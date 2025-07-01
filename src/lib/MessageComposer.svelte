@@ -106,7 +106,8 @@
 
 <svelte:window on:click={handleClickOutside} />
 
-<div class="{showComposer ? 'block' : 'hidden lg:block'} bg-white rounded-2xl shadow-xl p-4 lg:p-6">
+<!-- Desktop Composer -->
+<div class="{showComposer ? 'hidden' : 'hidden lg:block'} bg-white rounded-2xl shadow-xl p-4 lg:p-6">
   <div class="flex justify-between items-center mb-4">
     <h2 class="text-lg font-bold bg-gradient-to-r from-purple-600 to-indigo-600 bg-clip-text text-transparent">
       发送短信
@@ -235,6 +236,141 @@
     {/if}
   </button>
 </div>
+
+<!-- Mobile Composer Modal -->
+{#if showComposer}
+  <div class="lg:hidden fixed inset-0 bg-white z-50 overflow-y-auto">
+    <div class="sticky top-0 bg-white border-b border-gray-200 px-4 py-3 flex justify-between items-center">
+      <h2 class="text-lg font-bold bg-gradient-to-r from-purple-600 to-indigo-600 bg-clip-text text-transparent">
+        发送短信
+      </h2>
+      <button 
+        class="text-gray-500 hover:text-gray-700 p-2"
+        on:click={() => showComposer = false}
+      >
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      </button>
+    </div>
+    
+    <div class="p-4">
+      <!-- Recipient Number -->
+      <div class="mb-4 relative recipient-input-container">
+        <label class="block text-sm font-medium text-gray-700 mb-2">
+          接收号码
+        </label>
+        <input
+          type="text"
+          bind:value={recipientNumber}
+          on:focus={() => showRecipientHistory = true}
+          on:input={(e) => {
+            showRecipientHistory = true;
+            recipientSearch = e.target.value;
+          }}
+          placeholder="输入接收方手机号..."
+          class="w-full px-4 py-2 border border-purple-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+        />
+        
+        <!-- Recipient History Dropdown -->
+        {#if showRecipientHistory && filteredRecipients.length > 0}
+          <div class="absolute top-full left-0 right-0 mt-1 bg-white border border-purple-200 rounded-lg shadow-xl max-h-48 overflow-y-auto z-10">
+            <div class="p-2">
+              <div class="text-xs text-gray-500 px-2 py-1 border-b border-gray-100 mb-1">
+                历史接收号码
+              </div>
+              {#each filteredRecipients as recipient}
+                <button
+                  on:click={() => selectRecipient(recipient)}
+                  class="w-full text-left px-3 py-2 hover:bg-gradient-to-r hover:from-purple-50 hover:to-indigo-50 rounded-md transition-colors text-sm flex items-center gap-2"
+                >
+                  <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <span class="font-mono">{recipient}</span>
+                </button>
+              {/each}
+            </div>
+          </div>
+        {/if}
+      </div>
+      
+      <!-- SIM Card Selection -->
+      <div class="mb-4">
+        <label class="block text-sm font-medium text-gray-700 mb-2">
+          发送卡号
+        </label>
+        <select
+          bind:value={recipientSIM}
+          class="w-full px-4 py-2 border border-purple-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+        >
+          <option value="">选择发送卡...</option>
+          {#each phoneNumbers.filter(p => p.status === 'online') as phone}
+            <option value={phone.id}>
+              {phone.flag} {phone.number} - {phone.id}
+            </option>
+          {/each}
+        </select>
+      </div>
+      
+      <!-- Message Templates -->
+      <div class="mb-4">
+        <label class="block text-sm font-medium text-gray-700 mb-2">
+          快速模板
+        </label>
+        <div class="flex flex-wrap gap-2">
+          {#each messageTemplates as template}
+            <button
+              on:click={() => insertTemplate(template.content)}
+              class="px-3 py-1 text-xs bg-gradient-to-r from-purple-100 to-indigo-100 text-purple-700 rounded-full hover:from-purple-200 hover:to-indigo-200 transition-colors"
+            >
+              {template.name}
+            </button>
+          {/each}
+        </div>
+      </div>
+      
+      <!-- Message Content -->
+      <div class="mb-4">
+        <label class="block text-sm font-medium text-gray-700 mb-2">
+          短信内容
+        </label>
+        <textarea
+          bind:value={messageContent}
+          placeholder="输入短信内容..."
+          rows="4"
+          class="w-full px-4 py-2 border border-purple-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none"
+        ></textarea>
+        <div class="mt-1 text-xs text-gray-500">
+          字数：{messageContent.length} / 500
+        </div>
+      </div>
+      
+      <!-- Send Button -->
+      <button
+        on:click={handleSend}
+        disabled={sendingStatus === 'sending'}
+        class="w-full py-3 bg-gradient-to-r from-purple-500 to-indigo-500 text-white font-medium rounded-lg hover:from-purple-600 hover:to-indigo-600 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed {sendingStatus === 'success' ? 'from-green-500 to-green-600' : ''} {sendingStatus === 'error' ? 'from-red-500 to-red-600' : ''}"
+      >
+        {#if sendingStatus === 'sending'}
+          <span class="flex items-center justify-center">
+            <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            发送中...
+          </span>
+        {:else if sendingStatus === 'success'}
+          ✅ 发送成功
+        {:else if sendingStatus === 'error'}
+          ❌ 请填写完整信息
+        {:else}
+          发送短信
+        {/if}
+      </button>
+    </div>
+  </div>
+{/if}
 
 <!-- Mobile Floating Button -->
 <button
