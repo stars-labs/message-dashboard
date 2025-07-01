@@ -1,8 +1,9 @@
 <script>
-  import { createEventDispatcher } from 'svelte';
+  import { createEventDispatcher, onMount } from 'svelte';
   
   export let selectedPhone = null;
   export let phoneNumbers = [];
+  export let messages = [];
   
   const dispatch = createEventDispatcher();
   
@@ -11,6 +12,19 @@
   let messageContent = '';
   let sendingStatus = '';
   let showComposer = false;
+  let showRecipientHistory = false;
+  let recipientSearch = '';
+  
+  // Get unique recipient numbers from sent messages
+  $: recipientHistory = [...new Set(messages
+    .filter(msg => msg.type === 'sent' && msg.recipient)
+    .map(msg => msg.recipient))]
+    .slice(0, 20); // Keep last 20 unique recipients
+  
+  // Filter recipient history based on search
+  $: filteredRecipients = recipientHistory.filter(num => 
+    num.includes(recipientSearch) || recipientSearch === ''
+  );
   
   $: if (selectedPhone) {
     recipientSIM = selectedPhone.id;
@@ -24,6 +38,13 @@
     }
     
     sendingStatus = 'sending';
+    
+    // Store recipient in localStorage for persistence
+    const storedRecipients = JSON.parse(localStorage.getItem('recipientHistory') || '[]');
+    if (!storedRecipients.includes(recipientNumber)) {
+      storedRecipients.unshift(recipientNumber);
+      localStorage.setItem('recipientHistory', JSON.stringify(storedRecipients.slice(0, 50)));
+    }
     
     // Simulate sending
     setTimeout(() => {
@@ -50,6 +71,12 @@
     }, 1500);
   }
   
+  function selectRecipient(number) {
+    recipientNumber = number;
+    showRecipientHistory = false;
+    recipientSearch = '';
+  }
+  
   function insertTemplate(template) {
     messageContent = template;
   }
@@ -60,7 +87,24 @@
     { name: '提醒模板', content: '温馨提醒：您的账户余额不足，请及时充值。' },
     { name: '营销模板', content: '限时优惠！全场商品8折，快来选购吧！' }
   ];
+  
+  // Load recipient history from localStorage on mount
+  onMount(() => {
+    const storedRecipients = JSON.parse(localStorage.getItem('recipientHistory') || '[]');
+    if (storedRecipients.length > 0) {
+      recipientHistory.push(...storedRecipients);
+    }
+  });
+  
+  // Close dropdown when clicking outside
+  function handleClickOutside(event) {
+    if (!event.target.closest('.recipient-input-container')) {
+      showRecipientHistory = false;
+    }
+  }
 </script>
+
+<svelte:window on:click={handleClickOutside} />
 
 <div class="{showComposer ? 'block' : 'hidden lg:block'} bg-white rounded-2xl shadow-xl p-4 lg:p-6">
   <div class="flex justify-between items-center mb-4">
@@ -78,16 +122,43 @@
   </div>
   
   <!-- Recipient Number -->
-  <div class="mb-4">
+  <div class="mb-4 relative recipient-input-container">
     <label class="block text-sm font-medium text-gray-700 mb-2">
       接收号码
     </label>
     <input
       type="text"
       bind:value={recipientNumber}
+      on:focus={() => showRecipientHistory = true}
+      on:input={(e) => {
+        showRecipientHistory = true;
+        recipientSearch = e.target.value;
+      }}
       placeholder="输入接收方手机号..."
       class="w-full px-4 py-2 border border-purple-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
     />
+    
+    <!-- Recipient History Dropdown -->
+    {#if showRecipientHistory && filteredRecipients.length > 0}
+      <div class="absolute top-full left-0 right-0 mt-1 bg-white border border-purple-200 rounded-lg shadow-xl max-h-48 overflow-y-auto z-10">
+        <div class="p-2">
+          <div class="text-xs text-gray-500 px-2 py-1 border-b border-gray-100 mb-1">
+            历史接收号码
+          </div>
+          {#each filteredRecipients as recipient}
+            <button
+              on:click={() => selectRecipient(recipient)}
+              class="w-full text-left px-3 py-2 hover:bg-gradient-to-r hover:from-purple-50 hover:to-indigo-50 rounded-md transition-colors text-sm flex items-center gap-2"
+            >
+              <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span class="font-mono">{recipient}</span>
+            </button>
+          {/each}
+        </div>
+      </div>
+    {/if}
   </div>
   
   <!-- SIM Card Selection -->
