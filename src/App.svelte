@@ -145,6 +145,7 @@
         <MessageComposer 
           {selectedPhone}
           {phoneNumbers}
+          {messages}
           on:messageSent={handleMessageSent}
         />
       </div>
