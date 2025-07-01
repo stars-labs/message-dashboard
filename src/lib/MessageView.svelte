@@ -160,30 +160,48 @@
     {:else}
       <div class="space-y-2 lg:space-y-3">
         {#each displayMessages as message}
-          <div class="bg-gradient-to-r from-white to-gray-50 rounded-xl p-3 lg:p-4 border border-gray-200 hover:shadow-xl hover:scale-[1.02] active:scale-100 transition-all duration-300">
+          <div class="bg-gradient-to-r {message.type === 'sent' ? 'from-blue-50 to-indigo-50' : 'from-white to-gray-50'} rounded-xl p-3 lg:p-4 border {message.type === 'sent' ? 'border-blue-200' : 'border-gray-200'} hover:shadow-xl hover:scale-[1.02] active:scale-100 transition-all duration-300">
             <div class="flex justify-between items-start mb-2">
               <div class="flex-1">
                 <div class="flex flex-wrap items-center gap-2 mb-1">
-                  <span class="text-xs px-2 py-1 rounded-full bg-gradient-to-r {getSourceColor(message.source)} text-white font-medium shadow-md">
-                    {message.source}
-                  </span>
-                  {#if message.verificationCode}
-                    <span class="px-3 py-1 bg-gradient-to-r from-blue-500 to-blue-600 text-white text-sm rounded-full font-mono font-bold shadow-md animate-pulse">
-                      {message.verificationCode}
+                  {#if message.type === 'sent'}
+                    <span class="text-xs px-2 py-1 rounded-full bg-gradient-to-r from-blue-500 to-indigo-500 text-white font-medium shadow-md">
+                      已发送
                     </span>
+                    {#if message.status === 'delivered'}
+                      <span class="text-xs text-green-600">✓ 已送达</span>
+                    {/if}
+                  {:else}
+                    <span class="text-xs px-2 py-1 rounded-full bg-gradient-to-r {getSourceColor(message.source)} text-white font-medium shadow-md">
+                      {message.source}
+                    </span>
+                    {#if message.verificationCode}
+                      <span class="px-3 py-1 bg-gradient-to-r from-blue-500 to-blue-600 text-white text-sm rounded-full font-mono font-bold shadow-md animate-pulse">
+                        {message.verificationCode}
+                      </span>
+                    {/if}
                   {/if}
                 </div>
                 <div class="mt-2 bg-gray-50 rounded-lg p-2">
                   <p class="text-xs lg:text-sm text-gray-700 break-words">{message.content}</p>
                 </div>
                 <div class="mt-2 flex flex-wrap items-center gap-2 text-xs">
-                  <span class="text-purple-600 font-medium flex items-center gap-1">
-                    <span>📱</span>
-                    接收卡: {message.phoneId}
-                  </span>
-                  {#if !selectedPhone}
+                  {#if message.type === 'sent'}
+                    <span class="text-blue-600 font-medium flex items-center gap-1">
+                      <span>📤</span>
+                      发送卡: {message.phoneId}
+                    </span>
                     <span class="text-gray-500">•</span>
-                    <span class="text-gray-600">{message.phoneNumber}</span>
+                    <span class="text-gray-600">发送至: {message.recipient}</span>
+                  {:else}
+                    <span class="text-purple-600 font-medium flex items-center gap-1">
+                      <span>📱</span>
+                      接收卡: {message.phoneId}
+                    </span>
+                    {#if !selectedPhone}
+                      <span class="text-gray-500">•</span>
+                      <span class="text-gray-600">{message.phoneNumber}</span>
+                    {/if}
                   {/if}
                 </div>
               </div>

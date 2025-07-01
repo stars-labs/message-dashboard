@@ -1,19 +1,27 @@
 <script>
-  import { phoneNumbers, messages, getMessageStats } from './lib/mockData.js';
+  import { phoneNumbers, messages as initialMessages, getMessageStats } from './lib/mockData.js';
   import PhoneList from './lib/PhoneList.svelte';
   import MessageView from './lib/MessageView.svelte';
+  import MessageComposer from './lib/MessageComposer.svelte';
   import StatsCard from './lib/StatsCard.svelte';
   
   let selectedPhone = null;
   let selectedCountry = 'all';
   let searchTerm = '';
   let showPhoneList = false;
+  let messages = [...initialMessages];
   
-  const stats = getMessageStats();
+  let stats = getMessageStats();
   
   function selectPhone(phone) {
     selectedPhone = phone;
     showPhoneList = false;
+  }
+  
+  function handleMessageSent(event) {
+    const newMessage = event.detail;
+    messages = [newMessage, ...messages];
+    stats = getMessageStats();
   }
 </script>
 
@@ -94,7 +102,7 @@
 
   <!-- Main Content -->
   <div class="lg:px-8 lg:pb-6">
-    <div class="lg:grid lg:grid-cols-3 lg:gap-6">
+    <div class="lg:grid lg:grid-cols-4 lg:gap-6">
       <!-- Mobile Phone List Overlay -->
       {#if showPhoneList}
         <div class="lg:hidden fixed inset-0 z-50 bg-gray-900 bg-opacity-75 backdrop-blur-sm" on:click={() => showPhoneList = false}>
@@ -129,6 +137,15 @@
           {messages} 
           {selectedPhone}
           mobile={true}
+        />
+      </div>
+      
+      <!-- Message Composer -->
+      <div class="lg:col-span-1">
+        <MessageComposer 
+          {selectedPhone}
+          {phoneNumbers}
+          on:messageSent={handleMessageSent}
         />
       </div>
     </div>
