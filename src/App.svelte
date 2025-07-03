@@ -1,33 +1,129 @@
 <script>
-  import { phoneNumbers, messages as initialMessages, getMessageStats } from './lib/mockData.js';
+  import { onMount, onDestroy } from 'svelte';
   import PhoneList from './lib/PhoneList.svelte';
   import MessageView from './lib/MessageView.svelte';
   import MessageComposer from './lib/MessageComposer.svelte';
   import StatsCard from './lib/StatsCard.svelte';
+  import { api } from './lib/api.js';
   
   let selectedPhone = null;
   let selectedCountry = 'all';
   let searchTerm = '';
   let showPhoneList = false;
-  let messages = [...initialMessages];
+  let messages = [];
+  let phoneNumbers = [];
+  let user = null;
+  let loading = true;
   
-  let stats = getMessageStats();
+  let stats = {
+    totalMessages: 0,
+    todayMessages: 0,
+    onlineDevices: 0,
+    totalDevices: 0,
+    verificationRate: 0
+  };
+  
+  // Load data from API
+  async function loadData() {
+    try {
+      const [phonesData, messagesData, statsData] = await Promise.all([
+        api.getPhones(),
+        api.getMessages({ limit: 100 }),
+        api.getStats()
+      ]);
+      
+      phoneNumbers = phonesData || [];
+      messages = messagesData.data || [];
+      
+      // Map API stats to component format
+      stats = {
+        totalMessages: statsData.total_messages,
+        todayMessages: statsData.today_messages,
+        onlineDevices: statsData.online_devices,
+        totalDevices: statsData.total_devices,
+        verificationRate: Math.round(statsData.verification_rate * 100)
+      };
+    } catch (error) {
+      console.error('Failed to load data:', error);
+    }
+  }
+  
+  onMount(async () => {
+    // Check authentication
+    try {
+      const response = await api.getUser();
+      if (response && response.user) {
+        user = response.user;
+        await loadData();
+      }
+    } catch (error) {
+      // User not authenticated, will redirect to login
+      console.log('Authentication required');
+    }
+    loading = false;
+  });
+  
+  // Refresh data periodically
+  let refreshInterval;
+  $: if (user && !refreshInterval) {
+    refreshInterval = setInterval(loadData, 30000); // Refresh every 30 seconds
+  }
+  
+  onDestroy(() => {
+    if (refreshInterval) clearInterval(refreshInterval);
+  });
   
   function selectPhone(phone) {
     selectedPhone = phone;
     showPhoneList = false;
   }
   
-  function handleMessageSent(event) {
+  async function handleMessageSent(event) {
     const newMessage = event.detail;
-    messages = [newMessage, ...messages];
-    stats = getMessageStats();
+    
+    // Send to API
+    try {
+      const response = await api.sendMessage({
+        phoneId: newMessage.phoneId,
+        recipient: newMessage.recipient,
+        content: newMessage.content
+      });
+      
+      if (response.success) {
+        // Add to local messages
+        messages = [response.data, ...messages];
+        // Reload stats
+        await loadData();
+      }
+    } catch (error) {
+      console.error('Failed to send message:', error);
+    }
   }
 </script>
 
-<div class="min-h-screen">
-  <!-- Mobile Header -->
-  <header class="glassmorphism shadow-lg sticky top-0 z-40">
+{#if loading}
+  <div class="min-h-screen flex items-center justify-center">
+    <div class="text-center">
+      <div class="inline-flex items-center">
+        <svg class="animate-spin h-8 w-8 text-purple-600 mr-3" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+        <span class="text-xl text-gray-600">加载中...</span>
+      </div>
+    </div>
+  </div>
+{:else if !user}
+  <div class="min-h-screen flex items-center justify-center">
+    <div class="text-center">
+      <h1 class="text-2xl font-bold text-gray-800 mb-4">请先登录</h1>
+      <p class="text-gray-600">正在跳转到登录页面...</p>
+    </div>
+  </div>
+{:else}
+  <div class="min-h-screen">
+    <!-- Mobile Header -->
+    <header class="glassmorphism shadow-lg sticky top-0 z-40">
     <div class="px-4">
       <div class="flex justify-between items-center h-16">
         <button 
@@ -39,9 +135,20 @@
           </svg>
         </button>
         <h1 class="text-xl font-bold bg-gradient-to-r from-purple-600 to-indigo-600 bg-clip-text text-transparent flex-1 text-center lg:text-left">短信验证码管理系统</h1>
-        <div class="hidden lg:flex items-center gap-2 text-sm text-gray-600">
-          <div class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-          <span>EC20 x95</span>
+        <div class="hidden lg:flex items-center gap-4">
+          {#if user}
+            <span class="text-sm text-gray-600">欢迎, {user.name || user.email}</span>
+            <button 
+              on:click={() => api.logout()}
+              class="text-sm px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+            >
+              退出
+            </button>
+          {/if}
+          <div class="flex items-center gap-2 text-sm text-gray-600">
+            <div class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+            <span>EC20 x95</span>
+          </div>
         </div>
       </div>
     </div>
@@ -56,15 +163,15 @@
       </div>
       <div class="bg-gradient-to-br from-green-500 to-green-600 text-white px-4 py-3 rounded-xl shadow-lg">
         <div class="text-xs opacity-90">今日消息</div>
-        <div class="text-xl font-bold">{stats.today}</div>
+        <div class="text-xl font-bold">{stats.todayMessages}</div>
       </div>
       <div class="bg-gradient-to-br from-purple-500 to-purple-600 text-white px-4 py-3 rounded-xl shadow-lg">
         <div class="text-xs opacity-90">总消息数</div>
-        <div class="text-xl font-bold">{stats.total}</div>
+        <div class="text-xl font-bold">{stats.totalMessages}</div>
       </div>
       <div class="bg-gradient-to-br from-orange-500 to-orange-600 text-white px-4 py-3 rounded-xl shadow-lg">
         <div class="text-xs opacity-90">提取成功率</div>
-        <div class="text-xl font-bold">98%</div>
+        <div class="text-xl font-bold">{stats.verificationRate}%</div>
       </div>
     </div>
   </div>
@@ -81,19 +188,19 @@
       />
       <StatsCard 
         title="总消息数" 
-        value={stats.total} 
+        value={stats.totalMessages} 
         gradient="from-purple-500 to-purple-600"
         icon="💬"
       />
       <StatsCard 
         title="今日消息" 
-        value={stats.today} 
+        value={stats.todayMessages} 
         gradient="from-green-500 to-green-600"
         icon="📊"
       />
       <StatsCard 
         title="验证码提取率" 
-        value="98%" 
+        value={`${stats.verificationRate}%`} 
         gradient="from-orange-500 to-orange-600"
         icon="✅"
       />
@@ -152,3 +259,4 @@
     </div>
   </div>
 </div>
+{/if}

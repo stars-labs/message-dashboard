@@ -1,0 +1,24 @@
+name = "sms-dashboard-api"
+main = "src/index.js"
+compatibility_date = "2023-12-01"
+
+# D1 Database binding
+[[d1_databases]]
+binding = "DB"
+database_name = "sms-dashboard"
+database_id = "YOUR_DATABASE_ID"
+
+# KV Namespace for sessions
+[[kv_namespaces]]
+binding = "SESSIONS"
+id = "YOUR_KV_NAMESPACE_ID"
+
+# Environment variables
+[vars]
+ENVIRONMENT = "production"
+FRONTEND_URL = "https://your-app.pages.dev"
+
+# Secrets (set these with wrangler secret put)
+# CF_ACCESS_CLIENT_ID
+# CF_ACCESS_CLIENT_SECRET
+# API_KEY
