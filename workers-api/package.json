@@ -1,0 +1,19 @@
+{
+  "name": "sms-dashboard-api",
+  "version": "1.0.0",
+  "description": "Cloudflare Workers API for SMS Dashboard",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:init": "wrangler d1 execute sms-dashboard --local --file=./schema.sql",
+    "db:migrate": "wrangler d1 execute sms-dashboard --file=./schema.sql"
+  },
+  "dependencies": {
+    "itty-router": "^4.0.0",
+    "nanoid": "^5.0.0"
+  },
+  "devDependencies": {
+    "wrangler": "^3.0.0"
+  }
+}
