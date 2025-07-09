@@ -1,5 +1,6 @@
 import { nanoid } from 'nanoid';
 import { extractVerificationCode } from '../utils/verification';
+import { broadcastEvent } from '../utils/websocket';
 
 export const controlHandler = {
   // Upload messages from Orange Pi
@@ -31,6 +32,7 @@ export const controlHandler = {
       // Process messages in batches
       const batchSize = 50;
       let processed = 0;
+      const newMessages = [];
       
       for (let i = 0; i < messages.length; i += batchSize) {
         const batch = messages.slice(i, i + batchSize);
@@ -42,6 +44,18 @@ export const controlHandler = {
         const promises = batch.map(msg => {
           const messageId = msg.id || `msg-${nanoid()}`;
           const verificationCode = extractVerificationCode(msg.content);
+          const timestamp = msg.timestamp || new Date().toISOString();
+          
+          newMessages.push({
+            id: messageId,
+            phone_id: msg.phone_id,
+            phone_number: msg.phone_number,
+            content: msg.content,
+            source: msg.source || null,
+            timestamp,
+            type: 'received',
+            verification_code: verificationCode
+          });
           
           return stmt.bind(
             messageId,
@@ -49,13 +63,18 @@ export const controlHandler = {
             msg.phone_number,
             msg.content,
             msg.source || null,
-            msg.timestamp || new Date().toISOString(),
+            timestamp,
             verificationCode
           ).run();
         });
         
         await Promise.all(promises);
         processed += batch.length;
+      }
+      
+      // Broadcast new messages
+      if (newMessages.length > 0) {
+        await broadcastEvent(env, 'messages:bulk_created', newMessages);
       }
       
       return new Response(JSON.stringify({
@@ -103,29 +122,48 @@ export const controlHandler = {
         });
       }
       
-      // Update phones
+      // Update phones with ICCID support
       const stmt = env.DB.prepare(`
-        INSERT INTO phones (id, number, country, flag, carrier, status, signal)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO phones (id, number, country, flag, carrier, status, signal, iccid)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           status = excluded.status,
           signal = excluded.signal,
+          iccid = excluded.iccid,
           updated_at = CURRENT_TIMESTAMP
       `);
       
-      const promises = phones.map(phone => {
-        return stmt.bind(
-          phone.id,
-          phone.number,
-          phone.country,
-          phone.flag,
-          phone.carrier,
-          phone.status,
-          phone.signal
-        ).run();
-      });
+      const updatedPhones = [];
       
-      await Promise.all(promises);
+      for (const phone of phones) {
+        // If phone has ICCID but no number, look up the mapping
+        if (phone.iccid && !phone.number) {
+          const mapping = await env.DB.prepare(`
+            SELECT phone_number FROM iccid_mappings 
+            WHERE iccid = ? AND is_active = true
+          `).bind(phone.iccid).first();
+          
+          if (mapping) {
+            phone.number = mapping.phone_number;
+          }
+        }
+        
+        await stmt.bind(
+          phone.id,
+          phone.number || null,
+          phone.country || null,
+          phone.flag || null,
+          phone.carrier || null,
+          phone.status,
+          phone.signal || null,
+          phone.iccid || null
+        ).run();
+        
+        updatedPhones.push(phone);
+      }
+      
+      // Broadcast phone updates
+      await broadcastEvent(env, 'phones:updated', updatedPhones);
       
       return new Response(JSON.stringify({
         success: true,

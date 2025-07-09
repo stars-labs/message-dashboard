@@ -1,5 +1,7 @@
 import { nanoid } from 'nanoid';
 import { extractVerificationCode } from '../utils/verification';
+import { broadcastEvent } from '../utils/websocket';
+import { broadcastSSEEvent } from './sse';
 
 export const messagesHandler = {
   // List messages with pagination
@@ -140,13 +142,36 @@ export const messagesHandler = {
         recipient
       ).run();
       
+      // Broadcast new message event
+      const messageData = {
+        id: messageId,
+        phone_id: phoneId,
+        phone_number: phone.number,
+        content,
+        timestamp,
+        type: 'sent',
+        recipient,
+        status: 'pending'
+      };
+      await broadcastEvent(env, 'message:created', messageData);
+      
       // TODO: Implement actual SMS sending logic here
       // For now, we'll simulate success
-      setTimeout(async () => {
-        await env.DB.prepare(`
-          UPDATE messages SET status = 'delivered' WHERE id = ?
-        `).bind(messageId).run();
-      }, 2000);
+      request.ctx.waitUntil(
+        new Promise(async (resolve) => {
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          await env.DB.prepare(`
+            UPDATE messages SET status = 'delivered' WHERE id = ?
+          `).bind(messageId).run();
+          
+          // Broadcast status update
+          await broadcastEvent(env, 'message:updated', {
+            ...messageData,
+            status: 'delivered'
+          });
+          resolve();
+        })
+      );
       
       return new Response(JSON.stringify({
         success: true,

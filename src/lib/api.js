@@ -1,7 +1,10 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://sms-dashboard-api.workers.dev';
+import { auth } from './auth';
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 
+  (typeof window !== 'undefined' ? window.location.origin : 'https://sms-dashboard-api.workers.dev');
 
 export async function fetchWithAuth(endpoint, options = {}) {
-  const token = localStorage.getItem('auth_token');
+  const token = auth.token || localStorage.getItem('auth_token');
   
   const response = await fetch(`${API_BASE_URL}${endpoint}`, {
     ...options,
@@ -13,8 +16,8 @@ export async function fetchWithAuth(endpoint, options = {}) {
   });
   
   if (response.status === 401) {
-    // Redirect to login
-    window.location.href = `${API_BASE_URL}/api/auth/login`;
+    // Token expired or invalid, redirect to login
+    auth.logout();
     return;
   }
   
@@ -28,9 +31,11 @@ export const api = {
   },
   
   async logout() {
-    await fetchWithAuth('/api/auth/logout', { method: 'POST' });
-    localStorage.removeItem('auth_token');
-    window.location.href = '/';
+    auth.logout();
+  },
+  
+  getAuthToken() {
+    return auth.token;
   },
   
   // Phones
@@ -64,6 +69,49 @@ export const api = {
       verification_rate: 0
     };
   },
+  
+  // ICCID Mappings
+  iccidMappings: {
+    async list(params = {}) {
+      const query = new URLSearchParams(params).toString();
+      return fetchWithAuth(`/api/iccid-mappings?${query}`);
+    },
+    
+    async get(id) {
+      return fetchWithAuth(`/api/iccid-mappings/${id}`);
+    },
+    
+    async getByIccid(iccid) {
+      return fetchWithAuth(`/api/iccid-mappings/by-iccid/${iccid}`);
+    },
+    
+    async create(data) {
+      return fetchWithAuth('/api/iccid-mappings', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      });
+    },
+    
+    async update(id, data) {
+      return fetchWithAuth(`/api/iccid-mappings/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      });
+    },
+    
+    async delete(id) {
+      return fetchWithAuth(`/api/iccid-mappings/${id}`, {
+        method: 'DELETE',
+      });
+    },
+    
+    async bulkImport(data) {
+      return fetchWithAuth('/api/iccid-mappings/bulk', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      });
+    }
+  }
 };
 
 // Check for auth token in URL on page load

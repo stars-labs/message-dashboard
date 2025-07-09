@@ -1,0 +1,11 @@
+# SOPS configuration for encrypting secrets
+creation_rules:
+  - path_regex: secrets\.enc\.yaml$
+    # You can use age, pgp, or cloud KMS
+    # Example with age (recommended for simplicity):
+    age: >-
+      age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p
+    # Example with AWS KMS:
+    # kms: arn:aws:kms:us-east-1:111122223333:key/1234abcd-12ab-34cd-56ef-1234567890ab
+    # Example with GCP KMS:
+    # gcp_kms: projects/PROJECT/locations/global/keyRings/KEYRING/cryptoKeys/KEY
