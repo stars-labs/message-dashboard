@@ -1,9 +1,10 @@
 // CORS middleware
 export function handleCORS(response) {
   const headers = {
-    'Access-Control-Allow-Origin': '*', // Update with your domain in production
+    'Access-Control-Allow-Origin': '*', // Allow all origins for WebSocket compatibility
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-API-Key',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-API-Key, Upgrade, Connection',
+    'Access-Control-Allow-Credentials': 'true',
     'Access-Control-Max-Age': '86400',
   };
   

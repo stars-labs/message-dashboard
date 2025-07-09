@@ -4,6 +4,10 @@ export const phonesHandler = {
     const { env } = request;
     
     try {
+      if (!env.DB) {
+        throw new Error('Database binding not found');
+      }
+      
       const { results } = await env.DB.prepare(`
         SELECT * FROM phones ORDER BY id
       `).all();
@@ -16,9 +20,11 @@ export const phonesHandler = {
       });
     } catch (error) {
       console.error('List phones error:', error);
+      console.error('Error stack:', error.stack);
       return new Response(JSON.stringify({
         success: false,
-        error: 'Failed to fetch phones'
+        error: error.message || 'Failed to fetch phones',
+        details: error.stack
       }), {
         status: 500,
         headers: { 'Content-Type': 'application/json' }

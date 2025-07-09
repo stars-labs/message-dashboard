@@ -31,3 +31,11 @@ bun.lockb
 .env
 .env.local
 .env.*.local
+
+# Secrets - NEVER commit these
+secrets.yaml
+key.txt
+*.key
+*.age
+# Keep encrypted secrets
+!secrets.enc.yaml
