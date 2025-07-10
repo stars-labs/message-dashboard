@@ -1,47 +1,55 @@
-# Message Dashboard
+# SMS Dashboard
 
-A modern SMS verification code management system for 95 EC20 modems connected to Orange Pi 5 Plus.
+A real-time SMS management dashboard with multi-SIM support, built with Svelte and Cloudflare Workers.
 
-## Features
+## Documentation
 
-- 📱 Manage 95 SIM cards from China, Hong Kong, and Singapore
-- 🔍 Automatic verification code extraction
-- 🎨 Modern, colorful UI with gradient designs
-- 📊 Real-time statistics and monitoring
-- 🌐 Mobile-first responsive design
-- 🔖 Message history with source-based grouping
+All documentation is in the `docs/` directory:
 
-## Tech Stack
+- [API Documentation](docs/API_DOCUMENTATION.md)
+- [Auth0 Setup Guide](docs/AUTH0_SETUP.md)
+- [Deployment Guide](docs/DEPLOYMENT_GUIDE.md)
+- [Orange Pi Quickstart](docs/ORANGE_PI_QUICKSTART.md)
+- [Architecture Overview](docs/CLOUDFLARE_ARCHITECTURE.md)
 
-- **Frontend**: Svelte + Vite
-- **Styling**: Tailwind CSS
-- **Runtime**: Bun
-- **Hardware**: Orange Pi 5 Plus + 95x EC20 Modems
+## Project Structure
 
-## Development
-
-```bash
-# Install dependencies
-bun install
-
-# Start dev server
-bun run dev --host 0.0.0.0
-
-# Build for production
-bun run build
+```
+message-dashboard/
+├── docs/                 # Documentation
+└── sms-dashboard/        # Main application
+    ├── client/           # Frontend source code (Svelte)
+    ├── database/         # SQL migrations
+    ├── dist/             # Built frontend assets
+    ├── public/           # Static assets
+    ├── scripts/          # Build and deployment scripts
+    ├── server/           # Backend source code (Workers)
+    ├── package.json      # Dependencies
+    └── wrangler.toml     # Cloudflare Workers config
 ```
 
-## Access
+## Quick Start
 
-- Local: http://localhost:8080
-- Network: http://[YOUR_IP]:8080
+```bash
+cd sms-dashboard
+npm install
 
-## Architecture
+# Development
+npm run dev         # Frontend development (Vite)
+npm run dev:api     # Backend development (Wrangler)
 
-The system manages SMS messages from 95 EC20 modems, extracts verification codes, and provides a structured view organized by source applications (Taobao, WeChat, WhatsApp, etc.).
+# Production
+npm run deploy      # Build and deploy to Cloudflare
+```
 
-Each message displays:
-- Source application with color-coded labels
-- Extracted verification code (highlighted)
-- Receiver SIM card ID
-- Timestamp
+## Database Setup
+
+```bash
+# Initialize database
+npm run db:init
+
+# Run migrations
+npm run db:migrate
+```
+
+See documentation for detailed setup and deployment instructions.

@@ -1,0 +1,49 @@
+name = "sms-dashboard"
+main = "server/index.js"
+compatibility_date = "2025-01-09"
+account_id = "2764ae0fd9a5cb92c9ac67708620e54c"
+
+# No compatibility flags needed for 2025-01-09
+
+# Routes
+workers_dev = true
+routes = [
+  { pattern = "sexy.qzz.io", custom_domain = true }
+]
+
+# D1 Database binding
+[[d1_databases]]
+binding = "DB"
+database_name = "sms-dashboard"
+database_id = "14311b51-4169-4449-9f41-30ca4428a76e"
+
+# KV Namespace for sessions
+[[kv_namespaces]]
+binding = "SESSIONS"
+id = "92704d6efb8d466598db166d944697a7"
+
+# Environment variables
+[vars]
+ENVIRONMENT = "production"
+# Use workers.dev URL by default, or custom domain if routes are enabled
+FRONTEND_URL = "https://sms-dashboard.xiongchenyu6.workers.dev"
+# FRONTEND_URL = "https://sexy.qzz.io"  # Uncomment when using custom domain
+DEFAULT_USER_GROUP = "viewer"
+# ALLOWED_EMAIL_DOMAINS = "example.com,partner.com"  # Uncomment to restrict domains
+
+# Durable Objects binding
+[[durable_objects.bindings]]
+name = "WEBSOCKET_ROOMS"
+class_name = "WebSocketRoom"
+
+# Durable Objects migrations
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["WebSocketRoom"]
+
+# Secrets (set these with wrangler secret put)
+# AUTH0_DOMAIN - Your Auth0 domain (e.g., your-tenant.auth0.com)
+# AUTH0_CLIENT_ID - Your Auth0 application client ID
+# AUTH0_CLIENT_SECRET - Your Auth0 application client secret
+# AUTH0_AUDIENCE - Your Auth0 API audience (optional)
+# API_KEY - API key for Orange Pi integration

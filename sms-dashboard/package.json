@@ -1,0 +1,32 @@
+{
+  "name": "sms-dashboard",
+  "version": "1.0.0",
+  "description": "SMS Dashboard with Cloudflare Workers",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:api": "wrangler dev",
+    "build": "vite build",
+    "build:unified": "npm run build && node scripts/build-unified.js",
+    "deploy": "npm run build:unified && wrangler deploy",
+    "preview": "vite preview",
+    "db:init": "wrangler d1 execute sms-dashboard --local --file=./database/migrations/schema-v2.sql",
+    "db:migrate": "wrangler d1 execute sms-dashboard --file=./database/migrations/schema-v2.sql"
+  },
+  "dependencies": {
+    "itty-router": "^4.0.0",
+    "jose": "^6.0.11",
+    "nanoid": "^5.0.0"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^4.0.0",
+    "@tailwindcss/forms": "^0.5.10",
+    "autoprefixer": "^10.4.21",
+    "postcss": "^8.5.6",
+    "svelte": "^5.1.0",
+    "tailwindcss": "^3.4.0",
+    "vite": "^5.4.0",
+    "wrangler": "^3.0.0"
+  }
+}
