@@ -25,11 +25,18 @@ export default {
       
       // Control endpoints
       if (method === 'POST' && url.pathname === '/api/control/messages') {
+        console.log('Control messages endpoint hit');
+        const apiKey = request.headers.get('X-API-Key');
+        console.log('API key present:', !!apiKey);
         const response = await controlHandler.uploadMessages(request);
         return handleCORS(response);
       }
       
       if (method === 'POST' && url.pathname === '/api/control/phones') {
+        console.log('Control phones endpoint hit');
+        const apiKey = request.headers.get('X-API-Key');
+        console.log('API key present:', !!apiKey);
+        console.log('API key length:', apiKey ? apiKey.length : 0);
         const response = await controlHandler.updatePhones(request);
         return handleCORS(response);
       }
