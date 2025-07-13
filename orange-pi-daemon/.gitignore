@@ -1,0 +1,19 @@
+# Zig build artifacts
+.zig-cache/
+zig-out/
+zig-cache/
+
+# Build outputs
+*.o
+*.a
+*.so
+*.dylib
+*.exe
+*.pdb
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
