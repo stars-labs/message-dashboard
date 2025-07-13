@@ -114,6 +114,7 @@ in
           RestartSec = 10;
           User = cfg.user;
           Group = cfg.group;
+          WorkingDirectory = "/var/lib/sms-dashboard";
           
           # Security hardening
           NoNewPrivileges = true;
