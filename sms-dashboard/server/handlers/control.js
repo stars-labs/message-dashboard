@@ -122,6 +122,8 @@ export const controlHandler = {
         });
       }
       
+      console.log(`Updating ${phones.length} phones`);
+      
       // Update phones with ICCID and signal details support
       const stmt = env.DB.prepare(`
         INSERT INTO phones (id, number, country, flag, carrier, status, signal, iccid, rssi, rsrq, rsrp, snr)
@@ -137,41 +139,30 @@ export const controlHandler = {
           updated_at = CURRENT_TIMESTAMP
       `);
       
-      const updatedPhones = [];
-      
+      // Process phones one by one for now to avoid batch issues
       for (const phone of phones) {
-        // If phone has ICCID but no number, look up the mapping
-        if (phone.iccid && !phone.number) {
-          const mapping = await env.DB.prepare(`
-            SELECT phone_number FROM iccid_mappings 
-            WHERE iccid = ? AND is_active = true
-          `).bind(phone.iccid).first();
-          
-          if (mapping) {
-            phone.number = mapping.phone_number;
-          }
+        try {
+          await stmt.bind(
+            phone.id,
+            phone.number || null,
+            phone.country || null,
+            phone.flag || null,
+            phone.carrier || null,
+            phone.status || 'active',
+            phone.signal || null,
+            phone.iccid || null,
+            phone.rssi || null,
+            phone.rsrq || null,
+            phone.rsrp || null,
+            phone.snr || null
+          ).run();
+        } catch (err) {
+          console.error(`Failed to update phone ${phone.id}:`, err);
         }
-        
-        await stmt.bind(
-          phone.id,
-          phone.number || null,
-          phone.country || null,
-          phone.flag || null,
-          phone.carrier || null,
-          phone.status,
-          phone.signal || null,
-          phone.iccid || null,
-          phone.rssi || null,
-          phone.rsrq || null,
-          phone.rsrp || null,
-          phone.snr || null
-        ).run();
-        
-        updatedPhones.push(phone);
       }
       
       // Broadcast phone updates
-      await broadcastEvent(env, 'phones:updated', updatedPhones);
+      await broadcastEvent(env, 'phones:updated', phones);
       
       return new Response(JSON.stringify({
         success: true,
