@@ -1,0 +1,13 @@
+keys:
+  - &xiongchenyu 4EDE451FC10722D0C6662C6FB99B8189C7C153F6
+  - &yubikey C0807F4C5201D2EE612EE933D750F82262844F39
+  - &orangepi age14ucj8huwm2lahh3s9uur8f6lkcpf5u2rqa2xpqkju5785gngkszst8e2kh
+
+creation_rules:
+  - path_regex: secrets/[^/]+\.yaml$
+    key_groups:
+      - age:
+          - *orangepi
+        pgp:
+          - *xiongchenyu
+          - *yubikey

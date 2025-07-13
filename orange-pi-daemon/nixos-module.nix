@@ -12,7 +12,7 @@ let
     src = ./.;
     
     nativeBuildInputs = with pkgs; [
-      zig_0_11
+      zig
     ];
     
     buildPhase = ''
@@ -67,8 +67,7 @@ in
     };
   };
   
-  config = mkIf cfg.enable (mkMerge [
-    {
+  config = mkIf cfg.enable {
       assertions = [
         {
           assertion = cfg.apiKey != null || cfg.apiKeyFile != null;
@@ -128,15 +127,10 @@ in
           StandardError = "journal";
         };
       };
-    }
-    
-      # Ensure ModemManager is enabled
-      services.modemmanager.enable = true;
       
       # Create state directory
       systemd.tmpfiles.rules = [
         "d /var/lib/sms-dashboard 0700 ${cfg.user} ${cfg.group} -"
       ];
-    }
-  ]);
+  };
 }

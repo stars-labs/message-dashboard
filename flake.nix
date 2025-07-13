@@ -29,6 +29,43 @@
           default = ./orange-pi-daemon/nixos-module.nix;
           sms-dashboard-daemon = ./orange-pi-daemon/nixos-module.nix;
         };
+        
+        # NixOS configuration for Orange Pi
+        nixosConfigurations = {
+          orange-pi = nixpkgs.lib.nixosSystem {
+            system = "aarch64-linux";
+            modules = [
+              ./configuration.nix
+              self.nixosModules.default
+              sops-nix.nixosModules.sops
+              ({ config, pkgs, lib, ... }: {
+                # Enable flakes
+                nix.settings.experimental-features = [ "nix-command" "flakes" ];
+                
+                # SOPS configuration for secure secret management
+                sops = {
+                  defaultSopsFile = ./secrets/orange-pi.yaml;
+                  # Use SSH host key for decryption on the Orange Pi
+                  age.sshKeyPaths = [ "/etc/ssh/ssh_host_ed25519_key" ];
+                  
+                  secrets = {
+                    "sms-dashboard/api-key" = {
+                      owner = config.services.sms-dashboard-daemon.user;
+                      group = config.services.sms-dashboard-daemon.group;
+                      mode = "0400";
+                    };
+                  };
+                };
+                
+                # Override the SMS dashboard daemon to use SOPS secrets
+                services.sms-dashboard-daemon = {
+                  apiKeyFile = config.sops.secrets."sms-dashboard/api-key".path;
+                  apiUrl = "https://sexy.qzz.io/";
+                };
+              })
+            ];
+          };
+        };
       };
       
       perSystem =
