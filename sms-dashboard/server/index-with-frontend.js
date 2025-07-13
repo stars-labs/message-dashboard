@@ -1,6 +1,16 @@
 // Working version with frontend restored
 import { handleCORS } from './middleware/cors';
+import { handleAuth0 } from './middleware/auth0';
+import { requirePermission, enrichUserPermissions } from './middleware/rbac-simple';
 import { controlHandler } from './handlers/control';
+import { auth0Handler } from './handlers/auth0';
+import { phonesHandler } from './handlers/phones';
+import { messagesHandler } from './handlers/messages';
+import { statsHandler } from './handlers/stats';
+import { usersHandler } from './handlers/users';
+import { groupsHandler } from './handlers/groups';
+import { iccidMappingsHandler } from './handlers/iccid-mappings';
+import { sseHandler } from './handlers/sse';
 import { serveFrontend } from './frontend-handler';
 
 // Simple router implementation without itty-router
@@ -76,6 +86,55 @@ router.options('*', handleCORS);
 
 // Public API routes
 router.get('/api/health', () => new Response('OK', { status: 200 }));
+
+// Auth routes (not under /api since they're redirects, not API endpoints)
+router.get('/login', auth0Handler.login);
+router.get('/callback', auth0Handler.callback);
+router.get('/logout', auth0Handler.logout);
+
+// Auth API endpoint
+router.get('/api/auth/me', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  return auth0Handler.me(request);
+});
+
+// Protected routes - Web UI
+router.get('/api/phones', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  await enrichUserPermissions(request, env, ctx);
+  const permResponse = await requirePermission('phones.read')(request, env, ctx);
+  if (permResponse) return permResponse;
+  return phonesHandler.list(request);
+});
+
+router.get('/api/messages', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  await enrichUserPermissions(request, env, ctx);
+  const permResponse = await requirePermission('messages.read')(request, env, ctx);
+  if (permResponse) return permResponse;
+  return messagesHandler.list(request);
+});
+
+router.post('/api/messages/send', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  await enrichUserPermissions(request, env, ctx);
+  const permResponse = await requirePermission('messages.send')(request, env, ctx);
+  if (permResponse) return permResponse;
+  return messagesHandler.send(request);
+});
+
+router.get('/api/stats', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  await enrichUserPermissions(request, env, ctx);
+  const permResponse = await requirePermission('messages.read')(request, env, ctx);
+  if (permResponse) return permResponse;
+  return statsHandler.get(request);
+});
 
 // Control server routes - API Key auth
 router.post('/api/control/messages', async (request) => {
