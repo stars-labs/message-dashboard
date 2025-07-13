@@ -109,7 +109,7 @@ in
         
         serviceConfig = {
           Type = "simple";
-          ExecStart = mkIf (cfg.apiKey != null) "${sms-dashboard-daemon}/bin/sms-dashboard-daemon";
+          ExecStart = mkIf (cfg.apiKey != null && cfg.apiKeyFile == null) "${sms-dashboard-daemon}/bin/sms-dashboard-daemon";
           Restart = "always";
           RestartSec = 10;
           User = cfg.user;
