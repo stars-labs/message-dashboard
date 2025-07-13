@@ -72,10 +72,10 @@ export const controlHandler = {
         processed += batch.length;
       }
       
-      // TODO: Fix broadcast - it's causing timeouts
-      // if (newMessages.length > 0) {
-      //   await broadcastEvent(env, 'messages:bulk_created', newMessages);
-      // }
+      // Broadcast new messages
+      if (newMessages.length > 0) {
+        await broadcastEvent(env, 'messages:bulk_created', newMessages);
+      }
       
       return new Response(JSON.stringify({
         success: true,
@@ -161,8 +161,8 @@ export const controlHandler = {
         }
       }
       
-      // TODO: Fix broadcast - it's causing timeouts
-      // await broadcastEvent(env, 'phones:updated', phones);
+      // Broadcast phone updates
+      await broadcastEvent(env, 'phones:updated', phones);
       
       return new Response(JSON.stringify({
         success: true,
