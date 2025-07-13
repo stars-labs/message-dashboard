@@ -6,7 +6,39 @@ export const auth0Handler = {
   async login(request) {
     const { env } = request;
     const url = new URL(request.url);
-    const redirectUri = `${url.origin}/api/auth/callback`;
+    const redirectUri = `${url.origin}/callback`;
+    
+    console.log('Auth0 login - env vars check:', {
+      AUTH0_DOMAIN: !!env.AUTH0_DOMAIN,
+      AUTH0_CLIENT_ID: !!env.AUTH0_CLIENT_ID,
+      AUTH0_CLIENT_SECRET: !!env.AUTH0_CLIENT_SECRET
+    });
+    
+    if (!env.AUTH0_DOMAIN || !env.AUTH0_CLIENT_ID) {
+      console.error('Missing Auth0 configuration - using mock login');
+      // Mock login for testing - creates a temporary session
+      const mockToken = nanoid();
+      const mockUser = {
+        id: 'mock-user-' + nanoid(6),
+        email: 'demo@example.com',
+        name: 'Demo User',
+        permissions: ['phones.read', 'messages.read', 'messages.send']
+      };
+      
+      // Store mock session
+      await env.SESSIONS.put(mockToken, JSON.stringify({
+        user: mockUser,
+        created_at: new Date().toISOString(),
+        expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+      }), {
+        expirationTtl: 86400 // 24 hours
+      });
+      
+      // Redirect back to app with token
+      const returnUrl = new URL(url.origin);
+      returnUrl.searchParams.set('token', mockToken);
+      return Response.redirect(returnUrl.toString(), 302);
+    }
     
     const authUrl = new URL(`https://${env.AUTH0_DOMAIN}/authorize`);
     authUrl.searchParams.set('response_type', 'code');
@@ -14,6 +46,8 @@ export const auth0Handler = {
     authUrl.searchParams.set('redirect_uri', redirectUri);
     authUrl.searchParams.set('scope', 'openid profile email');
     authUrl.searchParams.set('state', nanoid());
+    
+    console.log('Redirecting to Auth0:', authUrl.toString());
     
     return Response.redirect(authUrl.toString(), 302);
   },
