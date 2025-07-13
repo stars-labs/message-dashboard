@@ -25,9 +25,6 @@ id = "92704d6efb8d466598db166d944697a7"
 # Environment variables
 [vars]
 ENVIRONMENT = "production"
-# Use workers.dev URL by default, or custom domain if routes are enabled
-FRONTEND_URL = "https://sms-dashboard.xiongchenyu6.workers.dev"
-# FRONTEND_URL = "https://sexy.qzz.io"  # Uncomment when using custom domain
 DEFAULT_USER_GROUP = "viewer"
 # ALLOWED_EMAIL_DOMAINS = "example.com,partner.com"  # Uncomment to restrict domains
 

@@ -42,6 +42,29 @@ npm run dev:api     # Backend development (Wrangler)
 npm run deploy      # Build and deploy to Cloudflare
 ```
 
+## Orange Pi NixOS Deployment
+
+Deploy the SMS dashboard daemon to your Orange Pi 5 Plus:
+
+```bash
+# Deploy to Orange Pi (replace with your actual IP)
+sudo nixos-rebuild switch --flake .#orange-pi \
+  --use-substitutes \
+  --target-host root@10.171.150.102 \
+  --impure
+
+# Check daemon status
+ssh root@10.171.150.102 'systemctl status sms-dashboard-daemon'
+```
+
+Before deployment, create the API key file on the Orange Pi:
+```bash
+ssh root@10.171.150.102
+mkdir -p /etc/sms-dashboard
+echo "your-api-key" > /etc/sms-dashboard/api-key
+chmod 600 /etc/sms-dashboard/api-key
+```
+
 ## Database Setup
 
 ```bash

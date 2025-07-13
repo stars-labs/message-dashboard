@@ -1,4 +1,16 @@
 .direnv
 result
 
+# Unencrypted secrets - NEVER commit these
+secrets/*.yaml
+!secrets/*.yaml.example
+!secrets/README.md
+# Allow encrypted secrets (they contain ENC[ in the content)
+!secrets/orange-pi.yaml
+
+# SOPS age keys
+*.age
+key.txt
+/var/lib/sops-nix/
+
 
