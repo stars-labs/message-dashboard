@@ -197,31 +197,36 @@ const ModemManager = struct {
         phone.carrier = try self.getCarrierInfo(modem_id);
         
         // Parse signal information
-        std.log.info("Signal output for modem {s}: {s}", .{ modem_id, result.stdout });
         
         var lines = std.mem.tokenizeScalar(u8, result.stdout, '\n');
         while (lines.next()) |line| {
             const trimmed = std.mem.trim(u8, line, " \t");
             
-            if (std.mem.indexOf(u8, trimmed, "rssi:")) |_| {
-                if (std.mem.indexOf(u8, trimmed, ": ")) |pos| {
-                    const value_str = std.mem.trim(u8, trimmed[pos + 2 ..], " dBm");
+            // Look for signal values that might be indented (e.g., under LTE section)
+            if (std.mem.indexOf(u8, trimmed, "rssi:")) |rssi_pos| {
+                // Find the colon position after "rssi:"
+                if (std.mem.indexOf(u8, trimmed[rssi_pos..], ": ")) |colon_offset| {
+                    const value_start = rssi_pos + colon_offset + 2;
+                    const value_str = std.mem.trim(u8, trimmed[value_start..], " dBm");
                     phone.rssi = std.fmt.parseFloat(f32, value_str) catch null;
                     std.log.info("Parsed RSSI for modem {s}: {?}", .{ modem_id, phone.rssi });
                 }
-            } else if (std.mem.indexOf(u8, trimmed, "rsrq:")) |_| {
-                if (std.mem.indexOf(u8, trimmed, ": ")) |pos| {
-                    const value_str = std.mem.trim(u8, trimmed[pos + 2 ..], " dB");
+            } else if (std.mem.indexOf(u8, trimmed, "rsrq:")) |rsrq_pos| {
+                if (std.mem.indexOf(u8, trimmed[rsrq_pos..], ": ")) |colon_offset| {
+                    const value_start = rsrq_pos + colon_offset + 2;
+                    const value_str = std.mem.trim(u8, trimmed[value_start..], " dB");
                     phone.rsrq = std.fmt.parseFloat(f32, value_str) catch null;
                 }
-            } else if (std.mem.indexOf(u8, trimmed, "rsrp:")) |_| {
-                if (std.mem.indexOf(u8, trimmed, ": ")) |pos| {
-                    const value_str = std.mem.trim(u8, trimmed[pos + 2 ..], " dBm");
+            } else if (std.mem.indexOf(u8, trimmed, "rsrp:")) |rsrp_pos| {
+                if (std.mem.indexOf(u8, trimmed[rsrp_pos..], ": ")) |colon_offset| {
+                    const value_start = rsrp_pos + colon_offset + 2;
+                    const value_str = std.mem.trim(u8, trimmed[value_start..], " dBm");
                     phone.rsrp = std.fmt.parseFloat(f32, value_str) catch null;
                 }
-            } else if (std.mem.indexOf(u8, trimmed, "s/n:")) |_| {
-                if (std.mem.indexOf(u8, trimmed, ": ")) |pos| {
-                    const value_str = std.mem.trim(u8, trimmed[pos + 2 ..], " dB");
+            } else if (std.mem.indexOf(u8, trimmed, "s/n:")) |sn_pos| {
+                if (std.mem.indexOf(u8, trimmed[sn_pos..], ": ")) |colon_offset| {
+                    const value_start = sn_pos + colon_offset + 2;
+                    const value_str = std.mem.trim(u8, trimmed[value_start..], " dB");
                     phone.snr = std.fmt.parseFloat(f32, value_str) catch null;
                 }
             }
@@ -426,6 +431,8 @@ const ApiClient = struct {
         const request_body = PhoneUpdateRequest{ .phones = phones };
         const json_body = try json.stringifyAlloc(self.allocator, request_body, .{});
         defer self.allocator.free(json_body);
+        
+        std.log.info("Sending phone update JSON: {s}", .{json_body});
         
         const url = try std.fmt.allocPrint(self.allocator, "{s}/api/control/phones", .{self.config.api_url});
         defer self.allocator.free(url);
