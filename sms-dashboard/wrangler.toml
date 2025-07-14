@@ -16,6 +16,7 @@ routes = [
 binding = "DB"
 database_name = "sms-dashboard"
 database_id = "14311b51-4169-4449-9f41-30ca4428a76e"
+migrations_dir = "migrations"
 
 # KV Namespace for sessions
 [[kv_namespaces]]

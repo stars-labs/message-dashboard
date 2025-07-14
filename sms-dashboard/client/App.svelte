@@ -44,9 +44,18 @@
       
       phoneNumbers = phonesData || [];
       console.log('Loaded phones:', phoneNumbers);
-      // Log signal values specifically
+      // Log all phone details
       phoneNumbers.forEach(phone => {
-        console.log(`Phone ${phone.id}: signal=${phone.signal}, status=${phone.status}`);
+        console.log(`Phone ${phone.id}:`, {
+          signal: phone.signal, 
+          status: phone.status,
+          operator_name: phone.operator_name,
+          operator_id: phone.operator_id,
+          imei: phone.imei,
+          access_tech: phone.access_tech,
+          iccid: phone.iccid,
+          number: phone.number
+        });
       });
       messages = messagesData.data || [];
       
