@@ -43,7 +43,7 @@ export const messagesHandler = {
         headers: { 'Content-Type': 'application/json' }
       });
     } catch (error) {
-      console.error('List messages error:', error);
+      // Error handling - list messages
       return new Response(JSON.stringify({
         success: false,
         error: 'Failed to fetch messages'
@@ -81,7 +81,7 @@ export const messagesHandler = {
         headers: { 'Content-Type': 'application/json' }
       });
     } catch (error) {
-      console.error('Get message error:', error);
+      // Error handling - get message
       return new Response(JSON.stringify({
         success: false,
         error: 'Failed to fetch message'
@@ -188,7 +188,7 @@ export const messagesHandler = {
         headers: { 'Content-Type': 'application/json' }
       });
     } catch (error) {
-      console.error('Send message error:', error);
+      // Error handling - send message
       return new Response(JSON.stringify({
         success: false,
         error: 'Failed to send message'

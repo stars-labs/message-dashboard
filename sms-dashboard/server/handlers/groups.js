@@ -26,7 +26,7 @@ export const groupsHandler = {
         headers: { 'Content-Type': 'application/json' }
       });
     } catch (error) {
-      console.error('List groups error:', error);
+      // Error handling - list groups
       return new Response(JSON.stringify({
         success: false,
         error: 'Failed to fetch groups'
@@ -86,7 +86,7 @@ export const groupsHandler = {
         headers: { 'Content-Type': 'application/json' }
       });
     } catch (error) {
-      console.error('Get group error:', error);
+      // Error handling - get group
       return new Response(JSON.stringify({
         success: false,
         error: 'Failed to fetch group'
@@ -152,7 +152,7 @@ export const groupsHandler = {
         headers: { 'Content-Type': 'application/json' }
       });
     } catch (error) {
-      console.error('Create group error:', error);
+      // Error handling - create group
       return new Response(JSON.stringify({
         success: false,
         error: 'Failed to create group'
@@ -251,7 +251,7 @@ export const groupsHandler = {
         headers: { 'Content-Type': 'application/json' }
       });
     } catch (error) {
-      console.error('Update group error:', error);
+      // Error handling - update group
       return new Response(JSON.stringify({
         success: false,
         error: 'Failed to update group'
@@ -315,7 +315,7 @@ export const groupsHandler = {
         headers: { 'Content-Type': 'application/json' }
       });
     } catch (error) {
-      console.error('Delete group error:', error);
+      // Error handling - delete group
       return new Response(JSON.stringify({
         success: false,
         error: 'Failed to delete group'
@@ -368,7 +368,7 @@ export const groupsHandler = {
         headers: { 'Content-Type': 'application/json' }
       });
     } catch (error) {
-      console.error('Add members error:', error);
+      // Error handling - add members
       return new Response(JSON.stringify({
         success: false,
         error: 'Failed to add members'
@@ -421,7 +421,7 @@ export const groupsHandler = {
         headers: { 'Content-Type': 'application/json' }
       });
     } catch (error) {
-      console.error('Remove members error:', error);
+      // Error handling - remove members
       return new Response(JSON.stringify({
         success: false,
         error: 'Failed to remove members'

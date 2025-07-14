@@ -68,7 +68,7 @@ export const usersHandler = {
         headers: { 'Content-Type': 'application/json' }
       });
     } catch (error) {
-      console.error('List users error:', error);
+      // Error handling - list users
       return new Response(JSON.stringify({
         success: false,
         error: 'Failed to fetch users'
@@ -129,7 +129,7 @@ export const usersHandler = {
         headers: { 'Content-Type': 'application/json' }
       });
     } catch (error) {
-      console.error('Get user error:', error);
+      // Error handling - get user
       return new Response(JSON.stringify({
         success: false,
         error: 'Failed to fetch user'
@@ -202,7 +202,7 @@ export const usersHandler = {
         headers: { 'Content-Type': 'application/json' }
       });
     } catch (error) {
-      console.error('Update user error:', error);
+      // Error handling - update user
       return new Response(JSON.stringify({
         success: false,
         error: 'Failed to update user'
@@ -252,7 +252,7 @@ export const usersHandler = {
         headers: { 'Content-Type': 'application/json' }
       });
     } catch (error) {
-      console.error('Delete user error:', error);
+      // Error handling - delete user
       return new Response(JSON.stringify({
         success: false,
         error: 'Failed to delete user'
@@ -298,7 +298,7 @@ export const usersHandler = {
         headers: { 'Content-Type': 'application/json' }
       });
     } catch (error) {
-      console.error('Update settings error:', error);
+      // Error handling - update settings
       return new Response(JSON.stringify({
         success: false,
         error: 'Failed to update settings'

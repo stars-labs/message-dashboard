@@ -8,15 +8,8 @@ export const auth0Handler = {
     const url = new URL(request.url);
     const redirectUri = `${url.origin}/callback`;
     
-    console.log('Auth0 login - env vars check:', {
-      AUTH0_DOMAIN: !!env.AUTH0_DOMAIN,
-      AUTH0_CLIENT_ID: !!env.AUTH0_CLIENT_ID,
-      AUTH0_CLIENT_SECRET: !!env.AUTH0_CLIENT_SECRET
-    });
-    
     if (!env.AUTH0_DOMAIN || !env.AUTH0_CLIENT_ID) {
-      console.error('Missing Auth0 configuration - using mock login');
-      // Mock login for testing - creates a temporary session
+      // Mock login for testing when Auth0 is not configured
       const mockToken = nanoid();
       const mockUser = {
         id: 'mock-user-' + nanoid(6),
@@ -47,8 +40,6 @@ export const auth0Handler = {
     authUrl.searchParams.set('scope', 'openid profile email');
     authUrl.searchParams.set('state', nanoid());
     
-    console.log('Redirecting to Auth0:', authUrl.toString());
-    
     return Response.redirect(authUrl.toString(), 302);
   },
 
@@ -61,16 +52,8 @@ export const auth0Handler = {
     const error = url.searchParams.get('error');
     const errorDescription = url.searchParams.get('error_description');
     
-    console.log('Auth0 callback received:', {
-      hasCode: !!code,
-      hasState: !!state,
-      error: error,
-      errorDescription: errorDescription,
-      url: url.toString()
-    });
     
     if (error) {
-      console.error('Auth0 error:', error, errorDescription);
       return new Response(`Authentication error: ${errorDescription || error}`, { status: 401 });
     }
     
@@ -81,12 +64,7 @@ export const auth0Handler = {
     try {
       // Exchange code for tokens
       const redirectUri = `${url.origin}/api/auth/callback`;
-      console.log('Token exchange params:', {
-        domain: env.AUTH0_DOMAIN,
-        clientId: env.AUTH0_CLIENT_ID,
-        redirectUri: redirectUri,
-        codeLength: code.length
-      });
+      // Token exchange with Auth0
       
       const tokenResponse = await fetch(`https://${env.AUTH0_DOMAIN}/oauth/token`, {
         method: 'POST',
@@ -104,9 +82,7 @@ export const auth0Handler = {
       
       if (!tokenResponse.ok) {
         const error = await tokenResponse.text();
-        console.error('Token exchange failed:', error);
-        console.error('Status:', tokenResponse.status);
-        console.error('Headers:', tokenResponse.headers);
+        // Token exchange failed
         return new Response(`Authentication failed: ${error}`, { status: 401 });
       }
       
@@ -218,8 +194,7 @@ export const auth0Handler = {
       
       return Response.redirect(frontendUrl.toString(), 302);
     } catch (error) {
-      console.error('Auth callback error:', error);
-      console.error('Error stack:', error.stack);
+      // Auth callback error
       return new Response(`Authentication failed: ${error.message}`, { status: 500 });
     }
   },
@@ -267,7 +242,7 @@ export const auth0Handler = {
       
       return payload;
     } catch (error) {
-      console.error('JWT verification failed:', error);
+      // JWT verification failed
       return null;
     }
   }

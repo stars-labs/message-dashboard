@@ -12,13 +12,13 @@ export async function broadcastToAll(env, type, data) {
   try {
     await broadcastWebSocket(env, type, data);
   } catch (error) {
-    console.error('WebSocket broadcast error:', error);
+    // WebSocket broadcast error
   }
   
   // Broadcast via SSE
   try {
     broadcastSSEEvent(type, data);
   } catch (error) {
-    console.error('SSE broadcast error:', error);
+    // SSE broadcast error
   }
 }
