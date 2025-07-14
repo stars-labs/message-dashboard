@@ -32,6 +32,13 @@ bun.lockb
 .env.local
 .env.*.local
 
+# Wrangler local development state
+.wrangler/
+
+# Build artifacts
+.cache/
+.tmp/
+
 # Secrets - NEVER commit these
 secrets.yaml
 key.txt

@@ -19,8 +19,7 @@ export const phonesHandler = {
         headers: { 'Content-Type': 'application/json' }
       });
     } catch (error) {
-      console.error('List phones error:', error);
-      console.error('Error stack:', error.stack);
+      // Error handling - list phones
       return new Response(JSON.stringify({
         success: false,
         error: error.message || 'Failed to fetch phones',
@@ -59,7 +58,7 @@ export const phonesHandler = {
         headers: { 'Content-Type': 'application/json' }
       });
     } catch (error) {
-      console.error('Get phone error:', error);
+      // Error handling - get phone
       return new Response(JSON.stringify({
         success: false,
         error: 'Failed to fetch phone'

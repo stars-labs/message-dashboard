@@ -86,12 +86,12 @@ export async function handleAuth0(request) {
         `).bind(request.user.id).run();
       }
     } catch (dbError) {
-      console.error('Failed to update user in database:', dbError);
+      // Failed to update user in database
       // Continue anyway - authentication is still valid
     }
     
   } catch (error) {
-    console.error('Auth0 middleware error:', error);
+    // Auth0 middleware error
     return new Response(JSON.stringify({ error: 'Authentication failed' }), {
       status: 401,
       headers: { 'Content-Type': 'application/json' }

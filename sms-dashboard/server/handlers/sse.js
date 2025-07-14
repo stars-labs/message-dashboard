@@ -1,5 +1,7 @@
-// Server-Sent Events handler for real-time updates
-export async function sseHandler(request) {
+// Server-Sent Events handler
+const activeConnections = new Set();
+
+export const sseHandler = async (request) => {
   const { env, user } = request;
   
   // Validate user is authenticated
@@ -54,10 +56,10 @@ export async function sseHandler(request) {
       'X-Connection-Id': connectionId
     }
   });
-}
+};
 
 // Broadcast a message to all SSE clients
-export async function broadcastSSEEvent(env, type, data) {
+export function broadcastSSEEvent(type, data) {
   // In a real implementation, this would send to all connected SSE clients
   // For now, this is a placeholder that shows the structure
   const message = {
@@ -68,5 +70,5 @@ export async function broadcastSSEEvent(env, type, data) {
   
   // You could store SSE connections in Durable Objects or use
   // Cloudflare Pub/Sub when it becomes available
-  console.log('SSE broadcast:', message);
+  // SSE broadcast placeholder
 }

@@ -80,7 +80,7 @@ export const authHandler = {
       // Redirect to frontend with token
       return Response.redirect(`${env.FRONTEND_URL}?token=${sessionToken}`, 302);
     } catch (error) {
-      console.error('Auth callback error:', error);
+      // Auth callback error
       return new Response(JSON.stringify({ error: 'Authentication failed' }), {
         status: 500,
         headers: { 'Content-Type': 'application/json' }
