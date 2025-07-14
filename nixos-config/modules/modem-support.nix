@@ -2,7 +2,7 @@
 
 {
   # Enable ModemManager for 3G/4G modem support
-  services.modemmanager.enable = true;
+  networking.modemmanager.enable = true;
 
   # USB mode switching for modems
   services.udev.packages = [ pkgs.usb-modeswitch ];
@@ -32,14 +32,7 @@
     SUBSYSTEM=="usb", ATTRS{idVendor}=="12d1|2c7c|05c6", GROUP="dialout", MODE="0664"
   '';
 
-  # FCC unlock scripts for Quectel modems
-  services.modemmanager.fccUnlockScripts = [
-    {
-      # Quectel EC25 LTE modem
-      id = "2c7c:0125";
-      path = "${pkgs.modemmanager}/share/ModemManager/fcc-unlock.available.d/2c7c";
-    }
-  ];
+  # FCC unlock scripts are handled automatically by ModemManager
 
   # Install useful packages for modem management
   environment.systemPackages = with pkgs; [
