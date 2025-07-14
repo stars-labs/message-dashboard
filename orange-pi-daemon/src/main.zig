@@ -197,6 +197,8 @@ const ModemManager = struct {
         phone.carrier = try self.getCarrierInfo(modem_id);
         
         // Parse signal information
+        std.log.info("Signal output for modem {s}: {s}", .{ modem_id, result.stdout });
+        
         var lines = std.mem.tokenizeScalar(u8, result.stdout, '\n');
         while (lines.next()) |line| {
             const trimmed = std.mem.trim(u8, line, " \t");
@@ -205,6 +207,7 @@ const ModemManager = struct {
                 if (std.mem.indexOf(u8, trimmed, ": ")) |pos| {
                     const value_str = std.mem.trim(u8, trimmed[pos + 2 ..], " dBm");
                     phone.rssi = std.fmt.parseFloat(f32, value_str) catch null;
+                    std.log.info("Parsed RSSI for modem {s}: {?}", .{ modem_id, phone.rssi });
                 }
             } else if (std.mem.indexOf(u8, trimmed, "rsrq:")) |_| {
                 if (std.mem.indexOf(u8, trimmed, ": ")) |pos| {
@@ -237,6 +240,9 @@ const ModemManager = struct {
             } else {
                 phone.signal = @intCast(@max(0, @as(i32, @intFromFloat((rssi + 100) * 1.25))));
             }
+            std.log.info("Calculated signal for modem {s}: {?} (RSSI: {})", .{ modem_id, phone.signal, rssi });
+        } else {
+            std.log.warn("No RSSI found for modem {s}, cannot calculate signal strength", .{modem_id});
         }
         
         return phone;
