@@ -165,6 +165,17 @@ const ModemManager = struct {
     }
     
     pub fn getSignalInfo(self: ModemManager, modem_id: []const u8) !Phone {
+        // First setup signal monitoring if not already done
+        const setup_argv = [_][]const u8{ "mmcli", "-m", modem_id, "--signal-setup=5" };
+        _ = try std.process.Child.run(.{
+            .allocator = self.allocator,
+            .argv = &setup_argv,
+        });
+        
+        // Give modem a moment to collect signal data
+        std.time.sleep(1 * std.time.ns_per_s);
+        
+        // Now get the signal information
         const argv = [_][]const u8{ "mmcli", "-m", modem_id, "--signal-get" };
         const result = try std.process.Child.run(.{
             .allocator = self.allocator,
