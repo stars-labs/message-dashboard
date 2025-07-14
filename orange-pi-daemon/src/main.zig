@@ -103,6 +103,67 @@ const ModemManager = struct {
         return null;
     }
     
+    pub fn getIccid(self: ModemManager, modem_id: []const u8) !?[]const u8 {
+        const argv = [_][]const u8{ "mmcli", "-m", modem_id, "--sim=0" };
+        const result = try std.process.Child.run(.{
+            .allocator = self.allocator,
+            .argv = &argv,
+        });
+        defer self.allocator.free(result.stdout);
+        defer self.allocator.free(result.stderr);
+        
+        var lines = std.mem.tokenizeScalar(u8, result.stdout, '\n');
+        while (lines.next()) |line| {
+            if (std.mem.indexOf(u8, line, "iccid:")) |_| {
+                const trimmed = std.mem.trim(u8, line, " \t");
+                if (std.mem.indexOf(u8, trimmed, ": ")) |pos| {
+                    const iccid = std.mem.trim(u8, trimmed[pos + 2 ..], " '\"");
+                    if (iccid.len > 0) {
+                        return try self.allocator.dupe(u8, iccid);
+                    }
+                }
+            }
+        }
+        
+        return null;
+    }
+    
+    pub fn getCarrierInfo(self: ModemManager, modem_id: []const u8) !?[]const u8 {
+        const argv = [_][]const u8{ "mmcli", "-m", modem_id };
+        const result = try std.process.Child.run(.{
+            .allocator = self.allocator,
+            .argv = &argv,
+        });
+        defer self.allocator.free(result.stdout);
+        defer self.allocator.free(result.stderr);
+        
+        var lines = std.mem.tokenizeScalar(u8, result.stdout, '\n');
+        while (lines.next()) |line| {
+            // Look for operator name
+            if (std.mem.indexOf(u8, line, "operator name:")) |_| {
+                const trimmed = std.mem.trim(u8, line, " \t");
+                if (std.mem.indexOf(u8, trimmed, ": ")) |pos| {
+                    const carrier = std.mem.trim(u8, trimmed[pos + 2 ..], " '\"");
+                    if (carrier.len > 0) {
+                        return try self.allocator.dupe(u8, carrier);
+                    }
+                }
+            }
+            // Fallback to manufacturer info
+            if (std.mem.indexOf(u8, line, "manufacturer:")) |_| {
+                const trimmed = std.mem.trim(u8, line, " \t");
+                if (std.mem.indexOf(u8, trimmed, ": ")) |pos| {
+                    const manufacturer = std.mem.trim(u8, trimmed[pos + 2 ..], " '\"");
+                    if (manufacturer.len > 0) {
+                        return try self.allocator.dupe(u8, manufacturer);
+                    }
+                }
+            }
+        }
+        
+        return null;
+    }
+    
     pub fn getSignalInfo(self: ModemManager, modem_id: []const u8) !Phone {
         const argv = [_][]const u8{ "mmcli", "-m", modem_id, "--signal-get" };
         const result = try std.process.Child.run(.{
@@ -119,6 +180,10 @@ const ModemManager = struct {
         
         // Get phone number
         phone.number = try self.getPhoneNumber(modem_id);
+        
+        // Get ICCID and carrier info
+        phone.iccid = try self.getIccid(modem_id);
+        phone.carrier = try self.getCarrierInfo(modem_id);
         
         // Parse signal information
         var lines = std.mem.tokenizeScalar(u8, result.stdout, '\n');
