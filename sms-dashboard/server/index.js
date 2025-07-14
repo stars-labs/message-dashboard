@@ -198,12 +198,11 @@ export default {
       const response = await router.handle(request, env, ctx);
       
       if (!response) {
-        // No route matched, serve frontend
-        const frontendResponse = serveFrontend(request);
-        return handleCORS(frontendResponse);
+        // No route matched, serve frontend (includes assets)
+        return serveFrontend(request);
       }
       
-      // Add CORS headers
+      // Add CORS headers to API responses
       return handleCORS(response);
       
     } catch (error) {
