@@ -51,7 +51,7 @@
         verificationRate: Math.round(statsData.verification_rate * 100)
       };
     } catch (error) {
-      console.error('Failed to load data:', error);
+      // Error handling - failed to load data
     }
   }
   
@@ -91,7 +91,7 @@
         }
       }
     } catch (error) {
-      console.log('Authentication check failed:', error);
+      // Authentication check failed
     }
     loading = false;
   });
@@ -100,7 +100,7 @@
     // Listen for new messages
     wsUnsubscribers.push(
       realtimeService.on('message:created', (msg) => {
-        console.log('New message received:', msg);
+        // New message received
         messages = [msg.data, ...messages];
         // Update stats
         stats.totalMessages++;
@@ -111,7 +111,7 @@
     // Listen for message updates
     wsUnsubscribers.push(
       realtimeService.on('message:updated', (msg) => {
-        console.log('Message updated:', msg);
+        // Message updated
         const index = messages.findIndex(m => m.id === msg.data.id);
         if (index !== -1) {
           messages[index] = msg.data;
@@ -123,7 +123,7 @@
     // Listen for bulk message creation
     wsUnsubscribers.push(
       realtimeService.on('messages:bulk_created', (msg) => {
-        console.log('Bulk messages received:', msg);
+        // Bulk messages received
         messages = [...msg.data, ...messages];
         // Update stats
         stats.totalMessages += msg.data.length;
@@ -134,7 +134,7 @@
     // Listen for phone updates
     wsUnsubscribers.push(
       realtimeService.on('phones:updated', (msg) => {
-        console.log('Phones updated:', msg);
+        // Phones updated
         msg.data.forEach(updatedPhone => {
           const index = phoneNumbers.findIndex(p => p.id === updatedPhone.id);
           if (index !== -1) {
@@ -155,7 +155,7 @@
     wsUnsubscribers.push(
       realtimeService.on('connected', () => {
         wsConnected = true;
-        console.log('WebSocket connected');
+        // WebSocket connected
       })
     );
   }
@@ -197,7 +197,7 @@
         await loadData();
       }
     } catch (error) {
-      console.error('Failed to send message:', error);
+      // Error handling - failed to send message
     }
   }
 </script>

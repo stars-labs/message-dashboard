@@ -47,7 +47,7 @@ export const statsHandler = {
         headers: { 'Content-Type': 'application/json' }
       });
     } catch (error) {
-      console.error('Stats error:', error);
+      // Error handling - stats
       return new Response(JSON.stringify({
         success: false,
         error: 'Failed to fetch statistics'

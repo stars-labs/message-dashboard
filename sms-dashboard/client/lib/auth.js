@@ -7,7 +7,7 @@ class Auth0Service {
   }
 
   async login() {
-    window.location.href = `${this.baseUrl}/api/auth/login`;
+    window.location.href = `${this.baseUrl}/login`;
   }
 
   async handleCallback() {
@@ -36,7 +36,7 @@ class Auth0Service {
     localStorage.removeItem('auth_token');
     
     // Redirect to Auth0 logout
-    window.location.href = `${this.baseUrl}/api/auth/logout`;
+    window.location.href = `${this.baseUrl}/logout`;
   }
 
   async getUser() {
@@ -62,7 +62,7 @@ class Auth0Service {
         return null;
       }
     } catch (error) {
-      console.error('Failed to get user:', error);
+      // Failed to get user
       return null;
     }
   }

@@ -1,22 +1,91 @@
-import { Router } from 'itty-router';
-import { handleAuth0 } from './middleware/auth0';
+// Working version with frontend restored
 import { handleCORS } from './middleware/cors';
+import { handleAuth0 } from './middleware/auth0';
 import { requirePermission, enrichUserPermissions } from './middleware/rbac-simple';
+import { controlHandler } from './handlers/control';
+import { auth0Handler } from './handlers/auth0';
 import { phonesHandler } from './handlers/phones';
 import { messagesHandler } from './handlers/messages';
 import { statsHandler } from './handlers/stats';
-import { controlHandler } from './handlers/control';
-import { auth0Handler } from './handlers/auth0';
 import { usersHandler } from './handlers/users';
 import { groupsHandler } from './handlers/groups';
 import { iccidMappingsHandler } from './handlers/iccid-mappings';
 import { sseHandler } from './handlers/sse';
-import { WebSocketRoom } from './durable-objects/WebSocketRoom';
-import { getAPIDocsHTML } from './pages/api-docs';
 import { serveFrontend } from './frontend-handler';
-import { swaggerSpec } from './swagger-spec';
+import { WebSocketRoom } from './durable-objects/WebSocketRoom';
 
-const router = Router();
+// Simple router implementation without itty-router
+class SimpleRouter {
+  constructor() {
+    this.routes = {
+      GET: [],
+      POST: [],
+      PUT: [],
+      DELETE: [],
+      OPTIONS: []
+    };
+  }
+
+  get(path, ...handlers) {
+    this.routes.GET.push({ path, handlers });
+  }
+
+  post(path, ...handlers) {
+    this.routes.POST.push({ path, handlers });
+  }
+
+  options(path, ...handlers) {
+    this.routes.OPTIONS.push({ path, handlers });
+  }
+
+  async handle(request, env, ctx) {
+    const url = new URL(request.url);
+    const method = request.method;
+    const pathname = url.pathname;
+
+    console.log(`[Router] Handling ${method} ${pathname}`);
+
+    // Add env and ctx to request
+    request.env = env;
+    request.ctx = ctx;
+
+    // Find matching route
+    const routes = this.routes[method] || [];
+    console.log(`[Router] Available routes for ${method}: ${routes.map(r => r.path).join(', ')}`);
+    
+    for (const route of routes) {
+      if (route.path === '*' || route.path === pathname || this.matchPath(route.path, pathname)) {
+        console.log(`[Router] Matched route: ${route.path}`);
+        // Execute handlers in sequence
+        let response;
+        for (const handler of route.handlers) {
+          response = await handler(request, env, ctx);
+          if (response) break;
+        }
+        return response;
+      }
+    }
+
+    console.log(`[Router] No matching route found for ${pathname}`);
+    return null;
+  }
+
+  matchPath(pattern, pathname) {
+    // Simple path matching (doesn't support params like :id)
+    if (pattern === pathname) return true;
+    if (pattern === '*') return true;
+    
+    // Check if pattern starts with pathname for wildcard routes
+    if (pattern.endsWith('*')) {
+      const prefix = pattern.slice(0, -1);
+      return pathname.startsWith(prefix);
+    }
+    
+    return false;
+  }
+}
+
+const router = new SimpleRouter();
 
 // CORS preflight
 router.options('*', handleCORS);
@@ -24,182 +93,151 @@ router.options('*', handleCORS);
 // Public API routes
 router.get('/api/health', () => new Response('OK', { status: 200 }));
 
-// Auth routes
-router.get('/api/auth/login', auth0Handler.login);
-router.get('/api/auth/callback', auth0Handler.callback);
-router.get('/api/auth/logout', auth0Handler.logout);
-router.get('/api/auth/me', handleAuth0, auth0Handler.me);
+// Test route to check HTML response
+router.get('/test-html', () => {
+  return new Response('<html><body>Test HTML</body></html>', {
+    headers: {
+      'Content-Type': 'text/html',
+      'Cache-Control': 'no-cache'
+    }
+  });
+});
+
+// Auth routes (not under /api since they're redirects, not API endpoints)
+router.get('/login', auth0Handler.login);
+router.get('/callback', auth0Handler.callback);
+router.get('/logout', auth0Handler.logout);
+
+// Auth API endpoint
+router.get('/api/auth/me', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  return auth0Handler.me(request);
+});
+
+// SSE endpoint for real-time updates
+router.get('/api/sse', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  return sseHandler(request);
+});
 
 // Protected routes - Web UI
-router.get('/api/phones', handleAuth0, enrichUserPermissions, requirePermission('phones.read'), phonesHandler.list);
-router.get('/api/phones/:id', handleAuth0, enrichUserPermissions, requirePermission('phones.read'), phonesHandler.get);
-router.get('/api/messages', handleAuth0, enrichUserPermissions, requirePermission('messages.read'), messagesHandler.list);
-router.get('/api/messages/:id', handleAuth0, enrichUserPermissions, requirePermission('messages.read'), messagesHandler.get);
-router.post('/api/messages/send', handleAuth0, enrichUserPermissions, requirePermission('messages.send'), messagesHandler.send);
-router.get('/api/stats', handleAuth0, enrichUserPermissions, requirePermission('messages.read'), statsHandler.get);
+router.get('/api/phones', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  await enrichUserPermissions(request, env, ctx);
+  const permResponse = await requirePermission('phones.read')(request, env, ctx);
+  if (permResponse) return permResponse;
+  return phonesHandler.list(request);
+});
 
-// User management routes
-router.get('/api/users', handleAuth0, enrichUserPermissions, requirePermission('users.read'), usersHandler.list);
-router.get('/api/users/:id', handleAuth0, enrichUserPermissions, requirePermission('users.read'), usersHandler.get);
-router.put('/api/users/:id', handleAuth0, enrichUserPermissions, requirePermission('users.write'), usersHandler.update);
-router.delete('/api/users/:id', handleAuth0, enrichUserPermissions, requirePermission('users.delete'), usersHandler.delete);
-router.put('/api/users/settings', handleAuth0, usersHandler.updateSettings);
+router.get('/api/messages', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  await enrichUserPermissions(request, env, ctx);
+  const permResponse = await requirePermission('messages.read')(request, env, ctx);
+  if (permResponse) return permResponse;
+  return messagesHandler.list(request);
+});
 
-// Group management routes
-router.get('/api/groups', handleAuth0, enrichUserPermissions, requirePermission('groups.read'), groupsHandler.list);
-router.get('/api/groups/:id', handleAuth0, enrichUserPermissions, requirePermission('groups.read'), groupsHandler.get);
-router.post('/api/groups', handleAuth0, enrichUserPermissions, requirePermission('groups.write'), groupsHandler.create);
-router.put('/api/groups/:id', handleAuth0, enrichUserPermissions, requirePermission('groups.write'), groupsHandler.update);
-router.delete('/api/groups/:id', handleAuth0, enrichUserPermissions, requirePermission('groups.delete'), groupsHandler.delete);
-router.post('/api/groups/:id/members', handleAuth0, enrichUserPermissions, requirePermission('users.manage_groups'), groupsHandler.addMembers);
-router.delete('/api/groups/:id/members', handleAuth0, enrichUserPermissions, requirePermission('users.manage_groups'), groupsHandler.removeMembers);
+router.post('/api/messages/send', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  await enrichUserPermissions(request, env, ctx);
+  const permResponse = await requirePermission('messages.send')(request, env, ctx);
+  if (permResponse) return permResponse;
+  return messagesHandler.send(request);
+});
 
-// ICCID mapping routes
-router.get('/api/iccid-mappings', handleAuth0, enrichUserPermissions, requirePermission('phones.read'), iccidMappingsHandler.list);
-router.get('/api/iccid-mappings/:id', handleAuth0, enrichUserPermissions, requirePermission('phones.read'), iccidMappingsHandler.get);
-router.get('/api/iccid-mappings/by-iccid/:iccid', handleAuth0, enrichUserPermissions, requirePermission('phones.read'), iccidMappingsHandler.getByIccid);
-router.post('/api/iccid-mappings', handleAuth0, enrichUserPermissions, requirePermission('phones.write'), iccidMappingsHandler.create);
-router.put('/api/iccid-mappings/:id', handleAuth0, enrichUserPermissions, requirePermission('phones.write'), iccidMappingsHandler.update);
-router.delete('/api/iccid-mappings/:id', handleAuth0, enrichUserPermissions, requirePermission('phones.delete'), iccidMappingsHandler.delete);
-router.post('/api/iccid-mappings/bulk', handleAuth0, enrichUserPermissions, requirePermission('phones.write'), iccidMappingsHandler.bulkImport);
+router.get('/api/stats', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  await enrichUserPermissions(request, env, ctx);
+  const permResponse = await requirePermission('messages.read')(request, env, ctx);
+  if (permResponse) return permResponse;
+  return statsHandler.get(request);
+});
 
 // Control server routes - API Key auth
-router.post('/api/control/messages', controlHandler.uploadMessages);
-router.post('/api/control/phones', controlHandler.updatePhones);
-
-// API Documentation page
-router.get('/api-docs', () => {
-  return new Response(`<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SMS Dashboard API Documentation</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.9.0/swagger-ui.css">
-    <style>
-        body { margin: 0; padding: 0; }
-        #swagger-ui { max-width: 1200px; margin: 0 auto; }
-        .swagger-ui .topbar { display: none; }
-    </style>
-</head>
-<body>
-    <div id="swagger-ui"></div>
-    <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.9.0/swagger-ui-bundle.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.9.0/swagger-ui-standalone-preset.js"></script>
-    <script>
-        window.onload = function() {
-            window.ui = SwaggerUIBundle({
-                url: "/swagger.json",
-                dom_id: '#swagger-ui',
-                deepLinking: true,
-                presets: [
-                    SwaggerUIBundle.presets.apis,
-                    SwaggerUIStandalonePreset
-                ],
-                plugins: [
-                    SwaggerUIBundle.plugins.DownloadUrl
-                ],
-                layout: "StandaloneLayout"
-            });
-        };
-    </script>
-</body>
-</html>`, {
-    headers: {
-      'Content-Type': 'text/html; charset=utf-8'
-    }
-  });
+router.post('/api/control/messages', async (request) => {
+  // Control messages endpoint hit
+  try {
+    return await controlHandler.uploadMessages(request);
+  } catch (error) {
+    // Control messages error
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
 });
 
-// OpenAPI/Swagger documentation
-router.options('/swagger.json', handleCORS);
-router.get('/swagger.json', () => {
-  return new Response(JSON.stringify(swaggerSpec, null, 2), {
-    headers: {
-      'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type'
-    }
-  });
+router.post('/api/control/phones', async (request) => {
+  // Control phones endpoint hit
+  try {
+    return await controlHandler.updatePhones(request);
+  } catch (error) {
+    // Control phones error
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
 });
-
-
-// Server-Sent Events for real-time updates
-router.get('/api/sse', handleAuth0, enrichUserPermissions, sseHandler);
-
-// API 404 handler
-router.all('/api/*', () => new Response('Not Found', { status: 404 }));
 
 // Serve frontend for all other routes
-router.all('*', (request) => serveFrontend(request));
+router.get('*', serveFrontend);
 
 export default {
   async fetch(request, env, ctx) {
+    // Worker started - with frontend
+    console.log(`[Worker] Received request: ${request.method} ${request.url}`);
+    
     try {
-      const url = new URL(request.url);
-      
       // Handle WebSocket endpoint directly (not through router)
+      const url = new URL(request.url);
       if (url.pathname === '/api/ws') {
+        console.log(`[Worker] WebSocket request detected`);
         const upgradeHeader = request.headers.get('Upgrade');
         if (upgradeHeader !== 'websocket') {
           return new Response('Expected Upgrade: websocket', { status: 426 });
         }
         
-        // Validate token
-        const token = url.searchParams.get('token');
-        if (!token) {
-          return new Response('Unauthorized: Missing token', { status: 401 });
-        }
-        
-        const sessionData = await env.SESSIONS.get(token);
-        if (!sessionData) {
-          return new Response('Unauthorized: Invalid token', { status: 401 });
-        }
-        
-        // Parse session and create new request with user info
-        const session = JSON.parse(sessionData);
-        const headers = new Headers(request.headers);
-        headers.set('X-User-Email', session.user?.email || '');
-        headers.set('X-User-Id', session.user?.id || '');
-        headers.set('X-Session-Valid', 'true');
-        
-        const durableObjectRequest = new Request(request.url, {
-          method: request.method,
-          headers: headers,
-          body: request.body
-        });
-        
         // Get Durable Object
         const roomId = env.WEBSOCKET_ROOMS.idFromName('global');
         const room = env.WEBSOCKET_ROOMS.get(roomId);
         
-        // Forward directly without changing the URL
-        // The Durable Object will detect WebSocket by the Upgrade header
-        return room.fetch(durableObjectRequest);
+        // Forward to Durable Object
+        return room.fetch(request);
       }
       
-      // Add environment to request
-      request.env = env;
-      request.ctx = ctx;
-      
-      // Handle request - pass env and ctx to router
+      // Handle regular routes
       const response = await router.handle(request, env, ctx);
       
-      // If no route matched, return undefined
       if (!response) {
-        return new Response('Not Found', { status: 404 });
+        console.log(`[Worker] No route matched, serving frontend`);
+        // No route matched, serve frontend (includes assets)
+        return serveFrontend(request);
       }
       
-      // Add CORS headers
-      return handleCORS(response);
+      console.log(`[Worker] Route matched, returning response`);
+      // Add CORS headers to API responses
+      if (response) {
+        return handleCORS(response);
+      }
+      return response;
+      
     } catch (error) {
+      console.error(`[Worker] Error:`, error);
+      // Worker error
       return new Response(JSON.stringify({ error: 'Internal Server Error' }), {
         status: 500,
         headers: { 'Content-Type': 'application/json' }
       });
     }
-  },
+  }
 };
 
+// Export WebSocketRoom from durable objects
 export { WebSocketRoom };
