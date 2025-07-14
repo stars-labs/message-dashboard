@@ -116,5 +116,15 @@ in {
 
     # Enable ModemManager
     networking.modemmanager.enable = true;
+
+    # PolicyKit rules to allow sms-daemon user to manage ModemManager
+    security.polkit.extraConfig = ''
+      polkit.addRule(function(action, subject) {
+        if (action.id.match("org.freedesktop.ModemManager1.") &&
+            subject.user == "${cfg.user}") {
+          return polkit.Result.YES;
+        }
+      });
+    '';
   };
 }
