@@ -13,9 +13,11 @@ export class RealtimeService {
   }
 
   async connect(token) {
+    console.log('[RealtimeService] connect() called with token:', token);
     this.isIntentionallyClosed = false;
     
     if (!token) {
+      console.error('[RealtimeService] No token provided');
       throw new Error('No auth token available');
     }
 
@@ -24,12 +26,15 @@ export class RealtimeService {
       await this.connectWebSocket(token);
     } catch (wsError) {
       // WebSocket connection failed, falling back to SSE
+      console.error('WebSocket connection failed:', wsError);
       
       // Fall back to Server-Sent Events
       try {
+        console.log('Falling back to SSE...');
         await this.connectSSE(token);
       } catch (sseError) {
         // SSE connection also failed
+        console.error('SSE connection also failed:', sseError);
         this.scheduleReconnect(token);
       }
     }
@@ -46,6 +51,7 @@ export class RealtimeService {
           .replace('https://', 'wss://');
         
         // Attempting WebSocket connection
+        console.log('Attempting WebSocket connection to:', `${wsUrl}/api/ws`);
         this.ws = new WebSocket(`${wsUrl}/api/ws`);
         
         const timeout = setTimeout(() => {
@@ -58,6 +64,7 @@ export class RealtimeService {
         this.ws.onopen = () => {
           clearTimeout(timeout);
           // WebSocket connected successfully
+          console.log('WebSocket connected successfully');
           this.connectionType = 'websocket';
           this.reconnectAttempts = 0;
           
@@ -82,6 +89,7 @@ export class RealtimeService {
         this.ws.onerror = (error) => {
           clearTimeout(timeout);
           // WebSocket error
+          console.error('WebSocket error:', error);
           reject(error);
         };
 

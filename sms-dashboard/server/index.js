@@ -93,6 +93,19 @@ router.options('*', handleCORS);
 // Public API routes
 router.get('/api/health', () => new Response('OK', { status: 200 }));
 
+// Debug endpoint to test WebSocket broadcast
+router.get('/api/debug/broadcast', async (request, env) => {
+  const { broadcastEvent } = await import('./utils/websocket');
+  const result = await broadcastEvent(env, 'phones:updated', [{
+    id: 'SIM_DEBUG',
+    signal: 99,
+    status: 'online'
+  }]);
+  return new Response(JSON.stringify(result), {
+    headers: { 'Content-Type': 'application/json' }
+  });
+});
+
 // Test route to check HTML response
 router.get('/test-html', () => {
   return new Response('<html><body>Test HTML</body></html>', {

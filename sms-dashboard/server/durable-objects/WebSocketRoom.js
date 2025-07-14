@@ -92,20 +92,28 @@ export class WebSocketRoom {
     try {
       const { type, data } = await request.json();
       
+      console.log(`[WebSocketRoom] Received broadcast: ${type}, sessions: ${this.sessions.size}`);
+      
       const message = JSON.stringify({
         type: type,
         data: data,
         timestamp: new Date().toISOString()
       });
 
-      this.sessions.forEach((session) => {
+      let sentCount = 0;
+      this.sessions.forEach((session, sessionId) => {
         try {
           session.websocket.send(message);
+          sentCount++;
+          console.log(`[WebSocketRoom] Sent ${type} to session ${sessionId}`);
         } catch (error) {
+          console.error(`[WebSocketRoom] Failed to send to session ${sessionId}:`, error);
         }
       });
 
-      return new Response(JSON.stringify({ success: true, recipients: this.sessions.size }), {
+      console.log(`[WebSocketRoom] Broadcast complete: sent to ${sentCount}/${this.sessions.size} sessions`);
+
+      return new Response(JSON.stringify({ success: true, recipients: this.sessions.size, sent: sentCount }), {
         headers: { 'Content-Type': 'application/json' }
       });
     } catch (error) {
