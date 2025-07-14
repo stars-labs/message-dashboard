@@ -99,6 +99,13 @@ router.get('/api/auth/me', async (request, env, ctx) => {
   return auth0Handler.me(request);
 });
 
+// SSE endpoint for real-time updates
+router.get('/api/sse', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  return sseHandler(request);
+});
+
 // Protected routes - Web UI
 router.get('/api/phones', async (request, env, ctx) => {
   const authResponse = await handleAuth0(request, env, ctx);
@@ -192,7 +199,8 @@ export default {
       
       if (!response) {
         // No route matched, serve frontend
-        return serveFrontend(request);
+        const frontendResponse = serveFrontend(request);
+        return handleCORS(frontendResponse);
       }
       
       // Add CORS headers
@@ -216,6 +224,43 @@ export class WebSocketRoom {
   }
   
   async fetch(request) {
-    return new Response('WebSocket temporarily disabled', { status: 503 });
+    // For now, return a proper WebSocket upgrade response
+    // even if we don't handle messages yet
+    const upgradeHeader = request.headers.get('Upgrade');
+    if (upgradeHeader !== 'websocket') {
+      return new Response('Expected Upgrade: websocket', { status: 426 });
+    }
+
+    const webSocketPair = new WebSocketPair();
+    const [client, server] = Object.values(webSocketPair);
+    
+    // Accept the WebSocket connection
+    server.accept();
+    
+    // Send initial connection message
+    server.send(JSON.stringify({
+      type: 'connected',
+      timestamp: new Date().toISOString()
+    }));
+    
+    // Handle incoming messages (placeholder)
+    server.addEventListener('message', event => {
+      // Echo messages for now
+      server.send(JSON.stringify({
+        type: 'echo',
+        data: event.data,
+        timestamp: new Date().toISOString()
+      }));
+    });
+    
+    // Handle close
+    server.addEventListener('close', event => {
+      // Cleanup if needed
+    });
+    
+    return new Response(null, {
+      status: 101,
+      webSocket: client,
+    });
   }
 }
