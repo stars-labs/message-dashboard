@@ -14,8 +14,11 @@ export function serveFrontend(request) {
     pathname = '/index.html';
   }
   
+  // Remove leading slash for asset lookup
+  const assetKey = pathname.startsWith('/') ? pathname.slice(1) : pathname;
+  
   // Try to find the exact file
-  let asset = FRONTEND_ASSETS[pathname.slice(1)]; // Remove leading slash
+  let asset = FRONTEND_ASSETS[assetKey];
   
   // If not found and no extension, try index.html (for SPA routing)
   if (!asset && !pathname.includes('.')) {
