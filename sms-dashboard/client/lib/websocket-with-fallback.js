@@ -46,7 +46,7 @@ export class RealtimeService {
           .replace('https://', 'wss://');
         
         // Attempting WebSocket connection
-        this.ws = new WebSocket(`${wsUrl}/api/ws?token=${token}`);
+        this.ws = new WebSocket(`${wsUrl}/api/ws`);
         
         const timeout = setTimeout(() => {
           if (this.ws.readyState !== WebSocket.OPEN) {
