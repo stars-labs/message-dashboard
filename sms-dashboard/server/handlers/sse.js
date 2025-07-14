@@ -68,5 +68,5 @@ export async function broadcastSSEEvent(env, type, data) {
   
   // You could store SSE connections in Durable Objects or use
   // Cloudflare Pub/Sub when it becomes available
-  console.log('SSE broadcast:', message);
+  // SSE broadcast placeholder
 }

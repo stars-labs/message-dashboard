@@ -62,7 +62,7 @@ class Auth0Service {
         return null;
       }
     } catch (error) {
-      console.error('Failed to get user:', error);
+      // Failed to get user
       return null;
     }
   }

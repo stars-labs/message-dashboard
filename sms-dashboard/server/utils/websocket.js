@@ -1,6 +1,6 @@
 export async function broadcastEvent(env, type, data) {
   // TODO: Fix WebSocket broadcast - temporarily disabled to prevent Worker hangs
-  console.log(`WebSocket broadcast disabled: ${type}`);
+  // WebSocket broadcast disabled
   return { success: false, error: 'Broadcast temporarily disabled' };
   
   // Original implementation causing issues:

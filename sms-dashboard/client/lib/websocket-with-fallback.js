@@ -23,13 +23,13 @@ export class RealtimeService {
     try {
       await this.connectWebSocket(token);
     } catch (wsError) {
-      console.warn('WebSocket connection failed, falling back to SSE:', wsError);
+      // WebSocket connection failed, falling back to SSE
       
       // Fall back to Server-Sent Events
       try {
         await this.connectSSE(token);
       } catch (sseError) {
-        console.error('SSE connection also failed:', sseError);
+        // SSE connection also failed
         this.scheduleReconnect(token);
       }
     }
@@ -45,7 +45,7 @@ export class RealtimeService {
           .replace('http://', 'ws://')
           .replace('https://', 'wss://');
         
-        console.log('Attempting WebSocket connection:', `${wsUrl}/api/ws`);
+        // Attempting WebSocket connection
         this.ws = new WebSocket(`${wsUrl}/api/ws?token=${token}`);
         
         const timeout = setTimeout(() => {
@@ -57,7 +57,7 @@ export class RealtimeService {
 
         this.ws.onopen = () => {
           clearTimeout(timeout);
-          console.log('WebSocket connected successfully');
+          // WebSocket connected successfully
           this.connectionType = 'websocket';
           this.reconnectAttempts = 0;
           
@@ -75,19 +75,19 @@ export class RealtimeService {
             const message = JSON.parse(event.data);
             this.handleMessage(message);
           } catch (error) {
-            console.error('Failed to parse WebSocket message:', error);
+            // Failed to parse WebSocket message
           }
         };
 
         this.ws.onerror = (error) => {
           clearTimeout(timeout);
-          console.error('WebSocket error:', error);
+          // WebSocket error
           reject(error);
         };
 
         this.ws.onclose = () => {
           clearTimeout(timeout);
-          console.log('WebSocket disconnected');
+          // WebSocket disconnected
           this.connectionType = null;
           
           if (!this.isIntentionallyClosed) {
@@ -104,13 +104,13 @@ export class RealtimeService {
     const baseUrl = import.meta.env.VITE_API_BASE_URL || 
       (typeof window !== 'undefined' ? window.location.origin : '');
     
-    console.log('Attempting SSE connection:', `${baseUrl}/api/sse`);
+    // Attempting SSE connection
     
     this.eventSource = new EventSource(`${baseUrl}/api/sse?token=${token}`);
     this.connectionType = 'sse';
     
     this.eventSource.onopen = () => {
-      console.log('SSE connected successfully');
+      // SSE connected successfully
       this.reconnectAttempts = 0;
     };
     
@@ -119,12 +119,12 @@ export class RealtimeService {
         const message = JSON.parse(event.data);
         this.handleMessage(message);
       } catch (error) {
-        console.error('Failed to parse SSE message:', error);
+        // Failed to parse SSE message
       }
     };
     
     this.eventSource.onerror = (error) => {
-      console.error('SSE error:', error);
+      // SSE error
       this.eventSource.close();
       this.connectionType = null;
       
@@ -189,13 +189,13 @@ export class RealtimeService {
       this.ws.send(JSON.stringify(data));
     } else if (this.connectionType === 'sse') {
       // SSE is one-way communication, log warning
-      console.warn('Cannot send data over SSE connection (one-way only)');
+      // Cannot send data over SSE connection (one-way only)
     }
   }
 
   scheduleReconnect(token) {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.error('Max reconnection attempts reached');
+      // Max reconnection attempts reached
       return;
     }
 
@@ -204,7 +204,7 @@ export class RealtimeService {
     this.reconnectAttempts++;
     const delay = this.reconnectDelay * Math.pow(2, Math.min(this.reconnectAttempts - 1, 3));
     
-    console.log(`Reconnecting in ${delay / 1000} seconds...`);
+    // Reconnecting...
     
     this.reconnectInterval = setTimeout(() => {
       this.connect(token);

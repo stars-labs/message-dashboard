@@ -74,7 +74,7 @@ export const iccidMappingsHandler = {
         headers: { 'Content-Type': 'application/json' }
       });
     } catch (error) {
-      console.error('Error listing ICCID mappings:', error);
+      // Error handling - list ICCID mappings
       return new Response(JSON.stringify({ 
         success: false, 
         error: 'Failed to list ICCID mappings' 
@@ -113,7 +113,7 @@ export const iccidMappingsHandler = {
         headers: { 'Content-Type': 'application/json' }
       });
     } catch (error) {
-      console.error('Error getting ICCID mapping:', error);
+      // Error handling - get ICCID mapping
       return new Response(JSON.stringify({
         success: false,
         error: 'Failed to get ICCID mapping'
@@ -152,7 +152,7 @@ export const iccidMappingsHandler = {
         headers: { 'Content-Type': 'application/json' }
       });
     } catch (error) {
-      console.error('Error getting ICCID mapping by ICCID:', error);
+      // Error handling - get ICCID mapping by ICCID
       return new Response(JSON.stringify({
         success: false,
         error: 'Failed to get ICCID mapping'
@@ -221,7 +221,7 @@ export const iccidMappingsHandler = {
         headers: { 'Content-Type': 'application/json' }
       });
     } catch (error) {
-      console.error('Error creating ICCID mapping:', error);
+      // Error handling - create ICCID mapping
       return new Response(JSON.stringify({
         success: false,
         error: 'Failed to create ICCID mapping'
@@ -287,7 +287,7 @@ export const iccidMappingsHandler = {
         headers: { 'Content-Type': 'application/json' }
       });
     } catch (error) {
-      console.error('Error updating ICCID mapping:', error);
+      // Error handling - update ICCID mapping
       return new Response(JSON.stringify({
         success: false,
         error: 'Failed to update ICCID mapping'
@@ -332,7 +332,7 @@ export const iccidMappingsHandler = {
         headers: { 'Content-Type': 'application/json' }
       });
     } catch (error) {
-      console.error('Error deleting ICCID mapping:', error);
+      // Error handling - delete ICCID mapping
       return new Response(JSON.stringify({
         success: false,
         error: 'Failed to delete ICCID mapping'
@@ -432,7 +432,7 @@ export const iccidMappingsHandler = {
         headers: { 'Content-Type': 'application/json' }
       });
     } catch (error) {
-      console.error('Error bulk importing ICCID mappings:', error);
+      // Error handling - bulk import ICCID mappings
       return new Response(JSON.stringify({
         success: false,
         error: 'Failed to bulk import ICCID mappings'
