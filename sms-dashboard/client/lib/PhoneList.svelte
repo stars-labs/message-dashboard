@@ -7,12 +7,14 @@
   export let searchTerm = '';
   export let onSelectPhone = null;
   export let mobile = false;
+  export let onSetIccidMapping = null;
   
   $: filteredPhones = phoneNumbers.filter(phone => {
     const matchesCountry = selectedCountry === 'all' || phone.country === selectedCountry;
     const matchesSearch = searchTerm === '' || 
-      phone.number.includes(searchTerm) || 
-      phone.carrier.toLowerCase().includes(searchTerm.toLowerCase());
+      (phone.number && phone.number.includes(searchTerm)) || 
+      (phone.carrier && phone.carrier.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (phone.id && phone.id.toLowerCase().includes(searchTerm.toLowerCase()));
     return matchesCountry && matchesSearch;
   });
   
@@ -91,14 +93,37 @@
         <div class="flex items-center justify-between">
           <div class="flex-1">
             <div class="flex items-center gap-2">
-              <span class="text-lg">{phone.flag}</span>
-              <span class="font-medium text-gray-900 text-sm">{phone.number}</span>
+              <span class="text-lg">{phone.flag || '📱'}</span>
+              {#if phone.number}
+                <span class="font-medium text-gray-900 text-sm">{phone.number}</span>
+              {:else}
+                <span class="font-medium text-orange-600 text-sm flex items-center gap-1">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                  未设置号码
+                </span>
+                {#if phone.iccid && onSetIccidMapping}
+                  <button
+                    class="text-xs bg-orange-500 hover:bg-orange-600 text-white px-2 py-1 rounded transition-colors"
+                    on:click|stopPropagation={() => onSetIccidMapping(phone)}
+                  >
+                    设置映射
+                  </button>
+                {/if}
+              {/if}
               {#if selectedPhone?.id === phone.id}
                 <span class="text-purple-600 text-xs font-semibold ml-1">✓</span>
               {/if}
             </div>
             <div class="text-xs text-gray-600 mt-0.5">
-              <span class="font-medium">{phone.carrier}</span> • <span class="text-purple-600 font-semibold">{phone.id}</span>
+              {#if phone.carrier}
+                <span class="font-medium">{phone.carrier}</span> • 
+              {/if}
+              <span class="text-purple-600 font-semibold">{phone.id}</span>
+              {#if phone.iccid && !phone.number}
+                <span class="text-gray-500"> • ICCID: {phone.iccid.slice(-6)}</span>
+              {/if}
             </div>
           </div>
           <SignalStrength 
