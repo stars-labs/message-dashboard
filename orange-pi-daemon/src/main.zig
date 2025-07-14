@@ -33,6 +33,10 @@ const Phone = struct {
     rsrq: ?f32 = null,
     rsrp: ?f32 = null,
     snr: ?f32 = null,
+    operator_name: ?[]const u8 = null,
+    operator_id: ?[]const u8 = null,
+    imei: ?[]const u8 = null,
+    access_tech: ?[]const u8 = null,
 };
 
 const MessageUploadRequest = struct {
@@ -128,6 +132,65 @@ const ModemManager = struct {
         return null;
     }
     
+    pub fn getModemInfo(self: ModemManager, modem_id: []const u8) !struct {
+        operator_name: ?[]const u8 = null,
+        operator_id: ?[]const u8 = null,
+        imei: ?[]const u8 = null,
+        access_tech: ?[]const u8 = null,
+    } {
+        const argv = [_][]const u8{ "mmcli", "-m", modem_id };
+        const result = try std.process.Child.run(.{
+            .allocator = self.allocator,
+            .argv = &argv,
+        });
+        defer self.allocator.free(result.stdout);
+        defer self.allocator.free(result.stderr);
+        
+        var info = struct {
+            operator_name: ?[]const u8 = null,
+            operator_id: ?[]const u8 = null,
+            imei: ?[]const u8 = null,
+            access_tech: ?[]const u8 = null,
+        }{};
+        
+        var lines = std.mem.tokenizeScalar(u8, result.stdout, '\n');
+        while (lines.next()) |line| {
+            const trimmed = std.mem.trim(u8, line, " \t");
+            
+            if (std.mem.indexOf(u8, trimmed, "operator name:")) |_| {
+                if (std.mem.indexOf(u8, trimmed, ": ")) |pos| {
+                    const value = std.mem.trim(u8, trimmed[pos + 2 ..], " '\"");
+                    if (value.len > 0) {
+                        info.operator_name = try self.allocator.dupe(u8, value);
+                    }
+                }
+            } else if (std.mem.indexOf(u8, trimmed, "operator id:")) |_| {
+                if (std.mem.indexOf(u8, trimmed, ": ")) |pos| {
+                    const value = std.mem.trim(u8, trimmed[pos + 2 ..], " '\"");
+                    if (value.len > 0) {
+                        info.operator_id = try self.allocator.dupe(u8, value);
+                    }
+                }
+            } else if (std.mem.indexOf(u8, trimmed, "imei:")) |_| {
+                if (std.mem.indexOf(u8, trimmed, ": ")) |pos| {
+                    const value = std.mem.trim(u8, trimmed[pos + 2 ..], " '\"");
+                    if (value.len > 0) {
+                        info.imei = try self.allocator.dupe(u8, value);
+                    }
+                }
+            } else if (std.mem.indexOf(u8, trimmed, "access tech:")) |_| {
+                if (std.mem.indexOf(u8, trimmed, ": ")) |pos| {
+                    const value = std.mem.trim(u8, trimmed[pos + 2 ..], " '\"");
+                    if (value.len > 0) {
+                        info.access_tech = try self.allocator.dupe(u8, value);
+                    }
+                }
+            }
+        }
+        
+        return info;
+    }
+    
     pub fn getCarrierInfo(self: ModemManager, modem_id: []const u8) !?[]const u8 {
         const argv = [_][]const u8{ "mmcli", "-m", modem_id };
         const result = try std.process.Child.run(.{
@@ -195,6 +258,13 @@ const ModemManager = struct {
         // Get ICCID and carrier info
         phone.iccid = try self.getIccid(modem_id);
         phone.carrier = try self.getCarrierInfo(modem_id);
+        
+        // Get additional modem info
+        const modem_info = try self.getModemInfo(modem_id);
+        phone.operator_name = modem_info.operator_name;
+        phone.operator_id = modem_info.operator_id;
+        phone.imei = modem_info.imei;
+        phone.access_tech = modem_info.access_tech;
         
         // Parse signal information
         

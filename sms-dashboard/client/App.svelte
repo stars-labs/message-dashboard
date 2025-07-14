@@ -40,6 +40,11 @@
       ]);
       
       phoneNumbers = phonesData || [];
+      console.log('Loaded phones:', phoneNumbers);
+      // Log signal values specifically
+      phoneNumbers.forEach(phone => {
+        console.log(`Phone ${phone.id}: signal=${phone.signal}, status=${phone.status}`);
+      });
       messages = messagesData.data || [];
       
       // Map API stats to component format
@@ -69,10 +74,15 @@
           await loadData();
           
           // Connect realtime service (WebSocket with SSE fallback)
-          const token = auth.token;
-          if (token) {
+          const token = auth.token || 'anonymous';
+          console.log('Auth token available:', !!auth.token, 'Using token:', token);
+          console.log('Connecting realtime service...');
+          try {
             await realtimeService.connect(token);
             setupWebSocketListeners();
+            console.log('WebSocket listeners set up successfully');
+          } catch (error) {
+            console.error('Failed to connect realtime service:', error);
           }
         }
       } else {
@@ -83,10 +93,15 @@
           await loadData();
           
           // Connect realtime service (WebSocket with SSE fallback)
-          const token = auth.token;
-          if (token) {
+          const token = auth.token || 'anonymous';
+          console.log('Auth token available:', !!auth.token, 'Using token:', token);
+          console.log('Connecting realtime service...');
+          try {
             await realtimeService.connect(token);
             setupWebSocketListeners();
+            console.log('WebSocket listeners set up successfully');
+          } catch (error) {
+            console.error('Failed to connect realtime service:', error);
           }
         }
       }
@@ -94,6 +109,20 @@
       // Authentication check failed
     }
     loading = false;
+    
+    // Always try to connect WebSocket for real-time updates
+    // This will work even without authentication
+    console.log('[App] Setting up WebSocket connection for real-time updates...');
+    try {
+      console.log('[App] Calling realtimeService.connect...');
+      await realtimeService.connect('anonymous');
+      console.log('[App] realtimeService.connect completed');
+      setupWebSocketListeners();
+      console.log('[App] WebSocket connection established and listeners set up');
+    } catch (error) {
+      console.error('[App] WebSocket connection failed:', error);
+      console.error('[App] Error stack:', error.stack);
+    }
   });
   
   function setupWebSocketListeners() {
@@ -135,7 +164,9 @@
     wsUnsubscribers.push(
       realtimeService.on('phones:updated', (msg) => {
         // Phones updated
+        console.log('WebSocket phones update:', msg.data);
         msg.data.forEach(updatedPhone => {
+          console.log(`WS Update - Phone ${updatedPhone.id}: signal=${updatedPhone.signal}, status=${updatedPhone.status}`);
           const index = phoneNumbers.findIndex(p => p.id === updatedPhone.id);
           if (index !== -1) {
             phoneNumbers[index] = { ...phoneNumbers[index], ...updatedPhone };
@@ -144,6 +175,7 @@
           }
         });
         phoneNumbers = [...phoneNumbers];
+        console.log('Updated phoneNumbers:', phoneNumbers);
         
         // Update online device count
         stats.onlineDevices = phoneNumbers.filter(p => p.status === 'online').length;

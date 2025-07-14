@@ -132,16 +132,22 @@ export const controlHandler = {
       
       // Update phones with ICCID and signal details support
       const stmt = env.DB.prepare(`
-        INSERT INTO phones (id, number, country, flag, carrier, status, signal, iccid, rssi, rsrq, rsrp, snr)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO phones (id, number, country, flag, carrier, status, signal, iccid, rssi, rsrq, rsrp, snr, operator_name, operator_id, imei, access_tech)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
+          number = COALESCE(excluded.number, phones.number),
+          carrier = COALESCE(excluded.carrier, phones.carrier),
           status = excluded.status,
           signal = excluded.signal,
-          iccid = excluded.iccid,
+          iccid = COALESCE(excluded.iccid, phones.iccid),
           rssi = excluded.rssi,
           rsrq = excluded.rsrq,
           rsrp = excluded.rsrp,
           snr = excluded.snr,
+          operator_name = COALESCE(excluded.operator_name, phones.operator_name),
+          operator_id = COALESCE(excluded.operator_id, phones.operator_id),
+          imei = COALESCE(excluded.imei, phones.imei),
+          access_tech = excluded.access_tech,
           updated_at = CURRENT_TIMESTAMP
       `);
       
@@ -160,7 +166,11 @@ export const controlHandler = {
             phone.rssi || null,
             phone.rsrq || null,
             phone.rsrp || null,
-            phone.snr || null
+            phone.snr || null,
+            phone.operator_name || null,
+            phone.operator_id || null,
+            phone.imei || null,
+            phone.access_tech || null
           ).run();
         } catch (err) {
           // Failed to update phone
@@ -168,7 +178,9 @@ export const controlHandler = {
       }
       
       // Broadcast phone updates
-      await broadcastEvent(env, 'phones:updated', phones);
+      console.log(`[control.js] Broadcasting phones:updated event with ${phones.length} phones`);
+      const broadcastResult = await broadcastEvent(env, 'phones:updated', phones);
+      console.log(`[control.js] Broadcast result:`, broadcastResult);
       
       return new Response(JSON.stringify({
         success: true,
