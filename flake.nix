@@ -24,10 +24,11 @@
       ];
       
       flake = {
-        # NixOS module for the daemon
+        # NixOS modules
         nixosModules = {
-          default = ./orange-pi-daemon/nixos-module.nix;
-          sms-dashboard-daemon = ./orange-pi-daemon/nixos-module.nix;
+          default = ./nixos-config/modules/sms-daemon.nix;
+          sms-daemon = ./nixos-config/modules/sms-daemon.nix;
+          modem-support = ./nixos-config/modules/modem-support.nix;
         };
         
         # NixOS configuration for Orange Pi
@@ -35,8 +36,7 @@
           orange-pi = nixpkgs.lib.nixosSystem {
             system = "aarch64-linux";
             modules = [
-              ./configuration.nix
-              self.nixosModules.default
+              ./nixos-config/orange-pi/configuration.nix
               sops-nix.nixosModules.sops
               ({ config, pkgs, lib, ... }: {
                 # Enable flakes
@@ -44,23 +44,26 @@
                 
                 # SOPS configuration for secure secret management
                 sops = {
-                  defaultSopsFile = ./secrets/orange-pi.yaml;
+                  defaultSopsFile = ./nixos-config/secrets/orange-pi.yaml;
                   # Use SSH host key for decryption on the Orange Pi
                   age.sshKeyPaths = [ "/etc/ssh/ssh_host_ed25519_key" ];
                   
                   secrets = {
                     "sms-dashboard/api-key" = {
-                      owner = config.services.sms-dashboard-daemon.user;
-                      group = config.services.sms-dashboard-daemon.group;
+                      owner = config.services.sms-daemon.user;
+                      group = config.services.sms-daemon.group;
                       mode = "0400";
                     };
                   };
                 };
                 
-                # Override the SMS dashboard daemon to use SOPS secrets
-                services.sms-dashboard-daemon = {
+                # Override the SMS daemon to use SOPS secrets
+                services.sms-daemon = {
+                  enable = true;
+                  package = self.packages.aarch64-linux.sms-daemon;
                   apiKeyFile = config.sops.secrets."sms-dashboard/api-key".path;
                   apiUrl = "https://sexy.qzz.io/";
+                  uploadInterval = 60;
                 };
               })
             ];
@@ -79,9 +82,9 @@
           ...
         }:
         let
-          # Orange Pi daemon package
-          sms-dashboard-daemon = pkgs.stdenv.mkDerivation rec {
-            pname = "sms-dashboard-daemon";
+          # Orange Pi SMS daemon package
+          sms-daemon = pkgs.stdenv.mkDerivation rec {
+            pname = "sms-daemon";
             version = "0.1.0";
             
             src = ./orange-pi-daemon;
@@ -97,14 +100,16 @@
             
             installPhase = ''
               mkdir -p $out/bin
-              cp zig-out/bin/sms-dashboard-daemon $out/bin/
+              cp zig-out/bin/orange-pi-daemon $out/bin/sms-daemon
             '';
           };
         in
         {
           packages = {
-            inherit sms-dashboard-daemon;
-            default = sms-dashboard-daemon;
+            inherit sms-daemon;
+            default = sms-daemon;
+            # Legacy alias
+            sms-dashboard-daemon = sms-daemon;
           };
           
           devShells = {
@@ -155,7 +160,11 @@
           apps = {
             daemon = {
               type = "app";
-              program = "${sms-dashboard-daemon}/bin/sms-dashboard-daemon";
+              program = "${sms-daemon}/bin/sms-daemon";
+            };
+            sms-daemon = {
+              type = "app";
+              program = "${sms-daemon}/bin/sms-daemon";
             };
           };
         };
