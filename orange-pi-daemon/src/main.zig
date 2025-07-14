@@ -132,12 +132,14 @@ const ModemManager = struct {
         return null;
     }
     
-    pub fn getModemInfo(self: ModemManager, modem_id: []const u8) !struct {
+    const ModemInfo = struct {
         operator_name: ?[]const u8 = null,
         operator_id: ?[]const u8 = null,
         imei: ?[]const u8 = null,
         access_tech: ?[]const u8 = null,
-    } {
+    };
+    
+    pub fn getModemInfo(self: ModemManager, modem_id: []const u8) !ModemInfo {
         const argv = [_][]const u8{ "mmcli", "-m", modem_id };
         const result = try std.process.Child.run(.{
             .allocator = self.allocator,
@@ -146,12 +148,7 @@ const ModemManager = struct {
         defer self.allocator.free(result.stdout);
         defer self.allocator.free(result.stderr);
         
-        var info = struct {
-            operator_name: ?[]const u8 = null,
-            operator_id: ?[]const u8 = null,
-            imei: ?[]const u8 = null,
-            access_tech: ?[]const u8 = null,
-        }{};
+        var info = ModemInfo{};
         
         var lines = std.mem.tokenizeScalar(u8, result.stdout, '\n');
         while (lines.next()) |line| {
