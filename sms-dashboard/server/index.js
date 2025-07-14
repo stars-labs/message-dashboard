@@ -42,15 +42,19 @@ class SimpleRouter {
     const method = request.method;
     const pathname = url.pathname;
 
+    console.log(`[Router] Handling ${method} ${pathname}`);
+
     // Add env and ctx to request
     request.env = env;
     request.ctx = ctx;
 
     // Find matching route
     const routes = this.routes[method] || [];
+    console.log(`[Router] Available routes for ${method}: ${routes.map(r => r.path).join(', ')}`);
     
     for (const route of routes) {
       if (route.path === '*' || route.path === pathname || this.matchPath(route.path, pathname)) {
+        console.log(`[Router] Matched route: ${route.path}`);
         // Execute handlers in sequence
         let response;
         for (const handler of route.handlers) {
@@ -61,6 +65,7 @@ class SimpleRouter {
       }
     }
 
+    console.log(`[Router] No matching route found for ${pathname}`);
     return null;
   }
 
@@ -86,6 +91,16 @@ router.options('*', handleCORS);
 
 // Public API routes
 router.get('/api/health', () => new Response('OK', { status: 200 }));
+
+// Test route to check HTML response
+router.get('/test-html', () => {
+  return new Response('<html><body>Test HTML</body></html>', {
+    headers: {
+      'Content-Type': 'text/html',
+      'Cache-Control': 'no-cache'
+    }
+  });
+});
 
 // Auth routes (not under /api since they're redirects, not API endpoints)
 router.get('/login', auth0Handler.login);
@@ -176,11 +191,13 @@ router.get('*', serveFrontend);
 export default {
   async fetch(request, env, ctx) {
     // Worker started - with frontend
+    console.log(`[Worker] Received request: ${request.method} ${request.url}`);
     
     try {
       // Handle WebSocket endpoint directly (not through router)
       const url = new URL(request.url);
       if (url.pathname === '/api/ws') {
+        console.log(`[Worker] WebSocket request detected`);
         const upgradeHeader = request.headers.get('Upgrade');
         if (upgradeHeader !== 'websocket') {
           return new Response('Expected Upgrade: websocket', { status: 426 });
@@ -198,14 +215,20 @@ export default {
       const response = await router.handle(request, env, ctx);
       
       if (!response) {
+        console.log(`[Worker] No route matched, serving frontend`);
         // No route matched, serve frontend (includes assets)
         return serveFrontend(request);
       }
       
+      console.log(`[Worker] Route matched, returning response`);
       // Add CORS headers to API responses
-      return handleCORS(response);
+      if (response) {
+        return handleCORS(response);
+      }
+      return response;
       
     } catch (error) {
+      console.error(`[Worker] Error:`, error);
       // Worker error
       return new Response(JSON.stringify({ error: 'Internal Server Error' }), {
         status: 500,
