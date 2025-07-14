@@ -6,6 +6,7 @@
   import StatsCard from './lib/StatsCard.svelte';
   import IccidMappings from './lib/IccidMappings.svelte';
   import PhoneDetails from './lib/PhoneDetails.svelte';
+  import IccidMappingDialog from './lib/IccidMappingDialog.svelte';
   import { api } from './lib/api.js';
   import { realtimeService } from './lib/websocket-with-fallback.js';
   import { auth } from './lib/auth.js';
@@ -21,6 +22,8 @@
   let wsConnected = false;
   let wsUnsubscribers = [];
   let currentView = 'dashboard'; // 'dashboard' or 'iccid-mappings'
+  let showIccidMappingDialog = false;
+  let phoneToMap = null;
   
   let stats = {
     totalMessages: 0,
@@ -211,6 +214,28 @@
     showPhoneList = false;
   }
   
+  function handleSetIccidMapping(phone) {
+    phoneToMap = phone;
+    showIccidMappingDialog = true;
+  }
+  
+  async function handleIccidMappingSuccess(event) {
+    const { phone_id, phone_number } = event.detail;
+    
+    // Update the phone in our local list
+    const phoneIndex = phoneNumbers.findIndex(p => p.id === phone_id);
+    if (phoneIndex !== -1) {
+      phoneNumbers[phoneIndex] = {
+        ...phoneNumbers[phoneIndex],
+        number: phone_number
+      };
+      phoneNumbers = [...phoneNumbers]; // Trigger reactivity
+    }
+    
+    // Reload data to get fresh mapping
+    await loadData();
+  }
+  
   async function handleMessageSent(event) {
     const newMessage = event.detail;
     
@@ -398,6 +423,7 @@
                   bind:selectedCountry
                   bind:searchTerm
                   onSelectPhone={selectPhone}
+                  onSetIccidMapping={handleSetIccidMapping}
                   mobile={true}
                 />
               </div>
@@ -412,6 +438,7 @@
             bind:selectedPhone 
             bind:selectedCountry
             bind:searchTerm
+            onSetIccidMapping={handleSetIccidMapping}
           />
         </div>
         
@@ -454,3 +481,11 @@
   {/if}
 </div>
 {/if}
+
+<!-- ICCID Mapping Dialog -->
+<IccidMappingDialog 
+  phone={phoneToMap}
+  bind:show={showIccidMappingDialog}
+  on:success={handleIccidMappingSuccess}
+  on:close={() => { phoneToMap = null; showIccidMappingDialog = false; }}
+/>
