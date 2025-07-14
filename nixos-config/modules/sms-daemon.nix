@@ -115,6 +115,6 @@ in {
     };
 
     # Enable ModemManager
-    services.modemmanager.enable = true;
+    networking.modemmanager.enable = true;
   };
 }
