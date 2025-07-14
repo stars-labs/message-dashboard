@@ -12,6 +12,7 @@ import { groupsHandler } from './handlers/groups';
 import { iccidMappingsHandler } from './handlers/iccid-mappings';
 import { sseHandler } from './handlers/sse';
 import { serveFrontend } from './frontend-handler';
+import { WebSocketRoom } from './durable-objects/WebSocketRoom';
 
 // Simple router implementation without itty-router
 class SimpleRouter {
@@ -238,51 +239,5 @@ export default {
   }
 };
 
-// Export WebSocketRoom to satisfy Durable Object binding
-export class WebSocketRoom {
-  constructor(state, env) {
-    this.state = state;
-    this.env = env;
-  }
-  
-  async fetch(request) {
-    // For now, return a proper WebSocket upgrade response
-    // even if we don't handle messages yet
-    const upgradeHeader = request.headers.get('Upgrade');
-    if (upgradeHeader !== 'websocket') {
-      return new Response('Expected Upgrade: websocket', { status: 426 });
-    }
-
-    const webSocketPair = new WebSocketPair();
-    const [client, server] = Object.values(webSocketPair);
-    
-    // Accept the WebSocket connection
-    server.accept();
-    
-    // Send initial connection message
-    server.send(JSON.stringify({
-      type: 'connected',
-      timestamp: new Date().toISOString()
-    }));
-    
-    // Handle incoming messages (placeholder)
-    server.addEventListener('message', event => {
-      // Echo messages for now
-      server.send(JSON.stringify({
-        type: 'echo',
-        data: event.data,
-        timestamp: new Date().toISOString()
-      }));
-    });
-    
-    // Handle close
-    server.addEventListener('close', event => {
-      // Cleanup if needed
-    });
-    
-    return new Response(null, {
-      status: 101,
-      webSocket: client,
-    });
-  }
-}
+// Export WebSocketRoom from durable objects
+export { WebSocketRoom };
