@@ -16,6 +16,7 @@ routes = [
 binding = "DB"
 database_name = "sms-dashboard"
 database_id = "14311b51-4169-4449-9f41-30ca4428a76e"
+migrations_dir = "migrations"
 
 # KV Namespace for sessions
 [[kv_namespaces]]
@@ -26,7 +27,15 @@ id = "92704d6efb8d466598db166d944697a7"
 [vars]
 ENVIRONMENT = "production"
 DEFAULT_USER_GROUP = "viewer"
+WORKER_URL = "https://sexy.qzz.io"
 # ALLOWED_EMAIL_DOMAINS = "example.com,partner.com"  # Uncomment to restrict domains
+
+# Auth0 Role Configuration
+USE_AUTH0_ROLES = "true"  # Set to "false" to disable role checking
+AUTH0_SMS_ROLE = "sms"    # The role that grants SMS access
+AUTH0_ALTERNATIVE_SMS_ROLES = ""  # No additional roles needed
+AUTH0_ROLE_NAMESPACE = "https://sexy.qzz.io"  # Where to find roles in Auth0 token
+AUTH0_ALLOW_NO_ROLES = "false"  # Set to "true" to allow access without roles (testing only)
 
 # Durable Objects binding
 [[durable_objects.bindings]]

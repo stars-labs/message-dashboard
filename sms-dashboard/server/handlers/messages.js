@@ -18,8 +18,8 @@ export const messagesHandler = {
       const params = [];
       
       if (phoneId) {
-        query += ` WHERE phone_id = ?`;
-        countQuery += ` WHERE phone_id = ?`;
+        query += ` WHERE phone_iccid = ?`;
+        countQuery += ` WHERE phone_iccid = ?`;
         params.push(phoneId);
       }
       
@@ -113,7 +113,7 @@ export const messagesHandler = {
       
       // Get phone details
       const phone = await env.DB.prepare(`
-        SELECT * FROM phones WHERE id = ? AND status = 'online'
+        SELECT * FROM phones WHERE iccid = ? AND status = 'online'
       `).bind(phoneId).first();
       
       if (!phone) {
@@ -131,8 +131,8 @@ export const messagesHandler = {
       const timestamp = new Date().toISOString();
       
       await env.DB.prepare(`
-        INSERT INTO messages (id, phone_id, phone_number, content, timestamp, type, recipient, status)
-        VALUES (?, ?, ?, ?, ?, 'sent', ?, 'pending')
+        INSERT INTO messages (id, phone_iccid, phone_number, content, timestamp, type, recipient, status)
+        VALUES (?, ?, ?, ?, ?, 'sent', ?, 'sending')
       `).bind(
         messageId,
         phoneId,
@@ -145,33 +145,34 @@ export const messagesHandler = {
       // Broadcast new message event
       const messageData = {
         id: messageId,
-        phone_id: phoneId,
+        phone_iccid: phoneId,
         phone_number: phone.number,
         content,
         timestamp,
         type: 'sent',
         recipient,
-        status: 'pending'
+        status: 'sending'
       };
       await broadcastEvent(env, 'message:created', messageData);
       
-      // TODO: Implement actual SMS sending logic here
-      // For now, we'll simulate success
-      request.ctx.waitUntil(
-        new Promise(async (resolve) => {
-          await new Promise(resolve => setTimeout(resolve, 2000));
-          await env.DB.prepare(`
-            UPDATE messages SET status = 'delivered' WHERE id = ?
-          `).bind(messageId).run();
-          
-          // Broadcast status update
-          await broadcastEvent(env, 'message:updated', {
-            ...messageData,
-            status: 'delivered'
-          });
-          resolve();
+      // Send SMS request to daemon via WebSocket
+      const roomId = env.WEBSOCKET_ROOMS.idFromName('global');
+      const room = env.WEBSOCKET_ROOMS.get(roomId);
+      
+      // Forward message to daemon
+      await room.fetch('http://internal/forward-to-daemon', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'send_message',
+          data: {
+            message_id: messageId,
+            phone_iccid: phoneId,
+            recipient: recipient,
+            content: content
+          }
         })
-      );
+      });
       
       return new Response(JSON.stringify({
         success: true,

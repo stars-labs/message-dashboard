@@ -6,6 +6,7 @@
   import StatsCard from './lib/StatsCard.svelte';
   import IccidMappings from './lib/IccidMappings.svelte';
   import PhoneDetails from './lib/PhoneDetails.svelte';
+  import IccidMappingDialog from './lib/IccidMappingDialog.svelte';
   import { api } from './lib/api.js';
   import { realtimeService } from './lib/websocket-with-fallback.js';
   import { auth } from './lib/auth.js';
@@ -21,6 +22,8 @@
   let wsConnected = false;
   let wsUnsubscribers = [];
   let currentView = 'dashboard'; // 'dashboard' or 'iccid-mappings'
+  let showIccidMappingDialog = false;
+  let phoneToMap = null;
   
   let stats = {
     totalMessages: 0,
@@ -30,9 +33,10 @@
     verificationRate: 0
   };
   
-  // Load data from API
+  // Load data from WebSocket API
   async function loadData() {
     try {
+      // Use WebSocket API for all data loading
       const [phonesData, messagesData, statsData] = await Promise.all([
         api.getPhones(),
         api.getMessages({ limit: 100 }),
@@ -40,6 +44,20 @@
       ]);
       
       phoneNumbers = phonesData || [];
+      console.log('Loaded phones:', phoneNumbers);
+      // Log all phone details
+      phoneNumbers.forEach(phone => {
+        console.log(`Phone ${phone.iccid}:`, {
+          signal: phone.signal, 
+          status: phone.status,
+          operator_name: phone.operator_name,
+          operator_id: phone.operator_id,
+          imei: phone.imei,
+          access_tech: phone.access_tech,
+          iccid: phone.iccid,
+          number: phone.number
+        });
+      });
       messages = messagesData.data || [];
       
       // Map API stats to component format
@@ -51,7 +69,17 @@
         verificationRate: Math.round(statsData.verification_rate * 100)
       };
     } catch (error) {
-      // Error handling - failed to load data
+      console.warn('Failed to load data:', error);
+      // Use default values on error
+      phoneNumbers = [];
+      messages = [];
+      stats = {
+        totalMessages: 0,
+        todayMessages: 0,
+        onlineDevices: 0,
+        totalDevices: 0,
+        verificationRate: 0
+      };
     }
   }
   
@@ -69,10 +97,15 @@
           await loadData();
           
           // Connect realtime service (WebSocket with SSE fallback)
-          const token = auth.token;
-          if (token) {
+          const token = auth.token || 'anonymous';
+          console.log('Auth token available:', !!auth.token, 'Using token:', token);
+          console.log('Connecting realtime service...');
+          try {
             await realtimeService.connect(token);
             setupWebSocketListeners();
+            console.log('WebSocket listeners set up successfully');
+          } catch (error) {
+            console.error('Failed to connect realtime service:', error);
           }
         }
       } else {
@@ -83,10 +116,15 @@
           await loadData();
           
           // Connect realtime service (WebSocket with SSE fallback)
-          const token = auth.token;
-          if (token) {
+          const token = auth.token || 'anonymous';
+          console.log('Auth token available:', !!auth.token, 'Using token:', token);
+          console.log('Connecting realtime service...');
+          try {
             await realtimeService.connect(token);
             setupWebSocketListeners();
+            console.log('WebSocket listeners set up successfully');
+          } catch (error) {
+            console.error('Failed to connect realtime service:', error);
           }
         }
       }
@@ -94,6 +132,20 @@
       // Authentication check failed
     }
     loading = false;
+    
+    // Always try to connect WebSocket for real-time updates
+    // This will work even without authentication
+    console.log('[App] Setting up WebSocket connection for real-time updates...');
+    try {
+      console.log('[App] Calling realtimeService.connect...');
+      await realtimeService.connect('anonymous');
+      console.log('[App] realtimeService.connect completed');
+      setupWebSocketListeners();
+      console.log('[App] WebSocket connection established and listeners set up');
+    } catch (error) {
+      console.error('[App] WebSocket connection failed:', error);
+      console.error('[App] Error stack:', error.stack);
+    }
   });
   
   function setupWebSocketListeners() {
@@ -135,19 +187,53 @@
     wsUnsubscribers.push(
       realtimeService.on('phones:updated', (msg) => {
         // Phones updated
-        msg.data.forEach(updatedPhone => {
-          const index = phoneNumbers.findIndex(p => p.id === updatedPhone.id);
-          if (index !== -1) {
-            phoneNumbers[index] = { ...phoneNumbers[index], ...updatedPhone };
-          } else {
-            phoneNumbers = [...phoneNumbers, updatedPhone];
-          }
-        });
-        phoneNumbers = [...phoneNumbers];
+        console.log('WebSocket phones update:', msg.data);
+        
+        // Replace all phones with the new data (don't append)
+        // The daemon sends the complete list of phones
+        // Filter out phones without valid ICCIDs
+        phoneNumbers = msg.data
+          .filter(phone => phone.iccid && phone.iccid.trim() !== '' && !phone.iccid.startsWith('SIM_'))
+          .map(updatedPhone => {
+            console.log(`WS Update - Phone ${updatedPhone.iccid}: signal=${updatedPhone.signal}, status=${updatedPhone.status}`);
+            // Ensure we have the proper structure
+            return {
+              ...updatedPhone
+            };
+          });
+        
+        console.log('Updated phoneNumbers:', phoneNumbers);
         
         // Update online device count
         stats.onlineDevices = phoneNumbers.filter(p => p.status === 'online').length;
         stats.totalDevices = phoneNumbers.length;
+      })
+    );
+    
+    // Listen for message sent responses
+    wsUnsubscribers.push(
+      realtimeService.on('message:sent', (msg) => {
+        // Message sent result received
+        console.log('Message sent result:', msg.data);
+        if (msg.data.success) {
+          // Create message for local display
+          const sentMessage = {
+            id: `msg-sent-${Date.now()}`,
+            phone_iccid: msg.data.phone_iccid || '',
+            phone_number: msg.data.recipient || '',
+            recipient: msg.data.recipient || '',
+            content: msg.data.content || '',
+            timestamp: new Date().toISOString(),
+            type: 'sent',
+            status: 'delivered',
+            sms_id: msg.data.sms_id
+          };
+          
+          // Add to local messages
+          messages = [sentMessage, ...messages];
+          stats.totalMessages++;
+          stats.todayMessages++;
+        }
       })
     );
     
@@ -160,15 +246,9 @@
     );
   }
   
-  // Refresh data periodically
-  let refreshInterval;
-  $: if (user && !refreshInterval) {
-    refreshInterval = setInterval(loadData, 30000); // Refresh every 30 seconds
-  }
+  // No need for periodic refresh - using WebSocket real-time updates
   
   onDestroy(() => {
-    if (refreshInterval) clearInterval(refreshInterval);
-    
     // Cleanup realtime service
     wsUnsubscribers.forEach(unsubscribe => unsubscribe());
     realtimeService.disconnect();
@@ -179,25 +259,61 @@
     showPhoneList = false;
   }
   
+  function handleSetIccidMapping(phone) {
+    phoneToMap = phone;
+    showIccidMappingDialog = true;
+  }
+  
+  async function handleIccidMappingSuccess(event) {
+    const { phone_iccid, phone_number } = event.detail;
+    
+    // Update the phone in our local list
+    const phoneIndex = phoneNumbers.findIndex(p => p.iccid === phone_iccid);
+    if (phoneIndex !== -1) {
+      phoneNumbers[phoneIndex] = {
+        ...phoneNumbers[phoneIndex],
+        number: phone_number
+      };
+      phoneNumbers = [...phoneNumbers]; // Trigger reactivity
+    }
+    
+    // No need to reload - WebSocket will provide updates
+  }
+  
   async function handleMessageSent(event) {
     const newMessage = event.detail;
     
-    // Send to API
+    console.log('Sending message via WebSocket:', newMessage);
+    
     try {
+      // Send message using WebSocket API
       const response = await api.sendMessage({
-        phoneId: newMessage.phoneId,
+        phone_iccid: newMessage.phone_iccid,
         recipient: newMessage.recipient,
         content: newMessage.content
       });
       
       if (response.success) {
-        // Add to local messages
-        messages = [response.data, ...messages];
-        // Reload stats
-        await loadData();
+        // Add to local messages immediately with sending status
+        const sentMessage = {
+          id: `msg-sent-${Date.now()}`,
+          phone_iccid: newMessage.phone_iccid,
+          phone_number: newMessage.recipient,
+          recipient: newMessage.recipient,
+          content: newMessage.content,
+          timestamp: new Date().toISOString(),
+          type: 'sent',
+          status: 'sending'
+        };
+        
+        messages = [sentMessage, ...messages];
+        stats.totalMessages++;
+        stats.todayMessages++;
       }
     } catch (error) {
-      // Error handling - failed to send message
+      console.error('Failed to send message:', error);
+      // Show error to user
+      alert('Failed to send message: ' + error.message);
     }
   }
 </script>
@@ -277,6 +393,38 @@
       </div>
     </div>
   </header>
+
+  <!-- Status Alert Banner -->
+  {#if phoneNumbers.some(p => p.status !== 'online')}
+    <div class="bg-yellow-50 border-b border-yellow-200 px-4 py-2">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <svg class="w-5 h-5 text-yellow-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+          <span class="text-sm text-yellow-800">
+            {#if phoneNumbers.filter(p => p.status === 'searching').length > 0}
+              <strong>{phoneNumbers.filter(p => p.status === 'searching').length}</strong> 张SIM卡正在搜索网络
+            {/if}
+            {#if phoneNumbers.filter(p => p.status === 'failed').length > 0}
+              {#if phoneNumbers.filter(p => p.status === 'searching').length > 0} • {/if}
+              <strong>{phoneNumbers.filter(p => p.status === 'failed').length}</strong> 张SIM卡连接故障
+            {/if}
+            {#if phoneNumbers.filter(p => p.status === 'offline').length > 0}
+              {#if phoneNumbers.filter(p => p.status === 'searching').length > 0 || phoneNumbers.filter(p => p.status === 'failed').length > 0} • {/if}
+              <strong>{phoneNumbers.filter(p => p.status === 'offline').length}</strong> 张SIM卡离线
+            {/if}
+          </span>
+        </div>
+        <button 
+          on:click={() => currentView = 'dashboard'}
+          class="text-xs text-yellow-600 hover:text-yellow-700 underline"
+        >
+          查看详情
+        </button>
+      </div>
+    </div>
+  {/if}
 
   <!-- Mobile Navigation -->
   <div class="lg:hidden px-4 py-2 bg-gray-50 border-b">
@@ -366,6 +514,7 @@
                   bind:selectedCountry
                   bind:searchTerm
                   onSelectPhone={selectPhone}
+                  onSetIccidMapping={handleSetIccidMapping}
                   mobile={true}
                 />
               </div>
@@ -380,6 +529,7 @@
             bind:selectedPhone 
             bind:selectedCountry
             bind:searchTerm
+            onSetIccidMapping={handleSetIccidMapping}
           />
         </div>
         
@@ -422,3 +572,11 @@
   {/if}
 </div>
 {/if}
+
+<!-- ICCID Mapping Dialog -->
+<IccidMappingDialog 
+  phone={phoneToMap}
+  bind:show={showIccidMappingDialog}
+  on:success={handleIccidMappingSuccess}
+  on:close={() => { phoneToMap = null; showIccidMappingDialog = false; }}
+/>
