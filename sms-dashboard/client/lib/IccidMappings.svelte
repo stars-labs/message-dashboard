@@ -34,14 +34,16 @@
         search: searchQuery
       });
       
-      if (response.success) {
-        mappings = response.data;
-        totalPages = response.pagination.totalPages;
+      if (response && response.success) {
+        mappings = response.data || [];
+        totalPages = response.pagination?.totalPages || 1;
       } else {
-        error = 'Failed to load ICCID mappings';
+        error = response?.error || 'Failed to load ICCID mappings';
+        console.error('ICCID mappings API error:', response);
       }
     } catch (err) {
-      error = err.message;
+      error = err.message || 'Failed to load ICCID mappings';
+      console.error('Failed to load ICCID mappings:', err);
     } finally {
       loading = false;
     }
