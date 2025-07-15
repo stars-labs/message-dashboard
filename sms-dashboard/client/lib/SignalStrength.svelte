@@ -61,7 +61,27 @@
           ></div>
         {/each}
       </div>
-    {:else}
+    {:else if status === 'searching'}
+      <div class="flex gap-0.5 items-end">
+        {#each [1, 2, 3, 4] as bar}
+          <div 
+            class="w-1 bg-yellow-300 rounded-sm animate-pulse"
+            style="height: {4 + bar * 3}px"
+          ></div>
+        {/each}
+      </div>
+      <span class="text-xs text-yellow-600">搜索中</span>
+    {:else if status === 'failed'}
+      <div class="flex gap-0.5 items-end">
+        {#each [1, 2, 3, 4] as bar}
+          <div 
+            class="w-1 bg-red-300 rounded-sm"
+            style="height: {4 + bar * 3}px"
+          ></div>
+        {/each}
+      </div>
+      <span class="text-xs text-red-600">故障</span>
+    {:else if status === 'offline'}
       <div class="flex gap-0.5 items-end">
         {#each [1, 2, 3, 4] as bar}
           <div 
@@ -71,6 +91,16 @@
         {/each}
       </div>
       <span class="text-xs text-gray-500">离线</span>
+    {:else}
+      <div class="flex gap-0.5 items-end">
+        {#each [1, 2, 3, 4] as bar}
+          <div 
+            class="w-1 bg-gray-200 rounded-sm"
+            style="height: {4 + bar * 3}px"
+          ></div>
+        {/each}
+      </div>
+      <span class="text-xs text-gray-400">未知</span>
     {/if}
   </div>
 {:else}
@@ -79,15 +109,57 @@
     <div class="flex items-center justify-between">
       <span class="text-sm font-medium text-gray-700">信号强度</span>
       <div class="flex items-center gap-2">
-        <div class="flex gap-0.5 items-end">
-          {#each [1, 2, 3, 4] as bar}
-            <div 
-              class="w-1.5 transition-all duration-300 rounded-sm {bar <= bars ? color : 'bg-gray-300'}"
-              style="height: {bar * 4 + 6}px"
-            ></div>
-          {/each}
-        </div>
-        <span class="text-sm font-semibold {textColor}">{quality}</span>
+        {#if status === 'online'}
+          <div class="flex gap-0.5 items-end">
+            {#each [1, 2, 3, 4] as bar}
+              <div 
+                class="w-1.5 transition-all duration-300 rounded-sm {bar <= bars ? color : 'bg-gray-300'}"
+                style="height: {bar * 4 + 6}px"
+              ></div>
+            {/each}
+          </div>
+          <span class="text-sm font-semibold {textColor}">{quality}</span>
+        {:else if status === 'searching'}
+          <div class="flex gap-0.5 items-end">
+            {#each [1, 2, 3, 4] as bar}
+              <div 
+                class="w-1.5 bg-yellow-300 rounded-sm animate-pulse"
+                style="height: {bar * 4 + 6}px"
+              ></div>
+            {/each}
+          </div>
+          <span class="text-sm font-semibold text-yellow-600">搜索网络中</span>
+        {:else if status === 'failed'}
+          <div class="flex gap-0.5 items-end">
+            {#each [1, 2, 3, 4] as bar}
+              <div 
+                class="w-1.5 bg-red-300 rounded-sm"
+                style="height: {bar * 4 + 6}px"
+              ></div>
+            {/each}
+          </div>
+          <span class="text-sm font-semibold text-red-600">连接故障</span>
+        {:else if status === 'offline'}
+          <div class="flex gap-0.5 items-end">
+            {#each [1, 2, 3, 4] as bar}
+              <div 
+                class="w-1.5 bg-gray-300 rounded-sm"
+                style="height: {bar * 4 + 6}px"
+              ></div>
+            {/each}
+          </div>
+          <span class="text-sm font-semibold text-gray-500">离线</span>
+        {:else}
+          <div class="flex gap-0.5 items-end">
+            {#each [1, 2, 3, 4] as bar}
+              <div 
+                class="w-1.5 bg-gray-200 rounded-sm"
+                style="height: {bar * 4 + 6}px"
+              ></div>
+            {/each}
+          </div>
+          <span class="text-sm font-semibold text-gray-400">未知状态</span>
+        {/if}
       </div>
     </div>
     

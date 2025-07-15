@@ -1,35 +1,47 @@
 # NixOS configuration for Orange Pi with SMS Dashboard
-{ config, pkgs, ... }:
+{
+  config,
+  pkgs,
+  lib,
+  ...
+}:
 
 {
   imports = [
     # Include hardware configuration (generate with nixos-generate-config)
     ./hardware-configuration.nix
-    
+
     # Include SMS daemon module
     ../modules/sms-daemon.nix
-    
+
     # Include modem support module
     ../modules/modem-support.nix
   ];
 
   # System identification
   networking.hostName = "orange-pi-sms";
-  
+  boot = {
+    kernelPackages = lib.mkForce pkgs.linuxPackages_latest;
+  };
   # Configure static network interface for Orange Pi
   networking.interfaces = {
     enP3p49s0 = {
-      ipv4.addresses = [{
-        address = "10.171.150.102";
-        prefixLength = 24;
-      }];
+      ipv4.addresses = [
+        {
+          address = "10.171.150.102";
+          prefixLength = 24;
+        }
+      ];
     };
   };
 
   # Configure network settings
   networking.defaultGateway = "10.171.150.1";
-  networking.nameservers = [ "8.8.8.8" "8.8.4.4" ];
-  
+  networking.nameservers = [
+    "8.8.8.8"
+    "8.8.4.4"
+  ];
+
   # Tell NetworkManager to ignore the static interface
   networking.networkmanager.unmanaged = [ "enP3p49s0" ];
 
@@ -60,7 +72,11 @@
   users.users.htx = {
     isNormalUser = true;
     description = "HTX User";
-    extraGroups = [ "networkmanager" "wheel" "dialout" ];
+    extraGroups = [
+      "networkmanager"
+      "wheel"
+      "dialout"
+    ];
     openssh.authorizedKeys.keys = [
       # Add your SSH public key here
       # "ssh-rsa AAAAB3NzaC1yc2E... your-key-here"
@@ -77,6 +93,7 @@
     htop
     tmux
     git
+    sbctl
   ];
 
   # Boot configuration

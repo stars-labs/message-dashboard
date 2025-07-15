@@ -27,7 +27,7 @@
   );
   
   $: if (selectedPhone) {
-    recipientSIM = selectedPhone.id;
+    recipientSIM = selectedPhone.iccid;
   }
   
   function handleSend() {
@@ -46,29 +46,29 @@
       localStorage.setItem('recipientHistory', JSON.stringify(storedRecipients.slice(0, 50)));
     }
     
-    // Simulate sending
+    // Send actual message via WebSocket
+    const sentMessage = {
+      id: `msg-sent-${Date.now()}`,
+      phoneId: recipientSIM,
+      phoneNumber: recipientNumber,
+      recipient: recipientNumber,
+      content: messageContent,
+      timestamp: new Date(),
+      type: 'sent',
+      status: 'sending'
+    };
+    
+    // Dispatch to parent (App.svelte) which will handle WebSocket/HTTP sending
+    dispatch('messageSent', sentMessage);
+    
+    // Set success status and clear form
+    sendingStatus = 'success';
+    messageContent = '';
+    
     setTimeout(() => {
-      const sentMessage = {
-        id: `msg-sent-${Date.now()}`,
-        phoneId: recipientSIM,
-        phoneNumber: recipientNumber,
-        recipient: recipientNumber,
-        content: messageContent,
-        timestamp: new Date(),
-        type: 'sent',
-        status: 'delivered'
-      };
-      
-      dispatch('messageSent', sentMessage);
-      
-      sendingStatus = 'success';
-      messageContent = '';
-      
-      setTimeout(() => {
-        sendingStatus = '';
-        showComposer = false;
-      }, 2000);
-    }, 1500);
+      sendingStatus = '';
+      showComposer = false;
+    }, 2000);
   }
   
   function selectRecipient(number) {
@@ -173,8 +173,8 @@
     >
       <option value="">选择发送卡...</option>
       {#each phoneNumbers.filter(p => p.status === 'online') as phone}
-        <option value={phone.id}>
-          {phone.flag} {phone.number} - {phone.id}
+        <option value={phone.iccid}>
+          {phone.flag} {phone.number || (phone.iccid ? `ICCID: ${phone.iccid.slice(-6)}` : 'Unknown')} {phone.operator_name ? `- ${phone.operator_name}` : ''}
         </option>
       {/each}
     </select>
@@ -306,8 +306,8 @@
         >
           <option value="">选择发送卡...</option>
           {#each phoneNumbers.filter(p => p.status === 'online') as phone}
-            <option value={phone.id}>
-              {phone.flag} {phone.number} - {phone.id}
+            <option value={phone.iccid}>
+              {phone.flag} {phone.number || (phone.iccid ? `ICCID: ${phone.iccid.slice(-6)}` : 'Unknown')} {phone.operator_name ? `- ${phone.operator_name}` : ''}
             </option>
           {/each}
         </select>

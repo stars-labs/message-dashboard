@@ -7,7 +7,7 @@
   let groupBy = 'time'; // 'time' or 'source'
   
   $: displayMessages = selectedPhone 
-    ? messages.filter(msg => msg.phone_id === selectedPhone.id)
+    ? messages.filter(msg => msg.phone_iccid === selectedPhone.iccid)
     : messages.slice(0, 50);
     
   $: groupedMessages = groupBy === 'source' 
@@ -142,7 +142,7 @@
                     <div class="mt-2 flex flex-wrap items-center gap-2 text-xs">
                       <span class="text-purple-600 font-medium flex items-center gap-1">
                         <span>📱</span>
-                        接收卡: {message.phoneId}
+                        接收卡: {message.phone_iccid}
                       </span>
                       <span class="text-gray-500">•</span>
                       <span class="text-gray-600">{message.phoneNumber}</span>
@@ -187,14 +187,14 @@
                   {#if message.type === 'sent'}
                     <span class="text-blue-600 font-medium flex items-center gap-1">
                       <span>📤</span>
-                      发送卡: {message.phoneId}
+                      发送卡: {message.phone_iccid}
                     </span>
                     <span class="text-gray-500">•</span>
                     <span class="text-gray-600">发送至: {message.recipient}</span>
                   {:else}
                     <span class="text-purple-600 font-medium flex items-center gap-1">
                       <span>📱</span>
-                      接收卡: {message.phoneId}
+                      接收卡: {message.phone_iccid}
                     </span>
                     {#if !selectedPhone}
                       <span class="text-gray-500">•</span>
