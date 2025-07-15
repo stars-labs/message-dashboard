@@ -4,6 +4,62 @@ export class WebSocketRoom {
     this.env = env;
     this.sessions = new Map(); // Client sessions
     this.daemons = new Map();  // Daemon connections
+    this.daemonStatus = {
+      connected: false,
+      lastHeartbeat: null,
+      lastDataUpdate: null,
+      connectionCount: 0
+    };
+    this.heartbeatInterval = null;
+    this.startHeartbeatMonitoring();
+  }
+
+  startHeartbeatMonitoring() {
+    // Check daemon status every 30 seconds
+    this.heartbeatInterval = setInterval(() => {
+      this.checkDaemonHealth();
+    }, 30000);
+  }
+
+  checkDaemonHealth() {
+    const now = Date.now();
+    const heartbeatTimeout = 60000; // 60 seconds
+    
+    let connectedDaemons = 0;
+    let hasRecentHeartbeat = false;
+    
+    for (const [sessionId, daemon] of this.daemons) {
+      if (daemon.authenticated) {
+        connectedDaemons++;
+        if (daemon.lastHeartbeat && (now - daemon.lastHeartbeat) < heartbeatTimeout) {
+          hasRecentHeartbeat = true;
+        }
+      }
+    }
+    
+    const previouslyConnected = this.daemonStatus.connected;
+    const nowConnected = connectedDaemons > 0 && hasRecentHeartbeat;
+    
+    this.daemonStatus.connected = nowConnected;
+    this.daemonStatus.connectionCount = connectedDaemons;
+    
+    // If status changed, broadcast to all clients
+    if (previouslyConnected !== nowConnected) {
+      console.log(`[WebSocketRoom] Daemon status changed: ${nowConnected ? 'online' : 'offline'}`);
+      this.broadcastDaemonStatus();
+    }
+  }
+
+  async broadcastDaemonStatus() {
+    const statusMessage = {
+      connected: this.daemonStatus.connected,
+      lastHeartbeat: this.daemonStatus.lastHeartbeat,
+      lastDataUpdate: this.daemonStatus.lastDataUpdate,
+      connectionCount: this.daemonStatus.connectionCount,
+      timestamp: new Date().toISOString()
+    };
+    
+    await this.broadcastToClients('daemon:status', statusMessage);
   }
 
   async fetch(request) {
@@ -94,6 +150,25 @@ export class WebSocketRoom {
       sessionId: sessionId,
       timestamp: new Date().toISOString()
     }));
+    
+    // Send current daemon status to new client
+    setTimeout(() => {
+      try {
+        server.send(JSON.stringify({
+          type: 'daemon:status',
+          data: {
+            connected: this.daemonStatus.connected,
+            lastHeartbeat: this.daemonStatus.lastHeartbeat,
+            lastDataUpdate: this.daemonStatus.lastDataUpdate,
+            connectionCount: this.daemonStatus.connectionCount,
+            timestamp: new Date().toISOString()
+          },
+          timestamp: new Date().toISOString()
+        }));
+      } catch (error) {
+        console.error('Failed to send daemon status to new client:', error);
+      }
+    }, 100);
 
     // Return response with WebSocket client
     return new Response(null, {
@@ -148,9 +223,16 @@ export class WebSocketRoom {
     });
 
     // Handle close event
-    server.addEventListener('close', (event) => {
+    server.addEventListener('close', async (event) => {
       console.log(`[WebSocketRoom] Daemon disconnected: ${sessionId}`);
       this.daemons.delete(sessionId);
+      
+      // Update daemon status and broadcast to clients
+      this.daemonStatus.connectionCount = this.daemons.size;
+      if (this.daemons.size === 0) {
+        this.daemonStatus.connected = false;
+      }
+      await this.broadcastDaemonStatus();
     });
 
     // Handle error event
@@ -164,8 +246,16 @@ export class WebSocketRoom {
       authenticated: true,
       connectedAt: new Date().toISOString(),
       device_id: 'orange-pi-001',
-      daemon_version: '1.0.0'
+      daemon_version: '1.0.0',
+      lastHeartbeat: Date.now(),
+      lastDataUpdate: null
     });
+    
+    // Update daemon status and broadcast to clients
+    this.daemonStatus.connected = true;
+    this.daemonStatus.connectionCount = this.daemons.size;
+    this.daemonStatus.lastHeartbeat = Date.now();
+    await this.broadcastDaemonStatus();
 
     // Send initial connection message
     server.send(JSON.stringify({
@@ -359,6 +449,10 @@ export class WebSocketRoom {
           const phones = message.data.phones;
           console.log(`[WebSocketRoom] Received phone_update with ${phones.length} phones`);
           
+          // Update data timestamp
+          daemon.lastDataUpdate = Date.now();
+          this.daemonStatus.lastDataUpdate = Date.now();
+          
           // Call back to the main worker to persist phones
           try {
             const response = await fetch(`${this.env.WORKER_URL || 'https://sexy.qzz.io'}/api/control/phones`, {
@@ -409,6 +503,10 @@ export class WebSocketRoom {
         if (daemon.authenticated) {
           const messages = message.data.messages;
           console.log(`[WebSocketRoom] Received message_upload with ${messages.length} messages`);
+          
+          // Update data timestamp
+          daemon.lastDataUpdate = Date.now();
+          this.daemonStatus.lastDataUpdate = Date.now();
           
           // Call back to the main worker to persist messages
           try {
@@ -465,6 +563,10 @@ export class WebSocketRoom {
 
       case 'heartbeat':
         if (daemon.authenticated) {
+          // Update heartbeat timestamp
+          daemon.lastHeartbeat = Date.now();
+          this.daemonStatus.lastHeartbeat = Date.now();
+          
           daemon.websocket.send(JSON.stringify({
             type: 'heartbeat_response',
             id: crypto.randomUUID(),

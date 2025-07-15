@@ -6,6 +6,7 @@
   export let rsrp = null; // RSRP in dBm
   export let snr = null;  // SNR in dB
   export let compact = false; // Compact mode for list view
+  export let daemonConnected = true; // Whether daemon is connected
   
   // Calculate signal bars (0-4) based on signal percentage
   function getSignalBars(signal) {
@@ -91,6 +92,26 @@
         {/each}
       </div>
       <span class="text-xs text-gray-500">离线</span>
+    {:else if status === 'unknown'}
+      <div class="flex gap-0.5 items-end">
+        {#each [1, 2, 3, 4] as bar}
+          <div 
+            class="w-1 bg-gray-200 rounded-sm opacity-50"
+            style="height: {4 + bar * 3}px"
+          ></div>
+        {/each}
+      </div>
+      <span class="text-xs text-gray-400">数据过期</span>
+    {:else if status === 'stale'}
+      <div class="flex gap-0.5 items-end">
+        {#each [1, 2, 3, 4] as bar}
+          <div 
+            class="w-1 bg-orange-200 rounded-sm"
+            style="height: {4 + bar * 3}px"
+          ></div>
+        {/each}
+      </div>
+      <span class="text-xs text-orange-500">数据陈旧</span>
     {:else}
       <div class="flex gap-0.5 items-end">
         {#each [1, 2, 3, 4] as bar}
@@ -149,6 +170,26 @@
             {/each}
           </div>
           <span class="text-sm font-semibold text-gray-500">离线</span>
+        {:else if status === 'unknown'}
+          <div class="flex gap-0.5 items-end">
+            {#each [1, 2, 3, 4] as bar}
+              <div 
+                class="w-1.5 bg-gray-200 rounded-sm opacity-50"
+                style="height: {bar * 4 + 6}px"
+              ></div>
+            {/each}
+          </div>
+          <span class="text-sm font-semibold text-gray-400">数据过期</span>
+        {:else if status === 'stale'}
+          <div class="flex gap-0.5 items-end">
+            {#each [1, 2, 3, 4] as bar}
+              <div 
+                class="w-1.5 bg-orange-200 rounded-sm"
+                style="height: {bar * 4 + 6}px"
+              ></div>
+            {/each}
+          </div>
+          <span class="text-sm font-semibold text-orange-500">数据陈旧</span>
         {:else}
           <div class="flex gap-0.5 items-end">
             {#each [1, 2, 3, 4] as bar}
