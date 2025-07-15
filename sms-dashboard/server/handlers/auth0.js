@@ -9,28 +9,11 @@ export const auth0Handler = {
     const redirectUri = `${url.origin}/callback`;
     
     if (!env.AUTH0_DOMAIN || !env.AUTH0_CLIENT_ID) {
-      // Mock login for testing when Auth0 is not configured
-      const mockToken = nanoid();
-      const mockUser = {
-        id: 'mock-user-' + nanoid(6),
-        email: 'demo@example.com',
-        name: 'Demo User',
-        permissions: ['phones.read', 'messages.read', 'messages.send']
-      };
-      
-      // Store mock session
-      await env.SESSIONS.put(mockToken, JSON.stringify({
-        user: mockUser,
-        created_at: new Date().toISOString(),
-        expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
-      }), {
-        expirationTtl: 86400 // 24 hours
+      // Auth0 not configured - return error
+      return new Response('Auth0 configuration missing. Please configure AUTH0_DOMAIN and AUTH0_CLIENT_ID.', { 
+        status: 500,
+        headers: { 'Content-Type': 'text/plain' }
       });
-      
-      // Redirect back to app with token
-      const returnUrl = new URL(url.origin);
-      returnUrl.searchParams.set('token', mockToken);
-      return Response.redirect(returnUrl.toString(), 302);
     }
     
     const authUrl = new URL(`https://${env.AUTH0_DOMAIN}/authorize`);
@@ -39,6 +22,11 @@ export const auth0Handler = {
     authUrl.searchParams.set('redirect_uri', redirectUri);
     authUrl.searchParams.set('scope', 'openid profile email');
     authUrl.searchParams.set('state', nanoid());
+    
+    // Add audience if configured to ensure we get a proper access token
+    if (env.AUTH0_AUDIENCE) {
+      authUrl.searchParams.set('audience', env.AUTH0_AUDIENCE);
+    }
     
     return Response.redirect(authUrl.toString(), 302);
   },
@@ -63,7 +51,7 @@ export const auth0Handler = {
     
     try {
       // Exchange code for tokens
-      const redirectUri = `${url.origin}/api/auth/callback`;
+      const redirectUri = `${url.origin}/callback`;
       // Token exchange with Auth0
       
       const tokenResponse = await fetch(`https://${env.AUTH0_DOMAIN}/oauth/token`, {
@@ -82,6 +70,7 @@ export const auth0Handler = {
       
       if (!tokenResponse.ok) {
         const error = await tokenResponse.text();
+        console.error('Token exchange failed:', tokenResponse.status, error);
         // Token exchange failed
         return new Response(`Authentication failed: ${error}`, { status: 401 });
       }
@@ -96,19 +85,49 @@ export const auth0Handler = {
       });
       
       if (!userResponse.ok) {
-        return new Response('Failed to get user info', { status: 401 });
+        const errorText = await userResponse.text();
+        console.error('Failed to get user info:', userResponse.status, errorText);
+        return new Response(`Failed to get user info: ${errorText || userResponse.statusText}`, { status: 401 });
       }
       
       const userInfo = await userResponse.json();
       
       // Create or update user in database
       const userId = userInfo.sub;
+      
+      // Try to get roles from various possible locations
+      let userRoles = [];
+      
+      // Check userInfo for roles
+      if (userInfo.roles) {
+        userRoles = userInfo.roles;
+      } else if (userInfo['https://sexy.qzz.io/roles']) {
+        userRoles = userInfo['https://sexy.qzz.io/roles'];
+      }
+      
+      // If no roles in userInfo, decode the access token to check
+      if (userRoles.length === 0 && tokens.access_token) {
+        try {
+          // Decode token without verification just to read claims
+          const tokenParts = tokens.access_token.split('.');
+          if (tokenParts.length === 3) {
+            const payload = JSON.parse(atob(tokenParts[1]));
+            userRoles = payload.roles || payload['https://sexy.qzz.io/roles'] || [];
+          }
+        } catch (e) {
+          console.error('Failed to decode access token:', e);
+        }
+      }
+      
+      console.log('User roles found:', userRoles);
+      
       const user = {
         id: userId,
         email: userInfo.email,
         name: userInfo.name || userInfo.nickname,
         picture: userInfo.picture,
-        provider: 'auth0'
+        provider: 'auth0',
+        roles: userRoles
       };
       
       // Check if this is a new user
@@ -187,12 +206,38 @@ export const auth0Handler = {
         expirationTtl: 24 * 60 * 60 // 24 hours in seconds
       });
       
-      // Redirect to frontend with session token - use the origin from the request
-      const origin = url.origin;
-      const frontendUrl = new URL(origin);
-      frontendUrl.searchParams.set('token', sessionToken);
+      // Check if user has SMS role
+      const roleConfig = {
+        SMS_ROLE: env.AUTH0_SMS_ROLE || 'sms',
+        ALTERNATIVE_SMS_ROLES: env.AUTH0_ALTERNATIVE_SMS_ROLES ? 
+          env.AUTH0_ALTERNATIVE_SMS_ROLES.split(',').map(r => r.trim()).filter(r => r.length > 0) : 
+          [],
+        ALLOW_NO_ROLES: env.AUTH0_ALLOW_NO_ROLES === 'true'
+      };
       
-      return Response.redirect(frontendUrl.toString(), 302);
+      const hasRole = roleConfig.ALLOW_NO_ROLES || 
+        user.roles.includes(roleConfig.SMS_ROLE) || 
+        user.roles.some(role => roleConfig.ALTERNATIVE_SMS_ROLES.includes(role));
+      
+      if (!hasRole && env.USE_AUTH0_ROLES !== 'false') {
+        // User doesn't have required role - redirect to login with error
+        return Response.redirect(new URL('/login?error=no_role', url.origin).toString(), 302);
+      }
+      
+      // Redirect to frontend with session token in cookie
+      const origin = url.origin;
+      const frontendUrl = new URL('/', origin);
+      
+      // Create response with redirect
+      const response = new Response(null, {
+        status: 302,
+        headers: {
+          'Location': frontendUrl.toString(),
+          'Set-Cookie': `auth_token=${sessionToken}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=86400`
+        }
+      });
+      
+      return response;
     } catch (error) {
       // Auth callback error
       return new Response(`Authentication failed: ${error.message}`, { status: 500 });

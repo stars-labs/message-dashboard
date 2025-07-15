@@ -8,7 +8,6 @@ const net = std.net;
 const Config = struct {
     api_url: []const u8,
     api_key: []const u8,
-    upload_interval: u64, // seconds
     modem_ids: []const []const u8,
 };
 
@@ -189,6 +188,75 @@ const ModemManager = struct {
         access_tech: ?[]const u8 = null,
     };
     
+    pub fn getSimOperatorInfo(self: ModemManager, modem_id: []const u8) !struct { operator_name: ?[]const u8, operator_id: ?[]const u8 } {
+        // First, get the SIM path from modem
+        const modem_argv = [_][]const u8{ "mmcli", "-m", modem_id };
+        const modem_result = try std.process.Child.run(.{
+            .allocator = self.allocator,
+            .argv = &modem_argv,
+        });
+        defer self.allocator.free(modem_result.stdout);
+        defer self.allocator.free(modem_result.stderr);
+        
+        // Find SIM number
+        var sim_number: ?[]const u8 = null;
+        var lines = std.mem.tokenizeScalar(u8, modem_result.stdout, '\n');
+        while (lines.next()) |line| {
+            if (std.mem.indexOf(u8, line, "SIM   |")) |_| {
+                if (std.mem.indexOf(u8, line, "/SIM/")) |pos| {
+                    const start = pos + 5;
+                    var end = start;
+                    while (end < line.len and line[end] >= '0' and line[end] <= '9') : (end += 1) {}
+                    if (end > start) {
+                        sim_number = try self.allocator.dupe(u8, line[start..end]);
+                        break;
+                    }
+                }
+            }
+        }
+        
+        if (sim_number == null) {
+            return .{ .operator_name = null, .operator_id = null };
+        }
+        defer self.allocator.free(sim_number.?);
+        
+        // Get SIM info
+        const sim_argv = [_][]const u8{ "mmcli", "-i", sim_number.? };
+        const sim_result = try std.process.Child.run(.{
+            .allocator = self.allocator,
+            .argv = &sim_argv,
+        });
+        defer self.allocator.free(sim_result.stdout);
+        defer self.allocator.free(sim_result.stderr);
+        
+        var operator_name: ?[]const u8 = null;
+        var operator_id: ?[]const u8 = null;
+        
+        // Parse SIM info for operator details
+        var sim_lines = std.mem.tokenizeScalar(u8, sim_result.stdout, '\n');
+        while (sim_lines.next()) |line| {
+            const trimmed = std.mem.trim(u8, line, " \t");
+            
+            if (std.mem.indexOf(u8, trimmed, "operator name:")) |_| {
+                if (std.mem.indexOf(u8, trimmed, ": ")) |pos| {
+                    const value = std.mem.trim(u8, trimmed[pos + 2 ..], " '\"");
+                    if (value.len > 0) {
+                        operator_name = try self.allocator.dupe(u8, value);
+                    }
+                }
+            } else if (std.mem.indexOf(u8, trimmed, "operator id:")) |_| {
+                if (std.mem.indexOf(u8, trimmed, ": ")) |pos| {
+                    const value = std.mem.trim(u8, trimmed[pos + 2 ..], " '\"");
+                    if (value.len > 0) {
+                        operator_id = try self.allocator.dupe(u8, value);
+                    }
+                }
+            }
+        }
+        
+        return .{ .operator_name = operator_name, .operator_id = operator_id };
+    }
+    
     pub fn getModemInfo(self: ModemManager, modem_id: []const u8) !ModemInfo {
         const argv = [_][]const u8{ "mmcli", "-m", modem_id };
         const result = try std.process.Child.run(.{
@@ -259,18 +327,9 @@ const ModemManager = struct {
                     }
                 }
             }
-            // Fallback to manufacturer info
-            if (std.mem.indexOf(u8, line, "manufacturer:")) |_| {
-                const trimmed = std.mem.trim(u8, line, " \t");
-                if (std.mem.indexOf(u8, trimmed, ": ")) |pos| {
-                    const manufacturer = std.mem.trim(u8, trimmed[pos + 2 ..], " '\"");
-                    if (manufacturer.len > 0) {
-                        return try self.allocator.dupe(u8, manufacturer);
-                    }
-                }
-            }
         }
         
+        // Don't fallback to manufacturer - return null instead
         return null;
     }
     
@@ -345,7 +404,7 @@ const ModemManager = struct {
             .iccid = iccid,
             .status = status,
             .number = phone_number,
-            .carrier = try self.getCarrierInfo(modem_id),
+            .carrier = null, // Will be set from operator name
         };
         
         // Get additional modem info
@@ -354,6 +413,28 @@ const ModemManager = struct {
         phone.operator_id = modem_info.operator_id;
         phone.imei = modem_info.imei;
         phone.access_tech = modem_info.access_tech;
+        
+        // If operator info is missing (e.g., when searching), try to get it from SIM
+        if (phone.operator_name == null or phone.operator_id == null) {
+            if (self.getSimOperatorInfo(modem_id)) |sim_info| {
+                if (phone.operator_name == null and sim_info.operator_name != null) {
+                    phone.operator_name = sim_info.operator_name;
+                }
+                if (phone.operator_id == null and sim_info.operator_id != null) {
+                    phone.operator_id = sim_info.operator_id;
+                }
+            } else |err| {
+                std.log.warn("Failed to get SIM operator info for modem {s}: {any}", .{ modem_id, err });
+            }
+        }
+        
+        // Set carrier from operator_name if available
+        if (phone.operator_name) |op_name| {
+            phone.carrier = try self.allocator.dupe(u8, op_name);
+            std.log.info("Modem {s} (ICCID: {s}) operator: {s}", .{ modem_id, iccid, op_name });
+        } else {
+            std.log.info("Modem {s} (ICCID: {s}) has no operator info", .{ modem_id, iccid });
+        }
         
         // Parse signal information
         
@@ -524,7 +605,10 @@ const ModemManager = struct {
         defer self.allocator.free(modem_id);
         
         // Create SMS using mmcli
-        const create_argv = [_][]const u8{ "mmcli", "-m", modem_id, "--messaging-create-sms", "--messaging-create-sms-text", content, "--messaging-create-sms-number", recipient };
+        const text_arg = try std.fmt.allocPrint(self.allocator, "text='{s}',number='{s}'", .{ content, recipient });
+        defer self.allocator.free(text_arg);
+        
+        const create_argv = [_][]const u8{ "mmcli", "-m", modem_id, "--messaging-create-sms", text_arg };
         const create_result = try std.process.Child.run(.{
             .allocator = self.allocator,
             .argv = &create_argv,
@@ -554,7 +638,7 @@ const ModemManager = struct {
         }
         
         const final_sms_id = sms_id orelse {
-            std.log.err("Failed to extract SMS ID from create output");
+            std.log.err("Failed to extract SMS ID from create output", .{});
             return null;
         };
         defer self.allocator.free(final_sms_id);
@@ -666,6 +750,121 @@ const ApiClient = struct {
         }
     }
     
+    pub fn checkPendingSMS(self: *ApiClient, modem_manager: *ModemManager) !void {
+        const url = try std.fmt.allocPrint(self.allocator, "{s}/api/control/pending-sms", .{self.config.api_url});
+        defer self.allocator.free(url);
+        
+        const uri = try std.Uri.parse(url);
+        
+        var server_header_buffer: [16384]u8 = undefined;
+        var request = try self.client.open(.GET, uri, .{
+            .server_header_buffer = &server_header_buffer,
+            .extra_headers = &[_]http.Header{
+                .{ .name = "X-API-Key", .value = self.config.api_key },
+            },
+            .keep_alive = false,
+        });
+        defer request.deinit();
+        
+        try request.send();
+        try request.finish();
+        try request.wait();
+        
+        if (request.response.status != .ok) {
+            if (request.response.status != .not_modified) {
+                std.log.err("Failed to check pending SMS: {any}", .{request.response.status});
+            }
+            return;
+        }
+        
+        const response_body = try request.reader().readAllAlloc(self.allocator, 1024 * 1024);
+        defer self.allocator.free(response_body);
+        
+        // Parse JSON response
+        const parsed = try json.parseFromSlice(json.Value, self.allocator, response_body, .{});
+        defer parsed.deinit();
+        
+        const pending_messages = parsed.value.object.get("pending_messages").?.array;
+        
+        if (pending_messages.items.len > 0) {
+            std.log.info("Found {d} pending SMS messages to send", .{pending_messages.items.len});
+            
+            for (pending_messages.items) |msg_value| {
+                const msg = msg_value.object;
+                const message_id = msg.get("id").?.string;
+                const phone_iccid = msg.get("phone_iccid").?.string;
+                const recipient = msg.get("recipient").?.string;
+                const content = msg.get("content").?.string;
+                
+                std.log.info("Sending SMS: {s} -> {s}", .{ phone_iccid, recipient });
+                
+                // Send SMS using modem manager
+                const sms_id = modem_manager.sendMessage(phone_iccid, recipient, content) catch |err| {
+                    std.log.err("Failed to send SMS {s}: {any}", .{ message_id, err });
+                    // Report failure
+                    self.reportSMSResult(message_id, false, "Failed to send SMS", null) catch {};
+                    continue;
+                };
+                
+                if (sms_id) |id| {
+                    defer self.allocator.free(id);
+                    std.log.info("SMS sent successfully: {s}", .{id});
+                    // Report success
+                    self.reportSMSResult(message_id, true, null, id) catch {};
+                } else {
+                    std.log.err("Failed to send SMS {s}: no SMS ID returned", .{message_id});
+                    // Report failure
+                    self.reportSMSResult(message_id, false, "No SMS ID returned", null) catch {};
+                }
+            }
+        }
+    }
+    
+    pub fn reportSMSResult(self: *ApiClient, message_id: []const u8, success: bool, error_message: ?[]const u8, sms_id: ?[]const u8) !void {
+        const result_data = struct {
+            message_id: []const u8,
+            success: bool,
+            error_message: ?[]const u8,
+            sms_id: ?[]const u8,
+        }{
+            .message_id = message_id,
+            .success = success,
+            .error_message = error_message,
+            .sms_id = sms_id,
+        };
+        
+        const json_body = try json.stringifyAlloc(self.allocator, result_data, .{ .emit_null_optional_fields = false });
+        defer self.allocator.free(json_body);
+        
+        const url = try std.fmt.allocPrint(self.allocator, "{s}/api/control/sms-result", .{self.config.api_url});
+        defer self.allocator.free(url);
+        
+        const uri = try std.Uri.parse(url);
+        
+        var server_header_buffer: [16384]u8 = undefined;
+        var request = try self.client.open(.POST, uri, .{
+            .server_header_buffer = &server_header_buffer,
+            .extra_headers = &[_]http.Header{
+                .{ .name = "X-API-Key", .value = self.config.api_key },
+                .{ .name = "Content-Type", .value = "application/json" },
+            },
+            .keep_alive = false,
+        });
+        defer request.deinit();
+        
+        request.transfer_encoding = .{ .content_length = json_body.len };
+        try request.send();
+        try request.writer().writeAll(json_body);
+        try request.finish();
+        try request.wait();
+        
+        if (request.response.status != .ok) {
+            std.log.err("Failed to report SMS result: {any}", .{request.response.status});
+        } else {
+            std.log.info("SMS result reported successfully for message {s}", .{message_id});
+        }
+    }
+    
     pub fn updatePhones(self: *ApiClient, phones: []const Phone) !void {
         if (phones.len == 0) return;
         
@@ -711,9 +910,11 @@ const WebSocketClient = struct {
     config: Config,
     modem_manager: *ModemManager,
     client: http.Client,
-    connection: ?http.Client.Connection = null,
-    authenticated: bool = false,
+    connection: ?*http.Client.Connection = null,
+    request: ?*http.Client.Request = null,
     running: bool = false,
+    authenticated: bool = false,
+    websocket_key: []const u8 = undefined,
     
     pub fn init(allocator: std.mem.Allocator, config: Config, modem_manager: *ModemManager) WebSocketClient {
         return .{
@@ -730,44 +931,325 @@ const WebSocketClient = struct {
     }
     
     pub fn connect(self: *WebSocketClient) !void {
+        std.log.info("Attempting WebSocket connection to {s}/api/daemon-ws", .{self.config.api_url});
+        
+        // Parse URL to get host and path  
         const ws_url = try std.fmt.allocPrint(self.allocator, "{s}/api/daemon-ws", .{self.config.api_url});
         defer self.allocator.free(ws_url);
         
-        // Parse WebSocket URL
         const uri = try std.Uri.parse(ws_url);
-        const host = switch (uri.host.?) {
-            .raw => |raw| raw,
-            .percent_encoded => |encoded| encoded,
+        
+        // Generate WebSocket key for handshake
+        self.websocket_key = try self.generateWebSocketKey();
+        
+        // Create authorization header with bearer token
+        const auth_header = try std.fmt.allocPrint(self.allocator, "Bearer {s}", .{self.config.api_key});
+        defer self.allocator.free(auth_header);
+        
+        // Create TLS connection with proper WebSocket headers
+        var server_header_buffer: [16384]u8 = undefined;
+        const request = try self.allocator.create(http.Client.Request);
+        request.* = try self.client.open(.GET, uri, .{
+            .server_header_buffer = &server_header_buffer,
+            .extra_headers = &[_]http.Header{
+                .{ .name = "Upgrade", .value = "websocket" },
+                .{ .name = "Connection", .value = "Upgrade" },
+                .{ .name = "Sec-WebSocket-Key", .value = self.websocket_key },
+                .{ .name = "Sec-WebSocket-Version", .value = "13" },
+                .{ .name = "Authorization", .value = auth_header },
+            },
+            .keep_alive = true,
+        });
+        // Store the request to keep it alive for WebSocket connection
+        self.request = request;
+        
+        std.log.info("Sending WebSocket handshake request", .{});
+        try request.send();
+        try request.finish();
+        
+        std.log.info("Waiting for WebSocket handshake response", .{});
+        try request.wait();
+        
+        // Check if WebSocket upgrade was successful
+        if (request.response.status == .switching_protocols) {
+            std.log.info("WebSocket handshake successful", .{});
+            self.running = true;
+            
+            // Store the connection for WebSocket communication
+            self.connection = request.connection;
+            
+            // Start message listening thread BEFORE authentication
+            const thread = try std.Thread.spawn(.{}, messageListenLoop, .{self});
+            thread.detach();
+            
+            // Give the message listener thread time to initialize
+            std.time.sleep(100 * std.time.ns_per_ms);
+            
+            // Simple bearer token auth - no handshake needed
+            self.authenticated = true;
+            std.log.info("WebSocket connected with bearer token authentication", .{});
+        } else {
+            std.log.err("WebSocket handshake failed: {any}", .{request.response.status});
+            return error.WebSocketHandshakeFailed;
+        }
+    }
+    
+    // Remove smsPollingLoop - using WebSocket only
+    
+    fn messageListenLoop(self: *WebSocketClient) void {
+        std.log.info("🎧 Message listening thread started", .{});
+        while (self.running) {
+            self.readWebSocketMessage() catch |err| {
+                switch (err) {
+                    error.ConnectionClosed => {
+                        // Connection was closed, exit the loop to trigger reconnection
+                        std.log.info("WebSocket connection closed in message listener", .{});
+                        self.running = false;
+                        break;
+                    },
+                    error.InvalidFrameHeader => {
+                        // Invalid frame, might be a temporary issue
+                        std.time.sleep(100 * std.time.ns_per_ms);
+                    },
+                    else => {
+                        std.log.err("Error reading WebSocket message: {any}", .{err});
+                        std.time.sleep(1 * std.time.ns_per_s); // Wait before retrying
+                    },
+                }
+            };
+        }
+        std.log.info("🎧 Message listening thread stopped", .{});
+    }
+    
+    fn readWebSocketMessage(self: *WebSocketClient) !void {
+        if (self.connection == null) return;
+        
+        // Reading WebSocket frame header...
+        // Read WebSocket frame header
+        var frame_header: [2]u8 = undefined;
+        const bytes_read = self.connection.?.reader().readAll(&frame_header) catch |err| {
+            std.log.err("❌ Failed to read WebSocket frame header: {any}", .{err});
+            return err;
         };
-        const port: u16 = if (uri.port) |p| p else if (std.mem.eql(u8, uri.scheme, "https")) 443 else 80;
-        const path = switch (uri.path) {
-            .raw => |raw| if (raw.len > 0) raw else "/",
-            .percent_encoded => |encoded| if (encoded.len > 0) encoded else "/",
-        };
+        if (bytes_read == 0) {
+            // Connection closed - reconnect
+            std.log.info("WebSocket connection closed, attempting to reconnect...", .{});
+            self.connection = null;
+            self.running = false;
+            return error.ConnectionClosed;
+        }
+        if (bytes_read != 2) {
+            std.log.warn("🔍 Frame header read failed: got {d} bytes instead of 2", .{bytes_read});
+            return error.InvalidFrameHeader;
+        }
+        // Frame header read successfully
         
-        std.log.info("Connecting to WebSocket: {s}:{d}{s}", .{ host, port, path });
+        const fin = (frame_header[0] & 0x80) != 0;
+        const opcode = frame_header[0] & 0x0F;
+        const masked = (frame_header[1] & 0x80) != 0;
+        var payload_len = @as(u64, frame_header[1] & 0x7F);
         
-        // Connect via HTTP client (simplified WebSocket handshake simulation)
-        // For now, we'll establish a basic connection and send auth
-        self.running = true;
+        // Read extended payload length if needed
+        if (payload_len == 126) {
+            var len_bytes: [2]u8 = undefined;
+            _ = try self.connection.?.reader().readAll(&len_bytes);
+            payload_len = (@as(u64, len_bytes[0]) << 8) | @as(u64, len_bytes[1]);
+        } else if (payload_len == 127) {
+            var len_bytes: [8]u8 = undefined;
+            _ = try self.connection.?.reader().readAll(&len_bytes);
+            payload_len = 0;
+            for (len_bytes) |byte| {
+                payload_len = (payload_len << 8) | @as(u64, byte);
+            }
+        }
         
-        try self.authenticate();
+        // Read masking key if present
+        var mask_key: [4]u8 = undefined;
+        if (masked) {
+            _ = try self.connection.?.reader().readAll(&mask_key);
+        }
         
-        std.log.info("WebSocket connection established and authenticated", .{});
+        // Read payload
+        if (payload_len > 0 and payload_len < 1024 * 1024) { // Limit to 1MB
+            const payload = try self.allocator.alloc(u8, @intCast(payload_len));
+            defer self.allocator.free(payload);
+            
+            _ = try self.connection.?.reader().readAll(payload);
+            
+            // Unmask payload if needed
+            if (masked) {
+                for (payload, 0..) |*byte, i| {
+                    byte.* ^= mask_key[i % 4];
+                }
+            }
+            
+            // Handle different frame types
+            switch (opcode) {
+                0x1 => { // Text frame
+                    if (fin) {
+                        self.handleIncomingMessage(payload) catch |err| {
+                            std.log.err("Error handling message: {any}", .{err});
+                        };
+                    }
+                },
+                0x8 => { // Close frame
+                    std.log.info("WebSocket connection closed by server", .{});
+                    self.running = false;
+                },
+                0x9 => { // Ping frame
+                    // Received WebSocket ping
+                    // Send pong response
+                    try self.sendPong(payload);
+                },
+                0xA => { // Pong frame
+                    // Received WebSocket pong
+                },
+                else => {
+                    std.log.warn("Received unknown WebSocket frame type: {d}", .{opcode});
+                },
+            }
+        }
+    }
+    
+    fn sendPong(self: *WebSocketClient, payload: []const u8) !void {
+        if (self.connection == null) return;
+        
+        const frame = try self.createWebSocketFrame(payload, 0xA); // Pong opcode
+        defer self.allocator.free(frame);
+        
+        _ = try self.connection.?.writer().writeAll(frame);
     }
     
     pub fn disconnect(self: *WebSocketClient) void {
         self.running = false;
         self.authenticated = false;
         self.connection = null;
+        if (self.request) |req| {
+            req.deinit();
+            self.allocator.destroy(req);
+            self.request = null;
+        }
+    }
+    
+    pub fn generateWebSocketKey(self: WebSocketClient) ![]const u8 {
+        // Generate a random 16-byte key and base64 encode it
+        // For now, use a simple static key that's properly base64 encoded
+        return try std.fmt.allocPrint(self.allocator, "x3JJHMbDL1EzLkh9GBhXDw==", .{});
+    }
+    
+    pub fn performWebSocketHandshake(self: *WebSocketClient, host: []const u8, path: []const u8) !void {
+        if (self.connection == null) return error.NoConnection;
+        
+        const handshake_request = try std.fmt.allocPrint(self.allocator,
+            "GET {s} HTTP/1.1\r\n" ++
+            "Host: {s}\r\n" ++
+            "Upgrade: websocket\r\n" ++
+            "Connection: Upgrade\r\n" ++
+            "Sec-WebSocket-Key: {s}\r\n" ++
+            "Sec-WebSocket-Version: 13\r\n" ++
+            "\r\n",
+            .{ path, host, self.websocket_key }
+        );
+        defer self.allocator.free(handshake_request);
+        
+        // Send handshake request
+        _ = try self.connection.?.writer().writeAll(handshake_request);
+        
+        // Read handshake response
+        var response_buffer: [1024]u8 = undefined;
+        const response_len = try self.connection.?.reader().readAll(&response_buffer);
+        const response = response_buffer[0..response_len];
+        
+        std.log.info("WebSocket handshake response: {s}", .{response});
+        
+        // Check if handshake was successful
+        if (std.mem.indexOf(u8, response, "101 Switching Protocols") == null) {
+            std.log.err("WebSocket handshake failed: {s}", .{response});
+            return error.HandshakeFailed;
+        }
+    }
+    
+    pub fn sendWebSocketMessage(self: *WebSocketClient, message: []const u8) !void {
+        if (self.connection == null) return error.NoConnection;
+        
+        // Create WebSocket frame (text frame)
+        const frame = try self.createWebSocketFrame(message, 0x1);
+        defer self.allocator.free(frame);
+        
+        // Send frame
+        _ = try self.connection.?.writer().writeAll(frame);
+    }
+    
+    pub fn createWebSocketFrame(self: WebSocketClient, payload: []const u8, opcode: u8) ![]const u8 {
+        const payload_len = payload.len;
+        var frame_size: usize = 2; // Basic frame header
+        
+        // Calculate frame size based on payload length
+        if (payload_len < 126) {
+            frame_size += payload_len;
+        } else if (payload_len < 65536) {
+            frame_size += 2 + payload_len;
+        } else {
+            frame_size += 8 + payload_len;
+        }
+        
+        // Add masking key size
+        frame_size += 4;
+        
+        var frame = try self.allocator.alloc(u8, frame_size);
+        var frame_index: usize = 0;
+        
+        // First byte: FIN=1, opcode=specified
+        frame[frame_index] = 0x80 | opcode;
+        frame_index += 1;
+        
+        // Second byte: MASK=1, payload length
+        if (payload_len < 126) {
+            frame[frame_index] = 0x80 | @as(u8, @intCast(payload_len));
+            frame_index += 1;
+        } else if (payload_len < 65536) {
+            frame[frame_index] = 0x80 | 126;
+            frame_index += 1;
+            frame[frame_index] = @as(u8, @intCast(payload_len >> 8));
+            frame_index += 1;
+            frame[frame_index] = @as(u8, @intCast(payload_len & 0xFF));
+            frame_index += 1;
+        } else {
+            frame[frame_index] = 0x80 | 127;
+            frame_index += 1;
+            // Add 64-bit length (simplified for now)
+            for (0..8) |i| {
+                frame[frame_index + i] = if (i >= 4) @as(u8, @intCast((payload_len >> @intCast((7-i)*8)) & 0xFF)) else 0;
+            }
+            frame_index += 8;
+        }
+        
+        // Masking key (simple static key for now)
+        const mask_key = [_]u8{0x12, 0x34, 0x56, 0x78};
+        for (mask_key) |byte| {
+            frame[frame_index] = byte;
+            frame_index += 1;
+        }
+        
+        // Masked payload
+        for (payload, 0..) |byte, i| {
+            frame[frame_index + i] = byte ^ mask_key[i % 4];
+        }
+        
+        return frame;
     }
     
     pub fn authenticate(self: *WebSocketClient) !void {
         const auth_message = try self.createAuthMessage();
         defer self.allocator.free(auth_message);
         
-        std.log.info("Sending authentication: {s}", .{auth_message});
-        self.authenticated = true;
+        std.log.info("Sending authentication message", .{});
+        
+        // Send authentication via WebSocket
+        try self.sendWebSocketMessage(auth_message);
+        
+        // Bearer token authentication complete
+        std.log.info("WebSocket connection ready with bearer token authentication", .{});
     }
     
     pub fn sendPhoneUpdate(self: *WebSocketClient, phones: []const Phone) !void {
@@ -781,7 +1263,14 @@ const WebSocketClient = struct {
         defer self.allocator.free(message);
         
         std.log.info("Sending phone update via WebSocket: {d} phones", .{phones.len});
-        std.log.debug("Phone update message: {s}", .{message});
+        
+        // Log raw JSON at debug level (only shown when compiled with debug mode)
+        std.log.debug("Phone update JSON: {s}", .{message});
+        
+        // Send via WebSocket only
+        try self.sendWebSocketMessage(message);
+        
+        std.log.info("✅ Phone update sent successfully ({d} phones)", .{phones.len});
     }
     
     pub fn sendMessageUpload(self: *WebSocketClient, messages: []const Message) !void {
@@ -791,71 +1280,120 @@ const WebSocketClient = struct {
         defer self.allocator.free(message);
         
         std.log.info("Sending message upload via WebSocket: {d} messages", .{messages.len});
-        std.log.debug("Message upload: {s}", .{message});
+        
+        try self.sendWebSocketMessage(message);
+        
+        std.log.info("✅ Message upload sent successfully ({d} messages)", .{messages.len});
     }
     
+    // Remove sendPhoneUpdateHTTP - using WebSocket only
+    
     pub fn handleIncomingMessage(self: *WebSocketClient, message_json: []const u8) !void {
-        std.log.info("Received WebSocket message: {s}", .{message_json});
+        // Log raw JSON at debug level
+        std.log.debug("Raw incoming JSON: {s}", .{message_json});
+        
+        // Log shortened version at info level
+        if (message_json.len > 200) {
+            std.log.info("📨 Received WebSocket message: {s}... (truncated)", .{message_json[0..200]});
+        } else {
+            std.log.info("📨 Received WebSocket message: {s}", .{message_json});
+        }
         
         // Parse JSON message
-        var stream = json.TokenStream.init(message_json);
-        const parsed = try json.parse(json.Value, &stream, .{ .allocator = self.allocator });
-        defer json.parseFree(json.Value, parsed, .{ .allocator = self.allocator });
+        const parsed = try json.parseFromSlice(json.Value, self.allocator, message_json, .{});
+        defer parsed.deinit();
         
-        const message_type = parsed.Object.get("type").?.String;
-        const message_data = parsed.Object.get("data");
-        const message_id = parsed.Object.get("id").?.String;
+        const message_type = parsed.value.object.get("type").?.string;
+        const message_data = parsed.value.object.get("data");
+        const message_id = if (parsed.value.object.get("id")) |id| id.string else "";
+        
+        std.log.info("📋 Processing message type: {s}", .{message_type});
         
         if (std.mem.eql(u8, message_type, "send_message")) {
-            try self.handleSendMessageRequest(message_id, message_data.?.Object);
-        } else if (std.mem.eql(u8, message_type, "auth_response")) {
-            try self.handleAuthResponse(message_data.?.Object);
+            std.log.info("📤 Handling SMS send request!", .{});
+            if (message_data) |data| {
+                try self.handleSendMessageRequest(message_id, data.object);
+            } else {
+                std.log.err("No data field in send_message", .{});
+            }
+        } else if (std.mem.eql(u8, message_type, "ack")) {
+            // Server acknowledgment
+            if (message_data) |data| {
+                if (data.object.get("message")) |msg| {
+                    std.log.info("✅ Server acknowledged: {s}", .{msg.string});
+                }
+            }
         } else if (std.mem.eql(u8, message_type, "heartbeat_response")) {
             std.log.info("Received heartbeat response", .{});
+        } else if (std.mem.eql(u8, message_type, "connected")) {
+            std.log.info("Connected to WebSocket server", .{});
+        } else if (std.mem.eql(u8, message_type, "phones:updated")) {
+            std.log.info("Received phones:updated message", .{});
+        } else if (std.mem.eql(u8, message_type, "messages:bulk_created")) {
+            std.log.info("Received messages:bulk_created message", .{});
+        } else if (std.mem.eql(u8, message_type, "message:created")) {
+            std.log.info("Received message:created message", .{});
         } else {
             std.log.warn("Unknown message type: {s}", .{message_type});
         }
     }
     
-    fn handleSendMessageRequest(self: *WebSocketClient, request_id: []const u8, data: json.ObjectMap) !void {
-        const phone_id = data.get("phone_id").?.String;
-        const recipient = data.get("recipient").?.String;
-        const content = data.get("content").?.String;
+    fn handleSendMessageRequest(self: *WebSocketClient, message_id: []const u8, data: json.ObjectMap) !void {
+        // Get fields with proper error handling
+        const phone_iccid_value = data.get("phone_iccid");
+        const recipient_value = data.get("recipient");
+        const content_value = data.get("content");
         
-        std.log.info("Handling send message request: {s} -> {s}", .{ phone_id, recipient });
+        if (phone_iccid_value == null) {
+            std.log.err("Missing phone_iccid field in message data", .{});
+            try self.sendSendResult(message_id, false, "Missing phone_iccid field", null);
+            return;
+        }
+        if (recipient_value == null) {
+            std.log.err("Missing recipient field in message data", .{});
+            try self.sendSendResult(message_id, false, "Missing recipient field", null);
+            return;
+        }
+        if (content_value == null) {
+            std.log.err("Missing content field in message data", .{});
+            try self.sendSendResult(message_id, false, "Missing content field", null);
+            return;
+        }
+        
+        const phone_iccid = phone_iccid_value.?.string;
+        const recipient = recipient_value.?.string;
+        const content = content_value.?.string;
+        
+        std.log.info("Handling send message request: {s} -> {s} (msg: {s})", .{ phone_iccid, recipient, message_id });
         
         // Send the SMS using the modem manager
-        const sms_id = self.modem_manager.sendMessage(phone_id, recipient, content) catch |err| {
+        const sms_id = self.modem_manager.sendMessage(phone_iccid, recipient, content) catch |err| {
             std.log.err("Failed to send SMS: {any}", .{err});
-            try self.sendSendResult(request_id, false, "Failed to send SMS", null);
+            // Report failure via WebSocket
+            self.sendSendResult(message_id, false, "Failed to send SMS", null) catch {};
             return;
         };
         
         if (sms_id) |id| {
             defer self.allocator.free(id);
-            try self.sendSendResult(request_id, true, "SMS sent successfully", id);
+            std.log.info("SMS sent successfully: {s}", .{id});
+            // Report success via WebSocket
+            self.sendSendResult(message_id, true, "SMS sent successfully", id) catch {};
         } else {
-            try self.sendSendResult(request_id, false, "Failed to send SMS: no SMS ID returned", null);
+            std.log.err("Failed to send SMS: no SMS ID returned", .{});
+            // Report failure via WebSocket
+            self.sendSendResult(message_id, false, "No SMS ID returned", null) catch {};
         }
     }
     
-    fn handleAuthResponse(self: *WebSocketClient, data: json.ObjectMap) !void {
-        const success = data.get("success").?.Bool;
-        if (success) {
-            self.authenticated = true;
-            std.log.info("WebSocket authentication successful", .{});
-        } else {
-            self.authenticated = false;
-            const message = data.get("message").?.String;
-            std.log.err("WebSocket authentication failed: {s}", .{message});
-        }
-    }
+    // handleAuthResponse function removed - no authentication required
     
     fn sendSendResult(self: *WebSocketClient, request_id: []const u8, success: bool, message_text: []const u8, sms_id: ?[]const u8) !void {
         const result_message = try self.createSendResult(request_id, success, message_text, sms_id);
         defer self.allocator.free(result_message);
         
         std.log.info("Sending send result: {s}", .{result_message});
+        try self.sendWebSocketMessage(result_message);
     }
     
     pub fn generateMessageId(self: WebSocketClient) ![]const u8 {
@@ -887,17 +1425,7 @@ const WebSocketClient = struct {
         });
     }
     
-    pub fn createAuthMessage(self: WebSocketClient) ![]const u8 {
-        const id = try self.generateMessageId();
-        defer self.allocator.free(id);
-        
-        const timestamp = try self.formatTimestamp();
-        defer self.allocator.free(timestamp);
-        
-        return try std.fmt.allocPrint(self.allocator,
-            \\{{"type":"auth","id":"{s}","timestamp":"{s}","data":{{"api_key":"{s}","daemon_version":"1.0.0","device_id":"orange-pi-001"}}}}
-        , .{ id, timestamp, self.config.api_key });
-    }
+    // createAuthMessage function removed - no authentication required
     
     pub fn createPhoneUpdateMessage(self: WebSocketClient, phones: []const Phone) ![]const u8 {
         const id = try self.generateMessageId();
@@ -956,8 +1484,6 @@ const WebSocketClient = struct {
     }
     
     pub fn sendHeartbeat(self: *WebSocketClient) !void {
-        if (!self.authenticated) return;
-        
         const id = try self.generateMessageId();
         defer self.allocator.free(id);
         
@@ -969,8 +1495,16 @@ const WebSocketClient = struct {
         , .{ id, timestamp });
         defer self.allocator.free(heartbeat_message);
         
-        std.log.debug("Sending heartbeat: {s}", .{heartbeat_message});
+        // Sending heartbeat
     }
+};
+
+// Set log level - can be overridden at compile time
+pub const std_options: std.Options = .{
+    .log_level = if (@import("builtin").mode == .Debug) 
+        .debug 
+    else 
+        .info,
 };
 
 pub fn main() !void {
@@ -982,7 +1516,6 @@ pub fn main() !void {
     const config = Config{
         .api_url = std.posix.getenv("SMS_API_URL") orelse "https://sexy.qzz.io",
         .api_key = std.posix.getenv("SMS_API_KEY") orelse "",
-        .upload_interval = 60, // 1 minute
         .modem_ids = &[_][]const u8{}, // Will be auto-detected
     };
     
@@ -992,8 +1525,6 @@ pub fn main() !void {
     }
     
     var modem_manager = ModemManager.init(allocator);
-    var api_client = ApiClient.init(allocator, config);
-    defer api_client.deinit();
     
     // Initialize WebSocket client for bidirectional communication
     var websocket_client = WebSocketClient.init(allocator, config, &modem_manager);
@@ -1001,16 +1532,43 @@ pub fn main() !void {
     
     std.log.info("Starting SMS dashboard daemon...", .{});
     std.log.info("API URL: {s}", .{config.api_url});
-    std.log.info("Upload interval: {d} seconds", .{config.upload_interval});
     
-    // Try to connect to WebSocket
-    websocket_client.connect() catch |err| {
-        std.log.warn("WebSocket connection failed, continuing with HTTP fallback: {any}", .{err});
-    };
+    // Connect to WebSocket server - WebSocket only, no HTTP fallback
+    try websocket_client.connect();
     
-    var heartbeat_counter: u32 = 0;
+    if (!websocket_client.authenticated) {
+        std.log.err("Failed to authenticate with WebSocket server", .{});
+        return;
+    }
+    
+    // Initialize with first upload
+    var initial_upload_done = false;
+    var last_phone_states = std.ArrayList(Phone).init(allocator);
+    defer last_phone_states.deinit();
+    
+    std.log.info("Starting event-driven daemon loop", .{});
     
     while (true) {
+        // Check if WebSocket connection is still alive
+        if (!websocket_client.running or websocket_client.connection == null) {
+            std.log.info("WebSocket connection lost, attempting to reconnect...", .{});
+            websocket_client.disconnect();
+            std.time.sleep(5 * std.time.ns_per_s); // Wait 5 seconds before reconnecting
+            
+            websocket_client.connect() catch |err| {
+                std.log.err("Failed to reconnect WebSocket: {any}", .{err});
+                std.time.sleep(30 * std.time.ns_per_s); // Wait longer before next attempt
+                continue;
+            };
+            
+            if (!websocket_client.authenticated) {
+                std.log.err("Failed to authenticate after reconnection", .{});
+                std.time.sleep(30 * std.time.ns_per_s);
+                continue;
+            }
+            
+            std.log.info("WebSocket reconnected successfully", .{});
+        }
         // Get list of modems
         const modems = try modem_manager.getModemList();
         defer {
@@ -1020,11 +1578,9 @@ pub fn main() !void {
             allocator.free(modems);
         }
         
-        std.log.info("Found {d} modems", .{modems.len});
-        
-        var all_phones = std.ArrayList(Phone).init(allocator);
+        var current_phones = std.ArrayList(Phone).init(allocator);
         var all_messages = std.ArrayList(Message).init(allocator);
-        defer all_phones.deinit();
+        defer current_phones.deinit();
         defer all_messages.deinit();
         
         // Structure to track messages and their SMS IDs for deletion
@@ -1047,7 +1603,7 @@ pub fn main() !void {
                 }
                 continue;
             };
-            try all_phones.append(phone);
+            try current_phones.append(phone);
             
             // Get messages with SMS IDs
             const msg_result = modem_manager.getMessages(modem_id) catch |err| {
@@ -1066,44 +1622,72 @@ pub fn main() !void {
             }
         }
         
-        // Upload phone status - try WebSocket first, fallback to HTTP
-        if (all_phones.items.len > 0) {
-            // Always update via HTTP to persist in database
-            api_client.updatePhones(all_phones.items) catch |err| {
-                std.log.err("Failed to update phones via HTTP: {any}", .{err});
-            };
-            
-            // Also send via WebSocket for real-time updates
-            if (websocket_client.authenticated) {
-                websocket_client.sendPhoneUpdate(all_phones.items) catch |err| {
-                    std.log.err("Failed to send phone update via WebSocket: {any}", .{err});
+        // Add test phone data when no modems are found (for debugging)
+        if (modems.len == 0) {
+            if (!initial_upload_done) {
+                std.log.info("No modems found, adding test phone data for debugging", .{});
+                const test_phone = Phone{
+                    .iccid = "89860040191833946266",
+                    .status = "online",
+                    .signal = 85,
+                    .number = "+1234567890",
+                    .country = "US",
+                    .carrier = "Test Carrier",
                 };
+                try current_phones.append(test_phone);
             }
         }
         
-        // Upload messages and delete on success - try WebSocket first, fallback to HTTP
+        // Check if phone states have changed or first upload
+        var phones_changed = !initial_upload_done;
+        if (initial_upload_done and current_phones.items.len == last_phone_states.items.len) {
+            for (current_phones.items, 0..) |phone, i| {
+                if (i < last_phone_states.items.len) {
+                    const last_phone = last_phone_states.items[i];
+                    if (!std.mem.eql(u8, phone.iccid, last_phone.iccid) or
+                        !std.mem.eql(u8, phone.status, last_phone.status) or
+                        phone.signal != last_phone.signal) {
+                        phones_changed = true;
+                        break;
+                    }
+                }
+            }
+        } else if (current_phones.items.len != last_phone_states.items.len) {
+            phones_changed = true;
+        }
+        
+        // Upload phone status only if changed
+        if (phones_changed and current_phones.items.len > 0) {
+            if (websocket_client.authenticated) {
+                std.log.info("Phone states changed, uploading {d} phones", .{current_phones.items.len});
+                websocket_client.sendPhoneUpdate(current_phones.items) catch |err| {
+                    std.log.err("Failed to send phone update via WebSocket: {any}", .{err});
+                };
+                
+                // Update last known states
+                last_phone_states.clearRetainingCapacity();
+                for (current_phones.items) |phone| {
+                    try last_phone_states.append(phone);
+                }
+                initial_upload_done = true;
+            } else {
+                std.log.err("WebSocket not connected, cannot send phone updates", .{});
+            }
+        }
+        
+        // Upload messages if any (messages are always uploaded immediately)
         if (all_messages.items.len > 0) {
             var upload_successful = false;
             
             if (websocket_client.authenticated) {
+                std.log.info("Uploading {d} new messages", .{all_messages.items.len});
                 if (websocket_client.sendMessageUpload(all_messages.items)) {
                     upload_successful = true;
                 } else |err| {
                     std.log.err("Failed to upload messages via WebSocket: {any}", .{err});
-                    // Fallback to HTTP
-                    if (api_client.uploadMessages(all_messages.items)) {
-                        upload_successful = true;
-                    } else |http_err| {
-                        std.log.err("Failed to upload messages via HTTP: {any}", .{http_err});
-                    }
                 }
             } else {
-                // Use HTTP if WebSocket not authenticated
-                if (api_client.uploadMessages(all_messages.items)) {
-                    upload_successful = true;
-                } else |err| {
-                    std.log.err("Failed to upload messages via HTTP: {any}", .{err});
-                }
+                std.log.err("WebSocket not connected, cannot upload messages", .{});
             }
             
             if (upload_successful) {
@@ -1117,16 +1701,9 @@ pub fn main() !void {
             }
         }
         
-        // Send heartbeat every 60 seconds (every 60 upload intervals)  
-        heartbeat_counter += 1;
-        if (heartbeat_counter >= 60 and websocket_client.authenticated) {
-            websocket_client.sendHeartbeat() catch |err| {
-                std.log.err("Failed to send heartbeat: {any}", .{err});
-            };
-            heartbeat_counter = 0;
-        }
+        // SMS sending is handled via WebSocket messages - no HTTP polling needed
         
-        // Sleep for the configured interval
-        std.time.sleep(config.upload_interval * std.time.ns_per_s);
+        // Sleep for a shorter interval - only for message checking and change detection
+        std.time.sleep(10 * std.time.ns_per_s); // Check every 10 seconds instead of 60
     }
 }

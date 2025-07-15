@@ -33,9 +33,10 @@
     verificationRate: 0
   };
   
-  // Load data from API
+  // Load data from WebSocket API
   async function loadData() {
     try {
+      // Use WebSocket API for all data loading
       const [phonesData, messagesData, statsData] = await Promise.all([
         api.getPhones(),
         api.getMessages({ limit: 100 }),
@@ -68,7 +69,17 @@
         verificationRate: Math.round(statsData.verification_rate * 100)
       };
     } catch (error) {
-      // Error handling - failed to load data
+      console.warn('Failed to load data:', error);
+      // Use default values on error
+      phoneNumbers = [];
+      messages = [];
+      stats = {
+        totalMessages: 0,
+        todayMessages: 0,
+        onlineDevices: 0,
+        totalDevices: 0,
+        verificationRate: 0
+      };
     }
   }
   
@@ -208,7 +219,7 @@
           // Create message for local display
           const sentMessage = {
             id: `msg-sent-${Date.now()}`,
-            phone_id: msg.data.phone_id || '',
+            phone_iccid: msg.data.phone_iccid || '',
             phone_number: msg.data.recipient || '',
             recipient: msg.data.recipient || '',
             content: msg.data.content || '',
@@ -235,15 +246,9 @@
     );
   }
   
-  // Refresh data periodically
-  let refreshInterval;
-  $: if (user && !refreshInterval) {
-    refreshInterval = setInterval(loadData, 30000); // Refresh every 30 seconds
-  }
+  // No need for periodic refresh - using WebSocket real-time updates
   
   onDestroy(() => {
-    if (refreshInterval) clearInterval(refreshInterval);
-    
     // Cleanup realtime service
     wsUnsubscribers.forEach(unsubscribe => unsubscribe());
     realtimeService.disconnect();
@@ -260,10 +265,10 @@
   }
   
   async function handleIccidMappingSuccess(event) {
-    const { phone_id, phone_number } = event.detail;
+    const { phone_iccid, phone_number } = event.detail;
     
     // Update the phone in our local list
-    const phoneIndex = phoneNumbers.findIndex(p => p.id === phone_id);
+    const phoneIndex = phoneNumbers.findIndex(p => p.iccid === phone_iccid);
     if (phoneIndex !== -1) {
       phoneNumbers[phoneIndex] = {
         ...phoneNumbers[phoneIndex],
@@ -272,48 +277,43 @@
       phoneNumbers = [...phoneNumbers]; // Trigger reactivity
     }
     
-    // Reload data to get fresh mapping
-    await loadData();
+    // No need to reload - WebSocket will provide updates
   }
   
   async function handleMessageSent(event) {
     const newMessage = event.detail;
     
-    // Send via WebSocket if connected, otherwise fallback to HTTP API
-    if (realtimeService.isConnected() && realtimeService.getConnectionType() === 'websocket') {
-      console.log('Sending message via WebSocket:', newMessage);
-      
-      // Send message request via WebSocket
-      realtimeService.send({
-        type: 'send_message',
-        data: {
-          phone_id: newMessage.phoneId,
-          recipient: newMessage.recipient,
-          content: newMessage.content,
-          priority: 'normal'
-        }
+    console.log('Sending message via WebSocket:', newMessage);
+    
+    try {
+      // Send message using WebSocket API
+      const response = await api.sendMessage({
+        phone_iccid: newMessage.phone_iccid,
+        recipient: newMessage.recipient,
+        content: newMessage.content
       });
       
-      // WebSocket response will be handled by the message:sent listener
-    } else {
-      // Fallback to HTTP API
-      console.log('WebSocket not available, falling back to HTTP API');
-      try {
-        const response = await api.sendMessage({
-          phoneId: newMessage.phoneId,
+      if (response.success) {
+        // Add to local messages immediately with sending status
+        const sentMessage = {
+          id: `msg-sent-${Date.now()}`,
+          phone_iccid: newMessage.phone_iccid,
+          phone_number: newMessage.recipient,
           recipient: newMessage.recipient,
-          content: newMessage.content
-        });
+          content: newMessage.content,
+          timestamp: new Date().toISOString(),
+          type: 'sent',
+          status: 'sending'
+        };
         
-        if (response.success) {
-          // Add to local messages
-          messages = [response.data, ...messages];
-          // Reload stats
-          await loadData();
-        }
-      } catch (error) {
-        console.error('Failed to send message via HTTP:', error);
+        messages = [sentMessage, ...messages];
+        stats.totalMessages++;
+        stats.todayMessages++;
       }
+    } catch (error) {
+      console.error('Failed to send message:', error);
+      // Show error to user
+      alert('Failed to send message: ' + error.message);
     }
   }
 </script>

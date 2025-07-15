@@ -293,5 +293,124 @@ export const controlHandler = {
         headers: { 'Content-Type': 'application/json' }
       });
     }
+  },
+
+  // Get pending SMS sends for daemon polling
+  async getPendingSMS(request) {
+    const { env } = request;
+    
+    // Check API key
+    const apiKey = request.headers.get('X-API-Key');
+    const expectedKey = '4025b019988238528f1fd5e909d0363c46e4e48490ea5045a9a490c259071cba';
+    
+    if (!apiKey || apiKey !== expectedKey) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+    
+    try {
+      // Get pending SMS messages (status = 'sending')
+      const stmt = env.DB.prepare(`
+        SELECT id, phone_iccid, phone_number, content, recipient, created_at
+        FROM messages 
+        WHERE type = 'sent' AND status = 'sending'
+        ORDER BY created_at ASC
+        LIMIT 50
+      `);
+      
+      const { results } = await stmt.all();
+      
+      return new Response(JSON.stringify({
+        success: true,
+        pending_messages: results || []
+      }), {
+        headers: { 'Content-Type': 'application/json' }
+      });
+    } catch (error) {
+      console.error('Get pending SMS error:', error);
+      return new Response(JSON.stringify({
+        success: false,
+        error: 'Failed to get pending SMS'
+      }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+  },
+
+  // Update SMS send result from daemon
+  async updateSMSResult(request) {
+    const { env } = request;
+    
+    // Check API key
+    const apiKey = request.headers.get('X-API-Key');
+    const expectedKey = '4025b019988238528f1fd5e909d0363c46e4e48490ea5045a9a490c259071cba';
+    
+    if (!apiKey || apiKey !== expectedKey) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+    
+    try {
+      const { message_id, success, error_message, sms_id } = await request.json();
+      
+      if (!message_id) {
+        return new Response(JSON.stringify({
+          success: false,
+          error: 'message_id is required'
+        }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+      
+      // Update message status
+      const status = success ? 'sent' : 'failed';
+      const stmt = env.DB.prepare(`
+        UPDATE messages 
+        SET status = ?, error_message = ?, sms_id = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `);
+      
+      const result = await stmt.bind(status, error_message || null, sms_id || null, message_id).run();
+      
+      if (result.meta.changes === 0) {
+        return new Response(JSON.stringify({
+          success: false,
+          error: 'Message not found'
+        }), {
+          status: 404,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+      
+      // Broadcast message status update
+      await broadcastEvent(env, 'message:status_updated', {
+        id: message_id,
+        status,
+        error_message,
+        sms_id
+      });
+      
+      return new Response(JSON.stringify({
+        success: true,
+        message: 'SMS result updated successfully'
+      }), {
+        headers: { 'Content-Type': 'application/json' }
+      });
+    } catch (error) {
+      console.error('Update SMS result error:', error);
+      return new Response(JSON.stringify({
+        success: false,
+        error: 'Failed to update SMS result'
+      }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
   }
 };

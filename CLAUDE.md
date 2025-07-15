@@ -195,3 +195,5 @@ npx wrangler d1 execute sms-dashboard --command "SELECT * FROM messages ORDER BY
 - Custom `build-unified.js` script combines frontend assets into Workers
 - TailwindCSS for styling
 - Bun as package manager and runtime
+
+the daemon use WebSocket to send and receive data to the dashboard server 
