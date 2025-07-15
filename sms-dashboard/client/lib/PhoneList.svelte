@@ -8,6 +8,7 @@
   export let onSelectPhone = null;
   export let mobile = false;
   export let onSetIccidMapping = null;
+  export let daemonStatus = { connected: false, lastDataUpdate: null };
   
   $: filteredPhones = phoneNumbers.filter(phone => {
     const matchesCountry = selectedCountry === 'all' || phone.country === selectedCountry;
@@ -47,6 +48,22 @@
         onSelectPhone(phone);
       }
     }
+  }
+  
+  function getEffectiveStatus(phone) {
+    if (!daemonStatus.connected) {
+      return 'unknown';
+    }
+    
+    // If daemon is connected but no recent data update, show as stale
+    if (daemonStatus.lastDataUpdate) {
+      const timeSinceUpdate = Date.now() - daemonStatus.lastDataUpdate;
+      if (timeSinceUpdate > 120000) { // 2 minutes
+        return 'stale';
+      }
+    }
+    
+    return phone.status;
   }
 </script>
 
@@ -134,8 +151,9 @@
           </div>
           <SignalStrength 
             signal={phone.signal || 0} 
-            status={phone.status}
+            status={getEffectiveStatus(phone)}
             compact={true}
+            daemonConnected={daemonStatus.connected}
           />
         </div>
         {#if phone.lastActive && !mobile}

@@ -3,6 +3,25 @@
   
   export let phone = null;
   export let mobile = false;
+  export let daemonStatus = { connected: false, lastDataUpdate: null };
+  
+  function getEffectiveStatus(phone) {
+    if (!phone) return 'unknown';
+    
+    if (!daemonStatus.connected) {
+      return 'unknown';
+    }
+    
+    // If daemon is connected but no recent data update, show as stale
+    if (daemonStatus.lastDataUpdate) {
+      const timeSinceUpdate = Date.now() - daemonStatus.lastDataUpdate;
+      if (timeSinceUpdate > 120000) { // 2 minutes
+        return 'stale';
+      }
+    }
+    
+    return phone.status;
+  }
 </script>
 
 {#if phone}
@@ -26,21 +45,22 @@
           {/if}
         </p>
       </div>
-      <div class="flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium {phone.status === 'online' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'}">
-        <div class="w-2 h-2 rounded-full {phone.status === 'online' ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}"></div>
-        {phone.status === 'online' ? '在线' : '离线'}
+      <div class="flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium {getEffectiveStatus(phone) === 'online' ? 'bg-green-100 text-green-700' : getEffectiveStatus(phone) === 'unknown' ? 'bg-gray-100 text-gray-500' : getEffectiveStatus(phone) === 'stale' ? 'bg-orange-100 text-orange-700' : 'bg-gray-100 text-gray-700'}">
+        <div class="w-2 h-2 rounded-full {getEffectiveStatus(phone) === 'online' ? 'bg-green-500 animate-pulse' : getEffectiveStatus(phone) === 'unknown' ? 'bg-gray-400' : getEffectiveStatus(phone) === 'stale' ? 'bg-orange-500' : 'bg-gray-400'}"></div>
+        {getEffectiveStatus(phone) === 'online' ? '在线' : getEffectiveStatus(phone) === 'unknown' ? '数据过期' : getEffectiveStatus(phone) === 'stale' ? '数据陈旧' : '离线'}
       </div>
     </div>
     
     <!-- Signal Strength Details -->
     <SignalStrength 
       signal={phone.signal || 0}
-      status={phone.status}
+      status={getEffectiveStatus(phone)}
       rssi={phone.rssi}
       rsrq={phone.rsrq}
       rsrp={phone.rsrp}
       snr={phone.snr}
       compact={false}
+      daemonConnected={daemonStatus.connected}
     />
     
     <!-- Additional Phone Info -->

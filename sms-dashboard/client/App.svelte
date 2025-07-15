@@ -24,6 +24,13 @@
   let currentView = 'dashboard'; // 'dashboard' or 'iccid-mappings'
   let showIccidMappingDialog = false;
   let phoneToMap = null;
+  let daemonStatus = {
+    connected: false,
+    lastHeartbeat: null,
+    lastDataUpdate: null,
+    connectionCount: 0,
+    timestamp: null
+  };
   
   let stats = {
     totalMessages: 0,
@@ -244,6 +251,20 @@
         // WebSocket connected
       })
     );
+    
+    // Listen for daemon status updates
+    wsUnsubscribers.push(
+      realtimeService.on('daemon:status', (msg) => {
+        daemonStatus = {
+          connected: msg.data.connected,
+          lastHeartbeat: msg.data.lastHeartbeat,
+          lastDataUpdate: msg.data.lastDataUpdate,
+          connectionCount: msg.data.connectionCount,
+          timestamp: msg.data.timestamp
+        };
+        console.log('Daemon status updated:', daemonStatus);
+      })
+    );
   }
   
   // No need for periodic refresh - using WebSocket real-time updates
@@ -316,6 +337,32 @@
       alert('Failed to send message: ' + error.message);
     }
   }
+  
+  function formatTimeAgo(timestamp) {
+    if (!timestamp) return '从未';
+    
+    const now = Date.now();
+    const diff = now - timestamp;
+    
+    if (diff < 60000) return '刚刚';
+    if (diff < 3600000) return `${Math.floor(diff / 60000)}分钟前`;
+    if (diff < 86400000) return `${Math.floor(diff / 3600000)}小时前`;
+    return `${Math.floor(diff / 86400000)}天前`;
+  }
+  
+  function getDaemonStatusText() {
+    if (!daemonStatus.connected) {
+      return '离线';
+    }
+    return '在线';
+  }
+  
+  function getDaemonStatusClass() {
+    if (!daemonStatus.connected) {
+      return 'text-red-600';
+    }
+    return 'text-green-600';
+  }
 </script>
 
 {#if loading}
@@ -385,14 +432,50 @@
               退出
             </button>
           {/if}
-          <div class="flex items-center gap-2 text-sm text-gray-600">
-            <div class="w-2 h-2 {wsConnected ? 'bg-green-500' : 'bg-red-500'} rounded-full {wsConnected ? 'animate-pulse' : ''}"></div>
-            <span>{wsConnected && realtimeService.getConnectionType() ? `${realtimeService.getConnectionType() === 'websocket' ? 'WS' : 'SSE'}` : 'Offline'}</span>
+          <div class="flex items-center gap-4 text-sm text-gray-600">
+            <!-- WebSocket Status -->
+            <div class="flex items-center gap-2">
+              <div class="w-2 h-2 {wsConnected ? 'bg-green-500' : 'bg-red-500'} rounded-full {wsConnected ? 'animate-pulse' : ''}"></div>
+              <span>{wsConnected && realtimeService.getConnectionType() ? `${realtimeService.getConnectionType() === 'websocket' ? 'WS' : 'SSE'}` : 'Offline'}</span>
+            </div>
+            
+            <!-- Daemon Status -->
+            <div class="flex items-center gap-2">
+              <div class="w-2 h-2 {daemonStatus.connected ? 'bg-green-500' : 'bg-red-500'} rounded-full {daemonStatus.connected ? 'animate-pulse' : ''}"></div>
+              <span class="{getDaemonStatusClass()}">守护进程: {getDaemonStatusText()}</span>
+            </div>
           </div>
         </div>
       </div>
     </div>
   </header>
+
+  <!-- Daemon Status Alert Banner -->
+  {#if !daemonStatus.connected}
+    <div class="bg-red-50 border-b border-red-200 px-4 py-2">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <svg class="w-5 h-5 text-red-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <span class="text-sm text-red-800">
+            <strong>守护进程离线</strong> - 设备数据可能不是最新的
+            {#if daemonStatus.lastHeartbeat}
+              • 最后更新: {formatTimeAgo(daemonStatus.lastHeartbeat)}
+            {/if}
+          </span>
+        </div>
+        <div class="flex items-center gap-2">
+          <button 
+            on:click={() => window.location.reload()}
+            class="text-xs text-red-600 hover:text-red-700 underline"
+          >
+            刷新页面
+          </button>
+        </div>
+      </div>
+    </div>
+  {/if}
 
   <!-- Status Alert Banner -->
   {#if phoneNumbers.some(p => p.status !== 'online')}
@@ -516,6 +599,7 @@
                   onSelectPhone={selectPhone}
                   onSetIccidMapping={handleSetIccidMapping}
                   mobile={true}
+                  {daemonStatus}
                 />
               </div>
             </div>
@@ -530,13 +614,14 @@
             bind:selectedCountry
             bind:searchTerm
             onSetIccidMapping={handleSetIccidMapping}
+            {daemonStatus}
           />
         </div>
         
         <!-- Message View -->
         <div class="lg:col-span-2">
           {#if selectedPhone}
-            <PhoneDetails phone={selectedPhone} mobile={false} />
+            <PhoneDetails phone={selectedPhone} mobile={false} {daemonStatus} />
             <div class="mt-4">
               <MessageView 
                 {messages} 
