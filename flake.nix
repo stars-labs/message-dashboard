@@ -85,7 +85,7 @@
           # Orange Pi SMS daemon package
           sms-daemon = pkgs.stdenv.mkDerivation rec {
             pname = "sms-daemon";
-            version = "0.1.0";
+            version = "0.1.1";
             
             src = ./orange-pi-daemon;
             

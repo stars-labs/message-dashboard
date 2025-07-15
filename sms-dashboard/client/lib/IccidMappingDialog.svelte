@@ -15,7 +15,7 @@
   
   $: if (phone) {
     carrier = phone.carrier || '';
-    description = `${phone.id} - ${phone.operator_name || 'Unknown Operator'}`;
+    description = `${phone.iccid} - ${phone.operator_name || 'Unknown Operator'}`;
   }
   
   async function handleSave() {
@@ -37,7 +37,7 @@
       
       if (response.success) {
         dispatch('success', { 
-          phone_id: phone.id, 
+          phone_iccid: phone.iccid, 
           phone_number: phoneNumber 
         });
         close();
@@ -67,16 +67,6 @@
       <h2 class="text-xl font-bold mb-4 text-gray-800">设置 ICCID 映射</h2>
       
       <div class="space-y-4">
-        <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">设备 ID</label>
-          <input
-            type="text"
-            value={phone.id}
-            disabled
-            class="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-100 text-gray-600"
-          />
-        </div>
-        
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">ICCID</label>
           <input

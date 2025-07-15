@@ -18,7 +18,13 @@ export async function fetchWithAuth(endpoint, options = {}) {
   if (response.status === 401) {
     // Token expired or invalid, redirect to login
     auth.logout();
-    return;
+    throw new Error('Authentication required');
+  }
+  
+  // Check if response is ok before parsing JSON
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+    throw new Error(errorData.error || `Request failed with status ${response.status}`);
   }
   
   return response.json();

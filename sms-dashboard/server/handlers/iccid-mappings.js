@@ -16,19 +16,18 @@ export const iccidMappingsHandler = {
           iccid,
           phone_number,
           carrier,
-          description,
+          country,
+          notes,
           is_active,
           created_at,
-          updated_at,
-          created_by,
-          updated_by
+          updated_at
         FROM iccid_mappings
         WHERE 1=1
       `;
       const params = [];
       
       if (search) {
-        query += ` AND (iccid LIKE ? OR phone_number LIKE ? OR carrier LIKE ? OR description LIKE ?)`;
+        query += ` AND (iccid LIKE ? OR phone_number LIKE ? OR carrier LIKE ? OR notes LIKE ?)`;
         const searchPattern = `%${search}%`;
         params.push(searchPattern, searchPattern, searchPattern, searchPattern);
       }
@@ -48,7 +47,7 @@ export const iccidMappingsHandler = {
       const countParams = [];
       
       if (search) {
-        countQuery += ` AND (iccid LIKE ? OR phone_number LIKE ? OR carrier LIKE ? OR description LIKE ?)`;
+        countQuery += ` AND (iccid LIKE ? OR phone_number LIKE ? OR carrier LIKE ? OR notes LIKE ?)`;
         const searchPattern = `%${search}%`;
         countParams.push(searchPattern, searchPattern, searchPattern, searchPattern);
       }
@@ -169,7 +168,7 @@ export const iccidMappingsHandler = {
     
     try {
       const body = await request.json();
-      const { iccid, phone_number, carrier, description } = body;
+      const { iccid, phone_number, carrier, country, notes } = body;
       
       if (!iccid || !phone_number) {
         return new Response(JSON.stringify({
@@ -197,21 +196,22 @@ export const iccidMappingsHandler = {
       }
       
       // Create new mapping
+      const id = crypto.randomUUID();
       const result = await env.DB.prepare(`
-        INSERT INTO iccid_mappings (iccid, phone_number, carrier, description, created_by, updated_by)
+        INSERT INTO iccid_mappings (id, iccid, phone_number, carrier, country, notes)
         VALUES (?, ?, ?, ?, ?, ?)
       `).bind(
+        id,
         iccid,
         phone_number,
         carrier || null,
-        description || null,
-        user.id,
-        user.id
+        country || null,
+        notes || null
       ).run();
       
       const newMapping = await env.DB.prepare(`
         SELECT * FROM iccid_mappings WHERE id = ?
-      `).bind(result.meta.last_row_id).first();
+      `).bind(id).first();
       
       return new Response(JSON.stringify({
         success: true,
@@ -240,7 +240,7 @@ export const iccidMappingsHandler = {
     
     try {
       const body = await request.json();
-      const { phone_number, carrier, description, is_active } = body;
+      const { phone_number, carrier, country, notes, is_active } = body;
       
       // Check if mapping exists
       const existing = await env.DB.prepare(`
@@ -262,17 +262,17 @@ export const iccidMappingsHandler = {
         UPDATE iccid_mappings 
         SET phone_number = ?,
             carrier = ?,
-            description = ?,
+            country = ?,
+            notes = ?,
             is_active = ?,
-            updated_at = datetime('now'),
-            updated_by = ?
+            updated_at = datetime('now')
         WHERE id = ?
       `).bind(
         phone_number,
         carrier || null,
-        description || null,
+        country || null,
+        notes || null,
         is_active !== undefined ? (is_active ? 1 : 0) : 1,
-        user.id,
         id
       ).run();
       

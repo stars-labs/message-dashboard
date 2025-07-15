@@ -14,7 +14,7 @@
     const matchesSearch = searchTerm === '' || 
       (phone.number && phone.number.includes(searchTerm)) || 
       (phone.carrier && phone.carrier.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (phone.id && phone.id.toLowerCase().includes(searchTerm.toLowerCase()));
+      (phone.iccid && phone.iccid.toLowerCase && phone.iccid.toLowerCase().includes(searchTerm.toLowerCase()));
     return matchesCountry && matchesSearch;
   });
   
@@ -36,7 +36,7 @@
   
   function handlePhoneClick(phone) {
     // Toggle selection - if clicking the same phone, unselect it
-    if (selectedPhone?.id === phone.id) {
+    if (selectedPhone?.iccid === phone.iccid) {
       selectedPhone = null;
       if (onSelectPhone) {
         onSelectPhone(null);
@@ -87,7 +87,7 @@
   <div class="{mobile ? '' : 'max-h-[600px]'} overflow-y-auto">
     {#each filteredPhones as phone}
       <button
-        class="w-full p-3 border-b hover:bg-purple-50 active:bg-purple-100 transition-all duration-300 text-left {selectedPhone?.id === phone.id ? 'bg-gradient-to-r from-purple-50 to-indigo-50 border-l-4 border-l-purple-500' : 'hover:border-l-4 hover:border-l-purple-200'}"
+        class="w-full p-3 border-b hover:bg-purple-50 active:bg-purple-100 transition-all duration-300 text-left {selectedPhone?.iccid === phone.iccid ? 'bg-gradient-to-r from-purple-50 to-indigo-50 border-l-4 border-l-purple-500' : 'hover:border-l-4 hover:border-l-purple-200'}"
         on:click={() => handlePhoneClick(phone)}
       >
         <div class="flex items-center justify-between">
@@ -112,17 +112,23 @@
                   </button>
                 {/if}
               {/if}
-              {#if selectedPhone?.id === phone.id}
+              {#if selectedPhone?.iccid === phone.iccid}
                 <span class="text-purple-600 text-xs font-semibold ml-1">✓</span>
               {/if}
             </div>
             <div class="text-xs text-gray-600 mt-0.5">
               {#if phone.carrier}
-                <span class="font-medium">{phone.carrier}</span> • 
+                <span class="font-medium">{phone.carrier}</span>
               {/if}
-              <span class="text-purple-600 font-semibold">{phone.id}</span>
-              {#if phone.iccid && !phone.number}
-                <span class="text-gray-500"> • ICCID: {phone.iccid.slice(-6)}</span>
+              {#if phone.operator_name}
+                <span class="text-gray-500"> • {phone.operator_name}</span>
+              {/if}
+              {#if phone.iccid && phone.iccid.length > 15}
+                <!-- ICCID (long numeric string) -->
+                <span class="text-gray-500 font-mono"> • {phone.iccid.slice(0, 6)}...{phone.iccid.slice(-4)}</span>
+              {:else if phone.iccid}
+                <!-- Shorter ICCID -->
+                <span class="text-purple-600"> • {phone.iccid}</span>
               {/if}
             </div>
           </div>

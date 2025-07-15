@@ -9,7 +9,11 @@ export const phonesHandler = {
       }
       
       const { results } = await env.DB.prepare(`
-        SELECT * FROM phones ORDER BY id
+        SELECT iccid, number, country, flag, carrier, status, signal, 
+               rssi, rsrq, rsrp, snr, operator_name, operator_id, imei, access_tech, 
+               created_at, updated_at
+        FROM phones 
+        ORDER BY iccid
       `).all();
       
       return new Response(JSON.stringify({
@@ -38,7 +42,11 @@ export const phonesHandler = {
     
     try {
       const phone = await env.DB.prepare(`
-        SELECT * FROM phones WHERE id = ?
+        SELECT iccid, number, country, flag, carrier, status, signal, 
+               rssi, rsrq, rsrp, snr, operator_name, operator_id, imei, access_tech, 
+               created_at, updated_at
+        FROM phones 
+        WHERE iccid = ?
       `).bind(phoneId).first();
       
       if (!phone) {

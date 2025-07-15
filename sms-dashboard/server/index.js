@@ -34,6 +34,14 @@ class SimpleRouter {
     this.routes.POST.push({ path, handlers });
   }
 
+  put(path, ...handlers) {
+    this.routes.PUT.push({ path, handlers });
+  }
+
+  delete(path, ...handlers) {
+    this.routes.DELETE.push({ path, handlers });
+  }
+
   options(path, ...handlers) {
     this.routes.OPTIONS.push({ path, handlers });
   }
@@ -172,6 +180,70 @@ router.get('/api/stats', async (request, env, ctx) => {
   return statsHandler.get(request);
 });
 
+// ICCID Mappings routes
+router.get('/api/iccid-mappings', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  await enrichUserPermissions(request, env, ctx);
+  const permResponse = await requirePermission('phones.read')(request, env, ctx);
+  if (permResponse) return permResponse;
+  return iccidMappingsHandler.list(request);
+});
+
+router.get('/api/iccid-mappings/:id', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  await enrichUserPermissions(request, env, ctx);
+  const permResponse = await requirePermission('phones.read')(request, env, ctx);
+  if (permResponse) return permResponse;
+  return iccidMappingsHandler.get(request);
+});
+
+router.get('/api/iccid-mappings/by-iccid/:iccid', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  await enrichUserPermissions(request, env, ctx);
+  const permResponse = await requirePermission('phones.read')(request, env, ctx);
+  if (permResponse) return permResponse;
+  return iccidMappingsHandler.getByIccid(request);
+});
+
+router.post('/api/iccid-mappings', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  await enrichUserPermissions(request, env, ctx);
+  const permResponse = await requirePermission('phones.write')(request, env, ctx);
+  if (permResponse) return permResponse;
+  return iccidMappingsHandler.create(request);
+});
+
+router.put('/api/iccid-mappings/:id', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  await enrichUserPermissions(request, env, ctx);
+  const permResponse = await requirePermission('phones.write')(request, env, ctx);
+  if (permResponse) return permResponse;
+  return iccidMappingsHandler.update(request);
+});
+
+router.delete('/api/iccid-mappings/:id', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  await enrichUserPermissions(request, env, ctx);
+  const permResponse = await requirePermission('phones.write')(request, env, ctx);
+  if (permResponse) return permResponse;
+  return iccidMappingsHandler.delete(request);
+});
+
+router.post('/api/iccid-mappings/bulk', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  await enrichUserPermissions(request, env, ctx);
+  const permResponse = await requirePermission('phones.write')(request, env, ctx);
+  if (permResponse) return permResponse;
+  return iccidMappingsHandler.bulkImport(request);
+});
+
 // Control server routes - API Key auth
 router.post('/api/control/messages', async (request) => {
   // Control messages endpoint hit
@@ -199,6 +271,19 @@ router.post('/api/control/phones', async (request) => {
   }
 });
 
+router.post('/api/control/cleanup-test-data', async (request) => {
+  // Cleanup test data endpoint
+  try {
+    return await controlHandler.cleanupTestData(request);
+  } catch (error) {
+    // Cleanup error
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+});
+
 // Serve frontend for all other routes
 router.get('*', serveFrontend);
 
@@ -208,10 +293,10 @@ export default {
     console.log(`[Worker] Received request: ${request.method} ${request.url}`);
     
     try {
-      // Handle WebSocket endpoint directly (not through router)
+      // Handle WebSocket endpoints directly (not through router)
       const url = new URL(request.url);
-      if (url.pathname === '/api/ws') {
-        console.log(`[Worker] WebSocket request detected`);
+      if (url.pathname === '/api/ws' || url.pathname === '/api/daemon-ws') {
+        console.log(`[Worker] WebSocket request detected: ${url.pathname}`);
         const upgradeHeader = request.headers.get('Upgrade');
         if (upgradeHeader !== 'websocket') {
           return new Response('Expected Upgrade: websocket', { status: 426 });

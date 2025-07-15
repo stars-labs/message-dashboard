@@ -46,7 +46,7 @@
       console.log('Loaded phones:', phoneNumbers);
       // Log all phone details
       phoneNumbers.forEach(phone => {
-        console.log(`Phone ${phone.id}:`, {
+        console.log(`Phone ${phone.iccid}:`, {
           signal: phone.signal, 
           status: phone.status,
           operator_name: phone.operator_name,
@@ -177,21 +177,52 @@
       realtimeService.on('phones:updated', (msg) => {
         // Phones updated
         console.log('WebSocket phones update:', msg.data);
-        msg.data.forEach(updatedPhone => {
-          console.log(`WS Update - Phone ${updatedPhone.id}: signal=${updatedPhone.signal}, status=${updatedPhone.status}`);
-          const index = phoneNumbers.findIndex(p => p.id === updatedPhone.id);
-          if (index !== -1) {
-            phoneNumbers[index] = { ...phoneNumbers[index], ...updatedPhone };
-          } else {
-            phoneNumbers = [...phoneNumbers, updatedPhone];
-          }
-        });
-        phoneNumbers = [...phoneNumbers];
+        
+        // Replace all phones with the new data (don't append)
+        // The daemon sends the complete list of phones
+        // Filter out phones without valid ICCIDs
+        phoneNumbers = msg.data
+          .filter(phone => phone.iccid && phone.iccid.trim() !== '' && !phone.iccid.startsWith('SIM_'))
+          .map(updatedPhone => {
+            console.log(`WS Update - Phone ${updatedPhone.iccid}: signal=${updatedPhone.signal}, status=${updatedPhone.status}`);
+            // Ensure we have the proper structure
+            return {
+              ...updatedPhone
+            };
+          });
+        
         console.log('Updated phoneNumbers:', phoneNumbers);
         
         // Update online device count
         stats.onlineDevices = phoneNumbers.filter(p => p.status === 'online').length;
         stats.totalDevices = phoneNumbers.length;
+      })
+    );
+    
+    // Listen for message sent responses
+    wsUnsubscribers.push(
+      realtimeService.on('message:sent', (msg) => {
+        // Message sent result received
+        console.log('Message sent result:', msg.data);
+        if (msg.data.success) {
+          // Create message for local display
+          const sentMessage = {
+            id: `msg-sent-${Date.now()}`,
+            phone_id: msg.data.phone_id || '',
+            phone_number: msg.data.recipient || '',
+            recipient: msg.data.recipient || '',
+            content: msg.data.content || '',
+            timestamp: new Date().toISOString(),
+            type: 'sent',
+            status: 'delivered',
+            sms_id: msg.data.sms_id
+          };
+          
+          // Add to local messages
+          messages = [sentMessage, ...messages];
+          stats.totalMessages++;
+          stats.todayMessages++;
+        }
       })
     );
     
@@ -248,22 +279,41 @@
   async function handleMessageSent(event) {
     const newMessage = event.detail;
     
-    // Send to API
-    try {
-      const response = await api.sendMessage({
-        phoneId: newMessage.phoneId,
-        recipient: newMessage.recipient,
-        content: newMessage.content
+    // Send via WebSocket if connected, otherwise fallback to HTTP API
+    if (realtimeService.isConnected() && realtimeService.getConnectionType() === 'websocket') {
+      console.log('Sending message via WebSocket:', newMessage);
+      
+      // Send message request via WebSocket
+      realtimeService.send({
+        type: 'send_message',
+        data: {
+          phone_id: newMessage.phoneId,
+          recipient: newMessage.recipient,
+          content: newMessage.content,
+          priority: 'normal'
+        }
       });
       
-      if (response.success) {
-        // Add to local messages
-        messages = [response.data, ...messages];
-        // Reload stats
-        await loadData();
+      // WebSocket response will be handled by the message:sent listener
+    } else {
+      // Fallback to HTTP API
+      console.log('WebSocket not available, falling back to HTTP API');
+      try {
+        const response = await api.sendMessage({
+          phoneId: newMessage.phoneId,
+          recipient: newMessage.recipient,
+          content: newMessage.content
+        });
+        
+        if (response.success) {
+          // Add to local messages
+          messages = [response.data, ...messages];
+          // Reload stats
+          await loadData();
+        }
+      } catch (error) {
+        console.error('Failed to send message via HTTP:', error);
       }
-    } catch (error) {
-      // Error handling - failed to send message
     }
   }
 </script>
@@ -343,6 +393,38 @@
       </div>
     </div>
   </header>
+
+  <!-- Status Alert Banner -->
+  {#if phoneNumbers.some(p => p.status !== 'online')}
+    <div class="bg-yellow-50 border-b border-yellow-200 px-4 py-2">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <svg class="w-5 h-5 text-yellow-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+          <span class="text-sm text-yellow-800">
+            {#if phoneNumbers.filter(p => p.status === 'searching').length > 0}
+              <strong>{phoneNumbers.filter(p => p.status === 'searching').length}</strong> 张SIM卡正在搜索网络
+            {/if}
+            {#if phoneNumbers.filter(p => p.status === 'failed').length > 0}
+              {#if phoneNumbers.filter(p => p.status === 'searching').length > 0} • {/if}
+              <strong>{phoneNumbers.filter(p => p.status === 'failed').length}</strong> 张SIM卡连接故障
+            {/if}
+            {#if phoneNumbers.filter(p => p.status === 'offline').length > 0}
+              {#if phoneNumbers.filter(p => p.status === 'searching').length > 0 || phoneNumbers.filter(p => p.status === 'failed').length > 0} • {/if}
+              <strong>{phoneNumbers.filter(p => p.status === 'offline').length}</strong> 张SIM卡离线
+            {/if}
+          </span>
+        </div>
+        <button 
+          on:click={() => currentView = 'dashboard'}
+          class="text-xs text-yellow-600 hover:text-yellow-700 underline"
+        >
+          查看详情
+        </button>
+      </div>
+    </div>
+  {/if}
 
   <!-- Mobile Navigation -->
   <div class="lg:hidden px-4 py-2 bg-gray-50 border-b">

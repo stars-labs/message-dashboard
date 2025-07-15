@@ -6,7 +6,7 @@
 </script>
 
 {#if phone}
-  <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4 {mobile ? 'mx-4 mb-4' : ''}">
+  <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4 {mobile ? 'mx-4 mb-4' : 'mb-4'}">
     <div class="flex items-start justify-between mb-4">
       <div>
         <h3 class="text-lg font-semibold text-gray-900">
@@ -18,9 +18,12 @@
         </h3>
         <p class="text-sm text-gray-600">
           {#if phone.carrier}
-            {phone.carrier} • 
+            {phone.carrier}
           {/if}
-          {phone.id}
+          {#if phone.operator_name}
+            {#if phone.carrier} • {/if}
+            {phone.operator_name}
+          {/if}
         </p>
       </div>
       <div class="flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium {phone.status === 'online' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'}">

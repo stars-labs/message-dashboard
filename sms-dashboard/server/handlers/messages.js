@@ -18,8 +18,8 @@ export const messagesHandler = {
       const params = [];
       
       if (phoneId) {
-        query += ` WHERE phone_id = ?`;
-        countQuery += ` WHERE phone_id = ?`;
+        query += ` WHERE phone_iccid = ?`;
+        countQuery += ` WHERE phone_iccid = ?`;
         params.push(phoneId);
       }
       
@@ -113,7 +113,7 @@ export const messagesHandler = {
       
       // Get phone details
       const phone = await env.DB.prepare(`
-        SELECT * FROM phones WHERE id = ? AND status = 'online'
+        SELECT * FROM phones WHERE iccid = ? AND status = 'online'
       `).bind(phoneId).first();
       
       if (!phone) {
@@ -131,7 +131,7 @@ export const messagesHandler = {
       const timestamp = new Date().toISOString();
       
       await env.DB.prepare(`
-        INSERT INTO messages (id, phone_id, phone_number, content, timestamp, type, recipient, status)
+        INSERT INTO messages (id, phone_iccid, phone_number, content, timestamp, type, recipient, status)
         VALUES (?, ?, ?, ?, ?, 'sent', ?, 'pending')
       `).bind(
         messageId,
@@ -145,7 +145,7 @@ export const messagesHandler = {
       // Broadcast new message event
       const messageData = {
         id: messageId,
-        phone_id: phoneId,
+        phone_iccid: phoneId,
         phone_number: phone.number,
         content,
         timestamp,
