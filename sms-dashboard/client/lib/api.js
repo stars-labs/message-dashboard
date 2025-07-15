@@ -1,4 +1,5 @@
 import { auth } from './auth';
+import { realtimeService } from './websocket-with-fallback';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 
   (typeof window !== 'undefined' ? window.location.origin : 'https://sms-dashboard-api.workers.dev');
@@ -30,10 +31,30 @@ export async function fetchWithAuth(endpoint, options = {}) {
   return response.json();
 }
 
+// WebSocket-first API with HTTP fallback
+async function apiRequest(method, data = {}) {
+  // Try WebSocket first
+  if (realtimeService.isConnected() && realtimeService.getConnectionType() === 'websocket') {
+    try {
+      return await realtimeService.request(method, data);
+    } catch (error) {
+      console.warn(`WebSocket ${method} failed, falling back to HTTP:`, error);
+    }
+  }
+  
+  // Fallback to HTTP - this will be implemented later if needed
+  throw new Error('WebSocket not connected and HTTP fallback not implemented');
+}
+
 export const api = {
   // Auth
   async getUser() {
-    return fetchWithAuth('/api/auth/me');
+    try {
+      return await apiRequest('getUser');
+    } catch (error) {
+      // Fallback to HTTP for auth (needed for initial login)
+      return await fetchWithAuth('/api/auth/me');
+    }
   },
   
   async logout() {
@@ -46,76 +67,134 @@ export const api = {
   
   // Phones
   async getPhones() {
-    const response = await fetchWithAuth('/api/phones');
-    return response.success ? response.data : [];
+    try {
+      const response = await apiRequest('getPhones');
+      return response.success ? response.data : [];
+    } catch (error) {
+      console.warn('Failed to get phones via WebSocket, using empty array:', error);
+      return [];
+    }
   },
   
   // Messages
   async getMessages(params = {}) {
-    const query = new URLSearchParams(params).toString();
-    const response = await fetchWithAuth(`/api/messages?${query}`);
-    return response.success ? response : { data: [], pagination: {} };
+    try {
+      const response = await apiRequest('getMessages', params);
+      return response.success ? response : { data: [], pagination: {} };
+    } catch (error) {
+      console.warn('Failed to get messages via WebSocket, using empty array:', error);
+      return { data: [], pagination: {} };
+    }
   },
   
   async sendMessage(data) {
-    return fetchWithAuth('/api/messages/send', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
+    try {
+      return await apiRequest('sendMessage', data);
+    } catch (error) {
+      console.warn('Failed to send message via WebSocket:', error);
+      // For message sending, we'll prefer WebSocket and show error if it fails
+      throw error;
+    }
   },
   
   // Stats
   async getStats() {
-    const response = await fetchWithAuth('/api/stats');
-    return response.success ? response.data : {
-      total_messages: 0,
-      today_messages: 0,
-      online_devices: 0,
-      total_devices: 0,
-      verification_rate: 0
-    };
+    try {
+      const response = await apiRequest('getStats');
+      return response.success ? response.data : {
+        total_messages: 0,
+        today_messages: 0,
+        online_devices: 0,
+        total_devices: 0,
+        verification_rate: 0
+      };
+    } catch (error) {
+      console.warn('Failed to get stats via WebSocket, using default values:', error);
+      return {
+        total_messages: 0,
+        today_messages: 0,
+        online_devices: 0,
+        total_devices: 0,
+        verification_rate: 0
+      };
+    }
   },
   
   // ICCID Mappings
   iccidMappings: {
     async list(params = {}) {
-      const query = new URLSearchParams(params).toString();
-      return fetchWithAuth(`/api/iccid-mappings?${query}`);
+      try {
+        return await apiRequest('listIccidMappings', params);
+      } catch (error) {
+        console.warn('Failed to list ICCID mappings via WebSocket, using HTTP fallback:', error);
+        const query = new URLSearchParams(params).toString();
+        return await fetchWithAuth(`/api/iccid-mappings?${query}`);
+      }
     },
     
     async get(id) {
-      return fetchWithAuth(`/api/iccid-mappings/${id}`);
+      try {
+        return await apiRequest('getIccidMapping', { id });
+      } catch (error) {
+        console.warn('Failed to get ICCID mapping via WebSocket, using HTTP fallback:', error);
+        return await fetchWithAuth(`/api/iccid-mappings/${id}`);
+      }
     },
     
     async getByIccid(iccid) {
-      return fetchWithAuth(`/api/iccid-mappings/by-iccid/${iccid}`);
+      try {
+        return await apiRequest('getIccidMappingByIccid', { iccid });
+      } catch (error) {
+        console.warn('Failed to get ICCID mapping by ICCID via WebSocket, using HTTP fallback:', error);
+        return await fetchWithAuth(`/api/iccid-mappings/by-iccid/${iccid}`);
+      }
     },
     
     async create(data) {
-      return fetchWithAuth('/api/iccid-mappings', {
-        method: 'POST',
-        body: JSON.stringify(data),
-      });
+      try {
+        return await apiRequest('createIccidMapping', data);
+      } catch (error) {
+        console.warn('Failed to create ICCID mapping via WebSocket, using HTTP fallback:', error);
+        return await fetchWithAuth('/api/iccid-mappings', {
+          method: 'POST',
+          body: JSON.stringify(data),
+        });
+      }
     },
     
     async update(id, data) {
-      return fetchWithAuth(`/api/iccid-mappings/${id}`, {
-        method: 'PUT',
-        body: JSON.stringify(data),
-      });
+      try {
+        return await apiRequest('updateIccidMapping', { id, ...data });
+      } catch (error) {
+        console.warn('Failed to update ICCID mapping via WebSocket, using HTTP fallback:', error);
+        return await fetchWithAuth(`/api/iccid-mappings/${id}`, {
+          method: 'PUT',
+          body: JSON.stringify(data),
+        });
+      }
     },
     
     async delete(id) {
-      return fetchWithAuth(`/api/iccid-mappings/${id}`, {
-        method: 'DELETE',
-      });
+      try {
+        return await apiRequest('deleteIccidMapping', { id });
+      } catch (error) {
+        console.warn('Failed to delete ICCID mapping via WebSocket, using HTTP fallback:', error);
+        return await fetchWithAuth(`/api/iccid-mappings/${id}`, {
+          method: 'DELETE',
+        });
+      }
     },
     
     async bulkImport(data) {
-      return fetchWithAuth('/api/iccid-mappings/bulk', {
-        method: 'POST',
-        body: JSON.stringify(data),
-      });
+      try {
+        return await apiRequest('bulkImportIccidMappings', data);
+      } catch (error) {
+        console.warn('Failed to bulk import ICCID mappings via WebSocket, using HTTP fallback:', error);
+        return await fetchWithAuth('/api/iccid-mappings/bulk', {
+          method: 'POST',
+          body: JSON.stringify(data),
+        });
+      }
     }
   }
 };

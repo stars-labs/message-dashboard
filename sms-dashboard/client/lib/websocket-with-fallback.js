@@ -201,6 +201,52 @@ export class RealtimeService {
     }
   }
 
+  // Request-response pattern for API calls over WebSocket
+  async request(type, data = {}) {
+    return new Promise((resolve, reject) => {
+      if (this.connectionType !== 'websocket' || !this.ws || this.ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+
+      const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      
+      // Set up one-time listener for the response
+      const responseHandler = (message) => {
+        if (message.request_id === requestId) {
+          if (message.type === 'response' && message.data) {
+            if (message.data.error) {
+              reject(new Error(message.data.error));
+            } else {
+              resolve(message.data);
+            }
+          } else if (message.type === 'error') {
+            reject(new Error(message.data?.message || 'Request failed'));
+          }
+        }
+      };
+
+      // Listen for response
+      const unsubscribe = this.on('response', responseHandler);
+      const errorUnsubscribe = this.on('error', responseHandler);
+
+      // Send request
+      this.send({
+        type: 'request',
+        request_id: requestId,
+        method: type,
+        data: data
+      });
+
+      // Clean up listeners after timeout
+      setTimeout(() => {
+        unsubscribe();
+        errorUnsubscribe();
+        reject(new Error('Request timeout'));
+      }, 10000); // 10 second timeout
+    });
+  }
+
   scheduleReconnect(token) {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
       // Max reconnection attempts reached

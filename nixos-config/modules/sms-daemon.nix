@@ -32,6 +32,18 @@ in {
       description = "Upload interval in seconds";
     };
 
+    logLevel = mkOption {
+      type = types.enum [ "debug" "info" "warn" "err" ];
+      default = "info";
+      description = "Log level for the daemon (debug, info, warn, err)";
+    };
+
+    debugBuild = mkOption {
+      type = types.bool;
+      default = false;
+      description = "Build the daemon in debug mode for verbose logging";
+    };
+
     user = mkOption {
       type = types.str;
       default = "sms-daemon";
@@ -47,6 +59,26 @@ in {
     package = mkOption {
       type = types.package;
       description = "SMS daemon package";
+      default = pkgs.stdenv.mkDerivation rec {
+        pname = "sms-daemon";
+        version = "1.0.0";
+        
+        src = ../..; # Path to the SMS dashboard project root
+        
+        nativeBuildInputs = [ pkgs.zig ];
+        
+        buildPhase = ''
+          cd orange-pi-daemon
+          zig build-exe src/main.zig \
+            ${if cfg.debugBuild then "" else "-O ReleaseFast"} \
+            -femit-bin=sms-daemon
+        '';
+        
+        installPhase = ''
+          mkdir -p $out/bin
+          cp sms-daemon $out/bin/
+        '';
+      };
     };
   };
 
@@ -76,6 +108,7 @@ in {
       environment = {
         SMS_API_URL = cfg.apiUrl;
         SMS_UPLOAD_INTERVAL = toString cfg.uploadInterval;
+        LOG_LEVEL = cfg.logLevel;
       };
 
       script = ''

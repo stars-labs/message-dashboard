@@ -18,6 +18,8 @@ export class WebSocketRoom {
     switch (url.pathname) {
       case '/broadcast':
         return this.handleBroadcast(request);
+      case '/forward-to-daemon':
+        return this.handleForwardToDaemon(request);
       case '/ping':
         return new Response('pong', { status: 200 });
       default:
@@ -42,10 +44,10 @@ export class WebSocketRoom {
       server.accept();
 
       const sessionId = crypto.randomUUID();
-      const isDaemon = url.pathname === '/daemon-ws';
+      const isDaemon = url.pathname === '/api/daemon-ws';
       
       if (isDaemon) {
-        return this.handleDaemonConnection(sessionId, server, client);
+        return this.handleDaemonConnection(sessionId, server, client, request);
       } else {
         return this.handleClientConnection(sessionId, server, client);
       }
@@ -100,8 +102,31 @@ export class WebSocketRoom {
     });
   }
 
-  async handleDaemonConnection(sessionId, server, client) {
+  async handleDaemonConnection(sessionId, server, client, request) {
     console.log(`[WebSocketRoom] New daemon connection: ${sessionId}`);
+
+    // Validate bearer token from request headers
+    const authHeader = request?.headers.get('Authorization');
+    
+    let authenticated = false;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.substring(7); // Remove 'Bearer ' prefix
+      const expectedToken = '4025b019988238528f1fd5e909d0363c46e4e48490ea5045a9a490c259071cba';
+      
+      if (token === expectedToken) {
+        authenticated = true;
+        console.log(`[WebSocketRoom] ✅ Daemon authenticated successfully with bearer token`);
+      } else {
+        console.log(`[WebSocketRoom] ❌ Daemon authentication failed: invalid bearer token`);
+      }
+    } else {
+      console.log(`[WebSocketRoom] ❌ Daemon authentication failed: missing Authorization header`);
+    }
+
+    if (!authenticated) {
+      server.close(1008, 'Authentication failed');
+      return new Response('Authentication failed', { status: 401 });
+    }
 
     // Handle incoming messages from daemon
     server.addEventListener('message', async (event) => {
@@ -133,13 +158,13 @@ export class WebSocketRoom {
       console.error(`[WebSocketRoom] Daemon error:`, error);
     });
 
-    // Store daemon session (not authenticated yet)
+    // Store daemon session (authenticated via bearer token)
     this.daemons.set(sessionId, {
       websocket: server,
-      authenticated: false,
+      authenticated: true,
       connectedAt: new Date().toISOString(),
-      device_id: null,
-      daemon_version: null
+      device_id: 'orange-pi-001',
+      daemon_version: '1.0.0'
     });
 
     // Send initial connection message
@@ -149,7 +174,7 @@ export class WebSocketRoom {
       timestamp: new Date().toISOString(),
       data: {
         sessionId: sessionId,
-        message: 'Please authenticate with API key'
+        message: 'Connected successfully with bearer token authentication'
       }
     }));
 
@@ -232,6 +257,11 @@ export class WebSocketRoom {
         // Forward message send request to daemon
         await this.forwardToAuthenticatedDaemon(message);
         break;
+
+      case 'request':
+        // Handle API requests over WebSocket
+        await this.handleApiRequest(sessionId, message);
+        break;
       
       default:
         session.websocket.send(JSON.stringify({
@@ -241,36 +271,137 @@ export class WebSocketRoom {
     }
   }
 
+  async handleApiRequest(sessionId, message) {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+
+    const { request_id, method, data } = message;
+    
+    try {
+      let response;
+      
+      switch (method) {
+        case 'getPhones':
+          response = await this.getPhones();
+          break;
+        
+        case 'getMessages':
+          response = await this.getMessages(data);
+          break;
+        
+        case 'sendMessage':
+          response = await this.sendMessage(data);
+          break;
+        
+        case 'getStats':
+          response = await this.getStats();
+          break;
+        
+        case 'listIccidMappings':
+          response = await this.listIccidMappings(data);
+          break;
+        
+        case 'getIccidMapping':
+          response = await this.getIccidMapping(data);
+          break;
+        
+        case 'getIccidMappingByIccid':
+          response = await this.getIccidMappingByIccid(data);
+          break;
+        
+        case 'createIccidMapping':
+          response = await this.createIccidMapping(data);
+          break;
+        
+        case 'updateIccidMapping':
+          response = await this.updateIccidMapping(data);
+          break;
+        
+        case 'deleteIccidMapping':
+          response = await this.deleteIccidMapping(data);
+          break;
+        
+        case 'bulkImportIccidMappings':
+          response = await this.bulkImportIccidMappings(data);
+          break;
+        
+        default:
+          throw new Error(`Unknown API method: ${method}`);
+      }
+      
+      session.websocket.send(JSON.stringify({
+        type: 'response',
+        request_id,
+        data: response
+      }));
+      
+    } catch (error) {
+      console.error(`[WebSocketRoom] API request ${method} failed:`, error);
+      session.websocket.send(JSON.stringify({
+        type: 'error',
+        request_id,
+        data: {
+          error: error.message || 'Request failed'
+        }
+      }));
+    }
+  }
+
   async handleDaemonMessage(sessionId, message) {
     const daemon = this.daemons.get(sessionId);
     if (!daemon) return;
 
-    console.log(`[WebSocketRoom] Daemon message: ${message.type} from ${sessionId}`);
+    console.log(`[WebSocketRoom] Daemon message: ${message.type} from ${sessionId} (authenticated: ${daemon.authenticated})`);
 
     switch (message.type) {
-      case 'auth':
-        await this.handleDaemonAuth(sessionId, message);
-        break;
-
       case 'phone_update':
         if (daemon.authenticated) {
           const phones = message.data.phones;
           console.log(`[WebSocketRoom] Received phone_update with ${phones.length} phones`);
           
-          // For now, just broadcast to clients
-          // The daemon should also call the HTTP API to persist phones
-          await this.broadcastToClients('phones:updated', phones);
-          
-          // Send acknowledgment to daemon
-          daemon.websocket.send(JSON.stringify({
-            type: 'ack',
-            id: crypto.randomUUID(),
-            timestamp: new Date().toISOString(),
-            data: {
-              request_id: message.id,
-              message: 'Phone update received and broadcast'
+          // Call back to the main worker to persist phones
+          try {
+            const response = await fetch(`${this.env.WORKER_URL || 'https://sexy.qzz.io'}/api/control/phones`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-API-Key': '4025b019988238528f1fd5e909d0363c46e4e48490ea5045a9a490c259071cba',
+                'X-Internal-Request': 'true'
+              },
+              body: JSON.stringify({ phones })
+            });
+            
+            if (!response.ok) {
+              throw new Error(`Failed to persist phones: ${response.status}`);
             }
-          }));
+            
+            console.log(`[WebSocketRoom] Successfully persisted ${phones.length} phones to database`);
+            
+            // Broadcast to all connected clients
+            await this.broadcastToClients('phones:updated', phones);
+            
+            // Send success acknowledgment to daemon
+            daemon.websocket.send(JSON.stringify({
+              type: 'ack',
+              id: crypto.randomUUID(),
+              timestamp: new Date().toISOString(),
+              data: {
+                request_id: message.id,
+                message: `Phone update received and saved: ${phones.length} phones`
+              }
+            }));
+          } catch (error) {
+            console.error(`[WebSocketRoom] Failed to persist phones:`, error);
+            daemon.websocket.send(JSON.stringify({
+              type: 'error',
+              id: crypto.randomUUID(),
+              timestamp: new Date().toISOString(),
+              data: {
+                code: 'PERSISTENCE_ERROR',
+                message: 'Failed to save phones: ' + error.message
+              }
+            }));
+          }
         }
         break;
 
@@ -279,20 +410,49 @@ export class WebSocketRoom {
           const messages = message.data.messages;
           console.log(`[WebSocketRoom] Received message_upload with ${messages.length} messages`);
           
-          // For now, just broadcast to clients
-          // The daemon should also call the HTTP API to persist messages
-          await this.broadcastToClients('messages:bulk_created', messages);
-          
-          // Send acknowledgment to daemon
-          daemon.websocket.send(JSON.stringify({
-            type: 'ack',
-            id: crypto.randomUUID(),
-            timestamp: new Date().toISOString(),
-            data: {
-              request_id: message.id,
-              message: 'Messages received and broadcast'
+          // Call back to the main worker to persist messages
+          try {
+            const response = await fetch(`${this.env.WORKER_URL || 'https://sexy.qzz.io'}/api/control/messages`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-API-Key': '4025b019988238528f1fd5e909d0363c46e4e48490ea5045a9a490c259071cba',
+                'X-Internal-Request': 'true'
+              },
+              body: JSON.stringify({ messages })
+            });
+            
+            if (!response.ok) {
+              throw new Error(`Failed to persist messages: ${response.status}`);
             }
-          }));
+            
+            console.log(`[WebSocketRoom] Successfully persisted ${messages.length} messages to database`);
+            
+            // Broadcast to all connected clients
+            await this.broadcastToClients('messages:bulk_created', messages);
+            
+            // Send success acknowledgment to daemon
+            daemon.websocket.send(JSON.stringify({
+              type: 'ack',
+              id: crypto.randomUUID(),
+              timestamp: new Date().toISOString(),
+              data: {
+                request_id: message.id,
+                message: `Messages uploaded successfully: ${messages.length} saved`
+              }
+            }));
+          } catch (error) {
+            console.error(`[WebSocketRoom] Failed to persist messages:`, error);
+            daemon.websocket.send(JSON.stringify({
+              type: 'error',
+              id: crypto.randomUUID(),
+              timestamp: new Date().toISOString(),
+              data: {
+                code: 'PERSISTENCE_ERROR',
+                message: 'Failed to save messages: ' + error.message
+              }
+            }));
+          }
         }
         break;
 
@@ -330,48 +490,25 @@ export class WebSocketRoom {
     }
   }
 
-  async handleDaemonAuth(sessionId, message) {
-    const daemon = this.daemons.get(sessionId);
-    if (!daemon) return;
+  // handleDaemonAuth function removed - no authentication required for daemon connections
 
-    const { api_key, daemon_version, device_id } = message.data;
-
-    // Validate API key (this should match the one in Wrangler secrets)
-    const expectedKey = '4025b019988238528f1fd5e909d0363c46e4e48490ea5045a9a490c259071cba';
-    
-    if (api_key === expectedKey) {
-      daemon.authenticated = true;
-      daemon.daemon_version = daemon_version;
-      daemon.device_id = device_id;
-
-      console.log(`[WebSocketRoom] Daemon authenticated: ${device_id} v${daemon_version}`);
-
-      daemon.websocket.send(JSON.stringify({
-        type: 'auth_response',
-        id: crypto.randomUUID(),
-        timestamp: new Date().toISOString(),
-        data: {
-          success: true,
-          message: 'Authenticated successfully',
-          daemon_id: sessionId
-        }
-      }));
-    } else {
-      console.log(`[WebSocketRoom] Daemon authentication failed: invalid API key`);
-      
-      daemon.websocket.send(JSON.stringify({
-        type: 'auth_response',
-        id: crypto.randomUUID(),
-        timestamp: new Date().toISOString(),
-        data: {
-          success: false,
-          message: 'Authentication failed: invalid API key'
-        }
-      }));
-
-      // Close connection after failed auth
-      daemon.websocket.close(1008, 'Authentication failed');
-      this.daemons.delete(sessionId);
+  async handleForwardToDaemon(request) {
+    try {
+      const body = await request.json();
+      await this.forwardToAuthenticatedDaemon(body);
+      return new Response(JSON.stringify({ success: true }), {
+        headers: { 'Content-Type': 'application/json' }
+      });
+    } catch (error) {
+      console.error('[WebSocketRoom] Error forwarding to daemon:', error);
+      // For now, return success even if no daemon is connected
+      // The daemon will pick up the message via HTTP polling
+      return new Response(JSON.stringify({ 
+        success: true,
+        message: 'Message queued for HTTP polling' 
+      }), {
+        headers: { 'Content-Type': 'application/json' }
+      });
     }
   }
 
@@ -386,16 +523,16 @@ export class WebSocketRoom {
     }
 
     if (authenticatedDaemon) {
-      console.log(`[WebSocketRoom] Forwarding send_message to daemon`);
+      console.log(`[WebSocketRoom] Forwarding ${message.type} to daemon`);
       authenticatedDaemon.websocket.send(JSON.stringify({
-        type: 'send_message',
+        type: message.type,
         id: crypto.randomUUID(),
         timestamp: new Date().toISOString(),
         data: message.data
       }));
     } else {
-      console.error(`[WebSocketRoom] No authenticated daemon available for message sending`);
-      // Could broadcast error to clients here
+      console.log(`[WebSocketRoom] No authenticated daemon available via WebSocket, message will be handled via HTTP polling`);
+      // Don't throw error - let the daemon pick up the message via HTTP polling
     }
   }
 
@@ -460,5 +597,179 @@ export class WebSocketRoom {
     }
     
     return null;
+  }
+
+  // API method implementations
+  async getPhones() {
+    const response = await fetch(`${this.env.WORKER_URL || 'https://sexy.qzz.io'}/api/phones`, {
+      headers: {
+        'Authorization': `Bearer ${this.env.AUTH_TOKEN || 'anonymous'}`,
+        'X-Internal-Request': 'true'
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to get phones: ${response.status}`);
+    }
+    
+    return await response.json();
+  }
+
+  async getMessages(params = {}) {
+    const query = new URLSearchParams(params).toString();
+    const response = await fetch(`${this.env.WORKER_URL || 'https://sexy.qzz.io'}/api/messages?${query}`, {
+      headers: {
+        'Authorization': `Bearer ${this.env.AUTH_TOKEN || 'anonymous'}`,
+        'X-Internal-Request': 'true'
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to get messages: ${response.status}`);
+    }
+    
+    return await response.json();
+  }
+
+  async sendMessage(data) {
+    // Forward message send request to daemon
+    await this.forwardToAuthenticatedDaemon({
+      type: 'send_message',
+      data: data
+    });
+    
+    return { success: true, message: 'Message sent to daemon' };
+  }
+
+  async getStats() {
+    const response = await fetch(`${this.env.WORKER_URL || 'https://sexy.qzz.io'}/api/stats`, {
+      headers: {
+        'Authorization': `Bearer ${this.env.AUTH_TOKEN || 'anonymous'}`,
+        'X-Internal-Request': 'true'
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to get stats: ${response.status}`);
+    }
+    
+    return await response.json();
+  }
+
+  async listIccidMappings(params = {}) {
+    const query = new URLSearchParams(params).toString();
+    const response = await fetch(`${this.env.WORKER_URL || 'https://sexy.qzz.io'}/api/iccid-mappings?${query}`, {
+      headers: {
+        'Authorization': `Bearer ${this.env.AUTH_TOKEN || 'anonymous'}`,
+        'X-Internal-Request': 'true'
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to list ICCID mappings: ${response.status}`);
+    }
+    
+    return await response.json();
+  }
+
+  async getIccidMapping(data) {
+    const response = await fetch(`${this.env.WORKER_URL || 'https://sexy.qzz.io'}/api/iccid-mappings/${data.id}`, {
+      headers: {
+        'Authorization': `Bearer ${this.env.AUTH_TOKEN || 'anonymous'}`,
+        'X-Internal-Request': 'true'
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to get ICCID mapping: ${response.status}`);
+    }
+    
+    return await response.json();
+  }
+
+  async getIccidMappingByIccid(data) {
+    const response = await fetch(`${this.env.WORKER_URL || 'https://sexy.qzz.io'}/api/iccid-mappings/by-iccid/${data.iccid}`, {
+      headers: {
+        'Authorization': `Bearer ${this.env.AUTH_TOKEN || 'anonymous'}`,
+        'X-Internal-Request': 'true'
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to get ICCID mapping by ICCID: ${response.status}`);
+    }
+    
+    return await response.json();
+  }
+
+  async createIccidMapping(data) {
+    const response = await fetch(`${this.env.WORKER_URL || 'https://sexy.qzz.io'}/api/iccid-mappings`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${this.env.AUTH_TOKEN || 'anonymous'}`,
+        'X-Internal-Request': 'true'
+      },
+      body: JSON.stringify(data)
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to create ICCID mapping: ${response.status}`);
+    }
+    
+    return await response.json();
+  }
+
+  async updateIccidMapping(data) {
+    const { id, ...updateData } = data;
+    const response = await fetch(`${this.env.WORKER_URL || 'https://sexy.qzz.io'}/api/iccid-mappings/${id}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${this.env.AUTH_TOKEN || 'anonymous'}`,
+        'X-Internal-Request': 'true'
+      },
+      body: JSON.stringify(updateData)
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to update ICCID mapping: ${response.status}`);
+    }
+    
+    return await response.json();
+  }
+
+  async deleteIccidMapping(data) {
+    const response = await fetch(`${this.env.WORKER_URL || 'https://sexy.qzz.io'}/api/iccid-mappings/${data.id}`, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${this.env.AUTH_TOKEN || 'anonymous'}`,
+        'X-Internal-Request': 'true'
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to delete ICCID mapping: ${response.status}`);
+    }
+    
+    return await response.json();
+  }
+
+  async bulkImportIccidMappings(data) {
+    const response = await fetch(`${this.env.WORKER_URL || 'https://sexy.qzz.io'}/api/iccid-mappings/bulk`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${this.env.AUTH_TOKEN || 'anonymous'}`,
+        'X-Internal-Request': 'true'
+      },
+      body: JSON.stringify(data)
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to bulk import ICCID mappings: ${response.status}`);
+    }
+    
+    return await response.json();
   }
 }

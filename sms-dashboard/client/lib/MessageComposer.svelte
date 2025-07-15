@@ -48,8 +48,7 @@
     
     // Send actual message via WebSocket
     const sentMessage = {
-      id: `msg-sent-${Date.now()}`,
-      phoneId: recipientSIM,
+      phone_iccid: recipientSIM,
       phoneNumber: recipientNumber,
       recipient: recipientNumber,
       content: messageContent,

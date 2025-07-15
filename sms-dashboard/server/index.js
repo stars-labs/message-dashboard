@@ -12,7 +12,9 @@ import { groupsHandler } from './handlers/groups';
 import { iccidMappingsHandler } from './handlers/iccid-mappings';
 import { sseHandler } from './handlers/sse';
 import { serveFrontend } from './frontend-handler';
+import { serveLoginPage } from './handlers/login-page';
 import { WebSocketRoom } from './durable-objects/WebSocketRoom';
+import { createRoleConfig, hasSmSAccess } from '../config/auth0-roles.js';
 
 // Simple router implementation without itty-router
 class SimpleRouter {
@@ -124,8 +126,9 @@ router.get('/test-html', () => {
   });
 });
 
-// Auth routes (not under /api since they're redirects, not API endpoints)
-router.get('/login', auth0Handler.login);
+// Auth routes
+router.get('/login', serveLoginPage); // Show login page
+router.get('/api/auth/login', auth0Handler.login); // Redirect to Auth0
 router.get('/callback', auth0Handler.callback);
 router.get('/logout', auth0Handler.logout);
 
@@ -284,8 +287,85 @@ router.post('/api/control/cleanup-test-data', async (request) => {
   }
 });
 
-// Serve frontend for all other routes
-router.get('*', serveFrontend);
+router.get('/api/control/pending-sms', async (request) => {
+  // Get pending SMS sends for daemon
+  try {
+    return await controlHandler.getPendingSMS(request);
+  } catch (error) {
+    // Pending SMS error
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+});
+
+router.post('/api/control/sms-result', async (request) => {
+  // Update SMS send result from daemon
+  try {
+    return await controlHandler.updateSMSResult(request);
+  } catch (error) {
+    // SMS result error
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+});
+
+// Login page route - removed duplicate, using auth0Handler.login above
+
+// Serve frontend for all other routes - check authentication
+router.get('*', async (request, env, ctx) => {
+  const url = new URL(request.url);
+  
+  // For the main app, check if user is authenticated and has the SMS role
+  if (url.pathname === '/' || url.pathname === '/index.html') {
+    // Check for session token in cookies
+    const cookieHeader = request.headers.get('Cookie');
+    let token = null;
+    
+    if (cookieHeader) {
+      const cookies = cookieHeader.split(';').map(c => c.trim());
+      const authCookie = cookies.find(c => c.startsWith('auth_token='));
+      if (authCookie) {
+        token = authCookie.split('=')[1];
+      }
+    }
+    
+    if (!token) {
+      // No token - redirect to login
+      return Response.redirect(new URL('/login', request.url).toString(), 302);
+    }
+    
+    // Verify session
+    const sessionData = await env.SESSIONS.get(token);
+    if (!sessionData) {
+      // Invalid session - redirect to login
+      return Response.redirect(new URL('/login', request.url).toString(), 302);
+    }
+    
+    const session = JSON.parse(sessionData);
+    if (session.expires_at < Date.now()) {
+      // Session expired - redirect to login
+      await env.SESSIONS.delete(token);
+      return Response.redirect(new URL('/login', request.url).toString(), 302);
+    }
+    
+    // Check if user has SMS role
+    const roleConfig = createRoleConfig(env);
+    const user = session.user;
+    const userRoles = user.roles || [];
+    
+    if (!hasSmSAccess(userRoles, roleConfig)) {
+      // User doesn't have SMS role - redirect to login with error
+      return Response.redirect(new URL('/login?error=no_role', request.url).toString(), 302);
+    }
+  }
+  
+  // Serve the frontend
+  return serveFrontend(request);
+});
 
 export default {
   async fetch(request, env, ctx) {

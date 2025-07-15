@@ -1,11 +1,11 @@
 // Simplified Role-Based Access Control middleware
-// This version works with the basic schema without advanced RBAC tables
+// This version uses Auth0 roles instead of database RBAC tables
+
+import { createRoleConfig, hasSmSAccess } from '../../config/auth0-roles.js';
 
 export function requirePermission(permission) {
   return async function(request) {
-    // For now, just check if user is authenticated
-    // In a production system, you would check actual permissions
-    const { user } = request;
+    const { user, env } = request;
     
     if (!user) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
@@ -14,14 +14,65 @@ export function requirePermission(permission) {
       });
     }
     
-    // Allow all authenticated users for now
-    // You can add more sophisticated permission checking here
+    // Check if Auth0 role-based access is enabled
+    const useAuth0Roles = env.USE_AUTH0_ROLES !== 'false'; // Default to true
+    
+    if (useAuth0Roles) {
+      // Create role config from environment
+      const roleConfig = createRoleConfig(env);
+      
+      // Check Auth0 roles
+      const userRoles = user.roles || [];
+      
+      // For SMS-related permissions, check if user has the SMS role
+      const smsPermissions = ['phones.read', 'messages.read', 'messages.send'];
+      if (smsPermissions.includes(permission)) {
+        if (!hasSmSAccess(userRoles, roleConfig)) {
+          const requiredRoles = [roleConfig.SMS_ROLE, ...roleConfig.ALTERNATIVE_SMS_ROLES].filter(r => r);
+          const roleMessage = requiredRoles.length === 1 
+            ? `You need the '${requiredRoles[0]}' role to access SMS features`
+            : `You need one of these roles to access SMS features: ${requiredRoles.join(', ')}`;
+            
+          return new Response(JSON.stringify({ 
+            error: 'Forbidden',
+            message: roleMessage
+          }), {
+            status: 403,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
+      }
+    }
+    
+    // User has access
     return;
   };
 }
 
 // Simplified middleware that doesn't require RBAC tables
 export async function enrichUserPermissions(request) {
-  // Just pass through - no permission enrichment needed for simplified version
+  // Add SMS permissions based on Auth0 roles
+  const { user, env } = request;
+  
+  if (!user) return;
+  
+  const useAuth0Roles = env.USE_AUTH0_ROLES !== 'false';
+  
+  if (useAuth0Roles) {
+    // Create role config from environment
+    const roleConfig = createRoleConfig(env);
+    
+    // When Auth0 roles are enabled, check roles strictly
+    const userRoles = user.roles || [];
+    if (hasSmSAccess(userRoles, roleConfig)) {
+      user.permissions = ['phones.read', 'messages.read', 'messages.send'];
+    } else {
+      user.permissions = [];
+    }
+  } else {
+    // Only grant permissions when Auth0 roles are explicitly disabled
+    user.permissions = ['phones.read', 'messages.read', 'messages.send'];
+  }
+  
   return;
 }

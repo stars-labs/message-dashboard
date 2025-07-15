@@ -63,8 +63,16 @@ export async function handleAuth0(request) {
       id: jwtPayload.sub,
       email: jwtPayload.email,
       name: jwtPayload.name || jwtPayload.nickname,
-      picture: jwtPayload.picture
+      picture: jwtPayload.picture,
+      // Extract roles from JWT payload
+      roles: jwtPayload.roles || 
+             jwtPayload['https://sexy.qzz.io/roles'] || 
+             jwtPayload['https://sexy.qzz.io/app_metadata']?.roles ||
+             []
     };
+    
+    // Store the full Auth0 token payload for role checking
+    request.auth0Token = jwtPayload;
     
     // Optionally update user in database
     try {
