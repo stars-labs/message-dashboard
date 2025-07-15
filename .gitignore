@@ -13,4 +13,15 @@ secrets/*.yaml
 key.txt
 /var/lib/sops-nix/
 
+# Daemon files
+orange-pi-daemon/daemon.log
+orange-pi-daemon/daemon_output.log
+orange-pi-daemon/main
+orange-pi-daemon/orange-pi-daemon
+orange-pi-daemon/test_connection
+orange-pi-daemon/test_connection.zig
+
+# Generated files
+sms-dashboard/server/frontend-assets.js
+
 
