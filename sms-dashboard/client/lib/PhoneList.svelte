@@ -3,6 +3,7 @@
   
   export let phoneNumbers = [];
   export let selectedPhone = null;
+  export let selectedPhoneIccid = null;
   export let selectedCountry = 'all';
   export let searchTerm = '';
   export let onSelectPhone = null;
@@ -41,13 +42,13 @@
   
   function handlePhoneClick(phone) {
     // Toggle selection - if clicking the same phone, unselect it
-    if (selectedPhone?.iccid === phone.iccid) {
-      selectedPhone = null;
+    if (selectedPhoneIccid === phone.iccid) {
+      selectedPhoneIccid = null;
       if (onSelectPhone) {
         onSelectPhone(null);
       }
     } else {
-      selectedPhone = phone;
+      selectedPhoneIccid = phone.iccid;
       if (onSelectPhone) {
         onSelectPhone(phone);
       }
@@ -143,7 +144,7 @@
     {:else}
       {#each filteredPhones as phone}
       <button
-        class="w-full p-3 border-b hover:bg-purple-50 active:bg-purple-100 transition-all duration-300 text-left {selectedPhone?.iccid === phone.iccid ? 'bg-gradient-to-r from-purple-50 to-indigo-50 border-l-4 border-l-purple-500' : 'hover:border-l-4 hover:border-l-purple-200'}"
+        class="w-full p-3 border-b hover:bg-purple-50 active:bg-purple-100 transition-all duration-300 text-left {selectedPhoneIccid === phone.iccid ? 'bg-gradient-to-r from-purple-50 to-indigo-50 border-l-4 border-l-purple-500' : 'hover:border-l-4 hover:border-l-purple-200'}"
         on:click={() => handlePhoneClick(phone)}
       >
         <div class="flex items-center justify-between">
@@ -168,7 +169,7 @@
                   </button>
                 {/if}
               {/if}
-              {#if selectedPhone?.iccid === phone.iccid}
+              {#if selectedPhoneIccid === phone.iccid}
                 <span class="text-purple-600 text-xs font-semibold ml-1">✓</span>
               {/if}
             </div>
