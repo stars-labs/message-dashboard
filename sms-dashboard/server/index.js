@@ -127,7 +127,6 @@ router.get('/test-html', () => {
 
 // Auth routes
 router.get('/login', auth0Handler.login); // Redirect directly to Auth0
-router.get('/api/auth/login', auth0Handler.login); // Redirect to Auth0 (kept for backward compatibility)
 router.get('/callback', auth0Handler.callback);
 router.get('/logout', auth0Handler.logout);
 

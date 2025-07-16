@@ -201,7 +201,7 @@ X-API-Key: your-api-key-here
                 <span class="method">GET</span> /api/health
             </div>
             <div class="endpoint">
-                <span class="method">POST</span> /api/auth/login
+                <span class="method">GET</span> /login
             </div>
             <div class="endpoint">
                 <span class="method">GET</span> /api/phones

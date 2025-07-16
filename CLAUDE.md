@@ -107,7 +107,6 @@ Orange Pi → mmcli → Zig Daemon → API (API Key) → D1 Database → WebSock
 
 ### Database Schema Critical Points
 - `phones.id` is ICCID (SIM card identifier) - never null
-- `phones.iccid` duplicates id for backward compatibility
 - `messages.phone_id` references `phones.id` (ICCID)
 - Control handler rejects phones without valid ICCIDs
 
