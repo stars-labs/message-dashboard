@@ -6,7 +6,7 @@
   export let daemonStatus = { connected: false, lastDataUpdate: null };
   
   // Track if we're in initial loading state
-  let isInitialLoad = daemonStatus.connected && Date.now() - (daemonStatus.lastDataUpdate || Date.now()) < 5000;
+  $: isInitialLoad = daemonStatus.connected && Date.now() - (daemonStatus.lastDataUpdate || Date.now()) < 5000;
   
   function getEffectiveStatus(phone) {
     if (!phone) return 'unknown';
