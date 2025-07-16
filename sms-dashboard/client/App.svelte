@@ -91,6 +91,25 @@
     }
   }
   
+  // Helper function to establish WebSocket connection
+  async function connectWebSocket() {
+    if (realtimeService.isConnected()) {
+      console.log('[App] WebSocket already connected, skipping');
+      return;
+    }
+    
+    const token = auth.token || 'anonymous';
+    console.log('[App] Connecting WebSocket with token:', !!auth.token ? 'authenticated' : 'anonymous');
+    
+    try {
+      await realtimeService.connect(token);
+      setupWebSocketListeners();
+      console.log('[App] WebSocket connection established successfully');
+    } catch (error) {
+      console.error('[App] WebSocket connection failed:', error);
+    }
+  }
+
   onMount(async () => {
     // Check if returning from Auth0 callback
     if (window.location.search.includes('token=')) {
@@ -103,18 +122,6 @@
         user = await auth.getUser();
         if (user) {
           await loadData();
-          
-          // Connect realtime service (WebSocket with SSE fallback)
-          const token = auth.token || 'anonymous';
-          console.log('Auth token available:', !!auth.token, 'Using token:', token);
-          console.log('Connecting realtime service...');
-          try {
-            await realtimeService.connect(token);
-            setupWebSocketListeners();
-            console.log('WebSocket listeners set up successfully');
-          } catch (error) {
-            console.error('Failed to connect realtime service:', error);
-          }
         }
       } else {
         // Try to get user info if token exists
@@ -122,18 +129,6 @@
         if (existingUser) {
           user = existingUser;
           await loadData();
-          
-          // Connect realtime service (WebSocket with SSE fallback)
-          const token = auth.token || 'anonymous';
-          console.log('Auth token available:', !!auth.token, 'Using token:', token);
-          console.log('Connecting realtime service...');
-          try {
-            await realtimeService.connect(token);
-            setupWebSocketListeners();
-            console.log('WebSocket listeners set up successfully');
-          } catch (error) {
-            console.error('Failed to connect realtime service:', error);
-          }
         }
       }
     } catch (error) {
@@ -141,19 +136,8 @@
     }
     loading = false;
     
-    // Always try to connect WebSocket for real-time updates
-    // This will work even without authentication
-    console.log('[App] Setting up WebSocket connection for real-time updates...');
-    try {
-      console.log('[App] Calling realtimeService.connect...');
-      await realtimeService.connect('anonymous');
-      console.log('[App] realtimeService.connect completed');
-      setupWebSocketListeners();
-      console.log('[App] WebSocket connection established and listeners set up');
-    } catch (error) {
-      console.error('[App] WebSocket connection failed:', error);
-      console.error('[App] Error stack:', error.stack);
-    }
+    // Establish WebSocket connection once after authentication check
+    await connectWebSocket();
   });
   
   function setupWebSocketListeners() {

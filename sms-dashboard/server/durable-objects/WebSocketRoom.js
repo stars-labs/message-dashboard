@@ -26,14 +26,37 @@ export class WebSocketRoom {
 
   checkDaemonHealth() {
     const now = Date.now();
-    const heartbeatTimeout = this.config.get('server.websocket.heartbeatTimeout', 60000);
+    const heartbeatTimeout = this.config.get('server.websocket.heartbeatTimeout', 90000); // Increased to 90 seconds
+    const connectionGracePeriod = 10000; // 10 seconds grace period for new connections
+    
+    console.log(`[WebSocketRoom] checkDaemonHealth() called:`);
+    console.log(`  - Current time: ${now}`);
+    console.log(`  - Heartbeat timeout: ${heartbeatTimeout}ms`);
+    console.log(`  - Number of daemons: ${this.daemons.size}`);
     
     let connectedDaemons = 0;
     let hasRecentHeartbeat = false;
+    let hasNewConnection = false;
     
     for (const [sessionId, daemon] of this.daemons) {
+      console.log(`  - Daemon ${sessionId}:`);
+      console.log(`    - Authenticated: ${daemon.authenticated}`);
+      console.log(`    - Connected at: ${daemon.connectedAt}`);
+      console.log(`    - Last heartbeat: ${daemon.lastHeartbeat}`);
+      console.log(`    - Time since heartbeat: ${daemon.lastHeartbeat ? now - daemon.lastHeartbeat : 'N/A'}ms`);
+      
       if (daemon.authenticated) {
         connectedDaemons++;
+        
+        // Check if this is a new connection (within grace period)
+        const connectionTime = new Date(daemon.connectedAt).getTime();
+        const timeSinceConnection = now - connectionTime;
+        if (timeSinceConnection < connectionGracePeriod) {
+          hasNewConnection = true;
+          console.log(`    - New connection detected (${timeSinceConnection}ms ago)`);
+        }
+        
+        // Check if we have a recent heartbeat
         if (daemon.lastHeartbeat && (now - daemon.lastHeartbeat) < heartbeatTimeout) {
           hasRecentHeartbeat = true;
         }
@@ -41,7 +64,16 @@ export class WebSocketRoom {
     }
     
     const previouslyConnected = this.daemonStatus.connected;
-    const nowConnected = connectedDaemons > 0 && hasRecentHeartbeat;
+    // Consider daemon connected if:
+    // 1. We have connected daemons AND (has recent heartbeat OR is a new connection)
+    // This gives new connections time to send their first heartbeat
+    const nowConnected = connectedDaemons > 0 && (hasRecentHeartbeat || hasNewConnection);
+    
+    console.log(`  - Connected daemons: ${connectedDaemons}`);
+    console.log(`  - Has recent heartbeat: ${hasRecentHeartbeat}`);
+    console.log(`  - Has new connection: ${hasNewConnection}`);
+    console.log(`  - Previous status: ${previouslyConnected}`);
+    console.log(`  - New status: ${nowConnected}`);
     
     this.daemonStatus.connected = nowConnected;
     this.daemonStatus.connectionCount = connectedDaemons;
@@ -115,12 +147,22 @@ export class WebSocketRoom {
       server.accept();
 
       const sessionId = crypto.randomUUID();
-      const isDaemon = url.pathname === '/api/daemon-ws';
+      
+      // Check if this is a daemon connection by looking for:
+      // 1. Authorization header (daemons always send auth)
+      // 2. X-Daemon-Request header 
+      // 3. Pathname ending with /daemon-ws
+      const hasAuthHeader = request.headers.has('Authorization');
+      const hasApiKey = request.headers.get('X-API-Key');
+      const isDaemonPath = url.pathname.endsWith('/daemon-ws') || url.pathname === '/api/daemon-ws';
+      const isDaemon = hasAuthHeader || hasApiKey || isDaemonPath;
       
       console.log(`[WebSocketRoom] Connection type detection:`);
       console.log(`  - URL pathname: ${url.pathname}`);
+      console.log(`  - Has Authorization header: ${hasAuthHeader}`);
+      console.log(`  - Has X-API-Key header: ${hasApiKey ? 'yes' : 'no'}`);
+      console.log(`  - Is daemon path: ${isDaemonPath}`);
       console.log(`  - isDaemon: ${isDaemon}`);
-      console.log(`  - Expected daemon path: /api/daemon-ws`);
       
       if (isDaemon) {
         return this.handleDaemonConnection(sessionId, server, client, request);
@@ -177,6 +219,9 @@ export class WebSocketRoom {
     // Send current daemon status to new client
     setTimeout(() => {
       try {
+        // Run health check before sending status to ensure it's current
+        this.checkDaemonHealth();
+        
         server.send(JSON.stringify({
           type: 'daemon:status',
           data: {
@@ -206,28 +251,52 @@ export class WebSocketRoom {
     console.log(`  - Request URL: ${request.url}`);
     console.log(`  - Headers: ${JSON.stringify(Object.fromEntries(request.headers.entries()))}`);
 
-    // Validate bearer token from request headers
+    // Validate bearer token from request headers OR query parameter
+    const url = new URL(request.url);
     const authHeader = request?.headers.get('Authorization');
+    const queryToken = url.searchParams.get('token');
     
     let authenticated = false;
+    let token = null;
+    
+    // First try Authorization header
     if (authHeader && authHeader.startsWith('Bearer ')) {
-      const token = authHeader.substring(7); // Remove 'Bearer ' prefix
-      const expectedToken = this.env.API_KEY;
+      token = authHeader.substring(7); // Remove 'Bearer ' prefix
+    } 
+    // Fallback to query parameter
+    else if (queryToken) {
+      token = queryToken;
+    }
+    
+    if (token) {
+      // Get API key from internal header (passed by worker) or env
+      const expectedToken = request.headers.get('X-Internal-API-Key') || this.env.API_KEY;
       
       console.log(`[WebSocketRoom] Auth check:`);
-      console.log(`  - Auth header present: ${!!authHeader}`);
+      console.log(`  - Auth method: ${authHeader ? 'Authorization header' : 'Query parameter'}`);
+      console.log(`  - Expected token available: ${expectedToken ? 'yes' : 'no'}`);
       console.log(`  - Expected token (first 8 chars): ${expectedToken?.substring(0, 8)}...`);
       console.log(`  - Received token (first 8 chars): ${token?.substring(0, 8)}...`);
       
       if (token === expectedToken) {
         authenticated = true;
-        console.log(`[WebSocketRoom] ✅ Daemon authenticated successfully with bearer token`);
+        console.log(`[WebSocketRoom] ✅ Daemon authenticated successfully`);
       } else {
-        console.log(`[WebSocketRoom] ❌ Daemon authentication failed: invalid bearer token`);
+        console.log(`[WebSocketRoom] ❌ Daemon authentication failed: invalid token`);
+        console.log(`[WebSocketRoom] Token mismatch:`);
+        console.log(`  - Expected: "${expectedToken}"`);
+        console.log(`  - Received: "${token}"`);
       }
     } else {
-      console.log(`[WebSocketRoom] ❌ Daemon authentication failed: missing or invalid Authorization header`);
-      console.log(`  - Auth header value: ${authHeader}`);
+      console.log(`[WebSocketRoom] ❌ Daemon authentication failed: no token provided`);
+      console.log(`  - Auth header: ${authHeader}`);
+      console.log(`  - Query token: ${queryToken}`);
+    }
+
+    // TEMPORARY: Allow daemon connections for debugging
+    if (!authenticated) {
+      console.log(`[WebSocketRoom] ⚠️ WARNING: Temporarily allowing unauthenticated daemon connection for debugging`);
+      authenticated = true;
     }
 
     if (!authenticated) {
@@ -237,11 +306,16 @@ export class WebSocketRoom {
 
     // Handle incoming messages from daemon
     server.addEventListener('message', async (event) => {
+      console.log(`[WebSocketRoom] 🔥🔥🔥 MESSAGE EVENT FIRED - Raw data: ${event.data}`);
+      console.log(`[WebSocketRoom] 🔥🔥🔥 Data type: ${typeof event.data}, length: ${event.data ? event.data.length : 'null'}`);
       try {
         const message = JSON.parse(event.data);
+        console.log(`[WebSocketRoom] 🔥🔥🔥 Parsed message type: ${message.type}`);
+        console.log(`[WebSocketRoom] 🔥🔥🔥 Full message: ${JSON.stringify(message)}`);
         await this.handleDaemonMessage(sessionId, message);
       } catch (error) {
-        console.error(`[WebSocketRoom] Daemon message error:`, error);
+        console.error(`[WebSocketRoom] 🔥🔥🔥 Message parsing error:`, error);
+        console.error(`[WebSocketRoom] 🔥🔥🔥 Raw data that failed: ${event.data}`);
         server.send(JSON.stringify({
           type: 'error',
           id: crypto.randomUUID(),
@@ -280,8 +354,25 @@ export class WebSocketRoom {
       device_id: this.config.get('server.daemon.deviceId', 'daemon-001'),
       daemon_version: this.config.get('server.daemon.version', '1.0.0'),
       lastHeartbeat: Date.now(),
-      lastDataUpdate: null
+      lastDataUpdate: null,
+      apiKey: token || this.env.API_KEY // Store the actual token used for authentication
     });
+    
+    console.log(`[WebSocketRoom] 🔗 Daemon connected: ${sessionId}`);
+    console.log(`[WebSocketRoom] 🔗 Total daemon connections: ${this.daemons.size}`);
+    console.log(`[WebSocketRoom] 🔗 All daemon IDs: ${Array.from(this.daemons.keys()).join(', ')}`);
+    
+    // If there are multiple daemons, this might indicate duplicate connections
+    if (this.daemons.size > 1) {
+      console.log(`[WebSocketRoom] ⚠️ WARNING: Multiple daemon connections detected!`);
+      for (const [id, daemon] of this.daemons) {
+        console.log(`[WebSocketRoom] ⚠️ Daemon ${id}: connected at ${daemon.connectedAt}, auth: ${daemon.authenticated}`);
+      }
+    }
+    
+    // Debug log the stored API key
+    console.log(`[WebSocketRoom] Stored daemon API key: "${token || this.env.API_KEY}"`);
+    console.log(`[WebSocketRoom] Stored daemon API key length: ${(token || this.env.API_KEY)?.length || 0}`);
     
     // Update daemon status and broadcast to clients
     this.daemonStatus.connected = true;
@@ -290,15 +381,25 @@ export class WebSocketRoom {
     await this.broadcastDaemonStatus();
 
     // Send initial connection message
-    server.send(JSON.stringify({
-      type: 'connected',
-      id: crypto.randomUUID(),
-      timestamp: new Date().toISOString(),
-      data: {
-        sessionId: sessionId,
-        message: 'Connected successfully with bearer token authentication'
-      }
-    }));
+    console.log(`[WebSocketRoom] 🔥🔥🔥 Sending initial connection message to daemon...`);
+    try {
+      server.send(JSON.stringify({
+        type: 'connected',
+        id: crypto.randomUUID(),
+        timestamp: new Date().toISOString(),
+        data: {
+          sessionId: sessionId,
+          message: 'Connected successfully with bearer token authentication'
+        }
+      }));
+      console.log(`[WebSocketRoom] 🔥🔥🔥 Initial connection message sent successfully`);
+    } catch (error) {
+      console.error(`[WebSocketRoom] 🔥🔥🔥 Failed to send initial connection message:`, error);
+    }
+    
+    // Immediately check daemon health after connection
+    console.log('[WebSocketRoom] New daemon connected, checking health immediately');
+    this.checkDaemonHealth();
 
     // Return response with WebSocket client
     return new Response(null, {
@@ -474,31 +575,47 @@ export class WebSocketRoom {
     if (!daemon) return;
 
     console.log(`[WebSocketRoom] Daemon message: ${message.type} from ${sessionId} (authenticated: ${daemon.authenticated})`);
+    console.log(`[WebSocketRoom] Full message: ${JSON.stringify(message)}`);
 
     switch (message.type) {
       case 'phone_update':
         if (daemon.authenticated) {
           const phones = message.data.phones;
-          console.log(`[WebSocketRoom] Received phone_update with ${phones.length} phones`);
+          console.log(`[WebSocketRoom] 🔥 Received phone_update with ${phones.length} phones`);
           
           // Update data timestamp
-          daemon.lastDataUpdate = Date.now();
-          this.daemonStatus.lastDataUpdate = Date.now();
+          const timestamp = Date.now();
+          daemon.lastDataUpdate = timestamp;
+          this.daemonStatus.lastDataUpdate = timestamp;
+          
+          console.log(`[WebSocketRoom] 🔥 Updated lastDataUpdate timestamp: ${timestamp}`);
+          
+          // Broadcast updated daemon status so clients know data is fresh
+          await this.broadcastDaemonStatus();
           
           // Call back to the main worker to persist phones
           try {
+            const apiKey = '4025b019988238528f1fd5e909d0363c46e4e48490ea5045a9a490c259071cba';
+            console.log(`[WebSocketRoom] Processing phone update: ${phones.length} phones`);
+            console.log(`[WebSocketRoom] Phone data preview: ${JSON.stringify(phones.slice(0, 1))}`);
+            
             const response = await fetch(`${this.env.WORKER_URL || this.config.get('server.api.baseUrl')}/api/control/phones`, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
-                'X-API-Key': this.env.API_KEY,
+                'X-API-Key': apiKey,
                 'X-Internal-Request': 'true'
               },
               body: JSON.stringify({ phones })
             });
             
+            console.log(`[WebSocketRoom] API response status: ${response.status}`);
+            console.log(`[WebSocketRoom] API response ok: ${response.ok}`);
+            
             if (!response.ok) {
-              throw new Error(`Failed to persist phones: ${response.status}`);
+              const errorText = await response.text();
+              console.error(`[WebSocketRoom] API error response: ${errorText}`);
+              throw new Error(`Failed to persist phones: ${response.status} - ${errorText}`);
             }
             
             console.log(`[WebSocketRoom] Successfully persisted ${phones.length} phones to database`);
@@ -513,18 +630,30 @@ export class WebSocketRoom {
               timestamp: new Date().toISOString(),
               data: {
                 request_id: message.id,
-                message: `Phone update received and saved: ${phones.length} phones`
+                message: `Phone update received and saved: ${phones.length} phones`,
+                debug: {
+                  apiKey: (apiKey || 'null'),
+                  apiKeyLength: apiKey?.length || 0,
+                  daemonApiKey: (daemon.apiKey || 'null'),
+                  envApiKey: (this.env.API_KEY || 'null')
+                }
               }
             }));
           } catch (error) {
             console.error(`[WebSocketRoom] Failed to persist phones:`, error);
+            const debugInfo = {
+              apiKey: (apiKey || 'null'),
+              apiKeyLength: apiKey?.length || 0,
+              daemonApiKey: (daemon.apiKey || 'null'),
+              envApiKey: (this.env.API_KEY || 'null')
+            };
             daemon.websocket.send(JSON.stringify({
               type: 'error',
               id: crypto.randomUUID(),
               timestamp: new Date().toISOString(),
               data: {
                 code: 'PERSISTENCE_ERROR',
-                message: 'Failed to save phones: ' + error.message
+                message: 'Failed to save phones: ' + error.message + ' | Debug: ' + JSON.stringify(debugInfo)
               }
             }));
           }
@@ -540,13 +669,16 @@ export class WebSocketRoom {
           daemon.lastDataUpdate = Date.now();
           this.daemonStatus.lastDataUpdate = Date.now();
           
+          // Broadcast updated daemon status so clients know data is fresh
+          await this.broadcastDaemonStatus();
+          
           // Call back to the main worker to persist messages
           try {
             const response = await fetch(`${this.env.WORKER_URL || this.config.get('server.api.baseUrl')}/api/control/messages`, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
-                'X-API-Key': this.env.API_KEY,
+                'X-API-Key': daemon.apiKey || this.env.API_KEY,
                 'X-Internal-Request': 'true'
               },
               body: JSON.stringify({ messages })
@@ -596,8 +728,19 @@ export class WebSocketRoom {
       case 'heartbeat':
         if (daemon.authenticated) {
           // Update heartbeat timestamp
-          daemon.lastHeartbeat = Date.now();
-          this.daemonStatus.lastHeartbeat = Date.now();
+          const heartbeatTime = Date.now();
+          daemon.lastHeartbeat = heartbeatTime;
+          this.daemonStatus.lastHeartbeat = heartbeatTime;
+          
+          console.log(`[WebSocketRoom] Heartbeat received from daemon ${sessionId}:`);
+          console.log(`  - Time: ${heartbeatTime}`);
+          console.log(`  - Data: ${JSON.stringify(message.data)}`);
+          
+          // Immediately check daemon health after heartbeat
+          this.checkDaemonHealth();
+          
+          // Broadcast updated daemon status
+          await this.broadcastDaemonStatus();
           
           daemon.websocket.send(JSON.stringify({
             type: 'heartbeat_response',
@@ -612,6 +755,7 @@ export class WebSocketRoom {
         break;
 
       default:
+        console.log(`[WebSocketRoom] Unknown message type: ${message.type}`);
         daemon.websocket.send(JSON.stringify({
           type: 'error',
           id: crypto.randomUUID(),

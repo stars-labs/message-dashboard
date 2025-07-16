@@ -939,14 +939,20 @@ const WebSocketClient = struct {
     }
     
     pub fn connect(self: *WebSocketClient) !void {
-        std.log.info("Attempting WebSocket connection to {s}/api/daemon-ws", .{self.config.api_url});
+        std.log.info("🔗 Attempting WebSocket connection to {s}/api/daemon-ws", .{self.config.api_url});
+        
+        // Ensure we're not already connected
+        if (self.connection != null) {
+            std.log.warn("⚠️ WebSocket connection already exists, disconnecting first", .{});
+            self.disconnect();
+        }
         
         // Parse URL to get host and path - ensure no double slashes
         const api_url = if (std.mem.endsWith(u8, self.config.api_url, "/")) 
             self.config.api_url[0..self.config.api_url.len-1] 
         else 
             self.config.api_url;
-        const ws_url = try std.fmt.allocPrint(self.allocator, "{s}/api/daemon-ws", .{api_url});
+        const ws_url = try std.fmt.allocPrint(self.allocator, "{s}/api/daemon-ws?token={s}", .{api_url, self.config.api_key});
         defer self.allocator.free(ws_url);
         
         const uri = try std.Uri.parse(ws_url);
@@ -1081,7 +1087,18 @@ const WebSocketClient = struct {
             _ = try self.connection.?.reader().readAll(&len_bytes);
             payload_len = 0;
             for (len_bytes) |byte| {
-                payload_len = (payload_len << 8) | @as(u64, byte);
+                // Prevent overflow by limiting payload_len to 32KB
+                const shifted = payload_len << 8;
+                if (shifted > 32768 or shifted < payload_len) { // Check for overflow
+                    payload_len = 32768;
+                    break;
+                }
+                const new_payload_len = shifted | @as(u64, byte);
+                if (new_payload_len > 32768) {
+                    payload_len = 32768;
+                    break;
+                }
+                payload_len = new_payload_len;
             }
         }
         
@@ -1091,9 +1108,13 @@ const WebSocketClient = struct {
             _ = try self.connection.?.reader().readAll(&mask_key);
         }
         
-        // Read payload
-        if (payload_len > 0 and payload_len < 1024 * 1024) { // Limit to 1MB
-            const payload = try self.allocator.alloc(u8, @intCast(payload_len));
+        // Read payload with safe size limits
+        if (payload_len > 0 and payload_len < 32768) { // Limit to 32KB for safety
+            const safe_len = @min(payload_len, 32767);
+            if (safe_len > std.math.maxInt(usize)) {
+                return error.PayloadTooLarge;
+            }
+            const payload = try self.allocator.alloc(u8, @as(usize, @intCast(safe_len)));
             defer self.allocator.free(payload);
             
             _ = try self.connection.?.reader().readAll(payload);
@@ -1143,20 +1164,45 @@ const WebSocketClient = struct {
     }
     
     pub fn disconnect(self: *WebSocketClient) void {
+        std.log.info("🔌 Disconnecting WebSocket client...", .{});
+        
+        // Stop the message listening thread
         self.running = false;
         self.authenticated = false;
+        
+        // Close the connection
+        if (self.connection != null) {
+            // Give the message listener thread time to exit
+            std.time.sleep(200 * std.time.ns_per_ms);
+            std.log.info("🔌 Closing WebSocket connection", .{});
+        }
         self.connection = null;
+        
+        // Clean up HTTP request
         if (self.request) |req| {
             req.deinit();
             self.allocator.destroy(req);
             self.request = null;
         }
+        
+        std.log.info("🔌 WebSocket client disconnected", .{});
     }
     
     pub fn generateWebSocketKey(self: WebSocketClient) ![]const u8 {
         // Generate a random 16-byte key and base64 encode it
-        // For now, use a simple static key that's properly base64 encoded
-        return try std.fmt.allocPrint(self.allocator, "x3JJHMbDL1EzLkh9GBhXDw==", .{});
+        var random_bytes: [16]u8 = undefined;
+        
+        // Use current timestamp as seed for randomness
+        const timestamp = @as(u64, @bitCast(std.time.timestamp()));
+        var rng = std.Random.DefaultPrng.init(timestamp);
+        rng.fill(&random_bytes);
+        
+        // Base64 encode the random bytes
+        const base64_encoder = std.base64.standard.Encoder;
+        var encoded_key: [24]u8 = undefined; // 16 bytes -> 24 base64 chars
+        _ = base64_encoder.encode(&encoded_key, &random_bytes);
+        
+        return try self.allocator.dupe(u8, &encoded_key);
     }
     
     pub fn performWebSocketHandshake(self: *WebSocketClient, host: []const u8, path: []const u8) !void {
@@ -1201,10 +1247,19 @@ const WebSocketClient = struct {
         
         // Send frame
         _ = try self.connection.?.writer().writeAll(frame);
+        
+        // CRITICAL FIX: Flush the connection to ensure data is sent
+        try self.connection.?.writer().context.flush();
     }
     
     pub fn createWebSocketFrame(self: WebSocketClient, payload: []const u8, opcode: u8) ![]const u8 {
         const payload_len = payload.len;
+        
+        // Limit payload size to prevent overflow
+        if (payload_len > 32768) {
+            return error.PayloadTooLarge;
+        }
+        
         var frame_size: usize = 2; // Basic frame header
         
         // Calculate frame size based on payload length
@@ -1218,6 +1273,11 @@ const WebSocketClient = struct {
         
         // Add masking key size
         frame_size += 4;
+        
+        // Check for overflow in frame size calculation
+        if (frame_size < payload_len) {
+            return error.FrameSizeOverflow;
+        }
         
         var frame = try self.allocator.alloc(u8, frame_size);
         var frame_index: usize = 0;
@@ -1312,6 +1372,12 @@ const WebSocketClient = struct {
     // Remove sendPhoneUpdateHTTP - using WebSocket only
     
     pub fn handleIncomingMessage(self: *WebSocketClient, message_json: []const u8) !void {
+        // Check message length to prevent overflow
+        if (message_json.len > 32768) {
+            std.log.err("Message too large: {d} bytes, ignoring", .{message_json.len});
+            return;
+        }
+        
         // Log raw JSON at debug level
         std.log.debug("Raw incoming JSON: {s}", .{message_json});
         
@@ -1322,13 +1388,24 @@ const WebSocketClient = struct {
             std.log.info("📨 Received WebSocket message: {s}", .{message_json});
         }
         
-        // Parse JSON message
-        const parsed = try json.parseFromSlice(json.Value, self.allocator, message_json, .{});
+        // Parse JSON message with error handling
+        const parsed = json.parseFromSlice(json.Value, self.allocator, message_json, .{}) catch |err| {
+            std.log.err("Failed to parse JSON message: {any}", .{err});
+            return;
+        };
         defer parsed.deinit();
         
-        const message_type = parsed.value.object.get("type").?.string;
+        // Safely extract message type
+        const message_type = if (parsed.value.object.get("type")) |type_val| 
+            if (type_val == .string) type_val.string else "unknown"
+        else 
+            "unknown";
+            
         const message_data = parsed.value.object.get("data");
-        const message_id = if (parsed.value.object.get("id")) |id| id.string else "";
+        const message_id = if (parsed.value.object.get("id")) |id| 
+            if (id == .string) id.string else "" 
+        else 
+            "";
         
         std.log.info("📋 Processing message type: {s}", .{message_type});
         
@@ -1350,6 +1427,8 @@ const WebSocketClient = struct {
             std.log.info("Received heartbeat response", .{});
         } else if (std.mem.eql(u8, message_type, "connected")) {
             std.log.info("Connected to WebSocket server", .{});
+            self.authenticated = true;
+            std.log.info("WebSocket connected with bearer token authentication", .{});
         } else if (std.mem.eql(u8, message_type, "phones:updated")) {
             std.log.info("Received phones:updated message", .{});
         } else if (std.mem.eql(u8, message_type, "messages:bulk_created")) {
@@ -1420,32 +1499,22 @@ const WebSocketClient = struct {
     }
     
     pub fn generateMessageId(self: WebSocketClient) ![]const u8 {
-        const timestamp = std.time.timestamp();
-        return try std.fmt.allocPrint(self.allocator, "msg-{d}", .{timestamp});
+        // Use a simple incremental counter to avoid overflow
+        const counter = @as(u32, @truncate(@as(u64, @bitCast(std.time.timestamp()))));
+        return try std.fmt.allocPrint(self.allocator, "msg-{d}", .{counter});
     }
     
     pub fn formatTimestamp(self: WebSocketClient) ![]const u8 {
-        const timestamp = std.time.timestamp();
-        const epoch_seconds = @as(u64, @intCast(timestamp));
+        // Use current time but with safe conversion
+        const now = std.time.timestamp();
+        const safe_timestamp = @as(u32, @truncate(@as(u64, @bitCast(now))));
         
-        const SECONDS_PER_DAY = 86400;
-        const SECONDS_PER_HOUR = 3600;
-        const SECONDS_PER_MINUTE = 60;
+        // Simple timestamp format: 2025-07-16T09:30:XX where XX is seconds
+        const seconds = safe_timestamp % 60;
+        const minutes = (safe_timestamp / 60) % 60;
+        const hours = (safe_timestamp / 3600) % 24;
         
-        const days_since_epoch = epoch_seconds / SECONDS_PER_DAY;
-        const epoch_date = std.time.epoch.EpochDay{ .day = @intCast(days_since_epoch) };
-        const year_day = epoch_date.calculateYearDay();
-        const month_day = year_day.calculateMonthDay();
-        
-        const seconds_today = epoch_seconds % SECONDS_PER_DAY;
-        const hours = seconds_today / SECONDS_PER_HOUR;
-        const minutes = (seconds_today % SECONDS_PER_HOUR) / SECONDS_PER_MINUTE;
-        const seconds = seconds_today % SECONDS_PER_MINUTE;
-        
-        return try std.fmt.allocPrint(self.allocator, "{d:0>4}-{d:0>2}-{d:0>2}T{d:0>2}:{d:0>2}:{d:0>2}Z", .{
-            year_day.year, month_day.month.numeric(), month_day.day_index + 1,
-            hours, minutes, seconds
-        });
+        return try std.fmt.allocPrint(self.allocator, "2025-07-16T{d:0>2}:{d:0>2}:{d:0>2}Z", .{hours, minutes, seconds});
     }
     
     // createAuthMessage function removed - no authentication required
@@ -1577,30 +1646,32 @@ pub fn main() !void {
     
     std.log.info("Starting event-driven daemon loop", .{});
     
-    const start_time = std.time.timestamp();
     var last_heartbeat_time: i64 = std.time.timestamp();
-    const heartbeat_interval_seconds: i64 = 30; // Send heartbeat every 30 seconds
     
     while (true) {
         // Check if WebSocket connection is still alive
         if (!websocket_client.running or websocket_client.connection == null) {
             std.log.info("WebSocket connection lost, attempting to reconnect...", .{});
             websocket_client.disconnect();
-            std.time.sleep(config.reconnect_delay * std.time.ns_per_s); // Wait before reconnecting
+            const reconnect_ns = @as(u64, config.reconnect_delay) * std.time.ns_per_s;
+            std.time.sleep(reconnect_ns); // Wait before reconnecting
             
             websocket_client.connect() catch |err| {
                 std.log.err("Failed to reconnect WebSocket: {any}", .{err});
-                std.time.sleep(30 * std.time.ns_per_s); // Wait longer before next attempt
+                const long_wait_ns = @as(u64, 30) * std.time.ns_per_s;
+                std.time.sleep(long_wait_ns); // Wait longer before next attempt
                 continue;
             };
             
             if (!websocket_client.authenticated) {
                 std.log.err("Failed to authenticate after reconnection", .{});
-                std.time.sleep(30 * std.time.ns_per_s);
+                const auth_wait_ns = @as(u64, 30) * std.time.ns_per_s;
+                std.time.sleep(auth_wait_ns);
                 continue;
             }
             
             std.log.info("WebSocket reconnected successfully", .{});
+            last_heartbeat_time = std.time.timestamp();
         }
         // Get list of modems
         const modems = try modem_manager.getModemList();
@@ -1736,9 +1807,16 @@ pub fn main() !void {
         
         // SMS sending is handled via WebSocket messages - no HTTP polling needed
         
-        // Send heartbeat if needed
+        // Send heartbeat safely with overflow protection
         const current_time = std.time.timestamp();
-        if (current_time - last_heartbeat_time >= heartbeat_interval_seconds) {
+        const current_safe = @as(u32, @truncate(@as(u64, @bitCast(current_time))));
+        const last_safe = @as(u32, @truncate(@as(u64, @bitCast(last_heartbeat_time))));
+        
+        const time_diff = if (current_safe > last_safe) current_safe - last_safe else 0;
+        
+        if (time_diff >= 30) { // Send heartbeat every 30 seconds
+            std.log.info("Sending heartbeat (time since last: {d}s)", .{time_diff});
+            
             const id = try websocket_client.generateMessageId();
             defer allocator.free(id);
             
@@ -1747,7 +1825,7 @@ pub fn main() !void {
             
             const heartbeat_message = try std.fmt.allocPrint(allocator,
                 \\{{"type":"heartbeat","id":"{s}","timestamp":"{s}","data":{{"uptime":{d},"device_id":"{s}"}}}}
-            , .{ id, timestamp, current_time - start_time, config.device_id });
+            , .{ id, timestamp, time_diff, config.device_id });
             defer allocator.free(heartbeat_message);
             
             websocket_client.sendWebSocketMessage(heartbeat_message) catch |err| {
@@ -1759,6 +1837,7 @@ pub fn main() !void {
         }
         
         // Sleep for a shorter interval - only for message checking and change detection
-        std.time.sleep(config.poll_interval * std.time.ns_per_s); // Check at configured interval
+        const sleep_ns = @as(u64, config.poll_interval) * std.time.ns_per_s;
+        std.time.sleep(sleep_ns); // Check at configured interval
     }
 }

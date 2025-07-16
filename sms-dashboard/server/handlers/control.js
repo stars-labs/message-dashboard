@@ -10,10 +10,11 @@ export const controlHandler = {
     // Check API key
     const apiKey = request.headers.get('X-API-Key');
     
-    // Temporary: accept the known API key directly
-    const expectedKey = '4025b019988238528f1fd5e909d0363c46e4e48490ea5045a9a490c259071cba';
+    // Check against environment API key
+    const expectedKey = env.API_KEY || '4025b019988238528f1fd5e909d0363c46e4e48490ea5045a9a490c259071cba';
     
     if (!apiKey || apiKey !== expectedKey) {
+      console.error(`[control.js] API key mismatch - expected: ${expectedKey?.substring(0, 8)}..., got: ${apiKey?.substring(0, 8)}...`);
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
         status: 401,
         headers: { 'Content-Type': 'application/json' }
@@ -107,10 +108,11 @@ export const controlHandler = {
     // Check API key
     const apiKey = request.headers.get('X-API-Key');
     
-    // Temporary: accept the known API key directly until env.API_KEY issue is resolved
-    const expectedKey = '4025b019988238528f1fd5e909d0363c46e4e48490ea5045a9a490c259071cba';
+    // Check against environment API key
+    const expectedKey = env.API_KEY || '4025b019988238528f1fd5e909d0363c46e4e48490ea5045a9a490c259071cba';
     
     if (!apiKey || apiKey !== expectedKey) {
+      console.error(`[control.js] API key mismatch - expected: ${expectedKey?.substring(0, 8)}..., got: ${apiKey?.substring(0, 8)}...`);
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
         status: 401,
         headers: { 'Content-Type': 'application/json' }
@@ -155,11 +157,13 @@ export const controlHandler = {
       let errorCount = 0;
       const errors = [];
       
+      console.log(`[control.js] Raw phones data received: ${JSON.stringify(phones)}`);
+      
       for (const phone of phones) {
         try {
           // Skip phones without valid ICCIDs
           if (!phone.iccid || phone.iccid.trim() === '') {
-            console.log(`[control.js] Skipping phone without ICCID: number=${phone.number}`);
+            console.log(`[control.js] Skipping phone without ICCID: number=${phone.number}, keys=${Object.keys(phone)}`);
             errorCount++;
             errors.push(`Phone without ICCID (number: ${phone.number || 'unknown'})`);
             continue;
@@ -208,10 +212,14 @@ export const controlHandler = {
         !phone.iccid.startsWith('SIM_')
       );
       
-      // Broadcast phone updates
-      console.log(`[control.js] Broadcasting phones:updated event with ${validPhones.length} valid phones (filtered from ${phones.length})`);
-      const broadcastResult = await broadcastEvent(env, 'phones:updated', validPhones);
-      console.log(`[control.js] Broadcast result:`, broadcastResult);
+      // Only broadcast if we have valid phones to avoid clearing the UI
+      if (validPhones.length > 0) {
+        console.log(`[control.js] Broadcasting phones:updated event with ${validPhones.length} valid phones (filtered from ${phones.length})`);
+        const broadcastResult = await broadcastEvent(env, 'phones:updated', validPhones);
+        console.log(`[control.js] Broadcast result:`, broadcastResult);
+      } else {
+        console.log(`[control.js] Skipping broadcast - no valid phones to send (all ${phones.length} phones were filtered out)`);
+      }
       
       return new Response(JSON.stringify({
         success: errorCount === 0,
@@ -240,9 +248,10 @@ export const controlHandler = {
     
     // Check API key
     const apiKey = request.headers.get('X-API-Key');
-    const expectedKey = '4025b019988238528f1fd5e909d0363c46e4e48490ea5045a9a490c259071cba';
+    const expectedKey = env.API_KEY || '4025b019988238528f1fd5e909d0363c46e4e48490ea5045a9a490c259071cba';
     
     if (!apiKey || apiKey !== expectedKey) {
+      console.error(`[control.js] API key mismatch - expected: ${expectedKey?.substring(0, 8)}..., got: ${apiKey?.substring(0, 8)}...`);
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
         status: 401,
         headers: { 'Content-Type': 'application/json' }

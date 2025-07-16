@@ -1,0 +1,101 @@
+
+ ⛅️ wrangler 4.24.0 (update available 4.24.3)
+─────────────────────────────────────────────
+Successfully created tail, expires at 2025-07-16T15:53:00Z
+Connected to sms-dashboard, waiting for logs...
+GET https://sexy.qzz.io/api/daemon-ws?token=REDACTED - Canceled @ 7/16/2025, 7:17:00 PM
+  (log) [WebSocketRoom] fetch() called:
+  (log)   - URL: https://sexy.qzz.io/api/daemon-ws?token=4025b019988238528f1fd5e909d0363c46e4e48490ea5045a9a490c259071cba
+  (log)   - Pathname: /api/daemon-ws
+  (log)   - Method: GET
+  (log)   - Upgrade header: websocket
+  (log) [WebSocketRoom] WebSocket upgrade detected, calling handleWebSocket
+  (log) [WebSocketRoom] handleWebSocket called:
+  (log)   - Full URL: https://sexy.qzz.io/api/daemon-ws?token=4025b019988238528f1fd5e909d0363c46e4e48490ea5045a9a490c259071cba
+  (log)   - Pathname: /api/daemon-ws
+  (log)   - Headers: {"accept-encoding":"gzip, br","authorization":"Bearer 4025b019988238528f1fd5e909d0363c46e4e48490ea5045a9a490c259071cba","cf-connecting-ip":"203.116.47.202","cf-ipcountry":"SG","cf-ray":"960117382e02fe1e","cf-visitor":"{\"scheme\":\"https\"}","connection":"Upgrade","host":"sexy.qzz.io","sec-websocket-key":"x3JJHMbDL1EzLkh9GBhXDw==","sec-websocket-version":"13","upgrade":"websocket","user-agent":"zig/0.14.1 (std.http)","x-forwarded-proto":"https","x-internal-api-key":"","x-real-ip":"203.116.47.202"}
+  (log) [WebSocketRoom] Connection type detection:
+  (log)   - URL pathname: /api/daemon-ws
+  (log)   - Has Authorization header: true
+  (log)   - Has X-API-Key header: no
+  (log)   - Is daemon path: true
+  (log)   - isDaemon: true
+  (log) [WebSocketRoom] handleDaemonConnection() called:
+  (log)   - Session ID: 709f61a1-e964-4310-8981-8977ac881a50
+  (log)   - Request URL: https://sexy.qzz.io/api/daemon-ws?token=4025b019988238528f1fd5e909d0363c46e4e48490ea5045a9a490c259071cba
+  (log)   - Headers: {"accept-encoding":"gzip, br","authorization":"Bearer 4025b019988238528f1fd5e909d0363c46e4e48490ea5045a9a490c259071cba","cf-connecting-ip":"203.116.47.202","cf-ipcountry":"SG","cf-ray":"960117382e02fe1e","cf-visitor":"{\"scheme\":\"https\"}","connection":"Upgrade","host":"sexy.qzz.io","sec-websocket-key":"x3JJHMbDL1EzLkh9GBhXDw==","sec-websocket-version":"13","upgrade":"websocket","user-agent":"zig/0.14.1 (std.http)","x-forwarded-proto":"https","x-internal-api-key":"","x-real-ip":"203.116.47.202"}
+  (log) [WebSocketRoom] Auth check:
+  (log)   - Auth method: Authorization header
+  (log)   - Expected token available: no
+  (log)   - Expected token (first 8 chars): ...
+  (log)   - Received token (first 8 chars): 4025b019...
+  (log) [WebSocketRoom] ❌ Daemon authentication failed: invalid token
+  (log) [WebSocketRoom] Token mismatch:
+  (log)   - Expected: ""
+  (log)   - Received: "4025b019988238528f1fd5e909d0363c46e4e48490ea5045a9a490c259071cba"
+  (log) [WebSocketRoom] ⚠️ WARNING: Temporarily allowing unauthenticated daemon connection for debugging
+  (log) [WebSocketRoom] Stored daemon API key: "4025b019988238528f1fd5e909d0363c46e4e48490ea5045a9a490c259071cba"
+  (log) [WebSocketRoom] Stored daemon API key length: 64
+  (log) [WebSocketRoom] Broadcast daemon:status to 0 clients
+  (log) [WebSocketRoom] 🔥🔥🔥 Sending initial connection message to daemon...
+  (log) [WebSocketRoom] 🔥🔥🔥 Initial connection message sent successfully
+  (log) [WebSocketRoom] New daemon connected, checking health immediately
+  (log) [WebSocketRoom] checkDaemonHealth() called:
+  (log)   - Current time: 1752664621108
+  (log)   - Heartbeat timeout: 120000ms
+  (log)   - Number of daemons: 1
+  (log)   - Daemon 709f61a1-e964-4310-8981-8977ac881a50:
+  (log)     - Authenticated: true
+  (log)     - Connected at: 2025-07-16T11:17:01.108Z
+  (log)     - Last heartbeat: 1752664621108
+  (log)     - Time since heartbeat: 0ms
+  (log)     - New connection detected (0ms ago)
+  (log)   - Connected daemons: 1
+  (log)   - Has recent heartbeat: true
+  (log)   - Has new connection: true
+  (log)   - Previous status: true
+  (log)   - New status: true
+  (log) [WebSocketRoom] checkDaemonHealth() called:
+  (log)   - Current time: 1752664651108
+  (log)   - Heartbeat timeout: 120000ms
+  (log)   - Number of daemons: 1
+  (log)   - Daemon 709f61a1-e964-4310-8981-8977ac881a50:
+  (log)     - Authenticated: true
+  (log)     - Connected at: 2025-07-16T11:17:01.108Z
+  (log)     - Last heartbeat: 1752664621108
+  (log)     - Time since heartbeat: 30000ms
+  (log)   - Connected daemons: 1
+  (log)   - Has recent heartbeat: true
+  (log)   - Has new connection: false
+  (log)   - Previous status: true
+  (log)   - New status: true
+  (log) [WebSocketRoom] checkDaemonHealth() called:
+  (log)   - Current time: 1752664681108
+  (log)   - Heartbeat timeout: 120000ms
+  (log)   - Number of daemons: 1
+  (log)   - Daemon 709f61a1-e964-4310-8981-8977ac881a50:
+  (log)     - Authenticated: true
+  (log)     - Connected at: 2025-07-16T11:17:01.108Z
+  (log)     - Last heartbeat: 1752664621108
+  (log)     - Time since heartbeat: 60000ms
+  (log)   - Connected daemons: 1
+  (log)   - Has recent heartbeat: true
+  (log)   - Has new connection: false
+  (log)   - Previous status: true
+  (log)   - New status: true
+  (log) [WebSocketRoom] checkDaemonHealth() called:
+  (log)   - Current time: 1752664711108
+  (log)   - Heartbeat timeout: 120000ms
+  (log)   - Number of daemons: 1
+  (log)   - Daemon 709f61a1-e964-4310-8981-8977ac881a50:
+  (log)     - Authenticated: true
+  (log)     - Connected at: 2025-07-16T11:17:01.108Z
+  (log)     - Last heartbeat: 1752664621108
+  (log)     - Time since heartbeat: 90000ms
+  (log)   - Connected daemons: 1
+  (log)   - Has recent heartbeat: true
+  (log)   - Has new connection: false
+  (log)   - Previous status: true
+  (log)   - New status: true
+  (log) [WebSocketRoom] Daemon disconnected: 709f61a1-e964-4310-8981-8977ac881a50
+  (log) [WebSocketRoom] Broadcast daemon:status to 0 clients
