@@ -10,10 +10,7 @@
   export let mobile = false;
   export let onSetIccidMapping = null;
   export let daemonStatus = { connected: false, lastDataUpdate: null };
-  
-  // Track if we're in initial loading state
-  let hasLoadedOnce = false;
-  $: if (phoneNumbers.length > 0) hasLoadedOnce = true;
+  export let isLoading = false;
   
   $: filteredPhones = phoneNumbers.filter(phone => {
     const matchesCountry = selectedCountry === 'all' || phone.country === selectedCountry;
@@ -56,8 +53,8 @@
   }
   
   function getEffectiveStatus(phone) {
-    // During initial load, assume phone status is valid if it exists
-    if (!hasLoadedOnce && phone.status) {
+    // During loading, trust the phone status if it exists
+    if (isLoading && phone.status) {
       return phone.status;
     }
     
@@ -112,7 +109,7 @@
   
   <!-- Phone List -->
   <div class="{mobile ? '' : 'max-h-[600px]'} overflow-y-auto">
-    {#if !hasLoadedOnce && phoneNumbers.length === 0}
+    {#if isLoading}
       <!-- Loading skeleton -->
       {#each [1, 2, 3, 4, 5] as index}
         <div class="w-full p-3 border-b">
@@ -194,7 +191,7 @@
             status={getEffectiveStatus(phone)}
             compact={true}
             daemonConnected={daemonStatus.connected}
-            isInitialLoad={!hasLoadedOnce}
+            isInitialLoad={isLoading}
           />
         </div>
         {#if phone.lastActive && !mobile}

@@ -21,6 +21,7 @@
   let phoneNumbers = [];
   let user = null;
   let loading = true;
+  let dataLoading = true; // Track data loading separately
   let wsConnected = false;
   let wsUnsubscribers = [];
   let currentView = 'dashboard'; // 'dashboard' or 'iccid-mappings'
@@ -84,6 +85,11 @@
         totalDevices: statsResponse.total_devices,
         verificationRate: Math.round(statsResponse.verification_rate * 100)
       };
+      
+      // Mark data as loaded
+      dataLoading = false;
+      // Update daemon status to show fresh data
+      daemonStatus.lastDataUpdate = Date.now();
     } catch (error) {
       console.warn('Failed to load data:', error);
       // Use default values on error
@@ -96,6 +102,8 @@
         totalDevices: 0,
         verificationRate: 0
       };
+      // Mark data as loaded even on error
+      dataLoading = false;
     }
   }
   
@@ -150,7 +158,7 @@
       
       // Load data and WebSocket in parallel without blocking
       Promise.all([
-        loadData(),
+        loadData().finally(() => { dataLoading = false; }),
         connectWebSocket()
       ]).catch(error => {
         console.error('Failed to load data or connect WebSocket:', error);
@@ -609,6 +617,7 @@
                   onSetIccidMapping={handleSetIccidMapping}
                   mobile={true}
                   {daemonStatus}
+                  isLoading={dataLoading}
                 />
               </div>
             </div>
@@ -625,6 +634,7 @@
             bind:searchTerm
             onSetIccidMapping={handleSetIccidMapping}
             {daemonStatus}
+            isLoading={dataLoading}
           />
         </div>
         
