@@ -910,13 +910,59 @@ export class WebSocketRoom {
   }
 
   async sendMessage(data) {
-    // Forward message send request to daemon
-    await this.forwardToAuthenticatedDaemon({
-      type: 'send_message',
-      data: data
-    });
+    // Generate message ID for tracking
+    const messageId = `msg-sent-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const timestamp = new Date().toISOString();
     
-    return { success: true, message: 'Message sent to daemon' };
+    try {
+      // Get phone details to ensure it exists and is online
+      const phone = await this.env.DB.prepare(`
+        SELECT * FROM phones WHERE iccid = ? AND status = 'online'
+      `).bind(data.phone_iccid).first();
+      
+      if (!phone) {
+        throw new Error('Phone not found or offline');
+      }
+      
+      // Insert message into database first
+      await this.env.DB.prepare(`
+        INSERT INTO messages (id, phone_iccid, phone_number, content, timestamp, type, recipient, status)
+        VALUES (?, ?, ?, ?, ?, 'sent', ?, 'sending')
+      `).bind(
+        messageId,
+        data.phone_iccid,
+        phone.number,
+        data.content,
+        timestamp,
+        data.recipient
+      ).run();
+      
+      // Broadcast message creation to all clients
+      await this.broadcastToClients('message:created', {
+        id: messageId,
+        phone_iccid: data.phone_iccid,
+        phone_number: phone.number,
+        content: data.content,
+        timestamp,
+        type: 'sent',
+        recipient: data.recipient,
+        status: 'sending'
+      });
+      
+      // Forward message send request to daemon with message ID
+      await this.forwardToAuthenticatedDaemon({
+        type: 'send_message',
+        data: {
+          ...data,
+          message_id: messageId
+        }
+      });
+      
+      return { success: true, message_id: messageId };
+    } catch (error) {
+      console.error('Failed to send message:', error);
+      throw error;
+    }
   }
 
   async getStats(token) {

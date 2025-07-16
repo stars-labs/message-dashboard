@@ -3,46 +3,28 @@ export const statsHandler = {
     const { env } = request;
     
     try {
-      const [totalMessages, todayMessages, onlineDevices, totalDevices] = await Promise.all([
-        // Total messages
-        env.DB.prepare(`SELECT COUNT(*) as count FROM messages`).first(),
-        
-        // Today's messages
-        env.DB.prepare(`
-          SELECT COUNT(*) as count FROM messages 
-          WHERE date(timestamp) = date('now')
-        `).first(),
-        
-        // Online devices
-        env.DB.prepare(`SELECT COUNT(*) as count FROM phones WHERE status = 'online'`).first(),
-        
-        // Total devices
-        env.DB.prepare(`SELECT COUNT(*) as count FROM phones`).first(),
-      ]);
-      
-      // Calculate verification rate
-      const verifiedMessages = await env.DB.prepare(`
-        SELECT COUNT(*) as count FROM messages 
-        WHERE verification_code IS NOT NULL AND type = 'received'
+      // Optimize with a single query for all stats
+      const stats = await env.DB.prepare(`
+        SELECT 
+          (SELECT COUNT(*) FROM messages) as total_messages,
+          (SELECT COUNT(*) FROM messages WHERE date(timestamp) = date('now')) as today_messages,
+          (SELECT COUNT(*) FROM phones WHERE status = 'online') as online_devices,
+          (SELECT COUNT(*) FROM phones) as total_devices,
+          (SELECT COUNT(*) FROM messages WHERE verification_code IS NOT NULL AND type = 'received') as verified_messages,
+          (SELECT COUNT(*) FROM messages WHERE type = 'received') as total_received
       `).first();
       
-      const totalReceived = await env.DB.prepare(`
-        SELECT COUNT(*) as count FROM messages WHERE type = 'received'
-      `).first();
-      
-      const verificationRate = totalReceived.count > 0 
-        ? (verifiedMessages.count / totalReceived.count) 
+      const verificationRate = stats.total_received > 0 
+        ? (stats.verified_messages / stats.total_received) 
         : 0;
       
       return new Response(JSON.stringify({
         success: true,
-        data: {
-          total_messages: totalMessages.count,
-          today_messages: todayMessages.count,
-          online_devices: onlineDevices.count,
-          total_devices: totalDevices.count,
-          verification_rate: verificationRate
-        }
+        total_messages: stats.total_messages,
+        today_messages: stats.today_messages,
+        online_devices: stats.online_devices,
+        total_devices: stats.total_devices,
+        verification_rate: verificationRate
       }), {
         headers: { 'Content-Type': 'application/json' }
       });
