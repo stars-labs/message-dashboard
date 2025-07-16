@@ -910,22 +910,41 @@ export class WebSocketRoom {
   }
 
   async sendMessage(data) {
+    console.log('[WebSocketRoom] sendMessage called with data:', JSON.stringify(data));
+    
     // Generate message ID for tracking
     const messageId = `msg-sent-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     const timestamp = new Date().toISOString();
     
     try {
-      // Get phone details to ensure it exists and is online
-      const phone = await this.env.DB.prepare(`
-        SELECT * FROM phones WHERE iccid = ? AND status = 'online'
-      `).bind(data.phone_iccid).first();
-      
-      if (!phone) {
-        throw new Error('Phone not found or offline');
+      // Check if DB is available
+      if (!this.env?.DB) {
+        console.error('[WebSocketRoom] DB binding not available in env:', Object.keys(this.env || {}));
+        throw new Error('Database not available');
       }
       
+      console.log('[WebSocketRoom] Looking for phone with ICCID:', data.phone_iccid);
+      
+      // Get phone details to ensure it exists
+      const phone = await this.env.DB.prepare(`
+        SELECT * FROM phones WHERE iccid = ?
+      `).bind(data.phone_iccid).first();
+      
+      console.log('[WebSocketRoom] Phone lookup result:', phone);
+      
+      if (!phone) {
+        throw new Error(`Phone not found: ${data.phone_iccid}`);
+      }
+      
+      // Check if phone is online
+      if (phone.status !== 'online') {
+        console.warn(`[WebSocketRoom] Phone ${data.phone_iccid} is not online (status: ${phone.status}), but proceeding anyway`);
+      }
+      
+      console.log('[WebSocketRoom] Inserting message into database...');
+      
       // Insert message into database first
-      await this.env.DB.prepare(`
+      const insertResult = await this.env.DB.prepare(`
         INSERT INTO messages (id, phone_iccid, phone_number, content, timestamp, type, recipient, status)
         VALUES (?, ?, ?, ?, ?, 'sent', ?, 'sending')
       `).bind(
@@ -936,6 +955,8 @@ export class WebSocketRoom {
         timestamp,
         data.recipient
       ).run();
+      
+      console.log('[WebSocketRoom] Database insert result:', insertResult);
       
       // Broadcast message creation to all clients
       await this.broadcastToClients('message:created', {
@@ -949,6 +970,8 @@ export class WebSocketRoom {
         status: 'sending'
       });
       
+      console.log('[WebSocketRoom] Broadcasting to daemon...');
+      
       // Forward message send request to daemon with message ID
       await this.forwardToAuthenticatedDaemon({
         type: 'send_message',
@@ -958,9 +981,10 @@ export class WebSocketRoom {
         }
       });
       
+      console.log('[WebSocketRoom] Message sent successfully:', messageId);
       return { success: true, message_id: messageId };
     } catch (error) {
-      console.error('Failed to send message:', error);
+      console.error('[WebSocketRoom] Failed to send message:', error.message, error.stack);
       throw error;
     }
   }
