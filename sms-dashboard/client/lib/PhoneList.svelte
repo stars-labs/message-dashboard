@@ -10,6 +10,10 @@
   export let onSetIccidMapping = null;
   export let daemonStatus = { connected: false, lastDataUpdate: null };
   
+  // Track if we're in initial loading state
+  let hasLoadedOnce = false;
+  $: if (phoneNumbers.length > 0) hasLoadedOnce = true;
+  
   $: filteredPhones = phoneNumbers.filter(phone => {
     const matchesCountry = selectedCountry === 'all' || phone.country === selectedCountry;
     const matchesSearch = searchTerm === '' || 
@@ -51,6 +55,11 @@
   }
   
   function getEffectiveStatus(phone) {
+    // During initial load, assume phone status is valid if it exists
+    if (!hasLoadedOnce && phone.status) {
+      return phone.status;
+    }
+    
     if (!daemonStatus.connected) {
       return 'unknown';
     }
@@ -63,7 +72,7 @@
       }
     }
     
-    return phone.status;
+    return phone.status || 'offline';
   }
 </script>
 
@@ -102,7 +111,37 @@
   
   <!-- Phone List -->
   <div class="{mobile ? '' : 'max-h-[600px]'} overflow-y-auto">
-    {#each filteredPhones as phone}
+    {#if !hasLoadedOnce && phoneNumbers.length === 0}
+      <!-- Loading skeleton -->
+      {#each [1, 2, 3, 4, 5] as index}
+        <div class="w-full p-3 border-b">
+          <div class="animate-pulse">
+            <div class="flex items-center justify-between">
+              <div class="flex-1">
+                <div class="flex items-center gap-2">
+                  <div class="w-6 h-6 bg-gray-200 rounded"></div>
+                  <div class="h-4 bg-gray-200 rounded w-32"></div>
+                </div>
+                <div class="h-3 bg-gray-200 rounded w-48 mt-2"></div>
+              </div>
+              <div class="flex gap-0.5 items-end">
+                {#each [1, 2, 3, 4] as bar}
+                  <div class="w-1 bg-gray-200 rounded-sm" style="height: {4 + bar * 3}px"></div>
+                {/each}
+              </div>
+            </div>
+          </div>
+        </div>
+      {/each}
+    {:else if filteredPhones.length === 0}
+      <div class="p-4 text-center text-gray-500">
+        <svg class="w-12 h-12 mx-auto mb-2 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
+        </svg>
+        <p class="text-sm">暂无设备</p>
+      </div>
+    {:else}
+      {#each filteredPhones as phone}
       <button
         class="w-full p-3 border-b hover:bg-purple-50 active:bg-purple-100 transition-all duration-300 text-left {selectedPhone?.iccid === phone.iccid ? 'bg-gradient-to-r from-purple-50 to-indigo-50 border-l-4 border-l-purple-500' : 'hover:border-l-4 hover:border-l-purple-200'}"
         on:click={() => handlePhoneClick(phone)}
@@ -154,6 +193,7 @@
             status={getEffectiveStatus(phone)}
             compact={true}
             daemonConnected={daemonStatus.connected}
+            isInitialLoad={!hasLoadedOnce}
           />
         </div>
         {#if phone.lastActive && !mobile}
@@ -162,6 +202,7 @@
           </div>
         {/if}
       </button>
-    {/each}
+      {/each}
+    {/if}
   </div>
 </div>
