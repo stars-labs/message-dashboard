@@ -10,11 +10,13 @@ export class RealtimeService {
     this.reconnectDelay = window.APP_CONFIG?.client?.websocket?.reconnectDelay || 3000;
     this.callbacks = new Map();
     this.isIntentionallyClosed = false;
+    this.token = null; // Store auth token for API requests
   }
 
   async connect(token) {
     console.log('[RealtimeService] connect() called with token:', token);
     this.isIntentionallyClosed = false;
+    this.token = token; // Store token for API requests
     
     if (!token) {
       console.error('[RealtimeService] No token provided');
@@ -235,7 +237,8 @@ export class RealtimeService {
         type: 'request',
         request_id: requestId,
         method: type,
-        data: data
+        data: data,
+        token: this.token // Include auth token for server-side API calls
       });
 
       // Clean up listeners after timeout

@@ -42,8 +42,41 @@ async function apiRequest(method, data = {}) {
     }
   }
   
-  // Fallback to HTTP - this will be implemented later if needed
-  throw new Error('WebSocket not connected and HTTP fallback not implemented');
+  // Fallback to HTTP
+  const httpEndpoints = {
+    'getPhones': { url: '/api/phones', method: 'GET' },
+    'getMessages': { url: '/api/messages', method: 'GET' },
+    'sendMessage': { url: '/api/messages/send', method: 'POST' },
+    'getStats': { url: '/api/stats', method: 'GET' },
+    'getUser': { url: '/api/auth/me', method: 'GET' },
+    'listIccidMappings': { url: '/api/iccid-mappings', method: 'GET' },
+    'getIccidMapping': { url: (params) => `/api/iccid-mappings/${params.id}`, method: 'GET' },
+    'getIccidMappingByIccid': { url: (params) => `/api/iccid-mappings/by-iccid/${params.iccid}`, method: 'GET' },
+    'createIccidMapping': { url: '/api/iccid-mappings', method: 'POST' },
+    'updateIccidMapping': { url: (params) => `/api/iccid-mappings/${params.id}`, method: 'PUT' },
+    'deleteIccidMapping': { url: (params) => `/api/iccid-mappings/${params.id}`, method: 'DELETE' }
+  };
+  
+  const endpoint = httpEndpoints[method];
+  if (!endpoint) {
+    throw new Error(`Unknown API method: ${method}`);
+  }
+  
+  const url = typeof endpoint.url === 'function' ? endpoint.url(data) : endpoint.url;
+  const options = {
+    method: endpoint.method
+  };
+  
+  if (endpoint.method === 'GET' && data && Object.keys(data).length > 0 && !url.includes('/')) {
+    // Add query params for GET requests
+    const queryString = new URLSearchParams(data).toString();
+    return fetchWithAuth(`${url}?${queryString}`, options);
+  } else if (endpoint.method !== 'GET') {
+    // Add body for non-GET requests
+    options.body = JSON.stringify(data);
+  }
+  
+  return fetchWithAuth(url, options);
 }
 
 export const api = {
@@ -71,7 +104,8 @@ export const api = {
       const response = await apiRequest('getPhones');
       return response.success ? response.data : [];
     } catch (error) {
-      console.warn('Failed to get phones via WebSocket, using empty array:', error);
+      console.warn('Failed to get phones:', error);
+      // Return empty array instead of throwing
       return [];
     }
   },
