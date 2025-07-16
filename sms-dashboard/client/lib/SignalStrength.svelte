@@ -7,6 +7,7 @@
   export let snr = null;  // SNR in dB
   export let compact = false; // Compact mode for list view
   export let daemonConnected = true; // Whether daemon is connected
+  export let isInitialLoad = false; // Whether this is the initial page load
   
   // Calculate signal bars (0-4) based on signal percentage
   function getSignalBars(signal) {
@@ -93,15 +94,29 @@
       </div>
       <span class="text-xs text-gray-500">离线</span>
     {:else if status === 'unknown'}
-      <div class="flex gap-0.5 items-end">
-        {#each [1, 2, 3, 4] as bar}
-          <div 
-            class="w-1 bg-gray-200 rounded-sm opacity-50"
-            style="height: {4 + bar * 3}px"
-          ></div>
-        {/each}
-      </div>
-      <span class="text-xs text-gray-400">数据过期</span>
+      {#if isInitialLoad}
+        <!-- Show loading animation during initial load -->
+        <div class="flex gap-0.5 items-end">
+          {#each [1, 2, 3, 4] as bar}
+            <div 
+              class="w-1 bg-gray-300 rounded-sm animate-pulse"
+              style="height: {4 + bar * 3}px; animation-delay: {bar * 100}ms"
+            ></div>
+          {/each}
+        </div>
+        <span class="text-xs text-gray-500">加载中</span>
+      {:else}
+        <!-- Show data expired only after initial load -->
+        <div class="flex gap-0.5 items-end">
+          {#each [1, 2, 3, 4] as bar}
+            <div 
+              class="w-1 bg-gray-200 rounded-sm opacity-50"
+              style="height: {4 + bar * 3}px"
+            ></div>
+          {/each}
+        </div>
+        <span class="text-xs text-gray-400">数据过期</span>
+      {/if}
     {:else if status === 'stale'}
       <div class="flex gap-0.5 items-end">
         {#each [1, 2, 3, 4] as bar}

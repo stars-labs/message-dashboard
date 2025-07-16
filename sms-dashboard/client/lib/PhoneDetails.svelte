@@ -5,8 +5,16 @@
   export let mobile = false;
   export let daemonStatus = { connected: false, lastDataUpdate: null };
   
+  // Track if we're in initial loading state
+  let isInitialLoad = daemonStatus.connected && Date.now() - (daemonStatus.lastDataUpdate || Date.now()) < 5000;
+  
   function getEffectiveStatus(phone) {
     if (!phone) return 'unknown';
+    
+    // During initial load with optimistic daemon status, trust the phone status
+    if (daemonStatus.connected && phone.status) {
+      return phone.status;
+    }
     
     if (!daemonStatus.connected) {
       return 'unknown';
@@ -20,7 +28,7 @@
       }
     }
     
-    return phone.status;
+    return phone.status || 'offline';
   }
 </script>
 
@@ -61,6 +69,7 @@
       snr={phone.snr}
       compact={false}
       daemonConnected={daemonStatus.connected}
+      isInitialLoad={isInitialLoad}
     />
     
     <!-- Additional Phone Info -->
