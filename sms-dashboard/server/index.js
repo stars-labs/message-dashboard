@@ -126,7 +126,10 @@ router.get('/test-html', () => {
 });
 
 // Auth routes
-router.get('/login', auth0Handler.login); // Redirect directly to Auth0
+router.get('/login', (request, env, ctx) => {
+  console.log('[Router] /login route matched - calling auth0Handler.login');
+  return auth0Handler.login(request);
+}); // Redirect directly to Auth0
 router.get('/callback', auth0Handler.callback);
 router.get('/logout', auth0Handler.logout);
 
@@ -318,7 +321,7 @@ router.get('*', async (request, env, ctx) => {
   const url = new URL(request.url);
   
   // Skip authentication for public routes
-  const publicRoutes = ['/login', '/callback', '/api/auth/login', '/logout'];
+  const publicRoutes = ['/callback'];
   if (publicRoutes.includes(url.pathname)) {
     return serveFrontend(request);
   }

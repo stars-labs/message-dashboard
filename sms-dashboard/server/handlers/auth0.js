@@ -4,6 +4,7 @@ import { nanoid } from 'nanoid';
 export const auth0Handler = {
   // Login - redirect to Auth0
   async login(request) {
+    console.log('[Auth0 Handler] Login route hit');
     const { env } = request;
     const url = new URL(request.url);
     const redirectUri = `${url.origin}/callback`;
