@@ -12,7 +12,8 @@
   import { auth } from './lib/auth.js';
   import config from './lib/config.js';
   
-  let selectedPhone = null;
+  let selectedPhoneIccid = null;
+  $: selectedPhone = selectedPhoneIccid ? phoneNumbers.find(p => p.iccid === selectedPhoneIccid) : null;
   let selectedCountry = 'all';
   let searchTerm = '';
   let showPhoneList = false;
@@ -283,7 +284,7 @@
   });
   
   function selectPhone(phone) {
-    selectedPhone = phone;
+    selectedPhoneIccid = phone?.iccid || null;
     showPhoneList = false;
   }
   
@@ -600,7 +601,8 @@
               <div class="h-full overflow-y-auto">
                 <PhoneList 
                   {phoneNumbers} 
-                  bind:selectedPhone={selectedPhone}
+                  selectedPhone={selectedPhone}
+                  bind:selectedPhoneIccid={selectedPhoneIccid}
                   bind:selectedCountry
                   bind:searchTerm
                   onSelectPhone={selectPhone}
@@ -617,7 +619,8 @@
         <div class="hidden lg:block lg:col-span-1">
           <PhoneList 
             {phoneNumbers} 
-            bind:selectedPhone 
+            selectedPhone={selectedPhone}
+            bind:selectedPhoneIccid={selectedPhoneIccid}
             bind:selectedCountry
             bind:searchTerm
             onSetIccidMapping={handleSetIccidMapping}
