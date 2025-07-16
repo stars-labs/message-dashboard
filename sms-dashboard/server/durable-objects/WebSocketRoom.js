@@ -912,77 +912,46 @@ export class WebSocketRoom {
   async sendMessage(data) {
     console.log('[WebSocketRoom] sendMessage called with data:', JSON.stringify(data));
     
-    // Generate message ID for tracking
-    const messageId = `msg-sent-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    const timestamp = new Date().toISOString();
-    
     try {
-      // Check if DB is available
-      if (!this.env?.DB) {
-        console.error('[WebSocketRoom] DB binding not available in env:', Object.keys(this.env || {}));
-        throw new Error('Database not available');
-      }
-      
-      console.log('[WebSocketRoom] Looking for phone with ICCID:', data.phone_iccid);
-      
-      // Get phone details to ensure it exists
-      const phone = await this.env.DB.prepare(`
-        SELECT * FROM phones WHERE iccid = ?
-      `).bind(data.phone_iccid).first();
-      
-      console.log('[WebSocketRoom] Phone lookup result:', phone);
-      
-      if (!phone) {
-        throw new Error(`Phone not found: ${data.phone_iccid}`);
-      }
-      
-      // Check if phone is online
-      if (phone.status !== 'online') {
-        console.warn(`[WebSocketRoom] Phone ${data.phone_iccid} is not online (status: ${phone.status}), but proceeding anyway`);
-      }
-      
-      console.log('[WebSocketRoom] Inserting message into database...');
-      
-      // Insert message into database first
-      const insertResult = await this.env.DB.prepare(`
-        INSERT INTO messages (id, phone_iccid, phone_number, content, timestamp, type, recipient, status)
-        VALUES (?, ?, ?, ?, ?, 'sent', ?, 'sending')
-      `).bind(
-        messageId,
-        data.phone_iccid,
-        phone.number,
-        data.content,
-        timestamp,
-        data.recipient
-      ).run();
-      
-      console.log('[WebSocketRoom] Database insert result:', insertResult);
-      
-      // Broadcast message creation to all clients
-      await this.broadcastToClients('message:created', {
-        id: messageId,
-        phone_iccid: data.phone_iccid,
-        phone_number: phone.number,
-        content: data.content,
-        timestamp,
-        type: 'sent',
-        recipient: data.recipient,
-        status: 'sending'
+      // Use HTTP API to send message since D1 is not available in Durable Objects
+      const response = await fetch(`${this.env.WORKER_URL || this.config.get('server.api.baseUrl')}/api/messages/send`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.env.API_KEY || 'system'}`,
+          'Content-Type': 'application/json',
+          'X-Internal-Request': 'true'
+        },
+        body: JSON.stringify({
+          phoneId: data.phone_iccid,  // HTTP API expects phoneId
+          recipient: data.recipient,
+          content: data.content
+        })
       });
       
-      console.log('[WebSocketRoom] Broadcasting to daemon...');
+      console.log('[WebSocketRoom] HTTP API response status:', response.status);
       
-      // Forward message send request to daemon with message ID
-      await this.forwardToAuthenticatedDaemon({
-        type: 'send_message',
-        data: {
-          ...data,
-          message_id: messageId
-        }
-      });
+      if (!response.ok) {
+        const error = await response.text();
+        console.error('[WebSocketRoom] HTTP API error:', error);
+        throw new Error(`Failed to send message via HTTP API: ${response.status} ${error}`);
+      }
       
-      console.log('[WebSocketRoom] Message sent successfully:', messageId);
-      return { success: true, message_id: messageId };
+      const result = await response.json();
+      console.log('[WebSocketRoom] HTTP API result:', result);
+      
+      // The HTTP API handler already broadcasts the message and stores it in DB
+      // Just forward to daemon if we have the message ID
+      if (result.messageId) {
+        await this.forwardToAuthenticatedDaemon({
+          type: 'send_message',
+          data: {
+            ...data,
+            message_id: result.messageId
+          }
+        });
+      }
+      
+      return { success: true, message_id: result.messageId };
     } catch (error) {
       console.error('[WebSocketRoom] Failed to send message:', error.message, error.stack);
       throw error;
