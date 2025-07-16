@@ -176,6 +176,7 @@ export const messagesHandler = {
       
       return new Response(JSON.stringify({
         success: true,
+        messageId: messageId,  // Add messageId at top level for WebSocket handler
         data: {
           id: messageId,
           phoneId,
