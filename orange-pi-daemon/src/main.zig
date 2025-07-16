@@ -1574,6 +1574,10 @@ pub fn main() !void {
     
     std.log.info("Starting event-driven daemon loop", .{});
     
+    const start_time = std.time.timestamp();
+    var last_heartbeat_time: i64 = std.time.timestamp();
+    const heartbeat_interval_seconds: i64 = 30; // Send heartbeat every 30 seconds
+    
     while (true) {
         // Check if WebSocket connection is still alive
         if (!websocket_client.running or websocket_client.connection == null) {
@@ -1728,6 +1732,28 @@ pub fn main() !void {
         }
         
         // SMS sending is handled via WebSocket messages - no HTTP polling needed
+        
+        // Send heartbeat if needed
+        const current_time = std.time.timestamp();
+        if (current_time - last_heartbeat_time >= heartbeat_interval_seconds) {
+            const id = try generateMessageId(&allocator);
+            defer allocator.free(id);
+            
+            const timestamp = try getCurrentTimestamp(&allocator);
+            defer allocator.free(timestamp);
+            
+            const heartbeat_message = try std.fmt.allocPrint(allocator,
+                \\{{"type":"heartbeat","id":"{s}","timestamp":"{s}","data":{{"uptime":{d},"device_id":"{s}"}}}}
+            , .{ id, timestamp, current_time - start_time, config.device_id });
+            defer allocator.free(heartbeat_message);
+            
+            websocket_client.sendMessage(heartbeat_message) catch |err| {
+                std.log.err("Failed to send heartbeat: {any}", .{err});
+            };
+            
+            std.log.info("Sent heartbeat", .{});
+            last_heartbeat_time = current_time;
+        }
         
         // Sleep for a shorter interval - only for message checking and change detection
         std.time.sleep(config.poll_interval * std.time.ns_per_s); // Check at configured interval
