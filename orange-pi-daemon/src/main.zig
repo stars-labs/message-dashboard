@@ -1736,10 +1736,10 @@ pub fn main() !void {
         // Send heartbeat if needed
         const current_time = std.time.timestamp();
         if (current_time - last_heartbeat_time >= heartbeat_interval_seconds) {
-            const id = try generateMessageId(&allocator);
+            const id = try websocket_client.generateMessageId();
             defer allocator.free(id);
             
-            const timestamp = try getCurrentTimestamp(&allocator);
+            const timestamp = try websocket_client.formatTimestamp();
             defer allocator.free(timestamp);
             
             const heartbeat_message = try std.fmt.allocPrint(allocator,
@@ -1747,7 +1747,7 @@ pub fn main() !void {
             , .{ id, timestamp, current_time - start_time, config.device_id });
             defer allocator.free(heartbeat_message);
             
-            websocket_client.sendMessage(heartbeat_message) catch |err| {
+            websocket_client.sendWebSocketMessage(heartbeat_message) catch |err| {
                 std.log.err("Failed to send heartbeat: {any}", .{err});
             };
             
