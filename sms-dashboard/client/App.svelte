@@ -26,11 +26,11 @@
   let showIccidMappingDialog = false;
   let phoneToMap = null;
   let daemonStatus = {
-    connected: false,
-    lastHeartbeat: null,
-    lastDataUpdate: null,
+    connected: true, // Assume connected initially to avoid "数据过期" flash
+    lastHeartbeat: Date.now(),
+    lastDataUpdate: Date.now(),
     connectionCount: 0,
-    timestamp: null
+    timestamp: Date.now()
   };
   
   let stats = {
@@ -123,39 +123,43 @@
       await auth.handleCallback();
     }
     
-    // Start authentication check, data loading, and WebSocket connection in parallel
-    const authPromise = (async () => {
-      try {
-        if (auth.isAuthenticated()) {
-          user = await auth.getUser();
-          return user;
-        } else {
-          // Try to get user info if token exists
-          const existingUser = await auth.getUser();
-          if (existingUser) {
-            user = existingUser;
-            return user;
-          }
+    // Quick authentication check
+    try {
+      if (auth.isAuthenticated()) {
+        user = await auth.getUser();
+      } else {
+        // Try to get user info if token exists
+        const existingUser = await auth.getUser();
+        if (existingUser) {
+          user = existingUser;
         }
-      } catch (error) {
-        // Authentication check failed
       }
-      return null;
-    })();
-    
-    const wsPromise = connectWebSocket();
-    
-    // Wait for authentication to complete before loading data
-    const authenticatedUser = await authPromise;
-    
-    // Load data and establish WebSocket connection in parallel
-    const promises = [wsPromise];
-    if (authenticatedUser) {
-      promises.push(loadData());
+    } catch (error) {
+      // Authentication check failed
     }
     
-    await Promise.all(promises);
+    // Set loading to false immediately to show UI
     loading = false;
+    
+    // Load data and establish WebSocket connection in the background
+    if (user) {
+      // Mark daemon as initially connected to prevent "数据过期" message
+      daemonStatus.connected = true;
+      daemonStatus.lastDataUpdate = Date.now();
+      
+      // Load data and WebSocket in parallel without blocking
+      Promise.all([
+        loadData(),
+        connectWebSocket()
+      ]).catch(error => {
+        console.error('Failed to load data or connect WebSocket:', error);
+      });
+    } else {
+      // Still try to connect WebSocket for anonymous users
+      connectWebSocket().catch(error => {
+        console.error('Failed to connect WebSocket:', error);
+      });
+    }
   });
   
   function setupWebSocketListeners() {
