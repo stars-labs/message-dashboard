@@ -375,8 +375,12 @@ export default {
     try {
       // Handle WebSocket endpoints directly (not through router)
       const url = new URL(request.url);
-      if (url.pathname === '/api/ws' || url.pathname === '/api/daemon-ws') {
-        console.log(`[Worker] WebSocket request detected: ${url.pathname}`);
+      
+      // Normalize pathname to handle double slashes
+      const normalizedPath = url.pathname.replace(/\/+/g, '/');
+      
+      if (normalizedPath === '/api/ws' || normalizedPath === '/api/daemon-ws') {
+        console.log(`[Worker] WebSocket request detected: original=${url.pathname}, normalized=${normalizedPath}`);
         const upgradeHeader = request.headers.get('Upgrade');
         if (upgradeHeader !== 'websocket') {
           return new Response('Expected Upgrade: websocket', { status: 426 });

@@ -1,7 +1,10 @@
+import { Config, createConfig } from '../config/index.js';
+
 export class WebSocketRoom {
   constructor(state, env) {
     this.state = state;
     this.env = env;
+    this.config = createConfig(env);
     this.sessions = new Map(); // Client sessions
     this.daemons = new Map();  // Daemon connections
     this.daemonStatus = {
@@ -23,7 +26,7 @@ export class WebSocketRoom {
 
   checkDaemonHealth() {
     const now = Date.now();
-    const heartbeatTimeout = 60000; // 60 seconds
+    const heartbeatTimeout = this.config.get('server.websocket.heartbeatTimeout', 60000);
     
     let connectedDaemons = 0;
     let hasRecentHeartbeat = false;
@@ -186,13 +189,13 @@ export class WebSocketRoom {
     let authenticated = false;
     if (authHeader && authHeader.startsWith('Bearer ')) {
       const token = authHeader.substring(7); // Remove 'Bearer ' prefix
-      const expectedToken = '4025b019988238528f1fd5e909d0363c46e4e48490ea5045a9a490c259071cba';
+      const expectedToken = this.env.API_KEY;
       
       if (token === expectedToken) {
         authenticated = true;
         console.log(`[WebSocketRoom] ✅ Daemon authenticated successfully with bearer token`);
       } else {
-        console.log(`[WebSocketRoom] ❌ Daemon authentication failed: invalid bearer token`);
+        console.log(`[WebSocketRoom] ❌ Daemon authentication failed: invalid bearer token. Expected: ${expectedToken.substring(0, 8)}..., Got: ${token.substring(0, 8)}...`);
       }
     } else {
       console.log(`[WebSocketRoom] ❌ Daemon authentication failed: missing Authorization header`);
@@ -245,8 +248,8 @@ export class WebSocketRoom {
       websocket: server,
       authenticated: true,
       connectedAt: new Date().toISOString(),
-      device_id: 'orange-pi-001',
-      daemon_version: '1.0.0',
+      device_id: this.config.get('server.daemon.deviceId', 'daemon-001'),
+      daemon_version: this.config.get('server.daemon.version', '1.0.0'),
       lastHeartbeat: Date.now(),
       lastDataUpdate: null
     });
@@ -455,11 +458,11 @@ export class WebSocketRoom {
           
           // Call back to the main worker to persist phones
           try {
-            const response = await fetch(`${this.env.WORKER_URL || 'https://sexy.qzz.io'}/api/control/phones`, {
+            const response = await fetch(`${this.env.WORKER_URL || this.config.get('server.api.baseUrl')}/api/control/phones`, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
-                'X-API-Key': '4025b019988238528f1fd5e909d0363c46e4e48490ea5045a9a490c259071cba',
+                'X-API-Key': this.env.API_KEY,
                 'X-Internal-Request': 'true'
               },
               body: JSON.stringify({ phones })
@@ -510,11 +513,11 @@ export class WebSocketRoom {
           
           // Call back to the main worker to persist messages
           try {
-            const response = await fetch(`${this.env.WORKER_URL || 'https://sexy.qzz.io'}/api/control/messages`, {
+            const response = await fetch(`${this.env.WORKER_URL || this.config.get('server.api.baseUrl')}/api/control/messages`, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
-                'X-API-Key': '4025b019988238528f1fd5e909d0363c46e4e48490ea5045a9a490c259071cba',
+                'X-API-Key': this.env.API_KEY,
                 'X-Internal-Request': 'true'
               },
               body: JSON.stringify({ messages })
@@ -703,7 +706,7 @@ export class WebSocketRoom {
 
   // API method implementations
   async getPhones() {
-    const response = await fetch(`${this.env.WORKER_URL || 'https://sexy.qzz.io'}/api/phones`, {
+    const response = await fetch(`${this.env.WORKER_URL || this.config.get('server.api.baseUrl')}/api/phones`, {
       headers: {
         'Authorization': `Bearer ${this.env.AUTH_TOKEN || 'anonymous'}`,
         'X-Internal-Request': 'true'
@@ -719,7 +722,7 @@ export class WebSocketRoom {
 
   async getMessages(params = {}) {
     const query = new URLSearchParams(params).toString();
-    const response = await fetch(`${this.env.WORKER_URL || 'https://sexy.qzz.io'}/api/messages?${query}`, {
+    const response = await fetch(`${this.env.WORKER_URL || this.config.get('server.api.baseUrl')}/api/messages?${query}`, {
       headers: {
         'Authorization': `Bearer ${this.env.AUTH_TOKEN || 'anonymous'}`,
         'X-Internal-Request': 'true'
@@ -744,7 +747,7 @@ export class WebSocketRoom {
   }
 
   async getStats() {
-    const response = await fetch(`${this.env.WORKER_URL || 'https://sexy.qzz.io'}/api/stats`, {
+    const response = await fetch(`${this.env.WORKER_URL || this.config.get('server.api.baseUrl')}/api/stats`, {
       headers: {
         'Authorization': `Bearer ${this.env.AUTH_TOKEN || 'anonymous'}`,
         'X-Internal-Request': 'true'
@@ -760,7 +763,7 @@ export class WebSocketRoom {
 
   async listIccidMappings(params = {}) {
     const query = new URLSearchParams(params).toString();
-    const response = await fetch(`${this.env.WORKER_URL || 'https://sexy.qzz.io'}/api/iccid-mappings?${query}`, {
+    const response = await fetch(`${this.env.WORKER_URL || this.config.get('server.api.baseUrl')}/api/iccid-mappings?${query}`, {
       headers: {
         'Authorization': `Bearer ${this.env.AUTH_TOKEN || 'anonymous'}`,
         'X-Internal-Request': 'true'
@@ -775,7 +778,7 @@ export class WebSocketRoom {
   }
 
   async getIccidMapping(data) {
-    const response = await fetch(`${this.env.WORKER_URL || 'https://sexy.qzz.io'}/api/iccid-mappings/${data.id}`, {
+    const response = await fetch(`${this.env.WORKER_URL || this.config.get('server.api.baseUrl')}/api/iccid-mappings/${data.id}`, {
       headers: {
         'Authorization': `Bearer ${this.env.AUTH_TOKEN || 'anonymous'}`,
         'X-Internal-Request': 'true'
@@ -790,7 +793,7 @@ export class WebSocketRoom {
   }
 
   async getIccidMappingByIccid(data) {
-    const response = await fetch(`${this.env.WORKER_URL || 'https://sexy.qzz.io'}/api/iccid-mappings/by-iccid/${data.iccid}`, {
+    const response = await fetch(`${this.env.WORKER_URL || this.config.get('server.api.baseUrl')}/api/iccid-mappings/by-iccid/${data.iccid}`, {
       headers: {
         'Authorization': `Bearer ${this.env.AUTH_TOKEN || 'anonymous'}`,
         'X-Internal-Request': 'true'
@@ -805,7 +808,7 @@ export class WebSocketRoom {
   }
 
   async createIccidMapping(data) {
-    const response = await fetch(`${this.env.WORKER_URL || 'https://sexy.qzz.io'}/api/iccid-mappings`, {
+    const response = await fetch(`${this.env.WORKER_URL || this.config.get('server.api.baseUrl')}/api/iccid-mappings`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -824,7 +827,7 @@ export class WebSocketRoom {
 
   async updateIccidMapping(data) {
     const { id, ...updateData } = data;
-    const response = await fetch(`${this.env.WORKER_URL || 'https://sexy.qzz.io'}/api/iccid-mappings/${id}`, {
+    const response = await fetch(`${this.env.WORKER_URL || this.config.get('server.api.baseUrl')}/api/iccid-mappings/${id}`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
@@ -842,7 +845,7 @@ export class WebSocketRoom {
   }
 
   async deleteIccidMapping(data) {
-    const response = await fetch(`${this.env.WORKER_URL || 'https://sexy.qzz.io'}/api/iccid-mappings/${data.id}`, {
+    const response = await fetch(`${this.env.WORKER_URL || this.config.get('server.api.baseUrl')}/api/iccid-mappings/${data.id}`, {
       method: 'DELETE',
       headers: {
         'Authorization': `Bearer ${this.env.AUTH_TOKEN || 'anonymous'}`,
@@ -858,7 +861,7 @@ export class WebSocketRoom {
   }
 
   async bulkImportIccidMappings(data) {
-    const response = await fetch(`${this.env.WORKER_URL || 'https://sexy.qzz.io'}/api/iccid-mappings/bulk`, {
+    const response = await fetch(`${this.env.WORKER_URL || this.config.get('server.api.baseUrl')}/api/iccid-mappings/bulk`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

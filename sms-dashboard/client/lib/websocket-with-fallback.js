@@ -6,8 +6,8 @@ export class RealtimeService {
     this.connectionType = null;
     this.reconnectInterval = null;
     this.reconnectAttempts = 0;
-    this.maxReconnectAttempts = 5;
-    this.reconnectDelay = 3000;
+    this.maxReconnectAttempts = window.APP_CONFIG?.client?.websocket?.maxReconnectAttempts || 5;
+    this.reconnectDelay = window.APP_CONFIG?.client?.websocket?.reconnectDelay || 3000;
     this.callbacks = new Map();
     this.isIntentionallyClosed = false;
   }
@@ -59,7 +59,7 @@ export class RealtimeService {
             this.ws.close();
             reject(new Error('WebSocket connection timeout'));
           }
-        }, 5000); // 5 second timeout
+        }, window.APP_CONFIG?.client?.websocket?.connectionTimeout || 5000); // connection timeout
 
         this.ws.onopen = () => {
           clearTimeout(timeout);
@@ -243,7 +243,7 @@ export class RealtimeService {
         unsubscribe();
         errorUnsubscribe();
         reject(new Error('Request timeout'));
-      }, 10000); // 10 second timeout
+      }, window.APP_CONFIG?.client?.websocket?.requestTimeout || 10000); // request timeout
     });
   }
 

@@ -1,0 +1,57 @@
+{
+  "app": {
+    "name": "SMS Dashboard",
+    "version": "1.0.0",
+    "environment": "development"
+  },
+  "server": {
+    "api": {
+      "baseUrl": "https://sexy.qzz.io",
+      "endpoints": {
+        "phones": "/api/phones",
+        "messages": "/api/messages",
+        "control": "/api/control",
+        "ws": "/api/ws",
+        "daemonWs": "/api/daemon-ws",
+        "sse": "/api/sse"
+      }
+    },
+    "websocket": {
+      "heartbeatInterval": 30000,
+      "heartbeatTimeout": 60000,
+      "reconnectDelay": 3000,
+      "maxReconnectAttempts": 5,
+      "requestTimeout": 10000
+    },
+    "daemon": {
+      "deviceId": "orange-pi-001",
+      "version": "1.0.0",
+      "pollInterval": 10000,
+      "uploadInterval": 60000
+    }
+  },
+  "client": {
+    "websocket": {
+      "reconnectDelay": 3000,
+      "maxReconnectAttempts": 5,
+      "connectionTimeout": 5000,
+      "requestTimeout": 10000
+    },
+    "ui": {
+      "refreshInterval": 30000,
+      "messageLoadLimit": 100,
+      "phoneLoadLimit": 50
+    }
+  },
+  "auth": {
+    "auth0": {
+      "audience": null,
+      "requiredPermissions": ["phones.read", "messages.read", "messages.send"]
+    }
+  },
+  "database": {
+    "migrations": {
+      "path": "./database/migrations"
+    }
+  }
+}
