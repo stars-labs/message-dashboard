@@ -368,18 +368,18 @@ export class WebSocketRoom {
     const session = this.sessions.get(sessionId);
     if (!session) return;
 
-    const { request_id, method, data } = message;
+    const { request_id, method, data, token } = message;
     
     try {
       let response;
       
       switch (method) {
         case 'getPhones':
-          response = await this.getPhones();
+          response = await this.getPhones(token);
           break;
         
         case 'getMessages':
-          response = await this.getMessages(data);
+          response = await this.getMessages(data, token);
           break;
         
         case 'sendMessage':
@@ -387,7 +387,7 @@ export class WebSocketRoom {
           break;
         
         case 'getStats':
-          response = await this.getStats();
+          response = await this.getStats(token);
           break;
         
         case 'listIccidMappings':
@@ -705,10 +705,10 @@ export class WebSocketRoom {
   }
 
   // API method implementations
-  async getPhones() {
+  async getPhones(token) {
     const response = await fetch(`${this.env.WORKER_URL || this.config.get('server.api.baseUrl')}/api/phones`, {
       headers: {
-        'Authorization': `Bearer ${this.env.AUTH_TOKEN || 'anonymous'}`,
+        'Authorization': token ? `Bearer ${token}` : `Bearer ${this.env.AUTH_TOKEN || 'anonymous'}`,
         'X-Internal-Request': 'true'
       }
     });
@@ -720,11 +720,11 @@ export class WebSocketRoom {
     return await response.json();
   }
 
-  async getMessages(params = {}) {
+  async getMessages(params = {}, token) {
     const query = new URLSearchParams(params).toString();
     const response = await fetch(`${this.env.WORKER_URL || this.config.get('server.api.baseUrl')}/api/messages?${query}`, {
       headers: {
-        'Authorization': `Bearer ${this.env.AUTH_TOKEN || 'anonymous'}`,
+        'Authorization': token ? `Bearer ${token}` : `Bearer ${this.env.AUTH_TOKEN || 'anonymous'}`,
         'X-Internal-Request': 'true'
       }
     });
@@ -746,10 +746,10 @@ export class WebSocketRoom {
     return { success: true, message: 'Message sent to daemon' };
   }
 
-  async getStats() {
+  async getStats(token) {
     const response = await fetch(`${this.env.WORKER_URL || this.config.get('server.api.baseUrl')}/api/stats`, {
       headers: {
-        'Authorization': `Bearer ${this.env.AUTH_TOKEN || 'anonymous'}`,
+        'Authorization': token ? `Bearer ${token}` : `Bearer ${this.env.AUTH_TOKEN || 'anonymous'}`,
         'X-Internal-Request': 'true'
       }
     });
