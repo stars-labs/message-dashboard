@@ -319,6 +319,12 @@ router.post('/api/control/sms-result', async (request) => {
 router.get('*', async (request, env, ctx) => {
   const url = new URL(request.url);
   
+  // Skip authentication for public routes
+  const publicRoutes = ['/login', '/callback', '/api/auth/login', '/logout'];
+  if (publicRoutes.includes(url.pathname)) {
+    return serveFrontend(request);
+  }
+  
   // For the main app, check if user is authenticated and has the SMS role
   if (url.pathname === '/' || url.pathname === '/index.html') {
     // Check for session token in cookies
