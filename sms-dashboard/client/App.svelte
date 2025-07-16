@@ -41,17 +41,24 @@
     verificationRate: 0
   };
   
-  // Load data from WebSocket API
+  // Load data using HTTP API directly for better performance
   async function loadData() {
     try {
-      // Use WebSocket API for all data loading
-      const [phonesData, messagesData, statsData] = await Promise.all([
-        api.getPhones(),
-        api.getMessages({ limit: 100 }),
-        api.getStats()
+      // Use HTTP API directly for initial load to avoid WebSocket timeout delays
+      const token = auth.token || 'anonymous';
+      const headers = {
+        'Authorization': token !== 'anonymous' ? `Bearer ${token}` : undefined,
+        'Content-Type': 'application/json'
+      };
+      
+      // Make direct HTTP requests in parallel
+      const [phonesResponse, messagesResponse, statsResponse] = await Promise.all([
+        fetch('/api/phones', { headers }).then(r => r.json()),
+        fetch('/api/messages?limit=100', { headers }).then(r => r.json()),
+        fetch('/api/stats', { headers }).then(r => r.json())
       ]);
       
-      phoneNumbers = phonesData || [];
+      phoneNumbers = phonesResponse || [];
       console.log('Loaded phones:', phoneNumbers);
       // Log all phone details
       phoneNumbers.forEach(phone => {
@@ -66,15 +73,15 @@
           number: phone.number
         });
       });
-      messages = messagesData.data || [];
+      messages = messagesResponse.data || [];
       
       // Map API stats to component format
       stats = {
-        totalMessages: statsData.total_messages,
-        todayMessages: statsData.today_messages,
-        onlineDevices: statsData.online_devices,
-        totalDevices: statsData.total_devices,
-        verificationRate: Math.round(statsData.verification_rate * 100)
+        totalMessages: statsResponse.total_messages,
+        todayMessages: statsResponse.today_messages,
+        onlineDevices: statsResponse.online_devices,
+        totalDevices: statsResponse.total_devices,
+        verificationRate: Math.round(statsResponse.verification_rate * 100)
       };
     } catch (error) {
       console.warn('Failed to load data:', error);
@@ -116,28 +123,39 @@
       await auth.handleCallback();
     }
     
-    // Check authentication
-    try {
-      if (auth.isAuthenticated()) {
-        user = await auth.getUser();
-        if (user) {
-          await loadData();
+    // Start authentication check, data loading, and WebSocket connection in parallel
+    const authPromise = (async () => {
+      try {
+        if (auth.isAuthenticated()) {
+          user = await auth.getUser();
+          return user;
+        } else {
+          // Try to get user info if token exists
+          const existingUser = await auth.getUser();
+          if (existingUser) {
+            user = existingUser;
+            return user;
+          }
         }
-      } else {
-        // Try to get user info if token exists
-        const existingUser = await auth.getUser();
-        if (existingUser) {
-          user = existingUser;
-          await loadData();
-        }
+      } catch (error) {
+        // Authentication check failed
       }
-    } catch (error) {
-      // Authentication check failed
-    }
-    loading = false;
+      return null;
+    })();
     
-    // Establish WebSocket connection once after authentication check
-    await connectWebSocket();
+    const wsPromise = connectWebSocket();
+    
+    // Wait for authentication to complete before loading data
+    const authenticatedUser = await authPromise;
+    
+    // Load data and establish WebSocket connection in parallel
+    const promises = [wsPromise];
+    if (authenticatedUser) {
+      promises.push(loadData());
+    }
+    
+    await Promise.all(promises);
+    loading = false;
   });
   
   function setupWebSocketListeners() {
