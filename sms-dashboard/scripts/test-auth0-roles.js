@@ -53,7 +53,7 @@ async function testCurrentConfig() {
     }
     
     // Check if Auth0 is configured
-    const loginResponse = await fetch(`${API_URL}/api/auth/login`, {
+    const loginResponse = await fetch(`${API_URL}/login`, {
       redirect: 'manual'
     });
     
