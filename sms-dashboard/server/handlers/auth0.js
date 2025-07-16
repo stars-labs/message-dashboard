@@ -225,15 +225,17 @@ export const auth0Handler = {
         return Response.redirect(new URL('/login?error=no_role', url.origin).toString(), 302);
       }
       
-      // Redirect to frontend with session token in cookie
+      // Redirect to frontend with session token in URL
       const origin = url.origin;
       const frontendUrl = new URL('/', origin);
+      frontendUrl.searchParams.set('token', sessionToken);
       
       // Create response with redirect
       const response = new Response(null, {
         status: 302,
         headers: {
           'Location': frontendUrl.toString(),
+          // Also set cookie for server-side auth checks
           'Set-Cookie': `auth_token=${sessionToken}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=86400`
         }
       });

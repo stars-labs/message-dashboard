@@ -321,7 +321,7 @@ router.get('*', async (request, env, ctx) => {
   const url = new URL(request.url);
   
   // Skip authentication for public routes
-  const publicRoutes = ['/callback'];
+  const publicRoutes = [];
   if (publicRoutes.includes(url.pathname)) {
     return serveFrontend(request);
   }
