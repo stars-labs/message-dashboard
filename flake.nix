@@ -14,7 +14,13 @@
   };
 
   outputs =
-    { self, nixpkgs, flake-parts, sops-nix, ... }@inputs:
+    {
+      self,
+      nixpkgs,
+      flake-parts,
+      sops-nix,
+      ...
+    }@inputs:
     flake-parts.lib.mkFlake { inherit inputs; } {
       systems = [
         "x86_64-linux"
@@ -22,7 +28,7 @@
         "aarch64-darwin"
         "x86_64-darwin"
       ];
-      
+
       flake = {
         # NixOS modules
         nixosModules = {
@@ -30,7 +36,7 @@
           sms-daemon = ./nixos-config/modules/sms-daemon.nix;
           modem-support = ./nixos-config/modules/modem-support.nix;
         };
-        
+
         # NixOS configuration for Orange Pi
         nixosConfigurations = {
           orange-pi = nixpkgs.lib.nixosSystem {
@@ -38,39 +44,51 @@
             modules = [
               ./nixos-config/orange-pi/configuration.nix
               sops-nix.nixosModules.sops
-              ({ config, pkgs, lib, ... }: {
-                # Enable flakes
-                nix.settings.experimental-features = [ "nix-command" "flakes" ];
-                
-                # SOPS configuration for secure secret management
-                sops = {
-                  defaultSopsFile = ./nixos-config/secrets/orange-pi.yaml;
-                  # Use SSH host key for decryption on the Orange Pi
-                  age.sshKeyPaths = [ "/etc/ssh/ssh_host_ed25519_key" ];
-                  
-                  secrets = {
-                    "sms-dashboard/api-key" = {
-                      owner = config.services.sms-daemon.user;
-                      group = config.services.sms-daemon.group;
-                      mode = "0400";
+              (
+                {
+                  config,
+                  pkgs,
+                  lib,
+                  ...
+                }:
+                {
+                  # Enable flakes
+                  nix.settings.experimental-features = [
+                    "nix-command"
+                    "flakes"
+                  ];
+
+                  # SOPS configuration for secure secret management
+                  sops = {
+                    defaultSopsFile = ./nixos-config/secrets/orange-pi.yaml;
+                    # Use SSH host key for decryption on the Orange Pi
+                    age.sshKeyPaths = [ "/etc/ssh/ssh_host_ed25519_key" ];
+
+                    secrets = {
+                      "sms-dashboard/api-key" = {
+                        owner = config.services.sms-daemon.user;
+                        group = config.services.sms-daemon.group;
+                        mode = "0400";
+                      };
                     };
                   };
-                };
-                
-                # Override the SMS daemon to use SOPS secrets
-                services.sms-daemon = {
-                  enable = true;
-                  package = self.packages.aarch64-linux.sms-daemon;
-                  apiKeyFile = config.sops.secrets."sms-dashboard/api-key".path;
-                  apiUrl = "https://sexy.qzz.io/";
-                  uploadInterval = 60;
-                };
-              })
+
+                  # Override the SMS daemon to use SOPS secrets
+                  services.sms-daemon = {
+                    enable = true;
+                    package = self.packages.aarch64-linux.sms-daemon;
+                    apiKeyFile = config.sops.secrets."sms-dashboard/api-key".path;
+                    apiUrl = "https://sexy.qzz.io/";
+                    uploadInterval = 60;
+                    logLevel = "debug";
+                  };
+                }
+              )
             ];
           };
         };
       };
-      
+
       perSystem =
         {
           config,
@@ -86,18 +104,18 @@
           sms-daemon = pkgs.stdenv.mkDerivation rec {
             pname = "sms-daemon";
             version = "0.1.1";
-            
+
             src = ./orange-pi-daemon;
-            
+
             nativeBuildInputs = with pkgs; [
               zig
             ];
-            
+
             buildPhase = ''
               export HOME=$TMPDIR
               zig build -Doptimize=ReleaseSafe
             '';
-            
+
             installPhase = ''
               mkdir -p $out/bin
               cp zig-out/bin/orange-pi-daemon $out/bin/sms-daemon
@@ -111,27 +129,27 @@
             # Legacy alias
             sms-dashboard-daemon = sms-daemon;
           };
-          
+
           devShells = {
             default = pkgs.mkShell {
               packages = with pkgs; [
                 # Nix tools
                 nixfmt-rfc-style
                 nixd
-                
+
                 # Frontend development
                 nodejs_20
                 nodePackages.npm
-                
+
                 # Zig development
                 zig
                 zls
-                
+
                 # Testing tools
                 curl
                 jq
               ];
-              
+
               shellHook = ''
                 echo "SMS Dashboard Development Environment"
                 echo ""
@@ -141,7 +159,7 @@
                 echo ""
               '';
             };
-            
+
             # Dedicated daemon development shell
             daemon = pkgs.mkShell {
               packages = with pkgs; [
@@ -149,14 +167,14 @@
                 zls
                 modemmanager
               ];
-              
+
               shellHook = ''
                 echo "SMS Dashboard Daemon Development"
                 echo "Run 'zig build' to compile the daemon"
               '';
             };
           };
-          
+
           apps = {
             daemon = {
               type = "app";

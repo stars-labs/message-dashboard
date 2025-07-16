@@ -1,0 +1,117 @@
+
+ ⛅️ wrangler 4.24.0 (update available 4.24.3)
+─────────────────────────────────────────────
+Successfully created tail, expires at 2025-07-16T15:53:00Z
+Connected to sms-dashboard, waiting for logs...
+POST https://sexy.qzz.io/api/control/phones - Ok @ 7/16/2025, 6:40:17 PM
+  (log) [Worker] Received request: POST https://sexy.qzz.io/api/control/phones
+  (log) [Router] Handling POST /api/control/phones
+  (log) [Router] Available routes for POST: /api/messages/send, /api/iccid-mappings, /api/iccid-mappings/bulk, /api/control/messages, /api/control/phones, /api/control/cleanup-test-data, /api/control/sms-result
+  (log) [Router] Matched route: /api/control/phones
+  (error) [control.js] API key mismatch - expected: 4025b019..., got: ...
+  (log) [Worker] Route matched, returning response
+POST https://sexy.qzz.io/api/control/phones - Ok @ 7/16/2025, 6:40:17 PM
+  (log) [Worker] Received request: POST https://sexy.qzz.io/api/control/phones
+  (log) [Router] Handling POST /api/control/phones
+  (log) [Router] Available routes for POST: /api/messages/send, /api/iccid-mappings, /api/iccid-mappings/bulk, /api/control/messages, /api/control/phones, /api/control/cleanup-test-data, /api/control/sms-result
+  (log) [Router] Matched route: /api/control/phones
+  (error) [control.js] API key mismatch - expected: 4025b019..., got: ...
+  (log) [Worker] Route matched, returning response
+POST https://sexy.qzz.io/api/control/phones - Ok @ 7/16/2025, 6:40:17 PM
+  (log) [Worker] Received request: POST https://sexy.qzz.io/api/control/phones
+  (log) [Router] Handling POST /api/control/phones
+  (log) [Router] Available routes for POST: /api/messages/send, /api/iccid-mappings, /api/iccid-mappings/bulk, /api/control/messages, /api/control/phones, /api/control/cleanup-test-data, /api/control/sms-result
+  (log) [Router] Matched route: /api/control/phones
+  (error) [control.js] API key mismatch - expected: 4025b019..., got: ...
+  (log) [Worker] Route matched, returning response
+POST https://sexy.qzz.io/api/control/phones - Ok @ 7/16/2025, 6:40:17 PM
+  (log) [Worker] Received request: POST https://sexy.qzz.io/api/control/phones
+  (log) [Router] Handling POST /api/control/phones
+  (log) [Router] Available routes for POST: /api/messages/send, /api/iccid-mappings, /api/iccid-mappings/bulk, /api/control/messages, /api/control/phones, /api/control/cleanup-test-data, /api/control/sms-result
+  (log) [Router] Matched route: /api/control/phones
+  (error) [control.js] API key mismatch - expected: 4025b019..., got: ...
+  (log) [Worker] Route matched, returning response
+POST https://sexy.qzz.io/api/control/phones - Ok @ 7/16/2025, 6:40:17 PM
+  (log) [Worker] Received request: POST https://sexy.qzz.io/api/control/phones
+  (log) [Router] Handling POST /api/control/phones
+  (log) [Router] Available routes for POST: /api/messages/send, /api/iccid-mappings, /api/iccid-mappings/bulk, /api/control/messages, /api/control/phones, /api/control/cleanup-test-data, /api/control/sms-result
+  (log) [Router] Matched route: /api/control/phones
+  (error) [control.js] API key mismatch - expected: 4025b019..., got: ...
+  (log) [Worker] Route matched, returning response
+POST https://sexy.qzz.io/api/control/phones - Ok @ 7/16/2025, 6:40:17 PM
+  (log) [Worker] Received request: POST https://sexy.qzz.io/api/control/phones
+  (log) [Router] Handling POST /api/control/phones
+  (log) [Router] Available routes for POST: /api/messages/send, /api/iccid-mappings, /api/iccid-mappings/bulk, /api/control/messages, /api/control/phones, /api/control/cleanup-test-data, /api/control/sms-result
+  (log) [Router] Matched route: /api/control/phones
+  (error) [control.js] API key mismatch - expected: 4025b019..., got: ...
+  (log) [Worker] Route matched, returning response
+POST https://sexy.qzz.io/api/control/phones - Ok @ 7/16/2025, 6:40:17 PM
+  (log) [Worker] Received request: POST https://sexy.qzz.io/api/control/phones
+  (log) [Router] Handling POST /api/control/phones
+  (log) [Router] Available routes for POST: /api/messages/send, /api/iccid-mappings, /api/iccid-mappings/bulk, /api/control/messages, /api/control/phones, /api/control/cleanup-test-data, /api/control/sms-result
+  (log) [Router] Matched route: /api/control/phones
+  (error) [control.js] API key mismatch - expected: 4025b019..., got: ...
+  (log) [Worker] Route matched, returning response
+POST https://sexy.qzz.io/api/control/phones - Ok @ 7/16/2025, 6:40:17 PM
+  (log) [Worker] Received request: POST https://sexy.qzz.io/api/control/phones
+  (log) [Router] Handling POST /api/control/phones
+  (log) [Router] Available routes for POST: /api/messages/send, /api/iccid-mappings, /api/iccid-mappings/bulk, /api/control/messages, /api/control/phones, /api/control/cleanup-test-data, /api/control/sms-result
+  (log) [Router] Matched route: /api/control/phones
+  (error) [control.js] API key mismatch - expected: 4025b019..., got: ...
+  (log) [Worker] Route matched, returning response
+POST https://sexy.qzz.io/api/control/phones - Ok @ 7/16/2025, 6:40:17 PM
+  (log) [Worker] Received request: POST https://sexy.qzz.io/api/control/phones
+  (log) [Router] Handling POST /api/control/phones
+  (log) [Router] Available routes for POST: /api/messages/send, /api/iccid-mappings, /api/iccid-mappings/bulk, /api/control/messages, /api/control/phones, /api/control/cleanup-test-data, /api/control/sms-result
+  (log) [Router] Matched route: /api/control/phones
+  (error) [control.js] API key mismatch - expected: 4025b019..., got: ...
+  (log) [Worker] Route matched, returning response
+POST https://sexy.qzz.io/api/control/phones - Ok @ 7/16/2025, 6:40:17 PM
+  (log) [Worker] Received request: POST https://sexy.qzz.io/api/control/phones
+  (log) [Router] Handling POST /api/control/phones
+  (log) [Router] Available routes for POST: /api/messages/send, /api/iccid-mappings, /api/iccid-mappings/bulk, /api/control/messages, /api/control/phones, /api/control/cleanup-test-data, /api/control/sms-result
+  (log) [Router] Matched route: /api/control/phones
+  (error) [control.js] API key mismatch - expected: 4025b019..., got: ...
+  (log) [Worker] Route matched, returning response
+POST https://sexy.qzz.io/api/control/phones - Ok @ 7/16/2025, 6:40:17 PM
+  (log) [Worker] Received request: POST https://sexy.qzz.io/api/control/phones
+  (log) [Router] Handling POST /api/control/phones
+  (log) [Router] Available routes for POST: /api/messages/send, /api/iccid-mappings, /api/iccid-mappings/bulk, /api/control/messages, /api/control/phones, /api/control/cleanup-test-data, /api/control/sms-result
+  (log) [Router] Matched route: /api/control/phones
+  (error) [control.js] API key mismatch - expected: 4025b019..., got: ...
+  (log) [Worker] Route matched, returning response
+POST https://sexy.qzz.io/api/control/phones - Ok @ 7/16/2025, 6:40:17 PM
+  (log) [Worker] Received request: POST https://sexy.qzz.io/api/control/phones
+  (log) [Router] Handling POST /api/control/phones
+  (log) [Router] Available routes for POST: /api/messages/send, /api/iccid-mappings, /api/iccid-mappings/bulk, /api/control/messages, /api/control/phones, /api/control/cleanup-test-data, /api/control/sms-result
+  (log) [Router] Matched route: /api/control/phones
+  (error) [control.js] API key mismatch - expected: 4025b019..., got: ...
+  (log) [Worker] Route matched, returning response
+POST https://sexy.qzz.io/api/control/phones - Ok @ 7/16/2025, 6:40:25 PM
+  (log) [Worker] Received request: POST https://sexy.qzz.io/api/control/phones
+  (log) [Router] Handling POST /api/control/phones
+  (log) [Router] Available routes for POST: /api/messages/send, /api/iccid-mappings, /api/iccid-mappings/bulk, /api/control/messages, /api/control/phones, /api/control/cleanup-test-data, /api/control/sms-result
+  (log) [Router] Matched route: /api/control/phones
+  (log) [control.js] Raw phones data received: [{"id":"SIM_8","number":null,"country":null,"flag":null,"carrier":null,"status":"online","signal":100,"iccid":null,"rssi":-49,"rsrq":-6,"rsrp":-74,"snr":27.200000762939453},{"id":"SIM_5","number":null,"country":null,"flag":null,"carrier":null,"status":"online","signal":100,"iccid":null,"rssi":-45,"rsrq":-6,"rsrp":-70,"snr":30},{"id":"SIM_7","number":null,"country":null,"flag":null,"carrier":null,"status":"online","signal":100,"iccid":null,"rssi":-36,"rsrq":-7,"rsrp":-62,"snr":25},{"id":"SIM_9","number":null,"country":null,"flag":null,"carrier":null,"status":"online","signal":100,"iccid":null,"rssi":-43,"rsrq":-6,"rsrp":-69,"snr":28.799999237060547},{"id":"SIM_6","number":null,"country":null,"flag":null,"carrier":null,"status":"online","signal":97,"iccid":null,"rssi":-51,"rsrq":-6,"rsrp":-77,"snr":28}]
+  (log) [control.js] Skipping phone without ICCID: number=null, keys=id,number,country,flag,carrier,status,signal,iccid,rssi,rsrq,rsrp,snr
+  (log) [control.js] Skipping phone without ICCID: number=null, keys=id,number,country,flag,carrier,status,signal,iccid,rssi,rsrq,rsrp,snr
+  (log) [control.js] Skipping phone without ICCID: number=null, keys=id,number,country,flag,carrier,status,signal,iccid,rssi,rsrq,rsrp,snr
+  (log) [control.js] Skipping phone without ICCID: number=null, keys=id,number,country,flag,carrier,status,signal,iccid,rssi,rsrq,rsrp,snr
+  (log) [control.js] Skipping phone without ICCID: number=null, keys=id,number,country,flag,carrier,status,signal,iccid,rssi,rsrq,rsrp,snr
+  (log) [control.js] Phone update results: success=0, errors=5
+  (error) [control.js] Phone update errors: [
+  'Phone without ICCID (number: unknown)',
+  'Phone without ICCID (number: unknown)',
+  'Phone without ICCID (number: unknown)',
+  'Phone without ICCID (number: unknown)',
+  'Phone without ICCID (number: unknown)'
+]
+  (log) [control.js] Skipping broadcast - no valid phones to send (all 5 phones were filtered out)
+  (log) [Worker] Route matched, returning response
+GET https://sexy.qzz.io/api/daemon-ws?token=REDACTED - Canceled @ 7/16/2025, 6:40:02 PM
+  (log) [Worker] Received request: GET https://sexy.qzz.io/api/daemon-ws?token=4025b019988238528f1fd5e909d0363c46e4e48490ea5045a9a490c259071cba
+  (log) [Worker] WebSocket request detected: original=/api/daemon-ws, normalized=/api/daemon-ws
+  (log) [Worker] Forwarding WebSocket request to Durable Object:
+  (log)   - URL: https://sexy.qzz.io/api/daemon-ws?token=4025b019988238528f1fd5e909d0363c46e4e48490ea5045a9a490c259071cba
+  (log)   - Pathname: /api/daemon-ws
+  (log)   - Headers: {"accept-encoding":"gzip, br","cf-connecting-ip":"203.116.47.202","cf-ipcountry":"SG","cf-ray":"9600e1105d4c9fcb","cf-visitor":"{\"scheme\":\"https\"}","connection":"Upgrade","host":"sexy.qzz.io","sec-websocket-extensions":"permessage-deflate; client_max_window_bits","sec-websocket-key":"keBiMFBvrYAgc9Ba9TwviA==","sec-websocket-version":"13","upgrade":"websocket","x-forwarded-proto":"https","x-real-ip":"203.116.47.202"}

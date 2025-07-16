@@ -403,8 +403,22 @@ export default {
         console.log(`  - Pathname: ${url.pathname}`);
         console.log(`  - Headers: ${JSON.stringify(Object.fromEntries(request.headers.entries()))}`);
         
-        // Forward to Durable Object
-        return room.fetch(request);
+        // Add the API_KEY as a header so the Durable Object can access it
+        // Clone headers to add our internal header
+        const headers = new Headers(request.headers);
+        headers.set('X-Internal-API-Key', env.API_KEY || '');
+        
+        // Create a new request with the additional header
+        const newRequest = new Request(request.url, {
+          method: request.method,
+          headers: headers,
+          body: request.body,
+          // Copy other request properties
+          ...request
+        });
+        
+        // Forward to Durable Object with API key
+        return room.fetch(newRequest);
       }
       
       // Handle regular routes
