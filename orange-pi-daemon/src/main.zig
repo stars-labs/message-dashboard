@@ -921,6 +921,7 @@ const WebSocketClient = struct {
     running: bool = false,
     authenticated: bool = false,
     websocket_key: []const u8 = undefined,
+    api_key: []const u8,
     
     pub fn init(allocator: std.mem.Allocator, config: Config, modem_manager: *ModemManager) WebSocketClient {
         return .{
@@ -928,6 +929,7 @@ const WebSocketClient = struct {
             .config = config,
             .modem_manager = modem_manager,
             .client = http.Client{ .allocator = allocator },
+            .api_key = config.api_key,
         };
     }
     
@@ -1167,8 +1169,9 @@ const WebSocketClient = struct {
             "Connection: Upgrade\r\n" ++
             "Sec-WebSocket-Key: {s}\r\n" ++
             "Sec-WebSocket-Version: 13\r\n" ++
+            "Authorization: Bearer {s}\r\n" ++
             "\r\n",
-            .{ path, host, self.websocket_key }
+            .{ path, host, self.websocket_key, self.api_key }
         );
         defer self.allocator.free(handshake_request);
         
