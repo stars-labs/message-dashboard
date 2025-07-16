@@ -68,9 +68,16 @@ export class WebSocketRoom {
   async fetch(request) {
     const url = new URL(request.url);
     
+    console.log(`[WebSocketRoom] fetch() called:`);
+    console.log(`  - URL: ${request.url}`);
+    console.log(`  - Pathname: ${url.pathname}`);
+    console.log(`  - Method: ${request.method}`);
+    console.log(`  - Upgrade header: ${request.headers.get('Upgrade')}`);
+    
     // Check if this is a WebSocket upgrade request
     const upgradeHeader = request.headers.get('Upgrade');
     if (upgradeHeader === 'websocket') {
+      console.log(`[WebSocketRoom] WebSocket upgrade detected, calling handleWebSocket`);
       return this.handleWebSocket(request);
     }
     
@@ -91,6 +98,11 @@ export class WebSocketRoom {
       const url = new URL(request.url);
       const upgradeHeader = request.headers.get('Upgrade');
       
+      console.log(`[WebSocketRoom] handleWebSocket called:`);
+      console.log(`  - Full URL: ${request.url}`);
+      console.log(`  - Pathname: ${url.pathname}`);
+      console.log(`  - Headers: ${JSON.stringify(Object.fromEntries(request.headers.entries()))}`);
+      
       if (!upgradeHeader || upgradeHeader !== 'websocket') {
         return new Response('Expected Upgrade: websocket', { status: 426 });
       }
@@ -105,6 +117,11 @@ export class WebSocketRoom {
       const sessionId = crypto.randomUUID();
       const isDaemon = url.pathname === '/api/daemon-ws';
       
+      console.log(`[WebSocketRoom] Connection type detection:`);
+      console.log(`  - URL pathname: ${url.pathname}`);
+      console.log(`  - isDaemon: ${isDaemon}`);
+      console.log(`  - Expected daemon path: /api/daemon-ws`);
+      
       if (isDaemon) {
         return this.handleDaemonConnection(sessionId, server, client, request);
       } else {
@@ -116,6 +133,9 @@ export class WebSocketRoom {
   }
 
   async handleClientConnection(sessionId, server, client) {
+    console.log(`[WebSocketRoom] handleClientConnection() called for session: ${sessionId}`);
+    console.log(`[WebSocketRoom] This is a CLIENT connection, not a daemon connection`);
+    
     // Handle incoming messages
     server.addEventListener('message', async (event) => {
       try {
@@ -181,7 +201,10 @@ export class WebSocketRoom {
   }
 
   async handleDaemonConnection(sessionId, server, client, request) {
-    console.log(`[WebSocketRoom] New daemon connection: ${sessionId}`);
+    console.log(`[WebSocketRoom] handleDaemonConnection() called:`);
+    console.log(`  - Session ID: ${sessionId}`);
+    console.log(`  - Request URL: ${request.url}`);
+    console.log(`  - Headers: ${JSON.stringify(Object.fromEntries(request.headers.entries()))}`);
 
     // Validate bearer token from request headers
     const authHeader = request?.headers.get('Authorization');
@@ -191,14 +214,20 @@ export class WebSocketRoom {
       const token = authHeader.substring(7); // Remove 'Bearer ' prefix
       const expectedToken = this.env.API_KEY;
       
+      console.log(`[WebSocketRoom] Auth check:`);
+      console.log(`  - Auth header present: ${!!authHeader}`);
+      console.log(`  - Expected token (first 8 chars): ${expectedToken?.substring(0, 8)}...`);
+      console.log(`  - Received token (first 8 chars): ${token?.substring(0, 8)}...`);
+      
       if (token === expectedToken) {
         authenticated = true;
         console.log(`[WebSocketRoom] ✅ Daemon authenticated successfully with bearer token`);
       } else {
-        console.log(`[WebSocketRoom] ❌ Daemon authentication failed: invalid bearer token. Expected: ${expectedToken.substring(0, 8)}..., Got: ${token.substring(0, 8)}...`);
+        console.log(`[WebSocketRoom] ❌ Daemon authentication failed: invalid bearer token`);
       }
     } else {
-      console.log(`[WebSocketRoom] ❌ Daemon authentication failed: missing Authorization header`);
+      console.log(`[WebSocketRoom] ❌ Daemon authentication failed: missing or invalid Authorization header`);
+      console.log(`  - Auth header value: ${authHeader}`);
     }
 
     if (!authenticated) {

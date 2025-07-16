@@ -397,6 +397,12 @@ export default {
         const roomId = env.WEBSOCKET_ROOMS.idFromName('global');
         const room = env.WEBSOCKET_ROOMS.get(roomId);
         
+        // Log request details before forwarding
+        console.log(`[Worker] Forwarding WebSocket request to Durable Object:`);
+        console.log(`  - URL: ${request.url}`);
+        console.log(`  - Pathname: ${url.pathname}`);
+        console.log(`  - Headers: ${JSON.stringify(Object.fromEntries(request.headers.entries()))}`);
+        
         // Forward to Durable Object
         return room.fetch(request);
       }
