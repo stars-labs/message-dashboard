@@ -383,12 +383,12 @@
     <div class="text-center bg-white p-8 rounded-xl shadow-lg">
       <h1 class="text-3xl font-bold text-gray-800 mb-4">短信验证码管理系统</h1>
       <p class="text-gray-600 mb-6">请登录以继续</p>
-      <button 
-        on:click={() => auth.login()}
-        class="px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white font-medium rounded-lg transition-colors"
+      <a 
+        href="/login"
+        class="inline-block px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white font-medium rounded-lg transition-colors"
       >
         使用 Auth0 登录
-      </button>
+      </a>
     </div>
   </div>
 {:else}

@@ -7,7 +7,8 @@ class Auth0Service {
   }
 
   async login() {
-    window.location.href = `${this.baseUrl}/login`;
+    // Use replace to prevent back button issues
+    window.location.replace(`${this.baseUrl}/login`);
   }
 
   async handleCallback() {
