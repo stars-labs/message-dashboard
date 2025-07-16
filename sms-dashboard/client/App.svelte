@@ -10,6 +10,7 @@
   import { api } from './lib/api.js';
   import { realtimeService } from './lib/websocket-with-fallback.js';
   import { auth } from './lib/auth.js';
+  import config from './lib/config.js';
   
   let selectedPhone = null;
   let selectedCountry = 'all';

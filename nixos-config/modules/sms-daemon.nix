@@ -14,6 +14,12 @@ in {
       description = "API URL for the SMS dashboard server";
     };
 
+    deviceId = mkOption {
+      type = types.str;
+      default = "orange-pi-001";
+      description = "Device ID for this daemon instance";
+    };
+
     apiKey = mkOption {
       type = types.nullOr types.str;
       default = null;
@@ -108,6 +114,7 @@ in {
       environment = {
         SMS_API_URL = cfg.apiUrl;
         SMS_UPLOAD_INTERVAL = toString cfg.uploadInterval;
+        SMS_DEVICE_ID = cfg.deviceId;
         LOG_LEVEL = cfg.logLevel;
       };
 

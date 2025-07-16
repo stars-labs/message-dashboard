@@ -1,0 +1,24 @@
+{
+  "app": {
+    "environment": "production"
+  },
+  "server": {
+    "api": {
+      "baseUrl": "https://sexy.qzz.io"
+    },
+    "websocket": {
+      "heartbeatInterval": 60000,
+      "heartbeatTimeout": 120000
+    },
+    "daemon": {
+      "uploadInterval": 300000
+    }
+  },
+  "client": {
+    "ui": {
+      "refreshInterval": 60000,
+      "messageLoadLimit": 200,
+      "phoneLoadLimit": 100
+    }
+  }
+}

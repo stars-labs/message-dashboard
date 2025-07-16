@@ -9,6 +9,12 @@ const Config = struct {
     api_url: []const u8,
     api_key: []const u8,
     modem_ids: []const []const u8,
+    device_id: []const u8,
+    daemon_version: []const u8,
+    upload_interval: u32,
+    poll_interval: u32,
+    heartbeat_interval: u32,
+    reconnect_delay: u32,
 };
 
 const Message = struct {
@@ -933,8 +939,12 @@ const WebSocketClient = struct {
     pub fn connect(self: *WebSocketClient) !void {
         std.log.info("Attempting WebSocket connection to {s}/api/daemon-ws", .{self.config.api_url});
         
-        // Parse URL to get host and path  
-        const ws_url = try std.fmt.allocPrint(self.allocator, "{s}/api/daemon-ws", .{self.config.api_url});
+        // Parse URL to get host and path - ensure no double slashes
+        const api_url = if (std.mem.endsWith(u8, self.config.api_url, "/")) 
+            self.config.api_url[0..self.config.api_url.len-1] 
+        else 
+            self.config.api_url;
+        const ws_url = try std.fmt.allocPrint(self.allocator, "{s}/api/daemon-ws", .{api_url});
         defer self.allocator.free(ws_url);
         
         const uri = try std.Uri.parse(ws_url);
@@ -971,6 +981,8 @@ const WebSocketClient = struct {
         try request.wait();
         
         // Check if WebSocket upgrade was successful
+        std.log.info("WebSocket handshake response status: {any}", .{request.response.status});
+        
         if (request.response.status == .switching_protocols) {
             std.log.info("WebSocket handshake successful", .{});
             self.running = true;
@@ -989,7 +1001,15 @@ const WebSocketClient = struct {
             self.authenticated = true;
             std.log.info("WebSocket connected with bearer token authentication", .{});
         } else {
+            // Try to read response body for more details
+            const response_body = request.reader().readAllAlloc(self.allocator, 1024) catch |err| {
+                std.log.err("Could not read response body: {any}", .{err});
+                return error.WebSocketHandshakeFailed;
+            };
+            defer self.allocator.free(response_body);
+            
             std.log.err("WebSocket handshake failed: {any}", .{request.response.status});
+            std.log.err("Response body: {s}", .{response_body});
             return error.WebSocketHandshakeFailed;
         }
     }
@@ -1517,6 +1537,12 @@ pub fn main() !void {
         .api_url = std.posix.getenv("SMS_API_URL") orelse "https://sexy.qzz.io",
         .api_key = std.posix.getenv("SMS_API_KEY") orelse "",
         .modem_ids = &[_][]const u8{}, // Will be auto-detected
+        .device_id = std.posix.getenv("SMS_DEVICE_ID") orelse "orange-pi-001",
+        .daemon_version = "1.0.0",
+        .upload_interval = if (std.posix.getenv("SMS_UPLOAD_INTERVAL")) |val| std.fmt.parseInt(u32, val, 10) catch 60 else 60,
+        .poll_interval = 10,
+        .heartbeat_interval = 60,
+        .reconnect_delay = 5,
     };
     
     if (config.api_key.len == 0) {
@@ -1553,7 +1579,7 @@ pub fn main() !void {
         if (!websocket_client.running or websocket_client.connection == null) {
             std.log.info("WebSocket connection lost, attempting to reconnect...", .{});
             websocket_client.disconnect();
-            std.time.sleep(5 * std.time.ns_per_s); // Wait 5 seconds before reconnecting
+            std.time.sleep(config.reconnect_delay * std.time.ns_per_s); // Wait before reconnecting
             
             websocket_client.connect() catch |err| {
                 std.log.err("Failed to reconnect WebSocket: {any}", .{err});
@@ -1628,8 +1654,8 @@ pub fn main() !void {
                 std.log.info("No modems found, adding test phone data for debugging", .{});
                 const test_phone = Phone{
                     .iccid = "89860040191833946266",
-                    .status = "online",
-                    .signal = 85,
+                    .status = "offline",
+                    .signal = 0,
                     .number = "+1234567890",
                     .country = "US",
                     .carrier = "Test Carrier",
@@ -1704,6 +1730,6 @@ pub fn main() !void {
         // SMS sending is handled via WebSocket messages - no HTTP polling needed
         
         // Sleep for a shorter interval - only for message checking and change detection
-        std.time.sleep(10 * std.time.ns_per_s); // Check every 10 seconds instead of 60
+        std.time.sleep(config.poll_interval * std.time.ns_per_s); // Check at configured interval
     }
 }

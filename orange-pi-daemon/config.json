@@ -1,0 +1,31 @@
+{
+  "daemon": {
+    "name": "SMS Dashboard Daemon",
+    "version": "1.0.0",
+    "deviceId": "orange-pi-001"
+  },
+  "api": {
+    "baseUrl": "https://sexy.qzz.io",
+    "endpoints": {
+      "phones": "/api/control/phones",
+      "messages": "/api/control/messages",
+      "pendingSms": "/api/control/pending-sms",
+      "smsResult": "/api/control/sms-result",
+      "daemonWs": "/api/daemon-ws"
+    }
+  },
+  "websocket": {
+    "reconnectDelay": 5000,
+    "maxReconnectAttempts": -1,
+    "heartbeatInterval": 60000,
+    "messageTimeout": 10000
+  },
+  "polling": {
+    "interval": 10000,
+    "uploadInterval": 60000
+  },
+  "modem": {
+    "signalSetupDelay": 5,
+    "messageCheckInterval": 10000
+  }
+}
