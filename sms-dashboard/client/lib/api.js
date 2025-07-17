@@ -138,6 +138,10 @@ export const api = {
       return response.success ? response.data : {
         total_messages: 0,
         today_messages: 0,
+        total_sent: 0,
+        total_received: 0,
+        today_sent: 0,
+        today_received: 0,
         online_devices: 0,
         total_devices: 0,
         verification_rate: 0
@@ -147,6 +151,10 @@ export const api = {
       return {
         total_messages: 0,
         today_messages: 0,
+        total_sent: 0,
+        total_received: 0,
+        today_sent: 0,
+        today_received: 0,
         online_devices: 0,
         total_devices: 0,
         verification_rate: 0
