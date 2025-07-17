@@ -53,8 +53,10 @@ export class RealtimeService {
           .replace('https://', 'wss://');
         
         // Attempting WebSocket connection
-        console.log('Attempting WebSocket connection to:', `${wsUrl}/api/ws`);
-        this.ws = new WebSocket(`${wsUrl}/api/ws`);
+        // Add token to URL for authentication
+        const wsUrlWithAuth = token ? `${wsUrl}/api/ws?token=${encodeURIComponent(token)}` : `${wsUrl}/api/ws`;
+        console.log('Attempting WebSocket connection to:', wsUrlWithAuth);
+        this.ws = new WebSocket(wsUrlWithAuth);
         
         const timeout = setTimeout(() => {
           if (this.ws.readyState !== WebSocket.OPEN) {
@@ -73,7 +75,8 @@ export class RealtimeService {
           // Subscribe to channels
           this.send({
             type: 'subscribe',
-            channels: ['messages', 'phones']
+            channels: ['messages', 'phones'],
+            token: this.token
           });
           
           resolve();
