@@ -167,16 +167,20 @@ export class WebSocketRoom {
       if (isDaemon) {
         return this.handleDaemonConnection(sessionId, server, client, request);
       } else {
-        return this.handleClientConnection(sessionId, server, client);
+        return this.handleClientConnection(sessionId, server, client, request);
       }
     } catch (error) {
       return new Response('Internal Server Error: ' + error.message, { status: 500 });
     }
   }
 
-  async handleClientConnection(sessionId, server, client) {
+  async handleClientConnection(sessionId, server, client, request) {
     console.log(`[WebSocketRoom] handleClientConnection() called for session: ${sessionId}`);
     console.log(`[WebSocketRoom] This is a CLIENT connection, not a daemon connection`);
+    
+    // Extract token from URL query params
+    const url = new URL(request.url);
+    const token = url.searchParams.get('token');
     
     // Handle incoming messages
     server.addEventListener('message', async (event) => {
@@ -202,10 +206,11 @@ export class WebSocketRoom {
       console.error(`[WebSocketRoom] Client error:`, error);
     });
 
-    // Store session
+    // Store session with token
     this.sessions.set(sessionId, {
       websocket: server,
       user: null, // Will be set on authentication
+      token: token, // Store token from URL
       connectedAt: new Date().toISOString()
     });
 
@@ -474,6 +479,31 @@ export class WebSocketRoom {
           type: 'subscribed',
           channels: session.subscriptions
         }));
+        
+        // If subscribing to phones channel, send current phone data ONLY to authenticated users
+        if (session.subscriptions.includes('phones')) {
+          try {
+            // Get the user's token from the session or message
+            const token = message.token || session.token || null;
+            
+            // SECURITY: Only send phone data to authenticated users
+            if (!token || token === 'anonymous') {
+              console.log('[WebSocketRoom] Skipping phone data for anonymous user');
+              return;
+            }
+            
+            const phonesResponse = await this.getPhones(token);
+            
+            // Send current phones data as an update
+            session.websocket.send(JSON.stringify({
+              type: 'phones:updated',
+              data: phonesResponse.data || phonesResponse || [],
+              timestamp: new Date().toISOString()
+            }));
+          } catch (error) {
+            console.error('[WebSocketRoom] Failed to send initial phones data:', error);
+          }
+        }
         break;
 
       case 'send_message':
@@ -824,6 +854,14 @@ export class WebSocketRoom {
     let sentCount = 0;
     this.sessions.forEach((session, sessionId) => {
       try {
+        // SECURITY: Only send phone-related updates to authenticated users
+        if (type === 'phones:updated' || type === 'phone:update') {
+          if (!session.token || session.token === 'anonymous') {
+            console.log(`[WebSocketRoom] Skipping phone broadcast to anonymous session ${sessionId}`);
+            return;
+          }
+        }
+        
         session.websocket.send(message);
         sentCount++;
       } catch (error) {
