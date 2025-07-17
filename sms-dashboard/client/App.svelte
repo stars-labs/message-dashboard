@@ -38,6 +38,10 @@
   let stats = {
     totalMessages: 0,
     todayMessages: 0,
+    totalSent: 0,
+    totalReceived: 0,
+    todaySent: 0,
+    todayReceived: 0,
     onlineDevices: 0,
     totalDevices: 0,
     verificationRate: 0
@@ -81,6 +85,10 @@
       stats = {
         totalMessages: statsResponse.total_messages,
         todayMessages: statsResponse.today_messages,
+        totalSent: statsResponse.total_sent,
+        totalReceived: statsResponse.total_received,
+        todaySent: statsResponse.today_sent,
+        todayReceived: statsResponse.today_received,
         onlineDevices: statsResponse.online_devices,
         totalDevices: statsResponse.total_devices,
         verificationRate: Math.round(statsResponse.verification_rate * 100)
@@ -98,6 +106,10 @@
       stats = {
         totalMessages: 0,
         todayMessages: 0,
+        totalSent: 0,
+        totalReceived: 0,
+        todaySent: 0,
+        todayReceived: 0,
         onlineDevices: 0,
         totalDevices: 0,
         verificationRate: 0
@@ -552,12 +564,20 @@
           <div class="text-xl font-bold">{phoneNumbers.filter(p => p.status === 'online').length}/{phoneNumbers.length}</div>
         </div>
         <div class="bg-gradient-to-br from-green-500 to-green-600 text-white px-4 py-3 rounded-xl shadow-lg">
-          <div class="text-xs opacity-90">今日消息</div>
-          <div class="text-xl font-bold">{stats.todayMessages}</div>
+          <div class="text-xs opacity-90">今日接收</div>
+          <div class="text-xl font-bold">{stats.todayReceived}</div>
+        </div>
+        <div class="bg-gradient-to-br from-blue-500 to-indigo-600 text-white px-4 py-3 rounded-xl shadow-lg">
+          <div class="text-xs opacity-90">今日发送</div>
+          <div class="text-xl font-bold">{stats.todaySent}</div>
         </div>
         <div class="bg-gradient-to-br from-purple-500 to-purple-600 text-white px-4 py-3 rounded-xl shadow-lg">
-          <div class="text-xs opacity-90">总消息数</div>
-          <div class="text-xl font-bold">{stats.totalMessages}</div>
+          <div class="text-xs opacity-90">总接收</div>
+          <div class="text-xl font-bold">{stats.totalReceived}</div>
+        </div>
+        <div class="bg-gradient-to-br from-indigo-500 to-indigo-600 text-white px-4 py-3 rounded-xl shadow-lg">
+          <div class="text-xs opacity-90">总发送</div>
+          <div class="text-xl font-bold">{stats.totalSent}</div>
         </div>
         <div class="bg-gradient-to-br from-orange-500 to-orange-600 text-white px-4 py-3 rounded-xl shadow-lg">
           <div class="text-xs opacity-90">提取成功率</div>
@@ -570,7 +590,7 @@
   {#if currentView === 'dashboard'}
     <!-- Desktop Stats -->
     <div class="hidden lg:block px-8 py-6">
-      <div class="grid grid-cols-4 gap-6">
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-6">
         <StatsCard 
           title="在线设备" 
           value={phoneNumbers.filter(p => p.status === 'online').length} 
@@ -579,16 +599,16 @@
           icon="📱"
         />
         <StatsCard 
-          title="总消息数" 
-          value={stats.totalMessages} 
-          gradient="from-purple-500 to-purple-600"
-          icon="💬"
+          title="今日接收" 
+          value={stats.todayReceived} 
+          gradient="from-green-500 to-green-600"
+          icon="📥"
         />
         <StatsCard 
-          title="今日消息" 
-          value={stats.todayMessages} 
-          gradient="from-green-500 to-green-600"
-          icon="📊"
+          title="今日发送" 
+          value={stats.todaySent} 
+          gradient="from-blue-500 to-indigo-600"
+          icon="📤"
         />
         <StatsCard 
           title="验证码提取率" 
@@ -596,6 +616,26 @@
           gradient="from-orange-500 to-orange-600"
           icon="✅"
         />
+      </div>
+      
+      <!-- Second row for total stats -->
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-6 mt-6">
+        <div class="lg:col-span-2">
+          <StatsCard 
+            title="总接收消息" 
+            value={stats.totalReceived} 
+            gradient="from-purple-500 to-purple-600"
+            icon="💬"
+          />
+        </div>
+        <div class="lg:col-span-2">
+          <StatsCard 
+            title="总发送消息" 
+            value={stats.totalSent} 
+            gradient="from-indigo-500 to-indigo-600"
+            icon="📨"
+          />
+        </div>
       </div>
     </div>
 
