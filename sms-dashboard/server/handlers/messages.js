@@ -8,29 +8,29 @@ export const messagesHandler = {
   async list(request) {
     const { env } = request;
     const url = new URL(request.url);
-    const phoneId = url.searchParams.get('phone_id');
+    const phoneIccid = url.searchParams.get('phone_iccid');
     const limit = parseInt(url.searchParams.get('limit') || '50');
     const offset = parseInt(url.searchParams.get('offset') || '0');
-    
+
     try {
       let query = `SELECT * FROM messages`;
       let countQuery = `SELECT COUNT(*) as total FROM messages`;
       const params = [];
-      
-      if (phoneId) {
+
+      if (phoneIccid) {
         query += ` WHERE phone_iccid = ?`;
         countQuery += ` WHERE phone_iccid = ?`;
-        params.push(phoneId);
+        params.push(phoneIccid);
       }
-      
+
       query += ` ORDER BY timestamp DESC LIMIT ? OFFSET ?`;
       params.push(limit, offset);
-      
+
       const [messages, count] = await Promise.all([
         env.DB.prepare(query).bind(...params).all(),
-        env.DB.prepare(countQuery).bind(...(phoneId ? [phoneId] : [])).first()
+        env.DB.prepare(countQuery).bind(...(phoneIccid ? [phoneIccid] : [])).first()
       ]);
-      
+
       return new Response(JSON.stringify({
         success: true,
         data: messages.results,
@@ -53,17 +53,17 @@ export const messagesHandler = {
       });
     }
   },
-  
+
   // Get specific message
   async get(request) {
     const { env } = request;
     const messageId = request.params.id;
-    
+
     try {
       const message = await env.DB.prepare(`
         SELECT * FROM messages WHERE id = ?
       `).bind(messageId).first();
-      
+
       if (!message) {
         return new Response(JSON.stringify({
           success: false,
@@ -73,7 +73,7 @@ export const messagesHandler = {
           headers: { 'Content-Type': 'application/json' }
         });
       }
-      
+
       return new Response(JSON.stringify({
         success: true,
         data: message
@@ -91,31 +91,31 @@ export const messagesHandler = {
       });
     }
   },
-  
+
   // Send SMS
   async send(request) {
     const { env } = request;
-    
+
     try {
       const body = await request.json();
-      const { phoneId, recipient, content } = body;
-      
+      const { phone_iccid, recipient, content } = body;
+
       // Validate input
-      if (!phoneId || !recipient || !content) {
+      if (!phone_iccid || !recipient || !content) {
         return new Response(JSON.stringify({
           success: false,
-          error: 'Missing required fields'
+          error: 'Missing required fields: phone_iccid, recipient, and content are required'
         }), {
           status: 400,
           headers: { 'Content-Type': 'application/json' }
         });
       }
-      
+
       // Get phone details
       const phone = await env.DB.prepare(`
         SELECT * FROM phones WHERE iccid = ? AND status = 'online'
-      `).bind(phoneId).first();
-      
+      `).bind(phone_iccid).first();
+
       if (!phone) {
         return new Response(JSON.stringify({
           success: false,
@@ -125,27 +125,27 @@ export const messagesHandler = {
           headers: { 'Content-Type': 'application/json' }
         });
       }
-      
+
       // Create message record
       const messageId = `msg-sent-${nanoid()}`;
       const timestamp = new Date().toISOString();
-      
+
       await env.DB.prepare(`
         INSERT INTO messages (id, phone_iccid, phone_number, content, timestamp, type, recipient, status)
         VALUES (?, ?, ?, ?, ?, 'sent', ?, 'sending')
       `).bind(
         messageId,
-        phoneId,
+        phone_iccid,
         phone.number,
         content,
         timestamp,
         recipient
       ).run();
-      
+
       // Broadcast new message event
       const messageData = {
         id: messageId,
-        phone_iccid: phoneId,
+        phone_iccid: phone_iccid,
         phone_number: phone.number,
         content,
         timestamp,
@@ -154,11 +154,11 @@ export const messagesHandler = {
         status: 'sending'
       };
       await broadcastEvent(env, 'message:created', messageData);
-      
+
       // Send SMS request to daemon via WebSocket
       const roomId = env.WEBSOCKET_ROOMS.idFromName('global');
       const room = env.WEBSOCKET_ROOMS.get(roomId);
-      
+
       // Forward message to daemon
       await room.fetch('http://internal/forward-to-daemon', {
         method: 'POST',
@@ -167,19 +167,19 @@ export const messagesHandler = {
           type: 'send_message',
           data: {
             message_id: messageId,
-            phone_iccid: phoneId,
+            phone_iccid: phone_iccid,
             recipient: recipient,
             content: content
           }
         })
       });
-      
+
       return new Response(JSON.stringify({
         success: true,
         messageId: messageId,  // Add messageId at top level for WebSocket handler
         data: {
           id: messageId,
-          phoneId,
+          phone_iccid: phone_iccid,
           recipient,
           content,
           timestamp,

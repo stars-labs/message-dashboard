@@ -1,5 +1,0 @@
-
- ⛅️ wrangler 4.24.0 (update available 4.24.3)
-─────────────────────────────────────────────
-Successfully created tail, expires at 2025-07-16T15:53:00Z
-Connected to sms-dashboard, waiting for logs...

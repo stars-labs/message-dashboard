@@ -34,15 +34,15 @@ export const swaggerSpec = {
           required: true,
           content: {
             "application/json": {
-              schema: { 
-                "$ref": "#/components/schemas/MessageUploadRequest" 
+              schema: {
+                "$ref": "#/components/schemas/MessageUploadRequest"
               },
               examples: {
                 single: {
                   summary: "Single message",
                   value: {
                     messages: [{
-                      phone_id: "SIM_001",
+                      phone_iccid: "8965030124051507851",
                       phone_number: "+8613800138000",
                       content: "[淘宝] 验证码123456，您正在登录，请勿告诉他人。",
                       source: "10690000",
@@ -55,12 +55,12 @@ export const swaggerSpec = {
                   value: {
                     messages: [
                       {
-                        phone_id: "SIM_001",
+                        phone_iccid: "8965030124051507851",
                         phone_number: "+8613800138000",
                         content: "[京东] 验证码：654321"
                       },
                       {
-                        phone_id: "SIM_002",
+                        phone_iccid: "8965030124051507852",
                         phone_number: "+85298765432",
                         content: "Your WhatsApp code: 789012"
                       }
@@ -76,8 +76,8 @@ export const swaggerSpec = {
             description: "Messages uploaded successfully",
             content: {
               "application/json": {
-                schema: { 
-                  "$ref": "#/components/schemas/MessageUploadResponse" 
+                schema: {
+                  "$ref": "#/components/schemas/MessageUploadResponse"
                 }
               }
             }
@@ -115,8 +115,8 @@ export const swaggerSpec = {
           required: true,
           content: {
             "application/json": {
-              schema: { 
-                "$ref": "#/components/schemas/PhoneUpdateRequest" 
+              schema: {
+                "$ref": "#/components/schemas/PhoneUpdateRequest"
               },
               examples: {
                 single: {
@@ -162,8 +162,8 @@ export const swaggerSpec = {
             description: "Phone status updated successfully",
             content: {
               "application/json": {
-                schema: { 
-                  "$ref": "#/components/schemas/PhoneUpdateResponse" 
+                schema: {
+                  "$ref": "#/components/schemas/PhoneUpdateResponse"
                 }
               }
             }
@@ -204,35 +204,35 @@ export const swaggerSpec = {
     schemas: {
       Message: {
         type: "object",
-        required: ["phone_id", "phone_number", "content"],
+        required: ["phone_iccid", "phone_number", "content"],
         properties: {
-          id: { 
-            type: "string", 
+          id: {
+            type: "string",
             description: "Message ID (auto-generated if not provided)",
-            example: "msg-001" 
+            example: "msg-001"
           },
-          phone_id: { 
-            type: "string", 
-            description: "Phone/SIM identifier",
-            example: "SIM_001" 
+          phone_iccid: {
+            type: "string",
+            description: "Phone ICCID identifier",
+            example: "8965030124051507851"
           },
-          phone_number: { 
-            type: "string", 
+          phone_number: {
+            type: "string",
             description: "Phone number in E.164 format",
-            example: "+8613800138000" 
+            example: "+8613800138000"
           },
-          content: { 
-            type: "string", 
+          content: {
+            type: "string",
             description: "SMS message content",
-            example: "[淘宝] 验证码123456，您正在登录，请勿告诉他人。" 
+            example: "[淘宝] 验证码123456，您正在登录，请勿告诉他人。"
           },
-          source: { 
-            type: "string", 
+          source: {
+            type: "string",
             description: "Sender number or name",
-            example: "10690000" 
+            example: "10690000"
           },
-          timestamp: { 
-            type: "string", 
+          timestamp: {
+            type: "string",
             format: "date-time",
             description: "Message timestamp in ISO 8601 format",
             example: "2024-01-09T10:30:00Z"
@@ -243,68 +243,68 @@ export const swaggerSpec = {
         type: "object",
         required: ["id", "status"],
         properties: {
-          id: { 
-            type: "string", 
+          id: {
+            type: "string",
             description: "Phone/SIM identifier",
-            example: "SIM_001" 
+            example: "SIM_001"
           },
-          number: { 
-            type: "string", 
+          number: {
+            type: "string",
             description: "Phone number in E.164 format",
-            example: "+8613800138000" 
+            example: "+8613800138000"
           },
-          country: { 
-            type: "string", 
+          country: {
+            type: "string",
             description: "Country code (ISO 3166-1 alpha-2)",
-            example: "CN" 
+            example: "CN"
           },
-          flag: { 
-            type: "string", 
+          flag: {
+            type: "string",
             description: "Country flag emoji",
-            example: "🇨🇳" 
+            example: "🇨🇳"
           },
-          carrier: { 
-            type: "string", 
+          carrier: {
+            type: "string",
             description: "Mobile carrier name",
-            example: "中国移动" 
+            example: "中国移动"
           },
-          status: { 
-            type: "string", 
+          status: {
+            type: "string",
             enum: ["online", "offline", "error"],
             description: "Phone status",
-            example: "online" 
+            example: "online"
           },
-          signal: { 
-            type: "integer", 
+          signal: {
+            type: "integer",
             minimum: 0,
             maximum: 100,
             description: "Signal strength percentage",
-            example: 85 
+            example: 85
           },
-          iccid: { 
-            type: "string", 
+          iccid: {
+            type: "string",
             description: "SIM card ICCID",
-            example: "89860000000000000000" 
+            example: "89860000000000000000"
           },
-          rssi: { 
-            type: "number", 
+          rssi: {
+            type: "number",
             description: "Received Signal Strength Indicator in dBm",
-            example: -44.0 
+            example: -44.0
           },
-          rsrq: { 
-            type: "number", 
+          rsrq: {
+            type: "number",
             description: "Reference Signal Received Quality in dB",
-            example: -6.0 
+            example: -6.0
           },
-          rsrp: { 
-            type: "number", 
+          rsrp: {
+            type: "number",
             description: "Reference Signal Received Power in dBm",
-            example: -70.0 
+            example: -70.0
           },
-          snr: { 
-            type: "number", 
+          snr: {
+            type: "number",
             description: "Signal-to-Noise Ratio in dB",
-            example: 28.0 
+            example: 28.0
           }
         }
       },
@@ -340,50 +340,50 @@ export const swaggerSpec = {
       MessageUploadResponse: {
         type: "object",
         properties: {
-          success: { 
+          success: {
             type: "boolean",
-            example: true 
+            example: true
           },
-          processed: { 
+          processed: {
             type: "integer",
             description: "Number of messages processed",
-            example: 1 
+            example: 1
           },
-          message: { 
+          message: {
             type: "string",
-            example: "Successfully uploaded 1 messages" 
+            example: "Successfully uploaded 1 messages"
           }
         }
       },
       PhoneUpdateResponse: {
         type: "object",
         properties: {
-          success: { 
+          success: {
             type: "boolean",
-            example: true 
+            example: true
           },
-          updated: { 
+          updated: {
             type: "integer",
             description: "Number of phones updated",
-            example: 1 
+            example: 1
           },
-          message: { 
+          message: {
             type: "string",
-            example: "Successfully updated 1 phones" 
+            example: "Successfully updated 1 phones"
           }
         }
       },
       ErrorResponse: {
         type: "object",
         properties: {
-          success: { 
+          success: {
             type: "boolean",
-            example: false 
+            example: false
           },
-          error: { 
+          error: {
             type: "string",
             description: "Error message",
-            example: "Unauthorized" 
+            example: "Unauthorized"
           }
         }
       }
