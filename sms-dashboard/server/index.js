@@ -275,6 +275,18 @@ router.post('/api/control/phones', async (request) => {
   }
 });
 
+router.delete('/api/control/messages', async (request) => {
+  // Clear all messages endpoint
+  try {
+    return await controlHandler.clearMessages(request);
+  } catch (error) {
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+});
+
 router.post('/api/control/cleanup-test-data', async (request) => {
   // Cleanup test data endpoint
   try {

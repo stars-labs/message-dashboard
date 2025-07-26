@@ -450,5 +450,44 @@ export const controlHandler = {
         headers: { 'Content-Type': 'application/json' }
       });
     }
+  },
+
+  // Clear all messages (admin endpoint)
+  async clearMessages(request) {
+    const { env } = request;
+    
+    // Check API key
+    const apiKey = request.headers.get('X-API-Key');
+    const expectedKey = env.API_KEY || '4025b019988238528f1fd5e909d0363c46e4e48490ea5045a9a490c259071cba';
+    
+    if (!apiKey || apiKey !== expectedKey) {
+      return new Response(JSON.stringify({
+        success: false,
+        error: 'Invalid API key'
+      }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
+    try {
+      const result = await env.DB.prepare('DELETE FROM messages').run();
+      
+      return new Response(JSON.stringify({
+        success: true,
+        message: `Cleared ${result.changes} messages`
+      }), {
+        headers: { 'Content-Type': 'application/json' }
+      });
+    } catch (error) {
+      console.error('[control.js] Clear messages error:', error);
+      return new Response(JSON.stringify({
+        success: false,
+        error: 'Failed to clear messages: ' + error.message
+      }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
   }
 };
