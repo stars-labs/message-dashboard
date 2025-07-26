@@ -1,11 +1,16 @@
-{ lib, stdenv, zig, fetchFromGitHub }:
+{
+  lib,
+  stdenv,
+  zig,
+  fetchFromGitHub,
+}:
 
 stdenv.mkDerivation rec {
   pname = "sms-daemon";
-  version = "0.1.0";
+  version = "0.1.1";
 
   # Use local source or fetch from git
-  src = ../../orange-pi-daemon;  # Relative path to the zig source
+  src = ../../orange-pi-daemon; # Relative path to the zig source
 
   nativeBuildInputs = [ zig ];
 
