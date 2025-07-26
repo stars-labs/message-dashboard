@@ -19,10 +19,9 @@ const Config = struct {
 
 const Message = struct {
     id: ?[]const u8 = null,
-    phone_id: []const u8,
+    phone_iccid: []const u8,
     phone_number: []const u8,
     content: []const u8,
-    source: ?[]const u8 = null,
     timestamp: []const u8,
 };
 
@@ -53,7 +52,7 @@ const PhoneUpdateRequest = struct {
 };
 
 const SendMessageRequest = struct {
-    phone_id: []const u8,
+    phone_iccid: []const u8,
     recipient: []const u8,
     content: []const u8,
     priority: ?[]const u8 = null,
@@ -549,7 +548,7 @@ const ModemManager = struct {
 
             var message = Message{
                 .id = try std.fmt.allocPrint(self.allocator, "msg-{s}-{s}", .{ modem_id, sms_id }),
-                .phone_id = try std.fmt.allocPrint(self.allocator, "SIM_{s}", .{modem_id}),
+                .phone_iccid = try std.fmt.allocPrint(self.allocator, "SIM_{s}", .{modem_id}),
                 .phone_number = "",
                 .content = "",
                 .timestamp = "",
@@ -1493,11 +1492,18 @@ const WebSocketClient = struct {
                     std.log.err("   Full error data: {s}", .{error_json});
                 }
 
-                // Handle failed message upload
+                // Handle failed message upload using request_id if available
                 const error_message = if (data.object.get("message")) |msg| msg.string else "Unknown error";
-                self.handleMessageUploadConfirmation(message_id, false, error_message) catch |err| {
-                    std.log.err("Failed to handle error response: {any}", .{err});
-                };
+                if (data.object.get("request_id")) |req_id| {
+                    self.handleMessageUploadConfirmation(req_id.string, false, error_message) catch |err| {
+                        std.log.err("Failed to handle error response: {any}", .{err});
+                    };
+                } else {
+                    // Fallback to message_id if no request_id (for backward compatibility)
+                    self.handleMessageUploadConfirmation(message_id, false, error_message) catch |err| {
+                        std.log.err("Failed to handle error response: {any}", .{err});
+                    };
+                }
             } else {
                 std.log.err("   No error data provided", .{});
                 // Still handle as failure
@@ -1521,18 +1527,9 @@ const WebSocketClient = struct {
         } else if (std.mem.eql(u8, message_type, "phones:updated")) {
             std.log.info("Received phones:updated message", .{});
         } else if (std.mem.eql(u8, message_type, "messages:bulk_created")) {
-            std.log.info("✅ Messages successfully uploaded and saved to database", .{});
-            if (message_data) |data| {
-                if (data.object.get("length")) |len| {
-                    std.log.info("📝 {d} messages confirmed saved", .{len.integer});
-                } else if (data == .array) {
-                    std.log.info("📝 {d} messages confirmed saved", .{data.array.items.len});
-                }
-            }
-            // Handle successful message upload confirmation
-            self.handleMessageUploadConfirmation(message_id, true, null) catch |err| {
-                std.log.err("Failed to handle message upload confirmation: {any}", .{err});
-            };
+            // This is a broadcast to all clients, not specifically for the daemon
+            // The daemon should wait for the ack message instead
+            std.log.info("Received messages:bulk_created broadcast (ignoring - waiting for ack)", .{});
         } else if (std.mem.eql(u8, message_type, "ack")) {
             // Server acknowledgment - check if it's for message upload
             if (message_data) |data| {
@@ -1718,9 +1715,18 @@ const WebSocketClient = struct {
         const phones_json = try json.stringifyAlloc(self.allocator, PhoneUpdateRequest{ .phones = phones }, .{ .emit_null_optional_fields = false });
         defer self.allocator.free(phones_json);
 
-        const start = std.mem.indexOf(u8, phones_json, "[").?;
-        const end = std.mem.lastIndexOf(u8, phones_json, "]").? + 1;
-        const phones_array = phones_json[start..end];
+        // Safely extract the phones array from JSON, or use the full JSON if array markers not found
+        const phones_array = if (std.mem.indexOf(u8, phones_json, "[")) |start| blk: {
+            if (std.mem.lastIndexOf(u8, phones_json, "]")) |end| {
+                break :blk phones_json[start..end + 1];
+            } else {
+                std.log.warn("JSON end bracket not found, using full phones JSON", .{});
+                break :blk phones_json;
+            }
+        } else blk: {
+            std.log.warn("JSON start bracket not found, using full phones JSON", .{});
+            break :blk phones_json;
+        };
 
         return try std.fmt.allocPrint(self.allocator,
             \\{{"type":"phone_update","id":"{s}","timestamp":"{s}","data":{{"phones":{s}}}}}
@@ -1737,9 +1743,18 @@ const WebSocketClient = struct {
         const messages_json = try json.stringifyAlloc(self.allocator, MessageUploadRequest{ .messages = messages }, .{ .emit_null_optional_fields = false });
         defer self.allocator.free(messages_json);
 
-        const start = std.mem.indexOf(u8, messages_json, "[").?;
-        const end = std.mem.lastIndexOf(u8, messages_json, "]").? + 1;
-        const messages_array = messages_json[start..end];
+        // Safely extract the messages array from JSON, or use the full JSON if array markers not found
+        const messages_array = if (std.mem.indexOf(u8, messages_json, "[")) |start| blk: {
+            if (std.mem.lastIndexOf(u8, messages_json, "]")) |end| {
+                break :blk messages_json[start..end + 1];
+            } else {
+                std.log.warn("JSON end bracket not found, using full messages JSON", .{});
+                break :blk messages_json;
+            }
+        } else blk: {
+            std.log.warn("JSON start bracket not found, using full messages JSON", .{});
+            break :blk messages_json;
+        };
 
         return try std.fmt.allocPrint(self.allocator,
             \\{{"type":"message_upload","id":"{s}","timestamp":"{s}","data":{{"messages":{s}}}}}
@@ -1833,6 +1848,10 @@ pub fn main() !void {
     var last_phone_states = std.ArrayList(Phone).init(allocator);
     defer last_phone_states.deinit();
 
+    // Track message IDs that have been uploaded but not yet confirmed deleted
+    var uploaded_message_ids = std.StringHashMap(void).init(allocator);
+    defer uploaded_message_ids.deinit();
+
     std.log.info("Starting event-driven daemon loop", .{});
 
     var last_heartbeat_time: i64 = std.time.timestamp();
@@ -1901,11 +1920,16 @@ pub fn main() !void {
 
             // Store messages with their metadata
             for (msg_result.messages, 0..) |message, i| {
-                try all_messages.append(message);
+                // Update message phone_iccid to use the actual ICCID
+                var updated_message = message;
+                allocator.free(message.phone_iccid);
+                updated_message.phone_iccid = try allocator.dupe(u8, phone.iccid);
+                
+                try all_messages.append(updated_message);
                 try message_infos.append(.{
                     .modem_id = modem_id,
                     .sms_id = msg_result.sms_ids[i],
-                    .message = message,
+                    .message = updated_message,
                 });
             }
         }
@@ -1967,15 +1991,42 @@ pub fn main() !void {
         // Upload messages if any (messages are always uploaded immediately)
         if (all_messages.items.len > 0) {
             if (websocket_client.authenticated) {
-                std.log.info("Uploading {d} new messages (with confirmation tracking)", .{all_messages.items.len});
-                const upload_id = websocket_client.sendMessageUpload(all_messages.items, message_infos.items) catch |err| {
-                    std.log.err("Failed to upload messages via WebSocket: {any}", .{err});
-                    continue; // Skip deletion, try again next cycle
-                };
-                defer allocator.free(upload_id);
+                // Filter out messages that have already been uploaded
+                var new_messages = std.ArrayList(Message).init(allocator);
+                var new_message_infos = std.ArrayList(MessageInfo).init(allocator);
+                defer new_messages.deinit();
+                defer new_message_infos.deinit();
 
-                std.log.info("📤 Messages uploaded with tracking ID: {s} - awaiting server confirmation", .{upload_id});
-                // Messages will be deleted from modems only after server confirms they were saved
+                for (all_messages.items, 0..) |msg, i| {
+                    if (msg.id) |msg_id| {
+                        if (!uploaded_message_ids.contains(msg_id)) {
+                            try new_messages.append(msg);
+                            try new_message_infos.append(message_infos.items[i]);
+                        }
+                    }
+                }
+
+                if (new_messages.items.len > 0) {
+                    std.log.info("Uploading {d} new messages (with confirmation tracking)", .{new_messages.items.len});
+                    const upload_id = websocket_client.sendMessageUpload(new_messages.items, new_message_infos.items) catch |err| {
+                        std.log.err("Failed to upload messages via WebSocket: {any}", .{err});
+                        continue; // Skip deletion, try again next cycle
+                    };
+                    defer allocator.free(upload_id);
+
+                    // Add message IDs to uploaded set
+                    for (new_messages.items) |msg| {
+                        if (msg.id) |msg_id| {
+                            const id_copy = try allocator.dupe(u8, msg_id);
+                            try uploaded_message_ids.put(id_copy, {});
+                        }
+                    }
+
+                    std.log.info("📤 Messages uploaded with tracking ID: {s} - awaiting server confirmation", .{upload_id});
+                    // Messages will be deleted from modems only after server confirms they were saved
+                } else {
+                    std.log.info("All {d} messages have already been uploaded, waiting for confirmation", .{all_messages.items.len});
+                }
             } else {
                 std.log.err("WebSocket not connected, cannot upload messages", .{});
             }

@@ -11,6 +11,13 @@
       url = "github:Mic92/sops-nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    lanzaboote = {
+      url = "github:nix-community/lanzaboote";
+      inputs = {
+        nixpkgs.follows = "nixpkgs";
+        flake-parts.follows = "flake-parts";
+      };
+    };
   };
 
   outputs =
@@ -19,6 +26,7 @@
       nixpkgs,
       flake-parts,
       sops-nix,
+      lanzaboote,
       ...
     }@inputs:
     flake-parts.lib.mkFlake { inherit inputs; } {
@@ -44,6 +52,8 @@
             modules = [
               ./nixos-config/orange-pi/configuration.nix
               sops-nix.nixosModules.sops
+              lanzaboote.nixosModules.lanzaboote
+
               (
                 {
                   config,

@@ -24,6 +24,14 @@ export const controlHandler = {
     try {
       const { messages } = await request.json();
       
+      console.log(`[control.js] Received ${messages?.length || 0} messages to upload`);
+      if (messages?.length > 0) {
+        console.log(`[control.js] First message sample:`, JSON.stringify(messages[0]));
+        // Log all unique phone_iccids
+        const uniquePhoneIds = [...new Set(messages.map(m => m.phone_iccid))];
+        console.log(`[control.js] Unique phone IDs in messages:`, uniquePhoneIds);
+      }
+      
       if (!Array.isArray(messages)) {
         return new Response(JSON.stringify({
           success: false,
@@ -42,21 +50,42 @@ export const controlHandler = {
       for (let i = 0; i < messages.length; i += batchSize) {
         const batch = messages.slice(i, i + batchSize);
         const stmt = env.DB.prepare(`
-          INSERT INTO messages (id, phone_iccid, phone_number, content, source, timestamp, type, verification_code)
-          VALUES (?, ?, ?, ?, ?, ?, 'received', ?)
+          INSERT INTO messages (id, phone_iccid, phone_number, content, timestamp, type, verification_code)
+          VALUES (?, ?, ?, ?, ?, 'received', ?)
         `);
         
-        const promises = batch.map(msg => {
+        const promises = batch.map(async (msg, index) => {
+          const phone_iccid = msg.phone_iccid;
+          
+          // Log the phone_iccid to debug foreign key issues
+          if (index === 0) {
+            console.log(`[control.js] Message ${index} phone_iccid: ${phone_iccid}`);
+            // Check if this ICCID exists in the phones table
+            const checkStmt = env.DB.prepare('SELECT iccid FROM phones WHERE iccid = ?');
+            const result = await checkStmt.bind(phone_iccid).all();
+            console.log(`[control.js] ICCID ${phone_iccid} exists in phones table:`, result.results.length > 0);
+          }
+          
+          // Validate required fields
+          if (!phone_iccid) {
+            console.error(`[control.js] Message ${index} missing phone_iccid:`, msg);
+            throw new Error(`Message ${index} missing required field: phone_iccid`);
+          }
+          if (!msg.content) {
+            console.error(`[control.js] Message ${index} missing content:`, msg);
+            throw new Error(`Message ${index} missing required field: content`);
+          }
+          
           const messageId = msg.id || `msg-${nanoid()}`;
           const verificationCode = extractVerificationCode(msg.content);
           const timestamp = msg.timestamp || new Date().toISOString();
+          const phoneNumber = msg.phone_number || null;
           
           newMessages.push({
             id: messageId,
-            phone_iccid: msg.phone_iccid,
-            phone_number: msg.phone_number,
+            phone_iccid: phone_iccid,
+            phone_number: phoneNumber,
             content: msg.content,
-            source: msg.source || null,
             timestamp,
             type: 'received',
             verification_code: verificationCode
@@ -64,10 +93,9 @@ export const controlHandler = {
           
           return stmt.bind(
             messageId,
-            msg.phone_iccid,
-            msg.phone_number,
+            phone_iccid,
+            phoneNumber,
             msg.content,
-            msg.source || null,
             timestamp,
             verificationCode
           ).run();
@@ -90,10 +118,11 @@ export const controlHandler = {
         headers: { 'Content-Type': 'application/json' }
       });
     } catch (error) {
-      // Upload messages error
+      console.error('[control.js] Upload messages error:', error);
+      console.error('[control.js] Error stack:', error.stack);
       return new Response(JSON.stringify({
         success: false,
-        error: 'Failed to upload messages'
+        error: 'Failed to upload messages: ' + error.message
       }), {
         status: 500,
         headers: { 'Content-Type': 'application/json' }
