@@ -682,6 +682,7 @@ export class WebSocketRoom {
               id: crypto.randomUUID(),
               timestamp: new Date().toISOString(),
               data: {
+                request_id: message.id,
                 code: 'PERSISTENCE_ERROR',
                 message: 'Failed to save phones: ' + error.message + ' | Debug: ' + JSON.stringify(debugInfo)
               }
@@ -715,7 +716,9 @@ export class WebSocketRoom {
             });
             
             if (!response.ok) {
-              throw new Error(`Failed to persist messages: ${response.status}`);
+              const errorText = await response.text();
+              console.error(`[WebSocketRoom] Failed to persist messages - Status: ${response.status}, Error: ${errorText}`);
+              throw new Error(`Failed to persist messages: ${response.status} - ${errorText}`);
             }
             
             console.log(`[WebSocketRoom] Successfully persisted ${messages.length} messages to database`);
@@ -740,6 +743,7 @@ export class WebSocketRoom {
               id: crypto.randomUUID(),
               timestamp: new Date().toISOString(),
               data: {
+                request_id: message.id,
                 code: 'PERSISTENCE_ERROR',
                 message: 'Failed to save messages: ' + error.message
               }
@@ -960,7 +964,7 @@ export class WebSocketRoom {
           'X-Internal-Request': 'true'
         },
         body: JSON.stringify({
-          phoneId: data.phone_iccid,  // HTTP API expects phoneId
+          phone_iccid: data.phone_iccid,
           recipient: data.recipient,
           content: data.content
         })
