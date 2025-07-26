@@ -692,19 +692,22 @@ const ModemManager = struct {
     fn formatTimestamp(self: ModemManager, timestamp: []const u8) ![]const u8 {
         // Convert mmcli timestamp format to ISO 8601
         // Example: "2024-01-09 10:30:00" -> "2024-01-09T10:30:00Z"
-        var buffer = try self.allocator.alloc(u8, timestamp.len + 2);
+        
+        // Allocate buffer with space for 'Z' suffix
+        var buffer = try self.allocator.alloc(u8, timestamp.len + 1);
+        
+        // Copy timestamp
         @memcpy(buffer[0..timestamp.len], timestamp);
-
+        
         // Replace space with T
         if (std.mem.indexOf(u8, buffer, " ")) |pos| {
             buffer[pos] = 'T';
         }
-
-        // Add Z suffix
-        buffer[buffer.len - 2] = 'Z';
-        buffer[buffer.len - 1] = 0;
-
-        return buffer[0 .. buffer.len - 1];
+        
+        // Add Z suffix at the end
+        buffer[timestamp.len] = 'Z';
+        
+        return buffer;
     }
 };
 
@@ -1687,16 +1690,64 @@ const WebSocketClient = struct {
     }
 
     pub fn formatTimestamp(self: WebSocketClient) ![]const u8 {
-        // Use current time but with safe conversion
-        const now = std.time.timestamp();
-        const safe_timestamp = @as(u32, @truncate(@as(u64, @bitCast(now))));
-
-        // Simple timestamp format: 2025-07-16T09:30:XX where XX is seconds
-        const seconds = safe_timestamp % 60;
-        const minutes = (safe_timestamp / 60) % 60;
-        const hours = (safe_timestamp / 3600) % 24;
-
-        return try std.fmt.allocPrint(self.allocator, "2025-07-16T{d:0>2}:{d:0>2}:{d:0>2}Z", .{ hours, minutes, seconds });
+        // Get current timestamp in milliseconds
+        const now_ms = std.time.milliTimestamp();
+        
+        // Convert to seconds for easier calculation
+        const now_s = @divTrunc(now_ms, 1000);
+        
+        // Calculate date components
+        // Unix epoch: January 1, 1970, 00:00:00 UTC
+        const seconds_per_day = 86400;
+        const days_since_epoch = @divTrunc(now_s, seconds_per_day);
+        const seconds_today = @mod(now_s, seconds_per_day);
+        
+        // Calculate time components
+        const hours = @divTrunc(seconds_today, 3600);
+        const minutes = @divTrunc(@mod(seconds_today, 3600), 60);
+        const seconds = @mod(seconds_today, 60);
+        
+        // Calculate year, month, day (simplified but accurate enough for our use)
+        // This is a simplified calculation - for production, consider using a proper date library
+        var year: u32 = 1970;
+        var remaining_days = days_since_epoch;
+        
+        // Account for leap years
+        while (remaining_days >= 365) {
+            const is_leap = (year % 4 == 0 and year % 100 != 0) or (year % 400 == 0);
+            const days_in_year: u32 = if (is_leap) 366 else 365;
+            if (remaining_days >= days_in_year) {
+                remaining_days -= days_in_year;
+                year += 1;
+            } else {
+                break;
+            }
+        }
+        
+        // Calculate month and day (simplified)
+        const month_days = [_]u32{ 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+        var month: u32 = 1;
+        var day = remaining_days + 1;
+        
+        for (month_days) |days_in_month| {
+            const adjusted_days = if (month == 2 and ((year % 4 == 0 and year % 100 != 0) or (year % 400 == 0))) 
+                days_in_month + 1 
+            else 
+                days_in_month;
+                
+            if (day > adjusted_days) {
+                day -= adjusted_days;
+                month += 1;
+            } else {
+                break;
+            }
+        }
+        
+        // Format as ISO 8601
+        return try std.fmt.allocPrint(self.allocator, 
+            "{d:0>4}-{d:0>2}-{d:0>2}T{d:0>2}:{d:0>2}:{d:0>2}Z", 
+            .{ year, month, day, hours, minutes, seconds }
+        );
     }
 
     // createAuthMessage function removed - no authentication required
@@ -1997,7 +2048,14 @@ pub fn main() !void {
                     if (msg.id) |msg_id| {
                         if (!uploaded_message_ids.contains(msg_id)) {
                             try new_messages.append(msg);
-                            try new_message_infos.append(message_infos.items[i]);
+                            // Ensure we don't go out of bounds
+                            if (i < message_infos.items.len) {
+                                try new_message_infos.append(message_infos.items[i]);
+                            } else {
+                                std.log.err("Message info index out of bounds: {d} >= {d}", .{i, message_infos.items.len});
+                                // Skip this message
+                                _ = new_messages.pop();
+                            }
                         }
                     }
                 }
