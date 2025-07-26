@@ -1499,17 +1499,13 @@ const WebSocketClient = struct {
                         std.log.err("Failed to handle error response: {any}", .{err});
                     };
                 } else {
-                    // Fallback to message_id if no request_id (for backward compatibility)
-                    self.handleMessageUploadConfirmation(message_id, false, error_message) catch |err| {
-                        std.log.err("Failed to handle error response: {any}", .{err});
-                    };
+                    // No request_id means we can't match this error to a specific upload
+                    std.log.warn("Error response received without request_id, cannot handle confirmation", .{});
                 }
             } else {
                 std.log.err("   No error data provided", .{});
-                // Still handle as failure
-                self.handleMessageUploadConfirmation(message_id, false, "No error details provided") catch |err| {
-                    std.log.err("Failed to handle error response: {any}", .{err});
-                };
+                // Cannot handle confirmation without error data containing request_id
+                std.log.warn("Error response received without data, cannot handle confirmation", .{});
             }
         } else if (std.mem.eql(u8, message_type, "ack")) {
             // Server acknowledgment
