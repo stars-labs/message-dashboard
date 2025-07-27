@@ -131,54 +131,16 @@ export const auth0Handler = {
         roles: userRoles
       };
       
-      // Check if this is a new user
-      const existingUser = await env.DB.prepare(`
-        SELECT id FROM users WHERE id = ?
-      `).bind(userId).first();
-      
-      const isNewUser = !existingUser;
-      
-      // Create or update user with only existing columns
-      if (isNewUser) {
-        // Insert new user - only use columns that exist in the table
-        await env.DB.prepare(`
-          INSERT INTO users (id, email, name, provider, created_at, last_login)
-          VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))
-        `).bind(
-          user.id, 
-          user.email, 
-          user.name, 
-          user.provider
-        ).run();
-      } else {
-        // Update existing user - only update columns that exist
-        await env.DB.prepare(`
-          UPDATE users SET
-            email = ?,
-            name = ?,
-            last_login = datetime('now')
-          WHERE id = ?
-        `).bind(
-          user.email, 
-          user.name, 
-          user.id
-        ).run();
-      }
-      
-      // Assign default group for new users
-      if (isNewUser) {
-        const defaultGroup = env.DEFAULT_USER_GROUP || 'viewer';
-        await env.DB.prepare(`
-          INSERT INTO user_groups (user_id, group_id, assigned_by)
-          VALUES (?, ?, 'system')
-        `).bind(userId, defaultGroup).run();
-        
-        // Create default user settings
-        await env.DB.prepare(`
-          INSERT INTO user_settings (user_id)
-          VALUES (?)
-        `).bind(userId).run();
-      }
+      // No need to store user in database - Auth0 handles user management
+      // Just log the authentication event in audit_logs
+      await env.DB.prepare(`
+        INSERT INTO audit_logs (action, resource_type, resource_id, user_email, details, timestamp)
+        VALUES ('login', 'user', ?, ?, ?, datetime('now'))
+      `).bind(
+        user.id,
+        user.email,
+        JSON.stringify({ provider: 'auth0', roles: userRoles })
+      ).run();
       
       // Check if user is in allowed domain (if configured)
       if (env.ALLOWED_EMAIL_DOMAINS) {
@@ -186,10 +148,15 @@ export const auth0Handler = {
         const emailDomain = user.email.split('@')[1];
         
         if (!allowedDomains.includes(emailDomain)) {
-          // Update user as inactive
+          // Log denied access attempt
           await env.DB.prepare(`
-            UPDATE users SET is_active = FALSE WHERE id = ?
-          `).bind(userId).run();
+            INSERT INTO audit_logs (action, resource_type, resource_id, user_email, details, timestamp)
+            VALUES ('login_denied', 'user', ?, ?, ?, datetime('now'))
+          `).bind(
+            user.id,
+            user.email,
+            JSON.stringify({ reason: 'Email domain not allowed', domain: emailDomain })
+          ).run();
           
           return new Response('Access denied: Email domain not allowed', { status: 403 });
         }

@@ -151,7 +151,7 @@ pub const ModemManager = struct {
                 phone.signal = 0;
             }
             
-            std.log.info("Calculated signal for modem {s}: {d} (RSSI: {d})", .{ modem_id, phone.signal.?, @as(i32, @intFromFloat(rssi)) });
+            std.log.info("Calculated signal for modem {s}: {d} (RSSI: {d})", .{ modem_id, phone.signal, @as(i32, @intFromFloat(rssi)) });
         } else {
             std.log.warn("No RSSI found for modem {s}, cannot calculate signal strength", .{modem_id});
         }
@@ -252,7 +252,7 @@ pub const ModemManager = struct {
                         const message = Message{
                             .id = try std.fmt.allocPrint(self.allocator, "sms-{s}-{s}", .{ modem_id, sms_id }),
                             .phone_iccid = try self.allocator.dupe(u8, modem_id),
-                            .phone_number = phone_number,
+                            .phone_number = phone_number orelse try self.allocator.dupe(u8, "unknown"),
                             .content = msg_content,
                             .timestamp = timestamp orelse try self.allocator.dupe(u8, ""),
                         };
