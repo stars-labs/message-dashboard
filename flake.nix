@@ -110,7 +110,7 @@
         }:
         let
           # SMS daemon version - single source of truth
-          daemonVersion = "0.3.0"; # Multi-threaded per-modem architecture for real-time message processing
+          daemonVersion = "1.1.1"; # Added detailed HTTP and message debugging
           
           # Orange Pi SMS daemon package
           sms-daemon = pkgs.stdenv.mkDerivation rec {

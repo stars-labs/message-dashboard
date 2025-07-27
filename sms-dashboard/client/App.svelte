@@ -24,17 +24,16 @@
   let user = null;
   let loading = true;
   let dataLoading = true; // Track data loading separately
-  let wsConnected = false;
-  let wsUnsubscribers = [];
+  let sseConnected = false;
+  let sseUnsubscribers = [];
   let currentView = "dashboard"; // 'dashboard' or 'iccid-mappings'
   let showIccidMappingDialog = false;
   let phoneToMap = null;
   let daemonStatus = {
     connected: true, // Assume connected initially to avoid "数据过期" flash
-    lastHeartbeat: Date.now(),
     lastDataUpdate: Date.now(),
-    connectionCount: 0,
-    timestamp: Date.now(),
+    lastPhoneUpdate: Date.now(),
+    healthCheckTime: Date.now(),
   };
 
   let stats = {
@@ -120,6 +119,10 @@
       dataLoading = false;
       // Update daemon status to show fresh data
       daemonStatus.lastDataUpdate = Date.now();
+      daemonStatus.lastPhoneUpdate = Date.now();
+      
+      // Check daemon health based on recent phone data
+      updateDaemonHealthStatus();
     } catch (error) {
       console.warn("Failed to load data:", error);
       // Use default values on error
@@ -141,25 +144,25 @@
     }
   }
 
-  // Helper function to establish WebSocket connection
-  async function connectWebSocket() {
+  // Helper function to establish SSE connection
+  async function connectSSE() {
     if (realtimeService.isConnected()) {
-      console.log("[App] WebSocket already connected, skipping");
+      console.log("[App] SSE already connected, skipping");
       return;
     }
 
     const token = auth.token || "anonymous";
     console.log(
-      "[App] Connecting WebSocket with token:",
+      "[App] Connecting SSE with token:",
       !!auth.token ? "authenticated" : "anonymous",
     );
 
     try {
       await realtimeService.connect(token);
-      setupWebSocketListeners();
-      console.log("[App] WebSocket connection established successfully");
+      setupSSEListeners();
+      console.log("[App] SSE connection established successfully");
     } catch (error) {
-      console.error("[App] WebSocket connection failed:", error);
+      console.error("[App] SSE connection failed:", error);
     }
   }
 
@@ -187,32 +190,40 @@
     // Set loading to false immediately to show UI
     loading = false;
 
-    // Load data and establish WebSocket connection in the background
+    // Load data and establish SSE connection in the background
     if (user) {
       // Mark daemon as initially connected to prevent "数据过期" message
       daemonStatus.connected = true;
       daemonStatus.lastDataUpdate = Date.now();
 
-      // Load data and WebSocket in parallel without blocking
+      // Load data and SSE in parallel without blocking
       Promise.all([
         loadData().finally(() => {
           dataLoading = false;
         }),
-        connectWebSocket(),
+        connectSSE(),
       ]).catch((error) => {
-        console.error("Failed to load data or connect WebSocket:", error);
+        console.error("Failed to load data or connect SSE:", error);
       });
+      
+      // Set up periodic daemon health check
+      const healthCheckInterval = setInterval(() => {
+        updateDaemonHealthStatus();
+      }, 60000); // Check every minute
+      
+      // Store interval for cleanup
+      window._daemonHealthInterval = healthCheckInterval;
     } else {
-      // Still try to connect WebSocket for anonymous users
-      connectWebSocket().catch((error) => {
-        console.error("Failed to connect WebSocket:", error);
+      // Still try to connect SSE for anonymous users
+      connectSSE().catch((error) => {
+        console.error("Failed to connect SSE:", error);
       });
     }
   });
 
-  function setupWebSocketListeners() {
+  function setupSSEListeners() {
     // Listen for new messages
-    wsUnsubscribers.push(
+    sseUnsubscribers.push(
       realtimeService.on("message:created", (msg) => {
         // New message received
         messages = [msg.data, ...messages];
@@ -223,7 +234,7 @@
     );
 
     // Listen for message updates
-    wsUnsubscribers.push(
+    sseUnsubscribers.push(
       realtimeService.on("message:updated", (msg) => {
         // Message updated
         const index = messages.findIndex((m) => m.id === msg.data.id);
@@ -235,7 +246,7 @@
     );
 
     // Listen for bulk message creation
-    wsUnsubscribers.push(
+    sseUnsubscribers.push(
       realtimeService.on("messages:bulk_created", (msg) => {
         // Bulk messages received
         messages = [...msg.data, ...messages];
@@ -246,13 +257,16 @@
     );
 
     // Listen for phone updates
-    wsUnsubscribers.push(
+    sseUnsubscribers.push(
       realtimeService.on("phones:updated", (msg) => {
         // Phones updated
-        console.log("WebSocket phones update:", msg.data);
+        console.log("SSE phones update:", msg.data);
 
-        // Only update phones if we have valid data and daemon is connected
-        // This prevents clearing phones when daemon goes offline
+        // Update daemon status when we receive phone data
+        daemonStatus.lastPhoneUpdate = Date.now();
+        daemonStatus.lastDataUpdate = Date.now();
+
+        // Only update phones if we have valid data
         if (msg.data && Array.isArray(msg.data) && msg.data.length > 0) {
           // Replace all phones with the new data (don't append)
           // The daemon sends the complete list of phones
@@ -266,7 +280,7 @@
             )
             .map((updatedPhone) => {
               console.log(
-                `WS Update - Phone ${updatedPhone.iccid}: signal=${updatedPhone.signal}, status=${updatedPhone.status}`,
+                `SSE Update - Phone ${updatedPhone.iccid}: signal=${updatedPhone.signal}, status=${updatedPhone.status}`,
               );
               // Ensure we have the proper structure
               return {
@@ -278,28 +292,26 @@
 
           // Update online device count
           stats.onlineDevices = phoneNumbers.filter(
-            (p) => p.status === "online",
+            (p) => p.status === "online" || p.status === "active",
           ).length;
           stats.totalDevices = phoneNumbers.length;
-        } else {
-          console.log(
-            "Received empty or invalid phone data, keeping existing phones",
-          );
-          // Don't clear phones on empty data - just update their status to offline if daemon is disconnected
-          if (!daemonStatus.connected) {
-            phoneNumbers = phoneNumbers.map((phone) => ({
-              ...phone,
-              status: "offline",
-            }));
-            stats.onlineDevices = 0; // No online devices when daemon is disconnected
-            // Keep totalDevices as is to show the known phone count
-          }
+          
+          // Update daemon health status
+          updateDaemonHealthStatus();
         }
       }),
     );
 
+    // Listen for connection status
+    sseUnsubscribers.push(
+      realtimeService.on("connected", () => {
+        sseConnected = true;
+        console.log("SSE connected");
+      }),
+    );
+
     // Listen for message sent responses
-    wsUnsubscribers.push(
+    sseUnsubscribers.push(
       realtimeService.on("message:sent", (msg) => {
         // Message sent result received
         console.log("Message sent result:", msg.data);
@@ -325,47 +337,26 @@
       }),
     );
 
-    // Listen for connection status
-    wsUnsubscribers.push(
-      realtimeService.on("connected", () => {
-        wsConnected = true;
-        // WebSocket connected
-      }),
-    );
-
-    // Listen for daemon status updates
-    wsUnsubscribers.push(
-      realtimeService.on("daemon:status", (msg) => {
-        const previouslyConnected = daemonStatus.connected;
-        daemonStatus = {
-          connected: msg.data.connected,
-          lastHeartbeat: msg.data.lastHeartbeat,
-          lastDataUpdate: msg.data.lastDataUpdate,
-          connectionCount: msg.data.connectionCount,
-          timestamp: msg.data.timestamp,
-        };
-        console.log("Daemon status updated:", daemonStatus);
-
-        // If daemon just went offline, mark all phones as offline
-        if (previouslyConnected && !daemonStatus.connected) {
-          console.log("Daemon disconnected, marking all phones as offline");
-          phoneNumbers = phoneNumbers.map((phone) => ({
-            ...phone,
-            status: "offline",
-          }));
-          stats.onlineDevices = 0;
-          // Keep totalDevices count to show how many phones we know about
-        }
+    // Listen for disconnection
+    sseUnsubscribers.push(
+      realtimeService.on("disconnected", () => {
+        sseConnected = false;
+        console.log("SSE disconnected");
       }),
     );
   }
 
-  // No need for periodic refresh - using WebSocket real-time updates
+  // No need for periodic refresh - using SSE real-time updates
 
   onDestroy(() => {
     // Cleanup realtime service
-    wsUnsubscribers.forEach((unsubscribe) => unsubscribe());
+    sseUnsubscribers.forEach((unsubscribe) => unsubscribe());
     realtimeService.disconnect();
+    
+    // Cleanup health check interval
+    if (window._daemonHealthInterval) {
+      clearInterval(window._daemonHealthInterval);
+    }
   });
 
   function selectPhone(phone) {
@@ -441,6 +432,34 @@
     if (diff < 3600000) return `${Math.floor(diff / 60000)}分钟前`;
     if (diff < 86400000) return `${Math.floor(diff / 3600000)}小时前`;
     return `${Math.floor(diff / 86400000)}天前`;
+  }
+
+  // Update daemon health status based on recent data
+  function updateDaemonHealthStatus() {
+    const now = Date.now();
+    const fiveMinutesAgo = now - (5 * 60 * 1000); // 5 minutes
+    
+    // Check if we have recent phone data (phones with recent status updates)
+    const hasRecentPhoneData = phoneNumbers.some(phone => {
+      return phone.status === 'active' || phone.status === 'online';
+    });
+    
+    // Daemon is considered online if:
+    // 1. We have recent data update (within 5 minutes)
+    // 2. We have phones with active/online status
+    const dataIsRecent = daemonStatus.lastDataUpdate > fiveMinutesAgo;
+    const hasActivePhones = phoneNumbers.length > 0 && hasRecentPhoneData;
+    
+    daemonStatus.connected = dataIsRecent && (hasActivePhones || phoneNumbers.length === 0);
+    daemonStatus.healthCheckTime = now;
+    
+    console.log('Daemon health check:', {
+      connected: daemonStatus.connected,
+      dataIsRecent,
+      hasActivePhones,
+      phoneCount: phoneNumbers.length,
+      lastDataUpdate: new Date(daemonStatus.lastDataUpdate).toLocaleString()
+    });
   }
 
   function getDaemonStatusText() {
@@ -566,22 +585,6 @@
               </button>
             {/if}
             <div class="flex items-center gap-4 text-sm text-gray-600">
-              <!-- WebSocket Status -->
-              <div class="flex items-center gap-2">
-                <div
-                  class="w-2 h-2 {wsConnected
-                    ? 'bg-green-500'
-                    : 'bg-red-500'} rounded-full {wsConnected
-                    ? 'animate-pulse'
-                    : ''}"
-                ></div>
-                <span
-                  >{wsConnected && realtimeService.getConnectionType()
-                    ? `${realtimeService.getConnectionType() === "websocket" ? "WS" : "SSE"}`
-                    : "Offline"}</span
-                >
-              </div>
-
               <!-- Daemon Status -->
               <div class="flex items-center gap-2">
                 <div

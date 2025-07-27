@@ -10,9 +10,8 @@ import { statsHandler } from './handlers/stats';
 import { usersHandler } from './handlers/users';
 import { groupsHandler } from './handlers/groups';
 import { iccidMappingsHandler } from './handlers/iccid-mappings';
-import { sseHandler } from './handlers/sse';
+import { sseHandler, broadcastSSEEvent, getActiveConnectionCount } from './handlers/sse';
 import { serveFrontend } from './frontend-handler';
-import { WebSocketRoom } from './durable-objects/WebSocketRoom';
 import { createRoleConfig, hasSmSAccess } from '../config/auth0-roles.js';
 
 // Simple router implementation without itty-router
@@ -102,18 +101,22 @@ router.options('*', handleCORS);
 // Public API routes
 router.get('/api/health', () => new Response('OK', { status: 200 }));
 
-// Debug endpoint to test WebSocket broadcast
-router.get('/api/debug/broadcast', async (request, env) => {
-  const { broadcastEvent } = await import('./utils/websocket');
-  const result = await broadcastEvent(env, 'phones:updated', [{
-    id: 'SIM_DEBUG',
-    signal: 99,
-    status: 'online'
-  }]);
-  return new Response(JSON.stringify(result), {
+// Debug endpoint to test SSE broadcast
+router.get('/api/debug/sse-broadcast', async (request, env) => {
+  const connectionCount = getActiveConnectionCount();
+  await broadcastSSEEvent('debug:test', {
+    message: 'Test SSE broadcast',
+    timestamp: new Date().toISOString(),
+    connections: connectionCount
+  });
+  return new Response(JSON.stringify({
+    success: true,
+    message: `Broadcasted test event to ${connectionCount} SSE connections`
+  }), {
     headers: { 'Content-Type': 'application/json' }
   });
 });
+
 
 // Test route to check HTML response
 router.get('/test-html', () => {
@@ -142,6 +145,21 @@ router.get('/api/auth/me', async (request, env, ctx) => {
 
 // SSE endpoint for real-time updates
 router.get('/api/sse', async (request, env, ctx) => {
+  // For SSE, check for token in URL parameter since EventSource doesn't support custom headers
+  const url = new URL(request.url);
+  const token = url.searchParams.get('token');
+  
+  if (token) {
+    // Add token to Authorization header so auth middleware can process it
+    const headers = new Headers(request.headers);
+    headers.set('Authorization', `Bearer ${token}`);
+    request = new Request(request.url, {
+      method: request.method,
+      headers: headers,
+      body: request.body
+    });
+  }
+  
   const authResponse = await handleAuth0(request, env, ctx);
   if (authResponse) return authResponse;
   return sseHandler(request);
@@ -392,46 +410,6 @@ export default {
     console.log(`[Worker] Received request: ${request.method} ${request.url}`);
     
     try {
-      // Handle WebSocket endpoints directly (not through router)
-      const url = new URL(request.url);
-      
-      // Normalize pathname to handle double slashes
-      const normalizedPath = url.pathname.replace(/\/+/g, '/');
-      
-      if (normalizedPath === '/api/ws' || normalizedPath === '/api/daemon-ws') {
-        console.log(`[Worker] WebSocket request detected: original=${url.pathname}, normalized=${normalizedPath}`);
-        const upgradeHeader = request.headers.get('Upgrade');
-        if (upgradeHeader !== 'websocket') {
-          return new Response('Expected Upgrade: websocket', { status: 426 });
-        }
-        
-        // Get Durable Object
-        const roomId = env.WEBSOCKET_ROOMS.idFromName('global');
-        const room = env.WEBSOCKET_ROOMS.get(roomId);
-        
-        // Log request details before forwarding
-        console.log(`[Worker] Forwarding WebSocket request to Durable Object:`);
-        console.log(`  - URL: ${request.url}`);
-        console.log(`  - Pathname: ${url.pathname}`);
-        console.log(`  - Headers: ${JSON.stringify(Object.fromEntries(request.headers.entries()))}`);
-        
-        // Add the API_KEY as a header so the Durable Object can access it
-        // Clone headers to add our internal header
-        const headers = new Headers(request.headers);
-        headers.set('X-Internal-API-Key', env.API_KEY || '');
-        
-        // Create a new request with the additional header
-        const newRequest = new Request(request.url, {
-          method: request.method,
-          headers: headers,
-          body: request.body,
-          // Copy other request properties
-          ...request
-        });
-        
-        // Forward to Durable Object with API key
-        return room.fetch(newRequest);
-      }
       
       // Handle regular routes
       const response = await router.handle(request, env, ctx);
@@ -460,5 +438,16 @@ export default {
   }
 };
 
-// Export WebSocketRoom from durable objects
-export { WebSocketRoom };
+// Stub WebSocketRoom class for migration purposes
+// This will be removed after Durable Objects migration
+export class WebSocketRoom {
+  constructor(state, env) {
+    this.state = state;
+    this.env = env;
+  }
+
+  async fetch(request) {
+    return new Response('WebSocket support removed - migrated to SSE', { status: 410 });
+  }
+}
+
