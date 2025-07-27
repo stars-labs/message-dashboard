@@ -42,7 +42,6 @@
         nixosModules = {
           default = ./nixos-config/modules/sms-daemon.nix;
           sms-daemon = ./nixos-config/modules/sms-daemon.nix;
-          modem-support = ./nixos-config/modules/modem-support.nix;
         };
 
         # NixOS configuration for Orange Pi
@@ -88,9 +87,9 @@
                     enable = true;
                     package = self.packages.aarch64-linux.sms-daemon;
                     apiKeyFile = config.sops.secrets."sms-dashboard/api-key".path;
-                    apiUrl = "https://sexy.qzz.io/";
+                    apiUrl = "https://sexy.qzz.io";
                     uploadInterval = 60;
-                    logLevel = "debug";
+                    logLevel = "info";
                   };
                 }
               )
@@ -110,10 +109,13 @@
           ...
         }:
         let
+          # SMS daemon version - single source of truth
+          daemonVersion = "0.3.0"; # Multi-threaded per-modem architecture for real-time message processing
+          
           # Orange Pi SMS daemon package
           sms-daemon = pkgs.stdenv.mkDerivation rec {
             pname = "sms-daemon";
-            version = "0.1.1";
+            version = daemonVersion;
 
             src = ./orange-pi-daemon;
 
@@ -123,6 +125,8 @@
 
             buildPhase = ''
               export HOME=$TMPDIR
+              # Clean any existing build artifacts
+              rm -rf zig-cache zig-out
               zig build -Doptimize=ReleaseSafe
             '';
 
@@ -130,14 +134,24 @@
               mkdir -p $out/bin
               cp zig-out/bin/orange-pi-daemon $out/bin/sms-daemon
             '';
+            
+            meta = with lib; {
+              description = "SMS Dashboard Daemon for Orange Pi with 3G/4G modems";
+              longDescription = ''
+                A multi-threaded daemon that monitors 3G/4G modems using ModemManager (mmcli),
+                collects SMS messages and phone status information, and forwards
+                them to the SMS Dashboard server API in real-time.
+              '';
+              homepage = "https://github.com/hecoinfo/message-dashboard";
+              license = licenses.mit;
+              platforms = platforms.linux;
+            };
           };
         in
         {
           packages = {
             inherit sms-daemon;
             default = sms-daemon;
-            # Legacy alias
-            sms-dashboard-daemon = sms-daemon;
           };
 
           devShells = {

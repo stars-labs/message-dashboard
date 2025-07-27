@@ -13,9 +13,6 @@
 
     # Include SMS daemon module
     ../modules/sms-daemon.nix
-
-    # Include modem support module
-    ../modules/modem-support.nix
   ];
 
   # System identification
