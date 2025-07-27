@@ -128,6 +128,7 @@ in {
       # Include necessary tools in PATH
       path = with pkgs; [
         modemmanager  # Provides mmcli
+        curl          # For HTTP requests
         coreutils
         findutils
         gnugrep

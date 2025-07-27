@@ -1,6 +1,6 @@
 import { nanoid } from 'nanoid';
 import { extractVerificationCode } from '../utils/verification';
-import { broadcastEvent } from '../utils/websocket';
+import { broadcastSSEEvent } from './sse.js';
 
 export const controlHandler = {
   // Upload messages from Orange Pi
@@ -107,7 +107,7 @@ export const controlHandler = {
       
       // Broadcast new messages
       if (newMessages.length > 0) {
-        await broadcastEvent(env, 'messages:bulk_created', newMessages);
+        await broadcastSSEEvent('messages:bulk_created', newMessages);
       }
       
       return new Response(JSON.stringify({
@@ -244,8 +244,8 @@ export const controlHandler = {
       // Only broadcast if we have valid phones to avoid clearing the UI
       if (validPhones.length > 0) {
         console.log(`[control.js] Broadcasting phones:updated event with ${validPhones.length} valid phones (filtered from ${phones.length})`);
-        const broadcastResult = await broadcastEvent(env, 'phones:updated', validPhones);
-        console.log(`[control.js] Broadcast result:`, broadcastResult);
+        await broadcastSSEEvent('phones:updated', validPhones);
+        console.log(`[control.js] SSE broadcast completed`);
       } else {
         console.log(`[control.js] Skipping broadcast - no valid phones to send (all ${phones.length} phones were filtered out)`);
       }
@@ -427,7 +427,7 @@ export const controlHandler = {
       }
       
       // Broadcast message status update
-      await broadcastEvent(env, 'message:status_updated', {
+      await broadcastSSEEvent('message:status_updated', {
         id: message_id,
         status,
         error_message,

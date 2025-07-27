@@ -37,15 +37,7 @@ AUTH0_ALTERNATIVE_SMS_ROLES = ""  # No additional roles needed
 AUTH0_ROLE_NAMESPACE = "https://sexy.qzz.io"  # Where to find roles in Auth0 token
 AUTH0_ALLOW_NO_ROLES = "false"  # Set to "true" to allow access without roles (testing only)
 
-# Durable Objects binding
-[[durable_objects.bindings]]
-name = "WEBSOCKET_ROOMS"
-class_name = "WebSocketRoom"
-
-# Durable Objects migrations
-[[migrations]]
-tag = "v1"
-new_sqlite_classes = ["WebSocketRoom"]
+# Durable Objects removed - using simple SSE instead
 
 # Secrets (set these with wrangler secret put)
 # AUTH0_DOMAIN - Your Auth0 domain (e.g., your-tenant.auth0.com)

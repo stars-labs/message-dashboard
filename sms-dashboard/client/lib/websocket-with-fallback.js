@@ -1,20 +1,19 @@
-// Enhanced WebSocket service with SSE fallback
+// Server-Sent Events real-time service
 export class RealtimeService {
   constructor() {
-    this.ws = null;
     this.eventSource = null;
-    this.connectionType = null;
     this.reconnectInterval = null;
     this.reconnectAttempts = 0;
-    this.maxReconnectAttempts = window.APP_CONFIG?.client?.websocket?.maxReconnectAttempts || 5;
-    this.reconnectDelay = window.APP_CONFIG?.client?.websocket?.reconnectDelay || 3000;
+    this.maxReconnectAttempts = window.APP_CONFIG?.client?.realtime?.maxReconnectAttempts || 5;
+    this.reconnectDelay = window.APP_CONFIG?.client?.realtime?.reconnectDelay || 3000;
     this.callbacks = new Map();
     this.isIntentionallyClosed = false;
+    this.isConnected = false;
     this.token = null; // Store auth token for API requests
   }
 
   async connect(token) {
-    console.log('[RealtimeService] connect() called with token:', token);
+    console.log('[RealtimeService] connect() called with token:', !!token);
     this.isIntentionallyClosed = false;
     this.token = token; // Store token for API requests
     
@@ -23,145 +22,90 @@ export class RealtimeService {
       throw new Error('No auth token available');
     }
 
-    // Try WebSocket first
     try {
-      await this.connectWebSocket(token);
-    } catch (wsError) {
-      // WebSocket connection failed, falling back to SSE
-      console.error('WebSocket connection failed:', wsError);
-      
-      // Fall back to Server-Sent Events
-      try {
-        console.log('Falling back to SSE...');
-        await this.connectSSE(token);
-      } catch (sseError) {
-        // SSE connection also failed
-        console.error('SSE connection also failed:', sseError);
-        this.scheduleReconnect(token);
-      }
+      await this.connectSSE(token);
+    } catch (sseError) {
+      console.error('SSE connection failed:', sseError);
+      this.scheduleReconnect(token);
     }
-  }
-
-  async connectWebSocket(token) {
-    return new Promise((resolve, reject) => {
-      try {
-        const baseUrl = import.meta.env.VITE_API_BASE_URL || 
-          (typeof window !== 'undefined' ? window.location.origin : '');
-        
-        const wsUrl = baseUrl
-          .replace('http://', 'ws://')
-          .replace('https://', 'wss://');
-        
-        // Attempting WebSocket connection
-        // Add token to URL for authentication
-        const wsUrlWithAuth = token ? `${wsUrl}/api/ws?token=${encodeURIComponent(token)}` : `${wsUrl}/api/ws`;
-        console.log('Attempting WebSocket connection to:', wsUrlWithAuth);
-        this.ws = new WebSocket(wsUrlWithAuth);
-        
-        const timeout = setTimeout(() => {
-          if (this.ws.readyState !== WebSocket.OPEN) {
-            this.ws.close();
-            reject(new Error('WebSocket connection timeout'));
-          }
-        }, window.APP_CONFIG?.client?.websocket?.connectionTimeout || 5000); // connection timeout
-
-        this.ws.onopen = () => {
-          clearTimeout(timeout);
-          // WebSocket connected successfully
-          console.log('WebSocket connected successfully');
-          this.connectionType = 'websocket';
-          this.reconnectAttempts = 0;
-          
-          // Subscribe to channels
-          this.send({
-            type: 'subscribe',
-            channels: ['messages', 'phones'],
-            token: this.token
-          });
-          
-          resolve();
-        };
-
-        this.ws.onmessage = (event) => {
-          try {
-            const message = JSON.parse(event.data);
-            this.handleMessage(message);
-          } catch (error) {
-            // Failed to parse WebSocket message
-          }
-        };
-
-        this.ws.onerror = (error) => {
-          clearTimeout(timeout);
-          // WebSocket error
-          console.error('WebSocket error:', error);
-          reject(error);
-        };
-
-        this.ws.onclose = () => {
-          clearTimeout(timeout);
-          // WebSocket disconnected
-          this.connectionType = null;
-          
-          if (!this.isIntentionallyClosed) {
-            reject(new Error('WebSocket closed unexpectedly'));
-          }
-        };
-      } catch (error) {
-        reject(error);
-      }
-    });
   }
 
   async connectSSE(token) {
-    const baseUrl = import.meta.env.VITE_API_BASE_URL || 
-      (typeof window !== 'undefined' ? window.location.origin : '');
-    
-    // Attempting SSE connection
-    
-    this.eventSource = new EventSource(`${baseUrl}/api/sse?token=${token}`);
-    this.connectionType = 'sse';
-    
-    this.eventSource.onopen = () => {
-      // SSE connected successfully
-      this.reconnectAttempts = 0;
-    };
-    
-    this.eventSource.onmessage = (event) => {
-      try {
-        const message = JSON.parse(event.data);
-        this.handleMessage(message);
-      } catch (error) {
-        // Failed to parse SSE message
-      }
-    };
-    
-    this.eventSource.onerror = (error) => {
-      // SSE error
-      this.eventSource.close();
-      this.connectionType = null;
+    return new Promise((resolve, reject) => {
+      const baseUrl = import.meta.env.VITE_API_BASE_URL || 
+        (typeof window !== 'undefined' ? window.location.origin : '');
       
-      if (!this.isIntentionallyClosed) {
-        this.scheduleReconnect(token);
-      }
-    };
+      console.log('[RealtimeService] Attempting SSE connection...');
+      
+      // Create EventSource with proper authentication
+      // Note: EventSource doesn't support custom headers, so we use URL parameter for auth
+      this.eventSource = new EventSource(`${baseUrl}/api/sse?token=${encodeURIComponent(token)}`);
+      
+      let connectionResolved = false;
+      
+      this.eventSource.onopen = () => {
+        console.log('[RealtimeService] SSE connected successfully');
+        this.isConnected = true;
+        this.reconnectAttempts = 0;
+        
+        if (!connectionResolved) {
+          connectionResolved = true;
+          resolve();
+        }
+      };
+      
+      this.eventSource.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          console.log('[RealtimeService] SSE message received:', message.type, message);
+          this.handleMessage(message);
+          
+          // If this is the first message and connection hasn't resolved yet, resolve it
+          if (!connectionResolved) {
+            connectionResolved = true;
+            resolve();
+          }
+        } catch (error) {
+          console.error('[RealtimeService] Failed to parse SSE message:', error);
+        }
+      };
+      
+      this.eventSource.onerror = (error) => {
+        console.error('[RealtimeService] SSE error:', error);
+        this.isConnected = false;
+        
+        if (this.eventSource) {
+          this.eventSource.close();
+        }
+        
+        if (!connectionResolved) {
+          connectionResolved = true;
+          reject(new Error('SSE connection failed'));
+        } else if (!this.isIntentionallyClosed) {
+          this.scheduleReconnect(token);
+        }
+      };
+      
+      // Timeout for initial connection
+      setTimeout(() => {
+        if (!connectionResolved) {
+          connectionResolved = true;
+          reject(new Error('SSE connection timeout'));
+        }
+      }, 10000);
+    });
   }
 
   disconnect() {
+    console.log('[RealtimeService] Disconnecting...');
     this.isIntentionallyClosed = true;
+    this.isConnected = false;
     this.clearReconnectInterval();
-    
-    if (this.ws) {
-      this.ws.close();
-      this.ws = null;
-    }
     
     if (this.eventSource) {
       this.eventSource.close();
       this.eventSource = null;
     }
-    
-    this.connectionType = null;
   }
 
   handleMessage(message) {
@@ -197,60 +141,15 @@ export class RealtimeService {
     };
   }
 
+  // SSE is one-way communication only - no send capability
   send(data) {
-    if (this.connectionType === 'websocket' && this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(data));
-    } else if (this.connectionType === 'sse') {
-      // SSE is one-way communication, log warning
-      // Cannot send data over SSE connection (one-way only)
-    }
+    console.warn('[RealtimeService] SSE is one-way communication - cannot send data:', data);
   }
 
-  // Request-response pattern for API calls over WebSocket
+  // For API requests, use regular HTTP calls instead of real-time connection
   async request(type, data = {}) {
-    return new Promise((resolve, reject) => {
-      if (this.connectionType !== 'websocket' || !this.ws || this.ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-
-      const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      
-      // Set up one-time listener for the response
-      const responseHandler = (message) => {
-        if (message.request_id === requestId) {
-          if (message.type === 'response' && message.data) {
-            if (message.data.error) {
-              reject(new Error(message.data.error));
-            } else {
-              resolve(message.data);
-            }
-          } else if (message.type === 'error') {
-            reject(new Error(message.data?.message || 'Request failed'));
-          }
-        }
-      };
-
-      // Listen for response
-      const unsubscribe = this.on('response', responseHandler);
-      const errorUnsubscribe = this.on('error', responseHandler);
-
-      // Send request
-      this.send({
-        type: 'request',
-        request_id: requestId,
-        method: type,
-        data: data,
-        token: this.token // Include auth token for server-side API calls
-      });
-
-      // Clean up listeners after timeout
-      setTimeout(() => {
-        unsubscribe();
-        errorUnsubscribe();
-        reject(new Error('Request timeout'));
-      }, window.APP_CONFIG?.client?.websocket?.requestTimeout || 10000); // request timeout
-    });
+    console.warn('[RealtimeService] Use regular HTTP API calls instead of request() method for SSE');
+    throw new Error('SSE does not support request-response pattern. Use regular HTTP API calls.');
   }
 
   scheduleReconnect(token) {
@@ -279,14 +178,11 @@ export class RealtimeService {
   }
 
   isConnected() {
-    return this.connectionType !== null && (
-      (this.connectionType === 'websocket' && this.ws !== null && this.ws.readyState === WebSocket.OPEN) ||
-      (this.connectionType === 'sse' && this.eventSource !== null && this.eventSource.readyState === EventSource.OPEN)
-    );
+    return this.eventSource !== null && this.eventSource.readyState === EventSource.OPEN;
   }
 
   getConnectionType() {
-    return this.connectionType;
+    return 'sse';
   }
 }
 

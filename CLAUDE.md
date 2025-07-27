@@ -129,6 +129,10 @@ npx wrangler tail sms-dashboard --format pretty
 - Check ModemManager status: `systemctl status ModemManager`
 - Verify modem detection: `mmcli -L`
 - Check ICCID extraction: `mmcli -m [modem_id]` then `mmcli -i [sim_id]`
+- HTTP Communication: As of v1.1.1, daemon uses curl subprocess for reliable HTTP requests
+  - Zig's native HTTP client had issues with response handling
+  - All API calls now use curl with proper error handling
+  - Requires curl in system PATH (added to NixOS config)
 
 ### Auth0 Configuration
 - Callback URLs must include both development and production domains
@@ -195,4 +199,15 @@ npx wrangler d1 execute sms-dashboard --command "SELECT * FROM messages ORDER BY
 - TailwindCSS for styling
 - Bun as package manager and runtime
 
-the daemon use WebSocket to send and receive data to the dashboard server 
+## Recent Changes (July 2025)
+
+### v1.1.1 - HTTP Client Migration
+- Replaced Zig's native HTTP client with curl subprocess calls
+- Fixed "Failed to write payload: error.NotWriteable" errors
+- Improved reliability of message uploads and phone status updates
+- Added comprehensive logging for HTTP request/response debugging
+
+### Architecture Update
+- Daemon now uses HTTP POST requests to upload data (not WebSocket)
+- Server broadcasts updates via WebSocket/SSE to connected clients
+- API endpoints: `/api/control/phones` and `/api/control/messages` 

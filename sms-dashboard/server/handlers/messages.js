@@ -1,6 +1,5 @@
 import { nanoid } from 'nanoid';
 import { extractVerificationCode } from '../utils/verification';
-import { broadcastEvent } from '../utils/websocket';
 import { broadcastSSEEvent } from './sse';
 
 export const messagesHandler = {
@@ -153,26 +152,10 @@ export const messagesHandler = {
         recipient,
         status: 'sending'
       };
-      await broadcastEvent(env, 'message:created', messageData);
+      await broadcastSSEEvent('message:created', messageData);
 
-      // Send SMS request to daemon via WebSocket
-      const roomId = env.WEBSOCKET_ROOMS.idFromName('global');
-      const room = env.WEBSOCKET_ROOMS.get(roomId);
-
-      // Forward message to daemon
-      await room.fetch('http://internal/forward-to-daemon', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'send_message',
-          data: {
-            message_id: messageId,
-            phone_iccid: phone_iccid,
-            recipient: recipient,
-            content: content
-          }
-        })
-      });
+      // Note: SMS sending is now handled by daemon polling /api/control/pending-sms
+      // The daemon will pick up this message and send it via HTTP polling
 
       return new Response(JSON.stringify({
         success: true,
