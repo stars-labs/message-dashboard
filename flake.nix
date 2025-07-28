@@ -110,7 +110,7 @@
         }:
         let
           # SMS daemon version - single source of truth
-          daemonVersion = "1.4.0"; # Add signal strength collection from ModemManager
+          daemonVersion = "1.4.5"; # Add detailed deletion failure debugging
           
           # Orange Pi SMS daemon package
           sms-daemon = pkgs.stdenv.mkDerivation rec {

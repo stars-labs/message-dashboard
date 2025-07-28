@@ -354,7 +354,8 @@ const ApiClient = struct {
 
         std.log.info("📱 Preparing to upload {d} messages:", .{messages.len});
         for (messages, 0..) |msg, i| {
-            std.log.info("  Message {d}: phone_iccid={s}, phone_number={s}, content_len={d}", .{ i, msg.phone_iccid, msg.phone_number, msg.content.len });
+            std.log.info("  Message {d}: phone_iccid={s}, phone_number={s}, content={s}, timestamp={s}", .{ i, msg.phone_iccid, msg.phone_number, msg.content, msg.timestamp });
+            std.log.warn("🔍 MESSAGE UPLOAD DEBUG - Message {d}: content={s}, timestamp={s}, iccid={s}", .{ i, msg.content, msg.timestamp, msg.phone_iccid });
         }
 
         const messages_json = try json.stringifyAlloc(self.allocator, messages, .{ .emit_null_optional_fields = false });
@@ -684,11 +685,13 @@ const ApiClient = struct {
 const ModemManager = struct {
     allocator: std.mem.Allocator,
     warned_iccids: std.HashMap([]const u8, void, std.hash_map.StringContext, std.hash_map.default_max_load_percentage),
+    failed_sms_ids: std.HashMap([]const u8, void, std.hash_map.StringContext, std.hash_map.default_max_load_percentage),
 
     pub fn init(allocator: std.mem.Allocator) ModemManager {
         return .{ 
             .allocator = allocator,
             .warned_iccids = std.HashMap([]const u8, void, std.hash_map.StringContext, std.hash_map.default_max_load_percentage).init(allocator),
+            .failed_sms_ids = std.HashMap([]const u8, void, std.hash_map.StringContext, std.hash_map.default_max_load_percentage).init(allocator),
         };
     }
     
@@ -698,6 +701,12 @@ const ModemManager = struct {
             self.allocator.free(entry.key_ptr.*);
         }
         self.warned_iccids.deinit();
+        
+        var failed_iterator = self.failed_sms_ids.iterator();
+        while (failed_iterator.next()) |entry| {
+            self.allocator.free(entry.key_ptr.*);
+        }
+        self.failed_sms_ids.deinit();
     }
 
     pub fn getModemList(self: ModemManager) ![][]const u8 {
@@ -954,6 +963,15 @@ const ModemManager = struct {
                 while (end < line.len and line[end] != ' ') : (end += 1) {}
                 const sms_id_str = line[start..end];
 
+                // Skip SMS IDs that previously failed to delete
+                const sms_modem_key = try std.fmt.allocPrint(self.allocator, "{s}:{s}", .{ modem_id, sms_id_str });
+                defer self.allocator.free(sms_modem_key);
+                
+                if (self.failed_sms_ids.contains(sms_modem_key)) {
+                    std.log.info("Skipping SMS {s} on modem {s} (previously failed to delete)", .{ sms_id_str, modem_id });
+                    continue;
+                }
+
                 if (self.getSmsDetails(sms_id_str, modem_id)) |message_info| {
                     try messages.append(message_info);
                 } else |_| {
@@ -1132,14 +1150,14 @@ const ModemManager = struct {
         }
 
         // Handle SMS timestamps without timezone info
-        // IMPORTANT: Timestamps without timezone info from the modem are in Beijing time (UTC+8)
-        // We need to convert them to UTC for storage
-        std.log.info("⏰ SMS timestamp conversion: raw='{s}' (Beijing time, converting to UTC)", .{raw_timestamp});
+        // ModemManager on Orange Pi provides timestamps in LOCAL time (Beijing/UTC+8)
+        // Always convert from Beijing time to UTC
+        std.log.info("⏰ SMS timestamp processing: raw='{s}' (assuming Beijing time)", .{raw_timestamp});
         
         // Parse the timestamp components
         if (parseLocalTimestamp(raw_timestamp)) |beijing_time| {
-            // Convert Beijing time to UTC by subtracting 8 hours
-            // Beijing is UTC+8, so beijing_time - 8h = UTC
+            // ALWAYS convert from Beijing time to UTC by subtracting 8 hours
+            // This ensures consistent behavior regardless of when the message is processed
             const utc_timestamp = beijing_time - (8 * 3600);
             
             // Convert back to broken down time for formatting
@@ -1375,9 +1393,18 @@ const ModemManager = struct {
         defer self.allocator.free(result.stderr);
 
         if (result.term.Exited != 0) {
-            std.log.warn("Failed to delete SMS {s} from modem {s}", .{ sms_id, modem_id });
+            // Check if the error is because the SMS doesn't exist
+            if (std.mem.indexOf(u8, result.stderr, "not found") != null or
+                std.mem.indexOf(u8, result.stderr, "doesn't exist") != null or
+                std.mem.indexOf(u8, result.stderr, "No SMS") != null or
+                std.mem.indexOf(u8, result.stderr, "couldn't find SMS") != null) {
+                std.log.info("✅ SMS {s} no longer exists on modem {s} (already deleted)", .{ sms_id, modem_id });
+            } else {
+                std.log.warn("🔍 DELETE FAILURE DEBUG - Failed to delete SMS {s} from modem {s}. Exit code: {}, stderr: {s}", .{ sms_id, modem_id, result.term.Exited, result.stderr });
+                return error.SmsDeleteFailed;
+            }
         } else {
-            std.log.info("Deleted SMS {s} from modem {s}", .{ sms_id, modem_id });
+            std.log.info("✅ Successfully deleted SMS {s} from modem {s}", .{ sms_id, modem_id });
         }
     }
 
@@ -1634,22 +1661,81 @@ pub fn main() !void {
 
         // Upload messages if we have any
         if (all_message_infos.items.len > 0) {
+            // Deduplicate messages before uploading
+            var seen_messages = std.hash_map.HashMap([]const u8, bool, std.hash_map.StringContext, 80).init(allocator);
+            defer seen_messages.deinit();
+            
+            var unique_message_infos = std.ArrayList(MessageInfo).init(allocator);
+            defer unique_message_infos.deinit();
+            
+            for (all_message_infos.items) |info| {
+                // Create a unique key for each message
+                const key = try std.fmt.allocPrint(allocator, "{s}|{s}|{s}", .{
+                    info.message.phone_iccid,
+                    info.message.content,
+                    info.message.timestamp
+                });
+                defer allocator.free(key);
+                
+                if (!seen_messages.contains(key)) {
+                    try seen_messages.put(key, true);
+                    try unique_message_infos.append(info);
+                    std.log.info("✅ DEDUP DEBUG - Keeping message: content={s}, timestamp={s}, key={s}", .{ info.message.content, info.message.timestamp, key });
+                } else {
+                    std.log.warn("⚠️  DEDUP DEBUG - Skipping duplicate in batch: content={s}, timestamp={s}, key={s}", .{ 
+                        info.message.content, info.message.timestamp, key
+                    });
+                    
+                    // Free the duplicate's memory
+                    allocator.free(info.modem_id);
+                    allocator.free(info.sms_id);
+                    allocator.free(info.message.phone_number);
+                    allocator.free(info.message.content);
+                    allocator.free(info.message.timestamp);
+                    allocator.free(info.message.phone_iccid);
+                }
+            }
+            
+            std.log.info("📋 Deduped {d} messages to {d} unique messages", .{ 
+                all_message_infos.items.len, unique_message_infos.items.len 
+            });
+            
             var messages = std.ArrayList(Message).init(allocator);
             defer messages.deinit();
 
-            for (all_message_infos.items) |info| {
+            for (unique_message_infos.items) |info| {
                 try messages.append(info.message);
             }
 
-            api_client.uploadMessages(messages.items) catch |err| {
-                std.log.warn("Failed to upload messages: {any}", .{err});
+            // Try to upload messages and track success
+            const upload_result = blk: {
+                api_client.uploadMessages(messages.items) catch |err| {
+                    std.log.warn("Failed to upload messages: {any}", .{err});
+                    break :blk false;
+                };
+                break :blk true;
             };
 
-            // Delete uploaded messages from modems
-            for (all_message_infos.items) |info| {
-                modem_manager.deleteSms(info.modem_id, info.sms_id) catch |err| {
-                    std.log.warn("Failed to delete SMS {s} from modem {s}: {any}", .{ info.sms_id, info.modem_id, err });
-                };
+            // Only delete messages if upload was successful
+            if (upload_result) {
+                std.log.info("📤 Upload successful, deleting messages from modems...", .{});
+                
+                // Delete only the unique messages that were uploaded
+                for (unique_message_infos.items) |info| {
+                    modem_manager.deleteSms(info.modem_id, info.sms_id) catch |err| {
+                        std.log.warn("Failed to delete SMS {s} from modem {s}: {any}", .{ info.sms_id, info.modem_id, err });
+                        
+                        // Mark this SMS as failed so we don't try to process it again
+                        const sms_modem_key = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ info.modem_id, info.sms_id });
+                        const owned_key = try allocator.dupe(u8, sms_modem_key);
+                        allocator.free(sms_modem_key);
+                        try modem_manager.failed_sms_ids.put(owned_key, {});
+                        
+                        std.log.info("Added SMS {s} on modem {s} to failed list", .{ info.sms_id, info.modem_id });
+                    };
+                }
+            } else {
+                std.log.warn("⚠️  Upload failed, keeping messages on modems to retry later", .{});
             }
 
             std.log.info("✅ Processed and uploaded {d} new messages", .{total_new_messages});

@@ -190,7 +190,7 @@ export const iccidMappingsHandler = {
     
     try {
       const body = await request.json();
-      const { iccid, phone_number, carrier, country, notes } = body;
+      const { iccid, phone_number, carrier, country, notes, description } = body;
       
       if (!iccid || !phone_number) {
         return new Response(JSON.stringify({
@@ -228,7 +228,7 @@ export const iccidMappingsHandler = {
         phone_number,
         carrier || null,
         country || null,
-        notes || null
+        description || notes || null
       ).run();
       
       const newMapping = await env.DB.prepare(`
@@ -261,7 +261,7 @@ export const iccidMappingsHandler = {
     
     try {
       const body = await request.json();
-      const { phone_number, carrier, country, notes, is_active } = body;
+      const { phone_number, carrier, country, notes, description, is_active } = body;
       
       // Check if mapping exists
       const existing = await env.DB.prepare(`
@@ -292,7 +292,7 @@ export const iccidMappingsHandler = {
         phone_number,
         carrier || null,
         country || null,
-        notes || null,
+        description || notes || null,
         is_active !== undefined ? (is_active ? 1 : 0) : 1,
         id
       ).run();

@@ -4,7 +4,7 @@ import WebSocket from 'ws';
 import crypto from 'crypto';
 
 const API_URL = 'https://sexy.qzz.io';
-const API_KEY = '4025b019988238528f1fd5e909d0363c46e4e48490ea5045a9a490c259071cba';
+const API_KEY = process.env.API_KEY || 'your-api-key-here';
 
 console.log('Testing daemon WebSocket connection...');
 console.log(`URL: ${API_URL}/api/daemon-ws`);
