@@ -1,6 +1,5 @@
 import { nanoid } from 'nanoid';
 import { extractVerificationCode } from '../utils/verification';
-import { broadcastSSEEvent } from './sse.js';
 
 export const controlHandler = {
   // Upload messages from Orange Pi
@@ -105,10 +104,7 @@ export const controlHandler = {
         processed += batch.length;
       }
       
-      // Broadcast new messages
-      if (newMessages.length > 0) {
-        await broadcastSSEEvent('messages:bulk_created', newMessages);
-      }
+      // Messages are now picked up by polling
       
       return new Response(JSON.stringify({
         success: true,
@@ -243,9 +239,7 @@ export const controlHandler = {
       
       // Only broadcast if we have valid phones to avoid clearing the UI
       if (validPhones.length > 0) {
-        console.log(`[control.js] Broadcasting phones:updated event with ${validPhones.length} valid phones (filtered from ${phones.length})`);
-        await broadcastSSEEvent('phones:updated', validPhones);
-        console.log(`[control.js] SSE broadcast completed`);
+        console.log(`[control.js] Updated ${validPhones.length} valid phones (filtered from ${phones.length})`);
       } else {
         console.log(`[control.js] Skipping broadcast - no valid phones to send (all ${phones.length} phones were filtered out)`);
       }
@@ -426,13 +420,7 @@ export const controlHandler = {
         });
       }
       
-      // Broadcast message status update
-      await broadcastSSEEvent('message:status_updated', {
-        id: message_id,
-        status,
-        error_message,
-        sms_id
-      });
+      // Status updates are now picked up by polling
       
       return new Response(JSON.stringify({
         success: true,

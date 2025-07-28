@@ -1,6 +1,5 @@
 import { nanoid } from 'nanoid';
 import { extractVerificationCode } from '../utils/verification';
-import { broadcastSSEEvent } from './sse';
 
 export const messagesHandler = {
   // List messages with pagination
@@ -152,7 +151,7 @@ export const messagesHandler = {
         recipient,
         status: 'sending'
       };
-      await broadcastSSEEvent('message:created', messageData);
+      // Message creation is now picked up by polling
 
       // Note: SMS sending is now handled by daemon polling /api/control/pending-sms
       // The daemon will pick up this message and send it via HTTP polling
