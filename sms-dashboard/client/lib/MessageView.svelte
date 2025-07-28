@@ -37,6 +37,15 @@
       return '无效时间';
     }
     
+    // Debug logging for timezone issues
+    console.log('Timestamp debug:', {
+      original: timestamp,
+      msgDate: msgDate.toISOString(),
+      now: now.toISOString(),
+      localMsgTime: msgDate.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }),
+      localNowTime: now.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })
+    });
+    
     const diffMs = now - msgDate;
     const diffMins = Math.floor(diffMs / 60000);
     const diffHours = Math.floor(diffMs / 3600000);
@@ -50,7 +59,8 @@
         month: 'short', 
         day: 'numeric', 
         hour: '2-digit', 
-        minute: '2-digit' 
+        minute: '2-digit',
+        timeZone: 'Asia/Shanghai' // Ensure consistent timezone
       });
     }
     if (diffMins < 1) return '刚刚';
@@ -58,7 +68,9 @@
     if (diffHours < 24) return `${diffHours}小时前`;
     if (diffDays < 7) return `${diffDays}天前`;
     
-    return msgDate.toLocaleDateString('zh-CN');
+    return msgDate.toLocaleDateString('zh-CN', { 
+      timeZone: 'Asia/Shanghai' 
+    });
   }
   
   function getSourceColor(source) {
