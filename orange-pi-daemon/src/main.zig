@@ -326,7 +326,7 @@ const ApiClient = struct {
         const payload = try std.fmt.allocPrint(self.allocator, "{{\"phones\":{s}}}", .{phones_json});
         defer self.allocator.free(payload);
 
-        self.makeRequest("/phones", payload);
+        try self.makeRequest("/phones", payload);
         std.log.info("✅ Uploaded phone {s} via HTTP API", .{phone.id});
     }
 
@@ -342,7 +342,7 @@ const ApiClient = struct {
         const payload = try std.fmt.allocPrint(self.allocator, "{{\"phones\":{s}}}", .{phones_json});
         defer self.allocator.free(payload);
 
-        self.makeRequest("/phones", payload);
+        try self.makeRequest("/phones", payload);
         std.log.info("✅ Uploaded {d} phones via HTTP API", .{phones.len});
     }
 
@@ -367,20 +367,20 @@ const ApiClient = struct {
         
         std.log.info("📦 Final payload length: {d} bytes", .{payload.len});
 
-        self.makeRequest("/messages", payload);
+        try self.makeRequest("/messages", payload);
         std.log.info("✅ Uploaded {d} messages via HTTP API", .{messages.len});
     }
 
-    fn makeRequest(self: *ApiClient, endpoint: []const u8, payload: []const u8) void {
+    fn makeRequest(self: *ApiClient, endpoint: []const u8, payload: []const u8) !void {
         const url_str = std.fmt.allocPrint(self.allocator, "{s}/api/control{s}", .{ self.config.api_url, endpoint }) catch |err| {
             std.log.warn("❌ Failed to allocate URL string: {any}", .{err});
-            return;
+            return err;
         };
         defer self.allocator.free(url_str);
         
         const uri = std.Uri.parse(url_str) catch |err| {
             std.log.warn("❌ Failed to parse URL {s}: {any}", .{ url_str, err });
-            return;
+            return err;
         };
         
         // Create a new HTTP client for this request (thread-safe)
@@ -398,7 +398,7 @@ const ApiClient = struct {
             },
         }) catch |err| {
             std.log.warn("❌ Failed to open HTTP request to {s}: {any}", .{ url_str, err });
-            return;
+            return err;
         };
         defer req.deinit();
         
@@ -408,25 +408,25 @@ const ApiClient = struct {
         // Send headers
         req.send() catch |err| {
             std.log.warn("❌ Failed to send HTTP headers to {s}: {any}", .{ url_str, err });
-            return;
+            return err;
         };
         
         // Write payload
         req.writeAll(payload) catch |err| {
             std.log.warn("❌ Failed to write payload to {s}: {any}", .{ url_str, err });
-            return;
+            return err;
         };
         
         // Finish request
         req.finish() catch |err| {
             std.log.warn("❌ Failed to finish HTTP request to {s}: {any}", .{ url_str, err });
-            return;
+            return err;
         };
         
         // Wait for response
         req.wait() catch |err| {
             std.log.warn("❌ Failed to wait for response from {s}: {any}", .{ url_str, err });
-            return;
+            return err;
         };
         
         const status_code = @intFromEnum(req.response.status);
@@ -439,8 +439,9 @@ const ApiClient = struct {
                 std.log.info("✅ HTTP request successful for {s}", .{endpoint});
             } else {
                 std.log.warn("❌ HTTP request failed with status: {d}", .{status_code});
+                return error.HttpRequestFailed;
             }
-            return;
+            return err;
         };
         defer self.allocator.free(response_body);
         
@@ -451,6 +452,7 @@ const ApiClient = struct {
         } else {
             std.log.warn("❌ HTTP request failed with status: {d}", .{status_code});
             std.log.warn("❌ Response body: {s}", .{response_body});
+            return error.HttpRequestFailed;
         }
     }
     
@@ -466,7 +468,7 @@ const ApiClient = struct {
         const heartbeat_json = try json.stringifyAlloc(self.allocator, heartbeat_data, .{});
         defer self.allocator.free(heartbeat_json);
         
-        self.makeRequest("/heartbeat", heartbeat_json);
+        try self.makeRequest("/heartbeat", heartbeat_json);
         std.log.info("💓 Sent daemon heartbeat", .{});
     }
 
@@ -545,7 +547,7 @@ const ApiClient = struct {
         const update_json = try json.stringifyAlloc(self.allocator, update_data, .{});
         defer self.allocator.free(update_json);
 
-        self.makeRequest("/sms-result", update_json);
+        try self.makeRequest("/sms-result", update_json);
         std.log.info("📝 Updated SMS status for message {s}: success={}", .{ message_id, success });
     }
 };
@@ -1018,7 +1020,7 @@ const ModemManager = struct {
 };
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.GeneralPurposeAllocator(.{ .thread_safe = true }){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
