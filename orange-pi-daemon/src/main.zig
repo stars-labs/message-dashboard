@@ -892,7 +892,8 @@ const ModemManager = struct {
 
     fn formatTimestamp(self: ModemManager, raw_timestamp: []const u8) ![]const u8 {
         if (raw_timestamp.len == 0) {
-            // Return current time in proper UTC ISO format using system time
+            // Get current time in UTC
+            // On systems with local timezone set, we need to ensure we get true UTC
             const now_s = std.time.timestamp();
             const now_ms = @rem(@as(u64, @intCast(std.time.milliTimestamp())), 1000);
             
