@@ -28,7 +28,7 @@
   function formatTime(timestamp) {
     if (!timestamp) return '未知时间';
     
-    const now = new Date();
+    // Parse the UTC timestamp from database
     const msgDate = new Date(timestamp);
     
     // Check if date is valid
@@ -37,22 +37,20 @@
       return '无效时间';
     }
     
-    // Debug logging for timezone issues
-    console.log('Timestamp debug:', {
-      original: timestamp,
-      msgDate: msgDate.toISOString(),
-      now: now.toISOString(),
-      localMsgTime: msgDate.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }),
-      localNowTime: now.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })
-    });
+    // Current time in local timezone
+    const now = new Date();
     
+    // Calculate difference (both dates are already in correct timezone context)
     const diffMs = now - msgDate;
     const diffMins = Math.floor(diffMs / 60000);
     const diffHours = Math.floor(diffMs / 3600000);
     const diffDays = Math.floor(diffMs / 86400000);
     
+    // For debugging timezone issues
+    // console.log('Timestamp:', timestamp, '-> Local:', msgDate.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }));
+    
     if (diffMs < 0) {
-      // Handle future timestamps gracefully - likely due to clock skew
+      // Handle future timestamps - show absolute time in local timezone
       const futureDiffMs = Math.abs(diffMs);
       if (futureDiffMs < 60000) return '刚刚'; // Within 1 minute, treat as "just now"
       return msgDate.toLocaleString('zh-CN', { 
@@ -60,7 +58,7 @@
         day: 'numeric', 
         hour: '2-digit', 
         minute: '2-digit',
-        timeZone: 'Asia/Shanghai' // Ensure consistent timezone
+        timeZone: 'Asia/Shanghai'
       });
     }
     if (diffMins < 1) return '刚刚';
@@ -68,8 +66,9 @@
     if (diffHours < 24) return `${diffHours}小时前`;
     if (diffDays < 7) return `${diffDays}天前`;
     
-    return msgDate.toLocaleDateString('zh-CN', { 
-      timeZone: 'Asia/Shanghai' 
+    // For older messages, show date in local timezone
+    return msgDate.toLocaleDateString('zh-CN', {
+      timeZone: 'Asia/Shanghai'
     });
   }
   
