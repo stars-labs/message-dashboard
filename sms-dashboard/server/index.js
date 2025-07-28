@@ -10,7 +10,7 @@ import { statsHandler } from './handlers/stats';
 import { usersHandler } from './handlers/users';
 import { groupsHandler } from './handlers/groups';
 import { iccidMappingsHandler } from './handlers/iccid-mappings';
-import { sseHandler, broadcastSSEEvent, getActiveConnectionCount } from './handlers/sse';
+import { updatesHandler } from './handlers/updates';
 import { serveFrontend } from './frontend-handler';
 import { createRoleConfig, hasSmSAccess } from '../config/auth0-roles.js';
 
@@ -143,35 +143,11 @@ router.get('/api/auth/me', async (request, env, ctx) => {
   return auth0Handler.me(request);
 });
 
-// SSE endpoint for real-time updates
-router.get('/api/sse', async (request, env, ctx) => {
-  // For SSE, check for token in URL parameter since EventSource doesn't support custom headers
-  const url = new URL(request.url);
-  const token = url.searchParams.get('token');
-  
-  let authRequest = request;
-  if (token) {
-    // Add token to Authorization header so auth middleware can process it
-    const headers = new Headers(request.headers);
-    headers.set('Authorization', `Bearer ${token}`);
-    authRequest = new Request(request.url, {
-      method: request.method,
-      headers: headers,
-      body: request.body
-    });
-    // Copy over request properties
-    authRequest.env = env;
-    authRequest.ctx = ctx;
-  }
-  
-  const authResponse = await handleAuth0(authRequest, env, ctx);
+// Polling updates endpoint
+router.get('/api/updates', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
   if (authResponse) return authResponse;
-  
-  // Copy user from authRequest back to original request
-  request.user = authRequest.user;
-  request.env = env;
-  
-  return sseHandler(request);
+  return updatesHandler.poll(request);
 });
 
 // Protected routes - Web UI

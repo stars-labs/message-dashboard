@@ -8,7 +8,7 @@
   import PhoneDetails from "./lib/PhoneDetails.svelte";
   import IccidMappingDialog from "./lib/IccidMappingDialog.svelte";
   import { api } from "./lib/api.js";
-  import { realtimeService } from "./lib/websocket-with-fallback.js";
+  import { pollingService } from "./lib/polling-service.js";
   import { auth } from "./lib/auth.js";
   import config from "./lib/config.js";
 
@@ -146,7 +146,7 @@
 
   // Helper function to establish SSE connection
   async function connectSSE() {
-    if (realtimeService.isConnected) {
+    if (pollingService.isConnected) {
       console.log("[App] SSE already connected, skipping");
       return;
     }
@@ -158,7 +158,7 @@
     );
 
     try {
-      await realtimeService.connect(token);
+      await pollingService.connect(token);
       setupSSEListeners();
       console.log("[App] SSE connection established successfully");
     } catch (error) {
@@ -224,7 +224,7 @@
   function setupSSEListeners() {
     // Listen for new messages
     sseUnsubscribers.push(
-      realtimeService.on("message:created", (msg) => {
+      pollingService.on("message:created", (msg) => {
         // New message received
         messages = [msg.data, ...messages];
         // Update stats
@@ -235,7 +235,7 @@
 
     // Listen for message updates
     sseUnsubscribers.push(
-      realtimeService.on("message:updated", (msg) => {
+      pollingService.on("message:updated", (msg) => {
         // Message updated
         const index = messages.findIndex((m) => m.id === msg.data.id);
         if (index !== -1) {
@@ -247,7 +247,7 @@
 
     // Listen for bulk message creation
     sseUnsubscribers.push(
-      realtimeService.on("messages:bulk_created", (msg) => {
+      pollingService.on("messages:bulk_created", (msg) => {
         // Bulk messages received
         messages = [...msg.data, ...messages];
         // Update stats
@@ -258,7 +258,7 @@
 
     // Listen for phone updates
     sseUnsubscribers.push(
-      realtimeService.on("phones:updated", (msg) => {
+      pollingService.on("phones:updated", (msg) => {
         // Phones updated
         console.log("SSE phones update:", msg.data);
 
@@ -304,7 +304,7 @@
 
     // Listen for connection status
     sseUnsubscribers.push(
-      realtimeService.on("connected", () => {
+      pollingService.on("connected", () => {
         sseConnected = true;
         console.log("SSE connected");
       }),
@@ -312,7 +312,7 @@
 
     // Listen for message sent responses
     sseUnsubscribers.push(
-      realtimeService.on("message:sent", (msg) => {
+      pollingService.on("message:sent", (msg) => {
         // Message sent result received
         console.log("Message sent result:", msg.data);
         if (msg.data.success) {
@@ -339,7 +339,7 @@
 
     // Listen for disconnection
     sseUnsubscribers.push(
-      realtimeService.on("disconnected", () => {
+      pollingService.on("disconnected", () => {
         sseConnected = false;
         console.log("SSE disconnected");
       }),
@@ -351,7 +351,7 @@
   onDestroy(() => {
     // Cleanup realtime service
     sseUnsubscribers.forEach((unsubscribe) => unsubscribe());
-    realtimeService.disconnect();
+    pollingService.disconnect();
     
     // Cleanup health check interval
     if (window._daemonHealthInterval) {
