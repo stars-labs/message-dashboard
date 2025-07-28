@@ -10,11 +10,30 @@ export const updatesHandler = {
       
       // Fetch current phone data to check for updates
       const { results: phones } = await env.DB.prepare(`
-        SELECT iccid, number, country, flag, carrier, status, signal, 
-               rssi, rsrq, rsrp, snr, operator_name, operator_id, imei, access_tech, 
-               created_at, updated_at
-        FROM phones 
-        ORDER BY updated_at DESC
+        SELECT 
+          p.iccid,
+          COALESCE(im.phone_number, p.number) as number,
+          p.country,
+          p.flag,
+          COALESCE(im.carrier, p.carrier) as carrier,
+          p.status,
+          p.signal,
+          p.rssi,
+          p.rsrq,
+          p.rsrp,
+          p.snr,
+          p.operator_name,
+          p.operator_id,
+          p.imei,
+          p.access_tech,
+          p.created_at,
+          p.updated_at,
+          im.phone_number as mapped_number,
+          im.carrier as mapped_carrier,
+          im.notes as mapping_notes
+        FROM phones p
+        LEFT JOIN iccid_mappings im ON p.iccid = im.iccid AND im.is_active = 1
+        ORDER BY p.updated_at DESC
       `).all();
       
       // If we have phones data, send it as an update
@@ -30,10 +49,24 @@ export const updatesHandler = {
       // Check for recent messages if 'since' is provided
       if (since) {
         const { results: messages } = await env.DB.prepare(`
-          SELECT id, phone_iccid, phone_number, content, timestamp, type, status, verification_code
-          FROM messages 
-          WHERE created_at > ?
-          ORDER BY timestamp DESC
+          SELECT 
+            m.id,
+            m.phone_iccid,
+            m.phone_number,
+            COALESCE(im.phone_number, p.number, m.phone_number) as display_phone_number,
+            m.content,
+            m.timestamp,
+            m.type,
+            m.status,
+            m.verification_code,
+            p.carrier as phone_carrier,
+            p.status as phone_status,
+            im.phone_number as mapped_number
+          FROM messages m
+          LEFT JOIN phones p ON m.phone_iccid = p.iccid
+          LEFT JOIN iccid_mappings im ON m.phone_iccid = im.iccid AND im.is_active = 1
+          WHERE m.created_at > ?
+          ORDER BY m.timestamp DESC
           LIMIT 50
         `).bind(since).all();
         
