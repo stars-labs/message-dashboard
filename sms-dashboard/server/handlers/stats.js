@@ -21,6 +21,32 @@ export const statsHandler = {
         ? (stats.verified_messages / stats.total_received) 
         : 0;
       
+      // Check daemon heartbeat from KV
+      let daemonStatus = {
+        online: false,
+        last_heartbeat: null,
+        version: null,
+        device_id: null
+      };
+      
+      try {
+        const heartbeatData = await env.KV.get('daemon:heartbeat');
+        if (heartbeatData) {
+          const heartbeat = JSON.parse(heartbeatData);
+          const now = Date.now();
+          const fiveMinutesAgo = now - (5 * 60 * 1000);
+          
+          daemonStatus = {
+            online: heartbeat.last_heartbeat > fiveMinutesAgo,
+            last_heartbeat: heartbeat.last_heartbeat,
+            version: heartbeat.version,
+            device_id: heartbeat.device_id
+          };
+        }
+      } catch (error) {
+        console.error('[stats.js] Failed to get daemon heartbeat:', error);
+      }
+      
       return new Response(JSON.stringify({
         success: true,
         total_messages: stats.total_messages,
@@ -31,7 +57,8 @@ export const statsHandler = {
         today_received: stats.today_received,
         online_devices: stats.online_devices,
         total_devices: stats.total_devices,
-        verification_rate: verificationRate
+        verification_rate: verificationRate,
+        daemon_status: daemonStatus
       }), {
         headers: { 'Content-Type': 'application/json' }
       });

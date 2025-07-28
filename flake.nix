@@ -110,7 +110,7 @@
         }:
         let
           # SMS daemon version - single source of truth
-          daemonVersion = "1.2.1"; # Fix thread-safe curl and auto-enable disabled modems
+          daemonVersion = "1.4.0"; # Add signal strength collection from ModemManager
           
           # Orange Pi SMS daemon package
           sms-daemon = pkgs.stdenv.mkDerivation rec {

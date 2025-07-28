@@ -329,6 +329,19 @@ router.post('/api/control/sms-result', async (request) => {
   }
 });
 
+router.post('/api/control/heartbeat', async (request) => {
+  // Daemon heartbeat endpoint
+  try {
+    return await controlHandler.heartbeat(request);
+  } catch (error) {
+    // Heartbeat error
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+});
+
 // Login page route - removed duplicate, using auth0Handler.login above
 
 // Serve frontend for all other routes - check authentication

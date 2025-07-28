@@ -165,11 +165,11 @@ export const controlHandler = {
           number = COALESCE(excluded.number, phones.number),
           carrier = COALESCE(excluded.carrier, phones.carrier),
           status = excluded.status,
-          signal = excluded.signal,
-          rssi = excluded.rssi,
-          rsrq = excluded.rsrq,
-          rsrp = excluded.rsrp,
-          snr = excluded.snr,
+          signal = COALESCE(excluded.signal, phones.signal),
+          rssi = COALESCE(excluded.rssi, phones.rssi),
+          rsrq = COALESCE(excluded.rsrq, phones.rsrq),
+          rsrp = COALESCE(excluded.rsrp, phones.rsrp),
+          snr = COALESCE(excluded.snr, phones.snr),
           operator_name = COALESCE(excluded.operator_name, phones.operator_name),
           operator_id = COALESCE(excluded.operator_id, phones.operator_id),
           imei = COALESCE(excluded.imei, phones.imei),
@@ -472,6 +472,59 @@ export const controlHandler = {
       return new Response(JSON.stringify({
         success: false,
         error: 'Failed to clear messages: ' + error.message
+      }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+  },
+
+  // Daemon heartbeat endpoint
+  async heartbeat(request) {
+    const { env } = request;
+    
+    // Check API key
+    const apiKey = request.headers.get('X-API-Key');
+    const expectedKey = env.API_KEY || '4025b019988238528f1fd5e909d0363c46e4e48490ea5045a9a490c259071cba';
+    
+    if (!apiKey || apiKey !== expectedKey) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+    
+    try {
+      const { device_id, version, status = 'online' } = await request.json();
+      
+      // Store heartbeat in KV with 5 minute expiration
+      const heartbeatData = {
+        device_id,
+        version,
+        status,
+        timestamp: new Date().toISOString(),
+        last_heartbeat: Date.now()
+      };
+      
+      await env.KV.put(
+        'daemon:heartbeat',
+        JSON.stringify(heartbeatData),
+        { expirationTtl: 300 } // 5 minutes
+      );
+      
+      console.log(`[control.js] Daemon heartbeat received: device=${device_id}, version=${version}, status=${status}`);
+      
+      return new Response(JSON.stringify({
+        success: true,
+        message: 'Heartbeat received'
+      }), {
+        headers: { 'Content-Type': 'application/json' }
+      });
+    } catch (error) {
+      console.error('[control.js] Heartbeat error:', error);
+      return new Response(JSON.stringify({
+        success: false,
+        error: 'Failed to process heartbeat'
       }), {
         status: 500,
         headers: { 'Content-Type': 'application/json' }

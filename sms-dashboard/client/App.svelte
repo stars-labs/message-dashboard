@@ -24,8 +24,8 @@
   let user = null;
   let loading = true;
   let dataLoading = true; // Track data loading separately
-  let sseConnected = false;
-  let sseUnsubscribers = [];
+  let pollingConnected = false;
+  let pollingUnsubscribers = [];
   let currentView = "dashboard"; // 'dashboard' or 'iccid-mappings'
   let showIccidMappingDialog = false;
   let phoneToMap = null;
@@ -79,22 +79,6 @@
         phoneNumbers = [];
       }
 
-      console.log("Loaded phones:", phoneNumbers);
-      // Log all phone details only if it's an array
-      if (Array.isArray(phoneNumbers)) {
-        phoneNumbers.forEach((phone) => {
-          console.log(`Phone ${phone.iccid}:`, {
-            signal: phone.signal,
-            status: phone.status,
-            operator_name: phone.operator_name,
-            operator_id: phone.operator_id,
-            imei: phone.imei,
-            access_tech: phone.access_tech,
-            iccid: phone.iccid,
-            number: phone.number,
-          });
-        });
-      }
       messages = messagesResponse.data || [];
 
       // Map API stats to component format
@@ -114,6 +98,14 @@
             (statsResponse.verification_rate || 0) * 100,
           ),
         };
+        
+        // Update daemon status from API
+        if (statsResponse.daemon_status) {
+          daemonStatus.connected = statsResponse.daemon_status.online || false;
+          daemonStatus.lastHeartbeat = statsResponse.daemon_status.last_heartbeat;
+          daemonStatus.version = statsResponse.daemon_status.version;
+          daemonStatus.deviceId = statsResponse.daemon_status.device_id;
+        }
       }
 
       // Mark data as loaded
@@ -145,25 +137,25 @@
     }
   }
 
-  // Helper function to establish SSE connection
-  async function connectSSE() {
+  // Helper function to start HTTP polling
+  async function startPolling() {
     if (pollingService.isConnected) {
-      console.log("[App] SSE already connected, skipping");
+      console.log("[App] Polling already active, skipping");
       return;
     }
 
     const token = auth.token || "anonymous";
     console.log(
-      "[App] Connecting SSE with token:",
+      "[App] Starting polling with token:",
       !!auth.token ? "authenticated" : "anonymous",
     );
 
     try {
       await pollingService.connect(token);
-      setupSSEListeners();
-      console.log("[App] SSE connection established successfully");
+      setupPollingListeners();
+      console.log("[App] Polling started successfully");
     } catch (error) {
-      console.error("[App] SSE connection failed:", error);
+      console.error("[App] Failed to start polling:", error);
     }
   }
 
@@ -191,20 +183,20 @@
     // Set loading to false immediately to show UI
     loading = false;
 
-    // Load data and establish SSE connection in the background
+    // Load data and start polling in the background
     if (user) {
       // Mark daemon as initially connected to prevent "数据过期" message
       daemonStatus.connected = true;
       daemonStatus.lastDataUpdate = Date.now();
 
-      // Load data and SSE in parallel without blocking
+      // Load data and polling in parallel without blocking
       Promise.all([
         loadData().finally(() => {
           dataLoading = false;
         }),
-        connectSSE(),
+        startPolling(),
       ]).catch((error) => {
-        console.error("Failed to load data or connect SSE:", error);
+        console.error("Failed to load data or start polling:", error);
       });
       
       // Set up periodic daemon health check
@@ -215,16 +207,16 @@
       // Store interval for cleanup
       window._daemonHealthInterval = healthCheckInterval;
     } else {
-      // Still try to connect SSE for anonymous users
-      connectSSE().catch((error) => {
-        console.error("Failed to connect SSE:", error);
+      // Still try to start polling for anonymous users
+      startPolling().catch((error) => {
+        console.error("Failed to start polling:", error);
       });
     }
   });
 
-  function setupSSEListeners() {
+  function setupPollingListeners() {
     // Listen for new messages
-    sseUnsubscribers.push(
+    pollingUnsubscribers.push(
       pollingService.on("message:created", (msg) => {
         // New message received
         messages = [msg.data, ...messages];
@@ -235,7 +227,7 @@
     );
 
     // Listen for message updates
-    sseUnsubscribers.push(
+    pollingUnsubscribers.push(
       pollingService.on("message:updated", (msg) => {
         // Message updated
         const index = messages.findIndex((m) => m.id === msg.data.id);
@@ -247,7 +239,7 @@
     );
 
     // Listen for bulk message creation
-    sseUnsubscribers.push(
+    pollingUnsubscribers.push(
       pollingService.on("messages:bulk_created", (msg) => {
         // Bulk messages received
         messages = [...msg.data, ...messages];
@@ -258,10 +250,10 @@
     );
 
     // Listen for phone updates
-    sseUnsubscribers.push(
+    pollingUnsubscribers.push(
       pollingService.on("phones:updated", (msg) => {
         // Phones updated
-        console.log("SSE phones update:", msg.data);
+        console.log("Polling update - phones:", msg.data);
 
         // Update daemon status when we receive phone data
         daemonStatus.lastPhoneUpdate = Date.now();
@@ -281,7 +273,7 @@
             )
             .map((updatedPhone) => {
               console.log(
-                `SSE Update - Phone ${updatedPhone.iccid}: signal=${updatedPhone.signal}, status=${updatedPhone.status}`,
+                `Phone update - ${updatedPhone.iccid}: signal=${updatedPhone.signal}, status=${updatedPhone.status}`,
               );
               // Ensure we have the proper structure
               return {
@@ -304,15 +296,15 @@
     );
 
     // Listen for connection status
-    sseUnsubscribers.push(
+    pollingUnsubscribers.push(
       pollingService.on("connected", () => {
-        sseConnected = true;
-        console.log("SSE connected");
+        pollingConnected = true;
+        console.log("Polling connected");
       }),
     );
 
     // Listen for message sent responses
-    sseUnsubscribers.push(
+    pollingUnsubscribers.push(
       pollingService.on("message:sent", (msg) => {
         // Message sent result received
         console.log("Message sent result:", msg.data);
@@ -339,19 +331,19 @@
     );
 
     // Listen for disconnection
-    sseUnsubscribers.push(
+    pollingUnsubscribers.push(
       pollingService.on("disconnected", () => {
-        sseConnected = false;
-        console.log("SSE disconnected");
+        pollingConnected = false;
+        console.log("Polling disconnected");
       }),
     );
   }
 
-  // No need for periodic refresh - using SSE real-time updates
+  // Using HTTP polling for real-time updates (every 5 seconds)
 
   onDestroy(() => {
     // Cleanup realtime service
-    sseUnsubscribers.forEach((unsubscribe) => unsubscribe());
+    pollingUnsubscribers.forEach((unsubscribe) => unsubscribe());
     pollingService.disconnect();
     
     // Cleanup health check interval
@@ -440,27 +432,46 @@
     const now = Date.now();
     const fiveMinutesAgo = now - (5 * 60 * 1000); // 5 minutes
     
-    // Check if we have recent phone data (phones with recent status updates)
-    const hasRecentPhoneData = phoneNumbers.some(phone => {
-      return phone.status === 'active' || phone.status === 'online' || phone.status === 'registered';
-    });
+    // If we have heartbeat-based status from API, check if it's still fresh
+    if (daemonStatus.lastHeartbeat) {
+      const heartbeatIsRecent = daemonStatus.lastHeartbeat > fiveMinutesAgo;
+      daemonStatus.connected = heartbeatIsRecent;
+    } else {
+      // Fallback to data-based detection if no heartbeat
+      const hasRecentPhoneData = phoneNumbers.some(phone => {
+        return phone.status === 'active' || phone.status === 'online' || phone.status === 'registered';
+      });
+      
+      const dataIsRecent = daemonStatus.lastDataUpdate > fiveMinutesAgo;
+      const hasActivePhones = phoneNumbers.length > 0 && hasRecentPhoneData;
+      
+      daemonStatus.connected = dataIsRecent && (hasActivePhones || phoneNumbers.length === 0);
+    }
     
-    // Daemon is considered online if:
-    // 1. We have recent data update (within 5 minutes)
-    // 2. We have phones with active/online status
-    const dataIsRecent = daemonStatus.lastDataUpdate > fiveMinutesAgo;
-    const hasActivePhones = phoneNumbers.length > 0 && hasRecentPhoneData;
-    
-    daemonStatus.connected = dataIsRecent && (hasActivePhones || phoneNumbers.length === 0);
     daemonStatus.healthCheckTime = now;
     
-    console.log('Daemon health check:', {
-      connected: daemonStatus.connected,
-      dataIsRecent,
-      hasActivePhones,
-      phoneCount: phoneNumbers.length,
-      lastDataUpdate: new Date(daemonStatus.lastDataUpdate).toLocaleString()
-    });
+    // Only log if we have the variables defined
+    if (daemonStatus.lastHeartbeat) {
+      console.log('Daemon health check:', {
+        connected: daemonStatus.connected,
+        heartbeatBased: true,
+        phoneCount: phoneNumbers.length,
+        lastHeartbeat: new Date(daemonStatus.lastHeartbeat).toLocaleString()
+      });
+    } else {
+      const dataIsRecent = daemonStatus.lastDataUpdate > fiveMinutesAgo;
+      const hasActivePhones = phoneNumbers.length > 0 && phoneNumbers.some(phone => {
+        return phone.status === 'active' || phone.status === 'online' || phone.status === 'registered';
+      });
+      
+      console.log('Daemon health check:', {
+        connected: daemonStatus.connected,
+        dataIsRecent,
+        hasActivePhones,
+        phoneCount: phoneNumbers.length,
+        lastDataUpdate: new Date(daemonStatus.lastDataUpdate).toLocaleString()
+      });
+    }
   }
 
   function getDaemonStatusText() {
@@ -643,7 +654,7 @@
     {/if}
 
     <!-- Status Alert Banner -->
-    {#if phoneNumbers.some((p) => p.status !== "online")}
+    {#if phoneNumbers.some((p) => p.status !== "online" && p.status !== "active" && p.status !== "registered")}
       <div class="bg-yellow-50 border-b border-yellow-200 px-4 py-2">
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
@@ -730,7 +741,7 @@
           >
             <div class="text-xs opacity-90">在线设备</div>
             <div class="text-xl font-bold">
-              {phoneNumbers.filter((p) => p.status === "online")
+              {phoneNumbers.filter((p) => p.status === "online" || p.status === "active" || p.status === "registered")
                 .length}/{phoneNumbers.length}
             </div>
           </div>
@@ -774,7 +785,7 @@
         <div class="grid grid-cols-2 lg:grid-cols-4 gap-6">
           <StatsCard
             title="在线设备"
-            value={phoneNumbers.filter((p) => p.status === "online").length}
+            value={phoneNumbers.filter((p) => p.status === "online" || p.status === "active" || p.status === "registered").length}
             total={phoneNumbers.length}
             gradient="from-blue-500 to-blue-600"
             icon="📱"

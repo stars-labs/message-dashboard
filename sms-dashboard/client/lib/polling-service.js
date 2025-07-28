@@ -1,16 +1,17 @@
-// Polling-based real-time service for Cloudflare Workers compatibility
+// HTTP Polling service using setTimeout for real-time updates
+// Replaces SSE/WebSocket for Cloudflare Workers compatibility
 export class PollingService {
   constructor() {
-    this.pollingInterval = null;
+    this.pollTimeout = null; // Using setTimeout instead of setInterval
     this.callbacks = new Map();
     this.isPolling = false;
     this.lastUpdateTime = null;
-    this.pollIntervalMs = 5000; // 5 seconds
+    this.pollIntervalMs = 5000; // Poll every 5 seconds
     this.token = null;
   }
 
   async connect(token) {
-    console.log('[PollingService] Starting polling with token:', !!token);
+    console.log('[PollingService] Starting HTTP polling with token:', !!token);
     this.token = token;
     this.isPolling = true;
     this.startPolling();
@@ -23,29 +24,34 @@ export class PollingService {
   }
 
   disconnect() {
-    console.log('[PollingService] Stopping polling');
+    console.log('[PollingService] Stopping HTTP polling');
     this.isPolling = false;
     this.stopPolling();
   }
 
   async startPolling() {
-    if (this.pollingInterval) return;
+    if (this.pollTimeout) return;
 
-    // Initial poll
-    await this.poll();
-
-    // Set up interval
-    this.pollingInterval = setInterval(async () => {
+    // Start polling loop using setTimeout for better control
+    const pollLoop = async () => {
+      if (!this.isPolling) return;
+      
+      await this.poll();
+      
+      // Schedule next poll using setTimeout
       if (this.isPolling) {
-        await this.poll();
+        this.pollTimeout = setTimeout(pollLoop, this.pollIntervalMs);
       }
-    }, this.pollIntervalMs);
+    };
+
+    // Start the polling loop immediately
+    pollLoop();
   }
 
   stopPolling() {
-    if (this.pollingInterval) {
-      clearInterval(this.pollingInterval);
-      this.pollingInterval = null;
+    if (this.pollTimeout) {
+      clearTimeout(this.pollTimeout);
+      this.pollTimeout = null;
     }
   }
 
@@ -68,7 +74,7 @@ export class PollingService {
       });
 
       if (!response.ok) {
-        console.error('[PollingService] Poll failed:', response.status);
+        console.error('[PollingService] HTTP poll failed with status:', response.status);
         return;
       }
 
@@ -91,12 +97,12 @@ export class PollingService {
       });
 
     } catch (error) {
-      console.error('[PollingService] Poll error:', error);
+      console.error('[PollingService] HTTP poll error:', error);
     }
   }
 
   handleMessage(message) {
-    console.log('[PollingService] Message received:', message.type, message);
+    console.log('[PollingService] Update received:', message.type, message);
     
     // Emit to specific event listeners
     const callbacks = this.callbacks.get(message.type);

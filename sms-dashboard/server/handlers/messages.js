@@ -97,7 +97,7 @@ export const messagesHandler = {
     try {
       const body = await request.json();
       const { phone_iccid, recipient, content } = body;
-
+      
       // Validate input
       if (!phone_iccid || !recipient || !content) {
         return new Response(JSON.stringify({
@@ -109,19 +109,35 @@ export const messagesHandler = {
         });
       }
 
-      // Get phone details
+      // Get phone details - check for active statuses
       const phone = await env.DB.prepare(`
-        SELECT * FROM phones WHERE iccid = ? AND status = 'online'
+        SELECT * FROM phones WHERE iccid = ? AND status IN ('registered', 'active', 'online')
       `).bind(phone_iccid).first();
 
+
       if (!phone) {
-        return new Response(JSON.stringify({
-          success: false,
-          error: 'Phone not found or offline'
-        }), {
-          status: 400,
-          headers: { 'Content-Type': 'application/json' }
-        });
+        // Check if phone exists with any status
+        const anyPhone = await env.DB.prepare(`
+          SELECT iccid, status FROM phones WHERE iccid = ?
+        `).bind(phone_iccid).first();
+        
+        if (anyPhone) {
+          return new Response(JSON.stringify({
+            success: false,
+            error: `Phone found but status is '${anyPhone.status}' (not active)`
+          }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        } else {
+          return new Response(JSON.stringify({
+            success: false,
+            error: `Phone with ICCID '${phone_iccid}' not found in database`
+          }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
       }
 
       // Create message record
