@@ -10,6 +10,27 @@ export const iccidMappingsHandler = {
     const offset = (page - 1) * limit;
     
     try {
+      // Ensure the table exists by creating it if needed
+      await env.DB.prepare(`
+        CREATE TABLE IF NOT EXISTS iccid_mappings (
+          id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+          iccid TEXT UNIQUE NOT NULL,
+          phone_number TEXT NOT NULL,
+          carrier TEXT,
+          country TEXT,
+          notes TEXT,
+          is_active INTEGER DEFAULT 1,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          created_by TEXT,
+          updated_by TEXT
+        )
+      `).run();
+      
+      // Create indexes if they don't exist
+      await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_iccid_mappings_iccid ON iccid_mappings(iccid)`).run();
+      await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_iccid_mappings_phone ON iccid_mappings(phone_number)`).run();
+      await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_iccid_mappings_active ON iccid_mappings(is_active)`).run();
       let query = `
         SELECT 
           id,
@@ -73,10 +94,12 @@ export const iccidMappingsHandler = {
         headers: { 'Content-Type': 'application/json' }
       });
     } catch (error) {
+      console.error('[iccid-mappings.js] Error listing ICCID mappings:', error);
+      console.error('[iccid-mappings.js] Error stack:', error.stack);
       // Error handling - list ICCID mappings
       return new Response(JSON.stringify({ 
         success: false, 
-        error: 'Failed to list ICCID mappings' 
+        error: `Failed to list ICCID mappings: ${error.message}` 
       }), {
         status: 500,
         headers: { 'Content-Type': 'application/json' }
