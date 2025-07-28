@@ -973,7 +973,9 @@ const ModemManager = struct {
         defer self.allocator.free(result.stderr);
 
         if (result.term.Exited != 0) {
-            std.log.warn("Failed to create SMS on modem {s}: {s}", .{ modem_id, result.stderr });
+            std.log.warn("Failed to create SMS on modem {s}: exit_code={d}", .{ modem_id, result.term.Exited });
+            std.log.warn("SMS creation stderr: {s}", .{result.stderr});
+            std.log.warn("SMS creation stdout: {s}", .{result.stdout});
             return error.SmsCreateFailed;
         }
 
@@ -1004,7 +1006,9 @@ const ModemManager = struct {
         defer self.allocator.free(send_result.stderr);
 
         if (send_result.term.Exited != 0) {
-            std.log.warn("Failed to send SMS {s}: {s}", .{ sms_id, send_result.stderr });
+            std.log.warn("Failed to send SMS {s}: exit_code={d}", .{ sms_id, send_result.term.Exited });
+            std.log.warn("SMS send stderr: {s}", .{send_result.stderr});
+            std.log.warn("SMS send stdout: {s}", .{send_result.stdout});
             return error.SmsSendFailed;
         }
 
