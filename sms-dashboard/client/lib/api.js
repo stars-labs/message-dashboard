@@ -1,5 +1,5 @@
 import { auth } from './auth';
-import { realtimeService } from './websocket-with-fallback';
+import { pollingService } from './polling-service';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 
   (typeof window !== 'undefined' ? window.location.origin : 'https://sms-dashboard-api.workers.dev');
@@ -31,16 +31,10 @@ export async function fetchWithAuth(endpoint, options = {}) {
   return response.json();
 }
 
-// WebSocket-first API with HTTP fallback
+// Polling-based API with HTTP fallback
 async function apiRequest(method, data = {}) {
-  // Try WebSocket first
-  if (realtimeService.isConnected() && realtimeService.getConnectionType() === 'websocket') {
-    try {
-      return await realtimeService.request(method, data);
-    } catch (error) {
-      console.warn(`WebSocket ${method} failed, falling back to HTTP:`, error);
-    }
-  }
+  // For polling service, we don't use request-response pattern
+  // All communication is HTTP-based, so skip the polling service request attempt
   
   // Fallback to HTTP
   const httpEndpoints = {

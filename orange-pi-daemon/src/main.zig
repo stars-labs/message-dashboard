@@ -28,7 +28,11 @@ const Phone = struct {
     iccid: []const u8,
     number: ?[]const u8 = null,
     status: []const u8,
-    signal_strength: u8 = 0,
+    signal: ?u8 = null,
+    rssi: ?i32 = null,
+    rsrq: ?i32 = null,
+    rsrp: ?i32 = null,
+    snr: ?i32 = null,
     operator_name: ?[]const u8 = null,
     operator_id: ?[]const u8 = null,
     network_type: ?[]const u8 = null,
@@ -42,12 +46,87 @@ const MessageInfo = struct {
     message: Message,
 };
 
+// Signal cache for tracking previous values
+const SignalCache = struct {
+    allocator: std.mem.Allocator,
+    cache: std.HashMap([]const u8, CachedSignal, std.hash_map.StringContext, std.hash_map.default_max_load_percentage),
+    
+    const CachedSignal = struct {
+        signal_data: SignalData,
+        last_update: i64,
+    };
+    
+    pub fn init(allocator: std.mem.Allocator) SignalCache {
+        return .{
+            .allocator = allocator,
+            .cache = std.HashMap([]const u8, CachedSignal, std.hash_map.StringContext, std.hash_map.default_max_load_percentage).init(allocator),
+        };
+    }
+    
+    pub fn deinit(self: *SignalCache) void {
+        var iterator = self.cache.iterator();
+        while (iterator.next()) |entry| {
+            self.allocator.free(entry.key_ptr.*);
+        }
+        self.cache.deinit();
+    }
+    
+    pub fn shouldUpdate(self: *SignalCache, modem_id: []const u8, new_signal: SignalData) bool {
+        const now = std.time.milliTimestamp();
+        
+        // Always update if not in cache
+        if (self.cache.get(modem_id)) |cached| {
+            // Don't update more than once every 5 seconds (0.2Hz)
+            if (now - cached.last_update < 5000) {
+                return false;
+            }
+            
+            // Only update if signal changed by more than 5%
+            const signal_diff = if (new_signal.signal_percent > cached.signal_data.signal_percent) 
+                new_signal.signal_percent - cached.signal_data.signal_percent 
+            else 
+                cached.signal_data.signal_percent - new_signal.signal_percent;
+                
+            if (signal_diff < 5) {
+                return false;
+            }
+        }
+        
+        return true;
+    }
+    
+    pub fn updateCache(self: *SignalCache, modem_id: []const u8, signal_data: SignalData) !void {
+        const key = try self.allocator.dupe(u8, modem_id);
+        const cached_signal = CachedSignal{
+            .signal_data = signal_data,
+            .last_update = std.time.milliTimestamp(),
+        };
+        
+        // Free old key if exists
+        if (self.cache.fetchPut(key, cached_signal)) |maybe_old_entry| {
+            if (maybe_old_entry) |old_entry| {
+                self.allocator.free(old_entry.key);
+            }
+        } else |_| {}
+    }
+};
+
+const SignalData = struct {
+        signal_percent: u8,
+        rssi: ?i32,
+        rsrq: ?i32,
+        rsrp: ?i32,
+        snr: ?i32,
+    };
+
 // Thread context for processing a single modem
 const ModemThreadContext = struct {
     allocator: std.mem.Allocator,
     modem_manager: *ModemManager,
     api_client: *ApiClient,
+    signal_cache: *SignalCache,
     modem_id: []const u8,
+    check_signal: bool, // Whether to check signal this cycle
     
     fn processModem(ctx: ModemThreadContext) void {
         const self = ctx;
@@ -102,7 +181,11 @@ const ModemThreadContext = struct {
             .iccid = iccid_copy,
             .number = null,
             .status = status_copy,
-            .signal_strength = 0,
+            .signal = null,
+            .rssi = null,
+            .rsrq = null,
+            .rsrp = null,
+            .snr = null,
             .operator_name = null,
             .operator_id = null,
             .network_type = null,
@@ -125,13 +208,85 @@ const ModemThreadContext = struct {
             phone.number = number;
         } else |_| {}
         
-        // TODO: Add more modem details when those functions are implemented
-        // For now, we have the essential data: ICCID, phone number, and status
+        var should_upload = true;
         
-        // Upload this phone's data immediately
-        self.api_client.uploadPhone(phone) catch |err| {
-            std.log.warn("🧵 Thread: Failed to upload phone {s}: {any}", .{ phone.id, err });
-        };
+        // Get signal quality only if it's time to check and if it should be updated
+        if (self.check_signal) {
+            if (self.modem_manager.getSignalQuality(self.modem_id)) |signal_data| {
+                // Check if we should update based on cache
+                if (self.signal_cache.shouldUpdate(self.modem_id, signal_data)) {
+                    phone.signal = signal_data.signal_percent;
+                    phone.rssi = signal_data.rssi;
+                    phone.rsrq = signal_data.rsrq;
+                    phone.rsrp = signal_data.rsrp;
+                    phone.snr = signal_data.snr;
+                    
+                    // Update cache
+                    self.signal_cache.updateCache(self.modem_id, signal_data) catch |err| {
+                        std.log.warn("Failed to update signal cache for modem {s}: {any}", .{ self.modem_id, err });
+                    };
+                    
+                    std.log.info("🧵 Thread: Modem {s} signal updated: {}%, RSSI: {?}, RSRQ: {?}, RSRP: {?}, SNR: {?}", .{
+                        self.modem_id, 
+                        signal_data.signal_percent,
+                        signal_data.rssi,
+                        signal_data.rsrq,
+                        signal_data.rsrp,
+                        signal_data.snr
+                    });
+                } else {
+                    // Use cached signal data if available
+                    if (self.signal_cache.cache.get(self.modem_id)) |cached| {
+                        phone.signal = cached.signal_data.signal_percent;
+                        phone.rssi = cached.signal_data.rssi;
+                        phone.rsrq = cached.signal_data.rsrq;
+                        phone.rsrp = cached.signal_data.rsrp;
+                        phone.snr = cached.signal_data.snr;
+                        std.log.info("🧵 Thread: Modem {s} using cached signal (no update needed): {}%", .{ self.modem_id, cached.signal_data.signal_percent });
+                    } else {
+                        std.log.warn("🧵 Thread: Modem {s} has no cached signal data during signal check - skipping upload", .{ self.modem_id });
+                        should_upload = false;
+                    }
+                }
+            } else |err| {
+                std.log.warn("🧵 Thread: Failed to get signal quality for modem {s}: {any}", .{ self.modem_id, err });
+                // Use cached signal data if available when signal retrieval fails
+                if (self.signal_cache.cache.get(self.modem_id)) |cached| {
+                    phone.signal = cached.signal_data.signal_percent;
+                    phone.rssi = cached.signal_data.rssi;
+                    phone.rsrq = cached.signal_data.rsrq;
+                    phone.rsrp = cached.signal_data.rsrp;
+                    phone.snr = cached.signal_data.snr;
+                    std.log.info("🧵 Thread: Modem {s} using cached signal after retrieval failure: {}%", .{ self.modem_id, cached.signal_data.signal_percent });
+                } else {
+                    std.log.warn("🧵 Thread: Modem {s} has no cached signal data after retrieval failure - skipping upload", .{ self.modem_id });
+                    should_upload = false;
+                }
+            }
+        } else {
+            // Use cached signal data if available
+            if (self.signal_cache.cache.get(self.modem_id)) |cached| {
+                phone.signal = cached.signal_data.signal_percent;
+                phone.rssi = cached.signal_data.rssi;
+                phone.rsrq = cached.signal_data.rsrq;
+                phone.rsrp = cached.signal_data.rsrp;
+                phone.snr = cached.signal_data.snr;
+                std.log.info("🧵 Thread: Modem {s} using cached signal: {}%", .{ self.modem_id, cached.signal_data.signal_percent });
+            } else {
+                std.log.warn("🧵 Thread: Modem {s} has no cached signal data - skipping upload to prevent null signals", .{ self.modem_id });
+                should_upload = false;
+            }
+        }
+        
+        // Only upload if we have signal data (either fresh or cached)
+        if (should_upload) {
+            std.log.info("🧵 Thread: Uploading phone {s} with signal: {?}", .{ phone.id, phone.signal });
+            self.api_client.uploadPhone(phone) catch |err| {
+                std.log.warn("🧵 Thread: Failed to upload phone {s}: {any}", .{ phone.id, err });
+            };
+        } else {
+            std.log.warn("🧵 Thread: Skipping upload for modem {s} - no signal data available", .{ self.modem_id });
+        }
     }
 };
 
@@ -274,6 +429,64 @@ const ApiClient = struct {
             std.log.warn("⚠️ Unexpected curl response format, length: {d}", .{curl_result.stdout.len});
         }
     }
+    
+    pub fn sendHeartbeat(self: ApiClient) !void {
+        const heartbeat_data = .{
+            .device_id = self.config.device_id,
+            .version = self.config.daemon_version,
+            .status = "online",
+        };
+        
+        const heartbeat_json = try json.stringifyAlloc(self.allocator, heartbeat_data, .{});
+        defer self.allocator.free(heartbeat_json);
+        
+        try self.makeRequest("/heartbeat", heartbeat_json);
+        std.log.info("💓 Sent daemon heartbeat", .{});
+    }
+
+    pub fn getPendingSMS(self: ApiClient) ![]const u8 {
+        const url = try std.fmt.allocPrint(self.allocator, "{s}/api/control/pending-sms", .{self.config.api_url});
+        defer self.allocator.free(url);
+
+        const api_key_header = try std.fmt.allocPrint(self.allocator, "X-API-Key: {s}", .{self.config.api_key});
+        defer self.allocator.free(api_key_header);
+
+        const curl_args = [_][]const u8{
+            "curl", "-s", "-X", "GET", 
+            "-H", "Content-Type: application/json",
+            "-H", api_key_header,
+            url,
+        };
+
+        const result = try std.process.Child.run(.{
+            .allocator = self.allocator,
+            .argv = &curl_args,
+        });
+        defer self.allocator.free(result.stderr);
+
+        if (result.term.Exited != 0) {
+            std.log.warn("Failed to get pending SMS: exit_code={d}, stderr={s}", .{ result.term.Exited, result.stderr });
+            self.allocator.free(result.stdout);
+            return error.GetPendingFailed;
+        }
+
+        return result.stdout; // Caller owns this memory
+    }
+
+    pub fn updateSMSResult(self: ApiClient, message_id: []const u8, success: bool, sms_id: ?[]const u8, error_message: ?[]const u8) !void {
+        const update_data = .{
+            .message_id = message_id,
+            .success = success,
+            .sms_id = sms_id,
+            .error_message = error_message,
+        };
+
+        const update_json = try json.stringifyAlloc(self.allocator, update_data, .{});
+        defer self.allocator.free(update_json);
+
+        try self.makeRequest("/sms-result", update_json);
+        std.log.info("📝 Updated SMS status for message {s}: success={}", .{ message_id, success });
+    }
 };
 
 // Modem Manager
@@ -401,6 +614,114 @@ const ModemManager = struct {
             }
         }
         return try self.allocator.dupe(u8, "unknown");
+    }
+
+    pub fn getSignalQuality(self: ModemManager, modem_id: []const u8) !SignalData {
+        // First enable signal monitoring with a 5-second refresh rate
+        _ = std.process.Child.run(.{
+            .allocator = self.allocator,
+            .argv = &[_][]const u8{ "mmcli", "-m", modem_id, "--signal-setup=5" },
+        }) catch |err| {
+            std.log.debug("Signal setup failed for modem {s}: {any}", .{ modem_id, err });
+        };
+        
+        // Wait a moment for signal data to be available
+        std.time.sleep(100 * std.time.ns_per_ms);
+        
+        const result = try std.process.Child.run(.{
+            .allocator = self.allocator,
+            .argv = &[_][]const u8{ "mmcli", "-m", modem_id, "--signal-get" },
+        });
+        defer self.allocator.free(result.stdout);
+        defer self.allocator.free(result.stderr);
+
+        var signal_percent: u8 = 0;
+        var rssi: ?i32 = null;
+        var rsrq: ?i32 = null;
+        var rsrp: ?i32 = null;
+        var snr: ?i32 = null;
+
+        var lines = std.mem.tokenizeScalar(u8, result.stdout, '\n');
+        while (lines.next()) |line| {
+            const trimmed = std.mem.trim(u8, line, " \t");
+            
+            // Look for signal quality percentage
+            if (std.mem.indexOf(u8, trimmed, "quality:")) |_| {
+                if (std.mem.indexOf(u8, trimmed, ": ")) |pos| {
+                    const value_str = std.mem.trim(u8, trimmed[pos + 2 ..], " %'\"");
+                    if (std.fmt.parseInt(u8, value_str, 10)) |value| {
+                        signal_percent = value;
+                    } else |_| {}
+                }
+            }
+            
+            // Look for RSSI
+            if (std.mem.indexOf(u8, trimmed, "rssi:")) |_| {
+                if (std.mem.indexOf(u8, trimmed, ": ")) |pos| {
+                    const value_str = std.mem.trim(u8, trimmed[pos + 2 ..], " dBm'\"");
+                    // Handle float values like -49.00
+                    if (std.fmt.parseFloat(f32, value_str)) |value| {
+                        rssi = @intFromFloat(value);
+                    } else |_| {}
+                }
+            }
+            
+            // Look for RSRQ
+            if (std.mem.indexOf(u8, trimmed, "rsrq:")) |_| {
+                if (std.mem.indexOf(u8, trimmed, ": ")) |pos| {
+                    const value_str = std.mem.trim(u8, trimmed[pos + 2 ..], " dB'\"");
+                    if (std.fmt.parseFloat(f32, value_str)) |value| {
+                        rsrq = @intFromFloat(value);
+                    } else |_| {}
+                }
+            }
+            
+            // Look for RSRP
+            if (std.mem.indexOf(u8, trimmed, "rsrp:")) |_| {
+                if (std.mem.indexOf(u8, trimmed, ": ")) |pos| {
+                    const value_str = std.mem.trim(u8, trimmed[pos + 2 ..], " dBm'\"");
+                    if (std.fmt.parseFloat(f32, value_str)) |value| {
+                        rsrp = @intFromFloat(value);
+                    } else |_| {}
+                }
+            }
+            
+            // Look for SNR (s/n in mmcli output)
+            if (std.mem.indexOf(u8, trimmed, "s/n:") != null) {
+                if (std.mem.indexOf(u8, trimmed, ": ")) |pos| {
+                    const value_str = std.mem.trim(u8, trimmed[pos + 2 ..], " dB'\"");
+                    if (std.fmt.parseFloat(f32, value_str)) |value| {
+                        snr = @intFromFloat(value);
+                    } else |_| {}
+                }
+            }
+        }
+
+        // Calculate signal percentage from RSSI if not provided
+        if (signal_percent == 0 and rssi != null) {
+            // Map RSSI to percentage (rough approximation)
+            // -50 dBm = excellent (100%)
+            // -80 dBm = good (50%) 
+            // -100 dBm = poor (0%)
+            const rssi_val = rssi.?;
+            if (rssi_val >= -50) {
+                signal_percent = 100;
+            } else if (rssi_val <= -100) {
+                signal_percent = 0;
+            } else {
+                // Linear interpolation between -50 and -100
+                const normalized = @as(f32, @floatFromInt(rssi_val + 100)) / 50.0;
+                signal_percent = @intFromFloat(normalized * 100.0);
+            }
+        }
+        
+        return SignalData{
+            .signal_percent = signal_percent,
+            .rssi = rssi,
+            .rsrq = rsrq,
+            .rsrp = rsrp,
+            .snr = snr,
+        };
     }
 
     pub fn getNewMessages(self: ModemManager, modem_id: []const u8) ![]MessageInfo {
@@ -556,6 +877,59 @@ const ModemManager = struct {
             std.log.info("Deleted SMS {s} from modem {s}", .{ sms_id, modem_id });
         }
     }
+
+    pub fn sendSms(self: ModemManager, modem_id: []const u8, recipient: []const u8, content: []const u8) ![]const u8 {
+        std.log.info("📤 Sending SMS from modem {s} to {s}: {s}", .{ modem_id, recipient, content });
+        
+        const sms_arg = try std.fmt.allocPrint(self.allocator, "text={s},number={s}", .{content, recipient});
+        defer self.allocator.free(sms_arg);
+        
+        const result = try std.process.Child.run(.{
+            .allocator = self.allocator,
+            .argv = &[_][]const u8{ "mmcli", "-m", modem_id, "--messaging-create-sms", sms_arg },
+        });
+        defer self.allocator.free(result.stdout);
+        defer self.allocator.free(result.stderr);
+
+        if (result.term.Exited != 0) {
+            std.log.warn("Failed to create SMS on modem {s}: {s}", .{ modem_id, result.stderr });
+            return error.SmsCreateFailed;
+        }
+
+        // Extract SMS ID from output (format: "Successfully created SMS: /org/freedesktop/ModemManager1/SMS/XX")
+        var sms_id: []const u8 = "";
+        var lines = std.mem.tokenizeScalar(u8, result.stdout, '\n');
+        while (lines.next()) |line| {
+            if (std.mem.indexOf(u8, line, "/SMS/")) |pos| {
+                const start = pos + 5;
+                var end = start;
+                while (end < line.len and line[end] != ' ' and line[end] != '\n') : (end += 1) {}
+                sms_id = line[start..end];
+                break;
+            }
+        }
+
+        if (sms_id.len == 0) {
+            std.log.warn("Could not extract SMS ID from: {s}", .{result.stdout});
+            return error.SmsIdNotFound;
+        }
+
+        // Send the SMS
+        const send_result = try std.process.Child.run(.{
+            .allocator = self.allocator,
+            .argv = &[_][]const u8{ "mmcli", "-s", sms_id, "--send" },
+        });
+        defer self.allocator.free(send_result.stdout);
+        defer self.allocator.free(send_result.stderr);
+
+        if (send_result.term.Exited != 0) {
+            std.log.warn("Failed to send SMS {s}: {s}", .{ sms_id, send_result.stderr });
+            return error.SmsSendFailed;
+        }
+
+        std.log.info("✅ Successfully sent SMS {s} to {s}", .{ sms_id, recipient });
+        return try self.allocator.dupe(u8, sms_id);
+    }
 };
 
 pub fn main() !void {
@@ -601,12 +975,35 @@ pub fn main() !void {
 
     var modem_manager = ModemManager.init(allocator);
     var api_client = ApiClient.init(allocator, config);
+    var signal_cache = SignalCache.init(allocator);
+    defer signal_cache.deinit();
+    
+    // Send initial heartbeat
+    api_client.sendHeartbeat() catch |err| {
+        std.log.warn("Failed to send initial heartbeat: {any}", .{err});
+    };
+    
+    var last_heartbeat_time = std.time.milliTimestamp();
+    const heartbeat_interval_ms: i64 = 60000; // 60 seconds
+    
+    // Separate timing for SMS (10Hz = 100ms) and signal updates (0.2Hz = 5000ms)
+    var last_signal_check = std.time.milliTimestamp();
+    const sms_interval_ms: i64 = 100; // 10Hz for SMS
+    const signal_interval_ms: i64 = 5000; // 0.2Hz for signal
     
     while (true) {
+        const now = std.time.milliTimestamp();
+        
+        // Check if it's time for signal updates
+        const should_check_signal = (now - last_signal_check) >= signal_interval_ms;
+        if (should_check_signal) {
+            last_signal_check = now;
+        }
+        
         // Get list of all modems
         const modems = modem_manager.getModemList() catch |err| {
             std.log.err("Failed to get modem list: {any}", .{err});
-            std.time.sleep(config.poll_interval * std.time.ns_per_s);
+            std.time.sleep(sms_interval_ms * std.time.ns_per_ms);
             continue;
         };
         defer {
@@ -616,7 +1013,9 @@ pub fn main() !void {
             allocator.free(modems);
         }
 
-        std.log.info("🔄 Starting parallel phone updates for {d} modems", .{modems.len});
+        if (should_check_signal) {
+            std.log.info("🔄 Starting parallel phone updates for {d} modems (with signal check)", .{modems.len});
+        }
         
         // Create threads for parallel modem processing
         var threads = std.ArrayList(std.Thread).init(allocator);
@@ -634,7 +1033,9 @@ pub fn main() !void {
                 .allocator = allocator,
                 .modem_manager = &modem_manager,
                 .api_client = &api_client,
+                .signal_cache = &signal_cache,
                 .modem_id = modem_id_copy,
+                .check_signal = should_check_signal,
             };
             
             const thread = std.Thread.spawn(.{}, ModemThreadContext.processModem, .{context}) catch |err| {
@@ -677,7 +1078,7 @@ pub fn main() !void {
                 std.log.warn("Failed to get messages from modem {s}: {any}", .{ modem_id, err });
                 continue;
             };
-            // Memory is already managed by getNewMessages, no defer needed here
+            defer allocator.free(new_messages); // Free the slice returned by getNewMessages
 
             if (new_messages.len > 0) {
                 std.log.info("📬 Found {d} new messages on modem {s}", .{ new_messages.len, modem_id });
@@ -717,7 +1118,88 @@ pub fn main() !void {
             std.log.info("✅ Processed and uploaded {d} new messages", .{total_new_messages});
         }
 
-        // Wait before next poll
-        std.time.sleep(config.poll_interval * std.time.ns_per_s);
+        // Check for pending SMS to send
+        if (api_client.getPendingSMS()) |response| {
+            defer allocator.free(response);
+            
+            // Parse JSON response
+            if (json.parseFromSlice(json.Value, allocator, response, .{})) |parsed_response| {
+                defer parsed_response.deinit();
+                
+                if (parsed_response.value.object.get("pending_messages")) |messages_value| {
+                    if (messages_value.array.items.len > 0) {
+                        std.log.info("📤 Found {d} pending SMS to send", .{messages_value.array.items.len});
+                        
+                        for (messages_value.array.items) |msg| {
+                            const phone_iccid = msg.object.get("phone_iccid").?.string;
+                            const recipient = msg.object.get("recipient").?.string;
+                            const content = msg.object.get("content").?.string;
+                            const message_id = msg.object.get("id").?.string;
+                            
+                            // Find modem with matching ICCID
+                            var sms_sent = false;
+                            for (modems) |modem_id| {
+                                const modem_iccid = modem_manager.getIccid(modem_id) catch continue;
+                                if (modem_iccid != null and std.mem.eql(u8, modem_iccid.?, phone_iccid)) {
+                                    // Send SMS
+                                    if (modem_manager.sendSms(modem_id, recipient, content)) |sms_id| {
+                                        defer allocator.free(sms_id);
+                                        
+                                        std.log.info("✅ Sent SMS {s} with ID {s}", .{ message_id, sms_id });
+                                        
+                                        // Update message status to sent
+                                        api_client.updateSMSResult(message_id, true, sms_id, null) catch |err| {
+                                            std.log.warn("Failed to update SMS status for {s}: {any}", .{ message_id, err });
+                                        };
+                                        
+                                        sms_sent = true;
+                                        break;
+                                    } else |err| {
+                                        std.log.warn("Failed to send SMS {s}: {any}", .{ message_id, err });
+                                        
+                                        // Update message status to failed
+                                        const error_msg = try std.fmt.allocPrint(allocator, "Send failed: {any}", .{err});
+                                        defer allocator.free(error_msg);
+                                        
+                                        api_client.updateSMSResult(message_id, false, null, error_msg) catch |update_err| {
+                                            std.log.warn("Failed to update SMS status for {s}: {any}", .{ message_id, update_err });
+                                        };
+                                        
+                                        sms_sent = true; // Don't try other modems for this message
+                                        break;
+                                    }
+                                }
+                            }
+                            
+                            // If no matching modem found, mark as failed
+                            if (!sms_sent) {
+                                const error_msg = try std.fmt.allocPrint(allocator, "No modem found with ICCID {s}", .{phone_iccid});
+                                defer allocator.free(error_msg);
+                                
+                                api_client.updateSMSResult(message_id, false, null, error_msg) catch |err| {
+                                    std.log.warn("Failed to update SMS status for {s}: {any}", .{ message_id, err });
+                                };
+                            }
+                        }
+                    }
+                }
+            } else |err| {
+                std.log.warn("Failed to parse pending SMS response: {any}", .{err});
+            }
+        } else |err| {
+            std.log.debug("No pending SMS or failed to get: {any}", .{err});
+        }
+
+        // Send heartbeat if it's time
+        const current_time = std.time.milliTimestamp();
+        if (current_time - last_heartbeat_time >= heartbeat_interval_ms) {
+            api_client.sendHeartbeat() catch |err| {
+                std.log.warn("Failed to send heartbeat: {any}", .{err});
+            };
+            last_heartbeat_time = current_time;
+        }
+
+        // Wait before next poll - use SMS interval for high-frequency checking
+        std.time.sleep(sms_interval_ms * std.time.ns_per_ms);
     }
 }
