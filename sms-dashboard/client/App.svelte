@@ -146,7 +146,7 @@
 
   // Helper function to establish SSE connection
   async function connectSSE() {
-    if (realtimeService.isConnected()) {
+    if (realtimeService.isConnected) {
       console.log("[App] SSE already connected, skipping");
       return;
     }

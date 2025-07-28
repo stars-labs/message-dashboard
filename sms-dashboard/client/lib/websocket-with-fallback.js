@@ -177,7 +177,7 @@ export class RealtimeService {
     }
   }
 
-  isConnected() {
+  getIsConnected() {
     return this.eventSource !== null && this.eventSource.readyState === EventSource.OPEN;
   }
 
