@@ -62,6 +62,16 @@ const ModemThreadContext = struct {
         
         std.log.info("🧵 Thread: Modem {s} state: {s}", .{ self.modem_id, modem_status });
         
+        // Enable modem if it's disabled
+        if (std.mem.eql(u8, modem_status, "disabled")) {
+            std.log.info("🔧 Thread: Enabling disabled modem {s}", .{self.modem_id});
+            self.modem_manager.enableModem(self.modem_id) catch |err| {
+                std.log.warn("🧵 Thread: Failed to enable modem {s}: {any}", .{ self.modem_id, err });
+            };
+            // Give modem time to enable
+            std.time.sleep(2 * std.time.ns_per_s);
+        }
+        
         // Get ICCID for this modem
         const iccid_opt = self.modem_manager.getIccid(self.modem_id) catch |err| {
             std.log.warn("🧵 Thread: Failed to get ICCID for modem {s}: {any}", .{ self.modem_id, err });
@@ -190,8 +200,11 @@ const ApiClient = struct {
         const url = try std.fmt.allocPrint(self.allocator, "{s}/api/control{s}", .{ self.config.api_url, endpoint });
         defer self.allocator.free(url);
 
-        // Create temporary file for payload
-        const temp_file = "/tmp/sms_payload.json";
+        // Create unique temporary file for each thread
+        const thread_id = std.Thread.getCurrentId();
+        const temp_file = try std.fmt.allocPrint(self.allocator, "/tmp/sms_payload_{d}.json", .{thread_id});
+        defer self.allocator.free(temp_file);
+        
         const file = std.fs.cwd().createFile(temp_file, .{}) catch |err| {
             std.log.warn("Failed to create temp file: {any}", .{err});
             return;
@@ -489,6 +502,22 @@ const ModemManager = struct {
         }
 
         return try std.fmt.allocPrint(self.allocator, "{s}.000Z", .{raw_timestamp});
+    }
+    
+    pub fn enableModem(self: ModemManager, modem_id: []const u8) !void {
+        const result = try std.process.Child.run(.{
+            .allocator = self.allocator,
+            .argv = &[_][]const u8{ "mmcli", "-m", modem_id, "-e" },
+        });
+        defer self.allocator.free(result.stdout);
+        defer self.allocator.free(result.stderr);
+        
+        if (result.term.Exited != 0) {
+            std.log.warn("Failed to enable modem {s}: {s}", .{ modem_id, result.stderr });
+            return error.ModemEnableFailed;
+        }
+        
+        std.log.info("✅ Successfully enabled modem {s}", .{modem_id});
     }
 
     pub fn deleteSms(self: ModemManager, modem_id: []const u8, sms_id: []const u8) !void {

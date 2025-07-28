@@ -110,7 +110,7 @@
         }:
         let
           # SMS daemon version - single source of truth
-          daemonVersion = "1.2.0"; # Multi-threaded parallel phone uploads for faster performance
+          daemonVersion = "1.2.1"; # Fix thread-safe curl and auto-enable disabled modems
           
           # Orange Pi SMS daemon package
           sms-daemon = pkgs.stdenv.mkDerivation rec {
