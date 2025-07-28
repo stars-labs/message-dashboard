@@ -178,7 +178,7 @@
                         <span class="text-gray-500">•</span>
                         <span class="text-green-600 font-medium flex items-center gap-1">
                           <span>📞</span>
-                          来电: {message.phone_number}
+                          发送方: {message.phone_number}
                         </span>
                       {/if}
                       <span class="text-gray-500">•</span>
@@ -237,7 +237,7 @@
                       <span class="text-gray-500">•</span>
                       <span class="text-green-600 font-medium flex items-center gap-1">
                         <span>📞</span>
-                        来电: {message.phone_number}
+                        发送方: {message.phone_number}
                       </span>
                     {/if}
                     {#if !selectedPhone}
