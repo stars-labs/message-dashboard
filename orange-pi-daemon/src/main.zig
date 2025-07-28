@@ -543,9 +543,21 @@ const ApiClient = struct {
 // Modem Manager
 const ModemManager = struct {
     allocator: std.mem.Allocator,
+    warned_iccids: std.HashMap([]const u8, void, std.hash_map.StringContext, std.hash_map.default_max_load_percentage),
 
     pub fn init(allocator: std.mem.Allocator) ModemManager {
-        return .{ .allocator = allocator };
+        return .{ 
+            .allocator = allocator,
+            .warned_iccids = std.HashMap([]const u8, void, std.hash_map.StringContext, std.hash_map.default_max_load_percentage).init(allocator),
+        };
+    }
+    
+    pub fn deinit(self: *ModemManager) void {
+        var iterator = self.warned_iccids.iterator();
+        while (iterator.next()) |entry| {
+            self.allocator.free(entry.key_ptr.*);
+        }
+        self.warned_iccids.deinit();
     }
 
     pub fn getModemList(self: ModemManager) ![][]const u8 {
@@ -573,7 +585,7 @@ const ModemManager = struct {
         return result.toOwnedSlice();
     }
 
-    pub fn getIccid(self: ModemManager, modem_id: []const u8) !?[]const u8 {
+    pub fn getIccid(self: *ModemManager, modem_id: []const u8) !?[]const u8 {
         const modem_result = try std.process.Child.run(.{
             .allocator = self.allocator,
             .argv = &[_][]const u8{ "mmcli", "-m", modem_id },
@@ -613,7 +625,15 @@ const ModemManager = struct {
                 if (std.mem.indexOf(u8, trimmed, ": ")) |pos| {
                     const iccid = std.mem.trim(u8, trimmed[pos + 2 ..], " '\"");
                     if (iccid.len > 0 and !std.mem.eql(u8, iccid, "unknown")) {
-                        std.log.warn("Using fallback ICCID {s} for modem {s} (SIM {s})", .{ iccid, modem_id, sim_num });
+                        // Only warn once per ICCID to avoid log spam
+                        if (!self.warned_iccids.contains(iccid)) {
+                            std.log.warn("Using fallback ICCID {s} for modem {s} (SIM {s})", .{ iccid, modem_id, sim_num });
+                            const iccid_key = try self.allocator.dupe(u8, iccid);
+                            self.warned_iccids.put(iccid_key, {}) catch |err| {
+                                std.log.warn("Failed to cache ICCID warning: {any}", .{err});
+                                self.allocator.free(iccid_key);
+                            };
+                        }
                         return try self.allocator.dupe(u8, iccid);
                     }
                 }
@@ -775,7 +795,7 @@ const ModemManager = struct {
         };
     }
 
-    pub fn getNewMessages(self: ModemManager, modem_id: []const u8) ![]MessageInfo {
+    pub fn getNewMessages(self: *ModemManager, modem_id: []const u8) ![]MessageInfo {
         const result = try std.process.Child.run(.{
             .allocator = self.allocator,
             .argv = &[_][]const u8{ "mmcli", "-m", modem_id, "--messaging-list-sms" },
@@ -805,7 +825,7 @@ const ModemManager = struct {
         return messages.toOwnedSlice();
     }
 
-    fn getSmsDetails(self: ModemManager, sms_id: []const u8, modem_id: []const u8) !MessageInfo {
+    fn getSmsDetails(self: *ModemManager, sms_id: []const u8, modem_id: []const u8) !MessageInfo {
         const result = try std.process.Child.run(.{
             .allocator = self.allocator,
             .argv = &[_][]const u8{ "mmcli", "-s", sms_id },
@@ -1025,6 +1045,7 @@ pub fn main() !void {
     std.log.info("Polling every {d} seconds", .{config.poll_interval});
 
     var modem_manager = ModemManager.init(allocator);
+    defer modem_manager.deinit();
     var api_client = ApiClient.init(allocator, config);
     defer api_client.deinit();
     var signal_cache = SignalCache.init(allocator);
