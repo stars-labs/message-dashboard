@@ -106,8 +106,9 @@
           totalReceived: statsResponse.total_received || 0,
           todaySent: statsResponse.today_sent || 0,
           todayReceived: statsResponse.today_received || 0,
-          onlineDevices: phoneNumbers.filter((p) => p.status === "online")
-            .length,
+          onlineDevices: phoneNumbers.filter((p) => 
+            p.status === "online" || p.status === "active" || p.status === "registered"
+          ).length,
           totalDevices: phoneNumbers.length,
           verificationRate: Math.round(
             (statsResponse.verification_rate || 0) * 100,
@@ -292,7 +293,7 @@
 
           // Update online device count
           stats.onlineDevices = phoneNumbers.filter(
-            (p) => p.status === "online" || p.status === "active",
+            (p) => p.status === "online" || p.status === "active" || p.status === "registered",
           ).length;
           stats.totalDevices = phoneNumbers.length;
           

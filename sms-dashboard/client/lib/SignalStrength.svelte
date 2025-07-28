@@ -54,7 +54,7 @@
 {#if compact}
   <!-- Compact view for list -->
   <div class="flex items-center gap-1.5">
-    {#if status === "online"}
+    {#if status === "online" || status === "active" || status === "registered" || status === "connected"}
       <div class="flex gap-0.5 items-end">
         {#each [1, 2, 3, 4] as bar}
           <div
@@ -147,7 +147,7 @@
     <div class="flex items-center justify-between">
       <span class="text-sm font-medium text-gray-700">信号强度</span>
       <div class="flex items-center gap-2">
-        {#if status === "online"}
+        {#if status === "online" || status === "active" || status === "registered" || status === "connected"}
           <div class="flex gap-0.5 items-end">
             {#each [1, 2, 3, 4] as bar}
               <div

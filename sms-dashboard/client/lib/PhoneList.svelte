@@ -36,6 +36,9 @@
   function getStatusColor(status) {
     switch (status) {
       case "online":
+      case "active":
+      case "registered":
+      case "connected":
         return "bg-gradient-to-r from-green-400 to-green-500";
       case "offline":
         return "bg-gradient-to-r from-gray-400 to-gray-500";
