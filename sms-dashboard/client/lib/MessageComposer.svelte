@@ -220,7 +220,7 @@
       class="w-full px-4 py-2 border border-purple-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
     >
       <option value="">选择发送卡...</option>
-      {#each phoneNumbers.filter((p) => p.status === "online") as phone}
+      {#each phoneNumbers.filter((p) => p.iccid && p.status !== "offline" && p.status !== "error") as phone}
         <option value={phone.iccid}>
           {phone.flag}
           {phone.number ||
@@ -422,7 +422,7 @@
           class="w-full px-4 py-2 border border-purple-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
         >
           <option value="">选择发送卡...</option>
-          {#each phoneNumbers.filter((p) => p.status === "online") as phone}
+          {#each phoneNumbers.filter((p) => p.iccid && p.status !== "offline" && p.status !== "error") as phone}
             <option value={phone.iccid}>
               {phone.flag}
               {phone.number ||

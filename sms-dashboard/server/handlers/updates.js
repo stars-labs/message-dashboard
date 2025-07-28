@@ -6,12 +6,45 @@ export const updatesHandler = {
     const since = url.searchParams.get('since');
     
     try {
-      // For now, just return empty updates
-      // In a real implementation, you'd query for updates since the given timestamp
       const updates = [];
       
-      // If we have recent phone updates from the daemon, include them
-      // This would normally check a queue or recent events table
+      // Fetch current phone data to check for updates
+      const { results: phones } = await env.DB.prepare(`
+        SELECT iccid, number, country, flag, carrier, status, signal, 
+               rssi, rsrq, rsrp, snr, operator_name, operator_id, imei, access_tech, 
+               created_at, updated_at
+        FROM phones 
+        ORDER BY updated_at DESC
+      `).all();
+      
+      // If we have phones data, send it as an update
+      // In a real implementation, you'd check if data changed since 'since' timestamp
+      if (phones && phones.length > 0) {
+        updates.push({
+          type: 'phones:updated',
+          data: phones,
+          timestamp: new Date().toISOString()
+        });
+      }
+      
+      // Check for recent messages if 'since' is provided
+      if (since) {
+        const { results: messages } = await env.DB.prepare(`
+          SELECT id, phone_iccid, phone_number, content, timestamp, type, status, verification_code
+          FROM messages 
+          WHERE created_at > ?
+          ORDER BY timestamp DESC
+          LIMIT 50
+        `).bind(since).all();
+        
+        if (messages && messages.length > 0) {
+          updates.push({
+            type: 'messages:bulk_created',
+            data: messages,
+            timestamp: new Date().toISOString()
+          });
+        }
+      }
       
       return new Response(JSON.stringify({
         success: true,
