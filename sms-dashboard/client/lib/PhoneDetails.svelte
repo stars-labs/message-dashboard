@@ -36,9 +36,19 @@
   <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4 {mobile ? 'mx-4 mb-4' : 'mb-4'}">
     <div class="flex items-start justify-between mb-4">
       <div>
-        <h3 class="text-lg font-semibold text-gray-900">
+        <h3 class="text-lg font-semibold">
           {#if phone.number}
-            {phone.number}
+            {#if phone.mapped_number}
+              <span class="text-purple-600 flex items-center gap-2">
+                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                  <path fill-rule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+                </svg>
+                {phone.number}
+                <span class="text-xs font-normal text-purple-500">(映射号码)</span>
+              </span>
+            {:else}
+              <span class="text-gray-900">{phone.number}</span>
+            {/if}
           {:else}
             <span class="text-orange-600">未设置号码</span>
           {/if}
@@ -78,6 +88,17 @@
         <div class="flex justify-between">
           <span class="text-gray-600">ICCID:</span>
           <span class="font-mono text-xs">{phone.iccid}</span>
+        </div>
+      {/if}
+      {#if phone.mapped_number}
+        <div class="flex justify-between items-center">
+          <span class="text-gray-600">映射来源:</span>
+          <span class="text-purple-600 text-sm flex items-center gap-1">
+            <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+            </svg>
+            ICCID 映射
+          </span>
         </div>
       {/if}
       {#if phone.imei}

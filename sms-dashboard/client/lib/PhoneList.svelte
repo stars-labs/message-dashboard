@@ -120,8 +120,22 @@
       />
     </div>
 
-    <div class="text-sm font-medium text-purple-600">
-      共 {filteredPhones.length} 个号码
+    <div class="flex items-center justify-between">
+      <div class="text-sm font-medium text-purple-600">
+        共 {filteredPhones.length} 个号码
+      </div>
+      <div class="text-xs text-gray-500 flex items-center gap-3">
+        <span class="flex items-center gap-1">
+          <span class="w-2 h-2 bg-gray-900 rounded-full"></span>
+          原始号码
+        </span>
+        <span class="flex items-center gap-1">
+          <svg class="w-3 h-3 text-purple-600" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+          </svg>
+          <span class="text-purple-600">映射号码</span>
+        </span>
+      </div>
     </div>
   </div>
 
@@ -183,9 +197,18 @@
               <div class="flex items-center gap-2">
                 <span class="text-lg">{phone.flag || "📱"}</span>
                 {#if phone.number}
-                  <span class="font-medium text-gray-900 text-sm"
-                    >{phone.number}</span
-                  >
+                  {#if phone.mapped_number}
+                    <span class="font-medium text-purple-600 text-sm flex items-center gap-1">
+                      <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+                      </svg>
+                      {phone.number}
+                    </span>
+                  {:else}
+                    <span class="font-medium text-gray-900 text-sm">
+                      {phone.number}
+                    </span>
+                  {/if}
                 {:else}
                   <span
                     class="font-medium text-orange-600 text-sm flex items-center gap-1"
