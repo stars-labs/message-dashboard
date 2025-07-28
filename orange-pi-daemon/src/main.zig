@@ -2,6 +2,7 @@ const std = @import("std");
 const time = std.time;
 const process = std.process;
 const json = std.json;
+const http = std.http;
 
 // Configuration
 const Config = struct {
@@ -299,12 +300,26 @@ pub const std_options: std.Options = .{
 const ApiClient = struct {
     allocator: std.mem.Allocator,
     config: Config,
+    http_client: http.Client,
+    mutex: std.Thread.Mutex,
 
     pub fn init(allocator: std.mem.Allocator, config: Config) ApiClient {
-        return .{ .allocator = allocator, .config = config };
+        return .{ 
+            .allocator = allocator, 
+            .config = config,
+            .http_client = http.Client{ .allocator = allocator },
+            .mutex = std.Thread.Mutex{},
+        };
+    }
+    
+    pub fn deinit(self: *ApiClient) void {
+        self.http_client.deinit();
     }
 
-    pub fn uploadPhone(self: ApiClient, phone: Phone) !void {
+    pub fn uploadPhone(self: *ApiClient, phone: Phone) !void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        
         const phones = [_]Phone{phone};
         const phones_json = try json.stringifyAlloc(self.allocator, phones, .{ .emit_null_optional_fields = false });
         defer self.allocator.free(phones_json);
@@ -316,8 +331,11 @@ const ApiClient = struct {
         std.log.info("✅ Uploaded phone {s} via HTTP API", .{phone.id});
     }
 
-    pub fn uploadPhones(self: ApiClient, phones: []const Phone) !void {
+    pub fn uploadPhones(self: *ApiClient, phones: []const Phone) !void {
         if (phones.len == 0) return;
+        
+        self.mutex.lock();
+        defer self.mutex.unlock();
 
         const phones_json = try json.stringifyAlloc(self.allocator, phones, .{ .emit_null_optional_fields = false });
         defer self.allocator.free(phones_json);
@@ -329,8 +347,11 @@ const ApiClient = struct {
         std.log.info("✅ Uploaded {d} phones via HTTP API", .{phones.len});
     }
 
-    pub fn uploadMessages(self: ApiClient, messages: []const Message) !void {
+    pub fn uploadMessages(self: *ApiClient, messages: []const Message) !void {
         if (messages.len == 0) return;
+        
+        self.mutex.lock();
+        defer self.mutex.unlock();
 
         std.log.info("📱 Preparing to upload {d} messages:", .{messages.len});
         for (messages, 0..) |msg, i| {
@@ -351,86 +372,85 @@ const ApiClient = struct {
         std.log.info("✅ Uploaded {d} messages via HTTP API", .{messages.len});
     }
 
-    fn makeRequest(self: ApiClient, endpoint: []const u8, payload: []const u8) !void {
-        const url = try std.fmt.allocPrint(self.allocator, "{s}/api/control{s}", .{ self.config.api_url, endpoint });
-        defer self.allocator.free(url);
-
-        // Create unique temporary file for each thread
-        const thread_id = std.Thread.getCurrentId();
-        const temp_file = try std.fmt.allocPrint(self.allocator, "/tmp/sms_payload_{d}.json", .{thread_id});
-        defer self.allocator.free(temp_file);
+    fn makeRequest(self: *ApiClient, endpoint: []const u8, payload: []const u8) !void {
+        const url_str = try std.fmt.allocPrint(self.allocator, "{s}/api/control{s}", .{ self.config.api_url, endpoint });
+        defer self.allocator.free(url_str);
         
-        const file = std.fs.cwd().createFile(temp_file, .{}) catch |err| {
-            std.log.warn("Failed to create temp file: {any}", .{err});
+        const uri = std.Uri.parse(url_str) catch |err| {
+            std.log.warn("❌ Failed to parse URL {s}: {any}", .{ url_str, err });
             return;
         };
-        defer file.close();
-        defer std.fs.cwd().deleteFile(temp_file) catch {};
-
-        // Write payload to temp file
-        file.writeAll(payload) catch |err| {
-            std.log.warn("Failed to write payload to temp file: {any}", .{err});
-            return;
-        };
-
-        // Prepare curl arguments with proper memory management
-        const api_key_header = try std.fmt.allocPrint(self.allocator, "X-API-Key: {s}", .{self.config.api_key});
-        defer self.allocator.free(api_key_header);
         
-        const data_arg = try std.fmt.allocPrint(self.allocator, "@{s}", .{temp_file});
-        defer self.allocator.free(data_arg);
-
-        // Use curl for reliable HTTP POST
-        const curl_result = std.process.Child.run(.{
-            .allocator = self.allocator,
-            .argv = &[_][]const u8{
-                "curl",
-                "-s",
-                "-w", "%{http_code}",
-                "-X", "POST",
-                "-H", "Content-Type: application/json",
-                "-H", api_key_header,
-                "--data-binary", data_arg,
-                url,
+        var server_header_buffer: [16 * 1024]u8 = undefined;
+        
+        // Create HTTP request
+        var req = self.http_client.open(.POST, uri, .{
+            .server_header_buffer = &server_header_buffer,
+            .extra_headers = &[_]http.Header{
+                .{ .name = "content-type", .value = "application/json" },
+                .{ .name = "x-api-key", .value = self.config.api_key },
             },
         }) catch |err| {
-            std.log.warn("Failed to execute curl: {any}", .{err});
+            std.log.warn("❌ Failed to open HTTP request to {s}: {any}", .{ url_str, err });
             return;
         };
-        defer self.allocator.free(curl_result.stdout);
-        defer self.allocator.free(curl_result.stderr);
-
-        std.log.info("🌐 Curl result for {s}: exit_code={d}, stdout_len={d}, stderr_len={d}", .{ endpoint, curl_result.term.Exited, curl_result.stdout.len, curl_result.stderr.len });
+        defer req.deinit();
         
-        if (curl_result.stderr.len > 0) {
-            std.log.warn("🔧 Curl stderr: {s}", .{curl_result.stderr});
-        }
+        // Set content length
+        req.transfer_encoding = .{ .content_length = payload.len };
         
-        if (curl_result.term.Exited != 0) {
-            std.log.warn("❌ Curl failed with exit code: {d}", .{curl_result.term.Exited});
-            std.log.warn("❌ Stderr: {s}", .{curl_result.stderr});
-            std.log.warn("❌ Stdout: {s}", .{curl_result.stdout});
+        // Send headers
+        req.send() catch |err| {
+            std.log.warn("❌ Failed to send HTTP headers to {s}: {any}", .{ url_str, err });
             return;
-        }
-
-        std.log.info("📡 Raw curl response: {s}", .{curl_result.stdout});
-
-        // Check HTTP status code (last 3 characters of stdout)
-        if (curl_result.stdout.len >= 3) {
-            const status_code = curl_result.stdout[curl_result.stdout.len - 3..];
-            std.log.info("📊 HTTP status code: {s}", .{status_code});
-            if (!std.mem.eql(u8, status_code, "200")) {
-                std.log.warn("❌ HTTP request failed with status: {s}", .{status_code});
-                std.log.warn("❌ Response body: {s}", .{curl_result.stdout[0..curl_result.stdout.len - 3]});
-            } else {
+        };
+        
+        // Write payload
+        req.writeAll(payload) catch |err| {
+            std.log.warn("❌ Failed to write payload to {s}: {any}", .{ url_str, err });
+            return;
+        };
+        
+        // Finish request
+        req.finish() catch |err| {
+            std.log.warn("❌ Failed to finish HTTP request to {s}: {any}", .{ url_str, err });
+            return;
+        };
+        
+        // Wait for response
+        req.wait() catch |err| {
+            std.log.warn("❌ Failed to wait for response from {s}: {any}", .{ url_str, err });
+            return;
+        };
+        
+        const status_code = @intFromEnum(req.response.status);
+        std.log.info("📊 HTTP status code: {d}", .{status_code});
+        
+        // Read response body for logging
+        const response_body = req.reader().readAllAlloc(self.allocator, 8192) catch |err| {
+            std.log.warn("⚠️ Failed to read response body from {s}: {any}", .{ url_str, err });
+            if (status_code == 200) {
                 std.log.info("✅ HTTP request successful for {s}", .{endpoint});
+            } else {
+                std.log.warn("❌ HTTP request failed with status: {d}", .{status_code});
             }
+            return;
+        };
+        defer self.allocator.free(response_body);
+        
+        std.log.info("📡 Raw HTTP response: {s}", .{response_body});
+        
+        if (status_code == 200) {
+            std.log.info("✅ HTTP request successful for {s}", .{endpoint});
         } else {
-            std.log.warn("⚠️ Unexpected curl response format, length: {d}", .{curl_result.stdout.len});
+            std.log.warn("❌ HTTP request failed with status: {d}", .{status_code});
+            std.log.warn("❌ Response body: {s}", .{response_body});
         }
     }
     
-    pub fn sendHeartbeat(self: ApiClient) !void {
+    pub fn sendHeartbeat(self: *ApiClient) !void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
         const heartbeat_data = .{
             .device_id = self.config.device_id,
             .version = self.config.daemon_version,
@@ -444,36 +464,67 @@ const ApiClient = struct {
         std.log.info("💓 Sent daemon heartbeat", .{});
     }
 
-    pub fn getPendingSMS(self: ApiClient) ![]const u8 {
-        const url = try std.fmt.allocPrint(self.allocator, "{s}/api/control/pending-sms", .{self.config.api_url});
-        defer self.allocator.free(url);
-
-        const api_key_header = try std.fmt.allocPrint(self.allocator, "X-API-Key: {s}", .{self.config.api_key});
-        defer self.allocator.free(api_key_header);
-
-        const curl_args = [_][]const u8{
-            "curl", "-s", "-X", "GET", 
-            "-H", "Content-Type: application/json",
-            "-H", api_key_header,
-            url,
+    pub fn getPendingSMS(self: *ApiClient) ![]const u8 {
+        const url_str = try std.fmt.allocPrint(self.allocator, "{s}/api/control/pending-sms", .{self.config.api_url});
+        defer self.allocator.free(url_str);
+        
+        const uri = std.Uri.parse(url_str) catch |err| {
+            std.log.warn("❌ Failed to parse URL {s}: {any}", .{ url_str, err });
+            return error.GetPendingFailed;
         };
-
-        const result = try std.process.Child.run(.{
-            .allocator = self.allocator,
-            .argv = &curl_args,
-        });
-        defer self.allocator.free(result.stderr);
-
-        if (result.term.Exited != 0) {
-            std.log.warn("Failed to get pending SMS: exit_code={d}, stderr={s}", .{ result.term.Exited, result.stderr });
-            self.allocator.free(result.stdout);
+        
+        var server_header_buffer: [16 * 1024]u8 = undefined;
+        
+        // Create HTTP GET request
+        var req = self.http_client.open(.GET, uri, .{
+            .server_header_buffer = &server_header_buffer,
+            .extra_headers = &[_]http.Header{
+                .{ .name = "content-type", .value = "application/json" },
+                .{ .name = "x-api-key", .value = self.config.api_key },
+            },
+        }) catch |err| {
+            std.log.warn("❌ Failed to open HTTP GET request to {s}: {any}", .{ url_str, err });
+            return error.GetPendingFailed;
+        };
+        defer req.deinit();
+        
+        // Send request
+        req.send() catch |err| {
+            std.log.warn("❌ Failed to send HTTP GET request to {s}: {any}", .{ url_str, err });
+            return error.GetPendingFailed;
+        };
+        
+        // Finish request (no body for GET)
+        req.finish() catch |err| {
+            std.log.warn("❌ Failed to finish HTTP GET request to {s}: {any}", .{ url_str, err });
+            return error.GetPendingFailed;
+        };
+        
+        // Wait for response
+        req.wait() catch |err| {
+            std.log.warn("❌ Failed to wait for GET response from {s}: {any}", .{ url_str, err });
+            return error.GetPendingFailed;
+        };
+        
+        const status_code = @intFromEnum(req.response.status);
+        
+        if (status_code != 200) {
+            std.log.warn("Failed to get pending SMS: HTTP status {d}", .{status_code});
             return error.GetPendingFailed;
         }
-
-        return result.stdout; // Caller owns this memory
+        
+        // Read response body and return it (caller owns this memory)
+        const response_body = req.reader().readAllAlloc(self.allocator, 1024 * 1024) catch |err| {
+            std.log.warn("❌ Failed to read GET response body from {s}: {any}", .{ url_str, err });
+            return error.GetPendingFailed;
+        };
+        
+        return response_body; // Caller owns this memory
     }
 
-    pub fn updateSMSResult(self: ApiClient, message_id: []const u8, success: bool, sms_id: ?[]const u8, error_message: ?[]const u8) !void {
+    pub fn updateSMSResult(self: *ApiClient, message_id: []const u8, success: bool, sms_id: ?[]const u8, error_message: ?[]const u8) !void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
         const update_data = .{
             .message_id = message_id,
             .success = success,
@@ -975,6 +1026,7 @@ pub fn main() !void {
 
     var modem_manager = ModemManager.init(allocator);
     var api_client = ApiClient.init(allocator, config);
+    defer api_client.deinit();
     var signal_cache = SignalCache.init(allocator);
     defer signal_cache.deinit();
     
