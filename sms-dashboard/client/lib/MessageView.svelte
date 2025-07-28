@@ -42,7 +42,17 @@
     const diffHours = Math.floor(diffMs / 3600000);
     const diffDays = Math.floor(diffMs / 86400000);
     
-    if (diffMs < 0) return '未来时间';
+    if (diffMs < 0) {
+      // Handle future timestamps gracefully - likely due to clock skew
+      const futureDiffMs = Math.abs(diffMs);
+      if (futureDiffMs < 60000) return '刚刚'; // Within 1 minute, treat as "just now"
+      return msgDate.toLocaleString('zh-CN', { 
+        month: 'short', 
+        day: 'numeric', 
+        hour: '2-digit', 
+        minute: '2-digit' 
+      });
+    }
     if (diffMins < 1) return '刚刚';
     if (diffMins < 60) return `${diffMins}分钟前`;
     if (diffHours < 24) return `${diffHours}小时前`;
