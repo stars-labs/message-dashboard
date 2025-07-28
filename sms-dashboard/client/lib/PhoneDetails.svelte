@@ -53,9 +53,9 @@
           {/if}
         </p>
       </div>
-      <div class="flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium {getEffectiveStatus(phone) === 'online' ? 'bg-green-100 text-green-700' : getEffectiveStatus(phone) === 'unknown' ? 'bg-gray-100 text-gray-500' : getEffectiveStatus(phone) === 'stale' ? 'bg-orange-100 text-orange-700' : 'bg-gray-100 text-gray-700'}">
-        <div class="w-2 h-2 rounded-full {getEffectiveStatus(phone) === 'online' ? 'bg-green-500 animate-pulse' : getEffectiveStatus(phone) === 'unknown' ? 'bg-gray-400' : getEffectiveStatus(phone) === 'stale' ? 'bg-orange-500' : 'bg-gray-400'}"></div>
-        {getEffectiveStatus(phone) === 'online' ? '在线' : getEffectiveStatus(phone) === 'unknown' ? '数据过期' : getEffectiveStatus(phone) === 'stale' ? '数据陈旧' : '离线'}
+      <div class="flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium {['online', 'active', 'registered', 'connected'].includes(getEffectiveStatus(phone)) ? 'bg-green-100 text-green-700' : getEffectiveStatus(phone) === 'unknown' ? 'bg-gray-100 text-gray-500' : getEffectiveStatus(phone) === 'stale' ? 'bg-orange-100 text-orange-700' : 'bg-gray-100 text-gray-700'}">
+        <div class="w-2 h-2 rounded-full {['online', 'active', 'registered', 'connected'].includes(getEffectiveStatus(phone)) ? 'bg-green-500 animate-pulse' : getEffectiveStatus(phone) === 'unknown' ? 'bg-gray-400' : getEffectiveStatus(phone) === 'stale' ? 'bg-orange-500' : 'bg-gray-400'}"></div>
+        {['online', 'active', 'registered', 'connected'].includes(getEffectiveStatus(phone)) ? '在线' : getEffectiveStatus(phone) === 'unknown' ? '数据过期' : getEffectiveStatus(phone) === 'stale' ? '数据陈旧' : '离线'}
       </div>
     </div>
     
