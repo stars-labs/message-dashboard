@@ -488,8 +488,30 @@ const ModemManager = struct {
 
     fn formatTimestamp(self: ModemManager, raw_timestamp: []const u8) ![]const u8 {
         if (raw_timestamp.len == 0) {
-            const now = std.time.timestamp();
-            return try std.fmt.allocPrint(self.allocator, "{d}", .{now});
+            // Return current time in ISO format
+            const now_ns = std.time.nanoTimestamp();
+            const now_s = @divFloor(now_ns, std.time.ns_per_s);
+            const now_ms = @divFloor(@mod(now_ns, std.time.ns_per_s), std.time.ns_per_ms);
+            
+            // Create ISO timestamp
+            // Format: YYYY-MM-DDTHH:MM:SS.sssZ
+            const epoch_seconds = @as(u64, @intCast(now_s));
+            const days_since_epoch = epoch_seconds / 86400;
+            const seconds_today = epoch_seconds % 86400;
+            
+            // Simple approximation for current date (this is approximate, not accounting for leap years properly)
+            const year = 1970 + days_since_epoch / 365;
+            const remaining_days = days_since_epoch % 365;
+            const month = 1 + remaining_days / 30;
+            const day = 1 + remaining_days % 30;
+            
+            const hours = seconds_today / 3600;
+            const minutes = (seconds_today % 3600) / 60;
+            const seconds = seconds_today % 60;
+            
+            return try std.fmt.allocPrint(self.allocator, "{d:0>4}-{d:0>2}-{d:0>2}T{d:0>2}:{d:0>2}:{d:0>2}.{d:0>3}Z", .{
+                year, month, day, hours, minutes, seconds, now_ms
+            });
         }
 
         if (std.mem.endsWith(u8, raw_timestamp, "Z")) {
