@@ -300,20 +300,19 @@ pub const std_options: std.Options = .{
 const ApiClient = struct {
     allocator: std.mem.Allocator,
     config: Config,
-    http_client: http.Client,
     mutex: std.Thread.Mutex,
 
     pub fn init(allocator: std.mem.Allocator, config: Config) ApiClient {
         return .{ 
             .allocator = allocator, 
             .config = config,
-            .http_client = http.Client{ .allocator = allocator },
             .mutex = std.Thread.Mutex{},
         };
     }
     
     pub fn deinit(self: *ApiClient) void {
-        self.http_client.deinit();
+        // No HTTP client to deinit since we create them per request
+        _ = self;
     }
 
     pub fn uploadPhone(self: *ApiClient, phone: Phone) !void {
@@ -327,7 +326,7 @@ const ApiClient = struct {
         const payload = try std.fmt.allocPrint(self.allocator, "{{\"phones\":{s}}}", .{phones_json});
         defer self.allocator.free(payload);
 
-        try self.makeRequest("/phones", payload);
+        self.makeRequest("/phones", payload);
         std.log.info("✅ Uploaded phone {s} via HTTP API", .{phone.id});
     }
 
@@ -343,7 +342,7 @@ const ApiClient = struct {
         const payload = try std.fmt.allocPrint(self.allocator, "{{\"phones\":{s}}}", .{phones_json});
         defer self.allocator.free(payload);
 
-        try self.makeRequest("/phones", payload);
+        self.makeRequest("/phones", payload);
         std.log.info("✅ Uploaded {d} phones via HTTP API", .{phones.len});
     }
 
@@ -368,12 +367,15 @@ const ApiClient = struct {
         
         std.log.info("📦 Final payload length: {d} bytes", .{payload.len});
 
-        try self.makeRequest("/messages", payload);
+        self.makeRequest("/messages", payload);
         std.log.info("✅ Uploaded {d} messages via HTTP API", .{messages.len});
     }
 
-    fn makeRequest(self: *ApiClient, endpoint: []const u8, payload: []const u8) !void {
-        const url_str = try std.fmt.allocPrint(self.allocator, "{s}/api/control{s}", .{ self.config.api_url, endpoint });
+    fn makeRequest(self: *ApiClient, endpoint: []const u8, payload: []const u8) void {
+        const url_str = std.fmt.allocPrint(self.allocator, "{s}/api/control{s}", .{ self.config.api_url, endpoint }) catch |err| {
+            std.log.warn("❌ Failed to allocate URL string: {any}", .{err});
+            return;
+        };
         defer self.allocator.free(url_str);
         
         const uri = std.Uri.parse(url_str) catch |err| {
@@ -381,10 +383,14 @@ const ApiClient = struct {
             return;
         };
         
+        // Create a new HTTP client for this request (thread-safe)
+        var http_client = http.Client{ .allocator = self.allocator };
+        defer http_client.deinit();
+        
         var server_header_buffer: [16 * 1024]u8 = undefined;
         
         // Create HTTP request
-        var req = self.http_client.open(.POST, uri, .{
+        var req = http_client.open(.POST, uri, .{
             .server_header_buffer = &server_header_buffer,
             .extra_headers = &[_]http.Header{
                 .{ .name = "content-type", .value = "application/json" },
@@ -460,7 +466,7 @@ const ApiClient = struct {
         const heartbeat_json = try json.stringifyAlloc(self.allocator, heartbeat_data, .{});
         defer self.allocator.free(heartbeat_json);
         
-        try self.makeRequest("/heartbeat", heartbeat_json);
+        self.makeRequest("/heartbeat", heartbeat_json);
         std.log.info("💓 Sent daemon heartbeat", .{});
     }
 
@@ -473,10 +479,14 @@ const ApiClient = struct {
             return error.GetPendingFailed;
         };
         
+        // Create a new HTTP client for this request (thread-safe)
+        var http_client = http.Client{ .allocator = self.allocator };
+        defer http_client.deinit();
+        
         var server_header_buffer: [16 * 1024]u8 = undefined;
         
         // Create HTTP GET request
-        var req = self.http_client.open(.GET, uri, .{
+        var req = http_client.open(.GET, uri, .{
             .server_header_buffer = &server_header_buffer,
             .extra_headers = &[_]http.Header{
                 .{ .name = "content-type", .value = "application/json" },
@@ -535,7 +545,7 @@ const ApiClient = struct {
         const update_json = try json.stringifyAlloc(self.allocator, update_data, .{});
         defer self.allocator.free(update_json);
 
-        try self.makeRequest("/sms-result", update_json);
+        self.makeRequest("/sms-result", update_json);
         std.log.info("📝 Updated SMS status for message {s}: success={}", .{ message_id, success });
     }
 };
