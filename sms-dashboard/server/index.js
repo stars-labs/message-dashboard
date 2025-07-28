@@ -149,19 +149,28 @@ router.get('/api/sse', async (request, env, ctx) => {
   const url = new URL(request.url);
   const token = url.searchParams.get('token');
   
+  let authRequest = request;
   if (token) {
     // Add token to Authorization header so auth middleware can process it
     const headers = new Headers(request.headers);
     headers.set('Authorization', `Bearer ${token}`);
-    request = new Request(request.url, {
+    authRequest = new Request(request.url, {
       method: request.method,
       headers: headers,
       body: request.body
     });
+    // Copy over request properties
+    authRequest.env = env;
+    authRequest.ctx = ctx;
   }
   
-  const authResponse = await handleAuth0(request, env, ctx);
+  const authResponse = await handleAuth0(authRequest, env, ctx);
   if (authResponse) return authResponse;
+  
+  // Copy user from authRequest back to original request
+  request.user = authRequest.user;
+  request.env = env;
+  
   return sseHandler(request);
 });
 
