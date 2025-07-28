@@ -110,8 +110,7 @@ export const iccidMappingsHandler = {
   // Get a single ICCID mapping
   async get(request) {
     const { env } = request;
-    const url = new URL(request.url);
-    const id = url.pathname.split('/').pop();
+    const id = request.params?.id || new URL(request.url).pathname.split('/').pop();
     
     try {
       const mapping = await env.DB.prepare(`
@@ -258,8 +257,7 @@ export const iccidMappingsHandler = {
   // Update an ICCID mapping
   async update(request) {
     const { env, user } = request;
-    const url = new URL(request.url);
-    const id = url.pathname.split('/').pop();
+    const id = request.params?.id || new URL(request.url).pathname.split('/').pop();
     
     try {
       const body = await request.json();
@@ -324,8 +322,7 @@ export const iccidMappingsHandler = {
   // Delete an ICCID mapping
   async delete(request) {
     const { env } = request;
-    const url = new URL(request.url);
-    const id = url.pathname.split('/').pop();
+    const id = request.params?.id || new URL(request.url).pathname.split('/').pop();
     
     try {
       // Check if mapping exists
@@ -368,7 +365,8 @@ export const iccidMappingsHandler = {
 
   // Bulk import ICCID mappings
   async bulkImport(request) {
-    const { env, user } = request;
+    const { env } = request;
+    const user = request.user || { id: 'system' };
     
     try {
       const body = await request.json();

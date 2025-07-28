@@ -46,8 +46,7 @@
     const diffHours = Math.floor(diffMs / 3600000);
     const diffDays = Math.floor(diffMs / 86400000);
     
-    // For debugging timezone issues
-    // console.log('Timestamp:', timestamp, '-> Local:', msgDate.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }));
+    // Clean timestamp handling - no debug logs needed
     
     if (diffMs < 0) {
       // Handle future timestamps - show absolute time in local timezone
