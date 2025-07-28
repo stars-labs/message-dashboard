@@ -24,27 +24,105 @@ const Message = struct {
 };
 
 const Phone = struct {
-    number: ?[]const u8 = null,
-    country: ?[]const u8 = null,
-    flag: ?[]const u8 = null,
-    carrier: ?[]const u8 = null,
-    status: []const u8,
-    signal: ?u8 = null,
+    id: []const u8, // ICCID is used as the primary identifier
     iccid: []const u8,
-    rssi: ?f32 = null,
-    rsrq: ?f32 = null,
-    rsrp: ?f32 = null,
-    snr: ?f32 = null,
+    number: ?[]const u8 = null,
+    status: []const u8,
+    signal_strength: u8 = 0,
     operator_name: ?[]const u8 = null,
     operator_id: ?[]const u8 = null,
-    imei: ?[]const u8 = null,
+    network_type: ?[]const u8 = null,
     access_tech: ?[]const u8 = null,
+    imei: ?[]const u8 = null,
 };
 
 const MessageInfo = struct {
     modem_id: []const u8,
     sms_id: []const u8,
     message: Message,
+};
+
+// Thread context for processing a single modem
+const ModemThreadContext = struct {
+    allocator: std.mem.Allocator,
+    modem_manager: *ModemManager,
+    api_client: *ApiClient,
+    modem_id: []const u8,
+    
+    fn processModem(ctx: ModemThreadContext) void {
+        const self = ctx;
+        
+        // Get modem status and details
+        const modem_status = self.modem_manager.getModemState(self.modem_id) catch |err| {
+            std.log.warn("Failed to get status for modem {s}: {any}", .{ self.modem_id, err });
+            self.allocator.free(self.modem_id);
+            return;
+        };
+        defer self.allocator.free(modem_status);
+        
+        std.log.info("🧵 Thread: Modem {s} state: {s}", .{ self.modem_id, modem_status });
+        
+        // Get ICCID for this modem
+        const iccid_opt = self.modem_manager.getIccid(self.modem_id) catch |err| {
+            std.log.warn("🧵 Thread: Failed to get ICCID for modem {s}: {any}", .{ self.modem_id, err });
+            self.allocator.free(self.modem_id);
+            return;
+        };
+        
+        const iccid = iccid_opt orelse {
+            std.log.warn("🧵 Thread: Skipping modem {s}: No ICCID found", .{ self.modem_id });
+            self.allocator.free(self.modem_id);
+            return;
+        };
+        defer self.allocator.free(iccid);
+        
+        const iccid_copy = self.allocator.dupe(u8, iccid) catch {
+            self.allocator.free(self.modem_id);
+            return;
+        };
+        
+        const status_copy = self.allocator.dupe(u8, modem_status) catch {
+            self.allocator.free(iccid_copy);
+            self.allocator.free(self.modem_id);
+            return;
+        };
+        
+        var phone = Phone{
+            .id = iccid,
+            .iccid = iccid_copy,
+            .number = null,
+            .status = status_copy,
+            .signal_strength = 0,
+            .operator_name = null,
+            .operator_id = null,
+            .network_type = null,
+            .access_tech = null,
+            .imei = null,
+        };
+        defer {
+            if (phone.number) |num| self.allocator.free(num);
+            self.allocator.free(phone.status);
+            self.allocator.free(phone.iccid);
+            if (phone.operator_name) |name| self.allocator.free(name);
+            if (phone.operator_id) |id| self.allocator.free(id);
+            if (phone.imei) |imei| self.allocator.free(imei);
+            if (phone.access_tech) |tech| self.allocator.free(tech);
+            self.allocator.free(self.modem_id);
+        }
+        
+        // Get phone number if available
+        if (self.modem_manager.getPhoneNumber(self.modem_id)) |number| {
+            phone.number = number;
+        } else |_| {}
+        
+        // TODO: Add more modem details when those functions are implemented
+        // For now, we have the essential data: ICCID, phone number, and status
+        
+        // Upload this phone's data immediately
+        self.api_client.uploadPhone(phone) catch |err| {
+            std.log.warn("🧵 Thread: Failed to upload phone {s}: {any}", .{ phone.id, err });
+        };
+    }
 };
 
 // Set log level
@@ -59,6 +137,18 @@ const ApiClient = struct {
 
     pub fn init(allocator: std.mem.Allocator, config: Config) ApiClient {
         return .{ .allocator = allocator, .config = config };
+    }
+
+    pub fn uploadPhone(self: ApiClient, phone: Phone) !void {
+        const phones = [_]Phone{phone};
+        const phones_json = try json.stringifyAlloc(self.allocator, phones, .{ .emit_null_optional_fields = false });
+        defer self.allocator.free(phones_json);
+
+        const payload = try std.fmt.allocPrint(self.allocator, "{{\"phones\":{s}}}", .{phones_json});
+        defer self.allocator.free(payload);
+
+        try self.makeRequest("/phones", payload);
+        std.log.info("✅ Uploaded phone {s} via HTTP API", .{phone.id});
     }
 
     pub fn uploadPhones(self: ApiClient, phones: []const Phone) !void {
@@ -422,12 +512,28 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
+    // Extract version from executable path (/nix/store/xxx-sms-daemon-1.2.0/bin/sms-daemon)
+    const exe_path = try std.fs.selfExePathAlloc(allocator);
+    defer allocator.free(exe_path);
+    
+    var version_buf: [20]u8 = undefined;
+    var version: []const u8 = "unknown";
+    if (std.mem.indexOf(u8, exe_path, "sms-daemon-")) |pos| {
+        const version_start = pos + 11; // length of "sms-daemon-"
+        if (std.mem.indexOf(u8, exe_path[version_start..], "/")) |version_end| {
+            const extracted_version = exe_path[version_start..version_start + version_end];
+            const len = @min(extracted_version.len, version_buf.len);
+            @memcpy(version_buf[0..len], extracted_version[0..len]);
+            version = version_buf[0..len];
+        }
+    }
+
     // Read configuration
     const config = Config{
         .api_url = std.posix.getenv("SMS_API_URL") orelse "https://sexy.qzz.io",
         .api_key = std.posix.getenv("SMS_API_KEY") orelse "",
         .device_id = std.posix.getenv("SMS_DEVICE_ID") orelse "orange-pi-001",
-        .daemon_version = "1.1.1", // Added detailed HTTP and message debugging
+        .daemon_version = version,
         .poll_interval = 2, // Fast polling
         .upload_interval = 30,
         .heartbeat_interval = 300,
@@ -438,28 +544,14 @@ pub fn main() !void {
         return;
     }
 
-    std.log.info("🚀 Starting SMS dashboard daemon v{s} (full)", .{config.daemon_version});
+    std.log.info("🚀 Starting SMS dashboard daemon v{s} (multi-threaded)", .{config.daemon_version});
     std.log.info("API URL: {s}", .{config.api_url});
     std.log.info("Polling every {d} seconds", .{config.poll_interval});
 
     var modem_manager = ModemManager.init(allocator);
     var api_client = ApiClient.init(allocator, config);
     
-    var last_heartbeat_time: i64 = std.time.timestamp();
-    var current_phones = std.ArrayList(Phone).init(allocator);
-    defer current_phones.deinit();
-
     while (true) {
-        const current_time = std.time.timestamp();
-        
-        // Send heartbeat every 5 minutes
-        if (current_time - last_heartbeat_time >= config.heartbeat_interval) {
-            api_client.uploadPhones(current_phones.items) catch |err| {
-                std.log.warn("Failed to upload phones: {any}", .{err});
-            };
-            last_heartbeat_time = current_time;
-        }
-
         // Get list of all modems
         const modems = modem_manager.getModemList() catch |err| {
             std.log.err("Failed to get modem list: {any}", .{err});
@@ -473,17 +565,45 @@ pub fn main() !void {
             allocator.free(modems);
         }
 
-        // Clear phones for this cycle
-        for (current_phones.items) |phone| {
-            if (phone.number) |num| allocator.free(num);
-            allocator.free(phone.status);
-            allocator.free(phone.iccid);
-            if (phone.operator_name) |name| allocator.free(name);
-            if (phone.operator_id) |id| allocator.free(id);
-            if (phone.imei) |imei| allocator.free(imei);
-            if (phone.access_tech) |tech| allocator.free(tech);
+        std.log.info("🔄 Starting parallel phone updates for {d} modems", .{modems.len});
+        
+        // Create threads for parallel modem processing
+        var threads = std.ArrayList(std.Thread).init(allocator);
+        defer threads.deinit();
+        
+        // Process modems in parallel
+        for (modems) |modem_id| {
+            // Create a copy of modem_id for the thread
+            const modem_id_copy = allocator.dupe(u8, modem_id) catch |err| {
+                std.log.warn("Failed to allocate memory for modem ID: {any}", .{err});
+                continue;
+            };
+            
+            const context = ModemThreadContext{
+                .allocator = allocator,
+                .modem_manager = &modem_manager,
+                .api_client = &api_client,
+                .modem_id = modem_id_copy,
+            };
+            
+            const thread = std.Thread.spawn(.{}, ModemThreadContext.processModem, .{context}) catch |err| {
+                std.log.warn("Failed to spawn thread for modem {s}: {any}", .{ modem_id, err });
+                allocator.free(modem_id_copy);
+                continue;
+            };
+            threads.append(thread) catch |err| {
+                std.log.warn("Failed to append thread to list: {any}", .{err});
+                thread.join();
+                continue;
+            };
         }
-        current_phones.clearRetainingCapacity();
+        
+        // Wait for all threads to complete
+        for (threads.items) |thread| {
+            thread.join();
+        }
+        
+        std.log.info("✅ Completed parallel phone updates", .{});
 
         var total_new_messages: usize = 0;
         var all_message_infos = std.ArrayList(MessageInfo).init(allocator);
@@ -499,52 +619,14 @@ pub fn main() !void {
             all_message_infos.deinit();
         }
 
-        // Process each modem
+        // Process messages from each modem (sequentially for now)
         for (modems) |modem_id| {
-            const state = modem_manager.getModemState(modem_id) catch "unknown";
-            defer allocator.free(state);
-
-            std.log.info("Modem {s} state: {s}", .{ modem_id, state });
-
-            // Get ICCID - required
-            const iccid = modem_manager.getIccid(modem_id) catch |err| {
-                std.log.warn("Skipping modem {s}: Failed to get ICCID: {any}", .{ modem_id, err });
-                continue;
-            };
-
-            if (iccid == null) {
-                std.log.warn("Skipping modem {s}: No ICCID found", .{modem_id});
-                continue;
-            }
-
-            const phone_number = modem_manager.getPhoneNumber(modem_id) catch null;
-
-            // Create phone entry
-            const phone = Phone{
-                .number = phone_number,
-                .country = null,
-                .flag = null,
-                .carrier = null,
-                .status = try allocator.dupe(u8, state),
-                .signal = null,
-                .iccid = iccid.?,
-                .rssi = null,
-                .rsrq = null,
-                .rsrp = null,
-                .snr = null,
-                .operator_name = null,
-                .operator_id = null,
-                .imei = null,
-                .access_tech = null,
-            };
-
-            try current_phones.append(phone);
-
             // Check for new messages
             const new_messages = modem_manager.getNewMessages(modem_id) catch |err| {
-                std.log.warn("Failed to get messages for modem {s}: {any}", .{ modem_id, err });
+                std.log.warn("Failed to get messages from modem {s}: {any}", .{ modem_id, err });
                 continue;
             };
+            // Memory is already managed by getNewMessages, no defer needed here
 
             if (new_messages.len > 0) {
                 std.log.info("📬 Found {d} new messages on modem {s}", .{ new_messages.len, modem_id });
@@ -554,16 +636,11 @@ pub fn main() !void {
                     std.log.info("  📨 Message {d}: SMS_ID={s}, ICCID={s}, from={s}", .{ 
                         i, message_info.sms_id, message_info.message.phone_iccid, message_info.message.phone_number 
                     });
+                    
+                    // Append the message info directly
                     try all_message_infos.append(message_info);
                 }
             }
-        }
-
-        // Upload phone data if we have any phones
-        if (current_phones.items.len > 0) {
-            api_client.uploadPhones(current_phones.items) catch |err| {
-                std.log.warn("Failed to upload phones: {any}", .{err});
-            };
         }
 
         // Upload messages if we have any
