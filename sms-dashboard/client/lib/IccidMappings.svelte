@@ -158,7 +158,7 @@
       iccid: mapping.iccid,
       phone_number: mapping.phone_number,
       carrier: mapping.carrier || "",
-      description: mapping.description || "",
+      description: mapping.notes || mapping.description || "",
       is_active: mapping.is_active,
     };
     showEditForm = true;
@@ -281,7 +281,7 @@
                 >{mapping.phone_number}</td
               >
               <td class="px-4 py-3 text-sm">{mapping.carrier || "-"}</td>
-              <td class="px-4 py-3 text-sm">{mapping.description || "-"}</td>
+              <td class="px-4 py-3 text-sm">{mapping.notes || mapping.description || "-"}</td>
               <td class="px-4 py-3">
                 <span
                   class="inline-flex px-2 py-1 text-xs rounded-full {mapping.is_active

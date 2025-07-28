@@ -10,7 +10,7 @@ export const controlHandler = {
     const apiKey = request.headers.get('X-API-Key');
     
     // Check against environment API key
-    const expectedKey = env.API_KEY || '4025b019988238528f1fd5e909d0363c46e4e48490ea5045a9a490c259071cba';
+    const expectedKey = env.API_KEY;
     
     if (!apiKey || apiKey !== expectedKey) {
       console.error(`[control.js] API key mismatch - expected: ${expectedKey?.substring(0, 8)}..., got: ${apiKey?.substring(0, 8)}...`);
@@ -22,14 +22,6 @@ export const controlHandler = {
     
     try {
       const { messages } = await request.json();
-      
-      console.log(`[control.js] Received ${messages?.length || 0} messages to upload`);
-      if (messages?.length > 0) {
-        console.log(`[control.js] First message sample:`, JSON.stringify(messages[0]));
-        // Log all unique phone_iccids
-        const uniquePhoneIds = [...new Set(messages.map(m => m.phone_iccid))];
-        console.log(`[control.js] Unique phone IDs in messages:`, uniquePhoneIds);
-      }
       
       if (!Array.isArray(messages)) {
         return new Response(JSON.stringify({
@@ -44,26 +36,42 @@ export const controlHandler = {
       // Process messages in batches
       const batchSize = 50;
       let processed = 0;
+      let duplicates = 0;
       const newMessages = [];
       
-      for (let i = 0; i < messages.length; i += batchSize) {
-        const batch = messages.slice(i, i + batchSize);
-        const stmt = env.DB.prepare(`
-          INSERT INTO messages (id, phone_iccid, phone_number, content, timestamp, type, verification_code)
-          VALUES (?, ?, ?, ?, ?, 'received', ?)
-        `);
+      // Prepare statements outside the loop for better performance
+      const checkStmt = env.DB.prepare(`
+        SELECT id FROM messages 
+        WHERE phone_iccid = ? 
+        AND content = ? 
+        AND datetime(timestamp) BETWEEN datetime(?, '-10 seconds') AND datetime(?, '+10 seconds')
+      `);
+      
+      const insertStmt = env.DB.prepare(`
+        INSERT INTO messages (id, phone_iccid, phone_number, content, timestamp, type, verification_code)
+        VALUES (?, ?, ?, ?, ?, 'received', ?)
+      `);
+      
+      // First, deduplicate within the entire request
+      const uniqueMessages = [];
+      const seen = new Set();
+      
+      for (const msg of messages) {
+        // Create a unique key for each message
+        const key = `${msg.phone_iccid}|${msg.content}|${msg.timestamp || 'no-timestamp'}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          uniqueMessages.push(msg);
+        } else {
+          duplicates++;
+        }
+      }
+      
+      for (let i = 0; i < uniqueMessages.length; i += batchSize) {
+        const batch = uniqueMessages.slice(i, i + batchSize);
         
         const promises = batch.map(async (msg, index) => {
           const phone_iccid = msg.phone_iccid;
-          
-          // Log the phone_iccid to debug foreign key issues
-          if (index === 0) {
-            console.log(`[control.js] Message ${index} phone_iccid: ${phone_iccid}`);
-            // Check if this ICCID exists in the phones table
-            const checkStmt = env.DB.prepare('SELECT iccid FROM phones WHERE iccid = ?');
-            const result = await checkStmt.bind(phone_iccid).all();
-            console.log(`[control.js] ICCID ${phone_iccid} exists in phones table:`, result.results.length > 0);
-          }
           
           // Validate required fields
           if (!phone_iccid) {
@@ -77,8 +85,37 @@ export const controlHandler = {
           
           const messageId = msg.id || `msg-${nanoid()}`;
           const verificationCode = extractVerificationCode(msg.content);
-          const timestamp = msg.timestamp || new Date().toISOString();
+          // Fix timestamp - handle various formatting issues
+          let timestamp = msg.timestamp || new Date().toISOString();
+          
+          // First handle URL-encoded + signs (convert to space temporarily for processing)
+          timestamp = timestamp.replace(/\+/g, ' ');
+          
+          // Try to match timestamp with spaces or T separator
+          const timeMatch = timestamp.match(/^(\d{4})-(\d{2})-(\d{2})[T\s]+(\d{1,2}):(\d{1,2}):(\d{1,2})(\.\d{3})?Z?$/);
+          if (timeMatch) {
+            const [_, year, month, day, hours, minutes, seconds, millis] = timeMatch;
+            // Pad single digits with leading zeros
+            const paddedHours = hours.padStart(2, '0');
+            const paddedMinutes = minutes.padStart(2, '0');
+            const paddedSeconds = seconds.padStart(2, '0');
+            timestamp = `${year}-${month}-${day}T${paddedHours}:${paddedMinutes}:${paddedSeconds}${millis || '.000'}Z`;
+          } else {
+            // Remove all remaining spaces and ensure proper format
+            timestamp = timestamp.replace(/\s+/g, '');
+            if (timestamp.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?$/) && !timestamp.endsWith('Z')) {
+              timestamp += 'Z';
+            }
+          }
+          
           const phoneNumber = msg.phone_number || null;
+          
+          // Check for duplicate using the prepared statement
+          const existing = await checkStmt.bind(phone_iccid, msg.content, timestamp, timestamp).first();
+          if (existing) {
+            duplicates++;
+            return null;
+          }
           
           newMessages.push({
             id: messageId,
@@ -90,7 +127,7 @@ export const controlHandler = {
             verification_code: verificationCode
           });
           
-          return stmt.bind(
+          return insertStmt.bind(
             messageId,
             phone_iccid,
             phoneNumber,
@@ -100,8 +137,10 @@ export const controlHandler = {
           ).run();
         });
         
-        await Promise.all(promises);
-        processed += batch.length;
+        const results = await Promise.all(promises);
+        // Count actual inserts (excluding nulls from duplicates)
+        const inserted = results.filter(r => r !== null).length;
+        processed += inserted;
       }
       
       // Messages are now picked up by polling
@@ -109,7 +148,8 @@ export const controlHandler = {
       return new Response(JSON.stringify({
         success: true,
         processed,
-        message: `Successfully uploaded ${processed} messages`
+        duplicates,
+        message: `Successfully uploaded ${processed} messages${duplicates > 0 ? `, skipped ${duplicates} duplicates` : ''}`
       }), {
         headers: { 'Content-Type': 'application/json' }
       });
@@ -134,7 +174,7 @@ export const controlHandler = {
     const apiKey = request.headers.get('X-API-Key');
     
     // Check against environment API key
-    const expectedKey = env.API_KEY || '4025b019988238528f1fd5e909d0363c46e4e48490ea5045a9a490c259071cba';
+    const expectedKey = env.API_KEY;
     
     if (!apiKey || apiKey !== expectedKey) {
       console.error(`[control.js] API key mismatch - expected: ${expectedKey?.substring(0, 8)}..., got: ${apiKey?.substring(0, 8)}...`);
@@ -225,8 +265,6 @@ export const controlHandler = {
       let errorCount = 0;
       const errors = [];
       
-      console.log(`[control.js] Raw phones data received: ${JSON.stringify(phones)}`);
-      
       for (const phone of phones) {
         try {
           // Skip phones without valid ICCIDs
@@ -237,8 +275,6 @@ export const controlHandler = {
             continue;
           }
           
-          // Log the phone data for debugging
-          console.log(`[control.js] Processing phone: iccid=${phone.iccid}, number=${phone.number}`);
           
           await stmt.bind(
             phone.iccid,  // ICCID is now the primary key
@@ -268,11 +304,6 @@ export const controlHandler = {
         }
       }
       
-      console.log(`[control.js] Phone update results: success=${successCount}, errors=${errorCount}`);
-      if (errors.length > 0) {
-        console.error(`[control.js] Phone update errors:`, errors);
-      }
-      
       // Filter out invalid phones before broadcasting
       const validPhones = phones.filter(phone => 
         phone.iccid && 
@@ -280,12 +311,6 @@ export const controlHandler = {
         !phone.iccid.startsWith('SIM_')
       );
       
-      // Only broadcast if we have valid phones to avoid clearing the UI
-      if (validPhones.length > 0) {
-        console.log(`[control.js] Updated ${validPhones.length} valid phones (filtered from ${phones.length})`);
-      } else {
-        console.log(`[control.js] Skipping broadcast - no valid phones to send (all ${phones.length} phones were filtered out)`);
-      }
       
       return new Response(JSON.stringify({
         success: errorCount === 0,
@@ -314,7 +339,7 @@ export const controlHandler = {
     
     // Check API key
     const apiKey = request.headers.get('X-API-Key');
-    const expectedKey = env.API_KEY || '4025b019988238528f1fd5e909d0363c46e4e48490ea5045a9a490c259071cba';
+    const expectedKey = env.API_KEY;
     
     if (!apiKey || apiKey !== expectedKey) {
       console.error(`[control.js] API key mismatch - expected: ${expectedKey?.substring(0, 8)}..., got: ${apiKey?.substring(0, 8)}...`);
@@ -376,7 +401,7 @@ export const controlHandler = {
     
     // Check API key
     const apiKey = request.headers.get('X-API-Key');
-    const expectedKey = '4025b019988238528f1fd5e909d0363c46e4e48490ea5045a9a490c259071cba';
+    const expectedKey = env.API_KEY;
     
     if (!apiKey || apiKey !== expectedKey) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
@@ -421,7 +446,7 @@ export const controlHandler = {
     
     // Check API key
     const apiKey = request.headers.get('X-API-Key');
-    const expectedKey = '4025b019988238528f1fd5e909d0363c46e4e48490ea5045a9a490c259071cba';
+    const expectedKey = env.API_KEY;
     
     if (!apiKey || apiKey !== expectedKey) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
@@ -489,7 +514,7 @@ export const controlHandler = {
     
     // Check API key
     const apiKey = request.headers.get('X-API-Key');
-    const expectedKey = env.API_KEY || '4025b019988238528f1fd5e909d0363c46e4e48490ea5045a9a490c259071cba';
+    const expectedKey = env.API_KEY;
     
     if (!apiKey || apiKey !== expectedKey) {
       return new Response(JSON.stringify({
@@ -528,7 +553,7 @@ export const controlHandler = {
     
     // Check API key
     const apiKey = request.headers.get('X-API-Key');
-    const expectedKey = env.API_KEY || '4025b019988238528f1fd5e909d0363c46e4e48490ea5045a9a490c259071cba';
+    const expectedKey = env.API_KEY;
     
     if (!apiKey || apiKey !== expectedKey) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {

@@ -174,8 +174,15 @@
                         <span>📱</span>
                         接收卡: {message.phone_iccid}
                       </span>
+                      {#if message.phone_number}
+                        <span class="text-gray-500">•</span>
+                        <span class="text-green-600 font-medium flex items-center gap-1">
+                          <span>📞</span>
+                          来电: {message.phone_number}
+                        </span>
+                      {/if}
                       <span class="text-gray-500">•</span>
-                      <span class="text-gray-600">{message.display_phone_number || message.phone_number || '-'}</span>
+                      <span class="text-gray-600">{message.display_phone_number || '-'}</span>
                     </div>
                   </div>
                   <span class="text-xs text-gray-500 ml-2">{formatTime(message.timestamp)}</span>
@@ -226,9 +233,16 @@
                       <span>📱</span>
                       接收卡: {message.phone_iccid}
                     </span>
+                    {#if message.phone_number}
+                      <span class="text-gray-500">•</span>
+                      <span class="text-green-600 font-medium flex items-center gap-1">
+                        <span>📞</span>
+                        来电: {message.phone_number}
+                      </span>
+                    {/if}
                     {#if !selectedPhone}
                       <span class="text-gray-500">•</span>
-                      <span class="text-gray-600">{message.display_phone_number || message.phone_number || '-'}</span>
+                      <span class="text-gray-600">{message.display_phone_number || '-'}</span>
                     {/if}
                   {/if}
                 </div>

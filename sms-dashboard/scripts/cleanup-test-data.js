@@ -1,6 +1,6 @@
 // Script to clean up test/duplicate data from the database
 const API_URL = 'https://sexy.qzz.io';
-const API_KEY = '4025b019988238528f1fd5e909d0363c46e4e48490ea5045a9a490c259071cba';
+const API_KEY = process.env.API_KEY || 'your-api-key-here';
 
 async function cleanupTestData() {
   console.log('Cleaning up test data from database...');
