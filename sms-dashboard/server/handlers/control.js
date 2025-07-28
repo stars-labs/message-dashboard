@@ -506,7 +506,7 @@ export const controlHandler = {
         last_heartbeat: Date.now()
       };
       
-      await env.KV.put(
+      await env.SESSIONS.put(
         'daemon:heartbeat',
         JSON.stringify(heartbeatData),
         { expirationTtl: 300 } // 5 minutes
@@ -522,9 +522,11 @@ export const controlHandler = {
       });
     } catch (error) {
       console.error('[control.js] Heartbeat error:', error);
+      console.error('[control.js] Heartbeat error stack:', error.stack);
+      console.error('[control.js] Heartbeat error message:', error.message);
       return new Response(JSON.stringify({
         success: false,
-        error: 'Failed to process heartbeat'
+        error: `Failed to process heartbeat: ${error.message}`
       }), {
         status: 500,
         headers: { 'Content-Type': 'application/json' }
