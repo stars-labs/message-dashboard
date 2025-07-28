@@ -175,7 +175,7 @@
                         接收卡: {message.phone_iccid}
                       </span>
                       <span class="text-gray-500">•</span>
-                      <span class="text-gray-600">{message.phoneNumber}</span>
+                      <span class="text-gray-600">{message.display_phone_number || message.phone_number || '-'}</span>
                     </div>
                   </div>
                   <span class="text-xs text-gray-500 ml-2">{formatTime(message.timestamp)}</span>
@@ -228,7 +228,7 @@
                     </span>
                     {#if !selectedPhone}
                       <span class="text-gray-500">•</span>
-                      <span class="text-gray-600">{message.phoneNumber}</span>
+                      <span class="text-gray-600">{message.display_phone_number || message.phone_number || '-'}</span>
                     {/if}
                   {/if}
                 </div>

@@ -11,17 +11,27 @@ export const messagesHandler = {
     const offset = parseInt(url.searchParams.get('offset') || '0');
 
     try {
-      let query = `SELECT * FROM messages`;
+      let query = `
+        SELECT 
+          m.*,
+          COALESCE(im.phone_number, p.number, m.phone_number) as display_phone_number,
+          p.carrier as phone_carrier,
+          p.status as phone_status,
+          im.phone_number as mapped_number
+        FROM messages m
+        LEFT JOIN phones p ON m.phone_iccid = p.iccid
+        LEFT JOIN iccid_mappings im ON m.phone_iccid = im.iccid AND im.is_active = 1
+      `;
       let countQuery = `SELECT COUNT(*) as total FROM messages`;
       const params = [];
 
       if (phoneIccid) {
-        query += ` WHERE phone_iccid = ?`;
+        query += ` WHERE m.phone_iccid = ?`;
         countQuery += ` WHERE phone_iccid = ?`;
         params.push(phoneIccid);
       }
 
-      query += ` ORDER BY timestamp DESC LIMIT ? OFFSET ?`;
+      query += ` ORDER BY m.timestamp DESC LIMIT ? OFFSET ?`;
       params.push(limit, offset);
 
       const [messages, count] = await Promise.all([

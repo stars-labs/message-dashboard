@@ -9,11 +9,30 @@ export const phonesHandler = {
       }
       
       const { results } = await env.DB.prepare(`
-        SELECT iccid, number, country, flag, carrier, status, signal, 
-               rssi, rsrq, rsrp, snr, operator_name, operator_id, imei, access_tech, 
-               created_at, updated_at
-        FROM phones 
-        ORDER BY iccid
+        SELECT 
+          p.iccid,
+          COALESCE(im.phone_number, p.number) as number,
+          p.country,
+          p.flag,
+          COALESCE(im.carrier, p.carrier) as carrier,
+          p.status,
+          p.signal,
+          p.rssi,
+          p.rsrq,
+          p.rsrp,
+          p.snr,
+          p.operator_name,
+          p.operator_id,
+          p.imei,
+          p.access_tech,
+          p.created_at,
+          p.updated_at,
+          im.phone_number as mapped_number,
+          im.carrier as mapped_carrier,
+          im.notes as mapping_notes
+        FROM phones p
+        LEFT JOIN iccid_mappings im ON p.iccid = im.iccid AND im.is_active = 1
+        ORDER BY p.iccid
       `).all();
       
       return new Response(JSON.stringify({
@@ -42,11 +61,30 @@ export const phonesHandler = {
     
     try {
       const phone = await env.DB.prepare(`
-        SELECT iccid, number, country, flag, carrier, status, signal, 
-               rssi, rsrq, rsrp, snr, operator_name, operator_id, imei, access_tech, 
-               created_at, updated_at
-        FROM phones 
-        WHERE iccid = ?
+        SELECT 
+          p.iccid,
+          COALESCE(im.phone_number, p.number) as number,
+          p.country,
+          p.flag,
+          COALESCE(im.carrier, p.carrier) as carrier,
+          p.status,
+          p.signal,
+          p.rssi,
+          p.rsrq,
+          p.rsrp,
+          p.snr,
+          p.operator_name,
+          p.operator_id,
+          p.imei,
+          p.access_tech,
+          p.created_at,
+          p.updated_at,
+          im.phone_number as mapped_number,
+          im.carrier as mapped_carrier,
+          im.notes as mapping_notes
+        FROM phones p
+        LEFT JOIN iccid_mappings im ON p.iccid = im.iccid AND im.is_active = 1
+        WHERE p.iccid = ?
       `).bind(phoneId).first();
       
       if (!phone) {
