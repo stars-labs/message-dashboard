@@ -892,26 +892,45 @@ const ModemManager = struct {
 
     fn formatTimestamp(self: ModemManager, raw_timestamp: []const u8) ![]const u8 {
         if (raw_timestamp.len == 0) {
-            // Return current time in ISO format
-            const now_ns = std.time.nanoTimestamp();
-            const now_s = @divFloor(now_ns, std.time.ns_per_s);
-            const now_ms = @divFloor(@mod(now_ns, std.time.ns_per_s), std.time.ns_per_ms);
+            // Return current time in proper UTC ISO format using system time
+            const now_s = std.time.timestamp();
+            const now_ms = @rem(@as(u64, @intCast(std.time.milliTimestamp())), 1000);
             
-            // Create ISO timestamp
-            // Format: YYYY-MM-DDTHH:MM:SS.sssZ
-            const epoch_seconds = @as(u64, @intCast(now_s));
-            const days_since_epoch = epoch_seconds / 86400;
-            const seconds_today = epoch_seconds % 86400;
+            // Convert Unix timestamp to broken down time (UTC)
+            const secs_per_day = 86400;
+            const days_since_epoch = @divFloor(now_s, secs_per_day);
+            const secs_today = @rem(now_s, secs_per_day);
             
-            // Simple approximation for current date (this is approximate, not accounting for leap years properly)
-            const year = 1970 + days_since_epoch / 365;
-            const remaining_days = days_since_epoch % 365;
-            const month = 1 + remaining_days / 30;
-            const day = 1 + remaining_days % 30;
+            // Calculate year, month, day using proper algorithm
+            var year: u32 = 1970;
+            var days_left = days_since_epoch;
             
-            const hours = seconds_today / 3600;
-            const minutes = (seconds_today % 3600) / 60;
-            const seconds = seconds_today % 60;
+            // Handle years (accounting for leap years)
+            while (true) {
+                const days_in_year: u32 = if (isLeapYear(year)) 366 else 365;
+                if (days_left < days_in_year) break;
+                days_left -= days_in_year;
+                year += 1;
+            }
+            
+            // Calculate month and day
+            const days_in_months = if (isLeapYear(year)) 
+                [_]u32{ 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 }
+            else 
+                [_]u32{ 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+            
+            var month: u32 = 1;
+            for (days_in_months) |days_in_month| {
+                if (days_left < days_in_month) break;
+                days_left -= days_in_month;
+                month += 1;
+            }
+            const day = days_left + 1;
+            
+            // Calculate time components
+            const hours = @divFloor(secs_today, 3600);
+            const minutes = @divFloor(@rem(secs_today, 3600), 60);
+            const seconds = @rem(secs_today, 60);
             
             return try std.fmt.allocPrint(self.allocator, "{d:0>4}-{d:0>2}-{d:0>2}T{d:0>2}:{d:0>2}:{d:0>2}.{d:0>3}Z", .{
                 year, month, day, hours, minutes, seconds, now_ms
@@ -928,6 +947,10 @@ const ModemManager = struct {
         }
 
         return try std.fmt.allocPrint(self.allocator, "{s}.000Z", .{raw_timestamp});
+    }
+    
+    fn isLeapYear(year: u32) bool {
+        return (year % 4 == 0 and year % 100 != 0) or (year % 400 == 0);
     }
     
     pub fn enableModem(self: ModemManager, modem_id: []const u8) !void {
