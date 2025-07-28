@@ -441,7 +441,7 @@
     
     // Check if we have recent phone data (phones with recent status updates)
     const hasRecentPhoneData = phoneNumbers.some(phone => {
-      return phone.status === 'active' || phone.status === 'online';
+      return phone.status === 'active' || phone.status === 'online' || phone.status === 'registered';
     });
     
     // Daemon is considered online if:
