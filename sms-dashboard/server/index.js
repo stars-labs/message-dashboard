@@ -1,14 +1,12 @@
 // Working version with frontend restored
 import { handleCORS } from './middleware/cors';
 import { handleAuth0 } from './middleware/auth0';
-import { requirePermission, enrichUserPermissions } from './middleware/rbac-simple';
+import { requirePermission, enrichUserPermissions } from './middleware/rbac';
 import { controlHandler } from './handlers/control';
 import { auth0Handler } from './handlers/auth0';
 import { phonesHandler } from './handlers/phones';
 import { messagesHandler } from './handlers/messages';
 import { statsHandler } from './handlers/stats';
-import { usersHandler } from './handlers/users';
-import { groupsHandler } from './handlers/groups';
 import { iccidMappingsHandler } from './handlers/iccid-mappings';
 import { updatesHandler } from './handlers/updates';
 import { serveFrontend } from './frontend-handler';
@@ -60,10 +58,28 @@ class SimpleRouter {
     // Find matching route
     const routes = this.routes[method] || [];
     console.log(`[Router] Available routes for ${method}: ${routes.map(r => r.path).join(', ')}`);
-    
+
     for (const route of routes) {
       if (route.path === '*' || route.path === pathname || this.matchPath(route.path, pathname)) {
         console.log(`[Router] Matched route: ${route.path}`);
+        
+        // Extract route parameters if any
+        if (route.path.includes(':')) {
+          const params = {};
+          const patternParts = route.path.split('/');
+          const pathParts = pathname.split('/');
+          
+          for (let i = 0; i < patternParts.length; i++) {
+            if (patternParts[i].startsWith(':')) {
+              const paramName = patternParts[i].substring(1);
+              params[paramName] = pathParts[i];
+            }
+          }
+          
+          // Add params to request
+          request.params = params;
+        }
+        
         // Execute handlers in sequence
         let response;
         for (const handler of route.handlers) {
@@ -79,16 +95,38 @@ class SimpleRouter {
   }
 
   matchPath(pattern, pathname) {
-    // Simple path matching (doesn't support params like :id)
+    // Simple path matching with support for :param patterns
     if (pattern === pathname) return true;
     if (pattern === '*') return true;
-    
+
     // Check if pattern starts with pathname for wildcard routes
     if (pattern.endsWith('*')) {
       const prefix = pattern.slice(0, -1);
       return pathname.startsWith(prefix);
     }
-    
+
+    // Check for parameter patterns like /api/iccid-mappings/:id
+    if (pattern.includes(':')) {
+      const patternParts = pattern.split('/');
+      const pathParts = pathname.split('/');
+      
+      if (patternParts.length !== pathParts.length) {
+        return false;
+      }
+      
+      for (let i = 0; i < patternParts.length; i++) {
+        if (patternParts[i].startsWith(':')) {
+          // This is a parameter, any value matches
+          continue;
+        }
+        if (patternParts[i] !== pathParts[i]) {
+          return false;
+        }
+      }
+      
+      return true;
+    }
+
     return false;
   }
 }
@@ -347,19 +385,19 @@ router.post('/api/control/heartbeat', async (request) => {
 // Serve frontend for all other routes - check authentication
 router.get('*', async (request, env, ctx) => {
   const url = new URL(request.url);
-  
+
   // Skip authentication for public routes
   const publicRoutes = [];
   if (publicRoutes.includes(url.pathname)) {
     return serveFrontend(request);
   }
-  
+
   // For the main app, check if user is authenticated and has the SMS role
   if (url.pathname === '/' || url.pathname === '/index.html') {
     // Check for session token in cookies
     const cookieHeader = request.headers.get('Cookie');
     let token = null;
-    
+
     if (cookieHeader) {
       const cookies = cookieHeader.split(';').map(c => c.trim());
       const authCookie = cookies.find(c => c.startsWith('auth_token='));
@@ -367,37 +405,37 @@ router.get('*', async (request, env, ctx) => {
         token = authCookie.split('=')[1];
       }
     }
-    
+
     if (!token) {
       // No token - redirect to login
       return Response.redirect(new URL('/login', request.url).toString(), 302);
     }
-    
+
     // Verify session
     const sessionData = await env.SESSIONS.get(token);
     if (!sessionData) {
       // Invalid session - redirect to login
       return Response.redirect(new URL('/login', request.url).toString(), 302);
     }
-    
+
     const session = JSON.parse(sessionData);
     if (session.expires_at < Date.now()) {
       // Session expired - redirect to login
       await env.SESSIONS.delete(token);
       return Response.redirect(new URL('/login', request.url).toString(), 302);
     }
-    
+
     // Check if user has SMS role
     const roleConfig = createRoleConfig(env);
     const user = session.user;
     const userRoles = user.roles || [];
-    
+
     if (!hasSmSAccess(userRoles, roleConfig)) {
       // User doesn't have SMS role - redirect to login with error
       return Response.redirect(new URL('/login?error=no_role', request.url).toString(), 302);
     }
   }
-  
+
   // Serve the frontend
   return serveFrontend(request);
 });
@@ -406,25 +444,25 @@ export default {
   async fetch(request, env, ctx) {
     // Worker started - with frontend
     console.log(`[Worker] Received request: ${request.method} ${request.url}`);
-    
+
     try {
-      
+
       // Handle regular routes
       const response = await router.handle(request, env, ctx);
-      
+
       if (!response) {
         console.log(`[Worker] No route matched, serving frontend`);
         // No route matched, serve frontend (includes assets)
         return serveFrontend(request);
       }
-      
+
       console.log(`[Worker] Route matched, returning response`);
       // Add CORS headers to API responses
       if (response) {
         return handleCORS(response);
       }
       return response;
-      
+
     } catch (error) {
       console.error(`[Worker] Error:`, error);
       // Worker error

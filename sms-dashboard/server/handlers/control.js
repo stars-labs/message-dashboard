@@ -157,6 +157,49 @@ export const controlHandler = {
         });
       }
       
+      // Special case: mark all phones as offline when no modems found
+      if (phones.length === 1 && phones[0].iccid === 'ALL_PHONES_OFFLINE') {
+        console.log('[control.js] No modems found - marking all phones as offline');
+        
+        // Update all phones to offline status
+        const updateStmt = env.DB.prepare(`
+          UPDATE phones 
+          SET status = 'offline', 
+              signal = NULL,
+              rssi = NULL,
+              rsrq = NULL,
+              rsrp = NULL,
+              snr = NULL,
+              updated_at = CURRENT_TIMESTAMP
+          WHERE status != 'offline'
+        `);
+        
+        const result = await updateStmt.run();
+        console.log(`[control.js] Marked ${result.meta.changes} phones as offline`);
+        
+        // Get all offline phones to broadcast
+        const offlinePhones = await env.DB.prepare(`
+          SELECT * FROM phones WHERE status = 'offline'
+        `).all();
+        
+        // Broadcast phone updates to all connected clients
+        const ws = env.WEBSOCKET_HANDLER.get(env.WEBSOCKET_HANDLER.idFromName('broadcast'));
+        await ws.fetch('http://internal/broadcast', {
+          method: 'POST',
+          body: JSON.stringify({
+            type: 'phone_update',
+            data: offlinePhones.results
+          })
+        });
+        
+        return new Response(JSON.stringify({
+          success: true,
+          message: `Marked ${result.meta.changes} phones as offline`
+        }), {
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+      
       // Update phones using ICCID as primary key
       const stmt = env.DB.prepare(`
         INSERT INTO phones (iccid, number, country, flag, carrier, status, signal, rssi, rsrq, rsrp, snr, operator_name, operator_id, imei, access_tech)

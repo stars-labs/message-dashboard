@@ -209,7 +209,8 @@ const ModemThreadContext = struct {
             phone.number = number;
         } else |_| {}
         
-        var should_upload = true;
+        // Always upload phone status updates - signal data is optional
+        var has_signal_update = false;
         
         // Get signal quality only if it's time to check and if it should be updated
         if (self.check_signal) {
@@ -221,6 +222,7 @@ const ModemThreadContext = struct {
                     phone.rsrq = signal_data.rsrq;
                     phone.rsrp = signal_data.rsrp;
                     phone.snr = signal_data.snr;
+                    has_signal_update = true;
                     
                     // Update cache
                     self.signal_cache.updateCache(self.modem_id, signal_data) catch |err| {
@@ -245,8 +247,8 @@ const ModemThreadContext = struct {
                         phone.snr = cached.signal_data.snr;
                         std.log.info("🧵 Thread: Modem {s} using cached signal (no update needed): {}%", .{ self.modem_id, cached.signal_data.signal_percent });
                     } else {
-                        std.log.warn("🧵 Thread: Modem {s} has no cached signal data during signal check - skipping upload", .{ self.modem_id });
-                        should_upload = false;
+                        std.log.debug("🧵 Thread: Modem {s} has no cached signal data during signal check", .{ self.modem_id });
+                        // Continue with upload even without signal data
                     }
                 }
             } else |err| {
@@ -260,34 +262,32 @@ const ModemThreadContext = struct {
                     phone.snr = cached.signal_data.snr;
                     std.log.info("🧵 Thread: Modem {s} using cached signal after retrieval failure: {}%", .{ self.modem_id, cached.signal_data.signal_percent });
                 } else {
-                    std.log.warn("🧵 Thread: Modem {s} has no cached signal data after retrieval failure - skipping upload", .{ self.modem_id });
-                    should_upload = false;
+                    std.log.debug("🧵 Thread: Modem {s} has no cached signal data after retrieval failure", .{ self.modem_id });
+                    // Continue with upload even without signal data
                 }
             }
         } else {
-            // Use cached signal data if available
+            // Use cached signal data if available, but don't skip upload if missing
             if (self.signal_cache.cache.get(self.modem_id)) |cached| {
                 phone.signal = cached.signal_data.signal_percent;
                 phone.rssi = cached.signal_data.rssi;
                 phone.rsrq = cached.signal_data.rsrq;
                 phone.rsrp = cached.signal_data.rsrp;
                 phone.snr = cached.signal_data.snr;
-                std.log.info("🧵 Thread: Modem {s} using cached signal: {}%", .{ self.modem_id, cached.signal_data.signal_percent });
+                std.log.debug("🧵 Thread: Modem {s} using cached signal: {}%", .{ self.modem_id, cached.signal_data.signal_percent });
             } else {
-                std.log.warn("🧵 Thread: Modem {s} has no cached signal data - skipping upload to prevent null signals", .{ self.modem_id });
-                should_upload = false;
+                std.log.debug("🧵 Thread: Modem {s} has no cached signal data - uploading status without signal", .{ self.modem_id });
+                // Phone status upload proceeds without signal data
             }
         }
         
-        // Only upload if we have signal data (either fresh or cached)
-        if (should_upload) {
-            std.log.info("🧵 Thread: Uploading phone {s} with signal: {?}", .{ phone.id, phone.signal });
-            self.api_client.uploadPhone(phone) catch |err| {
-                std.log.warn("🧵 Thread: Failed to upload phone {s}: {any}", .{ phone.id, err });
-            };
-        } else {
-            std.log.warn("🧵 Thread: Skipping upload for modem {s} - no signal data available", .{ self.modem_id });
-        }
+        // Always upload phone status - signal data is optional
+        const upload_reason = if (has_signal_update) "with signal update" else if (phone.signal != null) "with cached signal" else "status only";
+        std.log.info("🧵 Thread: Uploading phone {s} ({s}): signal={?}", .{ phone.id, upload_reason, phone.signal });
+        
+        self.api_client.uploadPhone(phone) catch |err| {
+            std.log.warn("🧵 Thread: Failed to upload phone {s}: {any}", .{ phone.id, err });
+        };
     }
 };
 
@@ -383,77 +383,146 @@ const ApiClient = struct {
             return err;
         };
         
-        // Create a new HTTP client for this request (thread-safe)
-        var http_client = http.Client{ .allocator = self.allocator };
-        defer http_client.deinit();
+        // Retry configuration
+        const max_retries = 3;
+        const base_delay_ms = 1000; // 1 second base delay
         
-        var server_header_buffer: [16 * 1024]u8 = undefined;
-        
-        // Create HTTP request
-        var req = http_client.open(.POST, uri, .{
-            .server_header_buffer = &server_header_buffer,
-            .extra_headers = &[_]http.Header{
-                .{ .name = "content-type", .value = "application/json" },
-                .{ .name = "x-api-key", .value = self.config.api_key },
-            },
-        }) catch |err| {
-            std.log.warn("❌ Failed to open HTTP request to {s}: {any}", .{ url_str, err });
-            return err;
-        };
-        defer req.deinit();
-        
-        // Set content length
-        req.transfer_encoding = .{ .content_length = payload.len };
-        
-        // Send headers
-        req.send() catch |err| {
-            std.log.warn("❌ Failed to send HTTP headers to {s}: {any}", .{ url_str, err });
-            return err;
-        };
-        
-        // Write payload
-        req.writeAll(payload) catch |err| {
-            std.log.warn("❌ Failed to write payload to {s}: {any}", .{ url_str, err });
-            return err;
-        };
-        
-        // Finish request
-        req.finish() catch |err| {
-            std.log.warn("❌ Failed to finish HTTP request to {s}: {any}", .{ url_str, err });
-            return err;
-        };
-        
-        // Wait for response
-        req.wait() catch |err| {
-            std.log.warn("❌ Failed to wait for response from {s}: {any}", .{ url_str, err });
-            return err;
-        };
-        
-        const status_code = @intFromEnum(req.response.status);
-        std.log.info("📊 HTTP status code: {d}", .{status_code});
-        
-        // Read response body for logging
-        const response_body = req.reader().readAllAlloc(self.allocator, 8192) catch |err| {
-            std.log.warn("⚠️ Failed to read response body from {s}: {any}", .{ url_str, err });
+        var attempt: u32 = 0;
+        while (attempt < max_retries) : (attempt += 1) {
+            // Create a new HTTP client for this request (thread-safe)
+            var http_client = http.Client{ .allocator = self.allocator };
+            defer http_client.deinit();
+            
+            var server_header_buffer: [16 * 1024]u8 = undefined;
+            
+            // Create HTTP request
+            const req_result = http_client.open(.POST, uri, .{
+                .server_header_buffer = &server_header_buffer,
+                .extra_headers = &[_]http.Header{
+                    .{ .name = "content-type", .value = "application/json" },
+                    .{ .name = "x-api-key", .value = self.config.api_key },
+                },
+            });
+            
+            var req = req_result catch |err| {
+                if (attempt < max_retries - 1) {
+                    const delay_ms = base_delay_ms * (@as(u64, 1) << @intCast(attempt));
+                    std.log.warn("🔄 Failed to open HTTP request to {s} (attempt {d}/{d}): {any}. Retrying in {d}ms...", .{ url_str, attempt + 1, max_retries, err, delay_ms });
+                    std.time.sleep(delay_ms * std.time.ns_per_ms);
+                    continue;
+                } else {
+                    std.log.warn("❌ Failed to open HTTP request to {s} after {d} attempts: {any}", .{ url_str, max_retries, err });
+                    return err;
+                }
+            };
+            defer req.deinit();
+            
+            // Set content length
+            req.transfer_encoding = .{ .content_length = payload.len };
+            
+            // Send headers
+            req.send() catch |err| {
+                if (attempt < max_retries - 1) {
+                    const delay_ms = base_delay_ms * (@as(u64, 1) << @intCast(attempt));
+                    std.log.warn("🔄 Failed to send HTTP headers to {s} (attempt {d}/{d}): {any}. Retrying in {d}ms...", .{ url_str, attempt + 1, max_retries, err, delay_ms });
+                    std.time.sleep(delay_ms * std.time.ns_per_ms);
+                    continue;
+                } else {
+                    std.log.warn("❌ Failed to send HTTP headers to {s} after {d} attempts: {any}", .{ url_str, max_retries, err });
+                    return err;
+                }
+            };
+            
+            // Write payload
+            req.writeAll(payload) catch |err| {
+                if (attempt < max_retries - 1) {
+                    const delay_ms = base_delay_ms * (@as(u64, 1) << @intCast(attempt));
+                    std.log.warn("🔄 Failed to write payload to {s} (attempt {d}/{d}): {any}. Retrying in {d}ms...", .{ url_str, attempt + 1, max_retries, err, delay_ms });
+                    std.time.sleep(delay_ms * std.time.ns_per_ms);
+                    continue;
+                } else {
+                    std.log.warn("❌ Failed to write payload to {s} after {d} attempts: {any}", .{ url_str, max_retries, err });
+                    return err;
+                }
+            };
+            
+            // Finish request
+            req.finish() catch |err| {
+                if (attempt < max_retries - 1) {
+                    const delay_ms = base_delay_ms * (@as(u64, 1) << @intCast(attempt));
+                    std.log.warn("🔄 Failed to finish HTTP request to {s} (attempt {d}/{d}): {any}. Retrying in {d}ms...", .{ url_str, attempt + 1, max_retries, err, delay_ms });
+                    std.time.sleep(delay_ms * std.time.ns_per_ms);
+                    continue;
+                } else {
+                    std.log.warn("❌ Failed to finish HTTP request to {s} after {d} attempts: {any}", .{ url_str, max_retries, err });
+                    return err;
+                }
+            };
+            
+            // Wait for response
+            req.wait() catch |err| {
+                if (attempt < max_retries - 1) {
+                    const delay_ms = base_delay_ms * (@as(u64, 1) << @intCast(attempt));
+                    std.log.warn("🔄 Failed to wait for response from {s} (attempt {d}/{d}): {any}. Retrying in {d}ms...", .{ url_str, attempt + 1, max_retries, err, delay_ms });
+                    std.time.sleep(delay_ms * std.time.ns_per_ms);
+                    continue;
+                } else {
+                    std.log.warn("❌ Failed to wait for response from {s} after {d} attempts: {any}", .{ url_str, max_retries, err });
+                    return err;
+                }
+            };
+            
+            const status_code = @intFromEnum(req.response.status);
+            std.log.info("📊 HTTP status code: {d}", .{status_code});
+            
+            // Read response body for logging
+            const response_body = req.reader().readAllAlloc(self.allocator, 8192) catch |err| {
+                std.log.warn("⚠️ Failed to read response body from {s}: {any}", .{ url_str, err });
+                if (status_code == 200) {
+                    std.log.info("✅ HTTP request successful for {s}", .{endpoint});
+                    return; // Success even without response body
+                } else {
+                    if (attempt < max_retries - 1) {
+                        const delay_ms = base_delay_ms * (@as(u64, 1) << @intCast(attempt));
+                        std.log.warn("🔄 HTTP request failed with status {d} (attempt {d}/{d}). Retrying in {d}ms...", .{ status_code, attempt + 1, max_retries, delay_ms });
+                        std.time.sleep(delay_ms * std.time.ns_per_ms);
+                        continue;
+                    } else {
+                        std.log.warn("❌ HTTP request failed with status {d} after {d} attempts", .{ status_code, max_retries });
+                        return error.HttpRequestFailed;
+                    }
+                }
+            };
+            defer self.allocator.free(response_body);
+            
+            std.log.info("📡 Raw HTTP response: {s}", .{response_body});
+            
             if (status_code == 200) {
-                std.log.info("✅ HTTP request successful for {s}", .{endpoint});
+                // Success! Log if this was a retry
+                if (attempt > 0) {
+                    std.log.info("✅ HTTP request successful for {s} after {d} retries", .{ endpoint, attempt + 1 });
+                } else {
+                    std.log.info("✅ HTTP request successful for {s}", .{endpoint});
+                }
+                return;
             } else {
-                std.log.warn("❌ HTTP request failed with status: {d}", .{status_code});
-                return error.HttpRequestFailed;
+                if (attempt < max_retries - 1) {
+                    const delay_ms = base_delay_ms * (@as(u64, 1) << @intCast(attempt));
+                    std.log.warn("🔄 HTTP request failed with status {d} (attempt {d}/{d}). Retrying in {d}ms...", .{ status_code, attempt + 1, max_retries, delay_ms });
+                    std.log.warn("🔄 Response body: {s}", .{response_body});
+                    std.time.sleep(delay_ms * std.time.ns_per_ms);
+                    continue;
+                } else {
+                    std.log.warn("❌ HTTP request failed with status {d} after {d} attempts", .{ status_code, max_retries });
+                    std.log.warn("❌ Final response body: {s}", .{response_body});
+                    return error.HttpRequestFailed;
+                }
             }
-            return err;
-        };
-        defer self.allocator.free(response_body);
-        
-        std.log.info("📡 Raw HTTP response: {s}", .{response_body});
-        
-        if (status_code == 200) {
-            std.log.info("✅ HTTP request successful for {s}", .{endpoint});
-        } else {
-            std.log.warn("❌ HTTP request failed with status: {d}", .{status_code});
-            std.log.warn("❌ Response body: {s}", .{response_body});
-            return error.HttpRequestFailed;
         }
+        
+        // Should never reach here due to loop structure, but added for completeness
+        std.log.warn("❌ Exhausted all retry attempts for makeRequest to {s}", .{endpoint});
+        return error.HttpRequestFailed;
     }
     
     pub fn sendHeartbeat(self: *ApiClient) !void {
@@ -481,57 +550,116 @@ const ApiClient = struct {
             return error.GetPendingFailed;
         };
         
-        // Create a new HTTP client for this request (thread-safe)
-        var http_client = http.Client{ .allocator = self.allocator };
-        defer http_client.deinit();
+        // Retry configuration
+        const max_retries = 3;
+        const base_delay_ms = 1000; // 1 second base delay
         
-        var server_header_buffer: [16 * 1024]u8 = undefined;
-        
-        // Create HTTP GET request
-        var req = http_client.open(.GET, uri, .{
-            .server_header_buffer = &server_header_buffer,
-            .extra_headers = &[_]http.Header{
-                .{ .name = "content-type", .value = "application/json" },
-                .{ .name = "x-api-key", .value = self.config.api_key },
-            },
-        }) catch |err| {
-            std.log.warn("❌ Failed to open HTTP GET request to {s}: {any}", .{ url_str, err });
-            return error.GetPendingFailed;
-        };
-        defer req.deinit();
-        
-        // Send request
-        req.send() catch |err| {
-            std.log.warn("❌ Failed to send HTTP GET request to {s}: {any}", .{ url_str, err });
-            return error.GetPendingFailed;
-        };
-        
-        // Finish request (no body for GET)
-        req.finish() catch |err| {
-            std.log.warn("❌ Failed to finish HTTP GET request to {s}: {any}", .{ url_str, err });
-            return error.GetPendingFailed;
-        };
-        
-        // Wait for response
-        req.wait() catch |err| {
-            std.log.warn("❌ Failed to wait for GET response from {s}: {any}", .{ url_str, err });
-            return error.GetPendingFailed;
-        };
-        
-        const status_code = @intFromEnum(req.response.status);
-        
-        if (status_code != 200) {
-            std.log.warn("Failed to get pending SMS: HTTP status {d}", .{status_code});
-            return error.GetPendingFailed;
+        var attempt: u32 = 0;
+        while (attempt < max_retries) : (attempt += 1) {
+            // Create a new HTTP client for this request (thread-safe)
+            var http_client = http.Client{ .allocator = self.allocator };
+            defer http_client.deinit();
+            
+            var server_header_buffer: [16 * 1024]u8 = undefined;
+            
+            const req_result = http_client.open(.GET, uri, .{
+                .server_header_buffer = &server_header_buffer,
+                .extra_headers = &[_]http.Header{
+                    .{ .name = "content-type", .value = "application/json" },
+                    .{ .name = "x-api-key", .value = self.config.api_key },
+                },
+            });
+            
+            var req = req_result catch |err| {
+                if (attempt < max_retries - 1) {
+                    const delay_ms = base_delay_ms * (@as(u64, 1) << @intCast(attempt)); // Exponential backoff: 1s, 2s, 4s
+                    std.log.warn("🔄 Failed to open HTTP GET request to {s} (attempt {d}/{d}): {any}. Retrying in {d}ms...", .{ url_str, attempt + 1, max_retries, err, delay_ms });
+                    std.time.sleep(delay_ms * std.time.ns_per_ms);
+                    continue;
+                } else {
+                    std.log.warn("❌ Failed to open HTTP GET request to {s} after {d} attempts: {any}", .{ url_str, max_retries, err });
+                    return error.GetPendingFailed;
+                }
+            };
+            defer req.deinit();
+            
+            // Send request
+            req.send() catch |err| {
+                if (attempt < max_retries - 1) {
+                    const delay_ms = base_delay_ms * (@as(u64, 1) << @intCast(attempt));
+                    std.log.warn("🔄 Failed to send HTTP GET request to {s} (attempt {d}/{d}): {any}. Retrying in {d}ms...", .{ url_str, attempt + 1, max_retries, err, delay_ms });
+                    std.time.sleep(delay_ms * std.time.ns_per_ms);
+                    continue;
+                } else {
+                    std.log.warn("❌ Failed to send HTTP GET request to {s} after {d} attempts: {any}", .{ url_str, max_retries, err });
+                    return error.GetPendingFailed;
+                }
+            };
+            
+            // Finish request (no body for GET)
+            req.finish() catch |err| {
+                if (attempt < max_retries - 1) {
+                    const delay_ms = base_delay_ms * (@as(u64, 1) << @intCast(attempt));
+                    std.log.warn("🔄 Failed to finish HTTP GET request to {s} (attempt {d}/{d}): {any}. Retrying in {d}ms...", .{ url_str, attempt + 1, max_retries, err, delay_ms });
+                    std.time.sleep(delay_ms * std.time.ns_per_ms);
+                    continue;
+                } else {
+                    std.log.warn("❌ Failed to finish HTTP GET request to {s} after {d} attempts: {any}", .{ url_str, max_retries, err });
+                    return error.GetPendingFailed;
+                }
+            };
+            
+            // Wait for response
+            req.wait() catch |err| {
+                if (attempt < max_retries - 1) {
+                    const delay_ms = base_delay_ms * (@as(u64, 1) << @intCast(attempt));
+                    std.log.warn("🔄 Failed to wait for GET response from {s} (attempt {d}/{d}): {any}. Retrying in {d}ms...", .{ url_str, attempt + 1, max_retries, err, delay_ms });
+                    std.time.sleep(delay_ms * std.time.ns_per_ms);
+                    continue;
+                } else {
+                    std.log.warn("❌ Failed to wait for GET response from {s} after {d} attempts: {any}", .{ url_str, max_retries, err });
+                    return error.GetPendingFailed;
+                }
+            };
+            
+            const status_code = @intFromEnum(req.response.status);
+            
+            if (status_code != 200) {
+                if (attempt < max_retries - 1) {
+                    const delay_ms = base_delay_ms * (@as(u64, 1) << @intCast(attempt));
+                    std.log.warn("🔄 Failed to get pending SMS: HTTP status {d} (attempt {d}/{d}). Retrying in {d}ms...", .{ status_code, attempt + 1, max_retries, delay_ms });
+                    std.time.sleep(delay_ms * std.time.ns_per_ms);
+                    continue;
+                } else {
+                    std.log.warn("❌ Failed to get pending SMS after {d} attempts: HTTP status {d}", .{ max_retries, status_code });
+                    return error.GetPendingFailed;
+                }
+            }
+            
+            // Read response body and return it (caller owns this memory)
+            const response_body = req.reader().readAllAlloc(self.allocator, 1024 * 1024) catch |err| {
+                if (attempt < max_retries - 1) {
+                    const delay_ms = base_delay_ms * (@as(u64, 1) << @intCast(attempt));
+                    std.log.warn("🔄 Failed to read GET response body from {s} (attempt {d}/{d}): {any}. Retrying in {d}ms...", .{ url_str, attempt + 1, max_retries, err, delay_ms });
+                    std.time.sleep(delay_ms * std.time.ns_per_ms);
+                    continue;
+                } else {
+                    std.log.warn("❌ Failed to read GET response body from {s} after {d} attempts: {any}", .{ url_str, max_retries, err });
+                    return error.GetPendingFailed;
+                }
+            };
+            
+            // Success! Log if this was a retry
+            if (attempt > 0) {
+                std.log.info("✅ Successfully got pending SMS after {d} retries", .{attempt + 1});
+            }
+            
+            return response_body; // Caller owns this memory
         }
         
-        // Read response body and return it (caller owns this memory)
-        const response_body = req.reader().readAllAlloc(self.allocator, 1024 * 1024) catch |err| {
-            std.log.warn("❌ Failed to read GET response body from {s}: {any}", .{ url_str, err });
-            return error.GetPendingFailed;
-        };
-        
-        return response_body; // Caller owns this memory
+        // Should never reach here due to loop structure, but added for completeness
+        std.log.warn("❌ Exhausted all retry attempts for getPendingSMS", .{});
+        return error.GetPendingFailed;
     }
 
     pub fn updateSMSResult(self: *ApiClient, message_id: []const u8, success: bool, sms_id: ?[]const u8, error_message: ?[]const u8) !void {
@@ -892,15 +1020,16 @@ const ModemManager = struct {
 
     fn formatTimestamp(self: ModemManager, raw_timestamp: []const u8) ![]const u8 {
         if (raw_timestamp.len == 0) {
-            // Get current time in UTC
-            // On systems with local timezone set, we need to ensure we get true UTC
-            const now_s = std.time.timestamp();
+            // Get current time - std.time.timestamp() returns UTC seconds since epoch
+            const utc_timestamp = std.time.timestamp();
             const now_ms = @rem(@as(u64, @intCast(std.time.milliTimestamp())), 1000);
+            
+            std.log.info("⏰ Using current UTC timestamp: {d}", .{utc_timestamp});
             
             // Convert Unix timestamp to broken down time (UTC)
             const secs_per_day = 86400;
-            const days_since_epoch = @divFloor(now_s, secs_per_day);
-            const secs_today = @rem(now_s, secs_per_day);
+            const days_since_epoch = @divFloor(utc_timestamp, secs_per_day);
+            const secs_today = @rem(utc_timestamp, secs_per_day);
             
             // Calculate year, month, day using proper algorithm
             var year: u32 = 1970;
@@ -943,15 +1072,282 @@ const ModemManager = struct {
         }
 
         if (std.mem.indexOf(u8, raw_timestamp, "+")) |plus_pos| {
+            // Extract timezone offset (e.g., "+08:00" or "+0800")
             const base = raw_timestamp[0..plus_pos];
-            return try std.fmt.allocPrint(self.allocator, "{s}.000Z", .{base});
+            const offset_str = raw_timestamp[plus_pos+1..];
+            
+            // Parse offset hours (handle both "+08:00" and "+0800" formats)
+            var offset_hours: i32 = 0;
+            if (offset_str.len >= 2) {
+                offset_hours = std.fmt.parseInt(i32, offset_str[0..2], 10) catch 0;
+            }
+            
+            std.log.info("⏰ SMS timestamp with offset: raw='{s}', base='{s}', offset=+{d}h", .{ raw_timestamp, base, offset_hours });
+            
+            // Parse the base timestamp and adjust for timezone
+            if (parseLocalTimestamp(base)) |local_time| {
+                // Subtract the timezone offset to get UTC
+                const utc_timestamp = local_time - (@as(i64, offset_hours) * 3600);
+                
+                // Convert back to formatted timestamp
+                const secs_per_day = 86400;
+                const days_since_epoch = @divFloor(utc_timestamp, secs_per_day);
+                const secs_today = @rem(utc_timestamp, secs_per_day);
+                
+                // Calculate year, month, day
+                var year: u32 = 1970;
+                var days_left = days_since_epoch;
+                
+                while (true) {
+                    const days_in_year: u32 = if (isLeapYear(year)) 366 else 365;
+                    if (days_left < days_in_year) break;
+                    days_left -= days_in_year;
+                    year += 1;
+                }
+                
+                const days_in_months = if (isLeapYear(year)) 
+                    [_]u32{ 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 }
+                else 
+                    [_]u32{ 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+                
+                var month: u32 = 1;
+                for (days_in_months) |days_in_month| {
+                    if (days_left < days_in_month) break;
+                    days_left -= days_in_month;
+                    month += 1;
+                }
+                const day = days_left + 1;
+                
+                const hours = @divFloor(secs_today, 3600);
+                const minutes = @divFloor(@rem(secs_today, 3600), 60);
+                const seconds = @rem(secs_today, 60);
+                
+                return try std.fmt.allocPrint(self.allocator, "{d:0>4}-{d:0>2}-{d:0>2}T{d:0>2}:{d:0>2}:{d:0>2}.000Z", .{
+                    year, month, day, hours, minutes, seconds
+                });
+            } else |_| {
+                // Fallback: just use the base timestamp with Z
+                return try std.fmt.allocPrint(self.allocator, "{s}.000Z", .{base});
+            }
         }
 
-        return try std.fmt.allocPrint(self.allocator, "{s}.000Z", .{raw_timestamp});
+        // Handle SMS timestamps without timezone info
+        // IMPORTANT: Timestamps without timezone info from the modem are in Beijing time (UTC+8)
+        // We need to convert them to UTC for storage
+        std.log.info("⏰ SMS timestamp conversion: raw='{s}' (Beijing time, converting to UTC)", .{raw_timestamp});
+        
+        // Parse the timestamp components
+        if (parseLocalTimestamp(raw_timestamp)) |beijing_time| {
+            // Convert Beijing time to UTC by subtracting 8 hours
+            // Beijing is UTC+8, so beijing_time - 8h = UTC
+            const utc_timestamp = beijing_time - (8 * 3600);
+            
+            // Convert back to broken down time for formatting
+            const secs_per_day = 86400;
+            const days_since_epoch = @divFloor(utc_timestamp, secs_per_day);
+            const secs_today = @rem(utc_timestamp, secs_per_day);
+            
+            // Calculate year, month, day using proper algorithm
+            var year: u32 = 1970;
+            var days_left = days_since_epoch;
+            
+            // Handle years (accounting for leap years)
+            while (true) {
+                const days_in_year: u32 = if (isLeapYear(year)) 366 else 365;
+                if (days_left < days_in_year) break;
+                days_left -= days_in_year;
+                year += 1;
+            }
+            
+            // Calculate month and day
+            const days_in_months = if (isLeapYear(year)) 
+                [_]u32{ 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 }
+            else 
+                [_]u32{ 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+            
+            var month: u32 = 1;
+            for (days_in_months) |days_in_month| {
+                if (days_left < days_in_month) break;
+                days_left -= days_in_month;
+                month += 1;
+            }
+            const day = days_left + 1;
+            
+            // Calculate time components
+            const hours = @divFloor(secs_today, 3600);
+            const minutes = @divFloor(@rem(secs_today, 3600), 60);
+            const seconds = @rem(secs_today, 60);
+            
+            const utc_formatted = try std.fmt.allocPrint(self.allocator, "{d:0>4}-{d:0>2}-{d:0>2}T{d:0>2}:{d:0>2}:{d:0>2}.000Z", .{
+                year, month, day, hours, minutes, seconds
+            });
+            
+            std.log.info("⏰ SMS timestamp converted: '{s}' -> '{s}' (subtracted 8h for UTC)", .{ raw_timestamp, utc_formatted });
+            return utc_formatted;
+        } else |err| {
+            // Fallback: if parsing fails, log the error and assume Beijing time
+            std.log.warn("⚠️  Failed to parse timestamp '{s}': {any}, assuming Beijing time and converting to UTC", .{raw_timestamp, err});
+            
+            // Try a more lenient parsing approach
+            // If the timestamp looks like ISO format but parsing failed, it might be missing seconds or have extra chars
+            if (raw_timestamp.len >= 16) {
+                // Try to extract just the date and time parts
+                const clean_timestamp = if (raw_timestamp.len > 19) raw_timestamp[0..19] else raw_timestamp;
+                
+                // If it's too short, pad with zeros
+                const padded = if (clean_timestamp.len == 16) 
+                    try std.fmt.allocPrint(self.allocator, "{s}:00", .{clean_timestamp})
+                else 
+                    try self.allocator.dupe(u8, clean_timestamp);
+                defer if (clean_timestamp.len == 16) self.allocator.free(padded);
+                
+                // Try parsing again with the cleaned timestamp
+                if (parseLocalTimestamp(padded)) |beijing_time| {
+                    // Convert Beijing time to UTC
+                    const utc_time = beijing_time - (8 * 3600);
+                    
+                    // Format as UTC
+                    const secs_per_day = 86400;
+                    const days_since_epoch = @divFloor(utc_time, secs_per_day);
+                    const secs_today = @rem(utc_time, secs_per_day);
+                    
+                    // Calculate components
+                    var year: u32 = 1970;
+                    var days_left = days_since_epoch;
+                    
+                    while (true) {
+                        const days_in_year: u32 = if (isLeapYear(year)) 366 else 365;
+                        if (days_left < days_in_year) break;
+                        days_left -= days_in_year;
+                        year += 1;
+                    }
+                    
+                    const days_in_months = if (isLeapYear(year)) 
+                        [_]u32{ 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 }
+                    else 
+                        [_]u32{ 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+                    
+                    var month: u32 = 1;
+                    for (days_in_months) |days_in_month| {
+                        if (days_left < days_in_month) break;
+                        days_left -= days_in_month;
+                        month += 1;
+                    }
+                    const day = days_left + 1;
+                    
+                    const hours = @divFloor(secs_today, 3600);
+                    const minutes = @divFloor(@rem(secs_today, 3600), 60);
+                    const seconds = @rem(secs_today, 60);
+                    
+                    const utc_formatted = try std.fmt.allocPrint(self.allocator, "{d:0>4}-{d:0>2}-{d:0>2}T{d:0>2}:{d:0>2}:{d:0>2}.000Z", .{
+                        year, month, day, hours, minutes, seconds
+                    });
+                    
+                    std.log.info("⏰ Fallback timestamp converted: '{s}' -> '{s}' (Beijing to UTC)", .{ raw_timestamp, utc_formatted });
+                    return utc_formatted;
+                } else |_| {}
+            }
+            
+            // Last resort: return current UTC time
+            std.log.err("⚠️  Could not parse timestamp '{s}' at all, using current UTC time", .{raw_timestamp});
+            const utc_timestamp = std.time.timestamp();
+            
+            // Format current UTC time
+            const secs_per_day = 86400;
+            const days_since_epoch = @divFloor(utc_timestamp, secs_per_day);
+            const secs_today = @rem(utc_timestamp, secs_per_day);
+            
+            var year: u32 = 1970;
+            var days_left = days_since_epoch;
+            
+            while (true) {
+                const days_in_year: u32 = if (isLeapYear(year)) 366 else 365;
+                if (days_left < days_in_year) break;
+                days_left -= days_in_year;
+                year += 1;
+            }
+            
+            const days_in_months = if (isLeapYear(year)) 
+                [_]u32{ 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 }
+            else 
+                [_]u32{ 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+            
+            var month: u32 = 1;
+            for (days_in_months) |days_in_month| {
+                if (days_left < days_in_month) break;
+                days_left -= days_in_month;
+                month += 1;
+            }
+            const day = days_left + 1;
+            
+            const hours = @divFloor(secs_today, 3600);
+            const minutes = @divFloor(@rem(secs_today, 3600), 60);
+            const seconds = @rem(secs_today, 60);
+            
+            return try std.fmt.allocPrint(self.allocator, "{d:0>4}-{d:0>2}-{d:0>2}T{d:0>2}:{d:0>2}:{d:0>2}.000Z", .{
+                year, month, day, hours, minutes, seconds
+            });
+        }
     }
     
     fn isLeapYear(year: u32) bool {
         return (year % 4 == 0 and year % 100 != 0) or (year % 400 == 0);
+    }
+    
+    fn parseLocalTimestamp(timestamp_str: []const u8) !i64 {
+        // Parse timestamp format: "2025-07-28 16:04:39" or "2025-07-28T16:04:39"
+        // Expected to be in Asia/Shanghai timezone (+8)
+        
+        if (timestamp_str.len < 19) return error.InvalidTimestamp;
+        
+        // Extract date part: "2025-07-28"
+        const year = try std.fmt.parseInt(u32, timestamp_str[0..4], 10);
+        const month = try std.fmt.parseInt(u32, timestamp_str[5..7], 10);
+        const day = try std.fmt.parseInt(u32, timestamp_str[8..10], 10);
+        
+        // Extract time part: "16:04:39" (can be after space or 'T')
+        const time_start = if (timestamp_str[10] == ' ' or timestamp_str[10] == 'T') 11 else return error.InvalidTimestamp;
+        
+        const hour = try std.fmt.parseInt(u32, timestamp_str[time_start..time_start+2], 10);
+        const minute = try std.fmt.parseInt(u32, timestamp_str[time_start+3..time_start+5], 10);
+        const second = try std.fmt.parseInt(u32, timestamp_str[time_start+6..time_start+8], 10);
+        
+        // Validate ranges
+        if (month < 1 or month > 12) return error.InvalidTimestamp;
+        if (day < 1 or day > 31) return error.InvalidTimestamp;
+        if (hour > 23 or minute > 59 or second > 59) return error.InvalidTimestamp;
+        
+        // Convert to Unix timestamp (assuming local time in Asia/Shanghai)
+        // Calculate days since Unix epoch (1970-01-01)
+        var days_since_epoch: i64 = 0;
+        
+        // Add days for complete years
+        var y: u32 = 1970;
+        while (y < year) : (y += 1) {
+            days_since_epoch += if (isLeapYear(y)) 366 else 365;
+        }
+        
+        // Add days for complete months in current year
+        const days_in_months = if (isLeapYear(year)) 
+            [_]u32{ 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 }
+        else 
+            [_]u32{ 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+        
+        var m: u32 = 1;
+        while (m < month) : (m += 1) {
+            days_since_epoch += days_in_months[m - 1];
+        }
+        
+        // Add remaining days
+        days_since_epoch += @as(i64, @intCast(day - 1));
+        
+        // Convert to seconds and add time components
+        const seconds_since_epoch = days_since_epoch * 86400 + 
+            @as(i64, @intCast(hour)) * 3600 + 
+            @as(i64, @intCast(minute)) * 60 + 
+            @as(i64, @intCast(second));
+        
+        return seconds_since_epoch;
     }
     
     pub fn enableModem(self: ModemManager, modem_id: []const u8) !void {
@@ -1128,6 +1524,34 @@ pub fn main() !void {
 
         if (should_check_signal) {
             std.log.info("🔄 Starting parallel phone updates for {d} modems (with signal check)", .{modems.len});
+        }
+        
+        // If no modems found, mark all phones as offline
+        if (modems.len == 0) {
+            std.log.warn("⚠️  No modems found - marking all phones as offline", .{});
+            
+            // Create a special offline status update
+            const offline_phone = Phone{
+                .id = "ALL_PHONES_OFFLINE",
+                .iccid = "ALL_PHONES_OFFLINE",
+                .number = null,
+                .status = "offline",
+                .signal = null,
+                .rssi = null,
+                .rsrq = null,
+                .rsrp = null,
+                .snr = null,
+                .operator_name = null,
+                .operator_id = null,
+                .network_type = null,
+                .access_tech = null,
+                .imei = null,
+            };
+            
+            // Send special offline status to server
+            api_client.uploadPhone(offline_phone) catch |err| {
+                std.log.warn("Failed to mark phones as offline: {any}", .{err});
+            };
         }
         
         // Create threads for parallel modem processing
