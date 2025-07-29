@@ -182,6 +182,39 @@
   onMount(() => {
     loadMappings();
   });
+
+  // Function to get carrier color class
+  function getCarrierColor(carrier) {
+    if (!carrier) return "";
+    
+    const carrierUpper = carrier.toUpperCase();
+    
+    // Common carrier mappings
+    if (carrierUpper.includes("CMCC") || carrierUpper.includes("中国移动") || carrierUpper.includes("CHINA MOBILE")) {
+      return "bg-blue-100 text-blue-800";
+    }
+    if (carrierUpper.includes("UNICOM") || carrierUpper.includes("中国联通") || carrierUpper.includes("CHINA UNICOM")) {
+      return "bg-orange-100 text-orange-800";
+    }
+    if (carrierUpper.includes("TELECOM") || carrierUpper.includes("中国电信") || carrierUpper.includes("CHINA TELECOM")) {
+      return "bg-red-100 text-red-800";
+    }
+    if (carrierUpper.includes("CMHK") || carrierUpper.includes("香港移动")) {
+      return "bg-purple-100 text-purple-800";
+    }
+    if (carrierUpper.includes("SINGTEL")) {
+      return "bg-teal-100 text-teal-800";
+    }
+    if (carrierUpper.includes("STARHUB")) {
+      return "bg-indigo-100 text-indigo-800";
+    }
+    if (carrierUpper.includes("M1") || carrierUpper.includes("SGP-M1")) {
+      return "bg-green-100 text-green-800";
+    }
+    
+    // Default color for unknown carriers
+    return "bg-gray-100 text-gray-800";
+  }
 </script>
 
 <div class="bg-white rounded-lg shadow-sm p-6">
@@ -280,7 +313,15 @@
               <td class="px-4 py-3 text-sm font-medium"
                 >{mapping.phone_number}</td
               >
-              <td class="px-4 py-3 text-sm">{mapping.carrier || "-"}</td>
+              <td class="px-4 py-3 text-sm">
+                {#if mapping.carrier}
+                  <span class="inline-flex px-2 py-1 text-xs rounded-full font-medium {getCarrierColor(mapping.carrier)}">
+                    {mapping.carrier}
+                  </span>
+                {:else}
+                  <span class="text-gray-400">-</span>
+                {/if}
+              </td>
               <td class="px-4 py-3 text-sm">{mapping.notes || mapping.description || "-"}</td>
               <td class="px-4 py-3">
                 <span
