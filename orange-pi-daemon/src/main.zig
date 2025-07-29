@@ -1437,7 +1437,8 @@ const ModemManager = struct {
     pub fn sendSms(self: ModemManager, modem_id: []const u8, recipient: []const u8, content: []const u8) ![]const u8 {
         std.log.info("📤 Sending SMS from modem {s} to {s}: {s}", .{ modem_id, recipient, content });
         
-        const sms_arg = try std.fmt.allocPrint(self.allocator, "text={s},number={s}", .{content, recipient});
+        // Properly format the SMS arguments with quotes for content
+        const sms_arg = try std.fmt.allocPrint(self.allocator, "text=\"{s}\",number={s}", .{content, recipient});
         defer self.allocator.free(sms_arg);
         
         const result = try std.process.Child.run(.{
