@@ -101,7 +101,7 @@ in {
 
       script = ''
         ${optionalString (cfg.apiKeyFile != null) ''
-          export SMS_API_KEY="$(cat ${cfg.apiKeyFile})"
+          export SMS_API_KEY="$(cat ${cfg.apiKeyFile} | tr -d '\n')"
         ''}
         ${optionalString (cfg.apiKey != null) ''
           export SMS_API_KEY="${cfg.apiKey}"
