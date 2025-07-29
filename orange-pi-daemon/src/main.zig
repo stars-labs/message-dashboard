@@ -1402,7 +1402,7 @@ const ModemManager = struct {
         defer self.allocator.free(result.stdout);
         defer self.allocator.free(result.stderr);
         
-        if (result.term.Exited != 0) {
+        if (result.term != .Exited or result.term.Exited != 0) {
             std.log.warn("Failed to enable modem {s}: {s}", .{ modem_id, result.stderr });
             return error.ModemEnableFailed;
         }
@@ -1418,7 +1418,7 @@ const ModemManager = struct {
         defer self.allocator.free(result.stdout);
         defer self.allocator.free(result.stderr);
 
-        if (result.term.Exited != 0) {
+        if (result.term != .Exited or result.term.Exited != 0) {
             // Check if the error is because the SMS doesn't exist
             if (std.mem.indexOf(u8, result.stderr, "not found") != null or
                 std.mem.indexOf(u8, result.stderr, "doesn't exist") != null or
@@ -1426,7 +1426,8 @@ const ModemManager = struct {
                 std.mem.indexOf(u8, result.stderr, "couldn't find SMS") != null) {
                 std.log.info("✅ SMS {s} no longer exists on modem {s} (already deleted)", .{ sms_id, modem_id });
             } else {
-                std.log.debug("🔍 DELETE FAILURE DEBUG - Failed to delete SMS {s} from modem {s}. Exit code: {}, stderr: {s}", .{ sms_id, modem_id, result.term.Exited, result.stderr });
+                const exit_code: i32 = if (result.term == .Exited) @intCast(result.term.Exited) else -1;
+                std.log.debug("🔍 DELETE FAILURE DEBUG - Failed to delete SMS {s} from modem {s}. Exit code: {}, stderr: {s}", .{ sms_id, modem_id, exit_code, result.stderr });
                 return error.SmsDeleteFailed;
             }
         } else {
@@ -1448,8 +1449,9 @@ const ModemManager = struct {
         defer self.allocator.free(result.stdout);
         defer self.allocator.free(result.stderr);
 
-        if (result.term.Exited != 0) {
-            std.log.warn("Failed to create SMS on modem {s}: exit_code={d}", .{ modem_id, result.term.Exited });
+        if (result.term != .Exited or result.term.Exited != 0) {
+            const exit_code: i32 = if (result.term == .Exited) @intCast(result.term.Exited) else -1;
+            std.log.warn("Failed to create SMS on modem {s}: exit_code={d}", .{ modem_id, exit_code });
             std.log.warn("SMS creation stderr: {s}", .{result.stderr});
             std.log.warn("SMS creation stdout: {s}", .{result.stdout});
             return error.SmsCreateFailed;
@@ -1481,8 +1483,9 @@ const ModemManager = struct {
         defer self.allocator.free(send_result.stdout);
         defer self.allocator.free(send_result.stderr);
 
-        if (send_result.term.Exited != 0) {
-            std.log.warn("Failed to send SMS {s}: exit_code={d}", .{ sms_id, send_result.term.Exited });
+        if (send_result.term != .Exited or send_result.term.Exited != 0) {
+            const exit_code: i32 = if (send_result.term == .Exited) @intCast(send_result.term.Exited) else -1;
+            std.log.warn("Failed to send SMS {s}: exit_code={d}", .{ sms_id, exit_code });
             std.log.warn("SMS send stderr: {s}", .{send_result.stderr});
             std.log.warn("SMS send stdout: {s}", .{send_result.stdout});
             return error.SmsSendFailed;
@@ -1669,7 +1672,18 @@ pub fn main() !void {
                 std.log.warn("Failed to get messages from modem {s}: {any}", .{ modem_id, err });
                 continue;
             };
-            defer allocator.free(new_messages); // Free the slice returned by getNewMessages
+            defer {
+                // Free each MessageInfo's allocated memory before freeing the slice
+                for (new_messages) |*msg_info| {
+                    allocator.free(msg_info.modem_id);
+                    allocator.free(msg_info.sms_id);
+                    allocator.free(msg_info.message.phone_iccid);
+                    allocator.free(msg_info.message.phone_number);
+                    allocator.free(msg_info.message.content);
+                    allocator.free(msg_info.message.timestamp);
+                }
+                allocator.free(new_messages);
+            }
 
             if (new_messages.len > 0) {
                 std.log.debug("📬 Found {d} new messages on modem {s}", .{ new_messages.len, modem_id });
@@ -1680,8 +1694,18 @@ pub fn main() !void {
                         i, message_info.sms_id, message_info.message.phone_iccid, message_info.message.phone_number 
                     });
                     
-                    // Append the message info directly
-                    try all_message_infos.append(message_info);
+                    // Create a copy of the message info for storage
+                    const msg_copy = MessageInfo{
+                        .modem_id = try allocator.dupe(u8, message_info.modem_id),
+                        .sms_id = try allocator.dupe(u8, message_info.sms_id),
+                        .message = Message{
+                            .phone_iccid = try allocator.dupe(u8, message_info.message.phone_iccid),
+                            .phone_number = try allocator.dupe(u8, message_info.message.phone_number),
+                            .content = try allocator.dupe(u8, message_info.message.content),
+                            .timestamp = try allocator.dupe(u8, message_info.message.timestamp),
+                        },
+                    };
+                    try all_message_infos.append(msg_copy);
                 }
             }
         }
