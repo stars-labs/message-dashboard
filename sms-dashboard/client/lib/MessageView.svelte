@@ -211,11 +211,17 @@
               <div class="flex-1">
                 <div class="flex flex-wrap items-center gap-2 mb-1">
                   {#if message.type === 'sent'}
-                    <span class="text-xs px-2 py-1 rounded-full bg-gradient-to-r from-blue-500 to-indigo-500 text-white font-medium shadow-md">
-                      已发送
-                    </span>
-                    {#if message.status === 'delivered'}
-                      <span class="text-xs text-green-600">✓ 已送达</span>
+                    {#if message.status === 'failed'}
+                      <span class="text-xs px-2 py-1 rounded-full bg-gradient-to-r from-red-500 to-red-600 text-white font-medium shadow-md">
+                        发送失败
+                      </span>
+                    {:else}
+                      <span class="text-xs px-2 py-1 rounded-full bg-gradient-to-r from-blue-500 to-indigo-500 text-white font-medium shadow-md">
+                        已发送
+                      </span>
+                      {#if message.status === 'delivered'}
+                        <span class="text-xs text-green-600">✓ 已送达</span>
+                      {/if}
                     {/if}
                   {:else}
                     <span class="text-xs px-2 py-1 rounded-full bg-gradient-to-r {getSourceColor(message.source)} text-white font-medium shadow-md">
