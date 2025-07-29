@@ -54,10 +54,10 @@
           {/if}
         </h3>
         <p class="text-sm text-gray-600">
-          {#if phone.carrier}
-            {phone.carrier}
+          {#if phone.mapped_carrier || phone.carrier}
+            {phone.mapped_carrier || phone.carrier}
           {/if}
-          {#if phone.operator_name}
+          {#if phone.operator_name && !phone.mapped_carrier}
             {#if phone.carrier} • {/if}
             {phone.operator_name}
           {/if}
@@ -107,10 +107,16 @@
           <span class="font-mono text-xs">{phone.imei}</span>
         </div>
       {/if}
-      {#if phone.operator_name}
+      {#if phone.mapped_carrier || phone.operator_name}
         <div class="flex justify-between">
           <span class="text-gray-600">运营商:</span>
-          <span>{phone.operator_name} {phone.operator_id ? `(${phone.operator_id})` : ''}</span>
+          <span>
+            {#if phone.mapped_carrier}
+              {phone.mapped_carrier}
+            {:else}
+              {phone.operator_name} {phone.operator_id ? `(${phone.operator_id})` : ''}
+            {/if}
+          </span>
         </div>
       {/if}
       {#if phone.access_tech}
