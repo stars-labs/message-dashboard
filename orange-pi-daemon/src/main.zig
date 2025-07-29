@@ -352,21 +352,21 @@ const ApiClient = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
 
-        std.log.info("📱 Preparing to upload {d} messages:", .{messages.len});
+        std.log.debug("📱 Preparing to upload {d} messages:", .{messages.len});
         for (messages, 0..) |msg, i| {
-            std.log.info("  Message {d}: phone_iccid={s}, phone_number={s}, content={s}, timestamp={s}", .{ i, msg.phone_iccid, msg.phone_number, msg.content, msg.timestamp });
-            std.log.warn("🔍 MESSAGE UPLOAD DEBUG - Message {d}: content={s}, timestamp={s}, iccid={s}", .{ i, msg.content, msg.timestamp, msg.phone_iccid });
+            std.log.debug("  Message {d}: phone_iccid={s}, phone_number={s}, content={s}, timestamp={s}", .{ i, msg.phone_iccid, msg.phone_number, msg.content, msg.timestamp });
+            std.log.debug("🔍 MESSAGE UPLOAD DEBUG - Message {d}: content={s}, timestamp={s}, iccid={s}", .{ i, msg.content, msg.timestamp, msg.phone_iccid });
         }
 
         const messages_json = try json.stringifyAlloc(self.allocator, messages, .{ .emit_null_optional_fields = false });
         defer self.allocator.free(messages_json);
         
-        std.log.info("📄 Messages JSON payload length: {d} bytes", .{messages_json.len});
+        std.log.debug("📄 Messages JSON payload length: {d} bytes", .{messages_json.len});
 
         const payload = try std.fmt.allocPrint(self.allocator, "{{\"messages\":{s}}}", .{messages_json});
         defer self.allocator.free(payload);
         
-        std.log.info("📦 Final payload length: {d} bytes", .{payload.len});
+        std.log.debug("📦 Final payload length: {d} bytes", .{payload.len});
 
         try self.makeRequest("/messages", payload);
         std.log.info("✅ Uploaded {d} messages via HTTP API", .{messages.len});
@@ -401,7 +401,7 @@ const ApiClient = struct {
                 .server_header_buffer = &server_header_buffer,
                 .extra_headers = &[_]http.Header{
                     .{ .name = "content-type", .value = "application/json" },
-                    .{ .name = "x-api-key", .value = self.config.api_key },
+                    .{ .name = "X-API-Key", .value = self.config.api_key },
                 },
             });
             
@@ -474,7 +474,7 @@ const ApiClient = struct {
             };
             
             const status_code = @intFromEnum(req.response.status);
-            std.log.info("📊 HTTP status code: {d}", .{status_code});
+            std.log.debug("📊 HTTP status code: {d}", .{status_code});
             
             // Read response body for logging
             const response_body = req.reader().readAllAlloc(self.allocator, 8192) catch |err| {
@@ -496,7 +496,7 @@ const ApiClient = struct {
             };
             defer self.allocator.free(response_body);
             
-            std.log.info("📡 Raw HTTP response: {s}", .{response_body});
+            std.log.debug("📡 Raw HTTP response: {s}", .{response_body});
             
             if (status_code == 200) {
                 // Success! Log if this was a retry
@@ -567,7 +567,7 @@ const ApiClient = struct {
                 .server_header_buffer = &server_header_buffer,
                 .extra_headers = &[_]http.Header{
                     .{ .name = "content-type", .value = "application/json" },
-                    .{ .name = "x-api-key", .value = self.config.api_key },
+                    .{ .name = "X-API-Key", .value = self.config.api_key },
                 },
             });
             
@@ -1100,7 +1100,7 @@ const ModemManager = struct {
                 offset_hours = std.fmt.parseInt(i32, offset_str[0..2], 10) catch 0;
             }
             
-            std.log.info("⏰ SMS timestamp with offset: raw='{s}', base='{s}', offset=+{d}h", .{ raw_timestamp, base, offset_hours });
+            std.log.debug("⏰ SMS timestamp with offset: raw='{s}', base='{s}', offset=+{d}h", .{ raw_timestamp, base, offset_hours });
             
             // Parse the base timestamp and adjust for timezone
             if (parseLocalTimestamp(base)) |local_time| {
@@ -1152,7 +1152,7 @@ const ModemManager = struct {
         // Handle SMS timestamps without timezone info
         // ModemManager on Orange Pi provides timestamps in LOCAL time (Beijing/UTC+8)
         // Always convert from Beijing time to UTC
-        std.log.info("⏰ SMS timestamp processing: raw='{s}' (assuming Beijing time)", .{raw_timestamp});
+        std.log.debug("⏰ SMS timestamp processing: raw='{s}' (assuming Beijing time)", .{raw_timestamp});
         
         // Parse the timestamp components
         if (parseLocalTimestamp(raw_timestamp)) |beijing_time| {
@@ -1200,7 +1200,7 @@ const ModemManager = struct {
                 year, month, day, hours, minutes, seconds
             });
             
-            std.log.info("⏰ SMS timestamp converted: '{s}' -> '{s}' (subtracted 8h for UTC)", .{ raw_timestamp, utc_formatted });
+            std.log.debug("⏰ SMS timestamp converted: '{s}' -> '{s}' (subtracted 8h for UTC)", .{ raw_timestamp, utc_formatted });
             return utc_formatted;
         } else |err| {
             // Fallback: if parsing fails, log the error and assume Beijing time
@@ -1400,7 +1400,7 @@ const ModemManager = struct {
                 std.mem.indexOf(u8, result.stderr, "couldn't find SMS") != null) {
                 std.log.info("✅ SMS {s} no longer exists on modem {s} (already deleted)", .{ sms_id, modem_id });
             } else {
-                std.log.warn("🔍 DELETE FAILURE DEBUG - Failed to delete SMS {s} from modem {s}. Exit code: {}, stderr: {s}", .{ sms_id, modem_id, result.term.Exited, result.stderr });
+                std.log.debug("🔍 DELETE FAILURE DEBUG - Failed to delete SMS {s} from modem {s}. Exit code: {}, stderr: {s}", .{ sms_id, modem_id, result.term.Exited, result.stderr });
                 return error.SmsDeleteFailed;
             }
         } else {
@@ -1502,7 +1502,7 @@ pub fn main() !void {
         std.log.err("SMS_API_KEY environment variable not set", .{});
         return;
     }
-
+    
     std.log.info("🚀 Starting SMS dashboard daemon v{s} (multi-threaded)", .{config.daemon_version});
     std.log.info("API URL: {s}", .{config.api_url});
     std.log.info("Polling every {d} seconds", .{config.poll_interval});
@@ -1645,11 +1645,11 @@ pub fn main() !void {
             defer allocator.free(new_messages); // Free the slice returned by getNewMessages
 
             if (new_messages.len > 0) {
-                std.log.info("📬 Found {d} new messages on modem {s}", .{ new_messages.len, modem_id });
+                std.log.debug("📬 Found {d} new messages on modem {s}", .{ new_messages.len, modem_id });
                 total_new_messages += new_messages.len;
 
                 for (new_messages, 0..) |message_info, i| {
-                    std.log.info("  📨 Message {d}: SMS_ID={s}, ICCID={s}, from={s}", .{ 
+                    std.log.debug("  📨 Message {d}: SMS_ID={s}, ICCID={s}, from={s}", .{ 
                         i, message_info.sms_id, message_info.message.phone_iccid, message_info.message.phone_number 
                     });
                     
@@ -1680,9 +1680,9 @@ pub fn main() !void {
                 if (!seen_messages.contains(key)) {
                     try seen_messages.put(key, true);
                     try unique_message_infos.append(info);
-                    std.log.info("✅ DEDUP DEBUG - Keeping message: content={s}, timestamp={s}, key={s}", .{ info.message.content, info.message.timestamp, key });
+                    std.log.debug("✅ DEDUP DEBUG - Keeping message: content={s}, timestamp={s}, key={s}", .{ info.message.content, info.message.timestamp, key });
                 } else {
-                    std.log.warn("⚠️  DEDUP DEBUG - Skipping duplicate in batch: content={s}, timestamp={s}, key={s}", .{ 
+                    std.log.debug("⚠️  DEDUP DEBUG - Skipping duplicate in batch: content={s}, timestamp={s}, key={s}", .{ 
                         info.message.content, info.message.timestamp, key
                     });
                     
@@ -1696,7 +1696,7 @@ pub fn main() !void {
                 }
             }
             
-            std.log.info("📋 Deduped {d} messages to {d} unique messages", .{ 
+            std.log.debug("📋 Deduped {d} messages to {d} unique messages", .{ 
                 all_message_infos.items.len, unique_message_infos.items.len 
             });
             

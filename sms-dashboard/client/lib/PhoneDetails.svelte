@@ -5,6 +5,39 @@
   export let mobile = false;
   export let daemonStatus = { connected: false, lastDataUpdate: null };
   
+  // Function to get carrier color class (same as in IccidMappings)
+  function getCarrierColor(carrier) {
+    if (!carrier) return "";
+    
+    const carrierUpper = carrier.toUpperCase();
+    
+    // Common carrier mappings
+    if (carrierUpper.includes("CMCC") || carrierUpper.includes("中国移动") || carrierUpper.includes("CHINA MOBILE")) {
+      return "bg-blue-100 text-blue-800";
+    }
+    if (carrierUpper.includes("UNICOM") || carrierUpper.includes("中国联通") || carrierUpper.includes("CHINA UNICOM")) {
+      return "bg-orange-100 text-orange-800";
+    }
+    if (carrierUpper.includes("TELECOM") || carrierUpper.includes("中国电信") || carrierUpper.includes("CHINA TELECOM")) {
+      return "bg-red-100 text-red-800";
+    }
+    if (carrierUpper.includes("CMHK") || carrierUpper.includes("香港移动")) {
+      return "bg-purple-100 text-purple-800";
+    }
+    if (carrierUpper.includes("SINGTEL")) {
+      return "bg-teal-100 text-teal-800";
+    }
+    if (carrierUpper.includes("STARHUB")) {
+      return "bg-indigo-100 text-indigo-800";
+    }
+    if (carrierUpper.includes("M1") || carrierUpper.includes("SGP-M1")) {
+      return "bg-green-100 text-green-800";
+    }
+    
+    // Default color for unknown carriers
+    return "bg-gray-100 text-gray-800";
+  }
+  
   // Track if we're in initial loading state
   $: isInitialLoad = daemonStatus.connected && Date.now() - (daemonStatus.lastDataUpdate || Date.now()) < 5000;
   
@@ -53,13 +86,15 @@
             <span class="text-orange-600">未设置号码</span>
           {/if}
         </h3>
-        <p class="text-sm text-gray-600">
+        <p class="text-sm text-gray-600 mt-1">
           {#if phone.mapped_carrier || phone.carrier}
-            {phone.mapped_carrier || phone.carrier}
+            <span class="inline-flex px-2 py-1 text-xs rounded-full font-medium {getCarrierColor(phone.mapped_carrier || phone.carrier)}">
+              {phone.mapped_carrier || phone.carrier}
+            </span>
           {/if}
           {#if phone.operator_name && !phone.mapped_carrier}
             {#if phone.carrier} • {/if}
-            {phone.operator_name}
+            <span class="text-gray-600">{phone.operator_name}</span>
           {/if}
         </p>
       </div>
@@ -108,13 +143,15 @@
         </div>
       {/if}
       {#if phone.mapped_carrier || phone.operator_name}
-        <div class="flex justify-between">
+        <div class="flex justify-between items-center">
           <span class="text-gray-600">运营商:</span>
           <span>
             {#if phone.mapped_carrier}
-              {phone.mapped_carrier}
+              <span class="inline-flex px-2 py-1 text-xs rounded-full font-medium {getCarrierColor(phone.mapped_carrier)}">
+                {phone.mapped_carrier}
+              </span>
             {:else}
-              {phone.operator_name} {phone.operator_id ? `(${phone.operator_id})` : ''}
+              <span class="text-gray-700">{phone.operator_name} {phone.operator_id ? `(${phone.operator_id})` : ''}</span>
             {/if}
           </span>
         </div>
