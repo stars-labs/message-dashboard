@@ -1144,7 +1144,33 @@ const ModemManager = struct {
                     year, month, day, hours, minutes, seconds
                 });
             } else |_| {
-                // Fallback: just use the base timestamp with Z
+                // Fallback: try to parse and reformat with proper padding
+                // Handle timestamps with single-digit hours/minutes like "2025-07-29T2:0:17"
+                if (base.len >= 10) {
+                    // Try to extract components manually for more lenient parsing
+                    var parts = std.mem.tokenizeAny(u8, base, "-T: ");
+                    
+                    const year_str = parts.next() orelse return try std.fmt.allocPrint(self.allocator, "{s}.000Z", .{base});
+                    const month_str = parts.next() orelse return try std.fmt.allocPrint(self.allocator, "{s}.000Z", .{base});
+                    const day_str = parts.next() orelse return try std.fmt.allocPrint(self.allocator, "{s}.000Z", .{base});
+                    const hour_str = parts.next() orelse return try std.fmt.allocPrint(self.allocator, "{s}.000Z", .{base});
+                    const minute_str = parts.next() orelse return try std.fmt.allocPrint(self.allocator, "{s}.000Z", .{base});
+                    const second_str = parts.next() orelse "0";
+                    
+                    const year = std.fmt.parseInt(u32, year_str, 10) catch return try std.fmt.allocPrint(self.allocator, "{s}.000Z", .{base});
+                    const month = std.fmt.parseInt(u32, month_str, 10) catch return try std.fmt.allocPrint(self.allocator, "{s}.000Z", .{base});
+                    const day = std.fmt.parseInt(u32, day_str, 10) catch return try std.fmt.allocPrint(self.allocator, "{s}.000Z", .{base});
+                    const hour = std.fmt.parseInt(u32, hour_str, 10) catch return try std.fmt.allocPrint(self.allocator, "{s}.000Z", .{base});
+                    const minute = std.fmt.parseInt(u32, minute_str, 10) catch return try std.fmt.allocPrint(self.allocator, "{s}.000Z", .{base});
+                    const second = std.fmt.parseInt(u32, second_str, 10) catch 0;
+                    
+                    // Reformat with proper padding
+                    return try std.fmt.allocPrint(self.allocator, "{d:0>4}-{d:0>2}-{d:0>2}T{d:0>2}:{d:0>2}:{d:0>2}.000Z", .{
+                        year, month, day, hour, minute, second
+                    });
+                }
+                
+                // Last resort fallback
                 return try std.fmt.allocPrint(self.allocator, "{s}.000Z", .{base});
             }
         }

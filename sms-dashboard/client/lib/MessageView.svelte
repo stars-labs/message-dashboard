@@ -28,12 +28,23 @@
   function formatTime(timestamp) {
     if (!timestamp) return '未知时间';
     
+    // Handle malformed timestamps with single-digit hours/minutes
+    // e.g., "2025-07-29T2:0:17.000Z" -> "2025-07-29T02:00:17.000Z"
+    let normalizedTimestamp = timestamp;
+    const timestampRegex = /^(\d{4})-(\d{1,2})-(\d{1,2})T(\d{1,2}):(\d{1,2}):(\d{1,2})(.*)$/;
+    const match = timestamp.match(timestampRegex);
+    
+    if (match) {
+      const [_, year, month, day, hour, minute, second, rest] = match;
+      normalizedTimestamp = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:${second.padStart(2, '0')}${rest}`;
+    }
+    
     // Parse the UTC timestamp from database
-    const msgDate = new Date(timestamp);
+    const msgDate = new Date(normalizedTimestamp);
     
     // Check if date is valid
     if (isNaN(msgDate.getTime())) {
-      console.error('Invalid date:', timestamp);
+      console.error('Invalid date:', timestamp, 'normalized:', normalizedTimestamp);
       return '无效时间';
     }
     
