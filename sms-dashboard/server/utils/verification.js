@@ -12,6 +12,11 @@ const verificationCodePatterns = [
 ];
 
 export function extractVerificationCode(content) {
+  // Check if content is a string
+  if (typeof content !== 'string') {
+    return null;
+  }
+  
   for (const pattern of verificationCodePatterns) {
     const match = content.match(pattern);
     if (match) {

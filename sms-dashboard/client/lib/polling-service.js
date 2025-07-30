@@ -1,50 +1,63 @@
-// HTTP Polling service using setTimeout for real-time updates
-// Replaces SSE/WebSocket for Cloudflare Workers compatibility
+// Simple HTTP Polling service for real-time updates
 export class PollingService {
   constructor() {
-    this.pollTimeout = null; // Using setTimeout instead of setInterval
+    this.pollTimeout = null;
     this.callbacks = new Map();
     this.isPolling = false;
-    this.lastUpdateTime = null;
-    this.pollIntervalMs = 5000; // Poll every 5 seconds
+    this.pollIntervalMs = 2000; // Poll every 2 seconds
     this.token = null;
+    
+    // Track the latest message ID we've seen
+    this.latestMessageId = null;
+    this.latestMessageTimestamp = null;
   }
 
   async connect(token) {
-    console.log('[PollingService] Starting HTTP polling with token:', !!token);
+    console.log('[PollingService] Starting polling with token:', !!token);
     this.token = token;
     this.isPolling = true;
-    this.startPolling();
     
     // Emit connected event
-    this.handleMessage({
+    this.emit('connected', {
       type: 'connected',
       timestamp: new Date().toISOString()
     });
+    
+    // Start polling loop
+    this.startPolling();
   }
 
   disconnect() {
-    console.log('[PollingService] Stopping HTTP polling');
+    console.log('[PollingService] Stopping polling');
     this.isPolling = false;
     this.stopPolling();
+    
+    // Emit disconnected event
+    this.emit('disconnected', {
+      type: 'disconnected',
+      timestamp: new Date().toISOString()
+    });
   }
 
   async startPolling() {
     if (this.pollTimeout) return;
 
-    // Start polling loop using setTimeout for better control
     const pollLoop = async () => {
       if (!this.isPolling) return;
       
-      await this.poll();
+      try {
+        await this.poll();
+      } catch (error) {
+        console.error('[PollingService] Poll error:', error);
+      }
       
-      // Schedule next poll using setTimeout
+      // Schedule next poll
       if (this.isPolling) {
         this.pollTimeout = setTimeout(pollLoop, this.pollIntervalMs);
       }
     };
 
-    // Start the polling loop immediately
+    // Start polling immediately
     pollLoop();
   }
 
@@ -56,64 +69,98 @@ export class PollingService {
   }
 
   async poll() {
-    try {
-      const baseUrl = import.meta.env.VITE_API_BASE_URL || 
-        (typeof window !== 'undefined' ? window.location.origin : '');
-      
-      // Poll for updates since last update time
-      const params = new URLSearchParams();
-      if (this.lastUpdateTime) {
-        params.set('since', this.lastUpdateTime);
-      }
-      
-      const response = await fetch(`${baseUrl}/api/updates?${params}`, {
-        headers: {
-          'Authorization': `Bearer ${this.token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (!response.ok) {
-        console.error('[PollingService] HTTP poll failed with status:', response.status);
-        return;
-      }
-
-      const data = await response.json();
-      
-      // Process updates
-      if (data.updates && data.updates.length > 0) {
-        for (const update of data.updates) {
-          this.handleMessage(update);
-        }
-      }
-
-      // Update last poll time
-      this.lastUpdateTime = data.timestamp || new Date().toISOString();
-
-      // Emit heartbeat
-      this.handleMessage({
-        type: 'heartbeat',
-        timestamp: new Date().toISOString()
-      });
-
-    } catch (error) {
-      console.error('[PollingService] HTTP poll error:', error);
+    const baseUrl = import.meta.env.VITE_API_BASE_URL || 
+      (typeof window !== 'undefined' ? window.location.origin : '');
+    
+    // Build query params
+    const params = new URLSearchParams();
+    
+    // Only send the latest message info if we have it
+    if (this.latestMessageId) {
+      params.set('latest_message_id', this.latestMessageId);
     }
+    if (this.latestMessageTimestamp) {
+      params.set('latest_timestamp', this.latestMessageTimestamp);
+    }
+    
+    const queryString = params.toString();
+    const url = `${baseUrl}/api/updates${queryString ? '?' + queryString : ''}`;
+    
+    console.log(`[PollingService] Polling: ${url}`);
+    
+    const response = await fetch(url, {
+      headers: {
+        'Authorization': `Bearer ${this.token}`,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    if (!response.ok) {
+      console.error('[PollingService] Poll failed:', response.status);
+      return;
+    }
+
+    const data = await response.json();
+    
+    // Process updates
+    if (data.updates && Array.isArray(data.updates)) {
+      console.log(`[PollingService] Received ${data.updates.length} update(s)`);
+      
+      for (const update of data.updates) {
+        // Track latest message info from bulk_created events
+        if (update.type === 'messages:bulk_created' && update.data && update.data.length > 0) {
+          // Sort messages by timestamp to find the latest
+          const sortedMessages = update.data.sort((a, b) => 
+            new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+          );
+          
+          const latestMessage = sortedMessages[0];
+          if (latestMessage) {
+            // Update our tracking
+            this.latestMessageId = latestMessage.id;
+            this.latestMessageTimestamp = latestMessage.timestamp;
+            console.log(`[PollingService] Updated latest message tracking:`, {
+              id: this.latestMessageId,
+              timestamp: this.latestMessageTimestamp
+            });
+          }
+        }
+        
+        // Emit the update
+        this.emit(update.type, update);
+      }
+    }
+    
+    // Emit heartbeat
+    this.emit('heartbeat', {
+      type: 'heartbeat',
+      timestamp: new Date().toISOString()
+    });
   }
 
-  handleMessage(message) {
-    console.log('[PollingService] Update received:', message.type, message);
-    
+  emit(event, data) {
     // Emit to specific event listeners
-    const callbacks = this.callbacks.get(message.type);
+    const callbacks = this.callbacks.get(event);
     if (callbacks) {
-      callbacks.forEach(callback => callback(message));
+      callbacks.forEach(callback => {
+        try {
+          callback(data);
+        } catch (error) {
+          console.error(`[PollingService] Error in callback for ${event}:`, error);
+        }
+      });
     }
 
     // Emit to wildcard listeners
     const wildcardCallbacks = this.callbacks.get('*');
     if (wildcardCallbacks) {
-      wildcardCallbacks.forEach(callback => callback(message));
+      wildcardCallbacks.forEach(callback => {
+        try {
+          callback(data);
+        } catch (error) {
+          console.error('[PollingService] Error in wildcard callback:', error);
+        }
+      });
     }
   }
 
@@ -136,13 +183,13 @@ export class PollingService {
     };
   }
 
-  // Compatibility methods to match SSE interface
+  // Compatibility methods
   send(data) {
     console.warn('[PollingService] Send not supported in polling mode');
   }
 
   async request(type, data = {}) {
-    console.warn('[PollingService] Use regular HTTP API calls instead');
+    console.warn('[PollingService] Request not supported in polling mode');
     throw new Error('Polling does not support request-response pattern');
   }
 
@@ -150,9 +197,18 @@ export class PollingService {
     return 'polling';
   }
 
-  // Make isConnected a property getter for compatibility
   get isConnected() {
     return this.isPolling;
+  }
+  
+  // Method to update latest message tracking externally
+  updateLatestMessage(messageId, timestamp) {
+    this.latestMessageId = messageId;
+    this.latestMessageTimestamp = timestamp;
+    console.log('[PollingService] External update of latest message:', {
+      id: messageId,
+      timestamp: timestamp
+    });
   }
 }
 

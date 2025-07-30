@@ -3,7 +3,14 @@ export const updatesHandler = {
   async poll(request) {
     const { env, user } = request;
     const url = new URL(request.url);
-    const since = url.searchParams.get('since');
+    const latestMessageId = url.searchParams.get('latest_message_id');
+    const latestTimestamp = url.searchParams.get('latest_timestamp');
+    
+    console.log('[Updates] Poll request:', {
+      latestMessageId,
+      latestTimestamp,
+      query: url.search
+    });
     
     try {
       const updates = [];
@@ -46,9 +53,15 @@ export const updatesHandler = {
         });
       }
       
-      // Check for recent messages if 'since' is provided
-      if (since) {
-        const { results: messages } = await env.DB.prepare(`
+      // Check for new messages based on latest tracking info
+      let shouldCheckMessages = true;
+      let messagesQuery;
+      
+      if (latestMessageId && latestTimestamp) {
+        console.log(`[Updates] Checking for messages newer than: ${latestTimestamp} (ID: ${latestMessageId})`);
+        
+        // Get messages newer than the latest known message
+        messagesQuery = env.DB.prepare(`
           SELECT 
             m.id,
             m.phone_iccid,
@@ -65,18 +78,51 @@ export const updatesHandler = {
           FROM messages m
           LEFT JOIN phones p ON m.phone_iccid = p.iccid
           LEFT JOIN iccid_mappings im ON m.phone_iccid = im.iccid AND im.is_active = 1
-          WHERE m.created_at > ?
+          WHERE m.timestamp > ?
           ORDER BY m.timestamp DESC
-          LIMIT 50
-        `).bind(since).all();
+          LIMIT 20
+        `).bind(latestTimestamp);
+      } else {
+        console.log(`[Updates] First poll - getting latest messages`);
         
-        if (messages && messages.length > 0) {
-          updates.push({
-            type: 'messages:bulk_created',
-            data: messages,
-            timestamp: new Date().toISOString()
-          });
-        }
+        // First poll - get latest messages
+        messagesQuery = env.DB.prepare(`
+          SELECT 
+            m.id,
+            m.phone_iccid,
+            m.phone_number,
+            COALESCE(im.phone_number, p.number, m.phone_number) as display_phone_number,
+            m.content,
+            m.timestamp,
+            m.type,
+            m.status,
+            m.verification_code,
+            p.carrier as phone_carrier,
+            p.status as phone_status,
+            im.phone_number as mapped_number
+          FROM messages m
+          LEFT JOIN phones p ON m.phone_iccid = p.iccid
+          LEFT JOIN iccid_mappings im ON m.phone_iccid = im.iccid AND im.is_active = 1
+          ORDER BY m.timestamp DESC
+          LIMIT 10
+        `);
+      }
+      
+      const { results: messages } = await messagesQuery.all();
+      
+      if (messages && messages.length > 0) {
+        console.log(`[Updates] Found ${messages.length} message(s) to return:`);
+        messages.forEach((msg, idx) => {
+          console.log(`  ${idx + 1}. ${msg.id}: "${msg.content.substring(0, 30)}..." at ${msg.timestamp}`);
+        });
+        
+        updates.push({
+          type: 'messages:bulk_created',
+          data: messages,
+          timestamp: new Date().toISOString()
+        });
+      } else {
+        console.log(`[Updates] No new messages found`);
       }
       
       return new Response(JSON.stringify({

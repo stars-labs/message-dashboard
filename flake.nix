@@ -88,8 +88,10 @@
                     package = self.packages.aarch64-linux.sms-daemon;
                     apiKeyFile = config.sops.secrets."sms-dashboard/api-key".path;
                     apiUrl = "https://sexy.qzz.io";
-                    uploadInterval = 60;
-                    logLevel = "info";
+                    phoneUpdateIntervalSeconds = 30;      # Update phone status every 30 seconds
+                    messageCheckIntervalMs = 100;         # Check messages every 100ms (10 Hz) - should be safe with sequential processing
+                    signalCheckIntervalSeconds = 60;      # Check signal quality every minute
+                    logLevel = "debug";
                   };
                 }
               )
@@ -110,7 +112,7 @@
         }:
         let
           # SMS daemon version - single source of truth
-          daemonVersion = "1.4.5"; # Add detailed deletion failure debugging
+          daemonVersion = "1.31.0"; # Fixed pipe prefix removal in SMS content
           
           # Orange Pi SMS daemon package
           sms-daemon = pkgs.stdenv.mkDerivation rec {
