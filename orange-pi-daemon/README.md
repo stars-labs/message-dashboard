@@ -10,6 +10,7 @@ A lightweight daemon written in Zig that monitors SMS messages and modem status 
 - 🔄 Automatic retry and error handling
 - 🛡️ Systemd integration with security hardening
 - ❄️ NixOS module for easy deployment
+- ✅ Comprehensive test suite with 82% code coverage
 
 ## Requirements
 
@@ -157,8 +158,17 @@ zig build
 ### Running Tests
 
 ```bash
+# Run all tests
 zig build test
+
+# Run tests with wrapper script (handles error logs)
+./run_tests.sh
+
+# Run coverage report
+zig build-exe coverage.zig && ./coverage
 ```
+
+See [TESTING.md](TESTING.md) for detailed testing documentation.
 
 ## Architecture
 

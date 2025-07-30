@@ -10,6 +10,8 @@ zig-cache/
 *.dylib
 *.exe
 *.pdb
+coverage
+main
 
 # Editor files
 .vscode/

@@ -17,9 +17,7 @@
 
   # System identification
   networking.hostName = "orange-pi-sms";
-  boot = {
-    kernelPackages = lib.mkForce pkgs.linuxPackages_latest;
-  };
+  
   # Configure static network interface for Orange Pi
   networking.interfaces = {
     enP3p49s0 = {
@@ -94,8 +92,25 @@
   ];
 
   # Boot configuration
-  boot.loader.systemd-boot.enable = true;
-  boot.loader.efi.canTouchEfiVariables = true;
+  boot = {
+    # Use latest kernel packages
+    kernelPackages = lib.mkForce pkgs.linuxPackages_latest;
+    
+    # Lanzaboote secure boot configuration
+    lanzaboote = {
+      enable = true;
+      pkiBundle = "/var/lib/sbctl";
+    };
+    
+    # Disable systemd-boot as lanzaboote replaces it
+    loader = {
+      systemd-boot.enable = lib.mkForce false;
+      efi = {
+        canTouchEfiVariables = true;
+        efiSysMountPoint = "/boot";
+      };
+    };
+  };
 
   # This value determines the NixOS release compatibility
   system.stateVersion = "25.11";
