@@ -124,7 +124,7 @@ pub const ModemManager = struct {
                     std.time.sleep(50 * std.time.ns_per_ms);
                     
                     // In aggressive mode, delete up to 50 messages, otherwise 10
-                    const max_deletions = if (aggressive_mode) 50 else 10;
+                    const max_deletions: u32 = if (aggressive_mode) 50 else 10;
                     if (deleted_count >= max_deletions) {
                         std.log.info("🛑 Reached deletion limit ({d}), will continue later", .{max_deletions});
                         break;
