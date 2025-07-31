@@ -134,7 +134,7 @@ jobs:
       run: |
         echo "Attempting to build release binary..."
         if [ -f "build.zig" ]; then
-          zig build -Drelease-safe=true || {
+          zig build -Doptimize=ReleaseSafe || {
             echo "⚠️ Build with build.zig failed"
             exit 0
           }
