@@ -467,9 +467,15 @@ pub const ModemManager = struct {
                 
                 std.log.debug("🔍 Found SMS in list: {s} (extracted ID: {s}) on modem {s}", .{ line, sms_id_str, modem_id });
 
-                // Skip sent messages - we only want to process received messages
+                // Handle sent messages - delete them to prevent overflow
                 if (std.mem.indexOf(u8, line, "(sent)")) |_| {
-                    std.log.debug("📤 Skipping sent SMS {s} on modem {s}", .{ sms_id_str, modem_id });
+                    std.log.debug("📤 Found sent SMS {s} on modem {s}, deleting to prevent overflow", .{ sms_id_str, modem_id });
+                    
+                    // Delete sent messages to free up modem storage
+                    self.deleteSms(modem_id, sms_id_str) catch |delete_err| {
+                        std.log.warn("Failed to delete sent SMS {s} from modem {s}: {any}", .{ sms_id_str, modem_id, delete_err });
+                    };
+                    
                     continue;
                 }
 
@@ -951,10 +957,22 @@ pub const ModemManager = struct {
         if (send_result.term != .Exited or send_result.term.Exited != 0) {
             std.log.err("Failed to send SMS: {s}", .{send_result.stderr});
             std.log.err("SMS send stdout: {s}", .{send_result.stdout});
+            
+            // Try to delete the failed SMS to prevent accumulation
+            self.deleteSms(modem_id, sms_id) catch |delete_err| {
+                std.log.warn("Failed to delete failed SMS {s}: {any}", .{ sms_id, delete_err });
+            };
+            
             return error.SmsSendFailed;
         }
 
-        std.log.info("Successfully sent SMS to {s}", .{recipient});
+        std.log.info("Successfully sent SMS to {s} (SMS ID: {s})", .{ recipient, sms_id });
+        
+        // Delete the sent SMS to prevent modem storage overflow
+        self.deleteSms(modem_id, sms_id) catch |delete_err| {
+            std.log.warn("SMS sent successfully but failed to delete from modem {s}: {any}", .{ modem_id, delete_err });
+            // Don't fail the operation if deletion fails - SMS was sent successfully
+        };
         
         // Return the SMS ID (just the slice, no allocation)
         return sms_id;
