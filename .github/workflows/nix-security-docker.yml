@@ -29,6 +29,14 @@ jobs:
       options: --privileged
     
     steps:
+    - name: Install git
+      run: |
+        nix-env -iA nixpkgs.git || {
+          nix-channel --add https://nixos.org/channels/nixpkgs-unstable nixpkgs
+          nix-channel --update
+          nix-env -iA nixpkgs.git
+        }
+    
     - name: Checkout repository
       uses: actions/checkout@v4
 
