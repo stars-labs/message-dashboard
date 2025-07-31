@@ -263,6 +263,16 @@
                   <!-- Shorter ICCID -->
                   <span class="text-purple-600"> • {phone.iccid}</span>
                 {/if}
+                {#if phone.modem_index != null || phone.sim_index != null}
+                  <span class="text-indigo-600 font-medium">
+                    {#if phone.modem_index != null}
+                      • M{phone.modem_index}
+                    {/if}
+                    {#if phone.sim_index != null}
+                      /S{phone.sim_index}
+                    {/if}
+                  </span>
+                {/if}
               </div>
             </div>
             <SignalStrength

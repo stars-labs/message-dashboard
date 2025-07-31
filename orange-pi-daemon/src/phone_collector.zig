@@ -51,6 +51,8 @@ pub const PhoneCollector = struct {
             .network_type = if (phone.network_type) |s| try self.allocator.dupe(u8, s) else null,
             .access_tech = if (phone.access_tech) |s| try self.allocator.dupe(u8, s) else null,
             .imei = if (phone.imei) |s| try self.allocator.dupe(u8, s) else null,
+            .modem_index = phone.modem_index,
+            .sim_index = phone.sim_index,
         };
         
         try self.phones.append(phone_copy);
