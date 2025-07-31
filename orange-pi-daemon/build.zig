@@ -23,14 +23,25 @@ pub fn build(b: *std.Build) void {
     const run_step = b.step("run", "Run the daemon");
     run_step.dependOn(&run_cmd.step);
 
-    const unit_tests = b.addTest(.{
-        .root_source_file = b.path("src/main.zig"),
+    // Create unified test executable
+    const tests = b.addTest(.{
+        .root_source_file = b.path("src/tests.zig"),
         .target = target,
         .optimize = optimize,
     });
 
-    const run_unit_tests = b.addRunArtifact(unit_tests);
+    const run_tests = b.addRunArtifact(tests);
 
     const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&run_unit_tests.step);
+    test_step.dependOn(&run_tests.step);
+    
+    // Also add separate mmcli parser tests
+    const parser_tests = b.addTest(.{
+        .root_source_file = b.path("src/mmcli_parser_tests.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    
+    const run_parser_tests = b.addRunArtifact(parser_tests);
+    test_step.dependOn(&run_parser_tests.step);
 }

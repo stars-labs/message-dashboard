@@ -78,8 +78,24 @@
       } else {
         phoneNumbers = [];
       }
+      
+      console.log('[App] Loaded phones:', phoneNumbers.length);
+      console.log('[App] Phone ICCIDs:', phoneNumbers.map(p => p.iccid));
 
       messages = messagesResponse.data || [];
+      console.log('[App] Initial messages loaded:', messages.length);
+      if (messages.length > 0) {
+        console.log('[App] First message:', messages[0]);
+        console.log('[App] Message IDs:', messages.slice(0, 5).map(m => m.id));
+        
+        // Update polling service with latest message info
+        const sortedMessages = [...messages].sort((a, b) => 
+          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+        );
+        if (sortedMessages[0]) {
+          pollingService.updateLatestMessage(sortedMessages[0].id, sortedMessages[0].timestamp);
+        }
+      }
 
       // Map API stats to component format
       if (statsResponse) {
@@ -241,11 +257,59 @@
     // Listen for bulk message creation
     pollingUnsubscribers.push(
       pollingService.on("messages:bulk_created", (msg) => {
-        // Bulk messages received
-        messages = [...msg.data, ...messages];
-        // Update stats
-        stats.totalMessages += msg.data.length;
-        stats.todayMessages += msg.data.length;
+        console.log('[App] Received bulk messages event:', msg);
+        
+        if (!msg.data || !Array.isArray(msg.data)) {
+          console.warn('[App] Invalid message data received');
+          return;
+        }
+        
+        // Get incoming messages
+        const incomingMessages = msg.data.filter(m => m && m.id);
+        console.log('[App] Processing', incomingMessages.length, 'messages from polling');
+        
+        // Create a set of existing message IDs for quick lookup
+        const existingIds = new Set(messages.map(m => m.id));
+        
+        // Find truly new messages
+        const newMessages = incomingMessages.filter(m => !existingIds.has(m.id));
+        
+        if (newMessages.length > 0) {
+          console.log('[App] Found', newMessages.length, 'NEW messages:');
+          newMessages.forEach(m => {
+            console.log(`  - ${m.id}: "${m.content.substring(0, 30)}..." at ${m.timestamp}`);
+          });
+          
+          // Add new messages to the beginning of the list
+          messages = [...newMessages, ...messages];
+          
+          // Keep only the most recent 200 messages to prevent memory issues
+          if (messages.length > 200) {
+            messages = messages.slice(0, 200);
+          }
+          
+          // Update stats
+          stats.totalMessages += newMessages.length;
+          stats.todayMessages += newMessages.length;
+          
+          // Auto-select phone if no phone is selected
+          if (!selectedPhoneIccid && newMessages.length > 0) {
+            const firstNewMessage = newMessages[0];
+            const matchingPhone = phoneNumbers.find(p => p.iccid === firstNewMessage.phone_iccid);
+            if (matchingPhone) {
+              console.log('[App] Auto-selecting phone:', matchingPhone.iccid);
+              selectedPhoneIccid = matchingPhone.iccid;
+            }
+          }
+          
+          // Show notification
+          console.log(`[App] ✅ ${newMessages.length} new message(s) received!`);
+          
+          // Trigger UI update
+          messages = messages;
+        } else {
+          console.log('[App] No new messages in this update');
+        }
       }),
     );
 
@@ -392,9 +456,9 @@
       });
 
       if (response.success) {
-        // Add to local messages immediately with sending status
+        // Add to local messages immediately with sending status using backend ID
         const sentMessage = {
-          id: `msg-sent-${Date.now()}`,
+          id: response.messageId, // Use the actual message ID from backend
           phone_iccid: newMessage.phone_iccid,
           phone_number: newMessage.recipient,
           recipient: newMessage.recipient,

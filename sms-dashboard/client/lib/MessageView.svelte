@@ -6,9 +6,59 @@
   let viewMode = 'recent'; // 'recent' or 'history'
   let groupBy = 'time'; // 'time' or 'source'
   
-  $: displayMessages = selectedPhone 
+  // Filter messages first
+  $: filteredMessages = selectedPhone 
     ? messages.filter(msg => msg.phone_iccid === selectedPhone.iccid)
-    : messages.slice(0, 50);
+    : messages.slice().slice(0, 50);
+  
+  // Debug logging for message filtering
+  $: {
+    if (messages.length > 0) {
+      console.log('[MessageView] Total messages:', messages.length);
+      console.log('[MessageView] Selected phone:', selectedPhone);
+      console.log('[MessageView] Filtered messages:', filteredMessages.length);
+      if (selectedPhone) {
+        console.log('[MessageView] Filtering by ICCID:', selectedPhone.iccid);
+        console.log('[MessageView] Message ICCIDs:', messages.slice(0, 5).map(m => m.phone_iccid));
+      }
+    }
+  }
+  
+  // Helper function to parse and normalize timestamps
+  function parseTimestamp(timestamp) {
+    if (!timestamp) return new Date(0);
+    
+    // Handle malformed timestamps with single-digit hours/minutes
+    let normalizedTimestamp = timestamp;
+    const timestampRegex = /^(\d{4})-(\d{1,2})-(\d{1,2})T(\d{1,2}):(\d{1,2}):(\d{1,2})(.*)$/;
+    const match = timestamp.match(timestampRegex);
+    
+    if (match) {
+      const [_, year, month, day, hour, minute, second, rest] = match;
+      normalizedTimestamp = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:${second.padStart(2, '0')}${rest}`;
+    }
+    
+    const date = new Date(normalizedTimestamp);
+    return isNaN(date.getTime()) ? new Date(0) : date;
+  }
+  
+  // Sort messages based on view mode
+  $: recentMessages = filteredMessages.slice().sort((a, b) => {
+    // Recent mode: newest first (DESC)
+    const dateA = parseTimestamp(a.timestamp);
+    const dateB = parseTimestamp(b.timestamp);
+    return dateB.getTime() - dateA.getTime();
+  });
+  
+  $: historyMessages = filteredMessages.slice().sort((a, b) => {
+    // History mode: oldest first (ASC)
+    const dateA = parseTimestamp(a.timestamp);
+    const dateB = parseTimestamp(b.timestamp);
+    return dateA.getTime() - dateB.getTime();
+  });
+  
+  // Select which sorted array to display
+  $: displayMessages = viewMode === 'recent' ? recentMessages : historyMessages;
     
   $: groupedMessages = groupBy === 'source' 
     ? groupMessagesBySource(displayMessages)
@@ -22,6 +72,18 @@
       }
       groups[msg.source].push(msg);
     });
+    
+    // Sort messages within each group based on view mode
+    Object.keys(groups).forEach(source => {
+      if (viewMode === 'recent') {
+        // Recent mode: newest first in each group
+        groups[source].sort((a, b) => parseTimestamp(b.timestamp).getTime() - parseTimestamp(a.timestamp).getTime());
+      } else {
+        // History mode: oldest first in each group
+        groups[source].sort((a, b) => parseTimestamp(a.timestamp).getTime() - parseTimestamp(b.timestamp).getTime());
+      }
+    });
+    
     return groups;
   }
   
@@ -120,7 +182,7 @@
             <span class="text-sm lg:text-base">{selectedPhone.number}</span>
           </span>
         {:else}
-          最新消息
+          最新消息 (所有设备)
         {/if}
       </h2>
       
@@ -178,7 +240,7 @@
                       {/if}
                     </div>
                     <div class="mt-2 bg-white/50 rounded-lg p-2">
-                      <p class="text-xs lg:text-sm text-gray-700 break-words">{message.content}</p>
+                      <p class="text-xs lg:text-sm text-gray-700 break-words whitespace-pre-wrap">{message.content}</p>
                     </div>
                     <div class="mt-2 flex flex-wrap items-center gap-2 text-xs">
                       <span class="text-purple-600 font-medium flex items-center gap-1">
@@ -235,7 +297,7 @@
                   {/if}
                 </div>
                 <div class="mt-2 bg-gray-50 rounded-lg p-2">
-                  <p class="text-xs lg:text-sm text-gray-700 break-words">{message.content}</p>
+                  <p class="text-xs lg:text-sm text-gray-700 break-words whitespace-pre-wrap">{message.content}</p>
                 </div>
                 <div class="mt-2 flex flex-wrap items-center gap-2 text-xs">
                   {#if message.type === 'sent'}
