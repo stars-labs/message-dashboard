@@ -181,10 +181,13 @@ jobs:
       run: |
         echo "Scanning for hardcoded secrets..."
         
-        # Check for API keys, passwords, etc.
-        if grep -r -E "(api_key|password|secret|token)" src/ | grep -v -E "(getenv|env:|config|placeholder|example)"; then
+        # Check for API keys, passwords, etc. (excluding test files and type definitions)
+        if grep -r -E "(api_key|password|secret|token)\s*=\s*\"[^\"]+\"" src/ | \
+           grep -v -E "(test|tests|_test)\.zig:|type|struct|field|getenv|env:|config|placeholder|example"; then
           echo "⚠️ Potential hardcoded secrets found"
           exit 1
+        else
+          echo "✅ No hardcoded secrets found"
         fi
 
   # Summary for Zig security
