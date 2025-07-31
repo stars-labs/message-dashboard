@@ -215,6 +215,7 @@ pub fn main() !void {
     // Main loop with parallel checking
     var cycle_count: u64 = 0;
     var last_cache_refresh: i64 = std.time.timestamp();
+    var last_storage_cleanup: i64 = std.time.timestamp();
     
     while (true) {
         cycle_count += 1;
@@ -249,6 +250,19 @@ pub fn main() !void {
             
             last_cache_refresh = std.time.timestamp();
             std.log.info("🔄 Cache refreshed: {d} valid modems", .{valid_modems.items.len});
+        }
+        
+        // Clean up SMS storage every 10 minutes to prevent overflow
+        if (std.time.timestamp() - last_storage_cleanup > 600) {
+            std.log.info("🧹 Running periodic SMS storage cleanup", .{});
+            
+            for (valid_modems.items) |modem_id| {
+                modem_manager.cleanupModemStorage(modem_id) catch |err| {
+                    std.log.warn("Failed to cleanup storage for modem {s}: {any}", .{ modem_id, err });
+                };
+            }
+            
+            last_storage_cleanup = std.time.timestamp();
         }
         
         // Create shared results storage
