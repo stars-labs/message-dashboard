@@ -136,6 +136,8 @@ test "Phone struct with minimal fields" {
     try testing.expect(phone.number == null);
     try testing.expect(phone.signal == null);
     try testing.expect(phone.operator_name == null);
+    try testing.expect(phone.modem_index == null);
+    try testing.expect(phone.sim_index == null);
 }
 
 // MessageQueue tests
@@ -479,6 +481,8 @@ test "Phone struct with all fields" {
         .network_type = "lte",
         .access_tech = "4G",
         .imei = "123456789012345",
+        .modem_index = 7,
+        .sim_index = 12,
     };
     
     try testing.expectEqualStrings("89860123456789012345", phone.iccid);
@@ -487,6 +491,8 @@ test "Phone struct with all fields" {
     try testing.expectEqual(@as(u8, 75), phone.signal.?);
     try testing.expectEqual(@as(i32, -65), phone.rssi.?);
     try testing.expectEqualStrings("Test Operator", phone.operator_name.?);
+    try testing.expectEqual(@as(u32, 7), phone.modem_index.?);
+    try testing.expectEqual(@as(u32, 12), phone.sim_index.?);
 }
 
 test "SignalData struct complete" {
