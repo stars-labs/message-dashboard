@@ -467,6 +467,12 @@ pub const ModemManager = struct {
                 
                 std.log.debug("🔍 Found SMS in list: {s} (extracted ID: {s}) on modem {s}", .{ line, sms_id_str, modem_id });
 
+                // Skip sent messages - we only want to process received messages
+                if (std.mem.indexOf(u8, line, "(sent)")) |_| {
+                    std.log.debug("📤 Skipping sent SMS {s} on modem {s}", .{ sms_id_str, modem_id });
+                    continue;
+                }
+
                 // Skip SMS IDs that previously failed to delete
                 const sms_modem_key = try std.fmt.allocPrint(self.allocator, "{s}:{s}", .{ modem_id, sms_id_str });
                 defer self.allocator.free(sms_modem_key);

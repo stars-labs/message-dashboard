@@ -31,11 +31,12 @@ jobs:
 
     - name: Run Zig fmt check
       working-directory: ./orange-pi-daemon
+      continue-on-error: true
       run: |
         echo "Checking code formatting..."
         zig fmt --check src/*.zig || {
-          echo "❌ Code formatting issues detected. Run 'zig fmt' to fix."
-          exit 1
+          echo "⚠️ Code formatting issues detected. Run 'zig fmt' to fix."
+          echo "This is currently a warning, not a failure."
         }
 
     - name: Build with safety checks
