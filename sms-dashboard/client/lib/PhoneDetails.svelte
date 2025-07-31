@@ -125,6 +125,22 @@
           <span class="font-mono text-xs">{phone.iccid}</span>
         </div>
       {/if}
+      {#if phone.modem_index != null || phone.sim_index != null}
+        <div class="flex justify-between">
+          <span class="text-gray-600">位置索引:</span>
+          <span class="text-indigo-600 font-medium">
+            {#if phone.modem_index != null}
+              调制解调器 #{phone.modem_index}
+            {/if}
+            {#if phone.modem_index != null && phone.sim_index != null}
+              ,
+            {/if}
+            {#if phone.sim_index != null}
+              SIM卡 #{phone.sim_index}
+            {/if}
+          </span>
+        </div>
+      {/if}
       {#if phone.mapped_number}
         <div class="flex justify-between items-center">
           <span class="text-gray-600">映射来源:</span>

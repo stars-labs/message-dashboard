@@ -82,24 +82,39 @@ pub const SMSSender = struct {
     
     /// Find modem ID for a given ICCID
     pub fn findModemForIccid(self: *SMSSender, target_iccid: []const u8) ?[]const u8 {
+        std.log.debug("🔍 Searching for modem with ICCID: {s}", .{target_iccid});
+        
         // Get list of modems
-        const modems = self.modem_manager.listModems() catch return null;
+        const modems = self.modem_manager.listModems() catch {
+            std.log.err("Failed to list modems", .{});
+            return null;
+        };
         defer {
             for (modems) |modem| self.allocator.free(modem);
             self.allocator.free(modems);
         }
         
+        std.log.debug("📱 Found {d} modems to check", .{modems.len});
+        
         // Check each modem for matching ICCID
         for (modems) |modem_id| {
-            const iccid_opt = self.modem_manager.getIccid(modem_id) catch continue;
+            const iccid_opt = self.modem_manager.getIccid(modem_id) catch |err| {
+                std.log.debug("⚠️ Failed to get ICCID for modem {s}: {any}", .{ modem_id, err });
+                continue;
+            };
             if (iccid_opt) |iccid| {
                 defer self.allocator.free(iccid);
+                std.log.debug("📱 Modem {s} has ICCID: {s} (target: {s})", .{ modem_id, iccid, target_iccid });
                 if (std.mem.eql(u8, iccid, target_iccid)) {
+                    std.log.info("✅ Found modem {s} for ICCID {s}", .{ modem_id, target_iccid });
                     return self.allocator.dupe(u8, modem_id) catch null;
                 }
+            } else {
+                std.log.debug("⚠️ Modem {s} has no ICCID", .{modem_id});
             }
         }
         
+        std.log.err("❌ No modem found with ICCID {s} after checking {d} modems", .{ target_iccid, modems.len });
         return null;
     }
     

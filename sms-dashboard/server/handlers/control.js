@@ -242,8 +242,8 @@ export const controlHandler = {
       
       // Update phones using ICCID as primary key
       const stmt = env.DB.prepare(`
-        INSERT INTO phones (iccid, number, country, flag, carrier, status, signal, rssi, rsrq, rsrp, snr, operator_name, operator_id, imei, access_tech)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO phones (iccid, number, country, flag, carrier, status, signal, rssi, rsrq, rsrp, snr, operator_name, operator_id, imei, access_tech, modem_index, sim_index)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(iccid) DO UPDATE SET
           number = COALESCE(excluded.number, phones.number),
           carrier = COALESCE(excluded.carrier, phones.carrier),
@@ -257,6 +257,8 @@ export const controlHandler = {
           operator_id = COALESCE(excluded.operator_id, phones.operator_id),
           imei = COALESCE(excluded.imei, phones.imei),
           access_tech = excluded.access_tech,
+          modem_index = excluded.modem_index,
+          sim_index = excluded.sim_index,
           updated_at = CURRENT_TIMESTAMP
       `);
       
@@ -291,7 +293,9 @@ export const controlHandler = {
             phone.operator_name || null,
             phone.operator_id || null,
             phone.imei || null,
-            phone.access_tech || null
+            phone.access_tech || null,
+            phone.modem_index || null,
+            phone.sim_index || null
           ).run();
           successCount++;
         } catch (err) {

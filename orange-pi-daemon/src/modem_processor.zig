@@ -52,6 +52,12 @@ pub fn processModem(
     };
     defer allocator.free(iccid);
     
+    // Extract modem index from modem_id (e.g., "7" from modem ID "7")
+    const modem_index = std.fmt.parseInt(u32, modem_id, 10) catch null;
+    
+    // Get SIM index from ModemManager
+    const sim_index = modem_manager.getSimIndex(modem_id) catch null;
+    
     var phone = types.Phone{
         .iccid = iccid,
         .number = null,
@@ -66,6 +72,8 @@ pub fn processModem(
         .network_type = null,
         .access_tech = null,
         .imei = null,
+        .modem_index = modem_index,
+        .sim_index = sim_index,
     };
     defer {
         if (phone.number) |num| allocator.free(num);

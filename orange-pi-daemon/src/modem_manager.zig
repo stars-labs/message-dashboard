@@ -48,6 +48,96 @@ pub const ModemManager = struct {
         self.problematic_modems.deinit();
     }
 
+    /// Clean up all SMS messages on a modem to prevent storage overflow
+    pub fn cleanupModemStorage(self: *ModemManager, modem_id: []const u8) !void {
+        std.log.info("🧹 Cleaning up SMS storage on modem {s}", .{modem_id});
+        
+        // List all SMS messages
+        const result = std.process.Child.run(.{
+            .allocator = self.allocator,
+            .argv = &[_][]const u8{ "mmcli", "-m", modem_id, "--messaging-list-sms", "-a" },
+        }) catch |err| {
+            std.log.warn("Failed to list SMS for cleanup on modem {s}: {any}", .{ modem_id, err });
+            return;
+        };
+        defer self.allocator.free(result.stdout);
+        defer self.allocator.free(result.stderr);
+        
+        var deleted_count: u32 = 0;
+        var max_sms_id: u32 = 0;
+        var lines = std.mem.tokenizeScalar(u8, result.stdout, '\n');
+        
+        // First pass - find the highest SMS ID to determine cleanup aggressiveness
+        var lines_copy = std.mem.tokenizeScalar(u8, result.stdout, '\n');
+        while (lines_copy.next()) |line| {
+            if (std.mem.indexOf(u8, line, "/SMS/")) |pos| {
+                const start = pos + 5;
+                var end = start;
+                while (end < line.len and line[end] != ' ') : (end += 1) {}
+                const sms_id = line[start..end];
+                const id_num = std.fmt.parseInt(u32, sms_id, 10) catch continue;
+                if (id_num > max_sms_id) max_sms_id = id_num;
+            }
+        }
+        
+        // If SMS IDs are extremely high (>500), be very aggressive with cleanup
+        const aggressive_mode = max_sms_id > 500;
+        if (aggressive_mode) {
+            std.log.warn("⚠️ SMS IDs very high ({d}), using aggressive cleanup mode", .{max_sms_id});
+        }
+        
+        // Second pass - delete messages
+        while (lines.next()) |line| {
+            if (std.mem.indexOf(u8, line, "/SMS/")) |pos| {
+                const start = pos + 5;
+                var end = start;
+                while (end < line.len and line[end] != ' ') : (end += 1) {}
+                const sms_id = line[start..end];
+                
+                // Check if SMS ID is abnormally high (indicating storage issues)
+                const id_num = std.fmt.parseInt(u32, sms_id, 10) catch continue;
+                
+                // In aggressive mode, delete almost everything to free space
+                const should_delete = if (aggressive_mode) blk: {
+                    // Keep only the last 10 received messages
+                    break :blk std.mem.indexOf(u8, line, "(receiving)") == null or id_num > 10;
+                } else blk: {
+                    // Normal mode - Delete if:
+                    // 1. SMS is marked as sent
+                    // 2. SMS ID is above 50 (indicating accumulated messages)
+                    // 3. SMS is in received state but has high ID (> 100)
+                    // 4. Any SMS with unknown state
+                    break :blk std.mem.indexOf(u8, line, "(sent)") != null or
+                              id_num > 50 or
+                              (std.mem.indexOf(u8, line, "(received)") != null and id_num > 100) or
+                              std.mem.indexOf(u8, line, "(unknown)") != null;
+                };
+                
+                if (should_delete) {
+                    self.deleteSms(modem_id, sms_id) catch |err| {
+                        std.log.debug("Failed to delete SMS {s} during cleanup: {any}", .{ sms_id, err });
+                        continue;
+                    };
+                    deleted_count += 1;
+                    
+                    // Small delay to avoid overwhelming the modem
+                    std.time.sleep(50 * std.time.ns_per_ms);
+                    
+                    // In aggressive mode, delete up to 50 messages, otherwise 10
+                    const max_deletions: u32 = if (aggressive_mode) 50 else 10;
+                    if (deleted_count >= max_deletions) {
+                        std.log.info("🛑 Reached deletion limit ({d}), will continue later", .{max_deletions});
+                        break;
+                    }
+                }
+            }
+        }
+        
+        if (deleted_count > 0) {
+            std.log.info("🧹 Cleaned up {d} SMS messages from modem {s}", .{ deleted_count, modem_id });
+        }
+    }
+
     pub fn listModems(self: ModemManager) ![][]const u8 {
         const result = try std.process.Child.run(.{
             .allocator = self.allocator,
@@ -88,6 +178,36 @@ pub const ModemManager = struct {
         }
     }
 
+    /// Get SIM index from modem using mmcli
+    pub fn getSimIndex(self: *ModemManager, modem_id: []const u8) !?u32 {
+        const result = try std.process.Child.run(.{
+            .allocator = self.allocator,
+            .argv = &[_][]const u8{ "mmcli", "-m", modem_id },
+        });
+        defer self.allocator.free(result.stdout);
+        defer self.allocator.free(result.stderr);
+
+        var lines = std.mem.tokenizeScalar(u8, result.stdout, '\n');
+        while (lines.next()) |line| {
+            const trimmed = std.mem.trim(u8, line, " \t");
+            
+            // Look for SIM path like:   primary sim path: /org/freedesktop/ModemManager1/SIM/7
+            if (std.mem.indexOf(u8, trimmed, "primary sim path:") != null or
+                std.mem.indexOf(u8, trimmed, "sim path:") != null) {
+                
+                if (std.mem.lastIndexOf(u8, trimmed, "/SIM/")) |sim_pos| {
+                    const sim_id_str = trimmed[sim_pos + 5 ..];
+                    if (std.fmt.parseInt(u32, sim_id_str, 10)) |sim_id| {
+                        std.log.debug("🔍 Found SIM index {d} for modem {s}", .{ sim_id, modem_id });
+                        return sim_id;
+                    } else |_| {}
+                }
+            }
+        }
+        
+        return null;
+    }
+    
     pub fn getIccid(self: *ModemManager, modem_id: []const u8) !?[]const u8 {
         // Skip modems known to crash mmcli
         if (self.problematic_modems.contains(modem_id)) {
@@ -176,8 +296,10 @@ pub const ModemManager = struct {
                     while (sim_lines.next()) |sim_line| {
                         if (std.mem.indexOf(u8, sim_line, "iccid:")) |_| {
                             const sim_trimmed = std.mem.trim(u8, sim_line, " \t");
+                            std.log.debug("📱 Found ICCID line for modem {s}: {s}", .{ modem_id, sim_trimmed });
                             if (std.mem.indexOf(u8, sim_trimmed, ": ")) |sim_pos| {
                                 const iccid = std.mem.trim(u8, sim_trimmed[sim_pos + 2 ..], " '\"");
+                                std.log.debug("📱 Extracted ICCID for modem {s}: '{s}' (length: {d})", .{ modem_id, iccid, iccid.len });
                                 if (iccid.len > 0 and !std.mem.eql(u8, iccid, "unknown")) {
                                     // Check if this is a valid ICCID format (should be numeric)
                                     var valid = true;
@@ -941,6 +1063,7 @@ pub const ModemManager = struct {
             std.log.err("❌ Failed to create SMS: {s}", .{create_result.stderr});
             std.log.err("📄 SMS creation stdout: {s}", .{create_result.stdout});
             std.log.err("🔍 Command was: mmcli -m {s} --messaging-create-sms {s}", .{ modem_id, sms_params });
+            
             return error.SmsCreateFailed;
         }
         
@@ -966,6 +1089,27 @@ pub const ModemManager = struct {
         }
         
         std.log.debug("📌 Extracted SMS ID: {s}", .{sms_id});
+        
+        // Verify the SMS actually exists (ModemManager bug: returns success even when storage full)
+        std.log.debug("🔍 Verifying SMS {s} exists...", .{sms_id});
+        const verify_result = try std.process.Child.run(.{
+            .allocator = self.allocator,
+            .argv = &[_][]const u8{ "mmcli", "-s", sms_id },
+        });
+        defer self.allocator.free(verify_result.stdout);
+        defer self.allocator.free(verify_result.stderr);
+        
+        if (verify_result.term != .Exited or verify_result.term.Exited != 0) {
+            std.log.err("❌ SMS {s} doesn't exist despite creation success", .{sms_id});
+            std.log.warn("⚠️ ModemManager bug: reported success but SMS not created", .{});
+            
+            // This modem likely has corrupted state - mark it as problematic
+            const owned_id = try self.allocator.dupe(u8, modem_id);
+            try self.problematic_modems.put(owned_id, {});
+            std.log.err("🚨 Modem {s} marked as problematic - needs reset", .{modem_id});
+            
+            return error.SmsPhantomCreation;
+        }
 
         // Send the SMS
         // mmcli -s expects just the ID, not the full path
@@ -983,11 +1127,24 @@ pub const ModemManager = struct {
             std.log.err("📄 SMS send stdout: {s}", .{send_result.stdout});
             std.log.err("🔍 Command was: mmcli -s {s} --send", .{sms_id});
             
-            // Try to delete the failed SMS to prevent accumulation
-            std.log.debug("🗑️ Attempting to delete failed SMS {s}", .{sms_id});
+            // Delete the failed SMS first
+            std.log.debug("🗑️ Deleting failed SMS {s}", .{sms_id});
             self.deleteSms(modem_id, sms_id) catch |delete_err| {
                 std.log.warn("⚠️ Failed to delete failed SMS {s}: {any}", .{ sms_id, delete_err });
             };
+            
+            // Check if it's QMI error 54 (historically means storage full, but often indicates corrupted state)
+            if (std.mem.indexOf(u8, send_result.stderr, "WmsCauseCode") != null or
+                std.mem.indexOf(u8, send_result.stderr, "QMI protocol error (54)") != null) {
+                std.log.err("🚨 QMI error 54 - modem {s} likely has corrupted SMS storage state", .{modem_id});
+                
+                // Mark this modem as problematic
+                const owned_id = try self.allocator.dupe(u8, modem_id);
+                try self.problematic_modems.put(owned_id, {});
+                
+                return error.ModemCorruptedState;
+            }
+            
             
             return error.SmsSendFailed;
         }
