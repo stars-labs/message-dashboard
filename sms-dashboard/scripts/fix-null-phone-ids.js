@@ -9,7 +9,7 @@ console.log('Fixing null phone IDs in the database...\n');
 // First, apply the migration to add missing columns
 console.log('1. Applying migration to add missing columns...');
 try {
-  execSync('npx wrangler d1 execute sms-dashboard --file=database/migrations/add-missing-phone-columns.sql', {
+  execSync('npx wrangler d1 execute sms-dashboard --file=migrations/add-missing-phone-columns.sql', {
     stdio: 'inherit'
   });
   console.log('✅ Migration applied successfully\n');

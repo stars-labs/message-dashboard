@@ -17,16 +17,49 @@ All documentation has been organized in the `docs/` directory. See [Documentatio
 
 ```
 message-dashboard/
-├── docs/                 # Documentation
-└── sms-dashboard/        # Main application
-    ├── client/           # Frontend source code (Svelte)
-    ├── database/         # SQL migrations
-    ├── dist/             # Built frontend assets
-    ├── public/           # Static assets
-    ├── scripts/          # Build and deployment scripts
-    ├── server/           # Backend source code (Workers)
-    ├── package.json      # Dependencies
-    └── wrangler.toml     # Cloudflare Workers config
+├── docs/                     # Documentation
+│   ├── API_DOCUMENTATION.md  # API endpoints and usage
+│   ├── AUTH0_SETUP.md        # Auth0 configuration guide
+│   ├── CLOUDFLARE_ARCHITECTURE.md  # System architecture
+│   ├── DEPLOYMENT_GUIDE.md   # Full deployment instructions
+│   └── ORANGE_PI_QUICKSTART.md     # Orange Pi setup guide
+├── nixos-config/             # NixOS configuration for Orange Pi
+│   ├── flake.nix             # Nix flake configuration
+│   ├── flake.lock            # Locked dependencies
+│   └── modules/              # NixOS modules
+│       └── sms-dashboard.nix # SMS daemon service definition
+├── orange-pi-daemon/         # Zig SMS collection daemon
+│   ├── src/                  # Source code
+│   │   ├── main.zig          # Main entry point
+│   │   ├── modem.zig         # ModemManager interface
+│   │   ├── api_client.zig    # HTTP API client
+│   │   └── sms_sender.zig    # SMS sending logic
+│   └── build.zig             # Zig build configuration
+├── scripts/                  # System-level scripts (modem reset, etc.)
+│   ├── fix-modem-24.sh       # Fix specific modem issues
+│   └── reset-problematic-modems.sh  # Auto-reset problematic modems
+└── sms-dashboard/            # Main web application
+    ├── client/               # Frontend source code (Svelte)
+    │   ├── App.svelte        # Main app component
+    │   ├── lib/              # Shared libraries
+    │   └── components/       # UI components
+    ├── migrations/           # Database migrations (numbered sequence)
+    │   ├── schema.sql        # Complete database schema
+    │   ├── 0005_add_auth_tables.sql
+    │   └── 0006_add_missing_phone_columns.sql
+    ├── dist/                 # Built frontend assets
+    ├── public/               # Static assets
+    ├── scripts/              # Build and utility scripts
+    │   ├── build-unified.js  # Unified build script
+    │   ├── diagnose-phone-issues.js
+    │   └── test-phone-data.js
+    ├── server/               # Backend source code (Workers)
+    │   ├── index.js          # Main server entry
+    │   ├── auth.js           # Auth0 integration
+    │   ├── api/              # API route handlers
+    │   └── websocket.js      # WebSocket/SSE handling
+    ├── package.json          # Dependencies
+    └── wrangler.toml         # Cloudflare Workers config
 ```
 
 ## Quick Start
@@ -43,37 +76,112 @@ npm run dev:api     # Backend development (Wrangler)
 npm run deploy      # Build and deploy to Cloudflare
 ```
 
+## Cloudflare Workers Deployment
+
+Deploy the SMS dashboard to Cloudflare Workers:
+
+```bash
+cd sms-dashboard
+
+# Set up Cloudflare authentication
+npx wrangler login
+
+# Configure secrets (required)
+npx wrangler secret put AUTH0_DOMAIN          # e.g., your-tenant.auth0.com
+npx wrangler secret put AUTH0_CLIENT_ID       # Auth0 application client ID
+npx wrangler secret put AUTH0_CLIENT_SECRET   # Auth0 application client secret
+npx wrangler secret put API_KEY               # API key for Orange Pi authentication
+
+# Initialize D1 database (first time only)
+npm run db:init
+
+# Run database migrations
+npm run db:migrate
+
+# Build and deploy to Cloudflare
+npm run deploy
+
+# View live logs
+npx wrangler tail sms-dashboard
+```
+
+### Database Operations
+
+```bash
+# Execute SQL on local database
+npx wrangler d1 execute sms-dashboard --local --file=migrations/schema.sql
+
+# Execute SQL on remote database
+npx wrangler d1 execute sms-dashboard --remote --file=migrations/0006_add_missing_phone_columns.sql
+
+# Query remote database
+npx wrangler d1 execute sms-dashboard --remote --command="SELECT * FROM phones"
+```
+
 ## Orange Pi NixOS Deployment
 
 Deploy the SMS dashboard daemon to your Orange Pi 5 Plus:
 
 ```bash
-# Deploy to Orange Pi (replace with your actual IP)
-sudo nixos-rebuild switch --flake .#orange-pi \
+# Navigate to NixOS configuration directory
+cd nixos-config
+
+# Build and deploy to Orange Pi (critical command)
+nixos-rebuild switch --flake .#orange-pi \
   --use-substitutes \
   --target-host root@10.171.150.102 \
+  --build-host root@10.171.150.102 \
   --impure
 
-# Check daemon status
+# Verify deployment
 ssh root@10.171.150.102 'systemctl status sms-dashboard-daemon'
+ssh root@10.171.150.102 'journalctl -fu sms-dashboard-daemon'
 ```
 
-Before deployment, create the API key file on the Orange Pi:
+### Pre-deployment Setup
+
+Before deploying, configure secrets using SOPS:
+
 ```bash
+# In the nixos-config directory
+cd nixos-config
+
+# Create or edit the SOPS secrets file
+sops secrets/secrets.yaml
+
+# Add the following to secrets.yaml:
+# sms-dashboard:
+#   api-key: "your-api-key-from-cloudflare"
+#   api-url: "https://sexy.qzz.io"
+
+# The secrets will be automatically deployed to the Orange Pi at:
+# /run/secrets/sms-dashboard-api-key
+# /run/secrets/sms-dashboard-api-url
+
+# Verify deployment prerequisites
+ssh root@10.171.150.102 'systemctl status ModemManager'
+ssh root@10.171.150.102 'mmcli -L'
+```
+
+Note: The NixOS configuration automatically handles SOPS decryption and places secrets in the correct locations. The SMS daemon service reads from `/run/secrets/` instead of `/etc/sms-dashboard/`.
+
+### Troubleshooting Modem Issues
+
+If you encounter modem problems (QMI error 54, corrupted state):
+
+```bash
+# Reset specific problematic modem
+./scripts/fix-modem-24.sh
+
+# Reset all problematic modems automatically
+./scripts/reset-problematic-modems.sh
+
+# Manual modem reset on Orange Pi
 ssh root@10.171.150.102
-mkdir -p /etc/sms-dashboard
-echo "your-api-key" > /etc/sms-dashboard/api-key
-chmod 600 /etc/sms-dashboard/api-key
-```
-
-## Database Setup
-
-```bash
-# Initialize database
-npm run db:init
-
-# Run migrations
-npm run db:migrate
+mmcli -m [modem_id] --disable
+sleep 3
+mmcli -m [modem_id] --enable
+systemctl restart sms-dashboard-daemon
 ```
 
 See documentation for detailed setup and deployment instructions.

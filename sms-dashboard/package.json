@@ -11,8 +11,8 @@
     "build:unified": "bun run build && bun scripts/build-unified.js",
     "deploy": "bun run build:unified && bunx wrangler deploy",
     "preview": "bunx vite preview",
-    "db:init": "bunx wrangler d1 execute sms-dashboard --local --file=./database/migrations/schema-v2.sql",
-    "db:migrate": "bunx wrangler d1 execute sms-dashboard --file=./database/migrations/schema-v2.sql"
+    "db:init": "bunx wrangler d1 execute sms-dashboard --local --file=./migrations/schema.sql",
+    "db:migrate": "bunx wrangler d1 execute sms-dashboard --file=./migrations/schema.sql"
   },
   "dependencies": {
     "itty-router": "^5.0.18",
