@@ -33,6 +33,8 @@ export const updatesHandler = {
           p.operator_id,
           p.imei,
           p.access_tech,
+          p.modem_index,
+          p.sim_index,
           p.created_at,
           p.updated_at,
           im.phone_number as mapped_number,
