@@ -1032,45 +1032,7 @@ pub const ModemManager = struct {
             std.log.err("📄 SMS creation stdout: {s}", .{create_result.stdout});
             std.log.err("🔍 Command was: mmcli -m {s} --messaging-create-sms {s}", .{ modem_id, sms_params });
             
-            // Check if it's a storage full error (WmsCauseCode)
-            if (std.mem.indexOf(u8, create_result.stderr, "WmsCauseCode") != null or
-                std.mem.indexOf(u8, create_result.stderr, "QMI protocol error (54)") != null) {
-                std.log.warn("⚠️ Modem storage appears to be full, attempting cleanup...", .{});
-                
-                // Try to clean up storage and retry once
-                self.cleanupModemStorage(modem_id) catch |cleanup_err| {
-                    std.log.err("Failed to cleanup modem storage: {any}", .{cleanup_err});
-                };
-                
-                // Wait a bit for cleanup to take effect
-                std.time.sleep(500 * std.time.ns_per_ms);
-                
-                // Retry SMS creation
-                std.log.info("🔄 Retrying SMS creation after cleanup...", .{});
-                const retry_result = try std.process.Child.run(.{
-                    .allocator = self.allocator,
-                    .argv = &[_][]const u8{ 
-                        "mmcli", 
-                        "-m", modem_id, 
-                        "--messaging-create-sms", 
-                        sms_params
-                    },
-                });
-                
-                if (retry_result.term != .Exited or retry_result.term.Exited != 0) {
-                    std.log.err("❌ Failed to create SMS after cleanup: {s}", .{retry_result.stderr});
-                    self.allocator.free(retry_result.stdout);
-                    self.allocator.free(retry_result.stderr);
-                    return error.SmsCreateFailed;
-                }
-                
-                // Replace with retry result
-                self.allocator.free(create_result.stdout);
-                self.allocator.free(create_result.stderr);
-                create_result = retry_result;
-            } else {
-                return error.SmsCreateFailed;
-            }
+            return error.SmsCreateFailed;
         }
         
         std.log.debug("✅ SMS created successfully", .{});
@@ -1106,15 +1068,9 @@ pub const ModemManager = struct {
         defer self.allocator.free(verify_result.stderr);
         
         if (verify_result.term != .Exited or verify_result.term.Exited != 0) {
-            std.log.err("❌ SMS {s} doesn't exist despite creation success - storage is full", .{sms_id});
-            std.log.warn("⚠️ ModemManager bug: reported success but SMS not created, cleaning storage...", .{});
-            
-            // Clean up storage aggressively
-            self.cleanupModemStorage(modem_id) catch |cleanup_err| {
-                std.log.err("Failed to cleanup modem storage: {any}", .{cleanup_err});
-            };
-            
-            return error.SmsStorageFull;
+            std.log.err("❌ SMS {s} doesn't exist despite creation success", .{sms_id});
+            std.log.warn("⚠️ ModemManager bug: reported success but SMS not created", .{});
+            return error.SmsPhantomCreation;
         }
 
         // Send the SMS
@@ -1133,34 +1089,19 @@ pub const ModemManager = struct {
             std.log.err("📄 SMS send stdout: {s}", .{send_result.stdout});
             std.log.err("🔍 Command was: mmcli -s {s} --send", .{sms_id});
             
-            // Check if it's a storage full error during send (WmsCauseCode)
-            if (std.mem.indexOf(u8, send_result.stderr, "WmsCauseCode") != null or
-                std.mem.indexOf(u8, send_result.stderr, "QMI protocol error (54)") != null) {
-                std.log.warn("⚠️ Modem storage appears to be full during send, attempting cleanup...", .{});
-                
-                // Try to clean up storage
-                self.cleanupModemStorage(modem_id) catch |cleanup_err| {
-                    std.log.err("Failed to cleanup modem storage: {any}", .{cleanup_err});
-                };
-                
-                // Wait a bit for cleanup to take effect
-                std.time.sleep(500 * std.time.ns_per_ms);
-                
-                // Don't retry sending the same SMS - it's already created
-                // Just delete it to free space
-                std.log.info("🗑️ Deleting unsent SMS {s} to free space", .{sms_id});
-                self.deleteSms(modem_id, sms_id) catch |delete_err| {
-                    std.log.warn("⚠️ Failed to delete failed SMS {s}: {any}", .{ sms_id, delete_err });
-                };
-                
-                return error.SmsSendFailedStorageFull;
-            }
-            
-            // Try to delete the failed SMS to prevent accumulation
-            std.log.debug("🗑️ Attempting to delete failed SMS {s}", .{sms_id});
+            // Delete the failed SMS first
+            std.log.debug("🗑️ Deleting failed SMS {s}", .{sms_id});
             self.deleteSms(modem_id, sms_id) catch |delete_err| {
                 std.log.warn("⚠️ Failed to delete failed SMS {s}: {any}", .{ sms_id, delete_err });
             };
+            
+            // Check if it's a storage full error (WmsCauseCode)
+            if (std.mem.indexOf(u8, send_result.stderr, "WmsCauseCode") != null or
+                std.mem.indexOf(u8, send_result.stderr, "QMI protocol error (54)") != null) {
+                std.log.warn("⚠️ Modem appears to have QMI protocol error 54", .{});
+                return error.SmsSendFailedQMIError;
+            }
+            
             
             return error.SmsSendFailed;
         }
