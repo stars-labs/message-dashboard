@@ -27,7 +27,7 @@ jobs:
     - name: Setup Zig
       uses: goto-bus-stop/setup-zig@v2
       with:
-        version: 0.14.0-dev.2545+311d50f9d
+        version: master
 
     - name: Run Zig fmt check
       working-directory: ./orange-pi-daemon
@@ -126,7 +126,7 @@ jobs:
     - name: Setup Zig
       uses: goto-bus-stop/setup-zig@v2
       with:
-        version: 0.14.0-dev.2545+311d50f9d
+        version: master
 
     - name: Build release binary
       working-directory: ./orange-pi-daemon
