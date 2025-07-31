@@ -866,18 +866,16 @@ pub const ModemManager = struct {
     }
     
     pub fn deleteSms(self: *ModemManager, modem_id: []const u8, sms_id: []const u8) !void {
-        // The sms_id should be just the number, not the full path
-        // If it has /SMS/ prefix, it's the full path from mmcli output
-        const sms_path = if (std.mem.startsWith(u8, sms_id, "/SMS/")) 
-            sms_id 
-        else 
-            try std.fmt.allocPrint(self.allocator, "/SMS/{s}", .{sms_id});
-        defer if (!std.mem.startsWith(u8, sms_id, "/SMS/")) self.allocator.free(sms_path);
+        // Extract just the numeric ID if we have a full path
+        var actual_id = sms_id;
+        if (std.mem.startsWith(u8, sms_id, "/SMS/")) {
+            actual_id = sms_id[5..]; // Skip "/SMS/" prefix
+        }
         
         // Log the exact command being executed
-        std.log.debug("🔍 Executing mmcli command: mmcli -m {s} --messaging-delete-sms={s}", .{ modem_id, sms_path });
+        std.log.debug("🔍 Executing mmcli command: mmcli -m {s} --messaging-delete-sms={s}", .{ modem_id, actual_id });
         
-        const delete_arg = try std.fmt.allocPrint(self.allocator, "--messaging-delete-sms={s}", .{sms_path});
+        const delete_arg = try std.fmt.allocPrint(self.allocator, "--messaging-delete-sms={s}", .{actual_id});
         defer self.allocator.free(delete_arg);
         
         const result = try std.process.Child.run(.{
@@ -890,8 +888,8 @@ pub const ModemManager = struct {
         switch (result.term) {
             .Exited => |code| {
                 if (code != 0) {
-                    std.log.warn("❌ Failed to delete SMS {s} from modem {s}: exit code {d}", .{ sms_path, modem_id, code });
-                    std.log.warn("🔍 Full mmcli command was: mmcli -m {s} --messaging-delete-sms={s}", .{ modem_id, sms_path });
+                    std.log.warn("❌ Failed to delete SMS {s} from modem {s}: exit code {d}", .{ actual_id, modem_id, code });
+                    std.log.warn("🔍 Full mmcli command was: mmcli -m {s} --messaging-delete-sms={s}", .{ modem_id, actual_id });
                     std.log.warn("📄 mmcli stdout: {s}", .{result.stdout});
                     std.log.warn("📄 mmcli stderr: {s}", .{result.stderr});
                     
@@ -904,12 +902,12 @@ pub const ModemManager = struct {
                     
                     return error.SmsDeleteFailed;
                 }
-                std.log.debug("✅ Successfully deleted SMS {s} from modem {s}", .{ sms_path, modem_id });
+                std.log.debug("✅ Successfully deleted SMS {s} from modem {s}", .{ actual_id, modem_id });
                 std.log.debug("📄 Delete result stdout: {s}", .{result.stdout});
             },
             else => {
                 std.log.warn("mmcli process terminated abnormally when deleting SMS {s}", .{sms_id});
-                std.log.warn("🔍 Full mmcli command was: mmcli -m {s} --messaging-delete-sms={s}", .{ modem_id, sms_path });
+                std.log.warn("🔍 Full mmcli command was: mmcli -m {s} --messaging-delete-sms={s}", .{ modem_id, actual_id });
                 return error.SmsDeleteFailed;
             },
         }
