@@ -72,9 +72,15 @@
         phonesResponse.data &&
         Array.isArray(phonesResponse.data)
       ) {
-        phoneNumbers = phonesResponse.data;
+        phoneNumbers = phonesResponse.data.map(phone => ({
+          ...phone,
+          flag: getPhoneFlag(phone)
+        }));
       } else if (Array.isArray(phonesResponse)) {
-        phoneNumbers = phonesResponse;
+        phoneNumbers = phonesResponse.map(phone => ({
+          ...phone,
+          flag: getPhoneFlag(phone)
+        }));
       } else {
         phoneNumbers = [];
       }
@@ -342,6 +348,7 @@
               // Ensure we have the proper structure
               return {
                 ...updatedPhone,
+                flag: getPhoneFlag(updatedPhone)
               };
             });
 
@@ -550,6 +557,89 @@
       return "text-red-600";
     }
     return "text-green-600";
+  }
+
+  function getPhoneFlag(phone) {
+    // First check if phone has country from ICCID mapping
+    if (phone.country) {
+      const countryFlags = {
+        CN: "🇨🇳",
+        HK: "🇭🇰",
+        SG: "🇸🇬",
+        US: "🇺🇸",
+        UK: "🇬🇧",
+        JP: "🇯🇵",
+        KR: "🇰🇷",
+        MY: "🇲🇾",
+        TH: "🇹🇭",
+        VN: "🇻🇳",
+        PH: "🇵🇭",
+        ID: "🇮🇩",
+        IN: "🇮🇳",
+        AU: "🇦🇺",
+        NZ: "🇳🇿",
+        CA: "🇨🇦",
+        DE: "🇩🇪",
+        FR: "🇫🇷",
+        IT: "🇮🇹",
+        ES: "🇪🇸",
+        RU: "🇷🇺",
+        BR: "🇧🇷",
+        MX: "🇲🇽",
+      };
+      return countryFlags[phone.country] || "📱";
+    }
+
+    // Otherwise, try to determine from phone number
+    if (!phone.number) return "📱";
+    
+    const number = phone.number.toString();
+    
+    // China (+86)
+    if (number.startsWith("86") || number.startsWith("+86") || 
+        (number.startsWith("1") && number.length === 11)) {
+      return "🇨🇳";
+    }
+    
+    // Hong Kong (+852)
+    if (number.startsWith("852") || number.startsWith("+852") || 
+        number.startsWith("00852")) {
+      return "🇭🇰";
+    }
+    
+    // Singapore (+65)
+    if (number.startsWith("65") || number.startsWith("+65") || 
+        (number.length === 8 && (number.startsWith("8") || number.startsWith("9")))) {
+      return "🇸🇬";
+    }
+    
+    // USA (+1) - be careful as +1 is shared by many countries
+    if (number.startsWith("+1") || (number.length === 10 && !number.startsWith("1"))) {
+      return "🇺🇸";
+    }
+    
+    // Japan (+81)
+    if (number.startsWith("81") || number.startsWith("+81")) {
+      return "🇯🇵";
+    }
+    
+    // Korea (+82)
+    if (number.startsWith("82") || number.startsWith("+82")) {
+      return "🇰🇷";
+    }
+    
+    // Malaysia (+60)
+    if (number.startsWith("60") || number.startsWith("+60")) {
+      return "🇲🇾";
+    }
+    
+    // Thailand (+66)
+    if (number.startsWith("66") || number.startsWith("+66")) {
+      return "🇹🇭";
+    }
+    
+    // Default
+    return "📱";
   }
 </script>
 
