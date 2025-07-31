@@ -91,7 +91,7 @@ console.log('\n💡 Recommendations:');
 console.log('─'.repeat(50));
 
 console.log('\n1. Apply the missing columns migration:');
-console.log('   npx wrangler d1 execute sms-dashboard --file=database/migrations/add-missing-phone-columns.sql');
+console.log('   npx wrangler d1 execute sms-dashboard --file=migrations/add-missing-phone-columns.sql');
 
 console.log('\n2. Clean up NULL ID entries:');
 console.log('   npx wrangler d1 execute sms-dashboard --command "DELETE FROM phones WHERE id IS NULL"');
