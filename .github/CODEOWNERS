@@ -1,0 +1,35 @@
+# Code Owners for Security-Sensitive Files
+# These owners will be automatically requested for review when someone opens a PR
+
+# Security-related files
+SECURITY.md @xiongchenyu6
+.github/workflows/security*.yml @xiongchenyu6
+.gitleaks.toml @xiongchenyu6
+
+# Authentication and authorization
+sms-dashboard/server/middleware/auth.js @xiongchenyu6
+sms-dashboard/client/lib/auth.js @xiongchenyu6
+
+# API endpoints handling sensitive data
+sms-dashboard/server/handlers/messages.js @xiongchenyu6
+sms-dashboard/server/handlers/control.js @xiongchenyu6
+
+# Database and migrations
+sms-dashboard/migrations/ @xiongchenyu6
+sms-dashboard/server/db/ @xiongchenyu6
+
+# Infrastructure and deployment
+nixos-config/ @xiongchenyu6
+flake.nix @xiongchenyu6
+.github/workflows/ @xiongchenyu6
+
+# Daemon code handling SMS data
+orange-pi-daemon/src/api_client.zig @xiongchenyu6
+orange-pi-daemon/src/sms_sender.zig @xiongchenyu6
+orange-pi-daemon/src/types.zig @xiongchenyu6
+
+# Environment and configuration
+**/.env* @xiongchenyu6
+**/wrangler.toml @xiongchenyu6
+**/*secret* @xiongchenyu6
+**/*config*.nix @xiongchenyu6

@@ -1,0 +1,60 @@
+version: 2
+updates:
+  # NPM dependencies for SMS Dashboard
+  - package-ecosystem: "npm"
+    directory: "/sms-dashboard"
+    schedule:
+      interval: "daily"
+      time: "02:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "xiongchenyu6"  # Add your GitHub username
+    labels:
+      - "dependencies"
+      - "security"
+    commit-message:
+      prefix: "deps"
+      prefix-development: "dev-deps"
+    groups:
+      # Group all minor and patch updates together
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+      # Security updates in separate PRs for immediate attention
+      security:
+        patterns:
+          - "*"
+        update-types:
+          - "security"
+    # Ignore specific dependencies if needed
+    ignore:
+      # Example: Ignore major updates for stable packages
+      # - dependency-name: "svelte"
+      #   update-types: ["version-update:semver-major"]
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "UTC"
+    labels:
+      - "ci"
+      - "dependencies"
+    commit-message:
+      prefix: "ci"
+
+  # Docker dependencies (if you add Dockerfiles later)
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "docker"
+      - "dependencies"
+    commit-message:
+      prefix: "docker"
