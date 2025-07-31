@@ -20,7 +20,7 @@ export const updatesHandler = {
         SELECT 
           p.iccid,
           COALESCE(im.phone_number, p.number) as number,
-          p.country,
+          COALESCE(im.country, p.country) as country,
           p.flag,
           COALESCE(im.carrier, p.carrier) as carrier,
           p.status,
@@ -39,6 +39,7 @@ export const updatesHandler = {
           p.updated_at,
           im.phone_number as mapped_number,
           im.carrier as mapped_carrier,
+          im.country as mapped_country,
           im.notes as mapping_notes
         FROM phones p
         LEFT JOIN iccid_mappings im ON p.iccid = im.iccid AND im.is_active = 1

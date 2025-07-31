@@ -9,12 +9,50 @@
 
   let phoneNumber = "";
   let carrier = "";
+  let country = "";
   let description = "";
   let saving = false;
   let error = null;
 
+  // Country list with flags
+  const countries = [
+    { code: "CN", name: "中国", flag: "🇨🇳" },
+    { code: "HK", name: "香港", flag: "🇭🇰" },
+    { code: "SG", name: "新加坡", flag: "🇸🇬" },
+    { code: "US", name: "美国", flag: "🇺🇸" },
+    { code: "UK", name: "英国", flag: "🇬🇧" },
+    { code: "JP", name: "日本", flag: "🇯🇵" },
+    { code: "KR", name: "韩国", flag: "🇰🇷" },
+    { code: "MY", name: "马来西亚", flag: "🇲🇾" },
+    { code: "TH", name: "泰国", flag: "🇹🇭" },
+    { code: "VN", name: "越南", flag: "🇻🇳" },
+    { code: "PH", name: "菲律宾", flag: "🇵🇭" },
+    { code: "ID", name: "印度尼西亚", flag: "🇮🇩" },
+    { code: "IN", name: "印度", flag: "🇮🇳" },
+    { code: "AU", name: "澳大利亚", flag: "🇦🇺" },
+    { code: "NZ", name: "新西兰", flag: "🇳🇿" },
+    { code: "CA", name: "加拿大", flag: "🇨🇦" },
+    { code: "DE", name: "德国", flag: "🇩🇪" },
+    { code: "FR", name: "法国", flag: "🇫🇷" },
+    { code: "IT", name: "意大利", flag: "🇮🇹" },
+    { code: "ES", name: "西班牙", flag: "🇪🇸" },
+    { code: "RU", name: "俄罗斯", flag: "🇷🇺" },
+    { code: "BR", name: "巴西", flag: "🇧🇷" },
+    { code: "MX", name: "墨西哥", flag: "🇲🇽" },
+  ];
+
   $: if (phone) {
     carrier = phone.carrier || "";
+    // Try to auto-detect country based on phone number or carrier
+    if (!country && phoneNumber) {
+      if (phoneNumber.startsWith("+86") || phoneNumber.startsWith("86") || phoneNumber.startsWith("1") && phoneNumber.length === 11) {
+        country = "CN";
+      } else if (phoneNumber.startsWith("+852") || phoneNumber.startsWith("852")) {
+        country = "HK";
+      } else if (phoneNumber.startsWith("+65") || phoneNumber.startsWith("65")) {
+        country = "SG";
+      }
+    }
     description = `${phone.iccid} - ${phone.operator_name || "Unknown Operator"}`;
   }
 
@@ -32,6 +70,7 @@
         iccid: phone.iccid,
         phone_number: phoneNumber,
         carrier: carrier || phone.carrier || "",
+        country: country || "",
         description: description || "",
       });
 
@@ -55,6 +94,7 @@
     show = false;
     phoneNumber = "";
     carrier = "";
+    country = "";
     description = "";
     error = null;
     dispatch("close");
@@ -97,6 +137,25 @@
             placeholder="+86138xxxxx 或 138xxxxx"
             class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-purple-500 focus:border-purple-500"
           />
+        </div>
+
+        <div>
+          <label
+            for="dialog-country"
+            class="block text-sm font-medium text-gray-700 mb-1">国家</label
+          >
+          <select
+            id="dialog-country"
+            bind:value={country}
+            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-purple-500 focus:border-purple-500"
+          >
+            <option value="">选择国家...</option>
+            {#each countries as countryOption}
+              <option value={countryOption.code}>
+                {countryOption.flag} {countryOption.name}
+              </option>
+            {/each}
+          </select>
         </div>
 
         <div>

@@ -18,6 +18,7 @@
     iccid: "",
     phone_number: "",
     carrier: "",
+    country: "",
     description: "",
   };
 
@@ -70,6 +71,7 @@
       const response = await api.iccidMappings.update(editingMapping.id, {
         phone_number: formData.phone_number,
         carrier: formData.carrier,
+        country: formData.country,
         description: formData.description,
         is_active: formData.is_active,
       });
@@ -158,6 +160,7 @@
       iccid: mapping.iccid,
       phone_number: mapping.phone_number,
       carrier: mapping.carrier || "",
+      country: mapping.country || "",
       description: mapping.notes || mapping.description || "",
       is_active: mapping.is_active,
     };
@@ -169,6 +172,7 @@
       iccid: "",
       phone_number: "",
       carrier: "",
+      country: "",
       description: "",
     };
     editingMapping = null;
@@ -182,6 +186,43 @@
   onMount(() => {
     loadMappings();
   });
+
+  // Country list with flags
+  const countries = [
+    { code: "CN", name: "中国", flag: "🇨🇳" },
+    { code: "HK", name: "香港", flag: "🇭🇰" },
+    { code: "SG", name: "新加坡", flag: "🇸🇬" },
+    { code: "US", name: "美国", flag: "🇺🇸" },
+    { code: "UK", name: "英国", flag: "🇬🇧" },
+    { code: "JP", name: "日本", flag: "🇯🇵" },
+    { code: "KR", name: "韩国", flag: "🇰🇷" },
+    { code: "MY", name: "马来西亚", flag: "🇲🇾" },
+    { code: "TH", name: "泰国", flag: "🇹🇭" },
+    { code: "VN", name: "越南", flag: "🇻🇳" },
+    { code: "PH", name: "菲律宾", flag: "🇵🇭" },
+    { code: "ID", name: "印度尼西亚", flag: "🇮🇩" },
+    { code: "IN", name: "印度", flag: "🇮🇳" },
+    { code: "AU", name: "澳大利亚", flag: "🇦🇺" },
+    { code: "NZ", name: "新西兰", flag: "🇳🇿" },
+    { code: "CA", name: "加拿大", flag: "🇨🇦" },
+    { code: "DE", name: "德国", flag: "🇩🇪" },
+    { code: "FR", name: "法国", flag: "🇫🇷" },
+    { code: "IT", name: "意大利", flag: "🇮🇹" },
+    { code: "ES", name: "西班牙", flag: "🇪🇸" },
+    { code: "RU", name: "俄罗斯", flag: "🇷🇺" },
+    { code: "BR", name: "巴西", flag: "🇧🇷" },
+    { code: "MX", name: "墨西哥", flag: "🇲🇽" },
+  ];
+
+  function getCountryFlag(countryCode) {
+    const country = countries.find(c => c.code === countryCode);
+    return country ? country.flag : "🌍";
+  }
+
+  function getCountryName(countryCode) {
+    const country = countries.find(c => c.code === countryCode);
+    return country ? country.name : countryCode || "";
+  }
 
   // Function to get carrier color class
   function getCarrierColor(carrier) {
@@ -286,6 +327,10 @@
             >
             <th
               class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+              >国家</th
+            >
+            <th
+              class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
               >运营商</th
             >
             <th
@@ -313,6 +358,16 @@
               <td class="px-4 py-3 text-sm font-medium"
                 >{mapping.phone_number}</td
               >
+              <td class="px-4 py-3 text-sm">
+                {#if mapping.country}
+                  <span class="inline-flex items-center gap-1">
+                    <span class="text-lg">{getCountryFlag(mapping.country)}</span>
+                    <span class="text-xs text-gray-600">{getCountryName(mapping.country)}</span>
+                  </span>
+                {:else}
+                  <span class="text-gray-400">-</span>
+                {/if}
+              </td>
               <td class="px-4 py-3 text-sm">
                 {#if mapping.carrier}
                   <span class="inline-flex px-2 py-1 text-xs rounded-full font-medium {getCarrierColor(mapping.carrier)}">
@@ -429,6 +484,26 @@
 
         <div>
           <label
+            for="create-country"
+            class="block text-sm font-medium text-gray-700 mb-1"
+            >国家</label
+          >
+          <select
+            id="create-country"
+            bind:value={formData.country}
+            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+          >
+            <option value="">选择国家...</option>
+            {#each countries as country}
+              <option value={country.code}>
+                {country.flag} {country.name}
+              </option>
+            {/each}
+          </select>
+        </div>
+
+        <div>
+          <label
             for="create-carrier"
             class="block text-sm font-medium text-gray-700 mb-1"
             >运营商（可选）</label
@@ -518,6 +593,26 @@
 
         <div>
           <label
+            for="edit-country"
+            class="block text-sm font-medium text-gray-700 mb-1"
+            >国家</label
+          >
+          <select
+            id="edit-country"
+            bind:value={formData.country}
+            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+          >
+            <option value="">选择国家...</option>
+            {#each countries as country}
+              <option value={country.code}>
+                {country.flag} {country.name}
+              </option>
+            {/each}
+          </select>
+        </div>
+
+        <div>
+          <label
             for="edit-carrier"
             class="block text-sm font-medium text-gray-700 mb-1"
             >运营商（可选）</label
@@ -590,16 +685,20 @@
       <div class="mb-4">
         <p class="text-sm text-gray-600 mb-2">
           支持 CSV 或 JSON 格式。CSV
-          格式第一行应为标题行：iccid,phone_number,carrier,description
+          格式第一行应为标题行：iccid,phone_number,country,carrier,description
         </p>
         <p class="text-sm text-gray-600">
           JSON 格式示例：<code
             >[{JSON.stringify({
               iccid: "123456",
               phone_number: "13800138000",
+              country: "CN",
               carrier: "中国移动",
             })}]</code
           >
+        </p>
+        <p class="text-sm text-gray-600 mt-1">
+          国家代码：CN=中国, HK=香港, SG=新加坡, US=美国, UK=英国, JP=日本等
         </p>
       </div>
 
