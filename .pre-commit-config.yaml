@@ -1,0 +1,90 @@
+# Pre-commit hooks for security checks
+# Install: pip install pre-commit && pre-commit install
+
+repos:
+  # Secret detection
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.1
+    hooks:
+      - id: gitleaks
+
+  # General security checks
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.4.0
+    hooks:
+      - id: detect-secrets
+        args: ['--baseline', '.secrets.baseline']
+
+  # JavaScript/TypeScript security
+  - repo: https://github.com/returntocorp/semgrep
+    rev: v1.45.0
+    hooks:
+      - id: semgrep
+        args: ['--config=auto', '--error']
+        files: \.(js|jsx|ts|tsx)$
+
+  # NPM security audit
+  - repo: local
+    hooks:
+      - id: npm-audit
+        name: NPM Security Audit
+        entry: bash -c 'cd sms-dashboard && npm audit --production --audit-level=moderate'
+        language: system
+        pass_filenames: false
+        files: sms-dashboard/package\.json$
+
+  # Zig formatting and checks
+  - repo: local
+    hooks:
+      - id: zig-fmt
+        name: Zig Format
+        entry: bash -c 'cd orange-pi-daemon && zig fmt --check src/'
+        language: system
+        files: \.zig$
+
+  # Check for large files that might contain data dumps
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: check-added-large-files
+        args: ['--maxkb=1000']
+      - id: check-json
+      - id: check-yaml
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: detect-private-key
+      - id: check-symlinks
+      - id: destroyed-symlinks
+
+  # Markdown
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.37.0
+    hooks:
+      - id: markdownlint
+        args: ['--fix']
+
+  # Shell script checks
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.9.0.6
+    hooks:
+      - id: shellcheck
+
+  # License headers
+  - repo: https://github.com/Lucas-C/pre-commit-hooks
+    rev: v1.5.4
+    hooks:
+      - id: insert-license
+        files: \.(js|jsx|ts|tsx|zig)$
+        args:
+          - --license-filepath
+          - .license-header.txt
+          - --comment-style
+          - //
+        exclude: ^(node_modules|dist|vendor)/
+
+# Configuration for detect-secrets
+# Run: detect-secrets scan > .secrets.baseline
+exclude_lines:
+  - 'password": ".*"'  # Exclude test passwords
+  - 'api[_-]?key[_-]?placeholder'
+  - 'example[_-]?api[_-]?key'

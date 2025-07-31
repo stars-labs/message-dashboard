@@ -1,0 +1,106 @@
+# Gitleaks configuration for SMS Dashboard
+# https://github.com/gitleaks/gitleaks
+
+[allowlist]
+  description = "Global allowlist"
+  paths = [
+    '''.gitleaks\.toml''',
+    '''vendor''',
+    '''node_modules''',
+    '''\.git''',
+    '''\.zig-cache''',
+    '''zig-out''',
+    '''dist''',
+  ]
+
+[[rules]]
+  description = "SMS API Key"
+  id = "sms-api-key"
+  regex = '''(?i)(sms[_-]?api[_-]?key)(.{0,20})?[=:]\s*['\"]?([a-zA-Z0-9\-_]{32,})'''
+  tags = ["api", "key"]
+
+[[rules]]
+  description = "Auth0 Secrets"
+  id = "auth0-secret"
+  regex = '''(?i)(auth0[_-]?(domain|client[_-]?secret|audience))(.{0,20})?[=:]\s*['\"]?([a-zA-Z0-9\-_.]{8,})'''
+  tags = ["auth", "secret"]
+
+[[rules]]
+  description = "Cloudflare API Token"
+  id = "cloudflare-token"
+  regex = '''(?i)(cloudflare|cf)[_-]?(api[_-]?token|api[_-]?key)(.{0,20})?[=:]\s*['\"]?([a-zA-Z0-9\-_]{40,})'''
+  tags = ["api", "token"]
+
+[[rules]]
+  description = "Generic API Key"
+  id = "generic-api-key"
+  regex = '''(?i)(api[_-]?key|apikey)(.{0,20})?[=:]\s*['\"]?([a-zA-Z0-9\-_]{32,})'''
+  tags = ["api", "key"]
+  [rules.allowlist]
+    regexes = [
+      '''api[_-]?key[_-]?placeholder''',
+      '''example[_-]?api[_-]?key''',
+      '''your[_-]?api[_-]?key''',
+    ]
+
+[[rules]]
+  description = "Base64 Encoded Secrets"
+  id = "base64-secret"
+  regex = '''(?i)(secret|password|token)(.{0,20})?[=:]\s*['\"]?(eyJ[a-zA-Z0-9\-_]+\.eyJ[a-zA-Z0-9\-_]+\.[a-zA-Z0-9\-_]+)'''
+  tags = ["secret", "base64"]
+
+[[rules]]
+  description = "Phone Numbers (PII)"
+  id = "phone-number"
+  regex = '''(?i)(phone|mobile|cell)(.{0,20})?[=:]\s*['\"]?(\+?[0-9]{10,15})'''
+  tags = ["pii", "phone"]
+  [rules.allowlist]
+    regexes = [
+      '''test[_-]?phone''',
+      '''example[_-]?number''',
+      '''1234567890''',
+    ]
+
+[[rules]]
+  description = "ICCID Numbers"
+  id = "iccid-number"
+  regex = '''(?i)(iccid)(.{0,20})?[=:]\s*['\"]?([0-9]{19,20})'''
+  tags = ["pii", "iccid"]
+  [rules.allowlist]
+    paths = [
+      '''test''',
+      '''spec''',
+    ]
+
+[[rules]]
+  description = "Environment Variable Assignment"
+  id = "env-var-assignment"
+  regex = '''(?i)(export\s+)?(SMS_API_KEY|AUTH0_CLIENT_SECRET|API_KEY|DATABASE_URL)=['\"]?([^\s'\"]+)'''
+  tags = ["env", "secret"]
+  [rules.allowlist]
+    regexes = [
+      '''=['\"]?\$\{''',  # Variable substitution
+      '''=['\"]?\$[A-Z]''', # Environment variable reference
+    ]
+
+# Custom rule for Zig source files
+[[rules]]
+  description = "Hardcoded Secrets in Zig"
+  id = "zig-hardcoded-secret"
+  regex = '''(?i)(const\s+[a-zA-Z_]+\s*=\s*["\'])(api[_-]?key|password|secret|token)(["\'])'''
+  tags = ["zig", "secret"]
+  path = '''\.zig$'''
+
+# Entropy-based detection for high-entropy strings
+[[rules]]
+  description = "High Entropy String"
+  id = "high-entropy-string"
+  regex = '''['\"][a-zA-Z0-9\-_]{40,}['\"]'''
+  tags = ["entropy", "secret"]
+  secretGroup = 0
+  entropy = 4.5
+  [rules.allowlist]
+    regexes = [
+      '''[a-f0-9]{40}''',  # Git SHA
+      '''[a-f0-9]{64}''',  # SHA256
+    ]

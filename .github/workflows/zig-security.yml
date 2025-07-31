@@ -1,0 +1,183 @@
+name: Zig Security Analysis
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'orange-pi-daemon/**'
+      - '.github/workflows/zig-security.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'orange-pi-daemon/**'
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  # 1. Zig static analysis
+  zig-analysis:
+    name: Zig Code Analysis
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Zig
+      uses: goto-bus-stop/setup-zig@v2
+      with:
+        version: 0.11.0
+
+    - name: Run Zig fmt check
+      working-directory: ./orange-pi-daemon
+      run: |
+        echo "Checking code formatting..."
+        zig fmt --check src/*.zig || {
+          echo "❌ Code formatting issues detected. Run 'zig fmt' to fix."
+          exit 1
+        }
+
+    - name: Build with safety checks
+      working-directory: ./orange-pi-daemon
+      run: |
+        echo "Building with all safety checks enabled..."
+        zig build-exe src/main.zig \
+          -O ReleaseSafe \
+          -fsanitize=undefined \
+          -fno-sanitize-recover \
+          --verbose-llvm-ir 2>&1 | tee build-log.txt
+
+    - name: Run tests with sanitizers
+      working-directory: ./orange-pi-daemon
+      run: |
+        echo "Running tests with sanitizers..."
+        zig test src/tests.zig \
+          -O ReleaseSafe \
+          -fsanitize=undefined \
+          -fno-sanitize-recover || {
+          echo "❌ Tests failed with sanitizers"
+          exit 1
+        }
+
+    - name: Check for common vulnerabilities
+      working-directory: ./orange-pi-daemon
+      run: |
+        echo "Checking for common security issues..."
+        
+        # Check for unsafe patterns
+        if grep -r "unreachable" src/ --exclude="*test*" | grep -v "// unreachable"; then
+          echo "⚠️ Found unreachable statements that could cause panics"
+        fi
+        
+        if grep -r "@intToPtr" src/; then
+          echo "⚠️ Found raw pointer conversions - ensure they're validated"
+        fi
+        
+        if grep -r "undefined" src/ | grep -v "test" | grep -v "comment"; then
+          echo "⚠️ Found undefined behavior - review these carefully"
+        fi
+
+    - name: Memory safety analysis
+      working-directory: ./orange-pi-daemon
+      run: |
+        echo "Analyzing memory safety..."
+        
+        # Check for potential memory leaks
+        if ! grep -r "defer.*\.deinit\|defer.*\.free" src/; then
+          echo "⚠️ No defer cleanup found - potential memory leaks"
+        fi
+        
+        # Check allocator usage
+        if grep -r "std.heap.page_allocator" src/ | grep -v "test"; then
+          echo "⚠️ Using page_allocator in production code - consider arena allocator"
+        fi
+
+  # 2. Zig dependency analysis
+  zig-deps:
+    name: Zig Dependency Check
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Check build.zig.zon
+      working-directory: ./orange-pi-daemon
+      run: |
+        if [ -f "build.zig.zon" ]; then
+          echo "Checking Zig dependencies..."
+          # In future, when Zig package manager is stable, add dependency scanning
+        else
+          echo "No build.zig.zon found - no external dependencies"
+        fi
+
+  # 3. Binary analysis
+  binary-analysis:
+    name: Binary Security Analysis
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Zig
+      uses: goto-bus-stop/setup-zig@v2
+      with:
+        version: 0.11.0
+
+    - name: Build release binary
+      working-directory: ./orange-pi-daemon
+      run: |
+        zig build-exe src/main.zig -O ReleaseSafe -femit-bin=sms-daemon
+
+    - name: Check binary security features
+      working-directory: ./orange-pi-daemon
+      run: |
+        # Install checksec
+        sudo apt-get update && sudo apt-get install -y checksec
+        
+        echo "Checking binary security features..."
+        checksec --file=sms-daemon || true
+        
+        # Check for stack protection
+        if objdump -d sms-daemon | grep -q "__stack_chk_fail"; then
+          echo "✅ Stack protection enabled"
+        else
+          echo "⚠️ Stack protection not detected"
+        fi
+        
+        # Check for RELRO
+        if readelf -l sms-daemon | grep -q "GNU_RELRO"; then
+          echo "✅ RELRO enabled"
+        else
+          echo "⚠️ RELRO not enabled"
+        fi
+
+    - name: Check for hardcoded secrets
+      working-directory: ./orange-pi-daemon
+      run: |
+        echo "Scanning for hardcoded secrets..."
+        
+        # Check for API keys, passwords, etc.
+        if grep -r -E "(api_key|password|secret|token)" src/ | grep -v -E "(getenv|env:|config|placeholder|example)"; then
+          echo "⚠️ Potential hardcoded secrets found"
+          exit 1
+        fi
+
+  # Summary for Zig security
+  zig-security-summary:
+    name: Zig Security Summary
+    runs-on: ubuntu-latest
+    needs: [zig-analysis, zig-deps, binary-analysis]
+    if: always()
+    steps:
+    - name: Summary
+      run: |
+        echo "## Zig Security Analysis Summary"
+        echo "- Code Analysis: ${{ needs.zig-analysis.result }}"
+        echo "- Dependency Check: ${{ needs.zig-deps.result }}"
+        echo "- Binary Analysis: ${{ needs.binary-analysis.result }}"
+        
+        if [ "${{ contains(needs.*.result, 'failure') }}" = "true" ]; then
+          echo "❌ Zig security checks failed"
+          exit 1
+        fi
