@@ -1,0 +1,230 @@
+name: Nix Security Analysis (Docker)
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '*.nix'
+      - 'flake.*'
+      - 'nixos-config/**'
+      - '.github/workflows/nix-security-docker.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - '*.nix'
+      - 'flake.*'
+      - 'nixos-config/**'
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  # Run all Nix security checks in a NixOS container
+  nix-security-docker:
+    name: Nix Security (Docker)
+    runs-on: ubuntu-latest
+    container:
+      image: nixos/nix:latest
+      options: --privileged
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Configure Nix
+      run: |
+        echo "experimental-features = nix-command flakes" >> /etc/nix/nix.conf
+        echo "accept-flake-config = true" >> /etc/nix/nix.conf
+        
+        # Add nixpkgs channel for tools
+        nix-channel --add https://nixos.org/channels/nixpkgs-unstable nixpkgs
+        nix-channel --update
+
+    - name: Flake validation
+      run: |
+        echo "## Flake Validation"
+        echo "Checking flake structure..."
+        nix flake check --no-build || {
+          echo "❌ Flake check failed"
+          exit 1
+        }
+        echo "✅ Flake structure is valid"
+        
+        echo ""
+        echo "Flake metadata:"
+        nix flake metadata
+        
+        echo ""
+        echo "Flake outputs:"
+        nix flake show
+
+    - name: NixOS configuration evaluation
+      run: |
+        echo "## NixOS Configuration Evaluation"
+        
+        # List available configurations
+        echo "Available configurations:"
+        nix flake show --json | jq -r '.nixosConfigurations | keys[]' || echo "No configurations found"
+        
+        # Try to evaluate orange-pi configuration
+        if nix eval .#nixosConfigurations.orange-pi.config.system.build.toplevel --raw 2>/dev/null; then
+          echo "✅ orange-pi configuration evaluates successfully"
+          
+          # Get some config details
+          echo ""
+          echo "System details:"
+          nix eval .#nixosConfigurations.orange-pi.config.system.stateVersion --json 2>/dev/null || true
+          nix eval .#nixosConfigurations.orange-pi.config.networking.hostName --json 2>/dev/null || true
+        else
+          echo "⚠️ orange-pi configuration evaluation failed"
+        fi
+
+    - name: Security anti-pattern scanning
+      run: |
+        echo "## Security Anti-Pattern Scanning"
+        
+        # Check for hardcoded secrets
+        echo "Checking for hardcoded secrets..."
+        if grep -r 'password\s*=\s*"[^"]*"' --include="*.nix" . | grep -v -E "(mkOption|example|default\s*=\s*\"\"|test)" > /tmp/secrets.txt; then
+          echo "⚠️ Potential hardcoded passwords found:"
+          cat /tmp/secrets.txt
+          exit 1
+        else
+          echo "✅ No hardcoded passwords found"
+        fi
+        
+        # Check for insecure permissions
+        echo ""
+        echo "Checking for insecure permissions..."
+        if grep -r 'mode\s*=\s*"777"' --include="*.nix" . > /tmp/perms.txt; then
+          echo "⚠️ Insecure file permissions (777) found:"
+          cat /tmp/perms.txt
+          exit 1
+        else
+          echo "✅ No insecure permissions found"
+        fi
+        
+        # Check for disabled security features
+        echo ""
+        echo "Checking for disabled security features..."
+        if grep -r 'security\.[a-zA-Z]*\s*=\s*false' --include="*.nix" . | grep -v -E "(mkOption|example|test)" > /tmp/security.txt; then
+          echo "⚠️ Security features may be disabled:"
+          cat /tmp/security.txt
+        else
+          echo "✅ No disabled security features found"
+        fi
+
+    - name: Dependency vulnerability scanning
+      continue-on-error: true
+      run: |
+        echo "## Dependency Vulnerability Scanning"
+        
+        # Install vulnix
+        echo "Installing vulnix..."
+        nix-env -iA nixpkgs.vulnix 2>/dev/null || {
+          echo "Installing vulnix from source..."
+          nix-shell -p python3 python3Packages.pip python3Packages.requests --run "pip install vulnix" || {
+            echo "⚠️ Could not install vulnix, skipping vulnerability scan"
+            exit 0
+          }
+        }
+        
+        # Build and scan if vulnix is available
+        if command -v vulnix &> /dev/null; then
+          echo "Building system for vulnerability scanning..."
+          
+          if nix build .#nixosConfigurations.orange-pi.config.system.build.toplevel --no-link; then
+            STORE_PATH=$(nix eval .#nixosConfigurations.orange-pi.config.system.build.toplevel --raw)
+            echo "Scanning store path: $STORE_PATH"
+            
+            # Run vulnix scan
+            vulnix "$STORE_PATH" --json > vulnix-report.json 2>/dev/null || {
+              echo "⚠️ Vulnix scan failed, trying simple output..."
+              vulnix "$STORE_PATH" || true
+            }
+            
+            # Display results
+            if [ -f vulnix-report.json ] && [ -s vulnix-report.json ]; then
+              echo "Vulnerability report:"
+              cat vulnix-report.json | jq . || cat vulnix-report.json
+            fi
+          else
+            echo "⚠️ Could not build system for scanning"
+          fi
+        fi
+
+    - name: SOPS configuration check
+      run: |
+        echo "## SOPS Configuration Check"
+        
+        if [ -f ".sops.yaml" ]; then
+          echo "✅ SOPS configuration found"
+          
+          # Check for encrypted files
+          echo "Looking for encrypted files..."
+          find . -name "*.yaml" -o -name "*.json" | while read -r file; do
+            if grep -q "sops:" "$file" 2>/dev/null || grep -q "ENC\\[AES256_GCM" "$file" 2>/dev/null; then
+              echo "  - Encrypted: $file"
+            fi
+          done
+        else
+          echo "ℹ️ No .sops.yaml configuration found"
+        fi
+
+    - name: Nix code quality
+      run: |
+        echo "## Nix Code Quality"
+        
+        # Install tools
+        echo "Installing code quality tools..."
+        nix-env -iA nixpkgs.nixpkgs-fmt nixpkgs.statix nixpkgs.deadnix 2>/dev/null || {
+          echo "⚠️ Could not install all tools"
+        }
+        
+        # Format check
+        if command -v nixpkgs-fmt &> /dev/null; then
+          echo "Checking formatting..."
+          nixpkgs-fmt --check . 2>&1 || echo "⚠️ Formatting issues found"
+        fi
+        
+        # Linting
+        if command -v statix &> /dev/null; then
+          echo ""
+          echo "Running statix linter..."
+          statix check . || echo "⚠️ Linting issues found"
+        fi
+        
+        # Dead code
+        if command -v deadnix &> /dev/null; then
+          echo ""
+          echo "Checking for dead code..."
+          deadnix . || echo "⚠️ Dead code found"
+        fi
+
+    - name: Generate security report
+      if: always()
+      run: |
+        echo "## Security Analysis Summary"
+        echo ""
+        echo "Analysis completed at: $(date -u +"%Y-%m-%d %H:%M:%S UTC")"
+        echo ""
+        echo "### Components Analyzed:"
+        echo "- Flake structure and validity"
+        echo "- NixOS configuration evaluation"
+        echo "- Security anti-patterns"
+        echo "- Dependency vulnerabilities"
+        echo "- SOPS encryption"
+        echo "- Code quality"
+        
+        # Create report artifact
+        mkdir -p security-reports
+        cp vulnix-report.json security-reports/ 2>/dev/null || true
+        echo "Report generated" > security-reports/summary.txt
+
+    - name: Upload security reports
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: nix-security-reports
+        path: security-reports/

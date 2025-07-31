@@ -119,11 +119,17 @@ jobs:
         nix-channel --add https://nixos.org/channels/nixpkgs-unstable nixpkgs
         nix-channel --update
         
-        # Try to install vulnix
-        nix-env -iA nixpkgs.vulnix 2>/dev/null || {
-          echo "vulnix not available in nixpkgs, skipping vulnerability scan"
-          echo '{"notice": "vulnix not available"}' > vulnix-report.json
-        }
+        # Try to install vulnix from nixpkgs
+        if ! nix-env -iA nixpkgs.vulnix 2>/dev/null; then
+          echo "Trying alternative installation methods..."
+          # Try installing via nix-shell and pip
+          nix-shell -p python3 python3Packages.pip python3Packages.requests --run "pip install --user vulnix" || {
+            echo "⚠️ vulnix installation failed, skipping vulnerability scan"
+            echo '{"notice": "vulnix not available"}' > vulnix-report.json
+          }
+          # Add local pip bin to PATH
+          export PATH="$HOME/.local/bin:$PATH"
+        fi
 
     - name: Build and scan derivations
       continue-on-error: true
