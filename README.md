@@ -4,8 +4,9 @@ A real-time SMS management dashboard with multi-SIM support, built with Svelte a
 
 ## Documentation
 
-All documentation is in the `docs/` directory:
+All documentation has been organized in the `docs/` directory. See [Documentation Index](docs/index.md) for a complete overview.
 
+### Quick Links
 - [API Documentation](docs/API_DOCUMENTATION.md)
 - [Auth0 Setup Guide](docs/AUTH0_SETUP.md)
 - [Deployment Guide](docs/DEPLOYMENT_GUIDE.md)
