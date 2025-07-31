@@ -6,7 +6,25 @@ let
   cfg = config.services.sms-daemon;
 in {
   options.services.sms-daemon = {
-    enable = mkEnableOption "SMS Dashboard Daemon";
+    enable = mkEnableOption "SMS Dashboard Daemon for collecting and uploading SMS messages from USB modems";
+    
+    # Add module description with clear examples
+    /* Example configuration:
+       
+       services.sms-daemon = {
+         enable = true;
+         apiUrl = "https://your-dashboard.com";
+         phoneUpdateIntervalSeconds = 30;      # Update phone status every 30 seconds
+         messageCheckIntervalMs = 100;         # Check for new messages every 100ms (10 times per second)
+         signalCheckIntervalSeconds = 60;      # Check signal quality every 60 seconds (1 minute)
+       };
+       
+       Common configurations:
+       - High frequency message checking: messageCheckIntervalMs = 50 (20 Hz)
+       - Low frequency message checking: messageCheckIntervalMs = 1000 (1 Hz)
+       - Frequent signal updates: signalCheckIntervalSeconds = 30
+       - Battery-saving mode: all intervals increased by 2-5x
+    */
 
     apiUrl = mkOption {
       type = types.str;
@@ -32,10 +50,33 @@ in {
       description = "Path to file containing API key";
     };
 
-    uploadInterval = mkOption {
+    phoneUpdateIntervalSeconds = mkOption {
+      type = types.int;
+      default = 30;
+      description = ''
+        How often to update phone status (in seconds).
+        Default: 30 seconds
+      '';
+    };
+
+    messageCheckIntervalMs = mkOption {
+      type = types.int;
+      default = 100;
+      description = ''
+        How often to check for new messages (in milliseconds).
+        Default: 100ms (10 Hz)
+        Note: Lower values mean more frequent checks but higher CPU usage.
+        With sequential processing, 10 Hz should be stable.
+      '';
+    };
+
+    signalCheckIntervalSeconds = mkOption {
       type = types.int;
       default = 60;
-      description = "Upload interval in seconds";
+      description = ''
+        How often to check signal quality (in seconds).
+        Default: 60 seconds (1 minute)
+      '';
     };
 
     logLevel = mkOption {
@@ -94,7 +135,9 @@ in {
 
       environment = {
         SMS_API_URL = cfg.apiUrl;
-        SMS_UPLOAD_INTERVAL = toString cfg.uploadInterval;
+        SMS_CHECK_INTERVAL = toString cfg.phoneUpdateIntervalSeconds;
+        SMS_MESSAGE_CHECK_INTERVAL = toString cfg.messageCheckIntervalMs;
+        SMS_SIGNAL_CHECK_INTERVAL = toString cfg.signalCheckIntervalSeconds;
         SMS_DEVICE_ID = cfg.deviceId;
         LOG_LEVEL = cfg.logLevel;
       };
@@ -116,6 +159,11 @@ in {
         Restart = "always";
         RestartSec = "10";
         WorkingDirectory = "/var/lib/sms-dashboard";
+        
+        # Log level settings - ensure debug logs are shown
+        StandardOutput = "journal";
+        StandardError = "journal";
+        SyslogLevel = "debug";
         
         # Security settings
         NoNewPrivileges = true;

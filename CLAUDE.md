@@ -129,10 +129,11 @@ npx wrangler tail sms-dashboard --format pretty
 - Check ModemManager status: `systemctl status ModemManager`
 - Verify modem detection: `mmcli -L`
 - Check ICCID extraction: `mmcli -m [modem_id]` then `mmcli -i [sim_id]`
-- HTTP Communication: As of v1.1.1, daemon uses curl subprocess for reliable HTTP requests
-  - Zig's native HTTP client had issues with response handling
-  - All API calls now use curl with proper error handling
-  - Requires curl in system PATH (added to NixOS config)
+- HTTP Communication: As of v1.14.0, daemon uses native Zig HTTP client
+  - std.http.Client with proper timeout configuration
+  - Connection pooling for better performance
+  - No external dependencies (curl no longer required)
+  - Timeout settings: 10 seconds for both connection and read
 
 ### Auth0 Configuration
 - Callback URLs must include both development and production domains
@@ -201,7 +202,20 @@ npx wrangler d1 execute sms-dashboard --command "SELECT * FROM messages ORDER BY
 
 ## Recent Changes (July 2025)
 
-### v1.1.1 - HTTP Client Migration
+### v1.15.0 - Fixed API Field Mapping
+- Fixed PendingSms struct to match API response fields
+- Fixed api_client.zig field name mapping (pending_messages not pending_sms)
+- Updated sms_sender.zig to use correct field names (recipient, phone_iccid)
+- Removed Content-Length header that was causing 400 errors
+- All HTTP uploads now working correctly
+
+### v1.14.0 - Native Zig HTTP Client
+- Use Zig's std.http.Client instead of curl subprocess
+- Proper timeout handling with connection_timeout and read_timeout
+- More efficient memory usage without temp files
+- Better error handling and connection pooling
+
+### v1.1.1 - HTTP Client Migration (Deprecated)
 - Replaced Zig's native HTTP client with curl subprocess calls
 - Fixed "Failed to write payload: error.NotWriteable" errors
 - Improved reliability of message uploads and phone status updates
