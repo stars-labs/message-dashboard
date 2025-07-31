@@ -178,6 +178,36 @@ pub const ModemManager = struct {
         }
     }
 
+    /// Get SIM index from modem using mmcli
+    pub fn getSimIndex(self: *ModemManager, modem_id: []const u8) !?u32 {
+        const result = try std.process.Child.run(.{
+            .allocator = self.allocator,
+            .argv = &[_][]const u8{ "mmcli", "-m", modem_id },
+        });
+        defer self.allocator.free(result.stdout);
+        defer self.allocator.free(result.stderr);
+
+        var lines = std.mem.tokenizeScalar(u8, result.stdout, '\n');
+        while (lines.next()) |line| {
+            const trimmed = std.mem.trim(u8, line, " \t");
+            
+            // Look for SIM path like:   primary sim path: /org/freedesktop/ModemManager1/SIM/7
+            if (std.mem.indexOf(u8, trimmed, "primary sim path:") != null or
+                std.mem.indexOf(u8, trimmed, "sim path:") != null) {
+                
+                if (std.mem.lastIndexOf(u8, trimmed, "/SIM/")) |sim_pos| {
+                    const sim_id_str = trimmed[sim_pos + 5 ..];
+                    if (std.fmt.parseInt(u32, sim_id_str, 10)) |sim_id| {
+                        std.log.debug("🔍 Found SIM index {d} for modem {s}", .{ sim_id, modem_id });
+                        return sim_id;
+                    } else |_| {}
+                }
+            }
+        }
+        
+        return null;
+    }
+    
     pub fn getIccid(self: *ModemManager, modem_id: []const u8) !?[]const u8 {
         // Skip modems known to crash mmcli
         if (self.problematic_modems.contains(modem_id)) {
@@ -266,8 +296,10 @@ pub const ModemManager = struct {
                     while (sim_lines.next()) |sim_line| {
                         if (std.mem.indexOf(u8, sim_line, "iccid:")) |_| {
                             const sim_trimmed = std.mem.trim(u8, sim_line, " \t");
+                            std.log.debug("📱 Found ICCID line for modem {s}: {s}", .{ modem_id, sim_trimmed });
                             if (std.mem.indexOf(u8, sim_trimmed, ": ")) |sim_pos| {
                                 const iccid = std.mem.trim(u8, sim_trimmed[sim_pos + 2 ..], " '\"");
+                                std.log.debug("📱 Extracted ICCID for modem {s}: '{s}' (length: {d})", .{ modem_id, iccid, iccid.len });
                                 if (iccid.len > 0 and !std.mem.eql(u8, iccid, "unknown")) {
                                     // Check if this is a valid ICCID format (should be numeric)
                                     var valid = true;

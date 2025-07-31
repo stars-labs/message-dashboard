@@ -112,7 +112,7 @@
         }:
         let
           # SMS daemon version - single source of truth
-          daemonVersion = "1.31.0"; # Fixed pipe prefix removal in SMS content
+          daemonVersion = "1.31.6"; # Added modem and SIM indices tracking
           
           # Orange Pi SMS daemon package
           sms-daemon = pkgs.stdenv.mkDerivation rec {

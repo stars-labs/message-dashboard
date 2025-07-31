@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Fix modems stuck with QMI error 54 (phantom storage full)
 
 echo "🔧 Modem QMI Error 54 Fix Tool"
