@@ -866,12 +866,23 @@ pub const ModemManager = struct {
     }
     
     pub fn deleteSms(self: *ModemManager, modem_id: []const u8, sms_id: []const u8) !void {
+        // The sms_id should be just the number, not the full path
+        // If it has /SMS/ prefix, it's the full path from mmcli output
+        const sms_path = if (std.mem.startsWith(u8, sms_id, "/SMS/")) 
+            sms_id 
+        else 
+            try std.fmt.allocPrint(self.allocator, "/SMS/{s}", .{sms_id});
+        defer if (!std.mem.startsWith(u8, sms_id, "/SMS/")) self.allocator.free(sms_path);
+        
         // Log the exact command being executed
-        std.log.debug("🔍 Executing mmcli command: mmcli -m {s} --messaging-delete-sms {s} -a", .{ modem_id, sms_id });
+        std.log.debug("🔍 Executing mmcli command: mmcli -m {s} --messaging-delete-sms={s}", .{ modem_id, sms_path });
+        
+        const delete_arg = try std.fmt.allocPrint(self.allocator, "--messaging-delete-sms={s}", .{sms_path});
+        defer self.allocator.free(delete_arg);
         
         const result = try std.process.Child.run(.{
             .allocator = self.allocator,
-            .argv = &[_][]const u8{ "mmcli", "-m", modem_id, "--messaging-delete-sms", sms_id, "-a" },
+            .argv = &[_][]const u8{ "mmcli", "-m", modem_id, delete_arg },
         });
         defer self.allocator.free(result.stdout);
         defer self.allocator.free(result.stderr);
@@ -879,10 +890,10 @@ pub const ModemManager = struct {
         switch (result.term) {
             .Exited => |code| {
                 if (code != 0) {
-                    std.log.warn("Failed to delete SMS {s} from modem {s}: exit code {d}", .{ sms_id, modem_id, code });
-                    std.log.warn("🔍 Full mmcli command was: mmcli -m {s} --messaging-delete-sms {s} -a", .{ modem_id, sms_id });
-                    std.log.warn("🔍 mmcli stdout: {s}", .{result.stdout});
-                    std.log.warn("🔍 mmcli stderr: {s}", .{result.stderr});
+                    std.log.warn("❌ Failed to delete SMS {s} from modem {s}: exit code {d}", .{ sms_path, modem_id, code });
+                    std.log.warn("🔍 Full mmcli command was: mmcli -m {s} --messaging-delete-sms={s}", .{ modem_id, sms_path });
+                    std.log.warn("📄 mmcli stdout: {s}", .{result.stdout});
+                    std.log.warn("📄 mmcli stderr: {s}", .{result.stderr});
                     
                     // Mark this SMS as failed so we don't try again
                     const sms_modem_key = try std.fmt.allocPrint(self.allocator, "{s}:{s}", .{ modem_id, sms_id });
@@ -893,11 +904,12 @@ pub const ModemManager = struct {
                     
                     return error.SmsDeleteFailed;
                 }
-                std.log.debug("✅ Successfully deleted SMS {s} from modem {s}", .{ sms_id, modem_id });
+                std.log.debug("✅ Successfully deleted SMS {s} from modem {s}", .{ sms_path, modem_id });
+                std.log.debug("📄 Delete result stdout: {s}", .{result.stdout});
             },
             else => {
                 std.log.warn("mmcli process terminated abnormally when deleting SMS {s}", .{sms_id});
-                std.log.warn("🔍 Full mmcli command was: mmcli -m {s} --messaging-delete-sms {s} -a", .{ modem_id, sms_id });
+                std.log.warn("🔍 Full mmcli command was: mmcli -m {s} --messaging-delete-sms={s}", .{ modem_id, sms_path });
                 return error.SmsDeleteFailed;
             },
         }
@@ -908,7 +920,12 @@ pub const ModemManager = struct {
         const sms_params = try std.fmt.allocPrint(self.allocator, "text=\"{s}\",number={s}", .{ text, recipient });
         defer self.allocator.free(sms_params);
         
-        std.log.info("Creating SMS for {s} with text: {s}", .{ recipient, text });
+        std.log.info("🚀 Starting SMS send process for {s} with text: {s}", .{ recipient, text });
+        std.log.debug("📱 Using modem: {s}", .{modem_id});
+        std.log.debug("📝 SMS params: {s}", .{sms_params});
+        
+        // Log the exact mmcli create command
+        std.log.debug("🔍 Executing: mmcli -m {s} --messaging-create-sms {s}", .{ modem_id, sms_params });
         
         const create_result = try std.process.Child.run(.{
             .allocator = self.allocator,
@@ -923,10 +940,14 @@ pub const ModemManager = struct {
         defer self.allocator.free(create_result.stderr);
 
         if (create_result.term != .Exited or create_result.term.Exited != 0) {
-            std.log.err("Failed to create SMS: {s}", .{create_result.stderr});
-            std.log.err("SMS creation stdout: {s}", .{create_result.stdout});
+            std.log.err("❌ Failed to create SMS: {s}", .{create_result.stderr});
+            std.log.err("📄 SMS creation stdout: {s}", .{create_result.stdout});
+            std.log.err("🔍 Command was: mmcli -m {s} --messaging-create-sms {s}", .{ modem_id, sms_params });
             return error.SmsCreateFailed;
         }
+        
+        std.log.debug("✅ SMS created successfully");
+        std.log.debug("📄 Create result stdout: {s}", .{create_result.stdout});
 
         // Extract SMS ID from output (like old code - not owned here)
         var sms_id: []const u8 = "";
@@ -942,37 +963,55 @@ pub const ModemManager = struct {
         }
 
         if (sms_id.len == 0) {
-            std.log.err("Failed to extract SMS ID from output: {s}", .{create_result.stdout});
+            std.log.err("❌ Failed to extract SMS ID from output: {s}", .{create_result.stdout});
             return error.SmsIdNotFound;
         }
+        
+        std.log.debug("📌 Extracted SMS ID: {s}", .{sms_id});
 
         // Send the SMS
+        // The sms_id extracted above is just the number, we need to build the full path
+        const sms_path = try std.fmt.allocPrint(self.allocator, "/SMS/{s}", .{sms_id});
+        defer self.allocator.free(sms_path);
+        
+        std.log.debug("🔍 Executing: mmcli -s {s} --send", .{sms_path});
+        
         const send_result = try std.process.Child.run(.{
             .allocator = self.allocator,
-            .argv = &[_][]const u8{ "mmcli", "-s", sms_id, "--send" },
+            .argv = &[_][]const u8{ "mmcli", "-s", sms_path, "--send" },
         });
         defer self.allocator.free(send_result.stdout);
         defer self.allocator.free(send_result.stderr);
 
         if (send_result.term != .Exited or send_result.term.Exited != 0) {
-            std.log.err("Failed to send SMS: {s}", .{send_result.stderr});
-            std.log.err("SMS send stdout: {s}", .{send_result.stdout});
+            std.log.err("❌ Failed to send SMS: {s}", .{send_result.stderr});
+            std.log.err("📄 SMS send stdout: {s}", .{send_result.stdout});
+            std.log.err("🔍 Command was: mmcli -s {s} --send", .{sms_path});
             
             // Try to delete the failed SMS to prevent accumulation
+            std.log.debug("🗑️ Attempting to delete failed SMS {s}", .{sms_id});
             self.deleteSms(modem_id, sms_id) catch |delete_err| {
-                std.log.warn("Failed to delete failed SMS {s}: {any}", .{ sms_id, delete_err });
+                std.log.warn("⚠️ Failed to delete failed SMS {s}: {any}", .{ sms_id, delete_err });
             };
             
             return error.SmsSendFailed;
         }
+        
+        std.log.debug("✅ SMS sent successfully");
+        std.log.debug("📄 Send result stdout: {s}", .{send_result.stdout});
 
-        std.log.info("Successfully sent SMS to {s} (SMS ID: {s})", .{ recipient, sms_id });
+        std.log.info("✅ Successfully sent SMS to {s} (SMS ID: {s}, Path: {s})", .{ recipient, sms_id, sms_path });
         
         // Delete the sent SMS to prevent modem storage overflow
-        self.deleteSms(modem_id, sms_id) catch |delete_err| {
-            std.log.warn("SMS sent successfully but failed to delete from modem {s}: {any}", .{ modem_id, delete_err });
+        std.log.debug("🗑️ Attempting to delete sent SMS {s} from modem {s}", .{ sms_path, modem_id });
+        // Pass the full path to deleteSms
+        self.deleteSms(modem_id, sms_path) catch |delete_err| {
+            std.log.warn("⚠️ SMS sent successfully but failed to delete from modem {s}: {any}", .{ modem_id, delete_err });
+            std.log.debug("ℹ️ Deletion failure is non-critical - SMS was sent successfully");
             // Don't fail the operation if deletion fails - SMS was sent successfully
         };
+        
+        std.log.debug("🎉 SMS send process completed successfully");
         
         // Return the SMS ID (just the slice, no allocation)
         return sms_id;
