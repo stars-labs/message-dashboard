@@ -1095,6 +1095,27 @@ pub const ModemManager = struct {
         }
         
         std.log.debug("📌 Extracted SMS ID: {s}", .{sms_id});
+        
+        // Verify the SMS actually exists (ModemManager bug: returns success even when storage full)
+        std.log.debug("🔍 Verifying SMS {s} exists...", .{sms_id});
+        const verify_result = try std.process.Child.run(.{
+            .allocator = self.allocator,
+            .argv = &[_][]const u8{ "mmcli", "-s", sms_id },
+        });
+        defer self.allocator.free(verify_result.stdout);
+        defer self.allocator.free(verify_result.stderr);
+        
+        if (verify_result.term != .Exited or verify_result.term.Exited != 0) {
+            std.log.err("❌ SMS {s} doesn't exist despite creation success - storage is full", .{sms_id});
+            std.log.warn("⚠️ ModemManager bug: reported success but SMS not created, cleaning storage...", .{});
+            
+            // Clean up storage aggressively
+            self.cleanupModemStorage(modem_id) catch |cleanup_err| {
+                std.log.err("Failed to cleanup modem storage: {any}", .{cleanup_err});
+            };
+            
+            return error.SmsStorageFull;
+        }
 
         // Send the SMS
         // mmcli -s expects just the ID, not the full path
