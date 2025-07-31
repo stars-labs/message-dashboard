@@ -42,11 +42,13 @@ export const phonesHandler = {
         headers: { 'Content-Type': 'application/json' }
       });
     } catch (error) {
-      // Error handling - list phones
+      // Log error details server-side for debugging
+      console.error('[Phones] List error:', error.stack || error);
+      
+      // Return generic error to client without exposing stack trace
       return new Response(JSON.stringify({
         success: false,
-        error: error.message || 'Failed to fetch phones',
-        details: error.stack
+        error: 'Failed to fetch phones'
       }), {
         status: 500,
         headers: { 'Content-Type': 'application/json' }
