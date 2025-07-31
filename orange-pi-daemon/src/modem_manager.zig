@@ -1070,6 +1070,12 @@ pub const ModemManager = struct {
         if (verify_result.term != .Exited or verify_result.term.Exited != 0) {
             std.log.err("❌ SMS {s} doesn't exist despite creation success", .{sms_id});
             std.log.warn("⚠️ ModemManager bug: reported success but SMS not created", .{});
+            
+            // This modem likely has corrupted state - mark it as problematic
+            const owned_id = try self.allocator.dupe(u8, modem_id);
+            try self.problematic_modems.put(owned_id, {});
+            std.log.err("🚨 Modem {s} marked as problematic - needs reset", .{modem_id});
+            
             return error.SmsPhantomCreation;
         }
 
@@ -1095,11 +1101,16 @@ pub const ModemManager = struct {
                 std.log.warn("⚠️ Failed to delete failed SMS {s}: {any}", .{ sms_id, delete_err });
             };
             
-            // Check if it's a storage full error (WmsCauseCode)
+            // Check if it's QMI error 54 (historically means storage full, but often indicates corrupted state)
             if (std.mem.indexOf(u8, send_result.stderr, "WmsCauseCode") != null or
                 std.mem.indexOf(u8, send_result.stderr, "QMI protocol error (54)") != null) {
-                std.log.warn("⚠️ Modem appears to have QMI protocol error 54", .{});
-                return error.SmsSendFailedQMIError;
+                std.log.err("🚨 QMI error 54 - modem {s} likely has corrupted SMS storage state", .{modem_id});
+                
+                // Mark this modem as problematic
+                const owned_id = try self.allocator.dupe(u8, modem_id);
+                try self.problematic_modems.put(owned_id, {});
+                
+                return error.ModemCorruptedState;
             }
             
             

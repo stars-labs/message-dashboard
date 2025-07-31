@@ -107,7 +107,7 @@ fn checkModemMessages(context: *ParallelContext, modem_id: []const u8) void {
 
 pub fn main() !void {
     const stdout = std.io.getStdOut().writer();
-    try stdout.print("📱 Orange Pi SMS Dashboard Daemon v1.31.4\n", .{});
+    try stdout.print("📱 Orange Pi SMS Dashboard Daemon v1.31.5\n", .{});
     
     // Initialize allocator
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -199,7 +199,10 @@ pub fn main() !void {
     }
     
     for (all_modems) |modem_id| {
-        if (modem_manager.problematic_modems.contains(modem_id)) continue;
+        if (modem_manager.problematic_modems.contains(modem_id)) {
+            std.log.warn("⚠️ Skipping modem {s} - marked as problematic (corrupted state)", .{modem_id});
+            continue;
+        }
         
         // Quick check if modem has SIM
         const iccid_opt = modem_manager.getIccid(modem_id) catch continue;
