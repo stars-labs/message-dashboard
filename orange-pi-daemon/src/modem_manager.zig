@@ -915,7 +915,7 @@ pub const ModemManager = struct {
         }
     }
 
-    pub fn sendSms(self: ModemManager, modem_id: []const u8, recipient: []const u8, text: []const u8) ![]const u8 {
+    pub fn sendSms(self: *ModemManager, modem_id: []const u8, recipient: []const u8, text: []const u8) ![]const u8 {
         // Format SMS arguments with quotes for content (like old working code)
         const sms_params = try std.fmt.allocPrint(self.allocator, "text=\"{s}\",number={s}", .{ text, recipient });
         defer self.allocator.free(sms_params);
@@ -946,7 +946,7 @@ pub const ModemManager = struct {
             return error.SmsCreateFailed;
         }
         
-        std.log.debug("✅ SMS created successfully");
+        std.log.debug("✅ SMS created successfully", .{});
         std.log.debug("📄 Create result stdout: {s}", .{create_result.stdout});
 
         // Extract SMS ID from output (like old code - not owned here)
@@ -970,15 +970,12 @@ pub const ModemManager = struct {
         std.log.debug("📌 Extracted SMS ID: {s}", .{sms_id});
 
         // Send the SMS
-        // The sms_id extracted above is just the number, we need to build the full path
-        const sms_path = try std.fmt.allocPrint(self.allocator, "/SMS/{s}", .{sms_id});
-        defer self.allocator.free(sms_path);
-        
-        std.log.debug("🔍 Executing: mmcli -s {s} --send", .{sms_path});
+        // mmcli -s expects just the ID, not the full path
+        std.log.debug("🔍 Executing: mmcli -s {s} --send", .{sms_id});
         
         const send_result = try std.process.Child.run(.{
             .allocator = self.allocator,
-            .argv = &[_][]const u8{ "mmcli", "-s", sms_path, "--send" },
+            .argv = &[_][]const u8{ "mmcli", "-s", sms_id, "--send" },
         });
         defer self.allocator.free(send_result.stdout);
         defer self.allocator.free(send_result.stderr);
@@ -986,7 +983,7 @@ pub const ModemManager = struct {
         if (send_result.term != .Exited or send_result.term.Exited != 0) {
             std.log.err("❌ Failed to send SMS: {s}", .{send_result.stderr});
             std.log.err("📄 SMS send stdout: {s}", .{send_result.stdout});
-            std.log.err("🔍 Command was: mmcli -s {s} --send", .{sms_path});
+            std.log.err("🔍 Command was: mmcli -s {s} --send", .{sms_id});
             
             // Try to delete the failed SMS to prevent accumulation
             std.log.debug("🗑️ Attempting to delete failed SMS {s}", .{sms_id});
@@ -997,21 +994,21 @@ pub const ModemManager = struct {
             return error.SmsSendFailed;
         }
         
-        std.log.debug("✅ SMS sent successfully");
+        std.log.debug("✅ SMS sent successfully", .{});
         std.log.debug("📄 Send result stdout: {s}", .{send_result.stdout});
 
-        std.log.info("✅ Successfully sent SMS to {s} (SMS ID: {s}, Path: {s})", .{ recipient, sms_id, sms_path });
+        std.log.info("✅ Successfully sent SMS to {s} (SMS ID: {s})", .{ recipient, sms_id });
         
         // Delete the sent SMS to prevent modem storage overflow
-        std.log.debug("🗑️ Attempting to delete sent SMS {s} from modem {s}", .{ sms_path, modem_id });
-        // Pass the full path to deleteSms
-        self.deleteSms(modem_id, sms_path) catch |delete_err| {
+        std.log.debug("🗑️ Attempting to delete sent SMS {s} from modem {s}", .{ sms_id, modem_id });
+        // Pass just the ID to deleteSms
+        self.deleteSms(modem_id, sms_id) catch |delete_err| {
             std.log.warn("⚠️ SMS sent successfully but failed to delete from modem {s}: {any}", .{ modem_id, delete_err });
-            std.log.debug("ℹ️ Deletion failure is non-critical - SMS was sent successfully");
+            std.log.debug("ℹ️ Deletion failure is non-critical - SMS was sent successfully", .{});
             // Don't fail the operation if deletion fails - SMS was sent successfully
         };
         
-        std.log.debug("🎉 SMS send process completed successfully");
+        std.log.debug("🎉 SMS send process completed successfully", .{});
         
         // Return the SMS ID (just the slice, no allocation)
         return sms_id;
