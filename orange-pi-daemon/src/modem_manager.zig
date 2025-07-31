@@ -64,7 +64,29 @@ pub const ModemManager = struct {
         defer self.allocator.free(result.stderr);
         
         var deleted_count: u32 = 0;
+        var max_sms_id: u32 = 0;
         var lines = std.mem.tokenizeScalar(u8, result.stdout, '\n');
+        
+        // First pass - find the highest SMS ID to determine cleanup aggressiveness
+        var lines_copy = std.mem.tokenizeScalar(u8, result.stdout, '\n');
+        while (lines_copy.next()) |line| {
+            if (std.mem.indexOf(u8, line, "/SMS/")) |pos| {
+                const start = pos + 5;
+                var end = start;
+                while (end < line.len and line[end] != ' ') : (end += 1) {}
+                const sms_id = line[start..end];
+                const id_num = std.fmt.parseInt(u32, sms_id, 10) catch continue;
+                if (id_num > max_sms_id) max_sms_id = id_num;
+            }
+        }
+        
+        // If SMS IDs are extremely high (>500), be very aggressive with cleanup
+        const aggressive_mode = max_sms_id > 500;
+        if (aggressive_mode) {
+            std.log.warn("⚠️ SMS IDs very high ({d}), using aggressive cleanup mode", .{max_sms_id});
+        }
+        
+        // Second pass - delete messages
         while (lines.next()) |line| {
             if (std.mem.indexOf(u8, line, "/SMS/")) |pos| {
                 const start = pos + 5;
@@ -75,13 +97,21 @@ pub const ModemManager = struct {
                 // Check if SMS ID is abnormally high (indicating storage issues)
                 const id_num = std.fmt.parseInt(u32, sms_id, 10) catch continue;
                 
-                // Delete if:
-                // 1. SMS is marked as sent
-                // 2. SMS ID is above 100 (indicating accumulated messages)
-                // 3. SMS is in received state but has high ID
-                const should_delete = std.mem.indexOf(u8, line, "(sent)") != null or
-                                    id_num > 100 or
-                                    (std.mem.indexOf(u8, line, "(received)") != null and id_num > 200);
+                // In aggressive mode, delete almost everything to free space
+                const should_delete = if (aggressive_mode) blk: {
+                    // Keep only the last 10 received messages
+                    break :blk std.mem.indexOf(u8, line, "(receiving)") == null or id_num > 10;
+                } else blk: {
+                    // Normal mode - Delete if:
+                    // 1. SMS is marked as sent
+                    // 2. SMS ID is above 50 (indicating accumulated messages)
+                    // 3. SMS is in received state but has high ID (> 100)
+                    // 4. Any SMS with unknown state
+                    break :blk std.mem.indexOf(u8, line, "(sent)") != null or
+                              id_num > 50 or
+                              (std.mem.indexOf(u8, line, "(received)") != null and id_num > 100) or
+                              std.mem.indexOf(u8, line, "(unknown)") != null;
+                };
                 
                 if (should_delete) {
                     self.deleteSms(modem_id, sms_id) catch |err| {
@@ -92,6 +122,13 @@ pub const ModemManager = struct {
                     
                     // Small delay to avoid overwhelming the modem
                     std.time.sleep(50 * std.time.ns_per_ms);
+                    
+                    // In aggressive mode, delete up to 50 messages, otherwise 10
+                    const max_deletions = if (aggressive_mode) 50 else 10;
+                    if (deleted_count >= max_deletions) {
+                        std.log.info("🛑 Reached deletion limit ({d}), will continue later", .{max_deletions});
+                        break;
+                    }
                 }
             }
         }
