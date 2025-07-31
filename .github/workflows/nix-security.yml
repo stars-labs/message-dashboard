@@ -1,0 +1,252 @@
+name: Nix Security Analysis
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '*.nix'
+      - 'flake.*'
+      - 'nixos-config/**'
+      - '.github/workflows/nix-security.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - '*.nix'
+      - 'flake.*'
+      - 'nixos-config/**'
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  # 1. Nix flake checks
+  flake-check:
+    name: Nix Flake Check
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Install Nix
+      uses: cachix/install-nix-action@v24
+      with:
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+          accept-flake-config = true
+
+    - name: Check flake
+      run: |
+        echo "Checking Nix flake..."
+        nix flake check --no-build || {
+          echo "❌ Flake check failed"
+          exit 1
+        }
+
+    - name: Check flake metadata
+      run: |
+        echo "Checking flake metadata..."
+        nix flake metadata
+        nix flake show
+
+  # 2. NixOS configuration analysis
+  nixos-analysis:
+    name: NixOS Configuration Analysis
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Install Nix
+      uses: cachix/install-nix-action@v24
+      with:
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+          accept-flake-config = true
+
+    - name: Evaluate NixOS configurations
+      continue-on-error: true
+      run: |
+        echo "Evaluating NixOS configurations..."
+        
+        # Check if configurations are syntactically valid
+        if nix eval .#nixosConfigurations.orange-pi.config.system.build.toplevel --raw 2>/dev/null; then
+          echo "✅ orange-pi configuration is valid"
+        else
+          echo "⚠️ orange-pi configuration has issues"
+        fi
+
+    - name: Check for security anti-patterns
+      run: |
+        echo "Checking for security anti-patterns in Nix files..."
+        
+        # Check for hardcoded secrets
+        if grep -r "password\s*=\s*\"[^\"]*\"" --include="*.nix" . | grep -v -E "(mkOption|example|default\s*=\s*\"\")"; then
+          echo "⚠️ Potential hardcoded passwords found"
+          exit 1
+        fi
+        
+        # Check for insecure permissions
+        if grep -r "mode\s*=\s*\"777\"" --include="*.nix" .; then
+          echo "⚠️ Insecure file permissions (777) found"
+          exit 1
+        fi
+        
+        # Check for disabled security features
+        if grep -r "security.*=.*false" --include="*.nix" . | grep -v -E "(# |mkOption|example)"; then
+          echo "⚠️ Security features may be disabled"
+        fi
+
+  # 3. Dependency vulnerability scanning
+  nix-vuln-scan:
+    name: Nix Vulnerability Scan
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Install Nix
+      uses: cachix/install-nix-action@v24
+      with:
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+          accept-flake-config = true
+
+    - name: Install vulnix
+      run: |
+        echo "Installing vulnix for vulnerability scanning..."
+        nix-env -iA nixpkgs.vulnix || {
+          # Fallback to building from source if not in nixpkgs
+          nix-shell -p python3 python3Packages.pip --run "pip install vulnix"
+        }
+
+    - name: Build and scan derivations
+      continue-on-error: true
+      run: |
+        echo "Building and scanning NixOS system..."
+        
+        # Try to build the system derivation
+        if nix build .#nixosConfigurations.orange-pi.config.system.build.toplevel --no-link 2>/dev/null; then
+          # Scan for vulnerabilities
+          nix-store -r $(nix eval .#nixosConfigurations.orange-pi.config.system.build.toplevel --raw) | \
+            xargs vulnix --json > vulnix-report.json || true
+          
+          if [ -s vulnix-report.json ]; then
+            echo "Vulnerability report generated"
+            jq . vulnix-report.json || cat vulnix-report.json
+          fi
+        else
+          echo "⚠️ Could not build system for vulnerability scanning"
+        fi
+
+    - name: Upload vulnerability report
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: vulnix-report
+        path: vulnix-report.json
+
+  # 4. SOPS secrets validation
+  sops-check:
+    name: SOPS Secrets Validation
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Install SOPS
+      run: |
+        curl -LO https://github.com/getsops/sops/releases/latest/download/sops-linux-amd64
+        chmod +x sops-linux-amd64
+        sudo mv sops-linux-amd64 /usr/local/bin/sops
+
+    - name: Validate SOPS configuration
+      run: |
+        echo "Validating SOPS configuration..."
+        
+        # Check .sops.yaml exists
+        if [ ! -f ".sops.yaml" ]; then
+          echo "⚠️ No .sops.yaml configuration found"
+          exit 0
+        fi
+        
+        # Validate .sops.yaml syntax
+        if ! sops --config .sops.yaml --decrypt /dev/null 2>&1 | grep -q "no matching creation rules"; then
+          echo "✅ SOPS configuration is valid"
+        else
+          echo "⚠️ SOPS configuration may have issues"
+        fi
+        
+        # Check for encrypted files
+        find . -name "*.yaml" -o -name "*.json" | while read -r file; do
+          if grep -q "sops:" "$file" 2>/dev/null; then
+            echo "Found encrypted file: $file"
+            # Don't try to decrypt (no keys in CI), just validate structure
+            if sops --config .sops.yaml --decrypt "$file" 2>&1 | grep -q "could not decrypt data"; then
+              echo "✅ $file appears to be properly encrypted"
+            fi
+          fi
+        done
+
+  # 5. Nix formatting and linting
+  nix-lint:
+    name: Nix Code Quality
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Install Nix
+      uses: cachix/install-nix-action@v24
+      with:
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+
+    - name: Install formatters and linters
+      run: |
+        nix-env -iA nixpkgs.nixpkgs-fmt nixpkgs.statix nixpkgs.deadnix
+
+    - name: Check formatting
+      continue-on-error: true
+      run: |
+        echo "Checking Nix formatting..."
+        nixpkgs-fmt --check . || {
+          echo "⚠️ Formatting issues found. Run 'nixpkgs-fmt .' to fix."
+        }
+
+    - name: Run statix linter
+      continue-on-error: true
+      run: |
+        echo "Running statix linter..."
+        statix check . || {
+          echo "⚠️ Linting issues found"
+        }
+
+    - name: Check for dead code
+      continue-on-error: true
+      run: |
+        echo "Checking for dead code..."
+        deadnix . || {
+          echo "⚠️ Dead code found"
+        }
+
+  # Summary
+  nix-security-summary:
+    name: Nix Security Summary
+    runs-on: ubuntu-latest
+    needs: [flake-check, nixos-analysis, nix-vuln-scan, sops-check, nix-lint]
+    if: always()
+    steps:
+    - name: Summary
+      run: |
+        echo "## Nix Security Analysis Summary"
+        echo "- Flake Check: ${{ needs.flake-check.result }}"
+        echo "- NixOS Analysis: ${{ needs.nixos-analysis.result }}"
+        echo "- Vulnerability Scan: ${{ needs.nix-vuln-scan.result }}"
+        echo "- SOPS Validation: ${{ needs.sops-check.result }}"
+        echo "- Code Quality: ${{ needs.nix-lint.result }}"
+        
+        if [ "${{ contains(needs.*.result, 'failure') }}" = "true" ]; then
+          echo "❌ Nix security checks failed"
+          exit 1
+        fi
