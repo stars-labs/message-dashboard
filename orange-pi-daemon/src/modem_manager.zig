@@ -1015,7 +1015,7 @@ pub const ModemManager = struct {
         // Log the exact mmcli create command
         std.log.debug("🔍 Executing: mmcli -m {s} --messaging-create-sms {s}", .{ modem_id, sms_params });
         
-        var create_result = try std.process.Child.run(.{
+        const create_result = try std.process.Child.run(.{
             .allocator = self.allocator,
             .argv = &[_][]const u8{ 
                 "mmcli", 
