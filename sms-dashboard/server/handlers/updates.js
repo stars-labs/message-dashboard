@@ -71,7 +71,9 @@ export const updatesHandler = {
             m.timestamp,
             m.type,
             m.status,
+            m.recipient,
             m.verification_code,
+            m.source,
             p.carrier as phone_carrier,
             p.status as phone_status,
             im.phone_number as mapped_number
@@ -96,7 +98,9 @@ export const updatesHandler = {
             m.timestamp,
             m.type,
             m.status,
+            m.recipient,
             m.verification_code,
+            m.source,
             p.carrier as phone_carrier,
             p.status as phone_status,
             im.phone_number as mapped_number

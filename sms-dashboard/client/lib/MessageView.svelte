@@ -67,6 +67,9 @@
   function groupMessagesBySource(msgs) {
     const groups = {};
     msgs.forEach(msg => {
+      // Only group received messages by source, skip sent messages
+      if (msg.type === 'sent') return;
+      
       if (!groups[msg.source]) {
         groups[msg.source] = [];
       }
@@ -221,7 +224,7 @@
       {#each Object.entries(groupedMessages) as [source, msgs]}
         <div class="mb-4 lg:mb-6">
           <h3 class="font-bold text-gray-900 mb-2 lg:mb-3 sticky top-0 bg-white/90 backdrop-blur-sm py-1 lg:py-2 flex items-center gap-2">
-            <span class="px-2 py-1 rounded-lg bg-gradient-to-r {getSourceColor(source)} text-white text-xs">{source}</span>
+            <span class="px-2 py-1 rounded-lg bg-gradient-to-r {getSourceColor(source)} text-white text-xs">{source || '未知来源'}</span>
             <span class="text-sm text-gray-600">({msgs.length})</span>
           </h3>
           <div class="space-y-2 lg:space-y-3">
@@ -231,7 +234,7 @@
                   <div class="flex-1">
                     <div class="flex items-center gap-2 mb-1">
                       <span class="text-xs px-2 py-1 rounded-full bg-gradient-to-r {getSourceColor(message.source)} text-white font-medium">
-                        {message.source}
+                        {message.source || '未知来源'}
                       </span>
                       {#if message.verificationCode}
                         <span class="px-3 py-1 bg-gradient-to-r from-blue-500 to-blue-600 text-white text-sm rounded-full font-mono font-bold shadow-md">
@@ -286,9 +289,15 @@
                       {/if}
                     {/if}
                   {:else}
-                    <span class="text-xs px-2 py-1 rounded-full bg-gradient-to-r {getSourceColor(message.source)} text-white font-medium shadow-md">
-                      {message.source}
-                    </span>
+                    {#if message.source}
+                      <span class="text-xs px-2 py-1 rounded-full bg-gradient-to-r {getSourceColor(message.source)} text-white font-medium shadow-md">
+                        {message.source}
+                      </span>
+                    {:else}
+                      <span class="text-xs px-2 py-1 rounded-full bg-gradient-to-r from-gray-500 to-gray-600 text-white font-medium shadow-md">
+                        未知来源
+                      </span>
+                    {/if}
                     {#if message.verificationCode}
                       <span class="px-3 py-1 bg-gradient-to-r from-blue-500 to-blue-600 text-white text-sm rounded-full font-mono font-bold shadow-md animate-pulse">
                         {message.verificationCode}
