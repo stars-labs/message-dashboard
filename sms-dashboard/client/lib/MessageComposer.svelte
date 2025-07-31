@@ -29,7 +29,8 @@
     (num) => num.includes(recipientSearch) || recipientSearch === "",
   );
 
-  $: if (selectedPhone) {
+  // Initialize recipientSIM when selectedPhone changes, but only if recipientSIM is empty
+  $: if (selectedPhone && !recipientSIM) {
     recipientSIM = selectedPhone.iccid;
   }
 
@@ -172,7 +173,7 @@
     <!-- Recipient History Dropdown -->
     {#if showRecipientHistory && filteredRecipients.length > 0}
       <div
-        class="absolute top-full left-0 right-0 mt-1 bg-white border border-purple-200 rounded-lg shadow-xl max-h-48 overflow-y-auto z-10"
+        class="absolute top-full left-0 right-0 mt-1 bg-white border border-purple-200 rounded-lg shadow-xl max-h-48 overflow-y-auto z-50"
       >
         <div class="p-2">
           <div
@@ -374,7 +375,7 @@
         <!-- Recipient History Dropdown -->
         {#if showRecipientHistory && filteredRecipients.length > 0}
           <div
-            class="absolute top-full left-0 right-0 mt-1 bg-white border border-purple-200 rounded-lg shadow-xl max-h-48 overflow-y-auto z-10"
+            class="absolute top-full left-0 right-0 mt-1 bg-white border border-purple-200 rounded-lg shadow-xl max-h-48 overflow-y-auto z-50"
           >
             <div class="p-2">
               <div
