@@ -231,7 +231,7 @@ jobs:
         name: license-report
         path: sms-dashboard/license-report.json
 
-  # 7. Infrastructure as Code security (for NixOS configs)
+  # 7. Infrastructure as Code security
   iac-security:
     name: IaC Security Scan
     runs-on: ubuntu-latest
@@ -254,6 +254,8 @@ jobs:
       if: always()
       with:
         sarif_file: checkov-results.sarif
+
+    # Note: Comprehensive Nix/NixOS security scanning is handled by .github/workflows/nix-security.yml
 
   # 8. OWASP Dependency Check
   owasp-check:
