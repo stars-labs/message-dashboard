@@ -1,19 +1,230 @@
+@import './lib/tech-effects.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   body {
-    background: linear-gradient(to bottom right, #eef2ff, #ffffff, #faf5ff);
+    background: #0a0a0a;
     min-height: 100vh;
+    color: #ffffff;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace;
   }
 }
 
 @layer utilities {
   .glassmorphism {
-    background: rgba(255, 255, 255, 0.7);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: rgba(10, 10, 20, 0.7);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 
+      0 8px 32px 0 rgba(0, 255, 255, 0.2),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+  }
+  
+  .tech-card {
+    @apply glassmorphism rounded-xl p-6 relative overflow-hidden;
+    background: linear-gradient(135deg, rgba(10, 10, 20, 0.9) 0%, rgba(20, 20, 40, 0.8) 100%);
+    border: 1px solid transparent;
+    background-clip: padding-box;
+    position: relative;
+  }
+  
+  .tech-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(135deg, #00ffff 0%, #ff00ff 100%);
+    opacity: 0;
+    transition: opacity 0.3s;
+    z-index: -1;
+    margin: -1px;
+    border-radius: inherit;
+  }
+  
+  .tech-card:hover::before {
+    opacity: 0.3;
+  }
+  
+  .tech-button {
+    @apply relative overflow-hidden px-6 py-3 rounded-lg font-medium transition-all duration-300;
+    background: linear-gradient(135deg, rgba(0, 255, 255, 0.1) 0%, rgba(255, 0, 255, 0.1) 100%);
+    border: 1px solid rgba(0, 255, 255, 0.3);
+    color: #00ffff;
+    text-shadow: 0 0 10px currentColor;
+  }
+  
+  .tech-button:hover {
+    background: linear-gradient(135deg, rgba(0, 255, 255, 0.2) 0%, rgba(255, 0, 255, 0.2) 100%);
+    border-color: rgba(0, 255, 255, 0.6);
+    box-shadow: 
+      0 0 20px rgba(0, 255, 255, 0.5),
+      inset 0 0 20px rgba(0, 255, 255, 0.1);
+    transform: translateY(-2px);
+  }
+  
+  .data-value {
+    @apply font-mono text-2xl font-bold;
+    color: #00ffff;
+    text-shadow: 
+      0 0 10px #00ffff,
+      0 0 20px #00ffff,
+      0 0 30px #00ffff,
+      0 0 40px #0088ff;
+    letter-spacing: 0.05em;
+    font-weight: 700;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  
+  .status-online {
+    @apply text-green-400;
+    text-shadow: 0 0 10px currentColor;
+  }
+  
+  .status-offline {
+    @apply text-red-400;
+    text-shadow: 0 0 10px currentColor;
+  }
+  
+  .cyber-input {
+    @apply bg-transparent border border-cyan-500/30 rounded-lg px-4 py-2 text-cyan-300;
+    background: rgba(0, 255, 255, 0.05);
+    transition: all 0.3s;
+  }
+  
+  .cyber-input:focus {
+    @apply outline-none border-cyan-400;
+    box-shadow: 
+      0 0 20px rgba(0, 255, 255, 0.3),
+      inset 0 0 10px rgba(0, 255, 255, 0.1);
+  }
+}
+
+/* High-tech custom scrollbar */
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.8);
+  border: 1px solid rgba(0, 255, 255, 0.1);
+  border-radius: 10px;
+  box-shadow: 
+    inset 0 0 10px rgba(0, 255, 255, 0.1),
+    inset 0 0 20px rgba(0, 0, 0, 0.5);
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(
+    45deg,
+    rgba(0, 255, 255, 0.6),
+    rgba(255, 0, 255, 0.4),
+    rgba(0, 255, 255, 0.6)
+  );
+  border-radius: 10px;
+  border: 1px solid rgba(0, 255, 255, 0.3);
+  box-shadow: 
+    0 0 10px rgba(0, 255, 255, 0.5),
+    0 0 20px rgba(255, 0, 255, 0.3),
+    inset 0 0 10px rgba(255, 255, 255, 0.2);
+  background-size: 200% 200%;
+  animation: scrollbar-glow 3s ease infinite;
+  position: relative;
+  overflow: hidden;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(
+    45deg,
+    rgba(0, 255, 255, 0.8),
+    rgba(255, 0, 255, 0.6),
+    rgba(0, 255, 255, 0.8)
+  );
+  box-shadow: 
+    0 0 15px rgba(0, 255, 255, 0.8),
+    0 0 30px rgba(255, 0, 255, 0.5),
+    0 0 45px rgba(0, 255, 255, 0.3),
+    inset 0 0 15px rgba(255, 255, 255, 0.3);
+}
+
+::-webkit-scrollbar-thumb:active {
+  background: linear-gradient(
+    45deg,
+    rgba(0, 255, 255, 1),
+    rgba(255, 0, 255, 0.8),
+    rgba(0, 255, 255, 1)
+  );
+  box-shadow: 
+    0 0 20px rgba(0, 255, 255, 1),
+    0 0 40px rgba(255, 0, 255, 0.8),
+    0 0 60px rgba(0, 255, 255, 0.5);
+}
+
+/* Corner where scrollbars meet */
+::-webkit-scrollbar-corner {
+  background: rgba(0, 0, 0, 0.9);
+  border: 1px solid rgba(0, 255, 255, 0.1);
+}
+
+/* Firefox scrollbar styling */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 255, 255, 0.6) rgba(0, 0, 0, 0.8);
+}
+
+/* Scrollbar glow animation */
+@keyframes scrollbar-glow {
+  0%, 100% {
+    background-position: 0% 50%;
+    filter: brightness(1);
+  }
+  50% {
+    background-position: 100% 50%;
+    filter: brightness(1.2);
+  }
+}
+
+/* Add scanning line effect to scrollbar thumb */
+::-webkit-scrollbar-thumb::before {
+  content: '';
+  position: absolute;
+  top: -100%;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    0deg,
+    transparent,
+    rgba(0, 255, 255, 0.4),
+    transparent
+  );
+  animation: scrollbar-scan 2s linear infinite;
+}
+
+@keyframes scrollbar-scan {
+  0% {
+    top: -100%;
+  }
+  100% {
+    top: 100%;
+  }
+}
+
+/* Mobile-specific scrollbar (thinner) */
+@media (max-width: 768px) {
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  
+  ::-webkit-scrollbar-thumb {
+    border-radius: 8px;
   }
 }
