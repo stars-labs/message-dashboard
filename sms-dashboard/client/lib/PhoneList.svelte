@@ -87,10 +87,10 @@
   }
 </script>
 
-<div class={mobile ? "bg-white" : "glassmorphism rounded-2xl shadow-xl"}>
-  <div class="p-4 {mobile ? 'border-b' : ''}">
+<div class="{mobile ? 'bg-black/90' : 'tech-card'} digital-rain">
+  <div class="p-4 {mobile ? 'border-b border-cyan-900/30' : ''}">
     <h2
-      class="text-lg font-bold bg-gradient-to-r from-purple-600 to-indigo-600 bg-clip-text text-transparent mb-3"
+      class="text-lg font-bold data-value high-contrast mb-3 header-effect-target"
     >
       号码列表
     </h2>
@@ -99,7 +99,7 @@
     <div class="mb-3">
       <select
         bind:value={selectedCountry}
-        class="w-full px-3 py-2 text-sm border border-purple-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white/50 backdrop-blur-sm"
+        class="w-full px-3 py-2 text-sm cyber-input"
       >
         {#each countries as country}
           <option value={country.code}>
@@ -116,31 +116,31 @@
         type="text"
         bind:value={searchTerm}
         placeholder="搜索号码或运营商..."
-        class="w-full px-3 py-2 text-sm border border-purple-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white/50 backdrop-blur-sm"
+        class="w-full px-3 py-2 text-sm cyber-input placeholder-cyan-600"
       />
     </div>
 
     <div class="flex items-center justify-between">
-      <div class="text-sm font-medium text-purple-600">
-        共 {filteredPhones.length} 个号码
+      <div class="text-sm font-bold text-cyan-300 tech-text">
+        共 <span class="data-value text-base high-contrast">{filteredPhones.length}</span> 个号码
       </div>
-      <div class="text-xs text-gray-500 flex items-center gap-3">
+      <div class="text-xs text-cyan-400/60 flex items-center gap-3">
         <span class="flex items-center gap-1">
-          <span class="w-2 h-2 bg-gray-900 rounded-full"></span>
+          <span class="w-2 h-2 bg-cyan-400 rounded-full shadow-lg shadow-cyan-400/50"></span>
           原始号码
         </span>
         <span class="flex items-center gap-1">
-          <svg class="w-3 h-3 text-purple-600" fill="currentColor" viewBox="0 0 20 20">
+          <svg class="w-3 h-3 text-purple-400" fill="currentColor" viewBox="0 0 20 20">
             <path fill-rule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
           </svg>
-          <span class="text-purple-600">映射号码</span>
+          <span class="text-purple-400">映射号码</span>
         </span>
       </div>
     </div>
   </div>
 
   <!-- Phone List -->
-  <div class="{mobile ? '' : 'max-h-[600px]'} overflow-y-auto">
+  <div class="{mobile ? '' : 'max-h-[calc(100vh-350px)]'} overflow-y-auto">
     {#if isLoading}
       <!-- Loading skeleton -->
       {#each [1, 2, 3, 4, 5] as index}
@@ -149,15 +149,15 @@
             <div class="flex items-center justify-between">
               <div class="flex-1">
                 <div class="flex items-center gap-2">
-                  <div class="w-6 h-6 bg-gray-200 rounded"></div>
-                  <div class="h-4 bg-gray-200 rounded w-32"></div>
+                  <div class="w-6 h-6 bg-cyan-900/30 rounded"></div>
+                  <div class="h-4 bg-cyan-900/30 rounded w-32"></div>
                 </div>
-                <div class="h-3 bg-gray-200 rounded w-48 mt-2"></div>
+                <div class="h-3 bg-cyan-900/30 rounded w-48 mt-2"></div>
               </div>
               <div class="flex gap-0.5 items-end">
                 {#each [1, 2, 3, 4] as bar}
                   <div
-                    class="w-1 bg-gray-200 rounded-sm"
+                    class="w-1 bg-cyan-900/30 rounded-sm"
                     style="height: {4 + bar * 3}px"
                   ></div>
                 {/each}
@@ -167,9 +167,9 @@
         </div>
       {/each}
     {:else if filteredPhones.length === 0}
-      <div class="p-4 text-center text-gray-500">
+      <div class="p-4 text-center text-cyan-400/60">
         <svg
-          class="w-12 h-12 mx-auto mb-2 text-gray-300"
+          class="w-12 h-12 mx-auto mb-2 text-cyan-600/30"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -186,10 +186,10 @@
     {:else}
       {#each filteredPhones as phone}
         <button
-          class="w-full p-3 border-b hover:bg-purple-50 active:bg-purple-100 transition-all duration-300 text-left {selectedPhoneIccid ===
+          class="w-full p-3 border-b border-cyan-900/30 hover:bg-cyan-900/20 active:bg-cyan-900/30 transition-all duration-300 text-left {selectedPhoneIccid ===
           phone.iccid
-            ? 'bg-gradient-to-r from-purple-50 to-indigo-50 border-l-4 border-l-purple-500'
-            : 'hover:border-l-4 hover:border-l-purple-200'}"
+            ? 'bg-gradient-to-r from-cyan-900/30 to-purple-900/30 border-l-4 border-l-cyan-400 shadow-lg shadow-cyan-500/20'
+            : 'hover:border-l-4 hover:border-l-cyan-700'}"
           on:click={() => handlePhoneClick(phone)}
         >
           <div class="flex items-center justify-between">
@@ -198,20 +198,20 @@
                 <span class="text-lg">{phone.flag || "📱"}</span>
                 {#if phone.number}
                   {#if phone.mapped_number}
-                    <span class="font-medium text-purple-600 text-sm flex items-center gap-1">
+                    <span class="font-medium text-purple-400 text-sm flex items-center gap-1 tech-text">
                       <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                         <path fill-rule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
                       </svg>
                       {phone.number}
                     </span>
                   {:else}
-                    <span class="font-medium text-gray-900 text-sm">
+                    <span class="font-medium text-cyan-300 text-sm tech-text">
                       {phone.number}
                     </span>
                   {/if}
                 {:else}
                   <span
-                    class="font-medium text-orange-600 text-sm flex items-center gap-1"
+                    class="font-medium text-orange-400 text-sm flex items-center gap-1 tech-text"
                   >
                     <svg
                       class="w-4 h-4"
@@ -230,7 +230,7 @@
                   </span>
                   {#if phone.iccid && onSetIccidMapping}
                     <span
-                      class="text-xs bg-orange-500 hover:bg-orange-600 text-white px-2 py-1 rounded transition-colors cursor-pointer"
+                      class="text-xs tech-button px-2 py-1 cursor-pointer"
                       on:click|stopPropagation={() => onSetIccidMapping(phone)}
                       on:keydown|stopPropagation={(e) =>
                         e.key === "Enter" && onSetIccidMapping(phone)}
@@ -242,29 +242,29 @@
                   {/if}
                 {/if}
                 {#if selectedPhoneIccid === phone.iccid}
-                  <span class="text-purple-600 text-xs font-semibold ml-1"
+                  <span class="text-cyan-400 text-xs font-semibold ml-1 animate-pulse"
                     >✓</span
                   >
                 {/if}
               </div>
-              <div class="text-xs text-gray-600 mt-0.5">
+              <div class="text-xs text-cyan-400/70 mt-0.5">
                 {#if phone.carrier}
-                  <span class="font-medium">{phone.carrier}</span>
+                  <span class="font-bold text-cyan-300">{phone.carrier}</span>
                 {/if}
                 {#if phone.operator_name}
-                  <span class="text-gray-500"> • {phone.operator_name}</span>
+                  <span class="text-cyan-500/60"> • {phone.operator_name}</span>
                 {/if}
                 {#if phone.iccid && phone.iccid.length > 15}
                   <!-- ICCID (long numeric string) -->
-                  <span class="text-gray-500 font-mono">
+                  <span class="text-cyan-500/60 font-mono">
                     • {phone.iccid.slice(0, 6)}...{phone.iccid.slice(-4)}</span
                   >
                 {:else if phone.iccid}
                   <!-- Shorter ICCID -->
-                  <span class="text-purple-600"> • {phone.iccid}</span>
+                  <span class="text-purple-400"> • {phone.iccid}</span>
                 {/if}
                 {#if phone.modem_index != null || phone.sim_index != null}
-                  <span class="text-indigo-600 font-medium">
+                  <span class="text-indigo-400 font-medium">
                     {#if phone.modem_index != null}
                       • M{phone.modem_index}
                     {/if}
@@ -284,7 +284,7 @@
             />
           </div>
           {#if phone.lastActive && !mobile}
-            <div class="text-xs text-gray-400 mt-1">
+            <div class="text-xs text-cyan-600/50 mt-1">
               最后活跃: {new Date(phone.lastActive).toLocaleString("zh-CN")}
             </div>
           {/if}
