@@ -54,6 +54,13 @@ export const updatesHandler = {
           data: phones,
           timestamp: new Date().toISOString()
         });
+      } else {
+        // Still send an update but with empty array to ensure frontend gets valid data
+        updates.push({
+          type: 'phones:updated',
+          data: [],
+          timestamp: new Date().toISOString()
+        });
       }
       
       // Check for new messages based on latest tracking info

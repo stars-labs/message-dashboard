@@ -84,8 +84,8 @@ export class WebGPUEffects {
         let circularY = sin(angle) * radius;
         
         let mixFactor = sin(uniforms.time * 0.2) * 0.5 + 0.5;
-        let x = mix(gridX, circularX, mixFactor);
-        let y = mix(gridY, circularY, mixFactor);
+        var x = mix(gridX, circularX, mixFactor);
+        var y = mix(gridY, circularY, mixFactor);
         
         // Add mouse influence
         let mouseInfluence = 1.0 - distance(vec2<f32>(x, y), uniforms.mousePos) * 0.5;
@@ -147,7 +147,7 @@ export class WebGPUEffects {
         color.a *= glow * glow;
         
         // Add bloom effect
-        color.rgb *= 1.0 + glow * 2.0;
+        color = vec4<f32>(color.rgb * (1.0 + glow * 2.0), color.a);
         
         return color;
       }
@@ -227,12 +227,12 @@ export class WebGPUEffects {
   }
 
   updateUniforms(mouseX = 0, mouseY = 0) {
-    if (!this.device || !this.uniformBuffer) return;
+    if (!this.device || !this.uniformBuffer || !this.canvas) return;
 
     const uniformData = new Float32Array([
       this.time,
-      this.canvas.width,
-      this.canvas.height,
+      this.canvas.width || 1,
+      this.canvas.height || 1,
       0, // padding
       mouseX * 2 - 1,
       mouseY * 2 - 1,

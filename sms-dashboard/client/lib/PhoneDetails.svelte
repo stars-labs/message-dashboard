@@ -1,9 +1,11 @@
 <script>
   import SignalStrength from './SignalStrength.svelte';
+  import AIInsights from './AIInsights.svelte';
   
   export let phone = null;
   export let mobile = false;
   export let daemonStatus = { connected: false, lastDataUpdate: null };
+  export let showInsights = true;
   
   // Function to get carrier color class (dark theme)
   function getCarrierColor(carrier) {
@@ -192,4 +194,11 @@
       {/if}
     </div>
   </div>
+  
+  <!-- AI Insights for this phone -->
+  {#if showInsights && !mobile}
+    <div class="mt-4">
+      <AIInsights phoneId={phone.iccid} compact={true} />
+    </div>
+  {/if}
 {/if}

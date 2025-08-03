@@ -39,8 +39,8 @@
     if (!simSearch) return true;
     const searchLower = simSearch.toLowerCase();
     const phoneNumber = (phone.number && phone.number !== "null") ? phone.number : (phone.iccid ? `ICCID: ${phone.iccid.slice(-6)}` : "Unknown");
-    const phoneDisplay = `${phone.flag} ${phoneNumber} ${phone.operator_name || ""}`.toLowerCase();
-    return phoneDisplay.includes(searchLower) || phone.iccid.toLowerCase().includes(searchLower);
+    const phoneDisplay = `${phone.flag || ''} ${phoneNumber} ${phone.operator_name || ""}`.toLowerCase();
+    return phoneDisplay.includes(searchLower) || (phone.iccid && phone.iccid.toLowerCase().includes(searchLower));
   });
 
   // Initialize recipientSIM when selectedPhone changes, but only if recipientSIM is empty

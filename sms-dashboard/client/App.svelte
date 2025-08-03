@@ -8,6 +8,8 @@
   import PhoneDetails from "./lib/PhoneDetails.svelte";
   import IccidMappingDialog from "./lib/IccidMappingDialog.svelte";
   import WebGPUBackground from "./lib/WebGPUBackground.svelte";
+  import ChatAssistant from "./lib/ChatAssistant.svelte";
+  import SemanticSearch from "./lib/SemanticSearch.svelte";
   import { api } from "./lib/api.js";
   import { pollingService } from "./lib/polling-service.js";
   import { auth } from "./lib/auth.js";
@@ -18,6 +20,11 @@
   $: selectedPhone = selectedPhoneIccid
     ? phoneNumbers.find((p) => p.iccid === selectedPhoneIccid)
     : null;
+  
+  // When phone is selected, load messages for that specific phone
+  $: if (selectedPhoneIccid) {
+    loadMessagesForPhone(selectedPhoneIccid);
+  }
   let selectedCountry = "all";
   let searchTerm = "";
   let showPhoneList = false;
@@ -60,12 +67,27 @@
         "Content-Type": "application/json",
       };
 
-      // Make direct HTTP requests in parallel
+      // Make direct HTTP requests in parallel with error handling
       const [phonesResponse, messagesResponse, statsResponse] =
         await Promise.all([
-          fetch("/api/phones", { headers }).then((r) => r.json()),
-          fetch("/api/messages?limit=100", { headers }).then((r) => r.json()),
-          fetch("/api/stats", { headers }).then((r) => r.json()),
+          fetch("/api/phones", { headers })
+            .then((r) => r.json())
+            .catch((err) => {
+              console.error('[App] Failed to fetch phones:', err);
+              return { success: false, data: [] };
+            }),
+          fetch("/api/messages?limit=2000", { headers })
+            .then((r) => r.json())
+            .catch((err) => {
+              console.error('[App] Failed to fetch messages:', err);
+              return { success: false, data: [] };
+            }),
+          fetch("/api/stats", { headers })
+            .then((r) => r.json())
+            .catch((err) => {
+              console.error('[App] Failed to fetch stats:', err);
+              return { success: false };
+            }),
         ]);
 
       // Handle different response formats
@@ -90,10 +112,26 @@
       console.log('[App] Loaded phones:', phoneNumbers.length);
       console.log('[App] Phone ICCIDs:', phoneNumbers.map(p => p.iccid));
 
-      messages = messagesResponse.data || [];
+      // Safely handle messages response
+      if (messagesResponse && messagesResponse.data) {
+        // Handle both array and object with results
+        if (Array.isArray(messagesResponse.data)) {
+          messages = messagesResponse.data;
+        } else if (messagesResponse.data.results && Array.isArray(messagesResponse.data.results)) {
+          messages = messagesResponse.data.results;
+        } else {
+          console.warn('[App] Unexpected messages response format:', messagesResponse);
+          messages = [];
+        }
+      } else {
+        console.warn('[App] Invalid messages response:', messagesResponse);
+        messages = [];
+      }
+      
       console.log('[App] Initial messages loaded:', messages.length);
       if (messages.length > 0) {
         console.log('[App] First message:', messages[0]);
+        console.log('[App] Message ICCIDs:', [...new Set(messages.map(m => m.phone_iccid))]);
         console.log('[App] Message IDs:', messages.slice(0, 5).map(m => m.id));
         
         // Update polling service with latest message info
@@ -342,14 +380,20 @@
     pollingUnsubscribers.push(
       pollingService.on("phones:updated", (msg) => {
         // Phones updated
-        console.log("Polling update - phones:", msg.data);
+        console.log("Polling update - phones:", msg?.data);
+
+        // Safety check - ensure msg exists and has data
+        if (!msg || !msg.data) {
+          console.warn("[App] Invalid phone update message:", msg);
+          return;
+        }
 
         // Update daemon status when we receive phone data
         daemonStatus.lastPhoneUpdate = Date.now();
         daemonStatus.lastDataUpdate = Date.now();
 
         // Only update phones if we have valid data
-        if (msg.data && Array.isArray(msg.data) && msg.data.length > 0) {
+        if (Array.isArray(msg.data) && msg.data.length > 0) {
           // Replace all phones with the new data (don't append)
           // The daemon sends the complete list of phones
           // Filter out phones without valid ICCIDs
@@ -447,9 +491,90 @@
     }
   });
 
-  function selectPhone(phone) {
+  async function selectPhone(phone) {
     selectedPhoneIccid = phone?.iccid || null;
     showPhoneList = false;
+    
+    // Load all messages for the selected phone
+    if (phone?.iccid) {
+      try {
+        console.log('[App] Loading messages for phone:', phone.iccid);
+        const token = auth.token || "anonymous";
+        const headers = {
+          Authorization: token !== "anonymous" ? `Bearer ${token}` : undefined,
+          "Content-Type": "application/json",
+        };
+        
+        const response = await fetch(`/api/messages?phone_iccid=${phone.iccid}&limit=2000`, { headers });
+        const result = await response.json();
+        
+        console.log('[App] API Response:', {
+          success: result.success,
+          dataLength: result.data?.length,
+          sampleData: result.data?.slice(0, 2)
+        });
+        
+        if (result.success && result.data) {
+          // Check data format - handle both array and object responses
+          const messageData = Array.isArray(result.data) ? result.data : (result.data.results || []);
+          console.log('[App] Extracted message data:', messageData.length, 'messages');
+          
+          // Merge with existing messages, avoiding duplicates
+          const existingIds = new Set(messages.map(m => m.id));
+          const phoneMessages = messageData.filter(m => !existingIds.has(m.id));
+          
+          console.log('[App] Messages for phone:', {
+            iccid: phone.iccid,
+            totalInResponse: messageData.length,
+            newMessages: phoneMessages.length,
+            existingMessages: messages.length
+          });
+          
+          if (phoneMessages.length > 0) {
+            messages = [...messages, ...phoneMessages];
+            console.log(`[App] Updated total messages: ${messages.length}`);
+          } else if (messageData.length > 0) {
+            console.log('[App] All messages were already loaded');
+          } else {
+            console.log('[App] No messages found for this phone');
+          }
+        }
+      } catch (err) {
+        console.error('[App] Failed to load messages for phone:', err);
+      }
+    }
+  }
+  
+  // Load messages for a specific phone
+  async function loadMessagesForPhone(phoneIccid) {
+    if (!phoneIccid) return;
+    
+    try {
+      console.log(`[App] Loading messages for phone ICCID: ${phoneIccid}`);
+      
+      const response = await api.getMessages({ 
+        phone_iccid: phoneIccid,
+        limit: 500 // Load up to 500 messages for this specific phone
+      });
+      
+      if (response && response.data) {
+        console.log(`[App] Loaded ${response.data.length} messages for phone ${phoneIccid}`);
+        
+        // Merge with existing messages, avoiding duplicates
+        const existingIds = new Set(messages.map(m => m.id));
+        const newMessages = response.data.filter(m => !existingIds.has(m.id));
+        
+        if (newMessages.length > 0) {
+          console.log(`[App] Adding ${newMessages.length} new messages for phone ${phoneIccid}`);
+          messages = [...messages, ...newMessages];
+          
+          // Sort messages by timestamp (newest first)
+          messages.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+        }
+      }
+    } catch (error) {
+      console.error('[App] Failed to load messages for phone:', error);
+    }
   }
 
   function handleSetIccidMapping(phone) {
@@ -715,7 +840,7 @@
   <div class="min-h-screen bg-black relative">
     <WebGPUBackground />
     <!-- Mobile Header -->
-    <header class="glassmorphism shadow-lg sticky top-0 z-40 tech-border scan-line">
+    <header class="bg-gray-900/95 backdrop-blur-xl shadow-lg sticky top-0 z-40 border-b border-cyan-500/30">
       <div class="px-4">
         <div class="flex justify-between items-center h-16">
           <button
@@ -738,7 +863,7 @@
             </svg>
           </button>
           <h1
-            class="text-xl font-bold data-value header-effect-target"
+            class="text-xl font-bold bg-gradient-to-r from-green-400 to-emerald-500 bg-clip-text text-transparent animate-gradient-x header-effect-target"
           >
             短信验证码管理系统
           </h1>
@@ -755,7 +880,10 @@
               消息管理
             </button>
             <button
-              on:click={() => (currentView = "iccid-mappings")}
+              on:click={() => {
+                console.log("[App] Switching to ICCID mappings view");
+                currentView = "iccid-mappings";
+              }}
               class="px-4 py-2 rounded-lg transition-all {currentView ===
               'iccid-mappings'
                 ? 'tech-button'
@@ -902,7 +1030,10 @@
           消息管理
         </button>
         <button
-          on:click={() => (currentView = "iccid-mappings")}
+          on:click={() => {
+            console.log("[App] Switching to ICCID mappings view (mobile)");
+            currentView = "iccid-mappings";
+          }}
           class="flex-1 px-3 py-2 rounded-lg text-sm transition-all {currentView ===
           'iccid-mappings'
             ? 'tech-button'
@@ -1010,11 +1141,24 @@
             />
           </div>
         </div>
+        
+        <!-- AI-Powered Semantic Search -->
+        <div class="mt-6">
+          <SemanticSearch 
+            {selectedPhoneIccid}
+            on:messageSelected={(e) => {
+              // Handle message selection from search
+              const message = e.detail;
+              // You might want to scroll to the message or highlight it
+              console.log('Selected message from search:', message);
+            }}
+          />
+        </div>
       </div>
 
       <!-- Main Content -->
       <div class="lg:px-8 lg:pb-6">
-        <div class="lg:grid lg:grid-cols-4 lg:gap-6">
+        <div class="lg:grid lg:grid-cols-4 lg:gap-6 lg:items-start lg:content-start">
           <!-- Mobile Phone List Overlay -->
           {#if showPhoneList}
             <div
@@ -1065,19 +1209,19 @@
             />
           </div>
 
-          <!-- Message View -->
+          <!-- Message View Column -->
           <div class="lg:col-span-2">
+            <!-- Always show MessageView at the top -->
+            <MessageView {messages} {selectedPhone} mobile={false} />
+            <!-- Show PhoneDetails below if selected -->
             {#if selectedPhone}
-              <PhoneDetails
-                phone={selectedPhone}
-                mobile={false}
-                {daemonStatus}
-              />
               <div class="mt-4">
-                <MessageView {messages} {selectedPhone} mobile={true} />
+                <PhoneDetails
+                  phone={selectedPhone}
+                  mobile={false}
+                  {daemonStatus}
+                />
               </div>
-            {:else}
-              <MessageView {messages} {selectedPhone} mobile={true} />
             {/if}
           </div>
 
@@ -1111,3 +1255,8 @@
     showIccidMappingDialog = false;
   }}
 />
+
+<!-- AI Chat Assistant -->
+{#if user}
+  <ChatAssistant {user} />
+{/if}

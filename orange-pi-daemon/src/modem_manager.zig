@@ -1,5 +1,6 @@
 const std = @import("std");
 const types = @import("types.zig");
+const MessageTracker = @import("message_tracker.zig").MessageTracker;
 
 // Helper function to check if a byte sequence ends with valid UTF-8
 fn isValidUtf8Ending(bytes: []const u8) bool {
@@ -15,6 +16,7 @@ pub const ModemManager = struct {
     failed_sms_ids: std.hash_map.HashMap([]const u8, void, std.hash_map.StringContext, std.hash_map.default_max_load_percentage),
     iccid_warnings: std.hash_map.HashMap([]const u8, bool, std.hash_map.StringContext, std.hash_map.default_max_load_percentage),
     problematic_modems: std.hash_map.HashMap([]const u8, void, std.hash_map.StringContext, std.hash_map.default_max_load_percentage), // Track modems that crash mmcli
+    message_tracker: MessageTracker,
 
     pub fn init(allocator: std.mem.Allocator) ModemManager {
         return .{
@@ -22,6 +24,7 @@ pub const ModemManager = struct {
             .failed_sms_ids = std.hash_map.HashMap([]const u8, void, std.hash_map.StringContext, std.hash_map.default_max_load_percentage).init(allocator),
             .iccid_warnings = std.hash_map.HashMap([]const u8, bool, std.hash_map.StringContext, std.hash_map.default_max_load_percentage).init(allocator),
             .problematic_modems = std.hash_map.HashMap([]const u8, void, std.hash_map.StringContext, std.hash_map.default_max_load_percentage).init(allocator),
+            .message_tracker = MessageTracker.init(allocator),
         };
     }
 
@@ -46,6 +49,9 @@ pub const ModemManager = struct {
             self.allocator.free(entry.key_ptr.*);
         }
         self.problematic_modems.deinit();
+        
+        // Clean up message tracker
+        self.message_tracker.deinit();
     }
 
     /// Clean up all SMS messages on a modem to prevent storage overflow
@@ -611,6 +617,36 @@ pub const ModemManager = struct {
                 }
 
                 if (self.getSmsDetails(sms_id_str, modem_id)) |message_info| {
+                    // Check if this message has already been processed
+                    const is_processed = self.message_tracker.isProcessed(
+                        modem_id,
+                        sms_id_str,
+                        message_info.message.phone_number,
+                        message_info.message.timestamp
+                    ) catch false;
+                    
+                    if (is_processed) {
+                        std.log.debug("📋 Skipping already processed message {s} on modem {s}", .{ sms_id_str, modem_id });
+                        // Free the message info since we're not using it
+                        self.allocator.free(message_info.modem_id);
+                        self.allocator.free(message_info.sms_id);
+                        self.allocator.free(message_info.message.phone_iccid);
+                        self.allocator.free(message_info.message.phone_number);
+                        self.allocator.free(message_info.message.content);
+                        self.allocator.free(message_info.message.timestamp);
+                        continue;
+                    }
+                    
+                    // Mark this message as processed
+                    self.message_tracker.markProcessed(
+                        modem_id,
+                        sms_id_str,
+                        message_info.message.phone_number,
+                        message_info.message.timestamp
+                    ) catch |err| {
+                        std.log.warn("Failed to mark message as processed: {any}", .{err});
+                    };
+                    
                     try messages.append(message_info);
                 } else |_| {
                     continue;
