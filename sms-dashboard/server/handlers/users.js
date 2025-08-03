@@ -55,7 +55,7 @@ export const usersHandler = {
       
       return new Response(JSON.stringify({
         success: true,
-        data: users.results.map(u => ({
+        data: users.map(u => ({
           ...u,
           groups: u.groups ? u.groups.split(',') : []
         })),

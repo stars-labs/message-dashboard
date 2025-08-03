@@ -7,15 +7,24 @@
   import IccidMappings from "./lib/IccidMappings.svelte";
   import PhoneDetails from "./lib/PhoneDetails.svelte";
   import IccidMappingDialog from "./lib/IccidMappingDialog.svelte";
+  import WebGPUBackground from "./lib/WebGPUBackground.svelte";
+  import ChatAssistant from "./lib/ChatAssistant.svelte";
+  import SemanticSearch from "./lib/SemanticSearch.svelte";
   import { api } from "./lib/api.js";
   import { pollingService } from "./lib/polling-service.js";
   import { auth } from "./lib/auth.js";
   import config from "./lib/config.js";
+  import { applyDataStreamEffect, applyNeonGlow, createMatrixRain, applyHeaderEffect } from "./lib/webgpu-effects.js";
 
   let selectedPhoneIccid = null;
   $: selectedPhone = selectedPhoneIccid
     ? phoneNumbers.find((p) => p.iccid === selectedPhoneIccid)
     : null;
+  
+  // When phone is selected, load messages for that specific phone
+  $: if (selectedPhoneIccid) {
+    loadMessagesForPhone(selectedPhoneIccid);
+  }
   let selectedCountry = "all";
   let searchTerm = "";
   let showPhoneList = false;
@@ -58,12 +67,27 @@
         "Content-Type": "application/json",
       };
 
-      // Make direct HTTP requests in parallel
+      // Make direct HTTP requests in parallel with error handling
       const [phonesResponse, messagesResponse, statsResponse] =
         await Promise.all([
-          fetch("/api/phones", { headers }).then((r) => r.json()),
-          fetch("/api/messages?limit=100", { headers }).then((r) => r.json()),
-          fetch("/api/stats", { headers }).then((r) => r.json()),
+          fetch("/api/phones", { headers })
+            .then((r) => r.json())
+            .catch((err) => {
+              console.error('[App] Failed to fetch phones:', err);
+              return { success: false, data: [] };
+            }),
+          fetch("/api/messages?limit=2000", { headers })
+            .then((r) => r.json())
+            .catch((err) => {
+              console.error('[App] Failed to fetch messages:', err);
+              return { success: false, data: [] };
+            }),
+          fetch("/api/stats", { headers })
+            .then((r) => r.json())
+            .catch((err) => {
+              console.error('[App] Failed to fetch stats:', err);
+              return { success: false };
+            }),
         ]);
 
       // Handle different response formats
@@ -88,10 +112,26 @@
       console.log('[App] Loaded phones:', phoneNumbers.length);
       console.log('[App] Phone ICCIDs:', phoneNumbers.map(p => p.iccid));
 
-      messages = messagesResponse.data || [];
+      // Safely handle messages response
+      if (messagesResponse && messagesResponse.data) {
+        // Handle both array and object with results
+        if (Array.isArray(messagesResponse.data)) {
+          messages = messagesResponse.data;
+        } else if (messagesResponse.data.results && Array.isArray(messagesResponse.data.results)) {
+          messages = messagesResponse.data.results;
+        } else {
+          console.warn('[App] Unexpected messages response format:', messagesResponse);
+          messages = [];
+        }
+      } else {
+        console.warn('[App] Invalid messages response:', messagesResponse);
+        messages = [];
+      }
+      
       console.log('[App] Initial messages loaded:', messages.length);
       if (messages.length > 0) {
         console.log('[App] First message:', messages[0]);
+        console.log('[App] Message ICCIDs:', [...new Set(messages.map(m => m.phone_iccid))]);
         console.log('[App] Message IDs:', messages.slice(0, 5).map(m => m.id));
         
         // Update polling service with latest message info
@@ -105,6 +145,7 @@
 
       // Map API stats to component format
       if (statsResponse) {
+        console.log('[App] Stats API Response:', statsResponse);
         stats = {
           totalMessages: statsResponse.total_messages || 0,
           todayMessages: statsResponse.today_messages || 0,
@@ -120,6 +161,7 @@
             (statsResponse.verification_rate || 0) * 100,
           ),
         };
+        console.log('[App] Processed stats:', stats);
         
         // Update daemon status from API
         if (statsResponse.daemon_status) {
@@ -182,6 +224,18 @@
   }
 
   onMount(async () => {
+    // Apply matrix rain effect to body
+    const removeMatrixRain = createMatrixRain(document.body);
+    
+    // Apply header effects after a small delay to ensure DOM is ready
+    setTimeout(() => {
+      // Apply to main headers
+      const headers = document.querySelectorAll('.header-effect-target');
+      headers.forEach(header => {
+        applyHeaderEffect(header);
+      });
+    }, 100);
+    
     // Check if returning from Auth0 callback
     if (window.location.search.includes("token=")) {
       await auth.handleCallback();
@@ -228,6 +282,9 @@
       
       // Store interval for cleanup
       window._daemonHealthInterval = healthCheckInterval;
+      
+      // Store matrix rain cleanup
+      window._removeMatrixRain = removeMatrixRain;
     } else {
       // Still try to start polling for anonymous users
       startPolling().catch((error) => {
@@ -323,14 +380,20 @@
     pollingUnsubscribers.push(
       pollingService.on("phones:updated", (msg) => {
         // Phones updated
-        console.log("Polling update - phones:", msg.data);
+        console.log("Polling update - phones:", msg?.data);
+
+        // Safety check - ensure msg exists and has data
+        if (!msg || !msg.data) {
+          console.warn("[App] Invalid phone update message:", msg);
+          return;
+        }
 
         // Update daemon status when we receive phone data
         daemonStatus.lastPhoneUpdate = Date.now();
         daemonStatus.lastDataUpdate = Date.now();
 
         // Only update phones if we have valid data
-        if (msg.data && Array.isArray(msg.data) && msg.data.length > 0) {
+        if (Array.isArray(msg.data) && msg.data.length > 0) {
           // Replace all phones with the new data (don't append)
           // The daemon sends the complete list of phones
           // Filter out phones without valid ICCIDs
@@ -421,11 +484,97 @@
     if (window._daemonHealthInterval) {
       clearInterval(window._daemonHealthInterval);
     }
+    
+    // Remove matrix rain
+    if (window._removeMatrixRain) {
+      window._removeMatrixRain();
+    }
   });
 
-  function selectPhone(phone) {
+  async function selectPhone(phone) {
     selectedPhoneIccid = phone?.iccid || null;
     showPhoneList = false;
+    
+    // Load all messages for the selected phone
+    if (phone?.iccid) {
+      try {
+        console.log('[App] Loading messages for phone:', phone.iccid);
+        const token = auth.token || "anonymous";
+        const headers = {
+          Authorization: token !== "anonymous" ? `Bearer ${token}` : undefined,
+          "Content-Type": "application/json",
+        };
+        
+        const response = await fetch(`/api/messages?phone_iccid=${phone.iccid}&limit=2000`, { headers });
+        const result = await response.json();
+        
+        console.log('[App] API Response:', {
+          success: result.success,
+          dataLength: result.data?.length,
+          sampleData: result.data?.slice(0, 2)
+        });
+        
+        if (result.success && result.data) {
+          // Check data format - handle both array and object responses
+          const messageData = Array.isArray(result.data) ? result.data : (result.data.results || []);
+          console.log('[App] Extracted message data:', messageData.length, 'messages');
+          
+          // Merge with existing messages, avoiding duplicates
+          const existingIds = new Set(messages.map(m => m.id));
+          const phoneMessages = messageData.filter(m => !existingIds.has(m.id));
+          
+          console.log('[App] Messages for phone:', {
+            iccid: phone.iccid,
+            totalInResponse: messageData.length,
+            newMessages: phoneMessages.length,
+            existingMessages: messages.length
+          });
+          
+          if (phoneMessages.length > 0) {
+            messages = [...messages, ...phoneMessages];
+            console.log(`[App] Updated total messages: ${messages.length}`);
+          } else if (messageData.length > 0) {
+            console.log('[App] All messages were already loaded');
+          } else {
+            console.log('[App] No messages found for this phone');
+          }
+        }
+      } catch (err) {
+        console.error('[App] Failed to load messages for phone:', err);
+      }
+    }
+  }
+  
+  // Load messages for a specific phone
+  async function loadMessagesForPhone(phoneIccid) {
+    if (!phoneIccid) return;
+    
+    try {
+      console.log(`[App] Loading messages for phone ICCID: ${phoneIccid}`);
+      
+      const response = await api.getMessages({ 
+        phone_iccid: phoneIccid,
+        limit: 500 // Load up to 500 messages for this specific phone
+      });
+      
+      if (response && response.data) {
+        console.log(`[App] Loaded ${response.data.length} messages for phone ${phoneIccid}`);
+        
+        // Merge with existing messages, avoiding duplicates
+        const existingIds = new Set(messages.map(m => m.id));
+        const newMessages = response.data.filter(m => !existingIds.has(m.id));
+        
+        if (newMessages.length > 0) {
+          console.log(`[App] Adding ${newMessages.length} new messages for phone ${phoneIccid}`);
+          messages = [...messages, ...newMessages];
+          
+          // Sort messages by timestamp (newest first)
+          messages.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+        }
+      }
+    } catch (error) {
+      console.error('[App] Failed to load messages for phone:', error);
+    }
   }
 
   function handleSetIccidMapping(phone) {
@@ -644,11 +793,12 @@
 </script>
 
 {#if loading}
-  <div class="min-h-screen flex items-center justify-center">
-    <div class="text-center">
+  <div class="min-h-screen flex items-center justify-center bg-black">
+    <WebGPUBackground />
+    <div class="text-center z-10">
       <div class="inline-flex items-center">
         <svg
-          class="animate-spin h-8 w-8 text-purple-600 mr-3"
+          class="animate-spin h-8 w-8 text-cyan-400 mr-3"
           fill="none"
           viewBox="0 0 24 24"
         >
@@ -666,29 +816,31 @@
             d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
           ></path>
         </svg>
-        <span class="text-xl text-gray-600">加载中...</span>
+        <span class="text-xl text-cyan-300 cyber-text" data-text="加载中...">加载中...</span>
       </div>
     </div>
   </div>
 {:else if !user}
   <div
-    class="min-h-screen flex items-center justify-center bg-gradient-to-br from-purple-50 to-indigo-100"
+    class="min-h-screen flex items-center justify-center bg-black"
   >
-    <div class="text-center bg-white p-8 rounded-xl shadow-lg">
-      <h1 class="text-3xl font-bold text-gray-800 mb-4">短信验证码管理系统</h1>
-      <p class="text-gray-600 mb-6">请登录以继续</p>
+    <WebGPUBackground />
+    <div class="text-center tech-card holo-card p-8 z-10">
+      <h1 class="text-3xl font-bold mb-4 cyber-text header-effect-target" data-text="短信验证码管理系统">短信验证码管理系统</h1>
+      <p class="text-cyan-300 mb-6">请登录以继续</p>
       <a
         href="/login"
-        class="inline-block px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white font-medium rounded-lg transition-colors"
+        class="inline-block tech-button"
       >
         使用 Auth0 登录
       </a>
     </div>
   </div>
 {:else}
-  <div class="min-h-screen">
+  <div class="min-h-screen bg-black relative">
+    <WebGPUBackground />
     <!-- Mobile Header -->
-    <header class="glassmorphism shadow-lg sticky top-0 z-40">
+    <header class="bg-gray-900/95 backdrop-blur-xl shadow-lg sticky top-0 z-40 border-b border-cyan-500/30">
       <div class="px-4">
         <div class="flex justify-between items-center h-16">
           <button
@@ -711,7 +863,7 @@
             </svg>
           </button>
           <h1
-            class="text-xl font-bold bg-gradient-to-r from-purple-600 to-indigo-600 bg-clip-text text-transparent"
+            class="text-xl font-bold bg-gradient-to-r from-green-400 to-emerald-500 bg-clip-text text-transparent animate-gradient-x header-effect-target"
           >
             短信验证码管理系统
           </h1>
@@ -720,19 +872,22 @@
           <div class="hidden lg:flex items-center gap-4 flex-1 justify-center">
             <button
               on:click={() => (currentView = "dashboard")}
-              class="px-4 py-2 rounded-lg transition-colors {currentView ===
+              class="px-4 py-2 rounded-lg transition-all {currentView ===
               'dashboard'
-                ? 'bg-purple-100 text-purple-700'
-                : 'text-gray-600 hover:bg-gray-100'}"
+                ? 'tech-button'
+                : 'text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/20'}"
             >
               消息管理
             </button>
             <button
-              on:click={() => (currentView = "iccid-mappings")}
-              class="px-4 py-2 rounded-lg transition-colors {currentView ===
+              on:click={() => {
+                console.log("[App] Switching to ICCID mappings view");
+                currentView = "iccid-mappings";
+              }}
+              class="px-4 py-2 rounded-lg transition-all {currentView ===
               'iccid-mappings'
-                ? 'bg-purple-100 text-purple-700'
-                : 'text-gray-600 hover:bg-gray-100'}"
+                ? 'tech-button'
+                : 'text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/20'}"
             >
               ICCID 映射
             </button>
@@ -740,12 +895,12 @@
 
           <div class="hidden lg:flex items-center gap-4">
             {#if user}
-              <span class="text-sm text-gray-600"
+              <span class="text-sm text-cyan-300"
                 >欢迎, {user.name || user.email}</span
               >
               <button
                 on:click={() => auth.logout()}
-                class="text-sm px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                class="text-sm px-3 py-1 tech-button"
               >
                 退出
               </button>
@@ -755,12 +910,12 @@
               <div class="flex items-center gap-2">
                 <div
                   class="w-2 h-2 {daemonStatus.connected
-                    ? 'bg-green-500'
-                    : 'bg-red-500'} rounded-full {daemonStatus.connected
+                    ? 'bg-green-400 shadow-green-400'
+                    : 'bg-red-400 shadow-red-400'} rounded-full {daemonStatus.connected
                     ? 'animate-pulse'
-                    : ''}"
+                    : ''} shadow-lg"
                 ></div>
-                <span class={getDaemonStatusClass()}
+                <span class="{daemonStatus.connected ? 'status-online' : 'status-offline'}"
                   >守护进程: {getDaemonStatusText()}</span
                 >
               </div>
@@ -863,23 +1018,26 @@
     {/if}
 
     <!-- Mobile Navigation -->
-    <div class="lg:hidden px-4 py-2 bg-gray-50 border-b">
+    <div class="lg:hidden px-4 py-2 glassmorphism border-b border-cyan-900/30">
       <div class="flex gap-2">
         <button
           on:click={() => (currentView = "dashboard")}
-          class="flex-1 px-3 py-2 rounded-lg text-sm transition-colors {currentView ===
+          class="flex-1 px-3 py-2 rounded-lg text-sm transition-all {currentView ===
           'dashboard'
-            ? 'bg-purple-100 text-purple-700'
-            : 'text-gray-600 bg-white'}"
+            ? 'tech-button'
+            : 'text-cyan-400 bg-cyan-900/20'}"
         >
           消息管理
         </button>
         <button
-          on:click={() => (currentView = "iccid-mappings")}
-          class="flex-1 px-3 py-2 rounded-lg text-sm transition-colors {currentView ===
+          on:click={() => {
+            console.log("[App] Switching to ICCID mappings view (mobile)");
+            currentView = "iccid-mappings";
+          }}
+          class="flex-1 px-3 py-2 rounded-lg text-sm transition-all {currentView ===
           'iccid-mappings'
-            ? 'bg-purple-100 text-purple-700'
-            : 'text-gray-600 bg-white'}"
+            ? 'tech-button'
+            : 'text-cyan-400 bg-cyan-900/20'}"
         >
           ICCID 映射
         </button>
@@ -891,43 +1049,43 @@
       <div class="lg:hidden overflow-x-auto px-4 py-4">
         <div class="flex gap-3 min-w-max">
           <div
-            class="bg-gradient-to-br from-blue-500 to-blue-600 text-white px-4 py-3 rounded-xl shadow-lg"
+            class="tech-card holo-card text-white px-4 py-3"
           >
-            <div class="text-xs opacity-90">在线设备</div>
-            <div class="text-xl font-bold">
+            <div class="text-xs text-cyan-300 font-bold tech-text">在线设备</div>
+            <div class="text-xl font-bold data-value high-contrast">
               {phoneNumbers.filter((p) => p.status === "online" || p.status === "active" || p.status === "registered")
                 .length}/{phoneNumbers.length}
             </div>
           </div>
           <div
-            class="bg-gradient-to-br from-green-500 to-green-600 text-white px-4 py-3 rounded-xl shadow-lg"
+            class="tech-card holo-card text-white px-4 py-3"
           >
-            <div class="text-xs opacity-90">今日接收</div>
-            <div class="text-xl font-bold">{stats.todayReceived}</div>
+            <div class="text-xs text-cyan-300 font-bold tech-text">今日接收</div>
+            <div class="text-xl font-bold data-value high-contrast">{stats.todayReceived || 0}</div>
           </div>
           <div
-            class="bg-gradient-to-br from-blue-500 to-indigo-600 text-white px-4 py-3 rounded-xl shadow-lg"
+            class="tech-card holo-card text-white px-4 py-3"
           >
-            <div class="text-xs opacity-90">今日发送</div>
-            <div class="text-xl font-bold">{stats.todaySent}</div>
+            <div class="text-xs text-cyan-300 font-bold tech-text">今日发送</div>
+            <div class="text-xl font-bold data-value high-contrast">{stats.todaySent || 0}</div>
           </div>
           <div
-            class="bg-gradient-to-br from-purple-500 to-purple-600 text-white px-4 py-3 rounded-xl shadow-lg"
+            class="tech-card holo-card text-white px-4 py-3"
           >
-            <div class="text-xs opacity-90">总接收</div>
-            <div class="text-xl font-bold">{stats.totalReceived}</div>
+            <div class="text-xs text-cyan-300 font-bold tech-text">总接收</div>
+            <div class="text-xl font-bold data-value high-contrast">{stats.totalReceived || 0}</div>
           </div>
           <div
-            class="bg-gradient-to-br from-indigo-500 to-indigo-600 text-white px-4 py-3 rounded-xl shadow-lg"
+            class="tech-card holo-card text-white px-4 py-3"
           >
-            <div class="text-xs opacity-90">总发送</div>
-            <div class="text-xl font-bold">{stats.totalSent}</div>
+            <div class="text-xs text-cyan-300 font-bold tech-text">总发送</div>
+            <div class="text-xl font-bold data-value high-contrast">{stats.totalSent || 0}</div>
           </div>
           <div
-            class="bg-gradient-to-br from-orange-500 to-orange-600 text-white px-4 py-3 rounded-xl shadow-lg"
+            class="tech-card holo-card text-white px-4 py-3"
           >
-            <div class="text-xs opacity-90">提取成功率</div>
-            <div class="text-xl font-bold">{stats.verificationRate}%</div>
+            <div class="text-xs text-cyan-300 font-bold tech-text">提取成功率</div>
+            <div class="text-xl font-bold data-value high-contrast">{stats.verificationRate || 0}%</div>
           </div>
         </div>
       </div>
@@ -936,7 +1094,7 @@
     {#if currentView === "dashboard"}
       <!-- Desktop Stats -->
       <div class="hidden lg:block px-8 py-6">
-        <div class="grid grid-cols-2 lg:grid-cols-4 gap-6">
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-6 hex-pattern">
           <StatsCard
             title="在线设备"
             value={phoneNumbers.filter((p) => p.status === "online" || p.status === "active" || p.status === "registered").length}
@@ -983,15 +1141,28 @@
             />
           </div>
         </div>
+        
+        <!-- AI-Powered Semantic Search -->
+        <div class="mt-6">
+          <SemanticSearch 
+            {selectedPhoneIccid}
+            on:messageSelected={(e) => {
+              // Handle message selection from search
+              const message = e.detail;
+              // You might want to scroll to the message or highlight it
+              console.log('Selected message from search:', message);
+            }}
+          />
+        </div>
       </div>
 
       <!-- Main Content -->
       <div class="lg:px-8 lg:pb-6">
-        <div class="lg:grid lg:grid-cols-4 lg:gap-6">
+        <div class="lg:grid lg:grid-cols-4 lg:gap-6 lg:items-start lg:content-start">
           <!-- Mobile Phone List Overlay -->
           {#if showPhoneList}
             <div
-              class="lg:hidden fixed inset-0 z-50 bg-gray-900 bg-opacity-75 backdrop-blur-sm"
+              class="lg:hidden fixed inset-0 z-50 bg-black/90 backdrop-blur-md"
               on:click={() => (showPhoneList = false)}
               on:keydown={(e) => e.key === "Escape" && (showPhoneList = false)}
               role="button"
@@ -999,7 +1170,7 @@
               aria-label="关闭手机列表"
             >
               <div
-                class="absolute left-0 top-0 bottom-0 w-80 max-w-full bg-white shadow-2xl"
+                class="absolute left-0 top-0 bottom-0 w-80 max-w-full bg-black/95 shadow-2xl shadow-cyan-500/20 border-r border-cyan-900/50"
                 on:click|stopPropagation
                 on:keydown|stopPropagation
                 role="dialog"
@@ -1038,19 +1209,19 @@
             />
           </div>
 
-          <!-- Message View -->
+          <!-- Message View Column -->
           <div class="lg:col-span-2">
+            <!-- Always show MessageView at the top -->
+            <MessageView {messages} {selectedPhone} mobile={false} />
+            <!-- Show PhoneDetails below if selected -->
             {#if selectedPhone}
-              <PhoneDetails
-                phone={selectedPhone}
-                mobile={false}
-                {daemonStatus}
-              />
               <div class="mt-4">
-                <MessageView {messages} {selectedPhone} mobile={true} />
+                <PhoneDetails
+                  phone={selectedPhone}
+                  mobile={false}
+                  {daemonStatus}
+                />
               </div>
-            {:else}
-              <MessageView {messages} {selectedPhone} mobile={true} />
             {/if}
           </div>
 
@@ -1084,3 +1255,8 @@
     showIccidMappingDialog = false;
   }}
 />
+
+<!-- AI Chat Assistant -->
+{#if user}
+  <ChatAssistant {user} />
+{/if}

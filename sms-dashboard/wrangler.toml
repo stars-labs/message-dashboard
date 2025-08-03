@@ -37,6 +37,14 @@ AUTH0_ALTERNATIVE_SMS_ROLES = ""  # No additional roles needed
 AUTH0_ROLE_NAMESPACE = "https://sexy.qzz.io"  # Where to find roles in Auth0 token
 AUTH0_ALLOW_NO_ROLES = "false"  # Set to "true" to allow access without roles (testing only)
 
+# AI Infrastructure bindings
+[ai]
+binding = "AI"
+
+[[vectorize]]
+binding = "VECTORIZE"
+index_name = "sms-messages"
+
 # wrangler.toml (wrangler v3.88.0^)
 [observability.logs]
 enabled = true

@@ -2,18 +2,242 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Base layer - only for global element styles */
 @layer base {
   body {
-    background: linear-gradient(to bottom right, #eef2ff, #ffffff, #faf5ff);
-    min-height: 100vh;
+    @apply bg-black min-h-screen text-white antialiased;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace;
+  }
+  
+  /* CSS Custom Properties for reusable values */
+  :root {
+    --color-cyan: theme('colors.cyan.400');
+    --color-magenta: theme('colors.pink.500');
+    --color-yellow: theme('colors.yellow.400');
   }
 }
 
-@layer utilities {
+/* Components layer - for multi-class patterns */
+@layer components {
+  /* Glassmorphism effect using Tailwind utilities */
   .glassmorphism {
-    background: rgba(255, 255, 255, 0.7);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.2);
+    @apply backdrop-blur-xl backdrop-saturate-[1.8] border border-white/10 bg-black/70;
+    @apply shadow-[0_8px_32px_0_rgba(0,255,255,0.2)] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05)];
+  }
+  
+  /* Tech card component */
+  .tech-card {
+    @apply glassmorphism rounded-xl p-6 relative overflow-hidden;
+    @apply bg-gradient-to-br from-black/90 to-gray-900/80;
+  }
+  
+  /* Tech button component */
+  .tech-button {
+    @apply relative overflow-hidden px-6 py-3 rounded-lg font-medium;
+    @apply transition-all duration-300 border border-cyan-500/30 text-cyan-400;
+    @apply bg-gradient-to-r from-cyan-500/10 to-pink-500/10;
+    @apply hover:border-cyan-400/60 hover:from-cyan-500/20 hover:to-pink-500/20;
+    @apply hover:-translate-y-0.5 hover:shadow-[0_0_20px_rgba(0,255,255,0.5)];
+    @apply active:translate-y-0;
+  }
+  
+  /* Cyber input using Tailwind */
+  .cyber-input {
+    @apply bg-cyan-500/5 border border-cyan-500/30 rounded-lg px-4 py-2;
+    @apply text-cyan-300 placeholder-cyan-300/50;
+    @apply transition-all duration-300;
+    @apply focus:outline-none focus:border-cyan-400 focus:bg-cyan-500/10;
+    @apply focus:shadow-[0_0_20px_rgba(0,255,255,0.3),inset_0_0_10px_rgba(0,255,255,0.1)];
+  }
+  
+  /* Cyber select */
+  select.cyber-input {
+    @apply cursor-pointer pr-10 appearance-none;
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2300ffff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+    background-repeat: no-repeat;
+    background-position: right 0.5rem center;
+    background-size: 1.5em 1.5em;
+  }
+  
+  select.cyber-input option {
+    @apply bg-gray-900 text-cyan-300;
+  }
+}
+
+/* Utilities layer - for single-purpose utilities */
+@layer utilities {
+  /* Text shadow utilities using CSS variables */
+  .text-glow {
+    text-shadow: 0 0 10px currentColor;
+  }
+  
+  .text-glow-sm {
+    text-shadow: 0 0 5px currentColor;
+  }
+  
+  .text-glow-lg {
+    text-shadow: 
+      0 0 10px currentColor,
+      0 0 20px currentColor,
+      0 0 30px currentColor;
+  }
+  
+  .text-glow-xl {
+    text-shadow: 
+      0 0 10px currentColor,
+      0 0 20px currentColor,
+      0 0 30px currentColor,
+      0 0 40px currentColor;
+  }
+  
+  /* Data value styling */
+  .data-value {
+    @apply font-mono text-2xl font-bold text-cyan-400 tracking-wider;
+    @apply text-glow-lg;
+  }
+  
+  /* Status utilities */
+  .status-online {
+    @apply text-green-400 text-glow;
+  }
+  
+  .status-offline {
+    @apply text-red-400 text-glow;
+  }
+  
+  /* Gradient text utilities */
+  .gradient-text {
+    @apply bg-gradient-to-r from-cyan-400 to-pink-500 bg-clip-text text-transparent;
+    @apply animate-gradient-x;
+  }
+  
+  /* Animation utilities that Tailwind doesn't provide */
+  .animate-gradient-x {
+    background-size: 200% 200%;
+    animation: gradient-x 3s ease infinite;
+  }
+  
+  .animate-gradient-shift {
+    background-size: 200% 200%;
+    animation: gradient-shift 3s ease infinite;
+  }
+  
+  /* Background patterns */
+  .bg-grid-cyan {
+    background-image: 
+      linear-gradient(rgba(6, 182, 212, 0.1) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(6, 182, 212, 0.1) 1px, transparent 1px);
+    background-size: 50px 50px;
+  }
+  
+  .bg-circuit {
+    background-image: 
+      linear-gradient(90deg, transparent 90%, rgba(6, 182, 212, 0.05) 90%),
+      linear-gradient(0deg, transparent 90%, rgba(6, 182, 212, 0.05) 90%);
+    background-size: 20px 20px;
+  }
+  
+  /* Holographic effect */
+  .holographic {
+    @apply bg-gradient-to-br from-pink-500/10 via-cyan-500/10 to-pink-500/10;
+    background-size: 400% 400%;
+    @apply animate-gradient-shift;
+  }
+  
+  /* VIP selection effect */
+  .phone-selected {
+    @apply relative border-2 border-cyan-400/50 bg-gradient-to-br from-cyan-500/10 to-pink-500/10;
+    @apply shadow-[0_0_20px_rgba(0,255,255,0.5),inset_0_0_20px_rgba(0,255,255,0.1)];
+  }
+  
+  .phone-selected::before {
+    content: '👑';
+    @apply absolute -top-3 right-2 text-2xl z-10 animate-bounce;
+  }
+  
+  /* Scan line effect */
+  .scan-line::after {
+    content: '';
+    @apply absolute top-0 left-0 w-full h-full pointer-events-none;
+    background: linear-gradient(transparent, rgba(6, 182, 212, 0.2), transparent);
+    animation: scan 4s linear infinite;
+  }
+  
+  /* High contrast text */
+  .high-contrast {
+    @apply text-white font-semibold;
+    text-shadow: 
+      0 0 10px rgba(6, 182, 212, 0.8),
+      0 0 20px rgba(6, 182, 212, 0.6);
+  }
+  
+  /* Tech text effect */
+  .tech-text {
+    @apply font-semibold tracking-wider uppercase;
+    @apply text-glow;
+  }
+  
+  /* Header text effect - brighter for visibility */
+  .header-text {
+    @apply text-white font-bold;
+    text-shadow: 
+      0 0 20px rgba(6, 182, 212, 0.9),
+      0 0 40px rgba(6, 182, 212, 0.7),
+      0 0 60px rgba(6, 182, 212, 0.5);
+  }
+}
+
+/* Minimal keyframes - only what can't be done with Tailwind */
+@keyframes gradient-x {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+@keyframes gradient-shift {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+@keyframes scan {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(100%); }
+}
+
+/* Custom scrollbar using Tailwind colors */
+::-webkit-scrollbar {
+  @apply w-3 h-3;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-black/80 rounded-full;
+  @apply border border-cyan-500/10;
+  box-shadow: inset 0 0 10px rgba(6, 182, 212, 0.1);
+}
+
+::-webkit-scrollbar-thumb {
+  @apply rounded-full border border-cyan-500/30;
+  @apply bg-gradient-to-br from-cyan-500/60 to-pink-500/40;
+  box-shadow: 0 0 10px rgba(6, 182, 212, 0.5);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply from-cyan-500/80 to-pink-500/60;
+}
+
+/* Firefox scrollbar */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: theme('colors.cyan.500 / 60%') theme('colors.black / 80%');
+}
+
+/* Mobile responsive utilities */
+@media (max-width: 768px) {
+  /* Use Tailwind's responsive modifiers instead */
+  .mobile\:text-glow-sm {
+    text-shadow: 0 0 5px currentColor;
+  }
+  
+  .mobile\:brightness-110 {
+    filter: brightness(1.1);
   }
 }

@@ -74,30 +74,6 @@ export async function handleAuth0(request) {
     // Store the full Auth0 token payload for role checking
     request.auth0Token = jwtPayload;
     
-    // Optionally update user in database
-    try {
-      // Check if user exists first
-      const existingUser = await env.DB.prepare(`
-        SELECT id FROM users WHERE id = ?
-      `).bind(request.user.id).first();
-      
-      if (!existingUser) {
-        // Insert new user
-        await env.DB.prepare(`
-          INSERT INTO users (id, email, name, provider, created_at, last_login)
-          VALUES (?, ?, ?, 'auth0', datetime('now'), datetime('now'))
-        `).bind(request.user.id, request.user.email, request.user.name).run();
-      } else {
-        // Update last login
-        await env.DB.prepare(`
-          UPDATE users SET last_login = datetime('now') WHERE id = ?
-        `).bind(request.user.id).run();
-      }
-    } catch (dbError) {
-      // Failed to update user in database
-      // Continue anyway - authentication is still valid
-    }
-    
   } catch (error) {
     // Auth0 middleware error
     return new Response(JSON.stringify({ error: 'Authentication failed' }), {
