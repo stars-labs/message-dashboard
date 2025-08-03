@@ -11,15 +11,67 @@
     ? messages.filter(msg => msg.phone_iccid === selectedPhone.iccid)
     : messages.slice().slice(0, 50);
   
+  // Deduplicate messages based on content, source, and close timestamps
+  $: uniqueMessages = (() => {
+    const seen = new Map();
+    const unique = [];
+    
+    for (const msg of filteredMessages) {
+      // Create a key based on content, source, and rounded timestamp (to nearest minute)
+      const timestamp = new Date(msg.timestamp);
+      const roundedTime = new Date(Math.floor(timestamp.getTime() / 60000) * 60000).toISOString();
+      const key = `${msg.content}|${msg.source || 'unknown'}|${roundedTime}`;
+      
+      if (!seen.has(key)) {
+        seen.set(key, true);
+        unique.push(msg);
+      }
+    }
+    
+    console.log(`[MessageView] Deduplication: ${filteredMessages.length} messages -> ${unique.length} unique messages`);
+    return unique;
+  })();
+  
   // Debug logging for message filtering
   $: {
-    if (messages.length > 0) {
-      console.log('[MessageView] Total messages:', messages.length);
-      console.log('[MessageView] Selected phone:', selectedPhone);
-      console.log('[MessageView] Filtered messages:', filteredMessages.length);
+    if (messages.length > 0 || selectedPhone) {
+      console.log('[MessageView] Debug Info:');
+      console.log('- Total messages:', messages.length);
+      console.log('- Selected phone:', selectedPhone);
+      console.log('- Filtered messages:', filteredMessages.length);
+      console.log('- Unique messages:', uniqueMessages.length);
+      console.log('- Display messages:', displayMessages.length);
+      console.log('- View mode:', viewMode);
+      console.log('- Group by:', groupBy);
+      
       if (selectedPhone) {
-        console.log('[MessageView] Filtering by ICCID:', selectedPhone.iccid);
-        console.log('[MessageView] Message ICCIDs:', messages.slice(0, 5).map(m => m.phone_iccid));
+        console.log('- Filtering by ICCID:', selectedPhone.iccid);
+        console.log('- ICCID type:', typeof selectedPhone.iccid);
+        console.log('- Sample message ICCIDs:', messages.slice(0, 5).map(m => ({
+          iccid: m.phone_iccid,
+          type: typeof m.phone_iccid,
+          content: m.content?.substring(0, 50) + '...'
+        })));
+        
+        // Check for ICCID match
+        const matchingMessages = messages.filter(m => m.phone_iccid === selectedPhone.iccid);
+        console.log('- Messages matching ICCID:', matchingMessages.length);
+        if (matchingMessages.length > 0) {
+          console.log('- First matching message:', matchingMessages[0]);
+        }
+        
+        // Also check with type conversion
+        const matchingMessagesStr = messages.filter(m => String(m.phone_iccid) === String(selectedPhone.iccid));
+        console.log('- Messages matching ICCID (string comparison):', matchingMessagesStr.length);
+        
+        // Check for partial matches
+        const partialMatches = messages.filter(m => m.phone_iccid && selectedPhone.iccid && m.phone_iccid.includes(selectedPhone.iccid));
+        console.log('- Partial ICCID matches:', partialMatches.length);
+      }
+      
+      if (groupBy === 'source') {
+        console.log('- Grouped messages:', Object.keys(groupedMessages).length, 'groups');
+        console.log('- Groups:', Object.keys(groupedMessages));
       }
     }
   }
@@ -43,14 +95,14 @@
   }
   
   // Sort messages based on view mode
-  $: recentMessages = filteredMessages.slice().sort((a, b) => {
+  $: recentMessages = uniqueMessages.slice().sort((a, b) => {
     // Recent mode: newest first (DESC)
     const dateA = parseTimestamp(a.timestamp);
     const dateB = parseTimestamp(b.timestamp);
     return dateB.getTime() - dateA.getTime();
   });
   
-  $: historyMessages = filteredMessages.slice().sort((a, b) => {
+  $: historyMessages = uniqueMessages.slice().sort((a, b) => {
     // History mode: oldest first (ASC)
     const dateA = parseTimestamp(a.timestamp);
     const dateB = parseTimestamp(b.timestamp);
@@ -175,10 +227,10 @@
   }
 </script>
 
-<div class="{mobile ? 'bg-white' : 'glassmorphism rounded-2xl shadow-xl lg:mt-0'} mt-4">
-  <div class="p-3 lg:p-4 {mobile ? 'border-b' : ''}">
-    <div class="flex justify-between items-center {mobile ? '' : 'mb-4'}">
-      <h2 class="text-base lg:text-lg font-bold bg-gradient-to-r from-purple-600 to-indigo-600 bg-clip-text text-transparent">
+<div class="{mobile ? 'bg-black/90' : 'tech-card'}">
+  <div class="p-3 lg:p-4 {mobile ? 'border-b border-cyan-900/30' : ''}">
+    <div class="flex justify-between items-center mb-3">
+      <h2 class="text-base lg:text-lg font-bold data-value high-contrast header-effect-target">
         {#if selectedPhone}
           <span class="inline-flex items-center gap-1">
             <span>{selectedPhone.flag}</span>
@@ -191,13 +243,13 @@
       
       <div class="flex gap-1 lg:gap-2">
         <button
-          class="px-3 py-1.5 text-xs lg:text-sm rounded-lg font-medium transition-all duration-300 {viewMode === 'recent' ? 'bg-gradient-to-r from-purple-500 to-indigo-500 text-white shadow-lg' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}"
+          class="px-3 py-1.5 text-xs lg:text-sm rounded-lg font-medium transition-all duration-300 {viewMode === 'recent' ? 'tech-button' : 'text-cyan-400 bg-cyan-900/20 hover:bg-cyan-900/30'}"
           on:click={() => viewMode = 'recent'}
         >
           最新
         </button>
         <button
-          class="px-3 py-1.5 text-xs lg:text-sm rounded-lg font-medium transition-all duration-300 {viewMode === 'history' ? 'bg-gradient-to-r from-purple-500 to-indigo-500 text-white shadow-lg' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}"
+          class="px-3 py-1.5 text-xs lg:text-sm rounded-lg font-medium transition-all duration-300 {viewMode === 'history' ? 'tech-button' : 'text-cyan-400 bg-cyan-900/20 hover:bg-cyan-900/30'}"
           on:click={() => viewMode = 'history'}
         >
           历史
@@ -207,10 +259,10 @@
     
     {#if viewMode === 'history' && !mobile}
       <div class="flex gap-2 items-center mt-3">
-        <span class="text-sm text-gray-600">分组方式:</span>
+        <span class="text-sm text-cyan-300">分组方式:</span>
         <select
           bind:value={groupBy}
-          class="px-2 py-1 text-sm border border-purple-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white/50"
+          class="px-2 py-1 text-sm cyber-input"
         >
           <option value="time">按时间</option>
           <option value="source">按来源</option>
@@ -219,17 +271,17 @@
     {/if}
   </div>
   
-  <div class="{mobile ? 'max-h-[calc(100vh-280px)]' : 'max-h-[600px]'} overflow-y-auto p-3 lg:p-4">
+  <div class="{mobile ? 'max-h-[calc(100vh-280px)]' : 'max-h-[calc(100vh-400px)]'} overflow-y-auto p-3 lg:p-4">
     {#if groupBy === 'source' && viewMode === 'history' && !mobile}
       {#each Object.entries(groupedMessages) as [source, msgs]}
         <div class="mb-4 lg:mb-6">
-          <h3 class="font-bold text-gray-900 mb-2 lg:mb-3 sticky top-0 bg-white/90 backdrop-blur-sm py-1 lg:py-2 flex items-center gap-2">
+          <h3 class="font-bold text-cyan-300 mb-2 lg:mb-3 sticky top-0 bg-black/90 backdrop-blur-sm py-1 lg:py-2 flex items-center gap-2">
             <span class="px-2 py-1 rounded-lg bg-gradient-to-r {getSourceColor(source)} text-white text-xs">{source || '未知来源'}</span>
-            <span class="text-sm text-gray-600">({msgs.length})</span>
+            <span class="text-sm text-cyan-400/60">({msgs.length})</span>
           </h3>
           <div class="space-y-2 lg:space-y-3">
             {#each msgs as message}
-              <div class="bg-gradient-to-r from-gray-50 to-gray-100 rounded-xl p-3 lg:p-4 border border-gray-200 hover:shadow-lg transition-shadow duration-300">
+              <div class="tech-card holo-card rounded-xl p-3 lg:p-4 hover:shadow-lg hover:shadow-cyan-500/20 transition-all duration-300">
                 <div class="flex justify-between items-start mb-2">
                   <div class="flex-1">
                     <div class="flex items-center gap-2 mb-1">
@@ -237,31 +289,31 @@
                         {message.source || '未知来源'}
                       </span>
                       {#if message.verificationCode}
-                        <span class="px-3 py-1 bg-gradient-to-r from-blue-500 to-blue-600 text-white text-sm rounded-full font-mono font-bold shadow-md">
+                        <span class="px-3 py-1 bg-gradient-to-r from-blue-500 to-blue-600 text-white text-sm rounded-full font-mono font-bold shadow-md data-display">
                           {message.verificationCode}
                         </span>
                       {/if}
                     </div>
-                    <div class="mt-2 bg-white/50 rounded-lg p-2">
-                      <p class="text-xs lg:text-sm text-gray-700 break-words whitespace-pre-wrap">{message.content}</p>
+                    <div class="mt-2 bg-black/50 rounded-lg p-2 border border-cyan-500/30">
+                      <p class="text-xs lg:text-sm text-white font-medium break-words whitespace-pre-wrap high-contrast">{message.content}</p>
                     </div>
                     <div class="mt-2 flex flex-wrap items-center gap-2 text-xs">
-                      <span class="text-purple-600 font-medium flex items-center gap-1">
+                      <span class="text-purple-400 font-bold flex items-center gap-1 tech-text">
                         <span>📱</span>
                         接收卡: {message.phone_iccid}
                       </span>
                       {#if message.phone_number}
-                        <span class="text-gray-500">•</span>
-                        <span class="text-green-600 font-medium flex items-center gap-1">
+                        <span class="text-cyan-600">•</span>
+                        <span class="text-green-400 font-bold flex items-center gap-1 tech-text">
                           <span>📞</span>
                           发送方: {message.phone_number}
                         </span>
                       {/if}
-                      <span class="text-gray-500">•</span>
-                      <span class="text-gray-600">{message.display_phone_number || '-'}</span>
+                      <span class="text-cyan-600">•</span>
+                      <span class="text-cyan-400/70">{message.display_phone_number || '-'}</span>
                     </div>
                   </div>
-                  <span class="text-xs text-gray-500 ml-2">{formatTime(message.timestamp)}</span>
+                  <span class="text-xs text-cyan-500/60 ml-2">{formatTime(message.timestamp)}</span>
                 </div>
               </div>
             {/each}
@@ -271,7 +323,7 @@
     {:else}
       <div class="space-y-2 lg:space-y-3">
         {#each displayMessages as message}
-          <div class="bg-gradient-to-r {message.type === 'sent' ? 'from-blue-50 to-indigo-50' : 'from-white to-gray-50'} rounded-xl p-3 lg:p-4 border {message.type === 'sent' ? 'border-blue-200' : 'border-gray-200'} hover:shadow-xl hover:scale-[1.02] active:scale-100 transition-all duration-300">
+          <div class="tech-card {message.type === 'sent' ? 'border-l-4 border-l-blue-400' : ''} rounded-xl p-3 lg:p-4 hover:shadow-xl hover:shadow-cyan-500/20 hover:scale-[1.01] active:scale-100 transition-all duration-300">
             <div class="flex justify-between items-start mb-2">
               <div class="flex-1">
                 <div class="flex flex-wrap items-center gap-2 mb-1">
@@ -285,7 +337,7 @@
                         已发送
                       </span>
                       {#if message.status === 'delivered'}
-                        <span class="text-xs text-green-600">✓ 已送达</span>
+                        <span class="text-xs text-green-400">✓ 已送达</span>
                       {/if}
                     {/if}
                   {:else}
@@ -305,44 +357,44 @@
                     {/if}
                   {/if}
                 </div>
-                <div class="mt-2 bg-gray-50 rounded-lg p-2">
-                  <p class="text-xs lg:text-sm text-gray-700 break-words whitespace-pre-wrap">{message.content}</p>
+                <div class="mt-2 bg-black/50 rounded-lg p-2 border border-cyan-500/30">
+                  <p class="text-xs lg:text-sm text-white font-medium break-words whitespace-pre-wrap high-contrast">{message.content}</p>
                 </div>
                 <div class="mt-2 flex flex-wrap items-center gap-2 text-xs">
                   {#if message.type === 'sent'}
-                    <span class="text-blue-600 font-medium flex items-center gap-1">
+                    <span class="text-blue-400 font-bold flex items-center gap-1 tech-text">
                       <span>📤</span>
                       发送卡: {message.phone_iccid}
                     </span>
-                    <span class="text-gray-500">•</span>
-                    <span class="text-gray-600">发送至: {message.recipient}</span>
+                    <span class="text-cyan-600">•</span>
+                    <span class="text-cyan-400/70">发送至: {message.recipient}</span>
                   {:else}
-                    <span class="text-purple-600 font-medium flex items-center gap-1">
+                    <span class="text-purple-400 font-bold flex items-center gap-1 tech-text">
                       <span>📱</span>
                       接收卡: {message.phone_iccid}
                     </span>
                     {#if message.phone_number}
-                      <span class="text-gray-500">•</span>
-                      <span class="text-green-600 font-medium flex items-center gap-1">
+                      <span class="text-cyan-600">•</span>
+                      <span class="text-green-400 font-bold flex items-center gap-1 tech-text">
                         <span>📞</span>
                         发送方: {message.phone_number}
                       </span>
                     {/if}
                     {#if !selectedPhone}
-                      <span class="text-gray-500">•</span>
-                      <span class="text-gray-600">{message.display_phone_number || '-'}</span>
+                      <span class="text-cyan-600">•</span>
+                      <span class="text-cyan-400/70">{message.display_phone_number || '-'}</span>
                     {/if}
                   {/if}
                 </div>
               </div>
-              <span class="text-xs text-gray-500 ml-2 whitespace-nowrap">{formatTime(message.timestamp)}</span>
+              <span class="text-xs text-cyan-500/60 ml-2 whitespace-nowrap">{formatTime(message.timestamp)}</span>
             </div>
           </div>
         {/each}
       </div>
     {/if}
     
-    {#if displayMessages.length === 0}
+    {#if displayMessages.length === 0 || (groupBy === 'source' && Object.keys(groupedMessages).length === 0)}
       <div class="text-center py-8">
         <div class="text-6xl mb-4">📭</div>
         <p class="text-gray-500">暂无消息记录</p>

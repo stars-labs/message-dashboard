@@ -39,8 +39,8 @@
     if (!simSearch) return true;
     const searchLower = simSearch.toLowerCase();
     const phoneNumber = (phone.number && phone.number !== "null") ? phone.number : (phone.iccid ? `ICCID: ${phone.iccid.slice(-6)}` : "Unknown");
-    const phoneDisplay = `${phone.flag} ${phoneNumber} ${phone.operator_name || ""}`.toLowerCase();
-    return phoneDisplay.includes(searchLower) || phone.iccid.toLowerCase().includes(searchLower);
+    const phoneDisplay = `${phone.flag || ''} ${phoneNumber} ${phone.operator_name || ""}`.toLowerCase();
+    return phoneDisplay.includes(searchLower) || (phone.iccid && phone.iccid.toLowerCase().includes(searchLower));
   });
 
   // Initialize recipientSIM when selectedPhone changes, but only if recipientSIM is empty
@@ -162,16 +162,16 @@
 <div
   class="{showComposer
     ? 'hidden'
-    : 'hidden lg:block'} bg-white rounded-2xl shadow-xl p-4 lg:p-6"
+    : 'hidden lg:block'} tech-card p-4 lg:p-6"
 >
   <div class="flex justify-between items-center mb-4">
     <h2
-      class="text-lg font-bold bg-gradient-to-r from-purple-600 to-indigo-600 bg-clip-text text-transparent"
+      class="text-lg font-bold bg-gradient-to-r from-purple-600 to-indigo-600 bg-clip-text text-transparent header-effect-target"
     >
       发送短信
     </h2>
     <button
-      class="lg:hidden text-gray-500 hover:text-gray-700"
+      class="lg:hidden text-cyan-400/60 hover:text-cyan-300"
       on:click={() => (showComposer = false)}
       aria-label="关闭发送短信面板"
     >
@@ -195,7 +195,7 @@
   <div class="mb-4 relative recipient-input-container">
     <label
       for="recipient-number"
-      class="block text-sm font-medium text-gray-700 mb-2"
+      class="block text-sm font-medium text-cyan-300 mb-2"
     >
       接收号码
     </label>
@@ -209,27 +209,27 @@
         recipientSearch = e.target.value;
       }}
       placeholder="输入接收方手机号..."
-      class="w-full px-4 py-2 border border-purple-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+      class="w-full px-4 py-2 cyber-input"
     />
 
     <!-- Recipient History Dropdown -->
     {#if showRecipientHistory && filteredRecipients.length > 0}
       <div
-        class="absolute top-full left-0 right-0 mt-1 bg-white border border-purple-200 rounded-lg shadow-xl max-h-48 overflow-y-auto z-50"
+        class="absolute top-full left-0 right-0 mt-1 tech-card border border-cyan-900/30 rounded-lg shadow-xl shadow-cyan-500/20 max-h-48 overflow-y-auto z-50"
       >
         <div class="p-2">
           <div
-            class="text-xs text-gray-500 px-2 py-1 border-b border-gray-100 mb-1"
+            class="text-xs text-cyan-400/60 px-2 py-1 border-b border-cyan-900/30 mb-1"
           >
             历史接收号码
           </div>
           {#each filteredRecipients as recipient}
             <button
               on:click={() => selectRecipient(recipient)}
-              class="w-full text-left px-3 py-2 hover:bg-gradient-to-r hover:from-purple-50 hover:to-indigo-50 rounded-md transition-colors text-sm flex items-center gap-2"
+              class="w-full text-left px-3 py-2 hover:bg-cyan-900/20 rounded-md transition-colors text-sm flex items-center gap-2"
             >
               <svg
-                class="w-4 h-4 text-gray-400"
+                class="w-4 h-4 text-cyan-600"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -253,7 +253,7 @@
   <div class="mb-4 relative sim-input-container">
     <label
       for="sim-selection"
-      class="block text-sm font-medium text-gray-700 mb-2"
+      class="block text-sm font-medium text-cyan-300 mb-2"
     >
       发送卡号
     </label>
@@ -272,24 +272,24 @@
         recipientSIM = "";
       }}
       placeholder="输入卡号筛选或选择发送卡..."
-      class="w-full px-4 py-2 border border-purple-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+      class="w-full px-4 py-2 cyber-input"
     />
     
     <!-- SIM Cards Dropdown -->
     {#if showSimDropdown && filteredSims.length > 0}
       <div
-        class="absolute top-full left-0 right-0 mt-1 bg-white border border-purple-200 rounded-lg shadow-xl max-h-60 overflow-y-auto z-50"
+        class="absolute top-full left-0 right-0 mt-1 tech-card border border-cyan-900/30 rounded-lg shadow-xl shadow-cyan-500/20 max-h-60 overflow-y-auto z-50"
       >
         <div class="p-2">
           <div
-            class="text-xs text-gray-500 px-2 py-1 border-b border-gray-100 mb-1"
+            class="text-xs text-cyan-400/60 px-2 py-1 border-b border-cyan-900/30 mb-1"
           >
             可用发送卡 ({filteredSims.length})
           </div>
           {#each filteredSims as phone}
             <button
               on:click={() => selectSim(phone)}
-              class="w-full text-left px-3 py-2 hover:bg-gradient-to-r hover:from-purple-50 hover:to-indigo-50 rounded-md transition-colors text-sm flex items-center gap-2"
+              class="w-full text-left px-3 py-2 hover:bg-cyan-900/20 rounded-md transition-colors text-sm flex items-center gap-2"
             >
               <span class="text-lg">{phone.flag}</span>
               <div class="flex-1">
@@ -297,11 +297,11 @@
                   {(phone.number && phone.number !== "null") ? phone.number : (phone.iccid ? `ICCID: ${phone.iccid.slice(-6)}` : "Unknown")}
                 </div>
                 {#if phone.operator_name}
-                  <div class="text-xs text-gray-500">{phone.operator_name}</div>
+                  <div class="text-xs text-cyan-400/60">{phone.operator_name}</div>
                 {/if}
               </div>
               {#if phone.signal_strength}
-                <div class="text-xs text-gray-400">
+                <div class="text-xs text-cyan-600">
                   信号: {phone.signal_strength}%
                 </div>
               {/if}
@@ -316,7 +316,7 @@
   <div class="mb-4">
     <div
       id="template-label"
-      class="block text-sm font-medium text-gray-700 mb-2"
+      class="block text-sm font-medium text-cyan-300 mb-2"
     >
       快速模板
     </div>
@@ -340,7 +340,7 @@
   <div class="mb-4">
     <label
       for="message-content"
-      class="block text-sm font-medium text-gray-700 mb-2"
+      class="block text-sm font-medium text-cyan-300 mb-2"
     >
       短信内容
     </label>
@@ -349,9 +349,9 @@
       bind:value={messageContent}
       placeholder="输入短信内容..."
       rows="4"
-      class="w-full px-4 py-2 border border-purple-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none"
+      class="w-full px-4 py-2 cyber-input resize-none"
     ></textarea>
-    <div class="mt-1 text-xs text-gray-500">
+    <div class="mt-1 text-xs text-cyan-400/60">
       字数：{messageContent.length} / 500
     </div>
   </div>
@@ -400,17 +400,17 @@
 
 <!-- Mobile Composer Modal -->
 {#if showComposer}
-  <div class="lg:hidden fixed inset-0 bg-white z-50 overflow-y-auto">
+  <div class="lg:hidden fixed inset-0 bg-black z-50 overflow-y-auto">
     <div
-      class="sticky top-0 bg-white border-b border-gray-200 px-4 py-3 flex justify-between items-center"
+      class="sticky top-0 glassmorphism border-b border-cyan-900/30 px-4 py-3 flex justify-between items-center"
     >
       <h2
-        class="text-lg font-bold bg-gradient-to-r from-purple-600 to-indigo-600 bg-clip-text text-transparent"
+        class="text-lg font-bold data-value header-effect-target"
       >
         发送短信
       </h2>
       <button
-        class="text-gray-500 hover:text-gray-700 p-2"
+        class="text-cyan-400/60 hover:text-cyan-300 p-2"
         on:click={() => (showComposer = false)}
         aria-label="关闭发送短信面板"
       >
@@ -435,7 +435,7 @@
       <div class="mb-4 relative recipient-input-container">
         <label
           for="mobile-recipient-number"
-          class="block text-sm font-medium text-gray-700 mb-2"
+          class="block text-sm font-medium text-cyan-300 mb-2"
         >
           接收号码
         </label>
@@ -449,27 +449,27 @@
             recipientSearch = e.target.value;
           }}
           placeholder="输入接收方手机号..."
-          class="w-full px-4 py-2 border border-purple-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+          class="w-full px-4 py-2 cyber-input"
         />
 
         <!-- Recipient History Dropdown -->
         {#if showRecipientHistory && filteredRecipients.length > 0}
           <div
-            class="absolute top-full left-0 right-0 mt-1 bg-white border border-purple-200 rounded-lg shadow-xl max-h-48 overflow-y-auto z-50"
+            class="absolute top-full left-0 right-0 mt-1 tech-card border border-cyan-900/30 rounded-lg shadow-xl shadow-cyan-500/20 max-h-48 overflow-y-auto z-50"
           >
             <div class="p-2">
               <div
-                class="text-xs text-gray-500 px-2 py-1 border-b border-gray-100 mb-1"
+                class="text-xs text-cyan-400/60 px-2 py-1 border-b border-cyan-900/30 mb-1"
               >
                 历史接收号码
               </div>
               {#each filteredRecipients as recipient}
                 <button
                   on:click={() => selectRecipient(recipient)}
-                  class="w-full text-left px-3 py-2 hover:bg-gradient-to-r hover:from-purple-50 hover:to-indigo-50 rounded-md transition-colors text-sm flex items-center gap-2"
+                  class="w-full text-left px-3 py-2 hover:bg-cyan-900/20 rounded-md transition-colors text-sm flex items-center gap-2"
                 >
                   <svg
-                    class="w-4 h-4 text-gray-400"
+                    class="w-4 h-4 text-cyan-600"
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"
@@ -493,7 +493,7 @@
       <div class="mb-4 relative sim-input-container">
         <label
           for="mobile-sim-selection"
-          class="block text-sm font-medium text-gray-700 mb-2"
+          class="block text-sm font-medium text-cyan-300 mb-2"
         >
           发送卡号
         </label>
@@ -512,24 +512,24 @@
             recipientSIM = "";
           }}
           placeholder="输入卡号筛选或选择发送卡..."
-          class="w-full px-4 py-2 border border-purple-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+          class="w-full px-4 py-2 cyber-input"
         />
         
         <!-- SIM Cards Dropdown -->
         {#if showSimDropdown && filteredSims.length > 0}
           <div
-            class="absolute top-full left-0 right-0 mt-1 bg-white border border-purple-200 rounded-lg shadow-xl max-h-60 overflow-y-auto z-50"
+            class="absolute top-full left-0 right-0 mt-1 tech-card border border-cyan-900/30 rounded-lg shadow-xl shadow-cyan-500/20 max-h-60 overflow-y-auto z-50"
           >
             <div class="p-2">
               <div
-                class="text-xs text-gray-500 px-2 py-1 border-b border-gray-100 mb-1"
+                class="text-xs text-cyan-400/60 px-2 py-1 border-b border-cyan-900/30 mb-1"
               >
                 可用发送卡 ({filteredSims.length})
               </div>
               {#each filteredSims as phone}
                 <button
                   on:click={() => selectSim(phone)}
-                  class="w-full text-left px-3 py-2 hover:bg-gradient-to-r hover:from-purple-50 hover:to-indigo-50 rounded-md transition-colors text-sm flex items-center gap-2"
+                  class="w-full text-left px-3 py-2 hover:bg-cyan-900/20 rounded-md transition-colors text-sm flex items-center gap-2"
                 >
                   <span class="text-lg">{phone.flag}</span>
                   <div class="flex-1">
@@ -537,11 +537,11 @@
                       {(phone.number && phone.number !== "null") ? phone.number : (phone.iccid ? `ICCID: ${phone.iccid.slice(-6)}` : "Unknown")}
                     </div>
                     {#if phone.operator_name}
-                      <div class="text-xs text-gray-500">{phone.operator_name}</div>
+                      <div class="text-xs text-cyan-400/60">{phone.operator_name}</div>
                     {/if}
                   </div>
                   {#if phone.signal_strength}
-                    <div class="text-xs text-gray-400">
+                    <div class="text-xs text-cyan-600">
                       信号: {phone.signal_strength}%
                     </div>
                   {/if}
@@ -556,7 +556,7 @@
       <div class="mb-4">
         <div
           id="mobile-template-label"
-          class="block text-sm font-medium text-gray-700 mb-2"
+          class="block text-sm font-medium text-cyan-300 mb-2"
         >
           快速模板
         </div>
@@ -580,7 +580,7 @@
       <div class="mb-4">
         <label
           for="mobile-message-content"
-          class="block text-sm font-medium text-gray-700 mb-2"
+          class="block text-sm font-medium text-cyan-300 mb-2"
         >
           短信内容
         </label>
@@ -589,9 +589,9 @@
           bind:value={messageContent}
           placeholder="输入短信内容..."
           rows="4"
-          class="w-full px-4 py-2 border border-purple-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none"
+          class="w-full px-4 py-2 cyber-input resize-none"
         ></textarea>
-        <div class="mt-1 text-xs text-gray-500">
+        <div class="mt-1 text-xs text-cyan-400/60">
           字数：{messageContent.length} / 500
         </div>
       </div>
