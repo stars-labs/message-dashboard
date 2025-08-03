@@ -12,19 +12,20 @@
   export let daemonStatus = { connected: false, lastDataUpdate: null };
   export let isLoading = false;
 
-  $: filteredPhones = phoneNumbers.filter((phone) => {
-    const matchesCountry =
-      selectedCountry === "all" || phone.country === selectedCountry;
-    const matchesSearch =
-      searchTerm === "" ||
-      (phone.number && phone.number.includes(searchTerm)) ||
-      (phone.carrier &&
-        phone.carrier.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (phone.iccid &&
-        phone.iccid.toLowerCase &&
-        phone.iccid.toLowerCase().includes(searchTerm.toLowerCase()));
-    return matchesCountry && matchesSearch;
-  });
+  $: filteredPhones = phoneNumbers
+    .filter((phone) => {
+      const matchesCountry =
+        selectedCountry === "all" || phone.country === selectedCountry;
+      const matchesSearch =
+        searchTerm === "" ||
+        (phone.number && phone.number.includes(searchTerm)) ||
+        (phone.carrier &&
+          phone.carrier.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        (phone.iccid &&
+          phone.iccid.toLowerCase &&
+          phone.iccid.toLowerCase().includes(searchTerm.toLowerCase()));
+      return matchesCountry && matchesSearch;
+    });
 
   const countries = [
     { code: "all", name: "全部", flag: "🌍" },
@@ -87,10 +88,10 @@
   }
 </script>
 
-<div class="{mobile ? 'bg-black/90' : 'tech-card'} digital-rain">
-  <div class="p-4 {mobile ? 'border-b border-cyan-900/30' : ''}">
+<div class="{mobile ? 'bg-black/90' : 'tech-card'}">
+  <div class="p-3 lg:p-4 {mobile ? 'border-b border-cyan-900/30' : ''}">
     <h2
-      class="text-lg font-bold data-value high-contrast mb-3 header-effect-target"
+      class="text-base lg:text-lg font-bold data-value high-contrast mb-3 header-effect-target"
     >
       号码列表
     </h2>
@@ -140,7 +141,7 @@
   </div>
 
   <!-- Phone List -->
-  <div class="{mobile ? '' : 'max-h-[calc(100vh-350px)]'} overflow-y-auto">
+  <div class="{mobile ? '' : 'max-h-[calc(100vh-400px)]'} overflow-y-auto">
     {#if isLoading}
       <!-- Loading skeleton -->
       {#each [1, 2, 3, 4, 5] as index}
@@ -158,7 +159,7 @@
                 {#each [1, 2, 3, 4] as bar}
                   <div
                     class="w-1 bg-cyan-900/30 rounded-sm"
-                    style="height: {4 + bar * 3}px"
+                    style="height: {Number.isFinite(bar) ? 4 + bar * 3 : 4}px"
                   ></div>
                 {/each}
               </div>
@@ -186,12 +187,26 @@
     {:else}
       {#each filteredPhones as phone}
         <button
-          class="w-full p-3 border-b border-cyan-900/30 hover:bg-cyan-900/20 active:bg-cyan-900/30 transition-all duration-300 text-left {selectedPhoneIccid ===
+          class="w-full p-3 border-b border-cyan-900/30 hover:bg-cyan-900/20 active:bg-cyan-900/30 transition-all duration-300 text-left relative {selectedPhoneIccid ===
           phone.iccid
-            ? 'bg-gradient-to-r from-cyan-900/30 to-purple-900/30 border-l-4 border-l-cyan-400 shadow-lg shadow-cyan-500/20'
+            ? 'phone-selected'
             : 'hover:border-l-4 hover:border-l-cyan-700'}"
           on:click={() => handlePhoneClick(phone)}
         >
+          {#if selectedPhoneIccid === phone.iccid}
+            <!-- VIP effects -->
+            <div class="vip-sparkle top-left"></div>
+            <div class="vip-sparkle top-right"></div>
+            <div class="vip-sparkle bottom-left"></div>
+            <div class="vip-sparkle bottom-right"></div>
+            <div class="lightning-effect"></div>
+            <div class="particle"></div>
+            <div class="particle"></div>
+            <div class="particle"></div>
+            <div class="particle"></div>
+            <div class="particle"></div>
+            <div class="vip-badge">已选中</div>
+          {/if}
           <div class="flex items-center justify-between">
             <div class="flex-1">
               <div class="flex items-center gap-2">
@@ -241,11 +256,6 @@
                     </span>
                   {/if}
                 {/if}
-                {#if selectedPhoneIccid === phone.iccid}
-                  <span class="text-cyan-400 text-xs font-semibold ml-1 animate-pulse"
-                    >✓</span
-                  >
-                {/if}
               </div>
               <div class="text-xs text-cyan-400/70 mt-0.5">
                 {#if phone.carrier}
@@ -293,3 +303,4 @@
     {/if}
   </div>
 </div>
+

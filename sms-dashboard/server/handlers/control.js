@@ -1,5 +1,6 @@
 import { nanoid } from 'nanoid';
 import { extractVerificationCode } from '../utils/verification';
+import { aiHandler } from './ai';
 
 export const controlHandler = {
   // Upload messages from Orange Pi
@@ -141,6 +142,52 @@ export const controlHandler = {
         // Count actual inserts (excluding nulls from duplicates)
         const inserted = results.filter(r => r !== null).length;
         processed += inserted;
+      }
+      
+      // Process new messages with AI (async, don't wait)
+      if (newMessages.length > 0 && env.AI) {
+        // Process messages with AI in the background
+        request.ctx.waitUntil(
+          Promise.all(newMessages.map(async (msg) => {
+            try {
+              // Extract verification code with AI
+              const codeRequest = new Request('https://fake.url', {
+                method: 'POST',
+                body: JSON.stringify({
+                  content: msg.content,
+                  message_id: msg.id
+                })
+              });
+              codeRequest.env = env;
+              await aiHandler.extractCode(codeRequest);
+              
+              // Classify message
+              const classifyRequest = new Request('https://fake.url', {
+                method: 'POST',
+                body: JSON.stringify({
+                  content: msg.content,
+                  message_id: msg.id
+                })
+              });
+              classifyRequest.env = env;
+              await aiHandler.classifyMessage(classifyRequest);
+              
+              // Generate embedding for search
+              const embeddingRequest = new Request('https://fake.url', {
+                method: 'POST',
+                body: JSON.stringify({
+                  content: msg.content,
+                  message_id: msg.id
+                })
+              });
+              embeddingRequest.env = env;
+              await aiHandler.generateEmbedding(embeddingRequest);
+              
+            } catch (error) {
+              console.error(`AI processing error for message ${msg.id}:`, error);
+            }
+          }))
+        );
       }
       
       // Messages are now picked up by polling

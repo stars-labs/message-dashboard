@@ -9,6 +9,13 @@ export const messagesHandler = {
     const phoneIccid = url.searchParams.get('phone_iccid');
     const limit = parseInt(url.searchParams.get('limit') || '50');
     const offset = parseInt(url.searchParams.get('offset') || '0');
+    
+    console.log('[Messages Handler] List request:', {
+      phoneIccid,
+      limit,
+      offset,
+      url: url.toString()
+    });
 
     try {
       let query = `
@@ -34,14 +41,26 @@ export const messagesHandler = {
       query += ` ORDER BY m.timestamp DESC LIMIT ? OFFSET ?`;
       params.push(limit, offset);
 
-      const [messages, count] = await Promise.all([
+      const [messagesResult, count] = await Promise.all([
         env.DB.prepare(query).bind(...params).all(),
         env.DB.prepare(countQuery).bind(...(phoneIccid ? [phoneIccid] : [])).first()
       ]);
+      
+      const messages = messagesResult.results || messagesResult;
+      console.log('[Messages Handler] Query results:', {
+        phoneIccid,
+        messageCount: messages.length,
+        totalCount: count.total,
+        firstMessage: messages[0] ? {
+          id: messages[0].id,
+          phone_iccid: messages[0].phone_iccid,
+          content: messages[0].content?.substring(0, 50) + '...'
+        } : null
+      });
 
       return new Response(JSON.stringify({
         success: true,
-        data: messages.results,
+        data: messages,
         pagination: {
           total: count.total,
           limit,

@@ -340,8 +340,9 @@ pub fn main() !void {
         if (cycle_count % 20 == 0) {
             const avg_ms_per_modem = if (valid_modems.items.len > 0) 
                 @divFloor(cycle_time_ms, valid_modems.items.len) else 0;
-            std.log.info("⚡ Cycle {d}: {d}ms total, ~{d}ms per modem, {d} modems", .{
-                cycle_count, cycle_time_ms, avg_ms_per_modem, valid_modems.items.len
+            const tracked_messages = modem_manager.message_tracker.count();
+            std.log.info("⚡ Cycle {d}: {d}ms total, ~{d}ms per modem, {d} modems, {d} tracked messages", .{
+                cycle_count, cycle_time_ms, avg_ms_per_modem, valid_modems.items.len, tracked_messages
             });
         }
         

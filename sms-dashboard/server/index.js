@@ -9,6 +9,9 @@ import { messagesHandler } from './handlers/messages';
 import { statsHandler } from './handlers/stats';
 import { iccidMappingsHandler } from './handlers/iccid-mappings';
 import { updatesHandler } from './handlers/updates';
+import { aiHandler } from './handlers/ai';
+import { chatbotHandler } from './handlers/chatbot';
+import { chatbotStreamHandler } from './handlers/chatbot-stream';
 import { serveFrontend } from './frontend-handler';
 import { createRoleConfig, hasSmSAccess } from '../config/auth0-roles.js';
 
@@ -138,6 +141,11 @@ router.options('*', handleCORS);
 
 // Public API routes
 router.get('/api/health', () => new Response('OK', { status: 200 }));
+router.post('/api/test-stream', async (request) => {
+  console.log('[Test] Stream test endpoint hit');
+  return new Response('Stream test endpoint works', { status: 200 });
+});
+router.get('/favicon.ico', () => new Response(null, { status: 204 }));
 
 // Debug endpoint to test SSE broadcast
 router.get('/api/debug/sse-broadcast', async (request, env) => {
@@ -287,6 +295,132 @@ router.post('/api/iccid-mappings/bulk', async (request, env, ctx) => {
   const permResponse = await requirePermission('phones.write')(request, env, ctx);
   if (permResponse) return permResponse;
   return iccidMappingsHandler.bulkImport(request);
+});
+
+// AI-powered routes
+router.post('/api/ai/extract-code', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  await enrichUserPermissions(request, env, ctx);
+  const permResponse = await requirePermission('messages.read')(request, env, ctx);
+  if (permResponse) return permResponse;
+  return aiHandler.extractCode(request);
+});
+
+router.post('/api/ai/classify-message', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  await enrichUserPermissions(request, env, ctx);
+  const permResponse = await requirePermission('messages.read')(request, env, ctx);
+  if (permResponse) return permResponse;
+  return aiHandler.classifyMessage(request);
+});
+
+router.get('/api/ai/search', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  await enrichUserPermissions(request, env, ctx);
+  const permResponse = await requirePermission('messages.read')(request, env, ctx);
+  if (permResponse) return permResponse;
+  return aiHandler.search(request);
+});
+
+router.get('/api/ai/insights/:phone_id', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  await enrichUserPermissions(request, env, ctx);
+  const permResponse = await requirePermission('messages.read')(request, env, ctx);
+  if (permResponse) return permResponse;
+  
+  // Extract phone_id from URL
+  const url = new URL(request.url);
+  const pathParts = url.pathname.split('/');
+  const phoneId = pathParts[pathParts.length - 1];
+  
+  // Add params to request
+  request.params = { phone_id: phoneId };
+  
+  return aiHandler.getInsights(request);
+});
+
+router.post('/api/ai/suggest-reply', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  await enrichUserPermissions(request, env, ctx);
+  const permResponse = await requirePermission('messages.send')(request, env, ctx);
+  if (permResponse) return permResponse;
+  return aiHandler.suggestReply(request);
+});
+
+router.get('/api/ai/verification-codes', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  await enrichUserPermissions(request, env, ctx);
+  const permResponse = await requirePermission('messages.read')(request, env, ctx);
+  if (permResponse) return permResponse;
+  return aiHandler.getVerificationCodes(request);
+});
+
+router.post('/api/ai/generate-embedding', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  await enrichUserPermissions(request, env, ctx);
+  const permResponse = await requirePermission('messages.read')(request, env, ctx);
+  if (permResponse) return permResponse;
+  return aiHandler.generateEmbedding(request);
+});
+
+// Batch process existing messages with AI
+router.post('/api/ai/batch-process', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  await enrichUserPermissions(request, env, ctx);
+  const permResponse = await requirePermission('messages.read')(request, env, ctx);
+  if (permResponse) return permResponse;
+  return aiHandler.batchProcessMessages(request);
+});
+
+// Chatbot routes
+router.post('/api/ai/chat', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  request.env = env;
+  await enrichUserPermissions(request, env, ctx);
+  const permResponse = await requirePermission('messages.read')(request, env, ctx);
+  if (permResponse) return permResponse;
+  return chatbotHandler.chat(request);
+});
+
+// Streaming chatbot endpoint
+router.post('/api/ai/chat/stream', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  request.env = env;
+  request.ctx = ctx;
+  await enrichUserPermissions(request, env, ctx);
+  const permResponse = await requirePermission('messages.read')(request, env, ctx);
+  if (permResponse) return permResponse;
+  return chatbotStreamHandler.chatStream(request);
+});
+
+router.get('/api/ai/chat/conversations', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  request.env = env;
+  await enrichUserPermissions(request, env, ctx);
+  const permResponse = await requirePermission('messages.read')(request, env, ctx);
+  if (permResponse) return permResponse;
+  return chatbotHandler.listConversations(request);
+});
+
+router.get('/api/ai/chat/conversations/:conversation_id', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  request.env = env;
+  await enrichUserPermissions(request, env, ctx);
+  const permResponse = await requirePermission('messages.read')(request, env, ctx);
+  if (permResponse) return permResponse;
+  return chatbotHandler.getHistory(request);
 });
 
 // Control server routes - API Key auth

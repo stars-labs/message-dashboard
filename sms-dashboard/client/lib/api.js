@@ -6,8 +6,13 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ||
 
 export async function fetchWithAuth(endpoint, options = {}) {
   const token = auth.token || localStorage.getItem('auth_token');
+  const fullUrl = `${API_BASE_URL}${endpoint}`;
   
-  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+  console.log(`[fetchWithAuth] Making request to: ${fullUrl}`);
+  console.log(`[fetchWithAuth] Options:`, options);
+  console.log(`[fetchWithAuth] Token present:`, !!token);
+  
+  const response = await fetch(fullUrl, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
@@ -16,7 +21,11 @@ export async function fetchWithAuth(endpoint, options = {}) {
     },
   });
   
+  console.log(`[fetchWithAuth] Response status: ${response.status}`);
+  console.log(`[fetchWithAuth] Response headers:`, Object.fromEntries(response.headers.entries()));
+  
   if (response.status === 401) {
+    console.log(`[fetchWithAuth] 401 Unauthorized - logging out`);
     // Token expired or invalid, redirect to login
     auth.logout();
     throw new Error('Authentication required');
@@ -24,11 +33,20 @@ export async function fetchWithAuth(endpoint, options = {}) {
   
   // Check if response is ok before parsing JSON
   if (!response.ok) {
-    const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+    const errorText = await response.text();
+    console.log(`[fetchWithAuth] Error response text:`, errorText);
+    let errorData;
+    try {
+      errorData = JSON.parse(errorText);
+    } catch (e) {
+      errorData = { error: 'Unknown error' };
+    }
     throw new Error(errorData.error || `Request failed with status ${response.status}`);
   }
   
-  return response.json();
+  const responseData = await response.json();
+  console.log(`[fetchWithAuth] Response data:`, responseData);
+  return responseData;
 }
 
 // Polling-based API with HTTP fallback
@@ -74,6 +92,31 @@ async function apiRequest(method, data = {}) {
 }
 
 export const api = {
+  // Generic HTTP methods for AI features
+  async get(url, options = {}) {
+    return await fetchWithAuth(url, { ...options, method: 'GET' });
+  },
+  
+  async post(url, data = {}, options = {}) {
+    return await fetchWithAuth(url, {
+      ...options,
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+  },
+  
+  async put(url, data = {}, options = {}) {
+    return await fetchWithAuth(url, {
+      ...options,
+      method: 'PUT',
+      body: JSON.stringify(data)
+    });
+  },
+  
+  async delete(url, options = {}) {
+    return await fetchWithAuth(url, { ...options, method: 'DELETE' });
+  },
+  
   // Auth
   async getUser() {
     try {

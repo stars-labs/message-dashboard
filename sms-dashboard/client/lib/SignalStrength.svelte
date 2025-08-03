@@ -11,41 +11,45 @@
 
   // Calculate signal bars (0-4) based on signal percentage
   function getSignalBars(signal) {
-    if (signal >= 75) return 4;
-    if (signal >= 50) return 3;
-    if (signal >= 25) return 2;
-    if (signal > 0) return 1;
+    const validSignal = Number(signal) || 0;
+    if (validSignal >= 75) return 4;
+    if (validSignal >= 50) return 3;
+    if (validSignal >= 25) return 2;
+    if (validSignal > 0) return 1;
     return 0;
   }
 
   // Get signal quality label
   function getSignalQuality(signal) {
-    if (signal >= 75) return "优秀";
-    if (signal >= 50) return "良好";
-    if (signal >= 25) return "一般";
-    if (signal > 0) return "较弱";
+    const validSignal = Number(signal) || 0;
+    if (validSignal >= 75) return "优秀";
+    if (validSignal >= 50) return "良好";
+    if (validSignal >= 25) return "一般";
+    if (validSignal > 0) return "较弱";
     return "无信号";
   }
 
   // Get signal color for bars (dark theme)
   function getSignalColor(signal) {
-    if (signal >= 75) return "bg-green-400";
-    if (signal >= 50) return "bg-blue-400";
-    if (signal >= 25) return "bg-yellow-400";
-    if (signal > 0) return "bg-orange-400";
+    const validSignal = Number(signal) || 0;
+    if (validSignal >= 75) return "bg-green-400";
+    if (validSignal >= 50) return "bg-blue-400";
+    if (validSignal >= 25) return "bg-yellow-400";
+    if (validSignal > 0) return "bg-orange-400";
     return "bg-gray-600";
   }
 
   // Get text color for labels (dark theme)
   function getTextColor(signal) {
-    if (signal >= 75) return "text-green-400";
-    if (signal >= 50) return "text-blue-400";
-    if (signal >= 25) return "text-yellow-400";
-    if (signal > 0) return "text-orange-400";
+    const validSignal = Number(signal) || 0;
+    if (validSignal >= 75) return "text-green-400";
+    if (validSignal >= 50) return "text-blue-400";
+    if (validSignal >= 25) return "text-yellow-400";
+    if (validSignal > 0) return "text-orange-400";
     return "text-gray-500";
   }
 
-  $: bars = getSignalBars(signal);
+  $: bars = getSignalBars(signal) || 0;
   $: quality = getSignalQuality(signal);
   $: color = getSignalColor(signal);
   $: textColor = getTextColor(signal);
@@ -58,7 +62,7 @@
       <div class="flex gap-0.5 items-end">
         {#each [1, 2, 3, 4] as bar}
           <div
-            class="w-1 transition-all duration-300 rounded-sm {bar <= bars
+            class="w-1 rounded-sm {bar <= bars
               ? color
               : 'bg-gray-700'}"
             style="height: {4 + bar * 3}px"
@@ -151,7 +155,7 @@
           <div class="flex gap-0.5 items-end">
             {#each [1, 2, 3, 4] as bar}
               <div
-                class="w-1.5 transition-all duration-300 rounded-sm {bar <= bars
+                class="w-1.5 rounded-sm {bar <= bars
                   ? color
                   : 'bg-gray-700'}"
                 style="height: {bar * 4 + 6}px"

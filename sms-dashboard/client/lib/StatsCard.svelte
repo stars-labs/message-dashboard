@@ -33,29 +33,33 @@
   }
 </script>
 
-<div class="tech-card holo-card scan-line relative group">
-  <div class="absolute inset-0 bg-gradient-to-br {gradient} opacity-20 rounded-xl"></div>
+<div class="tech-card holographic scan-line relative group overflow-hidden">
+  <!-- Gradient background layers using Tailwind -->
+  <div class="absolute inset-0 bg-gradient-to-br {gradient} opacity-30 rounded-xl transition-opacity duration-300 group-hover:opacity-40"></div>
+  <div class="absolute inset-0 bg-gradient-to-tr {gradient} opacity-0 group-hover:opacity-20 transition-opacity duration-500 rounded-xl"></div>
+  
+  <!-- Content -->
   <div class="relative z-10 flex items-start justify-between">
     <div>
-      <h3 class="text-sm font-bold text-cyan-300 uppercase tracking-wider tech-text">{title}</h3>
+      <h3 class="text-sm font-bold uppercase tracking-wider bg-gradient-to-r {gradient} bg-clip-text text-transparent animate-gradient-x">{title}</h3>
       <div class="mt-2 flex items-baseline">
-        <p bind:this={valueElement} class="text-3xl font-bold data-value high-contrast">{value !== undefined && value !== null ? value : 0}</p>
+        <p bind:this={valueElement} class="text-3xl font-bold data-value">{value !== undefined && value !== null ? value : 0}</p>
         {#if total !== null && total !== undefined}
           <p class="ml-2 text-lg text-cyan-300 font-bold">/ {total}</p>
         {/if}
       </div>
     </div>
     {#if icon}
-      <div class="text-4xl opacity-30 group-hover:opacity-50 transition-opacity neon-glow">
+      <div class="text-4xl opacity-30 group-hover:opacity-50 transition-all duration-300 text-glow transform group-hover:scale-110">
         {icon}
       </div>
     {/if}
   </div>
-  <div class="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r {gradient} opacity-50 blur-sm"></div>
+  
+  <!-- Bottom gradient border -->
+  <div class="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r {gradient} opacity-70 blur-sm animate-pulse"></div>
+  
+  <!-- Corner accent -->
+  <div class="absolute top-0 right-0 w-16 h-16 bg-gradient-to-br {gradient} opacity-10 rounded-bl-3xl"></div>
 </div>
 
-<style>
-  .neon-glow {
-    filter: drop-shadow(0 0 10px currentColor);
-  }
-</style>

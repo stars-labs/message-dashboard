@@ -13,6 +13,12 @@
     
     // Initialize WebGPU
     webgpuEffects = new WebGPUEffects(canvas);
+    
+    // Reduce particle count on mobile for better performance and visibility
+    if (window.innerWidth <= 768) {
+      webgpuEffects.particleCount = 300; // Reduce from 1000
+    }
+    
     const initialized = await webgpuEffects.init();
     
     if (!initialized) {
@@ -24,6 +30,7 @@
     
     // Handle mouse movement
     const handleMouseMove = (e) => {
+      if (!canvas) return;
       const rect = canvas.getBoundingClientRect();
       mouseX = (e.clientX - rect.left) / rect.width;
       mouseY = (e.clientY - rect.top) / rect.height;
@@ -33,8 +40,12 @@
     
     // Handle resize
     const handleResize = () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
+      if (!canvas) return;
+      // Use document dimensions for mobile to ensure full coverage
+      const width = Math.max(window.innerWidth, document.documentElement.clientWidth);
+      const height = Math.max(window.innerHeight, document.documentElement.clientHeight);
+      canvas.width = width;
+      canvas.height = height;
     };
     
     handleResize();
@@ -42,8 +53,10 @@
     
     // Animation loop
     const animate = () => {
-      webgpuEffects.updateUniforms(mouseX, mouseY);
-      webgpuEffects.render();
+      if (webgpuEffects) {
+        webgpuEffects.updateUniforms(mouseX, mouseY);
+        webgpuEffects.render();
+      }
       animationFrame = requestAnimationFrame(animate);
     };
     
@@ -84,7 +97,7 @@
     width: 100%;
     height: 100%;
     pointer-events: none;
-    z-index: -1;
+    z-index: -999 !important;
     overflow: hidden;
   }
   
@@ -92,6 +105,23 @@
     width: 100%;
     height: 100%;
     opacity: 0.7;
+  }
+  
+  /* Mobile-specific fixes */
+  @media (max-width: 768px) {
+    .webgpu-container {
+      width: 100vw !important;
+      height: 100vh !important;
+      min-height: 100vh !important;
+      transform: translateZ(0); /* Force GPU acceleration */
+      -webkit-transform: translateZ(0);
+    }
+    
+    .webgpu-canvas {
+      width: 100vw !important;
+      height: 100vh !important;
+      min-height: 100vh !important;
+    }
   }
   
   /* Fallback gradient background */

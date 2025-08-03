@@ -11,15 +11,67 @@
     ? messages.filter(msg => msg.phone_iccid === selectedPhone.iccid)
     : messages.slice().slice(0, 50);
   
+  // Deduplicate messages based on content, source, and close timestamps
+  $: uniqueMessages = (() => {
+    const seen = new Map();
+    const unique = [];
+    
+    for (const msg of filteredMessages) {
+      // Create a key based on content, source, and rounded timestamp (to nearest minute)
+      const timestamp = new Date(msg.timestamp);
+      const roundedTime = new Date(Math.floor(timestamp.getTime() / 60000) * 60000).toISOString();
+      const key = `${msg.content}|${msg.source || 'unknown'}|${roundedTime}`;
+      
+      if (!seen.has(key)) {
+        seen.set(key, true);
+        unique.push(msg);
+      }
+    }
+    
+    console.log(`[MessageView] Deduplication: ${filteredMessages.length} messages -> ${unique.length} unique messages`);
+    return unique;
+  })();
+  
   // Debug logging for message filtering
   $: {
-    if (messages.length > 0) {
-      console.log('[MessageView] Total messages:', messages.length);
-      console.log('[MessageView] Selected phone:', selectedPhone);
-      console.log('[MessageView] Filtered messages:', filteredMessages.length);
+    if (messages.length > 0 || selectedPhone) {
+      console.log('[MessageView] Debug Info:');
+      console.log('- Total messages:', messages.length);
+      console.log('- Selected phone:', selectedPhone);
+      console.log('- Filtered messages:', filteredMessages.length);
+      console.log('- Unique messages:', uniqueMessages.length);
+      console.log('- Display messages:', displayMessages.length);
+      console.log('- View mode:', viewMode);
+      console.log('- Group by:', groupBy);
+      
       if (selectedPhone) {
-        console.log('[MessageView] Filtering by ICCID:', selectedPhone.iccid);
-        console.log('[MessageView] Message ICCIDs:', messages.slice(0, 5).map(m => m.phone_iccid));
+        console.log('- Filtering by ICCID:', selectedPhone.iccid);
+        console.log('- ICCID type:', typeof selectedPhone.iccid);
+        console.log('- Sample message ICCIDs:', messages.slice(0, 5).map(m => ({
+          iccid: m.phone_iccid,
+          type: typeof m.phone_iccid,
+          content: m.content?.substring(0, 50) + '...'
+        })));
+        
+        // Check for ICCID match
+        const matchingMessages = messages.filter(m => m.phone_iccid === selectedPhone.iccid);
+        console.log('- Messages matching ICCID:', matchingMessages.length);
+        if (matchingMessages.length > 0) {
+          console.log('- First matching message:', matchingMessages[0]);
+        }
+        
+        // Also check with type conversion
+        const matchingMessagesStr = messages.filter(m => String(m.phone_iccid) === String(selectedPhone.iccid));
+        console.log('- Messages matching ICCID (string comparison):', matchingMessagesStr.length);
+        
+        // Check for partial matches
+        const partialMatches = messages.filter(m => m.phone_iccid && selectedPhone.iccid && m.phone_iccid.includes(selectedPhone.iccid));
+        console.log('- Partial ICCID matches:', partialMatches.length);
+      }
+      
+      if (groupBy === 'source') {
+        console.log('- Grouped messages:', Object.keys(groupedMessages).length, 'groups');
+        console.log('- Groups:', Object.keys(groupedMessages));
       }
     }
   }
@@ -43,14 +95,14 @@
   }
   
   // Sort messages based on view mode
-  $: recentMessages = filteredMessages.slice().sort((a, b) => {
+  $: recentMessages = uniqueMessages.slice().sort((a, b) => {
     // Recent mode: newest first (DESC)
     const dateA = parseTimestamp(a.timestamp);
     const dateB = parseTimestamp(b.timestamp);
     return dateB.getTime() - dateA.getTime();
   });
   
-  $: historyMessages = filteredMessages.slice().sort((a, b) => {
+  $: historyMessages = uniqueMessages.slice().sort((a, b) => {
     // History mode: oldest first (ASC)
     const dateA = parseTimestamp(a.timestamp);
     const dateB = parseTimestamp(b.timestamp);
@@ -175,9 +227,9 @@
   }
 </script>
 
-<div class="{mobile ? 'bg-black/90' : 'tech-card'} mt-4 scan-line">
+<div class="{mobile ? 'bg-black/90' : 'tech-card'}">
   <div class="p-3 lg:p-4 {mobile ? 'border-b border-cyan-900/30' : ''}">
-    <div class="flex justify-between items-center {mobile ? '' : 'mb-4'}">
+    <div class="flex justify-between items-center mb-3">
       <h2 class="text-base lg:text-lg font-bold data-value high-contrast header-effect-target">
         {#if selectedPhone}
           <span class="inline-flex items-center gap-1">
@@ -342,7 +394,7 @@
       </div>
     {/if}
     
-    {#if displayMessages.length === 0}
+    {#if displayMessages.length === 0 || (groupBy === 'source' && Object.keys(groupedMessages).length === 0)}
       <div class="text-center py-8">
         <div class="text-6xl mb-4">📭</div>
         <p class="text-gray-500">暂无消息记录</p>

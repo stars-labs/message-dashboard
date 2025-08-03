@@ -26,18 +26,32 @@
   let bulkImportText = "";
 
   async function loadMappings() {
+    console.log("[IccidMappings] Loading mappings...");
     loading = true;
     error = null;
 
     try {
+      console.log("[IccidMappings] Calling API with params:", {
+        page: currentPage,
+        search: searchQuery,
+      });
+      
       const response = await api.iccidMappings.list({
         page: currentPage,
         search: searchQuery,
       });
 
+      console.log("[IccidMappings] API response:", response);
+
       if (response && response.success) {
-        mappings = response.data || [];
+        // Handle D1 response format
+        if (response.data && response.data.results) {
+          mappings = response.data.results || [];
+        } else {
+          mappings = response.data || [];
+        }
         totalPages = response.pagination?.totalPages || 1;
+        console.log("[IccidMappings] Loaded mappings:", mappings);
       } else {
         error = response?.error || "Failed to load ICCID mappings";
         console.error("ICCID mappings API error:", response);
@@ -184,6 +198,7 @@
   }
 
   onMount(() => {
+    console.log("[IccidMappings] Component mounted!");
     loadMappings();
   });
 
@@ -258,6 +273,7 @@
   }
 </script>
 
+{console.log("[IccidMappings] Component rendering")}
 <div class="tech-card p-6">
   <div class="flex justify-between items-center mb-6">
     <h2 class="text-2xl font-bold data-value high-contrast header-effect-target">ICCID 映射管理</h2>
@@ -311,48 +327,64 @@
       ></div>
       <p class="mt-2 text-cyan-400">加载中...</p>
     </div>
+  {:else if error}
+    <div class="text-center py-8">
+      <p class="text-red-400 mb-4">❌ {error}</p>
+      <button
+        on:click={loadMappings}
+        class="px-4 py-2 tech-button"
+      >
+        重试
+      </button>
+    </div>
   {:else}
     <!-- Mappings Table -->
     <div class="overflow-x-auto">
-      <table class="min-w-full">
-        <thead>
-          <tr class="border-b border-cyan-900/30">
-            <th
-              class="px-4 py-3 text-left text-xs font-medium text-cyan-400 uppercase tracking-wider"
-              >ICCID</th
-            >
-            <th
-              class="px-4 py-3 text-left text-xs font-medium text-cyan-400 uppercase tracking-wider"
-              >手机号</th
-            >
-            <th
-              class="px-4 py-3 text-left text-xs font-medium text-cyan-400 uppercase tracking-wider"
-              >国家</th
-            >
-            <th
-              class="px-4 py-3 text-left text-xs font-medium text-cyan-400 uppercase tracking-wider"
-              >运营商</th
-            >
-            <th
-              class="px-4 py-3 text-left text-xs font-medium text-cyan-400 uppercase tracking-wider"
-              >描述</th
-            >
-            <th
-              class="px-4 py-3 text-left text-xs font-medium text-cyan-400 uppercase tracking-wider"
-              >状态</th
-            >
-            <th
-              class="px-4 py-3 text-left text-xs font-medium text-cyan-400 uppercase tracking-wider"
-              >创建时间</th
-            >
-            <th
-              class="px-4 py-3 text-left text-xs font-medium text-cyan-400 uppercase tracking-wider"
-              >操作</th
-            >
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-cyan-900/30">
-          {#each mappings as mapping}
+      {#if mappings.length === 0}
+        <div class="text-center py-16">
+          <p class="text-cyan-400 mb-4">暂无 ICCID 映射数据</p>
+          <p class="text-cyan-300/60 text-sm">点击上方"添加映射"按钮创建第一个映射</p>
+        </div>
+      {:else}
+        <table class="min-w-full">
+          <thead>
+            <tr class="border-b border-cyan-900/30">
+              <th
+                class="px-4 py-3 text-left text-xs font-medium text-cyan-400 uppercase tracking-wider"
+                >ICCID</th
+              >
+              <th
+                class="px-4 py-3 text-left text-xs font-medium text-cyan-400 uppercase tracking-wider"
+                >手机号</th
+              >
+              <th
+                class="px-4 py-3 text-left text-xs font-medium text-cyan-400 uppercase tracking-wider"
+                >国家</th
+              >
+              <th
+                class="px-4 py-3 text-left text-xs font-medium text-cyan-400 uppercase tracking-wider"
+                >运营商</th
+              >
+              <th
+                class="px-4 py-3 text-left text-xs font-medium text-cyan-400 uppercase tracking-wider"
+                >描述</th
+              >
+              <th
+                class="px-4 py-3 text-left text-xs font-medium text-cyan-400 uppercase tracking-wider"
+                >状态</th
+              >
+              <th
+                class="px-4 py-3 text-left text-xs font-medium text-cyan-400 uppercase tracking-wider"
+                >创建时间</th
+              >
+              <th
+                class="px-4 py-3 text-left text-xs font-medium text-cyan-400 uppercase tracking-wider"
+                >操作</th
+              >
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-cyan-900/30">
+            {#each mappings as mapping}
             <tr class="hover:bg-cyan-900/20 transition-colors">
               <td class="px-4 py-3 text-sm font-mono text-cyan-300">{mapping.iccid}</td>
               <td class="px-4 py-3 text-sm font-medium text-white"
@@ -408,6 +440,7 @@
           {/each}
         </tbody>
       </table>
+      {/if}
     </div>
 
     <!-- Pagination -->

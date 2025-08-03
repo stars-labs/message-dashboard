@@ -83,7 +83,7 @@ export const iccidMappingsHandler = {
       
       return new Response(JSON.stringify({
         success: true,
-        data: mappings.results,
+        data: mappings,
         pagination: {
           page,
           limit,
