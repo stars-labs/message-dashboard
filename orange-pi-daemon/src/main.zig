@@ -6,44 +6,22 @@ const ApiClient = @import("api_client.zig").ApiClient;
 const SignalCache = @import("signal_cache.zig").SignalCache;
 const MessageQueue = @import("message_queue.zig").MessageQueue;
 const worker_threads = @import("worker_threads.zig");
+const build_options = @import("build_options");
 
-// Configure logging - will be overridden by LOG_LEVEL env var if set
-pub const std_options: std.Options = .{
-    .log_level = .debug,
+// Configure logging based on build options and runtime environment
+const build_log_level: std.log.Level = blk: {
+    const level_str = build_options.log_level;
+    if (std.mem.eql(u8, level_str, "debug")) break :blk .debug;
+    if (std.mem.eql(u8, level_str, "info")) break :blk .info;
+    if (std.mem.eql(u8, level_str, "warn")) break :blk .warn;
+    if (std.mem.eql(u8, level_str, "err")) break :blk .err;
+    break :blk .info; // default
 };
 
-// Custom log function to ensure debug logs work in production
-pub fn log(
-    comptime message_level: std.log.Level,
-    comptime scope: @TypeOf(.enum_literal),
-    comptime format: []const u8,
-    args: anytype,
-) void {
-    // Get log level from environment variable if available
-    const env_level = std.process.getEnvVarOwned(std.heap.page_allocator, "LOG_LEVEL") catch null;
-    defer if (env_level) |l| std.heap.page_allocator.free(l);
-    
-    const runtime_level: std.log.Level = if (env_level) |level_str| blk: {
-        if (std.mem.eql(u8, level_str, "debug")) break :blk .debug;
-        if (std.mem.eql(u8, level_str, "info")) break :blk .info;
-        if (std.mem.eql(u8, level_str, "warn")) break :blk .warn;
-        if (std.mem.eql(u8, level_str, "err")) break :blk .err;
-        break :blk std_options.log_level;
-    } else std_options.log_level;
-    
-    // Only log if the message level is at or above the runtime level
-    if (@intFromEnum(message_level) < @intFromEnum(runtime_level)) return;
-    
-    const level_txt = comptime message_level.asText();
-    const prefix = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
-    
-    const stderr = std.io.getStdErr().writer();
-    
-    std.debug.lockStdErr();
-    defer std.debug.unlockStdErr();
-    
-    stderr.print("{s}" ++ prefix ++ format ++ "\n", .{level_txt} ++ args) catch {};
-}
+pub const std_options: std.Options = .{
+    .log_level = build_log_level,
+};
+
 
 const ModemCheckResult = struct {
     modem_id: []const u8,

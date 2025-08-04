@@ -76,7 +76,9 @@ pub const SMSSender = struct {
         
         // Convert to owned slice
         const result = try sms_list.toOwnedSlice();
-        std.log.info("📱 Found {d} pending SMS messages", .{result.len});
+        if (result.len > 0) {
+            std.log.info("📱 Found {d} pending SMS messages to send", .{result.len});
+        }
         return result;
     }
     
@@ -106,7 +108,7 @@ pub const SMSSender = struct {
                 defer self.allocator.free(iccid);
                 std.log.debug("📱 Modem {s} has ICCID: {s} (target: {s})", .{ modem_id, iccid, target_iccid });
                 if (std.mem.eql(u8, iccid, target_iccid)) {
-                    std.log.info("✅ Found modem {s} for ICCID {s}", .{ modem_id, target_iccid });
+                    std.log.debug("✅ Found modem {s} for ICCID {s}", .{ modem_id, target_iccid });
                     return self.allocator.dupe(u8, modem_id) catch null;
                 }
             } else {

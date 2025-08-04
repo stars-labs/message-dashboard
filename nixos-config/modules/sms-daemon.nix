@@ -79,16 +79,10 @@ in {
       '';
     };
 
-    logLevel = mkOption {
-      type = types.enum [ "debug" "info" "warn" "err" ];
-      default = "info";
-      description = "Log level for the daemon (debug, info, warn, err)";
-    };
-
     debugBuild = mkOption {
       type = types.bool;
       default = false;
-      description = "Build the daemon in debug mode for verbose logging";
+      description = "Use debug build with verbose logging (otherwise uses release build with info level logging)";
     };
 
     user = mkOption {
@@ -139,7 +133,6 @@ in {
         SMS_MESSAGE_CHECK_INTERVAL = toString cfg.messageCheckIntervalMs;
         SMS_SIGNAL_CHECK_INTERVAL = toString cfg.signalCheckIntervalSeconds;
         SMS_DEVICE_ID = cfg.deviceId;
-        LOG_LEVEL = cfg.logLevel;
       };
 
       script = ''

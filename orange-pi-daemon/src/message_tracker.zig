@@ -51,7 +51,7 @@ pub const MessageTracker = struct {
         const owned_key = try self.allocator.dupe(u8, key);
         defer self.allocator.free(key);
         
-        const now = std.time.nanoTimestamp();
+        const now = @as(i64, @intCast(std.time.nanoTimestamp()));
         
         self.mutex.lock();
         defer self.mutex.unlock();
@@ -63,7 +63,7 @@ pub const MessageTracker = struct {
     
     /// Clean up entries older than max_age
     fn cleanupOldEntries(self: *Self) void {
-        const now = std.time.nanoTimestamp();
+        const now = @as(i64, @intCast(std.time.nanoTimestamp()));
         var to_remove = std.ArrayList([]const u8).init(self.allocator);
         defer to_remove.deinit();
         

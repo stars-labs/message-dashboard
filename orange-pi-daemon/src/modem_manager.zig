@@ -593,11 +593,11 @@ pub const ModemManager = struct {
                 while (end < line.len and line[end] != ' ') : (end += 1) {}
                 const sms_id_str = line[start..end];
                 
-                std.log.debug("🔍 Found SMS in list: {s} (extracted ID: {s}) on modem {s}", .{ line, sms_id_str, modem_id });
+                std.log.debug("📨 Found SMS {s} on modem {s}", .{ sms_id_str, modem_id });
 
                 // Handle sent messages - delete them to prevent overflow
                 if (std.mem.indexOf(u8, line, "(sent)")) |_| {
-                    std.log.debug("📤 Found sent SMS {s} on modem {s}, deleting to prevent overflow", .{ sms_id_str, modem_id });
+                    // Silently delete sent SMS to prevent overflow
                     
                     // Delete sent messages to free up modem storage
                     self.deleteSms(modem_id, sms_id_str) catch |delete_err| {
@@ -626,7 +626,7 @@ pub const ModemManager = struct {
                     ) catch false;
                     
                     if (is_processed) {
-                        std.log.debug("📋 Skipping already processed message {s} on modem {s}", .{ sms_id_str, modem_id });
+                        // Skip already processed message
                         // Free the message info since we're not using it
                         self.allocator.free(message_info.modem_id);
                         self.allocator.free(message_info.sms_id);
@@ -636,6 +636,13 @@ pub const ModemManager = struct {
                         self.allocator.free(message_info.message.timestamp);
                         continue;
                     }
+                    
+                    // This is a new message!
+                    std.log.info("📱 New SMS found: {s} from {s} on modem {s}", .{ 
+                        sms_id_str, 
+                        message_info.message.phone_number,
+                        modem_id 
+                    });
                     
                     // Mark this message as processed
                     self.message_tracker.markProcessed(
@@ -661,7 +668,7 @@ pub const ModemManager = struct {
         const iccid = (try self.getIccid(modem_id)) orelse return error.NoIccid;
         defer self.allocator.free(iccid);
 
-        std.log.debug("🔍 Getting SMS details with command: mmcli -s {s} -a", .{sms_id});
+        std.log.debug("📥 Processing SMS {s}", .{sms_id});
         
         const result = try std.process.Child.run(.{
             .allocator = self.allocator,
@@ -1185,7 +1192,7 @@ pub const ModemManager = struct {
             return error.SmsSendFailed;
         }
         
-        std.log.debug("✅ SMS sent successfully", .{});
+        std.log.info("✅ SMS sent successfully", .{});
         std.log.debug("📄 Send result stdout: {s}", .{send_result.stdout});
 
         std.log.info("✅ Successfully sent SMS to {s} (SMS ID: {s})", .{ recipient, sms_id });
@@ -1199,7 +1206,7 @@ pub const ModemManager = struct {
             // Don't fail the operation if deletion fails - SMS was sent successfully
         };
         
-        std.log.debug("🎉 SMS send process completed successfully", .{});
+        std.log.info("📤 SMS send completed", .{});
         
         // Return the SMS ID (just the slice, no allocation)
         return sms_id;

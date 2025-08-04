@@ -89,6 +89,7 @@
     tmux
     git
     sbctl
+    usbutils  # Provides lsusb command
   ];
 
   # Boot configuration
