@@ -4,12 +4,20 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    // Add log level option
+    const log_level = b.option([]const u8, "log_level", "Set the log level (debug, info, warn, err)") orelse "info";
+
     const exe = b.addExecutable(.{
         .name = "orange-pi-daemon",
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
+
+    // Define the log level at compile time
+    const options = b.addOptions();
+    options.addOption([]const u8, "log_level", log_level);
+    exe.root_module.addOptions("build_options", options);
 
     b.installArtifact(exe);
 

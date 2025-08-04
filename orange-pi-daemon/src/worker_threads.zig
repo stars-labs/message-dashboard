@@ -154,7 +154,7 @@ fn processModemParallel(context: *PhoneProcessorContext, modem_id: []const u8) v
 
 /// Phone status updater thread
 pub fn phoneStatusThread(context: *WorkerContext) !void {
-    std.log.info("🚀 Phone status thread started", .{});
+    std.log.debug("🚀 Phone status thread started", .{});
     
     while (!context.should_exit.load(.acquire)) {
         // Sleep for configured interval
@@ -224,24 +224,24 @@ pub fn phoneStatusThread(context: *WorkerContext) !void {
         const processing_time = std.time.milliTimestamp() - start_time;
         
         if (phones.len > 0) {
-            std.log.info("📤 Uploading {d} phone status updates (collected in {d}ms)", .{phones.len, processing_time});
+            std.log.debug("📤 Uploading {d} phone status updates (collected in {d}ms)", .{phones.len, processing_time});
             const upload_start = std.time.milliTimestamp();
             context.api_client.uploadPhones(phones) catch |err| {
                 std.log.err("Failed to upload phone status: {any}", .{err});
             };
             const upload_time = std.time.milliTimestamp() - upload_start;
-            std.log.info("✅ Phone upload completed in {d}ms", .{upload_time});
+            std.log.debug("✅ Phone upload completed in {d}ms", .{upload_time});
         } else {
-            std.log.info("📱 No phone updates to upload (processing took {d}ms)", .{processing_time});
+            std.log.debug("📱 No phone updates to upload (processing took {d}ms)", .{processing_time});
         }
     }
     
-    std.log.info("🛑 Phone status thread exiting", .{});
+    std.log.debug("🛑 Phone status thread exiting", .{});
 }
 
 /// Signal monitor thread
 pub fn signalMonitorThread(context: *WorkerContext) !void {
-    std.log.info("🚀 Signal monitor thread started", .{});
+    std.log.debug("🚀 Signal monitor thread started", .{});
     
     while (!context.should_exit.load(.acquire)) {
         // Sleep for configured interval

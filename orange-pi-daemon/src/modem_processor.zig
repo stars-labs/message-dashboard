@@ -28,7 +28,7 @@ pub fn processModem(
     };
     defer allocator.free(modem_status);
     
-    std.log.info("📱 Modem {s} state: {s}", .{ modem_id, modem_status });
+    std.log.debug("📱 Modem {s} state: {s}", .{ modem_id, modem_status });
     
     // Enable modem if it's disabled
     if (std.mem.eql(u8, modem_status, "disabled")) {
@@ -108,7 +108,7 @@ pub fn processModem(
                     std.log.warn("Failed to update signal cache for modem {s}: {any}", .{ modem_id, err });
                 };
                 
-                std.log.info("📱 Modem {s} signal updated: {}%, RSSI: {?}, RSRQ: {?}, RSRP: {?}, SNR: {?}", .{
+                std.log.debug("📱 Modem {s} signal updated: {}%, RSSI: {?}, RSRQ: {?}, RSRP: {?}, SNR: {?}", .{
                     modem_id, 
                     signal_data.signal_percent,
                     signal_data.rssi,
@@ -124,7 +124,7 @@ pub fn processModem(
                     phone.rsrq = cached_signal.rsrq;
                     phone.rsrp = cached_signal.rsrp;
                     phone.snr = cached_signal.snr;
-                    std.log.info("📱 Modem {s} using cached signal (no update needed): {}%", .{ modem_id, signal_data.signal_percent });
+                    std.log.debug("📱 Modem {s} using cached signal (no update needed): {}%", .{ modem_id, signal_data.signal_percent });
                 } else {
                     std.log.debug("📱 Modem {s} has no cached signal data during signal check", .{ modem_id });
                 }
@@ -138,7 +138,7 @@ pub fn processModem(
                 phone.rsrq = signal_data.rsrq;
                 phone.rsrp = signal_data.rsrp;
                 phone.snr = signal_data.snr;
-                std.log.info("📱 Modem {s} using cached signal after retrieval failure: {}%", .{ modem_id, signal_data.signal_percent });
+                std.log.debug("📱 Modem {s} using cached signal after retrieval failure: {}%", .{ modem_id, signal_data.signal_percent });
             } else {
                 std.log.debug("📱 Modem {s} has no cached signal data after retrieval failure", .{ modem_id });
             }
@@ -171,7 +171,7 @@ pub fn processModem(
     
     // Add phone to collector for batched upload
     const upload_reason = if (has_signal_update) "with signal update" else if (phone.signal != null) "with cached signal" else "status only";
-    std.log.info("📱 Adding phone {s} to batch ({s}): signal={?}", .{ phone.iccid, upload_reason, phone.signal });
+    std.log.debug("📱 Adding phone {s} to batch ({s}): signal={?}", .{ phone.iccid, upload_reason, phone.signal });
     
     phone_collector.addPhone(phone) catch |err| {
         std.log.warn("Failed to add phone {s} to batch: {any}", .{ phone.iccid, err });

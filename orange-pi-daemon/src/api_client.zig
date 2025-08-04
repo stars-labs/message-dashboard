@@ -34,7 +34,7 @@ pub const ApiClient = struct {
         defer self.allocator.free(payload);
 
         try self.makeRequest("/phones", payload);
-        std.log.info("✅ Uploaded phone {s} via HTTP API", .{phone.iccid});
+        std.log.debug("✅ Uploaded phone {s} via HTTP API", .{phone.iccid});
     }
 
     pub fn uploadPhones(self: *ApiClient, phones: []const types.Phone) !void {
@@ -50,7 +50,7 @@ pub const ApiClient = struct {
         defer self.allocator.free(payload);
 
         try self.makeRequest("/phones", payload);
-        std.log.info("✅ Uploaded {d} phones via HTTP API", .{phones.len});
+        std.log.debug("✅ Uploaded {d} phones via HTTP API", .{phones.len});
     }
 
     pub fn uploadMessages(self: *ApiClient, messages: []const types.Message) !void {
@@ -59,10 +59,8 @@ pub const ApiClient = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
 
-        std.log.debug("📱 Preparing to upload {d} messages:", .{messages.len});
+        std.log.info("📤 Uploading {d} new messages to API", .{messages.len});
         for (messages, 0..) |msg, i| {
-            std.log.debug("  Message {d}: phone_iccid={s}, phone_number={s}, content length={d}, timestamp={s}", .{ i, msg.phone_iccid, msg.phone_number, msg.content.len, msg.timestamp });
-            std.log.debug("🔍 MESSAGE UPLOAD DEBUG - Message {d}: content={s}, timestamp={s}, iccid={s}", .{ i, msg.content, msg.timestamp, msg.phone_iccid });
             
             // Check if content is valid UTF-8
             const is_valid_utf8 = std.unicode.utf8ValidateSlice(msg.content);
