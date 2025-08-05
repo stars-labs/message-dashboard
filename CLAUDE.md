@@ -224,4 +224,36 @@ npx wrangler d1 execute sms-dashboard --command "SELECT * FROM messages ORDER BY
 ### Architecture Update
 - Daemon now uses HTTP POST requests to upload data (not WebSocket)
 - Server broadcasts updates via WebSocket/SSE to connected clients
-- API endpoints: `/api/control/phones` and `/api/control/messages` 
+- API endpoints: `/api/control/phones` and `/api/control/messages`
+
+### v1.16.0 - Keyword Highlighting & Tagging System (August 2025)
+- **Database Schema**: Added `keyword_tags` and `message_tags` tables for keyword-tag mappings
+- **API Endpoints**: 
+  - `/api/keywords` - CRUD operations for keyword configuration
+  - `/api/messages/:id/tags` - Get tags for a specific message
+  - `/api/ai/analyze-keywords` - AI analysis of keyword usage and patterns
+- **UI Components**:
+  - `KeywordConfig.svelte` - Configuration interface for managing keywords
+  - `MessageHighlight.svelte` - Real-time message highlighting with tags
+  - Added "Keywords" tab to main navigation
+- **Features**:
+  - Case-sensitive and whole-word matching options
+  - Priority-based keyword matching to handle overlaps
+  - Custom colors for each keyword-tag pair
+  - Usage statistics and tracking
+  - Automatic keyword processing during message upload
+  - Server-side keyword matching for consistency
+  - Client-side fallback for real-time highlighting
+- **AI Integration**: Keyword analysis function provides insights on usage patterns and optimization recommendations
+- **Bug Fixes**:
+  - Added `keywords.read` and `keywords.write` permissions to RBAC middleware
+  - Implemented automatic table creation in API endpoints to ensure tables exist
+  - Added table creation to control handler for message processing
+  - Fixed API client method calls from `api.request()` to proper `api.get()`, `api.post()`, etc.
+
+### v1.31.8 - Reduced Daemon Logging (August 2025)
+- Implemented compile-time log level configuration in Zig build
+- Created two separate Nix derivations: `sms-daemon` (info level) and `sms-daemon-debug` (debug level)
+- Changed verbose modem state and signal strength logs from info to debug level
+- Now only logs pending SMS operations and new messages at info level
+- Significantly reduced log volume for production operations

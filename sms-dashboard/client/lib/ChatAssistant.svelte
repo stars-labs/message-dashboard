@@ -17,6 +17,11 @@
   let chatContainer;
   let isTyping = false;
   let typingTimeout;
+  
+  // Auto-hide functionality
+  let isHovered = false;
+  let hideTimeout;
+  let showButton = false;
 
   // Quick actions
   const quickActions = [
@@ -29,7 +34,63 @@
   onMount(() => {
     // Load conversation history
     loadConversations();
+    
+    // Show button initially
+    showButton = true;
+    
+    // Hide button after 2 seconds if not hovered
+    hideTimeout = setTimeout(() => {
+      if (!isHovered && !isOpen) {
+        showButton = false;
+      }
+    }, 2000);
+    
+    // Add mouse movement listener for auto-show functionality
+    document.addEventListener('mousemove', handleMouseMove);
   });
+  
+  onDestroy(() => {
+    if (hideTimeout) clearTimeout(hideTimeout);
+    document.removeEventListener('mousemove', handleMouseMove);
+  });
+  
+  function handleMouseMove(event) {
+    // Check if mouse is near bottom-right corner (within 150px)
+    const threshold = 150;
+    const distanceFromRight = window.innerWidth - event.clientX;
+    const distanceFromBottom = window.innerHeight - event.clientY;
+    
+    if (distanceFromRight < threshold && distanceFromBottom < threshold) {
+      showButton = true;
+      if (hideTimeout) clearTimeout(hideTimeout);
+    } else if (!isHovered && !isOpen && showButton) {
+      // Hide quickly (500ms) when mouse moves away
+      if (hideTimeout) clearTimeout(hideTimeout);
+      hideTimeout = setTimeout(() => {
+        if (!isHovered && !isOpen) {
+          showButton = false;
+        }
+      }, 500);
+    }
+  }
+  
+  function handleMouseEnter() {
+    isHovered = true;
+    showButton = true;
+    if (hideTimeout) clearTimeout(hideTimeout);
+  }
+  
+  function handleMouseLeave() {
+    isHovered = false;
+    if (!isOpen) {
+      // Hide quickly after mouse leaves the button
+      hideTimeout = setTimeout(() => {
+        if (!isHovered && !isOpen) {
+          showButton = false;
+        }
+      }, 500);
+    }
+  }
 
   async function loadConversations() {
     try {
@@ -71,6 +132,15 @@
     isOpen = !isOpen;
     if (isOpen && messages.length === 0) {
       newConversation();
+    }
+    // When closing chat, start hide timer
+    if (!isOpen) {
+      if (hideTimeout) clearTimeout(hideTimeout);
+      hideTimeout = setTimeout(() => {
+        if (!isHovered) {
+          showButton = false;
+        }
+      }, 500);
     }
   }
 
@@ -266,15 +336,23 @@
 
 <div class="chat-assistant" class:open={isOpen} class:minimized={isMinimized}>
   {#if !isOpen}
-    <button class="chat-toggle" on:click={toggleChat} transition:fade>
-      <div class="chat-icon">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-          <path d="M12 2C6.48 2 2 6.48 2 12C2 17.52 6.48 22 12 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 12 2ZM12 20C7.58 20 4 16.42 4 12C4 7.58 7.58 4 12 4C16.42 4 20 7.58 20 12C20 16.42 16.42 20 12 20Z" fill="currentColor"/>
-          <path d="M12 6C9.79 6 8 7.79 8 10H10C10 8.9 10.9 8 12 8C13.1 8 14 8.9 14 10C14 12 11 11.75 11 15H13C13 12.75 16 12.5 16 10C16 7.79 14.21 6 12 6ZM11 16H13V18H11V16Z" fill="currentColor"/>
-        </svg>
-      </div>
-      <span class="chat-label">AI Assistant</span>
-    </button>
+    {#if showButton}
+      <button 
+        class="chat-toggle" 
+        on:click={toggleChat}
+        on:mouseenter={handleMouseEnter}
+        on:mouseleave={handleMouseLeave}
+        transition:fade={{duration: 200}}
+      >
+        <div class="chat-icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+            <path d="M12 2C6.48 2 2 6.48 2 12C2 17.52 6.48 22 12 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 12 2ZM12 20C7.58 20 4 16.42 4 12C4 7.58 7.58 4 12 4C16.42 4 20 7.58 20 12C20 16.42 16.42 20 12 20Z" fill="currentColor"/>
+            <path d="M12 6C9.79 6 8 7.79 8 10H10C10 8.9 10.9 8 12 8C13.1 8 14 8.9 14 10C14 12 11 11.75 11 15H13C13 12.75 16 12.5 16 10C16 7.79 14.21 6 12 6ZM11 16H13V18H11V16Z" fill="currentColor"/>
+          </svg>
+        </div>
+        <span class="chat-label">AI Assistant</span>
+      </button>
+    {/if}
   {:else}
     <div class="chat-window" transition:slide>
       <div class="chat-header">
@@ -403,12 +481,39 @@
     cursor: pointer;
     box-shadow: 0 4px 12px rgba(0, 255, 255, 0.2);
     transition: all 0.3s ease;
+    opacity: 0.9;
   }
 
   .chat-toggle:hover {
     transform: translateY(-2px);
     box-shadow: 0 6px 20px rgba(0, 255, 255, 0.3);
     border-color: var(--accent-color, #00ffff);
+    opacity: 1;
+  }
+  
+  /* Subtle hint dot when button is hidden */
+  .chat-assistant::after {
+    content: '';
+    position: fixed;
+    bottom: 30px;
+    right: 30px;
+    width: 8px;
+    height: 8px;
+    background: var(--accent-color, #00ffff);
+    border-radius: 50%;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    pointer-events: none;
+    animation: pulse 2s ease-in-out infinite;
+  }
+  
+  .chat-assistant:not(:has(.chat-toggle)):not(.open)::after {
+    opacity: 0.4;
+  }
+  
+  @keyframes pulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.2); }
   }
 
   .chat-icon {
