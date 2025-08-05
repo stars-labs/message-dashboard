@@ -25,7 +25,7 @@ export function requirePermission(permission) {
       const userRoles = user.roles || [];
       
       // For SMS-related permissions, check if user has the SMS role
-      const smsPermissions = ['phones.read', 'messages.read', 'messages.send'];
+      const smsPermissions = ['phones.read', 'messages.read', 'messages.send', 'keywords.read', 'keywords.write', 'keywords.delete'];
       if (smsPermissions.includes(permission)) {
         if (!hasSmSAccess(userRoles, roleConfig)) {
           const requiredRoles = [roleConfig.SMS_ROLE, ...roleConfig.ALTERNATIVE_SMS_ROLES].filter(r => r);
@@ -65,13 +65,13 @@ export async function enrichUserPermissions(request) {
     // When Auth0 roles are enabled, check roles strictly
     const userRoles = user.roles || [];
     if (hasSmSAccess(userRoles, roleConfig)) {
-      user.permissions = ['phones.read', 'messages.read', 'messages.send'];
+      user.permissions = ['phones.read', 'messages.read', 'messages.send', 'keywords.read', 'keywords.write', 'keywords.delete'];
     } else {
       user.permissions = [];
     }
   } else {
     // Only grant permissions when Auth0 roles are explicitly disabled
-    user.permissions = ['phones.read', 'messages.read', 'messages.send'];
+    user.permissions = ['phones.read', 'messages.read', 'messages.send', 'keywords.read', 'keywords.write', 'keywords.delete'];
   }
   
   return;
