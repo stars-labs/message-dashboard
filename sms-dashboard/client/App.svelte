@@ -10,6 +10,7 @@
   import WebGPUBackground from "./lib/WebGPUBackground.svelte";
   import ChatAssistant from "./lib/ChatAssistant.svelte";
   import SemanticSearch from "./lib/SemanticSearch.svelte";
+  import KeywordConfig from "./lib/KeywordConfig.svelte";
   import { api } from "./lib/api.js";
   import { pollingService } from "./lib/polling-service.js";
   import { auth } from "./lib/auth.js";
@@ -35,7 +36,7 @@
   let dataLoading = true; // Track data loading separately
   let pollingConnected = false;
   let pollingUnsubscribers = [];
-  let currentView = "dashboard"; // 'dashboard' or 'iccid-mappings'
+  let currentView = "dashboard"; // 'dashboard', 'iccid-mappings', or 'keywords'
   let showIccidMappingDialog = false;
   let phoneToMap = null;
   let daemonStatus = {
@@ -56,6 +57,21 @@
     totalDevices: 0,
     verificationRate: 0,
   };
+  
+  // Hash routing handler
+  function handleHashChange() {
+    const hash = window.location.hash.slice(1);
+    if (hash === 'keywords') {
+      console.log('[App] Hash routing: switching to keywords view');
+      currentView = 'keywords';
+    } else if (hash === 'iccid-mappings') {
+      console.log('[App] Hash routing: switching to ICCID mappings view');
+      currentView = 'iccid-mappings';
+    } else if (hash === 'dashboard' || hash === '') {
+      console.log('[App] Hash routing: switching to dashboard view');
+      currentView = 'dashboard';
+    }
+  }
 
   // Load data using HTTP API directly for better performance
   async function loadData() {
@@ -240,6 +256,12 @@
     if (window.location.search.includes("token=")) {
       await auth.handleCallback();
     }
+    
+    // Set initial view based on hash
+    handleHashChange();
+    
+    // Listen for hash changes
+    window.addEventListener('hashchange', handleHashChange);
 
     // Quick authentication check
     try {
@@ -489,6 +511,9 @@
     if (window._removeMatrixRain) {
       window._removeMatrixRain();
     }
+    
+    // Remove hash change listener
+    window.removeEventListener('hashchange', handleHashChange);
   });
 
   async function selectPhone(phone) {
@@ -871,7 +896,10 @@
           <!-- Navigation -->
           <div class="hidden lg:flex items-center gap-4 flex-1 justify-center">
             <button
-              on:click={() => (currentView = "dashboard")}
+              on:click={() => {
+                currentView = "dashboard";
+                window.location.hash = 'dashboard';
+              }}
               class="px-4 py-2 rounded-lg transition-all {currentView ===
               'dashboard'
                 ? 'tech-button'
@@ -883,6 +911,7 @@
               on:click={() => {
                 console.log("[App] Switching to ICCID mappings view");
                 currentView = "iccid-mappings";
+                window.location.hash = 'iccid-mappings';
               }}
               class="px-4 py-2 rounded-lg transition-all {currentView ===
               'iccid-mappings'
@@ -890,6 +919,19 @@
                 : 'text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/20'}"
             >
               ICCID 映射
+            </button>
+            <button
+              on:click={() => {
+                console.log("[App] Switching to keywords view");
+                currentView = "keywords";
+                window.location.hash = 'keywords';
+              }}
+              class="px-4 py-2 rounded-lg transition-all {currentView ===
+              'keywords'
+                ? 'tech-button'
+                : 'text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/20'}"
+            >
+              关键词高亮
             </button>
           </div>
 
@@ -1040,6 +1082,18 @@
             : 'text-cyan-400 bg-cyan-900/20'}"
         >
           ICCID 映射
+        </button>
+        <button
+          on:click={() => {
+            console.log("[App] Switching to keywords view (mobile)");
+            currentView = "keywords";
+          }}
+          class="flex-1 px-3 py-2 rounded-lg text-sm transition-all {currentView ===
+          'keywords'
+            ? 'tech-button'
+            : 'text-cyan-400 bg-cyan-900/20'}"
+        >
+          关键词
         </button>
       </div>
     </div>
@@ -1240,6 +1294,11 @@
       <!-- ICCID Mappings View -->
       <div class="px-4 lg:px-8 py-6">
         <IccidMappings />
+      </div>
+    {:else if currentView === "keywords"}
+      <!-- Keywords Configuration View -->
+      <div class="px-4 lg:px-8 py-6">
+        <KeywordConfig />
       </div>
     {/if}
   </div>

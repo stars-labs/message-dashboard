@@ -1,10 +1,13 @@
 <script>
+  import MessageHighlight from './MessageHighlight.svelte';
+  
   export let messages = [];
   export let selectedPhone = null;
   export let mobile = false;
   
   let viewMode = 'recent'; // 'recent' or 'history'
   let groupBy = 'time'; // 'time' or 'source'
+  let messageTags = new Map(); // Store tags for each message
   
   // Filter messages first
   $: filteredMessages = selectedPhone 
@@ -225,6 +228,20 @@
     
     return colors[source] || 'from-gray-500 to-gray-600';
   }
+  
+  function handleTagsExtracted(messageId, tags) {
+    messageTags.set(messageId, tags);
+    messageTags = messageTags; // Trigger reactivity
+  }
+  
+  // Removed getMessageTags - no longer needed since we use messageTags Map directly
+  
+  function hexToRgba(hex, alpha) {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  }
 </script>
 
 <div class="{mobile ? 'bg-black/90' : 'tech-card'}">
@@ -284,18 +301,31 @@
               <div class="tech-card holo-card rounded-xl p-3 lg:p-4 hover:shadow-lg hover:shadow-cyan-500/20 transition-all duration-300">
                 <div class="flex justify-between items-start mb-2">
                   <div class="flex-1">
-                    <div class="flex items-center gap-2 mb-1">
+                    <div class="flex items-center gap-2 flex-wrap mb-2">
                       <span class="text-xs px-2 py-1 rounded-full bg-gradient-to-r {getSourceColor(message.source)} text-white font-medium">
                         {message.source || '未知来源'}
                       </span>
+                      {#if messageTags.has(message.id)}
+                        {#each messageTags.get(message.id) as tag}
+                          <span 
+                            class="text-xs px-2 py-1 rounded-full text-white font-bold"
+                            style="background: linear-gradient(135deg, {tag.color}, {hexToRgba(tag.color, 0.7)}); box-shadow: 0 0 10px {hexToRgba(tag.color, 0.5)}, inset 0 0 10px {hexToRgba(tag.color, 0.3)};"
+                          >
+                            {tag.tag}
+                            {#if tag.count > 1}
+                              <span class="text-xs opacity-80">×{tag.count}</span>
+                            {/if}
+                          </span>
+                        {/each}
+                      {/if}
                       {#if message.verificationCode}
                         <span class="px-3 py-1 bg-gradient-to-r from-blue-500 to-blue-600 text-white text-sm rounded-full font-mono font-bold shadow-md data-display">
                           {message.verificationCode}
                         </span>
                       {/if}
                     </div>
-                    <div class="mt-2 bg-black/50 rounded-lg p-2 border border-cyan-500/30">
-                      <p class="text-xs lg:text-sm text-white font-medium break-words whitespace-pre-wrap high-contrast">{message.content}</p>
+                    <div class="bg-black/50 rounded-lg p-3 border border-cyan-500/30 backdrop-blur-sm">
+                      <MessageHighlight content={message.content} messageId={message.id} onTagsExtracted={(tags) => handleTagsExtracted(message.id, tags)} />
                     </div>
                     <div class="mt-2 flex flex-wrap items-center gap-2 text-xs">
                       <span class="text-purple-400 font-bold flex items-center gap-1 tech-text">
@@ -326,8 +356,8 @@
           <div class="tech-card {message.type === 'sent' ? 'border-l-4 border-l-blue-400' : ''} rounded-xl p-3 lg:p-4 hover:shadow-xl hover:shadow-cyan-500/20 hover:scale-[1.01] active:scale-100 transition-all duration-300">
             <div class="flex justify-between items-start mb-2">
               <div class="flex-1">
-                <div class="flex flex-wrap items-center gap-2 mb-1">
-                  {#if message.type === 'sent'}
+                {#if message.type === 'sent'}
+                  <div class="flex flex-wrap items-center gap-2 mb-2">
                     {#if message.status === 'failed'}
                       <span class="text-xs px-2 py-1 rounded-full bg-gradient-to-r from-red-500 to-red-600 text-white font-medium shadow-md">
                         发送失败
@@ -340,7 +370,10 @@
                         <span class="text-xs text-green-400">✓ 已送达</span>
                       {/if}
                     {/if}
-                  {:else}
+                  </div>
+                {/if}
+                {#if message.type !== 'sent'}
+                  <div class="flex items-center gap-2 flex-wrap mb-2">
                     {#if message.source}
                       <span class="text-xs px-2 py-1 rounded-full bg-gradient-to-r {getSourceColor(message.source)} text-white font-medium shadow-md">
                         {message.source}
@@ -350,15 +383,28 @@
                         未知来源
                       </span>
                     {/if}
+                    {#if messageTags.has(message.id)}
+                      {#each messageTags.get(message.id) as tag}
+                        <span 
+                          class="text-xs px-2 py-1 rounded-full text-white font-bold"
+                          style="background: linear-gradient(135deg, {tag.color}, {hexToRgba(tag.color, 0.7)}); box-shadow: 0 0 10px {hexToRgba(tag.color, 0.5)}, inset 0 0 10px {hexToRgba(tag.color, 0.3)};"
+                        >
+                          {tag.tag}
+                          {#if tag.count > 1}
+                            <span class="text-xs opacity-80">×{tag.count}</span>
+                          {/if}
+                        </span>
+                      {/each}
+                    {/if}
                     {#if message.verificationCode}
                       <span class="px-3 py-1 bg-gradient-to-r from-blue-500 to-blue-600 text-white text-sm rounded-full font-mono font-bold shadow-md animate-pulse">
                         {message.verificationCode}
                       </span>
                     {/if}
-                  {/if}
-                </div>
-                <div class="mt-2 bg-black/50 rounded-lg p-2 border border-cyan-500/30">
-                  <p class="text-xs lg:text-sm text-white font-medium break-words whitespace-pre-wrap high-contrast">{message.content}</p>
+                  </div>
+                {/if}
+                <div class="bg-black/50 rounded-lg p-3 border border-cyan-500/30 backdrop-blur-sm">
+                  <MessageHighlight content={message.content} messageId={message.id} onTagsExtracted={(tags) => handleTagsExtracted(message.id, tags)} />
                 </div>
                 <div class="mt-2 flex flex-wrap items-center gap-2 text-xs">
                   {#if message.type === 'sent'}

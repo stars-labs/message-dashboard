@@ -1,6 +1,7 @@
 import { nanoid } from 'nanoid';
 import { extractVerificationCode } from '../utils/verification';
 import { aiHandler } from './ai';
+import { findKeywordMatches } from '../api/keywords.js';
 
 export const controlHandler = {
   // Upload messages from Orange Pi
@@ -144,12 +145,17 @@ export const controlHandler = {
         processed += inserted;
       }
       
-      // Process new messages with AI (async, don't wait)
-      if (newMessages.length > 0 && env.AI) {
-        // Process messages with AI in the background
+      // Process new messages with AI and keywords (async, don't wait)
+      if (newMessages.length > 0) {
+        // Process messages in the background
         request.ctx.waitUntil(
           Promise.all(newMessages.map(async (msg) => {
             try {
+              // Process keywords first
+              await processMessageKeywords(env.DB, msg);
+              
+              // Then process with AI if available
+              if (env.AI) {
               // Extract verification code with AI
               const codeRequest = new Request('https://fake.url', {
                 method: 'POST',
@@ -182,9 +188,9 @@ export const controlHandler = {
               });
               embeddingRequest.env = env;
               await aiHandler.generateEmbedding(embeddingRequest);
-              
+              }
             } catch (error) {
-              console.error(`AI processing error for message ${msg.id}:`, error);
+              console.error(`Message processing error for message ${msg.id}:`, error);
             }
           }))
         );
@@ -653,3 +659,93 @@ export const controlHandler = {
     }
   }
 };
+
+// Ensure keyword tables exist
+async function ensureKeywordTables(db) {
+    // Create keyword_tags table
+    await db.prepare(`
+        CREATE TABLE IF NOT EXISTS keyword_tags (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            keyword TEXT NOT NULL,
+            tag TEXT NOT NULL,
+            color TEXT DEFAULT '#3B82F6',
+            priority INTEGER DEFAULT 0,
+            is_active BOOLEAN DEFAULT TRUE,
+            case_sensitive BOOLEAN DEFAULT FALSE,
+            whole_word BOOLEAN DEFAULT FALSE,
+            created_by TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+        )
+    `).run();
+    
+    // Create message_tags table
+    await db.prepare(`
+        CREATE TABLE IF NOT EXISTS message_tags (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            message_id TEXT NOT NULL,
+            keyword_tag_id INTEGER NOT NULL,
+            matched_text TEXT NOT NULL,
+            position INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+            FOREIGN KEY (keyword_tag_id) REFERENCES keyword_tags(id) ON DELETE CASCADE,
+            UNIQUE(message_id, keyword_tag_id, position)
+        )
+    `).run();
+    
+    // Create indexes
+    await db.prepare(`CREATE INDEX IF NOT EXISTS idx_keyword_tags_keyword ON keyword_tags(keyword)`).run();
+    await db.prepare(`CREATE INDEX IF NOT EXISTS idx_keyword_tags_active ON keyword_tags(is_active)`).run();
+    await db.prepare(`CREATE INDEX IF NOT EXISTS idx_keyword_tags_priority ON keyword_tags(priority)`).run();
+    await db.prepare(`CREATE INDEX IF NOT EXISTS idx_message_tags_message ON message_tags(message_id)`).run();
+    await db.prepare(`CREATE INDEX IF NOT EXISTS idx_message_tags_keyword ON message_tags(keyword_tag_id)`).run();
+}
+
+// Process keywords for a message
+async function processMessageKeywords(db, message) {
+  try {
+    // Ensure keyword tables exist first
+    await ensureKeywordTables(db);
+    
+    // Get active keywords
+    const { results: keywords } = await db.prepare(`
+      SELECT id, keyword, tag, color, priority, case_sensitive, whole_word
+      FROM keyword_tags
+      WHERE is_active = TRUE
+      ORDER BY priority DESC
+    `).all();
+    
+    if (keywords.length === 0) return;
+    
+    // Find matches for each keyword
+    const matches = [];
+    for (const keyword of keywords) {
+      const keywordMatches = findKeywordMatches(message.content, keyword.keyword, keyword.case_sensitive, keyword.whole_word);
+      for (const match of keywordMatches) {
+        matches.push({
+          message_id: message.id,
+          keyword_tag_id: keyword.id,
+          matched_text: match.text,
+          position: match.position
+        });
+      }
+    }
+    
+    // Insert matches in batch if any found
+    if (matches.length > 0) {
+      const placeholders = matches.map(() => '(?, ?, ?, ?)').join(',');
+      const values = matches.flatMap(m => [m.message_id, m.keyword_tag_id, m.matched_text, m.position]);
+      
+      await db.prepare(`
+        INSERT OR IGNORE INTO message_tags (message_id, keyword_tag_id, matched_text, position)
+        VALUES ${placeholders}
+      `).bind(...values).run();
+      
+      console.log(`[control.js] Processed ${matches.length} keyword matches for message ${message.id}`);
+    }
+  } catch (error) {
+    console.error(`[control.js] Keyword processing error for message ${message.id}:`, error);
+  }
+}
