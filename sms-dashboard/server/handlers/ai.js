@@ -8,6 +8,49 @@ const AI_MODELS = {
   TRANSLATION: '@cf/meta/m2m100-1.2b'
 };
 
+// Ensure keyword tables exist
+async function ensureKeywordTables(db) {
+    // Create keyword_tags table
+    await db.prepare(`
+        CREATE TABLE IF NOT EXISTS keyword_tags (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            keyword TEXT NOT NULL,
+            tag TEXT NOT NULL,
+            color TEXT DEFAULT '#3B82F6',
+            priority INTEGER DEFAULT 0,
+            is_active BOOLEAN DEFAULT TRUE,
+            case_sensitive BOOLEAN DEFAULT FALSE,
+            whole_word BOOLEAN DEFAULT FALSE,
+            created_by TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+        )
+    `).run();
+    
+    // Create message_tags table
+    await db.prepare(`
+        CREATE TABLE IF NOT EXISTS message_tags (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            message_id TEXT NOT NULL,
+            keyword_tag_id INTEGER NOT NULL,
+            matched_text TEXT NOT NULL,
+            position INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+            FOREIGN KEY (keyword_tag_id) REFERENCES keyword_tags(id) ON DELETE CASCADE,
+            UNIQUE(message_id, keyword_tag_id, position)
+        )
+    `).run();
+    
+    // Create indexes
+    await db.prepare(`CREATE INDEX IF NOT EXISTS idx_keyword_tags_keyword ON keyword_tags(keyword)`).run();
+    await db.prepare(`CREATE INDEX IF NOT EXISTS idx_keyword_tags_active ON keyword_tags(is_active)`).run();
+    await db.prepare(`CREATE INDEX IF NOT EXISTS idx_keyword_tags_priority ON keyword_tags(priority)`).run();
+    await db.prepare(`CREATE INDEX IF NOT EXISTS idx_message_tags_message ON message_tags(message_id)`).run();
+    await db.prepare(`CREATE INDEX IF NOT EXISTS idx_message_tags_keyword ON message_tags(keyword_tag_id)`).run();
+}
+
 export const aiHandler = {
   // Extract verification code with AI
   async extractCode(request) {
@@ -853,6 +896,121 @@ Return a JSON object with:
       return new Response(JSON.stringify({
         success: false,
         error: 'Failed to get verification codes'
+      }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+  },
+
+  // Analyze keywords and tags for messages
+  async analyzeKeywords(request) {
+    const { env } = request;
+    
+    try {
+      // Ensure keyword tables exist
+      await ensureKeywordTables(env.DB);
+      
+      const { phone_iccid, start_date, end_date } = await request.json();
+      
+      // Get keyword statistics
+      const query = `
+        SELECT 
+          kt.id,
+          kt.keyword,
+          kt.tag,
+          kt.color,
+          COUNT(DISTINCT mt.message_id) as message_count,
+          COUNT(mt.matched_text) as match_count,
+          GROUP_CONCAT(DISTINCT m.source) as sources
+        FROM keyword_tags kt
+        JOIN message_tags mt ON kt.id = mt.keyword_tag_id
+        JOIN messages m ON mt.message_id = m.id
+        WHERE kt.is_active = TRUE
+        ${phone_iccid ? 'AND m.phone_iccid = ?' : ''}
+        ${start_date ? 'AND m.timestamp >= ?' : ''}
+        ${end_date ? 'AND m.timestamp <= ?' : ''}
+        GROUP BY kt.id
+        ORDER BY match_count DESC
+      `;
+      
+      const params = [];
+      if (phone_iccid) params.push(phone_iccid);
+      if (start_date) params.push(start_date);
+      if (end_date) params.push(end_date);
+      
+      const { results: keywordStats } = await env.DB.prepare(query).bind(...params).all();
+      
+      // Get recent tagged messages
+      const recentQuery = `
+        SELECT 
+          m.id,
+          m.content,
+          m.timestamp,
+          m.phone_iccid,
+          GROUP_CONCAT(kt.tag) as tags,
+          GROUP_CONCAT(kt.color) as colors
+        FROM messages m
+        JOIN message_tags mt ON m.id = mt.message_id
+        JOIN keyword_tags kt ON mt.keyword_tag_id = kt.id
+        WHERE kt.is_active = TRUE
+        ${phone_iccid ? 'AND m.phone_iccid = ?' : ''}
+        ${start_date ? 'AND m.timestamp >= ?' : ''}
+        ${end_date ? 'AND m.timestamp <= ?' : ''}
+        GROUP BY m.id
+        ORDER BY m.timestamp DESC
+        LIMIT 100
+      `;
+      
+      const { results: recentTagged } = await env.DB.prepare(recentQuery).bind(...params).all();
+      
+      // Generate AI insights if requested
+      let insights = null;
+      if (keywordStats.length > 0) {
+        const prompt = `Analyze these keyword statistics and provide insights:
+
+Keyword Statistics:
+${keywordStats.map(k => `- "${k.keyword}" (${k.tag}): ${k.match_count} matches in ${k.message_count} messages from ${k.sources || 'unknown'}`).join('\n')}
+
+Recent Tagged Messages: ${recentTagged.length} messages
+
+Provide a brief analysis including:
+1. Most common keywords and their significance
+2. Patterns or trends in the tagged messages
+3. Recommendations for keyword optimization
+4. Any unusual or noteworthy observations
+
+Keep the response concise and actionable.`;
+
+        try {
+          const aiResponse = await env.AI.run(AI_MODELS.TEXT_GENERATION, {
+            prompt,
+            max_tokens: 500,
+            temperature: 0.3
+          });
+          
+          insights = aiResponse.response;
+        } catch (error) {
+          console.error('AI insights generation error:', error);
+        }
+      }
+      
+      return new Response(JSON.stringify({
+        success: true,
+        data: {
+          keyword_stats: keywordStats,
+          recent_tagged: recentTagged,
+          insights
+        }
+      }), {
+        headers: { 'Content-Type': 'application/json' }
+      });
+      
+    } catch (error) {
+      console.error('Analyze keywords error:', error);
+      return new Response(JSON.stringify({
+        success: false,
+        error: 'Failed to analyze keywords'
       }), {
         status: 500,
         headers: { 'Content-Type': 'application/json' }

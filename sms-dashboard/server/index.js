@@ -14,6 +14,7 @@ import { chatbotHandler } from './handlers/chatbot';
 import { chatbotStreamHandler } from './handlers/chatbot-stream';
 import { serveFrontend } from './frontend-handler';
 import { createRoleConfig, hasSmSAccess } from '../config/auth0-roles.js';
+import { setupKeywordRoutes } from './api/keywords.js';
 
 // Simple router implementation without itty-router
 class SimpleRouter {
@@ -370,6 +371,16 @@ router.post('/api/ai/generate-embedding', async (request, env, ctx) => {
   return aiHandler.generateEmbedding(request);
 });
 
+// Analyze keywords and tags
+router.post('/api/ai/analyze-keywords', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  await enrichUserPermissions(request, env, ctx);
+  const permResponse = await requirePermission('keywords.read')(request, env, ctx);
+  if (permResponse) return permResponse;
+  return aiHandler.analyzeKeywords(request);
+});
+
 // Batch process existing messages with AI
 router.post('/api/ai/batch-process', async (request, env, ctx) => {
   const authResponse = await handleAuth0(request, env, ctx);
@@ -513,6 +524,9 @@ router.post('/api/control/heartbeat', async (request) => {
     });
   }
 });
+
+// Setup keyword routes
+setupKeywordRoutes(router);
 
 // Login page route - removed duplicate, using auth0Handler.login above
 
