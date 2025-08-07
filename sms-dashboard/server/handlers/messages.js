@@ -137,6 +137,39 @@ export const messagesHandler = {
           headers: { 'Content-Type': 'application/json' }
         });
       }
+      
+      // Check if recipient phone exists in our system and is online
+      // This prevents the "cheat logic" where offline phones appear to receive messages
+      const recipientPhone = await env.DB.prepare(`
+        SELECT iccid, number, status FROM phones 
+        WHERE number = ? OR iccid = ?
+      `).bind(recipient, recipient).first();
+      
+      let isInternalMessage = false;
+      if (recipientPhone) {
+        // Recipient is in our system - check if online
+        isInternalMessage = true;
+        
+        // Only allow sending to online/active phones for internal messages
+        const allowedStatuses = ['online', 'active', 'registered'];
+        if (!allowedStatuses.includes(recipientPhone.status)) {
+          console.log(`[Messages] Blocking message to offline phone: ${recipient} (status: ${recipientPhone.status})`);
+          return new Response(JSON.stringify({
+            success: false,
+            error: `Cannot send message: Recipient phone ${recipient} is ${recipientPhone.status}. The phone must be online to receive messages.`,
+            recipient_status: recipientPhone.status,
+            recipient_iccid: recipientPhone.iccid
+          }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
+        
+        console.log(`[Messages] Internal message detected: ${phone_iccid} -> ${recipient} (status: ${recipientPhone.status})`);
+      } else {
+        // External SMS - recipient not in our system
+        console.log(`[Messages] External SMS detected: ${phone_iccid} -> ${recipient} (not in system)`);
+      }
 
       // Get phone details - check for active statuses
       const phone = await env.DB.prepare(`
@@ -172,17 +205,26 @@ export const messagesHandler = {
       // Create message record
       const messageId = `msg-sent-${nanoid()}`;
       const timestamp = new Date().toISOString();
+      
+      // For internal messages to offline phones, mark as failed immediately
+      // For external messages or online internal recipients, proceed normally
+      const messageStatus = isInternalMessage && recipientPhone.status !== 'online' ? 'failed' : 'sending';
 
       await env.DB.prepare(`
-        INSERT INTO messages (id, phone_iccid, phone_number, content, timestamp, type, recipient, status)
-        VALUES (?, ?, ?, ?, ?, 'sent', ?, 'sending')
+        INSERT INTO messages (id, phone_iccid, phone_number, content, timestamp, type, recipient, status, metadata)
+        VALUES (?, ?, ?, ?, ?, 'sent', ?, ?, ?)
       `).bind(
         messageId,
         phone_iccid,
         phone.number,
         content,
         timestamp,
-        recipient
+        recipient,
+        messageStatus,
+        JSON.stringify({ 
+          internal: isInternalMessage,
+          recipient_status: recipientPhone?.status || 'external'
+        })
       ).run();
 
       // Broadcast new message event
@@ -194,12 +236,14 @@ export const messagesHandler = {
         timestamp,
         type: 'sent',
         recipient,
-        status: 'sending'
+        status: messageStatus,
+        internal: isInternalMessage
       };
       // Message creation is now picked up by polling
 
       // Note: SMS sending is now handled by daemon polling /api/control/pending-sms
-      // The daemon will pick up this message and send it via HTTP polling
+      // The daemon will only pick up messages with status='sending'
+      // Internal messages to offline phones are marked as 'failed' and won't be sent
 
       return new Response(JSON.stringify({
         success: true,
