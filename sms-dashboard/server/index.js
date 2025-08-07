@@ -13,7 +13,6 @@ import { aiHandler } from './handlers/ai';
 import { chatbotHandler } from './handlers/chatbot';
 import { chatbotStreamHandler } from './handlers/chatbot-stream';
 import { healthHandler } from './handlers/health';
-import { internalMessagingHandler } from './handlers/internal-messaging';
 import { serveFrontend } from './frontend-handler';
 import { createRoleConfig, hasSmSAccess } from '../config/auth0-roles.js';
 import { setupKeywordRoutes } from './api/keywords.js';
@@ -515,17 +514,6 @@ router.post('/api/control/sms-result', async (request) => {
   }
 });
 
-// Internal messaging - simulate delivery between system phones
-router.post('/api/internal/process-messages', async (request) => {
-  try {
-    return await internalMessagingHandler.processPendingInternal(request);
-  } catch (error) {
-    return new Response(JSON.stringify({ error: error.message }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' }
-    });
-  }
-});
 
 router.post('/api/control/heartbeat', async (request) => {
   // Daemon heartbeat endpoint
