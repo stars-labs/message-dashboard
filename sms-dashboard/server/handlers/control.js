@@ -85,6 +85,26 @@ export const controlHandler = {
             throw new Error(`Message ${index} missing required field: content`);
           }
           
+          // CRITICAL FIX: Check if the phone is actually online before accepting received messages
+          // This prevents the "cheat" where offline phones appear to receive messages
+          const phoneStatus = await env.DB.prepare(`
+            SELECT status FROM phones WHERE iccid = ?
+          `).bind(phone_iccid).first();
+          
+          if (phoneStatus) {
+            // Only accept messages from phones that are actually online/active
+            const allowedStatuses = ['online', 'active', 'registered'];
+            if (!allowedStatuses.includes(phoneStatus.status)) {
+              console.warn(`[control.js] Rejecting message from offline phone ${phone_iccid} (status: ${phoneStatus.status})`);
+              console.warn(`[control.js] Message content: ${msg.content.substring(0, 50)}...`);
+              // Skip this message - don't insert it
+              return null;
+            }
+          } else {
+            console.warn(`[control.js] Phone ${phone_iccid} not found in database - rejecting message`);
+            return null;
+          }
+          
           const messageId = msg.id || `msg-${nanoid()}`;
           const verificationCode = extractVerificationCode(msg.content);
           // Fix timestamp - handle various formatting issues
@@ -119,6 +139,7 @@ export const controlHandler = {
             return null;
           }
           
+          // Only add to newMessages if we're actually inserting it
           newMessages.push({
             id: messageId,
             phone_iccid: phone_iccid,
@@ -129,7 +150,8 @@ export const controlHandler = {
             verification_code: verificationCode
           });
           
-          return insertStmt.bind(
+          // Insert the message
+          const result = await insertStmt.bind(
             messageId,
             phone_iccid,
             phoneNumber,
@@ -137,6 +159,8 @@ export const controlHandler = {
             timestamp,
             verificationCode
           ).run();
+          
+          return result;
         });
         
         const results = await Promise.all(promises);
@@ -198,11 +222,15 @@ export const controlHandler = {
       
       // Messages are now picked up by polling
       
+      // Calculate rejected messages
+      const rejected = uniqueMessages.length - processed - duplicates;
+      
       return new Response(JSON.stringify({
         success: true,
         processed,
         duplicates,
-        message: `Successfully uploaded ${processed} messages${duplicates > 0 ? `, skipped ${duplicates} duplicates` : ''}`
+        rejected,
+        message: `Successfully uploaded ${processed} messages${duplicates > 0 ? `, skipped ${duplicates} duplicates` : ''}${rejected > 0 ? `, rejected ${rejected} from offline phones` : ''}`
       }), {
         headers: { 'Content-Type': 'application/json' }
       });
