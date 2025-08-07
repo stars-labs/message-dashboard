@@ -85,25 +85,8 @@ export const controlHandler = {
             throw new Error(`Message ${index} missing required field: content`);
           }
           
-          // CRITICAL FIX: Check if the phone is actually online before accepting received messages
-          // This prevents the "cheat" where offline phones appear to receive messages
-          const phoneStatus = await env.DB.prepare(`
-            SELECT status FROM phones WHERE iccid = ?
-          `).bind(phone_iccid).first();
-          
-          if (phoneStatus) {
-            // Only accept messages from phones that are actually online/active
-            const allowedStatuses = ['online', 'active', 'registered'];
-            if (!allowedStatuses.includes(phoneStatus.status)) {
-              console.warn(`[control.js] Rejecting message from offline phone ${phone_iccid} (status: ${phoneStatus.status})`);
-              console.warn(`[control.js] Message content: ${msg.content.substring(0, 50)}...`);
-              // Skip this message - don't insert it
-              return null;
-            }
-          } else {
-            console.warn(`[control.js] Phone ${phone_iccid} not found in database - rejecting message`);
-            return null;
-          }
+          // Simple validation: Messages must come from the daemon reading actual SIM cards
+          // This is the ONLY way to create 'received' messages - no fake/simulated paths
           
           const messageId = msg.id || `msg-${nanoid()}`;
           const verificationCode = extractVerificationCode(msg.content);
@@ -222,15 +205,11 @@ export const controlHandler = {
       
       // Messages are now picked up by polling
       
-      // Calculate rejected messages
-      const rejected = uniqueMessages.length - processed - duplicates;
-      
       return new Response(JSON.stringify({
         success: true,
         processed,
         duplicates,
-        rejected,
-        message: `Successfully uploaded ${processed} messages${duplicates > 0 ? `, skipped ${duplicates} duplicates` : ''}${rejected > 0 ? `, rejected ${rejected} from offline phones` : ''}`
+        message: `Successfully uploaded ${processed} messages${duplicates > 0 ? `, skipped ${duplicates} duplicates` : ''}`
       }), {
         headers: { 'Content-Type': 'application/json' }
       });
