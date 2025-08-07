@@ -145,12 +145,36 @@ pub const ModemManager = struct {
     }
 
     pub fn listModems(self: ModemManager) ![][]const u8 {
-        const result = try std.process.Child.run(.{
+        const result = std.process.Child.run(.{
             .allocator = self.allocator,
             .argv = &[_][]const u8{ "mmcli", "-L" },
-        });
+        }) catch |err| {
+            // When ModemManager is not running or available, return empty list
+            std.log.warn("Failed to list modems (ModemManager may be unavailable): {any}", .{err});
+            return try self.allocator.alloc([]const u8, 0); // Return empty array
+        };
         defer self.allocator.free(result.stdout);
         defer self.allocator.free(result.stderr);
+        
+        // Check if mmcli exited with an error
+        switch (result.term) {
+            .Exited => |code| {
+                if (code != 0) {
+                    std.log.warn("mmcli -L exited with code {d}: {s}", .{ code, result.stderr });
+                    // Check for specific error messages
+                    if (std.mem.indexOf(u8, result.stderr, "couldn't connect to system bus") != null or
+                        std.mem.indexOf(u8, result.stderr, "Could not connect") != null or
+                        std.mem.indexOf(u8, result.stderr, "ModemManager not available") != null) {
+                        std.log.warn("ModemManager is not available on system bus", .{});
+                    }
+                    return try self.allocator.alloc([]const u8, 0); // Return empty array
+                }
+            },
+            else => {
+                std.log.warn("mmcli -L terminated abnormally", .{});
+                return try self.allocator.alloc([]const u8, 0); // Return empty array
+            },
+        }
 
         var modems = std.ArrayList([]const u8).init(self.allocator);
         defer modems.deinit();

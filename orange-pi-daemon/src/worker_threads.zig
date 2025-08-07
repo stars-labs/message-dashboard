@@ -176,6 +176,56 @@ pub fn phoneStatusThread(context: *WorkerContext) !void {
             context.allocator.free(modems);
         }
         
+        // Check if no modems found (ModemManager unavailable or no modems)
+        if (modems.len == 0) {
+            std.log.warn("⚠️ No modems found - marking all phones as offline", .{});
+            
+            // Create special phone entry to signal all phones offline
+            var phone_collector = PhoneCollector.init(context.allocator);
+            defer phone_collector.deinit();
+            
+            const offline_phone = types.Phone{
+                .iccid = try context.allocator.dupe(u8, "ALL_PHONES_OFFLINE"),
+                .number = null,
+                .status = try context.allocator.dupe(u8, "offline"),
+                .signal = null,
+                .operator_name = null,
+                .operator_id = null,
+                .imei = null,
+                .access_tech = null,
+                .modem_index = null,
+                .sim_index = null,
+                .rssi = null,
+                .rsrq = null,
+                .rsrp = null,
+                .snr = null,
+            };
+            
+            phone_collector.addPhone(offline_phone) catch |add_err| {
+                std.log.err("Failed to add offline signal phone: {any}", .{add_err});
+                // Clean up allocated memory
+                context.allocator.free(offline_phone.iccid);
+                context.allocator.free(offline_phone.status);
+                continue;
+            };
+            
+            // Upload the offline signal
+            const phones = phone_collector.getAndClear() catch |get_err| {
+                std.log.err("Failed to get offline phones: {any}", .{get_err});
+                continue;
+            };
+            defer context.allocator.free(phones);
+            
+            if (phones.len > 0) {
+                std.log.info("📤 Sending ALL_PHONES_OFFLINE signal to server", .{});
+                context.api_client.uploadPhones(phones) catch |upload_err| {
+                    std.log.err("Failed to upload offline status: {any}", .{upload_err});
+                };
+            }
+            
+            continue;
+        }
+        
         // Create phone collector
         var phone_collector = PhoneCollector.init(context.allocator);
         defer phone_collector.deinit();
@@ -254,7 +304,8 @@ pub fn signalMonitorThread(context: *WorkerContext) !void {
         
         // Get list of modems
         const modems = context.modem_manager.listModems() catch |err| {
-            std.log.err("Failed to list modems: {any}", .{err});
+            std.log.err("Failed to list modems for signal monitoring: {any}", .{err});
+            std.log.warn("⚠️ Skipping signal quality check - ModemManager may be unavailable", .{});
             continue;
         };
         defer {

@@ -87,8 +87,9 @@ pub const SMSSender = struct {
         std.log.debug("🔍 Searching for modem with ICCID: {s}", .{target_iccid});
         
         // Get list of modems
-        const modems = self.modem_manager.listModems() catch {
-            std.log.err("Failed to list modems", .{});
+        const modems = self.modem_manager.listModems() catch |err| {
+            std.log.err("Failed to list modems for SMS sending: {any}", .{err});
+            std.log.warn("⚠️ ModemManager may be unavailable - cannot send SMS", .{});
             return null;
         };
         defer {
