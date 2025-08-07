@@ -272,6 +272,26 @@ export const controlHandler = {
       const modemCount = phones.length === 1 && phones[0].iccid === 'ALL_PHONES_OFFLINE' ? 0 : phones.length;
       const daemonStatus = modemCount === 0 ? 'warning' : 'online';
       
+      // Mark phones with modem_index >= modemCount as offline (phantom records)
+      if (modemCount > 0) {
+        console.log(`[control.js] Marking phantom phones offline (modem_index >= ${modemCount})`);
+        const phantomResult = await env.DB.prepare(`
+          UPDATE phones 
+          SET status = 'offline',
+              signal = NULL,
+              rssi = NULL,
+              rsrq = NULL,
+              rsrp = NULL,
+              snr = NULL,
+              updated_at = CURRENT_TIMESTAMP
+          WHERE modem_index >= ? AND status != 'offline'
+        `).bind(modemCount).run();
+        
+        if (phantomResult.meta.changes > 0) {
+          console.log(`[control.js] Marked ${phantomResult.meta.changes} phantom phones as offline`);
+        }
+      }
+      
       await env.DB.prepare(`
         INSERT INTO daemon_health (daemon_id, last_heartbeat, status, last_ip, version, modem_count, error_count, updated_at)
         VALUES ('orange-pi-main', CURRENT_TIMESTAMP, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP)
@@ -381,6 +401,11 @@ export const controlHandler = {
             continue;
           }
           
+          // Skip phantom phones that exceed daemon's modem count
+          if (phone.modem_index !== null && phone.modem_index !== undefined && phone.modem_index >= modemCount) {
+            console.log(`[control.js] Skipping phantom phone with modem_index=${phone.modem_index} (>= ${modemCount}): ICCID=${phone.iccid}`);
+            continue;
+          }
           
           await stmt.bind(
             phone.iccid,  // ICCID is now the primary key

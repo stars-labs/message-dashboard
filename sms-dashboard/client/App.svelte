@@ -11,7 +11,6 @@
   import ChatAssistant from "./lib/ChatAssistant.svelte";
   import SemanticSearch from "./lib/SemanticSearch.svelte";
   import KeywordConfig from "./lib/KeywordConfig.svelte";
-  import DaemonStatus from "./lib/DaemonStatus.svelte";
   import { api } from "./lib/api.js";
   import { pollingService } from "./lib/polling-service.js";
   import { auth } from "./lib/auth.js";
@@ -41,7 +40,14 @@
   let showIccidMappingDialog = false;
   let phoneToMap = null;
   let daemonStatus = {
-    connected: true, // Assume connected initially to avoid "数据过期" flash
+    status: 'unknown',
+    message: 'Checking daemon status...',
+    modem_count: 0,
+    last_heartbeat: null,
+    version: null,
+    device_id: null,
+    // Legacy fields for compatibility
+    connected: true,
     lastDataUpdate: Date.now(),
     lastPhoneUpdate: Date.now(),
     healthCheckTime: Date.now(),
@@ -163,6 +169,12 @@
       // Map API stats to component format
       if (statsResponse) {
         console.log('[App] Stats API Response:', statsResponse);
+        
+        // First calculate stats based on phone data
+        const calculatedOnlineDevices = phoneNumbers.filter((p) => 
+          p.status === "online" || p.status === "active" || p.status === "registered"
+        ).length;
+        
         stats = {
           totalMessages: statsResponse.total_messages || 0,
           todayMessages: statsResponse.today_messages || 0,
@@ -170,23 +182,17 @@
           totalReceived: statsResponse.total_received || 0,
           todaySent: statsResponse.today_sent || 0,
           todayReceived: statsResponse.today_received || 0,
-          onlineDevices: phoneNumbers.filter((p) => 
-            p.status === "online" || p.status === "active" || p.status === "registered"
-          ).length,
+          onlineDevices: calculatedOnlineDevices,
           totalDevices: phoneNumbers.length,
           verificationRate: Math.round(
             (statsResponse.verification_rate || 0) * 100,
           ),
         };
-        console.log('[App] Processed stats:', stats);
+        console.log('[App] Initial stats with calculated online devices:', stats);
         
-        // Update daemon status from API
-        if (statsResponse.daemon_status) {
-          daemonStatus.connected = statsResponse.daemon_status.online || false;
-          daemonStatus.lastHeartbeat = statsResponse.daemon_status.last_heartbeat;
-          daemonStatus.version = statsResponse.daemon_status.version;
-          daemonStatus.deviceId = statsResponse.daemon_status.device_id;
-        }
+        // Check daemon status and override online devices count with actual modem count
+        await checkDaemonStatus();
+        console.log('[App] Stats after daemon check:', stats);
       }
 
       // Mark data as loaded
@@ -240,7 +246,16 @@
     }
   }
 
+  let daemonInterval;
+
   onMount(async () => {
+    // Start periodic daemon status checks (initial check happens in loadAllData)
+    // Check every 30 seconds
+    daemonInterval = setInterval(checkDaemonStatus, 30000);
+    
+    // Fetch stats from API on mount
+    await fetchStats();
+    
     // Apply matrix rain effect to body
     const removeMatrixRain = createMatrixRain(document.body);
     
@@ -499,6 +514,9 @@
   // Using HTTP polling for real-time updates (every 5 seconds)
 
   onDestroy(() => {
+    // Cleanup daemon status interval
+    if (daemonInterval) clearInterval(daemonInterval);
+    
     // Cleanup realtime service
     pollingUnsubscribers.forEach((unsubscribe) => unsubscribe());
     pollingService.disconnect();
@@ -721,17 +739,106 @@
   }
 
   function getDaemonStatusText() {
-    if (!daemonStatus.connected) {
-      return "离线";
-    }
-    return "在线";
+    const statusMap = {
+      'online': '在线',
+      'warning': '警告',
+      'offline': '离线',
+      'error': '错误',
+      'unknown': '未知'
+    };
+    return statusMap[daemonStatus.status] || '未知';
   }
 
   function getDaemonStatusClass() {
-    if (!daemonStatus.connected) {
-      return "text-red-600";
+    const classMap = {
+      'online': 'text-green-400',
+      'warning': 'text-yellow-400',
+      'offline': 'text-red-400',
+      'error': 'text-red-400',
+      'unknown': 'text-gray-400'
+    };
+    return classMap[daemonStatus.status] || 'text-gray-400';
+  }
+
+  function getDaemonStatusIcon() {
+    const iconMap = {
+      'online': '🟢',
+      'warning': '🟡',
+      'offline': '🔴',
+      'error': '🔴',
+      'unknown': '⚪'
+    };
+    return iconMap[daemonStatus.status] || '⚪';
+  }
+
+  async function checkDaemonStatus() {
+    try {
+      const response = await fetch('/api/daemon/status');
+      if (response.ok) {
+        const data = await response.json();
+        console.log('[App] Daemon status response:', data);
+        // Only show modem count when actually online
+        const cleanData = {
+          ...data,
+          modem_count: data.status === 'online' ? (data.modem_count || 0) : undefined
+        };
+        daemonStatus = {
+          ...cleanData,
+          // Keep legacy fields for compatibility
+          connected: data.status === 'online',
+          lastDataUpdate: daemonStatus.lastDataUpdate,
+          lastPhoneUpdate: daemonStatus.lastPhoneUpdate,
+          healthCheckTime: daemonStatus.healthCheckTime
+        };
+        
+        // Always fetch fresh stats from API to ensure consistency
+        await fetchStats();
+      } else {
+        daemonStatus = {
+          ...daemonStatus,
+          status: 'error',
+          message: 'Failed to check daemon status',
+          connected: false,
+          modem_count: undefined
+        };
+      }
+    } catch (error) {
+      console.error('Failed to check daemon status:', error);
+      daemonStatus = {
+        ...daemonStatus,
+        status: 'error',
+        message: 'Cannot connect to server',
+        connected: false,
+        modem_count: undefined
+      };
     }
-    return "text-green-600";
+  }
+  
+  async function fetchStats() {
+    try {
+      const response = await fetch('/api/stats');
+      if (response.ok) {
+        const data = await response.json();
+        console.log('[App] Fetched stats from API:', data);
+        
+        // Update all stats from API response
+        stats = {
+          totalMessages: data.total_messages || 0,
+          todayMessages: data.today_messages || 0,
+          totalSent: data.total_sent || 0,
+          totalReceived: data.total_received || 0,
+          todaySent: data.today_sent || 0,
+          todayReceived: data.today_received || 0,
+          onlineDevices: data.online_devices || 0,
+          totalDevices: data.total_devices || 0,
+          verificationRate: Math.round((data.verification_rate || 0) * 100)
+        };
+        
+        console.log('[App] Updated stats from API:', stats);
+      }
+    } catch (error) {
+      console.error('Failed to fetch stats from API:', error);
+    }
   }
 
   function getPhoneFlag(phone) {
@@ -951,16 +1058,25 @@
             <div class="flex items-center gap-4 text-sm text-gray-600">
               <!-- Daemon Status -->
               <div class="flex items-center gap-2">
-                <div
-                  class="w-2 h-2 {daemonStatus.connected
-                    ? 'bg-green-400 shadow-green-400'
-                    : 'bg-red-400 shadow-red-400'} rounded-full {daemonStatus.connected
-                    ? 'animate-pulse'
-                    : ''} shadow-lg"
-                ></div>
-                <span class="{daemonStatus.connected ? 'status-online' : 'status-offline'}"
-                  >守护进程: {getDaemonStatusText()}</span
+                <span class="text-lg">{getDaemonStatusIcon()}</span>
+                <span class="{getDaemonStatusClass()} text-sm font-medium">
+                  {#if daemonStatus.status === 'online'}
+                    守护进程: {getDaemonStatusText()} ({daemonStatus.modem_count || 0} 设备)
+                  {:else if daemonStatus.status === 'warning'}
+                    守护进程: {getDaemonStatusText()}
+                  {:else if daemonStatus.status === 'offline'}
+                    守护进程: {getDaemonStatusText()}
+                  {:else}
+                    守护进程: 等待连接...
+                  {/if}
+                </span>
+                <button 
+                  on:click={checkDaemonStatus}
+                  class="text-xs text-cyan-400/60 hover:text-cyan-400 transition-colors ml-2"
+                  title="刷新状态"
                 >
+                  🔄
+                </button>
               </div>
             </div>
           </div>
@@ -969,7 +1085,7 @@
     </header>
 
     <!-- Daemon Status Alert Banner -->
-    {#if !daemonStatus.connected}
+    {#if daemonStatus.status === 'offline' || daemonStatus.status === 'error'}
       <div class="bg-red-50 border-b border-red-200 px-4 py-2">
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
@@ -987,9 +1103,9 @@
               />
             </svg>
             <span class="text-sm text-red-800">
-              <strong>守护进程离线</strong> - 设备数据可能不是最新的
-              {#if daemonStatus.lastHeartbeat}
-                • 最后更新: {formatTimeAgo(daemonStatus.lastHeartbeat)}
+              <strong>守护进程{daemonStatus.status === 'error' ? '错误' : '离线'}</strong> - {daemonStatus.message || '设备数据可能不是最新的'}
+              {#if daemonStatus.last_heartbeat}
+                • 最后心跳: {formatTimeAgo(daemonStatus.last_heartbeat)}
               {/if}
             </span>
           </div>
@@ -1108,8 +1224,7 @@
           >
             <div class="text-xs text-cyan-300 font-bold tech-text">在线设备</div>
             <div class="text-xl font-bold data-value high-contrast">
-              {phoneNumbers.filter((p) => p.status === "online" || p.status === "active" || p.status === "registered")
-                .length}/{phoneNumbers.length}
+              {stats.onlineDevices}/{stats.totalDevices}
             </div>
           </div>
           <div
@@ -1152,8 +1267,8 @@
         <div class="grid grid-cols-2 lg:grid-cols-4 gap-6 hex-pattern">
           <StatsCard
             title="在线设备"
-            value={phoneNumbers.filter((p) => p.status === "online" || p.status === "active" || p.status === "registered").length}
-            total={phoneNumbers.length}
+            value={stats.onlineDevices}
+            total={stats.totalDevices}
             gradient="from-blue-500 to-blue-600"
             icon="📱"
           />
@@ -1210,10 +1325,7 @@
           />
         </div>
         
-        <!-- Daemon Status -->
-        <div class="mt-6">
-          <DaemonStatus />
-        </div>
+        <!-- Daemon Status removed - now shown in header only -->
       </div>
 
       <!-- Main Content -->

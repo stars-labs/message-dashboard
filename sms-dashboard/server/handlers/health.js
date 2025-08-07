@@ -93,7 +93,8 @@ export const healthHandler = {
       if (!daemonHealth) {
         return new Response(JSON.stringify({
           status: 'unknown',
-          message: 'No daemon has ever connected',
+          message: '等待守护进程连接',
+          modem_count: 0,
           timestamp: new Date().toISOString()
         }), {
           headers: { 'Content-Type': 'application/json' }
@@ -103,15 +104,19 @@ export const healthHandler = {
       // Determine actual status based on last heartbeat
       let actualStatus = daemonHealth.status;
       let healthMessage = '';
+      let actualModemCount = daemonHealth.modem_count || 0;
       
       if (daemonHealth.seconds_since_heartbeat > 300) { // 5 minutes
         actualStatus = 'offline';
-        healthMessage = `Daemon offline for ${Math.floor(daemonHealth.seconds_since_heartbeat / 60)} minutes`;
+        healthMessage = `守护进程离线 ${Math.floor(daemonHealth.seconds_since_heartbeat / 60)} 分钟`;
+        // Don't show stale modem count when offline
+        actualModemCount = 0;
       } else if (daemonHealth.seconds_since_heartbeat > 120) { // 2 minutes
         actualStatus = 'warning';
-        healthMessage = `No heartbeat for ${daemonHealth.seconds_since_heartbeat} seconds`;
+        healthMessage = `${daemonHealth.seconds_since_heartbeat} 秒未收到心跳`;
+        // Show modem count but with warning
       } else {
-        healthMessage = `Last heartbeat ${daemonHealth.seconds_since_heartbeat} seconds ago`;
+        healthMessage = `正常运行中`;
       }
       
       return new Response(JSON.stringify({
@@ -120,7 +125,7 @@ export const healthHandler = {
         last_heartbeat: daemonHealth.last_heartbeat,
         seconds_since_heartbeat: daemonHealth.seconds_since_heartbeat,
         message: healthMessage,
-        modem_count: daemonHealth.modem_count,
+        modem_count: actualModemCount,
         error_count: daemonHealth.error_count,
         last_error: daemonHealth.last_error,
         last_ip: daemonHealth.last_ip,
