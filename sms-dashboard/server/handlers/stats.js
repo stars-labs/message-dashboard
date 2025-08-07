@@ -21,15 +21,20 @@ export const statsHandler = {
         ? (stats.verified_messages / stats.total_received) 
         : 0;
       
-      // Check daemon heartbeat from KV
+      // Check daemon heartbeat from KV and database
       let daemonStatus = {
         online: false,
         last_heartbeat: null,
         version: null,
-        device_id: null
+        device_id: null,
+        modem_count: null
       };
       
+      let actualOnlineDevices = stats.online_devices;
+      let actualTotalDevices = stats.total_devices;
+      
       try {
+        // First check KV for heartbeat
         const heartbeatData = await env.KV.get('daemon:heartbeat');
         if (heartbeatData) {
           const heartbeat = JSON.parse(heartbeatData);
@@ -40,11 +45,47 @@ export const statsHandler = {
             online: heartbeat.last_heartbeat > fiveMinutesAgo,
             last_heartbeat: heartbeat.last_heartbeat,
             version: heartbeat.version,
-            device_id: heartbeat.device_id
+            device_id: heartbeat.device_id,
+            modem_count: heartbeat.modem_count
           };
         }
+        
+        // Also check database for daemon health
+        const daemonHealth = await env.DB.prepare(`
+          SELECT * FROM daemon_health 
+          WHERE daemon_id = 'orange-pi-main'
+          ORDER BY last_heartbeat DESC
+          LIMIT 1
+        `).first();
+        
+        if (daemonHealth) {
+          const now = Date.now();
+          const lastHeartbeat = new Date(daemonHealth.last_heartbeat).getTime();
+          const isOnline = (now - lastHeartbeat) < 5 * 60 * 1000;
+          
+          // Use database modem count if more recent or KV doesn't have it
+          if (!daemonStatus.modem_count || 
+              (daemonHealth.last_heartbeat && lastHeartbeat > daemonStatus.last_heartbeat)) {
+            daemonStatus.modem_count = daemonHealth.modem_count;
+            daemonStatus.online = isOnline;
+          }
+          
+          // When daemon is online, use its modem count as the source of truth
+          if (isOnline && daemonHealth.modem_count !== null && daemonHealth.modem_count !== undefined) {
+            console.log('[Stats] Using daemon modem count:', daemonHealth.modem_count);
+            // Count only phones with modem_index < daemon's modem_count as online
+            const validOnlineCount = await env.DB.prepare(`
+              SELECT COUNT(*) as count 
+              FROM phones 
+              WHERE status = 'online' AND modem_index < ?
+            `).bind(daemonHealth.modem_count).first();
+            
+            actualOnlineDevices = validOnlineCount ? validOnlineCount.count : daemonHealth.modem_count;
+            actualTotalDevices = daemonHealth.modem_count; // Daemon knows the true count
+          }
+        }
       } catch (error) {
-        console.error('[stats.js] Failed to get daemon heartbeat:', error);
+        console.error('[stats.js] Failed to get daemon status:', error);
       }
       
       return new Response(JSON.stringify({
@@ -55,8 +96,8 @@ export const statsHandler = {
         total_received: stats.total_received,
         today_sent: stats.today_sent,
         today_received: stats.today_received,
-        online_devices: stats.online_devices,
-        total_devices: stats.total_devices,
+        online_devices: actualOnlineDevices,
+        total_devices: actualTotalDevices,
         verification_rate: verificationRate,
         daemon_status: daemonStatus
       }), {
