@@ -12,6 +12,7 @@ import { updatesHandler } from './handlers/updates';
 import { aiHandler } from './handlers/ai';
 import { chatbotHandler } from './handlers/chatbot';
 import { chatbotStreamHandler } from './handlers/chatbot-stream';
+import { healthHandler } from './handlers/health';
 import { serveFrontend } from './frontend-handler';
 import { createRoleConfig, hasSmSAccess } from '../config/auth0-roles.js';
 import { setupKeywordRoutes } from './api/keywords.js';
@@ -141,7 +142,8 @@ const router = new SimpleRouter();
 router.options('*', handleCORS);
 
 // Public API routes
-router.get('/api/health', () => new Response('OK', { status: 200 }));
+router.get('/api/health', (request) => healthHandler.check(request));
+router.get('/api/daemon/status', (request) => healthHandler.daemonStatus(request));
 router.post('/api/test-stream', async (request) => {
   console.log('[Test] Stream test endpoint hit');
   return new Response('Stream test endpoint works', { status: 200 });
