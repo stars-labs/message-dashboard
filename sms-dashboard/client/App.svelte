@@ -11,6 +11,7 @@
   import ChatAssistant from "./lib/ChatAssistant.svelte";
   import SemanticSearch from "./lib/SemanticSearch.svelte";
   import KeywordConfig from "./lib/KeywordConfig.svelte";
+  import DaemonStatus from "./lib/DaemonStatus.svelte";
   import { api } from "./lib/api.js";
   import { pollingService } from "./lib/polling-service.js";
   import { auth } from "./lib/auth.js";
@@ -1207,6 +1208,11 @@
               console.log('Selected message from search:', message);
             }}
           />
+        </div>
+        
+        <!-- Daemon Status -->
+        <div class="mt-6">
+          <DaemonStatus />
         </div>
       </div>
 

@@ -240,6 +240,49 @@ export const controlHandler = {
     try {
       const { phones } = await request.json();
       
+      // Update daemon heartbeat
+      const clientIp = request.headers.get('CF-Connecting-IP') || request.headers.get('X-Forwarded-For') || 'unknown';
+      const daemonVersion = request.headers.get('X-Daemon-Version') || 'unknown';
+      
+      // Create daemon_health table if it doesn't exist
+      await env.DB.prepare(`
+        CREATE TABLE IF NOT EXISTS daemon_health (
+          daemon_id TEXT PRIMARY KEY,
+          last_heartbeat TIMESTAMP NOT NULL,
+          status TEXT DEFAULT 'online',
+          last_ip TEXT,
+          version TEXT,
+          modem_count INTEGER DEFAULT 0,
+          error_count INTEGER DEFAULT 0,
+          last_error TEXT,
+          metadata TEXT,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      `).run();
+      
+      // Update daemon heartbeat
+      const modemCount = phones.length === 1 && phones[0].iccid === 'ALL_PHONES_OFFLINE' ? 0 : phones.length;
+      const daemonStatus = modemCount === 0 ? 'warning' : 'online';
+      
+      await env.DB.prepare(`
+        INSERT INTO daemon_health (daemon_id, last_heartbeat, status, last_ip, version, modem_count, error_count, updated_at)
+        VALUES ('orange-pi-main', CURRENT_TIMESTAMP, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP)
+        ON CONFLICT(daemon_id) DO UPDATE SET
+          last_heartbeat = CURRENT_TIMESTAMP,
+          status = excluded.status,
+          last_ip = excluded.last_ip,
+          version = excluded.version,
+          modem_count = excluded.modem_count,
+          error_count = CASE 
+            WHEN excluded.status = 'online' THEN 0 
+            ELSE daemon_health.error_count 
+          END,
+          updated_at = CURRENT_TIMESTAMP
+      `).bind(daemonStatus, clientIp, daemonVersion, modemCount).run();
+      
+      console.log(`[control.js] Daemon heartbeat updated: status=${daemonStatus}, modems=${modemCount}, ip=${clientIp}`);
+      
       if (!Array.isArray(phones)) {
         return new Response(JSON.stringify({
           success: false,
@@ -287,7 +330,8 @@ export const controlHandler = {
         
         return new Response(JSON.stringify({
           success: true,
-          message: `Marked ${result.meta.changes} phones as offline`
+          message: `Marked ${result.meta.changes} phones as offline`,
+          daemon_status: 'warning'
         }), {
           headers: { 'Content-Type': 'application/json' }
         });
