@@ -26,6 +26,55 @@
   $: if (selectedPhoneIccid) {
     loadMessagesForPhone(selectedPhoneIccid);
   }
+  
+  // Centralized function to calculate online devices
+  function calculateOnlineDevices(phones) {
+    if (!phones || phones.length === 0) return 0;
+    
+    const fiveMinutesAgo = Date.now() - (5 * 60 * 1000);
+    const onlinePhones = phones.filter(p => {
+      const hasOnlineStatus = p?.status && ["online", "active", "registered"].includes(p.status);
+      if (!hasOnlineStatus) {
+        console.debug(`[calculateOnline] Phone ${p?.iccid} excluded - status: ${p?.status}`);
+        return false;
+      }
+      if (!p.updated_at) {
+        console.debug(`[calculateOnline] Phone ${p?.iccid} excluded - no updated_at`);
+        return false;
+      }
+      
+      try {
+        const updateTime = new Date(p.updated_at).getTime();
+        const isRecent = !isNaN(updateTime) && updateTime > fiveMinutesAgo;
+        if (!isRecent) {
+          console.debug(`[calculateOnline] Phone ${p?.iccid} excluded - too old: ${p.updated_at}`);
+        }
+        return isRecent;
+      } catch (e) {
+        console.warn('Invalid date for phone:', p.iccid, p.updated_at);
+        return false;
+      }
+    });
+    
+    console.log(`[calculateOnline] Result: ${onlinePhones.length}/${phones.length} online (sample phone status: ${phones[0]?.status}, updated_at: ${phones[0]?.updated_at})`);
+    return onlinePhones.length;
+  }
+  
+  // Track if we've loaded stats from backend (to prevent race conditions)
+  let backendStatsLoaded = false;
+  
+  // Single reactive statement for stats updates
+  // ONLY recalculate if we haven't received stats from backend
+  // Backend has authoritative data about online devices
+  $: if (phoneNumbers && phoneNumbers.length > 0 && !dataLoading && !backendStatsLoaded) {
+    // Only calculate if backend hasn't provided stats yet
+    const onlineCount = calculateOnlineDevices(phoneNumbers);
+    console.log('[App] No backend stats, calculating from phones:', onlineCount, '/', phoneNumbers.length);
+    if (onlineCount !== stats.onlineDevices) {
+      console.log('[App] Updating stats.onlineDevices from', stats.onlineDevices, 'to', onlineCount);
+      stats = { ...stats, onlineDevices: onlineCount };
+    }
+  }
   let selectedCountry = "all";
   let searchTerm = "";
   let showPhoneList = false;
@@ -64,6 +113,14 @@
     totalDevices: 0,
     verificationRate: 0,
   };
+  
+  // Debug: log whenever stats changes
+  $: console.log('[App] Stats changed:', { 
+    online: stats.onlineDevices, 
+    total: stats.totalDevices,
+    backendLoaded: backendStatsLoaded,
+    phonesLength: phoneNumbers.length 
+  });
   
   // Hash routing handler
   function handleHashChange() {
@@ -184,11 +241,17 @@
             (statsResponse.verification_rate || 0) * 100,
           ),
         };
-        console.log('[App] Initial stats with calculated online devices:', stats);
+        console.log('[App] Stats from backend - online:', stats.onlineDevices, 'total:', stats.totalDevices);
         
-        // Check daemon status and override online devices count with actual modem count
+        // Mark that we've loaded stats from backend
+        backendStatsLoaded = true;
+        
+        // Check daemon status
         await checkDaemonStatus();
-        console.log('[App] Stats after daemon check:', stats);
+        
+        // The reactive statement will automatically update online device count if needed
+        
+        console.log('[App] Stats after updates:', stats);
       }
 
       // Mark data as loaded
@@ -249,8 +312,8 @@
     // Check every 30 seconds
     daemonInterval = setInterval(checkDaemonStatus, 30000);
     
-    // Fetch stats from API on mount
-    await fetchStats();
+    // Don't fetch stats here - it will be fetched after authentication in loadAllData
+    // await fetchStats();
     
     // Apply matrix rain effect to body
     const removeMatrixRain = createMatrixRain(document.body);
@@ -451,23 +514,12 @@
 
           console.log("Updated phoneNumbers:", phoneNumbers);
 
-          // Update online device count - only count phones that are recently updated (within 5 minutes)
-          const daemonModemCount = daemonStatus.modem_count || 53; // Use daemon's actual count
-          const fiveMinutesAgo = Date.now() - (5 * 60 * 1000);
-          stats.onlineDevices = phoneNumbers.filter(
-            (p) => {
-              // Check if status indicates online
-              const hasOnlineStatus = p.status === "online" || p.status === "active" || p.status === "registered";
-              // Check if modem_index is within daemon's range
-              const validModemIndex = p.modem_index === null || p.modem_index === undefined || p.modem_index < daemonModemCount;
-              // Check if updated recently (within 5 minutes)
-              const recentlyUpdated = p.updated_at && new Date(p.updated_at).getTime() > fiveMinutesAgo;
-              
-              return hasOnlineStatus && validModemIndex && recentlyUpdated;
-            }
-          ).length;
-          // Total devices should be the daemon's actual modem count, not database record count
-          stats.totalDevices = daemonModemCount;
+          // Update total devices from daemon count
+          const daemonModemCount = daemonStatus.modem_count || phoneNumbers.length;
+          if (stats.totalDevices !== daemonModemCount) {
+            stats = { ...stats, totalDevices: daemonModemCount };
+          }
+          // The reactive statement will automatically update online device count
           
           // Update daemon health status
           updateDaemonHealthStatus();
@@ -799,8 +851,10 @@
           healthCheckTime: daemonStatus.healthCheckTime
         };
         
-        // Always fetch fresh stats from API to ensure consistency
-        await fetchStats();
+        // Only fetch stats if user is authenticated (stats API requires auth)
+        if (user && user.token) {
+          await fetchStats();
+        }
       } else {
         daemonStatus = {
           ...daemonStatus,
@@ -824,7 +878,13 @@
   
   async function fetchStats() {
     try {
-      const response = await fetch('/api/stats');
+      // Get auth headers if user is authenticated
+      const headers = {};
+      if (user && user.token) {
+        headers['Authorization'] = `Bearer ${user.token}`;
+      }
+      
+      const response = await fetch('/api/stats', { headers });
       if (response.ok) {
         const data = await response.json();
         console.log('[App] Fetched stats from API:', data);
@@ -843,6 +903,11 @@
         };
         
         console.log('[App] Updated stats from API:', stats);
+        
+        // Mark that we've loaded stats from backend
+        backendStatsLoaded = true;
+      } else if (response.status === 401) {
+        console.log('[App] Stats API requires authentication, skipping for now');
       }
     } catch (error) {
       console.error('Failed to fetch stats from API:', error);
@@ -1231,8 +1296,10 @@
             class="tech-card holo-card text-white px-4 py-3"
           >
             <div class="text-xs text-cyan-300 font-bold tech-text">在线设备</div>
-            <div class="text-xl font-bold data-value high-contrast">
-              {stats.onlineDevices}/{stats.totalDevices}
+            <div class="text-xl font-bold data-value high-contrast" title="Online: {stats.onlineDevices}, Total: {stats.totalDevices}, Phones: {phoneNumbers.length}">
+              {#key stats.onlineDevices + ':' + stats.totalDevices}
+                {stats.onlineDevices}/{stats.totalDevices}
+              {/key}
             </div>
           </div>
           <div
