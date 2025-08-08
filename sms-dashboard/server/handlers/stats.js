@@ -4,6 +4,7 @@ export const statsHandler = {
     
     try {
       // Optimize with a single query for all stats
+      // Only count phones as online if they've been updated recently (within 5 minutes)
       const stats = await env.DB.prepare(`
         SELECT 
           (SELECT COUNT(*) FROM messages) as total_messages,
@@ -12,7 +13,7 @@ export const statsHandler = {
           (SELECT COUNT(*) FROM messages WHERE type = 'received') as total_received,
           (SELECT COUNT(*) FROM messages WHERE date(timestamp) = date('now') AND type = 'sent') as today_sent,
           (SELECT COUNT(*) FROM messages WHERE date(timestamp) = date('now') AND type = 'received') as today_received,
-          (SELECT COUNT(*) FROM phones WHERE status = 'online') as online_devices,
+          (SELECT COUNT(*) FROM phones WHERE status IN ('online', 'active', 'registered') AND datetime(updated_at) > datetime('now', '-5 minutes')) as online_devices,
           (SELECT COUNT(*) FROM phones) as total_devices,
           (SELECT COUNT(*) FROM messages WHERE verification_code IS NOT NULL AND type = 'received') as verified_messages
       `).first();
@@ -70,18 +71,13 @@ export const statsHandler = {
             daemonStatus.online = isOnline;
           }
           
-          // When daemon is online, use its modem count as the source of truth
+          // When daemon is online, use its modem count as the source of truth for total devices
           if (isOnline && daemonHealth.modem_count !== null && daemonHealth.modem_count !== undefined) {
             console.log('[Stats] Using daemon modem count:', daemonHealth.modem_count);
-            // Count only phones with modem_index < daemon's modem_count as online
-            const validOnlineCount = await env.DB.prepare(`
-              SELECT COUNT(*) as count 
-              FROM phones 
-              WHERE status = 'online' AND modem_index < ?
-            `).bind(daemonHealth.modem_count).first();
-            
-            actualOnlineDevices = validOnlineCount ? validOnlineCount.count : daemonHealth.modem_count;
+            // Use the time-based online count we already calculated
+            // modem_index is not stable across USB reconnections, so we can't rely on it
             actualTotalDevices = daemonHealth.modem_count; // Daemon knows the true count
+            // Online devices is already correctly calculated based on updated_at timestamp
           }
         }
       } catch (error) {

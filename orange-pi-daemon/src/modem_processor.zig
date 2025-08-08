@@ -53,9 +53,12 @@ pub fn processModem(
     defer allocator.free(iccid);
     
     // Extract modem index from modem_id (e.g., "7" from modem ID "7")
+    // NOTE: This index is NOT stable across USB reconnections and should not be used for identification
+    // We keep it for informational purposes only - ICCID is the primary identifier
     const modem_index = std.fmt.parseInt(u32, modem_id, 10) catch null;
     
     // Get SIM index from ModemManager
+    // NOTE: This index can also change on USB reconnections
     const sim_index = modem_manager.getSimIndex(modem_id) catch null;
     
     var phone = types.Phone{
