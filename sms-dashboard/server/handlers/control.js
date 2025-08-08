@@ -272,23 +272,22 @@ export const controlHandler = {
       const modemCount = phones.length === 1 && phones[0].iccid === 'ALL_PHONES_OFFLINE' ? 0 : phones.length;
       const daemonStatus = modemCount === 0 ? 'warning' : 'online';
       
-      // Mark phones with modem_index >= modemCount as offline (phantom records)
+      // Mark stale phones as offline
       if (modemCount > 0) {
-        console.log(`[control.js] Marking phantom phones offline (modem_index >= ${modemCount})`);
-        const phantomResult = await env.DB.prepare(`
+        // Mark stale phones (not updated in last 10 minutes) as offline
+        // Note: We don't use modem_index for phantom detection as it's not stable across USB reconnections
+        console.log(`[control.js] Marking stale phones offline (not updated in 10 minutes)`);
+        const staleResult = await env.DB.prepare(`
           UPDATE phones 
           SET status = 'offline',
               signal = NULL,
-              rssi = NULL,
-              rsrq = NULL,
-              rsrp = NULL,
-              snr = NULL,
               updated_at = CURRENT_TIMESTAMP
-          WHERE modem_index >= ? AND status != 'offline'
-        `).bind(modemCount).run();
+          WHERE status IN ('online', 'active', 'registered')
+            AND datetime(updated_at) < datetime('now', '-10 minutes')
+        `).run();
         
-        if (phantomResult.meta.changes > 0) {
-          console.log(`[control.js] Marked ${phantomResult.meta.changes} phantom phones as offline`);
+        if (staleResult.meta.changes > 0) {
+          console.log(`[control.js] Marked ${staleResult.meta.changes} stale phones as offline`);
         }
       }
       
@@ -401,11 +400,9 @@ export const controlHandler = {
             continue;
           }
           
-          // Skip phantom phones that exceed daemon's modem count
-          if (phone.modem_index !== null && phone.modem_index !== undefined && phone.modem_index >= modemCount) {
-            console.log(`[control.js] Skipping phantom phone with modem_index=${phone.modem_index} (>= ${modemCount}): ICCID=${phone.iccid}`);
-            continue;
-          }
+          // Note: modem_index and sim_index are not stable across USB reconnections
+          // They are kept for informational purposes only - ICCID is the primary identifier
+          // We no longer skip based on modem_index as it's not a reliable indicator
           
           await stmt.bind(
             phone.iccid,  // ICCID is now the primary key

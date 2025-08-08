@@ -170,11 +170,7 @@
       if (statsResponse) {
         console.log('[App] Stats API Response:', statsResponse);
         
-        // First calculate stats based on phone data
-        const calculatedOnlineDevices = phoneNumbers.filter((p) => 
-          p.status === "online" || p.status === "active" || p.status === "registered"
-        ).length;
-        
+        // Use stats from API which already accounts for daemon's modem count
         stats = {
           totalMessages: statsResponse.total_messages || 0,
           todayMessages: statsResponse.today_messages || 0,
@@ -182,8 +178,8 @@
           totalReceived: statsResponse.total_received || 0,
           todaySent: statsResponse.today_sent || 0,
           todayReceived: statsResponse.today_received || 0,
-          onlineDevices: calculatedOnlineDevices,
-          totalDevices: phoneNumbers.length,
+          onlineDevices: statsResponse.online_devices || 0,
+          totalDevices: statsResponse.total_devices || 0,
           verificationRate: Math.round(
             (statsResponse.verification_rate || 0) * 100,
           ),
@@ -455,11 +451,23 @@
 
           console.log("Updated phoneNumbers:", phoneNumbers);
 
-          // Update online device count
+          // Update online device count - only count phones that are recently updated (within 5 minutes)
+          const daemonModemCount = daemonStatus.modem_count || 53; // Use daemon's actual count
+          const fiveMinutesAgo = Date.now() - (5 * 60 * 1000);
           stats.onlineDevices = phoneNumbers.filter(
-            (p) => p.status === "online" || p.status === "active" || p.status === "registered",
+            (p) => {
+              // Check if status indicates online
+              const hasOnlineStatus = p.status === "online" || p.status === "active" || p.status === "registered";
+              // Check if modem_index is within daemon's range
+              const validModemIndex = p.modem_index === null || p.modem_index === undefined || p.modem_index < daemonModemCount;
+              // Check if updated recently (within 5 minutes)
+              const recentlyUpdated = p.updated_at && new Date(p.updated_at).getTime() > fiveMinutesAgo;
+              
+              return hasOnlineStatus && validModemIndex && recentlyUpdated;
+            }
           ).length;
-          stats.totalDevices = phoneNumbers.length;
+          // Total devices should be the daemon's actual modem count, not database record count
+          stats.totalDevices = daemonModemCount;
           
           // Update daemon health status
           updateDaemonHealthStatus();
