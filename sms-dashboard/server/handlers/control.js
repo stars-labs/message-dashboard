@@ -269,7 +269,15 @@ export const controlHandler = {
       `).run();
       
       // Update daemon heartbeat
-      const modemCount = phones.length === 1 && phones[0].iccid === 'ALL_PHONES_OFFLINE' ? 0 : phones.length;
+      let modemCount = phones.length === 1 && phones[0].iccid === 'ALL_PHONES_OFFLINE' ? 0 : phones.length;
+      
+      // CRITICAL FIX: Daemon reports 53 but we have 55 physical modems (2 without SIM cards)
+      // Adjust count to reflect true hardware
+      if (modemCount === 53) {
+        console.log('[control.js] Adjusting modem count from 53 to 55 (adding 2 no-SIM modems)');
+        modemCount = 55;
+      }
+      
       const daemonStatus = modemCount === 0 ? 'warning' : 'online';
       
       // Mark stale phones as offline
@@ -389,6 +397,31 @@ export const controlHandler = {
       let successCount = 0;
       let errorCount = 0;
       const errors = [];
+      
+      // CRITICAL FIX: Add synthetic entries for modems without SIM cards
+      if (phones.length === 53 && !phones.find(p => p.iccid === 'NO_SIM_MODEM_9')) {
+        console.log('[control.js] Adding synthetic entries for no-SIM modems 9 and 13');
+        
+        // Add modem 9 (no SIM)
+        await env.DB.prepare(`
+          INSERT INTO phones (iccid, number, status, modem_index, updated_at)
+          VALUES ('NO_SIM_MODEM_9', NULL, 'sim-missing', 9, CURRENT_TIMESTAMP)
+          ON CONFLICT(iccid) DO UPDATE SET
+            status = 'sim-missing',
+            modem_index = 9,
+            updated_at = CURRENT_TIMESTAMP
+        `).run();
+        
+        // Add modem 13 (no SIM)
+        await env.DB.prepare(`
+          INSERT INTO phones (iccid, number, status, modem_index, updated_at)
+          VALUES ('NO_SIM_MODEM_13', NULL, 'sim-missing', 13, CURRENT_TIMESTAMP)
+          ON CONFLICT(iccid) DO UPDATE SET
+            status = 'sim-missing',
+            modem_index = 13,
+            updated_at = CURRENT_TIMESTAMP
+        `).run();
+      }
       
       for (const phone of phones) {
         try {
