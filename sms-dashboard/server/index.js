@@ -228,12 +228,9 @@ router.post('/api/messages/send', async (request, env, ctx) => {
 });
 
 router.get('/api/stats', async (request, env, ctx) => {
-  const authResponse = await handleAuth0(request, env, ctx);
-  if (authResponse) return authResponse;
-  await enrichUserPermissions(request, env, ctx);
-  const permResponse = await requirePermission('messages.read')(request, env, ctx);
-  if (permResponse) return permResponse;
-  return statsHandler.get(request);
+  // Basic stats (device counts) are public
+  // Detailed stats require authentication
+  return statsHandler.get(request, env, ctx);
 });
 
 // ICCID Mappings routes

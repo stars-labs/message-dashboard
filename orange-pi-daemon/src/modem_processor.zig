@@ -22,16 +22,16 @@ pub fn processModem(
     }
     
     // Get modem status and details
-    const modem_status = modem_manager.getModemState(modem_id) catch |err| {
+    const original_status = modem_manager.getModemState(modem_id) catch |err| {
         std.log.warn("Failed to get status for modem {s}: {any}", .{ modem_id, err });
         return;
     };
-    defer allocator.free(modem_status);
+    defer allocator.free(original_status);
     
-    std.log.debug("📱 Modem {s} state: {s}", .{ modem_id, modem_status });
+    std.log.debug("📱 Modem {s} state: {s}", .{ modem_id, original_status });
     
     // Enable modem if it's disabled
-    if (std.mem.eql(u8, modem_status, "disabled")) {
+    if (std.mem.eql(u8, original_status, "disabled")) {
         std.log.info("🔧 Enabling disabled modem {s}", .{modem_id});
         modem_manager.enableModem(modem_id) catch |err| {
             std.log.warn("Failed to enable modem {s}: {any}", .{ modem_id, err });
@@ -40,23 +40,51 @@ pub fn processModem(
         std.time.sleep(2 * std.time.ns_per_s);
     }
     
-    // Get ICCID for this modem
-    const iccid_opt = modem_manager.getIccid(modem_id) catch |err| {
-        std.log.warn("Failed to get ICCID for modem {s}: {any}", .{ modem_id, err });
-        return;
-    };
+    // Track if this is a no-SIM modem
+    var is_no_sim_modem = false;
     
-    const iccid = iccid_opt orelse {
-        std.log.warn("Skipping modem {s}: No ICCID found", .{ modem_id });
-        return;
+    // Get ICCID for this modem - if no SIM, create synthetic ICCID to track the modem
+    const iccid = blk: {
+        const iccid_opt = modem_manager.getIccid(modem_id) catch |err| {
+            std.log.warn("Failed to get ICCID for modem {s}: {any}", .{ modem_id, err });
+            // Create a synthetic ICCID for modems with errors
+            const synthetic_iccid = std.fmt.allocPrint(allocator, "NO_SIM_MODEM_{s}", .{modem_id}) catch {
+                std.log.err("Failed to allocate synthetic ICCID for modem {s}", .{modem_id});
+                return;
+            };
+            is_no_sim_modem = true;
+            break :blk synthetic_iccid;
+        };
+        
+        if (iccid_opt) |real_iccid| {
+            break :blk real_iccid;
+        } else {
+            // No ICCID (no SIM card) - create synthetic one to track the modem
+            std.log.warn("Modem {s} has no SIM card - creating synthetic ICCID", .{modem_id});
+            const synthetic_iccid = std.fmt.allocPrint(allocator, "NO_SIM_MODEM_{s}", .{modem_id}) catch {
+                std.log.err("Failed to allocate synthetic ICCID for modem {s}", .{modem_id});
+                return;
+            };
+            is_no_sim_modem = true;
+            break :blk synthetic_iccid;
+        }
     };
     defer allocator.free(iccid);
     
+    // Use "sim-missing" status for modems without SIM cards
+    const modem_status = if (is_no_sim_modem) "sim-missing" else original_status;
+    
     // Extract modem index from modem_id (e.g., "7" from modem ID "7")
+    // NOTE: This index is NOT stable across USB reconnections and should not be used for identification
+    // We keep it for informational purposes only - ICCID is the primary identifier
     const modem_index = std.fmt.parseInt(u32, modem_id, 10) catch null;
     
     // Get SIM index from ModemManager
-    const sim_index = modem_manager.getSimIndex(modem_id) catch null;
+    // NOTE: This index can also change on USB reconnections
+    const sim_index = modem_manager.getSimIndex(modem_id) catch |err| blk: {
+        std.log.warn("Failed to get SIM index for modem {s}: {any}", .{ modem_id, err });
+        break :blk null;
+    };
     
     var phone = types.Phone{
         .iccid = iccid,
