@@ -74,14 +74,18 @@ export const statsHandler = {
           // When daemon is online, use its modem count as the source of truth for total devices
           if (isOnline && daemonHealth.modem_count !== null && daemonHealth.modem_count !== undefined) {
             console.log('[Stats] Using daemon modem count:', daemonHealth.modem_count);
-            // CRITICAL FIX: We have 55 physical modems total
-            // The daemon currently reports 53 (skips 2 modems without SIM cards)
-            // Always show the true hardware count of 55
-            actualTotalDevices = 55; // Fixed to actual hardware count
+            actualTotalDevices = daemonHealth.modem_count;
             
-            // For daemon status display, add 2 to account for no-SIM modems
-            if (daemonHealth.modem_count === 53) {
-              daemonStatus.modem_count = 55; // Show true count in UI
+            // If daemon is missing no-SIM modems, count them from database
+            const noSimModems = await env.DB.prepare(`
+              SELECT COUNT(*) as count FROM phones 
+              WHERE status = 'sim-missing' OR iccid LIKE 'NO_SIM_%'
+            `).first();
+            
+            if (noSimModems && noSimModems.count > 0) {
+              // Include no-SIM modems in total count
+              actualTotalDevices = Math.max(actualTotalDevices, daemonHealth.modem_count + noSimModems.count);
+              console.log('[Stats] Including', noSimModems.count, 'no-SIM modems, total:', actualTotalDevices);
             }
           }
         }
