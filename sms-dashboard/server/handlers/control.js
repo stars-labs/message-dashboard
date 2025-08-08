@@ -268,30 +268,30 @@ export const controlHandler = {
         )
       `).run();
       
-      // Update daemon heartbeat
-      const modemCount = phones.length === 1 && phones[0].iccid === 'ALL_PHONES_OFFLINE' ? 0 : phones.length;
-      const daemonStatus = modemCount === 0 ? 'warning' : 'online';
+      // Initial modem count from daemon report
+      let modemCount = phones.length === 1 && phones[0].iccid === 'ALL_PHONES_OFFLINE' ? 0 : phones.length;
+      let daemonStatus = modemCount === 0 ? 'warning' : 'online';
       
-      // Mark phones with modem_index >= modemCount as offline (phantom records)
+      // Mark stale phones as offline
       if (modemCount > 0) {
-        console.log(`[control.js] Marking phantom phones offline (modem_index >= ${modemCount})`);
-        const phantomResult = await env.DB.prepare(`
+        // Mark stale phones (not updated in last 10 minutes) as offline
+        // Note: We don't use modem_index for phantom detection as it's not stable across USB reconnections
+        console.log(`[control.js] Marking stale phones offline (not updated in 10 minutes)`);
+        const staleResult = await env.DB.prepare(`
           UPDATE phones 
           SET status = 'offline',
               signal = NULL,
-              rssi = NULL,
-              rsrq = NULL,
-              rsrp = NULL,
-              snr = NULL,
               updated_at = CURRENT_TIMESTAMP
-          WHERE modem_index >= ? AND status != 'offline'
-        `).bind(modemCount).run();
+          WHERE status IN ('online', 'active', 'registered')
+            AND datetime(updated_at) < datetime('now', '-10 minutes')
+        `).run();
         
-        if (phantomResult.meta.changes > 0) {
-          console.log(`[control.js] Marked ${phantomResult.meta.changes} phantom phones as offline`);
+        if (staleResult.meta.changes > 0) {
+          console.log(`[control.js] Marked ${staleResult.meta.changes} stale phones as offline`);
         }
       }
       
+      // Store daemon heartbeat with initial count (will be adjusted later if needed)
       await env.DB.prepare(`
         INSERT INTO daemon_health (daemon_id, last_heartbeat, status, last_ip, version, modem_count, error_count, updated_at)
         VALUES ('orange-pi-main', CURRENT_TIMESTAMP, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP)
@@ -391,6 +391,51 @@ export const controlHandler = {
       let errorCount = 0;
       const errors = [];
       
+      // Detect missing modems and maintain synthetic entries for them
+      // The daemon should report all modems, but if it doesn't, we need to track them
+      const reportedModemIndices = new Set(phones.map(p => p.modem_index).filter(idx => idx !== null && idx !== undefined));
+      
+      // Check for gaps in modem indices (indicates missing modems)
+      if (reportedModemIndices.size > 0) {
+        const maxIndex = Math.max(...reportedModemIndices);
+        const expectedModems = maxIndex + 1; // Modems are indexed 0 to maxIndex
+        
+        if (phones.length < expectedModems) {
+          console.log(`[control.js] Detected missing modems: reported ${phones.length}, expected at least ${expectedModems}`);
+          
+          // Find missing indices and add synthetic entries
+          for (let i = 0; i < expectedModems; i++) {
+            if (!reportedModemIndices.has(i)) {
+              const syntheticIccid = `NO_SIM_MODEM_${i}`;
+              
+              // Check if this synthetic entry already exists in our phone list
+              const existing = phones.find(p => p.iccid === syntheticIccid);
+              if (!existing) {
+                console.log(`[control.js] Adding synthetic entry for missing modem ${i}`);
+                await env.DB.prepare(`
+                  INSERT INTO phones (iccid, number, status, modem_index, updated_at)
+                  VALUES (?, NULL, 'sim-missing', ?, CURRENT_TIMESTAMP)
+                  ON CONFLICT(iccid) DO UPDATE SET
+                    status = 'sim-missing',
+                    modem_index = excluded.modem_index,
+                    updated_at = CURRENT_TIMESTAMP
+                `).bind(syntheticIccid, i).run();
+              }
+            }
+          }
+          
+          // Update daemon health with the corrected modem count
+          const correctedModemCount = expectedModems;
+          await env.DB.prepare(`
+            UPDATE daemon_health 
+            SET modem_count = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE daemon_id = 'orange-pi-main'
+          `).bind(correctedModemCount).run();
+          
+          console.log(`[control.js] Updated daemon health with corrected modem count: ${correctedModemCount}`);
+        }
+      }
+      
       for (const phone of phones) {
         try {
           // Skip phones without valid ICCIDs
@@ -401,11 +446,9 @@ export const controlHandler = {
             continue;
           }
           
-          // Skip phantom phones that exceed daemon's modem count
-          if (phone.modem_index !== null && phone.modem_index !== undefined && phone.modem_index >= modemCount) {
-            console.log(`[control.js] Skipping phantom phone with modem_index=${phone.modem_index} (>= ${modemCount}): ICCID=${phone.iccid}`);
-            continue;
-          }
+          // Note: modem_index and sim_index are not stable across USB reconnections
+          // They are kept for informational purposes only - ICCID is the primary identifier
+          // We no longer skip based on modem_index as it's not a reliable indicator
           
           await stmt.bind(
             phone.iccid,  // ICCID is now the primary key
