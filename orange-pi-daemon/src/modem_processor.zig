@@ -45,7 +45,10 @@ pub fn processModem(
         const iccid_opt = modem_manager.getIccid(modem_id) catch |err| {
             std.log.warn("Failed to get ICCID for modem {s}: {any}", .{ modem_id, err });
             // Create a synthetic ICCID for modems with errors
-            const synthetic_iccid = try std.fmt.allocPrint(allocator, "NO_SIM_MODEM_{s}", .{modem_id});
+            const synthetic_iccid = std.fmt.allocPrint(allocator, "NO_SIM_MODEM_{s}", .{modem_id}) catch {
+                std.log.err("Failed to allocate synthetic ICCID for modem {s}", .{modem_id});
+                return;
+            };
             break :blk synthetic_iccid;
         };
         
@@ -54,7 +57,10 @@ pub fn processModem(
         } else {
             // No ICCID (no SIM card) - create synthetic one to track the modem
             std.log.warn("Modem {s} has no SIM card - creating synthetic ICCID", .{modem_id});
-            const synthetic_iccid = try std.fmt.allocPrint(allocator, "NO_SIM_MODEM_{s}", .{modem_id});
+            const synthetic_iccid = std.fmt.allocPrint(allocator, "NO_SIM_MODEM_{s}", .{modem_id}) catch {
+                std.log.err("Failed to allocate synthetic ICCID for modem {s}", .{modem_id});
+                return;
+            };
             // Override status for modems without SIM
             modem_status = "sim-missing";
             break :blk synthetic_iccid;
