@@ -59,7 +59,10 @@ pub fn processModem(
     
     // Get SIM index from ModemManager
     // NOTE: This index can also change on USB reconnections
-    const sim_index = modem_manager.getSimIndex(modem_id) catch null;
+    const sim_index = modem_manager.getSimIndex(modem_id) catch |err| blk: {
+        std.log.warn("Failed to get SIM index for modem {s}: {any}", .{ modem_id, err });
+        break :blk null;
+    };
     
     var phone = types.Phone{
         .iccid = iccid,

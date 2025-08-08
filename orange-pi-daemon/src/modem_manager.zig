@@ -219,22 +219,34 @@ pub const ModemManager = struct {
 
         var lines = std.mem.tokenizeScalar(u8, result.stdout, '\n');
         while (lines.next()) |line| {
-            const trimmed = std.mem.trim(u8, line, " \t");
-            
-            // Look for SIM path like:   primary sim path: /org/freedesktop/ModemManager1/SIM/7
-            if (std.mem.indexOf(u8, trimmed, "primary sim path:") != null or
-                std.mem.indexOf(u8, trimmed, "sim path:") != null) {
+            // Look for SIM path anywhere in the line (not just at the start after trimming)
+            // Lines look like: "  SIM      |        primary sim path: /org/freedesktop/ModemManager1/SIM/0"
+            if (std.mem.indexOf(u8, line, "primary sim path:") != null or
+                std.mem.indexOf(u8, line, "sim path:") != null) {
                 
-                if (std.mem.lastIndexOf(u8, trimmed, "/SIM/")) |sim_pos| {
-                    const sim_id_str = trimmed[sim_pos + 5 ..];
-                    if (std.fmt.parseInt(u32, sim_id_str, 10)) |sim_id| {
-                        std.log.info("🔍 Found SIM index {d} for modem {s}", .{ sim_id, modem_id });
-                        return sim_id;
-                    } else |_| {
-                        std.log.warn("Failed to parse SIM index from: {s}", .{sim_id_str});
+                if (std.mem.lastIndexOf(u8, line, "/SIM/")) |sim_pos| {
+                    const remaining = line[sim_pos + 5 ..];
+                    // Extract just the number part (might have trailing text)
+                    var sim_id_str: []const u8 = remaining;
+                    
+                    // Find where the number ends (look for non-digit)
+                    for (remaining, 0..) |c, i| {
+                        if (c < '0' or c > '9') {
+                            sim_id_str = remaining[0..i];
+                            break;
+                        }
+                    }
+                    
+                    if (sim_id_str.len > 0) {
+                        if (std.fmt.parseInt(u32, sim_id_str, 10)) |sim_id| {
+                            std.log.info("🔍 Found SIM index {d} for modem {s}", .{ sim_id, modem_id });
+                            return sim_id;
+                        } else |_| {
+                            std.log.warn("Failed to parse SIM index from: {s}", .{sim_id_str});
+                        }
                     }
                 } else {
-                    std.log.warn("No /SIM/ found in line: {s}", .{trimmed});
+                    std.log.warn("No /SIM/ found in line: {s}", .{line});
                 }
             }
         }
