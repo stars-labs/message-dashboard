@@ -228,13 +228,18 @@ pub const ModemManager = struct {
                 if (std.mem.lastIndexOf(u8, trimmed, "/SIM/")) |sim_pos| {
                     const sim_id_str = trimmed[sim_pos + 5 ..];
                     if (std.fmt.parseInt(u32, sim_id_str, 10)) |sim_id| {
-                        std.log.debug("🔍 Found SIM index {d} for modem {s}", .{ sim_id, modem_id });
+                        std.log.info("🔍 Found SIM index {d} for modem {s}", .{ sim_id, modem_id });
                         return sim_id;
-                    } else |_| {}
+                    } else |_| {
+                        std.log.warn("Failed to parse SIM index from: {s}", .{sim_id_str});
+                    }
+                } else {
+                    std.log.warn("No /SIM/ found in line: {s}", .{trimmed});
                 }
             }
         }
         
+        std.log.debug("No SIM index found for modem {s}", .{modem_id});
         return null;
     }
     
