@@ -14,16 +14,46 @@
 
   $: filteredPhones = phoneNumbers
     .filter((phone) => {
+      // Debug logging for filter matching
       const matchesCountry =
-        selectedCountry === "all" || phone.country === selectedCountry;
+        selectedCountry === "all" || 
+        phone.country === selectedCountry ||
+        // Also check mapped_country from ICCID mappings
+        phone.mapped_country === selectedCountry;
+      
+      const searchLower = searchTerm.toLowerCase();
       const matchesSearch =
         searchTerm === "" ||
-        (phone.number && phone.number.includes(searchTerm)) ||
-        (phone.carrier &&
-          phone.carrier.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (phone.iccid &&
-          phone.iccid.toLowerCase &&
-          phone.iccid.toLowerCase().includes(searchTerm.toLowerCase()));
+        (phone.number && phone.number.toString().toLowerCase().includes(searchLower)) ||
+        (phone.carrier && 
+          phone.carrier.toLowerCase().includes(searchLower)) ||
+        (phone.iccid && 
+          phone.iccid.toLowerCase().includes(searchLower)) ||
+        (phone.operator_name && 
+          phone.operator_name.toLowerCase().includes(searchLower)) ||
+        (phone.mapped_number && 
+          phone.mapped_number.toString().toLowerCase().includes(searchLower)) ||
+        (phone.mapped_carrier && 
+          phone.mapped_carrier.toLowerCase().includes(searchLower));
+          
+      // Log first few phones for debugging
+      if (phoneNumbers.indexOf(phone) < 3) {
+        console.log('[PhoneList] Filter debug:', {
+          phone: {
+            iccid: phone.iccid,
+            country: phone.country,
+            mapped_country: phone.mapped_country,
+            number: phone.number,
+            carrier: phone.carrier
+          },
+          selectedCountry,
+          searchTerm,
+          matchesCountry,
+          matchesSearch,
+          willShow: matchesCountry && matchesSearch
+        });
+      }
+          
       return matchesCountry && matchesSearch;
     });
 
@@ -33,6 +63,21 @@
     { code: "HK", name: "香港", flag: "🇭🇰" },
     { code: "SG", name: "新加坡", flag: "🇸🇬" },
   ];
+
+  // Debug: Log unique countries found in phone data
+  $: {
+    if (phoneNumbers.length > 0) {
+      const uniqueCountries = [...new Set(phoneNumbers.map(p => p.country).filter(Boolean))];
+      const uniqueMappedCountries = [...new Set(phoneNumbers.map(p => p.mapped_country).filter(Boolean))];
+      console.log('[PhoneList] Available countries in data:', {
+        countries: uniqueCountries,
+        mappedCountries: uniqueMappedCountries,
+        totalPhones: phoneNumbers.length,
+        filteredCount: filteredPhones.length,
+        selectedCountry
+      });
+    }
+  }
 
   function getStatusColor(status) {
     switch (status) {
@@ -182,7 +227,13 @@
             d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"
           />
         </svg>
-        <p class="text-sm">暂无设备</p>
+        {#if phoneNumbers.length === 0}
+          <p class="text-sm text-red-400 mb-2">无法加载设备数据</p>
+          <p class="text-xs text-gray-500">请检查网络连接或重新登录</p>
+        {:else}
+          <p class="text-sm">无匹配的设备</p>
+          <p class="text-xs text-gray-500">尝试调整筛选条件</p>
+        {/if}
       </div>
     {:else}
       {#each filteredPhones as phone}

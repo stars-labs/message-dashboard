@@ -36,6 +36,7 @@
   let dataLoading = true; // Track data loading separately
   let pollingConnected = false;
   let pollingUnsubscribers = [];
+  let authError = null; // Track authentication errors
   let currentView = "dashboard"; // 'dashboard', 'iccid-mappings', or 'keywords'
   let showIccidMappingDialog = false;
   let phoneToMap = null;
@@ -90,32 +91,70 @@
         "Content-Type": "application/json",
       };
 
+      console.log('[App] Loading data with auth status:', {
+        hasToken: !!auth.token,
+        tokenLength: auth.token ? auth.token.length : 0,
+        isAuthenticated: auth.isAuthenticated(),
+        user: user
+      });
+
       // Make direct HTTP requests in parallel with error handling
       const [phonesResponse, messagesResponse, statsResponse] =
         await Promise.all([
           fetch("/api/phones", { headers })
-            .then((r) => r.json())
+            .then(async (r) => {
+              const result = await r.json();
+              console.log('[App] Phones API response:', { 
+                status: r.status, 
+                success: result.success, 
+                dataLength: result.data?.length,
+                error: result.error 
+              });
+              return result;
+            })
             .catch((err) => {
               console.error('[App] Failed to fetch phones:', err);
-              return { success: false, data: [] };
+              return { success: false, data: [], error: err.message };
             }),
           fetch("/api/messages?limit=2000", { headers })
-            .then((r) => r.json())
+            .then(async (r) => {
+              const result = await r.json();
+              console.log('[App] Messages API response:', { 
+                status: r.status, 
+                success: result.success, 
+                dataLength: result.data?.length,
+                error: result.error 
+              });
+              return result;
+            })
             .catch((err) => {
               console.error('[App] Failed to fetch messages:', err);
-              return { success: false, data: [] };
+              return { success: false, data: [], error: err.message };
             }),
           fetch("/api/stats", { headers })
-            .then((r) => r.json())
+            .then(async (r) => {
+              const result = await r.json();
+              console.log('[App] Stats API response:', { 
+                status: r.status, 
+                success: result.success, 
+                error: result.error 
+              });
+              return result;
+            })
             .catch((err) => {
               console.error('[App] Failed to fetch stats:', err);
-              return { success: false };
+              return { success: false, error: err.message };
             }),
         ]);
 
-      // Handle different response formats
-      if (
+      // Handle different response formats and authentication errors
+      if (phonesResponse?.error === "No token provided" || phonesResponse?.error?.includes("Authentication")) {
+        console.warn('[App] Authentication error detected');
+        authError = "认证失败：请重新登录以访问设备数据";
+        phoneNumbers = [];
+      } else if (
         phonesResponse &&
+        phonesResponse.success &&
         phonesResponse.data &&
         Array.isArray(phonesResponse.data)
       ) {
@@ -129,7 +168,13 @@
           flag: getPhoneFlag(phone)
         }));
       } else {
+        console.warn('[App] Unexpected phones response format:', phonesResponse);
         phoneNumbers = [];
+      }
+      
+      // Clear auth error if we successfully loaded phone data
+      if (phoneNumbers.length > 0) {
+        authError = null;
       }
       
       console.log('[App] Loaded phones:', phoneNumbers.length);
@@ -1090,6 +1135,46 @@
         </div>
       </div>
     </header>
+
+    <!-- Authentication Error Banner -->
+    {#if authError}
+      <div class="bg-red-900/90 border-b border-red-700 px-4 py-2">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <svg
+              class="w-5 h-5 text-red-400 flex-shrink-0"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+              />
+            </svg>
+            <span class="text-sm text-red-300">
+              <strong>认证错误</strong> - {authError}
+            </span>
+          </div>
+          <div class="flex items-center gap-2">
+            <button
+              on:click={() => auth.login()}
+              class="text-xs px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded"
+            >
+              重新登录
+            </button>
+            <button
+              on:click={() => authError = null}
+              class="text-xs text-red-400 hover:text-red-300"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      </div>
+    {/if}
 
     <!-- Daemon Status Alert Banner -->
     {#if daemonStatus.status === 'offline' || daemonStatus.status === 'error'}
