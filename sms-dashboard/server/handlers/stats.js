@@ -1,10 +1,13 @@
+import { getDeviceStats } from '../utils/device-count.js';
+import { success, error } from '../utils/api-response.js';
+
 export const statsHandler = {
   async get(request) {
     const { env } = request;
     
     try {
-      // Optimize with a single query for all stats
-      const stats = await env.DB.prepare(`
+      // Get message statistics
+      const messageStats = await env.DB.prepare(`
         SELECT 
           (SELECT COUNT(*) FROM messages) as total_messages,
           (SELECT COUNT(*) FROM messages WHERE date(timestamp) = date('now')) as today_messages,
@@ -12,106 +15,51 @@ export const statsHandler = {
           (SELECT COUNT(*) FROM messages WHERE type = 'received') as total_received,
           (SELECT COUNT(*) FROM messages WHERE date(timestamp) = date('now') AND type = 'sent') as today_sent,
           (SELECT COUNT(*) FROM messages WHERE date(timestamp) = date('now') AND type = 'received') as today_received,
-          (SELECT COUNT(*) FROM phones WHERE status = 'online') as online_devices,
-          (SELECT COUNT(*) FROM phones) as total_devices,
           (SELECT COUNT(*) FROM messages WHERE verification_code IS NOT NULL AND type = 'received') as verified_messages
       `).first();
       
-      const verificationRate = stats.total_received > 0 
-        ? (stats.verified_messages / stats.total_received) 
+      // Get device statistics from single source of truth
+      const deviceStats = await getDeviceStats(env.DB);
+      
+      const verificationRate = messageStats.total_received > 0 
+        ? (messageStats.verified_messages / messageStats.total_received) 
         : 0;
       
-      // Check daemon heartbeat from KV and database
-      let daemonStatus = {
-        online: false,
-        last_heartbeat: null,
-        version: null,
-        device_id: null,
-        modem_count: null
+      // Simple daemon status from device stats
+      const daemonStatus = {
+        online: deviceStats.daemon.health === 'healthy',
+        last_heartbeat: deviceStats.daemon.last_heartbeat,
+        version: null, // Can be added to daemon_health table if needed
+        device_id: 'orange-pi-main',
+        modem_count: deviceStats.daemon.reported_count
       };
       
-      let actualOnlineDevices = stats.online_devices;
-      let actualTotalDevices = stats.total_devices;
-      
+      // Try to get version from KV if available
       try {
-        // First check KV for heartbeat
-        const heartbeatData = await env.KV.get('daemon:heartbeat');
+        const heartbeatData = await env.SESSIONS.get('daemon:heartbeat');
         if (heartbeatData) {
           const heartbeat = JSON.parse(heartbeatData);
-          const now = Date.now();
-          const fiveMinutesAgo = now - (5 * 60 * 1000);
-          
-          daemonStatus = {
-            online: heartbeat.last_heartbeat > fiveMinutesAgo,
-            last_heartbeat: heartbeat.last_heartbeat,
-            version: heartbeat.version,
-            device_id: heartbeat.device_id,
-            modem_count: heartbeat.modem_count
-          };
-        }
-        
-        // Also check database for daemon health
-        const daemonHealth = await env.DB.prepare(`
-          SELECT * FROM daemon_health 
-          WHERE daemon_id = 'orange-pi-main'
-          ORDER BY last_heartbeat DESC
-          LIMIT 1
-        `).first();
-        
-        if (daemonHealth) {
-          const now = Date.now();
-          const lastHeartbeat = new Date(daemonHealth.last_heartbeat).getTime();
-          const isOnline = (now - lastHeartbeat) < 5 * 60 * 1000;
-          
-          // Use database modem count if more recent or KV doesn't have it
-          if (!daemonStatus.modem_count || 
-              (daemonHealth.last_heartbeat && lastHeartbeat > daemonStatus.last_heartbeat)) {
-            daemonStatus.modem_count = daemonHealth.modem_count;
-            daemonStatus.online = isOnline;
-          }
-          
-          // When daemon is online, use its modem count as the source of truth
-          if (isOnline && daemonHealth.modem_count !== null && daemonHealth.modem_count !== undefined) {
-            console.log('[Stats] Using daemon modem count:', daemonHealth.modem_count);
-            // Count only phones with modem_index < daemon's modem_count as online
-            const validOnlineCount = await env.DB.prepare(`
-              SELECT COUNT(*) as count 
-              FROM phones 
-              WHERE status = 'online' AND modem_index < ?
-            `).bind(daemonHealth.modem_count).first();
-            
-            actualOnlineDevices = validOnlineCount ? validOnlineCount.count : daemonHealth.modem_count;
-            actualTotalDevices = daemonHealth.modem_count; // Daemon knows the true count
-          }
+          daemonStatus.version = heartbeat.version;
         }
       } catch (error) {
-        console.error('[stats.js] Failed to get daemon status:', error);
+        console.error('[stats.js] Failed to get daemon version from KV:', error);
       }
       
-      return new Response(JSON.stringify({
-        success: true,
-        total_messages: stats.total_messages,
-        today_messages: stats.today_messages,
-        total_sent: stats.total_sent,
-        total_received: stats.total_received,
-        today_sent: stats.today_sent,
-        today_received: stats.today_received,
-        online_devices: actualOnlineDevices,
-        total_devices: actualTotalDevices,
+      return success({
+        total_messages: messageStats.total_messages,
+        today_messages: messageStats.today_messages,
+        total_sent: messageStats.total_sent,
+        total_received: messageStats.total_received,
+        today_sent: messageStats.today_sent,
+        today_received: messageStats.today_received,
+        online_devices: deviceStats.online_count,
+        total_devices: deviceStats.total_count,
         verification_rate: verificationRate,
         daemon_status: daemonStatus
-      }), {
-        headers: { 'Content-Type': 'application/json' }
       });
-    } catch (error) {
-      // Error handling - stats
-      return new Response(JSON.stringify({
-        success: false,
-        error: 'Failed to fetch statistics'
-      }), {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' }
-      });
+    } catch (err) {
+      console.error('[stats.js] Error fetching statistics:', err);
+      return error('Failed to fetch statistics');
     }
   }
 };

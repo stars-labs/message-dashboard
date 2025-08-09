@@ -390,8 +390,8 @@ export function createMatrixRain(container) {
   container.appendChild(canvas);
   
   const ctx = canvas.getContext('2d');
-  canvas.width = container.offsetWidth;
-  canvas.height = container.offsetHeight;
+  canvas.width = container.offsetWidth || 800;
+  canvas.height = container.offsetHeight || 600;
   
   const matrix = '0123456789ABCDEF';
   const matrixArray = matrix.split('');

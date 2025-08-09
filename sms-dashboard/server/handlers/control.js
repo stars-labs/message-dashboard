@@ -467,7 +467,7 @@ export const controlHandler = {
               phone.firmware_revision || null,
               phone.hardware_revision || null,
               phone.device_path || null,
-              phone.status === 'online' || phone.status === 'active' ? 'connected' : 'disconnected',
+              phone.status === 'online' || phone.status === 'active' || phone.status === 'registered' ? 'connected' : 'disconnected',
               phone.modem_index || null,
               phone.usb_port || phone.modem_index || null
             ]);
@@ -481,14 +481,14 @@ export const controlHandler = {
                 phone.operator_name || null,
                 phone.operator_id || null,
                 phone.country || null,
-                phone.status === 'online' || phone.status === 'active' ? 'active' : 'inactive',
+                phone.status === 'online' || phone.status === 'active' || phone.status === 'registered' ? 'active' : 'inactive',
                 equipmentId, // Link SIM to modem
                 phone.sim_index || null // Store SIM index from daemon
               ]);
             }
             
             // Add modem state update to transaction
-            const connectionStatus = phone.status === 'online' ? 'registered' : 
+            const connectionStatus = phone.status === 'online' || phone.status === 'registered' ? 'registered' : 
                                     phone.status === 'active' ? 'connected' : 'disconnected';
             
             conn.addToTransaction(MODEM_STATE_UPSERT_SQL, [
@@ -533,7 +533,7 @@ export const controlHandler = {
                 phone.firmware_revision || null,
                 phone.hardware_revision || null,
                 phone.device_path || null,
-                phone.status === 'online' || phone.status === 'active' ? 'connected' : 'disconnected',
+                phone.status === 'online' || phone.status === 'active' || phone.status === 'registered' ? 'connected' : 'disconnected',
                 phone.modem_index || null,
                 phone.usb_port || phone.modem_index || null
               ]);
@@ -546,7 +546,7 @@ export const controlHandler = {
                   phone.operator_name || null,
                   phone.operator_id || null,
                   phone.country || null,
-                  phone.status === 'online' || phone.status === 'active' ? 'active' : 'inactive',
+                  phone.status === 'online' || phone.status === 'active' || phone.status === 'registered' ? 'active' : 'inactive',
                   equipmentId,
                   phone.sim_index || null // Store SIM index from daemon
                 ]);

@@ -218,8 +218,8 @@ pub const ApiClient = struct {
         std.log.debug("📥 HTTP Response Code: {d}", .{status});
 
         if (status < 200 or status >= 300) {
-            // Try to read error response
-            const error_body = request.reader().readAllAlloc(self.allocator, 4096) catch |err| {
+            // Try to read error response (up to 16KB)
+            const error_body = request.reader().readAllAlloc(self.allocator, 16 * 1024) catch |err| {
                 std.log.err("Failed to read error response: {any}", .{err});
                 return error.HttpRequestFailed;
             };
@@ -233,7 +233,8 @@ pub const ApiClient = struct {
         }
 
         // Read success response body (if any)
-        const response_body = request.reader().readAllAlloc(self.allocator, 4096) catch |err| {
+        // Increase buffer size to 64KB to handle larger responses
+        const response_body = request.reader().readAllAlloc(self.allocator, 64 * 1024) catch |err| {
             std.log.debug("No response body or failed to read: {any}", .{err});
             return;
         };

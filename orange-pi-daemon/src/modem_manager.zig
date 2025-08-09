@@ -1359,4 +1359,126 @@ pub const ModemManager = struct {
         }
         return null;
     }
+    
+    pub fn getModemDetails(self: *ModemManager, modem_id: []const u8) !struct {
+        manufacturer: ?[]const u8,
+        model: ?[]const u8,
+        firmware_revision: ?[]const u8,
+        hardware_revision: ?[]const u8,
+        device_path: ?[]const u8,
+    } {
+        // Skip modems known to crash mmcli
+        if (self.problematic_modems.contains(modem_id)) {
+            return .{ 
+                .manufacturer = null, 
+                .model = null, 
+                .firmware_revision = null,
+                .hardware_revision = null,
+                .device_path = null,
+            };
+        }
+        
+        const result = std.process.Child.run(.{
+            .allocator = self.allocator,
+            .argv = &[_][]const u8{ "mmcli", "-m", modem_id },
+        }) catch |err| {
+            std.log.warn("Failed to run mmcli for modem details {s}: {any}", .{ modem_id, err });
+            return .{ 
+                .manufacturer = null, 
+                .model = null, 
+                .firmware_revision = null,
+                .hardware_revision = null,
+                .device_path = null,
+            };
+        };
+        defer self.allocator.free(result.stdout);
+        defer self.allocator.free(result.stderr);
+        
+        var manufacturer: ?[]const u8 = null;
+        var model: ?[]const u8 = null;
+        var firmware_revision: ?[]const u8 = null;
+        var hardware_revision: ?[]const u8 = null;
+        var device_path_field: ?[]const u8 = null;
+        
+        var lines = std.mem.tokenizeScalar(u8, result.stdout, '\n');
+        while (lines.next()) |line| {
+            // Look for manufacturer
+            if (std.mem.indexOf(u8, line, "manufacturer:")) |_| {
+                const trimmed = std.mem.trim(u8, line, " \t");
+                if (std.mem.indexOf(u8, trimmed, ": ")) |pos| {
+                    const value = std.mem.trim(u8, trimmed[pos + 2 ..], " '\"");
+                    if (value.len > 0 and !std.mem.eql(u8, value, "unknown")) {
+                        manufacturer = try self.allocator.dupe(u8, value);
+                    }
+                }
+            }
+            
+            // Look for model
+            if (std.mem.indexOf(u8, line, "model:")) |_| {
+                const trimmed = std.mem.trim(u8, line, " \t");
+                if (std.mem.indexOf(u8, trimmed, ": ")) |pos| {
+                    const value = std.mem.trim(u8, trimmed[pos + 2 ..], " '\"");
+                    if (value.len > 0 and !std.mem.eql(u8, value, "unknown")) {
+                        model = try self.allocator.dupe(u8, value);
+                    }
+                }
+            }
+            
+            // Look for firmware revision
+            if (std.mem.indexOf(u8, line, "revision:")) |_| {
+                const trimmed = std.mem.trim(u8, line, " \t");
+                if (std.mem.indexOf(u8, trimmed, ": ")) |pos| {
+                    const value = std.mem.trim(u8, trimmed[pos + 2 ..], " '\"");
+                    if (value.len > 0 and !std.mem.eql(u8, value, "unknown")) {
+                        firmware_revision = try self.allocator.dupe(u8, value);
+                    }
+                }
+            }
+            
+            // Look for hardware revision  
+            if (std.mem.indexOf(u8, line, "h/w revision:")) |_| {
+                const trimmed = std.mem.trim(u8, line, " \t");
+                if (std.mem.indexOf(u8, trimmed, ": ")) |pos| {
+                    const value = std.mem.trim(u8, trimmed[pos + 2 ..], " '\"");
+                    if (value.len > 0 and !std.mem.eql(u8, value, "unknown")) {
+                        hardware_revision = try self.allocator.dupe(u8, value);
+                    }
+                }
+            }
+            
+            // Look for device path (under Ports section)
+            if (std.mem.indexOf(u8, line, "cdc-wdm")) |_| {
+                const trimmed = std.mem.trim(u8, line, " \t");
+                // Extract device path like /dev/cdc-wdm0
+                if (std.mem.indexOf(u8, trimmed, "/dev/")) |start| {
+                    // Find the end of the device path (space or end of line)
+                    var end = start + 5; // Start after "/dev/"
+                    while (end < trimmed.len and trimmed[end] != ' ' and trimmed[end] != '\t') : (end += 1) {}
+                    const device_path = trimmed[start..end];
+                    if (device_path.len > 0) {
+                        device_path_field = try self.allocator.dupe(u8, device_path);
+                    }
+                }
+            } else if (device_path_field == null and std.mem.indexOf(u8, line, "ttyUSB") != null) {
+                const trimmed = std.mem.trim(u8, line, " \t");
+                // Extract device path like /dev/ttyUSB0
+                if (std.mem.indexOf(u8, trimmed, "/dev/")) |start| {
+                    var end = start + 5;
+                    while (end < trimmed.len and trimmed[end] != ' ' and trimmed[end] != '\t') : (end += 1) {}
+                    const device_path = trimmed[start..end];
+                    if (device_path.len > 0) {
+                        device_path_field = try self.allocator.dupe(u8, device_path);
+                    }
+                }
+            }
+        }
+        
+        return .{
+            .manufacturer = manufacturer,
+            .model = model,
+            .firmware_revision = firmware_revision,
+            .hardware_revision = hardware_revision,
+            .device_path = device_path_field,
+        };
+    }
 };

@@ -1,7 +1,7 @@
 {
   "daemon": {
     "name": "SMS Dashboard Daemon",
-    "version": "1.0.0",
+    "version": "2.0.0",
     "deviceId": "orange-pi-001"
   },
   "api": {

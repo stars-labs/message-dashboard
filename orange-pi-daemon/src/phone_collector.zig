@@ -28,6 +28,11 @@ pub const PhoneCollector = struct {
             if (phone.network_type) |net| self.allocator.free(net);
             if (phone.access_tech) |tech| self.allocator.free(tech);
             if (phone.imei) |imei| self.allocator.free(imei);
+            if (phone.manufacturer) |mfr| self.allocator.free(mfr);
+            if (phone.model) |mdl| self.allocator.free(mdl);
+            if (phone.firmware_revision) |fw| self.allocator.free(fw);
+            if (phone.hardware_revision) |hw| self.allocator.free(hw);
+            if (phone.device_path) |path| self.allocator.free(path);
         }
         self.phones.deinit();
     }
@@ -51,8 +56,14 @@ pub const PhoneCollector = struct {
             .network_type = if (phone.network_type) |s| try self.allocator.dupe(u8, s) else null,
             .access_tech = if (phone.access_tech) |s| try self.allocator.dupe(u8, s) else null,
             .imei = if (phone.imei) |s| try self.allocator.dupe(u8, s) else null,
+            .manufacturer = if (phone.manufacturer) |s| try self.allocator.dupe(u8, s) else null,
+            .model = if (phone.model) |s| try self.allocator.dupe(u8, s) else null,
+            .firmware_revision = if (phone.firmware_revision) |s| try self.allocator.dupe(u8, s) else null,
+            .hardware_revision = if (phone.hardware_revision) |s| try self.allocator.dupe(u8, s) else null,
+            .device_path = if (phone.device_path) |s| try self.allocator.dupe(u8, s) else null,
             .modem_index = phone.modem_index,
             .sim_index = phone.sim_index,
+            .usb_port = phone.usb_port,
         };
         
         try self.phones.append(phone_copy);
