@@ -9,20 +9,33 @@ This is a distributed SMS management system with three main components:
 1. **Web Dashboard** (`sms-dashboard/`) - Real-time SMS management interface
    - Frontend: Svelte + TailwindCSS with Vite build system
    - Backend: Cloudflare Workers with custom routing
-   - Database: Cloudflare D1 (SQLite)
+   - Database: Cloudflare D1 (SQLite) with normalized schema
    - Real-time: WebSocket + SSE fallback with Durable Objects
    - Auth: Auth0 integration with RBAC
+   - Utilities: Centralized database management, API responses, and device counting
 
-2. **SMS Collection Daemon** (`orange-pi-daemon/`) - Zig daemon for hardware integration
+2. **SMS Collection Daemon** (`orange-pi-daemon/`) - Zig daemon for hardware integration (v2.0.0)
    - Interfaces with ModemManager via mmcli commands
-   - Extracts ICCID, phone numbers, signal strength, operator info
+   - Extracts hardware details (manufacturer, model, firmware, hardware revision)
+   - Collects ICCID, phone numbers, signal strength, operator info
    - Uploads data to dashboard API with API key authentication
    - Designed for Orange Pi 5 Plus with multiple USB modems
+   - Enhanced memory management with proper deallocation
 
 3. **NixOS Configuration** (`nixos-config/`) - Declarative system deployment
    - Flake-based NixOS configuration for Orange Pi
    - SMS daemon service definition and modem support
    - Secrets management with SOPS
+
+### Database Architecture (v2.0)
+
+The system has been refactored from a monolithic `phones` table to a normalized structure:
+
+- **`modems`** - Hardware tracking (IMEI/equipment_id as primary key)
+- **`sims`** - SIM card data (ICCID as primary key)
+- **`modem_state`** - Real-time modem status (volatile data)
+- **`daemon_health`** - Daemon monitoring and heartbeat tracking
+- **`device_view`** - Backward compatibility view combining all tables
 
 ## Development Commands
 
@@ -52,7 +65,14 @@ npm run db:migrate                 # Run migrations on remote database
 
 # Manual D1 operations
 npx wrangler d1 execute sms-dashboard --local --file=path/to/file.sql
-npx wrangler d1 execute sms-dashboard --remote --command="SELECT * FROM phones"
+npx wrangler d1 execute sms-dashboard --remote --command="SELECT * FROM device_view"
+
+# Migration validation
+npx wrangler d1 execute sms-dashboard --remote --file=migrations/validate-migration.sql
+node scripts/validate-migration.js  # Automated validation
+
+# Rollback if needed
+npx wrangler d1 execute sms-dashboard --remote --file=migrations/rollback-to-phones.sql
 ```
 
 ### SMS Daemon (Zig)
@@ -97,6 +117,11 @@ npm run deploy      # Build unified bundle and deploy to Cloudflare
 - **API Authentication**: Dual auth system - Auth0 for users, API key for Orange Pi
 - **Database Layer**: Direct D1 SQL queries with prepared statements
 - **WebSocket**: Durable Objects for connection persistence and broadcasting
+- **Utilities**:
+  - `server/utils/database-setup.js` - Table creation and index management
+  - `server/utils/device-count.js` - Centralized device statistics
+  - `server/utils/api-response.js` - Standardized API responses
+  - `server/utils/database-wrapper.js` - D1 connection wrapper with statement caching
 
 ### Data Flow
 ```
@@ -106,9 +131,26 @@ Orange Pi → mmcli → Zig Daemon → API (API Key) → D1 Database → WebSock
 ```
 
 ### Database Schema Critical Points
+
+#### Legacy Schema (being phased out)
 - `phones.id` is ICCID (SIM card identifier) - never null
 - `messages.phone_id` references `phones.id` (ICCID)
 - Control handler rejects phones without valid ICCIDs
+
+#### New Normalized Schema (v2.0)
+- **Primary Keys**:
+  - `modems.equipment_id` - IMEI from hardware (e.g., "865827078383361")
+  - `sims.iccid` - SIM card identifier (e.g., "89860121652000047334")
+- **Foreign Keys**:
+  - `sims.current_modem_id` → `modems.equipment_id`
+  - `modem_state.modem_id` → `modems.equipment_id`
+  - `messages.phone_id` → `sims.iccid` (maintains compatibility)
+- **Synthetic IDs**: For modems without valid IMEI, uses `MODEM_{index}` format
+- **Timestamps**: All tables have `created_at` and `updated_at` with automatic updates
+- **Status Tracking**:
+  - Modem status: `connected`, `disconnected`, `error`
+  - SIM status: `active`, `inactive`, `removed`
+  - Connection status: `registered`, `searching`, `denied`
 
 ## Common Issues & Debugging
 
@@ -118,22 +160,36 @@ Orange Pi → mmcli → Zig Daemon → API (API Key) → D1 Database → WebSock
 
 ### Backend Data Issues
 ```bash
-# Clean up invalid phone entries
-npx wrangler d1 execute sms-dashboard --command "DELETE FROM phones WHERE id IS NULL OR (id LIKE 'phone-%' AND iccid IS NULL)" --remote
-
 # Monitor API calls causing issues
 npx wrangler tail sms-dashboard --format pretty
+
+# Check for data inconsistencies
+npx wrangler d1 execute sms-dashboard --command "SELECT * FROM device_stats" --remote
+
+# Verify device counts match
+node scripts/test-stats-api.js
+
+# Clean up stale modem states (older than 2 minutes)
+npx wrangler d1 execute sms-dashboard --command "UPDATE modems SET status = 'disconnected' WHERE datetime(updated_at) < datetime('now', '-2 minutes') AND status = 'connected'" --remote
+
+# Check daemon health
+npx wrangler d1 execute sms-dashboard --command "SELECT *, datetime(last_heartbeat) as heartbeat_time FROM daemon_health ORDER BY last_heartbeat DESC" --remote
 ```
 
 ### SMS Daemon Issues
 - Check ModemManager status: `systemctl status ModemManager`
 - Verify modem detection: `mmcli -L`
 - Check ICCID extraction: `mmcli -m [modem_id]` then `mmcli -i [sim_id]`
+- Check modem details: `mmcli -m [modem_id] | grep -E "(manufacturer|model|firmware|equipment)"` 
 - HTTP Communication: As of v1.14.0, daemon uses native Zig HTTP client
   - std.http.Client with proper timeout configuration
   - Connection pooling for better performance
   - No external dependencies (curl no longer required)
   - Timeout settings: 10 seconds for both connection and read
+- Memory Management (v2.0.0+): 
+  - All allocated memory properly freed in defer blocks
+  - Fixed memory leak in `getModemDetails()` function
+  - Batch processing with proper cleanup between iterations
 
 ### Auth0 Configuration
 - Callback URLs must include both development and production domains
@@ -173,11 +229,21 @@ curl -H "Authorization: Bearer $TOKEN" https://sexy.qzz.io/api/phones
 
 ### Database Monitoring
 ```bash
-# Check phone count and status
-npx wrangler d1 execute sms-dashboard --command "SELECT status, COUNT(*) FROM phones GROUP BY status" --remote
+# Check device statistics
+npx wrangler d1 execute sms-dashboard --command "SELECT * FROM device_stats" --remote
+
+# Monitor modem/SIM status
+npx wrangler d1 execute sms-dashboard --command "SELECT status, COUNT(*) FROM modems GROUP BY status" --remote
+npx wrangler d1 execute sms-dashboard --command "SELECT status, COUNT(*) FROM sims GROUP BY status" --remote
 
 # Recent messages
 npx wrangler d1 execute sms-dashboard --command "SELECT * FROM messages ORDER BY created_at DESC LIMIT 10" --remote
+
+# Check for phantom modems (connected but no recent update)
+npx wrangler d1 execute sms-dashboard --command "SELECT equipment_id, status, datetime(updated_at) as last_update FROM modems WHERE status = 'connected' AND datetime(updated_at) < datetime('now', '-60 seconds')" --remote
+
+# Performance statistics
+npx wrangler d1 execute sms-dashboard --command "SELECT COUNT(*) as state_records, AVG(signal_percent) as avg_signal FROM modem_state" --remote
 ```
 
 ## Critical System Dependencies
@@ -257,3 +323,33 @@ npx wrangler d1 execute sms-dashboard --command "SELECT * FROM messages ORDER BY
 - Changed verbose modem state and signal strength logs from info to debug level
 - Now only logs pending SMS operations and new messages at info level
 - Significantly reduced log volume for production operations
+
+### v2.0.0 - Database Architecture Refactoring (August 2025)
+- **Major Schema Changes**:
+  - Migrated from monolithic `phones` table to normalized structure
+  - New tables: `modems`, `sims`, `modem_state`, `daemon_health`
+  - Created `device_view` for backward compatibility
+  - Equipment ID (IMEI) now primary key for modems
+  - ICCID remains primary key for SIMs
+- **Infrastructure Improvements**:
+  - Centralized table creation in `/server/utils/database-setup.js`
+  - Single source of truth for device counts in `/server/utils/device-count.js`
+  - Standardized API responses via `/server/utils/api-response.js`
+  - D1 connection wrapper with statement caching in `/server/utils/database-wrapper.js`
+- **Critical Fixes**:
+  - Fixed memory leak in Zig daemon's `getModemDetails()` function
+  - Added transaction boundaries for multi-table updates using D1 batch API
+  - Implemented stale threshold checks (60s for phantom modems, 120s for offline)
+  - Equipment ID validation with synthetic ID generation fallback
+- **Performance Optimizations**:
+  - Batch processing with transactions (10 phones per batch)
+  - Prepared statement caching for frequently used queries
+  - Optimized indexes for common query patterns
+- **Migration Support**:
+  - Comprehensive validation scripts (`validate-migration.sql`)
+  - Safe rollback procedure (`rollback-to-phones.sql`)
+  - Automated validation runner (`scripts/validate-migration.js`)
+- **Zig Daemon Updates**:
+  - Added hardware detail collection (manufacturer, model, firmware, hardware revision)
+  - Enhanced memory management with proper deallocation
+  - Updated Phone struct with new hardware fields

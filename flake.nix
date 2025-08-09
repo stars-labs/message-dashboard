@@ -85,15 +85,17 @@
                   # Override the SMS daemon to use SOPS secrets
                   services.sms-daemon = {
                     enable = true;
-                    package = if config.services.sms-daemon.debugBuild 
-                      then self.packages.aarch64-linux.sms-daemon-debug
-                      else self.packages.aarch64-linux.sms-daemon;
+                    package =
+                      if config.services.sms-daemon.debugBuild then
+                        self.packages.aarch64-linux.sms-daemon-debug
+                      else
+                        self.packages.aarch64-linux.sms-daemon;
                     apiKeyFile = config.sops.secrets."sms-dashboard/api-key".path;
                     apiUrl = "https://sexy.qzz.io";
-                    phoneUpdateIntervalSeconds = 30;      # Update phone status every 30 seconds
-                    messageCheckIntervalMs = 100;         # Check messages every 100ms (10 Hz) - should be safe with sequential processing
-                    signalCheckIntervalSeconds = 60;      # Check signal quality every minute
-                    debugBuild = false;
+                    phoneUpdateIntervalSeconds = 30; # Update phone status every 30 seconds
+                    messageCheckIntervalMs = 100; # Check messages every 100ms (10 Hz) - should be safe with sequential processing
+                    signalCheckIntervalSeconds = 60; # Check signal quality every minute
+                    debugBuild = true;
                   };
                 }
               )
@@ -114,8 +116,8 @@
         }:
         let
           # SMS daemon version - single source of truth
-          daemonVersion = "1.31.8"; # Minimal logging - only pending SMS and new messages
-          
+          daemonVersion = "2.0.1"; # Fixed StreamTooLong error and messages foreign key issue
+
           # Orange Pi SMS daemon package
           # Base derivation for common settings
           sms-daemon-base = {
@@ -123,12 +125,12 @@
             version = daemonVersion;
             src = ./orange-pi-daemon;
             nativeBuildInputs = with pkgs; [ zig ];
-            
+
             installPhase = ''
               mkdir -p $out/bin
               cp zig-out/bin/orange-pi-daemon $out/bin/sms-daemon
             '';
-            
+
             meta = with lib; {
               description = "SMS Dashboard Daemon for Orange Pi with 3G/4G modems";
               longDescription = ''
@@ -143,26 +145,32 @@
           };
 
           # Release build with info logging
-          sms-daemon = pkgs.stdenv.mkDerivation (sms-daemon-base // {
-            pname = "sms-daemon";
-            
-            buildPhase = ''
-              export HOME=$TMPDIR
-              rm -rf zig-cache zig-out
-              zig build -Doptimize=ReleaseSafe -Dlog_level=info
-            '';
-          });
+          sms-daemon = pkgs.stdenv.mkDerivation (
+            sms-daemon-base
+            // {
+              pname = "sms-daemon";
+
+              buildPhase = ''
+                export HOME=$TMPDIR
+                rm -rf zig-cache zig-out
+                zig build -Doptimize=ReleaseSafe -Dlog_level=info
+              '';
+            }
+          );
 
           # Debug build with debug logging
-          sms-daemon-debug = pkgs.stdenv.mkDerivation (sms-daemon-base // {
-            pname = "sms-daemon-debug";
-            
-            buildPhase = ''
-              export HOME=$TMPDIR
-              rm -rf zig-cache zig-out
-              zig build -Doptimize=Debug -Dlog_level=debug
-            '';
-          });
+          sms-daemon-debug = pkgs.stdenv.mkDerivation (
+            sms-daemon-base
+            // {
+              pname = "sms-daemon-debug";
+
+              buildPhase = ''
+                export HOME=$TMPDIR
+                rm -rf zig-cache zig-out
+                zig build -Doptimize=Debug -Dlog_level=debug
+              '';
+            }
+          );
         in
         {
           packages = {

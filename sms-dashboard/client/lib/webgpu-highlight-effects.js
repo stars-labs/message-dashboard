@@ -96,8 +96,8 @@ export function createMatrixRainForHighlight(container) {
   container.appendChild(canvas);
   
   const ctx = canvas.getContext('2d');
-  canvas.width = container.offsetWidth;
-  canvas.height = container.offsetHeight;
+  canvas.width = container.offsetWidth || 800;
+  canvas.height = container.offsetHeight || 600;
   
   const columns = Math.floor(canvas.width / 10);
   const drops = Array(columns).fill(0);

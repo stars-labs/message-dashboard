@@ -175,17 +175,20 @@
           p.status === "online" || p.status === "active" || p.status === "registered"
         ).length;
         
+        // Extract data from stats response (it's wrapped in a data property)
+        const statsData = statsResponse.data || statsResponse;
+        
         stats = {
-          totalMessages: statsResponse.total_messages || 0,
-          todayMessages: statsResponse.today_messages || 0,
-          totalSent: statsResponse.total_sent || 0,
-          totalReceived: statsResponse.total_received || 0,
-          todaySent: statsResponse.today_sent || 0,
-          todayReceived: statsResponse.today_received || 0,
+          totalMessages: statsData.total_messages || 0,
+          todayMessages: statsData.today_messages || 0,
+          totalSent: statsData.total_sent || 0,
+          totalReceived: statsData.total_received || 0,
+          todaySent: statsData.today_sent || 0,
+          todayReceived: statsData.today_received || 0,
           onlineDevices: calculatedOnlineDevices,
           totalDevices: phoneNumbers.length,
           verificationRate: Math.round(
-            (statsResponse.verification_rate || 0) * 100,
+            (statsData.verification_rate || 0) * 100,
           ),
         };
         console.log('[App] Initial stats with calculated online devices:', stats);
@@ -252,9 +255,6 @@
     // Start periodic daemon status checks (initial check happens in loadAllData)
     // Check every 30 seconds
     daemonInterval = setInterval(checkDaemonStatus, 30000);
-    
-    // Fetch stats from API on mount
-    await fetchStats();
     
     // Apply matrix rain effect to body
     const removeMatrixRain = createMatrixRain(document.body);
@@ -816,10 +816,17 @@
   
   async function fetchStats() {
     try {
-      const response = await fetch('/api/stats');
+      const token = auth.token || "anonymous";
+      const headers = {
+        Authorization: token !== "anonymous" ? `Bearer ${token}` : undefined,
+      };
+      const response = await fetch('/api/stats', { headers });
       if (response.ok) {
-        const data = await response.json();
-        console.log('[App] Fetched stats from API:', data);
+        const result = await response.json();
+        console.log('[App] Fetched stats from API:', result);
+        
+        // Extract data from response (it's wrapped in a data property)
+        const data = result.data || result;
         
         // Update all stats from API response
         stats = {

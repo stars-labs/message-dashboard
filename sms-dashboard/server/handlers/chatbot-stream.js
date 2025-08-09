@@ -501,7 +501,7 @@ My response:`;
 
     // Check if phone exists and is active
     const phone = await env.DB.prepare(`
-      SELECT * FROM phones WHERE iccid = ? AND status IN ('registered', 'active', 'online')
+      SELECT * FROM device_view WHERE iccid = ? AND status IN ('registered', 'active', 'online')
     `).bind(phone_id).first();
 
     if (!phone) {
@@ -527,7 +527,7 @@ My response:`;
     
     let sql = `
       SELECT iccid, number, status, signal, carrier, country, modem_index
-      FROM phones
+      FROM device_view
     `;
     const bindings = [];
 

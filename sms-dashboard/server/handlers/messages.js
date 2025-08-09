@@ -21,12 +21,12 @@ export const messagesHandler = {
       let query = `
         SELECT 
           m.*,
-          COALESCE(im.phone_number, p.number, m.phone_number) as display_phone_number,
-          p.carrier as phone_carrier,
-          p.status as phone_status,
+          COALESCE(im.phone_number, dv.number, m.phone_number) as display_phone_number,
+          dv.carrier as phone_carrier,
+          dv.status as phone_status,
           im.phone_number as mapped_number
         FROM messages m
-        LEFT JOIN phones p ON m.phone_iccid = p.iccid
+        LEFT JOIN device_view dv ON m.phone_iccid = dv.iccid
         LEFT JOIN iccid_mappings im ON m.phone_iccid = im.iccid AND im.is_active = 1
       `;
       let countQuery = `SELECT COUNT(*) as total FROM messages`;
@@ -141,14 +141,14 @@ export const messagesHandler = {
 
       // Get phone details - check for active statuses
       const phone = await env.DB.prepare(`
-        SELECT * FROM phones WHERE iccid = ? AND status IN ('registered', 'active', 'online')
+        SELECT * FROM device_view WHERE iccid = ? AND status IN ('registered', 'active', 'online')
       `).bind(phone_iccid).first();
 
 
       if (!phone) {
         // Check if phone exists with any status
         const anyPhone = await env.DB.prepare(`
-          SELECT iccid, status FROM phones WHERE iccid = ?
+          SELECT iccid, status FROM device_view WHERE iccid = ?
         `).bind(phone_iccid).first();
         
         if (anyPhone) {

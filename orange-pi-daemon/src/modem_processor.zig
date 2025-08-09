@@ -58,6 +58,38 @@ pub fn processModem(
     // Get SIM index from ModemManager
     const sim_index = modem_manager.getSimIndex(modem_id) catch null;
     
+    // Get detailed modem information with proper error handling
+    var manufacturer: ?[]const u8 = null;
+    var model: ?[]const u8 = null;
+    var firmware_revision: ?[]const u8 = null;
+    var hardware_revision: ?[]const u8 = null;
+    var device_path: ?[]const u8 = null;
+    
+    // Try to get modem details, but continue even if it fails
+    if (modem_manager.getModemDetails(modem_id)) |details| {
+        manufacturer = details.manufacturer;
+        model = details.model;
+        firmware_revision = details.firmware_revision;
+        hardware_revision = details.hardware_revision;
+        device_path = details.device_path;
+    } else |err| {
+        std.log.warn("Failed to get modem details for {s}: {any}", .{ modem_id, err });
+        // Continue with null values for all fields
+    }
+    
+    // Important: We must free the allocated memory when this function returns
+    // The defer ensures memory is freed even if we return early
+    defer {
+        if (manufacturer) |mfr| allocator.free(mfr);
+        if (model) |mdl| allocator.free(mdl);
+        if (firmware_revision) |fw| allocator.free(fw);
+        if (hardware_revision) |hw| allocator.free(hw);
+        if (device_path) |path| allocator.free(path);
+    }
+    
+    // Calculate USB port from modem_index (assuming sequential assignment)
+    const usb_port = modem_index;
+    
     var phone = types.Phone{
         .iccid = iccid,
         .number = null,
@@ -72,8 +104,14 @@ pub fn processModem(
         .network_type = null,
         .access_tech = null,
         .imei = null,
+        .manufacturer = manufacturer,
+        .model = model,
+        .firmware_revision = firmware_revision,
+        .hardware_revision = hardware_revision,
+        .device_path = device_path,
         .modem_index = modem_index,
         .sim_index = sim_index,
+        .usb_port = usb_port,
     };
     defer {
         if (phone.number) |num| allocator.free(num);
@@ -81,6 +119,8 @@ pub fn processModem(
         if (phone.operator_id) |id| allocator.free(id);
         if (phone.imei) |imei| allocator.free(imei);
         if (phone.access_tech) |tech| allocator.free(tech);
+        // Note: manufacturer, model, firmware_revision, hardware_revision, and device_path
+        // are freed in the defer block above, not here
     }
     
     // Get phone number if available

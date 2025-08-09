@@ -865,15 +865,15 @@ Return a JSON object with:
           ai.verification_code as code,
           ai.sender_category as service,
           ai.confidence_score,
-          p.number as phone_number
+          dv.number as phone_number
         FROM messages m
         INNER JOIN ai_insights ai ON m.id = ai.message_id
-        LEFT JOIN phones p ON m.phone_iccid = p.iccid
+        LEFT JOIN device_view dv ON m.phone_iccid = dv.iccid
         WHERE ai.verification_code IS NOT NULL
-        AND m.timestamp > datetime('now', '-${hours} hours')
+        AND m.timestamp > datetime('now', '-' || ? || ' hours')
       `;
       
-      const params = [];
+      const params = [hours];
       if (phoneId) {
         query += ' AND m.phone_iccid = ?';
         params.push(phoneId);

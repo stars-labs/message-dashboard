@@ -34,8 +34,14 @@ pub const Phone = struct {
     network_type: ?[]const u8 = null,
     access_tech: ?[]const u8 = null,
     imei: ?[]const u8 = null,
+    manufacturer: ?[]const u8 = null,  // Modem manufacturer (e.g., "Quectel")
+    model: ?[]const u8 = null,          // Modem model (e.g., "EC20")
+    firmware_revision: ?[]const u8 = null, // Firmware version
+    hardware_revision: ?[]const u8 = null, // Hardware version
+    device_path: ?[]const u8 = null,    // USB device path (e.g., "/dev/ttyUSB0")
     modem_index: ?u32 = null,  // Modem ID from mmcli (e.g., 7 from /Modem/7)
     sim_index: ?u32 = null,    // SIM ID from mmcli (e.g., 12 from /SIM/12)
+    usb_port: ?u32 = null,     // USB port number for physical identification
 };
 
 /// Internal message info including modem details
