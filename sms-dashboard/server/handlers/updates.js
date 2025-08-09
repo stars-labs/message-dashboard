@@ -15,35 +15,36 @@ export const updatesHandler = {
     try {
       const updates = [];
       
-      // Fetch current phone data to check for updates
+      // Fetch current device data to check for updates
       const { results: phones } = await env.DB.prepare(`
         SELECT 
-          p.iccid,
-          COALESCE(im.phone_number, p.number) as number,
-          COALESCE(im.country, p.country) as country,
-          p.flag,
-          COALESCE(im.carrier, p.carrier) as carrier,
-          p.status,
-          p.signal,
-          p.rssi,
-          p.rsrq,
-          p.rsrp,
-          p.snr,
-          p.operator_name,
-          p.operator_id,
-          p.imei,
-          p.access_tech,
-          p.modem_index,
-          p.sim_index,
-          p.created_at,
-          p.updated_at,
+          dv.id,
+          dv.iccid,
+          COALESCE(im.phone_number, dv.number) as number,
+          COALESCE(im.country, dv.country) as country,
+          dv.flag,
+          COALESCE(im.carrier, dv.carrier) as carrier,
+          dv.status,
+          dv.signal,
+          dv.rssi,
+          dv.rsrq,
+          dv.rsrp,
+          dv.snr,
+          dv.operator_name,
+          dv.operator_id,
+          dv.imei,
+          dv.access_tech,
+          dv.modem_index,
+          dv.sim_index,
+          dv.modem_updated_at as created_at,
+          dv.updated_at,
           im.phone_number as mapped_number,
           im.carrier as mapped_carrier,
           im.country as mapped_country,
           im.notes as mapping_notes
-        FROM phones p
-        LEFT JOIN iccid_mappings im ON p.iccid = im.iccid AND im.is_active = 1
-        ORDER BY p.updated_at DESC
+        FROM device_view dv
+        LEFT JOIN iccid_mappings im ON dv.iccid = im.iccid AND im.is_active = 1
+        ORDER BY dv.updated_at DESC
       `).all();
       
       // If we have phones data, send it as an update
@@ -76,18 +77,18 @@ export const updatesHandler = {
             m.id,
             m.phone_iccid,
             m.phone_number,
-            COALESCE(im.phone_number, p.number, m.phone_number) as display_phone_number,
+            COALESCE(im.phone_number, dv.number, m.phone_number) as display_phone_number,
             m.content,
             m.timestamp,
             m.type,
             m.status,
             m.recipient,
             m.verification_code,
-            p.carrier as phone_carrier,
-            p.status as phone_status,
+            dv.carrier as phone_carrier,
+            dv.status as phone_status,
             im.phone_number as mapped_number
           FROM messages m
-          LEFT JOIN phones p ON m.phone_iccid = p.iccid
+          LEFT JOIN device_view dv ON m.phone_iccid = dv.iccid
           LEFT JOIN iccid_mappings im ON m.phone_iccid = im.iccid AND im.is_active = 1
           WHERE m.timestamp > ?
           ORDER BY m.timestamp DESC
@@ -102,18 +103,18 @@ export const updatesHandler = {
             m.id,
             m.phone_iccid,
             m.phone_number,
-            COALESCE(im.phone_number, p.number, m.phone_number) as display_phone_number,
+            COALESCE(im.phone_number, dv.number, m.phone_number) as display_phone_number,
             m.content,
             m.timestamp,
             m.type,
             m.status,
             m.recipient,
             m.verification_code,
-            p.carrier as phone_carrier,
-            p.status as phone_status,
+            dv.carrier as phone_carrier,
+            dv.status as phone_status,
             im.phone_number as mapped_number
           FROM messages m
-          LEFT JOIN phones p ON m.phone_iccid = p.iccid
+          LEFT JOIN device_view dv ON m.phone_iccid = dv.iccid
           LEFT JOIN iccid_mappings im ON m.phone_iccid = im.iccid AND im.is_active = 1
           ORDER BY m.timestamp DESC
           LIMIT 10

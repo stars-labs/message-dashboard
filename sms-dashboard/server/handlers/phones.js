@@ -10,32 +10,42 @@ export const phonesHandler = {
       
       const { results } = await env.DB.prepare(`
         SELECT 
-          p.iccid,
-          COALESCE(im.phone_number, p.number) as number,
-          COALESCE(im.country, p.country) as country,
-          p.flag,
-          COALESCE(im.carrier, p.carrier) as carrier,
-          p.status,
-          p.signal,
-          p.rssi,
-          p.rsrq,
-          p.rsrp,
-          p.snr,
-          p.operator_name,
-          p.operator_id,
-          p.imei,
-          p.access_tech,
-          p.modem_index,
-          p.sim_index,
-          p.created_at,
-          p.updated_at,
+          dv.id,
+          dv.iccid,
+          COALESCE(im.phone_number, dv.number) as number,
+          COALESCE(im.country, dv.country) as country,
+          dv.flag,
+          COALESCE(im.carrier, dv.carrier) as carrier,
+          dv.status,
+          dv.signal,
+          dv.rssi,
+          dv.rsrq,
+          dv.rsrp,
+          dv.snr,
+          dv.operator_name,
+          dv.operator_id,
+          dv.imei,
+          dv.access_tech,
+          dv.modem_index,
+          dv.sim_index,
+          dv.modem_updated_at as created_at,
+          dv.updated_at,
           im.phone_number as mapped_number,
           im.carrier as mapped_carrier,
           im.country as mapped_country,
-          im.notes as mapping_notes
-        FROM phones p
-        LEFT JOIN iccid_mappings im ON p.iccid = im.iccid AND im.is_active = 1
-        ORDER BY p.iccid
+          im.notes as mapping_notes,
+          -- Additional modem/SIM info for frontend
+          dv.modem_id,
+          dv.modem_manufacturer,
+          dv.modem_model,
+          dv.modem_status,
+          dv.sim_iccid,
+          dv.sim_phone_number,
+          dv.sim_status,
+          dv.usb_port
+        FROM device_view dv
+        LEFT JOIN iccid_mappings im ON dv.iccid = im.iccid AND im.is_active = 1
+        ORDER BY dv.usb_port, dv.iccid
       `).all();
       
       return new Response(JSON.stringify({
@@ -67,32 +77,36 @@ export const phonesHandler = {
     try {
       const phone = await env.DB.prepare(`
         SELECT 
-          p.iccid,
-          COALESCE(im.phone_number, p.number) as number,
-          p.country,
-          p.flag,
-          COALESCE(im.carrier, p.carrier) as carrier,
-          p.status,
-          p.signal,
-          p.rssi,
-          p.rsrq,
-          p.rsrp,
-          p.snr,
-          p.operator_name,
-          p.operator_id,
-          p.imei,
-          p.access_tech,
-          p.modem_index,
-          p.sim_index,
-          p.created_at,
-          p.updated_at,
+          dv.id,
+          dv.iccid,
+          COALESCE(im.phone_number, dv.number) as number,
+          dv.country,
+          dv.flag,
+          COALESCE(im.carrier, dv.carrier) as carrier,
+          dv.status,
+          dv.signal,
+          dv.rssi,
+          dv.rsrq,
+          dv.rsrp,
+          dv.snr,
+          dv.operator_name,
+          dv.operator_id,
+          dv.imei,
+          dv.access_tech,
+          dv.modem_index,
+          dv.sim_index,
+          dv.modem_updated_at as created_at,
+          dv.updated_at,
           im.phone_number as mapped_number,
           im.carrier as mapped_carrier,
-          im.notes as mapping_notes
-        FROM phones p
-        LEFT JOIN iccid_mappings im ON p.iccid = im.iccid AND im.is_active = 1
-        WHERE p.iccid = ?
-      `).bind(phoneId).first();
+          im.notes as mapping_notes,
+          dv.modem_id,
+          dv.modem_status,
+          dv.sim_status
+        FROM device_view dv
+        LEFT JOIN iccid_mappings im ON dv.iccid = im.iccid AND im.is_active = 1
+        WHERE dv.iccid = ? OR dv.id = ?
+      `).bind(phoneId, phoneId).first();
       
       if (!phone) {
         return new Response(JSON.stringify({
