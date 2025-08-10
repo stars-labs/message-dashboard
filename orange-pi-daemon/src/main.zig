@@ -302,43 +302,23 @@ pub fn main() !void {
         
         // Submit work to worker pool for parallel processing
         for (modems_to_check) |modem_id| {
-            try worker_pool.submit(.CheckMessages, modem_id);
+            try worker_pool.submit(.CheckMessages, modem_id, &parallel_context);
         }
         
-        // Wait for work to complete (with timeout)
+        // Wait for work to complete (with smart timeout)
         const start_wait = std.time.milliTimestamp();
-        const max_wait_ms: i64 = 40; // Don't wait more than 40ms
+        const max_wait_ms: i64 = @max(20, @min(100, modems_to_check.len * 2)); // Dynamic timeout based on modem count
         
-        while (worker_pool.queueSize() > 0) {
+        while (worker_pool.hasActiveWork()) {
             const elapsed = std.time.milliTimestamp() - start_wait;
             if (elapsed > max_wait_ms) {
-                std.log.warn("⚠️ Work queue still has {d} items after {d}ms", .{ worker_pool.queueSize(), elapsed });
+                const pending = worker_pool.queueSize();
+                if (pending > 0) {
+                    std.log.debug("⏳ {d} modems still processing after {d}ms", .{ pending, elapsed });
+                }
                 break;
             }
-            std.time.sleep(1 * std.time.ns_per_ms);
-        }
-        
-        // Use existing thread approach as fallback for now (will be removed once worker pool is fully integrated)
-        const max_threads = @min(modems_to_check.len, 8);
-        var threads = std.ArrayList(std.Thread).init(allocator);
-        defer threads.deinit();
-        
-        for (modems_to_check) |modem_id| {
-            const thread = try std.Thread.spawn(.{}, checkModemMessages, .{ &parallel_context, modem_id });
-            try threads.append(thread);
-            
-            if (threads.items.len >= max_threads) {
-                // Wait for batch to complete
-                for (threads.items) |t| {
-                    t.join();
-                }
-                threads.clearRetainingCapacity();
-            }
-        }
-        
-        // Wait for remaining threads
-        for (threads.items) |thread| {
-            thread.join();
+            std.time.sleep(500 * std.time.ns_per_us); // 0.5ms sleep for faster response
         }
         
         // Process all results and update priorities
