@@ -10,8 +10,6 @@ const build_options = @import("build_options");
 const LockFreePriorityManager = @import("lockfree_priority_manager.zig").LockFreePriorityManager;
 const MessageDeduplicator = @import("bloom_filter.zig").MessageDeduplicator;
 const WorkerPool = @import("worker_pool.zig").WorkerPool;
-// const EventLoop = @import("event_loop.zig").EventLoop; // Removed - causing deadlock
-const ConnectionPool = @import("connection_pool.zig").ConnectionPool;
 const LockFreeMPMC = @import("lockfree_mpmc.zig").LockFreeMPMC;
 
 // Configure logging based on build options and runtime environment
@@ -83,7 +81,7 @@ fn checkModemMessages(context: *ParallelContext, modem_id: []const u8) void {
 
 pub fn main() !void {
     const stdout = std.io.getStdOut().writer();
-    try stdout.print("📱 Orange Pi SMS Dashboard Daemon v3.3.0 (Lock-Free Edition)\n", .{});
+    try stdout.print("📱 Orange Pi SMS Dashboard Daemon v3.4.0 (Clean Lock-Free Edition)\n", .{});
     
     // Initialize allocator
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
