@@ -83,7 +83,7 @@ fn checkModemMessages(context: *ParallelContext, modem_id: []const u8) void {
 
 pub fn main() !void {
     const stdout = std.io.getStdOut().writer();
-    try stdout.print("📱 Orange Pi SMS Dashboard Daemon v3.1.1\n", .{});
+    try stdout.print("📱 Orange Pi SMS Dashboard Daemon v3.2.0\n", .{});
     
     // Initialize allocator
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
