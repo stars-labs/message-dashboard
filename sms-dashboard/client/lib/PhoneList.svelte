@@ -12,14 +12,73 @@
   export let daemonStatus = { connected: false, lastDataUpdate: null };
   export let isLoading = false;
 
+  // Helper function to infer country code from phone number
+  function inferCountryFromNumber(phone) {
+    // First check if phone has explicit country from ICCID mapping or database
+    if (phone.country || phone.mapped_country) {
+      return phone.country || phone.mapped_country;
+    }
+
+    // Otherwise, try to infer from phone number
+    if (!phone.number) return null;
+    
+    const number = phone.number.toString();
+    
+    // China (+86)
+    if (number.startsWith("86") || number.startsWith("+86") || 
+        (number.startsWith("1") && number.length === 11)) {
+      return "CN";
+    }
+    
+    // Hong Kong (+852)
+    if (number.startsWith("852") || number.startsWith("+852") || 
+        number.startsWith("00852")) {
+      return "HK";
+    }
+    
+    // Singapore (+65)
+    if (number.startsWith("65") || number.startsWith("+65") || 
+        (number.length === 8 && (number.startsWith("8") || number.startsWith("9")))) {
+      return "SG";
+    }
+    
+    // USA (+1) - be careful as +1 is shared by many countries
+    if (number.startsWith("+1") || (number.length === 10 && !number.startsWith("1"))) {
+      return "US";
+    }
+    
+    // Japan (+81)
+    if (number.startsWith("81") || number.startsWith("+81")) {
+      return "JP";
+    }
+    
+    // Korea (+82)
+    if (number.startsWith("82") || number.startsWith("+82")) {
+      return "KR";
+    }
+    
+    // Malaysia (+60)
+    if (number.startsWith("60") || number.startsWith("+60")) {
+      return "MY";
+    }
+    
+    // Thailand (+66)
+    if (number.startsWith("66") || number.startsWith("+66")) {
+      return "TH";
+    }
+    
+    return null;
+  }
+
   $: filteredPhones = phoneNumbers
     .filter((phone) => {
+      // Get the effective country (explicit or inferred)
+      const effectiveCountry = inferCountryFromNumber(phone);
+      
       // Debug logging for filter matching
       const matchesCountry =
         selectedCountry === "all" || 
-        phone.country === selectedCountry ||
-        // Also check mapped_country from ICCID mappings
-        phone.mapped_country === selectedCountry;
+        effectiveCountry === selectedCountry;
       
       const searchLower = searchTerm.toLowerCase();
       const matchesSearch =
@@ -43,6 +102,7 @@
             iccid: phone.iccid,
             country: phone.country,
             mapped_country: phone.mapped_country,
+            effectiveCountry: effectiveCountry,
             number: phone.number,
             carrier: phone.carrier
           },
@@ -69,9 +129,11 @@
     if (phoneNumbers.length > 0) {
       const uniqueCountries = [...new Set(phoneNumbers.map(p => p.country).filter(Boolean))];
       const uniqueMappedCountries = [...new Set(phoneNumbers.map(p => p.mapped_country).filter(Boolean))];
+      const uniqueInferredCountries = [...new Set(phoneNumbers.map(p => inferCountryFromNumber(p)).filter(Boolean))];
       console.log('[PhoneList] Available countries in data:', {
-        countries: uniqueCountries,
+        dbCountries: uniqueCountries,
         mappedCountries: uniqueMappedCountries,
+        inferredCountries: uniqueInferredCountries,
         totalPhones: phoneNumbers.length,
         filteredCount: filteredPhones.length,
         selectedCountry
