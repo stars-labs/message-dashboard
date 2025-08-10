@@ -172,22 +172,12 @@ pub fn main() !void {
     var deduplicator = try MessageDeduplicator.init(allocator);
     defer deduplicator.deinit();
     
-    // Initialize worker pool for parallel processing
-    const num_workers = @min(8, std.Thread.getCpuCount() catch 4); // Use up to 8 workers or CPU count
-    var worker_pool = try WorkerPool.init(allocator, num_workers, &modem_manager, &should_exit);
-    defer worker_pool.deinit();
-    
     // Initialize event loop for reactive processing
     var event_loop = EventLoop.init(allocator);
     defer event_loop.deinit();
     try event_loop.start();
     
-    std.log.info("🚀 Initialized with {d} worker threads for parallel processing", .{num_workers});
-    
-    // Give workers time to fully initialize before starting main loop
-    std.time.sleep(50 * std.time.ns_per_ms);
-    
-    // Get initial modem list and build cache of valid modems
+    // Get initial modem list and build cache of valid modems BEFORE starting workers
     std.log.info("🔄 Building valid modem cache", .{});
     var valid_modems = std.ArrayList([]const u8).init(allocator);
     defer {
@@ -219,6 +209,16 @@ pub fn main() !void {
     }
     
     std.log.info("🚀 Starting parallel message checking with {d} modems", .{valid_modems.items.len});
+    
+    // Initialize worker pool AFTER building modem cache to avoid deadlock
+    const num_workers = @min(8, std.Thread.getCpuCount() catch 4); // Use up to 8 workers or CPU count
+    var worker_pool = try WorkerPool.init(allocator, num_workers, &modem_manager, &should_exit);
+    defer worker_pool.deinit();
+    
+    std.log.info("🚀 Initialized {d} worker threads for parallel processing", .{num_workers});
+    
+    // Give workers time to fully initialize before starting main loop
+    std.time.sleep(50 * std.time.ns_per_ms);
     
     // Main loop with parallel checking
     var cycle_count: u64 = 0;
