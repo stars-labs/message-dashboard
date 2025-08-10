@@ -76,8 +76,9 @@ pub const WorkerPool = struct {
         fn run(self: *Worker) void {
             std.log.info("Worker {d} started", .{self.id});
             
-            // Add a small delay to ensure main thread completes initialization
-            std.time.sleep(10 * std.time.ns_per_ms);
+            // Add longer delay to ensure main thread completes initialization
+            // This prevents deadlock when main loop starts immediately after worker creation
+            std.time.sleep(100 * std.time.ns_per_ms);
             
             while (!self.pool.should_exit.load(.acquire) and !self.pool.pool_shutdown.load(.acquire)) {
                 // Get work from queue with timeout protection
