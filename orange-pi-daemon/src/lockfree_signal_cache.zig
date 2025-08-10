@@ -97,9 +97,10 @@ pub const LockFreeSignalCache = struct {
         
         return types.SignalData{
             .signal_percent = entry.signal_percent,
-            .operator_name = "",
-            .operator_id = "",
-            .network_type = "",
+            .rssi = null,
+            .rsrq = null,
+            .rsrp = null,
+            .snr = null,
         };
     }
     
