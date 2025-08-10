@@ -9,6 +9,9 @@ const worker_threads = @import("worker_threads.zig");
 const build_options = @import("build_options");
 const ModemPriority = @import("modem_priority.zig");
 const MessageDeduplicator = @import("bloom_filter.zig").MessageDeduplicator;
+const WorkerPool = @import("worker_pool.zig").WorkerPool;
+const EventLoop = @import("event_loop.zig").EventLoop;
+const ConnectionPool = @import("connection_pool.zig").ConnectionPool;
 
 // Configure logging based on build options and runtime environment
 const build_log_level: std.log.Level = blk: {
@@ -169,6 +172,18 @@ pub fn main() !void {
     var deduplicator = try MessageDeduplicator.init(allocator);
     defer deduplicator.deinit();
     
+    // Initialize worker pool for parallel processing
+    const num_workers = @min(8, std.Thread.getCpuCount() catch 4); // Use up to 8 workers or CPU count
+    var worker_pool = try WorkerPool.init(allocator, num_workers, &modem_manager, &should_exit);
+    defer worker_pool.deinit();
+    
+    // Initialize event loop for reactive processing
+    var event_loop = EventLoop.init(allocator);
+    defer event_loop.deinit();
+    try event_loop.start();
+    
+    std.log.info("🚀 Initialized with {d} worker threads for parallel processing", .{num_workers});
+    
     // Get initial modem list and build cache of valid modems
     std.log.info("🔄 Building valid modem cache", .{});
     var valid_modems = std.ArrayList([]const u8).init(allocator);
@@ -285,31 +300,45 @@ pub fn main() !void {
             });
         }
         
-        // Spawn threads for parallel checking (limit to reasonable number)
-        const max_threads = @min(modems_to_check.len, 8); // Don't overwhelm ModemManager
+        // Submit work to worker pool for parallel processing
+        for (modems_to_check) |modem_id| {
+            try worker_pool.submit(.CheckMessages, modem_id);
+        }
+        
+        // Wait for work to complete (with timeout)
+        const start_wait = std.time.milliTimestamp();
+        const max_wait_ms: i64 = 40; // Don't wait more than 40ms
+        
+        while (worker_pool.queueSize() > 0) {
+            const elapsed = std.time.milliTimestamp() - start_wait;
+            if (elapsed > max_wait_ms) {
+                std.log.warn("⚠️ Work queue still has {d} items after {d}ms", .{ worker_pool.queueSize(), elapsed });
+                break;
+            }
+            std.time.sleep(1 * std.time.ns_per_ms);
+        }
+        
+        // Use existing thread approach as fallback for now (will be removed once worker pool is fully integrated)
+        const max_threads = @min(modems_to_check.len, 8);
         var threads = std.ArrayList(std.Thread).init(allocator);
         defer threads.deinit();
         
-        var modem_idx: usize = 0;
-        while (modem_idx < modems_to_check.len) {
-            const batch_size = @min(max_threads, modems_to_check.len - modem_idx);
+        for (modems_to_check) |modem_id| {
+            const thread = try std.Thread.spawn(.{}, checkModemMessages, .{ &parallel_context, modem_id });
+            try threads.append(thread);
             
-            // Spawn batch of threads
-            for (0..batch_size) |i| {
-                const idx = modem_idx + i;
-                if (idx >= modems_to_check.len) break;
-                
-                const thread = try std.Thread.spawn(.{}, checkModemMessages, .{ &parallel_context, modems_to_check[idx] });
-                try threads.append(thread);
+            if (threads.items.len >= max_threads) {
+                // Wait for batch to complete
+                for (threads.items) |t| {
+                    t.join();
+                }
+                threads.clearRetainingCapacity();
             }
-            
-            // Wait for batch to complete
-            for (threads.items) |thread| {
-                thread.join();
-            }
-            threads.clearRetainingCapacity();
-            
-            modem_idx += batch_size;
+        }
+        
+        // Wait for remaining threads
+        for (threads.items) |thread| {
+            thread.join();
         }
         
         // Process all results and update priorities
