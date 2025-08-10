@@ -6,14 +6,12 @@ const types = @import("types.zig");
 pub const ApiClient = struct {
     allocator: std.mem.Allocator,
     config: types.Config,
-    mutex: std.Thread.Mutex,
     client: std.http.Client,
 
     pub fn init(allocator: std.mem.Allocator, config: types.Config) ApiClient {
         return .{ 
             .allocator = allocator, 
             .config = config,
-            .mutex = std.Thread.Mutex{},
             .client = std.http.Client{ .allocator = allocator },
         };
     }
@@ -23,9 +21,6 @@ pub const ApiClient = struct {
     }
 
     pub fn uploadPhone(self: *ApiClient, phone: types.Phone) !void {
-        self.mutex.lock();
-        defer self.mutex.unlock();
-        
         const phones = [_]types.Phone{phone};
         const phones_json = try json.stringifyAlloc(self.allocator, phones, .{ .emit_null_optional_fields = false });
         defer self.allocator.free(phones_json);
@@ -40,8 +35,6 @@ pub const ApiClient = struct {
     pub fn uploadPhones(self: *ApiClient, phones: []const types.Phone) !void {
         if (phones.len == 0) return;
         
-        self.mutex.lock();
-        defer self.mutex.unlock();
 
         const phones_json = try json.stringifyAlloc(self.allocator, phones, .{ .emit_null_optional_fields = false });
         defer self.allocator.free(phones_json);
@@ -56,8 +49,6 @@ pub const ApiClient = struct {
     pub fn uploadMessages(self: *ApiClient, messages: []const types.Message) !void {
         if (messages.len == 0) return;
         
-        self.mutex.lock();
-        defer self.mutex.unlock();
 
         std.log.info("📤 Uploading {d} new messages to API", .{messages.len});
         for (messages, 0..) |msg, i| {
@@ -87,8 +78,6 @@ pub const ApiClient = struct {
     }
 
     pub fn getPendingSms(self: *ApiClient) ![]const types.PendingSms {
-        self.mutex.lock();
-        defer self.mutex.unlock();
 
         const url = try std.fmt.allocPrint(self.allocator, "{s}/api/control/pending-sms", .{self.config.api_url});
         defer self.allocator.free(url);
@@ -159,8 +148,6 @@ pub const ApiClient = struct {
     }
 
     pub fn markSmsAsSent(self: *ApiClient, sms_id: []const u8) !void {
-        self.mutex.lock();
-        defer self.mutex.unlock();
 
         // Use the correct endpoint and payload format
         const endpoint = "/sms-result";

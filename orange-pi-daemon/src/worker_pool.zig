@@ -3,28 +3,9 @@ const types = @import("types.zig");
 const ModemManager = @import("modem_manager.zig").ModemManager;
 const LockFreeMPMC = @import("lockfree_mpmc.zig").LockFreeMPMC;
 
-// Import types from main.zig
-const ModemCheckResult = struct {
-    modem_id: []const u8,
-    messages: []types.MessageInfo,
-    success: bool,
-    allocator: std.mem.Allocator,
-    
-    pub fn deinit(self: *ModemCheckResult) void {
-        if (self.success) {
-            for (self.messages) |*msg| {
-                self.allocator.free(msg.modem_id);
-                self.allocator.free(msg.sms_id);
-                self.allocator.free(msg.message.phone_iccid);
-                self.allocator.free(msg.message.phone_number);
-                self.allocator.free(msg.message.content);
-                self.allocator.free(msg.message.timestamp);
-            }
-            self.allocator.free(self.messages);
-        }
-    }
-};
+const ModemCheckResult = types.ModemCheckResult;
 
+// Import types from main.zig
 const ParallelContext = struct {
     allocator: std.mem.Allocator,
     modem_manager: *ModemManager,
@@ -46,21 +27,11 @@ pub const WorkItem = struct {
     context: ?*anyopaque = null,
 };
 
-pub const WorkResult = struct {
-    type: WorkType,
-    modem_id: []const u8,
-    success: bool,
-    messages: ?[]types.MessageInfo = null,
-    signal: ?types.SignalData = null,
-    error_msg: ?[]const u8 = null,
-};
-
 /// Worker pool for parallel modem operations using lock-free queues
 pub const WorkerPool = struct {
     allocator: std.mem.Allocator,
     workers: []Worker,
     work_queue: LockFreeMPMC(WorkItem),
-    result_queue: LockFreeMPMC(WorkResult),
     modem_manager: *ModemManager,
     should_exit: *std.atomic.Value(bool),
     pool_shutdown: std.atomic.Value(bool),
@@ -202,7 +173,6 @@ pub const WorkerPool = struct {
             .allocator = allocator,
             .workers = try allocator.alloc(Worker, num_workers),
             .work_queue = LockFreeMPMC(WorkItem).init(allocator),
-            .result_queue = LockFreeMPMC(WorkResult).init(allocator),
             .modem_manager = modem_manager,
             .should_exit = should_exit,
             .pool_shutdown = std.atomic.Value(bool).init(false),
@@ -245,7 +215,6 @@ pub const WorkerPool = struct {
         }
         
         self.work_queue.deinit();
-        self.result_queue.deinit();
         self.allocator.free(self.workers);
     }
     
@@ -268,18 +237,5 @@ pub const WorkerPool = struct {
     /// Get queue size
     pub fn queueSize(self: *Self) usize {
         return self.work_queue.size();
-    }
-    
-    /// Get all results (drain the result queue)
-    pub fn getResults(self: *Self) ![]WorkResult {
-        var results = std.ArrayList(WorkResult).init(self.allocator);
-        defer results.deinit();
-        
-        // Drain all available results
-        while (self.result_queue.tryPop()) |result| {
-            try results.append(result);
-        }
-        
-        return results.toOwnedSlice();
     }
 };

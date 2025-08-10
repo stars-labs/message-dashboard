@@ -69,3 +69,24 @@ pub const PendingSms = struct {
     recipient: []const u8,          // Number to send to
     created_at: []const u8,
 };
+
+pub const ModemCheckResult = struct {
+    modem_id: []const u8,
+    messages: []MessageInfo,
+    success: bool,
+    allocator: std.mem.Allocator,
+    
+    pub fn deinit(self: *ModemCheckResult) void {
+        if (self.success) {
+            for (self.messages) |*msg| {
+                self.allocator.free(msg.modem_id);
+                self.allocator.free(msg.sms_id);
+                self.allocator.free(msg.message.phone_iccid);
+                self.allocator.free(msg.message.phone_number);
+                self.allocator.free(msg.message.content);
+                self.allocator.free(msg.message.timestamp);
+            }
+            self.allocator.free(self.messages);
+        }
+    }
+};

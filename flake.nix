@@ -116,7 +116,7 @@
         }:
         let
           # SMS daemon version - single source of truth
-          daemonVersion = "3.4.0"; # Cleaned up - removed all unused code, fully lock-free
+          daemonVersion = "3.6.0"; # Code cleanup - removed unused code, fixed hash collisions
 
           # Orange Pi SMS daemon package
           # Base derivation for common settings
