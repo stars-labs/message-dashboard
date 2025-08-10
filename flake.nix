@@ -116,7 +116,7 @@
         }:
         let
           # SMS daemon version - single source of truth
-          daemonVersion = "3.2.0"; # Lock-free MPMC queue eliminates all deadlocks
+          daemonVersion = "3.3.0"; # Fully lock-free implementation - all mutexes removed
 
           # Orange Pi SMS daemon package
           # Base derivation for common settings

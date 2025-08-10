@@ -28,7 +28,7 @@ const ModemCheckResult = struct {
 const ParallelContext = struct {
     allocator: std.mem.Allocator,
     modem_manager: *ModemManager,
-    message_queue: *anyopaque, // MessageQueue
+    message_queue: *anyopaque, // LockFreeMessageQueue
     results: *LockFreeMPMC(ModemCheckResult),
 };
 
@@ -65,6 +65,7 @@ pub const WorkerPool = struct {
     should_exit: *std.atomic.Value(bool),
     pool_shutdown: std.atomic.Value(bool),
     active_workers: std.atomic.Value(u32),
+    initialized: std.atomic.Value(bool),
     
     const Self = @This();
     
@@ -74,6 +75,11 @@ pub const WorkerPool = struct {
         id: usize,
         
         fn run(self: *Worker) void {
+            // Wait for pool to be fully initialized
+            while (!self.pool.initialized.load(.acquire)) {
+                std.time.sleep(10 * std.time.ns_per_ms);
+            }
+            
             std.log.info("Worker {d} started", .{self.id});
             
             while (!self.pool.should_exit.load(.acquire) and !self.pool.pool_shutdown.load(.acquire)) {
@@ -192,7 +198,7 @@ pub const WorkerPool = struct {
         modem_manager: *ModemManager,
         should_exit: *std.atomic.Value(bool),
     ) !Self {
-        var pool = Self{
+        const pool = Self{
             .allocator = allocator,
             .workers = try allocator.alloc(Worker, num_workers),
             .work_queue = LockFreeMPMC(WorkItem).init(allocator),
@@ -201,19 +207,29 @@ pub const WorkerPool = struct {
             .should_exit = should_exit,
             .pool_shutdown = std.atomic.Value(bool).init(false),
             .active_workers = std.atomic.Value(u32).init(0),
+            .initialized = std.atomic.Value(bool).init(false),
         };
         
+        // DON'T start worker threads here - let main.zig handle it after pool is returned
+        // This avoids the issue where workers reference a pool that hasn't been returned yet
+        
+        return pool;
+    }
+    
+    /// Start the worker threads - call this after init returns
+    pub fn start(self: *Self) !void {
         // Start worker threads
-        for (pool.workers, 0..) |*worker, i| {
+        for (self.workers, 0..) |*worker, i| {
             worker.* = Worker{
                 .thread = undefined,
-                .pool = &pool,
+                .pool = self,
                 .id = i,
             };
             worker.thread = try std.Thread.spawn(.{}, Worker.run, .{worker});
         }
         
-        return pool;
+        // Mark as initialized so workers can start processing
+        self.initialized.store(true, .release);
     }
     
     pub fn deinit(self: *Self) void {
