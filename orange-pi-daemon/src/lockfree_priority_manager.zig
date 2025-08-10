@@ -130,19 +130,21 @@ pub const LockFreePriorityManager = struct {
     }
     
     pub fn getStats(self: *LockFreePriorityManager) struct { high: u32, medium: u32, low: u32 } {
-        var stats = .{ .high = 0, .medium = 0, .low = 0 };
+        var high: u32 = 0;
+        var medium: u32 = 0;
+        var low: u32 = 0;
         
         for (&self.modems) |*modem| {
             if (!modem.valid.load(.acquire)) continue;
             
             const priority = @as(Priority, @enumFromInt(modem.priority.load(.acquire)));
             switch (priority) {
-                .High => stats.high += 1,
-                .Medium => stats.medium += 1,
-                .Low => stats.low += 1,
+                .High => high += 1,
+                .Medium => medium += 1,
+                .Low => low += 1,
             }
         }
         
-        return stats;
+        return .{ .high = high, .medium = medium, .low = low };
     }
 };
