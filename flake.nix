@@ -116,7 +116,7 @@
         }:
         let
           # SMS daemon version - single source of truth
-          daemonVersion = "3.0.0"; # Major performance improvements: adaptive timing, priority polling, bloom filter deduplication
+          daemonVersion = "3.1.0"; # D-Bus integration: zero subprocess overhead, direct ModemManager communication
 
           # Orange Pi SMS daemon package
           # Base derivation for common settings
@@ -124,7 +124,8 @@
             pname = "sms-daemon";
             version = daemonVersion;
             src = ./orange-pi-daemon;
-            nativeBuildInputs = with pkgs; [ zig ];
+            nativeBuildInputs = with pkgs; [ zig pkg-config ];
+            buildInputs = with pkgs; [ dbus ];
 
             installPhase = ''
               mkdir -p $out/bin

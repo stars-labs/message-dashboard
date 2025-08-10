@@ -14,6 +14,11 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    // Optional: Link with libdbus for native D-Bus support (zero subprocess overhead)
+    // Uncomment these lines if you have dbus-1 development libraries installed
+    // exe.linkSystemLibrary("dbus-1");
+    // exe.linkLibC();
+
     // Define the log level at compile time
     const options = b.addOptions();
     options.addOption([]const u8, "log_level", log_level);
