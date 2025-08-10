@@ -323,9 +323,7 @@ pub fn signalMonitorThread(context: *WorkerContext) !void {
             };
             
             // Update cache
-            context.signal_cache.updateCache(modem_id, signal_data) catch |err| {
-                std.log.warn("Failed to update signal cache: {any}", .{err});
-            };
+            context.signal_cache.put(modem_id, signal_data.signal_percent);
         }
     }
     

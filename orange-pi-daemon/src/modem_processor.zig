@@ -1,6 +1,6 @@
 const std = @import("std");
 const types = @import("types.zig");
-const SignalCache = @import("signal_cache.zig").SignalCache;
+const LockFreeSignalCache = @import("lockfree_signal_cache.zig").LockFreeSignalCache;
 const PhoneCollector = @import("phone_collector.zig").PhoneCollector;
 const ApiClient = @import("api_client.zig").ApiClient;
 const ModemManager = @import("modem_manager.zig").ModemManager;
@@ -10,7 +10,7 @@ pub fn processModem(
     allocator: std.mem.Allocator,
     modem_manager: *ModemManager,
     _: *ApiClient, // Not used directly but kept for API consistency
-    signal_cache: *SignalCache,
+    signal_cache: *LockFreeSignalCache,
     phone_collector: *PhoneCollector,
     modem_id: []const u8,
     check_signal: bool,
@@ -162,8 +162,8 @@ pub fn processModem(
     // Get signal quality only if it's time to check and if it should be updated
     if (check_signal) {
         if (modem_manager.getSignalQuality(modem_id)) |signal_data| {
-            // Check if we should update based on cache
-            if (signal_cache.shouldUpdate(modem_id, signal_data)) {
+            // Always update with new signal data
+            {
                 phone.signal = signal_data.signal_percent;
                 phone.rssi = signal_data.rssi;
                 phone.rsrq = signal_data.rsrq;
@@ -172,9 +172,7 @@ pub fn processModem(
                 has_signal_update = true;
                 
                 // Update cache
-                signal_cache.updateCache(modem_id, signal_data) catch |err| {
-                    std.log.warn("Failed to update signal cache for modem {s}: {any}", .{ modem_id, err });
-                };
+                signal_cache.put(modem_id, signal_data.signal_percent);
                 
                 std.log.debug("📱 Modem {s} signal updated: {}%, RSSI: {?}, RSRQ: {?}, RSRP: {?}, SNR: {?}", .{
                     modem_id, 
@@ -184,42 +182,24 @@ pub fn processModem(
                     signal_data.rsrp,
                     signal_data.snr
                 });
-            } else {
-                // Use cached signal data if available
-                if (signal_cache.getSignal(modem_id)) |cached_signal| {
-                    phone.signal = cached_signal.signal_percent;
-                    phone.rssi = cached_signal.rssi;
-                    phone.rsrq = cached_signal.rsrq;
-                    phone.rsrp = cached_signal.rsrp;
-                    phone.snr = cached_signal.snr;
-                    std.log.debug("📱 Modem {s} using cached signal (no update needed): {}%", .{ modem_id, signal_data.signal_percent });
-                } else {
-                    std.log.debug("📱 Modem {s} has no cached signal data during signal check", .{ modem_id });
-                }
             }
         } else |err| {
             std.log.warn("Failed to get signal quality for modem {s}: {any}", .{ modem_id, err });
             // Use cached signal data if available when signal retrieval fails
-            if (signal_cache.getSignal(modem_id)) |signal_data| {
-                phone.signal = signal_data.signal_percent;
-                phone.rssi = signal_data.rssi;
-                phone.rsrq = signal_data.rsrq;
-                phone.rsrp = signal_data.rsrp;
-                phone.snr = signal_data.snr;
-                std.log.debug("📱 Modem {s} using cached signal after retrieval failure: {}%", .{ modem_id, signal_data.signal_percent });
+            if (signal_cache.get(modem_id)) |cached_signal| {
+                phone.signal = cached_signal.signal_percent;
+                // Only signal percent is cached in lock-free cache
+                std.log.debug("📱 Modem {s} using cached signal after retrieval failure: {}%", .{ modem_id, cached_signal.signal_percent });
             } else {
                 std.log.debug("📱 Modem {s} has no cached signal data after retrieval failure", .{ modem_id });
             }
         }
     } else {
         // Use cached signal data if available, but don't skip upload if missing
-        if (signal_cache.getSignal(modem_id)) |signal_data| {
-            phone.signal = signal_data.signal_percent;
-            phone.rssi = signal_data.rssi;
-            phone.rsrq = signal_data.rsrq;
-            phone.rsrp = signal_data.rsrp;
-            phone.snr = signal_data.snr;
-            std.log.debug("📱 Modem {s} using cached signal: {}%", .{ modem_id, signal_data.signal_percent });
+        if (signal_cache.get(modem_id)) |cached_signal| {
+            phone.signal = cached_signal.signal_percent;
+            // Only signal percent is cached in lock-free cache
+            std.log.debug("📱 Modem {s} using cached signal: {}%", .{ modem_id, cached_signal.signal_percent });
         } else {
             std.log.debug("📱 Modem {s} has no cached signal data - uploading status without signal", .{ modem_id });
         }
