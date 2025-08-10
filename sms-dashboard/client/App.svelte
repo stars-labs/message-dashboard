@@ -26,6 +26,55 @@
   $: if (selectedPhoneIccid) {
     loadMessagesForPhone(selectedPhoneIccid);
   }
+  
+  // Centralized function to calculate online devices
+  function calculateOnlineDevices(phones) {
+    if (!phones || phones.length === 0) return 0;
+    
+    const fiveMinutesAgo = Date.now() - (5 * 60 * 1000);
+    const onlinePhones = phones.filter(p => {
+      const hasOnlineStatus = p?.status && ["online", "active", "registered"].includes(p.status);
+      if (!hasOnlineStatus) {
+        console.debug(`[calculateOnline] Phone ${p?.iccid} excluded - status: ${p?.status}`);
+        return false;
+      }
+      if (!p.updated_at) {
+        console.debug(`[calculateOnline] Phone ${p?.iccid} excluded - no updated_at`);
+        return false;
+      }
+      
+      try {
+        const updateTime = new Date(p.updated_at).getTime();
+        const isRecent = !isNaN(updateTime) && updateTime > fiveMinutesAgo;
+        if (!isRecent) {
+          console.debug(`[calculateOnline] Phone ${p?.iccid} excluded - too old: ${p.updated_at}`);
+        }
+        return isRecent;
+      } catch (e) {
+        console.warn('Invalid date for phone:', p.iccid, p.updated_at);
+        return false;
+      }
+    });
+    
+    console.log(`[calculateOnline] Result: ${onlinePhones.length}/${phones.length} online (sample phone status: ${phones[0]?.status}, updated_at: ${phones[0]?.updated_at})`);
+    return onlinePhones.length;
+  }
+  
+  // Track if we've loaded stats from backend (to prevent race conditions)
+  let backendStatsLoaded = false;
+  
+  // Single reactive statement for stats updates
+  // ONLY recalculate if we haven't received stats from backend
+  // Backend has authoritative data about online devices
+  $: if (phoneNumbers && phoneNumbers.length > 0 && !dataLoading && !backendStatsLoaded) {
+    // Only calculate if backend hasn't provided stats yet
+    const onlineCount = calculateOnlineDevices(phoneNumbers);
+    console.log('[App] No backend stats, calculating from phones:', onlineCount, '/', phoneNumbers.length);
+    if (onlineCount !== stats.onlineDevices) {
+      console.log('[App] Updating stats.onlineDevices from', stats.onlineDevices, 'to', onlineCount);
+      stats = { ...stats, onlineDevices: onlineCount };
+    }
+  }
   let selectedCountry = "all";
   let searchTerm = "";
   let showPhoneList = false;
@@ -36,7 +85,6 @@
   let dataLoading = true; // Track data loading separately
   let pollingConnected = false;
   let pollingUnsubscribers = [];
-  let authError = null; // Track authentication errors
   let currentView = "dashboard"; // 'dashboard', 'iccid-mappings', or 'keywords'
   let showIccidMappingDialog = false;
   let phoneToMap = null;
@@ -66,6 +114,14 @@
     verificationRate: 0,
   };
   
+  // Debug: log whenever stats changes
+  $: console.log('[App] Stats changed:', { 
+    online: stats.onlineDevices, 
+    total: stats.totalDevices,
+    backendLoaded: backendStatsLoaded,
+    phonesLength: phoneNumbers.length 
+  });
+  
   // Hash routing handler
   function handleHashChange() {
     const hash = window.location.hash.slice(1);
@@ -91,70 +147,32 @@
         "Content-Type": "application/json",
       };
 
-      console.log('[App] Loading data with auth status:', {
-        hasToken: !!auth.token,
-        tokenLength: auth.token ? auth.token.length : 0,
-        isAuthenticated: auth.isAuthenticated(),
-        user: user
-      });
-
       // Make direct HTTP requests in parallel with error handling
       const [phonesResponse, messagesResponse, statsResponse] =
         await Promise.all([
           fetch("/api/phones", { headers })
-            .then(async (r) => {
-              const result = await r.json();
-              console.log('[App] Phones API response:', { 
-                status: r.status, 
-                success: result.success, 
-                dataLength: result.data?.length,
-                error: result.error 
-              });
-              return result;
-            })
+            .then((r) => r.json())
             .catch((err) => {
               console.error('[App] Failed to fetch phones:', err);
-              return { success: false, data: [], error: err.message };
+              return { success: false, data: [] };
             }),
           fetch("/api/messages?limit=2000", { headers })
-            .then(async (r) => {
-              const result = await r.json();
-              console.log('[App] Messages API response:', { 
-                status: r.status, 
-                success: result.success, 
-                dataLength: result.data?.length,
-                error: result.error 
-              });
-              return result;
-            })
+            .then((r) => r.json())
             .catch((err) => {
               console.error('[App] Failed to fetch messages:', err);
-              return { success: false, data: [], error: err.message };
+              return { success: false, data: [] };
             }),
           fetch("/api/stats", { headers })
-            .then(async (r) => {
-              const result = await r.json();
-              console.log('[App] Stats API response:', { 
-                status: r.status, 
-                success: result.success, 
-                error: result.error 
-              });
-              return result;
-            })
+            .then((r) => r.json())
             .catch((err) => {
               console.error('[App] Failed to fetch stats:', err);
-              return { success: false, error: err.message };
+              return { success: false };
             }),
         ]);
 
-      // Handle different response formats and authentication errors
-      if (phonesResponse?.error === "No token provided" || phonesResponse?.error?.includes("Authentication")) {
-        console.warn('[App] Authentication error detected');
-        authError = "认证失败：请重新登录以访问设备数据";
-        phoneNumbers = [];
-      } else if (
+      // Handle different response formats
+      if (
         phonesResponse &&
-        phonesResponse.success &&
         phonesResponse.data &&
         Array.isArray(phonesResponse.data)
       ) {
@@ -168,13 +186,7 @@
           flag: getPhoneFlag(phone)
         }));
       } else {
-        console.warn('[App] Unexpected phones response format:', phonesResponse);
         phoneNumbers = [];
-      }
-      
-      // Clear auth error if we successfully loaded phone data
-      if (phoneNumbers.length > 0) {
-        authError = null;
       }
       
       console.log('[App] Loaded phones:', phoneNumbers.length);
@@ -215,32 +227,31 @@
       if (statsResponse) {
         console.log('[App] Stats API Response:', statsResponse);
         
-        // First calculate stats based on phone data
-        const calculatedOnlineDevices = phoneNumbers.filter((p) => 
-          p.status === "online" || p.status === "active" || p.status === "registered"
-        ).length;
-        
-        // Extract data from stats response (it's wrapped in a data property)
-        const statsData = statsResponse.data || statsResponse;
-        
+        // Use stats from API which already accounts for daemon's modem count
         stats = {
-          totalMessages: statsData.total_messages || 0,
-          todayMessages: statsData.today_messages || 0,
-          totalSent: statsData.total_sent || 0,
-          totalReceived: statsData.total_received || 0,
-          todaySent: statsData.today_sent || 0,
-          todayReceived: statsData.today_received || 0,
-          onlineDevices: calculatedOnlineDevices,
-          totalDevices: phoneNumbers.length,
+          totalMessages: statsResponse.total_messages || 0,
+          todayMessages: statsResponse.today_messages || 0,
+          totalSent: statsResponse.total_sent || 0,
+          totalReceived: statsResponse.total_received || 0,
+          todaySent: statsResponse.today_sent || 0,
+          todayReceived: statsResponse.today_received || 0,
+          onlineDevices: statsResponse.online_devices || 0,
+          totalDevices: statsResponse.total_devices || 0,
           verificationRate: Math.round(
-            (statsData.verification_rate || 0) * 100,
+            (statsResponse.verification_rate || 0) * 100,
           ),
         };
-        console.log('[App] Initial stats with calculated online devices:', stats);
+        console.log('[App] Stats from backend - online:', stats.onlineDevices, 'total:', stats.totalDevices);
         
-        // Check daemon status and override online devices count with actual modem count
+        // Mark that we've loaded stats from backend
+        backendStatsLoaded = true;
+        
+        // Check daemon status
         await checkDaemonStatus();
-        console.log('[App] Stats after daemon check:', stats);
+        
+        // The reactive statement will automatically update online device count if needed
+        
+        console.log('[App] Stats after updates:', stats);
       }
 
       // Mark data as loaded
@@ -300,6 +311,9 @@
     // Start periodic daemon status checks (initial check happens in loadAllData)
     // Check every 30 seconds
     daemonInterval = setInterval(checkDaemonStatus, 30000);
+    
+    // Don't fetch stats here - it will be fetched after authentication in loadAllData
+    // await fetchStats();
     
     // Apply matrix rain effect to body
     const removeMatrixRain = createMatrixRain(document.body);
@@ -500,11 +514,12 @@
 
           console.log("Updated phoneNumbers:", phoneNumbers);
 
-          // Update online device count
-          stats.onlineDevices = phoneNumbers.filter(
-            (p) => p.status === "online" || p.status === "active" || p.status === "registered",
-          ).length;
-          stats.totalDevices = phoneNumbers.length;
+          // Update total devices from daemon count
+          const daemonModemCount = daemonStatus.modem_count || phoneNumbers.length;
+          if (stats.totalDevices !== daemonModemCount) {
+            stats = { ...stats, totalDevices: daemonModemCount };
+          }
+          // The reactive statement will automatically update online device count
           
           // Update daemon health status
           updateDaemonHealthStatus();
@@ -836,8 +851,10 @@
           healthCheckTime: daemonStatus.healthCheckTime
         };
         
-        // Always fetch fresh stats from API to ensure consistency
-        await fetchStats();
+        // Only fetch stats if user is authenticated (stats API requires auth)
+        if (user && user.token) {
+          await fetchStats();
+        }
       } else {
         daemonStatus = {
           ...daemonStatus,
@@ -861,17 +878,16 @@
   
   async function fetchStats() {
     try {
-      const token = auth.token || "anonymous";
-      const headers = {
-        Authorization: token !== "anonymous" ? `Bearer ${token}` : undefined,
-      };
+      // Get auth headers if user is authenticated
+      const headers = {};
+      if (user && user.token) {
+        headers['Authorization'] = `Bearer ${user.token}`;
+      }
+      
       const response = await fetch('/api/stats', { headers });
       if (response.ok) {
-        const result = await response.json();
-        console.log('[App] Fetched stats from API:', result);
-        
-        // Extract data from response (it's wrapped in a data property)
-        const data = result.data || result;
+        const data = await response.json();
+        console.log('[App] Fetched stats from API:', data);
         
         // Update all stats from API response
         stats = {
@@ -887,6 +903,11 @@
         };
         
         console.log('[App] Updated stats from API:', stats);
+        
+        // Mark that we've loaded stats from backend
+        backendStatsLoaded = true;
+      } else if (response.status === 401) {
+        console.log('[App] Stats API requires authentication, skipping for now');
       }
     } catch (error) {
       console.error('Failed to fetch stats from API:', error);
@@ -1136,46 +1157,6 @@
       </div>
     </header>
 
-    <!-- Authentication Error Banner -->
-    {#if authError}
-      <div class="bg-red-900/90 border-b border-red-700 px-4 py-2">
-        <div class="flex items-center justify-between">
-          <div class="flex items-center gap-2">
-            <svg
-              class="w-5 h-5 text-red-400 flex-shrink-0"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-              />
-            </svg>
-            <span class="text-sm text-red-300">
-              <strong>认证错误</strong> - {authError}
-            </span>
-          </div>
-          <div class="flex items-center gap-2">
-            <button
-              on:click={() => auth.login()}
-              class="text-xs px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded"
-            >
-              重新登录
-            </button>
-            <button
-              on:click={() => authError = null}
-              class="text-xs text-red-400 hover:text-red-300"
-            >
-              ✕
-            </button>
-          </div>
-        </div>
-      </div>
-    {/if}
-
     <!-- Daemon Status Alert Banner -->
     {#if daemonStatus.status === 'offline' || daemonStatus.status === 'error'}
       <div class="bg-red-50 border-b border-red-200 px-4 py-2">
@@ -1315,8 +1296,10 @@
             class="tech-card holo-card text-white px-4 py-3"
           >
             <div class="text-xs text-cyan-300 font-bold tech-text">在线设备</div>
-            <div class="text-xl font-bold data-value high-contrast">
-              {stats.onlineDevices}/{stats.totalDevices}
+            <div class="text-xl font-bold data-value high-contrast" title="Online: {stats.onlineDevices}, Total: {stats.totalDevices}, Phones: {phoneNumbers.length}">
+              {#key stats.onlineDevices + ':' + stats.totalDevices}
+                {stats.onlineDevices}/{stats.totalDevices}
+              {/key}
             </div>
           </div>
           <div
