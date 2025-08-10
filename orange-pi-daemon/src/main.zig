@@ -218,7 +218,8 @@ pub fn main() !void {
     std.log.info("🚀 Initialized {d} worker threads for parallel processing", .{num_workers});
     
     // Give workers time to fully initialize before starting main loop
-    std.time.sleep(50 * std.time.ns_per_ms);
+    // Must be longer than worker initialization delay to prevent deadlock
+    std.time.sleep(200 * std.time.ns_per_ms);
     
     // Main loop with parallel checking
     var cycle_count: u64 = 0;
