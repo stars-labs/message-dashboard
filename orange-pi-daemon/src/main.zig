@@ -90,7 +90,7 @@ fn checkModemMessages(context: *ParallelContext, modem_id: []const u8) void {
 
 pub fn main() !void {
     const stdout = std.io.getStdOut().writer();
-    try stdout.print("📱 Orange Pi SMS Dashboard Daemon v1.31.6\n", .{});
+    try stdout.print("📱 Orange Pi SMS Dashboard Daemon v3.1.0\n", .{});
     
     // Initialize allocator
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -302,7 +302,13 @@ pub fn main() !void {
         
         // Submit work to worker pool for parallel processing
         for (modems_to_check) |modem_id| {
-            try worker_pool.submit(.CheckMessages, modem_id, &parallel_context);
+            // Validate context pointer alignment before submitting
+            const context_ptr = &parallel_context;
+            if (@intFromPtr(context_ptr) % @alignOf(ParallelContext) != 0) {
+                std.log.err("Context alignment issue detected for modem {s}", .{modem_id});
+                continue;
+            }
+            try worker_pool.submit(.CheckMessages, modem_id, context_ptr);
         }
         
         // Wait for work to complete (with smart timeout)
@@ -323,6 +329,12 @@ pub fn main() !void {
         
         // Process all results and update priorities
         var total_messages: usize = 0;
+        
+        // Add safety check for results processing
+        if (results.items.len == 0) {
+            std.log.debug("No results to process in cycle {d}", .{cycle_count});
+        }
+        
         for (results.items) |*result| {
             // Update modem priority based on whether messages were found
             const found_messages = result.success and result.messages.len > 0;

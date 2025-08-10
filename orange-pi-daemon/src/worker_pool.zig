@@ -60,6 +60,7 @@ pub const WorkerPool = struct {
     allocator: std.mem.Allocator,
     workers: []Worker,
     work_queue: WorkQueue,
+    result_queue: ResultQueue,
     modem_manager: *ModemManager,
     should_exit: *std.atomic.Value(bool),
     active_workers: std.atomic.Value(u32),
@@ -91,7 +92,14 @@ pub const WorkerPool = struct {
                     .CheckMessages => {
                         // Get context if provided
                         if (work.context) |ctx_ptr| {
-                            const context = @as(*ParallelContext, @ptrCast(@alignCast(ctx_ptr)));
+                            // Safely cast the context pointer with validation
+                            if (@intFromPtr(ctx_ptr) % @alignOf(ParallelContext) != 0) {
+                                std.log.err("Worker {d}: Invalid context alignment for modem {s}", .{ self.id, work.modem_id });
+                                _ = self.pool.active_workers.fetchSub(1, .monotonic);
+                                continue;
+                            }
+                            
+                            const context: *ParallelContext = @ptrCast(@alignCast(ctx_ptr));
                             
                             var result = ModemCheckResult{
                                 .modem_id = work.modem_id,
@@ -268,6 +276,7 @@ pub const WorkerPool = struct {
             .allocator = allocator,
             .workers = try allocator.alloc(Worker, num_workers),
             .work_queue = WorkQueue.init(allocator),
+            .result_queue = ResultQueue.init(allocator),
             .modem_manager = modem_manager,
             .should_exit = should_exit,
             .active_workers = std.atomic.Value(u32).init(0),
@@ -293,6 +302,7 @@ pub const WorkerPool = struct {
         }
         
         self.work_queue.deinit();
+        self.result_queue.deinit();
         self.allocator.free(self.workers);
     }
     
