@@ -65,7 +65,6 @@ pub const BusctlDBus = struct {
                 "busctl",
                 "tree",
                 MODEM_MANAGER_SERVICE,
-                MODEM_MANAGER_PATH,
             },
             .max_output_bytes = 256 * 1024,
         });

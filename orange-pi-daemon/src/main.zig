@@ -27,26 +27,7 @@ pub const std_options: std.Options = .{
 };
 
 
-const ModemCheckResult = struct {
-    modem_id: []const u8,
-    messages: []types.MessageInfo,
-    success: bool,
-    allocator: std.mem.Allocator,
-    
-    pub fn deinit(self: *ModemCheckResult) void {
-        if (self.success) {
-            for (self.messages) |*msg| {
-                self.allocator.free(msg.modem_id);
-                self.allocator.free(msg.sms_id);
-                self.allocator.free(msg.message.phone_iccid);
-                self.allocator.free(msg.message.phone_number);
-                self.allocator.free(msg.message.content);
-                self.allocator.free(msg.message.timestamp);
-            }
-            self.allocator.free(self.messages);
-        }
-    }
-};
+const ModemCheckResult = types.ModemCheckResult;
 
 const ParallelContext = struct {
     allocator: std.mem.Allocator,
@@ -81,7 +62,7 @@ fn checkModemMessages(context: *ParallelContext, modem_id: []const u8) void {
 
 pub fn main() !void {
     const stdout = std.io.getStdOut().writer();
-    try stdout.print("📱 Orange Pi SMS Dashboard Daemon v3.4.0 (Clean Lock-Free Edition)\n", .{});
+    try stdout.print("📱 Orange Pi SMS Dashboard Daemon v3.6.0 (Code Cleanup Edition)\n", .{});
     
     // Initialize allocator
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};

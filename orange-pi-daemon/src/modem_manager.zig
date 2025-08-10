@@ -291,6 +291,18 @@ pub const ModemManager = struct {
             return null;
         }
         
+        // Use BusctlDBus if available (much faster)
+        if (self.dbus) |dbus| {
+            return dbus.getICCID(modem_id) catch |err| {
+                std.log.debug("BusctlDBus getICCID failed for {s}, falling back to mmcli: {any}", .{ modem_id, err });
+                return self.getIccidMMCLI(modem_id);
+            };
+        }
+        
+        return self.getIccidMMCLI(modem_id);
+    }
+    
+    fn getIccidMMCLI(self: *ModemManager, modem_id: []const u8) !?[]const u8 {
         const result = std.process.Child.run(.{
             .allocator = self.allocator,
             .argv = &[_][]const u8{ "mmcli", "-m", modem_id },
@@ -522,6 +534,18 @@ pub const ModemManager = struct {
             return error.ProblematicModem;
         }
         
+        // Use BusctlDBus if available (much faster)
+        if (self.dbus) |dbus| {
+            return dbus.getSignalQuality(modem_id) catch |err| {
+                std.log.debug("BusctlDBus getSignalQuality failed for {s}, falling back to mmcli: {any}", .{ modem_id, err });
+                return self.getSignalQualityMMCLI(modem_id);
+            };
+        }
+        
+        return self.getSignalQualityMMCLI(modem_id);
+    }
+    
+    fn getSignalQualityMMCLI(self: *ModemManager, modem_id: []const u8) !types.SignalData {
         // First enable signal monitoring with a 5-second refresh rate
         _ = std.process.Child.run(.{
             .allocator = self.allocator,
