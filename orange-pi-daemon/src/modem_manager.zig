@@ -1,6 +1,7 @@
 const std = @import("std");
 const types = @import("types.zig");
 const MessageTracker = @import("message_tracker.zig").MessageTracker;
+const BusctlDBus = @import("busctl_dbus.zig").BusctlDBus;
 
 // Helper function to check if a byte sequence ends with valid UTF-8
 fn isValidUtf8Ending(bytes: []const u8) bool {
@@ -10,25 +11,42 @@ fn isValidUtf8Ending(bytes: []const u8) bool {
     return std.unicode.utf8ValidateSlice(bytes);
 }
 
-/// Manages ModemManager interactions via mmcli
+/// Manages ModemManager interactions via D-Bus (no subprocess spawning)
 pub const ModemManager = struct {
     allocator: std.mem.Allocator,
     failed_sms_ids: std.hash_map.HashMap([]const u8, void, std.hash_map.StringContext, std.hash_map.default_max_load_percentage),
     iccid_warnings: std.hash_map.HashMap([]const u8, bool, std.hash_map.StringContext, std.hash_map.default_max_load_percentage),
     problematic_modems: std.hash_map.HashMap([]const u8, void, std.hash_map.StringContext, std.hash_map.default_max_load_percentage), // Track modems that crash mmcli
     message_tracker: MessageTracker,
+    dbus: ?BusctlDBus, // Busctl D-Bus wrapper (faster than mmcli)
 
     pub fn init(allocator: std.mem.Allocator) ModemManager {
+        // Try to initialize busctl D-Bus wrapper (faster than mmcli)
+        const dbus = BusctlDBus.init(allocator) catch |err| blk: {
+            std.log.warn("Failed to initialize busctl D-Bus, using mmcli fallback: {any}", .{err});
+            break :blk null;
+        };
+        
+        if (dbus != null) {
+            std.log.info("✅ Busctl D-Bus wrapper initialized - reduced subprocess overhead!", .{});
+        }
+        
         return .{
             .allocator = allocator,
             .failed_sms_ids = std.hash_map.HashMap([]const u8, void, std.hash_map.StringContext, std.hash_map.default_max_load_percentage).init(allocator),
             .iccid_warnings = std.hash_map.HashMap([]const u8, bool, std.hash_map.StringContext, std.hash_map.default_max_load_percentage).init(allocator),
             .problematic_modems = std.hash_map.HashMap([]const u8, void, std.hash_map.StringContext, std.hash_map.default_max_load_percentage).init(allocator),
             .message_tracker = MessageTracker.init(allocator),
+            .dbus = dbus,
         };
     }
 
     pub fn deinit(self: *ModemManager) void {
+        // Clean up D-Bus connection
+        if (self.dbus) |*dbus| {
+            dbus.deinit();
+        }
+        
         // Free all keys in failed_sms_ids
         var it = self.failed_sms_ids.iterator();
         while (it.next()) |entry| {
@@ -145,6 +163,18 @@ pub const ModemManager = struct {
     }
 
     pub fn listModems(self: ModemManager) ![][]const u8 {
+        // Use D-Bus if available (zero subprocess overhead)
+        if (self.dbus) |dbus| {
+            return dbus.listModems() catch |err| {
+                std.log.warn("D-Bus listModems failed, falling back to mmcli: {any}", .{err});
+                return self.listModemsMMCLI();
+            };
+        }
+        
+        return self.listModemsMMCLI();
+    }
+    
+    fn listModemsMMCLI(self: ModemManager) ![][]const u8 {
         const result = std.process.Child.run(.{
             .allocator = self.allocator,
             .argv = &[_][]const u8{ "mmcli", "-L" },
@@ -409,11 +439,23 @@ pub const ModemManager = struct {
     }
 
     pub fn getModemState(self: *ModemManager, modem_id: []const u8) ![]const u8 {
-        // Skip modems known to crash mmcli
+        // Skip modems known to be problematic
         if (self.problematic_modems.contains(modem_id)) {
             return try self.allocator.dupe(u8, "problematic");
         }
         
+        // Use D-Bus if available (zero subprocess overhead)
+        if (self.dbus) |dbus| {
+            return dbus.getModemState(modem_id) catch |err| {
+                std.log.warn("D-Bus getModemState failed for {s}, falling back to mmcli: {any}", .{ modem_id, err });
+                return self.getModemStateMMCLI(modem_id);
+            };
+        }
+        
+        return self.getModemStateMMCLI(modem_id);
+    }
+    
+    fn getModemStateMMCLI(self: *ModemManager, modem_id: []const u8) ![]const u8 {
         const result = std.process.Child.run(.{
             .allocator = self.allocator,
             .argv = &[_][]const u8{ "mmcli", "-m", modem_id },
@@ -1103,12 +1145,26 @@ pub const ModemManager = struct {
     }
 
     pub fn sendSms(self: *ModemManager, modem_id: []const u8, recipient: []const u8, text: []const u8) ![]const u8 {
+        std.log.info("🚀 Starting SMS send process for {s} with text: {s}", .{ recipient, text });
+        std.log.debug("📱 Using modem: {s}", .{modem_id});
+        
+        // Use D-Bus if available (zero subprocess overhead)
+        if (self.dbus) |dbus| {
+            dbus.sendSMS(modem_id, recipient, text) catch |err| {
+                std.log.warn("D-Bus sendSMS failed, falling back to mmcli: {any}", .{err});
+                return self.sendSmsMMCLI(modem_id, recipient, text);
+            };
+            return try self.allocator.dupe(u8, "sent");
+        }
+        
+        return self.sendSmsMMCLI(modem_id, recipient, text);
+    }
+    
+    fn sendSmsMMCLI(self: *ModemManager, modem_id: []const u8, recipient: []const u8, text: []const u8) ![]const u8 {
         // Format SMS arguments with quotes for content (like old working code)
         const sms_params = try std.fmt.allocPrint(self.allocator, "text=\"{s}\",number={s}", .{ text, recipient });
         defer self.allocator.free(sms_params);
         
-        std.log.info("🚀 Starting SMS send process for {s} with text: {s}", .{ recipient, text });
-        std.log.debug("📱 Using modem: {s}", .{modem_id});
         std.log.debug("📝 SMS params: {s}", .{sms_params});
         
         // Log the exact mmcli create command
