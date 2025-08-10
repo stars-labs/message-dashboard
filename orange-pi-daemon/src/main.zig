@@ -12,6 +12,7 @@ const MessageDeduplicator = @import("bloom_filter.zig").MessageDeduplicator;
 const WorkerPool = @import("worker_pool.zig").WorkerPool;
 const EventLoop = @import("event_loop.zig").EventLoop;
 const ConnectionPool = @import("connection_pool.zig").ConnectionPool;
+const LockFreeMPMC = @import("lockfree_mpmc.zig").LockFreeMPMC;
 
 // Configure logging based on build options and runtime environment
 const build_log_level: std.log.Level = blk: {
@@ -53,8 +54,7 @@ const ParallelContext = struct {
     allocator: std.mem.Allocator,
     modem_manager: *ModemManager,
     message_queue: *MessageQueue,
-    results_mutex: std.Thread.Mutex,
-    results: *std.ArrayList(ModemCheckResult),
+    results: *LockFreeMPMC(ModemCheckResult),
 };
 
 fn checkModemMessages(context: *ParallelContext, modem_id: []const u8) void {
@@ -70,22 +70,15 @@ fn checkModemMessages(context: *ParallelContext, modem_id: []const u8) void {
         std.log.debug("Failed to get messages from modem {s}: {any}", .{ modem_id, err });
         
         // Add failed result
-        context.results_mutex.lock();
-        defer context.results_mutex.unlock();
-        context.results.append(result) catch {};
+        context.results.push(result);
         return;
     };
     
     result.messages = new_messages;
     result.success = true;
     
-    // Add result to shared list
-    context.results_mutex.lock();
-    defer context.results_mutex.unlock();
-    context.results.append(result) catch |err| {
-        std.log.err("Failed to store result: {any}", .{err});
-        result.deinit();
-    };
+    // Add result to lock-free queue
+    context.results.push(result);
 }
 
 pub fn main() !void {
@@ -274,21 +267,15 @@ pub fn main() !void {
             last_storage_cleanup = std.time.timestamp();
         }
         
-        // Create shared results storage
-        var results = std.ArrayList(ModemCheckResult).init(allocator);
-        defer {
-            for (results.items) |*result| {
-                result.deinit();
-            }
-            results.deinit();
-        }
+        // Create lock-free results queue for this cycle
+        var results_queue = LockFreeMPMC(ModemCheckResult).init(allocator);
+        defer results_queue.deinit();
         
         var parallel_context = ParallelContext{
             .allocator = allocator,
             .modem_manager = &modem_manager,
             .message_queue = &message_queue,
-            .results_mutex = .{},
-            .results = &results,
+            .results = &results_queue,
         };
         
         // Get modems to check based on priority
@@ -334,6 +321,20 @@ pub fn main() !void {
         
         // Process all results and update priorities
         var total_messages: usize = 0;
+        
+        // Collect all results from lock-free queue
+        var results = std.ArrayList(ModemCheckResult).init(allocator);
+        defer {
+            for (results.items) |*result| {
+                result.deinit();
+            }
+            results.deinit();
+        }
+        
+        // Drain results from lock-free queue
+        while (results_queue.tryPop()) |result| {
+            try results.append(result);
+        }
         
         // Add safety check for results processing
         if (results.items.len == 0) {
