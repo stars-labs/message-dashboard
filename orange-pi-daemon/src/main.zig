@@ -184,6 +184,9 @@ pub fn main() !void {
     
     std.log.info("🚀 Initialized with {d} worker threads for parallel processing", .{num_workers});
     
+    // Give workers time to fully initialize before starting main loop
+    std.time.sleep(50 * std.time.ns_per_ms);
+    
     // Get initial modem list and build cache of valid modems
     std.log.info("🔄 Building valid modem cache", .{});
     var valid_modems = std.ArrayList([]const u8).init(allocator);
@@ -308,6 +311,7 @@ pub fn main() !void {
                 std.log.err("Context alignment issue detected for modem {s}", .{modem_id});
                 continue;
             }
+            
             try worker_pool.submit(.CheckMessages, modem_id, context_ptr);
         }
         

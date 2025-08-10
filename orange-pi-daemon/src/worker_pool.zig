@@ -63,6 +63,7 @@ pub const WorkerPool = struct {
     result_queue: ResultQueue,
     modem_manager: *ModemManager,
     should_exit: *std.atomic.Value(bool),
+    pool_shutdown: std.atomic.Value(bool),
     active_workers: std.atomic.Value(u32),
     
     const Self = @This();
@@ -75,10 +76,14 @@ pub const WorkerPool = struct {
         fn run(self: *Worker) void {
             std.log.info("Worker {d} started", .{self.id});
             
-            while (!self.pool.should_exit.load(.acquire)) {
-                // Get work from queue
+            // Add a small delay to ensure main thread completes initialization
+            std.time.sleep(10 * std.time.ns_per_ms);
+            
+            while (!self.pool.should_exit.load(.acquire) and !self.pool.pool_shutdown.load(.acquire)) {
+                // Get work from queue with timeout protection
                 const work = self.pool.work_queue.pop() orelse {
-                    std.time.sleep(1 * std.time.ns_per_ms);
+                    // Sleep longer to reduce mutex contention
+                    std.time.sleep(10 * std.time.ns_per_ms);
                     continue;
                 };
                 defer self.pool.allocator.free(work.modem_id);
@@ -279,6 +284,7 @@ pub const WorkerPool = struct {
             .result_queue = ResultQueue.init(allocator),
             .modem_manager = modem_manager,
             .should_exit = should_exit,
+            .pool_shutdown = std.atomic.Value(bool).init(false),
             .active_workers = std.atomic.Value(u32).init(0),
         };
         
@@ -296,6 +302,12 @@ pub const WorkerPool = struct {
     }
     
     pub fn deinit(self: *Self) void {
+        // Signal all workers to exit using our separate flag
+        self.pool_shutdown.store(true, .release);
+        
+        // Give workers time to see the exit flag
+        std.time.sleep(100 * std.time.ns_per_ms);
+        
         // Wait for all workers to finish
         for (self.workers) |*worker| {
             worker.thread.join();
