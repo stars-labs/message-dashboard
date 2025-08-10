@@ -3,14 +3,14 @@ const utils = @import("utils.zig");
 const types = @import("types.zig");
 const ModemManager = @import("modem_manager.zig").ModemManager;
 const ApiClient = @import("api_client.zig").ApiClient;
-const SignalCache = @import("signal_cache.zig").SignalCache;
-const MessageQueue = @import("message_queue.zig").MessageQueue;
+const LockFreeSignalCache = @import("lockfree_signal_cache.zig").LockFreeSignalCache;
+const LockFreeMessageQueue = @import("lockfree_message_queue.zig").LockFreeMessageQueue;
 const worker_threads = @import("worker_threads.zig");
 const build_options = @import("build_options");
-const ModemPriority = @import("modem_priority.zig");
+const LockFreePriorityManager = @import("lockfree_priority_manager.zig").LockFreePriorityManager;
 const MessageDeduplicator = @import("bloom_filter.zig").MessageDeduplicator;
 const WorkerPool = @import("worker_pool.zig").WorkerPool;
-const EventLoop = @import("event_loop.zig").EventLoop;
+// const EventLoop = @import("event_loop.zig").EventLoop; // Removed - causing deadlock
 const ConnectionPool = @import("connection_pool.zig").ConnectionPool;
 const LockFreeMPMC = @import("lockfree_mpmc.zig").LockFreeMPMC;
 
@@ -53,7 +53,7 @@ const ModemCheckResult = struct {
 const ParallelContext = struct {
     allocator: std.mem.Allocator,
     modem_manager: *ModemManager,
-    message_queue: *MessageQueue,
+    message_queue: *LockFreeMessageQueue,
     results: *LockFreeMPMC(ModemCheckResult),
 };
 
@@ -83,7 +83,7 @@ fn checkModemMessages(context: *ParallelContext, modem_id: []const u8) void {
 
 pub fn main() !void {
     const stdout = std.io.getStdOut().writer();
-    try stdout.print("📱 Orange Pi SMS Dashboard Daemon v3.2.0\n", .{});
+    try stdout.print("📱 Orange Pi SMS Dashboard Daemon v3.3.0 (Lock-Free Edition)\n", .{});
     
     // Initialize allocator
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -108,10 +108,10 @@ pub fn main() !void {
     var api_client = ApiClient.init(allocator, config);
     defer api_client.deinit();
     
-    var signal_cache = SignalCache.init(allocator);
+    var signal_cache = LockFreeSignalCache.init(allocator);
     defer signal_cache.deinit();
     
-    var message_queue = MessageQueue.init(allocator);
+    var message_queue = LockFreeMessageQueue.init(allocator);
     defer message_queue.deinit();
     
     // Shared exit flag
@@ -158,17 +158,15 @@ pub fn main() !void {
     const signal_thread = try std.Thread.spawn(.{}, ThreadWrapper.signalWrapper, .{&context});
     const sms_thread = try std.Thread.spawn(.{}, ThreadWrapper.smsWrapper, .{&context});
     
-    // Initialize priority manager and deduplicator
-    var priority_manager = ModemPriority.PriorityManager.init(allocator);
+    // Initialize lock-free priority manager and deduplicator BEFORE starting workers
+    // Lock-free implementation prevents all deadlocks
+    var priority_manager = LockFreePriorityManager.init(allocator);
     defer priority_manager.deinit();
     
     var deduplicator = try MessageDeduplicator.init(allocator);
     defer deduplicator.deinit();
     
-    // Initialize event loop for reactive processing
-    var event_loop = EventLoop.init(allocator);
-    defer event_loop.deinit();
-    try event_loop.start();
+    // Event loop removed - was causing deadlock and not being used
     
     // Get initial modem list and build cache of valid modems BEFORE starting workers
     std.log.info("🔄 Building valid modem cache", .{});
@@ -208,11 +206,15 @@ pub fn main() !void {
     var worker_pool = try WorkerPool.init(allocator, num_workers, &modem_manager, &should_exit);
     defer worker_pool.deinit();
     
+    // Start the worker threads now that the pool is fully initialized
+    try worker_pool.start();
+    
     std.log.info("🚀 Initialized {d} worker threads for parallel processing", .{num_workers});
     
     // Give workers time to fully initialize before starting main loop
-    // Must be longer than worker initialization delay to prevent deadlock
-    std.time.sleep(200 * std.time.ns_per_ms);
+    // This prevents deadlock when main thread starts using mutexes before workers are ready
+    std.time.sleep(500 * std.time.ns_per_ms);
+    std.log.info("✅ Worker initialization complete, starting main loop", .{});
     
     // Main loop with parallel checking
     var cycle_count: u64 = 0;

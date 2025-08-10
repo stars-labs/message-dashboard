@@ -2,8 +2,8 @@ const std = @import("std");
 const types = @import("types.zig");
 const ApiClient = @import("api_client.zig").ApiClient;
 const ModemManager = @import("modem_manager.zig").ModemManager;
-const MessageQueue = @import("message_queue.zig").MessageQueue;
-const SignalCache = @import("signal_cache.zig").SignalCache;
+const LockFreeMessageQueue = @import("lockfree_message_queue.zig").LockFreeMessageQueue;
+const LockFreeSignalCache = @import("lockfree_signal_cache.zig").LockFreeSignalCache;
 const PhoneCollector = @import("phone_collector.zig").PhoneCollector;
 const SMSSender = @import("sms_sender.zig").SMSSender;
 const modem_processor = @import("modem_processor.zig");
@@ -11,10 +11,10 @@ const modem_processor = @import("modem_processor.zig");
 pub const WorkerContext = struct {
     allocator: std.mem.Allocator,
     config: types.Config,
-    message_queue: *MessageQueue,
+    message_queue: *LockFreeMessageQueue,
     modem_manager: *ModemManager,
     api_client: *ApiClient,
-    signal_cache: *SignalCache,
+    signal_cache: *LockFreeSignalCache,
     should_exit: *std.atomic.Value(bool),
 };
 
@@ -23,21 +23,19 @@ pub fn messageProcessorThread(context: *WorkerContext) !void {
     std.log.info("🚀 Message processor thread started", .{});
     
     while (!context.should_exit.load(.acquire)) {
-        // Get batch of messages
-        const messages = context.message_queue.popBatch(50) catch |err| {
-            std.log.err("Failed to pop messages from queue: {any}", .{err});
-            std.time.sleep(1 * std.time.ns_per_s);
-            continue;
-        };
-        defer context.allocator.free(messages);
+        // Get batch of messages from lock-free queue
+        var batch_buffer: [50]types.MessageInfo = undefined;
+        const message_count = context.message_queue.popBatch(&batch_buffer);
         
-        if (messages.len == 0) {
+        if (message_count == 0) {
             // No messages, sleep briefly
             std.time.sleep(100 * std.time.ns_per_ms);
             continue;
         }
         
-        std.log.info("📤 Processing {d} messages", .{messages.len});
+        const messages = batch_buffer[0..message_count];
+        
+        std.log.info("📤 Processing {d} messages", .{message_count});
         
         // Convert to API format and deduplicate
         var unique_messages = std.ArrayList(types.Message).init(context.allocator);
@@ -108,7 +106,7 @@ const PhoneProcessorContext = struct {
     allocator: std.mem.Allocator,
     modem_manager: *ModemManager,
     api_client: *ApiClient,
-    signal_cache: *SignalCache,
+    signal_cache: *LockFreeSignalCache,
     collector_mutex: std.Thread.Mutex,
     phone_collector: *PhoneCollector,
 };
