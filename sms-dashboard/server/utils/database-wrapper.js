@@ -48,10 +48,9 @@ export class DatabaseConnection {
    * Add to transaction queue
    */
   addToTransaction(sql, params = []) {
-    const stmt = this.prepare(sql);
-    this.transactionQueue.push(
-      params.length > 0 ? stmt.bind(...params) : stmt
-    );
+    // Store the SQL and params for later execution
+    // D1 batch API needs prepared statements created fresh
+    this.transactionQueue.push({ sql, params });
   }
 
   /**
@@ -63,11 +62,18 @@ export class DatabaseConnection {
     }
 
     try {
-      const results = await this.db.batch(this.transactionQueue);
+      // Create prepared statements for the batch
+      const statements = this.transactionQueue.map(({ sql, params }) => {
+        const stmt = this.db.prepare(sql);
+        return params.length > 0 ? stmt.bind(...params) : stmt;
+      });
+      
+      const results = await this.db.batch(statements);
       const changes = results.reduce((sum, r) => sum + (r.meta?.changes || 0), 0);
       this.transactionQueue = [];
       return { success: true, changes, results };
     } catch (error) {
+      console.error('Transaction failed:', error);
       this.transactionQueue = [];
       throw error;
     }

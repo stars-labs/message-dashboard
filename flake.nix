@@ -93,7 +93,7 @@
                     apiKeyFile = config.sops.secrets."sms-dashboard/api-key".path;
                     apiUrl = "https://sexy.qzz.io";
                     phoneUpdateIntervalSeconds = 30; # Update phone status every 30 seconds
-                    messageCheckIntervalMs = 100; # Check messages every 100ms (10 Hz) - should be safe with sequential processing
+                    messageCheckIntervalMs = 50; # Adaptive timing with 50ms target - priority-based polling
                     signalCheckIntervalSeconds = 60; # Check signal quality every minute
                     debugBuild = true;
                   };
@@ -116,7 +116,7 @@
         }:
         let
           # SMS daemon version - single source of truth
-          daemonVersion = "2.0.1"; # Fixed StreamTooLong error and messages foreign key issue
+          daemonVersion = "3.0.0"; # Major performance improvements: adaptive timing, priority polling, bloom filter deduplication
 
           # Orange Pi SMS daemon package
           # Base derivation for common settings
@@ -153,7 +153,7 @@
               buildPhase = ''
                 export HOME=$TMPDIR
                 rm -rf zig-cache zig-out
-                zig build -Doptimize=ReleaseSafe -Dlog_level=info
+                zig build -Doptimize=ReleaseFast -Dlog_level=info
               '';
             }
           );

@@ -7,6 +7,8 @@ const SignalCache = @import("signal_cache.zig").SignalCache;
 const MessageQueue = @import("message_queue.zig").MessageQueue;
 const worker_threads = @import("worker_threads.zig");
 const build_options = @import("build_options");
+const ModemPriority = @import("modem_priority.zig");
+const MessageDeduplicator = @import("bloom_filter.zig").MessageDeduplicator;
 
 // Configure logging based on build options and runtime environment
 const build_log_level: std.log.Level = blk: {
@@ -160,6 +162,13 @@ pub fn main() !void {
     const signal_thread = try std.Thread.spawn(.{}, ThreadWrapper.signalWrapper, .{&context});
     const sms_thread = try std.Thread.spawn(.{}, ThreadWrapper.smsWrapper, .{&context});
     
+    // Initialize priority manager and deduplicator
+    var priority_manager = ModemPriority.PriorityManager.init(allocator);
+    defer priority_manager.deinit();
+    
+    var deduplicator = try MessageDeduplicator.init(allocator);
+    defer deduplicator.deinit();
+    
     // Get initial modem list and build cache of valid modems
     std.log.info("🔄 Building valid modem cache", .{});
     var valid_modems = std.ArrayList([]const u8).init(allocator);
@@ -263,21 +272,34 @@ pub fn main() !void {
             .results = &results,
         };
         
+        // Get modems to check based on priority
+        const modems_to_check = try priority_manager.getModemsToCheck(valid_modems.items, cycle_count, allocator);
+        defer allocator.free(modems_to_check);
+        
+        // Log priority stats periodically
+        if (cycle_count % 50 == 0) {
+            const priority_stats = priority_manager.getStats();
+            std.log.info("📊 Priority stats: High={d}, Medium={d}, Low={d}, Checking={d}/{d}", .{
+                priority_stats.high, priority_stats.medium, priority_stats.low,
+                modems_to_check.len, valid_modems.items.len
+            });
+        }
+        
         // Spawn threads for parallel checking (limit to reasonable number)
-        const max_threads = @min(valid_modems.items.len, 8); // Don't overwhelm ModemManager
+        const max_threads = @min(modems_to_check.len, 8); // Don't overwhelm ModemManager
         var threads = std.ArrayList(std.Thread).init(allocator);
         defer threads.deinit();
         
         var modem_idx: usize = 0;
-        while (modem_idx < valid_modems.items.len) {
-            const batch_size = @min(max_threads, valid_modems.items.len - modem_idx);
+        while (modem_idx < modems_to_check.len) {
+            const batch_size = @min(max_threads, modems_to_check.len - modem_idx);
             
             // Spawn batch of threads
             for (0..batch_size) |i| {
                 const idx = modem_idx + i;
-                if (idx >= valid_modems.items.len) break;
+                if (idx >= modems_to_check.len) break;
                 
-                const thread = try std.Thread.spawn(.{}, checkModemMessages, .{ &parallel_context, valid_modems.items[idx] });
+                const thread = try std.Thread.spawn(.{}, checkModemMessages, .{ &parallel_context, modems_to_check[idx] });
                 try threads.append(thread);
             }
             
@@ -290,17 +312,39 @@ pub fn main() !void {
             modem_idx += batch_size;
         }
         
-        // Process all results
+        // Process all results and update priorities
         var total_messages: usize = 0;
         for (results.items) |*result| {
+            // Update modem priority based on whether messages were found
+            const found_messages = result.success and result.messages.len > 0;
+            priority_manager.updateModemPriority(result.modem_id, found_messages) catch |err| {
+                std.log.warn("Failed to update priority for modem {s}: {any}", .{ result.modem_id, err });
+            };
+            
             if (result.success) {
                 total_messages += result.messages.len;
                 
-                // Queue messages for processing
+                // Queue messages for processing with deduplication
                 for (result.messages) |msg| {
-                    message_queue.push(msg) catch |err| {
-                        std.log.err("Failed to queue message: {any}", .{err});
+                    // Create deduplication key
+                    const key = MessageDeduplicator.makeKey(allocator, msg.message.phone_iccid, msg.message.content, msg.message.timestamp) catch {
+                        // If we can't make a key, queue it anyway
+                        message_queue.push(msg) catch |err| {
+                            std.log.err("Failed to queue message: {any}", .{err});
+                        };
+                        continue;
                     };
+                    defer allocator.free(key);
+                    
+                    // Check for duplicate
+                    if (!deduplicator.isDuplicate(key)) {
+                        message_queue.push(msg) catch |err| {
+                            std.log.err("Failed to queue message: {any}", .{err});
+                        };
+                        deduplicator.addMessage(key) catch |err| {
+                            std.log.warn("Failed to add message to deduplicator: {any}", .{err});
+                        };
+                    }
                 }
             }
         }
@@ -316,16 +360,29 @@ pub fn main() !void {
         
         // Performance stats every 20 cycles
         if (cycle_count % 20 == 0) {
-            const avg_ms_per_modem = if (valid_modems.items.len > 0) 
-                @divFloor(cycle_time_ms, valid_modems.items.len) else 0;
+            const avg_ms_per_modem = if (modems_to_check.len > 0) 
+                @divFloor(cycle_time_ms, modems_to_check.len) else 0;
             const tracked_messages = modem_manager.message_tracker.count();
-            std.log.info("⚡ Cycle {d}: {d}ms total, ~{d}ms per modem, {d} modems, {d} tracked messages", .{
-                cycle_count, cycle_time_ms, avg_ms_per_modem, valid_modems.items.len, tracked_messages
+            const dedup_stats = deduplicator.getStats();
+            std.log.info("⚡ Cycle {d}: {d}ms total, ~{d}ms per modem, {d}/{d} modems checked", .{
+                cycle_count, cycle_time_ms, avg_ms_per_modem, modems_to_check.len, valid_modems.items.len
             });
+            std.log.info("📈 Dedup stats: ~{d:.0} in bloom, {d} in cache, {d:.3}% false positive", .{
+                dedup_stats.bloom_estimate, dedup_stats.cache_size, dedup_stats.false_positive_prob * 100
+            });
+            std.log.info("💾 Tracked messages: {d}", .{tracked_messages});
         }
         
-        // Small delay to prevent overwhelming the system
-        std.time.sleep(100 * std.time.ns_per_ms); // 100ms between cycles
+        // Adaptive timing: sleep only remaining time to reach target cycle time
+        const target_cycle_time: u64 = 50 * std.time.ns_per_ms; // 50ms target for faster response
+        const actual_cycle_time: u64 = @intCast(cycle_time_ms * std.time.ns_per_ms);
+        
+        const sleep_time: u64 = if (actual_cycle_time < target_cycle_time)
+            target_cycle_time - actual_cycle_time  // Sleep remaining time
+        else
+            1 * std.time.ns_per_ms;  // Minimal sleep if cycle took longer than target
+        
+        std.time.sleep(sleep_time);
     }
     
     // Cleanup

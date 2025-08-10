@@ -274,11 +274,21 @@ export const controlHandler = {
         const phantomResult = await conn.execute(`
           UPDATE modems 
           SET status = 'disconnected',
+              modem_index = NULL,  -- Clear modem_index for disconnected modems to prevent conflicts
               updated_at = CURRENT_TIMESTAMP
           WHERE modem_index >= ? 
             AND status != 'disconnected'
             AND (updated_at IS NULL OR updated_at < ?)
         `, [modemCount, staleThreshold]);
+        
+        // Also clear sim_index for disconnected modems
+        await conn.execute(`
+          UPDATE sims 
+          SET sim_index = NULL
+          WHERE current_modem_id IN (
+            SELECT equipment_id FROM modems WHERE status = 'disconnected'
+          )
+        `);
         
         if (phantomResult.meta.changes > 0) {
           console.log(`[control.js] Marked ${phantomResult.meta.changes} stale phantom modems as disconnected`);
@@ -292,10 +302,20 @@ export const controlHandler = {
         const updateModems = await conn.execute(`
           UPDATE modems 
           SET status = 'disconnected', 
+              modem_index = NULL,  -- Clear modem_index when disconnecting
               updated_at = CURRENT_TIMESTAMP
           WHERE status != 'disconnected'
             AND (updated_at IS NULL OR updated_at < ?)
         `, [staleThreshold]);
+        
+        // Also clear sim_index for all disconnected modems
+        await conn.execute(`
+          UPDATE sims 
+          SET sim_index = NULL
+          WHERE current_modem_id IN (
+            SELECT equipment_id FROM modems WHERE status = 'disconnected'
+          )
+        `);
         
         console.log(`[control.js] Marked ${updateModems.meta.changes} stale modems as disconnected`);
       }
@@ -459,6 +479,19 @@ export const controlHandler = {
               }
             }
             
+            // Before updating, check if another modem has this index and clear it
+            if (phone.modem_index !== null && phone.modem_index !== undefined) {
+              // Clear any other modem that might have this index (handle index reassignment)
+              conn.addToTransaction(`
+                UPDATE modems 
+                SET modem_index = NULL 
+                WHERE modem_index = ? AND equipment_id != ?
+              `, [phone.modem_index, equipmentId]);
+            }
+            
+            // Determine connection status
+            const isConnected = phone.status === 'online' || phone.status === 'active' || phone.status === 'registered';
+            
             // Add modem update to transaction
             conn.addToTransaction(MODEM_UPSERT_SQL, [
               equipmentId,
@@ -467,8 +500,8 @@ export const controlHandler = {
               phone.firmware_revision || null,
               phone.hardware_revision || null,
               phone.device_path || null,
-              phone.status === 'online' || phone.status === 'active' || phone.status === 'registered' ? 'connected' : 'disconnected',
-              phone.modem_index || null,
+              isConnected ? 'connected' : 'disconnected',
+              isConnected ? (phone.modem_index || null) : null,  // Clear modem_index if disconnected
               phone.usb_port || phone.modem_index || null
             ]);
             
@@ -481,15 +514,28 @@ export const controlHandler = {
                 phone.operator_name || null,
                 phone.operator_id || null,
                 phone.country || null,
-                phone.status === 'online' || phone.status === 'active' || phone.status === 'registered' ? 'active' : 'inactive',
+                isConnected ? 'active' : 'inactive',
                 equipmentId, // Link SIM to modem
-                phone.sim_index || null // Store SIM index from daemon
+                isConnected ? (phone.sim_index || null) : null // Clear sim_index if disconnected
               ]);
             }
             
             // Add modem state update to transaction
             const connectionStatus = phone.status === 'online' || phone.status === 'registered' ? 'registered' : 
                                     phone.status === 'active' ? 'connected' : 'disconnected';
+            
+            // Debug logging for modem 29
+            if (equipmentId === '865827078904323') {
+              console.log(`[control.js] DEBUG: Modem 29 state update:`, {
+                equipmentId,
+                connectionStatus,
+                signal: phone.signal,
+                rssi: phone.rssi,
+                rsrq: phone.rsrq,
+                rsrp: phone.rsrp,
+                snr: phone.snr
+              });
+            }
             
             conn.addToTransaction(MODEM_STATE_UPSERT_SQL, [
               equipmentId,
@@ -511,10 +557,22 @@ export const controlHandler = {
             successCount += batch.filter(p => 
               !(p.modem_index !== null && p.modem_index !== undefined && p.modem_index >= modemCount)
             ).length;
+            
+            // Log transaction results for debugging
+            if (result.results && result.results.some(r => r.meta?.changes > 0)) {
+              console.log(`[control.js] Transaction successful: ${result.changes} total changes`);
+            }
+          } else {
+            console.error(`[control.js] Transaction failed for batch`);
           }
         } catch (err) {
           // If the batch fails, try processing individually to identify the problematic record
           console.error(`[control.js] Batch update failed, trying individual updates:`, err);
+          console.error(`[control.js] Error details:`, {
+            message: err.message,
+            stack: err.stack,
+            cause: err.cause
+          });
           
           for (const phone of batch) {
             try {
@@ -552,8 +610,21 @@ export const controlHandler = {
                 ]);
               }
               
-              const connectionStatus = phone.status === 'online' ? 'registered' : 
+              const connectionStatus = phone.status === 'online' || phone.status === 'registered' ? 'registered' : 
                                       phone.status === 'active' ? 'connected' : 'disconnected';
+              
+              // Debug logging for modem 29
+              if (equipmentId === '865827078904323') {
+                console.log(`[control.js] DEBUG: Modem 29 individual state update:`, {
+                  equipmentId,
+                  connectionStatus,
+                  signal: phone.signal,
+                  rssi: phone.rssi,
+                  rsrq: phone.rsrq,
+                  rsrp: phone.rsrp,
+                  snr: phone.snr
+                });
+              }
               
               await conn.execute(MODEM_STATE_UPSERT_SQL, [
                 equipmentId,
