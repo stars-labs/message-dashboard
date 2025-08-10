@@ -1,6 +1,7 @@
 const std = @import("std");
 const types = @import("types.zig");
 const ModemManager = @import("modem_manager.zig").ModemManager;
+const LockFreeMPMC = @import("lockfree_mpmc.zig").LockFreeMPMC;
 
 // Import types from main.zig
 const ModemCheckResult = struct {
@@ -28,8 +29,7 @@ const ParallelContext = struct {
     allocator: std.mem.Allocator,
     modem_manager: *ModemManager,
     message_queue: *anyopaque, // MessageQueue
-    results_mutex: std.Thread.Mutex,
-    results: *std.ArrayList(ModemCheckResult),
+    results: *LockFreeMPMC(ModemCheckResult),
 };
 
 pub const WorkType = enum {
@@ -55,12 +55,12 @@ pub const WorkResult = struct {
     error_msg: ?[]const u8 = null,
 };
 
-/// Worker pool for parallel modem operations
+/// Worker pool for parallel modem operations using lock-free queues
 pub const WorkerPool = struct {
     allocator: std.mem.Allocator,
     workers: []Worker,
-    work_queue: WorkQueue,
-    result_queue: ResultQueue,
+    work_queue: LockFreeMPMC(WorkItem),
+    result_queue: LockFreeMPMC(WorkResult),
     modem_manager: *ModemManager,
     should_exit: *std.atomic.Value(bool),
     pool_shutdown: std.atomic.Value(bool),
@@ -76,15 +76,11 @@ pub const WorkerPool = struct {
         fn run(self: *Worker) void {
             std.log.info("Worker {d} started", .{self.id});
             
-            // Add longer delay to ensure main thread completes initialization
-            // This prevents deadlock when main loop starts immediately after worker creation
-            std.time.sleep(100 * std.time.ns_per_ms);
-            
             while (!self.pool.should_exit.load(.acquire) and !self.pool.pool_shutdown.load(.acquire)) {
-                // Get work from queue with timeout protection
-                const work = self.pool.work_queue.pop() orelse {
-                    // Sleep longer to reduce mutex contention
-                    std.time.sleep(10 * std.time.ns_per_ms);
+                // Get work from lock-free queue (non-blocking)
+                const work = self.pool.work_queue.tryPop() orelse {
+                    // Short sleep to prevent busy-waiting while allowing fast response
+                    std.time.sleep(1 * std.time.ns_per_ms);
                     continue;
                 };
                 defer self.pool.allocator.free(work.modem_id);
@@ -119,9 +115,7 @@ pub const WorkerPool = struct {
                                 std.log.debug("Worker {d}: Failed to check messages for {s}: {any}", .{ self.id, work.modem_id, err });
                                 
                                 // Add failed result
-                                context.results_mutex.lock();
-                                defer context.results_mutex.unlock();
-                                context.results.append(result) catch {};
+                                context.results.push(result);
                                 _ = self.pool.active_workers.fetchSub(1, .monotonic);
                                 continue;
                             };
@@ -133,13 +127,8 @@ pub const WorkerPool = struct {
                                 std.log.info("Worker {d}: Found {d} messages from {s}", .{ self.id, messages.len, work.modem_id });
                             }
                             
-                            // Add result to shared list
-                            context.results_mutex.lock();
-                            defer context.results_mutex.unlock();
-                            context.results.append(result) catch |err| {
-                                std.log.err("Failed to store result: {any}", .{err});
-                                result.deinit();
-                            };
+                            // Add result to lock-free queue
+                            context.results.push(result);
                         } else {
                             // Fallback without context
                             const messages = self.pool.modem_manager.getNewMessages(work.modem_id) catch |err| {
@@ -191,86 +180,11 @@ pub const WorkerPool = struct {
         }
     };
     
-    const ResultQueue = struct {
-        items: std.ArrayList(WorkResult),
-        mutex: std.Thread.Mutex,
-        allocator: std.mem.Allocator,
-        
-        fn init(allocator: std.mem.Allocator) ResultQueue {
-            return .{
-                .items = std.ArrayList(WorkResult).init(allocator),
-                .mutex = std.Thread.Mutex{},
-                .allocator = allocator,
-            };
-        }
-        
-        fn deinit(self: *ResultQueue) void {
-            for (self.items.items) |item| {
-                if (item.error_msg) |msg| {
-                    self.allocator.free(msg);
-                }
-            }
-            self.items.deinit();
-        }
-        
-        fn push(self: *ResultQueue, item: WorkResult) !void {
-            self.mutex.lock();
-            defer self.mutex.unlock();
-            try self.items.append(item);
-        }
-        
-        fn popAll(self: *ResultQueue) ![]WorkResult {
-            self.mutex.lock();
-            defer self.mutex.unlock();
-            
-            if (self.items.items.len == 0) return try self.allocator.alloc(WorkResult, 0);
-            
-            const results = try self.allocator.dupe(WorkResult, self.items.items);
-            self.items.clearRetainingCapacity();
-            return results;
-        }
-    };
+    // ResultQueue is now replaced by LockFreeMPMC(WorkResult)
+    // Legacy functions kept for API compatibility
     
-    const WorkQueue = struct {
-        items: std.ArrayList(WorkItem),
-        mutex: std.Thread.Mutex,
-        allocator: std.mem.Allocator,
-        
-        fn init(allocator: std.mem.Allocator) WorkQueue {
-            return .{
-                .items = std.ArrayList(WorkItem).init(allocator),
-                .mutex = std.Thread.Mutex{},
-                .allocator = allocator,
-            };
-        }
-        
-        fn deinit(self: *WorkQueue) void {
-            for (self.items.items) |item| {
-                self.allocator.free(item.modem_id);
-            }
-            self.items.deinit();
-        }
-        
-        fn push(self: *WorkQueue, item: WorkItem) !void {
-            self.mutex.lock();
-            defer self.mutex.unlock();
-            try self.items.append(item);
-        }
-        
-        fn pop(self: *WorkQueue) ?WorkItem {
-            self.mutex.lock();
-            defer self.mutex.unlock();
-            
-            if (self.items.items.len == 0) return null;
-            return self.items.orderedRemove(0);
-        }
-        
-        fn size(self: *WorkQueue) usize {
-            self.mutex.lock();
-            defer self.mutex.unlock();
-            return self.items.items.len;
-        }
-    };
+    // WorkQueue is now replaced by LockFreeMPMC(WorkItem)
+    // Legacy functions kept for API compatibility
     
     pub fn init(
         allocator: std.mem.Allocator,
@@ -281,8 +195,8 @@ pub const WorkerPool = struct {
         var pool = Self{
             .allocator = allocator,
             .workers = try allocator.alloc(Worker, num_workers),
-            .work_queue = WorkQueue.init(allocator),
-            .result_queue = ResultQueue.init(allocator),
+            .work_queue = LockFreeMPMC(WorkItem).init(allocator),
+            .result_queue = LockFreeMPMC(WorkResult).init(allocator),
             .modem_manager = modem_manager,
             .should_exit = should_exit,
             .pool_shutdown = std.atomic.Value(bool).init(false),
@@ -319,10 +233,10 @@ pub const WorkerPool = struct {
         self.allocator.free(self.workers);
     }
     
-    /// Submit work to the pool with context
+    /// Submit work to the pool with context (now lock-free)
     pub fn submit(self: *Self, work_type: WorkType, modem_id: []const u8, context: ?*anyopaque) !void {
         const modem_id_copy = try self.allocator.dupe(u8, modem_id);
-        try self.work_queue.push(.{
+        self.work_queue.push(.{
             .type = work_type,
             .modem_id = modem_id_copy,
             .data = null,
@@ -332,7 +246,7 @@ pub const WorkerPool = struct {
     
     /// Check if workers are still processing
     pub fn hasActiveWork(self: *Self) bool {
-        return self.active_workers.load(.acquire) > 0 or self.work_queue.size() > 0;
+        return self.active_workers.load(.acquire) > 0 or !self.work_queue.isEmpty();
     }
     
     /// Get queue size
@@ -340,8 +254,16 @@ pub const WorkerPool = struct {
         return self.work_queue.size();
     }
     
-    /// Get all results
+    /// Get all results (drain the result queue)
     pub fn getResults(self: *Self) ![]WorkResult {
-        return self.result_queue.popAll();
+        var results = std.ArrayList(WorkResult).init(self.allocator);
+        defer results.deinit();
+        
+        // Drain all available results
+        while (self.result_queue.tryPop()) |result| {
+            try results.append(result);
+        }
+        
+        return results.toOwnedSlice();
     }
 };
