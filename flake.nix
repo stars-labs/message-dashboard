@@ -116,7 +116,7 @@
         }:
         let
           # SMS daemon version - single source of truth
-          daemonVersion = "3.1.0"; # D-Bus integration: zero subprocess overhead, direct ModemManager communication
+          daemonVersion = "3.1.1"; # Fixed deadlock by initializing workers after modem cache
 
           # Orange Pi SMS daemon package
           # Base derivation for common settings
