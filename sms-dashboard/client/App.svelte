@@ -1034,12 +1034,12 @@
     <div class="text-center tech-card holo-card p-8 z-10">
       <h1 class="text-3xl font-bold mb-4 cyber-text header-effect-target" data-text="短信验证码管理系统">短信验证码管理系统</h1>
       <p class="text-cyan-300 mb-6">请登录以继续</p>
-      <a
-        href="/login"
+      <button
+        on:click={() => auth.login()}
         class="inline-block tech-button"
       >
         使用 Auth0 登录
-      </a>
+      </button>
     </div>
   </div>
 {:else}
