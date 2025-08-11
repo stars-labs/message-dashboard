@@ -14,9 +14,14 @@ pub const Config = struct {
 /// SMS message data structure
 pub const Message = struct {
     phone_iccid: []const u8,
-    phone_number: []const u8,
+    phone_number: []const u8,  // Sender's phone number for received messages
     content: []const u8,
     timestamp: []const u8,
+    sender: ?[]const u8 = null,  // Alternative field for sender
+    smsc: ?[]const u8 = null,    // SMS center number
+    storage: ?[]const u8 = null, // Storage location (SIM, ME, etc.)
+    pdu_type: ?[]const u8 = null, // PDU type
+    message_class: ?u8 = null,   // Message class (0-3)
 };
 
 /// Phone/modem data structure

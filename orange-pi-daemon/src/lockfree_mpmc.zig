@@ -33,7 +33,7 @@ pub fn LockFreeMPMC(comptime T: type) type {
             pub fn init(seq: u64) Self_Slot {
                 return .{
                     .sequence = std.atomic.Value(u64).init(seq),
-                    .data = undefined,
+                    .data = undefined, // Will be properly initialized when slot is used
                 };
             }
         };
@@ -184,16 +184,39 @@ pub fn LockFreeMPMC(comptime T: type) type {
         }
         
         /// Get approximate queue size (may be stale due to concurrent access)
+        /// Returns 0 if there's any overflow or corruption detected
         pub fn size(self: *Self) usize {
             const head = self.head.load(.acquire);
             const tail = self.tail.load(.acquire);
-            return @intCast(head - tail);
+            
+            // Safety check: detect potential overflow or corruption
+            if (head < tail) {
+                // This should never happen in normal operation - indicates corruption
+                std.log.err("Queue corruption detected: head={d} < tail={d}", .{ head, tail });
+                return 0;
+            }
+            
+            const diff = head - tail;
+            // Safety check: ensure size doesn't exceed buffer capacity
+            if (diff > BUFFER_SIZE) {
+                std.log.err("Queue size exceeds capacity: {d} > {d}", .{ diff, BUFFER_SIZE });
+                return BUFFER_SIZE; // Return max reasonable size
+            }
+            
+            return @intCast(diff);
         }
         
         /// Check if queue is empty (may be stale due to concurrent access)
         pub fn isEmpty(self: *Self) bool {
             const head = self.head.load(.acquire);
             const tail = self.tail.load(.acquire);
+            
+            // Safety check: if there's corruption, assume not empty to be safe
+            if (head < tail) {
+                std.log.err("Queue corruption in isEmpty: head={d} < tail={d}", .{ head, tail });
+                return false;
+            }
+            
             return head == tail;
         }
         
@@ -201,7 +224,15 @@ pub fn LockFreeMPMC(comptime T: type) type {
         pub fn isFull(self: *Self) bool {
             const head = self.head.load(.acquire);
             const tail = self.tail.load(.acquire);
-            return head - tail >= BUFFER_SIZE;
+            
+            // Safety check: if there's corruption, assume full to prevent further writes
+            if (head < tail) {
+                std.log.err("Queue corruption in isFull: head={d} < tail={d}", .{ head, tail });
+                return true;
+            }
+            
+            const diff = head - tail;
+            return diff >= BUFFER_SIZE;
         }
     };
 }

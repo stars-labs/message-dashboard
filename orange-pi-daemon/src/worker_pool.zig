@@ -54,10 +54,36 @@ pub const WorkerPool = struct {
             std.log.info("Worker {d} started", .{self.id});
             
             while (!self.pool.should_exit.load(.acquire) and !self.pool.pool_shutdown.load(.acquire)) {
-                // Get work from lock-free queue (non-blocking)
-                const work = self.pool.work_queue.tryPop() orelse {
-                    // Short sleep to prevent busy-waiting while allowing fast response
-                    std.time.sleep(1 * std.time.ns_per_ms);
+                // Get work from lock-free queue with improved retry logic
+                const work = blk: {
+                    var retry_count: u32 = 0;
+                    const max_retries = 10; // Increased retries for better success rate
+                    var backoff_us: u64 = 10; // Start with 10 microseconds
+                    
+                    while (retry_count < max_retries) {
+                        if (self.pool.work_queue.tryPop()) |item| {
+                            break :blk item;
+                        }
+                        
+                        retry_count += 1;
+                        
+                        // Progressive backoff strategy
+                        if (retry_count <= 3) {
+                            // First 3 attempts: just spin hints
+                            std.atomic.spinLoopHint();
+                        } else if (retry_count <= 6) {
+                            // Next 3 attempts: very short sleeps
+                            std.time.sleep(backoff_us * std.time.ns_per_us);
+                            backoff_us = @min(backoff_us * 2, 100); // Cap at 100us
+                        } else {
+                            // Final attempts: slightly longer sleeps
+                            std.time.sleep(500 * std.time.ns_per_us); // 0.5ms
+                        }
+                    }
+                    
+                    // If all retries failed, sleep longer and continue
+                    // This gives time for queue to be refilled
+                    std.time.sleep(5 * std.time.ns_per_ms);
                     continue;
                 };
                 defer self.pool.allocator.free(work.modem_id);
@@ -234,8 +260,28 @@ pub const WorkerPool = struct {
         return self.active_workers.load(.acquire) > 0 or !self.work_queue.isEmpty();
     }
     
-    /// Get queue size
+    /// Get queue size with safety checks and enhanced debugging
     pub fn queueSize(self: *Self) usize {
-        return self.work_queue.size();
+        const size = self.work_queue.size();
+        
+        // Enhanced logging for queue growth debugging
+        if (size > 1000) {
+            const active_workers = self.active_workers.load(.acquire);
+            const head = self.work_queue.head.load(.acquire);
+            const tail = self.work_queue.tail.load(.acquire);
+            std.log.warn("WorkerPool: Large queue size: {d} (head={d}, tail={d}, active_workers={d})", .{size, head, tail, active_workers});
+        }
+        
+        return size;
+    }
+    
+    /// Get detailed queue statistics for debugging
+    pub fn getQueueStats(self: *Self) struct { size: usize, head: u64, tail: u64, active_workers: u32 } {
+        return .{
+            .size = self.work_queue.size(),
+            .head = self.work_queue.head.load(.acquire),
+            .tail = self.work_queue.tail.load(.acquire),
+            .active_workers = self.active_workers.load(.acquire),
+        };
     }
 };

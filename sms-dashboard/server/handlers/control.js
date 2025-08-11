@@ -50,8 +50,8 @@ export const controlHandler = {
       `);
       
       const insertStmt = env.DB.prepare(`
-        INSERT INTO messages (id, phone_iccid, phone_number, content, timestamp, type, verification_code)
-        VALUES (?, ?, ?, ?, ?, 'received', ?)
+        INSERT INTO messages (id, phone_iccid, phone_number, content, timestamp, type, verification_code, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, 'received', ?, 'received', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       `);
       
       // First, deduplicate within the entire request
@@ -366,8 +366,8 @@ export const controlHandler = {
       
       // Update phones using ICCID as primary key
       const stmt = env.DB.prepare(`
-        INSERT INTO phones (iccid, number, country, flag, carrier, status, signal, rssi, rsrq, rsrp, snr, operator_name, operator_id, imei, access_tech, modem_index, sim_index)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO phones (iccid, number, country, flag, carrier, status, signal, rssi, rsrq, rsrp, snr, operator_name, operator_id, imei, access_tech, modem_index, sim_index, manufacturer, model, firmware_revision, hardware_revision, device_path, usb_port)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(iccid) DO UPDATE SET
           number = COALESCE(excluded.number, phones.number),
           carrier = COALESCE(excluded.carrier, phones.carrier),
@@ -383,6 +383,12 @@ export const controlHandler = {
           access_tech = excluded.access_tech,
           modem_index = excluded.modem_index,
           sim_index = excluded.sim_index,
+          manufacturer = COALESCE(excluded.manufacturer, phones.manufacturer),
+          model = COALESCE(excluded.model, phones.model),
+          firmware_revision = COALESCE(excluded.firmware_revision, phones.firmware_revision),
+          hardware_revision = COALESCE(excluded.hardware_revision, phones.hardware_revision),
+          device_path = COALESCE(excluded.device_path, phones.device_path),
+          usb_port = COALESCE(excluded.usb_port, phones.usb_port),
           updated_at = CURRENT_TIMESTAMP
       `);
       
@@ -467,7 +473,13 @@ export const controlHandler = {
             phone.imei || null,
             phone.access_tech || null,
             phone.modem_index || null,
-            phone.sim_index || null
+            phone.sim_index || null,
+            phone.manufacturer || null,
+            phone.model || null,
+            phone.firmware_revision || null,
+            phone.hardware_revision || null,
+            phone.device_path || null,
+            phone.usb_port || null
           ).run();
           successCount++;
         } catch (err) {

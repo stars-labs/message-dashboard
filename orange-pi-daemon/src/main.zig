@@ -62,7 +62,7 @@ fn checkModemMessages(context: *ParallelContext, modem_id: []const u8) void {
 
 pub fn main() !void {
     const stdout = std.io.getStdOut().writer();
-    try stdout.print("📱 Orange Pi SMS Dashboard Daemon v3.6.0 (Code Cleanup Edition)\n", .{});
+    try stdout.print("📱 Orange Pi SMS Dashboard Daemon v3.9.0 (Queue Management Edition)\n", .{});
     
     // Initialize allocator
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -181,7 +181,8 @@ pub fn main() !void {
     std.log.info("🚀 Starting parallel message checking with {d} modems", .{valid_modems.items.len});
     
     // Initialize worker pool AFTER building modem cache to avoid deadlock
-    const num_workers = @min(8, std.Thread.getCpuCount() catch 4); // Use up to 8 workers or CPU count
+    // Force 16 workers regardless of CPU count for better throughput with 54 modems
+    const num_workers = 16;
     var worker_pool = try WorkerPool.init(allocator, num_workers, &modem_manager, &should_exit);
     defer worker_pool.deinit();
     
@@ -199,6 +200,8 @@ pub fn main() !void {
     var cycle_count: u64 = 0;
     var last_cache_refresh: i64 = std.time.timestamp();
     var last_storage_cleanup: i64 = std.time.timestamp();
+    var last_queue_health_check: i64 = std.time.timestamp();
+    var consecutive_queue_issues: u32 = 0;
     
     while (true) {
         cycle_count += 1;
@@ -233,6 +236,43 @@ pub fn main() !void {
             
             last_cache_refresh = std.time.timestamp();
             std.log.info("🔄 Cache refreshed: {d} valid modems", .{valid_modems.items.len});
+        }
+        
+        // Queue health check every 30 seconds
+        if (std.time.timestamp() - last_queue_health_check > 30) {
+            const queue_stats = worker_pool.getQueueStats();
+            const queue_size = queue_stats.size;
+            
+            if (queue_size > valid_modems.items.len) {
+                consecutive_queue_issues += 1;
+                std.log.warn("⚠️ Queue health check: size={d} exceeds modem count={d} (issue #{d})", .{ 
+                    queue_size, valid_modems.items.len, consecutive_queue_issues 
+                });
+                
+                // If persistent issues, try to recover
+                if (consecutive_queue_issues >= 3) {
+                    std.log.err("🔧 Persistent queue issues detected. Attempting recovery...", .{});
+                    
+                    // Clear the work queue completely
+                    var cleared: usize = 0;
+                    while (worker_pool.work_queue.tryPop()) |work| {
+                        allocator.free(work.modem_id);
+                        cleared += 1;
+                        if (cleared > 10000) break; // Safety limit
+                    }
+                    
+                    std.log.info("✅ Cleared {d} items from work queue", .{cleared});
+                    consecutive_queue_issues = 0;
+                }
+            } else {
+                // Queue is healthy, reset counter
+                if (consecutive_queue_issues > 0) {
+                    std.log.info("✅ Queue health restored: size={d}", .{queue_size});
+                }
+                consecutive_queue_issues = 0;
+            }
+            
+            last_queue_health_check = std.time.timestamp();
         }
         
         // Clean up SMS storage every 10 minutes to prevent overflow
@@ -272,6 +312,24 @@ pub fn main() !void {
             });
         }
         
+        // Check if worker pool is still busy from previous cycle
+        const initial_queue_size = worker_pool.queueSize();
+        
+        // CRITICAL: Only submit new work when queue is nearly empty
+        // This prevents queue overflow and ensures workers can catch up
+        if (initial_queue_size > 10) {
+            const wait_ms: u64 = if (initial_queue_size > 100)
+                200 // Very full, wait longer
+            else if (initial_queue_size > 50)
+                100 // Moderately full
+            else
+                50; // Slightly full
+                
+            std.log.debug("⏳ Queue has {d} items, waiting {d}ms for workers to catch up", .{initial_queue_size, wait_ms});
+            std.time.sleep(wait_ms * std.time.ns_per_ms);
+            continue; // Skip this cycle completely
+        }
+        
         // Submit work to worker pool for parallel processing
         for (modems_to_check) |modem_id| {
             // Validate context pointer alignment before submitting
@@ -286,7 +344,7 @@ pub fn main() !void {
         
         // Wait for work to complete (with smart timeout)
         const start_wait = std.time.milliTimestamp();
-        const max_wait_ms: i64 = @max(20, @min(100, modems_to_check.len * 2)); // Dynamic timeout based on modem count
+        const max_wait_ms: i64 = @max(50, @min(200, modems_to_check.len * 3)); // More generous timeout
         
         while (worker_pool.hasActiveWork()) {
             const elapsed = std.time.milliTimestamp() - start_wait;
@@ -297,7 +355,7 @@ pub fn main() !void {
                 }
                 break;
             }
-            std.time.sleep(500 * std.time.ns_per_us); // 0.5ms sleep for faster response
+            std.time.sleep(1 * std.time.ns_per_ms); // 1ms sleep for better balance
         }
         
         // Process all results and update priorities
@@ -372,8 +430,12 @@ pub fn main() !void {
                 @divFloor(cycle_time_ms, modems_to_check.len) else 0;
             const tracked_messages = modem_manager.message_tracker.count();
             const dedup_stats = deduplicator.getStats();
+            const worker_stats = worker_pool.getQueueStats();
             std.log.info("⚡ Cycle {d}: {d}ms total, ~{d}ms per modem, {d}/{d} modems checked", .{
                 cycle_count, cycle_time_ms, avg_ms_per_modem, modems_to_check.len, valid_modems.items.len
+            });
+            std.log.info("🔧 Worker pool: queue_size={d}, head={d}, tail={d}, active_workers={d}", .{
+                worker_stats.size, worker_stats.head, worker_stats.tail, worker_stats.active_workers
             });
             std.log.info("📈 Dedup stats: ~{d:.0} in bloom, {d} in cache, {d:.3}% false positive", .{
                 dedup_stats.bloom_estimate, dedup_stats.cache_size, dedup_stats.false_positive_prob * 100
@@ -381,8 +443,21 @@ pub fn main() !void {
             std.log.info("💾 Tracked messages: {d}", .{tracked_messages});
         }
         
-        // Adaptive timing: sleep only remaining time to reach target cycle time
-        const target_cycle_time: u64 = 50 * std.time.ns_per_ms; // 50ms target for faster response
+        // Adaptive timing based on queue status and cycle performance
+        const final_queue_size = worker_pool.queueSize();
+        
+        // Dynamic target based on queue health
+        const base_target: u64 = 50 * std.time.ns_per_ms;
+        const target_cycle_time: u64 = if (final_queue_size > modems_to_check.len)
+            // Queue is growing, slow down to let workers catch up
+            @min(200 * std.time.ns_per_ms, base_target + (final_queue_size * 2 * std.time.ns_per_ms))
+        else if (final_queue_size > 10)
+            // Queue has some items, slightly slower cycle
+            base_target + 20 * std.time.ns_per_ms
+        else
+            // Queue is healthy, use base target
+            base_target;
+        
         const actual_cycle_time: u64 = @intCast(cycle_time_ms * std.time.ns_per_ms);
         
         const sleep_time: u64 = if (actual_cycle_time < target_cycle_time)
