@@ -13,7 +13,7 @@ export class PollingService {
   }
 
   async connect(token) {
-    console.log('[PollingService] Starting polling with token:', !!token);
+    console.debug('[PollingService] Starting polling with token:', !!token);
     this.token = token;
     this.isPolling = true;
     
@@ -28,7 +28,7 @@ export class PollingService {
   }
 
   disconnect() {
-    console.log('[PollingService] Stopping polling');
+    console.debug('[PollingService] Stopping polling');
     this.isPolling = false;
     this.stopPolling();
     
@@ -86,7 +86,7 @@ export class PollingService {
     const queryString = params.toString();
     const url = `${baseUrl}/api/updates${queryString ? '?' + queryString : ''}`;
     
-    console.log(`[PollingService] Polling: ${url}`);
+    console.debug(`[PollingService] Polling: ${url}`);
     
     const response = await fetch(url, {
       headers: {
@@ -104,7 +104,7 @@ export class PollingService {
     
     // Process updates
     if (data.updates && Array.isArray(data.updates)) {
-      console.log(`[PollingService] Received ${data.updates.length} update(s)`);
+      console.debug(`[PollingService] Received ${data.updates.length} update(s)`);
       
       for (const update of data.updates) {
         // Track latest message info from bulk_created events
@@ -119,7 +119,7 @@ export class PollingService {
             // Update our tracking
             this.latestMessageId = latestMessage.id;
             this.latestMessageTimestamp = latestMessage.timestamp;
-            console.log(`[PollingService] Updated latest message tracking:`, {
+            console.debug(`[PollingService] Updated latest message tracking:`, {
               id: this.latestMessageId,
               timestamp: this.latestMessageTimestamp
             });
@@ -205,7 +205,7 @@ export class PollingService {
   updateLatestMessage(messageId, timestamp) {
     this.latestMessageId = messageId;
     this.latestMessageTimestamp = timestamp;
-    console.log('[PollingService] External update of latest message:', {
+    console.debug('[PollingService] External update of latest message:', {
       id: messageId,
       timestamp: timestamp
     });

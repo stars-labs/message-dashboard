@@ -163,7 +163,7 @@
     const userMessage = inputMessage.trim();
     inputMessage = '';
     
-    console.log('[ChatAssistant] Sending message:', userMessage);
+    console.debug('[ChatAssistant] Sending message:', userMessage);
     addMessage('user', userMessage);
     isLoading = true;
     isTyping = true;
@@ -179,10 +179,10 @@
 
     // Check auth token
     const authToken = localStorage.getItem('auth_token');
-    console.log('[ChatAssistant] Auth token:', authToken ? 'present' : 'missing');
+    console.debug('[ChatAssistant] Auth token:', authToken ? 'present' : 'missing');
 
     try {
-      console.log('[ChatAssistant] Making fetch request to /api/ai/chat/stream');
+      console.debug('[ChatAssistant] Making fetch request to /api/ai/chat/stream');
       const response = await fetch('/api/ai/chat/stream', {
         method: 'POST',
         headers: {
@@ -195,10 +195,10 @@
         })
       });
 
-      console.log('[ChatAssistant] Response received:', response.status, response.statusText);
+      console.debug('[ChatAssistant] Response received:', response.status, response.statusText);
       if (!response.ok) {
         const errorText = await response.text();
-        console.log('[ChatAssistant] Error response:', errorText);
+        console.debug('[ChatAssistant] Error response:', errorText);
         throw new Error(`HTTP error! status: ${response.status}, body: ${errorText}`);
       }
 
@@ -290,7 +290,7 @@
       messages = [...messages];
       isTyping = false;
     } finally {
-      console.log('[ChatAssistant] Finally block, setting isLoading = false');
+      console.debug('[ChatAssistant] Finally block, setting isLoading = false');
       isLoading = false;
     }
   }

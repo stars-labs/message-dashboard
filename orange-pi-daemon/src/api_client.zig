@@ -59,13 +59,8 @@ pub const ApiClient = struct {
         const payload = try std.fmt.allocPrint(self.allocator, "{{\"modems\":{s},\"sims\":{s}}}", .{ modems_json, sims_json });
         defer self.allocator.free(payload);
 
-        // Try new endpoint first, fall back to legacy phones endpoint if needed
-        self.makeRequest("/devices", payload) catch |err| {
-            std.log.warn("Failed to upload to /devices endpoint: {any}, trying legacy /phones", .{err});
-            // Convert to legacy format if new endpoint fails
-            // For now, just log the error - full fallback implementation would go here
-            return err;
-        };
+        // Upload to the correct API endpoint
+        try self.makeRequest("/control/devices", payload);
         
         std.log.debug("✅ Uploaded {d} modems and {d} SIMs via HTTP API", .{ modems.len, sims.len });
     }

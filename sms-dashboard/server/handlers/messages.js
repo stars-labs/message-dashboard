@@ -57,6 +57,23 @@ export const messagesHandler = {
           content: messages[0].content?.substring(0, 50) + '...'
         } : null
       });
+      
+      // DEBUG: Verify all messages have the correct ICCID when filtered
+      if (phoneIccid) {
+        const wrongIccidMessages = messages.filter(msg => msg.phone_iccid !== phoneIccid);
+        if (wrongIccidMessages.length > 0) {
+          console.error('[Messages Handler] ERROR: Query returned messages with wrong ICCIDs!');
+          console.error('Query filter ICCID:', phoneIccid);
+          console.error('Wrong ICCID messages found:', wrongIccidMessages.length);
+          console.error('Sample wrong messages:', wrongIccidMessages.slice(0, 3).map(m => ({
+            id: m.id,
+            phone_iccid: m.phone_iccid,
+            content: m.content?.substring(0, 30) + '...'
+          })));
+        } else {
+          console.log('[Messages Handler] ✓ All messages have correct ICCID:', phoneIccid);
+        }
+      }
 
       return new Response(JSON.stringify({
         success: true,
