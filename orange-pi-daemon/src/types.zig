@@ -25,6 +25,38 @@ pub const Message = struct {
 };
 
 /// Phone/modem data structure
+/// Modem hardware information
+pub const Modem = struct {
+    equipment_id: []const u8,           // Primary key (IMEI)
+    manufacturer: ?[]const u8 = null,   // Modem manufacturer (e.g., "Quectel")
+    model: ?[]const u8 = null,          // Modem model (e.g., "EC20")
+    firmware_revision: ?[]const u8 = null, // Firmware version
+    hardware_revision: ?[]const u8 = null, // Hardware version
+    device_path: ?[]const u8 = null,    // USB device path (e.g., "/dev/ttyUSB0")
+    status: []const u8,                 // connected, disconnected, sim-missing
+    modem_index: ?u32 = null,          // Modem ID from mmcli (e.g., 7 from /Modem/7)
+    usb_port: ?u32 = null,             // USB port number for physical identification
+    signal: ?u8 = null,                // Signal strength percentage
+    rssi: ?i32 = null,                 // Received Signal Strength Indicator
+    rsrq: ?i32 = null,                 // Reference Signal Received Quality
+    rsrp: ?i32 = null,                 // Reference Signal Received Power
+    snr: ?i32 = null,                  // Signal-to-Noise Ratio
+};
+
+/// SIM card information
+pub const SIM = struct {
+    iccid: []const u8,                  // Primary key (ICCID)
+    phone_number: ?[]const u8 = null,   // Phone number if available
+    current_modem_id: ?[]const u8 = null, // Foreign key to Modem.equipment_id
+    operator_name: ?[]const u8 = null,  // Carrier name
+    operator_id: ?[]const u8 = null,    // MCC+MNC
+    network_type: ?[]const u8 = null,   // Network type
+    access_tech: ?[]const u8 = null,    // Access technology (LTE, 3G, etc)
+    status: []const u8,                 // active, inactive, removed
+    sim_index: ?u32 = null,             // SIM ID from mmcli (e.g., 12 from /SIM/12)
+};
+
+/// Legacy Phone struct for backward compatibility (will be removed)
 pub const Phone = struct {
     iccid: []const u8, // ICCID is the primary identifier
     number: ?[]const u8 = null,

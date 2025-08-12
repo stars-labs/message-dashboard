@@ -200,6 +200,48 @@ pub const BusctlDBus = struct {
         return try self.allocator.dupe(u8, iccid_result.stdout[iccid_start + 1 .. iccid_end]);
     }
     
+    /// Get device path (primary port like /dev/ttyUSB2) using busctl
+    pub fn getDevicePath(self: *const Self, modem_id: []const u8) !?[]const u8 {
+        const modem_path = try std.fmt.allocPrint(
+            self.allocator,
+            "{s}/Modem/{s}",
+            .{ MODEM_MANAGER_PATH, modem_id }
+        );
+        defer self.allocator.free(modem_path);
+        
+        // Get the Ports property which contains device names
+        const result = try std.process.Child.run(.{
+            .allocator = self.allocator,
+            .argv = &[_][]const u8{
+                "busctl",
+                "get-property",
+                MODEM_MANAGER_SERVICE,
+                modem_path,
+                MODEM_INTERFACE,
+                "Ports",
+            },
+            .max_output_bytes = 4096,
+        });
+        defer self.allocator.free(result.stdout);
+        defer self.allocator.free(result.stderr);
+        
+        if (result.term.Exited != 0) {
+            return null;
+        }
+        
+        // Parse ports from output format: a(su) 6 "cdc-wdm0" 6 "ttyUSB0" 9 "ttyUSB1" 5 "ttyUSB2" 3 ...
+        // Look for the first ttyUSB device (primary AT port)
+        var iter = std.mem.tokenizeAny(u8, result.stdout, " \"");
+        while (iter.next()) |token| {
+            if (std.mem.startsWith(u8, token, "ttyUSB")) {
+                // Return the full device path
+                return try std.fmt.allocPrint(self.allocator, "/dev/{s}", .{token});
+            }
+        }
+        
+        return null;
+    }
+    
     /// Get signal quality using busctl
     pub fn getSignalQuality(self: *const Self, modem_id: []const u8) !types.SignalData {
         const modem_path = try std.fmt.allocPrint(

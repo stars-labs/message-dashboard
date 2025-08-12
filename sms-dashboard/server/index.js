@@ -460,6 +460,20 @@ router.post('/api/control/phones', async (request) => {
   }
 });
 
+// New clean endpoint for devices (modems and SIMs separated) 
+router.post('/api/control/devices', async (request) => {
+  // Control devices endpoint hit
+  try {
+    return await controlHandler.updateDevices(request);
+  } catch (error) {
+    // Control devices error
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+});
+
 router.delete('/api/control/messages', async (request) => {
   // Clear all messages endpoint
   try {
@@ -486,9 +500,9 @@ router.post('/api/control/cleanup-test-data', async (request) => {
 });
 
 router.get('/api/control/pending-sms', async (request) => {
-  // Get pending SMS sends for daemon
+  // Daemon heartbeat and get pending SMS
   try {
-    return await controlHandler.getPendingSMS(request);
+    return await controlHandler.heartbeatAndGetPendingSMS(request);
   } catch (error) {
     // Pending SMS error
     return new Response(JSON.stringify({ error: error.message }), {

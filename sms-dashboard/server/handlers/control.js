@@ -4,6 +4,155 @@ import { aiHandler } from './ai';
 import { findKeywordMatches } from '../api/keywords.js';
 
 export const controlHandler = {
+  // New clean endpoint for separate modems and SIMs
+  async updateDevices(request) {
+    const { env } = request;
+    
+    // Check API key
+    const apiKey = request.headers.get('X-API-Key');
+    const expectedKey = env.API_KEY;
+    
+    if (!apiKey || apiKey !== expectedKey) {
+      console.error(`[control.js] API key mismatch in updateDevices`);
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+    
+    // Parse request body
+    const { modems = [], sims = [] } = await request.json();
+    
+    console.log(`[control.js] Received ${modems.length} modems and ${sims.length} SIMs`);
+    
+    try {
+      // Update modems table
+      for (const modem of modems) {
+        if (!modem.equipment_id) {
+          console.warn('[control.js] Skipping modem without equipment_id');
+          continue;
+        }
+        
+        await env.DB.prepare(`
+          INSERT INTO modems (
+            equipment_id, manufacturer, model, firmware_revision, 
+            hardware_revision, status, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+          ON CONFLICT(equipment_id) DO UPDATE SET
+            manufacturer = excluded.manufacturer,
+            model = excluded.model,
+            firmware_revision = excluded.firmware_revision,
+            hardware_revision = excluded.hardware_revision,
+            status = excluded.status,
+            updated_at = CURRENT_TIMESTAMP
+        `).bind(
+          modem.equipment_id,
+          modem.manufacturer || null,
+          modem.model || null,
+          modem.firmware_revision || null,
+          modem.hardware_revision || null,
+          modem.status || 'unknown'
+        ).run();
+        
+        // Update modem_state if we have signal data
+        if (modem.signal !== null || modem.signal !== undefined) {
+          await env.DB.prepare(`
+            INSERT INTO modem_state (
+              modem_id, signal_percent, rssi, rsrq, rsrp, snr,
+              modem_index, usb_port, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(modem_id) DO UPDATE SET
+              signal_percent = excluded.signal_percent,
+              rssi = excluded.rssi,
+              rsrq = excluded.rsrq,
+              rsrp = excluded.rsrp,
+              snr = excluded.snr,
+              modem_index = excluded.modem_index,
+              usb_port = excluded.usb_port,
+              updated_at = CURRENT_TIMESTAMP
+          `).bind(
+            modem.equipment_id,
+            modem.signal || null,
+            modem.rssi || null,
+            modem.rsrq || null,
+            modem.rsrp || null,
+            modem.snr || null,
+            modem.modem_index || null,
+            modem.usb_port || null
+          ).run();
+        }
+      }
+      
+      // Update SIMs table
+      for (const sim of sims) {
+        if (!sim.iccid) {
+          console.warn('[control.js] Skipping SIM without ICCID');
+          continue;
+        }
+        
+        await env.DB.prepare(`
+          INSERT INTO sims (
+            iccid, phone_number, current_modem_id, operator_name,
+            operator_id, status, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+          ON CONFLICT(iccid) DO UPDATE SET
+            phone_number = excluded.phone_number,
+            current_modem_id = excluded.current_modem_id,
+            operator_name = excluded.operator_name,
+            operator_id = excluded.operator_id,
+            status = excluded.status,
+            updated_at = CURRENT_TIMESTAMP
+        `).bind(
+          sim.iccid,
+          sim.phone_number || null,
+          sim.current_modem_id || null,
+          sim.operator_name || null,
+          sim.operator_id || null,
+          sim.status || 'active'
+        ).run();
+      }
+      
+      // Update daemon heartbeat
+      const clientIp = request.headers.get('CF-Connecting-IP') || 
+                      request.headers.get('X-Forwarded-For') || 
+                      'unknown';
+      
+      await env.DB.prepare(`
+        INSERT INTO daemon_health (
+          daemon_id, last_heartbeat, status, modem_count, last_ip, updated_at
+        ) VALUES (
+          'orange-pi-main', CURRENT_TIMESTAMP, 'online', ?, ?, CURRENT_TIMESTAMP
+        )
+        ON CONFLICT(daemon_id) DO UPDATE SET
+          last_heartbeat = CURRENT_TIMESTAMP,
+          status = 'online',
+          modem_count = excluded.modem_count,
+          last_ip = excluded.last_ip,
+          updated_at = CURRENT_TIMESTAMP
+      `).bind(modems.length, clientIp).run();
+      
+      return new Response(JSON.stringify({
+        success: true,
+        processed: {
+          modems: modems.length,
+          sims: sims.length
+        }
+      }), {
+        headers: { 'Content-Type': 'application/json' }
+      });
+      
+    } catch (error) {
+      console.error('[control.js] Database error in updateDevices:', error);
+      return new Response(JSON.stringify({
+        success: false,
+        error: 'Failed to update devices'
+      }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+  },
+  
   // Upload messages from Orange Pi
   async uploadMessages(request) {
     const { env } = request;
@@ -88,7 +237,8 @@ export const controlHandler = {
           // Simple validation: Messages must come from the daemon reading actual SIM cards
           // This is the ONLY way to create 'received' messages - no fake/simulated paths
           
-          const messageId = msg.id || `msg-${nanoid()}`;
+          // Generate a unique message ID with timestamp prefix to ensure uniqueness
+          const messageId = msg.id || `msg-${Date.now()}-${nanoid(10)}`;
           const verificationCode = extractVerificationCode(msg.content);
           // Fix timestamp - handle various formatting issues
           let timestamp = msg.timestamp || new Date().toISOString();
@@ -397,50 +547,9 @@ export const controlHandler = {
       let errorCount = 0;
       const errors = [];
       
-      // Detect missing modems and maintain synthetic entries for them
-      // The daemon should report all modems, but if it doesn't, we need to track them
-      const reportedModemIndices = new Set(phones.map(p => p.modem_index).filter(idx => idx !== null && idx !== undefined));
-      
-      // Check for gaps in modem indices (indicates missing modems)
-      if (reportedModemIndices.size > 0) {
-        const maxIndex = Math.max(...reportedModemIndices);
-        const expectedModems = maxIndex + 1; // Modems are indexed 0 to maxIndex
-        
-        if (phones.length < expectedModems) {
-          console.log(`[control.js] Detected missing modems: reported ${phones.length}, expected at least ${expectedModems}`);
-          
-          // Find missing indices and add synthetic entries
-          for (let i = 0; i < expectedModems; i++) {
-            if (!reportedModemIndices.has(i)) {
-              const syntheticIccid = `NO_SIM_MODEM_${i}`;
-              
-              // Check if this synthetic entry already exists in our phone list
-              const existing = phones.find(p => p.iccid === syntheticIccid);
-              if (!existing) {
-                console.log(`[control.js] Adding synthetic entry for missing modem ${i}`);
-                await env.DB.prepare(`
-                  INSERT INTO phones (iccid, number, status, modem_index, updated_at)
-                  VALUES (?, NULL, 'sim-missing', ?, CURRENT_TIMESTAMP)
-                  ON CONFLICT(iccid) DO UPDATE SET
-                    status = 'sim-missing',
-                    modem_index = excluded.modem_index,
-                    updated_at = CURRENT_TIMESTAMP
-                `).bind(syntheticIccid, i).run();
-              }
-            }
-          }
-          
-          // Update daemon health with the corrected modem count
-          const correctedModemCount = expectedModems;
-          await env.DB.prepare(`
-            UPDATE daemon_health 
-            SET modem_count = ?, updated_at = CURRENT_TIMESTAMP
-            WHERE daemon_id = 'orange-pi-main'
-          `).bind(correctedModemCount).run();
-          
-          console.log(`[control.js] Updated daemon health with corrected modem count: ${correctedModemCount}`);
-        }
-      }
+      // Don't create synthetic entries for missing modems
+      // The daemon accurately reports which modems have SIM cards
+      // Modems without SIM cards simply won't be reported
       
       for (const phone of phones) {
         try {
@@ -583,8 +692,11 @@ export const controlHandler = {
     }
   },
 
-  // Get pending SMS sends for daemon polling
-  async getPendingSMS(request) {
+  // Daemon heartbeat and check for pending SMS to send
+  // This endpoint is polled regularly by the daemon, serving as both:
+  // 1. A heartbeat to track daemon health
+  // 2. A way to get pending SMS messages to send
+  async heartbeatAndGetPendingSMS(request) {
     const { env } = request;
     
     // Check API key
@@ -599,6 +711,44 @@ export const controlHandler = {
     }
     
     try {
+      // Update daemon heartbeat since this endpoint is polled regularly
+      const clientIp = request.headers.get('CF-Connecting-IP') || 
+                      request.headers.get('X-Forwarded-For') || 
+                      'unknown';
+      const daemonVersion = request.headers.get('X-Daemon-Version') || 'v3.9.0';
+      
+      // Create daemon_health table if it doesn't exist
+      await env.DB.prepare(`
+        CREATE TABLE IF NOT EXISTS daemon_health (
+          daemon_id TEXT PRIMARY KEY,
+          last_heartbeat TIMESTAMP NOT NULL,
+          status TEXT DEFAULT 'online',
+          last_ip TEXT,
+          version TEXT,
+          modem_count INTEGER DEFAULT 0,
+          error_count INTEGER DEFAULT 0,
+          last_error TEXT,
+          metadata TEXT,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      `).run();
+      
+      // Update daemon heartbeat
+      await env.DB.prepare(`
+        INSERT INTO daemon_health (
+          daemon_id, last_heartbeat, status, last_ip, version, updated_at
+        ) VALUES (
+          'orange-pi-main', CURRENT_TIMESTAMP, 'online', ?, ?, CURRENT_TIMESTAMP
+        )
+        ON CONFLICT(daemon_id) DO UPDATE SET
+          last_heartbeat = CURRENT_TIMESTAMP,
+          status = 'online',
+          last_ip = excluded.last_ip,
+          version = excluded.version,
+          updated_at = CURRENT_TIMESTAMP
+      `).bind(clientIp, daemonVersion).run();
+      
       // Get pending SMS messages (status = 'sending')
       const stmt = env.DB.prepare(`
         SELECT id, phone_iccid, phone_number, content, recipient, created_at

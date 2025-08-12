@@ -157,6 +157,13 @@ Orange Pi → mmcli → Zig Daemon → API (API Key) → D1 Database → WebSock
 
 ## Common Issues & Debugging
 
+### Wrangler Authentication Errors
+If you see `Authentication error [code: 10000]` when running wrangler commands:
+```bash
+npx wrangler login
+```
+This will open a browser for OAuth authentication. Always fix authentication issues first before debugging other problems.
+
 ### Frontend Crashes
 - Null ID handling: Always check `phone.id && phone.id.length` before calling `.slice()`
 - Search filters: Verify `.toLowerCase()` availability before calling

@@ -60,6 +60,18 @@
     return onlinePhones.length;
   }
   
+  // Centralized function to calculate SIM missing devices
+  function calculateSimMissingDevices(phones) {
+    if (!phones || phones.length === 0) return 0;
+    
+    const simMissingPhones = phones.filter(p => {
+      return p?.status === 'sim-missing' || (!p?.iccid && !p?.number);
+    });
+    
+    console.log(`[calculateSimMissing] Result: ${simMissingPhones.length}/${phones.length} need SIM cards`);
+    return simMissingPhones.length;
+  }
+  
   // Track if we've loaded stats from backend (to prevent race conditions)
   let backendStatsLoaded = false;
   
@@ -69,10 +81,11 @@
   $: if (phoneNumbers && phoneNumbers.length > 0 && !dataLoading && !backendStatsLoaded) {
     // Only calculate if backend hasn't provided stats yet
     const onlineCount = calculateOnlineDevices(phoneNumbers);
-    console.log('[App] No backend stats, calculating from phones:', onlineCount, '/', phoneNumbers.length);
-    if (onlineCount !== stats.onlineDevices) {
-      console.log('[App] Updating stats.onlineDevices from', stats.onlineDevices, 'to', onlineCount);
-      stats = { ...stats, onlineDevices: onlineCount };
+    const simMissingCount = calculateSimMissingDevices(phoneNumbers);
+    console.log('[App] No backend stats, calculating from phones:', onlineCount, '/', phoneNumbers.length, '(', simMissingCount, 'need SIM)');
+    if (onlineCount !== stats.onlineDevices || simMissingCount !== stats.simMissingDevices) {
+      console.log('[App] Updating stats from', {online: stats.onlineDevices, simMissing: stats.simMissingDevices}, 'to', {online: onlineCount, simMissing: simMissingCount});
+      stats = { ...stats, onlineDevices: onlineCount, simMissingDevices: simMissingCount };
     }
   }
   let selectedCountry = "all";
@@ -112,6 +125,7 @@
     onlineDevices: 0,
     totalDevices: 0,
     verificationRate: 0,
+    simMissingDevices: 0,
   };
   
   // Debug: log whenever stats changes
@@ -428,11 +442,34 @@
         const incomingMessages = msg.data.filter(m => m && m.id);
         console.log('[App] Processing', incomingMessages.length, 'messages from polling');
         
-        // Create a set of existing message IDs for quick lookup
-        const existingIds = new Set(messages.map(m => m.id));
+        // Create a map of existing messages by ID for quick lookup and update
+        const existingMessagesMap = new Map(messages.map(m => [m.id, m]));
         
-        // Find truly new messages
-        const newMessages = incomingMessages.filter(m => !existingIds.has(m.id));
+        // Track which messages are truly new
+        const newMessages = [];
+        const updatedMessages = [];
+        
+        // Process each incoming message
+        incomingMessages.forEach(incomingMsg => {
+          const existingMsg = existingMessagesMap.get(incomingMsg.id);
+          
+          if (!existingMsg) {
+            // This is a new message
+            newMessages.push(incomingMsg);
+          } else {
+            // Check if this is actually an update to an existing message
+            // Compare timestamps to avoid false updates
+            const existingTime = new Date(existingMsg.timestamp).getTime();
+            const incomingTime = new Date(incomingMsg.timestamp).getTime();
+            
+            if (Math.abs(existingTime - incomingTime) > 1000 || 
+                existingMsg.content !== incomingMsg.content) {
+              // This looks like an actual update
+              updatedMessages.push(incomingMsg);
+              existingMessagesMap.set(incomingMsg.id, incomingMsg);
+            }
+          }
+        });
         
         if (newMessages.length > 0) {
           console.log('[App] Found', newMessages.length, 'NEW messages:');
@@ -440,8 +477,29 @@
             console.log(`  - ${m.id}: "${m.content.substring(0, 30)}..." at ${m.timestamp}`);
           });
           
-          // Add new messages to the beginning of the list
-          messages = [...newMessages, ...messages];
+          // Build new messages array: new messages first, then existing
+          const allMessageIds = new Set();
+          const deduplicatedMessages = [];
+          
+          // Add new messages first
+          newMessages.forEach(m => {
+            if (!allMessageIds.has(m.id)) {
+              allMessageIds.add(m.id);
+              deduplicatedMessages.push(m);
+            }
+          });
+          
+          // Then add existing messages (including any updates)
+          messages.forEach(m => {
+            const updatedMsg = existingMessagesMap.get(m.id);
+            if (!allMessageIds.has(m.id)) {
+              allMessageIds.add(m.id);
+              deduplicatedMessages.push(updatedMsg || m);
+            }
+          });
+          
+          // Update messages array
+          messages = deduplicatedMessages;
           
           // Keep only the most recent 200 messages to prevent memory issues
           if (messages.length > 200) {
@@ -464,8 +522,9 @@
           
           // Show notification
           console.log(`[App] ✅ ${newMessages.length} new message(s) received!`);
-          
-          // Trigger UI update
+        } else if (updatedMessages.length > 0) {
+          console.log('[App] Updated', updatedMessages.length, 'existing message(s)');
+          // Trigger reactive update
           messages = messages;
         } else {
           console.log('[App] No new messages in this update');
@@ -1360,10 +1419,10 @@
             icon="📤"
           />
           <StatsCard
-            title="验证码提取率"
-            value={`${stats.verificationRate}%`}
-            gradient="from-orange-500 to-orange-600"
-            icon="✅"
+            title="需要SIM卡"
+            value={stats.simMissingDevices}
+            gradient="from-orange-500 to-red-600"
+            icon="📵"
           />
         </div>
 

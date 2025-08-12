@@ -114,9 +114,9 @@ pub fn main() !void {
                 std.log.err("Message processor thread crashed: {any}", .{err});
             };
         }
-        fn phoneWrapper(ctx: *worker_threads.WorkerContext) void {
-            worker_threads.phoneStatusThread(ctx) catch |err| {
-                std.log.err("Phone status thread crashed: {any}", .{err});
+        fn deviceWrapper(ctx: *worker_threads.WorkerContext) void {
+            worker_threads.deviceStatusThread(ctx) catch |err| {
+                std.log.err("Device status thread crashed: {any}", .{err});
             };
         }
         fn signalWrapper(ctx: *worker_threads.WorkerContext) void {
@@ -133,7 +133,7 @@ pub fn main() !void {
     
     // Start worker threads
     const message_thread = try std.Thread.spawn(.{}, ThreadWrapper.messageWrapper, .{&context});
-    const phone_thread = try std.Thread.spawn(.{}, ThreadWrapper.phoneWrapper, .{&context});
+    const device_thread = try std.Thread.spawn(.{}, ThreadWrapper.deviceWrapper, .{&context});
     const signal_thread = try std.Thread.spawn(.{}, ThreadWrapper.signalWrapper, .{&context});
     const sms_thread = try std.Thread.spawn(.{}, ThreadWrapper.smsWrapper, .{&context});
     
@@ -471,7 +471,7 @@ pub fn main() !void {
     // Cleanup
     should_exit.store(true, .release);
     message_thread.join();
-    phone_thread.join();
+    device_thread.join();
     signal_thread.join();
     sms_thread.join();
 }
