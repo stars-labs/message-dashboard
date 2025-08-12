@@ -73,7 +73,7 @@
         highlightedContent = applyHighlights(trimmedContent, messageTags);
       } else {
         // No tags from server, fall back to client-side highlighting
-        console.log('[MessageHighlight] No server tags for message', messageId, '- using client-side highlighting');
+        console.debug('[MessageHighlight] No server tags for message', messageId, '- using client-side highlighting');
         highlightedContent = processContent(trimmedContent);
       }
     } catch (err) {
@@ -89,8 +89,8 @@
     // Debug: Log Chinese keyword processing
     const chineseKeywords = keywords.filter(k => /[一-龥]/.test(k.keyword));
     if (chineseKeywords.length > 0) {
-      console.log('[MessageHighlight] Processing Chinese keywords:', chineseKeywords);
-      console.log('[MessageHighlight] Text to search:', text);
+      console.debug('[MessageHighlight] Processing Chinese keywords:', chineseKeywords);
+      console.debug('[MessageHighlight] Text to search:', text);
     }
     
     // Find all matches
@@ -99,7 +99,7 @@
     for (const keyword of keywords) {
       const keywordMatches = findMatches(text, keyword);
       if (keywordMatches.length > 0 && /[一-龥]/.test(keyword.keyword)) {
-        console.log('[MessageHighlight] Found Chinese matches for', keyword.keyword, ':', keywordMatches);
+        console.debug('[MessageHighlight] Found Chinese matches for', keyword.keyword, ':', keywordMatches);
       }
       for (const match of keywordMatches) {
         matches.push({
@@ -125,7 +125,7 @@
     for (const match of matches) {
       // Debug logging for Chinese keywords
       if (/[一-龥]/.test(match.keyword.keyword)) {
-        console.log(`[MessageHighlight] Checking match:`, {
+        console.debug(`[MessageHighlight] Checking match:`, {
           keyword: match.keyword.keyword,
           position: match.position,
           text: match.text,
@@ -151,8 +151,8 @@
     }
     
     if (matches.length > 0 && chineseKeywords.length > 0) {
-      console.log('[MessageHighlight] All matches before filtering:', matches);
-      console.log('[MessageHighlight] Filtered matches:', filteredMatches);
+      console.debug('[MessageHighlight] All matches before filtering:', matches);
+      console.debug('[MessageHighlight] Filtered matches:', filteredMatches);
     }
     
     // Apply highlights
@@ -166,8 +166,8 @@
     }));
     
     if (chineseKeywords.length > 0 && highlightData.length !== matches.length) {
-      console.log('[MessageHighlight] Filtered matches (some were removed):', highlightData);
-      console.log('[MessageHighlight] Original matches count:', matches.length, 'Filtered count:', highlightData.length);
+      console.debug('[MessageHighlight] Filtered matches (some were removed):', highlightData);
+      console.debug('[MessageHighlight] Original matches count:', matches.length, 'Filtered count:', highlightData.length);
     }
     
     return applyHighlights(text, highlightData);
@@ -207,7 +207,7 @@
     
     // Debug logging for Chinese keywords
     if (/[一-龥]/.test(keyword.keyword) && matches.length > 0) {
-      console.log(`[MessageHighlight] findMatches for "${keyword.keyword}": found ${matches.length} matches`, matches);
+      console.debug(`[MessageHighlight] findMatches for "${keyword.keyword}": found ${matches.length} matches`, matches);
     }
     
     return matches;

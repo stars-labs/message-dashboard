@@ -8,9 +8,9 @@ export async function fetchWithAuth(endpoint, options = {}) {
   const token = auth.token || localStorage.getItem('auth_token');
   const fullUrl = `${API_BASE_URL}${endpoint}`;
   
-  console.log(`[fetchWithAuth] Making request to: ${fullUrl}`);
-  console.log(`[fetchWithAuth] Options:`, options);
-  console.log(`[fetchWithAuth] Token present:`, !!token);
+  console.debug(`[fetchWithAuth] Making request to: ${fullUrl}`);
+  console.debug(`[fetchWithAuth] Options:`, options);
+  console.debug(`[fetchWithAuth] Token present:`, !!token);
   
   const response = await fetch(fullUrl, {
     ...options,
@@ -21,8 +21,8 @@ export async function fetchWithAuth(endpoint, options = {}) {
     },
   });
   
-  console.log(`[fetchWithAuth] Response status: ${response.status}`);
-  console.log(`[fetchWithAuth] Response headers:`, Object.fromEntries(response.headers.entries()));
+  console.debug(`[fetchWithAuth] Response status: ${response.status}`);
+  console.debug(`[fetchWithAuth] Response headers:`, Object.fromEntries(response.headers.entries()));
   
   if (response.status === 401) {
     console.log(`[fetchWithAuth] 401 Unauthorized - logging out`);
@@ -34,7 +34,7 @@ export async function fetchWithAuth(endpoint, options = {}) {
   // Check if response is ok before parsing JSON
   if (!response.ok) {
     const errorText = await response.text();
-    console.log(`[fetchWithAuth] Error response text:`, errorText);
+    console.debug(`[fetchWithAuth] Error response text:`, errorText);
     let errorData;
     try {
       errorData = JSON.parse(errorText);
@@ -45,7 +45,7 @@ export async function fetchWithAuth(endpoint, options = {}) {
   }
   
   const responseData = await response.json();
-  console.log(`[fetchWithAuth] Response data:`, responseData);
+  console.debug(`[fetchWithAuth] Response data:`, responseData);
   return responseData;
 }
 
@@ -79,7 +79,7 @@ async function apiRequest(method, data = {}) {
     method: endpoint.method
   };
   
-  if (endpoint.method === 'GET' && data && Object.keys(data).length > 0 && !url.includes('/')) {
+  if (endpoint.method === 'GET' && data && Object.keys(data).length > 0) {
     // Add query params for GET requests
     const queryString = new URLSearchParams(data).toString();
     return fetchWithAuth(`${url}?${queryString}`, options);

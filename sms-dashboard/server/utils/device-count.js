@@ -7,15 +7,16 @@ export async function getDeviceStats(db) {
   // Get counts from the actual tables (source of truth)
   const stats = await db.prepare(`
     SELECT 
-      (SELECT COUNT(*) FROM modems WHERE status = 'connected') as connected_modems,
+      (SELECT COUNT(*) FROM modems WHERE status IN ('connected', 'registered')) as connected_modems,
       (SELECT COUNT(*) FROM modems WHERE status = 'disconnected') as disconnected_modems,
+      (SELECT COUNT(*) FROM modems) as total_modems,
       (SELECT COUNT(*) FROM sims WHERE status = 'active') as active_sims,
       (SELECT COUNT(*) FROM sims WHERE status = 'inactive') as inactive_sims,
       (SELECT COUNT(DISTINCT current_modem_id) FROM sims WHERE current_modem_id IS NOT NULL) as modems_with_sims
   `).first();
   
   // Calculate totals
-  const totalModems = (stats.connected_modems || 0) + (stats.disconnected_modems || 0);
+  const totalModems = stats.total_modems || 0;
   const totalSims = (stats.active_sims || 0) + (stats.inactive_sims || 0);
   
   // Get daemon status from daemon_health table

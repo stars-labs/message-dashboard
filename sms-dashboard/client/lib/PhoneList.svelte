@@ -122,7 +122,7 @@
           
       // Log first few phones for debugging
       if (phoneNumbers.indexOf(phone) < 3) {
-        console.log('[PhoneList] Filter debug:', {
+        console.debug('[PhoneList] Filter debug:', {
           phone: {
             iccid: phone.iccid,
             country: phone.country,
@@ -159,7 +159,7 @@
       const uniqueCountries = [...new Set(phoneNumbers.map(p => p.country).filter(Boolean))];
       const uniqueMappedCountries = [...new Set(phoneNumbers.map(p => p.mapped_country).filter(Boolean))];
       const uniqueInferredCountries = [...new Set(phoneNumbers.map(p => inferCountryFromNumber(p)).filter(Boolean))];
-      console.log('[PhoneList] Available countries in data:', {
+      console.debug('[PhoneList] Available countries in data:', {
         dbCountries: uniqueCountries,
         mappedCountries: uniqueMappedCountries,
         inferredCountries: uniqueInferredCountries,

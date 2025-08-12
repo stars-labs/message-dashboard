@@ -2,6 +2,8 @@ const std = @import("std");
 const types = @import("types.zig");
 const ModemManager = @import("modem_manager.zig").ModemManager;
 const LockFreeMPMC = @import("lockfree_mpmc.zig").LockFreeMPMC;
+const MessageDeduplicator = @import("bloom_filter.zig").MessageDeduplicator;
+const LockFreeMessageQueue = @import("lockfree_message_queue.zig").LockFreeMessageQueue;
 
 const ModemCheckResult = types.ModemCheckResult;
 
@@ -9,8 +11,9 @@ const ModemCheckResult = types.ModemCheckResult;
 const ParallelContext = struct {
     allocator: std.mem.Allocator,
     modem_manager: *ModemManager,
-    message_queue: *anyopaque, // LockFreeMessageQueue
+    message_queue: *LockFreeMessageQueue,
     results: *LockFreeMPMC(ModemCheckResult),
+    deduplicator: *MessageDeduplicator,
 };
 
 pub const WorkType = enum {
@@ -123,14 +126,54 @@ pub const WorkerPool = struct {
                                 continue;
                             };
                             
-                            result.messages = messages;
-                            result.success = true;
-                            
+                            // Process messages directly in worker instead of passing through queue
                             if (messages.len > 0) {
-                                std.log.info("Worker {d}: Found {d} messages from {s}", .{ self.id, messages.len, work.modem_id });
+                                std.log.info("Worker {d}: Found {d} messages from {s}, queuing directly", .{ self.id, messages.len, work.modem_id });
+                                
+                                // Queue each message directly to the message queue with deduplication
+                                for (messages) |msg| {
+                                    // Create deduplication key
+                                    const key = MessageDeduplicator.makeKey(context.allocator, msg.message.phone_iccid, msg.message.content, msg.message.timestamp) catch {
+                                        // If we can't make a key, queue it anyway
+                                        context.message_queue.push(msg) catch |err| {
+                                            std.log.err("Worker {d}: Failed to queue message: {any}", .{ self.id, err });
+                                        };
+                                        continue;
+                                    };
+                                    defer context.allocator.free(key);
+                                    
+                                    // Check for duplicate
+                                    if (!context.deduplicator.isDuplicate(key)) {
+                                        context.message_queue.push(msg) catch |err| {
+                                            std.log.err("Worker {d}: Failed to queue message: {any}", .{ self.id, err });
+                                        };
+                                        std.log.debug("Worker {d}: Queued message (queue size: {d})", .{ self.id, context.message_queue.size() });
+                                        context.deduplicator.addMessage(key) catch |err| {
+                                            std.log.warn("Worker {d}: Failed to add message to deduplicator: {any}", .{ self.id, err });
+                                        };
+                                    } else {
+                                        std.log.debug("Worker {d}: Skipped duplicate message", .{ self.id });
+                                    }
+                                }
+                                
+                                // Free the messages array since we've processed them
+                                for (messages) |*msg| {
+                                    context.allocator.free(msg.modem_id);
+                                    context.allocator.free(msg.sms_id);
+                                    context.allocator.free(msg.message.phone_iccid);
+                                    context.allocator.free(msg.message.phone_number);
+                                    context.allocator.free(msg.message.content);
+                                    context.allocator.free(msg.message.timestamp);
+                                }
+                                context.allocator.free(messages);
                             }
                             
+                            // Only report success/failure, no message data
+                            result.messages = &[_]types.MessageInfo{}; // Empty slice
+                            result.success = true;
+                            
                             // Add result to lock-free queue
+                            std.log.debug("Worker {d}: Pushing status result to queue", .{ self.id });
                             context.results.push(result);
                         } else {
                             // Fallback without context

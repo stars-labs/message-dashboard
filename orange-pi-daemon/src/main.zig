@@ -34,6 +34,7 @@ const ParallelContext = struct {
     modem_manager: *ModemManager,
     message_queue: *LockFreeMessageQueue,
     results: *LockFreeMPMC(ModemCheckResult),
+    deduplicator: *MessageDeduplicator,
 };
 
 fn checkModemMessages(context: *ParallelContext, modem_id: []const u8) void {
@@ -297,6 +298,7 @@ pub fn main() !void {
             .modem_manager = &modem_manager,
             .message_queue = &message_queue,
             .results = &results_queue,
+            .deduplicator = &deduplicator,
         };
         
         // Get modems to check based on priority
@@ -371,23 +373,71 @@ pub fn main() !void {
         }
         
         // Drain results from lock-free queue
+        const queue_size_before = results_queue.size();
+        if (queue_size_before > 0) {
+            std.log.debug("Results queue has {d} items before draining", .{queue_size_before});
+        }
+        var popped_count: usize = 0;
         while (results_queue.tryPop()) |result| {
+            popped_count += 1;
+            std.log.debug("Popped result: modem_id len={d}, success={}, messages.len={d}", .{result.modem_id.len, result.success, result.messages.len});
             try results.append(result);
+            // Validate the result was appended correctly
+            const appended = &results.items[results.items.len - 1];
+            std.log.debug("After append: messages.len={d}", .{appended.messages.len});
+        }
+        if (queue_size_before > 0) {
+            std.log.debug("Popped {d} results from queue (had {d}), results.items.len={d}", .{popped_count, queue_size_before, results.items.len});
         }
         
         // Add safety check for results processing
         if (results.items.len == 0) {
-            std.log.debug("No results to process in cycle {d}", .{cycle_count});
+            std.log.debug("No results to process in cycle {d} (queue had {d} items)", .{cycle_count, queue_size_before});
+        } else {
+            std.log.debug("Processing {d} results in cycle {d}", .{results.items.len, cycle_count});
         }
         
-        for (results.items) |*result| {
+        std.log.debug("About to process results, items ptr: {*}, len: {d}", .{results.items.ptr, results.items.len});
+        
+        // Add memory validation before processing
+        for (0..results.items.len) |i| {
+            const result_ptr = &results.items[i];
+            std.log.debug("Validating result {d}: ptr={*}, success={}", .{i, result_ptr, result_ptr.success});
+        }
+        
+        // Try a simpler loop first
+        var idx: usize = 0;
+        while (idx < results.items.len) : (idx += 1) {
+            std.log.debug("Processing result {d}/{d}", .{idx + 1, results.items.len});
+            
+            // Add safety check before accessing result
+            if (idx >= results.items.len) {
+                std.log.err("Index {d} out of bounds for results array len {d}", .{idx, results.items.len});
+                break;
+            }
+            
+            const result = &results.items[idx];
+            std.log.debug("Got result pointer: {*}", .{result});
+            
+            // Validate modem_id before using it
+            const modem_id_len = result.modem_id.len;
+            if (modem_id_len == 0 or modem_id_len > 100) {
+                std.log.warn("Invalid modem_id length {d} for result {d}", .{modem_id_len, idx});
+                continue;
+            }
+            std.log.debug("Got result for modem with ID length {d}", .{modem_id_len});
+            
             // Update modem priority based on whether messages were found
             const found_messages = result.success and result.messages.len > 0;
             priority_manager.updateModemPriority(result.modem_id, found_messages) catch |err| {
-                std.log.warn("Failed to update priority for modem {s}: {any}", .{ result.modem_id, err });
+                std.log.warn("Failed to update priority for modem (len={d}): {any}", .{ modem_id_len, err });
             };
             
             if (result.success) {
+                std.log.debug("Result successful: messages.len={d}", .{result.messages.len});
+                if (result.messages.len > 0) {
+                    std.log.info("📬 Processing {d} messages from result", .{result.messages.len});
+                }
                 total_messages += result.messages.len;
                 
                 // Queue messages for processing with deduplication
@@ -407,9 +457,12 @@ pub fn main() !void {
                         message_queue.push(msg) catch |err| {
                             std.log.err("Failed to queue message: {any}", .{err});
                         };
+                        std.log.debug("Queued message (queue size: {d})", .{message_queue.size()});
                         deduplicator.addMessage(key) catch |err| {
                             std.log.warn("Failed to add message to deduplicator: {any}", .{err});
                         };
+                    } else {
+                        std.log.debug("Skipped duplicate message", .{});
                     }
                 }
             }

@@ -11,8 +11,19 @@
   
   // Filter messages first
   $: filteredMessages = selectedPhone 
-    ? messages.filter(msg => msg.phone_iccid === selectedPhone.iccid)
-    : messages.slice().slice(0, 50);
+    ? messages.filter(msg => {
+        const matches = msg.phone_iccid === selectedPhone.iccid;
+        if (!matches && messages.indexOf(msg) < 5) {
+          console.warn('[MessageView] Message excluded by filter:', {
+            msgIccid: msg.phone_iccid,
+            selectedIccid: selectedPhone.iccid,
+            msgContent: msg.content?.substring(0, 30) + '...',
+            msgId: msg.id
+          });
+        }
+        return matches;
+      })
+    : messages;
   
   // Deduplicate messages based on content, source, and close timestamps
   $: uniqueMessages = (() => {
@@ -31,26 +42,26 @@
       }
     }
     
-    console.log(`[MessageView] Deduplication: ${filteredMessages.length} messages -> ${unique.length} unique messages`);
+    console.debug(`[MessageView] Deduplication: ${filteredMessages.length} messages -> ${unique.length} unique messages`);
     return unique;
   })();
   
   // Debug logging for message filtering
   $: {
     if (messages.length > 0 || selectedPhone) {
-      console.log('[MessageView] Debug Info:');
-      console.log('- Total messages:', messages.length);
-      console.log('- Selected phone:', selectedPhone);
-      console.log('- Filtered messages:', filteredMessages.length);
-      console.log('- Unique messages:', uniqueMessages.length);
-      console.log('- Display messages:', displayMessages.length);
-      console.log('- View mode:', viewMode);
-      console.log('- Group by:', groupBy);
+      console.debug('[MessageView] Debug Info:');
+      console.debug('- Total messages:', messages.length);
+      console.debug('- Selected phone:', selectedPhone);
+      console.debug('- Filtered messages:', filteredMessages.length);
+      console.debug('- Unique messages:', uniqueMessages.length);
+      console.debug('- Display messages:', displayMessages.length);
+      console.debug('- View mode:', viewMode);
+      console.debug('- Group by:', groupBy);
       
       if (selectedPhone) {
-        console.log('- Filtering by ICCID:', selectedPhone.iccid);
-        console.log('- ICCID type:', typeof selectedPhone.iccid);
-        console.log('- Sample message ICCIDs:', messages.slice(0, 5).map(m => ({
+        console.debug('- Filtering by ICCID:', selectedPhone.iccid);
+        console.debug('- ICCID type:', typeof selectedPhone.iccid);
+        console.debug('- Sample message ICCIDs:', messages.slice(0, 5).map(m => ({
           iccid: m.phone_iccid,
           type: typeof m.phone_iccid,
           content: m.content?.substring(0, 50) + '...'
@@ -58,23 +69,23 @@
         
         // Check for ICCID match
         const matchingMessages = messages.filter(m => m.phone_iccid === selectedPhone.iccid);
-        console.log('- Messages matching ICCID:', matchingMessages.length);
+        console.debug('- Messages matching ICCID:', matchingMessages.length);
         if (matchingMessages.length > 0) {
-          console.log('- First matching message:', matchingMessages[0]);
+          console.debug('- First matching message:', matchingMessages[0]);
         }
         
         // Also check with type conversion
         const matchingMessagesStr = messages.filter(m => String(m.phone_iccid) === String(selectedPhone.iccid));
-        console.log('- Messages matching ICCID (string comparison):', matchingMessagesStr.length);
+        console.debug('- Messages matching ICCID (string comparison):', matchingMessagesStr.length);
         
         // Check for partial matches
         const partialMatches = messages.filter(m => m.phone_iccid && selectedPhone.iccid && m.phone_iccid.includes(selectedPhone.iccid));
-        console.log('- Partial ICCID matches:', partialMatches.length);
+        console.debug('- Partial ICCID matches:', partialMatches.length);
       }
       
       if (groupBy === 'source') {
-        console.log('- Grouped messages:', Object.keys(groupedMessages).length, 'groups');
-        console.log('- Groups:', Object.keys(groupedMessages));
+        console.debug('- Grouped messages:', Object.keys(groupedMessages).length, 'groups');
+        console.debug('- Groups:', Object.keys(groupedMessages));
       }
     }
   }

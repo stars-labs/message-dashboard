@@ -26,12 +26,12 @@
   let bulkImportText = "";
 
   async function loadMappings() {
-    console.log("[IccidMappings] Loading mappings...");
+    console.debug("[IccidMappings] Loading mappings...");
     loading = true;
     error = null;
 
     try {
-      console.log("[IccidMappings] Calling API with params:", {
+      console.debug("[IccidMappings] Calling API with params:", {
         page: currentPage,
         search: searchQuery,
       });
@@ -41,7 +41,7 @@
         search: searchQuery,
       });
 
-      console.log("[IccidMappings] API response:", response);
+      console.debug("[IccidMappings] API response:", response);
 
       if (response && response.success) {
         // Handle D1 response format
@@ -51,7 +51,7 @@
           mappings = response.data || [];
         }
         totalPages = response.pagination?.totalPages || 1;
-        console.log("[IccidMappings] Loaded mappings:", mappings);
+        console.debug("[IccidMappings] Loaded mappings:", mappings);
       } else {
         error = response?.error || "Failed to load ICCID mappings";
         console.error("ICCID mappings API error:", response);
@@ -198,7 +198,7 @@
   }
 
   onMount(() => {
-    console.log("[IccidMappings] Component mounted!");
+    console.debug("[IccidMappings] Component mounted!");
     loadMappings();
   });
 
@@ -273,7 +273,7 @@
   }
 </script>
 
-{console.log("[IccidMappings] Component rendering")}
+{console.debug("[IccidMappings] Component rendering")}
 <div class="tech-card p-6">
   <div class="flex justify-between items-center mb-6">
     <h2 class="text-2xl font-bold data-value high-contrast header-effect-target">ICCID 映射管理</h2>

@@ -25,11 +25,11 @@ SELECT
   s.operator_name,
   s.operator_id,
   
-  -- Status calculation
+  -- Status calculation - Fixed to handle 'registered' modem status
   CASE 
-    WHEN m.status = 'connected' AND s.status = 'active' AND ms.connection_status = 'registered' THEN 'online'
-    WHEN m.status = 'connected' AND s.status = 'active' THEN 'registered'
-    WHEN m.status = 'connected' AND s.iccid IS NULL THEN 'sim-missing'
+    WHEN (m.status = 'connected' OR m.status = 'registered') AND s.status = 'active' AND ms.connection_status = 'registered' THEN 'online'
+    WHEN (m.status = 'connected' OR m.status = 'registered') AND s.status = 'active' THEN 'registered'
+    WHEN (m.status = 'connected' OR m.status = 'registered') AND s.iccid IS NULL THEN 'sim-missing'
     WHEN m.status = 'disconnected' THEN 'offline'
     ELSE 'error'
   END as status,

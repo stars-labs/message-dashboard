@@ -25,6 +25,10 @@ pub fn messageProcessorThread(context: *WorkerContext) !void {
     while (!context.should_exit.load(.acquire)) {
         // Get batch of messages from lock-free queue
         var batch_buffer: [50]types.MessageInfo = undefined;
+        const queue_size = context.message_queue.size();
+        if (queue_size > 0) {
+            std.log.debug("📬 Message processor: Queue has {d} items, attempting to pop batch", .{queue_size});
+        }
         const message_count = context.message_queue.popBatch(&batch_buffer);
         
         if (message_count == 0) {

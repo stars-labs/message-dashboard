@@ -70,14 +70,14 @@
         params.append('phone_id', selectedPhoneIccid);
       }
 
-      console.log('Performing AI search:', `/api/ai/search?${params}`);
+      console.debug('Performing AI search:', `/api/ai/search?${params}`);
       const response = await api.get(`/api/ai/search?${params}`);
       
       if (response.success && response.data) {
         searchResults = response.data.messages || [];
         needsProcessing = false;
         const searchMethod = response.data.search_method || 'unknown';
-        console.log(`Search successful (${searchMethod}):`, searchResults.length, 'results');
+        console.debug(`Search successful (${searchMethod}):`, searchResults.length, 'results');
         
         // Show a note if fallback was used
         if (response.data.note) {
@@ -94,7 +94,7 @@
         searchError = 'Authentication required for AI search';
       } else {
         // Try fallback search using regular message filtering
-        console.log('AI search failed, trying fallback search...');
+        console.debug('AI search failed, trying fallback search...');
         const fallbackResults = await performFallbackSearch();
         if (fallbackResults.length === 0) {
           needsProcessing = true;
@@ -110,7 +110,7 @@
   // Fallback search using simple message content filtering
   async function performFallbackSearch() {
     try {
-      console.log('Performing fallback search...');
+      console.debug('Performing fallback search...');
       const params = new URLSearchParams({
         limit: '100'
       });
@@ -130,7 +130,7 @@
           msg.content && msg.content.toLowerCase().includes(query)
         ).slice(0, 30);
         
-        console.log('Fallback search found:', filtered.length, 'results');
+        console.debug('Fallback search found:', filtered.length, 'results');
         searchResults = filtered;
         searchError = filtered.length > 0 ? 
           'Using basic text search. For better results, process messages with AI.' : 
@@ -152,7 +152,7 @@
     processingProgress = { processed: 0, total: 0 };
     
     try {
-      console.log('Starting AI batch processing...');
+      console.debug('Starting AI batch processing...');
       const response = await api.post('/api/ai/batch-process', {
         limit: 50 // Process 50 messages at a time
       });
