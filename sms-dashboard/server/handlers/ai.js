@@ -315,7 +315,7 @@ Return a JSON object with:
     }
   },
 
-  // Semantic search using embeddings
+  // Semantic search using embeddings with robust fallback
   async search(request) {
     const { env } = request;
     const url = new URL(request.url);
@@ -334,8 +334,15 @@ Return a JSON object with:
         });
       }
 
-      // First, understand the search intent
-      const intentPrompt = `Analyze this search query and extract search parameters:
+      // Try AI-powered search first if available
+      let messages = [];
+      let searchIntent = null;
+      let useAI = false;
+
+      try {
+        if (env.AI && env.VECTORIZE) {
+          // First, understand the search intent
+          const intentPrompt = `Analyze this search query and extract search parameters:
 Query: "${query}"
 
 Return JSON with:
@@ -347,89 +354,159 @@ Return JSON with:
   "keywords": ["important", "terms"]
 }`;
 
-      const intentResponse = await env.AI.run(AI_MODELS.TEXT_GENERATION, {
-        prompt: intentPrompt,
-        max_tokens: 150,
-        temperature: 0.1
-      });
+          const intentResponse = await env.AI.run(AI_MODELS.TEXT_GENERATION, {
+            prompt: intentPrompt,
+            max_tokens: 150,
+            temperature: 0.1
+          });
 
-      let searchIntent;
-      try {
-        searchIntent = JSON.parse(intentResponse.response);
-      } catch (e) {
-        searchIntent = { type: 'all', keywords: [query] };
-      }
-
-      // Generate embedding for the query
-      const queryEmbedding = await env.AI.run(AI_MODELS.EMBEDDINGS, {
-        text: query
-      });
-
-      // Build filter for Vectorize
-      const filter = {};
-      if (phoneId) {
-        filter.phone_id = phoneId;
-      }
-      if (searchIntent.type !== 'all') {
-        filter.type = searchIntent.type;
-      }
-
-      // Perform vector search
-      let vectorResults = [];
-      if (env.VECTORIZE) {
-        const searchResults = await env.VECTORIZE.query(
-          queryEmbedding.data[0],
-          {
-            topK: limit,
-            filter: filter
+          try {
+            searchIntent = JSON.parse(intentResponse.response);
+          } catch (e) {
+            searchIntent = { type: 'all', keywords: [query] };
           }
-        );
-        vectorResults = searchResults.matches || [];
-      }
 
-      // Get message details for the results
-      const messageIds = vectorResults.map(r => r.id);
-      let messages = [];
-      
-      if (messageIds.length > 0) {
-        const placeholders = messageIds.map(() => '?').join(',');
-        const messagesResult = await env.DB.prepare(`
-          SELECT m.*, 
-                 ai.classification, 
-                 ai.verification_code,
-                 ai.confidence_score,
-                 ai.sender_category
-          FROM messages m
-          LEFT JOIN ai_insights ai ON m.id = ai.message_id
-          WHERE m.id IN (${placeholders})
-          ORDER BY m.timestamp DESC
-        `).bind(...messageIds).all();
-        
-        messages = messagesResult;
-      }
+          // Generate embedding for the query
+          const queryEmbedding = await env.AI.run(AI_MODELS.EMBEDDINGS, {
+            text: query
+          });
 
-      // If we have verification code intent, also do a fallback search
-      if (searchIntent.has_code && messages.length < limit) {
-        const codeSearch = await env.DB.prepare(`
-          SELECT m.*, 
-                 ai.classification, 
-                 ai.verification_code,
-                 ai.confidence_score,
-                 ai.sender_category
-          FROM messages m
-          LEFT JOIN ai_insights ai ON m.id = ai.message_id
-          WHERE ai.verification_code IS NOT NULL
-          ${phoneId ? 'AND m.phone_iccid = ?' : ''}
-          ORDER BY m.timestamp DESC
-          LIMIT ?
-        `).bind(...(phoneId ? [phoneId, limit] : [limit])).all();
-        
-        // Merge results, avoiding duplicates
-        const existingIds = new Set(messages.map(m => m.id));
-        for (const msg of codeSearch) {
-          if (!existingIds.has(msg.id)) {
-            messages.push(msg);
+          // Build filter for Vectorize
+          const filter = {};
+          if (phoneId) {
+            filter.phone_id = phoneId;
           }
+          if (searchIntent.type !== 'all') {
+            filter.type = searchIntent.type;
+          }
+
+          // Perform vector search
+          const searchResults = await env.VECTORIZE.query(
+            queryEmbedding.data[0],
+            {
+              topK: limit,
+              filter: filter
+            }
+          );
+          
+          const vectorResults = searchResults.matches || [];
+          const messageIds = vectorResults.map(r => r.id);
+          
+          if (messageIds.length > 0) {
+            const placeholders = messageIds.map(() => '?').join(',');
+            const messagesResult = await env.DB.prepare(`
+              SELECT m.*, 
+                     ai.classification, 
+                     ai.verification_code as ai_verification_code,
+                     ai.confidence_score,
+                     ai.sender_category
+              FROM messages m
+              LEFT JOIN ai_insights ai ON m.id = ai.message_id
+              WHERE m.id IN (${placeholders})
+              ORDER BY m.timestamp DESC
+            `).bind(...messageIds).all();
+            
+            messages = messagesResult.results || [];
+            useAI = true;
+          }
+        }
+      } catch (aiError) {
+        console.log('AI search not available, falling back to text search:', aiError.message);
+      }
+
+      // If AI search didn't work or returned no results, use text-based fallback
+      if (messages.length === 0) {
+        console.log('Using fallback text-based search for query:', query);
+        
+        // Parse common search patterns
+        const lowerQuery = query.toLowerCase();
+        const isVerificationSearch = lowerQuery.includes('验证码') || 
+                                    lowerQuery.includes('verification') || 
+                                    lowerQuery.includes('code') ||
+                                    lowerQuery.includes('otp');
+        
+        const isAllSearch = lowerQuery.includes('所有') || 
+                            lowerQuery.includes('all');
+
+        // Build the SQL query based on search intent
+        let sqlQuery;
+        let params = [];
+        
+        if (isVerificationSearch) {
+          // Search for verification codes
+          sqlQuery = `
+            SELECT m.*, 
+                   ai.classification, 
+                   ai.verification_code as ai_verification_code,
+                   ai.confidence_score,
+                   ai.sender_category
+            FROM messages m
+            LEFT JOIN ai_insights ai ON m.id = ai.message_id
+            WHERE (
+              m.content LIKE '%验证码%' OR 
+              m.content LIKE '%verification%' OR 
+              m.content LIKE '%OTP%' OR
+              m.content LIKE '%code%' OR
+              m.content REGEXP '[0-9]{4,8}' OR
+              ai.verification_code IS NOT NULL
+            )
+            ${phoneId ? 'AND m.phone_iccid = ?' : ''}
+            ORDER BY m.timestamp DESC
+            LIMIT ?
+          `;
+          
+          if (phoneId) params.push(phoneId);
+          params.push(limit);
+        } else {
+          // General text search
+          const searchTerms = query.split(/\s+/).filter(term => term.length > 0);
+          const whereConditions = searchTerms.map(() => 
+            'LOWER(m.content) LIKE ?'
+          ).join(' AND ');
+          
+          sqlQuery = `
+            SELECT m.*, 
+                   ai.classification, 
+                   ai.verification_code as ai_verification_code,
+                   ai.confidence_score,
+                   ai.sender_category
+            FROM messages m
+            LEFT JOIN ai_insights ai ON m.id = ai.message_id
+            WHERE ${whereConditions || '1=1'}
+            ${phoneId ? 'AND m.phone_iccid = ?' : ''}
+            ORDER BY m.timestamp DESC
+            LIMIT ?
+          `;
+          
+          // Add search term parameters
+          searchTerms.forEach(term => {
+            params.push(`%${term.toLowerCase()}%`);
+          });
+          if (phoneId) params.push(phoneId);
+          params.push(limit);
+        }
+        
+        const result = await env.DB.prepare(sqlQuery).bind(...params).all();
+        messages = result.results || [];
+        
+        // Also add a simpler fallback for finding any recent messages if nothing found
+        if (messages.length === 0 && isAllSearch) {
+          const allMessagesQuery = `
+            SELECT m.*, 
+                   ai.classification, 
+                   ai.verification_code as ai_verification_code,
+                   ai.confidence_score,
+                   ai.sender_category
+            FROM messages m
+            LEFT JOIN ai_insights ai ON m.id = ai.message_id
+            ${phoneId ? 'WHERE m.phone_iccid = ?' : ''}
+            ORDER BY m.timestamp DESC
+            LIMIT ?
+          `;
+          
+          const allParams = phoneId ? [phoneId, limit] : [limit];
+          const allResult = await env.DB.prepare(allMessagesQuery).bind(...allParams).all();
+          messages = allResult.results || [];
         }
       }
 
@@ -438,21 +515,55 @@ Return JSON with:
         data: {
           messages,
           search_intent: searchIntent,
-          total: messages.length
+          total: messages.length,
+          search_method: useAI ? 'ai' : 'text'
         }
       }), {
         headers: { 'Content-Type': 'application/json' }
       });
 
     } catch (error) {
-      console.error('Semantic search error:', error);
-      return new Response(JSON.stringify({
-        success: false,
-        error: 'Search failed'
-      }), {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' }
-      });
+      console.error('Search error:', error);
+      
+      // Last resort - return recent messages
+      try {
+        const fallbackQuery = `
+          SELECT m.*, 
+                 ai.classification, 
+                 ai.verification_code as ai_verification_code,
+                 ai.confidence_score,
+                 ai.sender_category
+          FROM messages m
+          LEFT JOIN ai_insights ai ON m.id = ai.message_id
+          ${phoneId ? 'WHERE m.phone_iccid = ?' : ''}
+          ORDER BY m.timestamp DESC
+          LIMIT ?
+        `;
+        
+        const params = phoneId ? [phoneId, limit] : [limit];
+        const result = await env.DB.prepare(fallbackQuery).bind(...params).all();
+        
+        return new Response(JSON.stringify({
+          success: true,
+          data: {
+            messages: result.results || [],
+            search_intent: null,
+            total: result.results?.length || 0,
+            search_method: 'fallback',
+            note: 'Search functionality limited, showing recent messages'
+          }
+        }), {
+          headers: { 'Content-Type': 'application/json' }
+        });
+      } catch (fallbackError) {
+        return new Response(JSON.stringify({
+          success: false,
+          error: 'Search service unavailable'
+        }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
     }
   },
 

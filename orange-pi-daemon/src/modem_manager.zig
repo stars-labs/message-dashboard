@@ -1457,6 +1457,50 @@ pub const ModemManager = struct {
         return null;
     }
     
+    /// Get device path for a modem (e.g., /dev/ttyUSB2)
+    pub fn getDevicePath(self: *ModemManager, modem_id: []const u8) !?[]const u8 {
+        // Try busctl first if available
+        if (self.dbus) |*busctl| {
+            if (busctl.getDevicePath(modem_id)) |path| {
+                return path;
+            } else |_| {}
+        }
+        
+        // Fallback to mmcli
+        const result = std.process.Child.run(.{
+            .allocator = self.allocator,
+            .argv = &[_][]const u8{ "mmcli", "-m", modem_id },
+            .max_output_bytes = 64 * 1024,
+        }) catch {
+            return null;
+        };
+        defer self.allocator.free(result.stdout);
+        defer self.allocator.free(result.stderr);
+        
+        if (result.term.Exited != 0) {
+            return null;
+        }
+        
+        // Parse device path from mmcli output
+        // Look for "ports:" line which contains device names
+        var lines = std.mem.tokenizeScalar(u8, result.stdout, '\n');
+        while (lines.next()) |line| {
+            if (std.mem.indexOf(u8, line, "ports:")) |_| {
+                // Look for ttyUSB device in the ports line
+                if (std.mem.indexOf(u8, line, "ttyUSB")) |pos| {
+                    // Extract just the ttyUSB part
+                    const start = pos;
+                    var end = pos + 7; // "ttyUSB" + one digit minimum
+                    while (end < line.len and std.ascii.isDigit(line[end])) : (end += 1) {}
+                    const device_name = line[start..end];
+                    return try std.fmt.allocPrint(self.allocator, "/dev/{s}", .{device_name});
+                }
+            }
+        }
+        
+        return null;
+    }
+    
     pub fn getModemDetails(self: *ModemManager, modem_id: []const u8) !struct {
         manufacturer: ?[]const u8,
         model: ?[]const u8,

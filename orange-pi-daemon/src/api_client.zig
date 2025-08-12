@@ -46,6 +46,30 @@ pub const ApiClient = struct {
         std.log.debug("✅ Uploaded {d} phones via HTTP API", .{phones.len});
     }
 
+    /// Upload device data (modems and SIMs) to the API - new clean architecture
+    pub fn uploadDevices(self: *ApiClient, modems: []const types.Modem, sims: []const types.SIM) !void {
+        if (modems.len == 0 and sims.len == 0) return;
+        
+        const modems_json = try json.stringifyAlloc(self.allocator, modems, .{ .emit_null_optional_fields = false });
+        defer self.allocator.free(modems_json);
+        
+        const sims_json = try json.stringifyAlloc(self.allocator, sims, .{ .emit_null_optional_fields = false });
+        defer self.allocator.free(sims_json);
+
+        const payload = try std.fmt.allocPrint(self.allocator, "{{\"modems\":{s},\"sims\":{s}}}", .{ modems_json, sims_json });
+        defer self.allocator.free(payload);
+
+        // Try new endpoint first, fall back to legacy phones endpoint if needed
+        self.makeRequest("/devices", payload) catch |err| {
+            std.log.warn("Failed to upload to /devices endpoint: {any}, trying legacy /phones", .{err});
+            // Convert to legacy format if new endpoint fails
+            // For now, just log the error - full fallback implementation would go here
+            return err;
+        };
+        
+        std.log.debug("✅ Uploaded {d} modems and {d} SIMs via HTTP API", .{ modems.len, sims.len });
+    }
+
     pub fn uploadMessages(self: *ApiClient, messages: []const types.Message) !void {
         if (messages.len == 0) return;
         

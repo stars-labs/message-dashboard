@@ -11,6 +11,20 @@
   export let onSetIccidMapping = null;
   export let daemonStatus = { connected: false, lastDataUpdate: null };
   export let isLoading = false;
+  export let showSimMissing = true; // Toggle to show/hide modems without SIM cards
+
+  // Helper function to check if device has SIM card issues
+  function hasSimIssue(phone) {
+    return phone.status === 'sim-missing' || (!phone.iccid && !phone.number);
+  }
+
+  // Helper function to get display identifier for device
+  function getDeviceIdentifier(phone) {
+    if (hasSimIssue(phone)) {
+      return phone.equipment_id || phone.imei || `设备-${phone.modem_index || 'Unknown'}`;
+    }
+    return phone.number || phone.iccid;
+  }
 
   // Helper function to infer country code from phone number
   function inferCountryFromNumber(phone) {
@@ -72,17 +86,26 @@
 
   $: filteredPhones = phoneNumbers
     .filter((phone) => {
-      // Get the effective country (explicit or inferred)
-      const effectiveCountry = inferCountryFromNumber(phone);
+      // Filter by SIM status first
+      const isSimMissing = hasSimIssue(phone);
+      if (isSimMissing && !showSimMissing) {
+        return false;
+      }
+      
+      // Get the effective country (explicit or inferred) - skip for sim-missing devices
+      const effectiveCountry = isSimMissing ? null : inferCountryFromNumber(phone);
       
       // Debug logging for filter matching
       const matchesCountry =
         selectedCountry === "all" || 
+        isSimMissing || // Always show sim-missing devices if toggle is on
         effectiveCountry === selectedCountry;
       
       const searchLower = searchTerm.toLowerCase();
+      const deviceId = getDeviceIdentifier(phone);
       const matchesSearch =
         searchTerm === "" ||
+        (deviceId && deviceId.toString().toLowerCase().includes(searchLower)) ||
         (phone.number && phone.number.toString().toLowerCase().includes(searchLower)) ||
         (phone.carrier && 
           phone.carrier.toLowerCase().includes(searchLower)) ||
@@ -93,7 +116,9 @@
         (phone.mapped_number && 
           phone.mapped_number.toString().toLowerCase().includes(searchLower)) ||
         (phone.mapped_carrier && 
-          phone.mapped_carrier.toLowerCase().includes(searchLower));
+          phone.mapped_carrier.toLowerCase().includes(searchLower)) ||
+        (phone.equipment_id && 
+          phone.equipment_id.toLowerCase().includes(searchLower));
           
       // Log first few phones for debugging
       if (phoneNumbers.indexOf(phone) < 3) {
@@ -104,10 +129,14 @@
             mapped_country: phone.mapped_country,
             effectiveCountry: effectiveCountry,
             number: phone.number,
-            carrier: phone.carrier
+            carrier: phone.carrier,
+            status: phone.status,
+            isSimMissing: isSimMissing,
+            equipment_id: phone.equipment_id
           },
           selectedCountry,
           searchTerm,
+          showSimMissing,
           matchesCountry,
           matchesSearch,
           willShow: matchesCountry && matchesSearch
@@ -148,6 +177,8 @@
       case "registered":
       case "connected":
         return "bg-gradient-to-r from-green-400 to-green-500";
+      case "sim-missing":
+        return "bg-gradient-to-r from-orange-400 to-red-500";
       case "offline":
         return "bg-gradient-to-r from-gray-400 to-gray-500";
       case "error":
@@ -228,9 +259,26 @@
       />
     </div>
 
+    <!-- SIM Missing Filter Toggle -->
+    <div class="mb-3">
+      <label class="flex items-center gap-2 text-sm text-cyan-400">
+        <input
+          type="checkbox"
+          bind:checked={showSimMissing}
+          class="accent-cyan-400"
+        />
+        <span>显示需要SIM卡的设备</span>
+        {#if phoneNumbers.filter(hasSimIssue).length > 0}
+          <span class="px-2 py-1 bg-orange-500/20 text-orange-400 rounded-full text-xs font-medium">
+            {phoneNumbers.filter(hasSimIssue).length} 个设备
+          </span>
+        {/if}
+      </label>
+    </div>
+
     <div class="flex items-center justify-between">
       <div class="text-sm font-bold text-cyan-300 tech-text">
-        共 <span class="data-value text-base high-contrast">{filteredPhones.length}</span> 个号码
+        共 <span class="data-value text-base high-contrast">{filteredPhones.length}</span> 个设备
       </div>
       <div class="text-xs text-cyan-400/60 flex items-center gap-3">
         <span class="flex items-center gap-1">
@@ -323,24 +371,10 @@
           <div class="flex items-center justify-between">
             <div class="flex-1">
               <div class="flex items-center gap-2">
-                <span class="text-lg">{phone.flag || "📱"}</span>
-                {#if phone.number}
-                  {#if phone.mapped_number}
-                    <span class="font-medium text-purple-400 text-sm flex items-center gap-1 tech-text">
-                      <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                        <path fill-rule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
-                      </svg>
-                      {phone.number}
-                    </span>
-                  {:else}
-                    <span class="font-medium text-cyan-300 text-sm tech-text">
-                      {phone.number}
-                    </span>
-                  {/if}
-                {:else}
-                  <span
-                    class="font-medium text-orange-400 text-sm flex items-center gap-1 tech-text"
-                  >
+                {#if hasSimIssue(phone)}
+                  <!-- Modem without SIM card -->
+                  <span class="text-lg">📵</span>
+                  <span class="font-medium text-orange-400 text-sm flex items-center gap-1 tech-text">
                     <svg
                       class="w-4 h-4"
                       fill="none"
@@ -354,47 +388,109 @@
                         d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
                       />
                     </svg>
-                    未设置号码
+                    {getDeviceIdentifier(phone)}
                   </span>
-                  {#if phone.iccid && onSetIccidMapping}
+                  <span class="px-2 py-1 bg-red-500/20 text-red-400 rounded-full text-xs font-medium sim-missing-badge">
+                    需要SIM卡
+                  </span>
+                {:else}
+                  <!-- Normal phone with SIM -->
+                  <span class="text-lg">{phone.flag || "📱"}</span>
+                  {#if phone.number}
+                    {#if phone.mapped_number}
+                      <span class="font-medium text-purple-400 text-sm flex items-center gap-1 tech-text">
+                        <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                          <path fill-rule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+                        </svg>
+                        {phone.number}
+                      </span>
+                    {:else}
+                      <span class="font-medium text-cyan-300 text-sm tech-text">
+                        {phone.number}
+                      </span>
+                    {/if}
+                  {:else}
                     <span
-                      class="text-xs tech-button px-2 py-1 cursor-pointer"
-                      on:click|stopPropagation={() => onSetIccidMapping(phone)}
-                      on:keydown|stopPropagation={(e) =>
-                        e.key === "Enter" && onSetIccidMapping(phone)}
-                      role="button"
-                      tabindex="0"
+                      class="font-medium text-orange-400 text-sm flex items-center gap-1 tech-text"
                     >
-                      设置映射
+                      <svg
+                        class="w-4 h-4"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                        />
+                      </svg>
+                      未设置号码
                     </span>
+                    {#if phone.iccid && onSetIccidMapping}
+                      <span
+                        class="text-xs tech-button px-2 py-1 cursor-pointer"
+                        on:click|stopPropagation={() => onSetIccidMapping(phone)}
+                        on:keydown|stopPropagation={(e) =>
+                          e.key === "Enter" && onSetIccidMapping(phone)}
+                        role="button"
+                        tabindex="0"
+                      >
+                        设置映射
+                      </span>
+                    {/if}
                   {/if}
                 {/if}
               </div>
               <div class="text-xs text-cyan-400/70 mt-0.5">
-                {#if phone.carrier}
-                  <span class="font-bold text-cyan-300">{phone.carrier}</span>
-                {/if}
-                {#if phone.operator_name}
-                  <span class="text-cyan-500/60"> • {phone.operator_name}</span>
-                {/if}
-                {#if phone.iccid && phone.iccid.length > 15}
-                  <!-- ICCID (long numeric string) -->
-                  <span class="text-cyan-500/60 font-mono">
-                    • {phone.iccid.slice(0, 6)}...{phone.iccid.slice(-4)}</span
-                  >
-                {:else if phone.iccid}
-                  <!-- Shorter ICCID -->
-                  <span class="text-purple-400"> • {phone.iccid}</span>
-                {/if}
-                {#if phone.modem_index != null || phone.sim_index != null}
-                  <span class="text-indigo-400 font-medium">
-                    {#if phone.modem_index != null}
-                      • M{phone.modem_index}
-                    {/if}
-                    {#if phone.sim_index != null}
-                      /S{phone.sim_index}
-                    {/if}
+                {#if hasSimIssue(phone)}
+                  <!-- Modem without SIM - show hardware details -->
+                  {#if phone.equipment_id}
+                    <span class="text-orange-400/80 font-mono">
+                      IMEI: {phone.equipment_id.slice(0, 8)}...{phone.equipment_id.slice(-4)}
+                    </span>
+                  {/if}
+                  {#if phone.manufacturer || phone.model}
+                    <span class="text-gray-400">
+                      • {phone.manufacturer || ''} {phone.model || ''}
+                    </span>
+                  {/if}
+                  {#if phone.modem_index != null}
+                    <span class="text-indigo-400 font-medium">
+                      • 设备{phone.modem_index}
+                    </span>
+                  {/if}
+                  <span class="text-red-400/80">
+                    • 请插入SIM卡
                   </span>
+                {:else}
+                  <!-- Normal phone with SIM -->
+                  {#if phone.carrier}
+                    <span class="font-bold text-cyan-300">{phone.carrier}</span>
+                  {/if}
+                  {#if phone.operator_name}
+                    <span class="text-cyan-500/60"> • {phone.operator_name}</span>
+                  {/if}
+                  {#if phone.iccid && phone.iccid.length > 15}
+                    <!-- ICCID (long numeric string) -->
+                    <span class="text-cyan-500/60 font-mono">
+                      • {phone.iccid.slice(0, 6)}...{phone.iccid.slice(-4)}</span
+                    >
+                  {:else if phone.iccid}
+                    <!-- Shorter ICCID -->
+                    <span class="text-purple-400"> • {phone.iccid}</span>
+                  {/if}
+                  {#if phone.modem_index != null || phone.sim_index != null}
+                    <span class="text-indigo-400 font-medium">
+                      {#if phone.modem_index != null}
+                        • M{phone.modem_index}
+                      {/if}
+                      {#if phone.sim_index != null}
+                        /S{phone.sim_index}
+                      {/if}
+                    </span>
+                  {/if}
                 {/if}
               </div>
             </div>

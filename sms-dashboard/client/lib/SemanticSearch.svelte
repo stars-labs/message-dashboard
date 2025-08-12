@@ -15,6 +15,10 @@
   let searchTimeout;
   let recentCodes = [];
   let loadingCodes = true;
+  let searchError = null;
+  let needsProcessing = false;
+  let isProcessing = false;
+  let processingProgress = null;
 
   // Example searches for user guidance
   const exampleSearches = [
@@ -48,11 +52,13 @@
     if (!searchQuery.trim()) {
       searchResults = [];
       showResults = false;
+      searchError = null;
       return;
     }
 
     isSearching = true;
     showResults = true;
+    searchError = null;
 
     try {
       const params = new URLSearchParams({
@@ -64,18 +70,124 @@
         params.append('phone_id', selectedPhoneIccid);
       }
 
+      console.log('Performing AI search:', `/api/ai/search?${params}`);
       const response = await api.get(`/api/ai/search?${params}`);
       
-      if (response.success) {
-        searchResults = response.data.messages;
+      if (response.success && response.data) {
+        searchResults = response.data.messages || [];
+        needsProcessing = false;
+        const searchMethod = response.data.search_method || 'unknown';
+        console.log(`Search successful (${searchMethod}):`, searchResults.length, 'results');
+        
+        // Show a note if fallback was used
+        if (response.data.note) {
+          searchError = response.data.note;
+        }
       } else {
         throw new Error(response.error || 'Search failed');
       }
     } catch (error) {
-      console.error('Search error:', error);
+      console.error('AI search error:', error);
+      
+      // If AI search fails, try fallback search
+      if (error.message.includes('No token provided') || error.message.includes('401')) {
+        searchError = 'Authentication required for AI search';
+      } else {
+        // Try fallback search using regular message filtering
+        console.log('AI search failed, trying fallback search...');
+        const fallbackResults = await performFallbackSearch();
+        if (fallbackResults.length === 0) {
+          needsProcessing = true;
+          searchError = 'No AI embeddings found. Messages need to be processed first.';
+        }
+      }
       searchResults = [];
     } finally {
       isSearching = false;
+    }
+  }
+
+  // Fallback search using simple message content filtering
+  async function performFallbackSearch() {
+    try {
+      console.log('Performing fallback search...');
+      const params = new URLSearchParams({
+        limit: '100'
+      });
+      
+      if (selectedPhoneIccid) {
+        params.append('phone_iccid', selectedPhoneIccid);
+      }
+      
+      const response = await api.get(`/api/messages?${params}`);
+      
+      if (response.success && response.data) {
+        const messages = Array.isArray(response.data) ? response.data : response.data.results || [];
+        const query = searchQuery.toLowerCase();
+        
+        // Simple text-based filtering as fallback
+        const filtered = messages.filter(msg => 
+          msg.content && msg.content.toLowerCase().includes(query)
+        ).slice(0, 30);
+        
+        console.log('Fallback search found:', filtered.length, 'results');
+        searchResults = filtered;
+        searchError = filtered.length > 0 ? 
+          'Using basic text search. For better results, process messages with AI.' : 
+          `No messages found containing "${searchQuery}"`;
+        
+        return filtered;
+      }
+    } catch (error) {
+      console.error('Fallback search failed:', error);
+    }
+    return [];
+  }
+
+  // Trigger AI batch processing
+  async function processBatch() {
+    if (isProcessing) return;
+    
+    isProcessing = true;
+    processingProgress = { processed: 0, total: 0 };
+    
+    try {
+      console.log('Starting AI batch processing...');
+      const response = await api.post('/api/ai/batch-process', {
+        limit: 50 // Process 50 messages at a time
+      });
+      
+      if (response.success) {
+        processingProgress = {
+          processed: response.data.processed,
+          total: response.data.processed + response.data.failed,
+          verification_codes_found: response.data.verification_codes_found
+        };
+        
+        needsProcessing = false;
+        searchError = null;
+        
+        // Retry search after processing
+        if (searchQuery.trim()) {
+          setTimeout(() => {
+            performSearch();
+          }, 1000);
+        }
+        
+        // Refresh recent codes
+        loadRecentVerificationCodes();
+        
+      } else {
+        throw new Error(response.error || 'Batch processing failed');
+      }
+    } catch (error) {
+      console.error('Batch processing error:', error);
+      searchError = `Failed to process messages: ${error.message}`;
+    } finally {
+      isProcessing = false;
+      setTimeout(() => {
+        processingProgress = null;
+      }, 3000);
     }
   }
 
@@ -155,65 +267,114 @@
       </div>
     {/if}
 
-    {#if showResults && searchResults.length > 0}
+    {#if showResults && (searchResults.length > 0 || searchError)}
       <div class="search-results" transition:slide>
         <div class="results-header">
-          <span>Found {searchResults.length} messages</span>
+          <span>
+            {#if searchResults.length > 0}
+              Found {searchResults.length} messages
+            {:else if searchError}
+              Search Status
+            {:else}
+              Searching...
+            {/if}
+          </span>
           <button class="close-btn" on:click={() => showResults = false}>✕</button>
         </div>
         
-        <div class="results-list">
-          {#each searchResults as result}
-            <div 
-              class="result-item" 
-              on:click={() => selectMessage(result)}
-              on:keydown={(e) => e.key === 'Enter' && selectMessage(result)}
-              role="button"
-              tabindex="0"
-            >
-              <div class="result-header">
-                <span class="result-phone">{result.phone_number || result.phone_iccid}</span>
-                <span class="result-time">{new Date(result.timestamp).toLocaleString()}</span>
-              </div>
-              
-              <div class="result-content">
-                {@html highlightMatch(result.content, searchQuery)}
-              </div>
-              
-              {#if result.ai_verification_code}
-                <div class="result-code">
-                  <span class="code-label">Code:</span>
-                  <code>{result.ai_verification_code}</code>
-                  <button 
-                    class="copy-btn" 
-                    on:click|stopPropagation={() => copyCode(result.ai_verification_code)}
-                    title="Copy code"
-                  >
-                    📋
-                  </button>
-                </div>
-              {/if}
-              
-              {#if result.classification}
-                <div class="result-meta">
-                  <span class="classification-badge {result.classification}">
-                    {result.classification}
-                  </span>
-                  {#if result.sender_category}
-                    <span class="sender-badge">
-                      {result.sender_category}
-                    </span>
+        {#if searchError}
+          <div class="error-message" transition:fade>
+            <div class="error-content">
+              <div class="error-icon">⚠️</div>
+              <div>
+                <p class="error-title">{searchError}</p>
+                {#if needsProcessing}
+                  <p class="error-hint">
+                    To enable AI search, messages need to be processed with AI to create embeddings.
+                  </p>
+                  <div class="error-actions">
+                    <button 
+                      class="process-btn"
+                      on:click={processBatch}
+                      disabled={isProcessing}
+                    >
+                      {#if isProcessing}
+                        🔄 Processing...
+                      {:else}
+                        🤖 Process Messages with AI
+                      {/if}
+                    </button>
+                  </div>
+                  {#if processingProgress}
+                    <div class="processing-status" transition:slide>
+                      <p>✅ Processed {processingProgress.processed} messages</p>
+                      {#if processingProgress.verification_codes_found > 0}
+                        <p>🔑 Found {processingProgress.verification_codes_found} verification codes</p>
+                      {/if}
+                    </div>
                   {/if}
-                </div>
-              {/if}
+                {:else}
+                  <p class="error-hint">
+                    Try different keywords or check your search terms.
+                  </p>
+                {/if}
+              </div>
             </div>
-          {/each}
-        </div>
-      </div>
-    {:else if showResults && !isSearching}
-      <div class="no-results" transition:fade>
-        <p>No messages found for "{searchQuery}"</p>
-        <p class="no-results-hint">Try different keywords or check the filters</p>
+          </div>
+        {:else if searchResults.length === 0 && !isSearching}
+          <div class="no-results" transition:fade>
+            <p>No messages found for "{searchQuery}"</p>
+            <p class="no-results-hint">Try different keywords or check the filters</p>
+          </div>
+        {:else}
+          <div class="results-list">
+            {#each searchResults as result}
+              <div 
+                class="result-item" 
+                on:click={() => selectMessage(result)}
+                on:keydown={(e) => e.key === 'Enter' && selectMessage(result)}
+                role="button"
+                tabindex="0"
+              >
+                <div class="result-header">
+                  <span class="result-phone">{result.phone_number || result.phone_iccid}</span>
+                  <span class="result-time">{new Date(result.timestamp).toLocaleString()}</span>
+                </div>
+                
+                <div class="result-content">
+                  {@html highlightMatch(result.content, searchQuery)}
+                </div>
+                
+                {#if result.ai_verification_code}
+                  <div class="result-code">
+                    <span class="code-label">Code:</span>
+                    <code>{result.ai_verification_code}</code>
+                    <button 
+                      class="copy-btn" 
+                      on:click|stopPropagation={() => copyCode(result.ai_verification_code)}
+                      title="Copy code"
+                    >
+                      📋
+                    </button>
+                  </div>
+                {/if}
+                
+                {#if result.classification}
+                  <div class="result-meta">
+                    <span class="classification-badge {result.classification}">
+                      {result.classification}
+                    </span>
+                    {#if result.sender_category}
+                      <span class="sender-badge">
+                        {result.sender_category}
+                      </span>
+                    {/if}
+                  </div>
+                {/if}
+              </div>
+            {/each}
+          </div>
+        {/if}
       </div>
     {/if}
   </div>
@@ -529,6 +690,83 @@
     color: var(--text-secondary, #666);
   }
 
+  /* Error handling styles */
+  .error-message {
+    padding: 16px;
+    background: rgba(255, 193, 7, 0.1);
+    border: 1px solid rgba(255, 193, 7, 0.3);
+    border-radius: 8px;
+    margin: 8px 0;
+  }
+
+  .error-content {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+  }
+
+  .error-icon {
+    font-size: 24px;
+    flex-shrink: 0;
+  }
+
+  .error-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary, #fff);
+    margin: 0 0 8px 0;
+  }
+
+  .error-hint {
+    font-size: 13px;
+    color: var(--text-secondary, #ccc);
+    margin: 0 0 12px 0;
+    line-height: 1.4;
+  }
+
+  .error-actions {
+    margin-bottom: 12px;
+  }
+
+  .process-btn {
+    padding: 8px 16px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border: none;
+    border-radius: 6px;
+    color: white;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: 0 2px 4px rgba(102, 126, 234, 0.3);
+  }
+
+  .process-btn:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+  }
+
+  .process-btn:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+    transform: none;
+  }
+
+  .processing-status {
+    padding: 8px 12px;
+    background: rgba(16, 185, 129, 0.1);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    border-radius: 6px;
+    margin-top: 8px;
+  }
+
+  .processing-status p {
+    margin: 0;
+    font-size: 12px;
+    color: #10b981;
+    line-height: 1.4;
+  }
+
   /* Recent Codes Widget */
   .recent-codes-widget {
     margin-top: 20px;
@@ -630,6 +868,20 @@
       left: 10px;
       right: 10px;
       max-height: calc(100vh - 80px);
+    }
+    
+    .error-content {
+      flex-direction: column;
+      gap: 8px;
+    }
+    
+    .error-icon {
+      align-self: center;
+    }
+    
+    .process-btn {
+      width: 100%;
+      padding: 12px;
     }
   }
 </style>

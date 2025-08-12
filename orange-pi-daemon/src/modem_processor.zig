@@ -1,227 +1,205 @@
 const std = @import("std");
 const types = @import("types.zig");
 const LockFreeSignalCache = @import("lockfree_signal_cache.zig").LockFreeSignalCache;
-const PhoneCollector = @import("phone_collector.zig").PhoneCollector;
-const ApiClient = @import("api_client.zig").ApiClient;
+const DeviceCollector = @import("device_collector.zig").DeviceCollector;
 const ModemManager = @import("modem_manager.zig").ModemManager;
 
-/// Process a single modem and add its data to the phone collector
+/// Process a single modem and add its data to the device collector
 pub fn processModem(
     allocator: std.mem.Allocator,
-    modem_manager: *ModemManager,
-    _: *ApiClient, // Not used directly but kept for API consistency
-    signal_cache: *LockFreeSignalCache,
-    phone_collector: *PhoneCollector,
     modem_id: []const u8,
+    modem_manager: *ModemManager,
+    device_collector: *DeviceCollector,
+    signal_cache: *LockFreeSignalCache,
     check_signal: bool,
 ) void {
-    // Skip modems known to crash mmcli
-    if (modem_manager.problematic_modems.contains(modem_id)) {
-        std.log.debug("📱 Skipping problematic modem {s}", .{modem_id});
-        return;
-    }
-    
-    // Get modem status and details
-    const original_status = modem_manager.getModemState(modem_id) catch |err| {
-        std.log.warn("Failed to get status for modem {s}: {any}", .{ modem_id, err });
+    // Get modem state (enabled/disabled/etc)
+    const modem_state = modem_manager.getModemState(modem_id) catch |err| {
+        std.log.warn("Failed to get state for modem {s}: {any}", .{ modem_id, err });
         return;
     };
-    defer allocator.free(original_status);
+    defer allocator.free(modem_state);
     
-    std.log.debug("📱 Modem {s} state: {s}", .{ modem_id, original_status });
+    // Determine modem status
+    const original_status = modem_state;
     
-    // Enable modem if it's disabled
-    if (std.mem.eql(u8, original_status, "disabled")) {
-        std.log.info("🔧 Enabling disabled modem {s}", .{modem_id});
-        modem_manager.enableModem(modem_id) catch |err| {
-            std.log.warn("Failed to enable modem {s}: {any}", .{ modem_id, err });
-        };
-        // Give modem time to enable
-        std.time.sleep(2 * std.time.ns_per_s);
-    }
-    
-    // Track if this is a no-SIM modem
-    var is_no_sim_modem = false;
-    
-    // Get ICCID for this modem - if no SIM, create synthetic ICCID to track the modem
-    const iccid = blk: {
-        const iccid_opt = modem_manager.getIccid(modem_id) catch |err| {
-            std.log.warn("Failed to get ICCID for modem {s}: {any}", .{ modem_id, err });
-            // Create a synthetic ICCID for modems with errors
-            const synthetic_iccid = std.fmt.allocPrint(allocator, "NO_SIM_MODEM_{s}", .{modem_id}) catch {
-                std.log.err("Failed to allocate synthetic ICCID for modem {s}", .{modem_id});
+    // Check if modem is actually registered/online
+    if (!std.mem.eql(u8, original_status, "registered") and 
+        !std.mem.eql(u8, original_status, "connected") and
+        !std.mem.eql(u8, original_status, "enabled")) {
+        std.log.debug("Modem {s} not ready: {s}", .{ modem_id, original_status });
+        
+        // For disabled modems, try to enable them
+        if (std.mem.eql(u8, original_status, "disabled")) {
+            std.log.info("Attempting to enable modem {s}", .{modem_id});
+            modem_manager.enableModem(modem_id) catch |err| {
+                std.log.err("Failed to enable modem {s}: {any}", .{ modem_id, err });
                 return;
             };
-            is_no_sim_modem = true;
-            break :blk synthetic_iccid;
+            // Give modem time to enable
+            std.time.sleep(2 * std.time.ns_per_s);
+        }
+    }
+    
+    // Get IMEI (equipment ID) - this is our primary identifier for modems
+    const imei = blk: {
+        const imei_result = modem_manager.getImei(modem_id) catch |err| {
+            std.log.warn("Failed to get IMEI for modem {s}: {any}", .{ modem_id, err });
+            // Generate synthetic ID if no IMEI
+            const synthetic_id = std.fmt.allocPrint(allocator, "MODEM_{s}", .{modem_id}) catch {
+                std.log.err("Failed to allocate synthetic ID for modem {s}", .{modem_id});
+                return;
+            };
+            break :blk synthetic_id;
         };
         
-        if (iccid_opt) |real_iccid| {
-            break :blk real_iccid;
+        if (imei_result) |actual_imei| {
+            break :blk actual_imei;
         } else {
-            // No ICCID (no SIM card) - create synthetic one to track the modem
-            std.log.warn("Modem {s} has no SIM card - creating synthetic ICCID", .{modem_id});
-            const synthetic_iccid = std.fmt.allocPrint(allocator, "NO_SIM_MODEM_{s}", .{modem_id}) catch {
-                std.log.err("Failed to allocate synthetic ICCID for modem {s}", .{modem_id});
+            // No IMEI - create synthetic identifier
+            const synthetic_id = std.fmt.allocPrint(allocator, "MODEM_{s}", .{modem_id}) catch {
+                std.log.err("Failed to allocate synthetic ID for modem {s}", .{modem_id});
                 return;
             };
-            is_no_sim_modem = true;
-            break :blk synthetic_iccid;
+            std.log.warn("Modem {s} has no IMEI - using synthetic ID", .{modem_id});
+            break :blk synthetic_id;
         }
     };
-    defer allocator.free(iccid);
+    defer allocator.free(imei);
     
-    // Use "sim-missing" status for modems without SIM cards
-    const modem_status = if (is_no_sim_modem) "sim-missing" else original_status;
-    
-    // Extract modem index from modem_id (e.g., "7" from modem ID "7")
-    // NOTE: This index is NOT stable across USB reconnections and should not be used for identification
-    // We keep it for informational purposes only - ICCID is the primary identifier
-    const modem_index = std.fmt.parseInt(u32, modem_id, 10) catch null;
-    
-    // Get SIM index from ModemManager
-    // NOTE: This index can also change on USB reconnections
-    const sim_index = modem_manager.getSimIndex(modem_id) catch |err| blk: {
-        std.log.warn("Failed to get SIM index for modem {s}: {any}", .{ modem_id, err });
-        break :blk null;
-    };
-    
-    // Get detailed modem information with proper error handling
+    // Get modem hardware details
     var manufacturer: ?[]const u8 = null;
-    var model: ?[]const u8 = null;
+    var model: ?[]const u8 = null; 
     var firmware_revision: ?[]const u8 = null;
     var hardware_revision: ?[]const u8 = null;
-    var device_path: ?[]const u8 = null;
     
-    // Try to get modem details, but continue even if it fails
-    if (modem_manager.getModemDetails(modem_id)) |details| {
-        manufacturer = details.manufacturer;
-        model = details.model;
-        firmware_revision = details.firmware_revision;
-        hardware_revision = details.hardware_revision;
-        device_path = details.device_path;
+    if (modem_manager.getModemDetails(modem_id)) |modem_details| {
+        // Clone the strings we need (modem_details will be freed by getModemDetails)
+        manufacturer = if (modem_details.manufacturer) |m| 
+            allocator.dupe(u8, m) catch null else null;
+        model = if (modem_details.model) |m| 
+            allocator.dupe(u8, m) catch null else null;
+        firmware_revision = if (modem_details.firmware_revision) |f| 
+            allocator.dupe(u8, f) catch null else null;
+        hardware_revision = if (modem_details.hardware_revision) |h| 
+            allocator.dupe(u8, h) catch null else null;
     } else |err| {
-        std.log.warn("Failed to get modem details for {s}: {any}", .{ modem_id, err });
-        // Continue with null values for all fields
+        std.log.warn("Failed to get details for modem {s}: {any}", .{ modem_id, err });
     }
     
-    // Important: We must free the allocated memory when this function returns
-    // The defer ensures memory is freed even if we return early
+    // Get device path separately
+    const device_path = modem_manager.getDevicePath(modem_id) catch null orelse null;
+    
     defer {
-        if (manufacturer) |mfr| allocator.free(mfr);
-        if (model) |mdl| allocator.free(mdl);
-        if (firmware_revision) |fw| allocator.free(fw);
-        if (hardware_revision) |hw| allocator.free(hw);
-        if (device_path) |path| allocator.free(path);
+        if (manufacturer) |m| allocator.free(m);
+        if (model) |m| allocator.free(m);
+        if (firmware_revision) |f| allocator.free(f);
+        if (hardware_revision) |h| allocator.free(h);
+        if (device_path) |d| allocator.free(d);
     }
     
-    // Calculate USB port from modem_index (assuming sequential assignment)
+    // Extract modem index and calculate USB port
+    const modem_index = std.fmt.parseInt(u32, modem_id, 10) catch null;
     const usb_port = modem_index;
     
-    var phone = types.Phone{
-        .iccid = iccid,
-        .number = null,
-        .status = modem_status,
-        .signal = null,
-        .rssi = null,
-        .rsrq = null,
-        .rsrp = null,
-        .snr = null,
-        .operator_name = null,
-        .operator_id = null,
-        .network_type = null,
-        .access_tech = null,
-        .imei = null,
+    // Check for SIM card
+    const iccid_result = modem_manager.getIccid(modem_id) catch null;
+    const has_sim = iccid_result != null;
+    defer if (iccid_result) |iccid| allocator.free(iccid);
+    
+    // Determine status based on SIM presence
+    const modem_status = if (!has_sim) "sim-missing" else original_status;
+    
+    // Create modem record
+    var modem = types.Modem{
+        .equipment_id = imei,
         .manufacturer = manufacturer,
         .model = model,
         .firmware_revision = firmware_revision,
         .hardware_revision = hardware_revision,
         .device_path = device_path,
+        .status = modem_status,
         .modem_index = modem_index,
-        .sim_index = sim_index,
         .usb_port = usb_port,
+        .signal = null,
+        .rssi = null,
+        .rsrq = null,
+        .rsrp = null,
+        .snr = null,
     };
-    defer {
-        if (phone.number) |num| allocator.free(num);
-        if (phone.operator_name) |name| allocator.free(name);
-        if (phone.operator_id) |id| allocator.free(id);
-        if (phone.imei) |imei| allocator.free(imei);
-        if (phone.access_tech) |tech| allocator.free(tech);
-        // Note: manufacturer, model, firmware_revision, hardware_revision, and device_path
-        // are freed in the defer block above, not here
-    }
     
-    // Get phone number if available
-    if (modem_manager.getPhoneNumber(modem_id)) |number| {
-        phone.number = number;
-    } else |_| {}
-    
-    // Always upload phone status updates - signal data is optional
-    var has_signal_update = false;
-    
-    // Get signal quality only if it's time to check and if it should be updated
+    // Get signal quality if needed
     if (check_signal) {
         if (modem_manager.getSignalQuality(modem_id)) |signal_data| {
-            // Always update with new signal data
-            {
-                phone.signal = signal_data.signal_percent;
-                phone.rssi = signal_data.rssi;
-                phone.rsrq = signal_data.rsrq;
-                phone.rsrp = signal_data.rsrp;
-                phone.snr = signal_data.snr;
-                has_signal_update = true;
-                
-                // Update cache
-                signal_cache.put(modem_id, signal_data.signal_percent);
-                
-                std.log.debug("📱 Modem {s} signal updated: {}%, RSSI: {?}, RSRQ: {?}, RSRP: {?}, SNR: {?}", .{
-                    modem_id, 
-                    signal_data.signal_percent,
-                    signal_data.rssi,
-                    signal_data.rsrq,
-                    signal_data.rsrp,
-                    signal_data.snr
-                });
-            }
-        } else |err| {
-            std.log.warn("Failed to get signal quality for modem {s}: {any}", .{ modem_id, err });
-            // Use cached signal data if available when signal retrieval fails
+            modem.signal = signal_data.signal_percent;
+            modem.rssi = signal_data.rssi;
+            modem.rsrq = signal_data.rsrq;
+            modem.rsrp = signal_data.rsrp;
+            modem.snr = signal_data.snr;
+            
+            // Update cache
+            signal_cache.put(modem_id, signal_data.signal_percent);
+            
+            std.log.debug("📱 Modem {s} signal: {}%", .{ modem_id, signal_data.signal_percent });
+        } else |_| {
+            // Try to get cached signal
             if (signal_cache.get(modem_id)) |cached_signal| {
-                phone.signal = cached_signal.signal_percent;
-                // Only signal percent is cached in lock-free cache
-                std.log.debug("📱 Modem {s} using cached signal after retrieval failure: {}%", .{ modem_id, cached_signal.signal_percent });
-            } else {
-                std.log.debug("📱 Modem {s} has no cached signal data after retrieval failure", .{ modem_id });
+                modem.signal = cached_signal.signal_percent;
+                std.log.debug("📱 Modem {s} using cached signal: {}%", .{ modem_id, cached_signal.signal_percent });
             }
         }
     } else {
-        // Use cached signal data if available, but don't skip upload if missing
+        // Use cached signal if available
         if (signal_cache.get(modem_id)) |cached_signal| {
-            phone.signal = cached_signal.signal_percent;
-            // Only signal percent is cached in lock-free cache
-            std.log.debug("📱 Modem {s} using cached signal: {}%", .{ modem_id, cached_signal.signal_percent });
-        } else {
-            std.log.debug("📱 Modem {s} has no cached signal data - uploading status without signal", .{ modem_id });
+            modem.signal = cached_signal.signal_percent;
         }
     }
     
-    // Get operator info
-    if (modem_manager.getOperatorInfo(modem_id)) |op_info| {
-        phone.operator_name = op_info.name;
-        phone.operator_id = op_info.id;
-        phone.access_tech = op_info.access_tech;
-    } else |_| {}
-    
-    // Get IMEI
-    if (modem_manager.getImei(modem_id)) |imei| {
-        phone.imei = imei;
-    } else |_| {}
-    
-    // Add phone to collector for batched upload
-    const upload_reason = if (has_signal_update) "with signal update" else if (phone.signal != null) "with cached signal" else "status only";
-    std.log.debug("📱 Adding phone {s} to batch ({s}): signal={?}", .{ phone.iccid, upload_reason, phone.signal });
-    
-    phone_collector.addPhone(phone) catch |err| {
-        std.log.warn("Failed to add phone {s} to batch: {any}", .{ phone.iccid, err });
+    // Add modem to collector
+    device_collector.addModem(modem) catch |err| {
+        std.log.warn("Failed to add modem {s} to collector: {any}", .{ imei, err });
     };
+    
+    // If modem has a SIM, create SIM record
+    if (iccid_result) |iccid| {
+        // Get SIM index
+        const sim_index = modem_manager.getSimIndex(modem_id) catch |err| blk: {
+            std.log.warn("Failed to get SIM index for modem {s}: {any}", .{ modem_id, err });
+            break :blk null;
+        };
+        
+        // Create SIM record
+        var sim = types.SIM{
+            .iccid = iccid,
+            .phone_number = null,
+            .current_modem_id = imei,
+            .operator_name = null,
+            .operator_id = null,
+            .network_type = null,
+            .access_tech = null,
+            .status = if (std.mem.eql(u8, original_status, "registered")) "active" else "inactive",
+            .sim_index = sim_index,
+        };
+        
+        // Get phone number if available
+        if (modem_manager.getPhoneNumber(modem_id)) |number| {
+            sim.phone_number = number;
+        } else |_| {}
+        
+        // Get operator info
+        if (modem_manager.getOperatorInfo(modem_id)) |op_info| {
+            sim.operator_name = op_info.name;
+            sim.operator_id = op_info.id;
+            sim.access_tech = op_info.access_tech;
+        } else |_| {}
+        
+        // Add SIM to collector
+        device_collector.addSIM(sim) catch |err| {
+            std.log.warn("Failed to add SIM {s} to collector: {any}", .{ iccid, err });
+        };
+        
+        std.log.debug("📱 Added modem {s} with SIM {s}", .{ imei, iccid });
+    } else {
+        std.log.debug("📱 Added modem {s} without SIM (status: sim-missing)", .{imei});
+    }
 }

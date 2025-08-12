@@ -4,7 +4,7 @@ const ApiClient = @import("api_client.zig").ApiClient;
 const ModemManager = @import("modem_manager.zig").ModemManager;
 const LockFreeMessageQueue = @import("lockfree_message_queue.zig").LockFreeMessageQueue;
 const LockFreeSignalCache = @import("lockfree_signal_cache.zig").LockFreeSignalCache;
-const PhoneCollector = @import("phone_collector.zig").PhoneCollector;
+const DeviceCollector = @import("device_collector.zig").DeviceCollector;
 const SMSSender = @import("sms_sender.zig").SMSSender;
 const modem_processor = @import("modem_processor.zig");
 
@@ -101,58 +101,67 @@ pub fn messageProcessorThread(context: *WorkerContext) !void {
     std.log.info("🛑 Message processor thread exiting", .{});
 }
 
-// Context for parallel phone processing
-const PhoneProcessorContext = struct {
+// Context for parallel device processing
+const DeviceProcessorContext = struct {
     allocator: std.mem.Allocator,
     modem_manager: *ModemManager,
     api_client: *ApiClient,
     signal_cache: *LockFreeSignalCache,
     collector_mutex: std.Thread.Mutex,
-    phone_collector: *PhoneCollector,
+    device_collector: *DeviceCollector,
 };
 
 // Process a single modem in parallel
-fn processModemParallel(context: *PhoneProcessorContext, modem_id: []const u8) void {
+fn processModemParallel(context: *DeviceProcessorContext, modem_id: []const u8) void {
     const allocator = context.allocator;
     
     // Create a temporary collector for this modem
-    var temp_collector = PhoneCollector.init(allocator);
+    var temp_collector = DeviceCollector.init(allocator);
     defer temp_collector.deinit();
     
     // Process the modem
     modem_processor.processModem(
         allocator,
-        context.modem_manager,
-        context.api_client,
-        context.signal_cache,
-        &temp_collector,
         modem_id,
+        context.modem_manager,
+        &temp_collector,
+        context.signal_cache,
         true, // Check signal for accurate status
     );
     
-    // Get phones from temp collector
-    const phones = temp_collector.getAndClear() catch |err| {
-        std.log.err("Failed to get phones from temp collector: {any}", .{err});
+    // Get devices from temp collector
+    const modems = temp_collector.getModems() catch |err| {
+        std.log.err("Failed to get modems from temp collector: {any}", .{err});
         return;
     };
-    defer allocator.free(phones);
+    defer allocator.free(modems);
+    
+    const sims = temp_collector.getSIMs() catch |err| {
+        std.log.err("Failed to get SIMs from temp collector: {any}", .{err});
+        return;
+    };
+    defer allocator.free(sims);
     
     // Add to main collector under lock
-    if (phones.len > 0) {
-        context.collector_mutex.lock();
-        defer context.collector_mutex.unlock();
-        
-        for (phones) |phone| {
-            context.phone_collector.addPhone(phone) catch |err| {
-                std.log.err("Failed to add phone to collector: {any}", .{err});
-            };
-        }
+    context.collector_mutex.lock();
+    defer context.collector_mutex.unlock();
+    
+    for (modems) |modem| {
+        context.device_collector.addModem(modem) catch |err| {
+            std.log.err("Failed to add modem to collector: {any}", .{err});
+        };
+    }
+    
+    for (sims) |sim| {
+        context.device_collector.addSIM(sim) catch |err| {
+            std.log.err("Failed to add SIM to collector: {any}", .{err});
+        };
     }
 }
 
-/// Phone status updater thread
-pub fn phoneStatusThread(context: *WorkerContext) !void {
-    std.log.debug("🚀 Phone status thread started", .{});
+/// Device status updater thread  
+pub fn deviceStatusThread(context: *WorkerContext) !void {
+    std.log.debug("🚀 Device status thread started", .{});
     
     while (!context.should_exit.load(.acquire)) {
         // Sleep for configured interval
@@ -162,7 +171,7 @@ pub fn phoneStatusThread(context: *WorkerContext) !void {
         if (context.should_exit.load(.acquire)) break;
         
         const start_time = std.time.milliTimestamp();
-        std.log.info("📱 Updating phone status", .{});
+        std.log.info("📱 Updating device status", .{});
         
         // Get list of modems
         const modems = context.modem_manager.listModems() catch |err| {
@@ -176,47 +185,53 @@ pub fn phoneStatusThread(context: *WorkerContext) !void {
         
         // Check if no modems found (ModemManager unavailable or no modems)
         if (modems.len == 0) {
-            std.log.warn("⚠️ No modems found - marking all phones as offline", .{});
+            std.log.warn("⚠️ No modems found - marking all devices as offline", .{});
             
-            // Create special phone entry to signal all phones offline
-            var phone_collector = PhoneCollector.init(context.allocator);
-            defer phone_collector.deinit();
+            // Create special modem entry to signal all devices offline
+            var device_collector = DeviceCollector.init(context.allocator);
+            defer device_collector.deinit();
             
-            const offline_phone = types.Phone{
-                .iccid = try context.allocator.dupe(u8, "ALL_PHONES_OFFLINE"),
-                .number = null,
-                .status = try context.allocator.dupe(u8, "offline"),
-                .signal = null,
-                .operator_name = null,
-                .operator_id = null,
-                .imei = null,
-                .access_tech = null,
+            const offline_modem = types.Modem{
+                .equipment_id = try context.allocator.dupe(u8, "ALL_DEVICES_OFFLINE"),
+                .manufacturer = null,
+                .model = null,
+                .firmware_revision = null,
+                .hardware_revision = null,
+                .device_path = null,
+                .status = try context.allocator.dupe(u8, "disconnected"),
                 .modem_index = null,
-                .sim_index = null,
+                .usb_port = null,
+                .signal = null,
                 .rssi = null,
                 .rsrq = null,
                 .rsrp = null,
                 .snr = null,
             };
             
-            phone_collector.addPhone(offline_phone) catch |add_err| {
-                std.log.err("Failed to add offline signal phone: {any}", .{add_err});
+            device_collector.addModem(offline_modem) catch |add_err| {
+                std.log.err("Failed to add offline signal modem: {any}", .{add_err});
                 // Clean up allocated memory
-                context.allocator.free(offline_phone.iccid);
-                context.allocator.free(offline_phone.status);
+                context.allocator.free(offline_modem.equipment_id);
+                context.allocator.free(offline_modem.status);
                 continue;
             };
             
             // Upload the offline signal
-            const phones = phone_collector.getAndClear() catch |get_err| {
-                std.log.err("Failed to get offline phones: {any}", .{get_err});
+            const offline_modems = device_collector.getModems() catch |get_err| {
+                std.log.err("Failed to get offline modems: {any}", .{get_err});
                 continue;
             };
-            defer context.allocator.free(phones);
+            defer context.allocator.free(offline_modems);
             
-            if (phones.len > 0) {
-                std.log.info("📤 Sending ALL_PHONES_OFFLINE signal to server", .{});
-                context.api_client.uploadPhones(phones) catch |upload_err| {
+            const offline_sims = device_collector.getSIMs() catch |get_err| {
+                std.log.err("Failed to get offline SIMs: {any}", .{get_err});
+                continue;
+            };
+            defer context.allocator.free(offline_sims);
+            
+            if (offline_modems.len > 0) {
+                std.log.info("📤 Sending ALL_DEVICES_OFFLINE signal to server", .{});
+                context.api_client.uploadDevices(offline_modems, offline_sims) catch |upload_err| {
                     std.log.err("Failed to upload offline status: {any}", .{upload_err});
                 };
             }
@@ -224,18 +239,18 @@ pub fn phoneStatusThread(context: *WorkerContext) !void {
             continue;
         }
         
-        // Create phone collector
-        var phone_collector = PhoneCollector.init(context.allocator);
-        defer phone_collector.deinit();
+        // Create device collector
+        var device_collector = DeviceCollector.init(context.allocator);
+        defer device_collector.deinit();
         
         // Create parallel processing context
-        var processor_context = PhoneProcessorContext{
+        var processor_context = DeviceProcessorContext{
             .allocator = context.allocator,
             .modem_manager = context.modem_manager,
             .api_client = context.api_client,
             .signal_cache = context.signal_cache,
             .collector_mutex = .{},
-            .phone_collector = &phone_collector,
+            .device_collector = &device_collector,
         };
         
         // Process modems in parallel batches
@@ -265,26 +280,29 @@ pub fn phoneStatusThread(context: *WorkerContext) !void {
             modem_idx += batch_size;
         }
         
-        // Upload collected phones
-        const phones = try phone_collector.getAndClear();
-        defer context.allocator.free(phones);
+        // Upload collected devices
+        const collected_modems = try device_collector.getModems();
+        defer context.allocator.free(collected_modems);
+        
+        const collected_sims = try device_collector.getSIMs();
+        defer context.allocator.free(collected_sims);
         
         const processing_time = std.time.milliTimestamp() - start_time;
         
-        if (phones.len > 0) {
-            std.log.debug("📤 Uploading {d} phone status updates (collected in {d}ms)", .{phones.len, processing_time});
+        if (collected_modems.len > 0 or collected_sims.len > 0) {
+            std.log.debug("📤 Uploading {d} modems and {d} SIMs (collected in {d}ms)", .{collected_modems.len, collected_sims.len, processing_time});
             const upload_start = std.time.milliTimestamp();
-            context.api_client.uploadPhones(phones) catch |err| {
-                std.log.err("Failed to upload phone status: {any}", .{err});
+            context.api_client.uploadDevices(collected_modems, collected_sims) catch |err| {
+                std.log.err("Failed to upload device status: {any}", .{err});
             };
             const upload_time = std.time.milliTimestamp() - upload_start;
-            std.log.debug("✅ Phone upload completed in {d}ms", .{upload_time});
+            std.log.debug("✅ Device upload completed in {d}ms", .{upload_time});
         } else {
-            std.log.debug("📱 No phone updates to upload (processing took {d}ms)", .{processing_time});
+            std.log.debug("📱 No device updates to upload (processing took {d}ms)", .{processing_time});
         }
     }
     
-    std.log.debug("🛑 Phone status thread exiting", .{});
+    std.log.debug("🛑 Device status thread exiting", .{});
 }
 
 /// Signal monitor thread

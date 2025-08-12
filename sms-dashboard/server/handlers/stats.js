@@ -1,10 +1,14 @@
+import { getDeviceStats } from '../utils/device-count.js';
+
 export const statsHandler = {
   async get(request) {
     const { env } = request;
     
     try {
-      // Optimize with a single query for all stats
-      // Only count phones as online if they've been updated recently (within 5 minutes)
+      // Get device statistics from the new normalized tables
+      const deviceStats = await getDeviceStats(env.DB);
+      
+      // Get message statistics
       const stats = await env.DB.prepare(`
         SELECT 
           (SELECT COUNT(*) FROM messages) as total_messages,
@@ -13,8 +17,6 @@ export const statsHandler = {
           (SELECT COUNT(*) FROM messages WHERE type = 'received') as total_received,
           (SELECT COUNT(*) FROM messages WHERE date(timestamp) = date('now') AND type = 'sent') as today_sent,
           (SELECT COUNT(*) FROM messages WHERE date(timestamp) = date('now') AND type = 'received') as today_received,
-          (SELECT COUNT(*) FROM phones WHERE status IN ('online', 'active', 'registered') AND datetime(updated_at) > datetime('now', '-5 minutes')) as online_devices,
-          (SELECT COUNT(*) FROM phones) as total_devices,
           (SELECT COUNT(*) FROM messages WHERE verification_code IS NOT NULL AND type = 'received') as verified_messages
       `).first();
       
@@ -22,75 +24,38 @@ export const statsHandler = {
         ? (stats.verified_messages / stats.total_received) 
         : 0;
       
-      // Check daemon heartbeat from KV and database
+      // Use device stats from the new normalized tables
+      let actualOnlineDevices = deviceStats.online_count;
+      let actualTotalDevices = deviceStats.total_count;
+      
+      // Get daemon status from deviceStats
       let daemonStatus = {
-        online: false,
-        last_heartbeat: null,
-        version: null,
-        device_id: null,
-        modem_count: null
+        online: deviceStats.daemon.health === 'healthy' || deviceStats.daemon.health === 'warning',
+        last_heartbeat: deviceStats.daemon.last_heartbeat ? new Date(deviceStats.daemon.last_heartbeat).getTime() : null,
+        version: null, // Will be set from daemon_health below
+        device_id: 'orange-pi-main',
+        modem_count: deviceStats.daemon.reported_count
       };
       
-      let actualOnlineDevices = stats.online_devices;
-      let actualTotalDevices = stats.total_devices;
-      
+      // Get additional daemon info from database
       try {
-        // First check KV for heartbeat
-        const heartbeatData = await env.KV.get('daemon:heartbeat');
-        if (heartbeatData) {
-          const heartbeat = JSON.parse(heartbeatData);
-          const now = Date.now();
-          const fiveMinutesAgo = now - (5 * 60 * 1000);
-          
-          daemonStatus = {
-            online: heartbeat.last_heartbeat > fiveMinutesAgo,
-            last_heartbeat: heartbeat.last_heartbeat,
-            version: heartbeat.version,
-            device_id: heartbeat.device_id,
-            modem_count: heartbeat.modem_count
-          };
-        }
-        
-        // Also check database for daemon health
         const daemonHealth = await env.DB.prepare(`
-          SELECT * FROM daemon_health 
+          SELECT version FROM daemon_health 
           WHERE daemon_id = 'orange-pi-main'
           ORDER BY last_heartbeat DESC
           LIMIT 1
         `).first();
         
-        if (daemonHealth) {
-          const now = Date.now();
-          const lastHeartbeat = new Date(daemonHealth.last_heartbeat).getTime();
-          const isOnline = (now - lastHeartbeat) < 5 * 60 * 1000;
-          
-          // Use database modem count if more recent or KV doesn't have it
-          if (!daemonStatus.modem_count || 
-              (daemonHealth.last_heartbeat && lastHeartbeat > daemonStatus.last_heartbeat)) {
-            daemonStatus.modem_count = daemonHealth.modem_count;
-            daemonStatus.online = isOnline;
-          }
-          
-          // When daemon is online, use its modem count as the source of truth for total devices
-          if (isOnline && daemonHealth.modem_count !== null && daemonHealth.modem_count !== undefined) {
-            console.log('[Stats] Using daemon modem count:', daemonHealth.modem_count);
-            actualTotalDevices = daemonHealth.modem_count;
-            
-            // If daemon is missing no-SIM modems, count them from database
-            const noSimModems = await env.DB.prepare(`
-              SELECT COUNT(*) as count FROM phones 
-              WHERE status = 'sim-missing' OR iccid LIKE 'NO_SIM_%'
-            `).first();
-            
-            if (noSimModems && noSimModems.count > 0) {
-              // Include no-SIM modems in total count
-              actualTotalDevices = Math.max(actualTotalDevices, daemonHealth.modem_count + noSimModems.count);
-              console.log('[Stats] Including', noSimModems.count, 'no-SIM modems, total:', actualTotalDevices);
-            }
-          }
+        if (daemonHealth && daemonHealth.version) {
+          daemonStatus.version = daemonHealth.version;
+        }
+        
+        // If daemon reported a modem count, use it as the total
+        if (daemonStatus.online && deviceStats.daemon.reported_count > 0) {
+          actualTotalDevices = deviceStats.daemon.reported_count;
         }
       } catch (error) {
-        console.error('[stats.js] Failed to get daemon status:', error);
+        console.error('[stats.js] Failed to get daemon version:', error);
       }
       
       return new Response(JSON.stringify({
