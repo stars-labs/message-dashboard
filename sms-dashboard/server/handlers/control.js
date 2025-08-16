@@ -313,38 +313,35 @@ export const controlHandler = {
               
               // Then process with AI if available
               if (env.AI) {
-              // Extract verification code with AI
-              const codeRequest = new Request('https://fake.url', {
-                method: 'POST',
-                body: JSON.stringify({
-                  content: msg.content,
-                  message_id: msg.id
-                })
-              });
-              codeRequest.env = env;
-              await aiHandler.extractCode(codeRequest);
-              
-              // Classify message
-              const classifyRequest = new Request('https://fake.url', {
-                method: 'POST',
-                body: JSON.stringify({
-                  content: msg.content,
-                  message_id: msg.id
-                })
-              });
-              classifyRequest.env = env;
-              await aiHandler.classifyMessage(classifyRequest);
-              
-              // Generate embedding for search
-              const embeddingRequest = new Request('https://fake.url', {
-                method: 'POST',
-                body: JSON.stringify({
-                  content: msg.content,
-                  message_id: msg.id
-                })
-              });
-              embeddingRequest.env = env;
-              await aiHandler.generateEmbedding(embeddingRequest);
+                // Extract verification code with AI
+                try {
+                  await aiHandler.extractCodeDirect(env, {
+                    content: msg.content,
+                    message_id: msg.id
+                  });
+                } catch (error) {
+                  console.error(`Failed to extract code for message ${msg.id}:`, error);
+                }
+                
+                // Classify message
+                try {
+                  await aiHandler.classifyMessageDirect(env, {
+                    content: msg.content,
+                    message_id: msg.id
+                  });
+                } catch (error) {
+                  console.error(`Failed to classify message ${msg.id}:`, error);
+                }
+                
+                // Generate embedding for search
+                try {
+                  await aiHandler.generateEmbeddingDirect(env, {
+                    content: msg.content,
+                    message_id: msg.id
+                  });
+                } catch (error) {
+                  console.error(`Failed to generate embedding for message ${msg.id}:`, error);
+                }
               }
             } catch (error) {
               console.error(`Message processing error for message ${msg.id}:`, error);

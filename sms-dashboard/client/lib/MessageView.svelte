@@ -253,6 +253,22 @@
     const b = parseInt(hex.slice(5, 7), 16);
     return `rgba(${r}, ${g}, ${b}, ${alpha})`;
   }
+
+  // Navigate to a specific message by ID
+  export function scrollToMessage(messageId) {
+    console.debug('[MessageView] Scrolling to message:', messageId);
+    const element = document.getElementById(`message-${messageId}`);
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      // Add a highlight effect
+      element.classList.add('highlight-message');
+      setTimeout(() => {
+        element.classList.remove('highlight-message');
+      }, 3000);
+    } else {
+      console.warn('[MessageView] Message element not found:', messageId);
+    }
+  }
 </script>
 
 <div class="{mobile ? 'bg-black/90' : 'tech-card'}">
@@ -364,7 +380,7 @@
     {:else}
       <div class="space-y-2 lg:space-y-3">
         {#each displayMessages as message}
-          <div class="tech-card {message.type === 'sent' ? 'border-l-4 border-l-blue-400' : ''} rounded-xl p-3 lg:p-4 hover:shadow-xl hover:shadow-cyan-500/20 hover:scale-[1.01] active:scale-100 transition-all duration-300">
+          <div id="message-{message.id}" class="tech-card {message.type === 'sent' ? 'border-l-4 border-l-blue-400' : ''} rounded-xl p-3 lg:p-4 hover:shadow-xl hover:shadow-cyan-500/20 hover:scale-[1.01] active:scale-100 transition-all duration-300">
             <div class="flex justify-between items-start mb-2">
               <div class="flex-1">
                 {#if message.type === 'sent'}
@@ -459,3 +475,23 @@
     {/if}
   </div>
 </div>
+
+<style>
+  /* Highlight effect for scrolled-to message */
+  :global(.highlight-message) {
+    animation: pulse-highlight 3s ease-out;
+    box-shadow: 0 0 30px rgba(0, 255, 255, 0.8), inset 0 0 20px rgba(0, 255, 255, 0.3) !important;
+  }
+
+  @keyframes pulse-highlight {
+    0% {
+      box-shadow: 0 0 10px rgba(0, 255, 255, 0.4), inset 0 0 10px rgba(0, 255, 255, 0.2);
+    }
+    20% {
+      box-shadow: 0 0 40px rgba(0, 255, 255, 1), inset 0 0 30px rgba(0, 255, 255, 0.5);
+    }
+    100% {
+      box-shadow: 0 0 10px rgba(0, 255, 255, 0.2), inset 0 0 5px rgba(0, 255, 255, 0.1);
+    }
+  }
+</style>
