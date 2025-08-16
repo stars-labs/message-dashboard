@@ -275,7 +275,6 @@ Return a JSON object with:
             values: embedding,
             metadata: {
               phone_id: message.phone_iccid,
-              timestamp: message.timestamp,
               type: message.type
             }
           }]);
@@ -907,10 +906,7 @@ Return a JSON object with:
               values: embedding,
               metadata: {
                 phone_id: message.phone_iccid,
-                timestamp: message.timestamp,
-                type: message.type,
-                classification: classification.type,
-                has_code: codeResult.code !== null
+                type: message.type
               }
             }]);
           }
@@ -1011,6 +1007,217 @@ Return a JSON object with:
         status: 500,
         headers: { 'Content-Type': 'application/json' }
       });
+    }
+  },
+
+  // Direct method for internal use without Request object
+  async extractCodeDirect(env, { content, message_id }) {
+    try {
+      if (!content) {
+        console.error('extractCodeDirect: Message content is required');
+        return null;
+      }
+
+      // AI prompt for code extraction
+      const prompt = `Extract any verification code, OTP, PIN, or authentication code from this message.
+      
+Message: "${content}"
+
+Return ONLY a JSON object with this exact format:
+{
+  "code": "extracted code or null",
+  "type": "otp|2fa|verification|pin|null",
+  "service": "detected service name or null",
+  "expires_in": "expiration time if mentioned or null",
+  "confidence": 0.0-1.0
+}
+
+Examples:
+- "Your Google verification code is 123456" → {"code": "123456", "type": "verification", "service": "Google", "confidence": 0.95}
+- "您的验证码是 888888，5分钟内有效" → {"code": "888888", "type": "verification", "expires_in": "5 minutes", "confidence": 0.95}
+- "Use 4321 to login to Facebook" → {"code": "4321", "type": "otp", "service": "Facebook", "confidence": 0.9}
+- "Thanks for your order!" → {"code": null, "type": null, "service": null, "confidence": 1.0}`;
+
+      const response = await env.AI.run(AI_MODELS.TEXT_GENERATION, {
+        prompt,
+        max_tokens: 150,
+        temperature: 0.1
+      });
+
+      let result;
+      try {
+        result = JSON.parse(response.response);
+      } catch (e) {
+        console.error('Failed to parse AI response:', response.response);
+        result = { code: null, type: null, confidence: 0 };
+      }
+
+      // Update message with AI-extracted code if message_id provided
+      if (message_id && result.code) {
+        await env.DB.prepare(`
+          UPDATE messages 
+          SET ai_verification_code = ?, ai_confidence = ?, ai_processed_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `).bind(result.code, result.confidence, message_id).run();
+
+        // Also store detailed insights
+        await env.DB.prepare(`
+          INSERT OR REPLACE INTO ai_insights (
+            message_id, verification_code, confidence_score, 
+            sender_category, extracted_at
+          ) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+        `).bind(
+          message_id, 
+          result.code, 
+          result.confidence,
+          result.service
+        ).run();
+      }
+
+      return result;
+    } catch (error) {
+      console.error('Direct AI code extraction error:', error);
+      return null;
+    }
+  },
+
+  // Direct method for classifying message
+  async classifyMessageDirect(env, { content, message_id }) {
+    try {
+      if (!content) {
+        console.error('classifyMessageDirect: Message content is required');
+        return null;
+      }
+
+      const prompt = `Analyze this SMS message and provide detailed classification.
+
+Message: "${content}"
+
+Return a JSON object with:
+{
+  "type": "verification|marketing|personal|transaction|delivery|spam|notification",
+  "is_spam": boolean,
+  "urgency": "high|medium|low",
+  "language": "ISO language code (en, zh, es, etc)",
+  "sender_type": "bank|social|ecommerce|delivery|telecom|government|unknown",
+  "contains_link": boolean,
+  "sentiment": "positive|neutral|negative",
+  "summary": "Brief summary in 10 words or less"
+}`;
+
+      const response = await env.AI.run(AI_MODELS.TEXT_GENERATION, {
+        prompt,
+        max_tokens: 200,
+        temperature: 0.1
+      });
+
+      let classification;
+      try {
+        classification = JSON.parse(response.response);
+      } catch (e) {
+        console.error('Failed to parse classification:', response.response);
+        classification = {
+          type: 'unknown',
+          is_spam: false,
+          urgency: 'low',
+          language: 'en'
+        };
+      }
+
+      // Update message classification if message_id provided
+      if (message_id) {
+        await env.DB.prepare(`
+          UPDATE messages 
+          SET ai_classification = ?, ai_processed_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `).bind(classification.type, message_id).run();
+
+        // Store detailed insights
+        await env.DB.prepare(`
+          INSERT OR REPLACE INTO ai_insights (
+            message_id, classification, is_spam, urgency, 
+            language, sender_category, extracted_at
+          ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        `).bind(
+          message_id,
+          classification.type,
+          classification.is_spam ? 1 : 0,
+          classification.urgency,
+          classification.language,
+          classification.sender_type
+        ).run();
+      }
+
+      return classification;
+    } catch (error) {
+      console.error('Direct message classification error:', error);
+      return null;
+    }
+  },
+
+  // Direct method for generating embeddings
+  async generateEmbeddingDirect(env, { content, message_id }) {
+    try {
+      if (!content) {
+        console.error('generateEmbeddingDirect: Message content is required');
+        return null;
+      }
+
+      console.log(`Generating embedding for message ${message_id}`);
+
+      // Generate embedding
+      const embeddingResponse = await env.AI.run(AI_MODELS.EMBEDDINGS, {
+        text: content
+      });
+
+      const embedding = embeddingResponse.data[0];
+      console.log(`Generated embedding with ${embedding.length} dimensions for message ${message_id}`);
+
+      // Store in Vectorize if message_id provided
+      if (message_id && env.VECTORIZE) {
+        const message = await env.DB.prepare(
+          'SELECT phone_iccid, timestamp, type FROM messages WHERE id = ?'
+        ).bind(message_id).first();
+
+        if (message) {
+          console.log(`Storing embedding in Vectorize for message ${message_id}`);
+          // Only store metadata that's actually used for filtering
+          // phone_id is essential for phone-specific searches
+          // type is occasionally used for filtering (received/sent/verification)
+          // timestamp is not used in vector filters (handled in SQL post-processing)
+          await env.VECTORIZE.upsert([{
+            id: message_id,
+            values: embedding,
+            metadata: {
+              phone_id: message.phone_iccid,
+              type: message.type
+            }
+          }]);
+          console.log(`Successfully stored embedding in Vectorize for message ${message_id}`);
+
+          // Also store in database for backup
+          await env.DB.prepare(`
+            INSERT OR REPLACE INTO message_embeddings (
+              message_id, embedding, model_version, created_at
+            ) VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+          `).bind(
+            message_id,
+            JSON.stringify(embedding),
+            AI_MODELS.EMBEDDINGS
+          ).run();
+        } else {
+          console.warn(`Message ${message_id} not found in database, skipping Vectorize storage`);
+        }
+      } else {
+        if (!env.VECTORIZE) {
+          console.warn('VECTORIZE binding not available, embeddings not stored in vector database');
+        }
+      }
+
+      return embedding;
+    } catch (error) {
+      console.error('Direct embedding generation error:', error);
+      return null;
     }
   },
 
