@@ -377,7 +377,84 @@ My response:`;
   async searchMessages(env, params) {
     const { query, phone_id, time_range, type } = params;
     
-    // Build SQL query based on parameters
+    // Try vector search first if we have a query and Vectorize is available
+    if (query && env.AI && env.VECTORIZE) {
+      try {
+        // Generate embedding for the query
+        const queryEmbedding = await env.AI.run('@cf/baai/bge-base-en-v1.5', {
+          text: query
+        });
+
+        // Build filter for Vectorize based on parameters
+        const filter = {};
+        if (phone_id) {
+          filter.phone_id = phone_id;
+        }
+        if (type && type !== 'all') {
+          filter.type = type;
+        }
+
+        // Perform vector search
+        const searchResults = await env.VECTORIZE.query(
+          queryEmbedding.data[0],
+          {
+            topK: 20,
+            filter: Object.keys(filter).length > 0 ? filter : undefined
+          }
+        );
+        
+        const vectorResults = searchResults.matches || [];
+        
+        if (vectorResults.length > 0) {
+          // Get the message IDs from vector search
+          const messageIds = vectorResults.map(r => r.id);
+          const placeholders = messageIds.map(() => '?').join(',');
+          
+          // Build SQL to get full message details with time filtering
+          let sql = `
+            SELECT m.*, ai.verification_code, ai.classification
+            FROM messages m
+            LEFT JOIN ai_insights ai ON m.id = ai.message_id
+            WHERE m.id IN (${placeholders})
+          `;
+          const bindings = [...messageIds];
+          
+          // Apply time range filter if specified
+          if (time_range) {
+            const ranges = {
+              today: "datetime('now', '-1 day')",
+              week: "datetime('now', '-7 days')",
+              month: "datetime('now', '-30 days')"
+            };
+            if (ranges[time_range]) {
+              sql += ` AND m.timestamp > ${ranges[time_range]}`;
+            }
+          }
+          
+          sql += ` ORDER BY m.timestamp DESC`;
+          
+          const queryResult = await env.DB.prepare(sql).bind(...bindings).all();
+          const results = queryResult?.results || [];
+          
+          return {
+            count: results.length,
+            search_method: 'vector',
+            messages: results.map(m => ({
+              id: m.id,
+              content: m.content.substring(0, 100) + (m.content.length > 100 ? '...' : ''),
+              timestamp: m.timestamp,
+              type: m.type,
+              verification_code: m.verification_code,
+              classification: m.classification
+            }))
+          };
+        }
+      } catch (error) {
+        console.error('Vector search failed, falling back to SQL search:', error);
+      }
+    }
+    
+    // Fallback to SQL-based search
     let sql = `
       SELECT m.*, ai.verification_code, ai.classification
       FROM messages m
@@ -418,6 +495,7 @@ My response:`;
     const results = queryResult?.results || [];
     return {
       count: results.length,
+      search_method: 'sql',
       messages: results.map(m => ({
         id: m.id,
         content: m.content.substring(0, 100) + (m.content.length > 100 ? '...' : ''),

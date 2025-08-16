@@ -18,6 +18,7 @@
   import { applyDataStreamEffect, applyNeonGlow, createMatrixRain, applyHeaderEffect } from "./lib/webgpu-effects.js";
 
   let selectedPhoneIccid = null;
+  let messageViewRef = null;
   $: selectedPhone = selectedPhoneIccid
     ? phoneNumbers.find((p) => p.iccid === selectedPhoneIccid)
     : null;
@@ -1535,8 +1536,21 @@
             on:messageSelected={(e) => {
               // Handle message selection from search
               const message = e.detail;
-              // You might want to scroll to the message or highlight it
               console.debug('Selected message from search:', message);
+              
+              // First, select the phone if it's different
+              if (message.phone_iccid && message.phone_iccid !== selectedPhoneIccid) {
+                selectPhone(message.phone_iccid);
+                // Wait a bit for the messages to load
+                setTimeout(() => {
+                  if (messageViewRef) {
+                    messageViewRef.scrollToMessage(message.id);
+                  }
+                }, 500);
+              } else if (messageViewRef) {
+                // Same phone or no phone selection needed, scroll immediately
+                messageViewRef.scrollToMessage(message.id);
+              }
             }}
           />
         </div>
@@ -1600,7 +1614,7 @@
           <!-- Message View Column -->
           <div class="lg:col-span-2">
             <!-- Always show MessageView at the top -->
-            <MessageView {messages} {selectedPhone} mobile={false} />
+            <MessageView bind:this={messageViewRef} {messages} {selectedPhone} mobile={false} />
             <!-- Show PhoneDetails below if selected -->
             {#if selectedPhone}
               <div class="mt-4">
