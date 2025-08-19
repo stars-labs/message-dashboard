@@ -2,9 +2,9 @@ import { nanoid } from 'nanoid';
 
 // AI Models configuration
 const AI_MODELS = {
-  TEXT_GENERATION: '@cf/meta/llama-4-scout-17b-16e-instruct',
+  TEXT_GENERATION: '@cf/openai/gpt-oss-120b',
   TEXT_CLASSIFICATION: '@cf/huggingface/distilbert-sst-2-int8',
-  EMBEDDINGS: '@cf/baai/bge-base-en-v1.5',
+  EMBEDDINGS: '@cf/baai/bge-m3',
   TRANSLATION: '@cf/meta/m2m100-1.2b'
 };
 

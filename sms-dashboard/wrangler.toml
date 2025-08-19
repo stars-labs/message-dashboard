@@ -1,27 +1,27 @@
 name = "sms-dashboard"
 main = "server/index.js"
 compatibility_date = "2025-01-09"
-account_id = "2764ae0fd9a5cb92c9ac67708620e54c"
+account_id = "793e3286eaca411bf1eebaf4b8c7051e"
 
 # No compatibility flags needed for 2025-01-09
 
 # Routes
 workers_dev = true
-routes = [
-  { pattern = "sexy.qzz.io", custom_domain = true }
-]
+# routes = [
+#   { pattern = "sexy.qzz.io", custom_domain = true }
+# ]
 
 # D1 Database binding
 [[d1_databases]]
 binding = "DB"
 database_name = "sms-dashboard"
-database_id = "14311b51-4169-4449-9f41-30ca4428a76e"
+database_id = "e6e594a7-9b82-4cff-a369-bad7c0e735f6"
 migrations_dir = "migrations"
 
 # KV Namespace for sessions
 [[kv_namespaces]]
 binding = "SESSIONS"
-id = "92704d6efb8d466598db166d944697a7"
+id = "4d7e71fcf5c44a469aa63e28f60cb6d7"
 
 # Environment variables
 [vars]
