@@ -1,0 +1,167 @@
+{
+  "name": "chat_conversations",
+  "schema": "CREATE TABLE chat_conversations (\n    id TEXT PRIMARY KEY,\n    user_id TEXT NOT NULL,  -- Auth0 user ID (sub claim)\n    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n    last_message_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n    message_count INTEGER DEFAULT 0,\n    context JSON\n)",
+  "indexes": [
+    "CREATE INDEX idx_chat_conversations_user_id ON chat_conversations(user_id)\"",
+    "CREATE INDEX idx_chat_conversations_last_message ON chat_conversations(last_message_at DESC)\""
+  ],
+  "data": [
+    {
+      "results": [
+        {
+          "id": "conv_lm_97pH6uN202f3BMAYx3",
+          "user_id": "google-oauth2|102811072453011538327",
+          "started_at": "2025-08-02 10:51:12",
+          "last_message_at": "2025-08-02 10:51:21",
+          "message_count": 2,
+          "context": null
+        },
+        {
+          "id": "conv_-Rrv0dMwpVsjIDN_8xwo5",
+          "user_id": "google-oauth2|102811072453011538327",
+          "started_at": "2025-08-02 10:52:25",
+          "last_message_at": "2025-08-02 10:52:25",
+          "message_count": 0,
+          "context": null
+        },
+        {
+          "id": "conv_NDX8Ga0IE4u5eEMkPkk0q",
+          "user_id": "google-oauth2|102811072453011538327",
+          "started_at": "2025-08-02 10:52:38",
+          "last_message_at": "2025-08-02 10:53:25",
+          "message_count": 6,
+          "context": null
+        },
+        {
+          "id": "conv_qULp3KSrBgwodGfyNZ-H1",
+          "user_id": "google-oauth2|102811072453011538327",
+          "started_at": "2025-08-02 10:58:47",
+          "last_message_at": "2025-08-02 10:58:47",
+          "message_count": 0,
+          "context": null
+        },
+        {
+          "id": "conv_8TubE0MVe1ToblBjEDxG0",
+          "user_id": "google-oauth2|102811072453011538327",
+          "started_at": "2025-08-02 11:03:38",
+          "last_message_at": "2025-08-02 11:05:15",
+          "message_count": 6,
+          "context": null
+        },
+        {
+          "id": "conv_VA1dXeBpUhYUibPmz7eBF",
+          "user_id": "google-oauth2|102811072453011538327",
+          "started_at": "2025-08-02 11:16:38",
+          "last_message_at": "2025-08-02 11:17:35",
+          "message_count": 6,
+          "context": null
+        },
+        {
+          "id": "conv_81Ts50ygXHMbb_HSjWjEu",
+          "user_id": "google-oauth2|102811072453011538327",
+          "started_at": "2025-08-02 11:23:26",
+          "last_message_at": "2025-08-02 11:24:02",
+          "message_count": 4,
+          "context": null
+        },
+        {
+          "id": "conv_Voddi2iBA0Ro34fbORsH_",
+          "user_id": "google-oauth2|102811072453011538327",
+          "started_at": "2025-08-02 11:33:07",
+          "last_message_at": "2025-08-02 11:33:39",
+          "message_count": 4,
+          "context": null
+        },
+        {
+          "id": "conv_idHiCo-bQDGkWQLsorBIc",
+          "user_id": "google-oauth2|102811072453011538327",
+          "started_at": "2025-08-02 11:57:42",
+          "last_message_at": "2025-08-02 11:57:53",
+          "message_count": 2,
+          "context": null
+        },
+        {
+          "id": "conv_YNbvgJJqbiHeGymjWJTPw",
+          "user_id": "google-oauth2|102811072453011538327",
+          "started_at": "2025-08-03 12:54:17",
+          "last_message_at": "2025-08-03 12:54:17",
+          "message_count": 0,
+          "context": null
+        },
+        {
+          "id": "conv_qFQ_fa_8CKVTVwNt_d4OR",
+          "user_id": "google-oauth2|102811072453011538327",
+          "started_at": "2025-08-03 12:58:04",
+          "last_message_at": "2025-08-03 12:59:12",
+          "message_count": 4,
+          "context": null
+        },
+        {
+          "id": "conv_PWqt4ybwlnDiI14qxzEOH",
+          "user_id": "google-oauth2|102811072453011538327",
+          "started_at": "2025-08-03 13:02:26",
+          "last_message_at": "2025-08-03 13:02:44",
+          "message_count": 2,
+          "context": null
+        },
+        {
+          "id": "conv_RQCPSLt3FkDKveoBObYSW",
+          "user_id": "google-oauth2|102811072453011538327",
+          "started_at": "2025-08-03 13:19:23",
+          "last_message_at": "2025-08-03 13:20:09",
+          "message_count": 4,
+          "context": null
+        },
+        {
+          "id": "conv_aJTB-kd96Yuw37DU0rc3q",
+          "user_id": "google-oauth2|102811072453011538327",
+          "started_at": "2025-08-04 03:01:33",
+          "last_message_at": "2025-08-04 03:01:51",
+          "message_count": 2,
+          "context": null
+        },
+        {
+          "id": "conv_9dI56I-RgHNA5QK10aGPA",
+          "user_id": "google-oauth2|102811072453011538327",
+          "started_at": "2025-08-08 04:05:49",
+          "last_message_at": "2025-08-08 04:06:34",
+          "message_count": 2,
+          "context": null
+        },
+        {
+          "id": "conv_-xC-vE-5zZ8z1p6odYwVJ",
+          "user_id": "google-oauth2|102811072453011538327",
+          "started_at": "2025-08-16 10:33:00",
+          "last_message_at": "2025-08-16 10:34:31",
+          "message_count": 6,
+          "context": null
+        },
+        {
+          "id": "conv_Uwh_xkjEiqib_IBMGwYDB",
+          "user_id": "google-oauth2|102811072453011538327",
+          "started_at": "2025-08-17 10:02:06",
+          "last_message_at": "2025-08-17 10:02:30",
+          "message_count": 2,
+          "context": null
+        }
+      ],
+      "success": true,
+      "meta": {
+        "served_by": "v3-prod",
+        "served_by_region": "APAC",
+        "served_by_primary": true,
+        "timings": {
+          "sql_duration_ms": 0.3724
+        },
+        "duration": 0.3724,
+        "changes": 0,
+        "last_row_id": 54,
+        "changed_db": false,
+        "size_after": 3842048,
+        "rows_read": 17,
+        "rows_written": 0
+      }
+    }
+  ],
+  "rowCount": 1
+}

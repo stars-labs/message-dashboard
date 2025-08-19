@@ -200,6 +200,19 @@
   onMount(() => {
     console.debug("[IccidMappings] Component mounted!");
     loadMappings();
+    
+    // Close export menu when clicking outside
+    const handleClickOutside = (event) => {
+      if (showExportMenu && !event.target.closest('.export-menu-container')) {
+        showExportMenu = false;
+      }
+    };
+    
+    document.addEventListener('click', handleClickOutside);
+    
+    return () => {
+      document.removeEventListener('click', handleClickOutside);
+    };
   });
 
   // Country list with flags
@@ -271,6 +284,102 @@
     // Default color for unknown carriers
     return "bg-gray-900/50 text-gray-300 border border-gray-500/30";
   }
+
+  // Export functions
+  async function exportAllMappings(format = 'csv') {
+    try {
+      // Load all mappings without pagination
+      const response = await api.iccidMappings.list({
+        page: 1,
+        limit: 10000 // Get all mappings
+      });
+
+      if (!response || !response.success) {
+        error = "Failed to load mappings for export";
+        return;
+      }
+
+      const allMappings = response.data?.results || response.data || [];
+      
+      if (allMappings.length === 0) {
+        error = "No mappings to export";
+        return;
+      }
+
+      if (format === 'csv') {
+        exportAsCSV(allMappings);
+      } else if (format === 'json') {
+        exportAsJSON(allMappings);
+      }
+    } catch (err) {
+      error = err.message || "Failed to export mappings";
+      console.error("Export error:", err);
+    }
+  }
+
+  function exportAsCSV(data) {
+    // CSV header
+    const headers = ['ICCID', 'Phone Number', 'Country', 'Carrier', 'Status', 'Description', 'Created Time', 'Last Used'];
+    
+    // Convert data to CSV rows
+    const rows = data.map(item => [
+      item.iccid || '',
+      item.phone_number || '',
+      getCountryName(item.country) || item.country || '',
+      item.carrier || '',
+      item.is_active ? '启用' : '停用',
+      item.description || '',
+      item.created_at ? new Date(item.created_at).toLocaleString('zh-CN') : '',
+      item.last_used ? new Date(item.last_used).toLocaleString('zh-CN') : ''
+    ]);
+    
+    // Combine headers and rows
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.map(cell => `"${cell.replace(/"/g, '""')}"`).join(','))
+    ].join('\n');
+    
+    // Create download
+    const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `iccid_mappings_${new Date().toISOString().split('T')[0]}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+
+  function exportAsJSON(data) {
+    // Format data for JSON export
+    const exportData = data.map(item => ({
+      iccid: item.iccid,
+      phone_number: item.phone_number,
+      country: item.country,
+      country_name: getCountryName(item.country),
+      carrier: item.carrier,
+      is_active: item.is_active,
+      description: item.description,
+      created_at: item.created_at,
+      last_used: item.last_used
+    }));
+    
+    const jsonContent = JSON.stringify(exportData, null, 2);
+    
+    // Create download
+    const blob = new Blob([jsonContent], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `iccid_mappings_${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+
+  let showExportMenu = false;
 </script>
 
 {console.debug("[IccidMappings] Component rendering")}
@@ -278,6 +387,40 @@
   <div class="flex justify-between items-center mb-6">
     <h2 class="text-2xl font-bold data-value high-contrast header-effect-target">ICCID 映射管理</h2>
     <div class="flex gap-2">
+      <!-- Export button with dropdown -->
+      <div class="relative export-menu-container">
+        <button
+          on:click={() => (showExportMenu = !showExportMenu)}
+          class="px-4 py-2 tech-button bg-green-900/80 hover:bg-green-800/90 transition-all duration-300 flex items-center gap-2"
+        >
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+          </svg>
+          导出
+        </button>
+        {#if showExportMenu}
+          <div class="absolute right-0 mt-2 w-48 bg-gray-900 border border-cyan-500/30 rounded-lg shadow-lg z-50">
+            <button
+              on:click={() => {
+                exportAllMappings('csv');
+                showExportMenu = false;
+              }}
+              class="w-full px-4 py-2 text-left hover:bg-cyan-900/30 transition-colors"
+            >
+              导出为 CSV
+            </button>
+            <button
+              on:click={() => {
+                exportAllMappings('json');
+                showExportMenu = false;
+              }}
+              class="w-full px-4 py-2 text-left hover:bg-cyan-900/30 transition-colors"
+            >
+              导出为 JSON
+            </button>
+          </div>
+        {/if}
+      </div>
       <button
         on:click={() => (showBulkImport = true)}
         class="px-4 py-2 tech-button bg-gray-900/80 hover:bg-gray-800/90 transition-all duration-300"

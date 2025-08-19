@@ -1,0 +1,27 @@
+{
+  "name": "ai_insights",
+  "schema": "CREATE TABLE ai_insights (\n    message_id TEXT PRIMARY KEY,\n    classification TEXT,\n    verification_code TEXT,\n    confidence_score REAL,\n    sender_category TEXT,\n    language TEXT,\n    is_spam BOOLEAN DEFAULT FALSE,\n    urgency TEXT CHECK(urgency IN ('high', 'medium', 'low')),\n    extracted_entities JSON,\n    extracted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE\n)",
+  "indexes": [],
+  "data": [
+    {
+      "results": [],
+      "success": true,
+      "meta": {
+        "served_by": "v3-prod",
+        "served_by_region": "APAC",
+        "served_by_primary": true,
+        "timings": {
+          "sql_duration_ms": 0.4555
+        },
+        "duration": 0.4555,
+        "changes": 0,
+        "last_row_id": 54,
+        "changed_db": false,
+        "size_after": 3842048,
+        "rows_read": 1,
+        "rows_written": 0
+      }
+    }
+  ],
+  "rowCount": 1
+}
