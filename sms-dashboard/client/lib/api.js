@@ -1,5 +1,6 @@
 import { auth } from './auth';
 import { pollingService } from './polling-service';
+import { trackApiError, addBreadcrumb, startSpan } from './sentry-utils';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 
   (typeof window !== 'undefined' ? window.location.origin : 'https://sms-dashboard-api.workers.dev');
@@ -8,45 +9,85 @@ export async function fetchWithAuth(endpoint, options = {}) {
   const token = auth.token || localStorage.getItem('auth_token');
   const fullUrl = `${API_BASE_URL}${endpoint}`;
   
+  // Start performance tracking
+  let span = null;
+  try {
+    span = startSpan(`api.${options.method || 'GET'} ${endpoint}`, 'http.client');
+  } catch (e) {
+    // Sentry span might not be available in all contexts
+  }
+  
+  // Add breadcrumb for API call
+  addBreadcrumb(`API ${options.method || 'GET'} ${endpoint}`, 'api', {
+    url: fullUrl,
+    method: options.method || 'GET'
+  });
+  
   console.debug(`[fetchWithAuth] Making request to: ${fullUrl}`);
   console.debug(`[fetchWithAuth] Options:`, options);
   console.debug(`[fetchWithAuth] Token present:`, !!token);
   
-  const response = await fetch(fullUrl, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': token ? `Bearer ${token}` : '',
-      ...options.headers,
-    },
-  });
-  
-  console.debug(`[fetchWithAuth] Response status: ${response.status}`);
-  console.debug(`[fetchWithAuth] Response headers:`, Object.fromEntries(response.headers.entries()));
-  
-  if (response.status === 401) {
-    console.log(`[fetchWithAuth] 401 Unauthorized - logging out`);
-    // Token expired or invalid, redirect to login
-    auth.logout();
-    throw new Error('Authentication required');
-  }
-  
-  // Check if response is ok before parsing JSON
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.debug(`[fetchWithAuth] Error response text:`, errorText);
-    let errorData;
-    try {
-      errorData = JSON.parse(errorText);
-    } catch (e) {
-      errorData = { error: 'Unknown error' };
+  try {
+    const response = await fetch(fullUrl, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': token ? `Bearer ${token}` : '',
+        ...options.headers,
+      },
+    });
+    
+    console.debug(`[fetchWithAuth] Response status: ${response.status}`);
+    console.debug(`[fetchWithAuth] Response headers:`, Object.fromEntries(response.headers.entries()));
+    
+    if (response.status === 401) {
+      console.log(`[fetchWithAuth] 401 Unauthorized - logging out`);
+      // Track authentication error
+      trackApiError(endpoint, 401, { error: 'Authentication required' }, options.body);
+      // Token expired or invalid, redirect to login
+      auth.logout();
+      throw new Error('Authentication required');
     }
-    throw new Error(errorData.error || `Request failed with status ${response.status}`);
+    
+    // Check if response is ok before parsing JSON
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.debug(`[fetchWithAuth] Error response text:`, errorText);
+      let errorData;
+      try {
+        errorData = JSON.parse(errorText);
+      } catch (e) {
+        errorData = { error: 'Unknown error' };
+      }
+      
+      // Track API error
+      trackApiError(endpoint, response.status, errorData, options.body);
+      
+      throw new Error(errorData.error || `Request failed with status ${response.status}`);
+    }
+    
+    const responseData = await response.json();
+    console.debug(`[fetchWithAuth] Response data:`, responseData);
+    
+    // Finish span successfully
+    if (span && typeof span.end === 'function') {
+      span.end();
+    }
+    
+    return responseData;
+  } catch (error) {
+    // Finish span with error
+    if (span && typeof span.end === 'function') {
+      span.end();
+    }
+    
+    // Track network errors
+    if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+      trackApiError(endpoint, 0, { error: 'Network error', message: error.message }, options.body);
+    }
+    
+    throw error;
   }
-  
-  const responseData = await response.json();
-  console.debug(`[fetchWithAuth] Response data:`, responseData);
-  return responseData;
 }
 
 // Polling-based API with HTTP fallback

@@ -11,11 +11,14 @@
   import ChatAssistant from "./lib/ChatAssistant.svelte";
   import SemanticSearch from "./lib/SemanticSearch.svelte";
   import KeywordConfig from "./lib/KeywordConfig.svelte";
+  import ErrorBoundary from "./lib/ErrorBoundary.svelte";
+  import SentryTest from "./lib/SentryTest.svelte";
   import { api } from "./lib/api.js";
   import { pollingService } from "./lib/polling-service.js";
   import { auth } from "./lib/auth.js";
   import config from "./lib/config.js";
   import { applyDataStreamEffect, applyNeonGlow, createMatrixRain, applyHeaderEffect } from "./lib/webgpu-effects.js";
+  import { trackUserInteraction, addBreadcrumb, captureException } from "./lib/sentry-utils.js";
 
   let selectedPhoneIccid = null;
   let messageViewRef = null;
@@ -141,6 +144,8 @@
   // Hash routing handler
   function handleHashChange() {
     const hash = window.location.hash.slice(1);
+    const previousView = currentView;
+    
     if (hash === 'keywords') {
       console.debug('[App] Hash routing: switching to keywords view');
       currentView = 'keywords';
@@ -150,6 +155,18 @@
     } else if (hash === 'dashboard' || hash === '') {
       console.debug('[App] Hash routing: switching to dashboard view');
       currentView = 'dashboard';
+    }
+    
+    // Track navigation
+    if (previousView !== currentView) {
+      trackUserInteraction('navigate', `tab-${currentView}`, {
+        from: previousView,
+        to: currentView
+      });
+      addBreadcrumb(`Navigated to ${currentView}`, 'navigation', {
+        from: previousView,
+        to: currentView
+      });
     }
   }
 
@@ -177,18 +194,21 @@
             .then((r) => r.json())
             .catch((err) => {
               console.error('[App] Failed to fetch phones:', err);
+              captureException(err, { context: { endpoint: '/api/phones' } });
               return { success: false, data: [] };
             }),
           fetch("/api/messages?limit=2000", { headers })
             .then((r) => r.json())
             .catch((err) => {
               console.error('[App] Failed to fetch messages:', err);
+              captureException(err, { context: { endpoint: '/api/messages' } });
               return { success: false, data: [] };
             }),
           fetch("/api/stats", { headers })
             .then((r) => r.json())
             .catch((err) => {
               console.error('[App] Failed to fetch stats:', err);
+              captureException(err, { context: { endpoint: '/api/stats' } });
               return { success: false };
             }),
         ]);
@@ -1479,10 +1499,11 @@
     {/if}
 
     {#if currentView === "dashboard"}
-      <!-- Desktop Stats -->
-      <div class="hidden lg:block px-8 py-6">
-        <div class="grid grid-cols-2 lg:grid-cols-4 gap-6 hex-pattern">
-          <StatsCard
+      <ErrorBoundary componentName="Dashboard">
+        <!-- Desktop Stats -->
+        <div class="hidden lg:block px-8 py-6">
+          <div class="grid grid-cols-2 lg:grid-cols-4 gap-6 hex-pattern">
+            <StatsCard
             title="在线设备"
             value={stats.onlineDevices}
             total={stats.totalDevices}
@@ -1638,16 +1659,21 @@
           </div>
         </div>
       </div>
+      </ErrorBoundary>
     {:else if currentView === "iccid-mappings"}
-      <!-- ICCID Mappings View -->
-      <div class="px-4 lg:px-8 py-6">
-        <IccidMappings />
-      </div>
+      <ErrorBoundary componentName="IccidMappings">
+        <!-- ICCID Mappings View -->
+        <div class="px-4 lg:px-8 py-6">
+          <IccidMappings />
+        </div>
+      </ErrorBoundary>
     {:else if currentView === "keywords"}
-      <!-- Keywords Configuration View -->
-      <div class="px-4 lg:px-8 py-6">
-        <KeywordConfig />
-      </div>
+      <ErrorBoundary componentName="Keywords">
+        <!-- Keywords Configuration View -->
+        <div class="px-4 lg:px-8 py-6">
+          <KeywordConfig />
+        </div>
+      </ErrorBoundary>
     {/if}
   </div>
 {/if}
@@ -1666,4 +1692,9 @@
 <!-- AI Chat Assistant -->
 {#if user}
   <ChatAssistant {user} />
+{/if}
+
+<!-- Sentry Test Component (Development Only) -->
+{#if import.meta.env.MODE === 'development'}
+  <SentryTest />
 {/if}

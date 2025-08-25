@@ -1,3 +1,5 @@
+import { setUserContext } from './sentry-utils';
+
 class Auth0Service {
   constructor() {
     this.baseUrl = import.meta.env.VITE_API_BASE_URL || 
@@ -25,6 +27,11 @@ class Auth0Service {
       // Get user info
       await this.getUser();
       
+      // Set Sentry user context
+      if (this.user) {
+        setUserContext(this.user);
+      }
+      
       return true;
     }
     
@@ -35,6 +42,9 @@ class Auth0Service {
     this.token = null;
     this.user = null;
     localStorage.removeItem('auth_token');
+    
+    // Clear Sentry user context
+    setUserContext(null);
     
     // Redirect to Auth0 logout
     window.location.href = `${this.baseUrl}/logout`;
@@ -55,11 +65,18 @@ class Auth0Service {
       if (response.ok) {
         const data = await response.json();
         this.user = data.user;
+        
+        // Set Sentry user context
+        if (this.user) {
+          setUserContext(this.user);
+        }
+        
         return this.user;
       } else if (response.status === 401) {
         // Token expired or invalid
         this.token = null;
         localStorage.removeItem('auth_token');
+        setUserContext(null);
         return null;
       }
     } catch (error) {
