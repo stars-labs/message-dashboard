@@ -1,3 +1,5 @@
+import { trackWebSocketError, addBreadcrumb } from './sentry-utils';
+
 // Server-Sent Events real-time service
 export class RealtimeService {
   constructor() {
@@ -17,15 +19,24 @@ export class RealtimeService {
     this.isIntentionallyClosed = false;
     this.token = token; // Store token for API requests
     
+    // Add breadcrumb for connection attempt
+    addBreadcrumb('RealtimeService connect attempt', 'websocket', { hasToken: !!token });
+    
     if (!token) {
       console.error('[RealtimeService] No token provided');
-      throw new Error('No auth token available');
+      const error = new Error('No auth token available');
+      trackWebSocketError('connect', error, { reason: 'missing_token' });
+      throw error;
     }
 
     try {
       await this.connectSSE(token);
     } catch (sseError) {
       console.error('SSE connection failed:', sseError);
+      trackWebSocketError('connect', sseError, { 
+        type: 'sse',
+        reconnectAttempts: this.reconnectAttempts 
+      });
       this.scheduleReconnect(token);
     }
   }
@@ -47,6 +58,9 @@ export class RealtimeService {
         console.log('[RealtimeService] SSE connected successfully');
         this.isConnected = true;
         this.reconnectAttempts = 0;
+        
+        // Add breadcrumb for successful connection
+        addBreadcrumb('SSE connected', 'websocket', { type: 'sse' });
         
         if (!connectionResolved) {
           connectionResolved = true;
@@ -73,6 +87,13 @@ export class RealtimeService {
       this.eventSource.onerror = (error) => {
         console.error('[RealtimeService] SSE error:', error);
         this.isConnected = false;
+        
+        // Track SSE error
+        trackWebSocketError('sse_error', error, {
+          type: 'sse',
+          isConnected: this.isConnected,
+          reconnectAttempts: this.reconnectAttempts
+        });
         
         if (this.eventSource) {
           this.eventSource.close();

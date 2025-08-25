@@ -8,7 +8,7 @@ const LockFreeMessageQueue = @import("lockfree_message_queue.zig").LockFreeMessa
 const worker_threads = @import("worker_threads.zig");
 const build_options = @import("build_options");
 const LockFreePriorityManager = @import("lockfree_priority_manager.zig").LockFreePriorityManager;
-const MessageDeduplicator = @import("bloom_filter.zig").MessageDeduplicator;
+// MessageDeduplicator removed - not needed for receiving messages
 const WorkerPool = @import("worker_pool.zig").WorkerPool;
 const LockFreeMPMC = @import("lockfree_mpmc.zig").LockFreeMPMC;
 
@@ -34,7 +34,6 @@ const ParallelContext = struct {
     modem_manager: *ModemManager,
     message_queue: *LockFreeMessageQueue,
     results: *LockFreeMPMC(ModemCheckResult),
-    deduplicator: *MessageDeduplicator,
 };
 
 fn checkModemMessages(context: *ParallelContext, modem_id: []const u8) void {
@@ -143,8 +142,8 @@ pub fn main() !void {
     var priority_manager = LockFreePriorityManager.init(allocator);
     defer priority_manager.deinit();
     
-    var deduplicator = try MessageDeduplicator.init(allocator);
-    defer deduplicator.deinit();
+    // Message deduplicator removed - not needed for receiving messages
+    // The server handles any necessary deduplication
     
     // Event loop removed - was causing deadlock and not being used
     
@@ -298,7 +297,6 @@ pub fn main() !void {
             .modem_manager = &modem_manager,
             .message_queue = &message_queue,
             .results = &results_queue,
-            .deduplicator = &deduplicator,
         };
         
         // Get modems to check based on priority
@@ -440,30 +438,13 @@ pub fn main() !void {
                 }
                 total_messages += result.messages.len;
                 
-                // Queue messages for processing with deduplication
+                // Queue ALL received messages for upload - no deduplication needed
+                // The server will handle any deduplication if necessary
                 for (result.messages) |msg| {
-                    // Create deduplication key
-                    const key = MessageDeduplicator.makeKey(allocator, msg.message.phone_iccid, msg.message.content, msg.message.timestamp) catch {
-                        // If we can't make a key, queue it anyway
-                        message_queue.push(msg) catch |err| {
-                            std.log.err("Failed to queue message: {any}", .{err});
-                        };
-                        continue;
+                    message_queue.push(msg) catch |err| {
+                        std.log.err("Failed to queue message: {any}", .{err});
                     };
-                    defer allocator.free(key);
-                    
-                    // Check for duplicate
-                    if (!deduplicator.isDuplicate(key)) {
-                        message_queue.push(msg) catch |err| {
-                            std.log.err("Failed to queue message: {any}", .{err});
-                        };
-                        std.log.debug("Queued message (queue size: {d})", .{message_queue.size()});
-                        deduplicator.addMessage(key) catch |err| {
-                            std.log.warn("Failed to add message to deduplicator: {any}", .{err});
-                        };
-                    } else {
-                        std.log.debug("Skipped duplicate message", .{});
-                    }
+                    std.log.debug("Queued message (queue size: {d})", .{message_queue.size()});
                 }
             }
         }
@@ -482,16 +463,12 @@ pub fn main() !void {
             const avg_ms_per_modem = if (modems_to_check.len > 0) 
                 @divFloor(cycle_time_ms, modems_to_check.len) else 0;
             const tracked_messages = modem_manager.message_tracker.count();
-            const dedup_stats = deduplicator.getStats();
             const worker_stats = worker_pool.getQueueStats();
             std.log.info("⚡ Cycle {d}: {d}ms total, ~{d}ms per modem, {d}/{d} modems checked", .{
                 cycle_count, cycle_time_ms, avg_ms_per_modem, modems_to_check.len, valid_modems.items.len
             });
             std.log.info("🔧 Worker pool: queue_size={d}, head={d}, tail={d}, active_workers={d}", .{
                 worker_stats.size, worker_stats.head, worker_stats.tail, worker_stats.active_workers
-            });
-            std.log.info("📈 Dedup stats: ~{d:.0} in bloom, {d} in cache, {d:.3}% false positive", .{
-                dedup_stats.bloom_estimate, dedup_stats.cache_size, dedup_stats.false_positive_prob * 100
             });
             std.log.info("💾 Tracked messages: {d}", .{tracked_messages});
         }

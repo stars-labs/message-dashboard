@@ -13,8 +13,9 @@
   $: filteredMessages = selectedPhone 
     ? messages.filter(msg => {
         const matches = msg.phone_iccid === selectedPhone.iccid;
-        if (!matches && messages.indexOf(msg) < 5) {
-          console.warn('[MessageView] Message excluded by filter:', {
+        // Only log in development mode to reduce console noise
+        if (!matches && messages.indexOf(msg) < 5 && import.meta.env.MODE === 'development') {
+          console.debug('[MessageView] Message excluded by filter:', {
             msgIccid: msg.phone_iccid,
             selectedIccid: selectedPhone.iccid,
             msgContent: msg.content?.substring(0, 30) + '...',

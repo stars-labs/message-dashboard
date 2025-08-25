@@ -724,42 +724,15 @@ pub const ModemManager = struct {
                 }
 
                 if (self.getSmsDetails(sms_id_str, modem_id)) |message_info| {
-                    // Check if this message has already been processed
-                    const is_processed = self.message_tracker.isProcessed(
-                        modem_id,
-                        sms_id_str,
-                        message_info.message.phone_number,
-                        message_info.message.timestamp
-                    ) catch false;
-                    
-                    if (is_processed) {
-                        // Skip already processed message
-                        // Free the message info since we're not using it
-                        self.allocator.free(message_info.modem_id);
-                        self.allocator.free(message_info.sms_id);
-                        self.allocator.free(message_info.message.phone_iccid);
-                        self.allocator.free(message_info.message.phone_number);
-                        self.allocator.free(message_info.message.content);
-                        self.allocator.free(message_info.message.timestamp);
-                        continue;
-                    }
-                    
-                    // This is a new message!
+                    // Upload ALL messages - server handles deduplication
+                    // No local message tracking needed for received messages
                     std.log.info("📱 New SMS found: {s} from {s} on modem {s}", .{ 
                         sms_id_str, 
                         message_info.message.phone_number,
                         modem_id 
                     });
                     
-                    // Mark this message as processed
-                    self.message_tracker.markProcessed(
-                        modem_id,
-                        sms_id_str,
-                        message_info.message.phone_number,
-                        message_info.message.timestamp
-                    ) catch |err| {
-                        std.log.warn("Failed to mark message as processed: {any}", .{err});
-                    };
+                    // No message tracking needed - upload all messages
                     
                     try messages.append(message_info);
                 } else |_| {
