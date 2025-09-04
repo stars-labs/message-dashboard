@@ -22,9 +22,13 @@ pub const WorkerContext = struct {
 pub fn messageProcessorThread(context: *WorkerContext) !void {
     std.log.info("🚀 Message processor thread started", .{});
     
+    var last_upload_time = std.time.milliTimestamp();
+    var pending_messages = std.ArrayList(types.MessageInfo).init(context.allocator);
+    defer pending_messages.deinit();
+    
     while (!context.should_exit.load(.acquire)) {
-        // Get batch of messages from lock-free queue
-        var batch_buffer: [50]types.MessageInfo = undefined;
+        // Get batch of messages from lock-free queue (reduced from 50 to 10 for faster response)
+        var batch_buffer: [10]types.MessageInfo = undefined;
         const queue_size = context.message_queue.size();
         if (queue_size > 0) {
             std.log.debug("📬 Message processor: Queue has {d} items, attempting to pop batch", .{queue_size});
@@ -32,29 +36,55 @@ pub fn messageProcessorThread(context: *WorkerContext) !void {
         const message_count = context.message_queue.popBatch(&batch_buffer);
         
         if (message_count == 0) {
-            // No messages, sleep briefly
-            std.time.sleep(100 * std.time.ns_per_ms);
-            continue;
-        }
-        
-        const messages = batch_buffer[0..message_count];
-        
-        std.log.info("📤 Processing {d} messages", .{message_count});
-        
-        // Convert to API format and deduplicate
-        var unique_messages = std.ArrayList(types.Message).init(context.allocator);
-        defer unique_messages.deinit();
-        
-        var seen = std.hash_map.HashMap([]const u8, void, std.hash_map.StringContext, std.hash_map.default_max_load_percentage).init(context.allocator);
-        defer {
-            var it = seen.iterator();
-            while (it.next()) |entry| {
-                context.allocator.free(entry.key_ptr.*);
+            // Check if we have pending messages to upload (time-based batching)
+            const now = std.time.milliTimestamp();
+            if (pending_messages.items.len > 0 and (now - last_upload_time) > 50) { // Upload after 50ms
+                // Process pending messages
+                const messages_to_upload = try pending_messages.toOwnedSlice();
+                defer {
+                    for (messages_to_upload) |msg| {
+                        context.allocator.free(msg.modem_id);
+                        context.allocator.free(msg.sms_id);
+                        // Message fields are handled by upload function
+                    }
+                    context.allocator.free(messages_to_upload);
+                }
+                pending_messages = std.ArrayList(types.MessageInfo).init(context.allocator);
+                
+                // Continue to upload logic below
+            } else {
+                // No messages, sleep very briefly to reduce latency
+                std.time.sleep(10 * std.time.ns_per_ms); // Reduced from 100ms to 10ms
+                continue;
             }
-            seen.deinit();
         }
         
-        for (messages) |msg_info| {
+        // Add new messages to pending batch
+        const messages = batch_buffer[0..message_count];
+        for (messages) |msg| {
+            try pending_messages.append(msg);
+        }
+        
+        // Upload immediately if we have 5+ messages or 50ms has passed
+        const now = std.time.milliTimestamp();
+        if (pending_messages.items.len >= 5 or (now - last_upload_time) > 50) {
+            std.log.info("📤 Processing {d} messages (batch trigger)", .{pending_messages.items.len});
+            last_upload_time = now;
+            
+            // Convert to API format and deduplicate
+            var unique_messages = std.ArrayList(types.Message).init(context.allocator);
+            defer unique_messages.deinit();
+            
+            var seen = std.hash_map.HashMap([]const u8, void, std.hash_map.StringContext, std.hash_map.default_max_load_percentage).init(context.allocator);
+            defer {
+                var it = seen.iterator();
+                while (it.next()) |entry| {
+                    context.allocator.free(entry.key_ptr.*);
+                }
+                seen.deinit();
+            }
+            
+            for (pending_messages.items) |msg_info| {
             const key = try std.fmt.allocPrint(context.allocator, "{s}:{s}:{s}", .{
                 msg_info.message.phone_iccid,
                 msg_info.message.phone_number,
@@ -82,23 +112,25 @@ pub fn messageProcessorThread(context: *WorkerContext) !void {
         
         std.log.info("✅ Successfully uploaded {d} messages", .{unique_messages.items.len});
         
-        // Delete messages from modems
-        for (messages) |msg_info| {
-            context.modem_manager.deleteMessage(msg_info.modem_id, msg_info.sms_id) catch |err| {
-                std.log.warn("Failed to delete message {s} from modem {s}: {any}", .{
-                    msg_info.sms_id, msg_info.modem_id, err
-                });
-            };
-        }
-        
-        // Free message data
-        for (messages) |msg| {
-            context.allocator.free(msg.modem_id);
-            context.allocator.free(msg.sms_id);
-            context.allocator.free(msg.message.phone_iccid);
-            context.allocator.free(msg.message.phone_number);
-            context.allocator.free(msg.message.content);
-            context.allocator.free(msg.message.timestamp);
+            // Delete messages from modems
+            for (pending_messages.items) |msg_info| {
+                context.modem_manager.deleteMessage(msg_info.modem_id, msg_info.sms_id) catch |err| {
+                    std.log.warn("Failed to delete message {s} from modem {s}: {any}", .{
+                        msg_info.sms_id, msg_info.modem_id, err
+                    });
+                };
+            }
+            
+            // Free message data and clear pending list
+            for (pending_messages.items) |msg| {
+                context.allocator.free(msg.modem_id);
+                context.allocator.free(msg.sms_id);
+                context.allocator.free(msg.message.phone_iccid);
+                context.allocator.free(msg.message.phone_number);
+                context.allocator.free(msg.message.content);
+                context.allocator.free(msg.message.timestamp);
+            }
+            pending_messages.clearRetainingCapacity();
         }
     }
     

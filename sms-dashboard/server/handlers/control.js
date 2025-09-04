@@ -131,6 +131,30 @@ export const controlHandler = {
           updated_at = CURRENT_TIMESTAMP
       `).bind(modems.length, clientIp).run();
       
+      // Broadcast device updates to all connected clients
+      if (modems.length > 0 || sims.length > 0) {
+        try {
+          // Get current device data via device_view for backwards compatibility
+          const { results: devices } = await env.DB.prepare(`
+            SELECT * FROM device_view ORDER BY updated_at DESC
+          `).all();
+          
+          const ws = env.WEBSOCKET_HANDLER.get(env.WEBSOCKET_HANDLER.idFromName('broadcast'));
+          await ws.fetch('http://internal/broadcast', {
+            method: 'POST',
+            body: JSON.stringify({
+              type: 'phones:updated',  // Changed to match frontend listener
+              data: devices || []
+            })
+          });
+          
+          console.log(`[control.js] Broadcasted ${devices?.length || 0} device updates to connected clients`);
+        } catch (broadcastError) {
+          console.error('[control.js] Failed to broadcast device updates:', broadcastError);
+          // Don't fail the entire operation if broadcast fails
+        }
+      }
+      
       return new Response(JSON.stringify({
         success: true,
         processed: {

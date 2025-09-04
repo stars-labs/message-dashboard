@@ -60,7 +60,7 @@ pub const ApiClient = struct {
         defer self.allocator.free(payload);
 
         // Upload to the correct API endpoint
-        try self.makeRequest("/control/devices", payload);
+        try self.makeRequest("/devices", payload);
         
         std.log.debug("✅ Uploaded {d} modems and {d} SIMs via HTTP API", .{ modems.len, sims.len });
     }

@@ -14,7 +14,8 @@
   import ErrorBoundary from "./lib/ErrorBoundary.svelte";
   import SentryTest from "./lib/SentryTest.svelte";
   import { api } from "./lib/api.js";
-  import { pollingService } from "./lib/polling-service.js";
+  // All real-time updates disabled to save costs - manual refresh only
+  // import { RealtimeService } from "./lib/websocket-with-fallback.js";
   import { auth } from "./lib/auth.js";
   import config from "./lib/config.js";
   import { applyDataStreamEffect, applyNeonGlow, createMatrixRain, applyHeaderEffect } from "./lib/webgpu-effects.js";
@@ -101,8 +102,10 @@
   let user = null;
   let loading = true;
   let dataLoading = true; // Track data loading separately
-  let pollingConnected = false;
-  let pollingUnsubscribers = [];
+  // Real-time connections disabled - manual refresh only
+  // let wsConnected = false;
+  // let wsUnsubscribers = [];
+  // let wsConnection = null;
   let currentView = "dashboard"; // 'dashboard', 'iccid-mappings', or 'keywords'
   let showIccidMappingDialog = false;
   let phoneToMap = null;
@@ -262,7 +265,7 @@
           new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
         );
         if (sortedMessages[0]) {
-          pollingService.updateLatestMessage(sortedMessages[0].id, sortedMessages[0].timestamp);
+          // No need to track latest message for WebSocket - it handles all messages
         }
       }
 
@@ -326,37 +329,20 @@
     }
   }
 
-  // Helper function to start HTTP polling
-  async function startPolling() {
-    // Only proceed if user is authenticated
-    if (!user || !auth.token) {
-      console.debug("[App] startPolling called but user not authenticated, skipping");
-      return;
-    }
-    
-    if (pollingService.isConnected) {
-      console.debug("[App] Polling already active, skipping");
-      return;
-    }
-
-    const token = auth.token;
-    console.debug("[App] Starting polling with authenticated token");
-
-    try {
-      await pollingService.connect(token);
-      setupPollingListeners();
-      console.debug("[App] Polling started successfully");
-    } catch (error) {
-      console.error("[App] Failed to start polling:", error);
-    }
-  }
+  // Real-time updates disabled - users must manually refresh
+  // async function startRealtime() {
+  //   // Disabled to save API costs
+  // }
 
   let daemonInterval;
 
   onMount(async () => {
-    // Start periodic daemon status checks (initial check happens in loadAllData)
-    // Check every 30 seconds
-    daemonInterval = setInterval(checkDaemonStatus, 30000);
+    // All real-time connections and periodic checks disabled
+    // Users must manually refresh the page for updates
+    
+    // No WebSocket/SSE connection
+    // No periodic daemon status checks
+    // No automatic updates
     
     // Don't fetch stats here - it will be fetched after authentication in loadAllData
     // await fetchStats();
@@ -408,23 +394,21 @@
       daemonStatus.connected = true;
       daemonStatus.lastDataUpdate = Date.now();
 
-      // Load data and polling in parallel without blocking
-      Promise.all([
-        loadData().finally(() => {
-          dataLoading = false;
-        }),
-        startPolling(),
-      ]).catch((error) => {
-        console.error("Failed to load data or start polling:", error);
+      // Load data once on page load - no real-time updates
+      loadData().finally(() => {
+        dataLoading = false;
+      }).catch((error) => {
+        console.error("Failed to load data:", error);
       });
       
-      // Set up periodic daemon health check
-      const healthCheckInterval = setInterval(() => {
-        updateDaemonHealthStatus();
-      }, 60000); // Check every minute
+      // Disable periodic daemon health check to reduce API calls
+      // Health status will be updated via WebSocket events
+      // const healthCheckInterval = setInterval(() => {
+      //   updateDaemonHealthStatus();
+      // }, 60000); // Check every minute
       
       // Store interval for cleanup
-      window._daemonHealthInterval = healthCheckInterval;
+      // window._daemonHealthInterval = healthCheckInterval;
       
       // Store matrix rain cleanup
       window._removeMatrixRain = removeMatrixRain;
@@ -438,10 +422,12 @@
     }
   });
 
-  function setupPollingListeners() {
-    // Listen for new messages
-    pollingUnsubscribers.push(
-      pollingService.on("message:created", (msg) => {
+  // All real-time listeners removed - manual refresh only
+  /*
+  function setupRealtimeListeners() {
+    // Listen for new messages via WebSocket/SSE
+    wsUnsubscribers.push(
+      wsConnection.on("message:created", (msg) => {
         // New message received - only add if it belongs to the selected phone
         if (selectedPhoneIccid && msg.data.phone_iccid === selectedPhoneIccid) {
           messages = [msg.data, ...messages];
@@ -453,8 +439,8 @@
     );
 
     // Listen for message updates
-    pollingUnsubscribers.push(
-      pollingService.on("message:updated", (msg) => {
+    wsUnsubscribers.push(
+      wsConnection.on("message:updated", (msg) => {
         // Message updated
         const index = messages.findIndex((m) => m.id === msg.data.id);
         if (index !== -1) {
@@ -465,8 +451,8 @@
     );
 
     // Listen for bulk message creation
-    pollingUnsubscribers.push(
-      pollingService.on("messages:bulk_created", (msg) => {
+    wsUnsubscribers.push(
+      wsConnection.on("messages:bulk_created", (msg) => {
         console.debug('[App] Received bulk messages event:', msg);
         
         if (!msg.data || !Array.isArray(msg.data)) {
@@ -578,8 +564,8 @@
     );
 
     // Listen for phone updates
-    pollingUnsubscribers.push(
-      pollingService.on("phones:updated", (msg) => {
+    wsUnsubscribers.push(
+      wsConnection.on("phones:updated", (msg) => {
         // Phones updated
         console.debug("Polling update - phones:", msg?.data);
 
@@ -632,16 +618,16 @@
     );
 
     // Listen for connection status
-    pollingUnsubscribers.push(
-      pollingService.on("connected", () => {
+    wsUnsubscribers.push(
+      wsConnection.on("connected", () => {
         pollingConnected = true;
         console.debug("Polling connected");
       }),
     );
 
     // Listen for message sent responses
-    pollingUnsubscribers.push(
-      pollingService.on("message:sent", (msg) => {
+    wsUnsubscribers.push(
+      wsConnection.on("message:sent", (msg) => {
         // Message sent result received
         console.debug("Message sent result:", msg.data);
         if (msg.data.success) {
@@ -667,23 +653,24 @@
     );
 
     // Listen for disconnection
-    pollingUnsubscribers.push(
-      pollingService.on("disconnected", () => {
+    wsUnsubscribers.push(
+      wsConnection.on("disconnected", () => {
         pollingConnected = false;
         console.debug("Polling disconnected");
       }),
     );
   }
+  */
 
-  // Using HTTP polling for real-time updates (every 5 seconds)
+  // All real-time updates disabled - manual refresh only
 
   onDestroy(() => {
     // Cleanup daemon status interval
     if (daemonInterval) clearInterval(daemonInterval);
     
     // Cleanup realtime service
-    pollingUnsubscribers.forEach((unsubscribe) => unsubscribe());
-    pollingService.disconnect();
+    wsUnsubscribers.forEach((unsubscribe) => unsubscribe());
+    if (wsConnection) wsConnection.disconnect();
     
     // Cleanup health check interval
     if (window._daemonHealthInterval) {
