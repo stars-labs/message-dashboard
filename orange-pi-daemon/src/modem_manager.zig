@@ -702,6 +702,21 @@ pub const ModemManager = struct {
                 
                 std.log.debug("📨 Found SMS {s} on modem {s}", .{ sms_id_str, modem_id });
 
+                // Skip messages in "receiving" state - these are incomplete multipart messages
+                if (std.mem.indexOf(u8, line, "(receiving)")) |_| {
+                    std.log.debug("⏳ Skipping SMS {s} on modem {s} (still receiving/incomplete)", .{ sms_id_str, modem_id });
+                    
+                    // Try to clean up stuck messages older than 5 minutes
+                    const id_num = std.fmt.parseInt(u32, sms_id_str, 10) catch 0;
+                    if (id_num > 0 and id_num < 100) {
+                        // Attempt to delete stuck receiving messages with low IDs (likely old)
+                        self.deleteSms(modem_id, sms_id_str) catch |delete_err| {
+                            std.log.debug("Could not delete stuck receiving SMS {s}: {any}", .{ sms_id_str, delete_err });
+                        };
+                    }
+                    continue;
+                }
+
                 // Handle sent messages - delete them to prevent overflow
                 if (std.mem.indexOf(u8, line, "(sent)")) |_| {
                     // Silently delete sent SMS to prevent overflow
@@ -711,15 +726,6 @@ pub const ModemManager = struct {
                         std.log.warn("Failed to delete sent SMS {s} from modem {s}: {any}", .{ sms_id_str, modem_id, delete_err });
                     };
                     
-                    continue;
-                }
-
-                // Skip SMS IDs that previously failed to delete
-                const sms_modem_key = try std.fmt.allocPrint(self.allocator, "{s}:{s}", .{ modem_id, sms_id_str });
-                defer self.allocator.free(sms_modem_key);
-                
-                if (self.failed_sms_ids.contains(sms_modem_key)) {
-                    std.log.info("Skipping SMS {s} on modem {s} (previously failed to delete)", .{ sms_id_str, modem_id });
                     continue;
                 }
 
@@ -1138,12 +1144,8 @@ pub const ModemManager = struct {
                     std.log.warn("📄 mmcli stdout: {s}", .{result.stdout});
                     std.log.warn("📄 mmcli stderr: {s}", .{result.stderr});
                     
-                    // Mark this SMS as failed so we don't try again
-                    const sms_modem_key = try std.fmt.allocPrint(self.allocator, "{s}:{s}", .{ modem_id, sms_id });
-                    const owned_key = try self.allocator.dupe(u8, sms_modem_key);
-                    self.allocator.free(sms_modem_key);
-                    
-                    try self.failed_sms_ids.put(owned_key, {});
+                    // Don't permanently blacklist - we'll retry later
+                    // Stuck messages in "receiving" state are handled elsewhere
                     
                     return error.SmsDeleteFailed;
                 }

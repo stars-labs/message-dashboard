@@ -207,8 +207,8 @@ pub fn main() !void {
         cycle_count += 1;
         const cycle_start = std.time.nanoTimestamp();
         
-        // Refresh cache every 5 minutes
-        if (std.time.timestamp() - last_cache_refresh > 300) {
+        // Refresh cache every 30 seconds for faster detection of new modems
+        if (std.time.timestamp() - last_cache_refresh > 30) {
             std.log.info("🔄 Refreshing modem cache", .{});
             
             // Clear old cache
@@ -319,11 +319,11 @@ pub fn main() !void {
         // This prevents queue overflow and ensures workers can catch up
         if (initial_queue_size > 10) {
             const wait_ms: u64 = if (initial_queue_size > 100)
-                200 // Very full, wait longer
+                50 // Very full, reduced from 200ms
             else if (initial_queue_size > 50)
-                100 // Moderately full
+                25 // Moderately full, reduced from 100ms
             else
-                50; // Slightly full
+                10; // Slightly full, reduced from 50ms
                 
             std.log.debug("⏳ Queue has {d} items, waiting {d}ms for workers to catch up", .{initial_queue_size, wait_ms});
             std.time.sleep(wait_ms * std.time.ns_per_ms);
@@ -477,13 +477,13 @@ pub fn main() !void {
         const final_queue_size = worker_pool.queueSize();
         
         // Dynamic target based on queue health
-        const base_target: u64 = 50 * std.time.ns_per_ms;
+        const base_target: u64 = 10 * std.time.ns_per_ms; // Reduced from 50ms to 10ms for faster response
         const target_cycle_time: u64 = if (final_queue_size > modems_to_check.len)
             // Queue is growing, slow down to let workers catch up
-            @min(200 * std.time.ns_per_ms, base_target + (final_queue_size * 2 * std.time.ns_per_ms))
+            @min(100 * std.time.ns_per_ms, base_target + (final_queue_size * 1 * std.time.ns_per_ms))
         else if (final_queue_size > 10)
             // Queue has some items, slightly slower cycle
-            base_target + 20 * std.time.ns_per_ms
+            base_target + 10 * std.time.ns_per_ms
         else
             // Queue is healthy, use base target
             base_target;
