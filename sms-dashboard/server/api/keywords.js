@@ -314,6 +314,85 @@ export function setupKeywordRoutes(router) {
         }
     });
 
+    // NEW: Batch get tags for multiple messages - to reduce XHR requests
+    router.post('/api/messages/batch-tags', async (request, env, ctx) => {
+        const authResponse = await handleAuth0(request, env, ctx);
+        if (authResponse) return authResponse;
+        await enrichUserPermissions(request, env, ctx);
+        const permResponse = await requirePermission('messages.read')(request, env, ctx);
+        if (permResponse) return permResponse;
+        
+        const { messageIds } = await request.json();
+        
+        if (!Array.isArray(messageIds) || messageIds.length === 0) {
+            return new Response(JSON.stringify({ 
+                success: true, 
+                data: {} 
+            }), {
+                headers: { 'Content-Type': 'application/json' }
+            });
+        }
+        
+        try {
+            await ensureKeywordTables(env.DB);
+            
+            // Limit to 100 messages to prevent abuse
+            const limitedIds = messageIds.slice(0, 100);
+            const placeholders = limitedIds.map(() => '?').join(',');
+            
+            const result = await env.DB.prepare(`
+                SELECT 
+                    mt.message_id,
+                    kt.id,
+                    kt.keyword,
+                    kt.tag,
+                    kt.color,
+                    kt.priority,
+                    mt.position,
+                    mt.matched_text,
+                    LENGTH(mt.matched_text) as length
+                FROM message_tags mt
+                JOIN keyword_tags kt ON mt.keyword_tag_id = kt.id
+                WHERE mt.message_id IN (${placeholders})
+                ORDER BY mt.message_id, mt.position ASC
+            `).bind(...limitedIds).all();
+            
+            // Group tags by message ID
+            const tagsByMessage = {};
+            const tags = result.results || [];
+            
+            for (const tag of tags) {
+                if (!tagsByMessage[tag.message_id]) {
+                    tagsByMessage[tag.message_id] = [];
+                }
+                tagsByMessage[tag.message_id].push({
+                    id: tag.id,
+                    keyword: tag.keyword,
+                    tag: tag.tag,
+                    color: tag.color,
+                    priority: tag.priority,
+                    position: tag.position,
+                    length: tag.length
+                });
+            }
+            
+            return new Response(JSON.stringify({
+                success: true,
+                data: tagsByMessage
+            }), {
+                headers: { 'Content-Type': 'application/json' }
+            });
+        } catch (error) {
+            console.error('Error batch fetching message tags:', error);
+            return new Response(JSON.stringify({ 
+                error: 'Failed to fetch message tags' 
+            }), {
+                status: 500,
+                headers: { 'Content-Type': 'application/json' }
+            });
+        }
+    });
+
     // Reprocess all messages for a specific keyword
     router.post('/api/keywords/:id/reprocess', async (request, env, ctx) => {
         const authResponse = await handleAuth0(request, env, ctx);

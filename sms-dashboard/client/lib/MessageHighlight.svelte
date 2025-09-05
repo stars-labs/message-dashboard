@@ -5,7 +5,10 @@
   
   export let content = '';
   export let messageId = null;
-  export let onTagsExtracted = null; // Callback to pass tags to parent
+  export let onTagsExtracted = null;
+  export let serverTags = null; // Pre-fetched tags from parent component
+  export let preloadedKeywords = null; // Keywords loaded once by parent
+  export let disableServerFetch = true; // Disable individual fetching by default
   
   let keywords = [];
   let messageTags = [];
@@ -17,12 +20,39 @@
   // Trim content to remove leading/trailing whitespace
   $: trimmedContent = content ? content.trim() : '';
   
+  // Update keywords when preloadedKeywords changes
+  $: if (preloadedKeywords !== null && preloadedKeywords !== undefined) {
+    keywords = preloadedKeywords;
+    // Re-process content when keywords change
+    if (!serverTags || serverTags.length === 0) {
+      highlightedContent = processContent(trimmedContent);
+    }
+  }
+  
   onMount(async () => {
-    await loadKeywords();
-    if (messageId) {
+    // Use preloaded keywords if available
+    if (preloadedKeywords !== null && preloadedKeywords !== undefined) {
+      // If preloadedKeywords is provided (even if empty array), use it
+      keywords = preloadedKeywords || [];
+      console.debug('[MessageHighlight] Using preloaded keywords:', keywords.length);
+    } else if (!disableServerFetch) {
+      // Only load keywords if not in batch mode and server fetch is enabled
+      console.warn('[MessageHighlight] Loading keywords individually - this should be avoided!');
+      await loadKeywords();
+    } else {
+      // In batch mode with no keywords yet - use empty array
+      keywords = [];
+    }
+    
+    // Use pre-fetched tags if available
+    if (serverTags && serverTags.length > 0) {
+      messageTags = serverTags;
+      highlightedContent = applyHighlights(trimmedContent, messageTags);
+    } else if (messageId && !disableServerFetch) {
+      // Only fetch individually if not disabled
       await loadMessageTags();
     } else {
-      // Process content for highlighting if no specific message ID
+      // Fall back to client-side highlighting
       highlightedContent = processContent(trimmedContent);
     }
     loading = false;
