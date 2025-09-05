@@ -12,10 +12,10 @@ export const phonesHandler = {
         SELECT 
           dv.id,
           dv.iccid,
-          COALESCE(im.phone_number, dv.number) as number,
-          COALESCE(im.country, dv.country) as country,
+          dv.number as number,
+          dv.country as country,
           dv.flag,
-          COALESCE(im.carrier, dv.carrier) as carrier,
+          dv.carrier as carrier,
           dv.status,
           dv.signal,
           dv.rssi,
@@ -30,10 +30,10 @@ export const phonesHandler = {
           dv.sim_index,
           dv.modem_updated_at as created_at,
           dv.updated_at,
-          im.phone_number as mapped_number,
-          im.carrier as mapped_carrier,
-          im.country as mapped_country,
-          im.notes as mapping_notes,
+          NULL as mapped_number,
+          NULL as mapped_carrier,
+          NULL as mapped_country,
+          NULL as mapping_notes,
           -- Additional modem/SIM info for frontend
           dv.modem_id,
           dv.modem_manufacturer,
@@ -44,7 +44,6 @@ export const phonesHandler = {
           dv.sim_status,
           dv.usb_port
         FROM device_view dv
-        LEFT JOIN iccid_mappings im ON dv.iccid = im.iccid AND im.is_active = 1
         ORDER BY dv.usb_port, dv.iccid
       `).all();
       
@@ -79,10 +78,10 @@ export const phonesHandler = {
         SELECT 
           dv.id,
           dv.iccid,
-          COALESCE(im.phone_number, dv.number) as number,
+          dv.number as number,
           dv.country,
           dv.flag,
-          COALESCE(im.carrier, dv.carrier) as carrier,
+          dv.carrier as carrier,
           dv.status,
           dv.signal,
           dv.rssi,
@@ -97,14 +96,13 @@ export const phonesHandler = {
           dv.sim_index,
           dv.modem_updated_at as created_at,
           dv.updated_at,
-          im.phone_number as mapped_number,
-          im.carrier as mapped_carrier,
-          im.notes as mapping_notes,
+          NULL as mapped_number,
+          NULL as mapped_carrier,
+          NULL as mapping_notes,
           dv.modem_id,
           dv.modem_status,
           dv.sim_status
         FROM device_view dv
-        LEFT JOIN iccid_mappings im ON dv.iccid = im.iccid AND im.is_active = 1
         WHERE dv.iccid = ? OR dv.id = ?
       `).bind(phoneId, phoneId).first();
       
