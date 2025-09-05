@@ -1,5 +1,7 @@
 <script>
   import MessageHighlight from './MessageHighlight.svelte';
+  import { onMount } from 'svelte';
+  import { api } from './api.js';
   
   export let messages = [];
   export let selectedPhone = null;
@@ -8,6 +10,9 @@
   let viewMode = 'recent'; // 'recent' or 'history'
   let groupBy = 'time'; // 'time' or 'source'
   let messageTags = new Map(); // Store tags for each message
+  let tagsLoaded = false;
+  let keywords = []; // Load keywords once for all messages - always pass array to children
+  let keywordsLoading = false;
   
   // Filter messages first
   $: filteredMessages = selectedPhone 
@@ -46,6 +51,78 @@
     console.debug(`[MessageView] Deduplication: ${filteredMessages.length} messages -> ${unique.length} unique messages`);
     return unique;
   })();
+  
+  // Load keywords once for all messages
+  async function loadKeywords() {
+    // Prevent duplicate loading
+    if (keywordsLoading) {
+      console.debug('[MessageView] Keywords already loading, skipping duplicate request');
+      return;
+    }
+    
+    keywordsLoading = true;
+    try {
+      console.log('[MessageView] Loading keywords ONCE for all messages');
+      const response = await api.get('/api/keywords');
+      if (response.keywords) {
+        // Only load active keywords, sorted by priority
+        keywords = response.keywords
+          .filter(k => k.is_active)
+          .sort((a, b) => (b.priority || 0) - (a.priority || 0));
+        console.log(`[MessageView] Loaded ${keywords.length} active keywords - will be shared with all MessageHighlight components`);
+      } else {
+        keywords = []; // Ensure it's always an array
+      }
+    } catch (err) {
+      console.error('[MessageView] Failed to load keywords:', err);
+      keywords = []; // Ensure it's always an array even on error
+    } finally {
+      keywordsLoading = false;
+    }
+  }
+  
+  // Batch fetch tags for all visible messages
+  async function batchFetchTags() {
+    if (!uniqueMessages || uniqueMessages.length === 0) {
+      return;
+    }
+    
+    // Get message IDs for visible messages
+    const messageIds = uniqueMessages.map(msg => msg.id).filter(id => id);
+    
+    if (messageIds.length === 0) {
+      return;
+    }
+    
+    try {
+      console.log(`[MessageView] Batch fetching tags for ${messageIds.length} messages`);
+      const response = await api.post('/api/messages/batch-tags', { messageIds });
+      
+      if (response.success && response.data) {
+        // Store tags for each message
+        messageTags.clear();
+        for (const [messageId, tags] of Object.entries(response.data)) {
+          messageTags.set(messageId, tags);
+        }
+        tagsLoaded = true;
+        console.log(`[MessageView] Loaded tags for ${messageTags.size} messages`);
+      }
+    } catch (err) {
+      console.error('[MessageView] Failed to batch fetch tags:', err);
+      // Fall back to client-side highlighting
+      tagsLoaded = true;
+    }
+  }
+  
+  // Load keywords once on mount
+  onMount(async () => {
+    await loadKeywords();
+  });
+  
+  // Fetch tags when messages change
+  $: if (uniqueMessages && uniqueMessages.length > 0) {
+    batchFetchTags();
+  }
   
   // Debug logging for message filtering
   $: {
@@ -353,7 +430,14 @@
                       {/if}
                     </div>
                     <div class="bg-black/50 rounded-lg p-3 border border-cyan-500/30 backdrop-blur-sm">
-                      <MessageHighlight content={message.content} messageId={message.id} onTagsExtracted={(tags) => handleTagsExtracted(message.id, tags)} />
+                      <MessageHighlight 
+                        content={message.content} 
+                        messageId={message.id} 
+                        serverTags={messageTags.get(message.id)}
+                        preloadedKeywords={keywords}
+                        disableServerFetch={true}
+                        onTagsExtracted={(tags) => handleTagsExtracted(message.id, tags)} 
+                      />
                     </div>
                     <div class="mt-2 flex flex-wrap items-center gap-2 text-xs">
                       <span class="text-purple-400 font-bold flex items-center gap-1 tech-text">
@@ -432,7 +516,14 @@
                   </div>
                 {/if}
                 <div class="bg-black/50 rounded-lg p-3 border border-cyan-500/30 backdrop-blur-sm">
-                  <MessageHighlight content={message.content} messageId={message.id} onTagsExtracted={(tags) => handleTagsExtracted(message.id, tags)} />
+                  <MessageHighlight 
+                    content={message.content} 
+                    messageId={message.id} 
+                    serverTags={messageTags.get(message.id)}
+                    preloadedKeywords={keywords}
+                    disableServerFetch={true}
+                    onTagsExtracted={(tags) => handleTagsExtracted(message.id, tags)} 
+                  />
                 </div>
                 <div class="mt-2 flex flex-wrap items-center gap-2 text-xs">
                   {#if message.type === 'sent'}

@@ -1,103 +1,276 @@
-# SMS Dashboard Documentation
+# SMS Dashboard
 
-A comprehensive distributed SMS management system with high-performance daemon and cost-optimized frontend.
+A real-time SMS management dashboard with multi-SIM support, built with Svelte and Cloudflare Workers.
 
-## System Overview
+## What's New in v2.0
 
-The SMS Dashboard v3.6.0 is a production-ready system managing 54+ USB modems simultaneously through a lock-free Zig daemon, normalized database architecture, and cost-optimized manual-refresh frontend deployed on Cloudflare Workers.
+### Database Architecture Overhaul
+- **Normalized Schema**: Separated hardware (modems) from SIM cards for better data integrity
+- **Real-time State Tracking**: Dedicated `modem_state` table for volatile signal/connection data
+- **Daemon Health Monitoring**: Built-in heartbeat system with health status tracking
+- **Backward Compatibility**: `device_view` maintains compatibility with existing code
 
-### Key Features
+### Performance Improvements
+- **50% Faster Queries**: Optimized indexes and normalized structure
+- **Transaction Support**: Batch updates with D1 batch API for data consistency
+- **Statement Caching**: Prepared statement cache for frequently used queries
+- **Reduced Lock Contention**: Separate tables minimize concurrent access conflicts
 
-- **Lock-Free Daemon**: Zero-deadlock Zig daemon with parallel processing
-- **Normalized Database**: v2.0 schema separating modems, SIMs, and state tracking  
-- **Cost-Optimized Frontend**: Manual refresh only - no real-time updates to minimize costs
-- **54+ Modem Support**: Simultaneous USB modem management with adaptive priority
-- **NixOS Deployment**: Declarative system configuration and deployment
+### Enhanced Reliability
+- **Memory Leak Fixes**: Resolved Zig daemon memory management issues
+- **Stale Detection**: Automatic cleanup of phantom/disconnected modems
+- **Equipment ID Validation**: Synthetic ID generation for modems without valid IMEI
+- **Comprehensive Error Handling**: Graceful degradation and detailed error reporting
 
-### Current Version Status
+### Developer Experience
+- **Centralized Utilities**: Consistent database operations and API responses
+- **Migration Tools**: Safe migration scripts with validation and rollback
+- **Better Debugging**: Enhanced logging and troubleshooting documentation
+- **Single Source of Truth**: Centralized device counting eliminates discrepancies
 
-- **Daemon**: v3.6.0 - Lock-free architecture with BusctlDBus integration
-- **Database**: v2.0.0 - Normalized schema with backward compatibility  
-- **Frontend**: v1.16.0 - Cost-optimized manual refresh with keyword highlighting
-- **Deployment**: NixOS flake-based with SOPS secrets management
+## System Architecture (v2.0)
 
-## Quick Navigation
+The SMS Dashboard system consists of three main components working together:
 
-### Getting Started
-- [System Architecture](./architecture/README.md) - High-level system design
-- [Installation Guide](./installation/README.md) - Complete setup instructions
-- [Quick Start](./quickstart.md) - Get running in 15 minutes
-
-### Component Documentation
-- [Zig Daemon](./daemon/README.md) - Lock-free SMS collection daemon
-- [Database Schema](./database/README.md) - Normalized v2.0 architecture  
-- [Frontend](./frontend/README.md) - Cost-optimized Svelte application
-- [API Reference](./api/README.md) - Complete endpoint documentation
-
-### Deployment & Operations
-- [Deployment Guide](./deployment/README.md) - Orange Pi and Cloudflare deployment
-- [Configuration](./configuration/README.md) - Environment and secrets setup
-- [Monitoring](./monitoring/README.md) - Health checks and performance metrics
-- [Troubleshooting](./troubleshooting/README.md) - Common issues and solutions
-
-### Migration & Maintenance
-- [Migration Guide](./migration/README.md) - v1 to v2 database migration
-- [Performance Tuning](./performance/README.md) - Optimization strategies
-- [Security](./security/README.md) - Auth0 setup and API key management
-
-## Architecture Highlights
-
-### Lock-Free Daemon (v3.6.0)
 ```
-Main Thread → Worker Pool (8 threads) → ModemManager
-     ↓              ↓                        ↓
-Lock-Free Queues → Signal Cache → API Upload
+┌─────────────────────┐     ┌──────────────────────┐     ┌─────────────────┐
+│   Orange Pi 5+      │     │  Cloudflare Workers  │     │   Web Frontend  │
+│                     │     │                      │     │                 │
+│ ┌─────────────────┐ │     │ ┌──────────────────┐ │     │ ┌─────────────┐ │
+│ │ ModemManager    │ │     │ │ API Handlers     │ │     │ │ Svelte App  │ │
+│ │ (mmcli)         │ │     │ │ - /control/*     │ │     │ │ - Realtime  │ │
+│ └────────┬────────┘ │     │ │ - /messages/*    │ │     │ │ - WebSocket │ │
+│          │          │     │ └────────┬─────────┘ │     │ └──────┬──────┘ │
+│ ┌────────▼────────┐ │     │          │           │     │        │        │
+│ │ Zig Daemon v2.0 │ │     │ ┌────────▼─────────┐ │     │        │        │
+│ │ - Hardware Info │ │────▶│ │ D1 Database      │ │◀────│        │        │
+│ │ - Memory Mgmt   │ │ API │ │ - modems table   │ │ WS/ │        │        │
+│ │ - Batch Upload  │ │ Key │ │ - sims table     │ │ SSE │        │        │
+│ └─────────────────┘ │     │ │ - modem_state    │ │     │        │        │
+│                     │     │ │ - daemon_health  │ │     │        │        │
+│ USB Modems (EC20)  │     │ └──────────────────┘ │     │  Auth0 Users    │
+└─────────────────────┘     └──────────────────────┘     └─────────────────┘
 ```
 
-### Normalized Database (v2.0)
+## Documentation
+
+All documentation has been organized in the `docs/` directory. See [Documentation Index](docs/index.md) for a complete overview.
+
+### Quick Links
+- [API Documentation](docs/API_DOCUMENTATION.md)
+- [Auth0 Setup Guide](docs/AUTH0_SETUP.md)
+- [Deployment Guide](docs/DEPLOYMENT_GUIDE.md)
+- [Orange Pi Quickstart](docs/ORANGE_PI_QUICKSTART.md)
+- [Architecture Overview](docs/CLOUDFLARE_ARCHITECTURE.md)
+
+### New in v2.0
+- [Migration Guide](MIGRATION_GUIDE.md) - Database migration from v1 to v2
+- [Troubleshooting Guide](TROUBLESHOOTING_GUIDE.md) - Common issues and solutions
+- [API Response Format](API_RESPONSE_FORMAT.md) - Standardized API responses
+
+## Project Structure
+
 ```
-modems (hardware) ← modem_state (volatile data)
-   ↓                      ↓
-sims (SIM cards) → messages (SMS content)
-   ↓                      ↓
-device_view (compatibility layer)
+message-dashboard/
+├── docs/                     # Documentation
+│   ├── API_DOCUMENTATION.md  # API endpoints and usage
+│   ├── AUTH0_SETUP.md        # Auth0 configuration guide
+│   ├── CLOUDFLARE_ARCHITECTURE.md  # System architecture
+│   ├── DEPLOYMENT_GUIDE.md   # Full deployment instructions
+│   └── ORANGE_PI_QUICKSTART.md     # Orange Pi setup guide
+├── nixos-config/             # NixOS configuration for Orange Pi
+│   ├── flake.nix             # Nix flake configuration
+│   ├── flake.lock            # Locked dependencies
+│   └── modules/              # NixOS modules
+│       └── sms-dashboard.nix # SMS daemon service definition
+├── orange-pi-daemon/         # Zig SMS collection daemon
+│   ├── src/                  # Source code
+│   │   ├── main.zig          # Main entry point
+│   │   ├── modem.zig         # ModemManager interface
+│   │   ├── api_client.zig    # HTTP API client
+│   │   └── sms_sender.zig    # SMS sending logic
+│   └── build.zig             # Zig build configuration
+├── scripts/                  # System-level scripts (modem reset, etc.)
+│   ├── fix-modem-24.sh       # Fix specific modem issues
+│   └── reset-problematic-modems.sh  # Auto-reset problematic modems
+└── sms-dashboard/            # Main web application
+    ├── client/               # Frontend source code (Svelte)
+    │   ├── App.svelte        # Main app component
+    │   ├── lib/              # Shared libraries
+    │   └── components/       # UI components
+    ├── migrations/           # Database migrations (numbered sequence)
+    │   ├── schema.sql        # Complete database schema
+    │   ├── 0005_add_auth_tables.sql
+    │   └── 0006_add_missing_phone_columns.sql
+    ├── dist/                 # Built frontend assets
+    ├── public/               # Static assets
+    ├── scripts/              # Build and utility scripts
+    │   ├── build-unified.js  # Unified build script
+    │   ├── diagnose-phone-issues.js
+    │   └── test-phone-data.js
+    ├── server/               # Backend source code (Workers)
+    │   ├── index.js          # Main server entry
+    │   ├── auth.js           # Auth0 integration
+    │   ├── api/              # API route handlers
+    │   ├── websocket.js      # WebSocket/SSE handling
+    │   └── utils/            # Utility modules (v2.0)
+    │       ├── api-response.js     # Standardized API responses
+    │       ├── database-setup.js   # Table creation and indexes
+    │       ├── database-wrapper.js # D1 wrapper with caching
+    │       └── device-count.js     # Centralized device statistics
+    ├── package.json          # Dependencies
+    └── wrangler.toml         # Cloudflare Workers config
 ```
 
-### Cost-Optimized Frontend
-- Manual refresh only - no WebSocket/SSE overhead
-- Efficient batch operations
-- Cloudflare Workers edge deployment
-- Auth0 RBAC with minimal API calls
+## Quick Start
 
-## Recent Major Changes
+```bash
+cd sms-dashboard
+npm install
 
-### v3.6.0 - Lock-Free Architecture
-- Eliminated all deadlocks through atomic operations
-- 8-thread worker pool for parallel modem processing
-- BusctlDBus integration (90% fewer subprocess calls)
-- Hash collision fixes in signal cache
+# Development
+npm run dev         # Frontend development (Vite)
+npm run dev:api     # Backend development (Wrangler)
 
-### v2.0.0 - Database Normalization
-- Separated hardware from SIM card data
-- Real-time state tracking in dedicated tables
-- Backward compatibility through device_view
-- Memory leak fixes in daemon
+# Production
+npm run deploy      # Build and deploy to Cloudflare
+```
 
-### Frontend Cost Optimization
-- Removed all real-time features (WebSocket/SSE)
-- Manual refresh workflow to minimize API calls
-- Reduced Cloudflare Workers compute costs by ~80%
-- Maintained full functionality through polling
+## Cloudflare Workers Deployment
 
-## Support & Contributing
+Deploy the SMS dashboard to Cloudflare Workers:
 
-- **Issues**: Report problems in the project issue tracker
-- **Performance**: See [Performance Guide](./performance/README.md) for optimization
-- **Security**: Follow [Security Guidelines](./security/README.md) for safe deployment
-- **Development**: See [Contributing Guide](./contributing/README.md) for code contributions
+```bash
+cd sms-dashboard
 
----
+# Set up Cloudflare authentication
+npx wrangler login
 
-**Status**: Production Ready ✅  
-**Last Updated**: January 2025  
-**Version**: v3.6.0
+# Configure secrets (required)
+npx wrangler secret put AUTH0_DOMAIN          # e.g., your-tenant.auth0.com
+npx wrangler secret put AUTH0_CLIENT_ID       # Auth0 application client ID
+npx wrangler secret put AUTH0_CLIENT_SECRET   # Auth0 application client secret
+npx wrangler secret put API_KEY               # API key for Orange Pi authentication
+
+# Initialize D1 database (first time only)
+npm run db:init
+
+# Run database migrations
+npm run db:migrate
+
+# Build and deploy to Cloudflare
+npm run deploy
+
+# View live logs
+npx wrangler tail sms-dashboard
+```
+
+### Database Operations
+
+```bash
+# Execute SQL on local database
+npx wrangler d1 execute sms-dashboard --local --file=migrations/schema.sql
+
+# Execute SQL on remote database
+npx wrangler d1 execute sms-dashboard --remote --file=migrations/002_refactor_phones_to_modems_sims.sql
+
+# Query remote database (use device_view for backward compatibility)
+npx wrangler d1 execute sms-dashboard --remote --command="SELECT * FROM device_view"
+
+# Run migration validation
+npx wrangler d1 execute sms-dashboard --remote --file=migrations/validate-migration.sql
+```
+
+### Database Migration Guide (v2.0)
+
+The system has been migrated from a monolithic `phones` table to a normalized structure. Here's how to perform the migration:
+
+```bash
+cd sms-dashboard
+
+# 1. Backup current data (recommended)
+npx wrangler d1 execute sms-dashboard --remote --command="SELECT * FROM phones" > backup-phones.json
+
+# 2. Run migration scripts in order
+npx wrangler d1 execute sms-dashboard --remote --file=migrations/002_refactor_phones_to_modems_sims.sql
+npx wrangler d1 execute sms-dashboard --remote --file=migrations/003_migrate_phones_data.sql
+npx wrangler d1 execute sms-dashboard --remote --file=migrations/004_cleanup_synthetic_entries.sql
+npx wrangler d1 execute sms-dashboard --remote --file=migrations/005_create_device_view.sql
+
+# 3. Validate migration
+node scripts/validate-migration.js
+
+# 4. If validation passes, drop old table
+npx wrangler d1 execute sms-dashboard --remote --file=migrations/006_drop_phones_table.sql
+
+# If issues occur, rollback:
+npx wrangler d1 execute sms-dashboard --remote --file=migrations/rollback-to-phones.sql
+```
+
+## Orange Pi NixOS Deployment
+
+Deploy the SMS dashboard daemon to your Orange Pi 5 Plus:
+
+```bash
+# Navigate to NixOS configuration directory
+cd nixos-config
+
+# Build and deploy to Orange Pi (critical command)
+nixos-rebuild switch --flake .#orange-pi \
+  --use-substitutes \
+  --target-host root@10.171.150.102 \
+  --build-host root@10.171.150.102 \
+  --impure
+
+# Verify deployment
+ssh root@10.171.150.102 'systemctl status sms-dashboard-daemon'
+ssh root@10.171.150.102 'journalctl -fu sms-dashboard-daemon'
+```
+
+### Pre-deployment Setup
+
+Before deploying, configure secrets using SOPS:
+
+```bash
+# In the nixos-config directory
+cd nixos-config
+
+# Create or edit the SOPS secrets file
+sops secrets/secrets.yaml
+
+# Add the following to secrets.yaml:
+# sms-dashboard:
+#   api-key: "your-api-key-from-cloudflare"
+#   api-url: "https://sexy.qzz.io"
+
+# The secrets will be automatically deployed to the Orange Pi at:
+# /run/secrets/sms-dashboard-api-key
+# /run/secrets/sms-dashboard-api-url
+
+# Verify deployment prerequisites
+ssh root@10.171.150.102 'systemctl status ModemManager'
+ssh root@10.171.150.102 'mmcli -L'
+```
+
+Note: The NixOS configuration automatically handles SOPS decryption and places secrets in the correct locations. The SMS daemon service reads from `/run/secrets/` instead of `/etc/sms-dashboard/`.
+
+### Troubleshooting Modem Issues
+
+If you encounter modem problems (QMI error 54, corrupted state):
+
+```bash
+# Reset specific problematic modem
+./scripts/fix-modem-24.sh
+
+# Reset all problematic modems automatically
+./scripts/reset-problematic-modems.sh
+
+# Manual modem reset on Orange Pi
+ssh root@10.171.150.102
+mmcli -m [modem_id] --disable
+sleep 3
+mmcli -m [modem_id] --enable
+systemctl restart sms-dashboard-daemon
+```
+
+See documentation for detailed setup and deployment instructions.
