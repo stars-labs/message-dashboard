@@ -1,5 +1,6 @@
+// ICCID Mappings handler - now uses user_overrides from sims table
 export const iccidMappingsHandler = {
-  // List all ICCID mappings with pagination
+  // List all ICCID mappings (user overrides) with pagination
   async list(request) {
     const { env } = request;
     const url = new URL(request.url);
@@ -10,72 +11,56 @@ export const iccidMappingsHandler = {
     const offset = (page - 1) * limit;
     
     try {
-      // Ensure the table exists by creating it if needed
-      await env.DB.prepare(`
-        CREATE TABLE IF NOT EXISTS iccid_mappings (
-          id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-          iccid TEXT UNIQUE NOT NULL,
-          phone_number TEXT NOT NULL,
-          carrier TEXT,
-          country TEXT,
-          notes TEXT,
-          is_active INTEGER DEFAULT 1,
-          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-          created_by TEXT,
-          updated_by TEXT
-        )
-      `).run();
-      
-      // Create indexes if they don't exist
-      await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_iccid_mappings_iccid ON iccid_mappings(iccid)`).run();
-      await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_iccid_mappings_phone ON iccid_mappings(phone_number)`).run();
-      await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_iccid_mappings_active ON iccid_mappings(is_active)`).run();
+      // Query from sims table, treating user_override_enabled as the "mapping"
       let query = `
         SELECT 
-          id,
+          iccid as id,
           iccid,
-          phone_number,
-          carrier,
-          country,
-          notes,
-          is_active,
+          COALESCE(user_phone_number, phone_number) as phone_number,
+          COALESCE(user_carrier, carrier) as carrier,
+          COALESCE(user_country_code, country_code) as country,
+          user_notes as notes,
+          user_override_enabled as is_active,
           created_at,
-          updated_at
-        FROM iccid_mappings
+          COALESCE(user_updated_at, updated_at) as updated_at
+        FROM sims
         WHERE 1=1
       `;
       const params = [];
       
+      // If filtering by active, only show ones with overrides
+      if (isActive === 'true') {
+        query += ` AND user_override_enabled = TRUE`;
+      } else if (isActive === 'false') {
+        query += ` AND (user_override_enabled = FALSE OR user_override_enabled IS NULL)`;
+      }
+      
       if (search) {
-        query += ` AND (iccid LIKE ? OR phone_number LIKE ? OR carrier LIKE ? OR notes LIKE ?)`;
+        query += ` AND (iccid LIKE ? OR phone_number LIKE ? OR user_phone_number LIKE ? OR carrier LIKE ? OR user_carrier LIKE ? OR user_notes LIKE ?)`;
         const searchPattern = `%${search}%`;
-        params.push(searchPattern, searchPattern, searchPattern, searchPattern);
+        params.push(searchPattern, searchPattern, searchPattern, searchPattern, searchPattern, searchPattern);
       }
       
-      if (isActive !== null && isActive !== undefined) {
-        query += ` AND is_active = ?`;
-        params.push(isActive === 'true' ? 1 : 0);
-      }
-      
-      query += ` ORDER BY created_at DESC LIMIT ? OFFSET ?`;
+      query += ` ORDER BY COALESCE(user_updated_at, created_at) DESC LIMIT ? OFFSET ?`;
       params.push(limit, offset);
       
-      const mappings = await env.DB.prepare(query).bind(...params).all();
+      const result = await env.DB.prepare(query).bind(...params).all();
+      const mappings = result.results || result;
       
       // Get total count
-      let countQuery = `SELECT COUNT(*) as total FROM iccid_mappings WHERE 1=1`;
+      let countQuery = `SELECT COUNT(*) as total FROM sims WHERE 1=1`;
       const countParams = [];
       
-      if (search) {
-        countQuery += ` AND (iccid LIKE ? OR phone_number LIKE ? OR carrier LIKE ? OR notes LIKE ?)`;
-        const searchPattern = `%${search}%`;
-        countParams.push(searchPattern, searchPattern, searchPattern, searchPattern);
+      if (isActive === 'true') {
+        countQuery += ` AND user_override_enabled = TRUE`;
+      } else if (isActive === 'false') {
+        countQuery += ` AND (user_override_enabled = FALSE OR user_override_enabled IS NULL)`;
       }
       
-      if (isActive !== null && isActive !== undefined) {
-        countQuery += ` AND is_active = ?`;
-        countParams.push(isActive === 'true' ? 1 : 0);
+      if (search) {
+        countQuery += ` AND (iccid LIKE ? OR phone_number LIKE ? OR user_phone_number LIKE ? OR carrier LIKE ? OR user_carrier LIKE ? OR user_notes LIKE ?)`;
+        const searchPattern = `%${search}%`;
+        countParams.push(searchPattern, searchPattern, searchPattern, searchPattern, searchPattern, searchPattern);
       }
       
       const totalResult = await env.DB.prepare(countQuery).bind(...countParams).first();
@@ -96,32 +81,44 @@ export const iccidMappingsHandler = {
     } catch (error) {
       console.error('[iccid-mappings.js] Error listing ICCID mappings:', error);
       console.error('[iccid-mappings.js] Error stack:', error.stack);
-      // Error handling - list ICCID mappings
       return new Response(JSON.stringify({ 
-        success: false, 
-        error: `Failed to list ICCID mappings: ${error.message}` 
-      }), {
+        success: false,
+        error: 'Failed to fetch ICCID mappings',
+        details: error.message
+      }), { 
         status: 500,
         headers: { 'Content-Type': 'application/json' }
       });
     }
   },
-
-  // Get a single ICCID mapping
+  
+  // Get a specific ICCID mapping
   async get(request) {
-    const { env } = request;
-    const id = request.params?.id || new URL(request.url).pathname.split('/').pop();
+    const { env, params } = request;
+    const { id } = params;
     
     try {
       const mapping = await env.DB.prepare(`
-        SELECT * FROM iccid_mappings WHERE id = ?
+        SELECT 
+          iccid as id,
+          iccid,
+          COALESCE(user_phone_number, phone_number) as phone_number,
+          COALESCE(user_carrier, carrier) as carrier,
+          COALESCE(user_country_code, country_code) as country,
+          user_notes as notes,
+          user_override_enabled as is_active,
+          created_at,
+          COALESCE(user_updated_at, updated_at) as updated_at,
+          user_updated_by as updated_by
+        FROM sims
+        WHERE iccid = ?
       `).bind(id).first();
       
       if (!mapping) {
-        return new Response(JSON.stringify({
+        return new Response(JSON.stringify({ 
           success: false,
-          error: 'ICCID mapping not found'
-        }), {
+          error: 'ICCID mapping not found' 
+        }), { 
           status: 404,
           headers: { 'Content-Type': 'application/json' }
         });
@@ -134,33 +131,44 @@ export const iccidMappingsHandler = {
         headers: { 'Content-Type': 'application/json' }
       });
     } catch (error) {
-      // Error handling - get ICCID mapping
-      return new Response(JSON.stringify({
+      console.error('[iccid-mappings.js] Error fetching ICCID mapping:', error);
+      return new Response(JSON.stringify({ 
         success: false,
-        error: 'Failed to get ICCID mapping'
-      }), {
+        error: 'Failed to fetch ICCID mapping' 
+      }), { 
         status: 500,
         headers: { 'Content-Type': 'application/json' }
       });
     }
   },
-
+  
   // Get mapping by ICCID
   async getByIccid(request) {
-    const { env } = request;
-    const url = new URL(request.url);
-    const iccid = url.pathname.split('/').slice(-2)[0];
+    const { env, params } = request;
+    const { iccid } = params;
     
     try {
       const mapping = await env.DB.prepare(`
-        SELECT * FROM iccid_mappings WHERE iccid = ? AND is_active = true
+        SELECT 
+          iccid as id,
+          iccid,
+          COALESCE(user_phone_number, phone_number) as phone_number,
+          COALESCE(user_carrier, carrier) as carrier,
+          COALESCE(user_country_code, country_code) as country,
+          user_notes as notes,
+          user_override_enabled as is_active,
+          created_at,
+          COALESCE(user_updated_at, updated_at) as updated_at,
+          user_updated_by as updated_by
+        FROM sims
+        WHERE iccid = ?
       `).bind(iccid).first();
       
       if (!mapping) {
-        return new Response(JSON.stringify({
+        return new Response(JSON.stringify({ 
           success: false,
-          error: 'No active mapping found for this ICCID'
-        }), {
+          error: 'ICCID not found' 
+        }), { 
           status: 404,
           headers: { 'Content-Type': 'application/json' }
         });
@@ -173,177 +181,209 @@ export const iccidMappingsHandler = {
         headers: { 'Content-Type': 'application/json' }
       });
     } catch (error) {
-      // Error handling - get ICCID mapping by ICCID
-      return new Response(JSON.stringify({
+      console.error('[iccid-mappings.js] Error fetching ICCID by ID:', error);
+      return new Response(JSON.stringify({ 
         success: false,
-        error: 'Failed to get ICCID mapping'
-      }), {
+        error: 'Failed to fetch ICCID mapping' 
+      }), { 
         status: 500,
         headers: { 'Content-Type': 'application/json' }
       });
     }
   },
-
-  // Create a new ICCID mapping
+  
+  // Create a new ICCID mapping (user override)
   async create(request) {
     const { env, user } = request;
+    const data = await request.json();
     
     try {
-      const body = await request.json();
-      const { iccid, phone_number, carrier, country, notes, description } = body;
+      const { iccid, phone_number, carrier, country, notes } = data;
       
       if (!iccid || !phone_number) {
-        return new Response(JSON.stringify({
+        return new Response(JSON.stringify({ 
           success: false,
-          error: 'ICCID and phone number are required'
-        }), {
+          error: 'ICCID and phone number are required' 
+        }), { 
           status: 400,
           headers: { 'Content-Type': 'application/json' }
         });
       }
       
-      // Check if ICCID already exists
-      const existing = await env.DB.prepare(`
-        SELECT id FROM iccid_mappings WHERE iccid = ?
+      // Check if SIM exists
+      const simExists = await env.DB.prepare(`
+        SELECT iccid FROM sims WHERE iccid = ?
       `).bind(iccid).first();
       
-      if (existing) {
-        return new Response(JSON.stringify({
-          success: false,
-          error: 'ICCID already exists in mappings'
-        }), {
-          status: 409,
-          headers: { 'Content-Type': 'application/json' }
-        });
+      if (!simExists) {
+        // Create new SIM entry if it doesn't exist
+        await env.DB.prepare(`
+          INSERT INTO sims (iccid, phone_number, carrier, country_code, user_phone_number, user_carrier, user_country_code, user_notes, user_override_enabled, user_updated_at, user_updated_by, status)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, TRUE, CURRENT_TIMESTAMP, ?, 'active')
+        `).bind(
+          iccid,
+          phone_number, // system phone number
+          carrier || null,
+          country || null,
+          phone_number, // user override phone number
+          carrier || null,
+          country || null,
+          notes || null,
+          user?.email || 'system'
+        ).run();
+      } else {
+        // Update existing SIM with user override
+        await env.DB.prepare(`
+          UPDATE sims 
+          SET 
+            user_phone_number = ?,
+            user_carrier = ?,
+            user_country_code = ?,
+            user_notes = ?,
+            user_override_enabled = TRUE,
+            user_updated_at = CURRENT_TIMESTAMP,
+            user_updated_by = ?
+          WHERE iccid = ?
+        `).bind(
+          phone_number,
+          carrier || null,
+          country || null,
+          notes || null,
+          user?.email || 'system',
+          iccid
+        ).run();
       }
       
-      // Create new mapping
-      const id = crypto.randomUUID();
-      const result = await env.DB.prepare(`
-        INSERT INTO iccid_mappings (id, iccid, phone_number, carrier, country, notes)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `).bind(
-        id,
-        iccid,
-        phone_number,
-        carrier || null,
-        country || null,
-        description || notes || null
-      ).run();
-      
-      const newMapping = await env.DB.prepare(`
-        SELECT * FROM iccid_mappings WHERE id = ?
-      `).bind(id).first();
+      // Return the created/updated mapping
+      const mapping = await env.DB.prepare(`
+        SELECT 
+          iccid as id,
+          iccid,
+          COALESCE(user_phone_number, phone_number) as phone_number,
+          COALESCE(user_carrier, carrier) as carrier,
+          COALESCE(user_country_code, country_code) as country,
+          user_notes as notes,
+          user_override_enabled as is_active,
+          created_at,
+          COALESCE(user_updated_at, updated_at) as updated_at
+        FROM sims
+        WHERE iccid = ?
+      `).bind(iccid).first();
       
       return new Response(JSON.stringify({
         success: true,
-        data: newMapping
+        data: mapping
       }), {
         status: 201,
         headers: { 'Content-Type': 'application/json' }
       });
     } catch (error) {
-      // Error handling - create ICCID mapping
-      return new Response(JSON.stringify({
+      console.error('[iccid-mappings.js] Error creating ICCID mapping:', error);
+      return new Response(JSON.stringify({ 
         success: false,
-        error: 'Failed to create ICCID mapping'
-      }), {
+        error: 'Failed to create ICCID mapping',
+        details: error.message
+      }), { 
         status: 500,
         headers: { 'Content-Type': 'application/json' }
       });
     }
   },
-
+  
   // Update an ICCID mapping
   async update(request) {
-    const { env, user } = request;
-    const id = request.params?.id || new URL(request.url).pathname.split('/').pop();
+    const { env, params, user } = request;
+    const { id } = params;
+    const data = await request.json();
     
     try {
-      const body = await request.json();
-      const { phone_number, carrier, country, notes, description, is_active } = body;
+      const { phone_number, carrier, country, notes, is_active } = data;
       
-      // Check if mapping exists
-      const existing = await env.DB.prepare(`
-        SELECT id FROM iccid_mappings WHERE id = ?
+      // Update the user override fields
+      await env.DB.prepare(`
+        UPDATE sims 
+        SET 
+          user_phone_number = ?,
+          user_carrier = ?,
+          user_country_code = ?,
+          user_notes = ?,
+          user_override_enabled = ?,
+          user_updated_at = CURRENT_TIMESTAMP,
+          user_updated_by = ?
+        WHERE iccid = ?
+      `).bind(
+        phone_number || null,
+        carrier || null,
+        country || null,
+        notes || null,
+        is_active !== false, // convert to boolean
+        user?.email || 'system',
+        id
+      ).run();
+      
+      // Return updated mapping
+      const mapping = await env.DB.prepare(`
+        SELECT 
+          iccid as id,
+          iccid,
+          COALESCE(user_phone_number, phone_number) as phone_number,
+          COALESCE(user_carrier, carrier) as carrier,
+          COALESCE(user_country_code, country_code) as country,
+          user_notes as notes,
+          user_override_enabled as is_active,
+          created_at,
+          COALESCE(user_updated_at, updated_at) as updated_at
+        FROM sims
+        WHERE iccid = ?
       `).bind(id).first();
       
-      if (!existing) {
-        return new Response(JSON.stringify({
+      if (!mapping) {
+        return new Response(JSON.stringify({ 
           success: false,
-          error: 'ICCID mapping not found'
-        }), {
+          error: 'ICCID mapping not found' 
+        }), { 
           status: 404,
           headers: { 'Content-Type': 'application/json' }
         });
       }
       
-      // Update mapping
-      await env.DB.prepare(`
-        UPDATE iccid_mappings 
-        SET phone_number = ?,
-            carrier = ?,
-            country = ?,
-            notes = ?,
-            is_active = ?,
-            updated_at = datetime('now')
-        WHERE id = ?
-      `).bind(
-        phone_number,
-        carrier || null,
-        country || null,
-        description || notes || null,
-        is_active !== undefined ? (is_active ? 1 : 0) : 1,
-        id
-      ).run();
-      
-      const updated = await env.DB.prepare(`
-        SELECT * FROM iccid_mappings WHERE id = ?
-      `).bind(id).first();
-      
       return new Response(JSON.stringify({
         success: true,
-        data: updated
+        data: mapping
       }), {
         headers: { 'Content-Type': 'application/json' }
       });
     } catch (error) {
-      // Error handling - update ICCID mapping
-      return new Response(JSON.stringify({
+      console.error('[iccid-mappings.js] Error updating ICCID mapping:', error);
+      return new Response(JSON.stringify({ 
         success: false,
-        error: 'Failed to update ICCID mapping'
-      }), {
+        error: 'Failed to update ICCID mapping' 
+      }), { 
         status: 500,
         headers: { 'Content-Type': 'application/json' }
       });
     }
   },
-
-  // Delete an ICCID mapping
+  
+  // Delete an ICCID mapping (disable override)
   async delete(request) {
-    const { env } = request;
-    const id = request.params?.id || new URL(request.url).pathname.split('/').pop();
+    const { env, params, user } = request;
+    const { id } = params;
     
     try {
-      // Check if mapping exists
-      const existing = await env.DB.prepare(`
-        SELECT id FROM iccid_mappings WHERE id = ?
-      `).bind(id).first();
-      
-      if (!existing) {
-        return new Response(JSON.stringify({
-          success: false,
-          error: 'ICCID mapping not found'
-        }), {
-          status: 404,
-          headers: { 'Content-Type': 'application/json' }
-        });
-      }
-      
-      // Delete mapping
+      // Just disable the user override, don't delete the SIM
       await env.DB.prepare(`
-        DELETE FROM iccid_mappings WHERE id = ?
-      `).bind(id).run();
+        UPDATE sims 
+        SET 
+          user_phone_number = NULL,
+          user_carrier = NULL,
+          user_country_code = NULL,
+          user_notes = NULL,
+          user_override_enabled = FALSE,
+          user_updated_at = CURRENT_TIMESTAMP,
+          user_updated_by = ?
+        WHERE iccid = ?
+      `).bind(user?.email || 'system', id).run();
       
       return new Response(JSON.stringify({
         success: true,
@@ -352,112 +392,122 @@ export const iccidMappingsHandler = {
         headers: { 'Content-Type': 'application/json' }
       });
     } catch (error) {
-      // Error handling - delete ICCID mapping
-      return new Response(JSON.stringify({
+      console.error('[iccid-mappings.js] Error deleting ICCID mapping:', error);
+      return new Response(JSON.stringify({ 
         success: false,
-        error: 'Failed to delete ICCID mapping'
-      }), {
+        error: 'Failed to delete ICCID mapping' 
+      }), { 
         status: 500,
         headers: { 'Content-Type': 'application/json' }
       });
     }
   },
-
+  
   // Bulk import ICCID mappings
   async bulkImport(request) {
-    const { env } = request;
-    const user = request.user || { id: 'system' };
+    const { env, user } = request;
+    const { mappings } = await request.json();
+    
+    if (!Array.isArray(mappings)) {
+      return new Response(JSON.stringify({ 
+        success: false,
+        error: 'Mappings must be an array' 
+      }), { 
+        status: 400,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
     
     try {
-      const body = await request.json();
-      const { mappings } = body;
-      
-      if (!Array.isArray(mappings) || mappings.length === 0) {
-        return new Response(JSON.stringify({
-          success: false,
-          error: 'Invalid mappings data'
-        }), {
-          status: 400,
-          headers: { 'Content-Type': 'application/json' }
-        });
-      }
-      
-      const results = {
-        success: 0,
-        failed: 0,
-        errors: []
-      };
+      let created = 0;
+      let updated = 0;
+      let failed = 0;
+      const errors = [];
       
       for (const mapping of mappings) {
         try {
-          if (!mapping.iccid || !mapping.phone_number) {
-            results.failed++;
-            results.errors.push({
-              iccid: mapping.iccid,
-              error: 'ICCID and phone number are required'
-            });
+          const { iccid, phone_number, carrier, country, notes } = mapping;
+          
+          if (!iccid || !phone_number) {
+            failed++;
+            errors.push(`Missing required fields for mapping: ${JSON.stringify(mapping)}`);
             continue;
           }
           
-          // Check if ICCID already exists
+          // Check if SIM exists
           const existing = await env.DB.prepare(`
-            SELECT id FROM iccid_mappings WHERE iccid = ?
-          `).bind(mapping.iccid).first();
+            SELECT iccid FROM sims WHERE iccid = ?
+          `).bind(iccid).first();
           
           if (existing) {
-            // Update existing mapping
+            // Update existing
             await env.DB.prepare(`
-              UPDATE iccid_mappings 
-              SET phone_number = ?,
-                  carrier = ?,
-                  description = ?,
-                  updated_at = datetime('now'),
-                  updated_by = ?
+              UPDATE sims 
+              SET 
+                user_phone_number = ?,
+                user_carrier = ?,
+                user_country_code = ?,
+                user_notes = ?,
+                user_override_enabled = TRUE,
+                user_updated_at = CURRENT_TIMESTAMP,
+                user_updated_by = ?
               WHERE iccid = ?
             `).bind(
-              mapping.phone_number,
-              mapping.carrier || null,
-              mapping.description || null,
-              user.id,
-              mapping.iccid
+              phone_number,
+              carrier || null,
+              country || null,
+              notes || null,
+              user?.email || 'system',
+              iccid
             ).run();
+            updated++;
           } else {
-            // Create new mapping
+            // Create new
             await env.DB.prepare(`
-              INSERT INTO iccid_mappings (iccid, phone_number, carrier, description, created_by, updated_by)
-              VALUES (?, ?, ?, ?, ?, ?)
+              INSERT INTO sims (
+                iccid, phone_number, carrier, country_code,
+                user_phone_number, user_carrier, user_country_code, user_notes, 
+                user_override_enabled, user_updated_at, user_updated_by, status
+              )
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, TRUE, CURRENT_TIMESTAMP, ?, 'active')
             `).bind(
-              mapping.iccid,
-              mapping.phone_number,
-              mapping.carrier || null,
-              mapping.description || null,
-              user.id,
-              user.id
+              iccid,
+              phone_number,
+              carrier || null,
+              country || null,
+              phone_number,
+              carrier || null,
+              country || null,
+              notes || null,
+              user?.email || 'system'
             ).run();
+            created++;
           }
-          
-          results.success++;
         } catch (error) {
-          results.failed++;
-          results.errors.push({
-            iccid: mapping.iccid,
-            error: error.message
-          });
+          failed++;
+          errors.push(`Failed to import mapping for ICCID ${mapping.iccid}: ${error.message}`);
         }
       }
       
       return new Response(JSON.stringify({
         success: true,
-        results
+        summary: {
+          total: mappings.length,
+          created,
+          updated,
+          failed
+        },
+        errors: errors.length > 0 ? errors : undefined
       }), {
         headers: { 'Content-Type': 'application/json' }
       });
     } catch (error) {
-      // Error handling - bulk import ICCID mappings
-      return new Response(JSON.stringify({
+      console.error('[iccid-mappings.js] Error in bulk import:', error);
+      return new Response(JSON.stringify({ 
         success: false,
-        error: 'Failed to bulk import ICCID mappings'
-      }), {
+        error: 'Failed to import ICCID mappings',
+        details: error.message
+      }), { 
         status: 500,
         headers: { 'Content-Type': 'application/json' }
       });

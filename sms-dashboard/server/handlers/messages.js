@@ -21,13 +21,12 @@ export const messagesHandler = {
       let query = `
         SELECT 
           m.*,
-          COALESCE(im.phone_number, dv.number, m.phone_number) as display_phone_number,
+          COALESCE(dv.number, m.phone_number) as display_phone_number,
           dv.carrier as phone_carrier,
           dv.status as phone_status,
-          im.phone_number as mapped_number
+          NULL as mapped_number
         FROM messages m
         LEFT JOIN device_view dv ON m.phone_iccid = dv.iccid
-        LEFT JOIN iccid_mappings im ON m.phone_iccid = im.iccid AND im.is_active = 1
       `;
       let countQuery = `SELECT COUNT(*) as total FROM messages`;
       const params = [];

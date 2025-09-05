@@ -8,16 +8,17 @@ export const statsHandler = {
       // Get device statistics from the new normalized tables
       const deviceStats = await getDeviceStats(env.DB);
       
-      // Get message statistics
+      // Get message statistics with a single optimized query
       const stats = await env.DB.prepare(`
         SELECT 
-          (SELECT COUNT(*) FROM messages) as total_messages,
-          (SELECT COUNT(*) FROM messages WHERE date(timestamp) = date('now')) as today_messages,
-          (SELECT COUNT(*) FROM messages WHERE type = 'sent') as total_sent,
-          (SELECT COUNT(*) FROM messages WHERE type = 'received') as total_received,
-          (SELECT COUNT(*) FROM messages WHERE date(timestamp) = date('now') AND type = 'sent') as today_sent,
-          (SELECT COUNT(*) FROM messages WHERE date(timestamp) = date('now') AND type = 'received') as today_received,
-          (SELECT COUNT(*) FROM messages WHERE verification_code IS NOT NULL AND type = 'received') as verified_messages
+          COUNT(*) as total_messages,
+          COUNT(CASE WHEN date(timestamp) = date('now') THEN 1 END) as today_messages,
+          COUNT(CASE WHEN type = 'sent' THEN 1 END) as total_sent,
+          COUNT(CASE WHEN type = 'received' THEN 1 END) as total_received,
+          COUNT(CASE WHEN date(timestamp) = date('now') AND type = 'sent' THEN 1 END) as today_sent,
+          COUNT(CASE WHEN date(timestamp) = date('now') AND type = 'received' THEN 1 END) as today_received,
+          COUNT(CASE WHEN verification_code IS NOT NULL AND type = 'received' THEN 1 END) as verified_messages
+        FROM messages
       `).first();
       
       const verificationRate = stats.total_received > 0 

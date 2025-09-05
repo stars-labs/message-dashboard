@@ -58,27 +58,33 @@ export const controlHandler = {
         if (modem.signal !== null || modem.signal !== undefined) {
           await env.DB.prepare(`
             INSERT INTO modem_state (
-              modem_id, signal_percent, rssi, rsrq, rsrp, snr,
-              modem_index, usb_port, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+              modem_id, modem_index, usb_port, signal_percent, rssi, rsrq, rsrp, snr,
+              connection_status, network_type, access_tech, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(modem_id) DO UPDATE SET
+              modem_index = excluded.modem_index,
+              usb_port = excluded.usb_port,
               signal_percent = excluded.signal_percent,
               rssi = excluded.rssi,
               rsrq = excluded.rsrq,
               rsrp = excluded.rsrp,
               snr = excluded.snr,
-              modem_index = excluded.modem_index,
-              usb_port = excluded.usb_port,
+              connection_status = excluded.connection_status,
+              network_type = excluded.network_type,
+              access_tech = excluded.access_tech,
               updated_at = CURRENT_TIMESTAMP
           `).bind(
             modem.equipment_id,
+            modem.modem_index || null,
+            modem.usb_port || null,
             modem.signal || null,
             modem.rssi || null,
             modem.rsrq || null,
             modem.rsrp || null,
             modem.snr || null,
-            modem.modem_index || null,
-            modem.usb_port || null
+            modem.connection_status || 'registered',
+            modem.network_type || null,
+            modem.access_tech || null
           ).run();
         }
       }
@@ -131,29 +137,8 @@ export const controlHandler = {
           updated_at = CURRENT_TIMESTAMP
       `).bind(modems.length, clientIp).run();
       
-      // Broadcast device updates to all connected clients
-      if (modems.length > 0 || sims.length > 0) {
-        try {
-          // Get current device data via device_view for backwards compatibility
-          const { results: devices } = await env.DB.prepare(`
-            SELECT * FROM device_view ORDER BY updated_at DESC
-          `).all();
-          
-          const ws = env.WEBSOCKET_HANDLER.get(env.WEBSOCKET_HANDLER.idFromName('broadcast'));
-          await ws.fetch('http://internal/broadcast', {
-            method: 'POST',
-            body: JSON.stringify({
-              type: 'phones:updated',  // Changed to match frontend listener
-              data: devices || []
-            })
-          });
-          
-          console.log(`[control.js] Broadcasted ${devices?.length || 0} device updates to connected clients`);
-        } catch (broadcastError) {
-          console.error('[control.js] Failed to broadcast device updates:', broadcastError);
-          // Don't fail the entire operation if broadcast fails
-        }
-      }
+      // WebSocket broadcast removed for cost savings - manual refresh only
+      // Users must refresh the page to see updates
       
       return new Response(JSON.stringify({
         success: true,

@@ -578,7 +578,7 @@ Return JSON with:
           COUNT(*) as total_messages,
           COUNT(CASE WHEN m.type = 'received' THEN 1 END) as received,
           COUNT(CASE WHEN m.type = 'sent' THEN 1 END) as sent,
-          COUNT(CASE WHEN m.ai_verification_code IS NOT NULL THEN 1 END) as verification_codes,
+          COUNT(CASE WHEN m.verification_code IS NOT NULL OR ai.verification_code IS NOT NULL THEN 1 END) as verification_codes,
           COUNT(CASE WHEN ai.is_spam = 1 THEN 1 END) as spam_count
         FROM messages m
         LEFT JOIN ai_insights ai ON m.id = ai.message_id
@@ -591,7 +591,7 @@ Return JSON with:
         SELECT 
           COUNT(*) as recent_messages,
           COUNT(CASE WHEN m.type = 'received' THEN 1 END) as recent_received,
-          COUNT(CASE WHEN m.ai_verification_code IS NOT NULL THEN 1 END) as recent_codes
+          COUNT(CASE WHEN m.verification_code IS NOT NULL THEN 1 END) as recent_codes
         FROM messages m
         WHERE m.phone_iccid = ?
         AND m.timestamp > datetime('now', '-7 days')

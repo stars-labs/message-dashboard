@@ -46,6 +46,8 @@ export async function ensureTablesExist(db) {
   await db.prepare(`
     CREATE TABLE IF NOT EXISTS modem_state (
       modem_id TEXT PRIMARY KEY,
+      modem_index INTEGER,
+      usb_port TEXT,
       connection_status TEXT,
       signal_percent INTEGER,
       rssi INTEGER,

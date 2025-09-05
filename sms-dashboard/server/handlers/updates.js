@@ -20,10 +20,10 @@ export const updatesHandler = {
         SELECT 
           dv.id,
           dv.iccid,
-          COALESCE(im.phone_number, dv.number) as number,
-          COALESCE(im.country, dv.country) as country,
+          dv.number as number,
+          dv.country as country,
           dv.flag,
-          COALESCE(im.carrier, dv.carrier) as carrier,
+          dv.carrier as carrier,
           dv.status,
           dv.signal,
           dv.rssi,
@@ -38,12 +38,11 @@ export const updatesHandler = {
           dv.sim_index,
           dv.modem_updated_at as created_at,
           dv.updated_at,
-          im.phone_number as mapped_number,
-          im.carrier as mapped_carrier,
-          im.country as mapped_country,
-          im.notes as mapping_notes
+          NULL as mapped_number,
+          NULL as mapped_carrier,
+          NULL as mapped_country,
+          NULL as mapping_notes
         FROM device_view dv
-        LEFT JOIN iccid_mappings im ON dv.iccid = im.iccid AND im.is_active = 1
         ORDER BY dv.updated_at DESC
       `).all();
       
@@ -77,7 +76,7 @@ export const updatesHandler = {
             m.id,
             m.phone_iccid,
             m.phone_number,
-            COALESCE(im.phone_number, dv.number, m.phone_number) as display_phone_number,
+            COALESCE(dv.number, m.phone_number) as display_phone_number,
             m.content,
             m.timestamp,
             m.type,
@@ -86,10 +85,9 @@ export const updatesHandler = {
             m.verification_code,
             dv.carrier as phone_carrier,
             dv.status as phone_status,
-            im.phone_number as mapped_number
+            dv.user_phone_number as mapped_number
           FROM messages m
           LEFT JOIN device_view dv ON m.phone_iccid = dv.iccid
-          LEFT JOIN iccid_mappings im ON m.phone_iccid = im.iccid AND im.is_active = 1
           WHERE m.timestamp > ?
           ORDER BY m.timestamp DESC
           LIMIT 20
@@ -103,7 +101,7 @@ export const updatesHandler = {
             m.id,
             m.phone_iccid,
             m.phone_number,
-            COALESCE(im.phone_number, dv.number, m.phone_number) as display_phone_number,
+            COALESCE(dv.number, m.phone_number) as display_phone_number,
             m.content,
             m.timestamp,
             m.type,
@@ -112,10 +110,9 @@ export const updatesHandler = {
             m.verification_code,
             dv.carrier as phone_carrier,
             dv.status as phone_status,
-            im.phone_number as mapped_number
+            dv.user_phone_number as mapped_number
           FROM messages m
           LEFT JOIN device_view dv ON m.phone_iccid = dv.iccid
-          LEFT JOIN iccid_mappings im ON m.phone_iccid = im.iccid AND im.is_active = 1
           ORDER BY m.timestamp DESC
           LIMIT 10
         `);

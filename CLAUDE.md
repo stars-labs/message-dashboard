@@ -135,25 +135,31 @@ Orange Pi → mmcli → Zig Daemon → API (API Key) → D1 Database → WebSock
 
 ### Database Schema Critical Points
 
-#### Legacy Schema (being phased out)
-- `phones.id` is ICCID (SIM card identifier) - never null
-- `messages.phone_id` references `phones.id` (ICCID)
-- Control handler rejects phones without valid ICCIDs
+#### Normalized Schema (v2.1 - September 2025)
+The database has been fully normalized to strict 3NF compliance:
 
-#### New Normalized Schema (v2.0)
-- **Primary Keys**:
-  - `modems.equipment_id` - IMEI from hardware (e.g., "865827078383361")
-  - `sims.iccid` - SIM card identifier (e.g., "89860121652000047334")
-- **Foreign Keys**:
-  - `sims.current_modem_id` → `modems.equipment_id`
-  - `modem_state.modem_id` → `modems.equipment_id`
-  - `messages.phone_id` → `sims.iccid` (maintains compatibility)
-- **Synthetic IDs**: For modems without valid IMEI, uses `MODEM_{index}` format
-- **Timestamps**: All tables have `created_at` and `updated_at` with automatic updates
-- **Status Tracking**:
-  - Modem status: `connected`, `disconnected`, `error`
-  - SIM status: `active`, `inactive`, `removed`
-  - Connection status: `registered`, `searching`, `denied`
+- **Core Tables**:
+  - `modems` - Hardware devices (Primary Key: `equipment_id` - IMEI)
+  - `sims` - SIM cards with user overrides (Primary Key: `iccid`)
+  - `modem_state` - Real-time modem status (Foreign Key: `modem_id`)
+  - `messages` - SMS messages (Foreign Key: `phone_iccid` → `sims.iccid`)
+  - `daemon_health` - Daemon monitoring and heartbeat
+
+- **User Override Pattern**:
+  - User phone number overrides stored directly in `sims` table
+  - Fields: `user_phone_number`, `user_carrier`, `user_country_code`, `user_notes`
+  - Flag: `user_override_enabled` to activate overrides
+  - Maintains 3NF - no transitive dependencies
+
+- **Deprecated Tables Removed**:
+  - `iccid_mappings` - Replaced by user override fields in `sims`
+  - `messages_old_backup` - Removed after successful migration
+  - Database size reduced by 79% (5.31MB → 1.09MB)
+
+- **View for Compatibility**:
+  - `device_view` - Combines all tables for backward compatibility
+  - Automatically uses user overrides when enabled
+  - USB port ordering support via `modem_state.usb_port`
 
 ## Common Issues & Debugging
 
@@ -424,3 +430,27 @@ npx wrangler d1 execute sms-dashboard --command "SELECT COUNT(*) as state_record
   - Removed unnecessary mutex operations in API client
   - Linear probing ensures signal data integrity
 - **Impact**: ~200 lines of dead code removed, 2KB memory reduction per daemon instance
+
+### v2.1.0 - Database Normalization to 3NF (September 2025)
+- **Major Schema Changes**:
+  - Database normalized to strict Third Normal Form (3NF) compliance
+  - Removed `iccid_mappings` table - replaced with user override fields in `sims` table
+  - Removed redundant columns from `messages` table (`phone_id`, `sim_iccid`, `modem_id`)
+  - Added foreign key constraints with proper referential integrity
+- **User Override Pattern**:
+  - Phone number overrides now stored directly in `sims` table
+  - New columns: `user_phone_number`, `user_carrier`, `user_country_code`, `user_notes`
+  - `user_override_enabled` flag to activate overrides
+  - Maintains 3NF - no transitive dependencies or redundancy
+- **API Updates**:
+  - ICCID mappings handler refactored to use `sims` table
+  - Updates handler fixed to remove references to deprecated tables
+  - AI insights handler fixed for column name mismatches
+- **Performance Impact**:
+  - Database size reduced by 79% (5.31MB → 1.09MB)
+  - Query optimization reduced reads from 4.89k to single scan
+  - Removed complex JOIN operations with deprecated tables
+- **Migration Scripts**:
+  - `006a_prepare_messages_fix_v2.sql` - Normalize messages table
+  - `007_add_user_overrides.sql` - Add override fields to sims
+  - `008_cleanup_deprecated_tables.sql` - Remove old backup tables
