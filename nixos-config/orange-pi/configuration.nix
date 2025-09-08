@@ -411,37 +411,6 @@
     };
   };
 
-  # =============================================================================
-  # USB SECURITY
-  # =============================================================================
-  
-  # USBGuard for USB device filtering
-  services.usbguard = {
-    enable = true;
-    package = pkgs.usbguard;
-    dbus.enable = true;
-    
-    # Only allow specific modem types
-    rules = ''
-      # Allow USB hubs (needed for multiple modems)
-      allow with-interface equals { 09:00:00 }
-      
-      # Allow specific modem vendors
-      allow id 2c7c:0125 name "Quectel EC25" with-interface equals { ff:ff:ff }
-      allow id 2c7c:0125 name "Quectel EC20" with-interface equals { ff:ff:ff }
-      allow id 12d1:* name "Huawei*" with-interface equals { ff:ff:ff }
-      allow id 05c6:* name "Qualcomm*" with-interface equals { ff:ff:ff }
-      allow id 1a86:7523 name "Au780" with-interface equals { ff:ff:ff }
-      
-      # Block everything else
-      block
-    '';
-    
-    implicitPolicyTarget = "block";
-    presentDevicePolicy = "keep";
-    presentControllerPolicy = "keep";
-    insertedDevicePolicy = "apply-policy";
-  };
 
   # =============================================================================
   # SERVICE HARDENING
@@ -499,7 +468,6 @@
     aide  # File integrity monitoring
     rkhunter  # Rootkit hunter
     lynis  # Security auditing
-    usbguard  # USB device control
   ];
   
   # Regular security updates
