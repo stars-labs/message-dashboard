@@ -247,8 +247,8 @@
   # =============================================================================
   
   boot = {
-    # Use latest kernel packages with security patches
-    kernelPackages = lib.mkForce pkgs.linuxPackages_latest;
+    # Use hardened kernel packages for enhanced security
+    kernelPackages = lib.mkForce pkgs.linuxPackages_hardened;
     
     # Lanzaboote secure boot configuration (maintain original setup)
     lanzaboote = {
