@@ -61,7 +61,19 @@
   };
 
   # Enable SSH for remote management
-  services.openssh.enable = true;
+  services.openssh = {
+    enable = true;
+    settings = {
+      PasswordAuthentication = false;
+      KbdInteractiveAuthentication = false;
+      PermitRootLogin = "prohibit-password";
+    };
+  };
+
+  # Configure root user SSH keys
+  users.users.root.openssh.authorizedKeys.keys = [
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFhTqqOg4U3juVuxFgHt9cq2Opy+XVHLQahORdA56z6F openpgp:0x0383A3C3"
+  ];
 
   # Create user for management
   users.users.htx = {
@@ -73,8 +85,7 @@
       "dialout"
     ];
     openssh.authorizedKeys.keys = [
-      # Add your SSH public key here
-      # "ssh-rsa AAAAB3NzaC1yc2E... your-key-here"
+      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFhTqqOg4U3juVuxFgHt9cq2Opy+XVHLQahORdA56z6F openpgp:0x0383A3C3"
     ];
   };
 
