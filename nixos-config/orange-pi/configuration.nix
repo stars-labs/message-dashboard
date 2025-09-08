@@ -92,8 +92,8 @@
     settings = {
       PasswordAuthentication = false;
       KbdInteractiveAuthentication = false;
-      PermitRootLogin = "no";  # Completely disable root login
-      AllowUsers = [ "htx" ];  # Whitelist specific users
+      PermitRootLogin = "prohibit-password";  # Allow root login with keys only (needed for nixos-rebuild)
+      AllowUsers = [ "htx" "root" ];  # Allow htx and root users
       MaxAuthTries = 3;
       MaxSessions = 2;
       ClientAliveInterval = 300;
@@ -200,10 +200,12 @@
     shell = pkgs.bashInteractive;
   };
   
-  # Disable root account
+  # Configure root user for nixos-rebuild (SSH keys only, no password)
   users.users.root = {
     hashedPassword = "!";  # Disable password login
-    openssh.authorizedKeys.keys = [];  # No SSH keys for root
+    openssh.authorizedKeys.keys = [
+      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFhTqqOg4U3juVuxFgHt9cq2Opy+XVHLQahORdA56z6F openpgp:0x0383A3C3"
+    ];
   };
 
   # Sudo configuration with restrictions
