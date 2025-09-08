@@ -42,38 +42,44 @@
     "8.8.4.4"
   ];
 
-  # Properly configured firewall with explicit rules
-  networking.firewall = {
+  # Modern nftables firewall configuration
+  networking.firewall.enable = false;  # Disable legacy iptables firewall
+  networking.nftables = {
     enable = true;
-    allowPing = false;  # Disable ICMP echo requests
-    
-    # Only allow specific ports
-    allowedTCPPorts = [ 
-      2222  # Custom SSH port
-    ];
-    allowedUDPPorts = [ ];
-    
-    # Log dropped packets
-    logRefusedConnections = true;
-    logRefusedPackets = true;
-    logReversePathDrops = true;
-    
-    # Additional firewall rules
-    extraCommands = ''
-      # Rate limit SSH connections
-      iptables -A INPUT -p tcp --dport 2222 -m state --state NEW -m recent --set
-      iptables -A INPUT -p tcp --dport 2222 -m state --state NEW -m recent --update --seconds 60 --hitcount 4 -j DROP
-      
-      # Drop invalid packets
-      iptables -A INPUT -m conntrack --ctstate INVALID -j DROP
-      
-      # Log dropped packets with rate limiting
-      iptables -A INPUT -m limit --limit 5/min -j LOG --log-prefix "IPT-DROP: " --log-level 4
+    ruleset = ''
+      table inet filter {
+        chain input {
+          type filter hook input priority filter; policy drop;
+          
+          # Allow loopback traffic
+          iif lo accept
+          
+          # Allow established and related connections
+          ct state established,related accept
+          
+          # Drop invalid packets
+          ct state invalid drop
+          
+          # Rate limit SSH connections (4 per minute per IP)
+          tcp dport 22 ct state new limit rate 4/minute accept
+          
+          # Log dropped packets with rate limiting
+          limit rate 5/minute log prefix "NFT-DROP: "
+          
+          # Drop everything else
+          drop
+        }
+        
+        chain forward {
+          type filter hook forward priority filter; policy drop;
+        }
+        
+        chain output {
+          type filter hook output priority filter; policy accept;
+        }
+      }
     '';
   };
-
-  # Enable nftables for modern firewall management
-  networking.nftables.enable = true;
 
   # =============================================================================
   # SSH HARDENING
@@ -82,7 +88,7 @@
   # Hardened SSH configuration
   services.openssh = {
     enable = true;
-    ports = [ 2222 ];  # Non-standard port
+    ports = [ 22 ];  # Standard SSH port (security through obscurity is ineffective)
     settings = {
       PasswordAuthentication = false;
       KbdInteractiveAuthentication = false;
@@ -162,7 +168,7 @@
       sshd = {
         settings = {
           enabled = true;
-          port = "2222";
+          port = "22";
           filter = "sshd[mode=aggressive]";
           maxretry = 3;
           findtime = "10m";
