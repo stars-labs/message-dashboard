@@ -12,6 +12,19 @@ const LockFreePriorityManager = @import("lockfree_priority_manager.zig").LockFre
 const WorkerPool = @import("worker_pool.zig").WorkerPool;
 const LockFreeMPMC = @import("lockfree_mpmc.zig").LockFreeMPMC;
 
+// Systemd notify for watchdog support
+fn notifySystemd(message: []const u8) void {
+    // Use systemd-notify command instead of linking to libsystemd
+    var process = std.process.Child.init(&[_][]const u8{ "systemd-notify", message }, std.heap.page_allocator);
+    process.stdin_behavior = .Ignore;
+    process.stdout_behavior = .Ignore;
+    process.stderr_behavior = .Ignore;
+    _ = process.spawnAndWait() catch {
+        // Ignore errors - systemd-notify may not be available
+        return;
+    };
+}
+
 // Configure logging based on build options and runtime environment
 const build_log_level: std.log.Level = blk: {
     const level_str = build_options.log_level;
@@ -196,11 +209,16 @@ pub fn main() !void {
     std.time.sleep(500 * std.time.ns_per_ms);
     std.log.info("✅ Worker initialization complete, starting main loop", .{});
     
+    // Notify systemd that daemon is ready
+    notifySystemd("READY=1");
+    std.log.info("🔔 Notified systemd that daemon is ready", .{});
+    
     // Main loop with parallel checking
     var cycle_count: u64 = 0;
     var last_cache_refresh: i64 = std.time.timestamp();
     var last_storage_cleanup: i64 = std.time.timestamp();
     var last_queue_health_check: i64 = std.time.timestamp();
+    var last_watchdog_notify: i64 = std.time.timestamp();
     var consecutive_queue_issues: u32 = 0;
     
     while (true) {
@@ -437,6 +455,14 @@ pub fn main() !void {
             std.log.info("📬 Found {d} messages in cycle {d} ({d}ms) (queue: {d})", .{
                 total_messages, cycle_count, cycle_time_ms, message_queue.size()
             });
+        }
+        
+        // Systemd watchdog notification every 30 seconds
+        const now = std.time.timestamp();
+        if (now - last_watchdog_notify >= 30) {
+            notifySystemd("WATCHDOG=1");
+            last_watchdog_notify = now;
+            std.log.debug("🔔 Sent systemd watchdog notification", .{});
         }
         
         // Performance stats every 20 cycles

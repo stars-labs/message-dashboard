@@ -50,6 +50,12 @@ pub const LockFreePriorityManager = struct {
     }
     
     fn findOrCreateSlot(self: *LockFreePriorityManager, modem_id: []const u8) ?*ModemPriority {
+        // Validate input
+        if (modem_id.len == 0 or modem_id.len > 32) {
+            std.log.warn("Invalid modem_id length: {d}", .{modem_id.len});
+            return null;
+        }
+        
         // First pass: look for existing entry
         for (&self.modems) |*modem| {
             if (!modem.valid.load(.acquire)) continue;
@@ -64,18 +70,21 @@ pub const LockFreePriorityManager = struct {
         for (&self.modems) |*modem| {
             // Try to claim this slot atomically
             if (modem.valid.cmpxchgWeak(false, true, .acq_rel, .acquire) == null) {
-                // Successfully claimed slot
+                // Successfully claimed slot - log for debugging
                 const copy_len = @min(modem_id.len, 32);
                 @memcpy(modem.modem_id[0..copy_len], modem_id[0..copy_len]);
                 modem.modem_id_len = @intCast(copy_len);
                 modem.priority.store(@intFromEnum(Priority.Medium), .release);
                 modem.last_check.store(0, .release);
                 modem.consecutive_empty.store(0, .release);
-                _ = self.count.fetchAdd(1, .monotonic);
+                const new_count = self.count.fetchAdd(1, .monotonic) + 1;
+                std.log.debug("Created slot for modem {s} (total: {d})", .{ modem_id, new_count });
                 return modem;
             }
         }
         
+        const current_count = self.count.load(.acquire);
+        std.log.err("Could not create slot for modem {s} - all {d} slots full (current count: {d})", .{ modem_id, MAX_MODEMS, current_count });
         return null; // All slots full
     }
     
