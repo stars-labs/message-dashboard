@@ -16,7 +16,6 @@
     ../modules/sms-daemon.nix
   ];
 
-
   # System identification
   networking.hostName = "orange-pi-sms";
   
@@ -43,44 +42,38 @@
     "8.8.4.4"
   ];
 
-  # Modern nftables firewall configuration
-  networking.firewall.enable = false;  # Disable legacy iptables firewall
-  networking.nftables = {
+  # Properly configured firewall with explicit rules
+  networking.firewall = {
     enable = true;
-    ruleset = ''
-      table inet filter {
-        chain input {
-          type filter hook input priority filter; policy drop;
-          
-          # Allow loopback traffic
-          iif lo accept
-          
-          # Allow established and related connections
-          ct state established,related accept
-          
-          # Drop invalid packets
-          ct state invalid drop
-          
-          # Rate limit SSH connections (4 per minute per IP)
-          tcp dport 22 ct state new limit rate 4/minute accept
-          
-          # Log dropped packets with rate limiting
-          limit rate 5/minute log prefix "NFT-DROP: "
-          
-          # Drop everything else
-          drop
-        }
-        
-        chain forward {
-          type filter hook forward priority filter; policy drop;
-        }
-        
-        chain output {
-          type filter hook output priority filter; policy accept;
-        }
-      }
+    allowPing = false;  # Disable ICMP echo requests
+    
+    # Only allow specific ports
+    allowedTCPPorts = [ 
+      2222  # Custom SSH port
+    ];
+    allowedUDPPorts = [ ];
+    
+    # Log dropped packets
+    logRefusedConnections = true;
+    logRefusedPackets = true;
+    logReversePathDrops = true;
+    
+    # Additional firewall rules
+    extraCommands = ''
+      # Rate limit SSH connections
+      iptables -A INPUT -p tcp --dport 2222 -m state --state NEW -m recent --set
+      iptables -A INPUT -p tcp --dport 2222 -m state --state NEW -m recent --update --seconds 60 --hitcount 4 -j DROP
+      
+      # Drop invalid packets
+      iptables -A INPUT -m conntrack --ctstate INVALID -j DROP
+      
+      # Log dropped packets with rate limiting
+      iptables -A INPUT -m limit --limit 5/min -j LOG --log-prefix "IPT-DROP: " --log-level 4
     '';
   };
+
+  # Enable nftables for modern firewall management
+  networking.nftables.enable = true;
 
   # =============================================================================
   # SSH HARDENING
@@ -89,12 +82,12 @@
   # Hardened SSH configuration
   services.openssh = {
     enable = true;
-    ports = [ 22 ];  # Standard SSH port (security through obscurity is ineffective)
+    ports = [ 2222 ];  # Non-standard port
     settings = {
       PasswordAuthentication = false;
       KbdInteractiveAuthentication = false;
-      PermitRootLogin = "prohibit-password";  # Allow root login with keys only (needed for nixos-rebuild)
-      AllowUsers = [ "htx" "root" ];  # Allow htx and root users
+      PermitRootLogin = "no";  # Completely disable root login
+      AllowUsers = [ "htx" ];  # Whitelist specific users
       MaxAuthTries = 3;
       MaxSessions = 2;
       ClientAliveInterval = 300;
@@ -169,7 +162,7 @@
       sshd = {
         settings = {
           enabled = true;
-          port = "22";
+          port = "2222";
           filter = "sshd[mode=aggressive]";
           maxretry = 3;
           findtime = "10m";
@@ -192,7 +185,6 @@
       "wheel"
       "dialout"
     ];
-    hashedPasswordFile = config.sops.secrets."sms-dashboard/user-passwords/htx-hash".path;
     openssh.authorizedKeys.keys = [
       "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFhTqqOg4U3juVuxFgHt9cq2Opy+XVHLQahORdA56z6F openpgp:0x0383A3C3"
       "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIG+YTPvO562Xqi0ATf38QtdtE9qXWyh/9a74cSxj+4z6 cardno:32_087_457"
@@ -202,12 +194,10 @@
     shell = pkgs.bashInteractive;
   };
   
-  # Configure root user for nixos-rebuild (with SOPS password hash)
+  # Disable root account
   users.users.root = {
-    hashedPasswordFile = config.sops.secrets."sms-dashboard/user-passwords/root-hash".path;
-    openssh.authorizedKeys.keys = [
-      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFhTqqOg4U3juVuxFgHt9cq2Opy+XVHLQahORdA56z6F openpgp:0x0383A3C3"
-    ];
+    hashedPassword = "!";  # Disable password login
+    openssh.authorizedKeys.keys = [];  # No SSH keys for root
   };
 
   # Sudo configuration with restrictions
@@ -249,22 +239,23 @@
   # =============================================================================
   
   boot = {
-    # Use hardened kernel packages for enhanced security
-    kernelPackages = lib.mkForce pkgs.linuxPackages_hardened;
-    
-    # Lanzaboote secure boot configuration (maintain original setup)
-    lanzaboote = {
-      enable = true;
-      pkiBundle = "/var/lib/sbctl";
-    };
+    # Use latest kernel packages with security patches
+    kernelPackages = lib.mkForce pkgs.linuxPackages_latest;
     
     # Boot loader configuration
     loader = {
-      systemd-boot.enable = lib.mkForce false;  # Disabled for Lanzaboote
+      systemd-boot = {
+        enable = true;
+        editor = false;  # Disable boot entry editing
+        consoleMode = "max";
+        configurationLimit = 5;  # Keep only 5 generations
+      };
+      
       efi = {
         canTouchEfiVariables = true;
         efiSysMountPoint = "/boot";
       };
+      
       timeout = 1;  # Minimal timeout to prevent boot delay attacks
     };
     
@@ -415,6 +406,37 @@
     };
   };
 
+  # =============================================================================
+  # USB SECURITY
+  # =============================================================================
+  
+  # USBGuard for USB device filtering
+  services.usbguard = {
+    enable = true;
+    package = pkgs.usbguard;
+    dbus.enable = true;
+    
+    # Only allow specific modem types
+    rules = ''
+      # Allow USB hubs (needed for multiple modems)
+      allow with-interface equals { 09:00:00 }
+      
+      # Allow specific modem vendors
+      allow id 2c7c:0125 name "Quectel EC25" with-interface equals { ff:ff:ff }
+      allow id 2c7c:0125 name "Quectel EC20" with-interface equals { ff:ff:ff }
+      allow id 12d1:* name "Huawei*" with-interface equals { ff:ff:ff }
+      allow id 05c6:* name "Qualcomm*" with-interface equals { ff:ff:ff }
+      allow id 1a86:7523 name "Au780" with-interface equals { ff:ff:ff }
+      
+      # Block everything else
+      block
+    '';
+    
+    implicitPolicyTarget = "block";
+    presentDevicePolicy = "keep";
+    presentControllerPolicy = "keep";
+    insertedDevicePolicy = "apply-policy";
+  };
 
   # =============================================================================
   # SERVICE HARDENING
@@ -467,11 +489,10 @@
     htop
     tmux
     git
-    sbctl  # Secure boot control
-    usbutils  # Provides lsusb command
     aide  # File integrity monitoring
     rkhunter  # Rootkit hunter
     lynis  # Security auditing
+    usbguard  # USB device control
   ];
   
   # Regular security updates
