@@ -19,10 +19,15 @@ fn notifySystemd(message: []const u8) void {
     process.stdin_behavior = .Ignore;
     process.stdout_behavior = .Ignore;
     process.stderr_behavior = .Ignore;
-    _ = process.spawnAndWait() catch {
-        // Ignore errors - systemd-notify may not be available
+    
+    const result = process.spawnAndWait() catch |err| {
+        std.log.warn("Failed to spawn systemd-notify: {any}", .{err});
         return;
     };
+    
+    if (result != .Exited or result.Exited != 0) {
+        std.log.warn("systemd-notify failed with result: {any}", .{result});
+    }
 }
 
 // Configure logging based on build options and runtime environment
@@ -457,9 +462,9 @@ pub fn main() !void {
             });
         }
         
-        // Systemd watchdog notification every 30 seconds
+        // Systemd watchdog notification every 15 seconds (more conservative)
         const now = std.time.timestamp();
-        if (now - last_watchdog_notify >= 30) {
+        if (now - last_watchdog_notify >= 15) {
             notifySystemd("WATCHDOG=1");
             last_watchdog_notify = now;
             std.log.debug("🔔 Sent systemd watchdog notification", .{});
