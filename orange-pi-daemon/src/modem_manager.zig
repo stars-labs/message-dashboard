@@ -690,7 +690,7 @@ pub const ModemManager = struct {
         }
 
         var messages = std.ArrayList(types.MessageInfo).init(self.allocator);
-        defer messages.deinit();
+        // Don't call deinit() - toOwnedSlice() transfers ownership to caller
 
         var lines = std.mem.tokenizeScalar(u8, result.stdout, '\n');
         while (lines.next()) |line| {
