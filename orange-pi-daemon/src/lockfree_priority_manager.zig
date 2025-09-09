@@ -108,7 +108,10 @@ pub const LockFreePriorityManager = struct {
         
         for (all_modems) |modem_id| {
             // Get or create modem entry
-            const modem = self.findOrCreateSlot(modem_id) orelse continue;
+            const modem = self.findOrCreateSlot(modem_id) orelse {
+                std.log.warn("Could not find or create slot for modem {s}", .{modem_id});
+                continue;
+            };
             
             const priority = @as(Priority, @enumFromInt(modem.priority.load(.acquire)));
             const last_check = modem.last_check.load(.acquire);
@@ -121,6 +124,12 @@ pub const LockFreePriorityManager = struct {
                 .Low => cycle_count % 5 == 0 or time_since_check > 15,
             };
             
+            // Debug logging for first few cycles to understand the issue
+            if (cycle_count < 10) {
+                std.log.debug("Modem {s}: priority={s}, last_check={d}, time_since={d}, cycle={d}, should_check={}", 
+                    .{ modem_id, @tagName(priority), last_check, time_since_check, cycle_count, should_check });
+            }
+            
             if (should_check) {
                 try result.append(modem_id);
             }
@@ -129,14 +138,16 @@ pub const LockFreePriorityManager = struct {
         return result.toOwnedSlice();
     }
     
-    pub fn getStats(self: *LockFreePriorityManager) struct { high: u32, medium: u32, low: u32 } {
+    pub fn getStats(self: *LockFreePriorityManager) struct { high: u32, medium: u32, low: u32, total: u32 } {
         var high: u32 = 0;
         var medium: u32 = 0;
         var low: u32 = 0;
+        var total: u32 = 0;
         
         for (&self.modems) |*modem| {
             if (!modem.valid.load(.acquire)) continue;
             
+            total += 1;
             const priority = @as(Priority, @enumFromInt(modem.priority.load(.acquire)));
             switch (priority) {
                 .High => high += 1,
@@ -145,6 +156,6 @@ pub const LockFreePriorityManager = struct {
             }
         }
         
-        return .{ .high = high, .medium = medium, .low = low };
+        return .{ .high = high, .medium = medium, .low = low, .total = total };
     }
 };
