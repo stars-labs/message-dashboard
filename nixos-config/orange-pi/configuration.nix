@@ -301,8 +301,8 @@
       "net.ipv4.conf.default.log_martians" = 1;
       "net.ipv4.tcp_timestamps" = 0;
       "net.ipv4.tcp_rfc1337" = 1;
-      "net.ipv6.conf.all.use_tempaddr" = 2;
-      "net.ipv6.conf.default.use_tempaddr" = 2;
+      "net.ipv6.conf.all.use_tempaddr" = lib.mkForce 2;
+      "net.ipv6.conf.default.use_tempaddr" = lib.mkForce 2;
       
       # File system hardening
       "fs.protected_hardlinks" = 1;
