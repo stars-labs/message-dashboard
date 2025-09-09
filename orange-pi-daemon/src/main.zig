@@ -181,8 +181,8 @@ pub fn main() !void {
     std.log.info("🚀 Starting parallel message checking with {d} modems", .{valid_modems.items.len});
     
     // Initialize worker pool AFTER building modem cache to avoid deadlock
-    // Force 16 workers regardless of CPU count for better throughput with 54 modems
-    const num_workers = 16;
+    // Reduce to 8 workers to prevent SystemResources errors with 54 modems
+    const num_workers = 8;
     var worker_pool = try WorkerPool.init(allocator, num_workers, &modem_manager, &should_exit);
     defer worker_pool.deinit();
     
@@ -317,13 +317,13 @@ pub fn main() !void {
         
         // CRITICAL: Only submit new work when queue is nearly empty
         // This prevents queue overflow and ensures workers can catch up
-        if (initial_queue_size > 10) {
+        if (initial_queue_size > 20) {
             const wait_ms: u64 = if (initial_queue_size > 100)
-                50 // Very full, reduced from 200ms
+                100 // Very full - increased wait time
             else if (initial_queue_size > 50)
-                25 // Moderately full, reduced from 100ms
+                50 // Moderately full
             else
-                10; // Slightly full, reduced from 50ms
+                25; // Slightly full
                 
             std.log.debug("⏳ Queue has {d} items, waiting {d}ms for workers to catch up", .{initial_queue_size, wait_ms});
             std.time.sleep(wait_ms * std.time.ns_per_ms);
@@ -388,63 +388,36 @@ pub fn main() !void {
             std.log.debug("Popped {d} results from queue (had {d}), results.items.len={d}", .{popped_count, queue_size_before, results.items.len});
         }
         
-        // Add safety check for results processing
-        if (results.items.len == 0) {
-            std.log.debug("No results to process in cycle {d} (queue had {d} items)", .{cycle_count, queue_size_before});
-        } else {
+        // Process results with simplified logic to avoid panic
+        if (results.items.len > 0) {
             std.log.debug("Processing {d} results in cycle {d}", .{results.items.len, cycle_count});
-        }
-        
-        std.log.debug("About to process results, items ptr: {*}, len: {d}", .{results.items.ptr, results.items.len});
-        
-        // Add memory validation before processing
-        for (0..results.items.len) |i| {
-            const result_ptr = &results.items[i];
-            std.log.debug("Validating result {d}: ptr={*}, success={}", .{i, result_ptr, result_ptr.success});
-        }
-        
-        // Try a simpler loop first
-        var idx: usize = 0;
-        while (idx < results.items.len) : (idx += 1) {
-            std.log.debug("Processing result {d}/{d}", .{idx + 1, results.items.len});
             
-            // Add safety check before accessing result
-            if (idx >= results.items.len) {
-                std.log.err("Index {d} out of bounds for results array len {d}", .{idx, results.items.len});
-                break;
-            }
-            
-            const result = &results.items[idx];
-            std.log.debug("Got result pointer: {*}", .{result});
-            
-            // Validate modem_id before using it
-            const modem_id_len = result.modem_id.len;
-            if (modem_id_len == 0 or modem_id_len > 100) {
-                std.log.warn("Invalid modem_id length {d} for result {d}", .{modem_id_len, idx});
-                continue;
-            }
-            std.log.debug("Got result for modem with ID length {d}", .{modem_id_len});
-            
-            // Update modem priority based on whether messages were found
-            const found_messages = result.success and result.messages.len > 0;
-            priority_manager.updateModemPriority(result.modem_id, found_messages) catch |err| {
-                std.log.warn("Failed to update priority for modem (len={d}): {any}", .{ modem_id_len, err });
-            };
-            
-            if (result.success) {
-                std.log.debug("Result successful: messages.len={d}", .{result.messages.len});
-                if (result.messages.len > 0) {
-                    std.log.info("📬 Processing {d} messages from result", .{result.messages.len});
+            // Simple foreach loop instead of complex bounds checking
+            for (results.items) |*result| {
+                // Basic validation only
+                if (result.modem_id.len == 0) {
+                    std.log.warn("Skipping result with empty modem_id", .{});
+                    continue;
                 }
-                total_messages += result.messages.len;
                 
-                // Queue ALL received messages for upload - no deduplication needed
-                // The server will handle any deduplication if necessary
-                for (result.messages) |msg| {
-                    message_queue.push(msg) catch |err| {
-                        std.log.err("Failed to queue message: {any}", .{err});
-                    };
-                    std.log.debug("Queued message (queue size: {d})", .{message_queue.size()});
+                // Update modem priority based on whether messages were found
+                const found_messages = result.success and result.messages.len > 0;
+                priority_manager.updateModemPriority(result.modem_id, found_messages) catch |err| {
+                    std.log.warn("Failed to update priority: {any}", .{err});
+                };
+                
+                if (result.success) {
+                    if (result.messages.len > 0) {
+                        std.log.info("📬 Processing {d} messages from result", .{result.messages.len});
+                        total_messages += result.messages.len;
+                        
+                        // Queue messages for upload
+                        for (result.messages) |msg| {
+                            message_queue.push(msg) catch |err| {
+                                std.log.err("Failed to queue message: {any}", .{err});
+                            };
+                        }
+                    }
                 }
             }
         }
