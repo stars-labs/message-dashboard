@@ -378,10 +378,10 @@ in {
       
       # Log modem connections for audit
       ACTION=="add", SUBSYSTEM=="usb", TAG=="sms-modem", \
-        RUN+="/run/current-system/sw/bin/logger -t modem-audit 'Modem connected: $attr{idVendor}:$attr{idProduct} on $kernel'"
+        RUN+="${pkgs.util-linux}/bin/logger -t modem-audit 'Modem connected: $attr{idVendor}:$attr{idProduct} on $kernel'"
       
       ACTION=="remove", SUBSYSTEM=="usb", TAG=="sms-modem", \
-        RUN+="/run/current-system/sw/bin/logger -t modem-audit 'Modem disconnected: $attr{idVendor}:$attr{idProduct} from $kernel'"
+        RUN+="${pkgs.util-linux}/bin/logger -t modem-audit 'Modem disconnected: $attr{idVendor}:$attr{idProduct} from $kernel'"
     '';
 
     # Restrictive PolicyKit rules for ModemManager access
