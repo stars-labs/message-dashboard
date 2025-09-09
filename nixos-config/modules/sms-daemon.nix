@@ -273,7 +273,8 @@ in {
           
           # Notification (for monitoring)
           NotifyAccess = "main";
-          WatchdogSec = "60s";
+          # Temporarily disable watchdog while fixing resource constraints
+          # WatchdogSec = "60s";
         }
         
         # Handle API key loading securely
