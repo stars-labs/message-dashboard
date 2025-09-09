@@ -311,6 +311,7 @@ in {
         gnugrep
         gnused
         systemd      # For busctl
+        util-linux   # For logger command in preStart/postStop
       ];
       
       # Pre-start checks
