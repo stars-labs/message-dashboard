@@ -206,11 +206,11 @@ in {
           MemoryMax = "512M";
           MemorySwapMax = "0";  # No swap
           CPUQuota = "200%";    # Max 2 cores
-          TasksMax = 50;
+          TasksMax = 150;       # Increased from 50 to handle 54+ modems + worker threads
           
           # File descriptor limits
           LimitNOFILE = 4096;
-          LimitNPROC = 50;  # Process limit
+          LimitNPROC = 150;  # Process limit - increased to match TasksMax
           LimitCORE = 0;    # No core dumps (may contain sensitive data)
           
           # Capability restrictions
