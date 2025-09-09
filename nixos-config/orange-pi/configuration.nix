@@ -469,9 +469,10 @@
     git
     sbctl  # Secure boot control
     usbutils  # Provides lsusb command
-    aide  # File integrity monitoring
-    rkhunter  # Rootkit hunter
-    lynis  # Security auditing
+    # Security tools (configure manually if needed)
+    # aide  # File integrity monitoring - not available as service
+    # rkhunter  # Rootkit hunter - not available as service
+    # lynis  # Security auditing - not available as service
   ];
   
   # Regular security updates
@@ -482,25 +483,6 @@
     randomizedDelaySec = "30min";
   };
   
-  # File integrity monitoring
-  services.aide = {
-    enable = true;
-    extraConfig = ''
-      # Monitor critical system files
-      /boot R+sha256
-      /etc R+sha256
-      /bin R+sha256
-      /sbin R+sha256
-      /lib R+sha256
-      /lib64 R+sha256
-      /root R+sha256
-      
-      # Exclude frequently changing files
-      !/var/log
-      !/var/cache
-      !/var/tmp
-    '';
-  };
 
   # ModemManager configuration
   networking.modemmanager = {
