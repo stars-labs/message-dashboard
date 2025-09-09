@@ -25,26 +25,26 @@
   # =============================================================================
   
   # Static IP configuration (more secure than DHCP)
-  networking.interfaces = {
-    enP3p49s0 = {
-      useDHCP = false;
-      ipv4.addresses = [
-        {
-          address = "10.171.150.102";
-          prefixLength = 24;
-        }
-      ];
-    };
-  };
+  #networking.interfaces = {
+  #  enP3p49s0 = {
+  #    useDHCP = false;
+  #    ipv4.addresses = [
+  #      {
+  #        address = "10.171.150.102";
+  #        prefixLength = 24;
+  #      }
+  #    ];
+  #  };
+  #};
 
-  networking.defaultGateway = "10.171.150.1";
-  networking.nameservers = [
-    "8.8.8.8"
-    "8.8.4.4"
-  ];
+  #networking.defaultGateway = "10.171.150.1";
+  #networking.nameservers = [
+  #  "8.8.8.8"
+  #  "8.8.4.4"
+  #];
 
   # Modern nftables firewall configuration
-  networking.firewall.enable = false;  # Disable legacy iptables firewall
+  networking.firewall.enable = true;  # Disable legacy iptables firewall
   networking.nftables = {
     enable = true;
     ruleset = ''
@@ -251,15 +251,9 @@
     # Use hardened kernel packages for enhanced security
     kernelPackages = lib.mkForce pkgs.linuxPackages_hardened;
     
-    # Lanzaboote secure boot configuration (maintain original setup)
-    lanzaboote = {
-      enable = true;
-      pkiBundle = "/var/lib/sbctl";
-    };
-    
     # Boot loader configuration
     loader = {
-      systemd-boot.enable = lib.mkForce false;  # Disabled for Lanzaboote
+      systemd-boot.enable = true;  # Disabled for Lanzaboote
       efi = {
         canTouchEfiVariables = true;
         efiSysMountPoint = "/boot";
@@ -475,12 +469,12 @@
   ];
   
   # Regular security updates
-  system.autoUpgrade = {
-    enable = true;
-    allowReboot = false;  # Manual reboot for production
-    dates = "04:00";
-    randomizedDelaySec = "30min";
-  };
+  #system.autoUpgrade = {
+  #  enable = true;
+  #  allowReboot = false;  # Manual reboot for production
+  #  dates = "04:00";
+  #  randomizedDelaySec = "30min";
+  #};
   
 
   # ModemManager configuration

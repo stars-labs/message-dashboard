@@ -79,6 +79,12 @@
                         group = config.services.sms-daemon.group;
                         mode = "0400";
                       };
+                      "sms-dashboard/user-passwords/root-hash" = {
+                        neededForUsers = true;
+                      };
+                      "sms-dashboard/user-passwords/htx-hash" = {
+                        neededForUsers = true;
+                      };
                     };
                   };
 
