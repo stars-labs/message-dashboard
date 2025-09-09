@@ -232,7 +232,7 @@
       Defaults log_input
       Defaults log_output
       Defaults passwd_tries=3
-      Defaults insults=false
+      Defaults !insults
       Defaults mail_badpass
       Defaults mail_no_user
       
