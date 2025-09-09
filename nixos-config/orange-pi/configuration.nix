@@ -111,7 +111,6 @@
       PrintLastLog = true;
       TCPKeepAlive = false;
       Compression = false;
-      UseDNS = false;
       StrictModes = true;
       IgnoreRhosts = true;
       HostbasedAuthentication = false;
