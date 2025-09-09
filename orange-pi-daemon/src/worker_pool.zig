@@ -135,7 +135,11 @@ pub const WorkerPool = struct {
                             result.success = true;
                             
                             // Add result to lock-free queue
-                            std.log.debug("Worker {d}: Pushing status result to queue", .{ self.id });
+                            if (result.messages.len > 0) {
+                                std.log.debug("Worker {d}: Pushing message result to queue ({d} messages)", .{ self.id, result.messages.len });
+                            } else {
+                                std.log.debug("Worker {d}: Pushing status result to queue", .{ self.id });
+                            }
                             context.results.push(result);
                         } else {
                             // Fallback without context - just log that we found messages
