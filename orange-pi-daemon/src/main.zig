@@ -303,11 +303,19 @@ pub fn main() !void {
         const modems_to_check = try priority_manager.getModemsToCheck(valid_modems.items, cycle_count, allocator);
         defer allocator.free(modems_to_check);
         
+        // DEBUG: Log first few cycles to understand the issue
+        if (cycle_count <= 10) {
+            std.log.info("🔍 CYCLE {d}: Found {d} valid modems, got {d} to check", .{cycle_count, valid_modems.items.len, modems_to_check.len});
+            if (valid_modems.items.len > 0 and modems_to_check.len == 0) {
+                std.log.warn("⚠️  No modems selected for checking despite {d} valid modems!", .{valid_modems.items.len});
+            }
+        }
+        
         // Log priority stats periodically
         if (cycle_count % 50 == 0) {
             const priority_stats = priority_manager.getStats();
-            std.log.info("📊 Priority stats: High={d}, Medium={d}, Low={d}, Checking={d}/{d}", .{
-                priority_stats.high, priority_stats.medium, priority_stats.low,
+            std.log.info("📊 Priority stats: High={d}, Medium={d}, Low={d}, Total={d}, Checking={d}/{d}", .{
+                priority_stats.high, priority_stats.medium, priority_stats.low, priority_stats.total,
                 modems_to_check.len, valid_modems.items.len
             });
         }
