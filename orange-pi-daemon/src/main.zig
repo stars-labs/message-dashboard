@@ -51,7 +51,7 @@ const ParallelContext = struct {
     allocator: std.mem.Allocator,
     modem_manager: *ModemManager,
     message_queue: *LockFreeMessageQueue,
-    results: *LockFreeMPMC(ModemCheckResult),
+    results: *LockFreeMPMC(*ModemCheckResult),  // Store pointers, not values!
 };
 
 fn checkModemMessages(context: *ParallelContext, modem_id: []const u8) void {
@@ -82,10 +82,11 @@ pub fn main() !void {
     const stdout = std.io.getStdOut().writer();
     try stdout.print("📱 Orange Pi SMS Dashboard Daemon v3.9.0 (Queue Management Edition)\n", .{});
     
-    // Initialize allocator
+    // Initialize thread-safe allocator
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    var thread_safe_allocator = std.heap.ThreadSafeAllocator{ .child_allocator = gpa.allocator() };
+    const allocator = thread_safe_allocator.allocator();
     
     // Load configuration
     const config = try utils.loadConfig(allocator);
@@ -218,6 +219,20 @@ pub fn main() !void {
     notifySystemd("READY=1");
     std.log.info("🔔 Notified systemd that daemon is ready", .{});
     
+    // Create lock-free results queue OUTSIDE the main loop
+    // This is critical - it must persist across cycles!
+    var results_queue = LockFreeMPMC(*ModemCheckResult).init(allocator);
+    defer results_queue.deinit();
+    
+    // Create the parallel context OUTSIDE the main loop too
+    // Workers need consistent context across cycles
+    var parallel_context = ParallelContext{
+        .allocator = allocator,
+        .modem_manager = &modem_manager,
+        .message_queue = &message_queue,
+        .results = &results_queue,
+    };
+    
     // Main loop with parallel checking
     var cycle_count: u64 = 0;
     var last_cache_refresh: i64 = std.time.timestamp();
@@ -311,17 +326,6 @@ pub fn main() !void {
             last_storage_cleanup = std.time.timestamp();
         }
         
-        // Create lock-free results queue for this cycle
-        var results_queue = LockFreeMPMC(ModemCheckResult).init(allocator);
-        defer results_queue.deinit();
-        
-        var parallel_context = ParallelContext{
-            .allocator = allocator,
-            .modem_manager = &modem_manager,
-            .message_queue = &message_queue,
-            .results = &results_queue,
-        };
-        
         // Get modems to check based on priority
         const modems_to_check = try priority_manager.getModemsToCheck(valid_modems.items, cycle_count, allocator);
         defer allocator.free(modems_to_check);
@@ -393,10 +397,11 @@ pub fn main() !void {
         var total_messages: usize = 0;
         
         // Collect all results from lock-free queue
-        var results = std.ArrayList(ModemCheckResult).init(allocator);
+        var results = std.ArrayList(*ModemCheckResult).init(allocator);
         defer {
-            for (results.items) |*result| {
+            for (results.items) |result| {  // Now result is a pointer
                 result.deinit();
+                allocator.destroy(result);  // Free the heap-allocated result
             }
             results.deinit();
         }
@@ -407,12 +412,42 @@ pub fn main() !void {
             std.log.debug("Results queue has {d} items before draining", .{queue_size_before});
         }
         var popped_count: usize = 0;
-        while (results_queue.tryPop()) |result| {
+        while (results_queue.tryPop()) |result_ptr| {
             popped_count += 1;
-            std.log.debug("Popped result: modem_id len={d}, success={}, messages.len={d}", .{result.modem_id.len, result.success, result.messages.len});
-            try results.append(result);
+            // More detailed logging to debug the issue
+            if (result_ptr.messages.len > 0) {
+                std.log.info("🎯 Popped result WITH MESSAGES: modem_id={s}, success={}, messages.len={d}", .{result_ptr.modem_id, result_ptr.success, result_ptr.messages.len});
+                std.log.info("Messages slice pointer: {*}, first message ptr: {*}", .{result_ptr.messages.ptr, &result_ptr.messages[0]});
+                std.log.info("First message modem_id: {s}, sms_id: {s}", .{result_ptr.messages[0].modem_id, result_ptr.messages[0].sms_id});
+            } else {
+                std.log.debug("Popped result: modem_id={s}, success={}, messages.len=0", .{result_ptr.modem_id, result_ptr.success});
+            }
+            
+            // Critical fix: Handle append failure without losing the result
+            results.append(result_ptr) catch |err| {
+                std.log.err("🚨 CRITICAL: Failed to append result, processing immediately to avoid message loss: {any}", .{err});
+                
+                // Process this single result immediately to prevent message loss
+                if (result_ptr.success and result_ptr.messages.len > 0) {
+                    std.log.info("📬 Emergency processing {d} messages from result", .{result_ptr.messages.len});
+                    
+                    // Queue messages for upload directly
+                    for (result_ptr.messages) |msg| {
+                        std.log.info("📤 Emergency queueing message from {s} for upload", .{msg.modem_id});
+                        message_queue.push(msg) catch |queue_err| {
+                            std.log.err("Failed to emergency queue message: {any}", .{queue_err});
+                        };
+                    }
+                }
+                
+                // Clean up the result since we can't store it
+                result_ptr.deinit();
+                allocator.destroy(result_ptr);
+                continue;
+            };
+            
             // Validate the result was appended correctly
-            const appended = &results.items[results.items.len - 1];
+            const appended = results.items[results.items.len - 1];
             std.log.debug("After append: messages.len={d}", .{appended.messages.len});
         }
         if (queue_size_before > 0) {
@@ -424,7 +459,7 @@ pub fn main() !void {
             std.log.debug("Processing {d} results in cycle {d}", .{results.items.len, cycle_count});
             
             // Simple foreach loop instead of complex bounds checking
-            for (results.items) |*result| {
+            for (results.items) |result| {  // result is now a pointer
                 // Basic validation only
                 if (result.modem_id.len == 0) {
                     std.log.warn("Skipping result with empty modem_id", .{});
@@ -444,10 +479,12 @@ pub fn main() !void {
                         
                         // Queue messages for upload
                         for (result.messages) |msg| {
+                            std.log.info("📤 Queueing message from {s} for upload", .{msg.modem_id});
                             message_queue.push(msg) catch |err| {
                                 std.log.err("Failed to queue message: {any}", .{err});
                             };
                         }
+                        std.log.info("📤 Queued {d} messages, queue size now: {d}", .{result.messages.len, message_queue.size()});
                     }
                 }
             }
