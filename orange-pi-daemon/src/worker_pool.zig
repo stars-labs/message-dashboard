@@ -12,7 +12,7 @@ const ParallelContext = struct {
     allocator: std.mem.Allocator,
     modem_manager: *ModemManager,
     message_queue: *LockFreeMessageQueue,
-    results: *LockFreeMPMC(ModemCheckResult),
+    results: *LockFreeMPMC(*ModemCheckResult),  // Store pointers to heap-allocated results
 };
 
 pub const WorkType = enum {
@@ -108,18 +108,30 @@ pub const WorkerPool = struct {
                             
                             const context: *ParallelContext = @ptrCast(@alignCast(ctx_ptr));
                             
-                            var result = ModemCheckResult{
-                                .modem_id = work.modem_id,
-                                .messages = &[_]types.MessageInfo{},
-                                .success = false,
-                                .allocator = context.allocator,
+                            // Duplicate modem_id since work.modem_id will be freed
+                            const modem_id_copy = context.allocator.dupe(u8, work.modem_id) catch {
+                                std.log.err("Worker {d}: Failed to allocate modem_id copy", .{ self.id });
+                                _ = self.pool.active_workers.fetchSub(1, .monotonic);
+                                continue;
                             };
                             
                             // Check messages for this modem
                             const messages = self.pool.modem_manager.getNewMessages(work.modem_id) catch |err| {
                                 std.log.debug("Worker {d}: Failed to check messages for {s}: {any}", .{ self.id, work.modem_id, err });
                                 
-                                // Add failed result
+                                // Add failed result - allocate on heap
+                                const result = context.allocator.create(ModemCheckResult) catch {
+                                    std.log.err("Worker {d}: Failed to allocate result", .{ self.id });
+                                    context.allocator.free(modem_id_copy);
+                                    _ = self.pool.active_workers.fetchSub(1, .monotonic);
+                                    continue;
+                                };
+                                result.* = ModemCheckResult{
+                                    .modem_id = modem_id_copy,
+                                    .messages = &[_]types.MessageInfo{},
+                                    .success = false,
+                                    .allocator = context.allocator,
+                                };
                                 context.results.push(result);
                                 _ = self.pool.active_workers.fetchSub(1, .monotonic);
                                 continue;
@@ -128,15 +140,42 @@ pub const WorkerPool = struct {
                             // Return messages in result for main loop to process
                             if (messages.len > 0) {
                                 std.log.info("Worker {d}: Found {d} messages from {s}, returning to main loop", .{ self.id, messages.len, work.modem_id });
+                                // Debug log to verify messages content
+                                for (messages, 0..) |msg, i| {
+                                    std.log.debug("Worker {d}: Message {d} from {s}: sms_id={s}", .{ self.id, i, work.modem_id, msg.sms_id });
+                                }
                             }
                             
-                            // Return messages in result - main loop will handle processing and cleanup
-                            result.messages = messages;
-                            result.success = true;
+                            // Create result on heap
+                            const result = context.allocator.create(ModemCheckResult) catch {
+                                std.log.err("Worker {d}: Failed to allocate result", .{ self.id });
+                                context.allocator.free(modem_id_copy);
+                                // Free messages if allocation failed
+                                for (messages) |*msg| {
+                                    context.allocator.free(msg.modem_id);
+                                    context.allocator.free(msg.sms_id);
+                                    context.allocator.free(msg.message.phone_iccid);
+                                    context.allocator.free(msg.message.phone_number);
+                                    context.allocator.free(msg.message.content);
+                                    context.allocator.free(msg.message.timestamp);
+                                }
+                                context.allocator.free(messages);
+                                _ = self.pool.active_workers.fetchSub(1, .monotonic);
+                                continue;
+                            };
+                            
+                            result.* = ModemCheckResult{
+                                .modem_id = modem_id_copy,
+                                .messages = messages,
+                                .success = true,
+                                .allocator = context.allocator,
+                            };
                             
                             // Add result to lock-free queue
                             if (result.messages.len > 0) {
-                                std.log.debug("Worker {d}: Pushing message result to queue ({d} messages)", .{ self.id, result.messages.len });
+                                std.log.info("Worker {d}: Pushing message result to queue ({d} messages)", .{ self.id, result.messages.len });
+                                // Debug: Verify message data is valid at push time
+                                std.log.debug("Worker {d}: Messages slice ptr: {*}, first message modem_id: {s}", .{ self.id, result.messages.ptr, result.messages[0].modem_id });
                             } else {
                                 std.log.debug("Worker {d}: Pushing status result to queue", .{ self.id });
                             }

@@ -151,7 +151,7 @@ in {
           # Restart configuration
           Restart = "on-failure";
           RestartSec = "10s";
-          RestartPreventExitStatus = "0 1";
+          # RestartPreventExitStatus = "1";  # Only prevent restart on config errors
           StartLimitIntervalSec = "300";
           StartLimitBurst = "5";
           
@@ -182,14 +182,15 @@ in {
           ];
           
           # Device access restrictions (only allow modem devices)
-          PrivateDevices = false;  # Need access to USB modems
+          # TODO: Test if PrivateDevices=true works with DeviceAllow whitelist
+          PrivateDevices = true;  # Currently need false for USB modem access
           DeviceAllow = [
             "char-usb_device rw"  # USB character devices
             "/dev/ttyUSB* rw"     # USB serial ports
             "/dev/cdc-wdm* rw"    # CDC WDM devices for modems
             "/dev/bus/usb rw"     # USB bus access
           ];
-          DevicePolicy = "closed";  # Deny all other devices
+          DevicePolicy = "closed";  # Deny all other devices (only effective with PrivateDevices=true)
           
           # Network restrictions
           PrivateNetwork = false;  # Need network for API
