@@ -99,18 +99,25 @@
       const response = await api.post('/api/messages/batch-tags', { messageIds });
       
       if (response.success && response.data) {
-        // Store tags for each message
-        messageTags.clear();
+        // Create a completely new Map to avoid triggering reactivity on the existing one
+        const newMessageTags = new Map();
         for (const [messageId, tags] of Object.entries(response.data)) {
-          messageTags.set(messageId, tags);
+          newMessageTags.set(messageId, tags);
         }
-        tagsLoaded = true;
-        console.log(`[MessageView] Loaded tags for ${messageTags.size} messages`);
+        
+        // Use requestAnimationFrame to ensure this update happens outside the current reactive cycle
+        requestAnimationFrame(() => {
+          messageTags = newMessageTags;  // Replace the entire Map
+          tagsLoaded = true;
+          console.log(`[MessageView] Loaded tags for ${newMessageTags.size} messages`);
+        });
       }
     } catch (err) {
       console.error('[MessageView] Failed to batch fetch tags:', err);
       // Fall back to client-side highlighting
-      tagsLoaded = true;
+      requestAnimationFrame(() => {
+        tagsLoaded = true;
+      });
     }
   }
   
@@ -127,24 +134,24 @@
     }
   });
   
-  // Use afterUpdate to check for message changes
-  // This runs after DOM updates, avoiding the reactive loop
-  afterUpdate(() => {
-    if (!uniqueMessages || uniqueMessages.length === 0) {
-      return;
-    }
-    
-    const currentMessageIds = uniqueMessages.map(m => m.id).sort().join(',');
-    if (currentMessageIds !== previousMessageIds) {
+  // Simple reactive statement to watch for message changes
+  // This will trigger when uniqueMessages changes, but we'll be careful not to cause loops
+  $: {
+    const currentMessageIds = uniqueMessages?.map(m => m.id).sort().join(',') || '';
+    if (currentMessageIds && currentMessageIds !== previousMessageIds) {
+      // Update the previous IDs synchronously (no reactivity)
       previousMessageIds = currentMessageIds;
       
-      // Debounce the fetch to avoid rapid consecutive calls
+      // Schedule the API call for the next tick to avoid blocking current reactive cycle
       clearTimeout(fetchTagsTimer);
       fetchTagsTimer = setTimeout(() => {
-        batchFetchTags();
+        // Call batchFetchTags but don't await it to avoid blocking
+        batchFetchTags().catch(err => {
+          console.error('[MessageView] Background tag fetch failed:', err);
+        });
       }, 100);
     }
-  });
+  }
   
   // Helper function to parse and normalize timestamps
   function parseTimestamp(timestamp) {
@@ -297,9 +304,10 @@
   }
   
   function handleTagsExtracted(messageId, tags) {
-    // Simply set the tags without forcing reactivity
-    // The Map will be updated and components can access it
-    messageTags.set(messageId, tags);
+    // Use requestAnimationFrame to ensure this update happens outside reactive cycles
+    requestAnimationFrame(() => {
+      messageTags.set(messageId, tags);
+    });
   }
   
   // Removed getMessageTags - no longer needed since we use messageTags Map directly
