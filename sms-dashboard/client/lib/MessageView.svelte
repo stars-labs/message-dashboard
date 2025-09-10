@@ -125,31 +125,31 @@
   let previousMessageIds = '';
   let fetchTagsTimer = null;
   
-  // Load keywords and initial tags on mount
+  // Load keywords on mount (tags will be fetched by reactive statement)
   onMount(async () => {
     await loadKeywords();
-    // Initial fetch of tags if we have messages
-    if (uniqueMessages && uniqueMessages.length > 0) {
-      await batchFetchTags();
-    }
+    // Don't fetch tags here - let the reactive statement handle it
+    // to avoid duplicate calls and potential loops
   });
   
-  // Simple reactive statement to watch for message changes
-  // This will trigger when uniqueMessages changes, but we'll be careful not to cause loops
-  $: {
-    const currentMessageIds = uniqueMessages?.map(m => m.id).sort().join(',') || '';
-    if (currentMessageIds && currentMessageIds !== previousMessageIds) {
-      // Update the previous IDs synchronously (no reactivity)
+  // Watch for message changes and fetch tags when needed
+  // Use a reactive statement but ensure it doesn't cause loops
+  $: if (uniqueMessages && uniqueMessages.length > 0) {
+    const currentMessageIds = uniqueMessages.map(m => m.id).sort().join(',');
+    if (currentMessageIds !== previousMessageIds) {
       previousMessageIds = currentMessageIds;
       
-      // Schedule the API call for the next tick to avoid blocking current reactive cycle
-      clearTimeout(fetchTagsTimer);
-      fetchTagsTimer = setTimeout(() => {
-        // Call batchFetchTags but don't await it to avoid blocking
-        batchFetchTags().catch(err => {
-          console.error('[MessageView] Background tag fetch failed:', err);
-        });
-      }, 100);
+      // Use requestAnimationFrame to defer the fetch completely out of reactive cycle
+      requestAnimationFrame(() => {
+        // Clear any pending timer
+        clearTimeout(fetchTagsTimer);
+        // Add a small delay to batch rapid changes
+        fetchTagsTimer = setTimeout(() => {
+          batchFetchTags().catch(err => {
+            console.error('[MessageView] Background tag fetch failed:', err);
+          });
+        }, 150);
+      });
     }
   }
   
