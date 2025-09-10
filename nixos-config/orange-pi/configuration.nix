@@ -162,6 +162,7 @@
       enable = true;
       factor = "2";
       maxtime = "24h";
+      rndtime = "8m";
     };
     
     jails = {

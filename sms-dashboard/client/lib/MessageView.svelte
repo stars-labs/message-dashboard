@@ -119,54 +119,20 @@
     await loadKeywords();
   });
   
-  // Fetch tags when messages change
-  $: if (uniqueMessages && uniqueMessages.length > 0) {
-    batchFetchTags();
-  }
+  // Track previous message IDs to prevent duplicate fetches
+  let previousMessageIds = '';
   
-  // Debug logging for message filtering
-  $: {
-    if (messages.length > 0 || selectedPhone) {
-      console.debug('[MessageView] Debug Info:');
-      console.debug('- Total messages:', messages.length);
-      console.debug('- Selected phone:', selectedPhone);
-      console.debug('- Filtered messages:', filteredMessages.length);
-      console.debug('- Unique messages:', uniqueMessages.length);
-      console.debug('- Display messages:', displayMessages.length);
-      console.debug('- View mode:', viewMode);
-      console.debug('- Group by:', groupBy);
-      
-      if (selectedPhone) {
-        console.debug('- Filtering by ICCID:', selectedPhone.iccid);
-        console.debug('- ICCID type:', typeof selectedPhone.iccid);
-        console.debug('- Sample message ICCIDs:', messages.slice(0, 5).map(m => ({
-          iccid: m.phone_iccid,
-          type: typeof m.phone_iccid,
-          content: m.content?.substring(0, 50) + '...'
-        })));
-        
-        // Check for ICCID match
-        const matchingMessages = messages.filter(m => m.phone_iccid === selectedPhone.iccid);
-        console.debug('- Messages matching ICCID:', matchingMessages.length);
-        if (matchingMessages.length > 0) {
-          console.debug('- First matching message:', matchingMessages[0]);
-        }
-        
-        // Also check with type conversion
-        const matchingMessagesStr = messages.filter(m => String(m.phone_iccid) === String(selectedPhone.iccid));
-        console.debug('- Messages matching ICCID (string comparison):', matchingMessagesStr.length);
-        
-        // Check for partial matches
-        const partialMatches = messages.filter(m => m.phone_iccid && selectedPhone.iccid && m.phone_iccid.includes(selectedPhone.iccid));
-        console.debug('- Partial ICCID matches:', partialMatches.length);
-      }
-      
-      if (groupBy === 'source') {
-        console.debug('- Grouped messages:', Object.keys(groupedMessages).length, 'groups');
-        console.debug('- Groups:', Object.keys(groupedMessages));
-      }
+  // Fetch tags when messages change (with guard to prevent re-runs)
+  $: if (uniqueMessages && uniqueMessages.length > 0) {
+    const currentMessageIds = uniqueMessages.map(m => m.id).join(',');
+    if (currentMessageIds !== previousMessageIds) {
+      previousMessageIds = currentMessageIds;
+      batchFetchTags();
     }
   }
+  
+  // Debug logging - removed reactive statement to prevent circular dependency
+  // Use onMount or explicit function calls for debugging instead
   
   // Helper function to parse and normalize timestamps
   function parseTimestamp(timestamp) {
