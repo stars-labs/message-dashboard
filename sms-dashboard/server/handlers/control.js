@@ -99,14 +99,15 @@ export const controlHandler = {
         await env.DB.prepare(`
           INSERT INTO sims (
             iccid, phone_number, current_modem_id, operator_name,
-            operator_id, status, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            operator_id, status, sim_index, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
           ON CONFLICT(iccid) DO UPDATE SET
             phone_number = excluded.phone_number,
             current_modem_id = excluded.current_modem_id,
             operator_name = excluded.operator_name,
             operator_id = excluded.operator_id,
             status = excluded.status,
+            sim_index = excluded.sim_index,
             updated_at = CURRENT_TIMESTAMP
         `).bind(
           sim.iccid,
@@ -114,7 +115,8 @@ export const controlHandler = {
           sim.current_modem_id || null,
           sim.operator_name || null,
           sim.operator_id || null,
-          sim.status || 'active'
+          sim.status || 'active',
+          sim.sim_index || null
         ).run();
       }
       
