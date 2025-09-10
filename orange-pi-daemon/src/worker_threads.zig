@@ -31,9 +31,16 @@ pub fn messageProcessorThread(context: *WorkerContext) !void {
         var batch_buffer: [10]types.MessageInfo = undefined;
         const queue_size = context.message_queue.size();
         if (queue_size > 0) {
-            std.log.debug("📬 Message processor: Queue has {d} items, attempting to pop batch", .{queue_size});
+            std.log.info("📬 Message processor: Queue has {d} items, attempting to pop batch", .{queue_size});
         }
         const message_count = context.message_queue.popBatch(&batch_buffer);
+        
+        // Log what we got from the queue
+        if (message_count > 0) {
+            std.log.info("📬 Message processor: Successfully popped {d} messages from queue", .{message_count});
+        } else if (queue_size > 0) {
+            std.log.warn("⚠️ Message processor: Queue had {d} items but popBatch returned 0!", .{queue_size});
+        }
         
         if (message_count == 0) {
             // Check if we have pending messages to upload (time-based batching)

@@ -741,7 +741,8 @@ pub const ModemManager = struct {
                     // No message tracking needed - upload all messages
                     
                     try messages.append(message_info);
-                } else |_| {
+                } else |err| {
+                    std.log.warn("❌ Failed to get SMS details for {s} on modem {s}: {any}", .{ sms_id_str, modem_id, err });
                     continue;
                 }
             }
@@ -792,6 +793,16 @@ pub const ModemManager = struct {
                         try content_lines.append(try self.allocator.dupe(u8, value));
                     }
                 }
+            } else if (std.mem.indexOf(u8, trimmed, "data:")) |_| {
+                // Skip binary/WAP/MMS messages - they're not text messages
+                std.log.info("⏭️ Skipping binary/MMS message (SMS {s}) - not a text message", .{sms_id});
+                // Clean up and return early
+                if (phone_number) |pn| self.allocator.free(pn);
+                if (timestamp) |ts| self.allocator.free(ts);
+                for (content_lines.items) |content_line| {
+                    self.allocator.free(content_line);
+                }
+                return error.BinaryMessageSkipped;
             } else if (std.mem.indexOf(u8, trimmed, "timestamp:")) |_| {
                 parsing_content = false; // Stop parsing content when we hit another field
                 if (std.mem.indexOf(u8, trimmed, ": ")) |pos| {
@@ -893,16 +904,13 @@ pub const ModemManager = struct {
                         );
                         std.log.debug("🕐 Converted timestamp: {s} -> {s}", .{ts_raw, formatted_timestamp});
                     } else if (std.mem.indexOf(u8, ts_without_tz, "T") != null) {
-                        // Already in ISO format, but might be missing timezone
-                        // Check if it already has Z or timezone offset
-                        if (std.mem.endsWith(u8, ts_without_tz, "Z") or 
-                            std.mem.indexOf(u8, ts_without_tz, "+") != null or
-                            (std.mem.lastIndexOf(u8, ts_without_tz, "-") orelse 0) > 10) { // Check for - after the date part
-                            // Already has timezone
+                        // Already in ISO format - check if we need timezone conversion
+                        if (std.mem.endsWith(u8, ts_without_tz, "Z")) {
+                            // Already UTC, use as-is
                             formatted_timestamp = try self.allocator.dupe(u8, ts_without_tz);
-                        } else {
-                            // Missing timezone, assume Beijing time (UTC+8) and convert to UTC
-                            std.log.debug("🕐 ISO timestamp without timezone, assuming Beijing time: {s}", .{ts_without_tz});
+                        } else if (has_timezone) {
+                            // We extracted timezone info, convert to UTC
+                            std.log.debug("🕐 Converting ISO timestamp with timezone offset +{d}: {s}", .{timezone_offset_hours, ts_without_tz});
                             
                             // Parse ISO format: YYYY-MM-DDTHH:MM:SS[.mmm]
                             var parts = std.mem.tokenizeScalar(u8, ts_without_tz, 'T');
@@ -936,9 +944,9 @@ pub const ModemManager = struct {
                             const min = try std.fmt.parseInt(u8, min_str, 10);
                             const sec = try std.fmt.parseInt(u8, sec_str, 10);
                             
-                            // Convert Beijing time to UTC (subtract 8 hours)
+                            // Convert to UTC using extracted timezone offset
                             const hour_i32: i32 = @intCast(hour);
-                            const adjusted_hour_i32 = hour_i32 - 8;
+                            const adjusted_hour_i32 = hour_i32 - timezone_offset_hours;
                             
                             var final_hour: u8 = undefined;
                             var final_day = day;
@@ -962,8 +970,12 @@ pub const ModemManager = struct {
                                     .{ year, month, final_day, final_hour, min, sec }
                                 );
                             }
+                        } else {
+                            // No timezone info, assume Beijing time (UTC+8) and convert to UTC
+                            std.log.debug("🕐 ISO timestamp without timezone, assuming Beijing time: {s}", .{ts_without_tz});
+                            formatted_timestamp = try self.allocator.dupe(u8, ts_without_tz);
                         }
-                        std.log.debug("🕐 Timestamp already in ISO format: {s} -> {s}", .{ts_without_tz, formatted_timestamp});
+                        std.log.debug("🕐 Timestamp processed: {s} -> {s}", .{ts_raw, formatted_timestamp});
                     } else {
                         // Fallback: use current time
                         std.log.debug("🕐 Unrecognized timestamp format, using current time", .{});
