@@ -1,6 +1,6 @@
 <script>
   import MessageHighlight from './MessageHighlight.svelte';
-  import { onMount } from 'svelte';
+  import { onMount, afterUpdate } from 'svelte';
   import { api } from './api.js';
   
   export let messages = [];
@@ -48,7 +48,7 @@
       }
     }
     
-    console.debug(`[MessageView] Deduplication: ${filteredMessages.length} messages -> ${unique.length} unique messages`);
+    // Remove debug logging from reactive computation to avoid side effects
     return unique;
   })();
   
@@ -114,25 +114,37 @@
     }
   }
   
-  // Load keywords once on mount
-  onMount(async () => {
-    await loadKeywords();
-  });
-  
   // Track previous message IDs to prevent duplicate fetches
   let previousMessageIds = '';
+  let fetchTagsTimer = null;
   
-  // Fetch tags when messages change (with guard to prevent re-runs)
-  $: if (uniqueMessages && uniqueMessages.length > 0) {
-    const currentMessageIds = uniqueMessages.map(m => m.id).join(',');
+  // Load keywords and initial tags on mount
+  onMount(async () => {
+    await loadKeywords();
+    // Initial fetch of tags if we have messages
+    if (uniqueMessages && uniqueMessages.length > 0) {
+      await batchFetchTags();
+    }
+  });
+  
+  // Use afterUpdate to check for message changes
+  // This runs after DOM updates, avoiding the reactive loop
+  afterUpdate(() => {
+    if (!uniqueMessages || uniqueMessages.length === 0) {
+      return;
+    }
+    
+    const currentMessageIds = uniqueMessages.map(m => m.id).sort().join(',');
     if (currentMessageIds !== previousMessageIds) {
       previousMessageIds = currentMessageIds;
-      batchFetchTags();
+      
+      // Debounce the fetch to avoid rapid consecutive calls
+      clearTimeout(fetchTagsTimer);
+      fetchTagsTimer = setTimeout(() => {
+        batchFetchTags();
+      }, 100);
     }
-  }
-  
-  // Debug logging - removed reactive statement to prevent circular dependency
-  // Use onMount or explicit function calls for debugging instead
+  });
   
   // Helper function to parse and normalize timestamps
   function parseTimestamp(timestamp) {
@@ -285,8 +297,9 @@
   }
   
   function handleTagsExtracted(messageId, tags) {
+    // Simply set the tags without forcing reactivity
+    // The Map will be updated and components can access it
     messageTags.set(messageId, tags);
-    messageTags = messageTags; // Trigger reactivity
   }
   
   // Removed getMessageTags - no longer needed since we use messageTags Map directly
