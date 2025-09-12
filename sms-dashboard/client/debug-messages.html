@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Debug Messages API</title>
+</head>
+<body>
+    <h1>Debug Messages API</h1>
+    <div id="output"></div>
+    
+    <script>
+        async function debugMessagesAPI() {
+            const output = document.getElementById('output');
+            
+            // Check if we have an auth token
+            const token = localStorage.getItem('auth_token');
+            output.innerHTML += `<p><strong>Auth token present:</strong> ${!!token}</p>`;
+            
+            if (!token) {
+                output.innerHTML += `<p style="color: red;">No auth token found. Please login first.</p>`;
+                return;
+            }
+            
+            try {
+                // Make the same API call as the app
+                const response = await fetch('/api/messages?limit=2000', {
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                output.innerHTML += `<p><strong>Response status:</strong> ${response.status} ${response.statusText}</p>`;
+                
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    output.innerHTML += `<p style="color: red;"><strong>Error response:</strong> ${errorText}</p>`;
+                    return;
+                }
+                
+                const data = await response.json();
+                output.innerHTML += `<p><strong>Response data:</strong></p>`;
+                output.innerHTML += `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+                
+                if (data.success && data.data) {
+                    output.innerHTML += `<p style="color: green;"><strong>Messages found:</strong> ${data.data.length}</p>`;
+                    if (data.data.length > 0) {
+                        output.innerHTML += `<p><strong>First message:</strong></p>`;
+                        output.innerHTML += `<pre>${JSON.stringify(data.data[0], null, 2)}</pre>`;
+                    }
+                } else {
+                    output.innerHTML += `<p style="color: red;"><strong>API response indicates failure or no data</strong></p>`;
+                }
+                
+            } catch (error) {
+                output.innerHTML += `<p style="color: red;"><strong>Fetch error:</strong> ${error.message}</p>`;
+            }
+        }
+        
+        // Run the debug
+        debugMessagesAPI();
+    </script>
+</body>
+</html>

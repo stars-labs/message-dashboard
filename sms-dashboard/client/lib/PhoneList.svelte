@@ -153,8 +153,8 @@
     { code: "SG", name: "新加坡", flag: "🇸🇬" },
   ];
 
-  // Debug: Log unique countries found in phone data
-  $: {
+  // Debug function to log countries - called manually to avoid circular dependencies
+  function debugCountries() {
     if (phoneNumbers.length > 0) {
       const uniqueCountries = [...new Set(phoneNumbers.map(p => p.country).filter(Boolean))];
       const uniqueMappedCountries = [...new Set(phoneNumbers.map(p => p.mapped_country).filter(Boolean))];
@@ -164,7 +164,6 @@
         mappedCountries: uniqueMappedCountries,
         inferredCountries: uniqueInferredCountries,
         totalPhones: phoneNumbers.length,
-        filteredCount: filteredPhones.length,
         selectedCountry
       });
     }

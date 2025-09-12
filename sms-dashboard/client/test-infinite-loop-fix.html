@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Infinite Loop Fix</title>
+</head>
+<body>
+    <h1>Testing MessageView Infinite Loop Fix</h1>
+    <p>Open browser console to check for effect_update_depth_exceeded errors.</p>
+    <p>The fix should prevent the infinite reactive loop when loading large message lists.</p>
+    
+    <script>
+        // Check if we can access the main app without errors
+        console.log('Test page loaded. Checking main dashboard...');
+        
+        // Redirect to main dashboard after 3 seconds if no errors
+        setTimeout(() => {
+            console.log('Redirecting to main dashboard...');
+            window.location.href = '/';
+        }, 3000);
+    </script>
+</body>
+</html>

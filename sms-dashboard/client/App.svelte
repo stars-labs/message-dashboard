@@ -1,7 +1,7 @@
 <script>
   import { onMount, onDestroy } from "svelte";
   import PhoneList from "./lib/PhoneList.svelte";
-  import MessageView from "./lib/MessageView.svelte";
+  import SimpleMessageView from "./lib/SimpleMessageView.svelte";
   import MessageComposer from "./lib/MessageComposer.svelte";
   import StatsCard from "./lib/StatsCard.svelte";
   import IccidMappings from "./lib/IccidMappings.svelte";
@@ -23,13 +23,18 @@
 
   let selectedPhoneIccid = null;
   let messageViewRef = null;
-  $: selectedPhone = selectedPhoneIccid
-    ? phoneNumbers.find((p) => p.iccid === selectedPhoneIccid)
-    : null;
+  let selectedPhone = null;
   
-  // When phone selection changes (including deselection), load appropriate messages
-  $: {
-    console.debug('[App] Phone selection changed to:', selectedPhoneIccid);
+  // Manual function to update selected phone
+  function updateSelectedPhone() {
+    selectedPhone = selectedPhoneIccid
+      ? phoneNumbers.find((p) => p.iccid === selectedPhoneIccid)
+      : null;
+  }
+  
+  // Manual function to handle phone selection changes
+  function handlePhoneSelection() {
+    updateSelectedPhone();
     loadMessagesForPhone(selectedPhoneIccid);
   }
   
@@ -81,17 +86,14 @@
   // Track if we've loaded stats from backend (to prevent race conditions)
   let backendStatsLoaded = false;
   
-  // Single reactive statement for stats updates
-  // ONLY recalculate if we haven't received stats from backend
-  // Backend has authoritative data about online devices
-  $: if (phoneNumbers && phoneNumbers.length > 0 && !dataLoading && !backendStatsLoaded) {
-    // Only calculate if backend hasn't provided stats yet
-    const onlineCount = calculateOnlineDevices(phoneNumbers);
-    const simMissingCount = calculateSimMissingDevices(phoneNumbers);
-    console.debug('[App] No backend stats, calculating from phones:', onlineCount, '/', phoneNumbers.length, '(', simMissingCount, 'need SIM)');
-    if (onlineCount !== stats.onlineDevices || simMissingCount !== stats.simMissingDevices) {
-      console.debug('[App] Updating stats from', {online: stats.onlineDevices, simMissing: stats.simMissingDevices}, 'to', {online: onlineCount, simMissing: simMissingCount});
-      stats = { ...stats, onlineDevices: onlineCount, simMissingDevices: simMissingCount };
+  // Manual function to update stats - no reactive statements to avoid circular dependencies
+  function updateStatsFromPhones() {
+    if (phoneNumbers && phoneNumbers.length > 0 && !dataLoading && !backendStatsLoaded) {
+      const onlineCount = calculateOnlineDevices(phoneNumbers);
+      const simMissingCount = calculateSimMissingDevices(phoneNumbers);
+      if (onlineCount !== stats.onlineDevices || simMissingCount !== stats.simMissingDevices) {
+        stats = { ...stats, onlineDevices: onlineCount, simMissingDevices: simMissingCount };
+      }
     }
   }
   let selectedCountry = "all";
@@ -136,13 +138,6 @@
     simMissingDevices: 0,
   };
   
-  // Debug: log whenever stats changes
-  $: console.debug('[App] Stats changed:', { 
-    online: stats.onlineDevices, 
-    total: stats.totalDevices,
-    backendLoaded: backendStatsLoaded,
-    phonesLength: phoneNumbers.length 
-  });
   
   // Hash routing handler
   function handleHashChange() {
@@ -201,7 +196,16 @@
               return { success: false, data: [] };
             }),
           fetch("/api/messages?limit=2000", { headers })
-            .then((r) => r.json())
+            .then(async (r) => {
+              console.debug('[App] Messages API response status:', r.status, r.statusText);
+              if (!r.ok) {
+                console.error('[App] Messages API response not ok:', r.status, r.statusText);
+                return { success: false, data: [], error: `HTTP ${r.status}` };
+              }
+              const data = await r.json();
+              console.debug('[App] Raw messages API response:', data);
+              return data;
+            })
             .catch((err) => {
               console.error('[App] Failed to fetch messages:', err);
               captureException(err, { context: { endpoint: '/api/messages' } });
@@ -226,31 +230,63 @@
           ...phone,
           flag: getPhoneFlag(phone)
         }));
+        updateStatsFromPhones();
+        updateSelectedPhone();
       } else if (Array.isArray(phonesResponse)) {
         phoneNumbers = phonesResponse.map(phone => ({
           ...phone,
           flag: getPhoneFlag(phone)
         }));
+        updateStatsFromPhones();
+        updateSelectedPhone();
       } else {
         phoneNumbers = [];
+        updateStatsFromPhones();
+        updateSelectedPhone();
       }
       
       console.debug('[App] Loaded phones:', phoneNumbers.length);
       console.debug('[App] Phone ICCIDs:', phoneNumbers.map(p => p.iccid));
 
       // Safely handle messages response
-      if (messagesResponse && messagesResponse.data) {
+      console.debug('[App] Processing messages response:', {
+        hasResponse: !!messagesResponse,
+        hasData: !!(messagesResponse && messagesResponse.data),
+        success: messagesResponse?.success,
+        isDataArray: Array.isArray(messagesResponse?.data),
+        dataLength: messagesResponse?.data?.length,
+        hasResults: !!(messagesResponse?.data?.results),
+        resultsLength: messagesResponse?.data?.results?.length
+      });
+      
+      if (messagesResponse && messagesResponse.success && messagesResponse.data) {
         // Handle both array and object with results
         if (Array.isArray(messagesResponse.data)) {
           messages = messagesResponse.data;
+          console.debug('[App] Using direct data array:', messages.length, 'messages');
         } else if (messagesResponse.data.results && Array.isArray(messagesResponse.data.results)) {
           messages = messagesResponse.data.results;
+          console.debug('[App] Using data.results array:', messages.length, 'messages');
         } else {
           console.warn('[App] Unexpected messages response format:', messagesResponse);
           messages = [];
         }
       } else {
-        console.warn('[App] Invalid messages response:', messagesResponse);
+        console.error('[App] CRITICAL: Messages API failed!', {
+          response: messagesResponse,
+          success: messagesResponse?.success,
+          hasData: !!(messagesResponse && messagesResponse.data),
+          error: messagesResponse?.error,
+          authToken: !!auth.token
+        });
+        
+        // If this is an auth error, try to re-authenticate
+        if (messagesResponse?.error && messagesResponse.error.includes('HTTP 401')) {
+          console.error('[App] Authentication error detected, forcing logout');
+          auth.logout();
+          return;
+        }
+        
         messages = [];
       }
       
@@ -312,6 +348,7 @@
       console.warn("Failed to load data:", error);
       // Use default values on error
       phoneNumbers = [];
+      updateStatsFromPhones();
       messages = [];
       stats = {
         totalMessages: 0,
@@ -347,17 +384,27 @@
     // Don't fetch stats here - it will be fetched after authentication in loadAllData
     // await fetchStats();
     
-    // Apply matrix rain effect to body
-    const removeMatrixRain = createMatrixRain(document.body);
-    
-    // Apply header effects after a small delay to ensure DOM is ready
-    setTimeout(() => {
-      // Apply to main headers
-      const headers = document.querySelectorAll('.header-effect-target');
-      headers.forEach(header => {
-        applyHeaderEffect(header);
-      });
-    }, 100);
+    // Apply visual effects (wrap in try-catch to prevent blocking)
+    let removeMatrixRain = null;
+    try {
+      // Apply matrix rain effect to body
+      removeMatrixRain = createMatrixRain(document.body);
+      
+      // Apply header effects after a small delay to ensure DOM is ready
+      setTimeout(() => {
+        try {
+          // Apply to main headers
+          const headers = document.querySelectorAll('.header-effect-target');
+          headers.forEach(header => {
+            applyHeaderEffect(header);
+          });
+        } catch (effectError) {
+          console.warn('Failed to apply header effects:', effectError);
+        }
+      }, 100);
+    } catch (error) {
+      console.warn('Failed to apply matrix rain effect:', error);
+    }
     
     // Check if returning from Auth0 callback
     if (window.location.search.includes("token=")) {
@@ -411,14 +458,18 @@
       // window._daemonHealthInterval = healthCheckInterval;
       
       // Store matrix rain cleanup
-      window._removeMatrixRain = removeMatrixRain;
+      if (removeMatrixRain) {
+        window._removeMatrixRain = removeMatrixRain;
+      }
     } else {
       // For anonymous users, don't make any API calls
       console.debug("[App] User not authenticated, skipping data loading and polling");
       dataLoading = false; // Mark data loading as complete
       
       // Store matrix rain cleanup for anonymous users too
-      window._removeMatrixRain = removeMatrixRain;
+      if (removeMatrixRain) {
+        window._removeMatrixRain = removeMatrixRain;
+      }
     }
   });
 
@@ -548,6 +599,7 @@
             if (matchingPhone) {
               console.debug('[App] Auto-selecting phone:', matchingPhone.iccid);
               selectedPhoneIccid = matchingPhone.iccid;
+              handlePhoneSelection();
             }
           }
           
@@ -609,7 +661,9 @@
           if (stats.totalDevices !== daemonModemCount) {
             stats = { ...stats, totalDevices: daemonModemCount };
           }
-          // The reactive statement will automatically update online device count
+          // Update stats manually (was reactive statement)
+          updateStatsFromPhones();
+          updateSelectedPhone();
           
           // Update daemon health status
           updateDaemonHealthStatus();
@@ -688,6 +742,7 @@
 
   async function selectPhone(phone) {
     selectedPhoneIccid = phone?.iccid || null;
+    handlePhoneSelection();
     showPhoneList = false;
     
     // Load all messages for the selected phone
@@ -843,6 +898,8 @@
         number: phone_number,
       };
       phoneNumbers = [...phoneNumbers]; // Trigger reactivity
+      updateStatsFromPhones();
+      updateSelectedPhone();
     }
 
     // No need to reload - WebSocket will provide updates
@@ -1621,8 +1678,8 @@
 
           <!-- Message View Column -->
           <div class="lg:col-span-2">
-            <!-- Always show MessageView at the top -->
-            <MessageView bind:this={messageViewRef} {messages} {selectedPhone} mobile={false} />
+            <!-- Always show SimpleMessageView at the top -->
+            <SimpleMessageView {messages} {selectedPhone} />
             <!-- Show PhoneDetails below if selected -->
             {#if selectedPhone}
               <div class="mt-4">

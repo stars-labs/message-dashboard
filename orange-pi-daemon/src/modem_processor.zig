@@ -155,6 +155,13 @@ pub fn processModem(
         }
     }
     
+    // Skip adding modems with synthetic IDs to prevent database pollution
+    if (std.mem.startsWith(u8, imei, "MODEM_")) {
+        std.log.warn("Skipping upload of modem with synthetic ID: {s}", .{imei});
+        std.log.info("Modem {s} likely still initializing - will retry on next cycle", .{modem_id});
+        return;
+    }
+    
     // Add modem to collector
     device_collector.addModem(modem) catch |err| {
         std.log.warn("Failed to add modem {s} to collector: {any}", .{ imei, err });

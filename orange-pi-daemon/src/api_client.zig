@@ -2,21 +2,47 @@ const std = @import("std");
 const json = std.json;
 const types = @import("types.zig");
 
+/// Sync mode for state reconciliation
+pub const SyncMode = enum {
+    full,
+    incremental,
+    
+    pub fn toString(self: SyncMode) []const u8 {
+        return switch (self) {
+            .full => "full",
+            .incremental => "incremental",
+        };
+    }
+};
+
 /// HTTP API client for uploading data to the dashboard
 pub const ApiClient = struct {
     allocator: std.mem.Allocator,
     config: types.Config,
     client: std.http.Client,
+    session_id: []const u8,
 
     pub fn init(allocator: std.mem.Allocator, config: types.Config) ApiClient {
+        // Generate unique session ID for this daemon instance
+        var prng = std.Random.DefaultPrng.init(@intCast(std.time.timestamp()));
+        const random = prng.random();
+        const session_id = std.fmt.allocPrint(allocator, "daemon-{x}-{x}", .{
+            random.int(u64),
+            @as(u64, @intCast(std.time.timestamp())),
+        }) catch "daemon-unknown";
+        
+        std.log.info("🔑 Daemon session ID: {s}", .{session_id});
+        
         return .{ 
             .allocator = allocator, 
             .config = config,
             .client = std.http.Client{ .allocator = allocator },
+            .session_id = session_id,
         };
     }
     
     pub fn deinit(self: *ApiClient) void {
+        self.allocator.free(self.session_id);
         self.client.deinit();
     }
 
@@ -46,8 +72,8 @@ pub const ApiClient = struct {
         std.log.debug("✅ Uploaded {d} phones via HTTP API", .{phones.len});
     }
 
-    /// Upload device data (modems and SIMs) to the API - new clean architecture
-    pub fn uploadDevices(self: *ApiClient, modems: []const types.Modem, sims: []const types.SIM) !void {
+    /// Upload device data with sync mode for state reconciliation
+    pub fn uploadDevicesWithSync(self: *ApiClient, modems: []const types.Modem, sims: []const types.SIM, sync_mode: SyncMode) !void {
         if (modems.len == 0 and sims.len == 0) return;
         
         const modems_json = try json.stringifyAlloc(self.allocator, modems, .{ .emit_null_optional_fields = false });
@@ -55,14 +81,25 @@ pub const ApiClient = struct {
         
         const sims_json = try json.stringifyAlloc(self.allocator, sims, .{ .emit_null_optional_fields = false });
         defer self.allocator.free(sims_json);
+        
+        const timestamp = try std.fmt.allocPrint(self.allocator, "{}", .{std.time.timestamp()});
+        defer self.allocator.free(timestamp);
 
-        const payload = try std.fmt.allocPrint(self.allocator, "{{\"modems\":{s},\"sims\":{s}}}", .{ modems_json, sims_json });
+        const payload = try std.fmt.allocPrint(self.allocator, 
+            "{{\"sync_mode\":\"{s}\",\"session_id\":\"{s}\",\"timestamp\":\"{s}\",\"modems\":{s},\"sims\":{s}}}", 
+            .{ sync_mode.toString(), self.session_id, timestamp, modems_json, sims_json }
+        );
         defer self.allocator.free(payload);
 
         // Upload to the correct API endpoint
         try self.makeRequest("/devices", payload);
         
-        std.log.debug("✅ Uploaded {d} modems and {d} SIMs via HTTP API", .{ modems.len, sims.len });
+        std.log.info("✅ Uploaded {d} modems and {d} SIMs via HTTP API (mode: {s})", .{ modems.len, sims.len, sync_mode.toString() });
+    }
+    
+    /// Legacy upload without sync mode (for backward compatibility)
+    pub fn uploadDevices(self: *ApiClient, modems: []const types.Modem, sims: []const types.SIM) !void {
+        try self.uploadDevicesWithSync(modems, sims, .incremental);
     }
 
     pub fn uploadMessages(self: *ApiClient, messages: []const types.Message) !void {
