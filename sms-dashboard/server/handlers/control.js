@@ -4,7 +4,7 @@ import { aiHandler } from './ai';
 import { findKeywordMatches } from '../api/keywords.js';
 
 export const controlHandler = {
-  // New clean endpoint for separate modems and SIMs
+  // New clean endpoint for separate modems and SIMs with state reconciliation
   async updateDevices(request) {
     const { env } = request;
     
@@ -20,12 +20,41 @@ export const controlHandler = {
       });
     }
     
-    // Parse request body
-    const { modems = [], sims = [] } = await request.json();
+    // Parse request body with sync metadata
+    const { 
+      sync_mode = 'incremental',
+      session_id = null,
+      timestamp = new Date().toISOString(),
+      modems = [], 
+      sims = [] 
+    } = await request.json();
     
-    console.log(`[control.js] Received ${modems.length} modems and ${sims.length} SIMs`);
+    console.log(`[control.js] Received ${modems.length} modems and ${sims.length} SIMs (mode: ${sync_mode}, session: ${session_id})`);
     
     try {
+      // Prepare batch operations for better performance
+      const batch = [];
+      
+      // Handle full state synchronization
+      if (sync_mode === 'full' && session_id) {
+        console.log(`[control.js] Starting FULL STATE SYNC for session ${session_id}`);
+        
+        // Step 1: Mark all existing connected modems as pending verification
+        batch.push(env.DB.prepare(`
+          UPDATE modems 
+          SET verification_status = 'pending'
+          WHERE status = 'connected'
+        `));
+        
+        // Step 2: Collect all received modem IDs
+        const receivedModemIds = new Set(modems.map(m => m.equipment_id).filter(id => id));
+        const receivedIccids = new Set(sims.map(s => s.iccid).filter(id => id));
+        
+        console.log(`[control.js] Full sync received ${receivedModemIds.size} modems, ${receivedIccids.size} SIMs`);
+        
+        // Process modems and SIMs (will be updated below)
+      }
+      
       // Update modems table
       for (const modem of modems) {
         if (!modem.equipment_id) {
@@ -33,17 +62,25 @@ export const controlHandler = {
           continue;
         }
         
-        await env.DB.prepare(`
+        // Include verification status in full sync mode
+        const verificationStatus = sync_mode === 'full' ? 'verified' : null;
+        const lastVerifiedSession = sync_mode === 'full' ? session_id : null;
+        
+        batch.push(env.DB.prepare(`
           INSERT INTO modems (
             equipment_id, manufacturer, model, firmware_revision, 
-            hardware_revision, status, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            hardware_revision, status, 
+            verification_status, last_verified_session,
+            updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
           ON CONFLICT(equipment_id) DO UPDATE SET
             manufacturer = excluded.manufacturer,
             model = excluded.model,
             firmware_revision = excluded.firmware_revision,
             hardware_revision = excluded.hardware_revision,
             status = excluded.status,
+            verification_status = COALESCE(excluded.verification_status, modems.verification_status),
+            last_verified_session = COALESCE(excluded.last_verified_session, modems.last_verified_session),
             updated_at = CURRENT_TIMESTAMP
         `).bind(
           modem.equipment_id,
@@ -51,12 +88,14 @@ export const controlHandler = {
           modem.model || null,
           modem.firmware_revision || null,
           modem.hardware_revision || null,
-          modem.status || 'unknown'
-        ).run();
+          modem.status || 'unknown',
+          verificationStatus,
+          lastVerifiedSession
+        ));
         
         // Update modem_state if we have signal data
         if (modem.signal !== null || modem.signal !== undefined) {
-          await env.DB.prepare(`
+          batch.push(env.DB.prepare(`
             INSERT INTO modem_state (
               modem_id, modem_index, usb_port, signal_percent, rssi, rsrq, rsrp, snr,
               connection_status, network_type, access_tech, updated_at
@@ -85,7 +124,7 @@ export const controlHandler = {
             modem.connection_status || 'registered',
             modem.network_type || null,
             modem.access_tech || null
-          ).run();
+          ));
         }
       }
       
@@ -96,11 +135,15 @@ export const controlHandler = {
           continue;
         }
         
-        await env.DB.prepare(`
+        const lastVerifiedSession = sync_mode === 'full' ? session_id : null;
+        
+        batch.push(env.DB.prepare(`
           INSERT INTO sims (
             iccid, phone_number, current_modem_id, operator_name,
-            operator_id, status, sim_index, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            operator_id, status, sim_index, 
+            last_verified_session,
+            updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
           ON CONFLICT(iccid) DO UPDATE SET
             phone_number = excluded.phone_number,
             current_modem_id = excluded.current_modem_id,
@@ -108,6 +151,7 @@ export const controlHandler = {
             operator_id = excluded.operator_id,
             status = excluded.status,
             sim_index = excluded.sim_index,
+            last_verified_session = COALESCE(excluded.last_verified_session, sims.last_verified_session),
             updated_at = CURRENT_TIMESTAMP
         `).bind(
           sim.iccid,
@@ -116,7 +160,58 @@ export const controlHandler = {
           sim.operator_name || null,
           sim.operator_id || null,
           sim.status || 'active',
-          sim.sim_index || null
+          sim.sim_index || null,
+          lastVerifiedSession
+        ));
+      }
+      
+      // Execute all batch operations
+      if (batch.length > 0) {
+        await env.DB.batch(batch);
+      }
+      
+      // Handle reconciliation for full sync
+      if (sync_mode === 'full') {
+        console.log('[control.js] Reconciling disconnected modems...');
+        
+        // Mark modems not in this sync as disconnected
+        const disconnectResult = await env.DB.prepare(`
+          UPDATE modems 
+          SET status = 'disconnected',
+              verification_status = 'absent'
+          WHERE verification_status = 'pending'
+        `).run();
+        
+        console.log(`[control.js] Marked ${disconnectResult.meta.changes} modems as disconnected`);
+        
+        // Clear SIM associations for disconnected modems
+        const clearSimsResult = await env.DB.prepare(`
+          UPDATE sims 
+          SET current_modem_id = NULL
+          WHERE current_modem_id IN (
+            SELECT equipment_id FROM modems 
+            WHERE verification_status = 'absent'
+          )
+        `).run();
+        
+        console.log(`[control.js] Cleared ${clearSimsResult.meta.changes} SIM associations`);
+        
+        // Record sync history
+        await env.DB.prepare(`
+          INSERT INTO sync_history (
+            daemon_id, session_id, sync_mode, sync_timestamp,
+            modems_received, sims_received, modems_disconnected,
+            status, created_at
+          ) VALUES (
+            'orange-pi-main', ?, ?, ?, ?, ?, ?, 'completed', CURRENT_TIMESTAMP
+          )
+        `).bind(
+          session_id,
+          sync_mode,
+          timestamp,
+          modems.length,
+          sims.length,
+          disconnectResult.meta.changes
         ).run();
       }
       
@@ -127,23 +222,43 @@ export const controlHandler = {
       
       await env.DB.prepare(`
         INSERT INTO daemon_health (
-          daemon_id, last_heartbeat, status, modem_count, last_ip, updated_at
+          daemon_id, last_heartbeat, status, modem_count, last_ip, 
+          current_session_id, last_full_sync, sync_mode,
+          updated_at
         ) VALUES (
-          'orange-pi-main', CURRENT_TIMESTAMP, 'online', ?, ?, CURRENT_TIMESTAMP
+          'orange-pi-main', CURRENT_TIMESTAMP, 'online', ?, ?, ?, 
+          ${sync_mode === 'full' ? 'CURRENT_TIMESTAMP' : 'NULL'},
+          ?, CURRENT_TIMESTAMP
         )
         ON CONFLICT(daemon_id) DO UPDATE SET
           last_heartbeat = CURRENT_TIMESTAMP,
           status = 'online',
           modem_count = excluded.modem_count,
           last_ip = excluded.last_ip,
+          current_session_id = COALESCE(?, daemon_health.current_session_id),
+          last_full_sync = CASE 
+            WHEN ? = 'full' THEN CURRENT_TIMESTAMP 
+            ELSE daemon_health.last_full_sync 
+          END,
+          sync_mode = ?,
           updated_at = CURRENT_TIMESTAMP
-      `).bind(modems.length, clientIp).run();
+      `).bind(
+        modems.length, 
+        clientIp, 
+        session_id,
+        sync_mode,
+        session_id,
+        sync_mode,
+        sync_mode
+      ).run();
       
       // WebSocket broadcast removed for cost savings - manual refresh only
       // Users must refresh the page to see updates
       
       return new Response(JSON.stringify({
         success: true,
+        sync_mode,
+        session_id,
         processed: {
           modems: modems.length,
           sims: sims.length

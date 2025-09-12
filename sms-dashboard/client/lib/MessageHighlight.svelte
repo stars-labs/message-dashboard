@@ -17,19 +17,27 @@
   let extractedTags = [];
   let containerEl;
   
-  // Trim content to remove leading/trailing whitespace
-  $: trimmedContent = content ? content.trim() : '';
+  // Trim content to remove leading/trailing whitespace - manual update to avoid circular deps
+  let trimmedContent = '';
   
-  // Update keywords when preloadedKeywords changes
-  $: if (preloadedKeywords !== null && preloadedKeywords !== undefined) {
-    keywords = preloadedKeywords;
-    // Re-process content when keywords change
-    if (!serverTags || serverTags.length === 0) {
-      highlightedContent = processContent(trimmedContent);
+  // Manual function to update content and keywords
+  function updateContent() {
+    trimmedContent = content ? content.trim() : '';
+    
+    // Update keywords when preloadedKeywords changes
+    if (preloadedKeywords !== null && preloadedKeywords !== undefined) {
+      keywords = preloadedKeywords;
+      // Re-process content when keywords change
+      if (!serverTags || serverTags.length === 0) {
+        highlightedContent = processContent(trimmedContent);
+      }
     }
   }
   
   onMount(async () => {
+    // Update content initially
+    updateContent();
+    
     // Use preloaded keywords if available
     if (preloadedKeywords !== null && preloadedKeywords !== undefined) {
       // If preloadedKeywords is provided (even if empty array), use it
@@ -58,7 +66,18 @@
     loading = false;
   });
   
+  // Watch for prop changes manually to avoid reactive circular dependencies
+  let lastContent = content;
+  let lastPreloadedKeywords = preloadedKeywords;
+  
   afterUpdate(() => {
+    // Watch for prop changes manually to avoid reactive circular dependencies
+    if (content !== lastContent || preloadedKeywords !== lastPreloadedKeywords) {
+      lastContent = content;
+      lastPreloadedKeywords = preloadedKeywords;
+      updateContent();
+    }
+    
     // Apply custom colors to highlights after DOM update
     applyHighlightColors();
     // Apply WebGPU effects

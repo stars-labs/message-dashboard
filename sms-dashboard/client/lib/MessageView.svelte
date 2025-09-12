@@ -14,146 +14,9 @@
   let keywords = []; // Load keywords once for all messages - always pass array to children
   let keywordsLoading = false;
   
-  // Filter messages first
-  $: filteredMessages = selectedPhone 
-    ? messages.filter(msg => {
-        const matches = msg.phone_iccid === selectedPhone.iccid;
-        // Only log in development mode to reduce console noise
-        if (!matches && messages.indexOf(msg) < 5 && import.meta.env.MODE === 'development') {
-          console.debug('[MessageView] Message excluded by filter:', {
-            msgIccid: msg.phone_iccid,
-            selectedIccid: selectedPhone.iccid,
-            msgContent: msg.content?.substring(0, 30) + '...',
-            msgId: msg.id
-          });
-        }
-        return matches;
-      })
-    : messages;
+  // These will be computed reactively below
   
-  // Deduplicate messages based on content, source, and close timestamps
-  $: uniqueMessages = (() => {
-    const seen = new Map();
-    const unique = [];
-    
-    for (const msg of filteredMessages) {
-      // Create a key based on content, source, and rounded timestamp (to nearest minute)
-      const timestamp = new Date(msg.timestamp);
-      const roundedTime = new Date(Math.floor(timestamp.getTime() / 60000) * 60000).toISOString();
-      const key = `${msg.content}|${msg.source || 'unknown'}|${roundedTime}`;
-      
-      if (!seen.has(key)) {
-        seen.set(key, true);
-        unique.push(msg);
-      }
-    }
-    
-    // Remove debug logging from reactive computation to avoid side effects
-    return unique;
-  })();
-  
-  // Load keywords once for all messages
-  async function loadKeywords() {
-    // Prevent duplicate loading
-    if (keywordsLoading) {
-      console.debug('[MessageView] Keywords already loading, skipping duplicate request');
-      return;
-    }
-    
-    keywordsLoading = true;
-    try {
-      console.log('[MessageView] Loading keywords ONCE for all messages');
-      const response = await api.get('/api/keywords');
-      if (response.keywords) {
-        // Only load active keywords, sorted by priority
-        keywords = response.keywords
-          .filter(k => k.is_active)
-          .sort((a, b) => (b.priority || 0) - (a.priority || 0));
-        console.log(`[MessageView] Loaded ${keywords.length} active keywords - will be shared with all MessageHighlight components`);
-      } else {
-        keywords = []; // Ensure it's always an array
-      }
-    } catch (err) {
-      console.error('[MessageView] Failed to load keywords:', err);
-      keywords = []; // Ensure it's always an array even on error
-    } finally {
-      keywordsLoading = false;
-    }
-  }
-  
-  // Batch fetch tags for all visible messages
-  async function batchFetchTags() {
-    if (!uniqueMessages || uniqueMessages.length === 0) {
-      return;
-    }
-    
-    // Get message IDs for visible messages
-    const messageIds = uniqueMessages.map(msg => msg.id).filter(id => id);
-    
-    if (messageIds.length === 0) {
-      return;
-    }
-    
-    try {
-      console.log(`[MessageView] Batch fetching tags for ${messageIds.length} messages`);
-      const response = await api.post('/api/messages/batch-tags', { messageIds });
-      
-      if (response.success && response.data) {
-        // Create a completely new Map to avoid triggering reactivity on the existing one
-        const newMessageTags = new Map();
-        for (const [messageId, tags] of Object.entries(response.data)) {
-          newMessageTags.set(messageId, tags);
-        }
-        
-        // Use requestAnimationFrame to ensure this update happens outside the current reactive cycle
-        requestAnimationFrame(() => {
-          messageTags = newMessageTags;  // Replace the entire Map
-          tagsLoaded = true;
-          console.log(`[MessageView] Loaded tags for ${newMessageTags.size} messages`);
-        });
-      }
-    } catch (err) {
-      console.error('[MessageView] Failed to batch fetch tags:', err);
-      // Fall back to client-side highlighting
-      requestAnimationFrame(() => {
-        tagsLoaded = true;
-      });
-    }
-  }
-  
-  // Track previous message IDs to prevent duplicate fetches
-  let previousMessageIds = '';
-  let fetchTagsTimer = null;
-  
-  // Load keywords on mount (tags will be fetched by reactive statement)
-  onMount(async () => {
-    await loadKeywords();
-    // Don't fetch tags here - let the reactive statement handle it
-    // to avoid duplicate calls and potential loops
-  });
-  
-  // Watch for message changes and fetch tags when needed
-  // Use a reactive statement but ensure it doesn't cause loops
-  $: if (uniqueMessages && uniqueMessages.length > 0) {
-    const currentMessageIds = uniqueMessages.map(m => m.id).sort().join(',');
-    if (currentMessageIds !== previousMessageIds) {
-      previousMessageIds = currentMessageIds;
-      
-      // Use requestAnimationFrame to defer the fetch completely out of reactive cycle
-      requestAnimationFrame(() => {
-        // Clear any pending timer
-        clearTimeout(fetchTagsTimer);
-        // Add a small delay to batch rapid changes
-        fetchTagsTimer = setTimeout(() => {
-          batchFetchTags().catch(err => {
-            console.error('[MessageView] Background tag fetch failed:', err);
-          });
-        }, 150);
-      });
-    }
-  }
-  
-  // Helper function to parse and normalize timestamps
+  // Helper function to parse timestamps - must be defined before groupMessagesBySource
   function parseTimestamp(timestamp) {
     if (!timestamp) return new Date(0);
     
@@ -171,28 +34,7 @@
     return isNaN(date.getTime()) ? new Date(0) : date;
   }
   
-  // Sort messages based on view mode
-  $: recentMessages = uniqueMessages.slice().sort((a, b) => {
-    // Recent mode: newest first (DESC)
-    const dateA = parseTimestamp(a.timestamp);
-    const dateB = parseTimestamp(b.timestamp);
-    return dateB.getTime() - dateA.getTime();
-  });
-  
-  $: historyMessages = uniqueMessages.slice().sort((a, b) => {
-    // History mode: oldest first (ASC)
-    const dateA = parseTimestamp(a.timestamp);
-    const dateB = parseTimestamp(b.timestamp);
-    return dateA.getTime() - dateB.getTime();
-  });
-  
-  // Select which sorted array to display
-  $: displayMessages = viewMode === 'recent' ? recentMessages : historyMessages;
-    
-  $: groupedMessages = groupBy === 'source' 
-    ? groupMessagesBySource(displayMessages)
-    : displayMessages;
-    
+  // Helper function to group messages by source - must be defined before reactive block
   function groupMessagesBySource(msgs) {
     const groups = {};
     msgs.forEach(msg => {
@@ -218,6 +60,117 @@
     
     return groups;
   }
+  
+  // Simple message display - no reactive statements
+  let displayMessages = [];
+  let groupedMessages = {};
+  
+  // Manual update function
+  function updateMessages() {
+    // Filter messages
+    displayMessages = selectedPhone 
+      ? (messages || []).filter(msg => msg.phone_iccid === selectedPhone.iccid)
+      : (messages || []);
+    
+    // Group if needed
+    if (groupBy === 'source' && viewMode === 'history') {
+      groupedMessages = groupMessagesBySource(displayMessages);
+    } else {
+      groupedMessages = {};
+    }
+  }
+  
+  // Load keywords once for all messages
+  async function loadKeywords() {
+    // Prevent duplicate loading
+    if (keywordsLoading) {
+      console.debug('[MessageView] Keywords already loading, skipping duplicate request');
+      return;
+    }
+    
+    keywordsLoading = true;
+    try {
+      console.log('[MessageView] Loading keywords ONCE for all messages');
+      const response = await api.get('/api/keywords');
+      if (response.keywords) {
+        // Only load active keywords, sorted by priority
+        keywords = response.keywords
+          .filter(k => k.is_active)
+          .sort((a, b) => (b.priority || 0) - (a.priority || 0));
+      } else {
+        keywords = []; // Ensure it's always an array
+      }
+    } catch (err) {
+      console.error('[MessageView] Failed to load keywords:', err);
+      keywords = []; // Ensure it's always an array even on error
+    } finally {
+      keywordsLoading = false;
+    }
+  }
+  
+  // Simple batch fetch tags for visible messages
+  async function batchFetchTags() {
+    if (!displayMessages || displayMessages.length === 0) {
+      return;
+    }
+    
+    // Get message IDs for visible messages
+    const messageIds = displayMessages.map(msg => msg.id).filter(id => id);
+    
+    if (messageIds.length === 0) {
+      return;
+    }
+    
+    try {
+      const response = await api.post('/api/messages/batch-tags', { messageIds });
+      
+      if (response.success && response.data) {
+        const newMessageTags = new Map();
+        for (const [messageId, tags] of Object.entries(response.data)) {
+          newMessageTags.set(messageId, tags);
+        }
+        messageTags = newMessageTags;
+        tagsLoaded = true;
+      }
+    } catch (err) {
+      console.error('[MessageView] Failed to batch fetch tags:', err);
+      tagsLoaded = true;
+    }
+  }
+  
+  
+  // Load keywords and tags on mount 
+  onMount(async () => {
+    updateMessages();
+    await loadKeywords();
+    await batchFetchTags();
+  });
+  
+  // Watch for prop changes with afterUpdate
+  let lastMessages = null;
+  let lastSelectedPhone = null;
+  let lastGroupBy = null;
+  let lastViewMode = null;
+  
+  afterUpdate(() => {
+    if (messages !== lastMessages || selectedPhone !== lastSelectedPhone || groupBy !== lastGroupBy || viewMode !== lastViewMode) {
+      lastMessages = messages;
+      lastSelectedPhone = selectedPhone;
+      lastGroupBy = groupBy;
+      lastViewMode = viewMode;
+      updateMessages();
+    }
+  });
+  
+  
+  // Export function for parent components to manually trigger tag reload if needed
+  export function reloadTags() {
+    tagsLoaded = false;
+    batchFetchTags();
+  }
+  
+  // Note: displayMessages and groupedMessages are now updated in the main reactive block above
+  // to avoid circular dependencies
   
   function formatTime(timestamp) {
     if (!timestamp) return '未知时间';
@@ -304,10 +257,15 @@
   }
   
   function handleTagsExtracted(messageId, tags) {
-    // Use requestAnimationFrame to ensure this update happens outside reactive cycles
-    requestAnimationFrame(() => {
-      messageTags.set(messageId, tags);
-    });
+    // Only update if we don't already have tags for this message from server
+    if (!messageTags.has(messageId)) {
+      // Create a new Map instead of mutating the existing one to avoid triggering reactivity
+      requestAnimationFrame(() => {
+        const newTagsMap = new Map(messageTags);
+        newTagsMap.set(messageId, tags);
+        messageTags = newTagsMap;
+      });
+    }
   }
   
   // Removed getMessageTags - no longer needed since we use messageTags Map directly

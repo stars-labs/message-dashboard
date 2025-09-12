@@ -80,12 +80,48 @@ export async function ensureTablesExist(db) {
     )
   `).run();
 
+  // Create sync_history table for tracking synchronization
+  await db.prepare(`
+    CREATE TABLE IF NOT EXISTS sync_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      daemon_id TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      sync_mode TEXT NOT NULL,
+      sync_timestamp TIMESTAMP NOT NULL,
+      modems_received INTEGER DEFAULT 0,
+      sims_received INTEGER DEFAULT 0,
+      modems_verified INTEGER DEFAULT 0,
+      modems_disconnected INTEGER DEFAULT 0,
+      sims_reassigned INTEGER DEFAULT 0,
+      duration_ms INTEGER,
+      status TEXT DEFAULT 'pending',
+      error_message TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `).run();
+  
+  // Create modem_sim_history table if not exists
+  await db.prepare(`
+    CREATE TABLE IF NOT EXISTS modem_sim_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      modem_id TEXT NOT NULL,
+      sim_iccid TEXT NOT NULL,
+      inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      removed_at TIMESTAMP,
+      signal_quality INTEGER,
+      network_type TEXT,
+      access_tech TEXT
+    )
+  `).run();
+  
   // Create indexes for better performance
   await db.prepare(`CREATE INDEX IF NOT EXISTS idx_modems_status ON modems(status)`).run();
   await db.prepare(`CREATE INDEX IF NOT EXISTS idx_modems_modem_index ON modems(modem_index)`).run();
   await db.prepare(`CREATE INDEX IF NOT EXISTS idx_sims_status ON sims(status)`).run();
   await db.prepare(`CREATE INDEX IF NOT EXISTS idx_sims_current_modem ON sims(current_modem_id)`).run();
   await db.prepare(`CREATE INDEX IF NOT EXISTS idx_modem_state_status ON modem_state(connection_status)`).run();
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_sync_history_session ON sync_history(session_id)`).run();
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_modem_sim_history_dates ON modem_sim_history(inserted_at, removed_at)`).run();
 }
 
 /**

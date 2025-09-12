@@ -7,6 +7,8 @@ const LockFreeSignalCache = @import("lockfree_signal_cache.zig").LockFreeSignalC
 const DeviceCollector = @import("device_collector.zig").DeviceCollector;
 const SMSSender = @import("sms_sender.zig").SMSSender;
 const modem_processor = @import("modem_processor.zig");
+const SyncManager = @import("sync_manager.zig").SyncManager;
+const RetryManager = @import("sync_manager.zig").RetryManager;
 
 pub const WorkerContext = struct {
     allocator: std.mem.Allocator,
@@ -206,6 +208,15 @@ fn processModemParallel(context: *DeviceProcessorContext, modem_id: []const u8) 
 pub fn deviceStatusThread(context: *WorkerContext) !void {
     std.log.debug("🚀 Device status thread started", .{});
     
+    const SyncMode = @import("api_client.zig").SyncMode;
+    
+    // Initialize sync manager
+    var sync_manager = SyncManager.init(context.allocator, context.api_client.session_id);
+    defer sync_manager.deinit();
+    
+    // Initialize retry manager for network failures
+    var retry_manager = RetryManager.init(3, 1000); // 3 retries, 1s base delay
+    
     while (!context.should_exit.load(.acquire)) {
         // Sleep for configured interval
         const sleep_ns = context.config.check_interval * std.time.ns_per_s;
@@ -332,16 +343,86 @@ pub fn deviceStatusThread(context: *WorkerContext) !void {
         
         const processing_time = std.time.milliTimestamp() - start_time;
         
-        if (collected_modems.len > 0 or collected_sims.len > 0) {
-            std.log.debug("📤 Uploading {d} modems and {d} SIMs (collected in {d}ms)", .{collected_modems.len, collected_sims.len, processing_time});
-            const upload_start = std.time.milliTimestamp();
-            context.api_client.uploadDevices(collected_modems, collected_sims) catch |err| {
-                std.log.err("Failed to upload device status: {any}", .{err});
+        // Determine sync mode
+        const needs_full_sync = sync_manager.needsFullSync();
+        const sync_mode: SyncMode = if (needs_full_sync) .full else .incremental;
+        
+        if (collected_modems.len > 0 or collected_sims.len > 0 or needs_full_sync) {
+            // Validate data before sending
+            sync_manager.validateSyncData(collected_modems, collected_sims) catch |err| {
+                std.log.err("🚫 Data validation failed: {any}", .{err});
+                sync_manager.recordFailure(needs_full_sync, err);
+                continue;
             };
-            const upload_time = std.time.milliTimestamp() - upload_start;
-            std.log.debug("✅ Device upload completed in {d}ms", .{upload_time});
+            
+            if (needs_full_sync) {
+                std.log.info("🔄 Performing FULL STATE SYNC with {d} modems and {d} SIMs", .{collected_modems.len, collected_sims.len});
+                
+                // Create checkpoint for recovery
+                const checkpoint = try sync_manager.createCheckpoint(collected_modems, collected_sims);
+                defer context.allocator.free(checkpoint);
+                std.log.debug("💾 Checkpoint: {s}", .{checkpoint});
+            } else {
+                std.log.debug("📤 Uploading {d} modems and {d} SIMs (incremental, collected in {d}ms)", .{collected_modems.len, collected_sims.len, processing_time});
+            }
+            
+            // Upload with retry logic
+            retry_manager.reset();
+            var upload_success = false;
+            
+            while (retry_manager.shouldRetry()) {
+                const upload_start = std.time.milliTimestamp();
+                
+                context.api_client.uploadDevicesWithSync(collected_modems, collected_sims, sync_mode) catch |err| {
+                    std.log.err("Upload attempt failed: {any}", .{err});
+                    
+                    // Check if we should retry
+                    if (retry_manager.shouldRetry()) {
+                        const delay = retry_manager.nextDelay();
+                        std.log.info("🔄 Retrying upload in {d}ms...", .{delay});
+                        std.time.sleep(delay * std.time.ns_per_ms);
+                        continue;
+                    } else {
+                        // Max retries exceeded
+                        sync_manager.recordFailure(needs_full_sync, err);
+                        break;
+                    }
+                };
+                
+                // Success!
+                const upload_time = std.time.milliTimestamp() - upload_start;
+                std.log.debug("✅ Device upload completed in {d}ms (mode: {s})", .{upload_time, @tagName(sync_mode)});
+                sync_manager.recordSuccess(needs_full_sync);
+                upload_success = true;
+                break;
+            }
+            
+            if (!upload_success and needs_full_sync) {
+                std.log.err("🚫 Full sync failed after all retries, will try again later", .{});
+            }
         } else {
             std.log.debug("📱 No device updates to upload (processing took {d}ms)", .{processing_time});
+            
+            // Special case: empty full sync to clear remote state
+            if (needs_full_sync) {
+                std.log.warn("⚠️ No devices found - sending empty full sync to clear remote state", .{});
+                
+                retry_manager.reset();
+                while (retry_manager.shouldRetry()) {
+                    context.api_client.uploadDevicesWithSync(&[_]types.Modem{}, &[_]types.SIM{}, .full) catch |err| {
+                        std.log.err("Empty sync failed: {any}", .{err});
+                        if (retry_manager.shouldRetry()) {
+                            const delay = retry_manager.nextDelay();
+                            std.time.sleep(delay * std.time.ns_per_ms);
+                            continue;
+                        }
+                        break;
+                    };
+                    
+                    sync_manager.recordSuccess(true);
+                    break;
+                }
+            }
         }
     }
     
