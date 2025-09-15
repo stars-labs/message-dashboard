@@ -312,13 +312,6 @@
       };
     };
   };
-  
-  # Disable systemd's watchdog to avoid conflicts with watchdogd
-  systemd.watchdog = {
-    runtimeTime = null;    # Disable systemd watchdog
-    rebootTime = null;     # Let watchdogd handle everything
-    kexecTime = null;      
-  };
 
   # =============================================================================
   # BOOT SECURITY
