@@ -370,7 +370,7 @@
       "kernel.perf_event_paranoid" = 3;
       
       # Process hardening
-      "kernel.pid_max" = 65536;
+      # kernel.pid_max already set above to 4194304 for 100 modems
       "vm.mmap_min_addr" = 65536;
       "vm.unprivileged_userfaultfd" = 0;
     };
