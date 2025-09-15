@@ -34,9 +34,12 @@
     "vm.dirty_background_ratio" = 2;
     "vm.swappiness" = 10;
     
-    # Network buffer optimizations (for API uploads)
+    # Network buffer optimizations (for API uploads and 100 modems)
     "net.core.rmem_max" = 134217728;
     "net.core.wmem_max" = 134217728;
+    "net.core.rmem_default" = 134217728;
+    "net.core.wmem_default" = 134217728;
+    "net.core.netdev_max_backlog" = 50000;
     "net.ipv4.tcp_rmem" = "4096 87380 134217728";
     "net.ipv4.tcp_wmem" = "4096 65536 134217728";
     
@@ -410,10 +413,11 @@
       killUnconfinedConfinables = true;
     };
     
-    # Audit framework
-    auditd.enable = true;
+    # Audit framework - DISABLED due to buffer overflow with 100 USB modems
+    # auditd generates too many events with 100 modems causing "No buffer space available"
+    auditd.enable = false;
     audit = {
-      enable = true;
+      enable = false;
       rules = [
         "-w /etc/passwd -p wa -k passwd_changes"
         "-w /etc/group -p wa -k group_changes"
