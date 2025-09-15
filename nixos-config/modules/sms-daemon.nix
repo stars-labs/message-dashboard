@@ -279,9 +279,9 @@ in {
           
           # Notification (for monitoring)
           NotifyAccess = "main";
-          # Enable watchdog for sms-daemon service
-          # If the daemon doesn't notify systemd within 60 seconds, it will be restarted
-          WatchdogSec = "60s";
+          # DISABLED: WatchdogSec causes restarts because Zig daemon doesn't implement sd_notify()
+          # The daemon doesn't send systemd watchdog keepalive notifications
+          # WatchdogSec = "60s";
         }
         
         # Handle API key loading securely
