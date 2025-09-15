@@ -285,39 +285,16 @@
   # =============================================================================
   
   # Hardware watchdog configuration using systemd
-  systemd.settings.Manager = {
-    RuntimeWatchdogSec = "30s";  # Reboot if system hangs for 30 seconds
-    RebootWatchdogSec = "10min"; # Allow 10 minutes for reboot to complete
-    KExecWatchdogSec = "1min";   # Time for kexec reboot
+  # systemd will handle the hardware watchdog directly
+  systemd.watchdog = {
+    runtimeTime = "30s";    # Reboot if system hangs for 30 seconds
+    rebootTime = "10min";   # Allow 10 minutes for reboot to complete
+    kexecTime = "1min";     # Time for kexec reboot
   };
   
-  # Enable watchdog daemon for additional monitoring
-  services.watchdogd = {
-    enable = true;
-    settings = {
-      "device /dev/watchdog" = {
-        timeout = 30;      # Hardware watchdog timeout in seconds
-        interval = 10;     # Ping interval in seconds
-        safe-exit = true;  # Disable watchdog on clean exit
-      };
-      loadavg = {
-        enabled = true;
-        interval = 60;
-        warning = 8.0;     # Warning at load average 8
-        critical = 12.0;   # Critical at load average 12 (will trigger reboot)
-      };
-      meminfo = {
-        enabled = true;
-        interval = 60;
-        warning = 0.85;    # Warning at 85% memory usage
-        critical = 0.95;   # Critical at 95% memory usage (will trigger reboot)
-      };
-      filenr = {
-        enabled = true;
-        logmark = true;    # Log file descriptor usage
-      };
-    };
-  };
+  # Disable watchdogd service since systemd handles the watchdog
+  # Having both can cause conflicts with the hardware watchdog device
+  services.watchdogd.enable = false;
 
   # =============================================================================
   # BOOT SECURITY
