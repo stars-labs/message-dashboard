@@ -741,8 +741,10 @@
   });
 
   async function selectPhone(phone) {
+    console.log('[App] selectPhone called with:', phone);
     selectedPhoneIccid = phone?.iccid || null;
     handlePhoneSelection();
+    console.log('[App] selectedPhone after update:', selectedPhone);
     showPhoneList = false;
     
     // Load all messages for the selected phone
@@ -1670,6 +1672,7 @@
               bind:selectedPhoneIccid
               bind:selectedCountry
               bind:searchTerm
+              onSelectPhone={selectPhone}
               onSetIccidMapping={handleSetIccidMapping}
               {daemonStatus}
               isLoading={dataLoading}
@@ -1677,12 +1680,14 @@
           </div>
 
           <!-- Message View Column -->
-          <div class="lg:col-span-2">
+          <div class="lg:col-span-2 flex flex-col gap-4 max-h-[calc(100vh-200px)] overflow-y-auto">
             <!-- Always show SimpleMessageView at the top -->
-            <SimpleMessageView {messages} {selectedPhone} />
+            <div class="flex-shrink-0">
+              <SimpleMessageView {messages} {selectedPhone} />
+            </div>
             <!-- Show PhoneDetails below if selected -->
             {#if selectedPhone}
-              <div class="mt-4">
+              <div class="flex-shrink-0">
                 <PhoneDetails
                   phone={selectedPhone}
                   mobile={false}
