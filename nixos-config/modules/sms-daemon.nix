@@ -279,8 +279,9 @@ in {
           
           # Notification (for monitoring)
           NotifyAccess = "main";
-          # Temporarily disable watchdog while fixing resource constraints
-          # WatchdogSec = "60s";
+          # Enable watchdog for sms-daemon service
+          # If the daemon doesn't notify systemd within 60 seconds, it will be restarted
+          WatchdogSec = "60s";
         }
         
         # Handle API key loading securely
