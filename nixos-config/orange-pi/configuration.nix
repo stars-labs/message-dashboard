@@ -27,34 +27,7 @@
   # Kernel parameters for USB performance with 100 modems
   # NOTE: These are merged with security hardening parameters in boot section below
   
-  # Sysctl settings for USB and system performance
-  boot.kernel.sysctl = {
-    # USB and device optimizations
-    "vm.dirty_ratio" = 5;
-    "vm.dirty_background_ratio" = 2;
-    "vm.swappiness" = 10;
-    
-    # Network buffer optimizations (for API uploads and 100 modems)
-    "net.core.rmem_max" = 134217728;
-    "net.core.wmem_max" = 134217728;
-    "net.core.rmem_default" = 134217728;
-    "net.core.wmem_default" = 134217728;
-    "net.core.netdev_max_backlog" = 50000;
-    "net.ipv4.tcp_rmem" = "4096 87380 134217728";
-    "net.ipv4.tcp_wmem" = "4096 65536 134217728";
-    
-    # File handle limits
-    "fs.file-max" = 2097152;
-    "fs.nr_open" = 1048576;
-    
-    # Inotify limits for monitoring many devices
-    "fs.inotify.max_user_instances" = 8192;
-    "fs.inotify.max_user_watches" = 524288;
-    
-    # Process limits
-    "kernel.pid_max" = 4194304;
-    "kernel.threads-max" = 2097152;
-  };
+  # NOTE: All sysctl settings are consolidated in boot.kernel.sysctl section within boot {}
 
   # =============================================================================
   # NETWORK SECURITY
@@ -363,8 +336,36 @@
       "vt.global_cursor_default=0"
     ];
     
-    # Kernel sysctl hardening
+    # Kernel sysctl settings - ALL sysctl configuration
     kernel.sysctl = {
+      # ===== USB and system performance (for 100 modems) =====
+      # USB and device optimizations
+      "vm.dirty_ratio" = 5;
+      "vm.dirty_background_ratio" = 2;
+      "vm.swappiness" = 10;
+      
+      # Network buffer optimizations (for API uploads and 100 modems)
+      "net.core.rmem_max" = 134217728;
+      "net.core.wmem_max" = 134217728;
+      "net.core.rmem_default" = 134217728;
+      "net.core.wmem_default" = 134217728;
+      "net.core.netdev_max_backlog" = 50000;
+      "net.ipv4.tcp_rmem" = "4096 87380 134217728";
+      "net.ipv4.tcp_wmem" = "4096 65536 134217728";
+      
+      # File handle limits
+      "fs.file-max" = 2097152;
+      "fs.nr_open" = 1048576;
+      
+      # Inotify limits for monitoring many devices
+      "fs.inotify.max_user_instances" = 8192;
+      "fs.inotify.max_user_watches" = 524288;
+      
+      # Process limits
+      "kernel.pid_max" = 4194304;
+      "kernel.threads-max" = 2097152;
+      
+      # ===== Security hardening =====
       # Network hardening
       "net.ipv4.conf.all.rp_filter" = 1;
       "net.ipv4.conf.default.rp_filter" = 1;
