@@ -362,8 +362,18 @@ in {
       "cdc_acm"    # CDC ACM driver for modem control
     ];
     
-    # Hardened udev rules for modem access
+    # Hardened udev rules for modem access with performance optimizations
     services.udev.extraRules = ''
+      # PERFORMANCE: Disable USB autosuspend for all USB hubs (critical for 100 modems)
+      ACTION=="add", SUBSYSTEM=="usb", ATTR{bDeviceClass}=="09", ATTR{power/autosuspend}="-1"
+      
+      # PERFORMANCE: Disable autosuspend for all modem devices
+      ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="12d1|2c7c|05c6|1a86", ATTR{power/autosuspend}="-1"
+      ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="12d1|2c7c|05c6|1a86", ATTR{power/control}="on"
+      
+      # PERFORMANCE: Increase USB device timeout for stability with many devices
+      ACTION=="add", SUBSYSTEM=="usb", ATTR{power/autosuspend_delay_ms}="60000"
+      
       # Security: Tag modem devices for access control
       SUBSYSTEM=="tty", ATTRS{idVendor}=="12d1|2c7c|05c6|1a86", TAG+="systemd", TAG+="sms-modem"
       SUBSYSTEM=="usb", ATTRS{idVendor}=="12d1|2c7c|05c6|1a86", TAG+="systemd", TAG+="sms-modem"

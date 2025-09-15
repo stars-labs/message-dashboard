@@ -21,6 +21,55 @@
   networking.hostName = "orange-pi-sms";
   
   # =============================================================================
+  # USB OPTIMIZATION FOR 100 MODEMS
+  # =============================================================================
+  
+  # Kernel parameters for USB performance with 100 modems
+  boot.kernelParams = [
+    # Increase USB buffer memory (default is 16MB, increase to 256MB for 100 modems)
+    "usbcore.usbfs_memory_mb=256"
+    
+    # Disable USB autosuspend to prevent modem disconnections
+    "usbcore.autosuspend=-1"
+    
+    # Increase kernel message buffer for debugging
+    "log_buf_len=4M"
+    
+    # Optimize for throughput
+    "elevator=noop"
+    
+    # Increase maximum number of file handles
+    "fs.file-max=2097152"
+    "fs.nr_open=1048576"
+  ];
+  
+  # Sysctl settings for USB and system performance
+  boot.kernel.sysctl = {
+    # USB and device optimizations
+    "vm.dirty_ratio" = 5;
+    "vm.dirty_background_ratio" = 2;
+    "vm.swappiness" = 10;
+    
+    # Network buffer optimizations (for API uploads)
+    "net.core.rmem_max" = 134217728;
+    "net.core.wmem_max" = 134217728;
+    "net.ipv4.tcp_rmem" = "4096 87380 134217728";
+    "net.ipv4.tcp_wmem" = "4096 65536 134217728";
+    
+    # File handle limits
+    "fs.file-max" = 2097152;
+    "fs.nr_open" = 1048576;
+    
+    # Inotify limits for monitoring many devices
+    "fs.inotify.max_user_instances" = 8192;
+    "fs.inotify.max_user_watches" = 524288;
+    
+    # Process limits
+    "kernel.pid_max" = 4194304;
+    "kernel.threads-max" = 2097152;
+  };
+
+  # =============================================================================
   # NETWORK SECURITY
   # =============================================================================
   
