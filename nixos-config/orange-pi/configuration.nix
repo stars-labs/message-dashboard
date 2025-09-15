@@ -25,23 +25,7 @@
   # =============================================================================
   
   # Kernel parameters for USB performance with 100 modems
-  boot.kernelParams = [
-    # Increase USB buffer memory (default is 16MB, increase to 256MB for 100 modems)
-    "usbcore.usbfs_memory_mb=256"
-    
-    # Disable USB autosuspend to prevent modem disconnections
-    "usbcore.autosuspend=-1"
-    
-    # Increase kernel message buffer for debugging
-    "log_buf_len=4M"
-    
-    # Optimize for throughput
-    "elevator=noop"
-    
-    # Increase maximum number of file handles
-    "fs.file-max=2097152"
-    "fs.nr_open=1048576"
-  ];
+  # NOTE: These are merged with security hardening parameters in boot section below
   
   # Sysctl settings for USB and system performance
   boot.kernel.sysctl = {
@@ -311,8 +295,17 @@
       timeout = 1;  # Minimal timeout to prevent boot delay attacks
     };
     
-    # Kernel parameters for security hardening
+    # Kernel parameters for security hardening AND USB optimization
     kernelParams = [
+      # USB optimization for 100 modems
+      "usbcore.usbfs_memory_mb=256"    # Increase USB buffer (default 16MB)
+      "usbcore.autosuspend=-1"          # Disable USB autosuspend
+      "log_buf_len=4M"                  # Increase kernel message buffer
+      "elevator=noop"                   # Optimize for throughput
+      "fs.file-max=2097152"             # Increase file handles
+      "fs.nr_open=1048576"              # Increase open file limit
+      
+      # Security hardening
       "init_on_alloc=1"
       "init_on_free=1"
       "page_alloc.shuffle=1"
