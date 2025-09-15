@@ -171,8 +171,10 @@ pub fn processModem(
     if (iccid_result) |iccid| {
         // Get SIM index
         const sim_index = modem_manager.getSimIndex(modem_id) catch |err| blk: {
-            std.log.warn("Failed to get SIM index for modem {s}: {any}", .{ modem_id, err });
-            break :blk null;
+            std.log.warn("⚠️ Failed to get SIM index for modem {s} (ICCID: {s}): {any}", .{ modem_id, iccid, err });
+            std.log.info("💡 Will use modem_index {?d} as fallback for sim_index", .{modem_index});
+            // Use modem_index as fallback when sim_index extraction fails
+            break :blk modem_index;
         };
         
         // Create SIM record
@@ -205,7 +207,7 @@ pub fn processModem(
             std.log.warn("Failed to add SIM {s} to collector: {any}", .{ iccid, err });
         };
         
-        std.log.debug("📱 Added modem {s} with SIM {s}", .{ imei, iccid });
+        std.log.debug("📱 Added modem {s} with SIM {s} (sim_index: {?d})", .{ imei, iccid, sim_index });
     } else {
         std.log.debug("📱 Added modem {s} without SIM (status: sim-missing)", .{imei});
     }

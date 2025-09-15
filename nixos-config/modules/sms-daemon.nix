@@ -203,16 +203,21 @@ in {
             # Add API server IP if known
           ];
           
-          # Resource limits
-          MemoryMax = "512M";
-          MemorySwapMax = "0";  # No swap
-          CPUQuota = "200%";    # Max 2 cores
-          TasksMax = 150;       # Increased from 50 to handle 54+ modems + worker threads
+          # Resource limits - Increased for 100 modems
+          MemoryMax = "2G";     # Increased from 512M to 2G for 100 modems
+          MemorySwapMax = "1G"; # Allow some swap for peak usage
+          CPUQuota = "400%";    # Max 4 cores for parallel processing
+          TasksMax = 512;       # Increased to handle 100+ modems + worker threads
           
-          # File descriptor limits
-          LimitNOFILE = 4096;
-          LimitNPROC = 150;  # Process limit - increased to match TasksMax
-          LimitCORE = 0;    # No core dumps (may contain sensitive data)
+          # File descriptor limits - Increased for many USB devices
+          LimitNOFILE = 65536;  # Increased for 100 modems (each needs multiple FDs)
+          LimitNPROC = 512;     # Process limit - increased to match TasksMax
+          LimitCORE = 0;        # No core dumps (may contain sensitive data)
+          
+          # Address space limits - Important for Zig memory management
+          LimitAS = "4G";       # Total address space limit
+          LimitDATA = "3G";     # Data segment limit
+          LimitSTACK = "16M";   # Stack size per thread
           
           # Capability restrictions
           NoNewPrivileges = true;
