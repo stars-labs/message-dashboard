@@ -14,6 +14,9 @@
 
     # Include SMS daemon module
     ../modules/sms-daemon.nix
+
+    # Include USB optimization module for 100 modems
+    ../modules/usb-optimization.nix
   ];
 
 
@@ -312,11 +315,12 @@
       # USB optimization for 100 modems
       "usbcore.usbfs_memory_mb=256"    # Increase USB buffer (default 16MB)
       "usbcore.autosuspend=-1"          # Disable USB autosuspend
+      "xhci_hcd.quirks=270336"          # USB controller quirk for stability (from dotfiles)
       "log_buf_len=4M"                  # Increase kernel message buffer
       "elevator=noop"                   # Optimize for throughput
       "fs.file-max=2097152"             # Increase file handles
       "fs.nr_open=1048576"              # Increase open file limit
-      
+
       # Watchdog parameters
       "sunxi_wdt.nowayout=1"            # Prevent watchdog from being disabled
       
@@ -499,10 +503,41 @@
   # =============================================================================
   # SERVICE HARDENING
   # =============================================================================
-  
+
   # Hardening for systemd services is defined in sms-daemon.nix
   # Additional global systemd hardening
   systemd.coredump.enable = false;
+
+  # =============================================================================
+  # DNS RESOLUTION AND NETWORK MANAGEMENT
+  # =============================================================================
+
+  # Enable NetworkManager for better network management
+  networking.networkmanager = {
+    enable = true;
+    dns = "systemd-resolved";  # Use systemd-resolved for DNS
+  };
+
+  # Enable systemd-resolved for better DNS handling
+  services.resolved = {
+    enable = true;
+    dnssec = "allow-downgrade";  # Allow DNSSEC but fall back if not available
+    dnsovertls = "opportunistic";  # Use DNS over TLS when available
+    llmnr = "false";  # Disable LLMNR for security (multicast name resolution)
+    fallbackDns = [
+      "8.8.8.8"
+      "8.8.4.4"
+      "1.1.1.1"
+      "1.0.0.1"
+    ];
+    extraConfig = ''
+      DNS=8.8.8.8 1.1.1.1 8.8.4.4 1.0.0.1
+      DNSStubListener=yes
+      Cache=yes
+      CacheFromLocalhost=yes
+      ReadEtcHosts=yes
+    '';
+  };
   
   # =============================================================================
   # LOGGING AND MONITORING
