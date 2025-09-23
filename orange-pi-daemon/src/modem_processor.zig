@@ -44,25 +44,17 @@ pub fn processModem(
     // Get IMEI (equipment ID) - this is our primary identifier for modems
     const imei = blk: {
         const imei_result = modem_manager.getImei(modem_id) catch |err| {
-            std.log.warn("Failed to get IMEI for modem {s}: {any}", .{ modem_id, err });
-            // Generate synthetic ID if no IMEI
-            const synthetic_id = std.fmt.allocPrint(allocator, "MODEM_{s}", .{modem_id}) catch {
-                std.log.err("Failed to allocate synthetic ID for modem {s}", .{modem_id});
-                return;
-            };
-            break :blk synthetic_id;
+            std.log.warn("Failed to get IMEI for modem {s}: {any} - skipping", .{ modem_id, err });
+            // Skip modems without IMEI instead of creating fake data
+            return;
         };
-        
+
         if (imei_result) |actual_imei| {
             break :blk actual_imei;
         } else {
-            // No IMEI - create synthetic identifier
-            const synthetic_id = std.fmt.allocPrint(allocator, "MODEM_{s}", .{modem_id}) catch {
-                std.log.err("Failed to allocate synthetic ID for modem {s}", .{modem_id});
-                return;
-            };
-            std.log.warn("Modem {s} has no IMEI - using synthetic ID", .{modem_id});
-            break :blk synthetic_id;
+            // No IMEI - skip this modem to avoid polluting database
+            std.log.warn("Modem {s} has no IMEI - skipping", .{modem_id});
+            return;
         }
     };
     defer allocator.free(imei);
