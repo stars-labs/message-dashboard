@@ -1,0 +1,17 @@
+# Systemd timer for regular modem monitoring
+# Place in /etc/systemd/system/modem-monitoring.timer
+
+[Unit]
+Description=Run USB Modem Array Health Monitoring every 15 minutes
+Requires=modem-monitoring.service
+
+[Timer]
+# Run every 15 minutes
+OnCalendar=*:0/15
+# Also run 2 minutes after boot
+OnBootSec=120
+# If system was down, run immediately when back up
+Persistent=true
+
+[Install]
+WantedBy=timers.target

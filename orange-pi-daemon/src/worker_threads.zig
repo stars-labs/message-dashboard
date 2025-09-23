@@ -239,57 +239,21 @@ pub fn deviceStatusThread(context: *WorkerContext) !void {
         
         // Check if no modems found (ModemManager unavailable or no modems)
         if (modems.len == 0) {
-            std.log.warn("⚠️ No modems found - marking all devices as offline", .{});
-            
-            // Create special modem entry to signal all devices offline
-            var device_collector = DeviceCollector.init(context.allocator);
-            defer device_collector.deinit();
-            
-            const offline_modem = types.Modem{
-                .equipment_id = try context.allocator.dupe(u8, "ALL_DEVICES_OFFLINE"),
-                .manufacturer = null,
-                .model = null,
-                .firmware_revision = null,
-                .hardware_revision = null,
-                .device_path = null,
-                .status = try context.allocator.dupe(u8, "disconnected"),
-                .modem_index = null,
-                .usb_port = null,
-                .signal = null,
-                .rssi = null,
-                .rsrq = null,
-                .rsrp = null,
-                .snr = null,
+            std.log.warn("⚠️ No modems detected by ModemManager", .{});
+
+            // Send empty arrays to clear any stale data on server
+            // This properly indicates no devices are connected without inserting fake data
+            const empty_modems = try context.allocator.alloc(types.Modem, 0);
+            defer context.allocator.free(empty_modems);
+
+            const empty_sims = try context.allocator.alloc(types.SIM, 0);
+            defer context.allocator.free(empty_sims);
+
+            std.log.info("📤 Sending empty device list to indicate no modems connected", .{});
+            context.api_client.uploadDevices(empty_modems, empty_sims) catch |upload_err| {
+                std.log.err("Failed to upload empty device status: {any}", .{upload_err});
             };
-            
-            device_collector.addModem(offline_modem) catch |add_err| {
-                std.log.err("Failed to add offline signal modem: {any}", .{add_err});
-                // Clean up allocated memory
-                context.allocator.free(offline_modem.equipment_id);
-                context.allocator.free(offline_modem.status);
-                continue;
-            };
-            
-            // Upload the offline signal
-            const offline_modems = device_collector.getModems() catch |get_err| {
-                std.log.err("Failed to get offline modems: {any}", .{get_err});
-                continue;
-            };
-            defer context.allocator.free(offline_modems);
-            
-            const offline_sims = device_collector.getSIMs() catch |get_err| {
-                std.log.err("Failed to get offline SIMs: {any}", .{get_err});
-                continue;
-            };
-            defer context.allocator.free(offline_sims);
-            
-            if (offline_modems.len > 0) {
-                std.log.info("📤 Sending ALL_DEVICES_OFFLINE signal to server", .{});
-                context.api_client.uploadDevices(offline_modems, offline_sims) catch |upload_err| {
-                    std.log.err("Failed to upload offline status: {any}", .{upload_err});
-                };
-            }
-            
+
             continue;
         }
         
