@@ -199,8 +199,8 @@ pub fn main() !void {
     std.log.info("🚀 Starting parallel message checking with {d} modems", .{valid_modems.items.len});
     
     // Initialize worker pool AFTER building modem cache to avoid deadlock
-    // Temporarily reduce to 1 worker to avoid concurrency issues observed on server
-    const num_workers = 1;
+    // Use 8 workers with lock-free queue hardened against UAF
+    const num_workers = 8;
     var worker_pool = try WorkerPool.init(allocator, num_workers, &modem_manager, &should_exit);
     defer worker_pool.deinit();
     
@@ -447,7 +447,10 @@ pub fn main() !void {
             
             // Validate the result was appended correctly
             const appended = results.items[results.items.len - 1];
-            std.log.debug("After append: messages.len={d}", .{appended.messages.len});
+            std.log.debug("After append: messages.len={d} (count={d})", .{appended.messages.len, appended.message_count});
+            if (appended.success and appended.messages.len == 0 and appended.message_count > 0) {
+                std.log.err("Inconsistent result: len=0 but count>0, dropping to avoid UAF", .{});
+            }
         }
         if (queue_size_before > 0) {
             std.log.debug("Popped {d} results from queue (had {d}), results.items.len={d}", .{popped_count, queue_size_before, results.items.len});

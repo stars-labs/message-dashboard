@@ -62,40 +62,40 @@ pub fn LockFreeMPMC(comptime T: type) type {
         /// Non-blocking push operation
         /// Returns true if successfully enqueued, false if queue is full
         pub fn tryPush(self: *Self, item: T) bool {
-            var head = self.head.load(.acquire);
+            var head = self.head.load(.seq_cst);
             
             while (true) {
                 const slot_idx = head & BUFFER_MASK;
                 const slot = &self.buffer[slot_idx];
-                const seq = slot.sequence.load(.acquire);
+                const seq = slot.sequence.load(.seq_cst);
                 
                 // Check if this slot is available for writing
                 if (seq == head) {
                     // Try to claim this slot
                     const new_head = head + 1;
-                    if (self.head.cmpxchgWeak(head, new_head, .acq_rel, .acquire)) |updated_head| {
+                    if (self.head.cmpxchgWeak(head, new_head, .seq_cst, .seq_cst)) |updated_head| {
                         head = updated_head;
                         continue;
                     }
                     
                     // Successfully claimed slot, write data
                     slot.data = item;
-                    slot.sequence.store(head + 1, .release);
+                    slot.sequence.store(head + 1, .seq_cst);
                     return true;
                 } else if (seq < head) {
                     // Slot not yet ready, queue might be full
-                    const tail = self.tail.load(.acquire);
+                    const tail = self.tail.load(.seq_cst);
                     if (head - tail >= BUFFER_SIZE) {
                         // Queue is definitely full
                         return false;
                     }
                     
                     // Retry with updated head
-                    head = self.head.load(.acquire);
+                    head = self.head.load(.seq_cst);
                     continue;
                 } else {
                     // seq > head, someone else claimed this slot
-                    head = self.head.load(.acquire);
+                    head = self.head.load(.seq_cst);
                     continue;
                 }
             }
@@ -126,32 +126,32 @@ pub fn LockFreeMPMC(comptime T: type) type {
         /// Non-blocking pop operation
         /// Returns item if available, null if queue is empty
         pub fn tryPop(self: *Self) ?T {
-            var tail = self.tail.load(.acquire);
+            var tail = self.tail.load(.seq_cst);
             
             while (true) {
                 const slot_idx = tail & BUFFER_MASK;
                 const slot = &self.buffer[slot_idx];
-                const seq = slot.sequence.load(.acquire);
+                const seq = slot.sequence.load(.seq_cst);
                 
                 // Check if this slot has data ready to read
                 if (seq == tail + 1) {
                     // Try to claim this slot
                     const new_tail = tail + 1;
-                    if (self.tail.cmpxchgWeak(tail, new_tail, .acq_rel, .acquire)) |updated_tail| {
+                    if (self.tail.cmpxchgWeak(tail, new_tail, .seq_cst, .seq_cst)) |updated_tail| {
                         tail = updated_tail;
                         continue;
                     }
                     
                     // Successfully claimed slot, read data
                     const data = slot.data;
-                    slot.sequence.store(tail + BUFFER_SIZE, .release);
+                    slot.sequence.store(tail + BUFFER_SIZE, .seq_cst);
                     return data;
                 } else if (seq < tail + 1) {
                     // No data available
                     return null;
                 } else {
                     // seq > tail + 1, someone else claimed this slot
-                    tail = self.tail.load(.acquire);
+                    tail = self.tail.load(.seq_cst);
                     continue;
                 }
             }
@@ -186,8 +186,8 @@ pub fn LockFreeMPMC(comptime T: type) type {
         /// Get approximate queue size (may be stale due to concurrent access)
         /// Returns 0 if there's any overflow or corruption detected
         pub fn size(self: *Self) usize {
-            const head = self.head.load(.acquire);
-            const tail = self.tail.load(.acquire);
+            const head = self.head.load(.seq_cst);
+            const tail = self.tail.load(.seq_cst);
             
             // Safety check: detect potential overflow or corruption
             if (head < tail) {
@@ -208,8 +208,8 @@ pub fn LockFreeMPMC(comptime T: type) type {
         
         /// Check if queue is empty (may be stale due to concurrent access)
         pub fn isEmpty(self: *Self) bool {
-            const head = self.head.load(.acquire);
-            const tail = self.tail.load(.acquire);
+            const head = self.head.load(.seq_cst);
+            const tail = self.tail.load(.seq_cst);
             
             // Safety check: if there's corruption, assume not empty to be safe
             if (head < tail) {
@@ -222,8 +222,8 @@ pub fn LockFreeMPMC(comptime T: type) type {
         
         /// Check if queue is full (may be stale due to concurrent access)
         pub fn isFull(self: *Self) bool {
-            const head = self.head.load(.acquire);
-            const tail = self.tail.load(.acquire);
+            const head = self.head.load(.seq_cst);
+            const tail = self.tail.load(.seq_cst);
             
             // Safety check: if there's corruption, assume full to prevent further writes
             if (head < tail) {
