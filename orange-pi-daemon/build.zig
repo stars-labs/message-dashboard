@@ -63,4 +63,18 @@ pub fn build(b: *std.Build) void {
     
     const run_parser_tests = b.addRunArtifact(parser_tests);
     test_step.dependOn(&run_parser_tests.step);
+    
+    // Create simple stress test executable 
+    const simple_stress_test = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/simple_stress_test.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+
+    const run_simple_stress_test = b.addRunArtifact(simple_stress_test);
+    
+    const simple_stress_test_step = b.step("test-simple-stress", "Run simple SafeResultQueue stress tests");
+    simple_stress_test_step.dependOn(&run_simple_stress_test.step);
 }
