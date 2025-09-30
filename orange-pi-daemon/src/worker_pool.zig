@@ -115,7 +115,6 @@ pub const WorkerPool = struct {
                             // Duplicate modem_id since work.modem_id will be freed
                             const modem_id_copy = context.allocator.dupe(u8, work.modem_id) catch {
                                 std.log.err("Worker {d}: Failed to allocate modem_id copy", .{ self.id });
-                                _ = self.pool.active_workers.fetchSub(1, .monotonic);
                                 continue;
                             };
                             
@@ -209,7 +208,6 @@ pub const WorkerPool = struct {
                     .CheckSignal => {
                         const signal = self.pool.modem_manager.getSignalQuality(work.modem_id) catch |err| {
                             std.log.debug("Worker {d}: Failed to check signal for {s}: {any}", .{ self.id, work.modem_id, err });
-                            _ = self.pool.active_workers.fetchSub(1, .monotonic);
                             continue;
                         };
                         
