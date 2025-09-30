@@ -60,8 +60,8 @@ pub const SMSSender = struct {
         }
         
         // Convert PendingSms to OutgoingSMS
-        var sms_list = std.ArrayList(OutgoingSMS).init(self.allocator);
-        defer sms_list.deinit();
+        var sms_list: std.ArrayList(OutgoingSMS) = .empty;
+        defer sms_list.deinit(self.allocator);
         
         for (pending_sms) |sms| {
             const outgoing = OutgoingSMS{
@@ -71,11 +71,11 @@ pub const SMSSender = struct {
                 .content = try self.allocator.dupe(u8, sms.content),
                 .created_at = try self.allocator.dupe(u8, sms.created_at),
             };
-            try sms_list.append(outgoing);
+            try sms_list.append(self.allocator, outgoing);
         }
         
         // Convert to owned slice
-        const result = try sms_list.toOwnedSlice();
+        const result = try sms_list.toOwnedSlice(self.allocator);
         if (result.len > 0) {
             std.log.info("📱 Found {d} pending SMS messages to send", .{result.len});
         }

@@ -75,7 +75,7 @@ pub const BusctlDBus = struct {
             return error.BusctlFailed;
         }
         
-        var modems = std.ArrayList([]const u8).init(self.allocator);
+        var modems: std.ArrayList([]const u8) = .empty;
         var lines = std.mem.tokenizeScalar(u8, result.stdout, '\n');
         
         while (lines.next()) |line| {
@@ -88,12 +88,12 @@ pub const BusctlDBus = struct {
                 
                 if (end > start) {
                     const modem_id = try self.allocator.dupe(u8, line[start..end]);
-                    try modems.append(modem_id);
+                    try modems.append(self.allocator, modem_id);
                 }
             }
         }
         
-        return modems.toOwnedSlice();
+        return modems.toOwnedSlice(self.allocator);
     }
     
     /// Get modem state using busctl (faster than mmcli -m)

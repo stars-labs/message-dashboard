@@ -37,7 +37,7 @@ pub fn processModem(
                 return;
             };
             // Give modem time to enable
-            std.time.sleep(2 * std.time.ns_per_s);
+            std.Thread.sleep(2 * std.time.ns_per_s);
         }
     }
     

@@ -9,9 +9,11 @@ pub fn build(b: *std.Build) void {
 
     const exe = b.addExecutable(.{
         .name = "orange-pi-daemon",
-        .root_source_file = b.path("src/main.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
     });
 
     // Optional: Link with libdbus for native D-Bus support (zero subprocess overhead)
@@ -38,9 +40,11 @@ pub fn build(b: *std.Build) void {
 
     // Create unified test executable
     const tests = b.addTest(.{
-        .root_source_file = b.path("src/tests.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/tests.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
     });
 
     const run_tests = b.addRunArtifact(tests);
@@ -50,9 +54,11 @@ pub fn build(b: *std.Build) void {
     
     // Also add separate mmcli parser tests
     const parser_tests = b.addTest(.{
-        .root_source_file = b.path("src/mmcli_parser_tests.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/mmcli_parser_tests.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
     });
     
     const run_parser_tests = b.addRunArtifact(parser_tests);

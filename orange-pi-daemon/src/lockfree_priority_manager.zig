@@ -110,8 +110,8 @@ pub const LockFreePriorityManager = struct {
     }
     
     pub fn getModemsToCheck(self: *LockFreePriorityManager, all_modems: [][]const u8, cycle_count: u64, allocator: std.mem.Allocator) ![][]const u8 {
-        var result = std.ArrayList([]const u8).init(allocator);
-        errdefer result.deinit();
+        var result: std.ArrayList([]const u8) = .empty;
+        errdefer result.deinit(allocator);
         
         const now = std.time.timestamp();
         
@@ -140,11 +140,11 @@ pub const LockFreePriorityManager = struct {
             }
             
             if (should_check) {
-                try result.append(modem_id);
+                try result.append(allocator, modem_id);
             }
         }
         
-        return result.toOwnedSlice();
+        return result.toOwnedSlice(allocator);
     }
     
     pub fn getStats(self: *LockFreePriorityManager) struct { high: u32, medium: u32, low: u32, total: u32 } {

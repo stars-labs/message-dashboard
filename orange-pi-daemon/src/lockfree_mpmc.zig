@@ -118,7 +118,7 @@ pub fn LockFreeMPMC(comptime T: type) type {
                     backoff *= 2;
                 } else {
                     // Yield to other threads if backoff gets too high
-                    std.time.sleep(1);
+                    std.Thread.sleep(1);
                 }
             }
         }
@@ -178,7 +178,7 @@ pub fn LockFreeMPMC(comptime T: type) type {
                     backoff *= 2;
                 } else {
                     // Yield to other threads if backoff gets too high
-                    std.time.sleep(1);
+                    std.Thread.sleep(1);
                 }
             }
         }
@@ -299,7 +299,7 @@ test "LockFreeMPMC concurrent stress test" {
                 } else if (ctx.active_producers.load(.acquire) == 0 and ctx.queue.isEmpty()) {
                     break;
                 } else {
-                    std.time.sleep(1);
+                    std.Thread.sleep(1);
                 }
             }
             _ = ctx.consumed_sum.fetchAdd(sum, .monotonic);
