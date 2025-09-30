@@ -10,8 +10,8 @@ pub const DeviceCollector = struct {
     pub fn init(allocator: std.mem.Allocator) DeviceCollector {
         return DeviceCollector{
             .allocator = allocator,
-            .modems = std.ArrayList(types.Modem).init(allocator),
-            .sims = std.ArrayList(types.SIM).init(allocator),
+            .modems = .empty,
+            .sims = .empty,
         };
     }
 
@@ -37,8 +37,8 @@ pub const DeviceCollector = struct {
             if (sim.access_tech) |a| self.allocator.free(a);
         }
         
-        self.modems.deinit();
-        self.sims.deinit();
+        self.modems.deinit(self.allocator);
+        self.sims.deinit(self.allocator);
     }
 
     /// Add a modem to the collection
@@ -61,7 +61,7 @@ pub const DeviceCollector = struct {
             .snr = modem.snr,
         };
         
-        try self.modems.append(cloned_modem);
+        try self.modems.append(self.allocator, cloned_modem);
     }
 
     /// Add a SIM to the collection
@@ -79,7 +79,7 @@ pub const DeviceCollector = struct {
             .sim_index = sim.sim_index,
         };
         
-        try self.sims.append(cloned_sim);
+        try self.sims.append(self.allocator, cloned_sim);
     }
 
     /// Get all collected modems and clear the list

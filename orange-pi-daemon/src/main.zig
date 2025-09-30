@@ -79,8 +79,7 @@ fn checkModemMessages(context: *ParallelContext, modem_id: []const u8) void {
 }
 
 pub fn main() !void {
-    const stdout = std.io.getStdOut().writer();
-    try stdout.print("📱 Orange Pi SMS Dashboard Daemon v3.9.0 (Queue Management Edition)\n", .{});
+    std.debug.print("📱 Orange Pi SMS Dashboard Daemon v3.9.0 (Queue Management Edition)\n", .{});
     
     // Initialize thread-safe allocator
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -168,12 +167,12 @@ pub fn main() !void {
     
     // Get initial modem list and build cache of valid modems BEFORE starting workers
     std.log.info("🔄 Building valid modem cache", .{});
-    var valid_modems = std.ArrayList([]const u8).init(allocator);
+    var valid_modems: std.ArrayList([]const u8) = .empty;
     defer {
         for (valid_modems.items) |modem_id| {
             allocator.free(modem_id);
         }
-        valid_modems.deinit();
+        valid_modems.deinit(allocator);
     }
     
     const all_modems = modem_manager.listModems() catch &[_][]const u8{};
@@ -192,7 +191,7 @@ pub fn main() !void {
         const iccid_opt = modem_manager.getIccid(modem_id) catch continue;
         if (iccid_opt) |iccid| {
             allocator.free(iccid);
-            try valid_modems.append(try allocator.dupe(u8, modem_id));
+            try valid_modems.append(allocator, try allocator.dupe(u8, modem_id));
             std.log.info("✅ Cached modem {s} as valid", .{modem_id});
         }
     }
@@ -200,8 +199,8 @@ pub fn main() !void {
     std.log.info("🚀 Starting parallel message checking with {d} modems", .{valid_modems.items.len});
     
     // Initialize worker pool AFTER building modem cache to avoid deadlock
-    // Reduce to 8 workers to prevent SystemResources errors with 54 modems
-    const num_workers = 8;
+    // Temporarily reduce to 1 worker to avoid concurrency issues observed on server
+    const num_workers = 1;
     var worker_pool = try WorkerPool.init(allocator, num_workers, &modem_manager, &should_exit);
     defer worker_pool.deinit();
     
@@ -212,7 +211,7 @@ pub fn main() !void {
     
     // Give workers time to fully initialize before starting main loop
     // This prevents deadlock when main thread starts using mutexes before workers are ready
-    std.time.sleep(500 * std.time.ns_per_ms);
+    std.Thread.sleep(500 * std.time.ns_per_ms);
     std.log.info("✅ Worker initialization complete, starting main loop", .{});
     
     // Notify systemd that daemon is ready
@@ -253,7 +252,7 @@ pub fn main() !void {
             for (valid_modems.items) |old_modem| {
                 allocator.free(old_modem);
             }
-            valid_modems.clearAndFree();
+            valid_modems.clearAndFree(allocator);
             
             // Rebuild cache
             const current_modems = modem_manager.listModems() catch &[_][]const u8{};
@@ -268,7 +267,7 @@ pub fn main() !void {
                 const iccid_opt = modem_manager.getIccid(modem_id) catch continue;
                 if (iccid_opt) |iccid| {
                     allocator.free(iccid);
-                    try valid_modems.append(try allocator.dupe(u8, modem_id));
+                    try valid_modems.append(allocator, try allocator.dupe(u8, modem_id));
                 }
             }
             
@@ -361,7 +360,7 @@ pub fn main() !void {
                 25; // Slightly full
                 
             std.log.debug("⏳ Queue has {d} items, waiting {d}ms for workers to catch up", .{initial_queue_size, wait_ms});
-            std.time.sleep(wait_ms * std.time.ns_per_ms);
+            std.Thread.sleep(wait_ms * std.time.ns_per_ms);
             continue; // Skip this cycle completely
         }
         
@@ -390,20 +389,20 @@ pub fn main() !void {
                 }
                 break;
             }
-            std.time.sleep(1 * std.time.ns_per_ms); // 1ms sleep for better balance
+            std.Thread.sleep(1 * std.time.ns_per_ms); // 1ms sleep for better balance
         }
         
         // Process all results and update priorities
         var total_messages: usize = 0;
         
         // Collect all results from lock-free queue
-        var results = std.ArrayList(*ModemCheckResult).init(allocator);
+        var results: std.ArrayList(*ModemCheckResult) = .empty;
         defer {
             for (results.items) |result| {  // Now result is a pointer
                 result.deinit();
                 allocator.destroy(result);  // Free the heap-allocated result
             }
-            results.deinit();
+            results.deinit(allocator);
         }
         
         // Drain results from lock-free queue
@@ -424,7 +423,7 @@ pub fn main() !void {
             }
             
             // Critical fix: Handle append failure without losing the result
-            results.append(result_ptr) catch |err| {
+            results.append(allocator, result_ptr) catch |err| {
                 std.log.err("🚨 CRITICAL: Failed to append result, processing immediately to avoid message loss: {any}", .{err});
                 
                 // Process this single result immediately to prevent message loss
@@ -544,7 +543,7 @@ pub fn main() !void {
         else
             1 * std.time.ns_per_ms;  // Minimal sleep if cycle took longer than target
         
-        std.time.sleep(sleep_time);
+        std.Thread.sleep(sleep_time);
     }
     
     // Cleanup

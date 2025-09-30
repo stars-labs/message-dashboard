@@ -50,7 +50,7 @@ pub const WorkerPool = struct {
         fn run(self: *Worker) void {
             // Wait for pool to be fully initialized
             while (!self.pool.initialized.load(.acquire)) {
-                std.time.sleep(10 * std.time.ns_per_ms);
+                std.Thread.sleep(10 * std.time.ns_per_ms);
             }
             
             std.log.info("Worker {d} started", .{self.id});
@@ -75,17 +75,17 @@ pub const WorkerPool = struct {
                             std.atomic.spinLoopHint();
                         } else if (retry_count <= 6) {
                             // Next 3 attempts: very short sleeps
-                            std.time.sleep(backoff_us * std.time.ns_per_us);
+                            std.Thread.sleep(backoff_us * std.time.ns_per_us);
                             backoff_us = @min(backoff_us * 2, 100); // Cap at 100us
                         } else {
                             // Final attempts: slightly longer sleeps
-                            std.time.sleep(500 * std.time.ns_per_us); // 0.5ms
+                            std.Thread.sleep(500 * std.time.ns_per_us); // 0.5ms
                         }
                     }
                     
                     // If all retries failed, sleep longer and continue
                     // This gives time for queue to be refilled
-                    std.time.sleep(5 * std.time.ns_per_ms);
+                    std.Thread.sleep(5 * std.time.ns_per_ms);
                     continue;
                 };
                 defer self.pool.allocator.free(work.modem_id);
@@ -281,7 +281,7 @@ pub const WorkerPool = struct {
         self.pool_shutdown.store(true, .release);
         
         // Give workers time to see the exit flag
-        std.time.sleep(100 * std.time.ns_per_ms);
+        std.Thread.sleep(100 * std.time.ns_per_ms);
         
         // Wait for all workers to finish
         for (self.workers) |*worker| {

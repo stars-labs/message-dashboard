@@ -145,7 +145,7 @@ pub const ModemManager = struct {
                     deleted_count += 1;
                     
                     // Small delay to avoid overwhelming the modem
-                    std.time.sleep(50 * std.time.ns_per_ms);
+                    std.Thread.sleep(50 * std.time.ns_per_ms);
                     
                     // In aggressive mode, delete up to 50 messages, otherwise 10
                     const max_deletions: u32 = if (aggressive_mode) 50 else 10;
@@ -206,8 +206,8 @@ pub const ModemManager = struct {
             },
         }
 
-        var modems = std.ArrayList([]const u8).init(self.allocator);
-        defer modems.deinit();
+        var modems: std.ArrayList([]const u8) = .empty;
+        defer modems.deinit(self.allocator);
 
         var lines = std.mem.tokenizeScalar(u8, result.stdout, '\n');
         while (lines.next()) |line| {
@@ -217,11 +217,11 @@ pub const ModemManager = struct {
                 while (end < line.len and line[end] != ' ') : (end += 1) {}
                 
                 const modem_id = try self.allocator.dupe(u8, line[start..end]);
-                try modems.append(modem_id);
+                try modems.append(self.allocator, modem_id);
             }
         }
 
-        return try modems.toOwnedSlice();
+        return try modems.toOwnedSlice(self.allocator);
     }
 
     pub fn enableModem(self: ModemManager, modem_id: []const u8) !void {
@@ -555,7 +555,7 @@ pub const ModemManager = struct {
         };
         
         // Wait a moment for signal data to be available
-        std.time.sleep(100 * std.time.ns_per_ms);
+        std.Thread.sleep(100 * std.time.ns_per_ms);
         
         const result = try std.process.Child.run(.{
             .allocator = self.allocator,
@@ -689,7 +689,7 @@ pub const ModemManager = struct {
             },
         }
 
-        var messages = std.ArrayList(types.MessageInfo).init(self.allocator);
+        var messages: std.ArrayList(types.MessageInfo) = .empty;
         // Don't call deinit() - toOwnedSlice() transfers ownership to caller
 
         var lines = std.mem.tokenizeScalar(u8, result.stdout, '\n');
@@ -740,7 +740,7 @@ pub const ModemManager = struct {
                     
                     // No message tracking needed - upload all messages
                     
-                    try messages.append(message_info);
+                    try messages.append(self.allocator, message_info);
                 } else |err| {
                     std.log.warn("❌ Failed to get SMS details for {s} on modem {s}: {any}", .{ sms_id_str, modem_id, err });
                     continue;
@@ -748,7 +748,7 @@ pub const ModemManager = struct {
             }
         }
 
-        return try messages.toOwnedSlice();
+        return try messages.toOwnedSlice(self.allocator);
     }
 
     fn getSmsDetails(self: *ModemManager, sms_id: []const u8, modem_id: []const u8) !types.MessageInfo {
@@ -769,8 +769,8 @@ pub const ModemManager = struct {
         var timestamp: ?[]const u8 = null;
 
         // Parse multiline SMS content by collecting all lines
-        var content_lines = std.ArrayList([]const u8).init(self.allocator);
-        defer content_lines.deinit();
+        var content_lines: std.ArrayList([]const u8) = .empty;
+        defer content_lines.deinit(self.allocator);
         var parsing_content = false;
 
         var lines = std.mem.tokenizeScalar(u8, result.stdout, '\n');
@@ -790,7 +790,7 @@ pub const ModemManager = struct {
                 if (std.mem.indexOf(u8, trimmed, ": ")) |pos| {
                     const value = std.mem.trim(u8, trimmed[pos + 2 ..], " '\"");
                     if (value.len > 0) {
-                        try content_lines.append(try self.allocator.dupe(u8, value));
+                        try content_lines.append(self.allocator, try self.allocator.dupe(u8, value));
                     }
                 }
             } else if (std.mem.indexOf(u8, trimmed, "data:")) |_| {
@@ -1021,7 +1021,7 @@ pub const ModemManager = struct {
                     
                     // If the line is empty after removing prefix, it's an empty line
                     if (clean_line.len == 0) {
-                        try content_lines.append(try self.allocator.dupe(u8, ""));
+                        try content_lines.append(self.allocator, try self.allocator.dupe(u8, ""));
                     } else {
                         // Check if this line is just formatting (dashes, equals, underscores, etc.)
                         var is_formatting_line = true;
@@ -1034,7 +1034,7 @@ pub const ModemManager = struct {
                         
                         // Only append if it's not a formatting line
                         if (!is_formatting_line) {
-                            try content_lines.append(try self.allocator.dupe(u8, clean_line));
+                            try content_lines.append(self.allocator, try self.allocator.dupe(u8, clean_line));
                         }
                     }
                 }

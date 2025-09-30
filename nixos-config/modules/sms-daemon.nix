@@ -448,17 +448,17 @@ in {
     };
     
     # Log rotation for SMS daemon logs
-    services.logrotate.settings.sms-daemon = {
-      files = "/var/log/sms-dashboard/*.log";
-      su = "${cfg.user} ${cfg.group}";
-      daily = true;
-      rotate = 7;
-      compress = true;
-      delaycompress = true;
-      missingok = true;
-      notifempty = true;
-      create = "0640 ${cfg.user} ${cfg.group}";
-      postrotate = "systemctl reload sms-daemon 2>/dev/null || true";
-    };
+   # services.logrotate.settings.sms-daemon = {
+   #   files = "/var/log/sms-dashboard/*.log";
+   #   su = "${cfg.user} ${cfg.group}";
+   #   daily = true;
+   #   rotate = 7;
+   #   compress = true;
+   #   delaycompress = true;
+   #   missingok = true;
+   #   notifempty = true;
+   #   create = "0640 ${cfg.user} ${cfg.group}";
+   #   postrotate = "systemctl reload sms-daemon 2>/dev/null || true";
+   # };
   };
 }

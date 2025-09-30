@@ -25,8 +25,8 @@ pub fn messageProcessorThread(context: *WorkerContext) !void {
     std.log.info("🚀 Message processor thread started", .{});
     
     var last_upload_time = std.time.milliTimestamp();
-    var pending_messages = std.ArrayList(types.MessageInfo).init(context.allocator);
-    defer pending_messages.deinit();
+    var pending_messages: std.ArrayList(types.MessageInfo) = .empty;
+    defer pending_messages.deinit(context.allocator);
     
     while (!context.should_exit.load(.acquire)) {
         // Get batch of messages from lock-free queue (reduced from 50 to 10 for faster response)
@@ -49,7 +49,7 @@ pub fn messageProcessorThread(context: *WorkerContext) !void {
             const now = std.time.milliTimestamp();
             if (pending_messages.items.len > 0 and (now - last_upload_time) > 50) { // Upload after 50ms
                 // Process pending messages
-                const messages_to_upload = try pending_messages.toOwnedSlice();
+                const messages_to_upload = try pending_messages.toOwnedSlice(context.allocator);
                 defer {
                     for (messages_to_upload) |msg| {
                         context.allocator.free(msg.modem_id);
@@ -58,12 +58,12 @@ pub fn messageProcessorThread(context: *WorkerContext) !void {
                     }
                     context.allocator.free(messages_to_upload);
                 }
-                pending_messages = std.ArrayList(types.MessageInfo).init(context.allocator);
+                pending_messages = std.ArrayList(types.MessageInfo){};  // Reset to empty
                 
                 // Continue to upload logic below
             } else {
                 // No messages, sleep very briefly to reduce latency
-                std.time.sleep(10 * std.time.ns_per_ms); // Reduced from 100ms to 10ms
+                std.Thread.sleep(10 * std.time.ns_per_ms); // Reduced from 100ms to 10ms
                 continue;
             }
         }
@@ -71,7 +71,7 @@ pub fn messageProcessorThread(context: *WorkerContext) !void {
         // Add new messages to pending batch
         const messages = batch_buffer[0..message_count];
         for (messages) |msg| {
-            try pending_messages.append(msg);
+            try pending_messages.append(context.allocator, msg);
         }
         
         // Upload immediately if we have 5+ messages or 50ms has passed
@@ -81,8 +81,8 @@ pub fn messageProcessorThread(context: *WorkerContext) !void {
             last_upload_time = now;
             
             // Convert to API format and deduplicate
-            var unique_messages = std.ArrayList(types.Message).init(context.allocator);
-            defer unique_messages.deinit();
+            var unique_messages: std.ArrayList(types.Message) = .empty;
+            defer unique_messages.deinit(context.allocator);
             
             var seen = std.hash_map.HashMap([]const u8, void, std.hash_map.StringContext, std.hash_map.default_max_load_percentage).init(context.allocator);
             defer {
@@ -102,7 +102,7 @@ pub fn messageProcessorThread(context: *WorkerContext) !void {
             
             if (!seen.contains(key)) {
                 try seen.put(key, {});
-                try unique_messages.append(msg_info.message);
+                try unique_messages.append(context.allocator, msg_info.message);
             } else {
                 context.allocator.free(key);
             }
@@ -220,7 +220,7 @@ pub fn deviceStatusThread(context: *WorkerContext) !void {
     while (!context.should_exit.load(.acquire)) {
         // Sleep for configured interval
         const sleep_ns = context.config.check_interval * std.time.ns_per_s;
-        std.time.sleep(sleep_ns);
+        std.Thread.sleep(sleep_ns);
         
         if (context.should_exit.load(.acquire)) break;
         
@@ -273,8 +273,8 @@ pub fn deviceStatusThread(context: *WorkerContext) !void {
         
         // Process modems in parallel batches
         const max_threads = @min(modems.len, 8); // Limit concurrent threads
-        var threads = std.ArrayList(std.Thread).init(context.allocator);
-        defer threads.deinit();
+        var threads: std.ArrayList(std.Thread) = .empty;
+        defer threads.deinit(context.allocator);
         
         var modem_idx: usize = 0;
         while (modem_idx < modems.len) {
@@ -286,7 +286,7 @@ pub fn deviceStatusThread(context: *WorkerContext) !void {
                 if (idx >= modems.len) break;
                 
                 const thread = try std.Thread.spawn(.{}, processModemParallel, .{ &processor_context, modems[idx] });
-                try threads.append(thread);
+                try threads.append(context.allocator, thread);
             }
             
             // Wait for batch to complete
@@ -344,7 +344,7 @@ pub fn deviceStatusThread(context: *WorkerContext) !void {
                     if (retry_manager.shouldRetry()) {
                         const delay = retry_manager.nextDelay();
                         std.log.info("🔄 Retrying upload in {d}ms...", .{delay});
-                        std.time.sleep(delay * std.time.ns_per_ms);
+                        std.Thread.sleep(delay * std.time.ns_per_ms);
                         continue;
                     } else {
                         // Max retries exceeded
@@ -377,7 +377,7 @@ pub fn deviceStatusThread(context: *WorkerContext) !void {
                         std.log.err("Empty sync failed: {any}", .{err});
                         if (retry_manager.shouldRetry()) {
                             const delay = retry_manager.nextDelay();
-                            std.time.sleep(delay * std.time.ns_per_ms);
+                            std.Thread.sleep(delay * std.time.ns_per_ms);
                             continue;
                         }
                         break;
@@ -400,7 +400,7 @@ pub fn signalMonitorThread(context: *WorkerContext) !void {
     while (!context.should_exit.load(.acquire)) {
         // Sleep for configured interval
         const sleep_ns = context.config.signal_check_interval * std.time.ns_per_s;
-        std.time.sleep(sleep_ns);
+        std.Thread.sleep(sleep_ns);
         
         if (context.should_exit.load(.acquire)) break;
         
@@ -449,7 +449,7 @@ pub fn smsSenderThread(context: *WorkerContext) !void {
     
     while (!context.should_exit.load(.acquire)) {
         // Poll for pending SMS every 5 seconds
-        std.time.sleep(5 * std.time.ns_per_s);
+        std.Thread.sleep(5 * std.time.ns_per_s);
         
         if (context.should_exit.load(.acquire)) break;
         

@@ -48,7 +48,7 @@ pub const ApiClient = struct {
 
     pub fn uploadPhone(self: *ApiClient, phone: types.Phone) !void {
         const phones = [_]types.Phone{phone};
-        const phones_json = try json.stringifyAlloc(self.allocator, phones, .{ .emit_null_optional_fields = false });
+        const phones_json = try std.json.Stringify.valueAlloc(self.allocator, phones, .{ .emit_null_optional_fields = false });
         defer self.allocator.free(phones_json);
 
         const payload = try std.fmt.allocPrint(self.allocator, "{{\"phones\":{s}}}", .{phones_json});
@@ -62,7 +62,7 @@ pub const ApiClient = struct {
         if (phones.len == 0) return;
         
 
-        const phones_json = try json.stringifyAlloc(self.allocator, phones, .{ .emit_null_optional_fields = false });
+        const phones_json = try std.json.Stringify.valueAlloc(self.allocator, phones, .{ .emit_null_optional_fields = false });
         defer self.allocator.free(phones_json);
 
         const payload = try std.fmt.allocPrint(self.allocator, "{{\"phones\":{s}}}", .{phones_json});
@@ -76,10 +76,11 @@ pub const ApiClient = struct {
     pub fn uploadDevicesWithSync(self: *ApiClient, modems: []const types.Modem, sims: []const types.SIM, sync_mode: SyncMode) !void {
         if (modems.len == 0 and sims.len == 0) return;
         
-        const modems_json = try json.stringifyAlloc(self.allocator, modems, .{ .emit_null_optional_fields = false });
+        // Use the new JSON API (std.json.Stringify.valueAlloc)
+        const modems_json = try std.json.Stringify.valueAlloc(self.allocator, modems, .{ .emit_null_optional_fields = false });
         defer self.allocator.free(modems_json);
         
-        const sims_json = try json.stringifyAlloc(self.allocator, sims, .{ .emit_null_optional_fields = false });
+        const sims_json = try std.json.Stringify.valueAlloc(self.allocator, sims, .{ .emit_null_optional_fields = false });
         defer self.allocator.free(sims_json);
         
         const timestamp = try std.fmt.allocPrint(self.allocator, "{}", .{std.time.timestamp()});
@@ -123,7 +124,8 @@ pub const ApiClient = struct {
             }
         }
 
-        const messages_json = try json.stringifyAlloc(self.allocator, messages, .{ .emit_null_optional_fields = false });
+        // Use the new JSON API (std.json.Stringify.valueAlloc)  
+        const messages_json = try std.json.Stringify.valueAlloc(self.allocator, messages, .{ .emit_null_optional_fields = false });
         defer self.allocator.free(messages_json);
 
         const payload = try std.fmt.allocPrint(self.allocator, "{{\"messages\":{s}}}", .{messages_json});
@@ -142,49 +144,37 @@ pub const ApiClient = struct {
 
         const uri = try std.Uri.parse(url);
         
-        // Create headers buffer
-        var header_buffer: [4096]u8 = undefined;
-        
-        // Build request headers
-        const api_key_header = try std.fmt.allocPrint(self.allocator, "X-API-Key: {s}", .{self.config.api_key});
-        defer self.allocator.free(api_key_header);
-        
-        const extra_headers = [_]std.http.Header{
-            .{ .name = "X-API-Key", .value = self.config.api_key },
-            .{ .name = "Accept", .value = "application/json" },
-        };
-        
-        // Create request options
-        const options = std.http.Client.RequestOptions{
-            .server_header_buffer = &header_buffer,
-            .extra_headers = &extra_headers,
-        };
-
-        // Make the request
-        var request = try self.client.open(.GET, uri, options);
+        // Make the HTTP request using the correct Zig 0.15.1 API
+        var request = try self.client.request(.GET, uri, .{
+            .extra_headers = &[_]std.http.Header{
+                .{ .name = "X-API-Key", .value = self.config.api_key },
+                .{ .name = "Accept", .value = "application/json" },
+            },
+        });
         defer request.deinit();
 
-        // Send request and wait for response
-        try request.send();
-        try request.wait();
-
-        // Check status code
-        if (request.response.status != .ok) {
-            std.log.err("HTTP request failed with status {d}", .{@intFromEnum(request.response.status)});
-            return error.HttpRequestFailed;
+        // Read response body using buffer approach  
+        var response_body: std.ArrayList(u8) = .empty;
+        defer response_body.deinit(self.allocator);
+        
+        // Read data in chunks
+        var buffer: [4096]u8 = undefined;
+        while (true) {
+            const bytes_read = request.reader.interface.readSliceShort(&buffer) catch |err| switch (err) {
+                error.ReadFailed => break,
+                else => return err,
+            };
+            if (bytes_read == 0) break;
+            try response_body.appendSlice(self.allocator, buffer[0..bytes_read]);
         }
 
-        // Read response body
-        const response_body = try request.reader().readAllAlloc(self.allocator, 1024 * 1024); // 1MB max
-        defer self.allocator.free(response_body);
-
-        std.log.debug("📥 Response body: {s}", .{response_body});
+        std.log.debug("📥 Response body: {s}", .{response_body.items});
 
         // Parse JSON response
-        const parsed = try json.parseFromSlice(struct {
+        const parsed = try std.json.parseFromSlice(struct {
             success: bool,
             pending_messages: []types.PendingSms,
-        }, self.allocator, response_body, .{ .ignore_unknown_fields = true });
+        }, self.allocator, response_body.items, .{ .ignore_unknown_fields = true });
         defer parsed.deinit();
 
         // Allocate and copy the pending SMS list
@@ -221,70 +211,31 @@ pub const ApiClient = struct {
         const url = try std.fmt.allocPrint(self.allocator, "{s}/api/control{s}", .{ self.config.api_url, endpoint });
         defer self.allocator.free(url);
 
-        std.log.debug("🌐 Making HTTP request to: {s}", .{url});
+        std.log.debug("🌐 Making HTTP POST request to: {s}", .{url});
         std.log.debug("📤 Request payload: {s}", .{payload});
 
-        const uri = try std.Uri.parse(url);
-        
-        // Create headers buffer
-        var header_buffer: [4096]u8 = undefined;
-        
-        // Build request headers
-        const extra_headers = [_]std.http.Header{
-            .{ .name = "Content-Type", .value = "application/json" },
-            .{ .name = "X-API-Key", .value = self.config.api_key },
-        };
-        
-        // Create request options
-        const options = std.http.Client.RequestOptions{
-            .server_header_buffer = &header_buffer,
-            .extra_headers = &extra_headers,
+        // Use the fetch method for simpler implementation
+        const result = self.client.fetch(.{
+            .location = .{ .url = url },
+            .method = .POST,
+            .payload = payload,
+            .extra_headers = &[_]std.http.Header{
+                .{ .name = "Content-Type", .value = "application/json" },
+                .{ .name = "X-API-Key", .value = self.config.api_key },
+            },
+        }) catch |err| {
+            std.log.err("HTTP POST request failed: {any}", .{err});
+            return error.HttpRequestFailed;
         };
 
-        // Make the request
-        var request = try self.client.open(.POST, uri, options);
-        defer request.deinit();
-
-        // Set transfer encoding
-        request.transfer_encoding = .{ .content_length = payload.len };
-
-        // Send headers and body
-        try request.send();
-        try request.writeAll(payload);
-        try request.finish();
-
-        // Wait for the response
-        try request.wait();
-
-        // Check status code
-        const status = @intFromEnum(request.response.status);
+        const status = @intFromEnum(result.status);
         std.log.debug("📥 HTTP Response Code: {d}", .{status});
 
         if (status < 200 or status >= 300) {
-            // Try to read error response (up to 16KB)
-            const error_body = request.reader().readAllAlloc(self.allocator, 16 * 1024) catch |err| {
-                std.log.err("Failed to read error response: {any}", .{err});
-                return error.HttpRequestFailed;
-            };
-            defer self.allocator.free(error_body);
-            
             std.log.err("HTTP request failed with status {d}", .{status});
-            if (error_body.len > 0) {
-                std.log.err("Response: {s}", .{error_body});
-            }
             return error.HttpRequestFailed;
         }
 
-        // Read success response body (if any)
-        // Increase buffer size to 64KB to handle larger responses
-        const response_body = request.reader().readAllAlloc(self.allocator, 64 * 1024) catch |err| {
-            std.log.debug("No response body or failed to read: {any}", .{err});
-            return;
-        };
-        defer self.allocator.free(response_body);
-
-        if (response_body.len > 0) {
-            std.log.debug("📥 Response body: {s}", .{response_body});
-        }
+        std.log.debug("📥 HTTP Response: Success", .{});
     }
 };
