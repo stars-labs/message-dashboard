@@ -112,9 +112,10 @@ pub const ModemCheckResult = struct {
     messages: []MessageInfo,
     success: bool,
     allocator: std.mem.Allocator,
+    message_count: u32 = 0,
     
     pub fn deinit(self: *ModemCheckResult) void {
-        if (self.success) {
+        if (self.success and self.messages.len > 0) {
             for (self.messages) |*msg| {
                 self.allocator.free(msg.modem_id);
                 self.allocator.free(msg.sms_id);

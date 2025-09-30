@@ -88,10 +88,15 @@ pub const WorkerPool = struct {
                     std.Thread.sleep(5 * std.time.ns_per_ms);
                     continue;
                 };
-                defer self.pool.allocator.free(work.modem_id);
-                
-                // Mark as active worker
+                // Protect against UAF: never free work.modem_id before we're done with it
+                // and do ALL uses before freeing. We free once, right before decrementing active_workers.
+
+                // Mark as active worker first
                 _ = self.pool.active_workers.fetchAdd(1, .monotonic);
+                defer _ = self.pool.active_workers.fetchSub(1, .monotonic);
+
+                // Defer free of modem_id at very end of scope to avoid UAF
+                defer self.pool.allocator.free(work.modem_id);
                 
                 
                 // Process work based on type
@@ -102,7 +107,6 @@ pub const WorkerPool = struct {
                             // Safely cast the context pointer with validation
                             if (@intFromPtr(ctx_ptr) % @alignOf(ParallelContext) != 0) {
                                 std.log.err("Worker {d}: Invalid context alignment for modem {s}", .{ self.id, work.modem_id });
-                                _ = self.pool.active_workers.fetchSub(1, .monotonic);
                                 continue;
                             }
                             
@@ -133,7 +137,6 @@ pub const WorkerPool = struct {
                                     .allocator = context.allocator,
                                 };
                                 context.results.push(result);
-                                _ = self.pool.active_workers.fetchSub(1, .monotonic);
                                 continue;
                             };
                             
@@ -160,7 +163,6 @@ pub const WorkerPool = struct {
                                     context.allocator.free(msg.message.timestamp);
                                 }
                                 context.allocator.free(messages);
-                                _ = self.pool.active_workers.fetchSub(1, .monotonic);
                                 continue;
                             };
                             
@@ -169,6 +171,7 @@ pub const WorkerPool = struct {
                                 .messages = messages,
                                 .success = true,
                                 .allocator = context.allocator,
+                                .message_count = @intCast(messages.len),
                             };
                             
                             // Add result to lock-free queue
@@ -184,7 +187,6 @@ pub const WorkerPool = struct {
                             // Fallback without context - just log that we found messages
                             const messages = self.pool.modem_manager.getNewMessages(work.modem_id) catch |err| {
                                 std.log.debug("Worker {d}: Failed to check messages for {s}: {any}", .{ self.id, work.modem_id, err });
-                                _ = self.pool.active_workers.fetchSub(1, .monotonic);
                                 continue;
                             };
                             
@@ -223,8 +225,7 @@ pub const WorkerPool = struct {
                     },
                 }
                 
-                // Decrement active workers
-                _ = self.pool.active_workers.fetchSub(1, .monotonic);
+                // active_workers decrement handled by defer
             }
             
             std.log.info("Worker {d} exiting", .{self.id});
