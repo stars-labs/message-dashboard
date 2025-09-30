@@ -10,7 +10,7 @@ const build_options = @import("build_options");
 const LockFreePriorityManager = @import("lockfree_priority_manager.zig").LockFreePriorityManager;
 // MessageDeduplicator removed - not needed for receiving messages
 const WorkerPool = @import("worker_pool.zig").WorkerPool;
-const LockFreeMPMC = @import("lockfree_mpmc.zig").LockFreeMPMC;
+const SafeResultQueue = @import("safe_result_queue.zig").SafeResultQueue;
 
 // Systemd notify for watchdog support
 fn notifySystemd(message: []const u8) void {
@@ -51,7 +51,7 @@ const ParallelContext = struct {
     allocator: std.mem.Allocator,
     modem_manager: *ModemManager,
     message_queue: *LockFreeMessageQueue,
-    results: *LockFreeMPMC(*ModemCheckResult),  // Store pointers, not values!
+    results: *SafeResultQueue,  // Thread-safe result queue with mutex
 };
 
 fn checkModemMessages(context: *ParallelContext, modem_id: []const u8) void {
@@ -220,7 +220,7 @@ pub fn main() !void {
     
     // Create lock-free results queue OUTSIDE the main loop
     // This is critical - it must persist across cycles!
-    var results_queue = LockFreeMPMC(*ModemCheckResult).init(allocator);
+    var results_queue = SafeResultQueue.init(allocator);
     defer results_queue.deinit();
     
     // Create the parallel context OUTSIDE the main loop too
