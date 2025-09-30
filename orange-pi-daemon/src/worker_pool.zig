@@ -1,6 +1,7 @@
 const std = @import("std");
 const types = @import("types.zig");
 const ModemManager = @import("modem_manager.zig").ModemManager;
+const SafeResultQueue = @import("safe_result_queue.zig").SafeResultQueue;
 const LockFreeMPMC = @import("lockfree_mpmc.zig").LockFreeMPMC;
 // MessageDeduplicator removed - no longer used
 const LockFreeMessageQueue = @import("lockfree_message_queue.zig").LockFreeMessageQueue;
@@ -12,7 +13,7 @@ const ParallelContext = struct {
     allocator: std.mem.Allocator,
     modem_manager: *ModemManager,
     message_queue: *LockFreeMessageQueue,
-    results: *LockFreeMPMC(*ModemCheckResult),  // Store pointers to heap-allocated results
+    results: *SafeResultQueue,  // Thread-safe result queue with mutex
 };
 
 pub const WorkType = enum {
