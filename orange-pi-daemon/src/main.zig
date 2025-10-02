@@ -182,7 +182,12 @@ pub fn main() !void {
     }
     
     for (all_modems) |modem_id| {
-        if (modem_manager.problematic_modems.contains(modem_id)) {
+        // Thread-safe check for problematic modems
+        modem_manager.hash_maps_mutex.lock();
+        const is_problematic = modem_manager.problematic_modems.contains(modem_id);
+        modem_manager.hash_maps_mutex.unlock();
+        
+        if (is_problematic) {
             std.log.warn("⚠️ Skipping modem {s} - marked as problematic (corrupted state)", .{modem_id});
             continue;
         }
@@ -262,7 +267,12 @@ pub fn main() !void {
             }
             
             for (current_modems) |modem_id| {
-                if (modem_manager.problematic_modems.contains(modem_id)) continue;
+                // Thread-safe check for problematic modems
+                modem_manager.hash_maps_mutex.lock();
+                const is_problematic = modem_manager.problematic_modems.contains(modem_id);
+                modem_manager.hash_maps_mutex.unlock();
+                
+                if (is_problematic) continue;
                 
                 const iccid_opt = modem_manager.getIccid(modem_id) catch continue;
                 if (iccid_opt) |iccid| {
