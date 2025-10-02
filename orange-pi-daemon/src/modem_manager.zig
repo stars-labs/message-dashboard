@@ -1058,9 +1058,14 @@ pub const ModemManager = struct {
                     combined_content[pos] = '\n';
                     pos += 1;
                 }
-                // Free the individual line
+            }
+            
+            // Free the content_lines items after copying (but not during iteration)
+            for (content_lines.items) |line| {
                 self.allocator.free(line);
             }
+            // Clear the list to prevent double-free in error paths
+            content_lines.clearRetainingCapacity();
             
             // Clean up content by removing trailing non-UTF8 bytes (like 0xAA)
             var clean_len = combined_content.len;

@@ -127,7 +127,7 @@ pub const WorkerPool = struct {
                                 const result = context.allocator.create(ModemCheckResult) catch {
                                     std.log.err("Worker {d}: Failed to allocate result", .{ self.id });
                                     context.allocator.free(modem_id_copy);
-                                    _ = self.pool.active_workers.fetchSub(1, .monotonic);
+                                    // Note: active_workers will be decremented by defer at line 97
                                     continue;
                                 };
                                 result.* = ModemCheckResult{
