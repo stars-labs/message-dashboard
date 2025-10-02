@@ -19,6 +19,7 @@ pub const ModemManager = struct {
     problematic_modems: std.hash_map.HashMap([]const u8, void, std.hash_map.StringContext, std.hash_map.default_max_load_percentage), // Track modems that crash mmcli
     message_tracker: MessageTracker,
     dbus: ?BusctlDBus, // Busctl D-Bus wrapper (faster than mmcli)
+    hash_maps_mutex: std.Thread.Mutex, // Protects failed_sms_ids, iccid_warnings, and problematic_modems
 
     pub fn init(allocator: std.mem.Allocator) ModemManager {
         // Try to initialize busctl D-Bus wrapper (faster than mmcli)
@@ -38,6 +39,7 @@ pub const ModemManager = struct {
             .problematic_modems = std.hash_map.HashMap([]const u8, void, std.hash_map.StringContext, std.hash_map.default_max_load_percentage).init(allocator),
             .message_tracker = MessageTracker.init(allocator),
             .dbus = dbus,
+            .hash_maps_mutex = std.Thread.Mutex{},
         };
     }
 
@@ -654,8 +656,12 @@ pub const ModemManager = struct {
     }
 
     pub fn getNewMessages(self: *ModemManager, modem_id: []const u8) ![]types.MessageInfo {
-        // Skip modems known to crash mmcli
-        if (self.problematic_modems.contains(modem_id)) {
+        // Skip modems known to crash mmcli (thread-safe check)
+        self.hash_maps_mutex.lock();
+        const is_problematic = self.problematic_modems.contains(modem_id);
+        self.hash_maps_mutex.unlock();
+        
+        if (is_problematic) {
             return &[_]types.MessageInfo{};
         }
         
@@ -664,9 +670,11 @@ pub const ModemManager = struct {
             .argv = &[_][]const u8{ "mmcli", "-m", modem_id, "--messaging-list-sms", "-a" },
         }) catch |err| {
             std.log.warn("Failed to run mmcli for messaging on modem {s}: {any}", .{ modem_id, err });
-            // Mark this modem as problematic
+            // Mark this modem as problematic (thread-safe)
             const owned_id = try self.allocator.dupe(u8, modem_id);
+            self.hash_maps_mutex.lock();
             try self.problematic_modems.put(owned_id, {});
+            self.hash_maps_mutex.unlock();
             return &[_]types.MessageInfo{};
         };
         defer self.allocator.free(result.stdout);
@@ -682,9 +690,11 @@ pub const ModemManager = struct {
             },
             else => {
                 std.log.warn("mmcli crashed during messaging-list-sms for modem {s}", .{modem_id});
-                // Mark this modem as problematic
+                // Mark this modem as problematic (thread-safe)
                 const owned_id = try self.allocator.dupe(u8, modem_id);
+                self.hash_maps_mutex.lock();
                 try self.problematic_modems.put(owned_id, {});
+                self.hash_maps_mutex.unlock();
                 return &[_]types.MessageInfo{};
             },
         }
