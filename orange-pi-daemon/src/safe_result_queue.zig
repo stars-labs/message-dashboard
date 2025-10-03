@@ -9,7 +9,7 @@ pub const SafeResultQueue = struct {
     pub fn init(allocator: std.mem.Allocator) SafeResultQueue {
         return .{
             .mutex = .{},
-            .items = std.ArrayList(*types.ModemCheckResult){},
+            .items = .empty,
             .allocator = allocator,
         };
     }
