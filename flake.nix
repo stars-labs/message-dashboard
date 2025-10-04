@@ -178,11 +178,38 @@
               '';
             }
           );
+
+          # Rust SMS daemon - memory-safe replacement
+          orange-pi-daemon-rust = pkgs.rustPlatform.buildRustPackage {
+            pname = "orange-pi-daemon-rust";
+            version = "1.0.0";
+            src = ./orange-pi-daemon-rust;
+            
+            cargoLock = {
+              lockFile = ./orange-pi-daemon-rust/Cargo.lock;
+            };
+            
+            nativeBuildInputs = with pkgs; [ pkg-config ];
+            buildInputs = with pkgs; [ openssl ];
+            
+            meta = with lib; {
+              description = "Memory-safe Rust SMS daemon for Orange Pi";
+              longDescription = ''
+                A single-threaded async Rust daemon that replaces the Zig version.
+                Provides guaranteed memory safety with zero segfaults.
+              '';
+              homepage = "https://github.com/hecoinfo/message-dashboard";
+              license = licenses.mit;
+              platforms = platforms.linux;
+            };
+          };
         in
         {
           packages = {
-            inherit sms-daemon sms-daemon-debug;
+            inherit sms-daemon sms-daemon-debug orange-pi-daemon-rust;
             default = sms-daemon;
+            # Alias for easier access
+            daemon-rust = orange-pi-daemon-rust;
           };
 
           devShells = {
@@ -200,6 +227,13 @@
                 zig
                 zls
 
+                # Rust development
+                cargo
+                rustc
+                rust-analyzer
+                rustfmt
+                clippy
+
                 # Testing tools
                 curl
                 jq
@@ -210,12 +244,13 @@
                 echo ""
                 echo "Available projects:"
                 echo "  • Web Dashboard: cd sms-dashboard"
-                echo "  • Orange Pi Daemon: cd orange-pi-daemon"
+                echo "  • Orange Pi Daemon (Zig): cd orange-pi-daemon"
+                echo "  • Orange Pi Daemon (Rust): cd orange-pi-daemon-rust"
                 echo ""
               '';
             };
 
-            # Dedicated daemon development shell
+            # Dedicated daemon development shell (Zig)
             daemon = pkgs.mkShell {
               packages = with pkgs; [
                 zig
@@ -224,8 +259,28 @@
               ];
 
               shellHook = ''
-                echo "SMS Dashboard Daemon Development"
+                echo "SMS Dashboard Daemon Development (Zig)"
                 echo "Run 'zig build' to compile the daemon"
+              '';
+            };
+
+            # Rust daemon development shell
+            rust = pkgs.mkShell {
+              packages = with pkgs; [
+                cargo
+                rustc
+                rust-analyzer
+                rustfmt
+                clippy
+                modemmanager
+                pkg-config
+                openssl
+              ];
+
+              shellHook = ''
+                echo "SMS Dashboard Daemon Development (Rust)"
+                echo "Run 'cargo build --release' to compile the daemon"
+                echo "Run 'cargo run' for development"
               '';
             };
           };
@@ -238,6 +293,14 @@
             sms-daemon = {
               type = "app";
               program = "${sms-daemon}/bin/sms-daemon";
+            };
+            daemon-rust = {
+              type = "app";
+              program = "${orange-pi-daemon-rust}/bin/orange-pi-daemon-rust";
+            };
+            rust = {
+              type = "app";
+              program = "${orange-pi-daemon-rust}/bin/orange-pi-daemon-rust";
             };
           };
         };
