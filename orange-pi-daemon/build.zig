@@ -6,11 +6,16 @@ pub fn build(b: *std.Build) void {
 
     // Add log level option
     const log_level = b.option([]const u8, "log_level", "Set the log level (debug, info, warn, err)") orelse "info";
-
+    
+    // Add simple mode option (default to true for stability)
+    const use_simple = b.option(bool, "simple", "Use simple single-threaded version (default: true)") orelse true;
+    
+    const main_file = if (use_simple) "src/main_simple.zig" else "src/main.zig";
+    
     const exe = b.addExecutable(.{
         .name = "orange-pi-daemon",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/main.zig"),
+            .root_source_file = b.path(main_file),
             .target = target,
             .optimize = optimize,
         }),
