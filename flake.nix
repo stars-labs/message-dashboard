@@ -189,6 +189,11 @@
             nativeBuildInputs = with pkgs; [ pkg-config ];
             buildInputs = with pkgs; [ openssl ];
             
+            # Post-install: create symlink from default binary name to expected name
+            postInstall = ''
+              ln -s $out/bin/orange-pi-daemon-rust $out/bin/sms-daemon
+            '';
+            
             meta = with lib; {
               description = "Memory-safe Rust SMS daemon for Orange Pi";
               longDescription = ''
