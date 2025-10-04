@@ -131,10 +131,14 @@ in {
 
       environment = {
         SMS_API_URL = cfg.apiUrl;
+        CHECK_INTERVAL_SECS = toString cfg.phoneUpdateIntervalSeconds;
         SMS_CHECK_INTERVAL = toString cfg.phoneUpdateIntervalSeconds;
         SMS_MESSAGE_CHECK_INTERVAL = toString cfg.messageCheckIntervalMs;
         SMS_SIGNAL_CHECK_INTERVAL = toString cfg.signalCheckIntervalSeconds;
         SMS_DEVICE_ID = cfg.deviceId;
+        
+        # Rust logging (info level by default, set to debug for verbose logs)
+        RUST_LOG = if cfg.debugBuild then "orange_pi_daemon_rust=debug" else "orange_pi_daemon_rust=info";
         
         # Security: Don't expose sensitive paths
         HOME = "/var/lib/sms-dashboard";

@@ -91,17 +91,14 @@
                   # Override the SMS daemon to use SOPS secrets
                   services.sms-daemon = {
                     enable = true;
-                    package =
-                      if config.services.sms-daemon.debugBuild then
-                        self.packages.aarch64-linux.sms-daemon-debug
-                      else
-                        self.packages.aarch64-linux.sms-daemon;
+                    # SWITCH TO RUST: Use the memory-safe Rust daemon
+                    package = self.packages.aarch64-linux.orange-pi-daemon-rust;
                     apiKeyFile = config.sops.secrets."sms-dashboard/api-key".path;
                     apiUrl = "https://sexy.qzz.io";
-                    phoneUpdateIntervalSeconds = 30; # Update phone status every 30 seconds
-                    messageCheckIntervalMs = 50; # Adaptive timing with 50ms target - priority-based polling
-                    signalCheckIntervalSeconds = 60; # Check signal quality every minute
-                    debugBuild = true;
+                    phoneUpdateIntervalSeconds = 5; # Check interval for Rust daemon
+                    messageCheckIntervalMs = 5000; # Not used by Rust (uses seconds)
+                    signalCheckIntervalSeconds = 10; # Not used by Rust (syncs with phone status)
+                    debugBuild = false; # Rust daemon uses RUST_LOG env var
                   };
                 }
               )
