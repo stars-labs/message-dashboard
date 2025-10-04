@@ -586,6 +586,7 @@
     git
     sbctl # Secure boot control
     usbutils # Provides lsusb command
+    ldns
     # Security tools (configure manually if needed)
     # aide  # File integrity monitoring - not available as service
     # rkhunter  # Rootkit hunter - not available as service
