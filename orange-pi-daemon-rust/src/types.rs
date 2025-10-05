@@ -38,44 +38,33 @@ pub struct Sim {
     pub status: String,        // "active", "inactive"
 }
 
-// Legacy Phone structure for backward compatibility
+// Phone structure matching API expectations
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Phone {
-    pub id: String,         // Equipment ID (IMEI)
     pub iccid: String,
-    pub phone_number: Option<String>,
-    pub signal_percent: i32,
+    pub number: Option<String>,
+    pub signal: Option<i32>,
     pub operator_name: Option<String>,
-    pub status: String,     // "connected", "disconnected"
+    pub status: String,     // "active", "offline"
     pub manufacturer: Option<String>,
     pub model: Option<String>,
-    pub firmware: Option<String>,
-    pub hardware: Option<String>,
-}
-
-impl Phone {
-    /// Convert Phone into separate Modem and Sim structs
-    pub fn into_normalized(self) -> (Modem, Sim) {
-        let modem = Modem {
-            equipment_id: self.id.clone(),
-            manufacturer: self.manufacturer,
-            model: self.model,
-            firmware_revision: self.firmware,
-            hardware_revision: self.hardware,
-            status: self.status.clone(),
-            signal: Some(self.signal_percent),
-        };
-        
-        let sim = Sim {
-            iccid: self.iccid,
-            phone_number: self.phone_number,
-            current_modem_id: Some(self.id),
-            operator_name: self.operator_name,
-            status: if self.status == "connected" { "active".to_string() } else { "inactive".to_string() },
-        };
-        
-        (modem, sim)
-    }
+    pub firmware_revision: Option<String>,
+    pub hardware_revision: Option<String>,
+    pub imei: Option<String>,
+    // Optional fields for compatibility
+    pub country: Option<String>,
+    pub flag: Option<String>,
+    pub carrier: Option<String>,
+    pub rssi: Option<i32>,
+    pub rsrq: Option<i32>,
+    pub rsrp: Option<i32>,
+    pub snr: Option<i32>,
+    pub operator_id: Option<String>,
+    pub access_tech: Option<String>,
+    pub modem_index: Option<i32>,
+    pub sim_index: Option<i32>,
+    pub device_path: Option<String>,
+    pub usb_port: Option<String>,
 }
 
 #[derive(Debug, Clone)]
