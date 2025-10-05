@@ -52,23 +52,20 @@ impl ApiClient {
         
         let url = format!("{}/api/control/messages", self.config.api_url);
         
-        for message in messages {
-            let response = self.client
-                .post(&url)
-                .header("x-api-key", &self.config.api_key)
-                .json(message)
-                .send()
-                .await
-                .context("Failed to upload message")?;
-            
-            if !response.status().is_success() {
-                warn!("Failed to upload message: {}", response.status());
-                continue;
-            }
-            
-            info!("✅ Uploaded message from {}", message.phone_number);
+        // Upload messages in batch
+        let response = self.client
+            .post(&url)
+            .header("x-api-key", &self.config.api_key)
+            .json(&json!({ "messages": messages }))
+            .send()
+            .await
+            .context("Failed to upload messages")?;
+        
+        if !response.status().is_success() {
+            anyhow::bail!("API returned error: {}", response.status());
         }
         
+        info!("✅ Uploaded {} messages", messages.len());
         Ok(())
     }
     
