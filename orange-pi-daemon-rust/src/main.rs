@@ -149,16 +149,30 @@ async fn main() -> Result<()> {
                     .flatten();
                 
                 phones.push(Phone {
-                    id: imei,
                     iccid: iccid.clone(),
-                    phone_number,
-                    signal_percent: signal.percent,
+                    number: phone_number,
+                    signal: Some(signal.percent),
                     operator_name: operator,
-                    status: "connected".to_string(),
+                    status: "active".to_string(),
                     manufacturer,
                     model,
-                    firmware,
-                    hardware,
+                    firmware_revision: firmware,
+                    hardware_revision: hardware,
+                    imei: Some(imei),
+                    // Optional fields
+                    country: None,
+                    flag: None,
+                    carrier: None,
+                    rssi: Some(signal.rssi),
+                    rsrq: None,
+                    rsrp: None,
+                    snr: None,
+                    operator_id: None,
+                    access_tech: None,
+                    modem_index: Some(modem_id.parse().unwrap_or(0)),
+                    sim_index: None,
+                    device_path: None,
+                    usb_port: None,
                 });
             }
             
