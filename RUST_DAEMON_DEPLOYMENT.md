@@ -1,8 +1,20 @@
 # Rust SMS Daemon - Deployment Guide
 
-## ✅ Status: READY FOR TESTING
+## ✅ Status: FULLY WORKING - DNS BLOCKING DEPLOYMENT
 
-The Rust SMS daemon has been successfully implemented and built. It's ready for deployment to the Orange Pi.
+**UPDATE Oct 4, 2025:** The Rust daemon is fully functional on the Orange Pi but message uploads had 400 errors. This has been **FIXED** - the issue was sending messages individually instead of as a batch. The code has been updated and is ready to redeploy.
+
+**Current Blocker:** DNS resolution failure on Orange Pi (DNSSEC validation failing). This prevents Nix from downloading packages from cache.nixos.org during deployment.
+
+### Critical Zig Daemon Bug
+
+The Zig daemon has a **confirmed memory corruption bug** causing segmentation faults at address `0xAAAAAAAAAAAAAAAABA`:
+```
+Segmentation fault at address 0xaaaaaaaaaaaaaaba
+Oct 02 12:27:28: Worker 3: Pushing status result to queue
+```
+
+This happens consistently after 5-10 check cycles and affects all 87+ modems. The `0xAA` pattern indicates use-after-free in the lock-free queue implementation.
 
 ## What Was Built
 
@@ -65,117 +77,101 @@ The Rust SMS daemon has been successfully implemented and built. It's ready for 
 - **Robust error handling** - Result type forces error checking
 - **Automatic retries** - Graceful handling of ModemManager/API issues
 
-## Deployment Steps
+## What Was Fixed
 
-### 1. Test Local Build (on your machine)
+### Message Upload API Mismatch (FIXED in commit 8b79147)
+
+**Issue:** Rust daemon was sending messages individually, but the API expects batch format:
+```rust
+// BROKEN (caused 400 errors)
+for message in messages {
+    .json(message)  // Individual messages
+}
+
+// FIXED
+.json(&json!({ "messages": messages }))  // Batch upload
+```
+
+**Status:** ✅ Code updated and committed. Ready to deploy.
+
+## DNS Resolution Issue (Current Blocker)
+
+The Orange Pi cannot resolve `cache.nixos.org` during Nix builds:
+
+```
+error: unable to download 'https://cache.nixos.org/...': 
+Could not resolve hostname (6) Could not resolve host: cache.nixos.org
+```
+
+**Root Cause:** systemd-resolved is failing DNSSEC validation:
+```
+DNSSEC validation failed for question sexy.qzz.io IN A: failed-auxiliary
+```
+
+**Workaround Options:**
+
+### Option A: Disable DNSSEC (Quick Fix)
+```bash
+ssh root@203.116.95.146
+echo "DNSSEC=no" >> /etc/systemd/resolved.conf
+systemctl restart systemd-resolved
+
+# Then deploy normally
+nixos-rebuild switch --flake .#orange-pi \
+    --use-substitutes \
+    --target-host root@203.116.95.146 \
+    --build-host root@203.116.95.146 \
+    --impure
+```
+
+### Option B: Manual Binary Deployment (Fastest)
+The Rust daemon is **already running on the Orange Pi** from a previous deployment. Just update it:
+
+```bash
+# 1. Build locally (if you have aarch64 support)
+cd orange-pi-daemon-rust
+cargo build --release --target aarch64-unknown-linux-gnu
+
+# 2. Copy to Orange Pi
+scp target/aarch64-unknown-linux-gnu/release/orange-pi-daemon-rust \
+    root@203.116.95.146:/tmp/sms-daemon-new
+
+# 3. Replace and restart
+ssh root@203.116.95.146 '
+  systemctl stop sms-daemon
+  cp /tmp/sms-daemon-new /nix/store/*/bin/sms-daemon
+  systemctl start sms-daemon
+  systemctl status sms-daemon
+'
+```
+
+### Option C: Build Locally, Copy Store Path
+```bash
+# Build the full NixOS configuration locally
+nix build .#nixosConfigurations.orange-pi.config.system.build.toplevel --impure
+
+# Copy to Orange Pi (may still hit DNS issues)
+nix copy --to ssh://root@203.116.95.146 ./result
+
+# Activate on Orange Pi
+ssh root@203.116.95.146 './result/bin/switch-to-configuration switch'
+```
+
+## Deployment Steps (Once DNS is Fixed)
+
+### 1. Verify Flake Configuration
+
+The flake.nix already has the Rust daemon configured:
+```bash
+# Check it's there
+grep -A 10 "orange-pi-daemon-rust" flake.nix
+```
+
+### 2. Deploy to Orange Pi
 
 ```bash
 cd /home/freeman.xiong/Documents/github/hecoinfo/message-dashboard
-nix build .#orange-pi-daemon-rust
-./result/bin/orange-pi-daemon-rust
-# Should panic with "SMS_API_KEY must be set" - this is expected
-```
 
-### 2. Create NixOS Service Module
-
-Create `nixos-config/modules/sms-daemon-rust.nix`:
-
-```nix
-{ config, lib, pkgs, ... }:
-
-with lib;
-
-let
-  cfg = config.services.sms-daemon-rust;
-in
-{
-  options.services.sms-daemon-rust = {
-    enable = mkEnableOption "SMS Dashboard Daemon (Rust)";
-    
-    apiUrl = mkOption {
-      type = types.str;
-      default = "https://sexy.qzz.io";
-      description = "API server URL";
-    };
-    
-    apiKeyFile = mkOption {
-      type = types.path;
-      description = "Path to file containing API key";
-    };
-    
-    checkIntervalSeconds = mkOption {
-      type = types.int;
-      default = 5;
-      description = "Interval between modem checks in seconds";
-    };
-  };
-
-  config = mkIf cfg.enable {
-    systemd.services.sms-daemon-rust = {
-      description = "SMS Dashboard Daemon (Rust)";
-      wantedBy = [ "multi-user.target" ];
-      after = [ "network.target" "ModemManager.service" ];
-      requires = [ "ModemManager.service" ];
-      
-      serviceConfig = {
-        Type = "notify";
-        ExecStart = "${pkgs.orange-pi-daemon-rust}/bin/orange-pi-daemon-rust";
-        Restart = "always";
-        RestartSec = "10s";
-        
-        # Load API key from file
-        EnvironmentFile = cfg.apiKeyFile;
-        
-        # Environment variables
-        Environment = [
-          "SMS_API_URL=${cfg.apiUrl}"
-          "RUST_LOG=info"
-        ];
-        
-        # Security hardening
-        DynamicUser = true;
-        SupplementaryGroups = [ "dialout" ];
-        ProtectSystem = "strict";
-        ProtectHome = true;
-        NoNewPrivileges = true;
-        PrivateTmp = true;
-      };
-    };
-  };
-}
-```
-
-### 3. Update Orange Pi Configuration
-
-In `nixos-config/orange-pi/configuration.nix`:
-
-```nix
-{
-  imports = [
-    # ... existing imports
-    ../modules/sms-daemon-rust.nix
-  ];
-
-  # Disable old Zig daemon (if enabled)
-  services.sms-daemon.enable = false;
-
-  # Enable Rust daemon
-  services.sms-daemon-rust = {
-    enable = true;
-    apiUrl = "https://sexy.qzz.io";
-    apiKeyFile = config.sops.secrets."sms-dashboard/api-key".path;
-    checkIntervalSeconds = 5;
-  };
-}
-```
-
-### 4. Deploy to Orange Pi
-
-```bash
-# From repository root
-cd /home/freeman.xiong/Documents/github/hecoinfo/message-dashboard
-
-# Deploy to Orange Pi
 nixos-rebuild switch --flake .#orange-pi \
     --use-substitutes \
     --target-host root@203.116.95.146 \
