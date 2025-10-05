@@ -20,35 +20,23 @@ impl ApiClient {
         }
     }
     
-    /// Upload phone status data (converts to normalized modem/SIM structure)
+    /// Upload phone status data (uses legacy phones endpoint)
     pub async fn upload_phones(&self, phones: &[Phone]) -> Result<()> {
         if phones.is_empty() {
             return Ok(());
         }
         
-        // Convert phones to normalized modem/SIM structure
-        let mut modems = Vec::new();
-        let mut sims = Vec::new();
-        
-        for phone in phones {
-            let (modem, sim) = phone.clone().into_normalized();
-            modems.push(modem);
-            sims.push(sim);
-        }
-        
-        let url = format!("{}/api/control/devices", self.config.api_url);
+        // Use the legacy /api/control/phones endpoint which expects { phones: [...] }
+        let url = format!("{}/api/control/phones", self.config.api_url);
         
         let response = self.client
             .post(&url)
             .header("x-api-key", &self.config.api_key)
-            .json(&json!({ 
-                "sync_mode": "incremental",
-                "modems": modems,
-                "sims": sims
-            }))
+            .header("x-daemon-version", "rust-1.0.0")
+            .json(&json!({ "phones": phones }))
             .send()
             .await
-            .context("Failed to send device data")?;
+            .context("Failed to send phone data")?;
         
         if !response.status().is_success() {
             let status = response.status();
@@ -56,7 +44,7 @@ impl ApiClient {
             anyhow::bail!("API returned error: {} - {}", status, body);
         }
         
-        info!("✅ Uploaded {} modems and {} SIMs", modems.len(), sims.len());
+        info!("✅ Uploaded {} phones", phones.len());
         Ok(())
     }
     
