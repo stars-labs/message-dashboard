@@ -170,10 +170,10 @@ impl ModemManager {
                 number = line.split(':').nth(1).unwrap_or("").trim().to_string();
             } else if line.contains("timestamp:") {
                 // Parse timestamp properly - mmcli format: "timestamp: 2025-10-05T14:23:45+08:00"
-                // We need to preserve the entire timestamp including timezone
-                let ts_parts: Vec<&str> = line.splitn(2, ':').collect();
-                if ts_parts.len() == 2 {
-                    timestamp = ts_parts[1].trim().to_string();
+                // Extract everything after "timestamp:" (handle multiple colons in the timestamp itself)
+                if let Some(idx) = line.find("timestamp:") {
+                    let ts_raw = &line[idx + 10..]; // Skip "timestamp:" (10 chars)
+                    timestamp = ts_raw.trim().to_string();
                 }
             }
         }
