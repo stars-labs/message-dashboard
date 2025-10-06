@@ -14,19 +14,19 @@ This is a distributed SMS management system with three main components:
    - Auth: Auth0 integration with RBAC
    - Utilities: Centralized database management, API responses, and device counting
 
-2. **SMS Collection Daemon** (`orange-pi-daemon-rust/`) - Rust daemon for hardware integration (v1.0.0)
+2. **SMS Collection Daemon** (`orange-pi-daemon-rust/`) - Rust daemon for hardware integration (v1.0.1)
    - **Technology**: Rust with tokio async runtime and reqwest HTTP client
    - **Reliability**: Memory-safe with no segfaults, robust error handling
-   - **Concurrency**: Async/await pattern for concurrent modem processing
+   - **Concurrency**: Async/await pattern for concurrent modem processing (batches of 20)
    - **ModemManager Integration**: Direct mmcli subprocess calls via tokio::process
    - **Features**:
      - Full modem discovery and state tracking
      - SMS message collection and forwarding to API
      - Signal quality monitoring
      - Device details extraction (IMEI, manufacturer, model, firmware)
-     - Proper timestamp handling for SMS messages
-   - Handles 87+ USB modems simultaneously with stable performance
-   - Replaced Zig daemon due to persistent segmentation faults
+     - Correct timestamp parsing for ISO 8601 with timezone offsets
+   - **Performance**: Handles 87 modems with ~95-105s cycle time, 8M memory usage
+   - **Stability**: Zero crashes, replaces unreliable Zig daemon (persistent segfaults)
 
 3. **NixOS Configuration** (`nixos-config/`) - Declarative system deployment
    - Flake-based NixOS configuration for Orange Pi
@@ -306,21 +306,36 @@ npx wrangler d1 execute sms-dashboard --command "SELECT COUNT(*) as state_record
 
 ## Recent Changes (October 2025)
 
-### v1.0.0 - Rust Daemon Migration (October 2025)
-- **Complete Rewrite**: Migrated from Zig to Rust for better stability
-- **Critical Fixes**:
-  - Fixed timestamp parsing bug that caused malformed timestamps (e.g., "2025-10-05T19:05:4208")
-  - Problem: Using `splitn(2, ':')` on "timestamp: 2025-10-05T14:23:45+08:00" split on first colon
-  - Solution: Use string slicing with `line.find("timestamp:")` to preserve full timestamp
-  - Fixed 500 Internal Server Errors from API rejections
-  - Eliminated all segmentation faults present in Zig version
+### v1.0.1 - Rust Daemon Timestamp Fix (October 6, 2025)
+- **Critical Bug Fix**: Corrected timestamp parsing in Rust daemon
+  - **Problem**: Timestamps like "2025-10-05T19:05:4208" instead of "2025-10-05T19:05:42+08:00"
+  - **Root Cause**: String slicing approach was cutting off timezone offset
+  - **Solution**: Changed from `line[idx + 10..]` to `line[colon_pos + 1..].trim()` using `find(':')`
+  - Fixed 500 Internal Server Errors caused by malformed timestamps
+  - Commit: `51c4f69` - successfully deployed to production
+- **Result**: Zero API errors, all 87 modems uploading correctly
+- **Stability**: Daemon running stable for hours, no crashes or memory leaks
+
+### v1.0.0 - Rust Daemon Migration (October 2-5, 2025)
+- **Complete Rewrite**: Migrated from Zig to Rust to eliminate persistent segfaults
+  - Zig daemon: Frequent `0xaaaaaaaaaaaaaaba` crashes (memory corruption)
+  - Rust daemon: Zero segfaults, memory-safe by design
+- **DNS Resolution Fix (October 5)**: Fixed DNSSEC validation failures
+  - Problem: systemd-resolved failing DNSSEC validation
+  - Solution: Disabled DNSSEC in NixOS (`services.resolved.dnssec = "false"`)
+  - Daemon now successfully connects to API
 - **Architecture**:
-  - Async/await with tokio runtime
-  - reqwest for HTTP client with proper error handling
-  - Direct mmcli integration via tokio::process::Command
-  - Clean separation of concerns (main, api_client, modem_manager, types)
-- **Performance**: Stable operation with 87 modems, 100-second check cycles
-- **Deployment**: NixOS flake integration with systemd service
+  - Async/await with tokio multi-threaded runtime (4 worker threads)
+  - reqwest HTTP client with 10s timeouts
+  - Direct mmcli integration via tokio::process::Command  
+  - Concurrent modem processing (batches of 20)
+  - Clean module structure: main, api_client, modem_manager, types
+- **Performance**: 
+  - 87 modems, 95-105s cycle time
+  - Memory: 8M typical, 44.4M peak
+  - CPU: ~2min per cycle
+  - Zero crashes in extended operation
+- **Deployment**: NixOS flake with systemd service integration
 
 ### v2.1.0 - Database Normalization to 3NF (September 2025)
 
