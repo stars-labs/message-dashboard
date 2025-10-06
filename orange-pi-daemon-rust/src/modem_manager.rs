@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
-use std::process::Command;
 use crate::types::*;
 
+#[derive(Clone)]
 pub struct ModemManager;
 
 impl ModemManager {
@@ -170,10 +170,12 @@ impl ModemManager {
                 number = line.split(':').nth(1).unwrap_or("").trim().to_string();
             } else if line.contains("timestamp:") {
                 // Parse timestamp properly - mmcli format: "timestamp: 2025-10-05T14:23:45+08:00"
-                // Extract everything after "timestamp:" (handle multiple colons in the timestamp itself)
-                if let Some(idx) = line.find("timestamp:") {
-                    let ts_raw = &line[idx + 10..]; // Skip "timestamp:" (10 chars)
-                    timestamp = ts_raw.trim().to_string();
+                // CRITICAL: splitn(2, ':') on "timestamp: 2025-10-05T18:14:42+08:00" 
+                // splits on FIRST colon, giving us ["timestamp", " 2025-10-05T18:14:42+08:00"]
+                // But using line[idx+10..] includes everything after "timestamp:"
+                if let Some(colon_pos) = line.find(':') {
+                    // Get everything after the first colon and trim whitespace
+                    timestamp = line[colon_pos + 1..].trim().to_string();
                 }
             }
         }
