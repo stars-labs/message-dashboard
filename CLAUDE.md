@@ -14,15 +14,19 @@ This is a distributed SMS management system with three main components:
    - Auth: Auth0 integration with RBAC
    - Utilities: Centralized database management, API responses, and device counting
 
-2. **SMS Collection Daemon** (`orange-pi-daemon/`) - Zig daemon for hardware integration (v3.4.0)
-   - **Lock-Free Architecture**: All components use atomic operations and lock-free data structures
-   - **Worker Pool**: 8 parallel workers process modems concurrently
-   - **Priority System**: Adaptive modem checking based on message activity (High/Medium/Low)
-   - **Deduplication**: Bloom filter (64KB) prevents duplicate message processing with O(1) lookups
-   - **BusctlDBus Wrapper**: Reduced subprocess overhead vs direct mmcli calls
-   - **Native HTTP Client**: Zig std.http.Client with connection pooling
-   - Handles 54+ USB modems simultaneously without deadlocks
-   - Extracts hardware details, ICCID, phone numbers, signal strength, operator info
+2. **SMS Collection Daemon** (`orange-pi-daemon-rust/`) - Rust daemon for hardware integration (v1.0.0)
+   - **Technology**: Rust with tokio async runtime and reqwest HTTP client
+   - **Reliability**: Memory-safe with no segfaults, robust error handling
+   - **Concurrency**: Async/await pattern for concurrent modem processing
+   - **ModemManager Integration**: Direct mmcli subprocess calls via tokio::process
+   - **Features**:
+     - Full modem discovery and state tracking
+     - SMS message collection and forwarding to API
+     - Signal quality monitoring
+     - Device details extraction (IMEI, manufacturer, model, firmware)
+     - Proper timestamp handling for SMS messages
+   - Handles 87+ USB modems simultaneously with stable performance
+   - Replaced Zig daemon due to persistent segmentation faults
 
 3. **NixOS Configuration** (`nixos-config/`) - Declarative system deployment
    - Flake-based NixOS configuration for Orange Pi
@@ -300,7 +304,25 @@ npx wrangler d1 execute sms-dashboard --command "SELECT COUNT(*) as state_record
 - TailwindCSS for styling
 - Bun as package manager and runtime
 
-## Recent Changes (July 2025)
+## Recent Changes (October 2025)
+
+### v1.0.0 - Rust Daemon Migration (October 2025)
+- **Complete Rewrite**: Migrated from Zig to Rust for better stability
+- **Critical Fixes**:
+  - Fixed timestamp parsing bug that caused malformed timestamps (e.g., "2025-10-05T19:05:4208")
+  - Problem: Using `splitn(2, ':')` on "timestamp: 2025-10-05T14:23:45+08:00" split on first colon
+  - Solution: Use string slicing with `line.find("timestamp:")` to preserve full timestamp
+  - Fixed 500 Internal Server Errors from API rejections
+  - Eliminated all segmentation faults present in Zig version
+- **Architecture**:
+  - Async/await with tokio runtime
+  - reqwest for HTTP client with proper error handling
+  - Direct mmcli integration via tokio::process::Command
+  - Clean separation of concerns (main, api_client, modem_manager, types)
+- **Performance**: Stable operation with 87 modems, 100-second check cycles
+- **Deployment**: NixOS flake integration with systemd service
+
+### v2.1.0 - Database Normalization to 3NF (September 2025)
 
 ### v1.15.0 - Fixed API Field Mapping
 - Fixed PendingSms struct to match API response fields
