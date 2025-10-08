@@ -523,7 +523,7 @@
   # Enable systemd-resolved for better DNS handling
   services.resolved = {
     enable = true;
-    dnssec = "allow-downgrade"; # Allow DNSSEC but fall back if not available
+    dnssec = "false"; # Disable DNSSEC completely as it's causing validation failures
     dnsovertls = "opportunistic"; # Use DNS over TLS when available
     llmnr = "false"; # Disable LLMNR for security (multicast name resolution)
     fallbackDns = [

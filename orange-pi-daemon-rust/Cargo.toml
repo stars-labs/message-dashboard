@@ -4,8 +4,8 @@ version = "1.0.0"
 edition = "2021"
 
 [dependencies]
-# Async runtime - single-threaded for simplicity and safety
-tokio = { version = "1", features = ["rt", "time", "macros", "process"] }
+# Async runtime - multi-threaded for concurrent modem processing
+tokio = { version = "1", features = ["rt-multi-thread", "time", "macros", "process"] }
 
 # HTTP client for API calls
 reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
@@ -24,6 +24,20 @@ thiserror = "1"
 
 # Systemd integration
 sd-notify = "0.4"
+
+# Time handling for proper timestamp parsing
+chrono = { version = "0.4", features = ["serde"] }
+
+# UUID for correlation IDs  
+uuid = { version = "1", features = ["v4"] }
+
+# D-Bus for better performance (optional - will add back when system deps are available)
+# dbus = { version = "0.9", optional = true }
+# dbus-tokio = { version = "0.7", optional = true }
+
+[features]
+default = []
+# dbus-support = ["dbus", "dbus-tokio"]
 
 [profile.release]
 opt-level = 3

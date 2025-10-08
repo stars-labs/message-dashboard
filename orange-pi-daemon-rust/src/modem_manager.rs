@@ -1,16 +1,55 @@
 use anyhow::{Context, Result};
 use crate::types::*;
+// use crate::dbus_manager::DBusManager;  // Disabled for now
+use chrono::{DateTime, Utc};
 
 #[derive(Clone)]
-pub struct ModemManager;
+pub struct ModemManager {
+    // dbus: Option<DBusManager>,  // Disabled for now
+}
 
 impl ModemManager {
     pub fn new() -> Self {
-        Self
+        // For now, always use mmcli until we get D-Bus dependencies sorted out
+        tracing::info!("🚀 Using mmcli interface (D-Bus support coming soon)");
+        
+        Self {
+            // dbus: None,  // Disabled for now
+        }
     }
     
-    /// List all modem IDs
+    /// List all modem IDs - currently mmcli only
     pub async fn list_modems(&self) -> Result<Vec<String>> {
+        self.list_modems_mmcli().await
+    }
+    
+    /// Get ICCID for a modem - currently mmcli only
+    pub async fn get_iccid(&self, modem_id: &str) -> Result<Option<String>> {
+        self.get_iccid_mmcli(modem_id).await
+    }
+    
+    /// Get signal quality - currently mmcli only
+    pub async fn get_signal_quality(&self, modem_id: &str) -> Result<SignalData> {
+        self.get_signal_quality_mmcli(modem_id).await
+    }
+    
+    /// Get device details - currently mmcli only
+    pub async fn get_device_details(&self, modem_id: &str) -> Result<(String, Option<String>, Option<String>, Option<String>, Option<String>)> {
+        self.get_device_details_mmcli(modem_id).await
+    }
+    
+    /// Get phone number - currently mmcli only
+    pub async fn get_phone_number(&self, modem_id: &str) -> Result<Option<String>> {
+        self.get_phone_number_mmcli(modem_id).await
+    }
+    
+    /// Get operator name - currently mmcli only
+    pub async fn get_operator(&self, modem_id: &str) -> Result<Option<String>> {
+        self.get_operator_mmcli(modem_id).await
+    }
+    
+    // MMCLI implementations
+    async fn list_modems_mmcli(&self) -> Result<Vec<String>> {
         let output = tokio::process::Command::new("mmcli")
             .arg("-L")
             .output()
@@ -31,7 +70,7 @@ impl ModemManager {
     }
     
     /// Get ICCID for a modem
-    pub async fn get_iccid(&self, modem_id: &str) -> Result<Option<String>> {
+    async fn get_iccid_mmcli(&self, modem_id: &str) -> Result<Option<String>> {
         // First get SIM path
         let output = tokio::process::Command::new("mmcli")
             .arg("-m")
@@ -73,7 +112,7 @@ impl ModemManager {
     }
     
     /// Get phone number
-    pub async fn get_phone_number(&self, modem_id: &str) -> Result<Option<String>> {
+    async fn get_phone_number_mmcli(&self, modem_id: &str) -> Result<Option<String>> {
         let output = tokio::process::Command::new("mmcli")
             .arg("-m")
             .arg(modem_id)
@@ -94,7 +133,7 @@ impl ModemManager {
     }
     
     /// Get signal quality
-    pub async fn get_signal_quality(&self, modem_id: &str) -> Result<SignalData> {
+    async fn get_signal_quality_mmcli(&self, modem_id: &str) -> Result<SignalData> {
         let output = tokio::process::Command::new("mmcli")
             .arg("-m")
             .arg(modem_id)
@@ -170,9 +209,8 @@ impl ModemManager {
                 number = line.split(':').nth(1).unwrap_or("").trim().to_string();
             } else if line.contains("timestamp:") {
                 // Parse timestamp properly - mmcli format: "timestamp: 2025-10-05T14:23:45+08:00"
-                // CRITICAL: splitn(2, ':') on "timestamp: 2025-10-05T18:14:42+08:00" 
-                // splits on FIRST colon, giving us ["timestamp", " 2025-10-05T18:14:42+08:00"]
-                // But using line[idx+10..] includes everything after "timestamp:"
+                // CRITICAL FIX: Use find(':') to locate the colon, then slice from there
+                // This preserves the full timestamp including timezone offset
                 if let Some(colon_pos) = line.find(':') {
                     // Get everything after the first colon and trim whitespace
                     timestamp = line[colon_pos + 1..].trim().to_string();
@@ -182,6 +220,37 @@ impl ModemManager {
         
         if content.is_empty() {
             return Ok(None);
+        }
+        
+        // Validate and normalize timestamp
+        if timestamp.is_empty() {
+            // If no timestamp from SMS, use current time
+            timestamp = chrono::Utc::now().to_rfc3339();
+        } else {
+            // Try to parse and reformat the timestamp to ensure it's valid ISO 8601
+            match chrono::DateTime::parse_from_rfc3339(&timestamp) {
+                Ok(dt) => {
+                    // Convert to UTC and format properly
+                    timestamp = dt.with_timezone(&chrono::Utc).to_rfc3339();
+                }
+                Err(_) => {
+                    // If parsing fails, try other common formats
+                    let parsed = chrono::NaiveDateTime::parse_from_str(&timestamp, "%Y-%m-%dT%H:%M:%S")
+                        .or_else(|_| chrono::NaiveDateTime::parse_from_str(&timestamp, "%Y-%m-%d %H:%M:%S"));
+                    
+                    match parsed {
+                        Ok(naive_dt) => {
+                            // Assume UTC if no timezone info
+                            timestamp = chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(naive_dt, chrono::Utc).to_rfc3339();
+                        }
+                        Err(_) => {
+                            // Fallback to current time if timestamp is unparseable
+                            tracing::warn!("⚠️  Invalid timestamp '{}', using current time", timestamp);
+                            timestamp = chrono::Utc::now().to_rfc3339();
+                        }
+                    }
+                }
+            }
         }
         
         Ok(Some(Message {
@@ -207,7 +276,7 @@ impl ModemManager {
     }
     
     /// Get device details (IMEI, manufacturer, model, etc.)
-    pub async fn get_device_details(&self, modem_id: &str) -> Result<(String, Option<String>, Option<String>, Option<String>, Option<String>)> {
+    async fn get_device_details_mmcli(&self, modem_id: &str) -> Result<(String, Option<String>, Option<String>, Option<String>, Option<String>)> {
         let output = tokio::process::Command::new("mmcli")
             .arg("-m")
             .arg(modem_id)
@@ -244,7 +313,7 @@ impl ModemManager {
     }
     
     /// Get operator name
-    pub async fn get_operator(&self, modem_id: &str) -> Result<Option<String>> {
+    async fn get_operator_mmcli(&self, modem_id: &str) -> Result<Option<String>> {
         let output = tokio::process::Command::new("mmcli")
             .arg("-m")
             .arg(modem_id)

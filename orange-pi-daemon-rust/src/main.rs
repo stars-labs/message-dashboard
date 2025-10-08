@@ -1,6 +1,7 @@
 mod types;
 mod modem_manager;
 mod api_client;
+// mod dbus_manager;  // Disabled for now
 
 use anyhow::Result;
 use std::collections::HashMap;
@@ -11,7 +12,7 @@ use crate::types::*;
 use crate::modem_manager::ModemManager;
 use crate::api_client::ApiClient;
 
-#[tokio::main(flavor = "current_thread")] // Single-threaded for simplicity
+#[tokio::main(flavor = "multi_thread", worker_threads = 4)] // Multi-threaded for concurrent modem processing
 async fn main() -> Result<()> {
     // Initialize logging
     tracing_subscriber::fmt()
@@ -91,19 +92,43 @@ async fn main() -> Result<()> {
         cycle += 1;
         let cycle_start = std::time::Instant::now();
         
-        // Check each modem for new messages
+        // Process modems concurrently in batches
+        let batch_size = 20; // Process 20 modems at a time
+        // Clone the HashMap entries to avoid borrow issues
+        let modem_vec: Vec<(String, String)> = valid_modems.iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        
         let mut all_messages = Vec::new();
-        for (modem_id, iccid) in &valid_modems {
-            match modem_manager.get_new_messages(modem_id, iccid).await {
-                Ok(messages) => {
-                    if !messages.is_empty() {
-                        info!("📨 Found {} new messages from modem {} (ICCID: {})", 
-                              messages.len(), modem_id, iccid);
-                        all_messages.extend(messages);
+        
+        for batch in modem_vec.chunks(batch_size) {
+            // Process this batch concurrently using tokio::spawn
+            let mut join_handles = Vec::new();
+            for (modem_id, iccid) in batch {
+                let modem_id = modem_id.clone();
+                let iccid = iccid.clone();
+                let mm = modem_manager.clone();
+                
+                let handle = tokio::spawn(async move {
+                    mm.get_new_messages(&modem_id, &iccid).await
+                });
+                join_handles.push(handle);
+            }
+            
+            // Collect results
+            for handle in join_handles {
+                match handle.await {
+                    Ok(Ok(messages)) => {
+                        if !messages.is_empty() {
+                            all_messages.extend(messages);
+                        }
                     }
-                }
-                Err(e) => {
-                    warn!("⚠️  Failed to check modem {}: {}", modem_id, e);
+                    Ok(Err(e)) => {
+                        warn!("⚠️  Failed to check modem: {}", e);
+                    }
+                    Err(e) => {
+                        error!("❌ Task panicked: {}", e);
+                    }
                 }
             }
         }
