@@ -577,23 +577,35 @@ export const controlHandler = {
       let modemCount = phones.length === 1 && phones[0].iccid === 'ALL_PHONES_OFFLINE' ? 0 : phones.length;
       let daemonStatus = modemCount === 0 ? 'warning' : 'online';
       
-      // Mark stale phones as offline
+      // Mark stale modems as offline
       if (modemCount > 0) {
-        // Mark stale phones (not updated in last 10 minutes) as offline
-        // Note: We don't use modem_index for phantom detection as it's not stable across USB reconnections
-        console.log(`[control.js] Marking stale phones offline (not updated in 10 minutes)`);
+        // Mark stale modems (not updated in last 10 minutes) as disconnected
+        console.log(`[control.js] Marking stale modems offline (not updated in 10 minutes)`);
         const staleResult = await env.DB.prepare(`
-          UPDATE phones 
-          SET status = 'offline',
-              signal = NULL,
+          UPDATE modems 
+          SET status = 'disconnected',
               updated_at = CURRENT_TIMESTAMP
-          WHERE status IN ('online', 'active', 'registered')
+          WHERE status IN ('connected', 'online', 'active', 'registered')
             AND datetime(updated_at) < datetime('now', '-10 minutes')
         `).run();
         
         if (staleResult.meta.changes > 0) {
-          console.log(`[control.js] Marked ${staleResult.meta.changes} stale phones as offline`);
+          console.log(`[control.js] Marked ${staleResult.meta.changes} stale modems as disconnected`);
         }
+        
+        // Also clear signal data for disconnected modems
+        await env.DB.prepare(`
+          UPDATE modem_state 
+          SET signal_percent = NULL,
+              rssi = NULL,
+              rsrq = NULL,
+              rsrp = NULL,
+              snr = NULL,
+              updated_at = CURRENT_TIMESTAMP
+          WHERE modem_id IN (
+            SELECT equipment_id FROM modems WHERE status = 'disconnected'
+          )
+        `).run();
       }
       
       // Store daemon heartbeat with initial count (will be adjusted later if needed)
@@ -625,86 +637,45 @@ export const controlHandler = {
         });
       }
       
-      // Special case: mark all phones as offline when no modems found
+      // Special case: mark all modems as offline when no modems found
       if (phones.length === 1 && phones[0].iccid === 'ALL_PHONES_OFFLINE') {
-        console.log('[control.js] No modems found - marking all phones as offline');
+        console.log('[control.js] No modems found - marking all modems as disconnected');
         
-        // Update all phones to offline status
-        const updateStmt = env.DB.prepare(`
-          UPDATE phones 
-          SET status = 'offline', 
-              signal = NULL,
+        // Update all modems to disconnected status
+        const result = await env.DB.prepare(`
+          UPDATE modems 
+          SET status = 'disconnected', 
+              updated_at = CURRENT_TIMESTAMP
+          WHERE status != 'disconnected'
+        `).run();
+        
+        console.log(`[control.js] Marked ${result.meta.changes} modems as disconnected`);
+        
+        // Clear signal data
+        await env.DB.prepare(`
+          UPDATE modem_state 
+          SET signal_percent = NULL,
               rssi = NULL,
               rsrq = NULL,
               rsrp = NULL,
               snr = NULL,
               updated_at = CURRENT_TIMESTAMP
-          WHERE status != 'offline'
-        `);
-        
-        const result = await updateStmt.run();
-        console.log(`[control.js] Marked ${result.meta.changes} phones as offline`);
-        
-        // Get all offline phones to broadcast
-        const offlinePhones = await env.DB.prepare(`
-          SELECT * FROM phones WHERE status = 'offline'
-        `).all();
-        
-        // Broadcast phone updates to all connected clients
-        const ws = env.WEBSOCKET_HANDLER.get(env.WEBSOCKET_HANDLER.idFromName('broadcast'));
-        await ws.fetch('http://internal/broadcast', {
-          method: 'POST',
-          body: JSON.stringify({
-            type: 'phone_update',
-            data: offlinePhones.results
-          })
-        });
+        `).run();
         
         return new Response(JSON.stringify({
           success: true,
-          message: `Marked ${result.meta.changes} phones as offline`,
+          message: `Marked ${result.meta.changes} modems as disconnected`,
           daemon_status: 'warning'
         }), {
           headers: { 'Content-Type': 'application/json' }
         });
       }
       
-      // Update phones using ICCID as primary key
-      const stmt = env.DB.prepare(`
-        INSERT INTO phones (iccid, number, country, flag, carrier, status, signal, rssi, rsrq, rsrp, snr, operator_name, operator_id, imei, access_tech, modem_index, sim_index, manufacturer, model, firmware_revision, hardware_revision, device_path, usb_port)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(iccid) DO UPDATE SET
-          number = COALESCE(excluded.number, phones.number),
-          carrier = COALESCE(excluded.carrier, phones.carrier),
-          status = excluded.status,
-          signal = COALESCE(excluded.signal, phones.signal),
-          rssi = COALESCE(excluded.rssi, phones.rssi),
-          rsrq = COALESCE(excluded.rsrq, phones.rsrq),
-          rsrp = COALESCE(excluded.rsrp, phones.rsrp),
-          snr = COALESCE(excluded.snr, phones.snr),
-          operator_name = COALESCE(excluded.operator_name, phones.operator_name),
-          operator_id = COALESCE(excluded.operator_id, phones.operator_id),
-          imei = COALESCE(excluded.imei, phones.imei),
-          access_tech = excluded.access_tech,
-          modem_index = excluded.modem_index,
-          sim_index = excluded.sim_index,
-          manufacturer = COALESCE(excluded.manufacturer, phones.manufacturer),
-          model = COALESCE(excluded.model, phones.model),
-          firmware_revision = COALESCE(excluded.firmware_revision, phones.firmware_revision),
-          hardware_revision = COALESCE(excluded.hardware_revision, phones.hardware_revision),
-          device_path = COALESCE(excluded.device_path, phones.device_path),
-          usb_port = COALESCE(excluded.usb_port, phones.usb_port),
-          updated_at = CURRENT_TIMESTAMP
-      `);
-      
-      // Process phones one by one for now to avoid batch issues
+      // Update phones using new normalized schema (modems + sims + modem_state)
+      // Translate old phones format to new schema
       let successCount = 0;
       let errorCount = 0;
       const errors = [];
-      
-      // Don't create synthetic entries for missing modems
-      // The daemon accurately reports which modems have SIM cards
-      // Modems without SIM cards simply won't be reported
       
       for (const phone of phones) {
         try {
@@ -716,35 +687,83 @@ export const controlHandler = {
             continue;
           }
           
-          // Note: modem_index and sim_index are not stable across USB reconnections
-          // They are kept for informational purposes only - ICCID is the primary identifier
-          // We no longer skip based on modem_index as it's not a reliable indicator
+          // Update modems table (hardware data)
+          await env.DB.prepare(`
+            INSERT INTO modems (
+              equipment_id, manufacturer, model, firmware_revision, 
+              hardware_revision, status, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(equipment_id) DO UPDATE SET
+              manufacturer = COALESCE(excluded.manufacturer, modems.manufacturer),
+              model = COALESCE(excluded.model, modems.model),
+              firmware_revision = COALESCE(excluded.firmware_revision, modems.firmware_revision),
+              hardware_revision = COALESCE(excluded.hardware_revision, modems.hardware_revision),
+              status = excluded.status,
+              updated_at = CURRENT_TIMESTAMP
+          `).bind(
+            phone.imei || `SIM_${phone.iccid}`,  // Use IMEI as equipment_id, fallback to SIM-based ID
+            phone.manufacturer || null,
+            phone.model || null,
+            phone.firmware_revision || null,
+            phone.hardware_revision || null,
+            phone.status || 'active'
+          ).run();
           
-          await stmt.bind(
-            phone.iccid,  // ICCID is now the primary key
+          // Update sims table (SIM card data)
+          await env.DB.prepare(`
+            INSERT INTO sims (
+              iccid, phone_number, carrier, country_code, 
+              status, operator_name, operator_id, 
+              current_modem_id, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(iccid) DO UPDATE SET
+              phone_number = COALESCE(excluded.phone_number, sims.phone_number),
+              carrier = COALESCE(excluded.carrier, sims.carrier),
+              country_code = COALESCE(excluded.country_code, sims.country_code),
+              status = excluded.status,
+              operator_name = COALESCE(excluded.operator_name, sims.operator_name),
+              operator_id = COALESCE(excluded.operator_id, sims.operator_id),
+              current_modem_id = excluded.current_modem_id,
+              updated_at = CURRENT_TIMESTAMP
+          `).bind(
+            phone.iccid,
             phone.number || null,
-            phone.country || null,
-            phone.flag || null,
             phone.carrier || null,
+            phone.country || null,
             phone.status || 'active',
+            phone.operator_name || null,
+            phone.operator_id || null,
+            phone.imei || `SIM_${phone.iccid}`
+          ).run();
+          
+          // Update modem_state table (real-time status)
+          await env.DB.prepare(`
+            INSERT INTO modem_state (
+              modem_id, modem_index, usb_port, signal_percent, 
+              rssi, rsrq, rsrp, snr, access_tech, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(modem_id) DO UPDATE SET
+              modem_index = excluded.modem_index,
+              usb_port = COALESCE(excluded.usb_port, modem_state.usb_port),
+              signal_percent = excluded.signal_percent,
+              rssi = excluded.rssi,
+              rsrq = excluded.rsrq,
+              rsrp = excluded.rsrp,
+              snr = excluded.snr,
+              access_tech = COALESCE(excluded.access_tech, modem_state.access_tech),
+              updated_at = CURRENT_TIMESTAMP
+          `).bind(
+            phone.imei || `SIM_${phone.iccid}`,
+            phone.modem_index || null,
+            phone.usb_port || null,
             phone.signal || null,
             phone.rssi || null,
             phone.rsrq || null,
             phone.rsrp || null,
             phone.snr || null,
-            phone.operator_name || null,
-            phone.operator_id || null,
-            phone.imei || null,
-            phone.access_tech || null,
-            phone.modem_index || null,
-            phone.sim_index || null,
-            phone.manufacturer || null,
-            phone.model || null,
-            phone.firmware_revision || null,
-            phone.hardware_revision || null,
-            phone.device_path || null,
-            phone.usb_port || null
+            phone.access_tech || null
           ).run();
+          
           successCount++;
         } catch (err) {
           errorCount++;
@@ -814,24 +833,24 @@ export const controlHandler = {
         });
       }
       
-      // Delete test phones by ICCID
+      // Delete test SIMs by ICCID
       const placeholders = phoneIds.map(() => '?').join(',');
       const deleteStmt = env.DB.prepare(
-        `DELETE FROM phones WHERE iccid IN (${placeholders})`
+        `DELETE FROM sims WHERE iccid IN (${placeholders})`
       );
       
       const result = await deleteStmt.bind(...phoneIds).run();
       
-      // Also delete any phones without ICCID
+      // Also delete any SIMs without ICCID
       const cleanupNullIccid = await env.DB.prepare(
-        `DELETE FROM phones WHERE iccid IS NULL OR iccid = ''`
+        `DELETE FROM sims WHERE iccid IS NULL OR iccid = ''`
       ).run();
       
       return new Response(JSON.stringify({
         success: true,
         deleted: result.meta.changes,
         cleanedNullIccid: cleanupNullIccid.meta.changes,
-        message: `Deleted ${result.meta.changes} test phones and ${cleanupNullIccid.meta.changes} phones without ICCID`
+        message: `Deleted ${result.meta.changes} test SIMs and ${cleanupNullIccid.meta.changes} SIMs without ICCID`
       }), {
         headers: { 'Content-Type': 'application/json' }
       });

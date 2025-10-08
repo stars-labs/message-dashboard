@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use reqwest::Client;
 use serde_json::json;
 use crate::types::*;
-use tracing::{info, warn};
+use tracing::info;
 
 pub struct ApiClient {
     client: Client,
