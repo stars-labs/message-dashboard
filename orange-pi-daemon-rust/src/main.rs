@@ -5,6 +5,7 @@ mod sync_manager;
 mod retry_manager;
 mod sms_sender;
 mod dbus_client;
+mod signal_cache;
 
 use anyhow::Result;
 use std::collections::HashMap;
