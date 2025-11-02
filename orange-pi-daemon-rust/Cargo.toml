@@ -26,18 +26,10 @@ thiserror = "1"
 sd-notify = "0.4"
 
 # Time handling for proper timestamp parsing
-chrono = { version = "0.4", features = ["serde"] }
+chrono = { version = "0.4", features = ["serde", "clock"] }
 
-# UUID for correlation IDs  
+# UUID for correlation IDs
 uuid = { version = "1", features = ["v4"] }
-
-# D-Bus for better performance (optional - will add back when system deps are available)
-# dbus = { version = "0.9", optional = true }
-# dbus-tokio = { version = "0.7", optional = true }
-
-[features]
-default = []
-# dbus-support = ["dbus", "dbus-tokio"]
 
 [profile.release]
 opt-level = 3

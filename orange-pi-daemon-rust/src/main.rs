@@ -1,7 +1,8 @@
 mod types;
 mod modem_manager;
 mod api_client;
-// mod dbus_manager;  // Disabled for now
+mod sync_manager;
+mod retry_manager;
 
 use anyhow::Result;
 use std::collections::HashMap;
@@ -11,6 +12,8 @@ use tracing::{info, warn, error};
 use crate::types::*;
 use crate::modem_manager::ModemManager;
 use crate::api_client::ApiClient;
+use crate::sync_manager::SyncManager;
+use crate::retry_manager::RetryManager;
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)] // Multi-threaded for concurrent modem processing
 async fn main() -> Result<()> {
@@ -31,16 +34,23 @@ async fn main() -> Result<()> {
         check_interval_secs: std::env::var("CHECK_INTERVAL_SECS")
             .ok()
             .and_then(|s| s.parse().ok())
-            .unwrap_or(5),
+            .unwrap_or(30), // Changed from 5s to 30s to reduce load
     };
-    
-    info!("🚀 Starting Rust SMS Daemon v1.0.0");
+
+    info!("🚀 Starting Rust SMS Daemon v2.0.0 (Sync Manager Edition)");
     info!("📡 API URL: {}", config.api_url);
-    info!("⏱️  Check interval: {}s", config.check_interval_secs);
-    
+    info!("⏱️  Device sync interval: {}s", config.check_interval_secs);
+
     // Initialize components
     let modem_manager = ModemManager::new();
     let api_client = ApiClient::new(config.clone());
+
+    // Initialize sync manager with unique session ID
+    let session_id = format!("rust-daemon-{}", uuid::Uuid::new_v4());
+    let mut sync_manager = SyncManager::new(session_id, 300); // Full sync every 5 minutes
+
+    // Initialize retry manager for network resilience
+    let mut retry_manager = RetryManager::new(3, 1000); // 3 retries, 1s base delay
     
     // Cache of valid modems (those with SIM cards)
     let mut valid_modems: HashMap<String, String> = HashMap::new(); // modem_id -> iccid
@@ -141,14 +151,19 @@ async fn main() -> Result<()> {
             }
         }
         
-        // Periodic device status sync (every 10 seconds)
-        if last_sync.elapsed() > sync_interval {
-            info!("🔄 Syncing device status to API");
-            
-            let mut phones = Vec::new();
+        // Periodic device status sync (respecting sync manager timing)
+        if last_sync.elapsed() > sync_interval && sync_manager.can_sync_now() {
+            let sync_mode = sync_manager.get_sync_mode();
+
+            info!("🔄 Syncing device status to API (mode: {})", sync_mode.as_str());
+
+            // Gather device data in normalized format
+            let mut modems = Vec::new();
+            let mut sims = Vec::new();
+
             for (modem_id, iccid) in &valid_modems {
-                // Gather device data
-                let (imei, manufacturer, model, firmware, hardware) = 
+                // Gather modem hardware details
+                let (imei, manufacturer, model, firmware, hardware) =
                     modem_manager.get_device_details(modem_id)
                         .await
                         .unwrap_or_else(|_| (
@@ -158,53 +173,85 @@ async fn main() -> Result<()> {
                             None,
                             None
                         ));
-                
-                let phone_number = modem_manager.get_phone_number(modem_id)
-                    .await
-                    .ok()
-                    .flatten();
-                
+
                 let signal = modem_manager.get_signal_quality(modem_id)
                     .await
                     .unwrap_or_default();
-                
-                let operator = modem_manager.get_operator(modem_id)
-                    .await
-                    .ok()
-                    .flatten();
-                
-                phones.push(Phone {
-                    iccid: iccid.clone(),
-                    number: phone_number,
-                    signal: Some(signal.percent),
-                    operator_name: operator,
-                    status: "active".to_string(),
+
+                // Create Modem record
+                modems.push(Modem {
+                    equipment_id: imei.clone(),
                     manufacturer,
                     model,
                     firmware_revision: firmware,
                     hardware_revision: hardware,
-                    imei: Some(imei),
-                    // Optional fields
-                    country: None,
-                    flag: None,
-                    carrier: None,
+                    status: "connected".to_string(),
+                    signal: Some(signal.percent),
                     rssi: Some(signal.rssi),
                     rsrq: None,
                     rsrp: None,
                     snr: None,
-                    operator_id: None,
-                    access_tech: None,
                     modem_index: Some(modem_id.parse().unwrap_or(0)),
-                    sim_index: None,
-                    device_path: None,
                     usb_port: None,
+                    connection_status: Some("registered".to_string()),
+                    network_type: None,
+                    access_tech: None,
+                });
+
+                // Gather SIM data
+                let phone_number = modem_manager.get_phone_number(modem_id)
+                    .await
+                    .ok()
+                    .flatten();
+
+                let operator = modem_manager.get_operator(modem_id)
+                    .await
+                    .ok()
+                    .flatten();
+
+                // Create SIM record
+                sims.push(Sim {
+                    iccid: iccid.clone(),
+                    phone_number,
+                    current_modem_id: Some(imei),
+                    operator_name: operator,
+                    operator_id: None,
+                    status: "active".to_string(),
+                    sim_index: None,
                 });
             }
-            
-            if let Err(e) = api_client.upload_phones(&phones).await {
-                error!("❌ Failed to upload phone data: {}", e);
+
+            // Validate before uploading
+            if let Err(e) = sync_manager.validate_sync_data(&modems, &sims) {
+                error!("❌ Data validation failed: {}", e);
+            } else {
+                // Upload with retry logic
+                retry_manager.reset();
+
+                let upload_result = retry_manager.execute_with_retry(|| {
+                    let api_client = &api_client;
+                    let modems = &modems;
+                    let sims = &sims;
+                    let session_id = sync_manager.session_id();
+                    async move {
+                        api_client.upload_devices(modems, sims, sync_mode, session_id).await
+                    }
+                }).await;
+
+                match upload_result {
+                    Ok(_) => {
+                        sync_manager.record_success(sync_mode);
+                    }
+                    Err(e) => {
+                        // Convert anyhow::Error to a type that implements std::error::Error
+                        let error_msg = format!("{}", e);
+                        let io_error = std::io::Error::new(std::io::ErrorKind::Other, error_msg.clone());
+                        sync_manager.record_failure(sync_mode, &io_error);
+                        error!("❌ Failed to upload device data after retries: {}", error_msg);
+                    }
+                }
             }
-            
+
             last_sync = std::time::Instant::now();
         }
         
