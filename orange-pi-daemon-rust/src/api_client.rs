@@ -5,9 +5,10 @@ use crate::types::*;
 use crate::sync_manager::SyncMode;
 use tracing::{info, warn};
 
+#[derive(Clone)]
 pub struct ApiClient {
     client: Client,
-    config: Config,
+    pub config: Config,
 }
 
 impl ApiClient {

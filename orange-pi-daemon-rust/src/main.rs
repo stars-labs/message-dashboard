@@ -3,6 +3,7 @@ mod modem_manager;
 mod api_client;
 mod sync_manager;
 mod retry_manager;
+mod sms_sender;
 
 use anyhow::Result;
 use std::collections::HashMap;
@@ -14,6 +15,7 @@ use crate::modem_manager::ModemManager;
 use crate::api_client::ApiClient;
 use crate::sync_manager::SyncManager;
 use crate::retry_manager::RetryManager;
+use crate::sms_sender::SmsSender;
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)] // Multi-threaded for concurrent modem processing
 async fn main() -> Result<()> {
@@ -44,6 +46,9 @@ async fn main() -> Result<()> {
     // Initialize components
     let modem_manager = ModemManager::new();
     let api_client = ApiClient::new(config.clone());
+
+    // Initialize SMS sender
+    let mut sms_sender = SmsSender::new(api_client.clone());
 
     // Initialize sync manager with unique session ID
     let session_id = format!("rust-daemon-{}", uuid::Uuid::new_v4());
@@ -150,7 +155,25 @@ async fn main() -> Result<()> {
                 error!("❌ Failed to upload messages: {}", e);
             }
         }
-        
+
+        // Check and send pending SMS every 5 cycles (every 5 * check_interval_secs seconds)
+        if cycle % 5 == 0 {
+            // Update SMS sender's modem cache with our valid modems (ICCID -> modem_id mapping)
+            let iccid_to_modem: HashMap<String, String> = valid_modems
+                .iter()
+                .map(|(modem_id, iccid)| (iccid.clone(), modem_id.clone()))
+                .collect();
+            sms_sender.update_modem_cache(iccid_to_modem);
+
+            // Process pending SMS messages
+            match sms_sender.process_pending_sms().await {
+                Ok(_) => {}
+                Err(e) => {
+                    warn!("⚠️  Failed to process pending SMS: {}", e);
+                }
+            }
+        }
+
         // Periodic device status sync (respecting sync manager timing)
         if last_sync.elapsed() > sync_interval && sync_manager.can_sync_now() {
             let sync_mode = sync_manager.get_sync_mode();
