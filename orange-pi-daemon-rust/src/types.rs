@@ -16,26 +16,54 @@ pub struct Message {
     pub direction: String, // "received" or "sent"
 }
 
-// Normalized modem data (hardware)
+// Normalized modem data (hardware) - matches server schema
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Modem {
-    pub equipment_id: String,  // IMEI
+    pub equipment_id: String,  // IMEI (Primary Key)
     pub manufacturer: Option<String>,
     pub model: Option<String>,
     pub firmware_revision: Option<String>,
     pub hardware_revision: Option<String>,
     pub status: String,        // "connected", "disconnected"
-    pub signal: Option<i32>,   // Signal percent for modem_state
+
+    // Optional modem_state fields (can be included for convenience)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signal: Option<i32>,   // Signal percent
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rssi: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rsrq: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rsrp: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snr: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub modem_index: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usb_port: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub connection_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub network_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub access_tech: Option<String>,
 }
 
-// Normalized SIM data
+// Normalized SIM data - matches server schema
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Sim {
-    pub iccid: String,
+    pub iccid: String,         // ICCID (Primary Key)
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub phone_number: Option<String>,
-    pub current_modem_id: Option<String>, // Equipment ID it's inserted into
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_modem_id: Option<String>, // Foreign Key to Modem.equipment_id
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub operator_name: Option<String>,
-    pub status: String,        // "active", "inactive"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operator_id: Option<String>,
+    pub status: String,        // "active", "inactive", "removed"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sim_index: Option<i32>,
 }
 
 // Phone structure matching API expectations

@@ -1,49 +1,41 @@
 use anyhow::{Context, Result};
 use crate::types::*;
-// use crate::dbus_manager::DBusManager;  // Disabled for now
-use chrono::{DateTime, Utc};
+use chrono::TimeZone;
 
 #[derive(Clone)]
-pub struct ModemManager {
-    // dbus: Option<DBusManager>,  // Disabled for now
-}
+pub struct ModemManager;
 
 impl ModemManager {
     pub fn new() -> Self {
-        // For now, always use mmcli until we get D-Bus dependencies sorted out
-        tracing::info!("🚀 Using mmcli interface (D-Bus support coming soon)");
-        
-        Self {
-            // dbus: None,  // Disabled for now
-        }
+        Self
     }
     
-    /// List all modem IDs - currently mmcli only
+    /// List all modem IDs using mmcli
     pub async fn list_modems(&self) -> Result<Vec<String>> {
         self.list_modems_mmcli().await
     }
     
-    /// Get ICCID for a modem - currently mmcli only
+    /// Get ICCID for a modem using mmcli
     pub async fn get_iccid(&self, modem_id: &str) -> Result<Option<String>> {
         self.get_iccid_mmcli(modem_id).await
     }
     
-    /// Get signal quality - currently mmcli only
+    /// Get signal quality using mmcli
     pub async fn get_signal_quality(&self, modem_id: &str) -> Result<SignalData> {
         self.get_signal_quality_mmcli(modem_id).await
     }
     
-    /// Get device details - currently mmcli only
+    /// Get device details using mmcli
     pub async fn get_device_details(&self, modem_id: &str) -> Result<(String, Option<String>, Option<String>, Option<String>, Option<String>)> {
         self.get_device_details_mmcli(modem_id).await
     }
     
-    /// Get phone number - currently mmcli only
+    /// Get phone number using mmcli
     pub async fn get_phone_number(&self, modem_id: &str) -> Result<Option<String>> {
         self.get_phone_number_mmcli(modem_id).await
     }
     
-    /// Get operator name - currently mmcli only
+    /// Get operator name using mmcli
     pub async fn get_operator(&self, modem_id: &str) -> Result<Option<String>> {
         self.get_operator_mmcli(modem_id).await
     }
@@ -208,12 +200,21 @@ impl ModemManager {
             } else if line.contains("number:") {
                 number = line.split(':').nth(1).unwrap_or("").trim().to_string();
             } else if line.contains("timestamp:") {
-                // Parse timestamp properly - mmcli format: "timestamp: 2025-10-05T14:23:45+08:00"
-                // CRITICAL FIX: Use find(':') to locate the colon, then slice from there
-                // This preserves the full timestamp including timezone offset
+                // Parse timestamp properly - mmcli can output various formats
+                // Examples: "timestamp: 2025-10-05T14:23:45+08:00" or "timestamp: 10/5/2025, 2:23:45 PM"
                 if let Some(colon_pos) = line.find(':') {
                     // Get everything after the first colon and trim whitespace
-                    timestamp = line[colon_pos + 1..].trim().to_string();
+                    let raw_timestamp = line[colon_pos + 1..].trim();
+                    tracing::debug!("📅 Raw timestamp from mmcli: '{}'", raw_timestamp);
+                    
+                    // Clean up potential quotes and extra whitespace
+                    let cleaned = raw_timestamp.trim_matches(|c| c == '"' || c == '\'' || c == ' ');
+                    timestamp = self.normalize_timestamp(cleaned).unwrap_or_else(|e| {
+                        tracing::warn!("⚠️  Failed to parse timestamp '{}': {}, using current time", cleaned, e);
+                        chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
+                    });
+                    
+                    tracing::debug!("📅 Normalized timestamp: '{}'", timestamp);
                 }
             }
         }
@@ -222,35 +223,10 @@ impl ModemManager {
             return Ok(None);
         }
         
-        // Validate and normalize timestamp
+        // Use current time if no timestamp was found
         if timestamp.is_empty() {
-            // If no timestamp from SMS, use current time
-            timestamp = chrono::Utc::now().to_rfc3339();
-        } else {
-            // Try to parse and reformat the timestamp to ensure it's valid ISO 8601
-            match chrono::DateTime::parse_from_rfc3339(&timestamp) {
-                Ok(dt) => {
-                    // Convert to UTC and format properly
-                    timestamp = dt.with_timezone(&chrono::Utc).to_rfc3339();
-                }
-                Err(_) => {
-                    // If parsing fails, try other common formats
-                    let parsed = chrono::NaiveDateTime::parse_from_str(&timestamp, "%Y-%m-%dT%H:%M:%S")
-                        .or_else(|_| chrono::NaiveDateTime::parse_from_str(&timestamp, "%Y-%m-%d %H:%M:%S"));
-                    
-                    match parsed {
-                        Ok(naive_dt) => {
-                            // Assume UTC if no timezone info
-                            timestamp = chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(naive_dt, chrono::Utc).to_rfc3339();
-                        }
-                        Err(_) => {
-                            // Fallback to current time if timestamp is unparseable
-                            tracing::warn!("⚠️  Invalid timestamp '{}', using current time", timestamp);
-                            timestamp = chrono::Utc::now().to_rfc3339();
-                        }
-                    }
-                }
-            }
+            timestamp = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+            tracing::debug!("📅 No timestamp found, using current time: {}", timestamp);
         }
         
         Ok(Some(Message {
@@ -330,6 +306,163 @@ impl ModemManager {
             .filter(|s| !s.is_empty());
         
         Ok(operator)
+    }
+    
+    
+    /// Normalize timestamp to RFC3339 UTC format
+    fn normalize_timestamp(&self, raw_timestamp: &str) -> Result<String> {
+        tracing::debug!("📅 Normalizing timestamp: '{}'", raw_timestamp);
+        
+        // First try: Parse as RFC3339 (ISO format with timezone)
+        if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(raw_timestamp) {
+            let utc_timestamp = dt.with_timezone(&chrono::Utc).format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+            tracing::debug!("📅 Parsed as RFC3339, converted to UTC: {}", utc_timestamp);
+            return Ok(utc_timestamp);
+        }
+        
+        // Second try: Parse as naive datetime and assume UTC
+        if let Ok(naive_dt) = chrono::NaiveDateTime::parse_from_str(raw_timestamp, "%Y-%m-%dT%H:%M:%S") {
+            let utc_timestamp = chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(naive_dt, chrono::Utc).format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+            tracing::debug!("📅 Parsed as naive datetime, assumed UTC: {}", utc_timestamp);
+            return Ok(utc_timestamp);
+        }
+        
+        // Third try: Parse US date format like "10/5/2025, 2:23:45 PM"
+        if raw_timestamp.contains('/') && raw_timestamp.contains(',') {
+            if let Some(formatted) = self.parse_us_date_format(raw_timestamp) {
+                tracing::debug!("📅 Parsed US date format: {} -> {}", raw_timestamp, formatted);
+                return Ok(formatted);
+            }
+        }
+        
+        // Fourth try: Handle timezone offset formats like "2025-10-05T14:23:45+08:00" or "2025-10-05T14:23:45+0800"
+        if let Some(formatted) = self.parse_timezone_offset_format(raw_timestamp) {
+            tracing::debug!("📅 Parsed timezone offset format: {} -> {}", raw_timestamp, formatted);
+            return Ok(formatted);
+        }
+        
+        Err(anyhow::anyhow!("Unable to parse timestamp format: {}", raw_timestamp))
+    }
+    
+    /// Parse US date format like "10/5/2025, 2:23:45 PM"
+    fn parse_us_date_format(&self, timestamp: &str) -> Option<String> {
+        // Split by comma to separate date and time
+        let parts: Vec<&str> = timestamp.split(',').collect();
+        if parts.len() != 2 {
+            return None;
+        }
+        
+        let date_part = parts[0].trim();
+        let time_part = parts[1].trim();
+        
+        // Parse date part (M/D/YYYY or MM/DD/YYYY)
+        let date_components: Vec<&str> = date_part.split('/').collect();
+        if date_components.len() != 3 {
+            return None;
+        }
+        
+        let month: u32 = date_components[0].parse().ok()?;
+        let day: u32 = date_components[1].parse().ok()?;
+        let year: u32 = date_components[2].parse().ok()?;
+        
+        // Parse time part (H:MM:SS AM/PM)
+        let is_pm = time_part.to_uppercase().contains("PM");
+        let time_clean = time_part.replace("AM", "").replace("PM", "");
+        let time_clean = time_clean.trim();
+        let time_components: Vec<&str> = time_clean.split(':').collect();
+        if time_components.len() < 2 {
+            return None;
+        }
+        
+        let mut hour: u32 = time_components[0].parse().ok()?;
+        let minute: u32 = time_components[1].parse().ok()?;
+        let second: u32 = if time_components.len() > 2 {
+            time_components[2].parse().unwrap_or(0)
+        } else {
+            0
+        };
+        
+        // Convert 12-hour to 24-hour format
+        if is_pm && hour != 12 {
+            hour += 12;
+        } else if !is_pm && hour == 12 {
+            hour = 0;
+        }
+        
+        // Create datetime (assume UTC+8 Beijing time, then convert to UTC)
+        if let Some(naive_dt) = chrono::NaiveDate::from_ymd_opt(year as i32, month, day)
+            .and_then(|date| date.and_hms_opt(hour, minute, second)) {
+
+            // Assume Beijing time (UTC+8) and convert to UTC
+            let beijing_tz = chrono::FixedOffset::east_opt(8 * 3600)?;
+            let beijing_dt = beijing_tz.from_local_datetime(&naive_dt).single()?;
+            let utc_dt = beijing_dt.to_utc();
+
+            return Some(utc_dt.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string());
+        }
+        
+        None
+    }
+    
+    /// Parse timezone offset formats like "2025-10-05T14:23:45+08:00" or "2025-10-05T14:23:45+0800"
+    fn parse_timezone_offset_format(&self, timestamp: &str) -> Option<String> {
+        // Look for timezone indicators
+        let has_plus = timestamp.contains('+');
+        let has_minus = timestamp.rfind('-').map(|pos| pos > 10); // Make sure it's not the date separator
+        
+        if !has_plus && has_minus != Some(true) {
+            return None;
+        }
+        
+        // Find the timezone offset position
+        let tz_pos = if has_plus {
+            timestamp.rfind('+')?
+        } else {
+            timestamp.rfind('-')?
+        };
+        
+        let datetime_part = &timestamp[..tz_pos];
+        let tz_part = &timestamp[tz_pos..];
+        
+        tracing::debug!("📅 Parsing timezone format - datetime: '{}', timezone: '{}'", datetime_part, tz_part);
+        
+        // Parse the datetime part
+        let naive_dt = chrono::NaiveDateTime::parse_from_str(datetime_part, "%Y-%m-%dT%H:%M:%S").ok()?;
+        
+        // Parse timezone offset
+        let tz_offset_hours = if tz_part.len() >= 3 {
+            let sign = if tz_part.starts_with('+') { 1 } else { -1 };
+            let offset_str = &tz_part[1..];
+            
+            // Handle both +08:00 and +0800 formats
+            let hours = if offset_str.contains(':') {
+                // Format: +08:00
+                let parts: Vec<&str> = offset_str.split(':').collect();
+                parts[0].parse::<i32>().ok()?
+            } else if offset_str.len() >= 4 {
+                // Format: +0800
+                let hours_str = &offset_str[0..2];
+                hours_str.parse::<i32>().ok()?
+            } else if offset_str.len() >= 2 {
+                // Format: +08
+                offset_str.parse::<i32>().ok()?
+            } else {
+                return None;
+            };
+            
+            sign * hours
+        } else {
+            return None;
+        };
+        
+        tracing::debug!("📅 Parsed timezone offset: {} hours", tz_offset_hours);
+        
+        // Create timezone offset and convert to UTC
+        let tz_offset = chrono::FixedOffset::east_opt(tz_offset_hours * 3600)?;
+        let local_dt = tz_offset.from_local_datetime(&naive_dt).single()?;
+        let utc_dt = local_dt.to_utc();
+
+        Some(utc_dt.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string())
     }
     
     // Helper functions
