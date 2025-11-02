@@ -1,19 +1,22 @@
 use anyhow::{Context, Result};
 use crate::types::*;
 use crate::dbus_client::DBusClient;
+use crate::signal_cache::SignalCache;
 use chrono::TimeZone;
 use std::sync::Arc;
-use tracing::{debug, warn};
+use tracing::{debug, info};
 
 #[derive(Clone)]
 pub struct ModemManager {
     dbus_client: Arc<DBusClient>,
+    signal_cache: Arc<SignalCache>,
 }
 
 impl ModemManager {
     pub fn new() -> Self {
         Self {
             dbus_client: Arc::new(DBusClient::new()),
+            signal_cache: Arc::new(SignalCache::new(30)), // 30 second cache TTL
         }
     }
     
@@ -44,21 +47,31 @@ impl ModemManager {
         }
     }
 
-    /// Get signal quality (D-Bus first, fallback to mmcli)
+    /// Get signal quality (cached, D-Bus first, fallback to mmcli)
     pub async fn get_signal_quality(&self, modem_id: &str) -> Result<SignalData> {
-        // Try D-Bus first
-        match self.dbus_client.get_signal_quality(modem_id).await {
+        // Check cache first
+        if let Some(cached_signal) = self.signal_cache.get(modem_id).await {
+            return Ok(cached_signal);
+        }
+
+        // Not in cache, fetch fresh data
+        let signal = match self.dbus_client.get_signal_quality(modem_id).await {
             Ok((percent, _recent)) => {
-                Ok(SignalData {
+                SignalData {
                     percent: percent as i32,
                     rssi: (percent as i32 * 120 / 100) - 110,
-                })
+                }
             }
             Err(_) => {
                 debug!("⚠️  D-Bus failed for signal {}, falling back to mmcli", modem_id);
-                self.get_signal_quality_mmcli(modem_id).await
+                self.get_signal_quality_mmcli(modem_id).await?
             }
-        }
+        };
+
+        // Cache the result
+        self.signal_cache.set(modem_id.to_string(), signal.clone()).await;
+
+        Ok(signal)
     }
 
     /// Get device details (D-Bus first, fallback to mmcli)
