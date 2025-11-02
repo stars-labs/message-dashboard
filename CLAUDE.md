@@ -14,9 +14,9 @@ This is a distributed SMS management system with three main components:
    - Auth: Auth0 integration with RBAC
    - Utilities: Centralized database management, API responses, and device counting
 
-2. **SMS Collection Daemon** (`orange-pi-daemon-rust/`) - Rust daemon for hardware integration (v1.0.1)
+2. **SMS Collection Daemon** (`orange-pi-daemon-rust/`) - Rust daemon for hardware integration (v2.0.0)
    - **Technology**: Rust with tokio async runtime and reqwest HTTP client
-   - **Reliability**: Memory-safe with no segfaults, robust error handling
+   - **Reliability**: Memory-safe with no segfaults, robust error handling with exponential backoff retry
    - **Concurrency**: Async/await pattern for concurrent modem processing (batches of 20)
    - **ModemManager Integration**: Direct mmcli subprocess calls via tokio::process
    - **Features**:
@@ -25,8 +25,11 @@ This is a distributed SMS management system with three main components:
      - Signal quality monitoring
      - Device details extraction (IMEI, manufacturer, model, firmware)
      - Correct timestamp parsing for ISO 8601 with timezone offsets
-   - **Performance**: Handles 87 modems with ~95-105s cycle time, 8M memory usage
-   - **Stability**: Zero crashes, replaces unreliable Zig daemon (persistent segfaults)
+     - **Sync Manager**: Full/incremental sync state reconciliation (5-minute full sync interval)
+     - **Retry Manager**: Exponential backoff (3 retries: 1s, 2s, 4s) for network resilience
+     - **Normalized Schema**: Uses `/api/control/devices` endpoint with separate modem/SIM payloads
+   - **Performance**: Handles 87 modems with 30s sync interval, 8M memory usage
+   - **Stability**: Zero crashes, eliminates 503 errors via proper rate limiting
 
 3. **NixOS Configuration** (`nixos-config/`) - Declarative system deployment
    - Flake-based NixOS configuration for Orange Pi
@@ -94,13 +97,15 @@ export SMS_API_KEY="your-api-key"
 ### NixOS Deployment
 ```bash
 # Deploy to Orange Pi (critical command - often forgotten)
+# Public IP: 203.116.95.146 | Local IP: 10.171.150.102
 nixos-rebuild switch --flake .#orange-pi \
     --use-substitutes \
-    --target-host root@10.171.150.102 --build-host root@10.171.150.102 \
+    --target-host root@203.116.95.146 --build-host root@203.116.95.146 \
     --impure
 
 # Check daemon status on Orange Pi
-ssh root@10.171.150.102 'systemctl status sms-dashboard-daemon'
+ssh root@203.116.95.146 'systemctl status sms-dashboard-daemon'
+ssh root@203.116.95.146 'journalctl -u sms-dashboard-daemon -f'  # Live logs
 ```
 
 ### Production Deployment
@@ -132,10 +137,16 @@ npm run deploy      # Build unified bundle and deploy to Cloudflare
 
 ### Data Flow
 ```
-Orange Pi → mmcli → Zig Daemon → API (API Key) → D1 Database → WebSocket Broadcast → Frontend
-                                      ↓
-                              User Auth (Auth0) → Protected API → Frontend
+Orange Pi → mmcli → Rust Daemon (v2.0.0) → API (API Key) → D1 Database → WebSocket Broadcast → Frontend
+                                                 ↓
+                                         User Auth (Auth0) → Protected API → Frontend
 ```
+
+**Key Endpoints**:
+- `/api/control/devices` - Daemon uploads with sync_mode (full/incremental) and normalized modem/SIM data
+- `/api/control/messages` - Daemon uploads SMS messages
+- `/api/phones` - Frontend fetches device list (Auth0 protected)
+- `/api/messages` - Frontend fetches messages (Auth0 protected)
 
 ### Database Schema Critical Points
 
@@ -304,7 +315,33 @@ npx wrangler d1 execute sms-dashboard --command "SELECT COUNT(*) as state_record
 - TailwindCSS for styling
 - Bun as package manager and runtime
 
-## Recent Changes (October 2025)
+## Recent Changes (November 2025)
+
+### v2.0.0 - Rust Daemon Sync Manager & Production 503 Fix (November 2, 2025)
+- **Critical Production Fix**: Eliminated continuous 503 errors (Cloudflare rate limiting error 1102)
+  - **Problem**: v1.0.1 daemon hitting `/api/control/phones` every 10 seconds with 87 phones = 261 SQL ops/request
+  - **Root Cause**: Excessive API call frequency triggering Cloudflare Workers rate limits
+  - **Solution**: Complete refactor to match Zig daemon architecture
+- **New Architecture**:
+  - **Sync Manager** (`sync_manager.rs`): Full/incremental sync state reconciliation
+    - Full sync every 5 minutes for complete state reconciliation
+    - Incremental syncs in between for efficiency
+    - Recovery mode after 3 consecutive failures
+    - Session-based state tracking with UUID
+  - **Retry Manager** (`retry_manager.rs`): Exponential backoff for network resilience
+    - 3 retries with 1s, 2s, 4s delays
+    - Prevents error storms during network issues
+    - Automatic recovery on success
+  - **Normalized Schema**: Migrated to `/api/control/devices` endpoint
+    - Separate modem and SIM payloads matching server schema
+    - sync_mode parameter (full/incremental)
+    - session_id for state tracking
+- **Configuration Changes**:
+  - Increased sync interval from 10s to 30s
+  - Increased HTTP timeout from 10s to 30s for large uploads
+  - Changed version from v1.0.1 to v2.0.0
+- **Result**: Zero 503 errors, proper rate limiting compliance, stable 87-modem operation
+- **Deployment**: Successfully built 4.8MB release binary, deployed via NixOS
 
 ### v1.0.1 - Rust Daemon Timestamp Fix (October 6, 2025)
 - **Critical Bug Fix**: Corrected timestamp parsing in Rust daemon

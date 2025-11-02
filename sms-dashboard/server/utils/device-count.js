@@ -7,7 +7,7 @@ export async function getDeviceStats(db) {
   // Get counts from the actual tables (source of truth)
   const stats = await db.prepare(`
     SELECT 
-      (SELECT COUNT(*) FROM modems WHERE status IN ('connected', 'registered')) as connected_modems,
+      (SELECT COUNT(*) FROM modems WHERE status IN ('connected', 'registered', 'active')) as connected_modems,
       (SELECT COUNT(*) FROM modems WHERE status = 'disconnected') as disconnected_modems,
       (SELECT COUNT(*) FROM modems) as total_modems,
       (SELECT COUNT(*) FROM sims WHERE status = 'active') as active_sims,
