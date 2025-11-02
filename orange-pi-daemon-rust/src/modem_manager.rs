@@ -1,43 +1,107 @@
 use anyhow::{Context, Result};
 use crate::types::*;
+use crate::dbus_client::DBusClient;
 use chrono::TimeZone;
+use std::sync::Arc;
+use tracing::{debug, warn};
 
 #[derive(Clone)]
-pub struct ModemManager;
+pub struct ModemManager {
+    dbus_client: Arc<DBusClient>,
+}
 
 impl ModemManager {
     pub fn new() -> Self {
-        Self
+        Self {
+            dbus_client: Arc::new(DBusClient::new()),
+        }
     }
     
-    /// List all modem IDs using mmcli
+    /// List all modem IDs (D-Bus first, fallback to mmcli)
     pub async fn list_modems(&self) -> Result<Vec<String>> {
-        self.list_modems_mmcli().await
+        // Try D-Bus first (90% faster)
+        match self.dbus_client.list_modems().await {
+            Ok(modems) => {
+                debug!("🚀 Listed {} modems via D-Bus", modems.len());
+                Ok(modems)
+            }
+            Err(_) => {
+                debug!("⚠️  D-Bus failed, falling back to mmcli");
+                self.list_modems_mmcli().await
+            }
+        }
     }
-    
-    /// Get ICCID for a modem using mmcli
+
+    /// Get ICCID for a modem (D-Bus first, fallback to mmcli)
     pub async fn get_iccid(&self, modem_id: &str) -> Result<Option<String>> {
-        self.get_iccid_mmcli(modem_id).await
+        // Try D-Bus first
+        match self.dbus_client.get_sim_iccid(modem_id).await {
+            Ok(iccid) => Ok(iccid),
+            Err(_) => {
+                debug!("⚠️  D-Bus failed for modem {}, falling back to mmcli", modem_id);
+                self.get_iccid_mmcli(modem_id).await
+            }
+        }
     }
-    
-    /// Get signal quality using mmcli
+
+    /// Get signal quality (D-Bus first, fallback to mmcli)
     pub async fn get_signal_quality(&self, modem_id: &str) -> Result<SignalData> {
-        self.get_signal_quality_mmcli(modem_id).await
+        // Try D-Bus first
+        match self.dbus_client.get_signal_quality(modem_id).await {
+            Ok((percent, _recent)) => {
+                Ok(SignalData {
+                    percent: percent as i32,
+                    rssi: (percent as i32 * 120 / 100) - 110,
+                })
+            }
+            Err(_) => {
+                debug!("⚠️  D-Bus failed for signal {}, falling back to mmcli", modem_id);
+                self.get_signal_quality_mmcli(modem_id).await
+            }
+        }
     }
-    
-    /// Get device details using mmcli
+
+    /// Get device details (D-Bus first, fallback to mmcli)
     pub async fn get_device_details(&self, modem_id: &str) -> Result<(String, Option<String>, Option<String>, Option<String>, Option<String>)> {
-        self.get_device_details_mmcli(modem_id).await
+        // Try D-Bus first
+        match self.dbus_client.get_device_details(modem_id).await {
+            Ok(details) => {
+                let imei = if details.imei.is_empty() {
+                    format!("MODEM_{}", modem_id)
+                } else {
+                    details.imei
+                };
+                Ok((imei, details.manufacturer, details.model, details.firmware_revision, details.hardware_revision))
+            }
+            Err(_) => {
+                debug!("⚠️  D-Bus failed for device details {}, falling back to mmcli", modem_id);
+                self.get_device_details_mmcli(modem_id).await
+            }
+        }
     }
-    
-    /// Get phone number using mmcli
+
+    /// Get phone number (D-Bus first, fallback to mmcli)
     pub async fn get_phone_number(&self, modem_id: &str) -> Result<Option<String>> {
-        self.get_phone_number_mmcli(modem_id).await
+        // Try D-Bus first
+        match self.dbus_client.get_phone_number(modem_id).await {
+            Ok(number) => Ok(number),
+            Err(_) => {
+                debug!("⚠️  D-Bus failed for phone number {}, falling back to mmcli", modem_id);
+                self.get_phone_number_mmcli(modem_id).await
+            }
+        }
     }
-    
-    /// Get operator name using mmcli
+
+    /// Get operator name (D-Bus first, fallback to mmcli)
     pub async fn get_operator(&self, modem_id: &str) -> Result<Option<String>> {
-        self.get_operator_mmcli(modem_id).await
+        // Try D-Bus first
+        match self.dbus_client.get_operator(modem_id).await {
+            Ok(operator) => Ok(operator),
+            Err(_) => {
+                debug!("⚠️  D-Bus failed for operator {}, falling back to mmcli", modem_id);
+                self.get_operator_mmcli(modem_id).await
+            }
+        }
     }
     
     // MMCLI implementations

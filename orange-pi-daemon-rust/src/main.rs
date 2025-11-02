@@ -4,6 +4,7 @@ mod api_client;
 mod sync_manager;
 mod retry_manager;
 mod sms_sender;
+mod dbus_client;
 
 use anyhow::Result;
 use std::collections::HashMap;
