@@ -3,6 +3,14 @@ name = "orange-pi-daemon-rust"
 version = "1.0.0"
 edition = "2021"
 
+[lib]
+name = "orange_pi_daemon_rust"
+path = "src/lib.rs"
+
+[[bin]]
+name = "orange-pi-daemon-rust"
+path = "src/main.rs"
+
 [dependencies]
 # Async runtime - multi-threaded for concurrent modem processing
 tokio = { version = "1", features = ["rt-multi-thread", "time", "macros", "process"] }
