@@ -61,10 +61,10 @@ in
 
     # Increase startup timeout for many modems
     serviceConfig = {
-      TimeoutStartSec = "10min";
+      TimeoutStartSec = lib.mkForce "10min";
       # Restart on failure but with delay
-      Restart = "on-failure";
-      RestartSec = "60s";
+      Restart = lib.mkDefault "on-failure";
+      RestartSec = lib.mkForce "60s";  # Use longer delay for batch detection
     };
   };
 
