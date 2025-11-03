@@ -20,6 +20,9 @@
 
     # Include ModemManager optimization for high modem count
     ../modules/modemmanager-optimization.nix
+
+    # Include ModemManager batch detection for 87+ modems
+    ../modules/modemmanager-batch.nix
   ];
 
   # System identification
