@@ -6,9 +6,11 @@ mod retry_manager;
 mod sms_sender;
 mod dbus_client;
 mod signal_cache;
+mod worker_pool;
 
 use anyhow::Result;
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::time;
 use tracing::{info, warn, error};
@@ -18,6 +20,7 @@ use crate::api_client::ApiClient;
 use crate::sync_manager::SyncManager;
 use crate::retry_manager::RetryManager;
 use crate::sms_sender::SmsSender;
+use crate::worker_pool::{WorkerPool, WorkerPoolConfig};
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)] // Multi-threaded for concurrent modem processing
 async fn main() -> Result<()> {
@@ -46,7 +49,7 @@ async fn main() -> Result<()> {
     info!("⏱️  Device sync interval: {}s", config.check_interval_secs);
 
     // Initialize components
-    let modem_manager = ModemManager::new();
+    let modem_manager = Arc::new(ModemManager::new());
     let api_client = ApiClient::new(config.clone());
 
     // Initialize SMS sender
@@ -58,6 +61,15 @@ async fn main() -> Result<()> {
 
     // Initialize retry manager for network resilience
     let mut retry_manager = RetryManager::new(3, 1000); // 3 retries, 1s base delay
+
+    // Initialize worker pool for parallel modem processing
+    let worker_config = WorkerPoolConfig {
+        num_workers: 8,  // 8 parallel workers for optimal performance
+        batch_size: 20,  // Process up to 20 modems per batch
+        modem_timeout: Duration::from_secs(5),
+    };
+    let worker_pool = WorkerPool::new(worker_config, modem_manager.clone());
+    info!("👷 Worker pool initialized with 8 parallel workers");
     
     // Cache of valid modems (those with SIM cards)
     let mut valid_modems: HashMap<String, String> = HashMap::new(); // modem_id -> iccid
@@ -109,44 +121,51 @@ async fn main() -> Result<()> {
         cycle += 1;
         let cycle_start = std::time::Instant::now();
         
-        // Process modems concurrently in batches
-        let batch_size = 20; // Process 20 modems at a time
-        // Clone the HashMap entries to avoid borrow issues
-        let modem_vec: Vec<(String, String)> = valid_modems.iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
-        
+        // Process modems in parallel using worker pool
+        let modem_ids: Vec<String> = valid_modems.keys().cloned().collect();
+
         let mut all_messages = Vec::new();
-        
-        for batch in modem_vec.chunks(batch_size) {
-            // Process this batch concurrently using tokio::spawn
-            let mut join_handles = Vec::new();
-            for (modem_id, iccid) in batch {
-                let modem_id = modem_id.clone();
-                let iccid = iccid.clone();
-                let mm = modem_manager.clone();
-                
-                let handle = tokio::spawn(async move {
-                    mm.get_new_messages(&modem_id, &iccid).await
-                });
-                join_handles.push(handle);
-            }
-            
-            // Collect results
-            for handle in join_handles {
-                match handle.await {
-                    Ok(Ok(messages)) => {
-                        if !messages.is_empty() {
-                            all_messages.extend(messages);
+        let mut all_phones = Vec::new();
+        let mut all_sims = Vec::new();
+
+        // Process all modems in parallel with worker pool
+        match worker_pool.process_modems(modem_ids.clone()).await {
+            Ok(results) => {
+                for result in results {
+                    if let Some(error) = &result.error {
+                        if error != "No SIM card" && error != "Timeout" {
+                            warn!("⚠️  Modem {} error: {}", result.modem_id, error);
                         }
                     }
-                    Ok(Err(e)) => {
-                        warn!("⚠️  Failed to check modem: {}", e);
+
+                    // Collect messages
+                    if !result.messages.is_empty() {
+                        all_messages.extend(result.messages);
                     }
-                    Err(e) => {
-                        error!("❌ Task panicked: {}", e);
+
+                    // Collect phone data
+                    if let Some(phone) = result.phone {
+                        all_phones.push(phone);
+                    }
+
+                    // Collect SIM data
+                    if let Some(sim) = result.sim {
+                        all_sims.push(sim);
                     }
                 }
+
+                // Log worker pool statistics
+                let stats = worker_pool.get_stats().await;
+                if cycle % 10 == 0 {  // Log stats every 10 cycles
+                    info!("📊 Worker pool stats: {} modems, {:.1}% success, avg {:.2}s/modem",
+                        stats.total_modems,
+                        stats.success_rate(),
+                        stats.avg_time_per_modem.as_secs_f64()
+                    );
+                }
+            }
+            Err(e) => {
+                error!("❌ Worker pool failed: {}", e);
             }
         }
         
@@ -182,69 +201,29 @@ async fn main() -> Result<()> {
 
             info!("🔄 Syncing device status to API (mode: {})", sync_mode.as_str());
 
-            // Gather device data in normalized format
-            let mut modems = Vec::new();
-            let mut sims = Vec::new();
-
-            for (modem_id, iccid) in &valid_modems {
-                // Gather modem hardware details
-                let (imei, manufacturer, model, firmware, hardware) =
-                    modem_manager.get_device_details(modem_id)
-                        .await
-                        .unwrap_or_else(|_| (
-                            format!("MODEM_{}", modem_id),
-                            None,
-                            None,
-                            None,
-                            None
-                        ));
-
-                let signal = modem_manager.get_signal_quality(modem_id)
-                    .await
-                    .unwrap_or_default();
-
-                // Create Modem record
-                modems.push(Modem {
-                    equipment_id: imei.clone(),
-                    manufacturer,
-                    model,
-                    firmware_revision: firmware,
-                    hardware_revision: hardware,
-                    status: "connected".to_string(),
-                    signal: Some(signal.percent),
-                    rssi: Some(signal.rssi),
-                    rsrq: None,
-                    rsrp: None,
-                    snr: None,
-                    modem_index: Some(modem_id.parse().unwrap_or(0)),
-                    usb_port: None,
+            // Use data already collected by worker pool for efficiency
+            let modems: Vec<Modem> = all_phones.iter().map(|phone| {
+                Modem {
+                    equipment_id: phone.imei.clone().unwrap_or_else(|| format!("MODEM_{}", phone.iccid)),
+                    manufacturer: phone.manufacturer.clone(),
+                    model: phone.model.clone(),
+                    firmware_revision: phone.firmware_revision.clone(),
+                    hardware_revision: phone.hardware_revision.clone(),
+                    status: phone.status.clone(),
+                    signal: phone.signal,
+                    rssi: phone.rssi,
+                    rsrq: phone.rsrq,
+                    rsrp: phone.rsrp,
+                    snr: phone.snr,
+                    modem_index: phone.modem_index,
+                    usb_port: phone.usb_port.as_ref().and_then(|p| p.parse().ok()),
                     connection_status: Some("registered".to_string()),
                     network_type: None,
-                    access_tech: None,
-                });
+                    access_tech: phone.access_tech.clone(),
+                }
+            }).collect();
 
-                // Gather SIM data
-                let phone_number = modem_manager.get_phone_number(modem_id)
-                    .await
-                    .ok()
-                    .flatten();
-
-                let operator = modem_manager.get_operator(modem_id)
-                    .await
-                    .ok()
-                    .flatten();
-
-                // Create SIM record
-                sims.push(Sim {
-                    iccid: iccid.clone(),
-                    phone_number,
-                    current_modem_id: Some(imei),
-                    operator_name: operator,
-                    operator_id: None,
-                    status: "active".to_string(),
-                    sim_index: None,
-                });
-            }
+            let sims = all_sims.clone();
 
             // Validate before uploading
             if let Err(e) = sync_manager.validate_sync_data(&modems, &sims) {
