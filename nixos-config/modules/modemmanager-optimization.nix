@@ -34,7 +34,7 @@
 
       # Increase resource limits
       LimitNOFILE = 65536;
-      LimitNPROC = 4096;
+      LimitNPROC = lib.mkForce 32768;  # Use higher value from usb-optimization
 
       # Nice level for better performance
       Nice = -5;
