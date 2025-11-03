@@ -33,7 +33,8 @@
   );
 
   // Filter available SIM cards based on search
-  $: availablePhones = phoneNumbers.filter((p) => p.iccid && p.status !== "offline" && p.status !== "error");
+  // Include phones that are online, registered, or have any other active status
+  $: availablePhones = phoneNumbers.filter((p) => p.iccid && (p.status === "online" || p.status === "registered" || (!p.status || (p.status !== "offline" && p.status !== "error" && p.status !== "sim-missing"))));
   
   $: filteredSims = availablePhones.filter(phone => {
     if (!simSearch) return true;
