@@ -17,6 +17,9 @@
 
     # Include USB optimization module for 100 modems
     ../modules/usb-optimization.nix
+
+    # Include ModemManager optimization for high modem count
+    ../modules/modemmanager-optimization.nix
   ];
 
   # System identification
@@ -601,22 +604,8 @@
   #  randomizedDelaySec = "30min";
   #};
 
-  # ModemManager configuration
-  networking.modemmanager = {
-    enable = true;
-    fccUnlockScripts = [
-      {
-        # Quectel EC25 LTE modem
-        id = "2c7c:0125";
-        path = "${pkgs.modemmanager}/share/ModemManager/fcc-unlock.available.d/2c7c";
-      }
-      {
-        # Au780 modem
-        id = "1a86:7523";
-        path = "${pkgs.modemmanager}/share/ModemManager/fcc-unlock.available.d/1a86";
-      }
-    ];
-  };
+  # ModemManager configuration moved to ../modules/modemmanager-optimization.nix
+  # for better handling of 100+ USB modems
 
   # This value determines the NixOS release compatibility
   system.stateVersion = "25.11";
