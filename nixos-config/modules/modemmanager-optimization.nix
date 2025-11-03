@@ -54,9 +54,10 @@
 
     # Override the ExecStart to add custom parameters
     # Only use valid options for ModemManager 1.24.0
+    # STRICT filter policy allows more devices through the filter
     serviceConfig.ExecStart = lib.mkForce [
       "" # Clear the original ExecStart
-      "${pkgs.modemmanager}/sbin/ModemManager --test-quick-suspend-resume --log-level=INFO"
+      "${pkgs.modemmanager}/sbin/ModemManager --filter-policy=STRICT --test-quick-suspend-resume --log-level=INFO"
     ];
 
     # Add a pre-start script to wait for USB devices to settle
