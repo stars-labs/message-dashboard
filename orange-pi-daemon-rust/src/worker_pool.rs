@@ -291,7 +291,7 @@ impl WorkerPool {
             snr: None,
             operator_id: None,
             access_tech: None,
-            modem_index: None,
+            modem_index: modem_id.parse::<i32>().ok(),
             sim_index: None,
             device_path: None,
             usb_port: None,
