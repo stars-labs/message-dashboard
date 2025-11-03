@@ -6,6 +6,7 @@ pub mod retry_manager;
 pub mod sms_sender;
 pub mod dbus_client;
 pub mod signal_cache;
+pub mod worker_pool;
 
 #[cfg(test)]
 mod tests {
