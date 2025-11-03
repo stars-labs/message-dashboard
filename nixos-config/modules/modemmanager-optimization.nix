@@ -46,19 +46,17 @@
       IOSchedulingPriority = 2;
     };
 
-    # ModemManager command line options
-    # --debug enables verbose logging
-    # --test-quick-suspend-resume disables suspend/resume which can cause issues with many modems
-    # --filter-policy=DEFAULT allows broader modem detection
+    # ModemManager environment variables
     environment = {
-      MM_FILTER_POLICY = "DEFAULT";
-      MM_PROBE_TIMEOUT = "120";  # Increase probe timeout to 120 seconds for many modems
+      MM_FILTER = "DEFAULT";  # Filter policy for device detection
+      MM_MAX_MODEMS = "100";  # Maximum modems to handle
     };
 
     # Override the ExecStart to add custom parameters
+    # Only use valid options for ModemManager 1.24.0
     serviceConfig.ExecStart = lib.mkForce [
       "" # Clear the original ExecStart
-      "${pkgs.modemmanager}/sbin/ModemManager --filter-policy=DEFAULT --test-quick-suspend-resume"
+      "${pkgs.modemmanager}/sbin/ModemManager --test-quick-suspend-resume --log-level=INFO"
     ];
 
     # Add a pre-start script to wait for USB devices to settle
