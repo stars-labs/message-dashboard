@@ -18,11 +18,8 @@
     # Include USB optimization module for 100 modems
     ../modules/usb-optimization.nix
 
-    # Include ModemManager optimization for high modem count
-    ../modules/modemmanager-optimization.nix
-
-    # Include ModemManager batch detection for 87+ modems
-    ../modules/modemmanager-batch.nix
+    # Minimal ModemManager configuration (daemon uses direct serial)
+    ../modules/modemmanager-minimal.nix
   ];
 
   # System identification
@@ -607,8 +604,7 @@
   #  randomizedDelaySec = "30min";
   #};
 
-  # ModemManager configuration moved to ../modules/modemmanager-optimization.nix
-  # for better handling of 100+ USB modems
+  # ModemManager managed directly by Rust daemon for better control of 87+ modems
 
   # This value determines the NixOS release compatibility
   system.stateVersion = "25.11";
