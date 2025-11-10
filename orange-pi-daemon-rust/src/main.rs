@@ -64,12 +64,12 @@ async fn main() -> Result<()> {
 
     // Initialize worker pool for parallel modem processing
     let worker_config = WorkerPoolConfig {
-        num_workers: 8,  // 8 parallel workers for optimal performance
-        batch_size: 20,  // Process up to 20 modems per batch
-        modem_timeout: Duration::from_secs(5),
+        num_workers: 4,  // Reduced to 4 workers to avoid overwhelming ModemManager
+        batch_size: 10,  // Reduced batch size for better reliability with 87+ modems
+        modem_timeout: Duration::from_secs(30),  // Increased timeout for ModemManager under load
     };
     let worker_pool = WorkerPool::new(worker_config, modem_manager.clone());
-    info!("👷 Worker pool initialized with 8 parallel workers");
+    info!("👷 Worker pool initialized with 4 parallel workers");
     
     // Cache of valid modems (those with SIM cards)
     let mut valid_modems: HashMap<String, String> = HashMap::new(); // modem_id -> iccid

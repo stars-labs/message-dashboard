@@ -1,13 +1,19 @@
-{ config, lib, pkgs, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 
 with lib;
 
 let
   cfg = config.services.sms-daemon;
-in {
+in
+{
   options.services.sms-daemon = {
     enable = mkEnableOption "SMS Dashboard Daemon for collecting and uploading SMS messages from USB modems";
-    
+
     apiUrl = mkOption {
       type = types.str;
       default = "https://sexy.qzz.io";
@@ -75,7 +81,7 @@ in {
 
     group = mkOption {
       type = types.str;
-      default = "sms-daemon";  # Use dedicated group instead of dialout
+      default = "sms-daemon"; # Use dedicated group instead of dialout
       description = "Group to run the daemon as";
     };
 
@@ -105,13 +111,13 @@ in {
       # Only add to dialout for modem access, nothing else
       extraGroups = [ "dialout" ];
       home = "/var/lib/sms-dashboard";
-      createHome = false;  # Managed by systemd
-      shell = "${pkgs.shadow}/bin/nologin";  # No shell access
+      createHome = false; # Managed by systemd
+      shell = "${pkgs.shadow}/bin/nologin"; # No shell access
       description = "SMS Dashboard Daemon User";
     };
 
     users.groups.${cfg.group} = {
-      gid = null;  # Let system assign
+      gid = null; # Let system assign
     };
 
     # Create working directory with strict permissions
@@ -124,7 +130,10 @@ in {
     # Hardened systemd service
     systemd.services.sms-daemon = {
       description = "SMS Dashboard Daemon";
-      after = [ "network-online.target" "ModemManager.service" ];
+      after = [
+        "network-online.target"
+        "ModemManager.service"
+      ];
       wants = [ "network-online.target" ];
       requires = [ "ModemManager.service" ];
       wantedBy = [ "multi-user.target" ];
@@ -136,10 +145,10 @@ in {
         SMS_MESSAGE_CHECK_INTERVAL = toString cfg.messageCheckIntervalMs;
         SMS_SIGNAL_CHECK_INTERVAL = toString cfg.signalCheckIntervalSeconds;
         SMS_DEVICE_ID = cfg.deviceId;
-        
+
         # Rust logging (info level by default, set to debug for verbose logs)
         RUST_LOG = if cfg.debugBuild then "orange_pi_daemon_rust=debug" else "orange_pi_daemon_rust=info";
-        
+
         # Security: Don't expose sensitive paths
         HOME = "/var/lib/sms-dashboard";
         TMPDIR = "/var/lib/sms-dashboard/tmp";
@@ -151,85 +160,85 @@ in {
           Type = "simple";
           User = cfg.user;
           Group = cfg.group;
-          
+
           # Restart configuration
           Restart = "on-failure";
           RestartSec = "10s";
           # RestartPreventExitStatus = "1";  # Only prevent restart on config errors
           StartLimitIntervalSec = "300";
           StartLimitBurst = "5";
-          
+
           # Working directory
           WorkingDirectory = "/var/lib/sms-dashboard";
-          
+
           # Logging
           StandardOutput = "journal";
           StandardError = "journal";
           SyslogLevel = if cfg.debugBuild then "debug" else "info";
           SyslogIdentifier = "sms-daemon";
-          
+
           # ==========================================================
           # SECURITY HARDENING
           # ==========================================================
-          
+
           # Filesystem protections
           ProtectSystem = "strict";
           ProtectHome = true;
           PrivateTmp = true;
           ProtectProc = "invisible";
           ProcSubset = "pid";
-          
+
           # Only allow access to specific paths
-          ReadWritePaths = [ 
+          ReadWritePaths = [
             "/var/lib/sms-dashboard"
             "/var/log/sms-dashboard"
           ];
-          
+
           # Device access restrictions (only allow modem devices)
           # TODO: Test if PrivateDevices=true works with DeviceAllow whitelist
-          PrivateDevices = true;  # Currently need false for USB modem access
+          PrivateDevices = true; # Currently need false for USB modem access
           DeviceAllow = [
-            "char-usb_device rw"  # USB character devices
-            "/dev/ttyUSB* rw"     # USB serial ports
-            "/dev/cdc-wdm* rw"    # CDC WDM devices for modems
-            "/dev/bus/usb rw"     # USB bus access
+            "char-usb_device rw" # USB character devices
+            "/dev/ttyUSB* rw" # USB serial ports
+            "/dev/cdc-wdm* rw" # CDC WDM devices for modems
+            "/dev/bus/usb rw" # USB bus access
           ];
-          DevicePolicy = "closed";  # Deny all other devices (only effective with PrivateDevices=true)
-          
+          DevicePolicy = "closed"; # Deny all other devices (only effective with PrivateDevices=true)
+
           # Network restrictions
-          PrivateNetwork = false;  # Need network for API
+          PrivateNetwork = false; # Need network for API
           RestrictAddressFamilies = "AF_INET AF_INET6 AF_UNIX";
           IPAccounting = true;
           IPAddressAllow = [
-            "10.171.150.0/24"  # Local network
-            "8.8.8.8/32"       # DNS
-            "8.8.4.4/32"       # DNS
+            "10.171.150.0/24" # Local network
+            "8.8.8.8/32" # DNS
+            "8.8.4.4/32" # DNS
             # Add API server IP if known
           ];
-          
+
           # Resource limits - Increased for 100 modems
-          MemoryMax = "2G";     # Increased from 512M to 2G for 100 modems
+          MemoryMax = "2G"; # Increased from 512M to 2G for 100 modems
           MemorySwapMax = "1G"; # Allow some swap for peak usage
-          CPUQuota = "400%";    # Max 4 cores for parallel processing
-          TasksMax = 512;       # Increased to handle 100+ modems + worker threads
-          
+          CPUQuota = "400%"; # Max 4 cores for parallel processing
+          TasksMax = 512; # Increased to handle 100+ modems + worker threads
+
           # File descriptor limits - Increased for many USB devices
-          LimitNOFILE = 65536;  # Increased for 100 modems (each needs multiple FDs)
-          LimitNPROC = 512;     # Process limit - increased to match TasksMax
-          LimitCORE = 0;        # No core dumps (may contain sensitive data)
-          
+          LimitNOFILE = 65536; # Increased for 100 modems (each needs multiple FDs)
+          LimitNPROC = 512; # Process limit - increased to match TasksMax
+          LimitCORE = 0; # No core dumps (may contain sensitive data)
+
           # Address space limits - Important for Zig memory management
-          LimitAS = "4G";       # Total address space limit
-          LimitDATA = "3G";     # Data segment limit
-          LimitSTACK = "16M";   # Stack size per thread
-          
+          LimitAS = "4G"; # Total address space limit
+          LimitDATA = "3G"; # Data segment limit
+          LimitSTACK = "16M"; # Stack size per thread
+
           # Capability restrictions
           NoNewPrivileges = true;
           CapabilityBoundingSet = [
-            "CAP_NET_RAW"  # For network operations
+            "CAP_NET_RAW" # For network operations
           ];
-          AmbientCapabilities = [];
-          
+          AmbientCapabilities = [ ];
+
           # Kernel protections
           ProtectKernelTunables = true;
           ProtectKernelModules = true;
@@ -237,7 +246,7 @@ in {
           ProtectControlGroups = true;
           ProtectClock = true;
           ProtectHostname = true;
-          
+
           # System call filtering
           SystemCallFilter = [
             "@system-service"
@@ -252,12 +261,12 @@ in {
           ];
           SystemCallErrorNumber = "EPERM";
           SystemCallArchitectures = "native";
-          
+
           # Namespacing
-          PrivateUsers = false;  # Need access to dialout group
+          PrivateUsers = false; # Need access to dialout group
           PrivateMounts = true;
           MountAPIVFS = true;
-          
+
           # Misc security
           RestrictRealtime = true;
           RestrictSUIDSGID = true;
@@ -265,67 +274,72 @@ in {
           LockPersonality = true;
           RestrictNamespaces = true;
           MemoryDenyWriteExecute = true;
-          
+
           # Execution restrictions
           ExecPaths = [
-            "/nix/store"  # Only allow Nix store executables
+            "/nix/store" # Only allow Nix store executables
           ];
           NoExecPaths = [
             "/var"
             "/tmp"
             "/home"
           ];
-          
+
           # Additional sandboxing
           PrivateIPC = true;
           KeyringMode = "private";
           UMask = "0077";
-          
+
           # Notification (for monitoring)
           NotifyAccess = "main";
           # DISABLED: WatchdogSec causes restarts because Zig daemon doesn't implement sd_notify()
           # The daemon doesn't send systemd watchdog keepalive notifications
           # WatchdogSec = "60s";
         }
-        
+
         # Handle API key loading securely
-        (if cfg.apiKeyFile != null then {
-          LoadCredential = "api-key:${cfg.apiKeyFile}";
-          ExecStart = pkgs.writeShellScript "sms-daemon-start" ''
-            # Read API key from systemd credential
-            if [ -f "$CREDENTIALS_DIRECTORY/api-key" ]; then
-              export SMS_API_KEY="$(cat "$CREDENTIALS_DIRECTORY/api-key" | tr -d '\n')"
-            else
-              echo "Error: API key credential not found" >&2
-              exit 1
-            fi
-            
-            # Validate API key format (example: must be 32+ chars)
-            if [ ''${#SMS_API_KEY} -lt 32 ]; then
-              echo "Error: API key appears to be invalid (too short)" >&2
-              exit 1
-            fi
-            
-            exec ${cfg.package}/bin/sms-daemon
-          '';
-        } else {
-          # Fallback to environment variable (less secure)
-          Environment = "SMS_API_KEY=${cfg.apiKey}";
-          ExecStart = "${cfg.package}/bin/sms-daemon";
-        })
+        (
+          if cfg.apiKeyFile != null then
+            {
+              LoadCredential = "api-key:${cfg.apiKeyFile}";
+              ExecStart = pkgs.writeShellScript "sms-daemon-start" ''
+                # Read API key from systemd credential
+                if [ -f "$CREDENTIALS_DIRECTORY/api-key" ]; then
+                  export SMS_API_KEY="$(cat "$CREDENTIALS_DIRECTORY/api-key" | tr -d '\n')"
+                else
+                  echo "Error: API key credential not found" >&2
+                  exit 1
+                fi
+
+                # Validate API key format (example: must be 32+ chars)
+                if [ ''${#SMS_API_KEY} -lt 32 ]; then
+                  echo "Error: API key appears to be invalid (too short)" >&2
+                  exit 1
+                fi
+
+                exec ${cfg.package}/bin/sms-daemon
+              '';
+            }
+          else
+            {
+              # Fallback to environment variable (less secure)
+              Environment = "SMS_API_KEY=${cfg.apiKey}";
+              ExecStart = "${cfg.package}/bin/sms-daemon";
+            }
+        )
       ];
 
       # Include necessary tools in PATH
       path = with pkgs; [
-        modemmanager  # Provides mmcli
+        modemmanager # Provides mmcli
         coreutils
         findutils
         gnugrep
         gnused
-        systemd      # For busctl
-        util-linux   # For logger command in preStart/postStop
+        systemd # For busctl
+        util-linux # For logger command in preStart/postStop
       ];
-      
+
       # Pre-start checks
       preStart = ''
         # Verify ModemManager is running
@@ -333,20 +347,20 @@ in {
           echo "Error: ModemManager is not running" >&2
           exit 1
         fi
-        
+
         # Check for modems
         modem_count=$(mmcli -L 2>/dev/null | grep -c "Modem/" || echo "0")
         echo "Found $modem_count modem(s)"
-        
+
         # Log service start
         logger -t sms-daemon "Starting SMS daemon with $modem_count modem(s)"
       '';
-      
+
       # Post-stop cleanup
       postStop = ''
         # Log service stop
         logger -t sms-daemon "SMS daemon stopped"
-        
+
         # Clean up any temporary files
         rm -rf /var/lib/sms-dashboard/tmp/*
       '';
@@ -354,115 +368,6 @@ in {
 
     # Enable ModemManager and modem support
     networking.modemmanager.enable = true;
-    
-    # USB mode switching for modems
-    services.udev.packages = [ pkgs.usb-modeswitch ];
-    
-    # Kernel modules for USB modems
-    boot.kernelModules = [ 
-      "option"     # USB serial driver for GSM modems
-      "usb_wwan"   # USB wireless WAN driver
-      "cdc_ether"  # CDC Ethernet driver
-      "cdc_ncm"    # CDC NCM driver
-      "cdc_acm"    # CDC ACM driver for modem control
-    ];
-    
-    # Hardened udev rules for modem access with performance optimizations
-    services.udev.extraRules = ''
-      # PERFORMANCE: Disable USB autosuspend for all USB hubs (critical for 100 modems)
-      ACTION=="add", SUBSYSTEM=="usb", ATTR{bDeviceClass}=="09", ATTR{power/autosuspend}="-1"
-      
-      # PERFORMANCE: Disable autosuspend for all modem devices
-      ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="12d1|2c7c|05c6|1a86", ATTR{power/autosuspend}="-1"
-      ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="12d1|2c7c|05c6|1a86", ATTR{power/control}="on"
-      
-      # PERFORMANCE: Increase USB device timeout for stability with many devices
-      ACTION=="add", SUBSYSTEM=="usb", ATTR{power/autosuspend_delay_ms}="60000"
-      
-      # Security: Tag modem devices for access control
-      SUBSYSTEM=="tty", ATTRS{idVendor}=="12d1|2c7c|05c6|1a86", TAG+="systemd", TAG+="sms-modem"
-      SUBSYSTEM=="usb", ATTRS{idVendor}=="12d1|2c7c|05c6|1a86", TAG+="systemd", TAG+="sms-modem"
-      
-      # Set strict permissions for modem devices
-      SUBSYSTEM=="tty", TAG=="sms-modem", GROUP="dialout", MODE="0660"
-      SUBSYSTEM=="usb", TAG=="sms-modem", GROUP="dialout", MODE="0660"
-      
-      # Huawei E3372 and similar modems (switch from CD-ROM mode to modem mode)
-      ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="12d1", ATTRS{idProduct}=="1f01", \
-        RUN+="${pkgs.usb-modeswitch}/bin/usb_modeswitch -v 12d1 -p 1f01 -M '55534243123456780000000000000011062000000100000000000000000000'"
-      
-      # Quectel EC25 LTE modem
-      ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="2c7c", ATTRS{idProduct}=="0125", \
-        RUN+="${pkgs.usb-modeswitch}/bin/usb_modeswitch -v 2c7c -p 0125"
-      
-      # Generic Qualcomm modems
-      ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="05c6", ATTRS{idProduct}=="9000|9001|9002|9003|9004|9005", \
-        RUN+="${pkgs.usb-modeswitch}/bin/usb_modeswitch -v 05c6 -p %s{idProduct}"
-      
-      # Log modem connections for audit
-      ACTION=="add", SUBSYSTEM=="usb", TAG=="sms-modem", \
-        RUN+="${pkgs.util-linux}/bin/logger -t modem-audit 'Modem connected: $attr{idVendor}:$attr{idProduct} on $kernel'"
-      
-      ACTION=="remove", SUBSYSTEM=="usb", TAG=="sms-modem", \
-        RUN+="${pkgs.util-linux}/bin/logger -t modem-audit 'Modem disconnected: $attr{idVendor}:$attr{idProduct} from $kernel'"
-    '';
 
-    # Restrictive PolicyKit rules for ModemManager access
-    security.polkit.extraConfig = ''
-      polkit.addRule(function(action, subject) {
-        // Define allowed ModemManager actions for SMS daemon
-        var allowed_actions = [
-          "org.freedesktop.ModemManager1.Device.Control",
-          "org.freedesktop.ModemManager1.Messaging",
-          "org.freedesktop.ModemManager1.Contacts",
-          "org.freedesktop.ModemManager1.SIM"
-        ];
-        
-        // Check if action is allowed for sms-daemon user
-        if (subject.user == "${cfg.user}") {
-          // Log all ModemManager access attempts
-          polkit.log("ModemManager access attempt: " + action.id + " by " + subject.user);
-          
-          // Allow specific actions
-          for (var i = 0; i < allowed_actions.length; i++) {
-            if (action.id == allowed_actions[i]) {
-              polkit.log("Granted: " + action.id + " to " + subject.user);
-              return polkit.Result.YES;
-            }
-          }
-          
-          // Deny all other ModemManager actions
-          if (action.id.indexOf("org.freedesktop.ModemManager1.") == 0) {
-            polkit.log("Denied: " + action.id + " to " + subject.user);
-            return polkit.Result.NO;
-          }
-        }
-        
-        // Default policy
-        return polkit.Result.NOT_HANDLED;
-      });
-    '';
-    
-    # Monitoring and alerting for the daemon
-    services.prometheus.exporters.systemd = mkIf config.services.prometheus.enable {
-      enable = true;
-      extraFlags = [
-        "--systemd.unit-include=sms-daemon.service"
-      ];
-    };
-    
-    # Log rotation for SMS daemon logs
-   # services.logrotate.settings.sms-daemon = {
-   #   files = "/var/log/sms-dashboard/*.log";
-   #   su = "${cfg.user} ${cfg.group}";
-   #   daily = true;
-   #   rotate = 7;
-   #   compress = true;
-   #   delaycompress = true;
-   #   missingok = true;
-   #   notifempty = true;
-   #   create = "0640 ${cfg.user} ${cfg.group}";
-   #   postrotate = "systemctl reload sms-daemon 2>/dev/null || true";
-   # };
   };
 }
