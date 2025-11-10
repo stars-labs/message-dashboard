@@ -4,6 +4,8 @@ use crate::dbus_client::DBusClient;
 use crate::signal_cache::SignalCache;
 use chrono::TimeZone;
 use std::sync::Arc;
+use std::time::Duration;
+use tokio::time::timeout;
 use tracing::{debug, info};
 
 #[derive(Clone)]
@@ -17,6 +19,22 @@ impl ModemManager {
         Self {
             dbus_client: Arc::new(DBusClient::new()),
             signal_cache: Arc::new(SignalCache::new(30)), // 30 second cache TTL
+        }
+    }
+
+    /// Execute mmcli command with timeout to prevent hanging
+    async fn execute_mmcli_with_timeout(&self, args: &[&str]) -> Result<std::process::Output> {
+        const MMCLI_TIMEOUT: Duration = Duration::from_secs(10); // 10 second timeout for mmcli commands
+
+        let mut cmd = tokio::process::Command::new("mmcli");
+        for arg in args {
+            cmd.arg(arg);
+        }
+
+        match timeout(MMCLI_TIMEOUT, cmd.output()).await {
+            Ok(Ok(output)) => Ok(output),
+            Ok(Err(e)) => Err(anyhow::anyhow!("Failed to execute mmcli: {}", e)),
+            Err(_) => Err(anyhow::anyhow!("mmcli command timed out after {:?}", MMCLI_TIMEOUT)),
         }
     }
     
@@ -119,9 +137,7 @@ impl ModemManager {
     
     // MMCLI implementations
     async fn list_modems_mmcli(&self) -> Result<Vec<String>> {
-        let output = tokio::process::Command::new("mmcli")
-            .arg("-L")
-            .output()
+        let output = self.execute_mmcli_with_timeout(&["-L"])
             .await
             .context("Failed to list modems")?;
         
@@ -141,10 +157,7 @@ impl ModemManager {
     /// Get ICCID for a modem
     async fn get_iccid_mmcli(&self, modem_id: &str) -> Result<Option<String>> {
         // First get SIM path
-        let output = tokio::process::Command::new("mmcli")
-            .arg("-m")
-            .arg(modem_id)
-            .output()
+        let output = self.execute_mmcli_with_timeout(&["-m", modem_id])
             .await?;
         
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -162,10 +175,7 @@ impl ModemManager {
         };
         
         // Query SIM for ICCID
-        let sim_output = tokio::process::Command::new("mmcli")
-            .arg("-i")
-            .arg(sim_id)
-            .output()
+        let sim_output = self.execute_mmcli_with_timeout(&["-i", sim_id])
             .await?;
         
         let sim_stdout = String::from_utf8_lossy(&sim_output.stdout);
@@ -182,10 +192,7 @@ impl ModemManager {
     
     /// Get phone number
     async fn get_phone_number_mmcli(&self, modem_id: &str) -> Result<Option<String>> {
-        let output = tokio::process::Command::new("mmcli")
-            .arg("-m")
-            .arg(modem_id)
-            .output()
+        let output = self.execute_mmcli_with_timeout(&["-m", modem_id])
             .await?;
         
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -203,10 +210,7 @@ impl ModemManager {
     
     /// Get signal quality
     async fn get_signal_quality_mmcli(&self, modem_id: &str) -> Result<SignalData> {
-        let output = tokio::process::Command::new("mmcli")
-            .arg("-m")
-            .arg(modem_id)
-            .output()
+        let output = self.execute_mmcli_with_timeout(&["-m", modem_id])
             .await?;
         
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -229,11 +233,7 @@ impl ModemManager {
     /// Get new SMS messages
     pub async fn get_new_messages(&self, modem_id: &str, iccid: &str) -> Result<Vec<Message>> {
         // List SMS
-        let output = tokio::process::Command::new("mmcli")
-            .arg("-m")
-            .arg(modem_id)
-            .arg("--messaging-list-sms")
-            .output()
+        let output = self.execute_mmcli_with_timeout(&["-m", modem_id, "--messaging-list-sms"])
             .await?;
         
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -255,12 +255,7 @@ impl ModemManager {
     
     /// Read a specific SMS
     async fn read_sms(&self, modem_id: &str, sms_id: &str, iccid: &str) -> Result<Option<Message>> {
-        let output = tokio::process::Command::new("mmcli")
-            .arg("-m")
-            .arg(modem_id)
-            .arg("--sms")
-            .arg(sms_id)
-            .output()
+        let output = self.execute_mmcli_with_timeout(&["-m", modem_id, "--sms", sms_id])
             .await?;
         
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -317,12 +312,7 @@ impl ModemManager {
     
     /// Delete SMS after processing
     pub async fn delete_sms(&self, modem_id: &str, sms_id: &str) -> Result<()> {
-        tokio::process::Command::new("mmcli")
-            .arg("-m")
-            .arg(modem_id)
-            .arg("--messaging-delete-sms")
-            .arg(sms_id)
-            .output()
+        self.execute_mmcli_with_timeout(&["-m", modem_id, "--messaging-delete-sms", sms_id])
             .await?;
         
         Ok(())
@@ -330,10 +320,7 @@ impl ModemManager {
     
     /// Get device details (IMEI, manufacturer, model, etc.)
     async fn get_device_details_mmcli(&self, modem_id: &str) -> Result<(String, Option<String>, Option<String>, Option<String>, Option<String>)> {
-        let output = tokio::process::Command::new("mmcli")
-            .arg("-m")
-            .arg(modem_id)
-            .output()
+        let output = self.execute_mmcli_with_timeout(&["-m", modem_id])
             .await?;
         
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -367,10 +354,7 @@ impl ModemManager {
     
     /// Get operator name
     async fn get_operator_mmcli(&self, modem_id: &str) -> Result<Option<String>> {
-        let output = tokio::process::Command::new("mmcli")
-            .arg("-m")
-            .arg(modem_id)
-            .output()
+        let output = self.execute_mmcli_with_timeout(&["-m", modem_id])
             .await?;
         
         let stdout = String::from_utf8_lossy(&output.stdout);
