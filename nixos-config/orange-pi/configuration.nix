@@ -16,10 +16,7 @@
     ../modules/sms-daemon.nix
 
     # Include USB optimization module for 100 modems
-    ../modules/usb-optimization.nix
-
-    # Minimal ModemManager configuration (daemon uses direct serial)
-    ../modules/modemmanager-minimal.nix
+    #../modules/usb-optimization.nix
   ];
 
   # System identification

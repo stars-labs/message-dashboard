@@ -24,7 +24,7 @@ impl Default for WorkerPoolConfig {
         Self {
             num_workers: 8,           // 8 parallel workers (like Zig)
             batch_size: 20,            // Process up to 20 modems per batch
-            modem_timeout: Duration::from_secs(5), // 5 second timeout per modem
+            modem_timeout: Duration::from_secs(30), // 30 second timeout per modem (increased for 87+ modems)
         }
     }
 }
