@@ -22,9 +22,9 @@ pub struct WorkerPoolConfig {
 impl Default for WorkerPoolConfig {
     fn default() -> Self {
         Self {
-            num_workers: 4,           // Reduced to 4 workers to avoid overwhelming ModemManager
-            batch_size: 10,            // Reduced batch size for better reliability with 87+ modems
-            modem_timeout: Duration::from_secs(30), // 30 second timeout per modem (increased for 87+ modems)
+            num_workers: 2,           // Further reduced to 2 workers for 92+ modems (50% success rate with 4)
+            batch_size: 5,            // Smaller batch size to reduce concurrent load
+            modem_timeout: Duration::from_secs(45), // 45 second timeout to allow slower modems to respond
         }
     }
 }
@@ -372,9 +372,9 @@ mod tests {
     #[test]
     fn test_worker_pool_config_default() {
         let config = WorkerPoolConfig::default();
-        assert_eq!(config.num_workers, 4);  // Reduced to 4 workers
-        assert_eq!(config.batch_size, 10);  // Reduced batch size
-        assert_eq!(config.modem_timeout, Duration::from_secs(30));  // Increased timeout
+        assert_eq!(config.num_workers, 2);  // Further reduced to 2 workers for 92+ modems
+        assert_eq!(config.batch_size, 5);  // Smaller batch size
+        assert_eq!(config.modem_timeout, Duration::from_secs(45));  // Increased timeout for slower modems
     }
 
     #[test]
