@@ -63,13 +63,10 @@ async fn main() -> Result<()> {
     let mut retry_manager = RetryManager::new(3, 1000); // 3 retries, 1s base delay
 
     // Initialize worker pool for parallel modem processing
-    let worker_config = WorkerPoolConfig {
-        num_workers: 4,  // Reduced to 4 workers to avoid overwhelming ModemManager
-        batch_size: 10,  // Reduced batch size for better reliability with 87+ modems
-        modem_timeout: Duration::from_secs(30),  // Increased timeout for ModemManager under load
-    };
-    let worker_pool = WorkerPool::new(worker_config, modem_manager.clone());
-    info!("👷 Worker pool initialized with 4 parallel workers");
+    // Using default config which has been tuned for 92+ modems
+    let worker_config = WorkerPoolConfig::default();
+    let worker_pool = WorkerPool::new(worker_config.clone(), modem_manager.clone());
+    info!("👷 Worker pool initialized with {} parallel workers", worker_config.num_workers);
     
     // Cache of valid modems (those with SIM cards)
     let mut valid_modems: HashMap<String, String> = HashMap::new(); // modem_id -> iccid
