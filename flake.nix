@@ -179,7 +179,7 @@
           # Rust SMS daemon - memory-safe replacement
           orange-pi-daemon-rust = pkgs.rustPlatform.buildRustPackage {
             pname = "orange-pi-daemon-rust";
-            version = "2.0.1";
+            version = "2.0.2";
             src = ./orange-pi-daemon-rust;
             
             cargoLock = {
