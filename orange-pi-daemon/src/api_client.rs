@@ -23,7 +23,7 @@ impl ApiClient {
     }
     
     /// Upload devices using normalized schema with sync mode
-    /// This is the NEW preferred method matching Zig daemon architecture
+    /// This is the preferred method for device synchronization
     pub async fn upload_devices(
         &self,
         modems: &[Modem],
@@ -106,28 +106,50 @@ impl ApiClient {
         Ok(())
     }
     
-    /// Upload messages
+    /// Upload messages with proper batching to avoid overwhelming the API
     pub async fn upload_messages(&self, messages: &[Message]) -> Result<()> {
         if messages.is_empty() {
             return Ok(());
         }
-        
+
+        const BATCH_SIZE: usize = 50; // Match the server's internal batch size
         let url = format!("{}/api/control/messages", self.config.api_url);
-        
-        // Upload messages in batch
-        let response = self.client
-            .post(&url)
-            .header("x-api-key", &self.config.api_key)
-            .json(&json!({ "messages": messages }))
-            .send()
-            .await
-            .context("Failed to upload messages")?;
-        
-        if !response.status().is_success() {
-            anyhow::bail!("API returned error: {}", response.status());
+
+        // Process messages in batches to avoid overwhelming the API
+        let total = messages.len();
+        let mut uploaded = 0;
+
+        for (batch_num, chunk) in messages.chunks(BATCH_SIZE).enumerate() {
+            info!("📤 Uploading batch {}/{} ({} messages)",
+                batch_num + 1,
+                (total + BATCH_SIZE - 1) / BATCH_SIZE,
+                chunk.len()
+            );
+
+            // Upload this batch
+            let response = self.client
+                .post(&url)
+                .header("x-api-key", &self.config.api_key)
+                .json(&json!({ "messages": chunk }))
+                .send()
+                .await
+                .context(format!("Failed to upload message batch {}", batch_num + 1))?;
+
+            if !response.status().is_success() {
+                let status = response.status();
+                let body = response.text().await.unwrap_or_else(|_| String::from("(no body)"));
+                anyhow::bail!("API returned error for batch {}: {} - {}", batch_num + 1, status, body);
+            }
+
+            uploaded += chunk.len();
+
+            // Small delay between batches to avoid rate limiting
+            if batch_num < messages.chunks(BATCH_SIZE).len() - 1 {
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            }
         }
-        
-        info!("✅ Uploaded {} messages", messages.len());
+
+        info!("✅ Successfully uploaded {} messages in {} batches", uploaded, (total + BATCH_SIZE - 1) / BATCH_SIZE);
         Ok(())
     }
     

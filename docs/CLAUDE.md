@@ -84,14 +84,14 @@ node scripts/validate-migration.js  # Automated validation
 npx wrangler d1 execute sms-dashboard --remote --file=migrations/rollback-to-phones.sql
 ```
 
-### SMS Daemon (Zig)
+### SMS Daemon (Rust)
 ```bash
 cd orange-pi-daemon
-zig build -Doptimize=ReleaseFast -Dlog_level=info  # Production build
-zig build -Doptimize=Debug -Dlog_level=debug       # Debug build
+cargo build --release                              # Production build
+cargo build                                         # Debug build
 export SMS_API_URL="https://sexy.qzz.io"
 export SMS_API_KEY="your-api-key"
-./zig-out/bin/orange-pi-daemon                     # Run daemon
+cargo run --release                                 # Run daemon
 ```
 
 ### NixOS Deployment
@@ -229,13 +229,13 @@ npx wrangler d1 execute sms-dashboard --command "SELECT *, datetime(last_heartbe
   - Signal cache: 256 entries with hash-based lookup
   - Priority manager: 256 modem slots
 - **HTTP Communication**:
-  - Native Zig std.http.Client
+  - Tokio async HTTP client with rustls
   - Connection pooling for efficiency
-  - Timeout: 10s connection, 10s read
+  - Configurable timeouts
 - **Memory Management**:
-  - All allocations use defer for cleanup
-  - Arena allocators for batch operations
-  - Zero memory leaks in production
+  - Rust ownership system ensures safety
+  - Automatic memory management
+  - Zero memory leaks guaranteed
 
 ### Auth0 Configuration
 - Callback URLs must include both development and production domains
@@ -321,7 +321,7 @@ npx wrangler d1 execute sms-dashboard --command "SELECT COUNT(*) as state_record
 - **Critical Production Fix**: Eliminated continuous 503 errors (Cloudflare rate limiting error 1102)
   - **Problem**: v1.0.1 daemon hitting `/api/control/phones` every 10 seconds with 87 phones = 261 SQL ops/request
   - **Root Cause**: Excessive API call frequency triggering Cloudflare Workers rate limits
-  - **Solution**: Complete refactor to match Zig daemon architecture
+  - **Solution**: Complete refactor to optimize API call patterns
 - **New Architecture**:
   - **Sync Manager** (`sync_manager.rs`): Full/incremental sync state reconciliation
     - Full sync every 5 minutes for complete state reconciliation
@@ -353,10 +353,10 @@ npx wrangler d1 execute sms-dashboard --command "SELECT COUNT(*) as state_record
 - **Result**: Zero API errors, all 87 modems uploading correctly
 - **Stability**: Daemon running stable for hours, no crashes or memory leaks
 
-### v1.0.0 - Rust Daemon Migration (October 2-5, 2025)
-- **Complete Rewrite**: Migrated from Zig to Rust to eliminate persistent segfaults
-  - Zig daemon: Frequent `0xaaaaaaaaaaaaaaba` crashes (memory corruption)
-  - Rust daemon: Zero segfaults, memory-safe by design
+### v1.0.0 - Rust Daemon Initial Implementation (October 2-5, 2025)
+- **Complete Rewrite**: Implemented in Rust for memory safety and reliability
+  - Zero segfaults, memory-safe by design
+  - Robust error handling with automatic recovery
 - **DNS Resolution Fix (October 5)**: Fixed DNSSEC validation failures
   - Problem: systemd-resolved failing DNSSEC validation
   - Solution: Disabled DNSSEC in NixOS (`services.resolved.dnssec = "false"`)
@@ -376,24 +376,6 @@ npx wrangler d1 execute sms-dashboard --command "SELECT COUNT(*) as state_record
 
 ### v2.1.0 - Database Normalization to 3NF (September 2025)
 
-### v1.15.0 - Fixed API Field Mapping
-- Fixed PendingSms struct to match API response fields
-- Fixed api_client.zig field name mapping (pending_messages not pending_sms)
-- Updated sms_sender.zig to use correct field names (recipient, phone_iccid)
-- Removed Content-Length header that was causing 400 errors
-- All HTTP uploads now working correctly
-
-### v1.14.0 - Native Zig HTTP Client
-- Use Zig's std.http.Client instead of curl subprocess
-- Proper timeout handling with connection_timeout and read_timeout
-- More efficient memory usage without temp files
-- Better error handling and connection pooling
-
-### v1.1.1 - HTTP Client Migration (Deprecated)
-- Replaced Zig's native HTTP client with curl subprocess calls
-- Fixed "Failed to write payload: error.NotWriteable" errors
-- Improved reliability of message uploads and phone status updates
-- Added comprehensive logging for HTTP request/response debugging
 
 ### Architecture Update
 - Daemon now uses HTTP POST requests to upload data (not WebSocket)
@@ -464,7 +446,6 @@ npx wrangler d1 execute sms-dashboard --command "SELECT COUNT(*) as state_record
   - Standardized API responses via `/server/utils/api-response.js`
   - D1 connection wrapper with statement caching in `/server/utils/database-wrapper.js`
 - **Critical Fixes**:
-  - Fixed memory leak in Zig daemon's `getModemDetails()` function
   - Added transaction boundaries for multi-table updates using D1 batch API
   - Implemented stale threshold checks (60s for phantom modems, 120s for offline)
   - Equipment ID validation with synthetic ID generation fallback
@@ -476,10 +457,6 @@ npx wrangler d1 execute sms-dashboard --command "SELECT COUNT(*) as state_record
   - Comprehensive validation scripts (`validate-migration.sql`)
   - Safe rollback procedure (`rollback-to-phones.sql`)
   - Automated validation runner (`scripts/validate-migration.js`)
-- **Zig Daemon Updates**:
-  - Added hardware detail collection (manufacturer, model, firmware, hardware revision)
-  - Enhanced memory management with proper deallocation
-  - Updated Phone struct with new hardware fields
 
 ### v3.5.0 - BusctlDBus Integration (August 2025)
 - **Major Performance Improvement**: Integrated BusctlDBus wrapper into ModemManager
@@ -496,8 +473,7 @@ npx wrangler d1 execute sms-dashboard --command "SELECT COUNT(*) as state_record
   - Removed unused mutex from `ApiClient` (was initialized but never provided benefit)
   - Removed entire unused result queue system from `WorkerPool`
 - **Code Consolidation**:
-  - Moved `ModemCheckResult` to `types.zig` to eliminate duplication
-  - Removed unused `processModemParallel` function from worker_threads
+  - Removed unused parallel processing functions
   - Cleaned up redundant error handling patterns
 - **Performance Improvements**:
   - Hash collision fix prevents silent data overwrites

@@ -119,7 +119,7 @@
         }:
         let
           # SMS daemon version - single source of truth
-          daemonVersion = "5.2.0"; # Fix fake MODEM_ entries + watchdog keepalive
+          daemonVersion = "6.0.0"; # SQLite message queue + reliable SMS deletion
 
           # Rust SMS daemon - the only daemon implementation
           sms-daemon = pkgs.rustPlatform.buildRustPackage {

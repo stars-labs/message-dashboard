@@ -57,6 +57,7 @@ pub struct ModemResult {
     pub phone: Option<Phone>,
     pub sim: Option<Sim>,
     pub messages: Vec<Message>,
+    pub messages_with_paths: Vec<MessageWithPath>,  // Track SMS paths for deletion
     pub error: Option<String>,
 }
 
@@ -144,6 +145,7 @@ impl WorkerPool {
                                 phone: None,
                                 sim: None,
                                 messages: vec![],
+                                messages_with_paths: vec![],
                                 error: Some(e.to_string()),
                             }
                         }
@@ -158,6 +160,7 @@ impl WorkerPool {
                                 phone: None,
                                 sim: None,
                                 messages: vec![],
+                                messages_with_paths: vec![],
                                 error: Some("Timeout".to_string()),
                             }
                         }
@@ -228,6 +231,7 @@ impl WorkerPool {
                 phone: None,
                 sim: None,
                 messages: vec![],
+                messages_with_paths: vec![],
                 error: Some("No SIM card".to_string()),
             });
         }
@@ -251,6 +255,7 @@ impl WorkerPool {
                     phone: None,
                     sim: None,
                     messages: vec![],
+                    messages_with_paths: vec![],
                     error: Some("No valid IMEI".to_string()),
                 });
             }
@@ -274,11 +279,16 @@ impl WorkerPool {
             .await
             .unwrap_or(None);
 
-        // Get messages
-        let messages = modem_manager
-            .get_new_messages(&modem_id, &iccid)
+        // Get messages with paths for later deletion
+        let messages_with_paths = modem_manager
+            .get_new_messages_with_paths(&modem_id, &iccid)
             .await
             .unwrap_or_default();
+
+        // Extract just the messages for the result
+        let messages: Vec<Message> = messages_with_paths.iter()
+            .map(|m| m.message.clone())
+            .collect();
 
         // Build Phone struct
         let phone = Phone {
@@ -324,6 +334,7 @@ impl WorkerPool {
             phone: Some(phone),
             sim: Some(sim),
             messages,
+            messages_with_paths,
             error: None,
         })
     }

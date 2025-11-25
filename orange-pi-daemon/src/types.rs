@@ -16,6 +16,14 @@ pub struct Message {
     pub direction: String, // "received" or "sent"
 }
 
+// Internal structure for tracking messages with their SMS paths
+#[derive(Debug, Clone)]
+pub struct MessageWithPath {
+    pub message: Message,
+    pub modem_id: String,
+    pub sms_path: String,  // D-Bus path for deletion after upload
+}
+
 // Normalized modem data (hardware) - matches server schema
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Modem {
