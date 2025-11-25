@@ -17,7 +17,7 @@ A real-time SMS management dashboard with multi-SIM support, built with Svelte a
 - **Reduced Lock Contention**: Separate tables minimize concurrent access conflicts
 
 ### Enhanced Reliability
-- **Memory Leak Fixes**: Resolved Zig daemon memory management issues
+- **Memory Safety**: Rust implementation with guaranteed memory safety
 - **Stale Detection**: Automatic cleanup of phantom/disconnected modems
 - **Equipment ID Validation**: Synthetic ID generation for modems without valid IMEI
 - **Comprehensive Error Handling**: Graceful degradation and detailed error reporting
@@ -42,9 +42,9 @@ The SMS Dashboard system consists of three main components working together:
 │ └────────┬────────┘ │     │ │ - /messages/*    │ │     │ │ - WebSocket │ │
 │          │          │     │ └────────┬─────────┘ │     │ └──────┬──────┘ │
 │ ┌────────▼────────┐ │     │          │           │     │        │        │
-│ │ Zig Daemon v2.0 │ │     │ ┌────────▼─────────┐ │     │        │        │
+│ │ Rust Daemon     │ │     │ ┌────────▼─────────┐ │     │        │        │
 │ │ - Hardware Info │ │────▶│ │ D1 Database      │ │◀────│        │        │
-│ │ - Memory Mgmt   │ │ API │ │ - modems table   │ │ WS/ │        │        │
+│ │ - Memory Safe   │ │ API │ │ - modems table   │ │ WS/ │        │        │
 │ │ - Batch Upload  │ │ Key │ │ - sims table     │ │ SSE │        │        │
 │ └─────────────────┘ │     │ │ - modem_state    │ │     │        │        │
 │                     │     │ │ - daemon_health  │ │     │        │        │
@@ -83,13 +83,13 @@ message-dashboard/
 │   ├── flake.lock            # Locked dependencies
 │   └── modules/              # NixOS modules
 │       └── sms-dashboard.nix # SMS daemon service definition
-├── orange-pi-daemon/         # Zig SMS collection daemon
+├── orange-pi-daemon/         # Rust SMS collection daemon
 │   ├── src/                  # Source code
-│   │   ├── main.zig          # Main entry point
-│   │   ├── modem.zig         # ModemManager interface
-│   │   ├── api_client.zig    # HTTP API client
-│   │   └── sms_sender.zig    # SMS sending logic
-│   └── build.zig             # Zig build configuration
+│   │   ├── main.rs           # Main entry point
+│   │   ├── modem_manager.rs  # ModemManager interface
+│   │   ├── api_client.rs     # HTTP API client
+│   │   └── sms_sender.rs     # SMS sending logic
+│   └── Cargo.toml            # Rust build configuration
 ├── scripts/                  # System-level scripts (modem reset, etc.)
 │   ├── fix-modem-24.sh       # Fix specific modem issues
 │   └── reset-problematic-modems.sh  # Auto-reset problematic modems

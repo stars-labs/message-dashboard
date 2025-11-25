@@ -227,7 +227,7 @@ in
           LimitNPROC = 512; # Process limit - increased to match TasksMax
           LimitCORE = 0; # No core dumps (may contain sensitive data)
 
-          # Address space limits - Important for Zig memory management
+          # Address space limits - Important for memory management
           LimitAS = "4G"; # Total address space limit
           LimitDATA = "3G"; # Data segment limit
           LimitSTACK = "16M"; # Stack size per thread
@@ -292,9 +292,8 @@ in
 
           # Notification (for monitoring)
           NotifyAccess = "main";
-          # DISABLED: WatchdogSec causes restarts because Zig daemon doesn't implement sd_notify()
-          # The daemon doesn't send systemd watchdog keepalive notifications
-          # WatchdogSec = "60s";
+          # The Rust daemon implements sd_notify() for proper systemd integration
+          WatchdogSec = "60s";
         }
 
         # Handle API key loading securely

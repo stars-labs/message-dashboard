@@ -33,14 +33,14 @@ repos:
         pass_filenames: false
         files: sms-dashboard/package\.json$
 
-  # Zig formatting and checks
+  # Rust formatting and checks
   - repo: local
     hooks:
-      - id: zig-fmt
-        name: Zig Format
-        entry: bash -c 'cd orange-pi-daemon && zig fmt --check src/'
+      - id: rust-fmt
+        name: Rust Format
+        entry: bash -c 'cd orange-pi-daemon && cargo fmt --check'
         language: system
-        files: \.zig$
+        files: \.rs$
 
   # Check for large files that might contain data dumps
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -74,7 +74,7 @@ repos:
     rev: v1.5.4
     hooks:
       - id: insert-license
-        files: \.(js|jsx|ts|tsx|zig)$
+        files: \.(js|jsx|ts|tsx|rs)$
         args:
           - --license-filepath
           - .license-header.txt

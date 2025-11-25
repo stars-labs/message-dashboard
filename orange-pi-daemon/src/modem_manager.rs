@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use crate::types::*;
+use crate::types::{Message, MessageWithPath, SignalData};
 use crate::dbus_client::DBusClient;
 use crate::signal_cache::SignalCache;
 use std::sync::Arc;
@@ -108,31 +108,44 @@ impl ModemManager {
         self.dbus_client.get_operator(modem_id).await
     }
 
-    /// Get new SMS messages (D-Bus only)
-    pub async fn get_new_messages(&self, modem_id: &str, iccid: &str) -> Result<Vec<Message>> {
+    /// Get new SMS messages with paths (D-Bus only)
+    /// Returns messages WITH their SMS paths for deletion after successful upload
+    pub async fn get_new_messages_with_paths(&self, modem_id: &str, iccid: &str) -> Result<Vec<MessageWithPath>> {
         // Use native D-Bus client to list and read SMS
         if let Some(native) = self.dbus_client.native_client() {
             let sms_messages = native.list_sms(modem_id).await?;
 
-            let mut messages = Vec::new();
+            let mut messages_with_paths = Vec::new();
             for sms in sms_messages {
-                messages.push(Message {
+                let message = Message {
                     phone_iccid: iccid.to_string(),
                     phone_number: sms.number,
                     content: sms.text,
                     timestamp: self.normalize_timestamp(&sms.timestamp)?,
                     direction: "received".to_string(),
+                };
+
+                messages_with_paths.push(MessageWithPath {
+                    message,
+                    modem_id: modem_id.to_string(),
+                    sms_path: sms.path.clone(),
                 });
 
-                // Delete after reading
-                let _ = native.delete_sms(modem_id, &sms.path).await;
+                // DO NOT DELETE HERE - will delete after successful upload
             }
 
-            Ok(messages)
+            Ok(messages_with_paths)
         } else {
             // No D-Bus available - cannot read messages
             Err(anyhow!("D-Bus is required for SMS operations"))
         }
+    }
+
+    /// Get new SMS messages (D-Bus only) - DEPRECATED, use get_new_messages_with_paths
+    pub async fn get_new_messages(&self, modem_id: &str, iccid: &str) -> Result<Vec<Message>> {
+        // For backward compatibility, return just messages without paths
+        let messages_with_paths = self.get_new_messages_with_paths(modem_id, iccid).await?;
+        Ok(messages_with_paths.into_iter().map(|m| m.message).collect())
     }
 
     /// Delete SMS after processing (D-Bus only)

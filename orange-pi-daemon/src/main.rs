@@ -14,6 +14,7 @@ use orange_pi_daemon_rust::retry_manager::RetryManager;
 use orange_pi_daemon_rust::sms_sender::SmsSender;
 use orange_pi_daemon_rust::worker_pool::{WorkerPool, WorkerPoolConfig};
 use orange_pi_daemon_rust::benchmark::PerformanceBenchmark;
+use orange_pi_daemon_rust::message_store::MessageStore;
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)] // Multi-threaded for concurrent modem processing
 async fn main() -> Result<()> {
@@ -52,6 +53,12 @@ async fn main() -> Result<()> {
     // Initialize components
     let modem_manager = Arc::new(ModemManager::new().await);
     let api_client = ApiClient::new(config.clone());
+
+    // Initialize message store with SQLite database
+    let db_path = std::env::var("MESSAGE_DB_PATH")
+        .unwrap_or_else(|_| "/var/lib/sms-daemon/messages.db".to_string());
+    let message_store = Arc::new(MessageStore::new(&db_path)?);
+    info!("📊 Message store initialized at: {}", db_path);
 
     // Initialize SMS sender
     let mut sms_sender = SmsSender::new(api_client.clone(), modem_manager.clone());
@@ -151,9 +158,23 @@ async fn main() -> Result<()> {
                         }
                     }
 
-                    // Collect messages
-                    if !result.messages.is_empty() {
-                        all_messages.extend(result.messages);
+                    // Store messages with paths in local database FIRST
+                    if !result.messages_with_paths.is_empty() {
+                        let store_clone = message_store.clone();
+                        for msg_with_path in &result.messages_with_paths {
+                            match store_clone.store_message(&msg_with_path.message, &msg_with_path.modem_id, &msg_with_path.sms_path) {
+                                Ok(true) => {
+                                    debug!("Stored new message from ICCID: {}", msg_with_path.message.phone_iccid);
+                                    all_messages.push(msg_with_path.message.clone());
+                                }
+                                Ok(false) => {
+                                    debug!("Duplicate message skipped from ICCID: {}", msg_with_path.message.phone_iccid);
+                                }
+                                Err(e) => {
+                                    error!("Failed to store message in database: {}", e);
+                                }
+                            }
+                        }
                     }
 
                     // Collect phone data
@@ -194,37 +215,72 @@ async fn main() -> Result<()> {
             }
         }
         
-        // Filter out invalid messages and upload if any valid ones found
-        if !all_messages.is_empty() {
-            let total_count = all_messages.len();
+        // Process queued messages for upload (every cycle)
+        // Get pending messages from the database
+        let store_clone = message_store.clone();
+        match store_clone.get_pending_messages(100) {
+            Ok(pending_messages) if !pending_messages.is_empty() => {
+                let message_ids: Vec<i64> = pending_messages.iter().map(|(id, _)| *id).collect();
+                let messages: Vec<Message> = pending_messages.into_iter().map(|(_, msg)| msg).collect();
 
-            // Filter out messages with missing or empty content
-            let valid_messages: Vec<Message> = all_messages.into_iter()
-                .filter(|msg| {
-                    if msg.content.trim().is_empty() {
-                        warn!("⚠️  Skipping message with empty content from ICCID: {}", msg.phone_iccid);
-                        false
-                    } else {
-                        true
-                    }
-                })
-                .collect();
-
-            if !valid_messages.is_empty() {
-                let filtered_count = total_count - valid_messages.len();
-                if filtered_count > 0 {
-                    info!("📤 Uploading {} valid messages to API (filtered out {} with empty content)",
-                        valid_messages.len(),
-                        filtered_count
-                    );
+                // Mark as uploading to prevent duplicate processing
+                if let Err(e) = store_clone.mark_uploading(&message_ids) {
+                    error!("Failed to mark messages as uploading: {}", e);
                 } else {
-                    info!("📤 Uploading {} messages to API", valid_messages.len());
+                    info!("📤 Uploading {} messages to API", messages.len());
+
+                    // Try to upload
+                    match api_client.upload_messages(&messages).await {
+                        Ok(_) => {
+                            // Mark as successfully uploaded
+                            if let Err(e) = store_clone.mark_uploaded(&message_ids) {
+                                error!("Failed to mark messages as uploaded: {}", e);
+                            }
+
+                            // Schedule SMS deletion from SIM cards
+                            // This will be done in the next section
+                        }
+                        Err(e) => {
+                            error!("❌ Failed to upload messages: {}", e);
+                            // Mark as failed for retry
+                            if let Err(e) = store_clone.mark_failed(&message_ids, &e.to_string()) {
+                                error!("Failed to mark messages as failed: {}", e);
+                            }
+                        }
+                    }
                 }
-                if let Err(e) = api_client.upload_messages(&valid_messages).await {
-                    error!("❌ Failed to upload messages: {}", e);
+            }
+            Ok(_) => {
+                // No pending messages
+            }
+            Err(e) => {
+                error!("Failed to get pending messages from database: {}", e);
+            }
+        }
+
+        // Delete successfully uploaded messages from SIM cards (every 5 cycles)
+        if cycle % 5 == 0 {
+            let store_clone = message_store.clone();
+            match store_clone.get_deletable_sms() {
+                Ok(deletable) if !deletable.is_empty() => {
+                    info!("🗑️ Cleaning up {} uploaded messages from SIM cards", deletable.len());
+                    for (modem_id, sms_path) in deletable {
+                        match modem_manager.delete_sms(&modem_id, &sms_path).await {
+                            Ok(_) => {
+                                if let Err(e) = store_clone.mark_sms_deleted(&modem_id, &sms_path) {
+                                    error!("Failed to mark SMS as deleted in database: {}", e);
+                                }
+                            }
+                            Err(e) => {
+                                warn!("Failed to delete SMS from modem {}: {}", modem_id, e);
+                            }
+                        }
+                    }
                 }
-            } else {
-                info!("📭 No valid messages to upload (all {} had empty content)", total_count);
+                Ok(_) => {}
+                Err(e) => {
+                    error!("Failed to get deletable SMS: {}", e);
+                }
             }
         }
 
@@ -329,8 +385,29 @@ async fn main() -> Result<()> {
         // Log progress every 10 cycles
         if cycle % 10 == 0 {
             let elapsed = cycle_start.elapsed();
-            info!("🔍 Cycle {}: checked {} modems in {:?}", 
+            info!("🔍 Cycle {}: checked {} modems in {:?}",
                   cycle, valid_modems.len(), elapsed);
+
+            // Log message store statistics
+            if let Ok(stats) = message_store.get_stats() {
+                stats.log();
+            }
+
+            // Check for full SIM cards
+            if let Ok(full_sims) = message_store.check_sim_storage() {
+                if !full_sims.is_empty() {
+                    warn!("⚠️ SIM cards near full (>200 messages): {:?}", full_sims);
+                }
+            }
+        }
+
+        // Clean up old messages every hour (120 cycles at 30s interval)
+        if cycle % 120 == 0 {
+            if let Ok(cleaned) = message_store.cleanup_old_messages() {
+                if cleaned > 0 {
+                    info!("🧹 Cleaned up {} old messages from database", cleaned);
+                }
+            }
         }
         
         // Sleep until next cycle

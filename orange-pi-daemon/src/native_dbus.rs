@@ -112,18 +112,33 @@ trait Sms {
 }
 
 impl NativeDBusClient {
-    /// Create a new native D-Bus client
+    /// Create a new native D-Bus client with retry logic
     pub async fn new() -> Self {
-        match Connection::system().await {
-            Ok(conn) => {
-                info!("🚀 Native D-Bus client initialized - zero subprocess overhead!");
-                Self { connection: Some(conn) }
-            }
-            Err(e) => {
-                warn!("⚠️  Failed to connect to D-Bus: {}. Performance will be degraded.", e);
-                Self { connection: None }
+        let mut attempts = 0;
+        const MAX_ATTEMPTS: u32 = 3;
+
+        while attempts < MAX_ATTEMPTS {
+            attempts += 1;
+
+            match Connection::system().await {
+                Ok(conn) => {
+                    info!("🚀 Native D-Bus client initialized successfully (attempt {})", attempts);
+                    info!("✨ Using native D-Bus for zero subprocess overhead");
+                    return Self { connection: Some(conn) };
+                }
+                Err(e) => {
+                    if attempts < MAX_ATTEMPTS {
+                        warn!("⚠️  D-Bus connection attempt {} failed: {}, retrying...", attempts, e);
+                        tokio::time::sleep(std::time::Duration::from_millis(100 * attempts as u64)).await;
+                    } else {
+                        warn!("⚠️  Failed to connect to D-Bus after {} attempts: {}", MAX_ATTEMPTS, e);
+                        warn!("   Performance will be degraded - falling back to busctl");
+                    }
+                }
             }
         }
+
+        Self { connection: None }
     }
 
     /// Check if native D-Bus is available

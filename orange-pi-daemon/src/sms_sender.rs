@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use tokio::process::Command;
+use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -22,13 +22,18 @@ struct SmsResult {
 
 pub struct SmsSender {
     api_client: crate::api_client::ApiClient,
+    modem_manager: Arc<crate::modem_manager::ModemManager>,
     modem_cache: HashMap<String, String>, // ICCID -> modem_id mapping
 }
 
 impl SmsSender {
-    pub fn new(api_client: crate::api_client::ApiClient) -> Self {
+    pub fn new(
+        api_client: crate::api_client::ApiClient,
+        modem_manager: Arc<crate::modem_manager::ModemManager>,
+    ) -> Self {
         Self {
             api_client,
+            modem_manager,
             modem_cache: HashMap::new(),
         }
     }
@@ -73,7 +78,7 @@ impl SmsSender {
         Ok(api_response.pending_messages)
     }
 
-    /// Find modem ID for a given ICCID
+    /// Find modem ID for a given ICCID using cache or D-Bus
     pub async fn find_modem_for_iccid(&self, target_iccid: &str) -> Option<String> {
         debug!("🔍 Searching for modem with ICCID: {}", target_iccid);
 
@@ -83,86 +88,36 @@ impl SmsSender {
             return Some(modem_id.clone());
         }
 
-        // If not in cache, try to find it via mmcli
-        info!("📱 ICCID {} not in cache, searching via mmcli...", target_iccid);
+        // If not in cache, search through all modems via D-Bus
+        info!("📱 ICCID {} not in cache, searching via D-Bus...", target_iccid);
 
-        // List all modems
-        let output = Command::new("mmcli")
-            .arg("-L")
-            .output()
-            .await
-            .ok()?;
-
-        if !output.status.success() {
-            warn!("⚠️  Failed to list modems via mmcli");
-            return None;
-        }
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let modem_ids: Vec<String> = stdout
-            .lines()
-            .filter_map(|line| {
-                if let Some(pos) = line.find("/Modem/") {
-                    let id_start = pos + 7;
-                    let id = line[id_start..]
-                        .split_whitespace()
-                        .next()?
-                        .to_string();
-                    Some(id)
-                } else {
-                    None
-                }
-            })
-            .collect();
+        // List all modems using D-Bus
+        let modem_ids = match self.modem_manager.list_modems().await {
+            Ok(ids) => ids,
+            Err(e) => {
+                error!("❌ Failed to list modems via D-Bus: {}", e);
+                return None;
+            }
+        };
 
         debug!("📱 Found {} modems to check", modem_ids.len());
 
         // Check each modem for matching ICCID
         for modem_id in modem_ids {
-            // Get SIM info
-            let output = Command::new("mmcli")
-                .arg("-m")
-                .arg(&modem_id)
-                .output()
-                .await
-                .ok()?;
+            match self.modem_manager.get_iccid(&modem_id).await {
+                Ok(Some(iccid)) => {
+                    debug!("📱 Modem {} has ICCID: {} (target: {})", modem_id, iccid, target_iccid);
 
-            if !output.status.success() {
-                continue;
-            }
-
-            let stdout = String::from_utf8_lossy(&output.stdout);
-
-            // Extract SIM path and get ICCID
-            if let Some(sim_line) = stdout.lines().find(|l| l.contains("primary sim path:")) {
-                if let Some(sim_path) = sim_line.split(':').nth(1) {
-                    let sim_path = sim_path.trim();
-
-                    // Get SIM details
-                    let output = Command::new("mmcli")
-                        .arg("-i")
-                        .arg(sim_path)
-                        .output()
-                        .await
-                        .ok()?;
-
-                    if output.status.success() {
-                        let stdout = String::from_utf8_lossy(&output.stdout);
-
-                        // Extract ICCID
-                        if let Some(iccid_line) = stdout.lines().find(|l| l.contains("iccid:")) {
-                            if let Some(iccid) = iccid_line.split(':').nth(1) {
-                                let iccid = iccid.trim().trim_matches('\'');
-
-                                debug!("📱 Modem {} has ICCID: {} (target: {})", modem_id, iccid, target_iccid);
-
-                                if iccid == target_iccid {
-                                    info!("✅ Found modem {} for ICCID {}", modem_id, target_iccid);
-                                    return Some(modem_id);
-                                }
-                            }
-                        }
+                    if iccid == target_iccid {
+                        info!("✅ Found modem {} for ICCID {}", modem_id, target_iccid);
+                        return Some(modem_id);
                     }
+                }
+                Ok(None) => {
+                    debug!("📱 Modem {} has no SIM", modem_id);
+                }
+                Err(e) => {
+                    debug!("⚠️  Failed to get ICCID for modem {}: {}", modem_id, e);
                 }
             }
         }
@@ -171,7 +126,7 @@ impl SmsSender {
         None
     }
 
-    /// Send an SMS message
+    /// Send an SMS message using D-Bus
     pub async fn send_sms(&self, sms: &PendingSms) -> Result<()> {
         // Find the modem for this ICCID
         let modem_id = match self.find_modem_for_iccid(&sms.phone_iccid).await {
@@ -185,51 +140,35 @@ impl SmsSender {
 
         info!("📤 Sending SMS from modem {} to {}", modem_id, sms.recipient);
 
-        // Send the SMS using mmcli
-        let output = Command::new("mmcli")
-            .arg("-m")
-            .arg(&modem_id)
-            .arg("--messaging-create-sms")
-            .arg(format!("text='{}',number='{}'", sms.content, sms.recipient))
-            .output()
-            .await?;
+        // Send SMS using native D-Bus client
+        let dbus_client = Arc::new(crate::dbus_client::DBusClient::new().await);
 
-        if !output.status.success() {
-            let error = String::from_utf8_lossy(&output.stderr);
-            error!("Failed to create SMS: {}", error);
-            self.report_sms_result(&sms.id, false, Some(&error)).await?;
-            return Err(anyhow!("Failed to create SMS: {}", error));
+        if let Some(native) = dbus_client.native_client() {
+            // Use native D-Bus to send SMS
+            match native.send_sms(&modem_id, &sms.recipient, &sms.content).await {
+                Ok(_) => {
+                    // Report success
+                    self.report_sms_result(&sms.id, true, None).await?;
+                    info!("✅ SMS sent successfully to {} (Message ID: {})", sms.recipient, sms.id);
+                    Ok(())
+                }
+                Err(e) => {
+                    let error_msg = format!("Failed to send SMS: {}", e);
+                    error!("{}", error_msg);
+                    self.report_sms_result(&sms.id, false, Some(&error_msg)).await?;
+                    Err(anyhow!(error_msg))
+                }
+            }
+        } else {
+            // D-Bus not available
+            let error_msg = "D-Bus is required for SMS operations";
+            error!("❌ {}", error_msg);
+            error!("💡 Please ensure:");
+            error!("   1. D-Bus system daemon is running: systemctl status dbus");
+            error!("   2. ModemManager is running: systemctl status ModemManager");
+            self.report_sms_result(&sms.id, false, Some(error_msg)).await?;
+            Err(anyhow!(error_msg))
         }
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
-
-        // Extract SMS path from output
-        let sms_path = stdout
-            .lines()
-            .find(|l| l.contains("SMS"))
-            .and_then(|l| l.split_whitespace().last())
-            .ok_or_else(|| anyhow!("Failed to extract SMS path from mmcli output"))?;
-
-        // Send the SMS
-        let output = Command::new("mmcli")
-            .arg("-s")
-            .arg(sms_path)
-            .arg("--send")
-            .output()
-            .await?;
-
-        if !output.status.success() {
-            let error = String::from_utf8_lossy(&output.stderr);
-            error!("Failed to send SMS: {}", error);
-            self.report_sms_result(&sms.id, false, Some(&error)).await?;
-            return Err(anyhow!("Failed to send SMS: {}", error));
-        }
-
-        // Report success
-        self.report_sms_result(&sms.id, true, None).await?;
-        info!("✅ SMS sent successfully to {} (Message ID: {})", sms.recipient, sms.id);
-
-        Ok(())
     }
 
     /// Report SMS result back to API

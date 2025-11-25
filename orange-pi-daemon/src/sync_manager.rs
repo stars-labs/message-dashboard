@@ -21,7 +21,7 @@ impl SyncMode {
 }
 
 /// Manages synchronization state between daemon and server
-/// Implements full/incremental sync pattern from Zig daemon
+/// Implements full/incremental sync pattern for efficient updates
 pub struct SyncManager {
     session_id: String,
     last_full_sync: Option<Instant>,

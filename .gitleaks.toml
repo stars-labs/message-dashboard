@@ -8,8 +8,7 @@
     '''vendor''',
     '''node_modules''',
     '''\.git''',
-    '''\.zig-cache''',
-    '''zig-out''',
+    '''target''',
     '''dist''',
   ]
 
@@ -83,13 +82,13 @@
       '''=['\"]?\$[A-Z]''', # Environment variable reference
     ]
 
-# Custom rule for Zig source files
+# Custom rule for Rust source files
 [[rules]]
-  description = "Hardcoded Secrets in Zig"
-  id = "zig-hardcoded-secret"
-  regex = '''(?i)(const\s+[a-zA-Z_]+\s*=\s*["\'])(api[_-]?key|password|secret|token)(["\'])'''
-  tags = ["zig", "secret"]
-  path = '''\.zig$'''
+  description = "Hardcoded Secrets in Rust"
+  id = "rust-hardcoded-secret"
+  regex = '''(?i)(let\s+[a-zA-Z_]+\s*=\s*["\']|const\s+[A-Z_]+:\s*&str\s*=\s*["\'])(api[_-]?key|password|secret|token)(["\'])'''
+  tags = ["rust", "secret"]
+  path = '''\.rs$'''
 
 # Entropy-based detection for high-entropy strings
 [[rules]]
