@@ -119,7 +119,7 @@
         }:
         let
           # SMS daemon version - single source of truth
-          daemonVersion = "6.4.0"; # Fix watchdog timeout - skip deletion of duplicates with stale paths
+          daemonVersion = "6.4.1"; # Complete watchdog fix - mark old uploaded messages as deleted
 
           # Rust SMS daemon - the only daemon implementation
           sms-daemon = pkgs.rustPlatform.buildRustPackage {

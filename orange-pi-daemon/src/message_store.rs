@@ -379,6 +379,28 @@ impl MessageStore {
 
         Ok(deleted)
     }
+
+    /// Mark old uploaded messages as having been deleted (to stop deletion attempts)
+    /// This is for messages that were uploaded before the immediate deletion fix
+    pub fn mark_old_uploaded_as_deleted(&self) -> Result<usize> {
+        let conn = self.conn.lock().unwrap();
+
+        // Mark messages uploaded >1 hour ago as deleted (they have stale paths)
+        let updated = conn.execute(
+            "UPDATE messages
+             SET deleted_at = CURRENT_TIMESTAMP
+             WHERE status = 'uploaded'
+               AND deleted_at IS NULL
+               AND uploaded_at < datetime('now', '-1 hour')",
+            [],
+        )?;
+
+        if updated > 0 {
+            info!("✅ Marked {} old uploaded messages as deleted (stale paths)", updated);
+        }
+
+        Ok(updated)
+    }
 }
 
 #[derive(Debug)]

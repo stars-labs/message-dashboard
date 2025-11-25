@@ -60,6 +60,13 @@ async fn main() -> Result<()> {
     let message_store = Arc::new(MessageStore::new(&db_path)?);
     info!("📊 Message store initialized at: {}", db_path);
 
+    // Clean up old uploaded messages with stale paths (one-time fix)
+    if let Ok(count) = message_store.mark_old_uploaded_as_deleted() {
+        if count > 0 {
+            info!("🧹 Cleaned up {} old uploaded messages with stale paths", count);
+        }
+    }
+
     // Initialize SMS sender
     let mut sms_sender = SmsSender::new(api_client.clone(), modem_manager.clone());
 
