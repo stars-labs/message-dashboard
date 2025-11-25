@@ -9,6 +9,7 @@ use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use std::sync::{Arc, Mutex};
 use std::path::Path;
+use std::collections::HashMap;
 use tracing::{info, warn, debug};
 use crate::types::Message;
 
@@ -167,11 +168,28 @@ impl MessageStore {
     pub fn get_pending_messages(&self, limit: usize) -> Result<Vec<(i64, Message)>> {
         let conn = self.conn.lock().unwrap();
 
+        // First log what we have in the database
+        let mut count_stmt = conn.prepare("SELECT status, COUNT(*) FROM messages GROUP BY status")?;
+        if let Ok(counts) = count_stmt.query_map(params![], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i32>(1)?))
+        }) {
+            for count in counts.flatten() {
+                debug!("Message counts by status: {} = {}", count.0, count.1);
+            }
+        }
+
         let mut stmt = conn.prepare(
             "SELECT id, phone_iccid, phone_number, content, timestamp, direction
              FROM messages
              WHERE status IN ('pending', 'failed')
                AND attempts < 5
+               AND content IS NOT NULL
+               AND content != ''
+               AND id NOT IN (
+                   SELECT id FROM messages
+                   WHERE status IN ('uploaded', 'uploading')
+                   AND uploaded_at > datetime('now', '-1 hour')
+               )
              ORDER BY created_at ASC
              LIMIT ?1"
         )?;
@@ -378,5 +396,78 @@ impl MessageStats {
             "📊 Message store (24h): {} pending, {} uploading, {} uploaded, {} failed (total: {})",
             self.pending, self.uploading, self.uploaded, self.failed, self.total
         );
+    }
+}
+
+impl MessageStore {
+    /// Get uploaded messages grouped by modem
+    pub fn get_uploaded_messages_by_modem(&self) -> Result<HashMap<String, Vec<Message>>> {
+        let conn = self.conn.lock().unwrap();
+
+        let mut stmt = conn.prepare(
+            "SELECT DISTINCT modem_id, phone_iccid, phone_number, content, timestamp, direction
+             FROM messages
+             WHERE status = 'uploaded'
+               AND deleted_at IS NULL
+             ORDER BY modem_id, created_at DESC
+             LIMIT 500"
+        )?;
+
+        let mut result: HashMap<String, Vec<Message>> = HashMap::new();
+
+        let messages = stmt.query_map([], |row| {
+            let modem_id: String = row.get(0)?;
+            let message = Message {
+                phone_iccid: row.get(1)?,
+                phone_number: row.get(2)?,
+                content: row.get(3)?,
+                timestamp: row.get(4)?,
+                direction: row.get(5)?,
+            };
+            Ok((modem_id, message))
+        })?;
+
+        for msg_result in messages {
+            let (modem_id, message) = msg_result?;
+            result.entry(modem_id).or_insert_with(Vec::new).push(message);
+        }
+
+        Ok(result)
+    }
+
+    /// Mark message as deleted by content match
+    pub fn mark_message_deleted_by_content(&self, iccid: &str, content: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+
+        conn.execute(
+            "UPDATE messages
+             SET deleted_at = CURRENT_TIMESTAMP
+             WHERE phone_iccid = ?1
+               AND content = ?2
+               AND status = 'uploaded'
+               AND deleted_at IS NULL",
+            params![iccid, content],
+        )?;
+
+        Ok(())
+    }
+
+    /// Clean up messages with empty content that have failed multiple times
+    pub fn cleanup_empty_messages(&self) -> Result<usize> {
+        let conn = self.conn.lock().unwrap();
+
+        // Delete messages with empty content that have failed 3+ times
+        let deleted = conn.execute(
+            "DELETE FROM messages
+             WHERE (content IS NULL OR content = '')
+               AND attempts >= 3",
+            params![],
+        )?;
+
+        if deleted > 0 {
+            info!("🧹 Cleaned up {} messages with empty content", deleted);
+        }
+
+        Ok(deleted)
     }
 }

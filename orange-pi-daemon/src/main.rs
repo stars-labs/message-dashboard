@@ -45,7 +45,7 @@ async fn main() -> Result<()> {
             .unwrap_or(30), // Changed from 5s to 30s to reduce load
     };
 
-    info!("🚀 Starting Rust SMS Daemon v5.0.0 (Native D-Bus Edition)");
+    info!("🚀 Starting Rust SMS Daemon v6.2.0 (Fixed duplicate uploads)");
     info!("✨ Features: Native D-Bus, Zero subprocess overhead, Performance monitoring");
     info!("📡 API URL: {}", config.api_url);
     info!("⏱️  Device sync interval: {}s", config.check_interval_secs);
@@ -158,7 +158,7 @@ async fn main() -> Result<()> {
                         }
                     }
 
-                    // Store messages with paths in local database FIRST
+                    // Store messages in database and DELETE FROM SIM IMMEDIATELY
                     if !result.messages_with_paths.is_empty() {
                         let store_clone = message_store.clone();
                         for msg_with_path in &result.messages_with_paths {
@@ -166,9 +166,21 @@ async fn main() -> Result<()> {
                                 Ok(true) => {
                                     debug!("Stored new message from ICCID: {}", msg_with_path.message.phone_iccid);
                                     all_messages.push(msg_with_path.message.clone());
+
+                                    // DELETE FROM SIM IMMEDIATELY to prevent re-reading
+                                    match modem_manager.delete_sms(&msg_with_path.modem_id, &msg_with_path.sms_path).await {
+                                        Ok(_) => {
+                                            debug!("✅ Deleted SMS from SIM immediately: {}", msg_with_path.sms_path);
+                                        }
+                                        Err(e) => {
+                                            error!("❌ Failed to delete SMS from SIM ({}): {}", msg_with_path.sms_path, e);
+                                            // Continue - message is safely in DB
+                                        }
+                                    }
                                 }
                                 Ok(false) => {
                                     debug!("Duplicate message skipped from ICCID: {}", msg_with_path.message.phone_iccid);
+                                    // Don't try to delete duplicates - they have stale paths from previous reads
                                 }
                                 Err(e) => {
                                     error!("Failed to store message in database: {}", e);
@@ -218,7 +230,8 @@ async fn main() -> Result<()> {
         // Process queued messages for upload (every cycle)
         // Get pending messages from the database
         let store_clone = message_store.clone();
-        match store_clone.get_pending_messages(100) {
+        // Reduced batch size to 25 to prevent watchdog timeout
+        match store_clone.get_pending_messages(25) {
             Ok(pending_messages) if !pending_messages.is_empty() => {
                 let message_ids: Vec<i64> = pending_messages.iter().map(|(id, _)| *id).collect();
                 let messages: Vec<Message> = pending_messages.into_iter().map(|(_, msg)| msg).collect();
@@ -229,16 +242,20 @@ async fn main() -> Result<()> {
                 } else {
                     info!("📤 Uploading {} messages to API", messages.len());
 
-                    // Try to upload
+                    // Send watchdog keepalive before upload
+                    let _ = sd_notify::notify(true, &[sd_notify::NotifyState::Watchdog]);
+
+                    // Upload synchronously but with shorter timeout
+                    // This ensures database updates complete properly
                     match api_client.upload_messages(&messages).await {
                         Ok(_) => {
-                            // Mark as successfully uploaded
+                            info!("✅ Successfully uploaded {} messages", messages.len());
+                            // Mark as successfully uploaded IMMEDIATELY
                             if let Err(e) = store_clone.mark_uploaded(&message_ids) {
                                 error!("Failed to mark messages as uploaded: {}", e);
+                            } else {
+                                debug!("Database updated: {} messages marked as uploaded", message_ids.len());
                             }
-
-                            // Schedule SMS deletion from SIM cards
-                            // This will be done in the next section
                         }
                         Err(e) => {
                             error!("❌ Failed to upload messages: {}", e);
@@ -258,31 +275,15 @@ async fn main() -> Result<()> {
             }
         }
 
-        // Delete successfully uploaded messages from SIM cards (every 5 cycles)
-        if cycle % 5 == 0 {
+        // Cleanup empty messages that have failed multiple times (every 10 cycles)
+        if cycle % 10 == 0 {
             let store_clone = message_store.clone();
-            match store_clone.get_deletable_sms() {
-                Ok(deletable) if !deletable.is_empty() => {
-                    info!("🗑️ Cleaning up {} uploaded messages from SIM cards", deletable.len());
-                    for (modem_id, sms_path) in deletable {
-                        match modem_manager.delete_sms(&modem_id, &sms_path).await {
-                            Ok(_) => {
-                                if let Err(e) = store_clone.mark_sms_deleted(&modem_id, &sms_path) {
-                                    error!("Failed to mark SMS as deleted in database: {}", e);
-                                }
-                            }
-                            Err(e) => {
-                                warn!("Failed to delete SMS from modem {}: {}", modem_id, e);
-                            }
-                        }
-                    }
-                }
-                Ok(_) => {}
-                Err(e) => {
-                    error!("Failed to get deletable SMS: {}", e);
-                }
+            if let Err(e) = store_clone.cleanup_empty_messages() {
+                warn!("Failed to cleanup empty messages: {}", e);
             }
         }
+
+        // No longer need delayed deletion - messages are deleted immediately from SIM after storing in DB
 
         // Check and send pending SMS every 5 cycles (every 5 * check_interval_secs seconds)
         if cycle % 5 == 0 {
