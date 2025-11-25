@@ -292,9 +292,9 @@ in
 
           # Notification (for monitoring)
           NotifyAccess = "main";
-          # The Rust daemon implements sd_notify() for proper systemd integration
-          # Increased to 600s (10 min) temporarily while cleaning up old messages with stale paths
-          WatchdogSec = "600s";
+          # WATCHDOG DISABLED - it was causing more problems than solving
+          # The daemon runs stable and doesn't need watchdog supervision
+          # WatchdogSec = "0";  # 0 = disabled
         }
 
         # Handle API key loading securely

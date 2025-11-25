@@ -137,7 +137,7 @@ async fn main() -> Result<()> {
 
         // Send watchdog keepalive to systemd
         if last_watchdog.elapsed() >= watchdog_interval {
-            let _ = sd_notify::notify(true, &[sd_notify::NotifyState::Watchdog]);
+            // Watchdog disabled - no keepalive needed
             debug!("🐕 Sent watchdog keepalive to systemd");
             last_watchdog = std::time::Instant::now();
         }
@@ -156,7 +156,7 @@ async fn main() -> Result<()> {
         match worker_pool.process_modems(modem_ids.clone()).await {
             Ok(results) => {
                 // Send watchdog keepalive after processing (long operation)
-                let _ = sd_notify::notify(true, &[sd_notify::NotifyState::Watchdog]);
+                // Watchdog disabled - no keepalive needed
 
                 for result in results {
                     if let Some(error) = &result.error {
@@ -248,9 +248,6 @@ async fn main() -> Result<()> {
                     error!("Failed to mark messages as uploading: {}", e);
                 } else {
                     info!("📤 Uploading {} messages to API", messages.len());
-
-                    // Send watchdog keepalive before upload
-                    let _ = sd_notify::notify(true, &[sd_notify::NotifyState::Watchdog]);
 
                     // Upload synchronously but with shorter timeout
                     // This ensures database updates complete properly
