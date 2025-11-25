@@ -234,17 +234,27 @@ impl WorkerPool {
 
         let iccid = iccid.unwrap();
 
-        // Get device details
-        let (equipment_id, manufacturer, model, firmware, hardware) = modem_manager
+        // Get device details - skip if no valid IMEI
+        let device_details = modem_manager
             .get_device_details(&modem_id)
             .await
-            .unwrap_or_else(|_| (
-                format!("MODEM_{}", modem_id),
-                None,
-                None,
-                None,
-                None,
-            ));
+            .context("Failed to get device details")?;
+
+        // Skip modems without valid IMEI (no SIM or during SIM swap)
+        let (equipment_id, manufacturer, model, firmware, hardware) = match device_details {
+            Some(details) => details,
+            None => {
+                debug!("Modem {} has no valid IMEI, skipping", modem_id);
+                return Ok(ModemResult {
+                    modem_id,
+                    iccid: Some(iccid),
+                    phone: None,
+                    sim: None,
+                    messages: vec![],
+                    error: Some("No valid IMEI".to_string()),
+                });
+            }
+        };
 
         // Get signal quality (cached)
         let signal_data = modem_manager
@@ -321,6 +331,11 @@ impl WorkerPool {
     /// Get current statistics
     pub async fn get_stats(&self) -> WorkerPoolStats {
         self.stats.read().await.clone()
+    }
+
+    /// Check if using native D-Bus
+    pub async fn is_using_native_dbus(&self) -> bool {
+        self.modem_manager.is_using_native_dbus().await
     }
 
     /// Update configuration

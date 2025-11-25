@@ -1,26 +1,19 @@
-mod types;
-mod modem_manager;
-mod api_client;
-mod sync_manager;
-mod retry_manager;
-mod sms_sender;
-mod dbus_client;
-mod signal_cache;
-mod worker_pool;
-
 use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time;
-use tracing::{info, warn, error};
-use crate::types::*;
-use crate::modem_manager::ModemManager;
-use crate::api_client::ApiClient;
-use crate::sync_manager::SyncManager;
-use crate::retry_manager::RetryManager;
-use crate::sms_sender::SmsSender;
-use crate::worker_pool::{WorkerPool, WorkerPoolConfig};
+use tracing::{debug, info, warn, error};
+
+// Import from the library crate
+use orange_pi_daemon_rust::types::*;
+use orange_pi_daemon_rust::modem_manager::ModemManager;
+use orange_pi_daemon_rust::api_client::ApiClient;
+use orange_pi_daemon_rust::sync_manager::SyncManager;
+use orange_pi_daemon_rust::retry_manager::RetryManager;
+use orange_pi_daemon_rust::sms_sender::SmsSender;
+use orange_pi_daemon_rust::worker_pool::{WorkerPool, WorkerPoolConfig};
+use orange_pi_daemon_rust::benchmark::PerformanceBenchmark;
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)] // Multi-threaded for concurrent modem processing
 async fn main() -> Result<()> {
@@ -32,6 +25,13 @@ async fn main() -> Result<()> {
         )
         .init();
     
+    // Check for benchmark mode
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() > 1 && args[1] == "benchmark" {
+        info!("🏁 Running performance benchmark...");
+        return PerformanceBenchmark::run_benchmark().await;
+    }
+
     // Load configuration
     let config = Config {
         api_url: std::env::var("SMS_API_URL")
@@ -44,16 +44,17 @@ async fn main() -> Result<()> {
             .unwrap_or(30), // Changed from 5s to 30s to reduce load
     };
 
-    info!("🚀 Starting Rust SMS Daemon v2.0.0 (Sync Manager Edition)");
+    info!("🚀 Starting Rust SMS Daemon v5.0.0 (Native D-Bus Edition)");
+    info!("✨ Features: Native D-Bus, Zero subprocess overhead, Performance monitoring");
     info!("📡 API URL: {}", config.api_url);
     info!("⏱️  Device sync interval: {}s", config.check_interval_secs);
 
     // Initialize components
-    let modem_manager = Arc::new(ModemManager::new());
+    let modem_manager = Arc::new(ModemManager::new().await);
     let api_client = ApiClient::new(config.clone());
 
     // Initialize SMS sender
-    let mut sms_sender = SmsSender::new(api_client.clone());
+    let mut sms_sender = SmsSender::new(api_client.clone(), modem_manager.clone());
 
     // Initialize sync manager with unique session ID
     let session_id = format!("rust-daemon-{}", uuid::Uuid::new_v4());
@@ -106,17 +107,26 @@ async fn main() -> Result<()> {
     // Notify systemd that we're ready
     let _ = sd_notify::notify(true, &[sd_notify::NotifyState::Ready]);
     info!("🔔 Notified systemd - daemon is ready");
-    
+
     info!("🚀 Starting main loop with {} modems", valid_modems.len());
-    
+
     let mut cycle = 0u64;
     let mut last_sync = std::time::Instant::now();
-    let sync_interval = Duration::from_secs(10);
-    
+    let mut last_watchdog = std::time::Instant::now();
+    let sync_interval = Duration::from_secs(30); // Cloudflare requires ≥30s to avoid rate limits
+    let watchdog_interval = Duration::from_secs(30); // Send watchdog ping every 30 seconds
+
     // Main event loop
     loop {
         cycle += 1;
         let cycle_start = std::time::Instant::now();
+
+        // Send watchdog keepalive to systemd
+        if last_watchdog.elapsed() >= watchdog_interval {
+            let _ = sd_notify::notify(true, &[sd_notify::NotifyState::Watchdog]);
+            debug!("🐕 Sent watchdog keepalive to systemd");
+            last_watchdog = std::time::Instant::now();
+        }
         
         // Process modems in parallel using worker pool
         let modem_ids: Vec<String> = valid_modems.keys().cloned().collect();
@@ -125,9 +135,15 @@ async fn main() -> Result<()> {
         let mut all_phones = Vec::new();
         let mut all_sims = Vec::new();
 
+        // Track performance metrics
+        let process_start = std::time::Instant::now();
+
         // Process all modems in parallel with worker pool
         match worker_pool.process_modems(modem_ids.clone()).await {
             Ok(results) => {
+                // Send watchdog keepalive after processing (long operation)
+                let _ = sd_notify::notify(true, &[sd_notify::NotifyState::Watchdog]);
+
                 for result in results {
                     if let Some(error) = &result.error {
                         if error != "No SIM card" && error != "Timeout" {
@@ -151,13 +167,25 @@ async fn main() -> Result<()> {
                     }
                 }
 
-                // Log worker pool statistics
+                // Log detailed performance metrics
+                let process_time = process_start.elapsed();
                 let stats = worker_pool.get_stats().await;
-                if cycle % 10 == 0 {  // Log stats every 10 cycles
-                    info!("📊 Worker pool stats: {} modems, {:.1}% success, avg {:.2}s/modem",
-                        stats.total_modems,
-                        stats.success_rate(),
-                        stats.avg_time_per_modem.as_secs_f64()
+
+                // Always log performance for monitoring
+                info!("⚡ Performance: {} modems in {:.2}s ({:.0}ms/modem), {:.1}% success",
+                    stats.total_modems,
+                    process_time.as_secs_f64(),
+                    process_time.as_millis() as f64 / stats.total_modems as f64,
+                    stats.success_rate()
+                );
+
+                // Detailed stats every 10 cycles
+                if cycle % 10 == 0 {
+                    info!("📊 Detailed stats: Messages: {}, Phones: {}, SIMs: {}, Using: {}",
+                        all_messages.len(),
+                        all_phones.len(),
+                        all_sims.len(),
+                        if worker_pool.is_using_native_dbus().await { "Native D-Bus" } else { "Busctl fallback" }
                     );
                 }
             }
@@ -166,11 +194,37 @@ async fn main() -> Result<()> {
             }
         }
         
-        // Upload messages if any found
+        // Filter out invalid messages and upload if any valid ones found
         if !all_messages.is_empty() {
-            info!("📤 Uploading {} messages to API", all_messages.len());
-            if let Err(e) = api_client.upload_messages(&all_messages).await {
-                error!("❌ Failed to upload messages: {}", e);
+            let total_count = all_messages.len();
+
+            // Filter out messages with missing or empty content
+            let valid_messages: Vec<Message> = all_messages.into_iter()
+                .filter(|msg| {
+                    if msg.content.trim().is_empty() {
+                        warn!("⚠️  Skipping message with empty content from ICCID: {}", msg.phone_iccid);
+                        false
+                    } else {
+                        true
+                    }
+                })
+                .collect();
+
+            if !valid_messages.is_empty() {
+                let filtered_count = total_count - valid_messages.len();
+                if filtered_count > 0 {
+                    info!("📤 Uploading {} valid messages to API (filtered out {} with empty content)",
+                        valid_messages.len(),
+                        filtered_count
+                    );
+                } else {
+                    info!("📤 Uploading {} messages to API", valid_messages.len());
+                }
+                if let Err(e) = api_client.upload_messages(&valid_messages).await {
+                    error!("❌ Failed to upload messages: {}", e);
+                }
+            } else {
+                info!("📭 No valid messages to upload (all {} had empty content)", total_count);
             }
         }
 
