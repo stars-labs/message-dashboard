@@ -61,7 +61,15 @@ export const controlHandler = {
           console.warn('[control.js] Skipping modem without equipment_id');
           continue;
         }
-        
+
+        // Validate against fake MODEM_ entries
+        if (modem.equipment_id.startsWith('MODEM_') &&
+            (!modem.manufacturer || modem.manufacturer === null) &&
+            (!modem.model || modem.model === null)) {
+          console.warn(`[control.js] Rejecting fake modem entry: ${modem.equipment_id} (no manufacturer/model)`);
+          continue;
+        }
+
         // Include verification status in full sync mode
         const verificationStatus = sync_mode === 'full' ? 'verified' : null;
         const lastVerifiedSession = sync_mode === 'full' ? session_id : null;
@@ -134,7 +142,13 @@ export const controlHandler = {
           console.warn('[control.js] Skipping SIM without ICCID');
           continue;
         }
-        
+
+        // Validate that SIM isn't pointing to a fake modem
+        if (sim.current_modem_id && sim.current_modem_id.startsWith('MODEM_')) {
+          console.warn(`[control.js] SIM ${sim.iccid} points to fake modem ${sim.current_modem_id}, clearing association`);
+          sim.current_modem_id = null;
+        }
+
         const lastVerifiedSession = sync_mode === 'full' ? session_id : null;
         
         batch.push(env.DB.prepare(`

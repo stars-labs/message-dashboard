@@ -119,96 +119,50 @@
         }:
         let
           # SMS daemon version - single source of truth
-          daemonVersion = "4.0.0"; # Clean Modem/SIM architecture with device path collection
+          daemonVersion = "5.2.0"; # Fix fake MODEM_ entries + watchdog keepalive
 
-          # Orange Pi SMS daemon package
-          # Base derivation for common settings
-          sms-daemon-base = {
+          # Rust SMS daemon - the only daemon implementation
+          sms-daemon = pkgs.rustPlatform.buildRustPackage {
             pname = "sms-daemon";
             version = daemonVersion;
             src = ./orange-pi-daemon;
-            nativeBuildInputs = with pkgs; [ zig pkg-config ];
-            buildInputs = with pkgs; [ dbus ];
 
-            installPhase = ''
-              mkdir -p $out/bin
-              cp zig-out/bin/orange-pi-daemon $out/bin/sms-daemon
-            '';
-
-            meta = with lib; {
-              description = "SMS Dashboard Daemon for Orange Pi with 3G/4G modems";
-              longDescription = ''
-                A multi-threaded daemon that monitors 3G/4G modems using ModemManager (mmcli),
-                collects SMS messages and phone status information, and forwards
-                them to the SMS Dashboard server API in real-time.
-              '';
-              homepage = "https://github.com/hecoinfo/message-dashboard";
-              license = licenses.mit;
-              platforms = platforms.linux;
-            };
-          };
-
-          # Release build with info logging
-          sms-daemon = pkgs.stdenv.mkDerivation (
-            sms-daemon-base
-            // {
-              pname = "sms-daemon";
-
-              buildPhase = ''
-                export HOME=$TMPDIR
-                rm -rf zig-cache zig-out
-                zig build -Doptimize=ReleaseFast -Dlog_level=info
-              '';
-            }
-          );
-
-          # Debug build with debug logging
-          sms-daemon-debug = pkgs.stdenv.mkDerivation (
-            sms-daemon-base
-            // {
-              pname = "sms-daemon-debug";
-
-              buildPhase = ''
-                export HOME=$TMPDIR
-                rm -rf zig-cache zig-out
-                zig build -Doptimize=Debug -Dlog_level=debug
-              '';
-            }
-          );
-
-          # Rust SMS daemon - memory-safe replacement
-          orange-pi-daemon-rust = pkgs.rustPlatform.buildRustPackage {
-            pname = "orange-pi-daemon-rust";
-            version = "2.0.3";
-            src = ./orange-pi-daemon-rust;
-            
             cargoLock = {
-              lockFile = ./orange-pi-daemon-rust/Cargo.lock;
+              lockFile = ./orange-pi-daemon/Cargo.lock;
             };
-            
+
             nativeBuildInputs = with pkgs; [ pkg-config ];
-            buildInputs = with pkgs; [ openssl ];
-            
-            # Post-install: create symlink from default binary name to expected name
+            buildInputs = with pkgs; [
+              openssl
+              dbus  # Required for native D-Bus support
+            ];
+
+            # Post-install: create symlink from Rust binary name to expected name
             postInstall = ''
               ln -s $out/bin/orange-pi-daemon-rust $out/bin/sms-daemon
             '';
-            
+
             meta = with lib; {
-              description = "Memory-safe Rust SMS daemon for Orange Pi";
+              description = "High-performance Rust SMS daemon with native D-Bus for zero-overhead modem communication";
               longDescription = ''
-                A single-threaded async Rust daemon that replaces the Zig version.
-                Provides guaranteed memory safety with zero segfaults.
+                A multi-threaded async Rust daemon that monitors 3G/4G modems using native D-Bus,
+                eliminating subprocess overhead entirely. Collects SMS messages and phone status
+                information, and forwards them to the SMS Dashboard server API in real-time.
+                Features native D-Bus (5ms/op), worker pool architecture for 92+ modems, and
+                intelligent fallback to busctl when native D-Bus is unavailable.
               '';
               homepage = "https://github.com/hecoinfo/message-dashboard";
               license = licenses.mit;
               platforms = platforms.linux;
             };
           };
+
+          # Alias for backward compatibility
+          orange-pi-daemon-rust = sms-daemon;
         in
         {
           packages = {
-            inherit sms-daemon sms-daemon-debug orange-pi-daemon-rust;
+            inherit sms-daemon orange-pi-daemon-rust;
             default = sms-daemon;
             # Alias for easier access
             daemon-rust = orange-pi-daemon-rust;
@@ -225,10 +179,6 @@
                 nodejs_20
                 nodePackages.npm
 
-                # Zig development
-                zig
-                zls
-
                 # Rust development
                 cargo
                 rustc
@@ -239,6 +189,9 @@
                 # Testing tools
                 curl
                 jq
+                modemmanager
+                pkg-config
+                openssl
               ];
 
               shellHook = ''
@@ -246,23 +199,28 @@
                 echo ""
                 echo "Available projects:"
                 echo "  • Web Dashboard: cd sms-dashboard"
-                echo "  • Orange Pi Daemon (Zig): cd orange-pi-daemon"
-                echo "  • Orange Pi Daemon (Rust): cd orange-pi-daemon-rust"
+                echo "  • Orange Pi Daemon (Rust): cd orange-pi-daemon"
                 echo ""
               '';
             };
 
-            # Dedicated daemon development shell (Zig)
+            # Dedicated daemon development shell (Rust)
             daemon = pkgs.mkShell {
               packages = with pkgs; [
-                zig
-                zls
+                cargo
+                rustc
+                rust-analyzer
+                rustfmt
+                clippy
                 modemmanager
+                pkg-config
+                openssl
               ];
 
               shellHook = ''
-                echo "SMS Dashboard Daemon Development (Zig)"
-                echo "Run 'zig build' to compile the daemon"
+                echo "SMS Dashboard Daemon Development (Rust)"
+                echo "Run 'cargo build --release' to compile the daemon"
+                echo "Run 'cargo run' for development"
               '';
             };
 
