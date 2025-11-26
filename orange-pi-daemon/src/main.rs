@@ -56,10 +56,10 @@ async fn main() -> Result<()> {
         check_interval_secs: std::env::var("CHECK_INTERVAL_SECS")
             .ok()
             .and_then(|s| s.parse().ok())
-            .unwrap_or(30), // Changed from 5s to 30s to reduce load
+            .unwrap_or(1), // Fast 1 second interval for quick uploads!
     };
 
-    info!("🚀 Starting Rust SMS Daemon v6.8.0 (Database cleanup for old messages)");
+    info!("🚀 Starting Rust SMS Daemon v6.9.0 (Fast 1-second upload interval)");
     info!("✨ Features: Native D-Bus, Zero subprocess overhead, Performance monitoring");
     info!("📡 API URL: {}", config.api_url);
     info!("⏱️  Device sync interval: {}s", config.check_interval_secs);

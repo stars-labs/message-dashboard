@@ -95,8 +95,8 @@
                     package = self.packages.aarch64-linux.orange-pi-daemon-rust;
                     apiKeyFile = config.sops.secrets."sms-dashboard/api-key".path;
                     apiUrl = "https://sexy.qzz.io";
-                    phoneUpdateIntervalSeconds = 5; # Check interval for Rust daemon
-                    messageCheckIntervalMs = 5000; # Not used by Rust (uses seconds)
+                    phoneUpdateIntervalSeconds = 1; # Upload every 1 second!
+                    messageCheckIntervalMs = 1000; # Check every 1 second
                     signalCheckIntervalSeconds = 10; # Not used by Rust (syncs with phone status)
                     debugBuild = false; # Rust daemon uses RUST_LOG env var
                   };
@@ -119,7 +119,7 @@
         }:
         let
           # SMS daemon version - single source of truth
-          daemonVersion = "6.8.0"; # Database cleanup to remove 90k+ old pending messages
+          daemonVersion = "6.9.0"; # Fast 1-second upload interval (10 messages/second)
 
           # Rust SMS daemon - the only daemon implementation
           sms-daemon = pkgs.rustPlatform.buildRustPackage {
