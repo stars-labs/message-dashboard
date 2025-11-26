@@ -119,7 +119,7 @@
         }:
         let
           # SMS daemon version - single source of truth
-          daemonVersion = "6.5.0"; # Watchdog completely disabled - stable without supervision
+          daemonVersion = "6.6.0"; # Only delete recent SMS (<1 hour) to avoid stale path errors
 
           # Rust SMS daemon - the only daemon implementation
           sms-daemon = pkgs.rustPlatform.buildRustPackage {

@@ -1,4 +1,5 @@
 use anyhow::Result;
+use chrono;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -174,14 +175,25 @@ async fn main() -> Result<()> {
                                     debug!("Stored new message from ICCID: {}", msg_with_path.message.phone_iccid);
                                     all_messages.push(msg_with_path.message.clone());
 
-                                    // DELETE FROM SIM IMMEDIATELY to prevent re-reading
-                                    match modem_manager.delete_sms(&msg_with_path.modem_id, &msg_with_path.sms_path).await {
-                                        Ok(_) => {
-                                            debug!("✅ Deleted SMS from SIM immediately: {}", msg_with_path.sms_path);
-                                        }
-                                        Err(e) => {
-                                            error!("❌ Failed to delete SMS from SIM ({}): {}", msg_with_path.sms_path, e);
-                                            // Continue - message is safely in DB
+                                    // Only try to delete TRULY NEW messages (not retries of old messages)
+                                    // Check if this is a recent message (within last hour)
+                                    if let Ok(timestamp) = chrono::DateTime::parse_from_rfc3339(&msg_with_path.message.timestamp) {
+                                        let now = chrono::Utc::now();
+                                        let age = now.signed_duration_since(timestamp.with_timezone(&chrono::Utc));
+
+                                        // Only delete if message is less than 1 hour old
+                                        if age.num_hours() < 1 {
+                                            match modem_manager.delete_sms(&msg_with_path.modem_id, &msg_with_path.sms_path).await {
+                                                Ok(_) => {
+                                                    debug!("✅ Deleted SMS from SIM immediately: {}", msg_with_path.sms_path);
+                                                }
+                                                Err(e) => {
+                                                    debug!("Could not delete SMS ({}): {}", msg_with_path.sms_path, e);
+                                                    // Don't log as error - this is expected for old messages
+                                                }
+                                            }
+                                        } else {
+                                            debug!("Skipping deletion for old message (>1 hour): {}", msg_with_path.sms_path);
                                         }
                                     }
                                 }
