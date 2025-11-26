@@ -119,7 +119,7 @@
         }:
         let
           # SMS daemon version - single source of truth
-          daemonVersion = "6.7.0"; # Reduced batch size to 10 to prevent Cloudflare 503 errors
+          daemonVersion = "6.8.0"; # Database cleanup to remove 90k+ old pending messages
 
           # Rust SMS daemon - the only daemon implementation
           sms-daemon = pkgs.rustPlatform.buildRustPackage {
