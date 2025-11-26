@@ -249,8 +249,8 @@ async fn main() -> Result<()> {
         // Process queued messages for upload (every cycle)
         // Get pending messages from the database
         let store_clone = message_store.clone();
-        // Reduced batch size to 25 to prevent watchdog timeout
-        match store_clone.get_pending_messages(25) {
+        // Reduced batch size to 10 to prevent 503 errors
+        match store_clone.get_pending_messages(10) {
             Ok(pending_messages) if !pending_messages.is_empty() => {
                 let message_ids: Vec<i64> = pending_messages.iter().map(|(id, _)| *id).collect();
                 let messages: Vec<Message> = pending_messages.into_iter().map(|(_, msg)| msg).collect();
