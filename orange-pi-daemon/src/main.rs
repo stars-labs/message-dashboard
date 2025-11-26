@@ -34,6 +34,19 @@ async fn main() -> Result<()> {
         return PerformanceBenchmark::run_benchmark().await;
     }
 
+    // Check for cleanup mode
+    if args.len() > 1 && args[1] == "cleanup" {
+        info!("🧹 Running database cleanup...");
+        let db_path = std::env::var("MESSAGE_DB_PATH")
+            .unwrap_or_else(|_| "/var/lib/sms-daemon/messages.db".to_string());
+        let message_store = Arc::new(MessageStore::new(&db_path)?);
+
+        // Run aggressive cleanup
+        let deleted = message_store.cleanup_all_old_pending()?;
+        info!("✅ Cleanup complete: {} old pending messages removed", deleted);
+        return Ok(());
+    }
+
     // Load configuration
     let config = Config {
         api_url: std::env::var("SMS_API_URL")
@@ -46,7 +59,7 @@ async fn main() -> Result<()> {
             .unwrap_or(30), // Changed from 5s to 30s to reduce load
     };
 
-    info!("🚀 Starting Rust SMS Daemon v6.2.0 (Fixed duplicate uploads)");
+    info!("🚀 Starting Rust SMS Daemon v6.8.0 (Database cleanup for old messages)");
     info!("✨ Features: Native D-Bus, Zero subprocess overhead, Performance monitoring");
     info!("📡 API URL: {}", config.api_url);
     info!("⏱️  Device sync interval: {}s", config.check_interval_secs);
@@ -60,6 +73,17 @@ async fn main() -> Result<()> {
         .unwrap_or_else(|_| "/var/lib/sms-daemon/messages.db".to_string());
     let message_store = Arc::new(MessageStore::new(&db_path)?);
     info!("📊 Message store initialized at: {}", db_path);
+
+    // AUTOMATIC CLEANUP: Remove all old pending messages on startup
+    // These are messages from before the immediate deletion fix
+    match message_store.cleanup_all_old_pending() {
+        Ok(count) if count > 0 => {
+            warn!("🔥 CLEANED UP {} old pending messages from database", count);
+            warn!("These were stuck messages from before v6.3.0");
+        }
+        Ok(_) => info!("✅ No old pending messages to clean"),
+        Err(e) => error!("Failed to cleanup old messages: {}", e),
+    }
 
     // Clean up old uploaded messages with stale paths (one-time fix)
     if let Ok(count) = message_store.mark_old_uploaded_as_deleted() {
@@ -410,10 +434,11 @@ async fn main() -> Result<()> {
                 stats.log();
             }
 
-            // Check for full SIM cards
+            // Check database message counts (NOT physical SIM cards!)
             if let Ok(full_sims) = message_store.check_sim_storage() {
                 if !full_sims.is_empty() {
-                    warn!("⚠️ SIM cards near full (>200 messages): {:?}", full_sims);
+                    warn!("⚠️ Database has old messages for these SIMs (NOT on physical SIM cards): {:?}", full_sims);
+                    warn!("Physical SIM cards are EMPTY - this is just old database entries from before v6.3.0");
                 }
             }
         }

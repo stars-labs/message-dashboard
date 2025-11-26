@@ -340,11 +340,11 @@ impl MessageStore {
         })
     }
 
-    /// Check if any SIM is near full (>80% based on message count)
+    /// Check if database has many messages for any SIM (NOT actual SIM card storage)
     pub fn check_sim_storage(&self) -> Result<Vec<String>> {
         let conn = self.conn.lock().unwrap();
 
-        // If we have >200 undeleted messages for a SIM, consider it near full
+        // This checks DATABASE message count, NOT physical SIM card!
         let mut stmt = conn.prepare(
             "SELECT iccid
              FROM sim_storage
@@ -355,7 +355,7 @@ impl MessageStore {
             .collect::<Result<Vec<String>, _>>()?;
 
         if !full_sims.is_empty() {
-            warn!("⚠️ SIM cards near full: {:?}", full_sims);
+            warn!("⚠️ Database has >200 old messages for SIMs (NOT on physical SIM cards): {:?}", full_sims);
         }
 
         Ok(full_sims)
@@ -376,6 +376,58 @@ impl MessageStore {
         if deleted > 0 {
             info!("🧹 Cleaned up {} old messages", deleted);
         }
+
+        Ok(deleted)
+    }
+
+    /// ROBUST CLEANUP: Delete ALL old pending messages that can't be uploaded
+    pub fn cleanup_all_old_pending(&self) -> Result<usize> {
+        let conn = self.conn.lock().unwrap();
+
+        // Delete ALL pending messages older than 1 hour
+        // These have stale SMS paths and can't be uploaded anyway
+        let deleted = conn.execute(
+            "DELETE FROM messages
+             WHERE status = 'pending'
+               AND created_at < datetime('now', '-1 hour')",
+            [],
+        )?;
+
+        if deleted > 0 {
+            info!("🔥 PURGED {} old pending messages that can't be uploaded", deleted);
+        }
+
+        // Also reset the sim_storage counts since we're cleaning up
+        conn.execute(
+            "UPDATE sim_storage
+             SET total_messages = 0, deleted_messages = 0",
+            [],
+        )?;
+
+        info!("✅ Reset all SIM storage counts");
+
+        Ok(deleted)
+    }
+
+    /// Emergency cleanup - delete EVERYTHING pending
+    pub fn emergency_cleanup(&self) -> Result<usize> {
+        let conn = self.conn.lock().unwrap();
+
+        // Delete ALL pending messages regardless of age
+        let deleted = conn.execute(
+            "DELETE FROM messages WHERE status = 'pending'",
+            [],
+        )?;
+
+        if deleted > 0 {
+            warn!("⚠️ EMERGENCY CLEANUP: Deleted {} pending messages", deleted);
+        }
+
+        // Reset all counters
+        conn.execute(
+            "UPDATE sim_storage SET total_messages = 0, deleted_messages = 0",
+            [],
+        )?;
 
         Ok(deleted)
     }
