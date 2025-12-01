@@ -148,13 +148,44 @@ impl ModemManager {
         Ok(messages_with_paths.into_iter().map(|m| m.message).collect())
     }
 
-    /// Delete SMS after processing (D-Bus only)
+    /// Delete SMS after processing (with busctl fallback)
     pub async fn delete_sms(&self, modem_id: &str, sms_path: &str) -> Result<()> {
+        // Try native D-Bus first
         if let Some(native) = self.dbus_client.native_client() {
-            native.delete_sms(modem_id, sms_path).await
-        } else {
-            Err(anyhow!("D-Bus is required for SMS operations"))
+            match native.delete_sms(modem_id, sms_path).await {
+                Ok(_) => {
+                    debug!("✅ Deleted SMS via native D-Bus: {}", sms_path);
+                    return Ok(());
+                }
+                Err(e) => {
+                    debug!("Native D-Bus deletion failed, trying busctl: {}", e);
+                }
+            }
         }
+
+        // Fallback to busctl command
+        debug!("🔧 Attempting busctl fallback deletion for: {}", sms_path);
+        let output = tokio::process::Command::new("busctl")
+            .arg("call")
+            .arg("org.freedesktop.ModemManager1")
+            .arg(format!("/org/freedesktop/ModemManager1/Modem/{}", modem_id))
+            .arg("org.freedesktop.ModemManager1.Modem.Messaging")
+            .arg("Delete")
+            .arg("o")
+            .arg(sms_path)
+            .output()
+            .await
+            .map_err(|e| anyhow!("Failed to execute busctl: {}", e))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            error!("busctl deletion failed - stderr: {}, stdout: {}", stderr, stdout);
+            return Err(anyhow!("busctl deletion failed: {}", stderr));
+        }
+
+        debug!("✅ Deleted SMS via busctl fallback: {}", sms_path);
+        Ok(())
     }
 
     /// Normalize timestamp to RFC3339 UTC format
