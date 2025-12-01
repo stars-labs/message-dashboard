@@ -1,506 +1,191 @@
 # CLAUDE.md
-All docs in ./docs/ folder
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Architecture Overview
+## System Overview
 
-This is a distributed SMS management system with three main components:
+This is a distributed SMS management system handling 100+ USB modems on Orange Pi hardware. It consists of:
+- **Rust daemon** (`orange-pi-daemon/`) that interfaces with ModemManager to collect SMS
+- **Cloudflare Workers API** (`sms-dashboard/server/`) with D1 database
+- **Svelte frontend** (`sms-dashboard/client/`) with real-time WebSocket updates
+- **NixOS deployment** (`nixos-config/`) for declarative system configuration
 
-1. **Web Dashboard** (`sms-dashboard/`) - Real-time SMS management interface
-   - Frontend: Svelte + TailwindCSS with Vite build system
-   - Backend: Cloudflare Workers with custom routing
-   - Database: Cloudflare D1 (SQLite) with normalized schema
-   - Real-time: WebSocket + SSE fallback with Durable Objects
-   - Auth: Auth0 integration with RBAC
-   - Utilities: Centralized database management, API responses, and device counting
+## Common Development Tasks
 
-2. **SMS Collection Daemon** (`orange-pi-daemon-rust/`) - Rust daemon for hardware integration (v2.0.0)
-   - **Technology**: Rust with tokio async runtime and reqwest HTTP client
-   - **Reliability**: Memory-safe with no segfaults, robust error handling with exponential backoff retry
-   - **Concurrency**: Async/await pattern for concurrent modem processing (batches of 20)
-   - **ModemManager Integration**: Direct mmcli subprocess calls via tokio::process
-   - **Features**:
-     - Full modem discovery and state tracking
-     - SMS message collection and forwarding to API
-     - Signal quality monitoring
-     - Device details extraction (IMEI, manufacturer, model, firmware)
-     - Correct timestamp parsing for ISO 8601 with timezone offsets
-     - **Sync Manager**: Full/incremental sync state reconciliation (5-minute full sync interval)
-     - **Retry Manager**: Exponential backoff (3 retries: 1s, 2s, 4s) for network resilience
-     - **Normalized Schema**: Uses `/api/control/devices` endpoint with separate modem/SIM payloads
-   - **Performance**: Handles 87 modems with 30s sync interval, 8M memory usage
-   - **Stability**: Zero crashes, eliminates 503 errors via proper rate limiting
+### Building and Running the Rust Daemon
+```bash
+cd orange-pi-daemon
+cargo build --release                    # Production build (optimized)
+cargo test                               # Run all tests
+cargo test test_signal_cache_basic      # Run specific test
+RUST_LOG=debug cargo run                # Run with debug logging
 
-3. **NixOS Configuration** (`nixos-config/`) - Declarative system deployment
-   - Flake-based NixOS configuration for Orange Pi
-   - SMS daemon service definition and modem support
-   - Secrets management with SOPS
-
-### Database Architecture (v2.0)
-
-The system has been refactored from a monolithic `phones` table to a normalized structure:
-
-- **`modems`** - Hardware tracking (IMEI/equipment_id as primary key)
-- **`sims`** - SIM card data (ICCID as primary key)
-- **`modem_state`** - Real-time modem status (volatile data)
-- **`daemon_health`** - Daemon monitoring and heartbeat tracking
-- **`device_view`** - Backward compatibility view combining all tables
-
-## Development Commands
+# Required environment variables:
+export SMS_API_URL="https://sexy.qzz.io"
+export SMS_API_KEY="your-api-key"
+```
 
 ### Frontend Development
 ```bash
 cd sms-dashboard
-npm install
-npm run dev          # Vite dev server (localhost:5173)
-npm run dev:api      # Wrangler dev server for API testing
-npm run build        # Production build
-npm run preview      # Preview production build
-```
-
-### Backend/API Development
-```bash
-cd sms-dashboard
-npm run dev:api                    # Local Workers development
-npx wrangler tail sms-dashboard    # Live production logs
-npx wrangler dev --remote          # Dev against remote D1/KV
+bun install                              # Install dependencies (using bun)
+bun run dev                              # Vite dev server (localhost:5173)
+bun run dev:api                          # Wrangler API dev server
+bun run build:unified                    # Build production bundle
+bun run deploy                           # Deploy to Cloudflare
 ```
 
 ### Database Operations
 ```bash
 cd sms-dashboard
-npm run db:init                    # Initialize local D1 database
-npm run db:migrate                 # Run migrations on remote database
+# Local development
+npx wrangler d1 execute sms-dashboard --local --file=migrations/schema.sql
 
-# Manual D1 operations
-npx wrangler d1 execute sms-dashboard --local --file=path/to/file.sql
+# Remote operations (production)
 npx wrangler d1 execute sms-dashboard --remote --command="SELECT * FROM device_view"
+npx wrangler tail sms-dashboard --format pretty    # Live production logs
 
-# Migration validation
-npx wrangler d1 execute sms-dashboard --remote --file=migrations/validate-migration.sql
-node scripts/validate-migration.js  # Automated validation
-
-# Rollback if needed
-npx wrangler d1 execute sms-dashboard --remote --file=migrations/rollback-to-phones.sql
-```
-
-### SMS Daemon (Rust)
-```bash
-cd orange-pi-daemon
-cargo build --release                              # Production build
-cargo build                                         # Debug build
-export SMS_API_URL="https://sexy.qzz.io"
-export SMS_API_KEY="your-api-key"
-cargo run --release                                 # Run daemon
+# Run migrations
+npx wrangler d1 migrations apply sms-dashboard --remote
 ```
 
 ### NixOS Deployment
 ```bash
-# Deploy to Orange Pi (critical command - often forgotten)
-# Public IP: 203.116.95.146 | Local IP: 10.171.150.102
+# Build daemon package
+nix build .#sms-daemon
+
+# Deploy to Orange Pi (203.116.95.146)
 nixos-rebuild switch --flake .#orange-pi \
     --use-substitutes \
     --target-host root@203.116.95.146 --build-host root@203.116.95.146 \
     --impure
 
-# Check daemon status on Orange Pi
-ssh root@203.116.95.146 'systemctl status sms-dashboard-daemon'
-ssh root@203.116.95.146 'journalctl -u sms-dashboard-daemon -f'  # Live logs
+# Check service status
+ssh root@203.116.95.146 'systemctl status sms-daemon'
+ssh root@203.116.95.146 'journalctl -u sms-daemon -f'
 ```
 
-### Production Deployment
+## Architecture & Data Flow
+
+### Request Flow
+```
+Orange Pi Hardware → ModemManager → Rust Daemon → Cloudflare API → D1 Database
+                                         ↓                              ↓
+                                    (API Key Auth)              (WebSocket Broadcast)
+                                                                         ↓
+                                                                   Svelte Frontend
+                                                                         ↑
+                                                                   (Auth0 Auth)
+```
+
+### Key Components
+
+**Rust Daemon (`orange-pi-daemon/src/`)**
+- `main.rs`: Event loop with 30-second sync intervals
+- `modem_manager.rs`: ModemManager interface using D-Bus exclusively (no subprocess for SMS/modem operations)
+- `native_dbus.rs`: Native D-Bus implementation using zbus for direct communication (5ms per operation)
+- `dbus_client.rs`: D-Bus client with automatic fallback (native zbus → busctl CLI only)
+- `sms_sender.rs`: SMS sending via native D-Bus (no mmcli subprocess)
+- `sync_manager.rs`: Full/incremental sync state management (5-min full sync)
+- `retry_manager.rs`: Exponential backoff (3 retries: 1s, 2s, 4s)
+- `worker_pool.rs`: Concurrent modem processing (2 workers for 92+ modems)
+- `api_client.rs`: HTTP client with `/api/control/devices` endpoint
+
+**Cloudflare Workers API (`sms-dashboard/server/`)**
+- `index.js`: Custom router with middleware chain (CORS → Auth → RBAC → Handler)
+- `api/control.js`: Device upload endpoints (dual auth: API key for daemon, Auth0 for users)
+- `websocket.js`: Durable Objects for real-time broadcasting
+- `utils/database-setup.js`: Table creation and migration logic
+- `utils/database-wrapper.js`: D1 wrapper with prepared statement caching
+
+**Frontend (`sms-dashboard/client/`)**
+- `App.svelte`: Main component with WebSocket/SSE connection
+- `lib/api.js`: API client with Auth0 token handling
+- `lib/websocket-with-fallback.js`: Real-time updates with automatic reconnection
+- `lib/stores.js`: Svelte stores for state management
+
+### Database Schema (Normalized 3NF)
+
+```sql
+modems (equipment_id PRIMARY KEY)    -- Hardware devices (IMEI)
+sims (iccid PRIMARY KEY)             -- SIM cards with user overrides
+modem_state (modem_id FOREIGN KEY)   -- Real-time status (signal, connection)
+messages (phone_iccid FOREIGN KEY)   -- SMS messages linked to SIMs
+daemon_health                         -- Heartbeat monitoring
+device_view                          -- Compatibility view joining all tables
+```
+
+User overrides in `sims` table:
+- `user_phone_number`, `user_carrier`, `user_country_code`, `user_notes`
+- `user_override_enabled` flag to activate overrides
+
+## Critical Configuration
+
+### Environment Variables
 ```bash
-cd sms-dashboard
-npm run deploy      # Build unified bundle and deploy to Cloudflare
-```
-
-## Key Technical Patterns
-
-### Frontend Architecture
-- **Component Structure**: Reactive Svelte 5 components with stores
-- **API Integration**: `lib/api.js` provides typed API client
-- **Real-time Updates**: WebSocket with SSE fallback (`lib/websocket-with-fallback.js`)
-- **Authentication**: Auth0 integration in `lib/auth.js`
-- **State Management**: Svelte stores for phones, messages, user state
-
-### Backend Architecture
-- **Custom Router**: Simple router implementation (not itty-router) in `server/index.js`
-- **Middleware Chain**: CORS → Auth0 → RBAC → Handler pattern
-- **API Authentication**: Dual auth system - Auth0 for users, API key for Orange Pi
-- **Database Layer**: Direct D1 SQL queries with prepared statements
-- **WebSocket**: Durable Objects for connection persistence and broadcasting
-- **Utilities**:
-  - `server/utils/database-setup.js` - Table creation and index management
-  - `server/utils/device-count.js` - Centralized device statistics
-  - `server/utils/api-response.js` - Standardized API responses
-  - `server/utils/database-wrapper.js` - D1 connection wrapper with statement caching
-
-### Data Flow
-```
-Orange Pi → mmcli → Rust Daemon (v2.0.0) → API (API Key) → D1 Database → WebSocket Broadcast → Frontend
-                                                 ↓
-                                         User Auth (Auth0) → Protected API → Frontend
-```
-
-**Key Endpoints**:
-- `/api/control/devices` - Daemon uploads with sync_mode (full/incremental) and normalized modem/SIM data
-- `/api/control/messages` - Daemon uploads SMS messages
-- `/api/phones` - Frontend fetches device list (Auth0 protected)
-- `/api/messages` - Frontend fetches messages (Auth0 protected)
-
-### Database Schema Critical Points
-
-#### Normalized Schema (v2.1 - September 2025)
-The database has been fully normalized to strict 3NF compliance:
-
-- **Core Tables**:
-  - `modems` - Hardware devices (Primary Key: `equipment_id` - IMEI)
-  - `sims` - SIM cards with user overrides (Primary Key: `iccid`)
-  - `modem_state` - Real-time modem status (Foreign Key: `modem_id`)
-  - `messages` - SMS messages (Foreign Key: `phone_iccid` → `sims.iccid`)
-  - `daemon_health` - Daemon monitoring and heartbeat
-
-- **User Override Pattern**:
-  - User phone number overrides stored directly in `sims` table
-  - Fields: `user_phone_number`, `user_carrier`, `user_country_code`, `user_notes`
-  - Flag: `user_override_enabled` to activate overrides
-  - Maintains 3NF - no transitive dependencies
-
-- **Deprecated Tables Removed**:
-  - `iccid_mappings` - Replaced by user override fields in `sims`
-  - `messages_old_backup` - Removed after successful migration
-  - Database size reduced by 79% (5.31MB → 1.09MB)
-
-- **View for Compatibility**:
-  - `device_view` - Combines all tables for backward compatibility
-  - Automatically uses user overrides when enabled
-  - USB port ordering support via `modem_state.usb_port`
-
-## Common Issues & Debugging
-
-### Wrangler Authentication Errors
-If you see `Authentication error [code: 10000]` when running wrangler commands:
-```bash
-npx wrangler login
-```
-This will open a browser for OAuth authentication. Always fix authentication issues first before debugging other problems.
-
-### Frontend Crashes
-- Null ID handling: Always check `phone.id && phone.id.length` before calling `.slice()`
-- Search filters: Verify `.toLowerCase()` availability before calling
-
-### Backend Data Issues
-```bash
-# Monitor API calls causing issues
-npx wrangler tail sms-dashboard --format pretty
-
-# Check for data inconsistencies
-npx wrangler d1 execute sms-dashboard --command "SELECT * FROM device_stats" --remote
-
-# Verify device counts match
-node scripts/test-stats-api.js
-
-# Clean up stale modem states (older than 2 minutes)
-npx wrangler d1 execute sms-dashboard --command "UPDATE modems SET status = 'disconnected' WHERE datetime(updated_at) < datetime('now', '-2 minutes') AND status = 'connected'" --remote
-
-# Check daemon health
-npx wrangler d1 execute sms-dashboard --command "SELECT *, datetime(last_heartbeat) as heartbeat_time FROM daemon_health ORDER BY last_heartbeat DESC" --remote
-```
-
-### SMS Daemon Issues
-- Check ModemManager status: `systemctl status ModemManager`
-- Verify modem detection: `mmcli -L`
-- Check ICCID extraction: `mmcli -m [modem_id]` then `mmcli -i [sim_id]`
-- Check modem details: `mmcli -m [modem_id] | grep -E "(manufacturer|model|firmware|equipment)"` 
-- Monitor daemon logs: `journalctl -u sms-daemon -f`
-- Check for deadlocks: `journalctl -u sms-daemon | grep -E '(deadlock|panic)'`
-
-### Daemon Performance Metrics (v3.4.0)
-- **Target Performance**:
-  - Cycle time: 50ms per check cycle
-  - Worker threads: 8 parallel processors
-  - Typical: 54 modems checked in ~100ms
-  - Memory usage: ~50MB for 54 modems
-  - CPU usage: ~20% with 54 modems on 8-core CPU
-- **Lock-Free Guarantees**:
-  - No mutexes or locks in critical paths
-  - All shared data uses atomic operations
-  - MPMC queues handle up to 8192 items
-  - Signal cache: 256 entries with hash-based lookup
-  - Priority manager: 256 modem slots
-- **HTTP Communication**:
-  - Tokio async HTTP client with rustls
-  - Connection pooling for efficiency
-  - Configurable timeouts
-- **Memory Management**:
-  - Rust ownership system ensures safety
-  - Automatic memory management
-  - Zero memory leaks guaranteed
-
-### Auth0 Configuration
-- Callback URLs must include both development and production domains
-- JWT verification requires proper audience and issuer configuration
-- RBAC permissions: `phones.read`, `messages.read`, `messages.send`
-
-## Environment Variables & Secrets
-
-### Wrangler Secrets (set with `wrangler secret put`)
-```bash
-AUTH0_DOMAIN          # tenant.auth0.com
-AUTH0_CLIENT_ID       # Auth0 application client ID
-AUTH0_CLIENT_SECRET   # Auth0 application client secret
-AUTH0_AUDIENCE        # API audience (optional)
-API_KEY              # Orange Pi authentication key
-```
-
-### Orange Pi Environment
-```bash
+# Rust Daemon
 SMS_API_URL="https://sexy.qzz.io"
-SMS_API_KEY="api-key-from-wrangler-secrets"
+SMS_API_KEY="<from wrangler secrets>"
+RUST_LOG="info"  # or "debug" for troubleshooting
+
+# Cloudflare Workers (set via wrangler secret put)
+AUTH0_DOMAIN
+AUTH0_CLIENT_ID
+AUTH0_CLIENT_SECRET
+API_KEY  # Must match SMS_API_KEY
 ```
 
-## Testing & Monitoring
+### API Endpoints
+- `/api/control/devices` - Daemon uploads (POST, API key auth)
+  - Accepts `sync_mode`: "full" or "incremental"
+  - Normalized payloads: separate `modems` and `sims` arrays
+- `/api/control/messages` - SMS upload (POST, API key auth)
+- `/api/phones` - Frontend device list (GET, Auth0 auth)
+- `/api/messages` - Frontend message list (GET, Auth0 auth)
 
-### API Testing
+### Performance Constraints & Optimizations
+- **Native D-Bus**: Zero subprocess overhead using zbus library
+  - Native D-Bus: ~5ms per operation (primary method)
+  - Busctl fallback: ~50ms per operation (when native unavailable)
+  - No mmcli: Removed entirely - was ~500ms per operation
+- Daemon handles 92+ modems with 2-worker pool
+- 30-second sync interval to avoid Cloudflare rate limits
+- Full sync every 5 minutes for state reconciliation
+- Signal caching: 30-second TTL reduces redundant D-Bus calls
+- D1 batch operations limited to 10 phones per transaction
+- WebSocket broadcasts throttled to prevent overload
+
+## Troubleshooting
+
+### Common Issues
+1. **Wrangler auth errors**: Run `npx wrangler login`
+2. **Daemon 503 errors**: Check sync interval (must be ≥30s)
+3. **Missing modems**: Verify ModemManager service is running
+4. **Database inconsistencies**: Check `device_stats` view for counts
+
+### Debug Commands
 ```bash
-# Test phone data upload
-node scripts/test-phone-data.js
+# Check modem hardware
+mmcli -L                                 # List modems
+mmcli -m 0                              # Modem details
+lsusb | grep -i modem                   # USB devices
 
-# Health check
-curl https://sexy.qzz.io/api/health
+# Database validation
+npx wrangler d1 execute sms-dashboard --remote --file=migrations/validate-migration.sql
+node scripts/validate-migration.js
 
-# Test with auth
-curl -H "Authorization: Bearer $TOKEN" https://sexy.qzz.io/api/phones
+# Service logs
+journalctl -u ModemManager -f           # ModemManager logs
+journalctl -u sms-daemon -f             # Daemon logs
+npx wrangler tail sms-dashboard         # API logs
 ```
 
-### Database Monitoring
-```bash
-# Check device statistics
-npx wrangler d1 execute sms-dashboard --command "SELECT * FROM device_stats" --remote
+## Project-Specific Patterns
 
-# Monitor modem/SIM status
-npx wrangler d1 execute sms-dashboard --command "SELECT status, COUNT(*) FROM modems GROUP BY status" --remote
-npx wrangler d1 execute sms-dashboard --command "SELECT status, COUNT(*) FROM sims GROUP BY status" --remote
-
-# Recent messages
-npx wrangler d1 execute sms-dashboard --command "SELECT * FROM messages ORDER BY created_at DESC LIMIT 10" --remote
-
-# Check for phantom modems (connected but no recent update)
-npx wrangler d1 execute sms-dashboard --command "SELECT equipment_id, status, datetime(updated_at) as last_update FROM modems WHERE status = 'connected' AND datetime(updated_at) < datetime('now', '-60 seconds')" --remote
-
-# Performance statistics
-npx wrangler d1 execute sms-dashboard --command "SELECT COUNT(*) as state_records, AVG(signal_percent) as avg_signal FROM modem_state" --remote
-```
-
-## Critical System Dependencies
-
-### Orange Pi Hardware Requirements
-- ModemManager 1.18+ for modem interface
-- USB 3.0 hubs with external power (12V 10A+ recommended for 50+ modems)
-- Tested with 54+ Quectel EC20 modems simultaneously
-- Minimum 8GB RAM for high modem counts
-- Multi-core CPU (8+ cores recommended) for parallel processing
-- ICCID extraction via mmcli SIM path parsing
-
-### Cloudflare Services Used
-- Workers (backend hosting)
-- D1 (SQLite database)
-- KV (session storage)
-- Durable Objects (WebSocket persistence)
-- Custom domain routing
-
-### Build System
-- Vite for frontend bundling
-- Custom `build-unified.js` script combines frontend assets into Workers
-- TailwindCSS for styling
-- Bun as package manager and runtime
-
-## Recent Changes (November 2025)
-
-### v2.0.0 - Rust Daemon Sync Manager & Production 503 Fix (November 2, 2025)
-- **Critical Production Fix**: Eliminated continuous 503 errors (Cloudflare rate limiting error 1102)
-  - **Problem**: v1.0.1 daemon hitting `/api/control/phones` every 10 seconds with 87 phones = 261 SQL ops/request
-  - **Root Cause**: Excessive API call frequency triggering Cloudflare Workers rate limits
-  - **Solution**: Complete refactor to optimize API call patterns
-- **New Architecture**:
-  - **Sync Manager** (`sync_manager.rs`): Full/incremental sync state reconciliation
-    - Full sync every 5 minutes for complete state reconciliation
-    - Incremental syncs in between for efficiency
-    - Recovery mode after 3 consecutive failures
-    - Session-based state tracking with UUID
-  - **Retry Manager** (`retry_manager.rs`): Exponential backoff for network resilience
-    - 3 retries with 1s, 2s, 4s delays
-    - Prevents error storms during network issues
-    - Automatic recovery on success
-  - **Normalized Schema**: Migrated to `/api/control/devices` endpoint
-    - Separate modem and SIM payloads matching server schema
-    - sync_mode parameter (full/incremental)
-    - session_id for state tracking
-- **Configuration Changes**:
-  - Increased sync interval from 10s to 30s
-  - Increased HTTP timeout from 10s to 30s for large uploads
-  - Changed version from v1.0.1 to v2.0.0
-- **Result**: Zero 503 errors, proper rate limiting compliance, stable 87-modem operation
-- **Deployment**: Successfully built 4.8MB release binary, deployed via NixOS
-
-### v1.0.1 - Rust Daemon Timestamp Fix (October 6, 2025)
-- **Critical Bug Fix**: Corrected timestamp parsing in Rust daemon
-  - **Problem**: Timestamps like "2025-10-05T19:05:4208" instead of "2025-10-05T19:05:42+08:00"
-  - **Root Cause**: String slicing approach was cutting off timezone offset
-  - **Solution**: Changed from `line[idx + 10..]` to `line[colon_pos + 1..].trim()` using `find(':')`
-  - Fixed 500 Internal Server Errors caused by malformed timestamps
-  - Commit: `51c4f69` - successfully deployed to production
-- **Result**: Zero API errors, all 87 modems uploading correctly
-- **Stability**: Daemon running stable for hours, no crashes or memory leaks
-
-### v1.0.0 - Rust Daemon Initial Implementation (October 2-5, 2025)
-- **Complete Rewrite**: Implemented in Rust for memory safety and reliability
-  - Zero segfaults, memory-safe by design
-  - Robust error handling with automatic recovery
-- **DNS Resolution Fix (October 5)**: Fixed DNSSEC validation failures
-  - Problem: systemd-resolved failing DNSSEC validation
-  - Solution: Disabled DNSSEC in NixOS (`services.resolved.dnssec = "false"`)
-  - Daemon now successfully connects to API
-- **Architecture**:
-  - Async/await with tokio multi-threaded runtime (4 worker threads)
-  - reqwest HTTP client with 10s timeouts
-  - Direct mmcli integration via tokio::process::Command  
-  - Concurrent modem processing (batches of 20)
-  - Clean module structure: main, api_client, modem_manager, types
-- **Performance**: 
-  - 87 modems, 95-105s cycle time
-  - Memory: 8M typical, 44.4M peak
-  - CPU: ~2min per cycle
-  - Zero crashes in extended operation
-- **Deployment**: NixOS flake with systemd service integration
-
-### v2.1.0 - Database Normalization to 3NF (September 2025)
-
-
-### Architecture Update
-- Daemon now uses HTTP POST requests to upload data (not WebSocket)
-- Server broadcasts updates via WebSocket/SSE to connected clients
-- API endpoints: `/api/control/phones` and `/api/control/messages`
-
-### v1.16.0 - Keyword Highlighting & Tagging System (August 2025)
-- **Database Schema**: Added `keyword_tags` and `message_tags` tables for keyword-tag mappings
-- **API Endpoints**: 
-  - `/api/keywords` - CRUD operations for keyword configuration
-  - `/api/messages/:id/tags` - Get tags for a specific message
-  - `/api/ai/analyze-keywords` - AI analysis of keyword usage and patterns
-- **UI Components**:
-  - `KeywordConfig.svelte` - Configuration interface for managing keywords
-  - `MessageHighlight.svelte` - Real-time message highlighting with tags
-  - Added "Keywords" tab to main navigation
-- **Features**:
-  - Case-sensitive and whole-word matching options
-  - Priority-based keyword matching to handle overlaps
-  - Custom colors for each keyword-tag pair
-  - Usage statistics and tracking
-  - Automatic keyword processing during message upload
-  - Server-side keyword matching for consistency
-  - Client-side fallback for real-time highlighting
-- **AI Integration**: Keyword analysis function provides insights on usage patterns and optimization recommendations
-- **Bug Fixes**:
-  - Added `keywords.read` and `keywords.write` permissions to RBAC middleware
-  - Implemented automatic table creation in API endpoints to ensure tables exist
-  - Added table creation to control handler for message processing
-  - Fixed API client method calls from `api.request()` to proper `api.get()`, `api.post()`, etc.
-
-### v1.31.8 - Reduced Daemon Logging (August 2025)
-- Implemented compile-time log level configuration in Zig build
-- Created two separate Nix derivations: `sms-daemon` (info level) and `sms-daemon-debug` (debug level)
-- Changed verbose modem state and signal strength logs from info to debug level
-- Now only logs pending SMS operations and new messages at info level
-- Significantly reduced log volume for production operations
-
-### v3.4.0 - Lock-Free Architecture & Code Cleanup (August 2025)
-- **Complete Lock-Free Implementation**: Replaced ALL mutex-based structures
-  - `LockFreeMessageQueue`: Lock-free MPMC queue for message processing
-  - `LockFreeSignalCache`: Atomic operations for signal caching
-  - `LockFreePriorityManager`: Lock-free modem priority management
-- **Performance Improvements**:
-  - Eliminated all deadlocks through lock-free data structures
-  - BusctlDBus wrapper reduces subprocess spawning by 90%
-  - Worker pool with 8 parallel threads for modem processing
-  - Adaptive timing with 50ms target cycle time
-  - Priority-based polling (High/Medium/Low)
-  - Bloom filter deduplication with O(1) lookups
-- **Code Cleanup**:
-  - Removed 12 unused source files (event_loop, mutex-based queues, etc.)
-  - Streamlined imports and dependencies
-  - Reduced codebase by ~40% while improving performance
-- **Stability**: Daemon runs continuously with 54+ USB modems without crashes or deadlocks
-- **Tested Configuration**: Orange Pi 5 Plus with 54 EC20 modems via USB hubs
-
-### v2.0.0 - Database Architecture Refactoring (August 2025)
-- **Major Schema Changes**:
-  - Migrated from monolithic `phones` table to normalized structure
-  - New tables: `modems`, `sims`, `modem_state`, `daemon_health`
-  - Created `device_view` for backward compatibility
-  - Equipment ID (IMEI) now primary key for modems
-  - ICCID remains primary key for SIMs
-- **Infrastructure Improvements**:
-  - Centralized table creation in `/server/utils/database-setup.js`
-  - Single source of truth for device counts in `/server/utils/device-count.js`
-  - Standardized API responses via `/server/utils/api-response.js`
-  - D1 connection wrapper with statement caching in `/server/utils/database-wrapper.js`
-- **Critical Fixes**:
-  - Added transaction boundaries for multi-table updates using D1 batch API
-  - Implemented stale threshold checks (60s for phantom modems, 120s for offline)
-  - Equipment ID validation with synthetic ID generation fallback
-- **Performance Optimizations**:
-  - Batch processing with transactions (10 phones per batch)
-  - Prepared statement caching for frequently used queries
-  - Optimized indexes for common query patterns
-- **Migration Support**:
-  - Comprehensive validation scripts (`validate-migration.sql`)
-  - Safe rollback procedure (`rollback-to-phones.sql`)
-  - Automated validation runner (`scripts/validate-migration.js`)
-
-### v3.5.0 - BusctlDBus Integration (August 2025)
-- **Major Performance Improvement**: Integrated BusctlDBus wrapper into ModemManager
-- All critical methods now use busctl D-Bus commands instead of mmcli when available
-- Reduces subprocess spawning overhead by ~90% (busctl is much faster than mmcli)
-- Methods updated: `listModems`, `getModemState`, `getIccid`, `getSignalQuality`
-- Automatic fallback to mmcli if busctl fails
-- Maintains backward compatibility while significantly improving performance
-- Subprocess reduction: from 200+ mmcli calls/second to ~20 busctl calls/second
-
-### v3.6.0 - Code Cleanup (August 2025)
-- **Critical Fixes**:
-  - Fixed hash collision bug in `LockFreeSignalCache` with linear probing (8 probe limit)
-  - Removed unused mutex from `ApiClient` (was initialized but never provided benefit)
-  - Removed entire unused result queue system from `WorkerPool`
-- **Code Consolidation**:
-  - Removed unused parallel processing functions
-  - Cleaned up redundant error handling patterns
-- **Performance Improvements**:
-  - Hash collision fix prevents silent data overwrites
-  - Removed unnecessary mutex operations in API client
-  - Linear probing ensures signal data integrity
-- **Impact**: ~200 lines of dead code removed, 2KB memory reduction per daemon instance
-
-### v2.1.0 - Database Normalization to 3NF (September 2025)
-- **Major Schema Changes**:
-  - Database normalized to strict Third Normal Form (3NF) compliance
-  - Removed `iccid_mappings` table - replaced with user override fields in `sims` table
-  - Removed redundant columns from `messages` table (`phone_id`, `sim_iccid`, `modem_id`)
-  - Added foreign key constraints with proper referential integrity
-- **User Override Pattern**:
-  - Phone number overrides now stored directly in `sims` table
-  - New columns: `user_phone_number`, `user_carrier`, `user_country_code`, `user_notes`
-  - `user_override_enabled` flag to activate overrides
-  - Maintains 3NF - no transitive dependencies or redundancy
-- **API Updates**:
-  - ICCID mappings handler refactored to use `sims` table
-  - Updates handler fixed to remove references to deprecated tables
-  - AI insights handler fixed for column name mismatches
-- **Performance Impact**:
-  - Database size reduced by 79% (5.31MB → 1.09MB)
-  - Query optimization reduced reads from 4.89k to single scan
-  - Removed complex JOIN operations with deprecated tables
-- **Migration Scripts**:
-  - `006a_prepare_messages_fix_v2.sql` - Normalize messages table
-  - `007_add_user_overrides.sql` - Add override fields to sims
-  - `008_cleanup_deprecated_tables.sql` - Remove old backup tables
+1. **Always use device_view** for backward compatibility when reading device data
+2. **Sync modes**: Use "full" for recovery, "incremental" for normal operation
+3. **Timestamp format**: ISO 8601 with timezone (e.g., "2025-10-05T19:05:42+08:00")
+4. **Error handling**: Daemon uses retry manager with exponential backoff
+5. **Auth pattern**: Dual auth system - API keys for daemon, Auth0 for users
+6. **State management**: Signal cache holds 256 entries with hash-based lookup
+7. **USB ordering**: Use `modem_state.usb_port` for consistent device ordering

@@ -13,12 +13,15 @@ use orange_pi_daemon_rust::worker_pool::{WorkerPool, WorkerPoolConfig};
 use orange_pi_daemon_rust::benchmark::PerformanceBenchmark;
 use orange_pi_daemon_rust::message_store::MessageStore;
 
-// V7.2.0 - DYNAMIC BATCH SIZE WITH SMART PAYLOAD CONTROL
-// Three independent tasks with intelligent batching:
+// V7.3.0 - EMERGENCY FIX FOR MODEMMANAGER DELETION FAILURE
+// ModemManager refuses ALL SMS deletion requests, causing exponential message growth
+// Workaround: Automatic cleanup every 5 minutes removes old pending messages
+// Tasks:
 // 1. Modem Reader: Reads SMS from modems every 1 second (6 workers)
 // 2. Database Uploader: Dynamic batch size (10-100) based on message length, 50ms rate limiting
 // 3. Device Status Sync: Syncs device status every 30 seconds
-// Expected: Optimal throughput with adaptive payload sizes!
+// 4. Statistics Logger: Logs database stats every 60 seconds
+// 5. Auto Cleanup: Removes old pending messages every 5 minutes (workaround for deletion failure)
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)] // Optimized for 4-core ARM CPU
 async fn main() -> Result<()> {
@@ -60,7 +63,7 @@ async fn main() -> Result<()> {
         });
 
     let session_id = format!("rust-daemon-{}", uuid::Uuid::new_v4());
-    info!("🚀 SMS Daemon v7.2.1-diagnostic starting (DELETION DIAGNOSTIC)");
+    info!("🚀 SMS Daemon v7.3.0 starting (EMERGENCY FIX - Auto Cleanup)");
     info!("📡 Session ID: {}", session_id);
     info!("🌍 API URL: {}", api_url);
 
@@ -364,6 +367,36 @@ async fn main() -> Result<()> {
                     if !full_sims.is_empty() {
                         warn!("⚠️  SIMs with >200 messages in DB: {} cards", full_sims.len());
                     }
+                }
+            }
+        }
+    });
+
+    // TASK 5: AUTOMATIC CLEANUP (every 5 minutes)
+    // Since ModemManager won't delete SMS from SIM cards, we need periodic cleanup
+    let cleanup_store = message_store.clone();
+
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(300)).await;  // Every 5 minutes
+
+            // Clean up old pending messages that can't be deleted from SIM
+            match cleanup_store.cleanup_all_old_pending() {
+                Ok(deleted) if deleted > 0 => {
+                    warn!("🧹 AUTO-CLEANUP: Removed {} old pending messages (ModemManager deletion failure workaround)", deleted);
+                }
+                Ok(_) => {
+                    debug!("🧹 Auto-cleanup: No old pending messages to remove");
+                }
+                Err(e) => {
+                    error!("❌ Auto-cleanup failed: {}", e);
+                }
+            }
+
+            // Also mark old uploaded messages as deleted to prevent deletion attempts
+            if let Ok(marked) = cleanup_store.mark_old_uploaded_as_deleted() {
+                if marked > 0 {
+                    info!("✅ Marked {} old uploaded messages as deleted (stale paths)", marked);
                 }
             }
         }

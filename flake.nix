@@ -119,7 +119,7 @@
         }:
         let
           # SMS daemon version - single source of truth
-          daemonVersion = "6.9.0"; # Fast 1-second upload interval (10 messages/second)
+          daemonVersion = "7.4.0"; # v7.4.0: Added busctl fallback for SMS deletion
 
           # Rust SMS daemon - the only daemon implementation
           sms-daemon = pkgs.rustPlatform.buildRustPackage {
