@@ -1,22 +1,23 @@
-pub mod types;
-pub mod modem_manager;
 pub mod api_client;
-pub mod sync_manager;
-pub mod retry_manager;
-pub mod sms_sender;
-pub mod dbus_client;
-pub mod native_dbus;
-pub mod signal_cache;
-pub mod worker_pool;
+pub mod at_modem;
 pub mod benchmark;
+pub mod dbus_client;
 pub mod message_store;
+pub mod modem_manager;
+pub mod native_dbus;
+pub mod retry_manager;
+pub mod signal_cache;
+pub mod sms_sender;
+pub mod sync_manager;
+pub mod types;
+pub mod worker_pool;
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::retry_manager::RetryManager;
     use crate::signal_cache::SignalCache;
     use crate::sync_manager::{SyncManager, SyncMode};
-    use crate::retry_manager::RetryManager;
     use crate::types::*;
     use std::time::Duration;
     use tokio::time::sleep;
@@ -105,7 +106,9 @@ mod tests {
             phone_iccid: "89860121750097854321".to_string(),
             phone_number: "+1234567890".to_string(),
             content: "Test message".to_string(),
-            timestamp: chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string(),
+            timestamp: chrono::Utc::now()
+                .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+                .to_string(),
             direction: "received".to_string(),
         };
 
@@ -237,9 +240,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_sms_sender_creation() {
-        use crate::sms_sender::SmsSender;
         use crate::api_client::ApiClient;
         use crate::modem_manager::ModemManager;
+        use crate::sms_sender::SmsSender;
         use crate::types::Config;
         use std::sync::Arc;
 

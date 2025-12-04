@@ -17,6 +17,38 @@
   let simSearch = "";
   let showSimDropdown = false;
   let selectedSimDisplay = "";
+  let selectedCountryCode = "+65"; // Default to Singapore
+  let showCountryDropdown = false;
+
+  // Common country codes
+  const countryCodes = [
+    { code: "+65", country: "🇸🇬 Singapore", short: "SG" },
+    { code: "+86", country: "🇨🇳 China", short: "CN" },
+    { code: "+1", country: "🇺🇸 USA/Canada", short: "US" },
+    { code: "+44", country: "🇬🇧 UK", short: "UK" },
+    { code: "+81", country: "🇯🇵 Japan", short: "JP" },
+    { code: "+82", country: "🇰🇷 South Korea", short: "KR" },
+    { code: "+60", country: "🇲🇾 Malaysia", short: "MY" },
+    { code: "+66", country: "🇹🇭 Thailand", short: "TH" },
+    { code: "+62", country: "🇮🇩 Indonesia", short: "ID" },
+    { code: "+63", country: "🇵🇭 Philippines", short: "PH" },
+    { code: "+84", country: "🇻🇳 Vietnam", short: "VN" },
+    { code: "+91", country: "🇮🇳 India", short: "IN" },
+    { code: "+61", country: "🇦🇺 Australia", short: "AU" },
+    { code: "+49", country: "🇩🇪 Germany", short: "DE" },
+    { code: "+33", country: "🇫🇷 France", short: "FR" },
+  ];
+
+  // Get full phone number with country code
+  function getFullPhoneNumber() {
+    const num = recipientNumber.trim();
+    // If already has + prefix, use as-is
+    if (num.startsWith('+')) {
+      return num;
+    }
+    // Otherwise prepend selected country code
+    return `${selectedCountryCode}${num}`;
+  }
 
   // Get unique recipient numbers from sent messages
   $: recipientHistory = [
@@ -74,12 +106,15 @@
 
     sendingStatus = "sending";
 
-    // Store recipient in localStorage for persistence
+    // Get full phone number with country code
+    const fullPhoneNumber = getFullPhoneNumber();
+
+    // Store recipient in localStorage for persistence (store with country code)
     const storedRecipients = JSON.parse(
       localStorage.getItem("recipientHistory") || "[]",
     );
-    if (!storedRecipients.includes(recipientNumber)) {
-      storedRecipients.unshift(recipientNumber);
+    if (!storedRecipients.includes(fullPhoneNumber)) {
+      storedRecipients.unshift(fullPhoneNumber);
       localStorage.setItem(
         "recipientHistory",
         JSON.stringify(storedRecipients.slice(0, 50)),
@@ -89,8 +124,8 @@
     // Send actual message via WebSocket
     const sentMessage = {
       phone_iccid: recipientSIM,
-      phoneNumber: recipientNumber,
-      recipient: recipientNumber,
+      phoneNumber: fullPhoneNumber,
+      recipient: fullPhoneNumber,
       content: messageContent,
       timestamp: new Date(),
       type: "sent",
@@ -154,6 +189,14 @@
     if (!event.target.closest(".sim-input-container")) {
       showSimDropdown = false;
     }
+    if (!event.target.closest(".country-code-container")) {
+      showCountryDropdown = false;
+    }
+  }
+
+  function selectCountryCode(code) {
+    selectedCountryCode = code;
+    showCountryDropdown = false;
   }
 </script>
 
@@ -200,18 +243,49 @@
     >
       接收号码
     </label>
-    <input
-      id="recipient-number"
-      type="text"
-      bind:value={recipientNumber}
-      on:focus={() => (showRecipientHistory = true)}
-      on:input={(e) => {
-        showRecipientHistory = true;
-        recipientSearch = e.target.value;
-      }}
-      placeholder="输入接收方手机号..."
-      class="w-full px-4 py-2 cyber-input"
-    />
+    <div class="flex gap-2">
+      <!-- Country Code Selector -->
+      <div class="relative country-code-container">
+        <button
+          type="button"
+          on:click={() => showCountryDropdown = !showCountryDropdown}
+          class="px-3 py-2 cyber-input flex items-center gap-1 min-w-[90px] justify-between"
+        >
+          <span class="font-mono">{selectedCountryCode}</span>
+          <svg class="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+        {#if showCountryDropdown}
+          <div class="absolute top-full left-0 mt-1 tech-card border border-cyan-900/30 rounded-lg shadow-xl shadow-cyan-500/20 max-h-60 overflow-y-auto z-50 min-w-[200px]">
+            <div class="p-2">
+              {#each countryCodes as cc}
+                <button
+                  on:click={() => selectCountryCode(cc.code)}
+                  class="w-full text-left px-3 py-2 hover:bg-cyan-900/20 rounded-md transition-colors text-sm flex items-center gap-2 {selectedCountryCode === cc.code ? 'bg-cyan-900/30' : ''}"
+                >
+                  <span class="font-mono w-12">{cc.code}</span>
+                  <span class="text-cyan-400/80">{cc.country}</span>
+                </button>
+              {/each}
+            </div>
+          </div>
+        {/if}
+      </div>
+      <!-- Phone Number Input -->
+      <input
+        id="recipient-number"
+        type="text"
+        bind:value={recipientNumber}
+        on:focus={() => (showRecipientHistory = true)}
+        on:input={(e) => {
+          showRecipientHistory = true;
+          recipientSearch = e.target.value;
+        }}
+        placeholder="输入手机号..."
+        class="flex-1 px-4 py-2 cyber-input"
+      />
+    </div>
 
     <!-- Recipient History Dropdown -->
     {#if showRecipientHistory && filteredRecipients.length > 0}
@@ -440,18 +514,49 @@
         >
           接收号码
         </label>
-        <input
-          id="mobile-recipient-number"
-          type="text"
-          bind:value={recipientNumber}
-          on:focus={() => (showRecipientHistory = true)}
-          on:input={(e) => {
-            showRecipientHistory = true;
-            recipientSearch = e.target.value;
-          }}
-          placeholder="输入接收方手机号..."
-          class="w-full px-4 py-2 cyber-input"
-        />
+        <div class="flex gap-2">
+          <!-- Country Code Selector -->
+          <div class="relative country-code-container">
+            <button
+              type="button"
+              on:click={() => showCountryDropdown = !showCountryDropdown}
+              class="px-3 py-2 cyber-input flex items-center gap-1 min-w-[90px] justify-between"
+            >
+              <span class="font-mono">{selectedCountryCode}</span>
+              <svg class="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+            {#if showCountryDropdown}
+              <div class="absolute top-full left-0 mt-1 tech-card border border-cyan-900/30 rounded-lg shadow-xl shadow-cyan-500/20 max-h-60 overflow-y-auto z-50 min-w-[200px]">
+                <div class="p-2">
+                  {#each countryCodes as cc}
+                    <button
+                      on:click={() => selectCountryCode(cc.code)}
+                      class="w-full text-left px-3 py-2 hover:bg-cyan-900/20 rounded-md transition-colors text-sm flex items-center gap-2 {selectedCountryCode === cc.code ? 'bg-cyan-900/30' : ''}"
+                    >
+                      <span class="font-mono w-12">{cc.code}</span>
+                      <span class="text-cyan-400/80">{cc.country}</span>
+                    </button>
+                  {/each}
+                </div>
+              </div>
+            {/if}
+          </div>
+          <!-- Phone Number Input -->
+          <input
+            id="mobile-recipient-number"
+            type="text"
+            bind:value={recipientNumber}
+            on:focus={() => (showRecipientHistory = true)}
+            on:input={(e) => {
+              showRecipientHistory = true;
+              recipientSearch = e.target.value;
+            }}
+            placeholder="输入手机号..."
+            class="flex-1 px-4 py-2 cyber-input"
+          />
+        </div>
 
         <!-- Recipient History Dropdown -->
         {#if showRecipientHistory && filteredRecipients.length > 0}

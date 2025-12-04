@@ -119,7 +119,7 @@
         }:
         let
           # SMS daemon version - single source of truth
-          daemonVersion = "7.4.0"; # v7.4.0: Added busctl fallback for SMS deletion
+          daemonVersion = "8.0.0"; # v8.0.0: Direct AT commands (bypasses ModemManager for better 100+ modem performance)
 
           # Rust SMS daemon - the only daemon implementation
           sms-daemon = pkgs.rustPlatform.buildRustPackage {
@@ -143,13 +143,13 @@
             '';
 
             meta = with lib; {
-              description = "High-performance Rust SMS daemon with native D-Bus for zero-overhead modem communication";
+              description = "High-performance Rust SMS daemon with direct AT commands for 100+ modems";
               longDescription = ''
-                A multi-threaded async Rust daemon that monitors 3G/4G modems using native D-Bus,
-                eliminating subprocess overhead entirely. Collects SMS messages and phone status
-                information, and forwards them to the SMS Dashboard server API in real-time.
-                Features native D-Bus (5ms/op), worker pool architecture for 92+ modems, and
-                intelligent fallback to busctl when native D-Bus is unavailable.
+                A multi-threaded async Rust daemon optimized for 100+ USB modems. Uses direct
+                AT commands via serial ports as primary backend, with D-Bus/ModemManager fallback.
+                Collects SMS messages and phone status, forwarding to SMS Dashboard API in real-time.
+                Features: Direct AT commands (~1-5ms/op), worker pool architecture, signal caching,
+                and automatic backend selection based on availability.
               '';
               homepage = "https://github.com/hecoinfo/message-dashboard";
               license = licenses.mit;

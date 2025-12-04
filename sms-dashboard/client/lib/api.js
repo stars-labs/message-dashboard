@@ -1,6 +1,7 @@
 import { auth } from './auth';
 import { pollingService } from './polling-service';
 import { trackApiError, addBreadcrumb, startSpan } from './sentry-utils';
+import { messageCache } from './message-cache';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 
   (typeof window !== 'undefined' ? window.location.origin : 'https://sms-dashboard-api.workers.dev');
@@ -133,6 +134,19 @@ async function apiRequest(method, data = {}) {
 }
 
 export const api = {
+  // Cache management
+  cache: {
+    async getStats() {
+      return await messageCache.getCacheStats();
+    },
+    async clear() {
+      return await messageCache.clearCache();
+    },
+    async prune(maxPerPhone = 200) {
+      return await messageCache.pruneCache(maxPerPhone);
+    }
+  },
+
   // Generic HTTP methods for AI features
   async get(url, options = {}) {
     return await fetchWithAuth(url, { ...options, method: 'GET' });
@@ -188,13 +202,113 @@ export const api = {
     }
   },
   
-  // Messages
+  // Messages - with client-side caching for reduced D1 reads
   async getMessages(params = {}) {
+    const phoneIccid = params.phone_iccid || null;
+    const cacheKey = phoneIccid || 'global';
+    const forceRefresh = params.force_refresh || false;
+
     try {
-      const response = await apiRequest('getMessages', params);
-      return response.success ? response : { data: [], pagination: {} };
+      // Step 1: Get cached messages first for immediate display
+      let cachedMessages = [];
+      let lastSyncTime = null;
+
+      if (!forceRefresh) {
+        try {
+          cachedMessages = await messageCache.getCachedMessages(phoneIccid, params.limit || 500);
+          lastSyncTime = await messageCache.getLastSyncTime(cacheKey);
+          console.debug(`[API] Cache hit: ${cachedMessages.length} messages, last sync: ${lastSyncTime}`);
+        } catch (cacheErr) {
+          console.warn('[API] Cache read failed:', cacheErr);
+        }
+      }
+
+      // Step 2: Fetch new messages from API (incremental if we have cache)
+      const apiParams = { ...params };
+      if (lastSyncTime && !forceRefresh) {
+        apiParams.since = lastSyncTime;
+        // Reduce limit for incremental sync since we're only getting new messages
+        apiParams.limit = Math.min(params.limit || 100, 100);
+      }
+
+      const response = await apiRequest('getMessages', apiParams);
+
+      if (response.success) {
+        const newMessages = response.data || [];
+        const serverTime = response.sync?.server_time || new Date().toISOString();
+
+        console.debug(`[API] Fetched ${newMessages.length} ${response.sync?.is_incremental ? 'new' : 'total'} messages from API`);
+
+        // Step 3: Cache new messages
+        if (newMessages.length > 0) {
+          try {
+            await messageCache.cacheMessages(newMessages);
+          } catch (cacheErr) {
+            console.warn('[API] Cache write failed:', cacheErr);
+          }
+        }
+
+        // Step 4: Update last sync time
+        try {
+          await messageCache.setLastSyncTime(cacheKey, serverTime);
+        } catch (cacheErr) {
+          console.warn('[API] Failed to update sync time:', cacheErr);
+        }
+
+        // Step 5: Merge new messages with cached (avoiding duplicates)
+        if (response.sync?.is_incremental && cachedMessages.length > 0) {
+          const existingIds = new Set(cachedMessages.map(m => m.id));
+          const uniqueNewMessages = newMessages.filter(m => !existingIds.has(m.id));
+          const merged = [...uniqueNewMessages, ...cachedMessages];
+          // Sort by timestamp descending and limit
+          merged.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+          const limitedMerged = merged.slice(0, params.limit || 500);
+
+          console.debug(`[API] Merged: ${uniqueNewMessages.length} new + ${cachedMessages.length} cached = ${limitedMerged.length} total`);
+
+          return {
+            success: true,
+            data: limitedMerged,
+            pagination: response.pagination,
+            sync: { ...response.sync, from_cache: cachedMessages.length, new_count: uniqueNewMessages.length }
+          };
+        }
+
+        // Full refresh - return API data directly
+        return response;
+      }
+
+      // API failed - return cached data if available
+      if (cachedMessages.length > 0) {
+        console.debug(`[API] API failed, returning ${cachedMessages.length} cached messages`);
+        return {
+          success: true,
+          data: cachedMessages,
+          pagination: { limit: params.limit || 500, offset: 0, total: cachedMessages.length },
+          sync: { from_cache: cachedMessages.length, is_offline: true }
+        };
+      }
+
+      return { data: [], pagination: {} };
     } catch (error) {
-      console.warn('Failed to get messages via WebSocket, using empty array:', error);
+      console.warn('Failed to get messages:', error);
+
+      // Try to return cached data on error
+      try {
+        const cachedMessages = await messageCache.getCachedMessages(phoneIccid, params.limit || 500);
+        if (cachedMessages.length > 0) {
+          console.debug(`[API] Error recovery: returning ${cachedMessages.length} cached messages`);
+          return {
+            success: true,
+            data: cachedMessages,
+            pagination: { limit: params.limit || 500, offset: 0, total: cachedMessages.length },
+            sync: { from_cache: cachedMessages.length, is_offline: true }
+          };
+        }
+      } catch (cacheErr) {
+        console.warn('[API] Cache fallback failed:', cacheErr);
+      }
+
       return { data: [], pagination: {} };
     }
   },

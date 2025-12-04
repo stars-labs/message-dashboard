@@ -1,8 +1,8 @@
+use crate::sync_manager::SyncMode;
+use crate::types::*;
 use anyhow::{Context, Result};
 use reqwest::Client;
 use serde_json::json;
-use crate::types::*;
-use crate::sync_manager::SyncMode;
 use tracing::{info, warn};
 
 #[derive(Clone)]
@@ -21,7 +21,7 @@ impl ApiClient {
             config,
         }
     }
-    
+
     /// Upload devices using normalized schema with sync mode
     /// This is the preferred method for device synchronization
     pub async fn upload_devices(
@@ -37,7 +37,9 @@ impl ApiClient {
         }
 
         let url = format!("{}/api/control/devices", self.config.api_url);
-        let timestamp = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+        let timestamp = chrono::Utc::now()
+            .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+            .to_string();
 
         info!(
             "📤 Uploading {} modems and {} SIMs (mode: {}, session: {})",
@@ -55,7 +57,8 @@ impl ApiClient {
             "sims": sims,
         });
 
-        let response = self.client
+        let response = self
+            .client
             .post(&url)
             .header("x-api-key", &self.config.api_key)
             .header("x-daemon-version", "rust-2.0.0-sync")
@@ -66,11 +69,17 @@ impl ApiClient {
 
         if !response.status().is_success() {
             let status = response.status();
-            let body = response.text().await.unwrap_or_else(|_| String::from("(no body)"));
+            let body = response
+                .text()
+                .await
+                .unwrap_or_else(|_| String::from("(no body)"));
             anyhow::bail!("API returned error: {} - {}", status, body);
         }
 
-        info!("✅ Successfully uploaded devices (mode: {})", sync_mode.as_str());
+        info!(
+            "✅ Successfully uploaded devices (mode: {})",
+            sync_mode.as_str()
+        );
         Ok(())
     }
 
@@ -87,7 +96,8 @@ impl ApiClient {
         // Use the legacy /api/control/phones endpoint which expects { phones: [...] }
         let url = format!("{}/api/control/phones", self.config.api_url);
 
-        let response = self.client
+        let response = self
+            .client
             .post(&url)
             .header("x-api-key", &self.config.api_key)
             .header("x-daemon-version", "rust-1.0.0")
@@ -98,14 +108,17 @@ impl ApiClient {
 
         if !response.status().is_success() {
             let status = response.status();
-            let body = response.text().await.unwrap_or_else(|_| String::from("(no body)"));
+            let body = response
+                .text()
+                .await
+                .unwrap_or_else(|_| String::from("(no body)"));
             anyhow::bail!("API returned error: {} - {}", status, body);
         }
 
         info!("✅ Uploaded {} phones", phones.len());
         Ok(())
     }
-    
+
     /// Upload messages with proper batching to avoid overwhelming the API
     pub async fn upload_messages(&self, messages: &[Message]) -> Result<()> {
         if messages.is_empty() {
@@ -120,14 +133,16 @@ impl ApiClient {
         let mut uploaded = 0;
 
         for (batch_num, chunk) in messages.chunks(BATCH_SIZE).enumerate() {
-            info!("📤 Uploading batch {}/{} ({} messages)",
+            info!(
+                "📤 Uploading batch {}/{} ({} messages)",
                 batch_num + 1,
                 (total + BATCH_SIZE - 1) / BATCH_SIZE,
                 chunk.len()
             );
 
             // Upload this batch
-            let response = self.client
+            let response = self
+                .client
                 .post(&url)
                 .header("x-api-key", &self.config.api_key)
                 .json(&json!({ "messages": chunk }))
@@ -137,8 +152,16 @@ impl ApiClient {
 
             if !response.status().is_success() {
                 let status = response.status();
-                let body = response.text().await.unwrap_or_else(|_| String::from("(no body)"));
-                anyhow::bail!("API returned error for batch {}: {} - {}", batch_num + 1, status, body);
+                let body = response
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| String::from("(no body)"));
+                anyhow::bail!(
+                    "API returned error for batch {}: {} - {}",
+                    batch_num + 1,
+                    status,
+                    body
+                );
             }
 
             uploaded += chunk.len();
@@ -149,30 +172,35 @@ impl ApiClient {
             }
         }
 
-        info!("✅ Successfully uploaded {} messages in {} batches", uploaded, (total + BATCH_SIZE - 1) / BATCH_SIZE);
+        info!(
+            "✅ Successfully uploaded {} messages in {} batches",
+            uploaded,
+            (total + BATCH_SIZE - 1) / BATCH_SIZE
+        );
         Ok(())
     }
-    
+
     /// Get pending SMS to send
     pub async fn get_pending_sms(&self) -> Result<Vec<PendingSms>> {
         let url = format!("{}/api/control/pending-sms", self.config.api_url);
-        
-        let response = self.client
+
+        let response = self
+            .client
             .get(&url)
             .header("x-api-key", &self.config.api_key)
             .send()
             .await
             .context("Failed to get pending SMS")?;
-        
+
         if !response.status().is_success() {
             anyhow::bail!("API returned error: {}", response.status());
         }
-        
+
         #[derive(serde::Deserialize)]
         struct PendingResponse {
             pending_messages: Vec<PendingSms>,
         }
-        
+
         let data: PendingResponse = response.json().await?;
         Ok(data.pending_messages)
     }

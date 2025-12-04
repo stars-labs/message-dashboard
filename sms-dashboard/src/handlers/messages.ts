@@ -1,4 +1,4 @@
-import { eq, sql, and, or, desc, like, inArray } from 'drizzle-orm';
+import { eq, sql, and, or, desc, like, inArray, gt } from 'drizzle-orm';
 import { createDb } from '../db/client';
 import { messages, sims, iccid_mappings, message_tags, keyword_tags } from '../db/schema';
 import type { Context } from 'hono';
@@ -19,6 +19,7 @@ type AppContext = Context<{
 
 export const messagesHandler = {
   // List messages with optional filtering
+  // Supports incremental sync via 'since' parameter to reduce D1 reads
   async list(c: AppContext) {
     const db = c.get('db');
     const url = new URL(c.req.url);
@@ -28,6 +29,8 @@ export const messagesHandler = {
     const search = url.searchParams.get('search');
     const limit = parseInt(url.searchParams.get('limit') || '100');
     const offset = parseInt(url.searchParams.get('offset') || '0');
+    // Incremental sync: only fetch messages newer than this timestamp
+    const since = url.searchParams.get('since'); // ISO timestamp string
     
     try {
       let query = db
@@ -60,22 +63,28 @@ export const messagesHandler = {
 
       // Build WHERE conditions
       const conditions = [];
-      
+
       if (phoneId) {
         conditions.push(or(
           eq(messages.phone_iccid, phoneId),
           eq(messages.phone_id, phoneId)
         ));
       }
-      
+
       if (direction) {
         conditions.push(eq(messages.direction, direction));
       }
-      
+
       if (search) {
         conditions.push(like(messages.content, `%${search}%`));
       }
-      
+
+      // Incremental sync: only return messages newer than 'since' timestamp
+      // This dramatically reduces row reads when client has cached messages
+      if (since) {
+        conditions.push(gt(messages.timestamp, since));
+      }
+
       if (conditions.length > 0) {
         query = query.where(and(...conditions));
       }
@@ -123,6 +132,12 @@ export const messagesHandler = {
           limit,
           offset,
           total: results.length
+        },
+        // Incremental sync metadata
+        sync: {
+          is_incremental: !!since,
+          server_time: new Date().toISOString(),
+          since: since || null
         }
       });
     } catch (error: any) {

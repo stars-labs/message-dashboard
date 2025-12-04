@@ -22,6 +22,9 @@
   # System identification
   networking.hostName = "orange-pi-sms";
 
+  # Allow unfree packages (for claude-code)
+  nixpkgs.config.allowUnfree = true;
+
   # =============================================================================
   # USB OPTIMIZATION FOR 100 MODEMS
   # =============================================================================
@@ -316,7 +319,7 @@
     # Kernel parameters for security hardening AND USB optimization
     kernelParams = [
       # USB optimization for 100 modems
-      "usbcore.usbfs_memory_mb=256" # Increase USB buffer (default 16MB)
+      "usbcore.usbfs_memory_mb=1024" # Increase USB buffer (default 16MB, 1GB for 100 modems)
       "usbcore.autosuspend=-1" # Disable USB autosuspend
       "xhci_hcd.quirks=270336" # USB controller quirk for stability (from dotfiles)
       "log_buf_len=4M" # Increase kernel message buffer
@@ -587,6 +590,7 @@
     sbctl # Secure boot control
     usbutils # Provides lsusb command
     ldns
+    claude-code
     # Security tools (configure manually if needed)
     # aide  # File integrity monitoring - not available as service
     # rkhunter  # Rootkit hunter - not available as service

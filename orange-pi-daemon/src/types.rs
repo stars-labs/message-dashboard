@@ -21,22 +21,22 @@ pub struct Message {
 pub struct MessageWithPath {
     pub message: Message,
     pub modem_id: String,
-    pub sms_path: String,  // D-Bus path for deletion after upload
+    pub sms_path: String, // D-Bus path for deletion after upload
 }
 
 // Normalized modem data (hardware) - matches server schema
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Modem {
-    pub equipment_id: String,  // IMEI (Primary Key)
+    pub equipment_id: String, // IMEI (Primary Key)
     pub manufacturer: Option<String>,
     pub model: Option<String>,
     pub firmware_revision: Option<String>,
     pub hardware_revision: Option<String>,
-    pub status: String,        // "connected", "disconnected"
+    pub status: String, // "connected", "disconnected"
 
     // Optional modem_state fields (can be included for convenience)
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub signal: Option<i32>,   // Signal percent
+    pub signal: Option<i32>, // Signal percent
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rssi: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -60,7 +60,7 @@ pub struct Modem {
 // Normalized SIM data - matches server schema
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Sim {
-    pub iccid: String,         // ICCID (Primary Key)
+    pub iccid: String, // ICCID (Primary Key)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub phone_number: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -69,7 +69,7 @@ pub struct Sim {
     pub operator_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub operator_id: Option<String>,
-    pub status: String,        // "active", "inactive", "removed"
+    pub status: String, // "active", "inactive", "removed"
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sim_index: Option<i32>,
 }
@@ -81,7 +81,7 @@ pub struct Phone {
     pub number: Option<String>,
     pub signal: Option<i32>,
     pub operator_name: Option<String>,
-    pub status: String,     // "active", "offline"
+    pub status: String, // "active", "offline"
     pub manufacturer: Option<String>,
     pub model: Option<String>,
     pub firmware_revision: Option<String>,

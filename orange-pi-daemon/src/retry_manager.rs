@@ -55,7 +55,10 @@ impl RetryManager {
         let delay_ms = self.next_delay();
         let delay_duration = Duration::from_millis(delay_ms);
 
-        info!("🔄 Retrying in {}ms (attempt {}/{})", delay_ms, self.current_attempt, self.max_retries);
+        info!(
+            "🔄 Retrying in {}ms (attempt {}/{})",
+            delay_ms, self.current_attempt, self.max_retries
+        );
         sleep(delay_duration).await;
 
         delay_ms
@@ -69,10 +72,7 @@ impl RetryManager {
     ///     api_client.upload_data(&data).await
     /// }).await;
     /// ```
-    pub async fn execute_with_retry<F, Fut, T, E>(
-        &mut self,
-        mut operation: F,
-    ) -> Result<T, E>
+    pub async fn execute_with_retry<F, Fut, T, E>(&mut self, mut operation: F) -> Result<T, E>
     where
         F: FnMut() -> Fut,
         Fut: std::future::Future<Output = Result<T, E>>,
@@ -82,7 +82,10 @@ impl RetryManager {
             match operation().await {
                 Ok(result) => {
                     if self.current_attempt > 0 {
-                        info!("✅ Operation succeeded after {} retries", self.current_attempt);
+                        info!(
+                            "✅ Operation succeeded after {} retries",
+                            self.current_attempt
+                        );
                     }
                     self.reset();
                     return Ok(result);
@@ -92,7 +95,10 @@ impl RetryManager {
                         warn!("❌ Operation failed: {}. Retrying...", err);
                         self.sleep_with_backoff().await;
                     } else {
-                        warn!("❌ Operation failed after {} attempts: {}", self.max_retries, err);
+                        warn!(
+                            "❌ Operation failed after {} attempts: {}",
+                            self.max_retries, err
+                        );
                         return Err(err);
                     }
                 }

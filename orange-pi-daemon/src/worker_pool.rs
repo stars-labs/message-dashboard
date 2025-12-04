@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, RwLock, Semaphore};
@@ -22,9 +23,9 @@ pub struct WorkerPoolConfig {
 impl Default for WorkerPoolConfig {
     fn default() -> Self {
         Self {
-            num_workers: 6,           // Optimized for 91 modems with v7.1.0 performance improvements
-            batch_size: 12,           // Increased batch size for higher throughput
-            modem_timeout: Duration::from_secs(20), // Reduced timeout for faster failure detection
+            num_workers: 16, // Higher concurrency for 100+ modems (I/O bound)
+            batch_size: 24, // Larger batches to reduce loop iterations
+            modem_timeout: Duration::from_secs(12), // Faster failure detection to avoid backlog
         }
     }
 }
@@ -57,7 +58,7 @@ pub struct ModemResult {
     pub phone: Option<Phone>,
     pub sim: Option<Sim>,
     pub messages: Vec<Message>,
-    pub messages_with_paths: Vec<MessageWithPath>,  // Track SMS paths for deletion
+    pub messages_with_paths: Vec<MessageWithPath>, // Track SMS paths for deletion
     pub error: Option<String>,
 }
 
@@ -67,6 +68,8 @@ pub struct WorkerPool {
     modem_manager: Arc<ModemManager>,
     semaphore: Arc<Semaphore>,
     stats: Arc<RwLock<WorkerPoolStats>>,
+    /// Flag to prevent concurrent processing calls
+    processing: Arc<AtomicBool>,
 }
 
 impl WorkerPool {
@@ -84,15 +87,38 @@ impl WorkerPool {
             modem_manager,
             semaphore,
             stats: Arc::new(RwLock::new(WorkerPoolStats::default())),
+            processing: Arc::new(AtomicBool::new(false)),
         }
     }
 
     /// Process a list of modem IDs in parallel
     pub async fn process_modems(&self, modem_ids: Vec<String>) -> Result<Vec<ModemResult>> {
+        // Prevent concurrent processing - if already running, skip this call
+        if self
+            .processing
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            debug!("⏭️  Skipping modem processing - previous cycle still running");
+            return Ok(vec![]);
+        }
+
+        // Helper struct to reset flag on drop
+        struct ProcessingGuard(Arc<AtomicBool>);
+        impl Drop for ProcessingGuard {
+            fn drop(&mut self) {
+                self.0.store(false, Ordering::SeqCst);
+            }
+        }
+        let _guard = ProcessingGuard(self.processing.clone());
+
         let start_time = Instant::now();
         let total_modems = modem_ids.len();
 
-        info!("👷 Processing {} modems with {} workers", total_modems, self.config.num_workers);
+        info!(
+            "👷 Processing {} modems with {} workers",
+            total_modems, self.config.num_workers
+        );
 
         // Reset stats
         {
@@ -125,8 +151,9 @@ impl WorkerPool {
 
                     let result = tokio::time::timeout(
                         timeout,
-                        Self::process_single_modem(modem_id.clone(), modem_manager)
-                    ).await;
+                        Self::process_single_modem(modem_id.clone(), modem_manager),
+                    )
+                    .await;
 
                     let modem_result = match result {
                         Ok(Ok(result)) => {
@@ -274,10 +301,7 @@ impl WorkerPool {
             .unwrap_or(None);
 
         // Get operator
-        let operator = modem_manager
-            .get_operator(&modem_id)
-            .await
-            .unwrap_or(None);
+        let operator = modem_manager.get_operator(&modem_id).await.unwrap_or(None);
 
         // Get messages with paths for later deletion
         let messages_with_paths = modem_manager
@@ -286,7 +310,8 @@ impl WorkerPool {
             .unwrap_or_default();
 
         // Extract just the messages for the result
-        let messages: Vec<Message> = messages_with_paths.iter()
+        let messages: Vec<Message> = messages_with_paths
+            .iter()
             .map(|m| m.message.clone())
             .collect();
 
@@ -398,9 +423,9 @@ mod tests {
     #[test]
     fn test_worker_pool_config_default() {
         let config = WorkerPoolConfig::default();
-        assert_eq!(config.num_workers, 6);  // Optimized for 91 modems with v7.1.0 performance improvements
-        assert_eq!(config.batch_size, 12);  // Increased batch size for higher throughput
-        assert_eq!(config.modem_timeout, Duration::from_secs(20));  // Reduced timeout for faster failure detection
+        assert_eq!(config.num_workers, 16); // Higher concurrency for 100+ modems (I/O bound)
+        assert_eq!(config.batch_size, 24); // Larger batches to reduce loop iterations
+        assert_eq!(config.modem_timeout, Duration::from_secs(12)); // Faster failure detection to avoid backlog
     }
 
     #[test]

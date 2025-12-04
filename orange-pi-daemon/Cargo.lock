@@ -1041,10 +1041,11 @@ checksum = "42f5e15c9953c5e4ccceeb2e7382a716482c34515315f7b03532b8b4e8393d2d"
 
 [[package]]
 name = "orange-pi-daemon-rust"
-version = "7.4.0"
+version = "8.0.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "nix",
  "reqwest",
  "rusqlite",
  "sd-notify",

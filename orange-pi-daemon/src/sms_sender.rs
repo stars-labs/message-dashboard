@@ -61,7 +61,11 @@ impl SmsSender {
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
-            return Err(anyhow!("Failed to fetch pending SMS: {} - {}", status, text));
+            return Err(anyhow!(
+                "Failed to fetch pending SMS: {} - {}",
+                status,
+                text
+            ));
         }
 
         #[derive(Deserialize)]
@@ -72,7 +76,10 @@ impl SmsSender {
         let api_response: ApiResponse = response.json().await?;
 
         if !api_response.pending_messages.is_empty() {
-            info!("📱 Found {} pending SMS messages to send", api_response.pending_messages.len());
+            info!(
+                "📱 Found {} pending SMS messages to send",
+                api_response.pending_messages.len()
+            );
         }
 
         Ok(api_response.pending_messages)
@@ -84,12 +91,18 @@ impl SmsSender {
 
         // First check our cache
         if let Some(modem_id) = self.modem_cache.get(target_iccid) {
-            debug!("✅ Found modem {} in cache for ICCID {}", modem_id, target_iccid);
+            debug!(
+                "✅ Found modem {} in cache for ICCID {}",
+                modem_id, target_iccid
+            );
             return Some(modem_id.clone());
         }
 
         // If not in cache, search through all modems via D-Bus
-        info!("📱 ICCID {} not in cache, searching via D-Bus...", target_iccid);
+        info!(
+            "📱 ICCID {} not in cache, searching via D-Bus...",
+            target_iccid
+        );
 
         // List all modems using D-Bus
         let modem_ids = match self.modem_manager.list_modems().await {
@@ -106,7 +119,10 @@ impl SmsSender {
         for modem_id in modem_ids {
             match self.modem_manager.get_iccid(&modem_id).await {
                 Ok(Some(iccid)) => {
-                    debug!("📱 Modem {} has ICCID: {} (target: {})", modem_id, iccid, target_iccid);
+                    debug!(
+                        "📱 Modem {} has ICCID: {} (target: {})",
+                        modem_id, iccid, target_iccid
+                    );
 
                     if iccid == target_iccid {
                         info!("✅ Found modem {} for ICCID {}", modem_id, target_iccid);
@@ -126,53 +142,57 @@ impl SmsSender {
         None
     }
 
-    /// Send an SMS message using D-Bus
+    /// Send an SMS message using ModemManager (AT commands or D-Bus)
     pub async fn send_sms(&self, sms: &PendingSms) -> Result<()> {
         // Find the modem for this ICCID
         let modem_id = match self.find_modem_for_iccid(&sms.phone_iccid).await {
             Some(id) => id,
             None => {
                 error!("No modem found for ICCID: {}", sms.phone_iccid);
-                let _ = self.report_sms_result(&sms.id, false, Some("No modem found for ICCID")).await;
+                let _ = self
+                    .report_sms_result(&sms.id, false, Some("No modem found for ICCID"))
+                    .await;
                 return Err(anyhow!("ModemNotFound"));
             }
         };
 
-        info!("📤 Sending SMS from modem {} to {}", modem_id, sms.recipient);
+        info!(
+            "📤 Sending SMS from modem {} to {}",
+            modem_id, sms.recipient
+        );
 
-        // Send SMS using native D-Bus client
-        let dbus_client = Arc::new(crate::dbus_client::DBusClient::new().await);
-
-        if let Some(native) = dbus_client.native_client() {
-            // Use native D-Bus to send SMS
-            match native.send_sms(&modem_id, &sms.recipient, &sms.content).await {
-                Ok(_) => {
-                    // Report success
-                    self.report_sms_result(&sms.id, true, None).await?;
-                    info!("✅ SMS sent successfully to {} (Message ID: {})", sms.recipient, sms.id);
-                    Ok(())
-                }
-                Err(e) => {
-                    let error_msg = format!("Failed to send SMS: {}", e);
-                    error!("{}", error_msg);
-                    self.report_sms_result(&sms.id, false, Some(&error_msg)).await?;
-                    Err(anyhow!(error_msg))
-                }
+        // Send SMS using ModemManager (supports both AT commands and D-Bus)
+        match self
+            .modem_manager
+            .send_sms(&modem_id, &sms.recipient, &sms.content)
+            .await
+        {
+            Ok(_) => {
+                // Report success
+                self.report_sms_result(&sms.id, true, None).await?;
+                info!(
+                    "✅ SMS sent successfully to {} (Message ID: {})",
+                    sms.recipient, sms.id
+                );
+                Ok(())
             }
-        } else {
-            // D-Bus not available
-            let error_msg = "D-Bus is required for SMS operations";
-            error!("❌ {}", error_msg);
-            error!("💡 Please ensure:");
-            error!("   1. D-Bus system daemon is running: systemctl status dbus");
-            error!("   2. ModemManager is running: systemctl status ModemManager");
-            self.report_sms_result(&sms.id, false, Some(error_msg)).await?;
-            Err(anyhow!(error_msg))
+            Err(e) => {
+                let error_msg = format!("Failed to send SMS: {}", e);
+                error!("{}", error_msg);
+                self.report_sms_result(&sms.id, false, Some(&error_msg))
+                    .await?;
+                Err(anyhow!(error_msg))
+            }
         }
     }
 
     /// Report SMS result back to API
-    pub async fn report_sms_result(&self, message_id: &str, success: bool, error_message: Option<&str>) -> Result<()> {
+    pub async fn report_sms_result(
+        &self,
+        message_id: &str,
+        success: bool,
+        error_message: Option<&str>,
+    ) -> Result<()> {
         let url = format!("{}/api/control/sms-result", self.api_client.config.api_url);
 
         let result = SmsResult {
@@ -181,7 +201,10 @@ impl SmsSender {
             error_message: error_message.map(|s| s.to_string()),
         };
 
-        debug!("📤 Reporting SMS result for {}: success={}", message_id, success);
+        debug!(
+            "📤 Reporting SMS result for {}: success={}",
+            message_id, success
+        );
 
         let client = reqwest::Client::new();
         let response = client
@@ -197,7 +220,11 @@ impl SmsSender {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
             warn!("Failed to report SMS result: {} - {}", status, text);
-            return Err(anyhow!("Failed to report SMS result: {} - {}", status, text));
+            return Err(anyhow!(
+                "Failed to report SMS result: {} - {}",
+                status,
+                text
+            ));
         }
 
         if success {
@@ -217,7 +244,10 @@ impl SmsSender {
             return Ok(());
         }
 
-        info!("📤 Processing {} pending SMS messages", pending_messages.len());
+        info!(
+            "📤 Processing {} pending SMS messages",
+            pending_messages.len()
+        );
 
         for sms in pending_messages {
             match self.send_sms(&sms).await {

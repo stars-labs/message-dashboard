@@ -1,9 +1,9 @@
+use crate::dbus_client::DBusClient;
+use crate::modem_manager::ModemManager;
 use anyhow::Result;
 use std::time::Instant;
-use tracing::{info, warn};
-use crate::modem_manager::ModemManager;
-use crate::dbus_client::DBusClient;
 use tokio::process::Command;
+use tracing::{info, warn};
 
 /// Benchmark module for comparing D-Bus performance
 pub struct PerformanceBenchmark;
@@ -46,7 +46,10 @@ impl PerformanceBenchmark {
         }
 
         if let Ok(mmcli_time) = mmcli_result {
-            info!("🐌 mmcli:         {:>6.2}ms per operation (baseline)", mmcli_time);
+            info!(
+                "🐌 mmcli:         {:>6.2}ms per operation (baseline)",
+                mmcli_time
+            );
         }
 
         info!("\n💡 Recommendation: Native D-Bus provides the best performance");
@@ -66,7 +69,7 @@ impl PerformanceBenchmark {
 
         for _ in 0..iterations {
             match dbus_client.list_modems().await {
-                Ok(_) => {},
+                Ok(_) => {}
                 Err(e) => {
                     warn!("Native D-Bus not available: {}", e);
                     return Err(e);
@@ -83,10 +86,7 @@ impl PerformanceBenchmark {
     /// Benchmark busctl subprocess performance
     async fn benchmark_busctl() -> Result<f64> {
         // Check if busctl is available
-        let check = Command::new("which")
-            .arg("busctl")
-            .output()
-            .await?;
+        let check = Command::new("which").arg("busctl").output().await?;
 
         if !check.status.success() {
             return Err(anyhow::anyhow!("busctl not available"));
@@ -129,29 +129,20 @@ impl PerformanceBenchmark {
     /// Benchmark mmcli subprocess performance (baseline)
     async fn benchmark_mmcli() -> Result<f64> {
         // Check if mmcli is available
-        let check = Command::new("which")
-            .arg("mmcli")
-            .output()
-            .await?;
+        let check = Command::new("which").arg("mmcli").output().await?;
 
         if !check.status.success() {
             return Err(anyhow::anyhow!("mmcli not available"));
         }
 
         // Warm up
-        let _ = Command::new("mmcli")
-            .arg("-L")
-            .output()
-            .await;
+        let _ = Command::new("mmcli").arg("-L").output().await;
 
         let iterations = 10;
         let start = Instant::now();
 
         for _ in 0..iterations {
-            let output = Command::new("mmcli")
-                .arg("-L")
-                .output()
-                .await?;
+            let output = Command::new("mmcli").arg("-L").output().await?;
 
             if !output.status.success() {
                 return Err(anyhow::anyhow!("mmcli command failed"));
