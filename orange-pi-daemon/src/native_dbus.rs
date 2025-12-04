@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Context, Result};
 use std::collections::HashMap;
 use tracing::{debug, info, warn};
-use zbus::{Connection, proxy};
+use zbus::{proxy, Connection};
 
 /// Native D-Bus client for zero-overhead modem communication
 /// Eliminates subprocess overhead completely by using native D-Bus bindings
@@ -26,7 +26,14 @@ trait ModemManager1 {
     default_path = "/org/freedesktop/ModemManager1"
 )]
 trait ObjectManager {
-    fn get_managed_objects(&self) -> zbus::Result<HashMap<zbus::zvariant::OwnedObjectPath, HashMap<String, HashMap<String, zbus::zvariant::OwnedValue>>>>;
+    fn get_managed_objects(
+        &self,
+    ) -> zbus::Result<
+        HashMap<
+            zbus::zvariant::OwnedObjectPath,
+            HashMap<String, HashMap<String, zbus::zvariant::OwnedValue>>,
+        >,
+    >;
 }
 
 #[proxy(
@@ -88,7 +95,10 @@ trait Sim {
 trait Messaging {
     fn list(&self) -> zbus::Result<Vec<zbus::zvariant::OwnedObjectPath>>;
     fn delete(&self, path: &zbus::zvariant::ObjectPath<'_>) -> zbus::Result<()>;
-    fn create(&self, properties: HashMap<String, zbus::zvariant::Value<'_>>) -> zbus::Result<zbus::zvariant::OwnedObjectPath>;
+    fn create(
+        &self,
+        properties: HashMap<String, zbus::zvariant::Value<'_>>,
+    ) -> zbus::Result<zbus::zvariant::OwnedObjectPath>;
 }
 
 #[proxy(
@@ -122,16 +132,28 @@ impl NativeDBusClient {
 
             match Connection::system().await {
                 Ok(conn) => {
-                    info!("🚀 Native D-Bus client initialized successfully (attempt {})", attempts);
+                    info!(
+                        "🚀 Native D-Bus client initialized successfully (attempt {})",
+                        attempts
+                    );
                     info!("✨ Using native D-Bus for zero subprocess overhead");
-                    return Self { connection: Some(conn) };
+                    return Self {
+                        connection: Some(conn),
+                    };
                 }
                 Err(e) => {
                     if attempts < MAX_ATTEMPTS {
-                        warn!("⚠️  D-Bus connection attempt {} failed: {}, retrying...", attempts, e);
-                        tokio::time::sleep(std::time::Duration::from_millis(100 * attempts as u64)).await;
+                        warn!(
+                            "⚠️  D-Bus connection attempt {} failed: {}, retrying...",
+                            attempts, e
+                        );
+                        tokio::time::sleep(std::time::Duration::from_millis(100 * attempts as u64))
+                            .await;
                     } else {
-                        warn!("⚠️  Failed to connect to D-Bus after {} attempts: {}", MAX_ATTEMPTS, e);
+                        warn!(
+                            "⚠️  Failed to connect to D-Bus after {} attempts: {}",
+                            MAX_ATTEMPTS, e
+                        );
                         warn!("   Performance will be degraded - falling back to busctl");
                     }
                 }
@@ -148,15 +170,20 @@ impl NativeDBusClient {
 
     /// List all modems using native D-Bus
     pub async fn list_modems(&self) -> Result<Vec<String>> {
-        let conn = self.connection.as_ref()
+        let conn = self
+            .connection
+            .as_ref()
             .ok_or_else(|| anyhow!("D-Bus connection not available"))?;
 
         debug!("🔍 Listing modems via native D-Bus");
 
-        let proxy = ObjectManagerProxy::new(conn).await
+        let proxy = ObjectManagerProxy::new(conn)
+            .await
             .context("Failed to create ObjectManager proxy")?;
 
-        let objects = proxy.get_managed_objects().await
+        let objects = proxy
+            .get_managed_objects()
+            .await
             .context("Failed to get managed objects")?;
 
         let mut modem_ids = Vec::new();
@@ -175,7 +202,9 @@ impl NativeDBusClient {
 
     /// Get modem state using native D-Bus
     pub async fn get_modem_state(&self, modem_id: &str) -> Result<String> {
-        let conn = self.connection.as_ref()
+        let conn = self
+            .connection
+            .as_ref()
             .ok_or_else(|| anyhow!("D-Bus connection not available"))?;
 
         let path = format!("/org/freedesktop/ModemManager1/Modem/{}", modem_id);
@@ -185,8 +214,7 @@ impl NativeDBusClient {
             .await
             .context("Failed to create Modem proxy")?;
 
-        let state_code = proxy.state().await
-            .context("Failed to get modem state")?;
+        let state_code = proxy.state().await.context("Failed to get modem state")?;
 
         let state = match state_code {
             -1 => "unknown",
@@ -210,7 +238,9 @@ impl NativeDBusClient {
 
     /// Get SIM ICCID using native D-Bus
     pub async fn get_sim_iccid(&self, modem_id: &str) -> Result<Option<String>> {
-        let conn = self.connection.as_ref()
+        let conn = self
+            .connection
+            .as_ref()
             .ok_or_else(|| anyhow!("D-Bus connection not available"))?;
 
         let modem_path = format!("/org/freedesktop/ModemManager1/Modem/{}", modem_id);
@@ -245,7 +275,9 @@ impl NativeDBusClient {
 
     /// Get signal quality using native D-Bus
     pub async fn get_signal_quality(&self, modem_id: &str) -> Result<(u32, bool)> {
-        let conn = self.connection.as_ref()
+        let conn = self
+            .connection
+            .as_ref()
             .ok_or_else(|| anyhow!("D-Bus connection not available"))?;
 
         let path = format!("/org/freedesktop/ModemManager1/Modem/{}", modem_id);
@@ -255,13 +287,17 @@ impl NativeDBusClient {
             .await
             .context("Failed to create Modem proxy")?;
 
-        proxy.get_signal_quality().await
+        proxy
+            .get_signal_quality()
+            .await
             .context("Failed to get signal quality")
     }
 
     /// Get device details using native D-Bus
     pub async fn get_device_details(&self, modem_id: &str) -> Result<DeviceDetails> {
-        let conn = self.connection.as_ref()
+        let conn = self
+            .connection
+            .as_ref()
             .ok_or_else(|| anyhow!("D-Bus connection not available"))?;
 
         let path = format!("/org/freedesktop/ModemManager1/Modem/{}", modem_id);
@@ -288,7 +324,9 @@ impl NativeDBusClient {
 
     /// Get phone number using native D-Bus
     pub async fn get_phone_number(&self, modem_id: &str) -> Result<Option<String>> {
-        let conn = self.connection.as_ref()
+        let conn = self
+            .connection
+            .as_ref()
             .ok_or_else(|| anyhow!("D-Bus connection not available"))?;
 
         let path = format!("/org/freedesktop/ModemManager1/Modem/{}", modem_id);
@@ -298,7 +336,9 @@ impl NativeDBusClient {
             .await
             .context("Failed to create ModemSimple proxy")?;
 
-        let status = proxy.get_status().await
+        let status = proxy
+            .get_status()
+            .await
             .context("Failed to get modem status")?;
 
         // Try multiple keys where phone number might be stored
@@ -317,7 +357,9 @@ impl NativeDBusClient {
 
     /// List SMS messages using native D-Bus
     pub async fn list_sms(&self, modem_id: &str) -> Result<Vec<SmsMessage>> {
-        let conn = self.connection.as_ref()
+        let conn = self
+            .connection
+            .as_ref()
             .ok_or_else(|| anyhow!("D-Bus connection not available"))?;
 
         let path = format!("/org/freedesktop/ModemManager1/Modem/{}", modem_id);
@@ -327,15 +369,11 @@ impl NativeDBusClient {
             .await
             .context("Failed to create Messaging proxy")?;
 
-        let sms_paths = proxy.list().await
-            .context("Failed to list SMS messages")?;
+        let sms_paths = proxy.list().await.context("Failed to list SMS messages")?;
 
         let mut messages = Vec::new();
         for sms_path in sms_paths {
-            let sms_proxy = SmsProxy::builder(conn)
-                .path(&sms_path)?
-                .build()
-                .await?;
+            let sms_proxy = SmsProxy::builder(conn).path(&sms_path)?.build().await?;
 
             let state = sms_proxy.state().await.unwrap_or(0);
             // Only get received messages (state == 3)
@@ -354,7 +392,9 @@ impl NativeDBusClient {
 
     /// Delete an SMS message using native D-Bus
     pub async fn delete_sms(&self, modem_id: &str, sms_path: &str) -> Result<()> {
-        let conn = self.connection.as_ref()
+        let conn = self
+            .connection
+            .as_ref()
             .ok_or_else(|| anyhow!("D-Bus connection not available"))?;
 
         let modem_path = format!("/org/freedesktop/ModemManager1/Modem/{}", modem_id);
@@ -366,16 +406,20 @@ impl NativeDBusClient {
             .await
             .context("Failed to create Messaging proxy")?;
 
-        let sms_obj_path = zbus::zvariant::ObjectPath::try_from(sms_path)
-            .context("Invalid SMS path")?;
+        let sms_obj_path =
+            zbus::zvariant::ObjectPath::try_from(sms_path).context("Invalid SMS path")?;
 
-        proxy.delete(&sms_obj_path).await
+        proxy
+            .delete(&sms_obj_path)
+            .await
             .context("Failed to delete SMS message")
     }
 
     /// Send an SMS message using native D-Bus
     pub async fn send_sms(&self, modem_id: &str, recipient: &str, text: &str) -> Result<()> {
-        let conn = self.connection.as_ref()
+        let conn = self
+            .connection
+            .as_ref()
             .ok_or_else(|| anyhow!("D-Bus connection not available"))?;
 
         let modem_path = format!("/org/freedesktop/ModemManager1/Modem/{}", modem_id);
@@ -392,7 +436,9 @@ impl NativeDBusClient {
         props.insert("number".to_string(), recipient.to_string().into());
         props.insert("text".to_string(), text.to_string().into());
 
-        let sms_path = proxy.create(props).await
+        let sms_path = proxy
+            .create(props)
+            .await
             .context("Failed to create SMS message")?;
 
         // Get the SMS proxy to send it
@@ -403,8 +449,7 @@ impl NativeDBusClient {
             .context("Failed to create SMS proxy")?;
 
         // Send the SMS
-        sms_proxy.send().await
-            .context("Failed to send SMS")?;
+        sms_proxy.send().await.context("Failed to send SMS")?;
 
         debug!("✅ SMS sent successfully via D-Bus");
         Ok(())

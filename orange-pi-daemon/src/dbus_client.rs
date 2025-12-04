@@ -40,8 +40,12 @@ impl DBusClient {
         }
 
         Self {
-            native_client: if has_native { Some(native_client) } else { None },
-            busctl_enabled
+            native_client: if has_native {
+                Some(native_client)
+            } else {
+                None
+            },
+            busctl_enabled,
         }
     }
 
@@ -312,10 +316,7 @@ impl DBusClient {
         let stdout = String::from_utf8_lossy(&output.stdout);
 
         // Parse ICCID
-        let iccid = stdout
-            .split('"')
-            .nth(1)
-            .map(|s| s.to_string());
+        let iccid = stdout.split('"').nth(1).map(|s| s.to_string());
 
         Ok(iccid)
     }
@@ -470,7 +471,8 @@ fn extract_modem_id_from_path(line: &str) -> Option<String> {
             let id_start = start + 7;
             let remaining = &line[id_start..];
             // Find the end (space or quote)
-            let end = remaining.find(|c: char| c == ' ' || c == '"')
+            let end = remaining
+                .find(|c: char| c == ' ' || c == '"')
                 .unwrap_or(remaining.len());
             let modem_id = &remaining[..end];
             if !modem_id.is_empty() {

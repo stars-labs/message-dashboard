@@ -5,13 +5,13 @@
 // 3. Deduplicated to prevent re-uploads
 // 4. Deleted from SIM only after successful processing
 
+use crate::types::Message;
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
-use std::sync::{Arc, Mutex};
-use std::path::Path;
 use std::collections::HashMap;
-use tracing::{info, warn, debug};
-use crate::types::Message;
+use std::path::Path;
+use std::sync::{Arc, Mutex};
+use tracing::{debug, info, warn};
 
 #[derive(Debug)]
 pub struct StoredMessage {
@@ -25,11 +25,11 @@ pub struct StoredMessage {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum MessageStatus {
-    Pending,      // Waiting to be uploaded
-    Uploading,    // Currently being uploaded
-    Uploaded,     // Successfully uploaded to API
-    Failed,       // Upload failed (will retry)
-    Deleted,      // Deleted from SIM card
+    Pending,   // Waiting to be uploaded
+    Uploading, // Currently being uploaded
+    Uploaded,  // Successfully uploaded to API
+    Failed,    // Upload failed (will retry)
+    Deleted,   // Deleted from SIM card
 }
 
 pub struct MessageStore {
@@ -44,15 +44,14 @@ impl MessageStore {
             std::fs::create_dir_all(parent)?;
         }
 
-        let conn = Connection::open(db_path)
-            .context("Failed to open SQLite database")?;
+        let conn = Connection::open(db_path).context("Failed to open SQLite database")?;
 
         // Enable WAL mode for better concurrency
         conn.execute_batch(
             "PRAGMA journal_mode = WAL;
              PRAGMA synchronous = NORMAL;
              PRAGMA cache_size = 10000;
-             PRAGMA temp_store = MEMORY;"
+             PRAGMA temp_store = MEMORY;",
         )?;
 
         // Create tables
@@ -107,29 +106,28 @@ impl MessageStore {
     }
 
     /// Store a message from SIM card (returns true if new, false if duplicate)
-    pub fn store_message(
-        &self,
-        message: &Message,
-        modem_id: &str,
-        sms_path: &str,
-    ) -> Result<bool> {
+    pub fn store_message(&self, message: &Message, modem_id: &str, sms_path: &str) -> Result<bool> {
         let conn = self.conn.lock().unwrap();
 
         // Check for duplicate first (same logic as server - within 10 seconds)
-        let existing: Option<i64> = conn.query_row(
-            "SELECT id FROM messages
+        let existing: Option<i64> = conn
+            .query_row(
+                "SELECT id FROM messages
              WHERE phone_iccid = ?1
                AND content = ?2
                AND datetime(timestamp) BETWEEN datetime(?3, '-10 seconds')
                                             AND datetime(?3, '+10 seconds')",
-            params![&message.phone_iccid, &message.content, &message.timestamp],
-            |row| row.get(0),
-        ).optional()?;
+                params![&message.phone_iccid, &message.content, &message.timestamp],
+                |row| row.get(0),
+            )
+            .optional()?;
 
         if existing.is_some() {
-            debug!("Duplicate message found, skipping: {} from {}",
-                   &message.content[..20.min(message.content.len())],
-                   &message.phone_iccid);
+            debug!(
+                "Duplicate message found, skipping: {} from {}",
+                &message.content[..20.min(message.content.len())],
+                &message.phone_iccid
+            );
             return Ok(false);
         }
 
@@ -169,7 +167,8 @@ impl MessageStore {
         let conn = self.conn.lock().unwrap();
 
         // First log what we have in the database
-        let mut count_stmt = conn.prepare("SELECT status, COUNT(*) FROM messages GROUP BY status")?;
+        let mut count_stmt =
+            conn.prepare("SELECT status, COUNT(*) FROM messages GROUP BY status")?;
         if let Ok(counts) = count_stmt.query_map(params![], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, i32>(1)?))
         }) {
@@ -191,22 +190,23 @@ impl MessageStore {
                    AND uploaded_at > datetime('now', '-1 hour')
                )
              ORDER BY created_at ASC
-             LIMIT ?1"
+             LIMIT ?1",
         )?;
 
-        let messages = stmt.query_map(params![limit], |row| {
-            Ok((
-                row.get(0)?,
-                Message {
-                    phone_iccid: row.get(1)?,
-                    phone_number: row.get(2)?,
-                    content: row.get(3)?,
-                    timestamp: row.get(4)?,
-                    direction: row.get(5)?,
-                },
-            ))
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
+        let messages = stmt
+            .query_map(params![limit], |row| {
+                Ok((
+                    row.get(0)?,
+                    Message {
+                        phone_iccid: row.get(1)?,
+                        phone_number: row.get(2)?,
+                        content: row.get(3)?,
+                        timestamp: row.get(4)?,
+                        direction: row.get(5)?,
+                    },
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
 
         Ok(messages)
     }
@@ -276,13 +276,12 @@ impl MessageStore {
              FROM messages
              WHERE status = 'uploaded'
                AND deleted_at IS NULL
-             LIMIT 100"
+             LIMIT 100",
         )?;
 
-        let paths = stmt.query_map([], |row| {
-            Ok((row.get(0)?, row.get(1)?))
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
+        let paths = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<Result<Vec<_>, _>>()?;
 
         Ok(paths)
     }
@@ -317,8 +316,8 @@ impl MessageStore {
     pub fn get_stats(&self) -> Result<MessageStats> {
         let conn = self.conn.lock().unwrap();
 
-        let (pending, uploading, uploaded, failed, total): (i64, i64, i64, i64, i64) =
-            conn.query_row(
+        let (pending, uploading, uploaded, failed, total): (i64, i64, i64, i64, i64) = conn
+            .query_row(
                 "SELECT
                     COUNT(CASE WHEN status = 'pending' THEN 1 END),
                     COUNT(CASE WHEN status = 'uploading' THEN 1 END),
@@ -328,7 +327,15 @@ impl MessageStore {
                  FROM messages
                  WHERE created_at > datetime('now', '-24 hours')",
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
             )?;
 
         Ok(MessageStats {
@@ -348,14 +355,18 @@ impl MessageStore {
         let mut stmt = conn.prepare(
             "SELECT iccid
              FROM sim_storage
-             WHERE (total_messages - deleted_messages) > 200"
+             WHERE (total_messages - deleted_messages) > 200",
         )?;
 
-        let full_sims = stmt.query_map([], |row| row.get(0))?
+        let full_sims = stmt
+            .query_map([], |row| row.get(0))?
             .collect::<Result<Vec<String>, _>>()?;
 
         if !full_sims.is_empty() {
-            warn!("⚠️ Database has >200 old messages for SIMs (NOT on physical SIM cards): {:?}", full_sims);
+            warn!(
+                "⚠️ Database has >200 old messages for SIMs (NOT on physical SIM cards): {:?}",
+                full_sims
+            );
         }
 
         Ok(full_sims)
@@ -394,7 +405,10 @@ impl MessageStore {
         )?;
 
         if deleted > 0 {
-            info!("🔥 PURGED {} old pending messages that can't be uploaded", deleted);
+            info!(
+                "🔥 PURGED {} old pending messages that can't be uploaded",
+                deleted
+            );
         }
 
         // Also reset the sim_storage counts since we're cleaning up
@@ -414,10 +428,7 @@ impl MessageStore {
         let conn = self.conn.lock().unwrap();
 
         // Delete ALL pending messages regardless of age
-        let deleted = conn.execute(
-            "DELETE FROM messages WHERE status = 'pending'",
-            [],
-        )?;
+        let deleted = conn.execute("DELETE FROM messages WHERE status = 'pending'", [])?;
 
         if deleted > 0 {
             warn!("⚠️ EMERGENCY CLEANUP: Deleted {} pending messages", deleted);
@@ -448,7 +459,10 @@ impl MessageStore {
         )?;
 
         if updated > 0 {
-            info!("✅ Marked {} old uploaded messages as deleted (stale paths)", updated);
+            info!(
+                "✅ Marked {} old uploaded messages as deleted (stale paths)",
+                updated
+            );
         }
 
         Ok(updated)
@@ -484,7 +498,7 @@ impl MessageStore {
              WHERE status = 'uploaded'
                AND deleted_at IS NULL
              ORDER BY modem_id, created_at DESC
-             LIMIT 500"
+             LIMIT 500",
         )?;
 
         let mut result: HashMap<String, Vec<Message>> = HashMap::new();
@@ -503,7 +517,10 @@ impl MessageStore {
 
         for msg_result in messages {
             let (modem_id, message) = msg_result?;
-            result.entry(modem_id).or_insert_with(Vec::new).push(message);
+            result
+                .entry(modem_id)
+                .or_insert_with(Vec::new)
+                .push(message);
         }
 
         Ok(result)

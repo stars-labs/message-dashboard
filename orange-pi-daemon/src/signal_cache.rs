@@ -1,9 +1,9 @@
+use crate::types::SignalData;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use tracing::{debug, trace};
-use crate::types::SignalData;
 
 /// Cache entry for signal data
 #[derive(Debug, Clone)]
@@ -41,13 +41,20 @@ impl SignalCache {
                 let mut hits = self.hit_count.write().await;
                 *hits += 1;
 
-                trace!("📊 Signal cache HIT for modem {}: {}% (age: {:?})",
-                    modem_id, entry.signal.percent, entry.timestamp.elapsed());
+                trace!(
+                    "📊 Signal cache HIT for modem {}: {}% (age: {:?})",
+                    modem_id,
+                    entry.signal.percent,
+                    entry.timestamp.elapsed()
+                );
 
                 return Some(entry.signal.clone());
             } else {
-                trace!("📊 Signal cache expired for modem {} (age: {:?})",
-                    modem_id, entry.timestamp.elapsed());
+                trace!(
+                    "📊 Signal cache expired for modem {} (age: {:?})",
+                    modem_id,
+                    entry.timestamp.elapsed()
+                );
             }
         }
 
@@ -62,12 +69,19 @@ impl SignalCache {
     pub async fn set(&self, modem_id: String, signal: SignalData) {
         let mut cache = self.cache.write().await;
 
-        trace!("📊 Caching signal for modem {}: {}%", modem_id, signal.percent);
+        trace!(
+            "📊 Caching signal for modem {}: {}%",
+            modem_id,
+            signal.percent
+        );
 
-        cache.insert(modem_id, CacheEntry {
-            signal,
-            timestamp: Instant::now(),
-        });
+        cache.insert(
+            modem_id,
+            CacheEntry {
+                signal,
+                timestamp: Instant::now(),
+            },
+        );
     }
 
     /// Clear expired entries from cache
@@ -86,7 +100,10 @@ impl SignalCache {
 
         let removed = before_count - cache.len();
         if removed > 0 {
-            debug!("🧹 Signal cache cleanup: removed {} expired entries", removed);
+            debug!(
+                "🧹 Signal cache cleanup: removed {} expired entries",
+                removed
+            );
         }
     }
 

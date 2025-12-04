@@ -1,6 +1,6 @@
+use crate::types::{Modem, Sim};
 use std::time::{Duration, Instant};
 use tracing::{info, warn};
-use crate::types::{Modem, Sim};
 
 /// Sync mode for state reconciliation
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,7 +38,10 @@ impl SyncManager {
     /// * `session_id` - Unique session ID for this daemon instance
     /// * `full_sync_interval_secs` - How often to do full syncs (default: 300s = 5 minutes)
     pub fn new(session_id: String, full_sync_interval_secs: u64) -> Self {
-        info!("🔑 Sync manager initialized with session ID: {}", session_id);
+        info!(
+            "🔑 Sync manager initialized with session ID: {}",
+            session_id
+        );
 
         Self {
             session_id,
@@ -76,7 +79,10 @@ impl SyncManager {
 
         // Recovery mode after failures
         if self.consecutive_failures >= 3 {
-            warn!("⚠️  {} consecutive sync failures - forcing full sync for recovery", self.consecutive_failures);
+            warn!(
+                "⚠️  {} consecutive sync failures - forcing full sync for recovery",
+                self.consecutive_failures
+            );
             return true;
         }
 
@@ -125,7 +131,10 @@ impl SyncManager {
         );
 
         if self.consecutive_failures >= 5 {
-            warn!("🚨 {} consecutive sync failures - system may need attention", self.consecutive_failures);
+            warn!(
+                "🚨 {} consecutive sync failures - system may need attention",
+                self.consecutive_failures
+            );
         }
     }
 
@@ -137,7 +146,10 @@ impl SyncManager {
         let mut seen_equipment_ids = std::collections::HashSet::new();
         for modem in modems {
             if !seen_equipment_ids.insert(&modem.equipment_id) {
-                return Err(format!("Duplicate equipment_id found: {}", modem.equipment_id));
+                return Err(format!(
+                    "Duplicate equipment_id found: {}",
+                    modem.equipment_id
+                ));
             }
         }
 
@@ -175,7 +187,9 @@ impl SyncManager {
             self.session_id,
             modems.len(),
             sims.len(),
-            chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
+            chrono::Utc::now()
+                .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+                .to_string()
         )
     }
 
@@ -230,7 +244,10 @@ mod tests {
 
         // Simulate failures
         for _ in 0..3 {
-            sm.record_failure(SyncMode::Incremental, &std::io::Error::new(std::io::ErrorKind::Other, "test"));
+            sm.record_failure(
+                SyncMode::Incremental,
+                &std::io::Error::new(std::io::ErrorKind::Other, "test"),
+            );
         }
 
         assert!(sm.needs_full_sync());

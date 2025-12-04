@@ -12,7 +12,7 @@ let
 in
 {
   options.services.sms-daemon = {
-    enable = mkEnableOption "SMS Dashboard Daemon for collecting and uploading SMS messages from USB modems";
+    enable = mkEnableOption "SMS Dashboard Daemon for collecting and uploading SMS messages from USB modems (uses direct AT commands with D-Bus fallback)";
 
     apiUrl = mkOption {
       type = types.str;
@@ -73,6 +73,16 @@ in
       description = "Use debug build with verbose logging (otherwise uses release build with info level logging)";
     };
 
+    useDBus = mkOption {
+      type = types.bool;
+      default = false;
+      description = ''
+        Use D-Bus/ModemManager backend instead of direct AT commands.
+        When false (default): Uses direct AT commands, ModemManager is disabled.
+        When true: Uses D-Bus/ModemManager (legacy mode).
+      '';
+    };
+
     user = mkOption {
       type = types.str;
       default = "sms-daemon";
@@ -110,7 +120,7 @@ in
       group = cfg.group;
       # Only add to dialout for modem access, nothing else
       extraGroups = [ "dialout" ];
-      home = "/var/lib/sms-dashboard";
+      home = "/var/lib/sms-daemon";
       createHome = false; # Managed by systemd
       shell = "${pkgs.shadow}/bin/nologin"; # No shell access
       description = "SMS Dashboard Daemon User";
@@ -122,20 +132,19 @@ in
 
     # Create working directory with strict permissions
     systemd.tmpfiles.rules = [
-      "d /var/lib/sms-dashboard 0750 ${cfg.user} ${cfg.group} -"
-      "d /var/lib/sms-dashboard/tmp 0700 ${cfg.user} ${cfg.group} -"
-      "d /var/log/sms-dashboard 0750 ${cfg.user} ${cfg.group} -"
+      "d /var/lib/sms-daemon 0750 ${cfg.user} ${cfg.group} -"
+      "d /var/lib/sms-daemon/tmp 0700 ${cfg.user} ${cfg.group} -"
+      "d /var/log/sms-daemon 0750 ${cfg.user} ${cfg.group} -"
     ];
 
     # Hardened systemd service
     systemd.services.sms-daemon = {
-      description = "SMS Dashboard Daemon";
-      after = [
-        "network-online.target"
-        "ModemManager.service"
-      ];
-      wants = [ "network-online.target" ];
-      requires = [ "ModemManager.service" ];
+      description = if cfg.useDBus
+        then "SMS Dashboard Daemon (D-Bus/ModemManager mode)"
+        else "SMS Dashboard Daemon (Direct AT commands mode)";
+      after = [ "network-online.target" ] ++ (if cfg.useDBus then [ "ModemManager.service" ] else []);
+      wants = [ "network-online.target" ] ++ (if cfg.useDBus then [ "ModemManager.service" ] else []);
+      requires = if cfg.useDBus then [ "ModemManager.service" ] else [];
       wantedBy = [ "multi-user.target" ];
 
       environment = {
@@ -146,12 +155,16 @@ in
         SMS_SIGNAL_CHECK_INTERVAL = toString cfg.signalCheckIntervalSeconds;
         SMS_DEVICE_ID = cfg.deviceId;
 
+        # Backend selection: AT commands (default) or D-Bus
+        # USE_DBUS=1 forces D-Bus/ModemManager as primary backend
+        USE_DBUS = if cfg.useDBus then "1" else "0";
+
         # Rust logging (info level by default, set to debug for verbose logs)
         RUST_LOG = if cfg.debugBuild then "orange_pi_daemon_rust=debug" else "orange_pi_daemon_rust=info";
 
         # Security: Don't expose sensitive paths
-        HOME = "/var/lib/sms-dashboard";
-        TMPDIR = "/var/lib/sms-dashboard/tmp";
+        HOME = "/var/lib/sms-daemon";
+        TMPDIR = "/var/lib/sms-daemon/tmp";
       };
 
       # Use systemd credentials for API key (more secure than environment variables)
@@ -162,14 +175,16 @@ in
           Group = cfg.group;
 
           # Restart configuration
-          Restart = "on-failure";
+          # Always restart: the daemon sometimes exits cleanly after a SIGHUP;
+          # we want systemd to bring it back up regardless of exit code.
+          Restart = "always";
           RestartSec = "10s";
           # RestartPreventExitStatus = "1";  # Only prevent restart on config errors
           StartLimitIntervalSec = "300";
           StartLimitBurst = "5";
 
           # Working directory
-          WorkingDirectory = "/var/lib/sms-dashboard";
+          WorkingDirectory = "/var/lib/sms-daemon";
 
           # Logging
           StandardOutput = "journal";
@@ -190,20 +205,17 @@ in
 
           # Only allow access to specific paths
           ReadWritePaths = [
-            "/var/lib/sms-dashboard"
-            "/var/log/sms-dashboard"
+            "/var/lib/sms-daemon"
+            "/var/log/sms-daemon"
           ];
 
           # Device access restrictions (only allow modem devices)
-          # TODO: Test if PrivateDevices=true works with DeviceAllow whitelist
-          PrivateDevices = true; # Currently need false for USB modem access
-          DeviceAllow = [
-            "char-usb_device rw" # USB character devices
-            "/dev/ttyUSB* rw" # USB serial ports
-            "/dev/cdc-wdm* rw" # CDC WDM devices for modems
-            "/dev/bus/usb rw" # USB bus access
-          ];
-          DevicePolicy = "closed"; # Deny all other devices (only effective with PrivateDevices=true)
+          # PrivateDevices=false required for USB modem access
+          # DeviceAllow whitelist only works when PrivateDevices=false
+          PrivateDevices = false; # Required for /dev/ttyUSB* access
+          # DeviceAllow doesn't support path wildcards - use auto policy for USB serial access
+          # The dialout group membership provides the actual permission
+          DevicePolicy = "auto"; # Required for dynamic USB serial port access
 
           # Network restrictions
           PrivateNetwork = false; # Need network for API
@@ -341,19 +353,21 @@ in
       ];
 
       # Pre-start checks
-      preStart = ''
-        # Verify ModemManager is running
+      preStart = if cfg.useDBus then ''
+        # D-Bus mode: verify ModemManager is running
         if ! systemctl is-active ModemManager.service >/dev/null 2>&1; then
-          echo "Error: ModemManager is not running" >&2
+          echo "Error: ModemManager is not running (required for D-Bus mode)" >&2
           exit 1
         fi
-
-        # Check for modems
         modem_count=$(mmcli -L 2>/dev/null | grep -c "Modem/" || echo "0")
-        echo "Found $modem_count modem(s)"
-
-        # Log service start
-        logger -t sms-daemon "Starting SMS daemon with $modem_count modem(s)"
+        echo "ModemManager mode: $modem_count modem(s) detected"
+        logger -t sms-daemon "Starting SMS daemon (D-Bus mode: $modem_count modems)"
+      '' else ''
+        # AT command mode: check for USB serial ports
+        usb_ports=$(ls /dev/ttyUSB* 2>/dev/null | wc -l || echo "0")
+        at_ports=$((usb_ports / 4))  # Each modem has 4 ports
+        echo "AT command mode: $at_ports modem(s) detected ($usb_ports USB ports)"
+        logger -t sms-daemon "Starting SMS daemon (AT mode: $at_ports modems)"
       '';
 
       # Post-stop cleanup
@@ -362,12 +376,13 @@ in
         logger -t sms-daemon "SMS daemon stopped"
 
         # Clean up any temporary files
-        rm -rf /var/lib/sms-dashboard/tmp/*
+        rm -rf /var/lib/sms-daemon/tmp/*
       '';
     };
 
-    # Enable ModemManager and modem support
-    networking.modemmanager.enable = true;
+    # ModemManager: only enable in D-Bus mode
+    # In AT command mode, ModemManager is disabled for better performance
+    networking.modemmanager.enable = cfg.useDBus;
 
   };
 }

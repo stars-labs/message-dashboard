@@ -1,15 +1,13 @@
 // Test program to verify SMS deletion on SIM cards
 use anyhow::Result;
-use tracing::{error, info, warn};
-use std::sync::Arc;
 use orange_pi_daemon_rust::modem_manager::ModemManager;
+use std::sync::Arc;
+use tracing::{error, info, warn};
 
 #[tokio::main]
 async fn main() -> Result<()> {
     // Initialize logging
-    tracing_subscriber::fmt()
-        .with_env_filter("debug")
-        .init();
+    tracing_subscriber::fmt().with_env_filter("debug").init();
 
     info!("🔬 SMS Deletion Test Program");
     info!("=============================");
@@ -36,7 +34,8 @@ async fn main() -> Result<()> {
 
     // Take first modem with a SIM card
     let mut target_modem = None;
-    for modem_id in &modems[..5.min(modems.len())] {  // Check first 5 modems
+    for modem_id in &modems[..5.min(modems.len())] {
+        // Check first 5 modems
         if let Ok(Some(iccid)) = modem_manager.get_iccid(modem_id).await {
             info!("📱 Modem {} has SIM with ICCID: {}", modem_id, iccid);
             target_modem = Some((modem_id.clone(), iccid));
@@ -57,7 +56,9 @@ async fn main() -> Result<()> {
 
     // Get messages from this modem
     info!("\n📥 Getting messages from modem...");
-    let messages = modem_manager.get_new_messages_with_paths(&modem_id, &iccid).await?;
+    let messages = modem_manager
+        .get_new_messages_with_paths(&modem_id, &iccid)
+        .await?;
     info!("Found {} messages on SIM card", messages.len());
 
     if messages.is_empty() {
@@ -71,7 +72,10 @@ async fn main() -> Result<()> {
         info!("   Path: {}", msg.sms_path);
         info!("   From: {}", msg.message.phone_number);
         info!("   Time: {}", msg.message.timestamp);
-        info!("   Text: {}", &msg.message.content[..50.min(msg.message.content.len())]);
+        info!(
+            "   Text: {}",
+            &msg.message.content[..50.min(msg.message.content.len())]
+        );
     }
 
     // Try to delete first message
@@ -82,7 +86,10 @@ async fn main() -> Result<()> {
 
     // Try deletion using different methods
     info!("\n=== METHOD 1: Direct ModemManager delete ===");
-    match modem_manager.delete_sms(&modem_id, &first_msg.sms_path).await {
+    match modem_manager
+        .delete_sms(&modem_id, &first_msg.sms_path)
+        .await
+    {
         Ok(_) => {
             info!("✅ SUCCESS! Message deleted using ModemManager");
         }
@@ -97,7 +104,10 @@ async fn main() -> Result<()> {
 
     // Try using mmcli directly as a comparison
     info!("\n=== METHOD 2: Direct mmcli command ===");
-    let cmd = format!("mmcli -m {} --messaging-delete-sms={}", modem_id, first_msg.sms_path);
+    let cmd = format!(
+        "mmcli -m {} --messaging-delete-sms={}",
+        modem_id, first_msg.sms_path
+    );
     info!("Running: {}", cmd);
 
     let output = tokio::process::Command::new("ssh")
@@ -132,13 +142,21 @@ async fn main() -> Result<()> {
         info!("✅ SUCCESS with busctl!");
     } else {
         error!("❌ FAILED with busctl!");
-        error!("   stdout: {}", String::from_utf8_lossy(&busctl_output.stdout));
-        error!("   stderr: {}", String::from_utf8_lossy(&busctl_output.stderr));
+        error!(
+            "   stdout: {}",
+            String::from_utf8_lossy(&busctl_output.stdout)
+        );
+        error!(
+            "   stderr: {}",
+            String::from_utf8_lossy(&busctl_output.stderr)
+        );
     }
 
     // Check if message still exists
     info!("\n🔍 Checking if message still exists...");
-    let remaining = modem_manager.get_new_messages_with_paths(&modem_id, &iccid).await?;
+    let remaining = modem_manager
+        .get_new_messages_with_paths(&modem_id, &iccid)
+        .await?;
     let still_exists = remaining.iter().any(|m| m.sms_path == first_msg.sms_path);
 
     if still_exists {

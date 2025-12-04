@@ -73,7 +73,13 @@
                 </div>
                 <div class="mt-2 text-xs text-gray-400">
                   接收卡: {message.phone_iccid}
-                  {#if message.phone_number}
+                  {#if message.direction === 'outgoing' || message.type === 'outgoing' || message.type === 'sent'}
+                    {#if message.recipient}
+                      • 接收方: {message.recipient}
+                    {:else if message.phone_number}
+                      • 接收方: {message.phone_number}
+                    {/if}
+                  {:else if message.phone_number}
                     • 发送方: {message.phone_number}
                   {/if}
                 </div>

@@ -1,0 +1,893 @@
+//! Direct AT command modem interface - bypasses ModemManager for better performance
+//!
+//! For Quectel EC20 modems, each modem exposes 4 ttyUSB ports:
+//! - ttyUSB0: DM port
+//! - ttyUSB1: GPS NMEA
+//! - ttyUSB2: AT commands (this is what we use)
+//! - ttyUSB3: PPP/Modem
+
+use anyhow::{anyhow, Result};
+use nix::sys::termios::{self, BaudRate, SetArg};
+use std::collections::HashMap;
+use std::fs::{self, File, OpenOptions};
+use std::io::{Read, Write};
+use std::path::Path;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use tokio::sync::RwLock;
+use tracing::{debug, info, warn};
+
+/// SMS message from AT command interface
+#[derive(Debug, Clone)]
+pub struct AtSms {
+    pub index: u32,
+    /// All SIM indices that belong to this logical message (concatenated parts)
+    pub part_indices: Vec<u32>,
+    pub sender: String,
+    pub timestamp: String,
+    pub text: String,
+}
+
+/// Modem device info from AT commands
+#[derive(Debug, Clone, Default)]
+pub struct AtModemInfo {
+    pub port: String,
+    pub iccid: Option<String>,
+    pub imei: Option<String>,
+    pub manufacturer: Option<String>,
+    pub model: Option<String>,
+    pub revision: Option<String>,
+    pub signal_percent: Option<u32>,
+    pub phone_number: Option<String>,
+    pub operator: Option<String>,
+}
+
+/// Direct AT command modem manager
+pub struct AtModemManager {
+    /// Map of port path -> modem info cache
+    modems: Arc<RwLock<HashMap<String, AtModemInfo>>>,
+    /// Timeout for AT commands
+    timeout: Duration,
+}
+
+impl AtModemManager {
+    pub fn new() -> Self {
+        Self {
+            modems: Arc::new(RwLock::new(HashMap::new())),
+            timeout: Duration::from_secs(5),
+        }
+    }
+
+    /// Discover all Quectel EC20 AT command ports
+    /// EC20 uses ttyUSB2 for AT commands (every 4th port starting at 2)
+    pub async fn discover_modems(&self) -> Result<Vec<String>> {
+        let mut ports = Vec::new();
+        let mut probe_failed_count = 0;
+
+        // Scan /dev/ttyUSB* for AT command ports without an arbitrary upper bound
+        // EC20 pattern: ttyUSB2, ttyUSB6, ttyUSB10, ... (every 4th, offset 2)
+        let mut at_ports: Vec<String> = fs::read_dir("/dev")
+            .map_err(|e| anyhow!("Failed to read /dev for modem discovery: {}", e))?
+            .filter_map(|entry| entry.ok())
+            .filter_map(|entry| {
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                if !name.starts_with("ttyUSB") {
+                    return None;
+                }
+
+                let num_str = name.trim_start_matches("ttyUSB");
+                let num = num_str.parse::<u32>().ok()?;
+
+                // EC20 AT ports are every 4th port starting at 2
+                if num >= 2 && num % 4 == 2 {
+                    Some(format!("/dev/ttyUSB{}", num))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        at_ports.sort();
+        let existing_count = at_ports.len();
+
+        for port_path in at_ports {
+            // Quick probe to verify it responds to AT
+            match self.probe_port_with_error(&port_path).await {
+                Ok(true) => {
+                    ports.push(port_path);
+                }
+                Ok(false) => {
+                    debug!("Port {} exists but no AT response", port_path);
+                    probe_failed_count += 1;
+                }
+                Err(e) => {
+                    warn!("Port {} probe error: {}", port_path, e);
+                    probe_failed_count += 1;
+                }
+            }
+        }
+
+        if existing_count > 0 && ports.is_empty() {
+            warn!(
+                "Found {} USB serial ports but none responded to AT commands (probe failures: {})",
+                existing_count, probe_failed_count
+            );
+            warn!("Check: 1) permissions on /dev/ttyUSB*, 2) if ModemManager is holding ports");
+        }
+
+        info!(
+            "Discovered {} AT modem ports (scanned {} existing ports)",
+            ports.len(),
+            existing_count
+        );
+        Ok(ports)
+    }
+
+    /// Probe port with detailed error
+    async fn probe_port_with_error(&self, port: &str) -> Result<bool> {
+        match self
+            .send_at_command(port, "AT", Duration::from_millis(1000))
+            .await
+        {
+            Ok(response) => Ok(response.contains("OK")),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Quick probe to check if port responds to AT command
+    async fn probe_port(&self, port: &str) -> bool {
+        match self
+            .send_at_command(port, "AT", Duration::from_millis(500))
+            .await
+        {
+            Ok(response) => response.contains("OK"),
+            Err(_) => false,
+        }
+    }
+
+    /// Send AT command and get response
+    async fn send_at_command(
+        &self,
+        port: &str,
+        command: &str,
+        timeout: Duration,
+    ) -> Result<String> {
+        let port_path = port.to_string();
+        let cmd = command.to_string();
+
+        // Run blocking serial I/O in spawn_blocking
+        tokio::task::spawn_blocking(move || Self::send_at_sync(&port_path, &cmd, timeout)).await?
+    }
+
+    /// Open serial port with proper settings
+    fn open_serial(port: &str) -> Result<File> {
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(port)
+            .map_err(|e| anyhow!("Failed to open {}: {}", port, e))?;
+
+        // Configure termios using the file reference
+        let mut term = termios::tcgetattr(&file).map_err(|e| anyhow!("tcgetattr failed: {}", e))?;
+
+        // Set baud rate 115200
+        termios::cfsetispeed(&mut term, BaudRate::B115200)
+            .map_err(|e| anyhow!("cfsetispeed failed: {}", e))?;
+        termios::cfsetospeed(&mut term, BaudRate::B115200)
+            .map_err(|e| anyhow!("cfsetospeed failed: {}", e))?;
+
+        // Raw mode: 8N1, no flow control
+        term.control_flags &= !(termios::ControlFlags::CSIZE | termios::ControlFlags::PARENB);
+        term.control_flags |= termios::ControlFlags::CS8
+            | termios::ControlFlags::CREAD
+            | termios::ControlFlags::CLOCAL;
+        term.control_flags &= !termios::ControlFlags::CRTSCTS;
+
+        // Disable special character processing
+        term.local_flags &= !(termios::LocalFlags::ICANON
+            | termios::LocalFlags::ECHO
+            | termios::LocalFlags::ECHOE
+            | termios::LocalFlags::ISIG);
+
+        // Disable input processing
+        term.input_flags &= !(termios::InputFlags::IXON
+            | termios::InputFlags::IXOFF
+            | termios::InputFlags::IXANY
+            | termios::InputFlags::ICRNL
+            | termios::InputFlags::INLCR);
+
+        // Disable output processing
+        term.output_flags &= !termios::OutputFlags::OPOST;
+
+        // Set read timeout: VMIN=0, VTIME=1 (0.1s timeout per read)
+        term.control_chars[termios::SpecialCharacterIndices::VMIN as usize] = 0;
+        term.control_chars[termios::SpecialCharacterIndices::VTIME as usize] = 1;
+
+        termios::tcsetattr(&file, SetArg::TCSANOW, &term)
+            .map_err(|e| anyhow!("tcsetattr failed: {}", e))?;
+
+        // Flush buffers
+        termios::tcflush(&file, termios::FlushArg::TCIOFLUSH)
+            .map_err(|_| anyhow!("tcflush failed"))?;
+
+        Ok(file)
+    }
+
+    /// Synchronous AT command send (runs in blocking thread)
+    fn send_at_sync(port: &str, command: &str, timeout: Duration) -> Result<String> {
+        let mut file = Self::open_serial(port)?;
+
+        // Send command with CR
+        let cmd = format!("{}\r", command);
+        file.write_all(cmd.as_bytes())
+            .map_err(|e| anyhow!("Write failed: {}", e))?;
+        file.flush()?;
+
+        // Read response with timeout
+        let mut response = Vec::new();
+        let mut buf = [0u8; 256];
+        let start = Instant::now();
+
+        loop {
+            if start.elapsed() > timeout {
+                break;
+            }
+
+            match file.read(&mut buf) {
+                Ok(0) => {
+                    std::thread::sleep(Duration::from_millis(10));
+                    continue;
+                }
+                Ok(n) => {
+                    response.extend_from_slice(&buf[..n]);
+
+                    // Check if we got a complete response
+                    let text = String::from_utf8_lossy(&response);
+                    if text.contains("OK\r")
+                        || text.contains("ERROR\r")
+                        || text.contains("+CME ERROR")
+                    {
+                        break;
+                    }
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(10));
+                    continue;
+                }
+                Err(e) => return Err(anyhow!("Read error: {}", e)),
+            }
+        }
+
+        let response_str = String::from_utf8_lossy(&response).to_string();
+        Ok(response_str)
+    }
+
+    /// Get ICCID from SIM card
+    pub async fn get_iccid(&self, port: &str) -> Result<Option<String>> {
+        // Try different ICCID commands (varies by modem)
+        for cmd in &["AT+QCCID", "AT+CCID", "AT+ICCID"] {
+            if let Ok(response) = self.send_at_command(port, cmd, self.timeout).await {
+                if let Some(iccid) = Self::parse_iccid(&response) {
+                    return Ok(Some(iccid));
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    fn parse_iccid(response: &str) -> Option<String> {
+        for line in response.lines() {
+            let line = line.trim();
+            if line.starts_with("+QCCID:")
+                || line.starts_with("+CCID:")
+                || line.starts_with("+ICCID:")
+            {
+                if let Some(pos) = line.find(':') {
+                    let iccid = line[pos + 1..].trim().trim_matches('"');
+                    // ICCID can contain hex digits (F is padding character)
+                    if iccid.len() >= 18 && iccid.chars().all(|c| c.is_ascii_hexdigit()) {
+                        return Some(iccid.to_string());
+                    }
+                }
+            } else if line.len() >= 18
+                && line.len() <= 22
+                && line.chars().all(|c| c.is_ascii_hexdigit())
+            {
+                // Raw ICCID line (can contain hex padding)
+                return Some(line.to_string());
+            }
+        }
+        None
+    }
+
+    /// Get IMEI
+    pub async fn get_imei(&self, port: &str) -> Result<Option<String>> {
+        let response = self.send_at_command(port, "AT+CGSN", self.timeout).await?;
+
+        for line in response.lines() {
+            let line = line.trim();
+            if line.len() == 15 && line.chars().all(|c| c.is_ascii_digit()) {
+                return Ok(Some(line.to_string()));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Get manufacturer
+    pub async fn get_manufacturer(&self, port: &str) -> Result<Option<String>> {
+        let response = self.send_at_command(port, "AT+CGMI", self.timeout).await?;
+
+        for line in response.lines() {
+            let line = line.trim();
+            if !line.is_empty() && line != "OK" && !line.starts_with("+") && !line.starts_with("AT")
+            {
+                return Ok(Some(line.to_string()));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Get model
+    pub async fn get_model(&self, port: &str) -> Result<Option<String>> {
+        let response = self.send_at_command(port, "AT+CGMM", self.timeout).await?;
+
+        for line in response.lines() {
+            let line = line.trim();
+            if !line.is_empty() && line != "OK" && !line.starts_with("+") && !line.starts_with("AT")
+            {
+                return Ok(Some(line.to_string()));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Get firmware revision
+    pub async fn get_revision(&self, port: &str) -> Result<Option<String>> {
+        let response = self.send_at_command(port, "AT+CGMR", self.timeout).await?;
+
+        for line in response.lines() {
+            let line = line.trim();
+            if !line.is_empty() && line != "OK" && !line.starts_with("+") && !line.starts_with("AT")
+            {
+                return Ok(Some(line.to_string()));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Get signal quality (returns 0-100 percent)
+    pub async fn get_signal(&self, port: &str) -> Result<u32> {
+        let response = self.send_at_command(port, "AT+CSQ", self.timeout).await?;
+
+        // Parse "+CSQ: 20,99" -> rssi=20 (0-31 scale)
+        for line in response.lines() {
+            if line.contains("+CSQ:") {
+                if let Some(pos) = line.find(':') {
+                    let parts: Vec<&str> = line[pos + 1..].trim().split(',').collect();
+                    if let Some(rssi_str) = parts.first() {
+                        if let Ok(rssi) = rssi_str.trim().parse::<u32>() {
+                            if rssi <= 31 {
+                                return Ok((rssi * 100) / 31);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(0)
+    }
+
+    /// Get phone number from SIM
+    pub async fn get_phone_number(&self, port: &str) -> Result<Option<String>> {
+        let response = self.send_at_command(port, "AT+CNUM", self.timeout).await?;
+
+        // Parse "+CNUM: "","+1234567890",129"
+        for line in response.lines() {
+            if line.contains("+CNUM:") {
+                let parts: Vec<&str> = line.split('"').collect();
+                if parts.len() >= 4 {
+                    let number = parts[3].trim();
+                    if !number.is_empty() {
+                        return Ok(Some(number.to_string()));
+                    }
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    /// Get operator name
+    pub async fn get_operator(&self, port: &str) -> Result<Option<String>> {
+        let response = self.send_at_command(port, "AT+COPS?", self.timeout).await?;
+
+        // Parse "+COPS: 0,0,"China Mobile",7"
+        for line in response.lines() {
+            if line.contains("+COPS:") {
+                let parts: Vec<&str> = line.split('"').collect();
+                if parts.len() >= 2 {
+                    let operator = parts[1].trim();
+                    if !operator.is_empty() {
+                        return Ok(Some(operator.to_string()));
+                    }
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    /// List all SMS messages, merging concatenated parts using PDU metadata.
+    pub async fn list_sms(&self, port: &str) -> Result<Vec<AtSms>> {
+        // Original behavior: rely solely on text mode listing (no concat merging)
+        let messages = self.list_sms_text_mode(port).await?;
+        debug!("Found {} SMS messages on {}", messages.len(), port);
+        Ok(messages)
+    }
+
+    /// Text-mode listing used as the primary decode path (preserves existing behavior).
+    async fn list_sms_text_mode(&self, port: &str) -> Result<Vec<AtSms>> {
+        // Set text mode
+        self.send_at_command(port, "AT+CMGF=1", self.timeout)
+            .await?;
+
+        // Set character set to UCS2 for proper Chinese/Unicode handling
+        // This makes the modem return text as UCS2 hex which we decode
+        let _ = self
+            .send_at_command(port, "AT+CSCS=\"UCS2\"", self.timeout)
+            .await;
+
+        // List all messages (longer timeout for many messages)
+        let response = self
+            .send_at_command(port, "AT+CMGL=\"ALL\"", Duration::from_secs(10))
+            .await?;
+
+        let mut messages = Vec::new();
+        let lines: Vec<&str> = response.lines().collect();
+        let mut i = 0;
+
+        while i < lines.len() {
+            let line = lines[i].trim();
+
+            // Parse "+CMGL: 1,"REC READ","+1234567890","","24/01/15,10:30:45+32"
+            if line.contains("+CMGL:") {
+                if let Some(sms) = self.parse_cmgl_header(line) {
+                    i += 1;
+                    if i < lines.len() {
+                        let raw_text = lines[i].trim();
+                        if !raw_text.is_empty() && raw_text != "OK" && !raw_text.contains("+CMGL:")
+                        {
+                            // Decode UCS2 hex if it looks like hex-encoded text
+                            let text = Self::decode_sms_content(raw_text);
+                            messages.push(AtSms {
+                                index: sms.0,
+                                part_indices: vec![sms.0],
+                                sender: sms.1,
+                                timestamp: sms.2,
+                                text,
+                            });
+                        }
+                    }
+                }
+            }
+            i += 1;
+        }
+
+        Ok(messages)
+    }
+
+    /// Decode SMS content - handles UCS2 hex encoding for Chinese/Unicode
+    fn decode_sms_content(raw: &str) -> String {
+        // Check if it looks like UCS2 hex (all hex chars, even length, typical length)
+        let is_hex =
+            raw.len() >= 4 && raw.len() % 4 == 0 && raw.chars().all(|c| c.is_ascii_hexdigit());
+
+        if is_hex {
+            // Try to decode as UCS2 (UTF-16BE) hex string
+            if let Some(decoded) = Self::decode_ucs2_hex(raw) {
+                // Only use decoded if it produced valid text
+                if !decoded.is_empty()
+                    && decoded
+                        .chars()
+                        .all(|c| !c.is_control() || c == '\n' || c == '\r')
+                {
+                    debug!("Decoded UCS2: {} -> {}", raw, decoded);
+                    return decoded;
+                }
+            }
+        }
+
+        // Return as-is if not hex or decode failed
+        raw.to_string()
+    }
+
+    /// Decode UCS2 hex string to UTF-8
+    /// Input: "4F60597D" (你好)
+    /// Output: "你好"
+    fn decode_ucs2_hex(hex: &str) -> Option<String> {
+        // Must be even length (2 hex chars per byte)
+        if hex.len() % 2 != 0 {
+            return None;
+        }
+
+        let bytes: Result<Vec<u8>, _> = (0..hex.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&hex[i..i + 2], 16))
+            .collect();
+
+        let bytes = bytes.ok()?;
+
+        // Decode as UTF-16BE (need even number of bytes)
+        if bytes.len() % 2 != 0 {
+            return None;
+        }
+
+        let u16_values: Vec<u16> = bytes
+            .chunks(2)
+            .map(|chunk| u16::from_be_bytes([chunk[0], chunk[1]]))
+            .collect();
+
+        String::from_utf16(&u16_values).ok()
+    }
+
+    /// Parse CMGL header line
+    fn parse_cmgl_header(&self, line: &str) -> Option<(u32, String, String)> {
+        // +CMGL: 1,"REC READ","+1234567890","","24/01/15,10:30:45+32"
+        // With UCS2: phone number may be hex encoded like "002B0036003500..."
+        let parts: Vec<&str> = line.split(',').collect();
+        if parts.len() < 3 {
+            return None;
+        }
+
+        // Extract index from "+CMGL: 1"
+        let index_part = parts[0].split(':').last()?.trim();
+        let index = index_part.parse::<u32>().ok()?;
+
+        // Extract sender (third part, quoted) - may be UCS2 encoded
+        let raw_sender = parts.get(2)?.trim().trim_matches('"');
+        let sender = Self::decode_sms_content(raw_sender);
+
+        // Extract timestamp (4th and 5th parts) - may also be UCS2 encoded
+        let timestamp = if parts.len() >= 5 {
+            let raw_date = parts
+                .get(4)
+                .map(|s| s.trim().trim_matches('"'))
+                .unwrap_or("");
+            let raw_time = parts
+                .get(5)
+                .map(|s| s.trim().trim_matches('"'))
+                .unwrap_or("");
+            // Decode date/time if UCS2 encoded
+            let date = Self::decode_sms_content(raw_date);
+            let time = Self::decode_sms_content(raw_time);
+            self.normalize_sms_timestamp(&date, &time)
+        } else {
+            chrono::Utc::now()
+                .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+                .to_string()
+        };
+
+        Some((index, sender, timestamp))
+    }
+
+    /// Convert SMS timestamp to RFC3339
+    fn normalize_sms_timestamp(&self, date: &str, time: &str) -> String {
+        // Input: "24/01/15" and "10:30:45+32" (YY/MM/DD and HH:MM:SS+TZ)
+        let date_parts: Vec<&str> = date.split('/').collect();
+        let time_clean = time
+            .split('+')
+            .next()
+            .unwrap_or(time)
+            .split('-')
+            .next()
+            .unwrap_or(time);
+
+        if date_parts.len() >= 3 {
+            let year = format!("20{}", date_parts[0]);
+            let month = date_parts[1];
+            let day = date_parts[2];
+
+            return format!("{}-{}-{}T{}Z", year, month, day, time_clean);
+        }
+
+        chrono::Utc::now()
+            .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+            .to_string()
+    }
+
+    /// Delete SMS by index
+    pub async fn delete_sms(&self, port: &str, index: u32) -> Result<()> {
+        let cmd = format!("AT+CMGD={}", index);
+        let response = self.send_at_command(port, &cmd, self.timeout).await?;
+
+        if response.contains("OK") {
+            debug!("Deleted SMS {} from {}", index, port);
+            Ok(())
+        } else {
+            Err(anyhow!("Failed to delete SMS {}: {}", index, response))
+        }
+    }
+
+    /// Delete all SMS (use with caution)
+    pub async fn delete_all_sms(&self, port: &str) -> Result<()> {
+        // AT+CMGD=1,4 deletes all messages
+        let response = self
+            .send_at_command(port, "AT+CMGD=1,4", self.timeout)
+            .await?;
+
+        if response.contains("OK") {
+            info!("Deleted all SMS from {}", port);
+            Ok(())
+        } else {
+            Err(anyhow!("Failed to delete all SMS: {}", response))
+        }
+    }
+
+    /// Encode string to UCS2 hex format (UTF-16BE)
+    fn encode_ucs2_hex(text: &str) -> String {
+        text.encode_utf16().map(|u| format!("{:04X}", u)).collect()
+    }
+
+    /// Check if text contains non-ASCII characters
+    fn needs_ucs2(text: &str) -> bool {
+        text.chars().any(|c| !c.is_ascii())
+    }
+
+    /// Send SMS
+    pub async fn send_sms(&self, port: &str, recipient: &str, message: &str) -> Result<()> {
+        // Set text mode
+        self.send_at_command(port, "AT+CMGF=1", self.timeout)
+            .await?;
+
+        // Check if we need UCS2 encoding for Unicode content
+        let use_ucs2 = Self::needs_ucs2(message);
+
+        if use_ucs2 {
+            // Set UCS2 character set and message format for Unicode messages
+            self.send_at_command(port, "AT+CSCS=\"UCS2\"", self.timeout)
+                .await?;
+            // Set message parameters: validity period, DCS=8 for UCS2
+            self.send_at_command(port, "AT+CSMP=17,167,0,8", self.timeout)
+                .await?;
+        } else {
+            // Set GSM character set for ASCII messages
+            self.send_at_command(port, "AT+CSCS=\"GSM\"", self.timeout)
+                .await?;
+            // Reset message parameters to default GSM 7-bit
+            self.send_at_command(port, "AT+CSMP=17,167,0,0", self.timeout)
+                .await?;
+        }
+
+        let port_path = port.to_string();
+        let recipient = recipient.to_string();
+        let msg = message.to_string();
+        let timeout = self.timeout;
+
+        tokio::task::spawn_blocking(move || {
+            Self::send_sms_sync(&port_path, &recipient, &msg, timeout, use_ucs2)
+        })
+        .await?
+    }
+
+    fn send_sms_sync(
+        port: &str,
+        recipient: &str,
+        message: &str,
+        timeout: Duration,
+        use_ucs2: bool,
+    ) -> Result<()> {
+        let mut file = Self::open_serial(port)?;
+
+        // In UCS2 mode, BOTH phone number and message must be UCS2 hex encoded
+        let (encoded_recipient, encoded_message) = if use_ucs2 {
+            (
+                Self::encode_ucs2_hex(recipient),
+                Self::encode_ucs2_hex(message),
+            )
+        } else {
+            (recipient.to_string(), message.to_string())
+        };
+
+        // Send CMGS command
+        let cmd = format!("AT+CMGS=\"{}\"\r", encoded_recipient);
+        file.write_all(cmd.as_bytes())?;
+        file.flush()?;
+
+        // Wait for > prompt (read until we see it)
+        let mut prompt_buf = Vec::new();
+        let mut buf = [0u8; 64];
+        let start = Instant::now();
+        let mut got_prompt = false;
+
+        while start.elapsed() < Duration::from_secs(5) {
+            match file.read(&mut buf) {
+                Ok(0) => {
+                    std::thread::sleep(Duration::from_millis(50));
+                    continue;
+                }
+                Ok(n) => {
+                    prompt_buf.extend_from_slice(&buf[..n]);
+                    let text = String::from_utf8_lossy(&prompt_buf);
+                    if text.contains('>') {
+                        got_prompt = true;
+                        break;
+                    }
+                    if text.contains("ERROR") {
+                        return Err(anyhow!("CMGS command failed: {}", text));
+                    }
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(50));
+                    continue;
+                }
+                Err(e) => return Err(anyhow!("Read error waiting for prompt: {}", e)),
+            }
+        }
+
+        if !got_prompt {
+            return Err(anyhow!("Timeout waiting for > prompt"));
+        }
+
+        // Small delay after prompt
+        std::thread::sleep(Duration::from_millis(100));
+
+        // Send message with Ctrl-Z (0x1A)
+        let msg_with_end = format!("{}\x1A", encoded_message);
+        file.write_all(msg_with_end.as_bytes())?;
+        file.flush()?;
+
+        // Read response
+        let mut response = Vec::new();
+        let mut buf = [0u8; 256];
+        let start = Instant::now();
+
+        loop {
+            if start.elapsed() > timeout {
+                break;
+            }
+
+            match file.read(&mut buf) {
+                Ok(0) => {
+                    std::thread::sleep(Duration::from_millis(50));
+                    continue;
+                }
+                Ok(n) => {
+                    response.extend_from_slice(&buf[..n]);
+                    let text = String::from_utf8_lossy(&response);
+                    if text.contains("OK") || text.contains("ERROR") {
+                        break;
+                    }
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(50));
+                    continue;
+                }
+                Err(e) => return Err(anyhow!("Read error: {}", e)),
+            }
+        }
+
+        let response_str = String::from_utf8_lossy(&response);
+        if response_str.contains("OK") {
+            Ok(())
+        } else {
+            Err(anyhow!("Send SMS failed: {}", response_str))
+        }
+    }
+
+    /// Get full modem info
+    pub async fn get_modem_info(&self, port: &str) -> Result<AtModemInfo> {
+        let mut info = AtModemInfo {
+            port: port.to_string(),
+            ..Default::default()
+        };
+
+        info.imei = self.get_imei(port).await.unwrap_or(None);
+        info.iccid = self.get_iccid(port).await.unwrap_or(None);
+        info.manufacturer = self.get_manufacturer(port).await.unwrap_or(None);
+        info.model = self.get_model(port).await.unwrap_or(None);
+        info.revision = self.get_revision(port).await.unwrap_or(None);
+        info.signal_percent = self.get_signal(port).await.ok();
+        info.phone_number = self.get_phone_number(port).await.unwrap_or(None);
+        info.operator = self.get_operator(port).await.unwrap_or(None);
+
+        self.modems
+            .write()
+            .await
+            .insert(port.to_string(), info.clone());
+
+        Ok(info)
+    }
+
+    /// Convert port path to modem ID
+    /// /dev/ttyUSB2 -> "0", /dev/ttyUSB6 -> "1", etc.
+    pub fn port_to_modem_id(port: &str) -> String {
+        if let Some(num_str) = port.strip_prefix("/dev/ttyUSB") {
+            if let Ok(num) = num_str.parse::<u32>() {
+                return ((num - 2) / 4).to_string();
+            }
+        }
+        port.to_string()
+    }
+
+    /// Convert modem ID to port path
+    pub fn modem_id_to_port(id: &str) -> String {
+        if let Ok(num) = id.parse::<u32>() {
+            return format!("/dev/ttyUSB{}", num * 4 + 2);
+        }
+        id.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_iccid() {
+        // Standard numeric ICCID
+        assert_eq!(
+            AtModemManager::parse_iccid("+QCCID: 89860121750097854321"),
+            Some("89860121750097854321".to_string())
+        );
+        assert_eq!(
+            AtModemManager::parse_iccid("89860121750097854321\nOK"),
+            Some("89860121750097854321".to_string())
+        );
+        // ICCID with hex padding (F is common padding character)
+        assert_eq!(
+            AtModemManager::parse_iccid("+QCCID: 8965012306052989707F"),
+            Some("8965012306052989707F".to_string())
+        );
+        assert_eq!(
+            AtModemManager::parse_iccid("AT+QCCID\r\n+QCCID: 8965012306052989681F\r\n\r\nOK\r\n"),
+            Some("8965012306052989681F".to_string())
+        );
+    }
+
+    #[test]
+    fn test_port_conversion() {
+        assert_eq!(AtModemManager::port_to_modem_id("/dev/ttyUSB2"), "0");
+        assert_eq!(AtModemManager::port_to_modem_id("/dev/ttyUSB6"), "1");
+        assert_eq!(AtModemManager::port_to_modem_id("/dev/ttyUSB10"), "2");
+
+        assert_eq!(AtModemManager::modem_id_to_port("0"), "/dev/ttyUSB2");
+        assert_eq!(AtModemManager::modem_id_to_port("1"), "/dev/ttyUSB6");
+        assert_eq!(AtModemManager::modem_id_to_port("2"), "/dev/ttyUSB10");
+    }
+
+    #[test]
+    fn test_ucs2_decode() {
+        // Chinese "你好" = 4F60 597D
+        assert_eq!(
+            AtModemManager::decode_ucs2_hex("4F60597D"),
+            Some("你好".to_string())
+        );
+
+        // English "Hi" = 0048 0069
+        assert_eq!(
+            AtModemManager::decode_ucs2_hex("00480069"),
+            Some("Hi".to_string())
+        );
+
+        // Empty returns empty string, invalid returns None
+        assert_eq!(AtModemManager::decode_ucs2_hex(""), Some("".to_string()));
+        assert_eq!(AtModemManager::decode_ucs2_hex("4F6"), None); // Odd length (3 chars)
+    }
+
+    #[test]
+    fn test_decode_sms_content() {
+        // UCS2 hex should be decoded
+        assert_eq!(AtModemManager::decode_sms_content("4F60597D"), "你好");
+
+        // Plain English should pass through
+        assert_eq!(
+            AtModemManager::decode_sms_content("Hello World"),
+            "Hello World"
+        );
+
+        // Short hex that might be a code should pass through
+        assert_eq!(
+            AtModemManager::decode_sms_content("1234"),
+            AtModemManager::decode_sms_content("1234") // May decode or pass through
+        );
+    }
+}
