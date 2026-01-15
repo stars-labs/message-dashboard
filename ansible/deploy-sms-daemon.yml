@@ -1,0 +1,204 @@
+- hosts: sms_ubuntu_arm
+  become: "{{ ansible_user != 'root' }}"
+  vars:
+    repo_url: "https://github.com/hecoinfo/message-dashboard.git"
+    repo_version: "main"
+    project_dir: /opt/orange-pi-daemon
+    bin_path: /usr/local/bin/sms-daemon
+    sms_user: sms-daemon
+    sms_group: sms-daemon
+    data_dir: /var/lib/sms-daemon
+    log_dir: /var/log/sms-daemon
+    check_interval_secs: 5
+    message_check_interval_ms: 5000
+    signal_check_interval_secs: 10
+    dns_primary: 1.1.1.1
+    dns_fallback: 8.8.8.8
+  pre_tasks:
+    - name: Ensure base packages (with ModemManager when use_dbus=true)
+      ansible.builtin.apt:
+        name: "{{ ['build-essential', 'pkg-config', 'clang', 'git', 'rsync', 'libssl-dev', 'sqlite3'] + (use_dbus | ternary(['modemmanager'], [])) }}"
+        state: present
+        update_cache: yes
+
+    - name: Remove ModemManager when not using D-Bus backend
+      ansible.builtin.apt:
+        name: modemmanager
+        state: absent
+        purge: yes
+      when: not use_dbus
+
+    - name: Mask ModemManager service when not using D-Bus backend
+      ansible.builtin.systemd:
+        name: ModemManager
+        state: stopped
+        enabled: false
+        masked: true
+      failed_when: false
+      when: not use_dbus
+
+    - name: Install rustup + stable toolchain
+      ansible.builtin.shell: |
+        set -e
+        if [ ! -x /usr/local/cargo/bin/rustup ]; then
+          curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable --no-modify-path
+        else
+          /usr/local/cargo/bin/rustup update stable
+        fi
+      args:
+        creates: /root/.cargo/bin/rustc
+
+  tasks:
+    - name: Ensure group
+      ansible.builtin.group:
+        name: "{{ sms_group }}"
+        state: present
+
+    - name: Ensure group/user
+      ansible.builtin.user:
+        name: "{{ sms_user }}"
+        group: "{{ sms_group }}"
+        shell: /usr/sbin/nologin
+        create_home: no
+        groups: dialout
+        append: yes
+
+    - name: Create directories
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: "{{ sms_user }}"
+        group: "{{ sms_group }}"
+        mode: "{{ item.mode }}"
+      loop:
+        - { path: "{{ data_dir }}", mode: "0750" }
+        - { path: "{{ data_dir }}/tmp", mode: "0700" }
+        - { path: "{{ log_dir }}", mode: "0750" }
+
+    - name: Ensure project dir exists
+      ansible.builtin.file:
+        path: "{{ project_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Sync source from local workspace
+      ansible.posix.synchronize:
+        src: "{{ playbook_dir }}/../orange-pi-daemon/"
+        dest: "{{ project_dir }}/"
+        delete: yes
+        recursive: yes
+        rsync_opts:
+          - "--exclude=.git"
+          - "--exclude=target"
+
+    - name: Build release on target
+      ansible.builtin.shell: "/root/.cargo/bin/cargo build --release"
+      args:
+        chdir: "{{ project_dir }}"
+      environment:
+        PATH: "/root/.cargo/bin:{{ ansible_env.PATH }}"
+
+    - name: Install binary
+      ansible.builtin.copy:
+        src: "{{ project_dir }}/target/release/orange-pi-daemon-rust"
+        dest: "{{ bin_path }}"
+        mode: "0755"
+        owner: root
+        group: root
+        remote_src: true
+
+    - name: Configure DNS via systemd-resolved
+      block:
+        - name: Ensure resolved.d directory exists
+          ansible.builtin.file:
+            path: /etc/systemd/resolved.conf.d
+            state: directory
+            mode: "0755"
+
+        - name: Set primary and fallback DNS servers
+          ansible.builtin.copy:
+            dest: /etc/systemd/resolved.conf.d/dns.conf
+            mode: "0644"
+            content: |
+              [Resolve]
+              DNS={{ dns_primary }}
+              FallbackDNS={{ dns_fallback }}
+
+        - name: Ensure /etc/resolv.conf points to systemd-resolved
+          ansible.builtin.file:
+            src: /run/systemd/resolve/resolv.conf
+            dest: /etc/resolv.conf
+            state: link
+            force: true
+
+        - name: Restart systemd-resolved
+          ansible.builtin.systemd:
+            name: systemd-resolved
+            state: restarted
+            enabled: true
+
+    - name: Env file
+      ansible.builtin.copy:
+        dest: /etc/sms-daemon.env
+        mode: "0600"
+        content: |
+          SMS_API_URL={{ sms_api_url }}
+          SMS_API_KEY={{ vault_sms_api_key }}
+          SMS_DEVICE_ID={{ sms_device_id }}
+          CHECK_INTERVAL_SECS={{ check_interval_secs }}
+          SMS_CHECK_INTERVAL={{ check_interval_secs }}
+          SMS_MESSAGE_CHECK_INTERVAL={{ message_check_interval_ms }}
+          SMS_SIGNAL_CHECK_INTERVAL={{ signal_check_interval_secs }}
+          USE_DBUS={{ 1 if use_dbus else 0 }}
+          RUST_LOG=orange_pi_daemon_rust=info
+          DB_PATH={{ data_dir }}/messages.db
+
+    - name: Systemd unit
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/sms-daemon.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=SMS Daemon
+          After=network-online.target{{ ' ModemManager.service' if use_dbus else '' }}
+          Wants=network-online.target{{ ' ModemManager.service' if use_dbus else '' }}
+
+          [Service]
+          Type=simple
+          User={{ sms_user }}
+          Group={{ sms_group }}
+          WorkingDirectory={{ data_dir }}
+          EnvironmentFile=/etc/sms-daemon.env
+          ExecStartPre=/bin/sh -c '{{ "systemctl is-active --quiet ModemManager.service" if use_dbus else "ls /dev/ttyUSB* >/dev/null 2>&1 || true" }}'
+          ExecStart={{ bin_path }} --db-path {{ data_dir }}/messages.db
+          Restart=always
+          RestartSec=10
+          LimitNOFILE=65536
+          LimitNPROC=512
+          CapabilityBoundingSet=CAP_NET_RAW
+          NoNewPrivileges=true
+          PrivateDevices=false
+          ProtectSystem=strict
+          ProtectHome=true
+          ReadWritePaths={{ data_dir }} {{ log_dir }}
+          PrivateTmp=true
+          StandardOutput=journal
+          StandardError=journal
+
+          [Install]
+          WantedBy=multi-user.target
+      notify: Restart sms-daemon
+
+    - name: Ensure service enabled
+      ansible.builtin.systemd:
+        name: sms-daemon
+        enabled: yes
+        state: started
+
+  handlers:
+    - name: Restart sms-daemon
+      ansible.builtin.systemd:
+        name: sms-daemon
+        state: restarted
