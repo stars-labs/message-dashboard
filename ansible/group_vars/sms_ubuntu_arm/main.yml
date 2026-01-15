@@ -1,0 +1,9 @@
+sms_api_url: "https://sexy.qzz.io"
+sms_device_id: "set-me"
+use_dbus: false
+dns_primary: "1.1.1.1"
+dns_fallback: "8.8.8.8"
+
+# Load decrypted secrets map once, then extract API key
+vault_sms_secrets: "{{ lookup('community.sops.sops', '../nixos-config/secrets/orange-pi.yaml') | from_yaml }}"
+vault_sms_api_key: "{{ vault_sms_secrets['sms-dashboard']['api-key'] }}"

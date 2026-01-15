@@ -134,7 +134,7 @@
             nativeBuildInputs = with pkgs; [ pkg-config ];
             buildInputs = with pkgs; [
               openssl
-              dbus  # Required for native D-Bus support
+              dbus # Required for native D-Bus support
             ];
 
             # Post-install: create symlink from Rust binary name to expected name
@@ -175,6 +175,12 @@
                 nixfmt-rfc-style
                 nixd
 
+                # Ops tooling
+                ansible
+                ansible-lint
+                sops
+                age
+
                 # Frontend development
                 nodejs_20
                 nodePackages.npm
@@ -189,7 +195,6 @@
                 # Testing tools
                 curl
                 jq
-                modemmanager
                 pkg-config
                 openssl
               ];
@@ -201,18 +206,21 @@
                 echo "  • Web Dashboard: cd sms-dashboard"
                 echo "  • Orange Pi Daemon (Rust): cd orange-pi-daemon"
                 echo ""
+
+                # Ensure Ansible finds collections installed by ansible-galaxy (SOPS, general)
+                export ANSIBLE_COLLECTIONS_PATHS="$HOME/.ansible/collections:/usr/share/ansible/collections:/etc/ansible/collections:''${ANSIBLE_COLLECTIONS_PATHS:-}"
               '';
             };
 
             # Dedicated daemon development shell (Rust)
             daemon = pkgs.mkShell {
               packages = with pkgs; [
+                nixos-rebuild
                 cargo
                 rustc
                 rust-analyzer
                 rustfmt
                 clippy
-                modemmanager
                 pkg-config
                 openssl
               ];
@@ -232,7 +240,6 @@
                 rust-analyzer
                 rustfmt
                 clippy
-                modemmanager
                 pkg-config
                 openssl
               ];

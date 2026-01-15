@@ -1,0 +1,2 @@
+[sms_ubuntu_arm]
+192.168.1.120 ansible_user=root ansible_become=false ansible_python_interpreter=/usr/bin/python3

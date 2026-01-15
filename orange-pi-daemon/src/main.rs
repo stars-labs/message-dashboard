@@ -189,7 +189,27 @@ async fn main() -> Result<()> {
                         }
                     }
                     Ok(None) => {
-                        warn!("⚠️  Modem {} has no SIM card", modem_id);
+                        // Log IMEI for SIM-less modems for easier troubleshooting
+                        let imei = match modem_manager.get_device_details(&modem_id).await {
+                            Ok(Some((imei, ..))) => Some(imei),
+                            Ok(None) => None,
+                            Err(e) => {
+                                warn!("⚠️  Failed to get IMEI for modem {}: {}", modem_id, e);
+                                None
+                            }
+                        };
+
+                        match imei {
+                            Some(imei) => {
+                                warn!("⚠️  Modem {} has no SIM card (IMEI {})", modem_id, imei);
+                            }
+                            None => {
+                                warn!(
+                                    "⚠️  Modem {} has no SIM card (IMEI unknown)",
+                                    modem_id
+                                );
+                            }
+                        }
                     }
                     Err(e) => {
                         warn!("⚠️  Failed to get ICCID for modem {}: {}", modem_id, e);
