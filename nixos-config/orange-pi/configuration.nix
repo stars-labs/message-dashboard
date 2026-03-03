@@ -39,23 +39,23 @@
   # =============================================================================
 
   # Static IP configuration (more secure than DHCP)
-  #networking.interfaces = {
-  #  enP3p49s0 = {
-  #    useDHCP = false;
-  #    ipv4.addresses = [
-  #      {
-  #        address = "10.171.150.102";
-  #        prefixLength = 24;
-  #      }
-  #    ];
-  #  };
-  #};
+  networking.interfaces = {
+    enP3p49s0 = {
+      useDHCP = false;
+      ipv4.addresses = [
+        {
+          address = "10.171.150.102";
+          prefixLength = 24;
+        }
+      ];
+    };
+  };
 
-  #networking.defaultGateway = "10.171.150.1";
-  #networking.nameservers = [
-  #  "8.8.8.8"
-  #  "8.8.4.4"
-  #];
+  networking.defaultGateway = "10.171.150.1";
+  networking.nameservers = [
+    "8.8.8.8"
+    "8.8.4.4"
+  ];
 
   # Modern nftables firewall configuration
   networking.firewall.enable = true; # Disable legacy iptables firewall
@@ -529,19 +529,6 @@
     dnssec = "false"; # Disable DNSSEC completely as it's causing validation failures
     dnsovertls = "opportunistic"; # Use DNS over TLS when available
     llmnr = "false"; # Disable LLMNR for security (multicast name resolution)
-    fallbackDns = [
-      "8.8.8.8"
-      "8.8.4.4"
-      "1.1.1.1"
-      "1.0.0.1"
-    ];
-    extraConfig = ''
-      DNS=8.8.8.8 1.1.1.1 8.8.4.4 1.0.0.1
-      DNSStubListener=yes
-      Cache=yes
-      CacheFromLocalhost=yes
-      ReadEtcHosts=yes
-    '';
   };
 
   # =============================================================================

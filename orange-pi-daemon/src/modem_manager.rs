@@ -272,6 +272,21 @@ impl ModemManager {
         }
     }
 
+    /// Health check for a modem (diagnostic)
+    pub async fn health_check(&self, modem_id: &str) -> Result<Option<crate::at_modem::ModemHealth>> {
+        match self.mode {
+            BackendMode::AtCommand => {
+                let port = self.get_port(modem_id).await;
+                let health = self.at_modem.health_check(&port).await?;
+                Ok(Some(health))
+            }
+            BackendMode::DBus => {
+                info!("Health check not implemented for D-Bus mode");
+                Ok(None)
+            }
+        }
+    }
+
     /// Get new SMS messages with paths/indices
     pub async fn get_new_messages_with_paths(
         &self,

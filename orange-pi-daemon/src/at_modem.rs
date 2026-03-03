@@ -42,6 +42,41 @@ pub struct AtModemInfo {
     pub operator: Option<String>,
 }
 
+/// Network registration status
+#[derive(Debug, Clone, Default)]
+pub struct NetworkRegStatus {
+    pub creg: (u32, u32), // (n, stat) - stat: 0=not reg, 1=reg home, 2=searching, 3=denied, 4=unknown, 5=roaming
+    pub cgreg: (u32, u32), // (n, stat) - GPRS registration
+}
+
+/// IMS status
+#[derive(Debug, Clone, Default)]
+pub struct ImsStatus {
+    pub enabled: bool,
+    pub registration: String,
+}
+
+/// SMS configuration
+#[derive(Debug, Clone, Default)]
+pub struct SmsConfig {
+    pub mode: String,
+    pub storage: String,
+}
+
+/// Full modem health check result
+#[derive(Debug, Clone, Default)]
+pub struct ModemHealth {
+    pub port: String,
+    pub iccid: Option<String>,
+    pub imei: Option<String>,
+    pub signal_percent: Option<u32>,
+    pub operator: Option<String>,
+    pub network_reg: Option<NetworkRegStatus>,
+    pub ims_status: Option<ImsStatus>,
+    pub sms_center: Option<String>,
+    pub sms_config: Option<SmsConfig>,
+}
+
 /// Direct AT command modem manager
 pub struct AtModemManager {
     /// Map of port path -> modem info cache
@@ -95,6 +130,10 @@ impl AtModemManager {
             // Quick probe to verify it responds to AT
             match self.probe_port_with_error(&port_path).await {
                 Ok(true) => {
+                    // Initialize IMS on successful probe
+                    if let Err(e) = self.init_ims(&port_path).await {
+                        warn!("Failed to initialize IMS on {}: {}", port_path, e);
+                    }
                     ports.push(port_path);
                 }
                 Ok(false) => {
@@ -144,6 +183,28 @@ impl AtModemManager {
             Ok(response) => response.contains("OK"),
             Err(_) => false,
         }
+    }
+
+    /// Initialize IMS settings on modem
+    async fn init_ims(&self, port: &str) -> Result<()> {
+        // Enable IMS (IP Multimedia Subsystem)
+        match self
+            .send_at_command(port, "AT+QCFG=\"ims\",1", Duration::from_millis(1000))
+            .await
+        {
+            Ok(response) if response.contains("OK") => {
+                debug!("IMS enabled on {}", port);
+            }
+            Ok(response) => {
+                warn!("Failed to enable IMS on {}: {}", port, response);
+                return Err(anyhow!("Failed to enable IMS: {}", response));
+            }
+            Err(e) => {
+                warn!("Error enabling IMS on {}: {}", port, e);
+                return Err(e);
+            }
+        }
+        Ok(())
     }
 
     /// Send AT command and get response
@@ -414,6 +475,144 @@ impl AtModemManager {
             }
         }
         Ok(None)
+    }
+
+    /// Diagnostic: Get network registration status
+    pub async fn get_network_registration(&self, port: &str) -> Result<NetworkRegStatus> {
+        let creg = self.send_at_command(port, "AT+CREG?", self.timeout).await?;
+        let creg = Self::parse_creg(&creg);
+
+        let cgreg = self.send_at_command(port, "AT+CGREG?", self.timeout).await?;
+        let gregs = Self::parse_cgreg(&cgreg);
+
+        Ok(NetworkRegStatus {
+            creg,
+            cgreg: gregs,
+        })
+    }
+
+    fn parse_creg(response: &str) -> (u32, u32) {
+        for line in response.lines() {
+            if line.contains("+CREG:") {
+                if let Some(pos) = line.find(':') {
+                    let parts: Vec<&str> = line[pos + 1..].trim().split(',').collect();
+                    if parts.len() >= 2 {
+                        let n = parts[0].trim().parse::<u32>().unwrap_or(0);
+                        let stat = parts[1].trim().parse::<u32>().unwrap_or(0);
+                        return (n, stat);
+                    }
+                }
+            }
+        }
+        (0, 0)
+    }
+
+    fn parse_cgreg(response: &str) -> (u32, u32) {
+        for line in response.lines() {
+            if line.contains("+CGREG:") {
+                if let Some(pos) = line.find(':') {
+                    let parts: Vec<&str> = line[pos + 1..].trim().split(',').collect();
+                    if parts.len() >= 2 {
+                        let n = parts[0].trim().parse::<u32>().unwrap_or(0);
+                        let stat = parts[1].trim().parse::<u32>().unwrap_or(0);
+                        return (n, stat);
+                    }
+                }
+            }
+        }
+        (0, 0)
+    }
+
+    /// Diagnostic: Get IMS status
+    pub async fn get_ims_status(&self, port: &str) -> Result<ImsStatus> {
+        let response = self.send_at_command(port, "AT+QCFG=\"ims\"", self.timeout).await?;
+
+        let mut ims_enabled = false;
+        let mut ims_reg_status = String::new();
+
+        for line in response.lines() {
+            if line.contains("+QCFG: \"ims\"") {
+                if let Some(pos) = line.find(',') {
+                    let val = line[pos + 1..].trim().trim_matches('"');
+                    ims_enabled = val == "1";
+                }
+            }
+        }
+
+        let reg_response = self.send_at_command(port, "AT+QIREGAPP?", self.timeout).await?;
+        for line in reg_response.lines() {
+            if line.contains("+QIREGAPP:") {
+                ims_reg_status = line.to_string();
+                break;
+            }
+        }
+
+        Ok(ImsStatus {
+            enabled: ims_enabled,
+            registration: ims_reg_status,
+        })
+    }
+
+    /// Diagnostic: Get SMS service center
+    pub async fn get_sms_center(&self, port: &str) -> Result<Option<String>> {
+        let response = self.send_at_command(port, "AT+CSCA?", self.timeout).await?;
+
+        for line in response.lines() {
+            if line.contains("+CSCA:") {
+                if let Some(pos) = line.find(':') {
+                    let csca = line[pos + 1..].trim().trim_matches('"');
+                    if !csca.is_empty() {
+                        return Ok(Some(csca.to_string()));
+                    }
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    /// Diagnostic: Get SMS mode and storage
+    pub async fn get_sms_config(&self, port: &str) -> Result<SmsConfig> {
+        let mode_response = self.send_at_command(port, "AT+CMGF?", self.timeout).await?;
+        let mut mode = "Unknown";
+        for line in mode_response.lines() {
+            if line.contains("+CMGF:") {
+                if let Some(pos) = line.find(':') {
+                    let val = line[pos + 1..].trim();
+                    if val == "0" {
+                        mode = "PDU";
+                    } else if val == "1" {
+                        mode = "Text";
+                    }
+                }
+            }
+        }
+
+        let storage_response = self.send_at_command(port, "AT+CPMS?", self.timeout).await?;
+        let storage = storage_response.lines().find(|l| l.contains("+CPMS:")).map(|s| s.to_string()).unwrap_or_default();
+
+        Ok(SmsConfig {
+            mode: mode.to_string(),
+            storage,
+        })
+    }
+
+    /// Diagnostic: Full health check for a modem
+    pub async fn health_check(&self, port: &str) -> Result<ModemHealth> {
+        let mut health = ModemHealth {
+            port: port.to_string(),
+            ..Default::default()
+        };
+
+        health.iccid = self.get_iccid(port).await.ok().flatten();
+        health.imei = self.get_imei(port).await.ok().flatten();
+        health.signal_percent = self.get_signal(port).await.ok();
+        health.operator = self.get_operator(port).await.ok().flatten();
+        health.network_reg = self.get_network_registration(port).await.ok();
+        health.ims_status = self.get_ims_status(port).await.ok();
+        health.sms_center = self.get_sms_center(port).await.ok().flatten();
+        health.sms_config = self.get_sms_config(port).await.ok();
+
+        Ok(health)
     }
 
     /// List all SMS messages, merging concatenated parts using PDU metadata.
