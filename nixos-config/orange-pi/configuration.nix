@@ -58,43 +58,43 @@
   ];
 
   # Modern nftables firewall configuration
-  networking.firewall.enable = true; # Disable legacy iptables firewall
-  networking.nftables = {
-    enable = true;
-    ruleset = ''
-      table inet filter {
-        chain input {
-          type filter hook input priority filter; policy drop;
-          
-          # Allow loopback traffic
-          iif lo accept
-          
-          # Allow established and related connections
-          ct state established,related accept
-          
-          # Drop invalid packets
-          ct state invalid drop
-          
-          # Rate limit SSH connections (4 per minute per IP)
-          tcp dport 22 ct state new limit rate 4/minute accept
-          
-          # Log dropped packets with rate limiting
-          limit rate 5/minute log prefix "NFT-DROP: "
-          
-          # Drop everything else
-          drop
-        }
-        
-        chain forward {
-          type filter hook forward priority filter; policy drop;
-        }
-        
-        chain output {
-          type filter hook output priority filter; policy accept;
-        }
-      }
-    '';
-  };
+  networking.firewall.enable = false; # Disable legacy iptables firewall
+  # networking.nftables = {
+  #   enable = true;
+  #   ruleset = ''
+  #     table inet filter {
+  #       chain input {
+  #         type filter hook input priority filter; policy drop;
+  #
+  #         # Allow loopback traffic
+  #         iif lo accept
+  #
+  #         # Allow established and related connections
+  #         ct state established,related accept
+  #
+  #         # Drop invalid packets
+  #         ct state invalid drop
+  #
+  #         # Rate limit SSH connections (4 per minute per IP)
+  #         tcp dport 22 ct state new limit rate 4/minute accept
+  #
+  #         # Log dropped packets with rate limiting
+  #         limit rate 5/minute log prefix "NFT-DROP: "
+  #
+  #         # Drop everything else
+  #         drop
+  #       }
+  #
+  #       chain forward {
+  #         type filter hook forward priority filter; policy drop;
+  #       }
+  #
+  #       chain output {
+  #         type filter hook output priority filter; policy accept;
+  #       }
+  #     }
+  #   '';
+  # };
 
   # =============================================================================
   # SSH HARDENING
@@ -132,31 +132,6 @@
       IgnoreRhosts = true;
       HostbasedAuthentication = false;
     };
-
-    # SSH host key algorithms (prefer ed25519)
-    hostKeys = [
-      {
-        path = "/etc/ssh/ssh_host_ed25519_key";
-        type = "ed25519";
-      }
-    ];
-
-    # Banner warning
-    extraConfig = ''
-      Banner /etc/ssh/banner
-
-      # Only allow specific key types
-      HostKeyAlgorithms ssh-ed25519,rsa-sha2-512,rsa-sha2-256
-
-      # Strong ciphers only
-      Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com
-
-      # Strong MACs only
-      MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com
-
-      # Strong key exchange algorithms
-      KexAlgorithms curve25519-sha256,curve25519-sha256@libssh.org
-    '';
   };
 
   # SSH banner warning
@@ -172,7 +147,7 @@
 
   # Fail2ban for brute force protection
   services.fail2ban = {
-    enable = true;
+    enable = false;
     maxretry = 3;
     bantime = "1h";
     bantime-increment = {
@@ -213,6 +188,7 @@
     openssh.authorizedKeys.keys = [
       "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFhTqqOg4U3juVuxFgHt9cq2Opy+XVHLQahORdA56z6F openpgp:0x0383A3C3"
       "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIG+YTPvO562Xqi0ATf38QtdtE9qXWyh/9a74cSxj+4z6 cardno:32_087_457"
+      "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC/XbGv4O4QXwFxs9gvie5LxHygseGa82ue+DpsiZ9zGaHwwKmLHAnkk9QsR4T4ALRCyK0yzGBliI2rRlICqw58CLQzASK9w23+YhQdp61NtXG94C8QTCJk2nGpsv9oKM+MnyH7d2dH97vfAE/S/2vAk7FwMzVhH8ehaH1E/f/d2WX6RjBHWqEwG4I4kLDkpMBBM2QmKnCxLOnxXmjZmhr/p0Pr61hedht2Fs1aRQ1XfMkRLPG0lHdzadcIdut6pG39yO33vKfJOf72BuRz3Qdd6P6x5bmFLjuymzvJrDC2KAFtBKpc5G0u+lozN3y9k8f+mgOj4EYFdNjKvRMgr9Dv cardno:25_422_096"
     ];
 
     # Set shell timeout
@@ -224,6 +200,7 @@
     hashedPasswordFile = config.sops.secrets."sms-dashboard/user-passwords/root-hash".path;
     openssh.authorizedKeys.keys = [
       "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFhTqqOg4U3juVuxFgHt9cq2Opy+XVHLQahORdA56z6F openpgp:0x0383A3C3"
+      "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC/XbGv4O4QXwFxs9gvie5LxHygseGa82ue+DpsiZ9zGaHwwKmLHAnkk9QsR4T4ALRCyK0yzGBliI2rRlICqw58CLQzASK9w23+YhQdp61NtXG94C8QTCJk2nGpsv9oKM+MnyH7d2dH97vfAE/S/2vAk7FwMzVhH8ehaH1E/f/d2WX6RjBHWqEwG4I4kLDkpMBBM2QmKnCxLOnxXmjZmhr/p0Pr61hedht2Fs1aRQ1XfMkRLPG0lHdzadcIdut6pG39yO33vKfJOf72BuRz3Qdd6P6x5bmFLjuymzvJrDC2KAFtBKpc5G0u+lozN3y9k8f+mgOj4EYFdNjKvRMgr9Dv cardno:25_422_096"
     ];
   };
 
