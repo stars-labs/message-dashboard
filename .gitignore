@@ -20,6 +20,9 @@ orange-pi-daemon/main
 orange-pi-daemon/orange-pi-daemon
 orange-pi-daemon/test_connection
 
+# Claude Code
+.claude/settings.local.json
+
 # Generated files
 sms-dashboard/server/frontend-assets.js
 
