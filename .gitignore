@@ -23,7 +23,11 @@ orange-pi-daemon/test_connection
 # Claude Code
 .claude/settings.local.json
 
+# Database dumps
+sms-dashboard/dump.sql
+
 # Generated files
 sms-dashboard/server/frontend-assets.js
+sms-dashboard/modem-sims.csv
 
 
