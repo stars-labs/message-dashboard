@@ -15,8 +15,6 @@
     # Include SMS daemon module
     ../modules/sms-daemon.nix
 
-    # Include USB optimization module for 100 modems
-    #../modules/usb-optimization.nix
   ];
 
   # System identification
@@ -25,14 +23,6 @@
   # Allow unfree packages (for claude-code)
   nixpkgs.config.allowUnfree = true;
 
-  # =============================================================================
-  # USB OPTIMIZATION FOR 100 MODEMS
-  # =============================================================================
-
-  # Kernel parameters for USB performance with 100 modems
-  # NOTE: These are merged with security hardening parameters in boot section below
-
-  # NOTE: All sysctl settings are consolidated in boot.kernel.sysctl section within boot {}
 
   # =============================================================================
   # NETWORK SECURITY
@@ -59,42 +49,6 @@
 
   # Modern nftables firewall configuration
   networking.firewall.enable = false; # Disable legacy iptables firewall
-  # networking.nftables = {
-  #   enable = true;
-  #   ruleset = ''
-  #     table inet filter {
-  #       chain input {
-  #         type filter hook input priority filter; policy drop;
-  #
-  #         # Allow loopback traffic
-  #         iif lo accept
-  #
-  #         # Allow established and related connections
-  #         ct state established,related accept
-  #
-  #         # Drop invalid packets
-  #         ct state invalid drop
-  #
-  #         # Rate limit SSH connections (4 per minute per IP)
-  #         tcp dport 22 ct state new limit rate 4/minute accept
-  #
-  #         # Log dropped packets with rate limiting
-  #         limit rate 5/minute log prefix "NFT-DROP: "
-  #
-  #         # Drop everything else
-  #         drop
-  #       }
-  #
-  #       chain forward {
-  #         type filter hook forward priority filter; policy drop;
-  #       }
-  #
-  #       chain output {
-  #         type filter hook output priority filter; policy accept;
-  #       }
-  #     }
-  #   '';
-  # };
 
   # =============================================================================
   # SSH HARDENING
@@ -103,7 +57,7 @@
   # Hardened SSH configuration
   services.openssh = {
     enable = true;
-    ports = [ 22 ]; # Standard SSH port (security through obscurity is ineffective)
+    ports = [ 22 ];
     settings = {
       PasswordAuthentication = false;
       KbdInteractiveAuthentication = false;
@@ -555,21 +509,7 @@
     usbutils # Provides lsusb command
     ldns
     claude-code
-    # Security tools (configure manually if needed)
-    # aide  # File integrity monitoring - not available as service
-    # rkhunter  # Rootkit hunter - not available as service
-    # lynis  # Security auditing - not available as service
   ];
-
-  # Regular security updates
-  #system.autoUpgrade = {
-  #  enable = true;
-  #  allowReboot = false;  # Manual reboot for production
-  #  dates = "04:00";
-  #  randomizedDelaySec = "30min";
-  #};
-
-  # ModemManager managed directly by Rust daemon for better control of 87+ modems
 
   # This value determines the NixOS release compatibility
   system.stateVersion = "25.11";
