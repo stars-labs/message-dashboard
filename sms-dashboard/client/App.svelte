@@ -8,8 +8,6 @@
   import PhoneDetails from "./lib/PhoneDetails.svelte";
   import IccidMappingDialog from "./lib/IccidMappingDialog.svelte";
   import WebGPUBackground from "./lib/WebGPUBackground.svelte";
-  import ChatAssistant from "./lib/ChatAssistant.svelte";
-  import SemanticSearch from "./lib/SemanticSearch.svelte";
   import KeywordConfig from "./lib/KeywordConfig.svelte";
   import ErrorBoundary from "./lib/ErrorBoundary.svelte";
   import SentryTest from "./lib/SentryTest.svelte";
@@ -1596,32 +1594,6 @@
           </div>
         </div>
         
-        <!-- AI-Powered Semantic Search -->
-        <div class="mt-6">
-          <SemanticSearch 
-            {selectedPhoneIccid}
-            on:messageSelected={(e) => {
-              // Handle message selection from search
-              const message = e.detail;
-              console.debug('Selected message from search:', message);
-              
-              // First, select the phone if it's different
-              if (message.phone_iccid && message.phone_iccid !== selectedPhoneIccid) {
-                selectPhone(message.phone_iccid);
-                // Wait a bit for the messages to load
-                setTimeout(() => {
-                  if (messageViewRef) {
-                    messageViewRef.scrollToMessage(message.id);
-                  }
-                }, 500);
-              } else if (messageViewRef) {
-                // Same phone or no phone selection needed, scroll immediately
-                messageViewRef.scrollToMessage(message.id);
-              }
-            }}
-          />
-        </div>
-        
         <!-- Daemon Status removed - now shown in header only -->
       </div>
 
@@ -1737,11 +1709,6 @@
     showIccidMappingDialog = false;
   }}
 />
-
-<!-- AI Chat Assistant -->
-{#if user}
-  <ChatAssistant {user} />
-{/if}
 
 <!-- Sentry Test Component (Development Only) -->
 {#if import.meta.env.MODE === 'development'}
