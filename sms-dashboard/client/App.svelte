@@ -7,7 +7,6 @@
   import IccidMappings from "./lib/IccidMappings.svelte";
   import PhoneDetails from "./lib/PhoneDetails.svelte";
   import IccidMappingDialog from "./lib/IccidMappingDialog.svelte";
-  import WebGPUBackground from "./lib/WebGPUBackground.svelte";
   import KeywordConfig from "./lib/KeywordConfig.svelte";
   import ErrorBoundary from "./lib/ErrorBoundary.svelte";
   import SentryTest from "./lib/SentryTest.svelte";
@@ -16,7 +15,6 @@
   // import { RealtimeService } from "./lib/websocket-with-fallback.js";
   import { auth } from "./lib/auth.js";
   import config from "./lib/config.js";
-  import { applyDataStreamEffect, applyNeonGlow, createMatrixRain, applyHeaderEffect } from "./lib/webgpu-effects.js";
   import { trackUserInteraction, addBreadcrumb, captureException } from "./lib/sentry-utils.js";
 
   let selectedPhoneIccid = null;
@@ -382,28 +380,6 @@
     // Don't fetch stats here - it will be fetched after authentication in loadAllData
     // await fetchStats();
     
-    // Apply visual effects (wrap in try-catch to prevent blocking)
-    let removeMatrixRain = null;
-    try {
-      // Apply matrix rain effect to body
-      removeMatrixRain = createMatrixRain(document.body);
-      
-      // Apply header effects after a small delay to ensure DOM is ready
-      setTimeout(() => {
-        try {
-          // Apply to main headers
-          const headers = document.querySelectorAll('.header-effect-target');
-          headers.forEach(header => {
-            applyHeaderEffect(header);
-          });
-        } catch (effectError) {
-          console.warn('Failed to apply header effects:', effectError);
-        }
-      }, 100);
-    } catch (error) {
-      console.warn('Failed to apply matrix rain effect:', error);
-    }
-    
     // Check if returning from Auth0 callback
     if (window.location.search.includes("token=")) {
       await auth.handleCallback();
@@ -455,19 +431,10 @@
       // Store interval for cleanup
       // window._daemonHealthInterval = healthCheckInterval;
       
-      // Store matrix rain cleanup
-      if (removeMatrixRain) {
-        window._removeMatrixRain = removeMatrixRain;
-      }
     } else {
       // For anonymous users, don't make any API calls
       console.debug("[App] User not authenticated, skipping data loading and polling");
       dataLoading = false; // Mark data loading as complete
-      
-      // Store matrix rain cleanup for anonymous users too
-      if (removeMatrixRain) {
-        window._removeMatrixRain = removeMatrixRain;
-      }
     }
   });
 
@@ -727,11 +694,6 @@
     // Cleanup health check interval
     if (window._daemonHealthInterval) {
       clearInterval(window._daemonHealthInterval);
-    }
-    
-    // Remove matrix rain
-    if (window._removeMatrixRain) {
-      window._removeMatrixRain();
     }
     
     // Remove hash change listener
@@ -1205,54 +1167,34 @@
 </script>
 
 {#if loading}
-  <div class="min-h-screen flex items-center justify-center bg-black">
-    <WebGPUBackground />
-    <div class="text-center z-10">
+  <div class="min-h-screen flex items-center justify-center bg-gray-950">
+    <div class="text-center">
       <div class="inline-flex items-center">
-        <svg
-          class="animate-spin h-8 w-8 text-cyan-400 mr-3"
-          fill="none"
-          viewBox="0 0 24 24"
-        >
-          <circle
-            class="opacity-25"
-            cx="12"
-            cy="12"
-            r="10"
-            stroke="currentColor"
-            stroke-width="4"
-          ></circle>
-          <path
-            class="opacity-75"
-            fill="currentColor"
-            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-          ></path>
+        <svg class="animate-spin h-8 w-8 text-gray-400 mr-3" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
         </svg>
-        <span class="text-xl text-cyan-300 cyber-text" data-text="加载中...">加载中...</span>
+        <span class="text-xl text-gray-300">加载中...</span>
       </div>
     </div>
   </div>
 {:else if !user}
-  <div
-    class="min-h-screen flex items-center justify-center bg-black"
-  >
-    <WebGPUBackground />
-    <div class="text-center tech-card holo-card p-8 z-10">
-      <h1 class="text-3xl font-bold mb-4 cyber-text header-effect-target" data-text="短信验证码管理系统">短信验证码管理系统</h1>
-      <p class="text-cyan-300 mb-6">请登录以继续</p>
+  <div class="min-h-screen flex items-center justify-center bg-gray-950">
+    <div class="text-center bg-gray-900 border border-gray-700 rounded-lg p-8">
+      <h1 class="text-2xl font-semibold mb-4 text-gray-100">短信验证码管理系统</h1>
+      <p class="text-gray-400 mb-6">请登录以继续</p>
       <button
         on:click={() => auth.login()}
-        class="inline-block tech-button"
+        class="px-6 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors"
       >
         使用 Auth0 登录
       </button>
     </div>
   </div>
 {:else}
-  <div class="min-h-screen bg-black relative">
-    <WebGPUBackground />
-    <!-- Mobile Header -->
-    <header class="bg-gray-900/95 backdrop-blur-xl shadow-lg sticky top-0 z-40 border-b border-cyan-500/30">
+  <div class="min-h-screen bg-gray-950">
+    <!-- Header -->
+    <header class="bg-gray-900 border-b border-gray-700 sticky top-0 z-40">
       <div class="px-4">
         <div class="flex justify-between items-center h-16">
           <button
@@ -1274,9 +1216,7 @@
               />
             </svg>
           </button>
-          <h1
-            class="text-xl font-bold bg-gradient-to-r from-green-400 to-emerald-500 bg-clip-text text-transparent animate-gradient-x header-effect-target"
-          >
+          <h1 class="text-xl font-semibold text-gray-100">
             短信验证码管理系统
           </h1>
 
@@ -1289,8 +1229,8 @@
               }}
               class="px-4 py-2 rounded-lg transition-all {currentView ===
               'dashboard'
-                ? 'tech-button'
-                : 'text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/20'}"
+                ? 'bg-gray-700 text-white'
+                : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800'}"
             >
               消息管理
             </button>
@@ -1302,8 +1242,8 @@
               }}
               class="px-4 py-2 rounded-lg transition-all {currentView ===
               'iccid-mappings'
-                ? 'tech-button'
-                : 'text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/20'}"
+                ? 'bg-gray-700 text-white'
+                : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800'}"
             >
               ICCID 映射
             </button>
@@ -1315,8 +1255,8 @@
               }}
               class="px-4 py-2 rounded-lg transition-all {currentView ===
               'keywords'
-                ? 'tech-button'
-                : 'text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/20'}"
+                ? 'bg-gray-700 text-white'
+                : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800'}"
             >
               关键词高亮
             </button>
@@ -1324,12 +1264,12 @@
 
           <div class="hidden lg:flex items-center gap-4">
             {#if user}
-              <span class="text-sm text-cyan-300"
+              <span class="text-sm text-gray-400"
                 >欢迎, {user.name || user.email}</span
               >
               <button
                 on:click={() => auth.logout()}
-                class="text-sm px-3 py-1 tech-button"
+                class="text-sm px-3 py-1 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded border border-gray-600"
               >
                 退出
               </button>
@@ -1351,7 +1291,7 @@
                 </span>
                 <button 
                   on:click={checkDaemonStatus}
-                  class="text-xs text-cyan-400/60 hover:text-cyan-400 transition-colors ml-2"
+                  class="text-xs text-gray-500 hover:text-gray-300 transition-colors ml-2"
                   title="刷新状态"
                 >
                   🔄
@@ -1456,14 +1396,14 @@
     {/if}
 
     <!-- Mobile Navigation -->
-    <div class="lg:hidden px-4 py-2 glassmorphism border-b border-cyan-900/30">
+    <div class="lg:hidden px-4 py-2 bg-gray-900 border-b border-gray-700">
       <div class="flex gap-2">
         <button
           on:click={() => (currentView = "dashboard")}
           class="flex-1 px-3 py-2 rounded-lg text-sm transition-all {currentView ===
           'dashboard'
-            ? 'tech-button'
-            : 'text-cyan-400 bg-cyan-900/20'}"
+            ? 'bg-gray-700 text-white'
+            : 'text-gray-400 hover:bg-gray-800'}"
         >
           消息管理
         </button>
@@ -1474,8 +1414,8 @@
           }}
           class="flex-1 px-3 py-2 rounded-lg text-sm transition-all {currentView ===
           'iccid-mappings'
-            ? 'tech-button'
-            : 'text-cyan-400 bg-cyan-900/20'}"
+            ? 'bg-gray-700 text-white'
+            : 'text-gray-400 hover:bg-gray-800'}"
         >
           ICCID 映射
         </button>
@@ -1486,8 +1426,8 @@
           }}
           class="flex-1 px-3 py-2 rounded-lg text-sm transition-all {currentView ===
           'keywords'
-            ? 'tech-button'
-            : 'text-cyan-400 bg-cyan-900/20'}"
+            ? 'bg-gray-700 text-white'
+            : 'text-gray-400 hover:bg-gray-800'}"
         >
           关键词
         </button>
@@ -1499,9 +1439,9 @@
       <div class="lg:hidden overflow-x-auto px-4 py-4">
         <div class="flex gap-3 min-w-max">
           <div
-            class="tech-card holo-card text-white px-4 py-3"
+            class="bg-gray-800 border border-gray-700 rounded-lg text-white px-4 py-3"
           >
-            <div class="text-xs text-cyan-300 font-bold tech-text">在线设备</div>
+            <div class="text-xs text-gray-400 font-medium">在线设备</div>
             <div class="text-xl font-bold data-value high-contrast" title="Online: {stats.onlineDevices}, Total: {stats.totalDevices}, Phones: {phoneNumbers.length}">
               {#key stats.onlineDevices + ':' + stats.totalDevices}
                 {stats.onlineDevices}/{stats.totalDevices}
@@ -1509,33 +1449,33 @@
             </div>
           </div>
           <div
-            class="tech-card holo-card text-white px-4 py-3"
+            class="bg-gray-800 border border-gray-700 rounded-lg text-white px-4 py-3"
           >
-            <div class="text-xs text-cyan-300 font-bold tech-text">今日接收</div>
+            <div class="text-xs text-gray-400 font-medium">今日接收</div>
             <div class="text-xl font-bold data-value high-contrast">{stats.todayReceived || 0}</div>
           </div>
           <div
-            class="tech-card holo-card text-white px-4 py-3"
+            class="bg-gray-800 border border-gray-700 rounded-lg text-white px-4 py-3"
           >
-            <div class="text-xs text-cyan-300 font-bold tech-text">今日发送</div>
+            <div class="text-xs text-gray-400 font-medium">今日发送</div>
             <div class="text-xl font-bold data-value high-contrast">{stats.todaySent || 0}</div>
           </div>
           <div
-            class="tech-card holo-card text-white px-4 py-3"
+            class="bg-gray-800 border border-gray-700 rounded-lg text-white px-4 py-3"
           >
-            <div class="text-xs text-cyan-300 font-bold tech-text">总接收</div>
+            <div class="text-xs text-gray-400 font-medium">总接收</div>
             <div class="text-xl font-bold data-value high-contrast">{stats.totalReceived || 0}</div>
           </div>
           <div
-            class="tech-card holo-card text-white px-4 py-3"
+            class="bg-gray-800 border border-gray-700 rounded-lg text-white px-4 py-3"
           >
-            <div class="text-xs text-cyan-300 font-bold tech-text">总发送</div>
+            <div class="text-xs text-gray-400 font-medium">总发送</div>
             <div class="text-xl font-bold data-value high-contrast">{stats.totalSent || 0}</div>
           </div>
           <div
-            class="tech-card holo-card text-white px-4 py-3"
+            class="bg-gray-800 border border-gray-700 rounded-lg text-white px-4 py-3"
           >
-            <div class="text-xs text-cyan-300 font-bold tech-text">提取成功率</div>
+            <div class="text-xs text-gray-400 font-medium">提取成功率</div>
             <div class="text-xl font-bold data-value high-contrast">{stats.verificationRate || 0}%</div>
           </div>
         </div>
@@ -1603,7 +1543,7 @@
           <!-- Mobile Phone List Overlay -->
           {#if showPhoneList}
             <div
-              class="lg:hidden fixed inset-0 z-50 bg-black/90 backdrop-blur-md"
+              class="lg:hidden fixed inset-0 z-50 bg-black/70"
               on:click={() => (showPhoneList = false)}
               on:keydown={(e) => e.key === "Escape" && (showPhoneList = false)}
               role="button"
@@ -1611,7 +1551,7 @@
               aria-label="关闭手机列表"
             >
               <div
-                class="absolute left-0 top-0 bottom-0 w-80 max-w-full bg-black/95 shadow-2xl shadow-cyan-500/20 border-r border-cyan-900/50"
+                class="absolute left-0 top-0 bottom-0 w-80 max-w-full bg-gray-900 shadow-xl border-r border-gray-700"
                 on:click|stopPropagation
                 on:keydown|stopPropagation
                 role="dialog"

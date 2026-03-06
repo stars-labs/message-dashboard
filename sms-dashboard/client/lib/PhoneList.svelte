@@ -226,7 +226,7 @@
 </script>
 
 <div class="{mobile ? 'bg-black/90' : 'tech-card'}">
-  <div class="p-3 lg:p-4 {mobile ? 'border-b border-cyan-900/30' : ''}">
+  <div class="p-3 lg:p-4 {mobile ? 'border-b border-gray-700' : ''}">
     <h2
       class="text-base lg:text-lg font-bold data-value high-contrast mb-3 header-effect-target"
     >
@@ -254,17 +254,17 @@
         type="text"
         bind:value={searchTerm}
         placeholder="搜索号码或运营商..."
-        class="w-full px-3 py-2 text-sm cyber-input placeholder-cyan-600"
+        class="w-full px-3 py-2 text-sm cyber-input placeholder-gray-500"
       />
     </div>
 
     <!-- SIM Missing Filter Toggle -->
     <div class="mb-3">
-      <label class="flex items-center gap-2 text-sm text-cyan-400">
+      <label class="flex items-center gap-2 text-sm text-gray-400">
         <input
           type="checkbox"
           bind:checked={showSimMissing}
-          class="accent-cyan-400"
+          class="accent-blue-400"
         />
         <span>显示需要SIM卡的设备</span>
         {#if phoneNumbers.filter(hasSimIssue).length > 0}
@@ -276,12 +276,12 @@
     </div>
 
     <div class="flex items-center justify-between">
-      <div class="text-sm font-bold text-cyan-300 tech-text">
+      <div class="text-sm font-bold text-gray-200 tech-text">
         共 <span class="data-value text-base high-contrast">{filteredPhones.length}</span> 个设备
       </div>
-      <div class="text-xs text-cyan-400/60 flex items-center gap-3">
+      <div class="text-xs text-gray-400/60 flex items-center gap-3">
         <span class="flex items-center gap-1">
-          <span class="w-2 h-2 bg-cyan-400 rounded-full shadow-lg shadow-cyan-400/50"></span>
+          <span class="w-2 h-2 bg-green-400 rounded-full shadow-lg shadow-green-400/30"></span>
           原始号码
         </span>
         <span class="flex items-center gap-1">
@@ -304,15 +304,15 @@
             <div class="flex items-center justify-between">
               <div class="flex-1">
                 <div class="flex items-center gap-2">
-                  <div class="w-6 h-6 bg-cyan-900/30 rounded"></div>
-                  <div class="h-4 bg-cyan-900/30 rounded w-32"></div>
+                  <div class="w-6 h-6 bg-gray-700/50 rounded"></div>
+                  <div class="h-4 bg-gray-700/50 rounded w-32"></div>
                 </div>
-                <div class="h-3 bg-cyan-900/30 rounded w-48 mt-2"></div>
+                <div class="h-3 bg-gray-700/50 rounded w-48 mt-2"></div>
               </div>
               <div class="flex gap-0.5 items-end">
                 {#each [1, 2, 3, 4] as bar}
                   <div
-                    class="w-1 bg-cyan-900/30 rounded-sm"
+                    class="w-1 bg-gray-700/50 rounded-sm"
                     style="height: {Number.isFinite(bar) ? 4 + bar * 3 : 4}px"
                   ></div>
                 {/each}
@@ -322,9 +322,9 @@
         </div>
       {/each}
     {:else if filteredPhones.length === 0}
-      <div class="p-4 text-center text-cyan-400/60">
+      <div class="p-4 text-center text-gray-400/60">
         <svg
-          class="w-12 h-12 mx-auto mb-2 text-cyan-600/30"
+          class="w-12 h-12 mx-auto mb-2 text-gray-600"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -347,10 +347,10 @@
     {:else}
       {#each filteredPhones as phone}
         <button
-          class="w-full p-3 border-b border-cyan-900/30 hover:bg-cyan-900/20 active:bg-cyan-900/30 transition-all duration-300 text-left relative {selectedPhoneIccid ===
+          class="w-full p-3 border-b border-gray-700 hover:bg-gray-700 active:bg-gray-700/50 transition-all duration-300 text-left relative {selectedPhoneIccid ===
           phone.iccid
             ? 'phone-selected'
-            : 'hover:border-l-4 hover:border-l-cyan-700'}"
+            : 'hover:border-l-4 hover:border-l-gray-500'}"
           on:click={() => handlePhoneClick(phone)}
         >
           {#if selectedPhoneIccid === phone.iccid}
@@ -404,7 +404,7 @@
                         {phone.number}
                       </span>
                     {:else}
-                      <span class="font-medium text-cyan-300 text-sm tech-text">
+                      <span class="font-medium text-gray-200 text-sm tech-text">
                         {phone.number}
                       </span>
                     {/if}
@@ -442,7 +442,7 @@
                   {/if}
                 {/if}
               </div>
-              <div class="text-xs text-cyan-400/70 mt-0.5">
+              <div class="text-xs text-gray-400/70 mt-0.5">
                 {#if hasSimIssue(phone)}
                   <!-- Modem without SIM - show hardware details -->
                   {#if phone.equipment_id}
@@ -466,14 +466,14 @@
                 {:else}
                   <!-- Normal phone with SIM -->
                   {#if phone.carrier}
-                    <span class="font-bold text-cyan-300">{phone.carrier}</span>
+                    <span class="font-bold text-gray-200">{phone.carrier}</span>
                   {/if}
                   {#if phone.operator_name}
-                    <span class="text-cyan-500/60"> • {phone.operator_name}</span>
+                    <span class="text-gray-500"> • {phone.operator_name}</span>
                   {/if}
                   {#if phone.iccid && phone.iccid.length > 15}
                     <!-- ICCID (long numeric string) -->
-                    <span class="text-cyan-500/60 font-mono">
+                    <span class="text-gray-500 font-mono">
                       • {phone.iccid.slice(0, 6)}...{phone.iccid.slice(-4)}</span
                     >
                   {:else if phone.iccid}
@@ -502,7 +502,7 @@
             />
           </div>
           {#if phone.lastActive && !mobile}
-            <div class="text-xs text-cyan-600/50 mt-1">
+            <div class="text-xs text-gray-500 mt-1">
               最后活跃: {new Date(phone.lastActive).toLocaleString("zh-CN")}
             </div>
           {/if}

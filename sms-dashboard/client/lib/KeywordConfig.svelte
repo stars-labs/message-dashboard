@@ -123,7 +123,7 @@
 <div class="keyword-config">
   <div class="flex justify-between items-center mb-6">
     <div>
-      <h2 class="text-2xl font-bold text-cyan-400">Keyword Highlighting</h2>
+      <h2 class="text-2xl font-bold text-gray-200">Keyword Highlighting</h2>
       <p class="text-gray-400 mt-1">Configure keywords to highlight and tag messages automatically</p>
     </div>
     <button
@@ -145,7 +145,7 @@
 
   {#if loading}
     <div class="text-center py-8">
-      <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-cyan-400"></div>
+      <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-gray-400"></div>
       <p class="text-gray-400 mt-2">Loading keywords...</p>
     </div>
   {:else if keywords.length === 0}
@@ -180,7 +180,7 @@
           {#each keywords as keyword}
             <tr class="border-b border-gray-800 hover:bg-gray-900/50 transition-colors">
               <td class="px-4 py-3">
-                <span class="font-mono text-cyan-400">{keyword.keyword}</span>
+                <span class="font-mono text-gray-200">{keyword.keyword}</span>
               </td>
               <td class="px-4 py-3">
                 <span 
@@ -218,7 +218,7 @@
               <td class="px-4 py-3">
                 <button
                   on:click={() => toggleKeywordActive(keyword)}
-                  class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {keyword.is_active ? 'bg-cyan-600' : 'bg-gray-700'}"
+                  class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {keyword.is_active ? 'bg-blue-600' : 'bg-gray-700'}"
                 >
                   <span class="sr-only">Toggle active</span>
                   <span
@@ -230,7 +230,7 @@
                 <div class="flex gap-2">
                   <button
                     on:click={() => showEditKeyword(keyword)}
-                    class="text-cyan-400 hover:text-cyan-300 transition-colors"
+                    class="text-gray-400 hover:text-gray-200 transition-colors"
                     title="Edit"
                   >
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -259,7 +259,7 @@
   {#if showAddDialog}
     <div class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50" on:click={() => showAddDialog = false}>
       <div class="bg-gray-900 border border-gray-800 rounded-lg p-6 max-w-md w-full mx-4" on:click|stopPropagation>
-        <h3 class="text-xl font-bold text-cyan-400 mb-4">
+        <h3 class="text-xl font-bold text-gray-200 mb-4">
           {editingKeyword ? 'Edit Keyword' : 'Add New Keyword'}
         </h3>
 
@@ -270,7 +270,7 @@
               type="text"
               bind:value={formData.keyword}
               placeholder="Enter keyword to highlight"
-              class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white focus:border-cyan-400 focus:outline-none"
+              class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white focus:border-gray-400 focus:outline-none"
             />
           </div>
 
@@ -280,7 +280,7 @@
               type="text"
               bind:value={formData.tag}
               placeholder="Tag to display"
-              class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white focus:border-cyan-400 focus:outline-none"
+              class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white focus:border-gray-400 focus:outline-none"
             />
           </div>
 
@@ -296,7 +296,7 @@
                 type="text"
                 bind:value={formData.color}
                 placeholder="#3B82F6"
-                class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white focus:border-cyan-400 focus:outline-none"
+                class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white focus:border-gray-400 focus:outline-none"
               />
             </div>
           </div>
@@ -308,7 +308,7 @@
               bind:value={formData.priority}
               min="0"
               max="100"
-              class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white focus:border-cyan-400 focus:outline-none"
+              class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white focus:border-gray-400 focus:outline-none"
             />
             <p class="text-xs text-gray-500 mt-1">Higher priority keywords take precedence when overlapping</p>
           </div>
@@ -318,7 +318,7 @@
               <input
                 type="checkbox"
                 bind:checked={formData.case_sensitive}
-                class="w-4 h-4 text-cyan-600 bg-gray-800 border-gray-600 rounded focus:ring-cyan-500"
+                class="w-4 h-4 text-blue-500 bg-gray-800 border-gray-600 rounded focus:ring-blue-500"
               />
               <span class="text-sm text-gray-400">Case sensitive matching</span>
             </label>
@@ -327,7 +327,7 @@
               <input
                 type="checkbox"
                 bind:checked={formData.whole_word}
-                class="w-4 h-4 text-cyan-600 bg-gray-800 border-gray-600 rounded focus:ring-cyan-500"
+                class="w-4 h-4 text-blue-500 bg-gray-800 border-gray-600 rounded focus:ring-blue-500"
               />
               <span class="text-sm text-gray-400">Match whole words only</span>
             </label>
@@ -360,6 +360,6 @@
   }
 
   .tech-button {
-    @apply bg-gradient-to-r from-cyan-500 to-blue-500 text-white font-medium hover:from-cyan-600 hover:to-blue-600 transition-all duration-200 shadow-lg hover:shadow-cyan-500/25;
+    @apply bg-gray-700 text-white font-medium hover:bg-gray-600 transition-colors duration-150;
   }
 </style>
