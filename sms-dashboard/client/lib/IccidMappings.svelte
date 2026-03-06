@@ -399,13 +399,13 @@
           导出
         </button>
         {#if showExportMenu}
-          <div class="absolute right-0 mt-2 w-48 bg-gray-900 border border-cyan-500/30 rounded-lg shadow-lg z-50">
+          <div class="absolute right-0 mt-2 w-48 bg-gray-900 border border-gray-600 rounded-lg shadow-lg z-50">
             <button
               on:click={() => {
                 exportAllMappings('csv');
                 showExportMenu = false;
               }}
-              class="w-full px-4 py-2 text-left hover:bg-cyan-900/30 transition-colors"
+              class="w-full px-4 py-2 text-left hover:bg-gray-700 transition-colors"
             >
               导出为 CSV
             </button>
@@ -414,7 +414,7 @@
                 exportAllMappings('json');
                 showExportMenu = false;
               }}
-              class="w-full px-4 py-2 text-left hover:bg-cyan-900/30 transition-colors"
+              class="w-full px-4 py-2 text-left hover:bg-gray-700 transition-colors"
             >
               导出为 JSON
             </button>
@@ -466,9 +466,9 @@
   {#if loading}
     <div class="text-center py-8">
       <div
-        class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-cyan-500"
+        class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-gray-500"
       ></div>
-      <p class="mt-2 text-cyan-400">加载中...</p>
+      <p class="mt-2 text-gray-400">加载中...</p>
     </div>
   {:else if error}
     <div class="text-center py-8">
@@ -485,51 +485,51 @@
     <div class="overflow-x-auto">
       {#if mappings.length === 0}
         <div class="text-center py-16">
-          <p class="text-cyan-400 mb-4">暂无 ICCID 映射数据</p>
-          <p class="text-cyan-300/60 text-sm">点击上方"添加映射"按钮创建第一个映射</p>
+          <p class="text-gray-400 mb-4">暂无 ICCID 映射数据</p>
+          <p class="text-gray-200/60 text-sm">点击上方"添加映射"按钮创建第一个映射</p>
         </div>
       {:else}
         <table class="min-w-full">
           <thead>
-            <tr class="border-b border-cyan-900/30">
+            <tr class="border-b border-gray-700">
               <th
-                class="px-4 py-3 text-left text-xs font-medium text-cyan-400 uppercase tracking-wider"
+                class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider"
                 >ICCID</th
               >
               <th
-                class="px-4 py-3 text-left text-xs font-medium text-cyan-400 uppercase tracking-wider"
+                class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider"
                 >手机号</th
               >
               <th
-                class="px-4 py-3 text-left text-xs font-medium text-cyan-400 uppercase tracking-wider"
+                class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider"
                 >国家</th
               >
               <th
-                class="px-4 py-3 text-left text-xs font-medium text-cyan-400 uppercase tracking-wider"
+                class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider"
                 >运营商</th
               >
               <th
-                class="px-4 py-3 text-left text-xs font-medium text-cyan-400 uppercase tracking-wider"
+                class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider"
                 >描述</th
               >
               <th
-                class="px-4 py-3 text-left text-xs font-medium text-cyan-400 uppercase tracking-wider"
+                class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider"
                 >状态</th
               >
               <th
-                class="px-4 py-3 text-left text-xs font-medium text-cyan-400 uppercase tracking-wider"
+                class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider"
                 >创建时间</th
               >
               <th
-                class="px-4 py-3 text-left text-xs font-medium text-cyan-400 uppercase tracking-wider"
+                class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider"
                 >操作</th
               >
             </tr>
           </thead>
           <tbody class="divide-y divide-cyan-900/30">
             {#each mappings as mapping}
-            <tr class="hover:bg-cyan-900/20 transition-colors">
-              <td class="px-4 py-3 text-sm font-mono text-cyan-300">{mapping.iccid}</td>
+            <tr class="hover:bg-gray-700/50 transition-colors">
+              <td class="px-4 py-3 text-sm font-mono text-gray-200">{mapping.iccid}</td>
               <td class="px-4 py-3 text-sm font-medium text-white"
                 >{mapping.phone_number}</td
               >
@@ -537,7 +537,7 @@
                 {#if mapping.country}
                   <span class="inline-flex items-center gap-1">
                     <span class="text-lg">{getCountryFlag(mapping.country)}</span>
-                    <span class="text-xs text-cyan-400">{getCountryName(mapping.country)}</span>
+                    <span class="text-xs text-gray-400">{getCountryName(mapping.country)}</span>
                   </span>
                 {:else}
                   <span class="text-gray-600">-</span>
@@ -552,7 +552,7 @@
                   <span class="text-gray-600">-</span>
                 {/if}
               </td>
-              <td class="px-4 py-3 text-sm text-cyan-300">{mapping.notes || mapping.description || "-"}</td>
+              <td class="px-4 py-3 text-sm text-gray-200">{mapping.notes || mapping.description || "-"}</td>
               <td class="px-4 py-3">
                 <span
                   class="inline-flex px-2 py-1 text-xs rounded-full {mapping.is_active
@@ -562,13 +562,13 @@
                   {mapping.is_active ? "启用" : "禁用"}
                 </span>
               </td>
-              <td class="px-4 py-3 text-sm text-cyan-400/70">
+              <td class="px-4 py-3 text-sm text-gray-400/70">
                 {new Date(mapping.created_at).toLocaleString()}
               </td>
               <td class="px-4 py-3 text-sm">
                 <button
                   on:click={() => startEdit(mapping)}
-                  class="text-cyan-400 hover:text-cyan-300 mr-3 transition-colors"
+                  class="text-gray-400 hover:text-gray-200 mr-3 transition-colors"
                 >
                   编辑
                 </button>
@@ -595,13 +595,13 @@
             loadMappings();
           }}
           disabled={currentPage === 1}
-          class="px-3 py-1 rounded border border-cyan-500/30 {currentPage === 1
+          class="px-3 py-1 rounded border border-gray-600 {currentPage === 1
             ? 'bg-gray-900/50 text-gray-600'
-            : 'bg-cyan-900/20 hover:bg-cyan-900/30 text-cyan-400'}"
+            : 'bg-gray-700/50 hover:bg-gray-700 text-gray-400'}"
         >
           上一页
         </button>
-        <span class="px-3 py-1 text-cyan-400">
+        <span class="px-3 py-1 text-gray-400">
           第 {currentPage} / {totalPages} 页
         </span>
         <button
@@ -610,9 +610,9 @@
             loadMappings();
           }}
           disabled={currentPage === totalPages}
-          class="px-3 py-1 rounded border border-cyan-500/30 {currentPage === totalPages
+          class="px-3 py-1 rounded border border-gray-600 {currentPage === totalPages
             ? 'bg-gray-900/50 text-gray-600'
-            : 'bg-cyan-900/20 hover:bg-cyan-900/30 text-cyan-400'}"
+            : 'bg-gray-700/50 hover:bg-gray-700 text-gray-400'}"
         >
           下一页
         </button>
@@ -624,7 +624,7 @@
 <!-- Add Mapping Modal -->
 {#if showAddForm}
   <div
-    class="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50"
+    class="fixed inset-0 bg-black/70 flex items-center justify-center z-50"
   >
     <div class="tech-card p-6 max-w-md w-full mx-4">
       <h3 class="text-lg font-bold mb-4 data-value high-contrast">添加 ICCID 映射</h3>
@@ -633,7 +633,7 @@
         <div>
           <label
             for="create-iccid"
-            class="block text-sm font-medium text-cyan-400 mb-1">ICCID</label
+            class="block text-sm font-medium text-gray-400 mb-1">ICCID</label
           >
           <input
             id="create-iccid"
@@ -647,7 +647,7 @@
         <div>
           <label
             for="create-phone-number"
-            class="block text-sm font-medium text-cyan-400 mb-1">手机号</label
+            class="block text-sm font-medium text-gray-400 mb-1">手机号</label
           >
           <input
             id="create-phone-number"
@@ -661,7 +661,7 @@
         <div>
           <label
             for="create-country"
-            class="block text-sm font-medium text-cyan-400 mb-1"
+            class="block text-sm font-medium text-gray-400 mb-1"
             >国家</label
           >
           <select
@@ -681,7 +681,7 @@
         <div>
           <label
             for="create-carrier"
-            class="block text-sm font-medium text-cyan-400 mb-1"
+            class="block text-sm font-medium text-gray-400 mb-1"
             >运营商（可选）</label
           >
           <input
@@ -696,7 +696,7 @@
         <div>
           <label
             for="create-description"
-            class="block text-sm font-medium text-cyan-400 mb-1"
+            class="block text-sm font-medium text-gray-400 mb-1"
             >描述（可选）</label
           >
           <textarea
@@ -715,7 +715,7 @@
             showAddForm = false;
             resetForm();
           }}
-          class="px-4 py-2 border border-cyan-500/30 rounded-lg hover:bg-cyan-900/20 text-cyan-400 transition-all duration-300"
+          class="px-4 py-2 border border-gray-600 rounded-lg hover:bg-gray-700/50 text-gray-400 transition-all duration-300"
         >
           取消
         </button>
@@ -733,7 +733,7 @@
 <!-- Edit Mapping Modal -->
 {#if showEditForm}
   <div
-    class="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50"
+    class="fixed inset-0 bg-black/70 flex items-center justify-center z-50"
   >
     <div class="tech-card p-6 max-w-md w-full mx-4">
       <h3 class="text-lg font-bold mb-4 data-value high-contrast">编辑 ICCID 映射</h3>
@@ -742,7 +742,7 @@
         <div>
           <label
             for="edit-iccid"
-            class="block text-sm font-medium text-cyan-400 mb-1">ICCID</label
+            class="block text-sm font-medium text-gray-400 mb-1">ICCID</label
           >
           <input
             id="edit-iccid"
@@ -756,7 +756,7 @@
         <div>
           <label
             for="edit-phone-number"
-            class="block text-sm font-medium text-cyan-400 mb-1">手机号</label
+            class="block text-sm font-medium text-gray-400 mb-1">手机号</label
           >
           <input
             id="edit-phone-number"
@@ -770,7 +770,7 @@
         <div>
           <label
             for="edit-country"
-            class="block text-sm font-medium text-cyan-400 mb-1"
+            class="block text-sm font-medium text-gray-400 mb-1"
             >国家</label
           >
           <select
@@ -790,7 +790,7 @@
         <div>
           <label
             for="edit-carrier"
-            class="block text-sm font-medium text-cyan-400 mb-1"
+            class="block text-sm font-medium text-gray-400 mb-1"
             >运营商（可选）</label
           >
           <input
@@ -805,7 +805,7 @@
         <div>
           <label
             for="edit-description"
-            class="block text-sm font-medium text-cyan-400 mb-1"
+            class="block text-sm font-medium text-gray-400 mb-1"
             >描述（可选）</label
           >
           <textarea
@@ -824,7 +824,7 @@
               bind:checked={formData.is_active}
               class="mr-2"
             />
-            <span class="text-sm font-medium text-cyan-400">启用状态</span>
+            <span class="text-sm font-medium text-gray-400">启用状态</span>
           </label>
         </div>
       </div>
@@ -835,7 +835,7 @@
             showEditForm = false;
             resetForm();
           }}
-          class="px-4 py-2 border border-cyan-500/30 rounded-lg hover:bg-cyan-900/20 text-cyan-400 transition-all duration-300"
+          class="px-4 py-2 border border-gray-600 rounded-lg hover:bg-gray-700/50 text-gray-400 transition-all duration-300"
         >
           取消
         </button>
@@ -853,19 +853,19 @@
 <!-- Bulk Import Modal -->
 {#if showBulkImport}
   <div
-    class="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50"
+    class="fixed inset-0 bg-black/70 flex items-center justify-center z-50"
   >
     <div class="tech-card p-6 max-w-2xl w-full mx-4">
       <h3 class="text-lg font-bold mb-4 data-value high-contrast">批量导入 ICCID 映射</h3>
 
       <div class="mb-4">
-        <p class="text-sm text-cyan-400/70 mb-2">
+        <p class="text-sm text-gray-400/70 mb-2">
           支持 CSV 或 JSON 格式。CSV
           格式第一行应为标题行：iccid,phone_number,country,carrier,description
         </p>
-        <p class="text-sm text-cyan-400/70">
+        <p class="text-sm text-gray-400/70">
           JSON 格式示例：<code
-            class="text-cyan-300">[{JSON.stringify({
+            class="text-gray-200">[{JSON.stringify({
               iccid: "123456",
               phone_number: "13800138000",
               country: "CN",
@@ -873,7 +873,7 @@
             })}]</code
           >
         </p>
-        <p class="text-sm text-cyan-400/70 mt-1">
+        <p class="text-sm text-gray-400/70 mt-1">
           国家代码：CN=中国, HK=香港, SG=新加坡, US=美国, UK=英国, JP=日本等
         </p>
       </div>
@@ -891,7 +891,7 @@
             showBulkImport = false;
             bulkImportText = "";
           }}
-          class="px-4 py-2 border border-cyan-500/30 rounded-lg hover:bg-cyan-900/20 text-cyan-400 transition-all duration-300"
+          class="px-4 py-2 border border-gray-600 rounded-lg hover:bg-gray-700/50 text-gray-400 transition-all duration-300"
         >
           取消
         </button>

@@ -37,7 +37,7 @@
 
 <div class="bg-gray-900 border border-gray-800 rounded-lg">
   <div class="p-4 border-b border-gray-800">
-    <h2 class="text-lg font-bold text-cyan-400">
+    <h2 class="text-lg font-bold text-gray-200">
       {#if selectedPhone}
         {selectedPhone.flag} {selectedPhone.number}
       {:else}

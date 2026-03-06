@@ -74,8 +74,8 @@
   }
 </script>
 
-<div class="{mobile ? 'bg-black/90' : 'tech-card'}">
-  <div class="p-3 lg:p-4 {mobile ? 'border-b border-cyan-900/30' : ''}">
+<div class="{mobile ? 'bg-gray-900' : 'tech-card'}">
+  <div class="p-3 lg:p-4 {mobile ? 'border-b border-gray-700' : ''}">
     <h2 class="text-base lg:text-lg font-bold data-value high-contrast mb-3">
       调制解调器列表
     </h2>
@@ -86,27 +86,27 @@
         type="text"
         bind:value={searchTerm}
         placeholder="搜索 IMEI、型号或 SIM 卡..."
-        class="w-full px-3 py-2 text-sm cyber-input placeholder-cyan-600"
+        class="w-full px-3 py-2 text-sm cyber-input placeholder-gray-500"
       />
     </div>
 
     <!-- Status Filter -->
     <div class="mb-3">
-      <label class="flex items-center gap-2 text-sm text-cyan-400">
+      <label class="flex items-center gap-2 text-sm text-gray-400">
         <input
           type="checkbox"
           bind:checked={showOffline}
-          class="accent-cyan-400"
+          class="accent-blue-400"
         />
         <span>显示离线设备</span>
       </label>
     </div>
 
     <div class="flex items-center justify-between">
-      <div class="text-sm font-bold text-cyan-300">
+      <div class="text-sm font-bold text-gray-200">
         共 <span class="data-value text-base high-contrast">{filteredModems.length}</span> 个调制解调器
       </div>
-      <div class="text-xs text-cyan-400/60 flex items-center gap-2">
+      <div class="text-xs text-gray-400/60 flex items-center gap-2">
         <span class="flex items-center gap-1">
           <span class="w-2 h-2 bg-green-400 rounded-full"></span>
           有 SIM 卡
@@ -124,23 +124,23 @@
     {#if isLoading}
       <!-- Loading skeleton -->
       {#each [1, 2, 3, 4] as _}
-        <div class="p-3 border-b border-cyan-900/30">
+        <div class="p-3 border-b border-gray-700">
           <div class="animate-pulse">
-            <div class="h-4 bg-cyan-900/30 rounded w-48 mb-2"></div>
-            <div class="h-3 bg-cyan-900/30 rounded w-32"></div>
+            <div class="h-4 bg-gray-700/50 rounded w-48 mb-2"></div>
+            <div class="h-3 bg-gray-700/50 rounded w-32"></div>
           </div>
         </div>
       {/each}
     {:else if filteredModems.length === 0}
-      <div class="p-4 text-center text-cyan-400/60">
+      <div class="p-4 text-center text-gray-400/60">
         <p class="text-sm">无匹配的调制解调器</p>
       </div>
     {:else}
       {#each filteredModems as modem}
         {@const sim = findSimForModem(modem)}
         <button
-          class="w-full p-3 border-b border-cyan-900/30 hover:bg-cyan-900/20 transition-all text-left
-                 {selectedModemId === modem.equipment_id ? 'bg-cyan-900/30 border-l-4 border-l-cyan-400' : ''}"
+          class="w-full p-3 border-b border-gray-700 hover:bg-gray-700 transition-all text-left
+                 {selectedModemId === modem.equipment_id ? 'bg-gray-700/50 border-l-4 border-l-blue-400' : ''}"
           on:click={() => handleModemClick(modem)}
         >
           <div class="flex items-center justify-between">
@@ -148,11 +148,11 @@
               <!-- Modem Info -->
               <div class="flex items-center gap-2 mb-1">
                 <span class="text-lg">📡</span>
-                <span class="font-mono text-sm text-cyan-300">
+                <span class="font-mono text-sm text-gray-200">
                   {formatImei(modem.equipment_id)}
                 </span>
                 {#if modem.modem_index != null}
-                  <span class="px-2 py-0.5 bg-cyan-900/30 text-cyan-400 rounded text-xs">
+                  <span class="px-2 py-0.5 bg-gray-700/50 text-gray-400 rounded text-xs">
                     #{modem.modem_index}
                   </span>
                 {/if}
@@ -162,7 +162,7 @@
               </div>
 
               <!-- Hardware Details -->
-              <div class="text-xs text-cyan-400/70">
+              <div class="text-xs text-gray-400/70">
                 {#if modem.manufacturer || modem.model}
                   <span>{modem.manufacturer || ''} {modem.model || ''}</span>
                 {/if}
@@ -178,10 +178,10 @@
                     SIM 卡已插入
                   </span>
                   {#if sim.phone_number}
-                    <span class="text-xs text-cyan-300">{sim.phone_number}</span>
+                    <span class="text-xs text-gray-200">{sim.phone_number}</span>
                   {/if}
                   {#if sim.operator_name}
-                    <span class="text-xs text-cyan-500/60">{sim.operator_name}</span>
+                    <span class="text-xs text-gray-500">{sim.operator_name}</span>
                   {/if}
                 </div>
               {:else}
@@ -219,19 +219,19 @@
 
 <style>
   .tech-card {
-    @apply bg-black/80 border border-cyan-900/50 rounded-lg shadow-2xl;
+    @apply bg-gray-900 border border-gray-700 rounded-lg;
   }
 
   .cyber-input {
-    @apply bg-cyan-950/30 border border-cyan-900/50 rounded text-cyan-300;
-    @apply focus:outline-none focus:border-cyan-400 focus:bg-cyan-950/50;
+    @apply bg-gray-800 border border-gray-600 rounded text-gray-200;
+    @apply focus:outline-none focus:border-gray-400;
   }
 
   .data-value {
-    text-shadow: 0 0 10px currentColor;
+    /* plain */
   }
 
   .high-contrast {
-    @apply text-cyan-300;
+    @apply text-gray-100;
   }
 </style>

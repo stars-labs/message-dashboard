@@ -109,8 +109,8 @@
   }
 </script>
 
-<div class="{mobile ? 'bg-black/90' : 'tech-card'}">
-  <div class="p-3 lg:p-4 {mobile ? 'border-b border-cyan-900/30' : ''}">
+<div class="{mobile ? 'bg-gray-900' : 'tech-card'}">
+  <div class="p-3 lg:p-4 {mobile ? 'border-b border-gray-700' : ''}">
     <h2 class="text-base lg:text-lg font-bold data-value high-contrast mb-3">
       SIM 卡列表
     </h2>
@@ -135,27 +135,27 @@
         type="text"
         bind:value={searchTerm}
         placeholder="搜索号码、ICCID 或运营商..."
-        class="w-full px-3 py-2 text-sm cyber-input placeholder-cyan-600"
+        class="w-full px-3 py-2 text-sm cyber-input placeholder-gray-500"
       />
     </div>
 
     <!-- Unassigned Filter -->
     <div class="mb-3">
-      <label class="flex items-center gap-2 text-sm text-cyan-400">
+      <label class="flex items-center gap-2 text-sm text-gray-400">
         <input
           type="checkbox"
           bind:checked={showUnassigned}
-          class="accent-cyan-400"
+          class="accent-blue-400"
         />
         <span>显示未分配的 SIM 卡</span>
       </label>
     </div>
 
     <div class="flex items-center justify-between">
-      <div class="text-sm font-bold text-cyan-300">
+      <div class="text-sm font-bold text-gray-200">
         共 <span class="data-value text-base high-contrast">{filteredSims.length}</span> 张 SIM 卡
       </div>
-      <div class="text-xs text-cyan-400/60 flex items-center gap-2">
+      <div class="text-xs text-gray-400/60 flex items-center gap-2">
         <span class="flex items-center gap-1">
           <span class="w-2 h-2 bg-green-400 rounded-full"></span>
           已插入
@@ -173,23 +173,23 @@
     {#if isLoading}
       <!-- Loading skeleton -->
       {#each [1, 2, 3, 4] as _}
-        <div class="p-3 border-b border-cyan-900/30">
+        <div class="p-3 border-b border-gray-700">
           <div class="animate-pulse">
-            <div class="h-4 bg-cyan-900/30 rounded w-48 mb-2"></div>
-            <div class="h-3 bg-cyan-900/30 rounded w-32"></div>
+            <div class="h-4 bg-gray-700/50 rounded w-48 mb-2"></div>
+            <div class="h-3 bg-gray-700/50 rounded w-32"></div>
           </div>
         </div>
       {/each}
     {:else if filteredSims.length === 0}
-      <div class="p-4 text-center text-cyan-400/60">
+      <div class="p-4 text-center text-gray-400/60">
         <p class="text-sm">无匹配的 SIM 卡</p>
       </div>
     {:else}
       {#each filteredSims as sim}
         {@const modem = findModemForSim(sim)}
         <button
-          class="w-full p-3 border-b border-cyan-900/30 hover:bg-cyan-900/20 transition-all text-left
-                 {selectedSimIccid === sim.iccid ? 'bg-cyan-900/30 border-l-4 border-l-purple-400' : ''}"
+          class="w-full p-3 border-b border-gray-700 hover:bg-gray-700 transition-all text-left
+                 {selectedSimIccid === sim.iccid ? 'bg-gray-700/50 border-l-4 border-l-purple-400' : ''}"
           on:click={() => handleSimClick(sim)}
         >
           <div class="flex items-start justify-between">
@@ -198,7 +198,7 @@
               <div class="flex items-center gap-2 mb-1">
                 <span class="text-lg">{getCountryFlag(sim.phone_number)}</span>
                 {#if sim.phone_number}
-                  <span class="font-medium text-cyan-300 text-sm">
+                  <span class="font-medium text-gray-200 text-sm">
                     {sim.phone_number}
                   </span>
                 {:else}
@@ -220,11 +220,11 @@
               </div>
 
               <!-- Carrier & ICCID -->
-              <div class="text-xs text-cyan-400/70">
+              <div class="text-xs text-gray-400/70">
                 {#if sim.operator_name}
-                  <span class="font-bold text-cyan-300">{sim.operator_name}</span>
+                  <span class="font-bold text-gray-200">{sim.operator_name}</span>
                 {/if}
-                <span class="font-mono text-cyan-500/60">
+                <span class="font-mono text-gray-500">
                   • {formatIccid(sim.iccid)}
                 </span>
               </div>
@@ -288,23 +288,23 @@
 
 <style>
   .tech-card {
-    @apply bg-black/80 border border-cyan-900/50 rounded-lg shadow-2xl;
+    @apply bg-gray-900 border border-gray-700 rounded-lg;
   }
 
   .cyber-input {
-    @apply bg-cyan-950/30 border border-cyan-900/50 rounded text-cyan-300;
-    @apply focus:outline-none focus:border-cyan-400 focus:bg-cyan-950/50;
+    @apply bg-gray-800 border border-gray-600 rounded text-gray-200;
+    @apply focus:outline-none focus:border-gray-400;
   }
 
   .tech-button {
-    @apply bg-cyan-900/30 hover:bg-cyan-800/40 text-cyan-400 rounded transition-colors;
+    @apply bg-gray-700 hover:bg-gray-600 text-gray-200 rounded transition-colors;
   }
 
   .data-value {
-    text-shadow: 0 0 10px currentColor;
+    /* plain */
   }
 
   .high-contrast {
-    @apply text-cyan-300;
+    @apply text-gray-100;
   }
 </style>

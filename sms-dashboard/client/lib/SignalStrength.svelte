@@ -147,9 +147,9 @@
   </div>
 {:else}
   <!-- Detailed view -->
-  <div class="bg-black/30 rounded-lg p-3 space-y-2 border border-cyan-500/20">
+  <div class="bg-gray-800 rounded-lg p-3 space-y-2 border border-gray-700">
     <div class="flex items-center justify-between">
-      <span class="text-sm font-medium text-cyan-400">信号强度</span>
+      <span class="text-sm font-medium text-gray-300">信号强度</span>
       <div class="flex items-center gap-2">
         {#if status === "online" || status === "active" || status === "registered" || status === "connected"}
           <div class="flex gap-0.5 items-end">
@@ -231,26 +231,26 @@
       <div class="grid grid-cols-2 gap-2 text-xs">
         {#if rssi}
           <div class="flex justify-between">
-            <span class="text-cyan-400/70">RSSI:</span>
-            <span class="font-mono font-medium text-cyan-300">{rssi} dBm</span>
+            <span class="text-gray-300/70">RSSI:</span>
+            <span class="font-mono font-medium text-gray-200">{rssi} dBm</span>
           </div>
         {/if}
         {#if rsrq}
           <div class="flex justify-between">
-            <span class="text-cyan-400/70">RSRQ:</span>
-            <span class="font-mono font-medium text-cyan-300">{rsrq} dB</span>
+            <span class="text-gray-300/70">RSRQ:</span>
+            <span class="font-mono font-medium text-gray-200">{rsrq} dB</span>
           </div>
         {/if}
         {#if rsrp}
           <div class="flex justify-between">
-            <span class="text-cyan-400/70">RSRP:</span>
-            <span class="font-mono font-medium text-cyan-300">{rsrp} dBm</span>
+            <span class="text-gray-300/70">RSRP:</span>
+            <span class="font-mono font-medium text-gray-200">{rsrp} dBm</span>
           </div>
         {/if}
         {#if snr}
           <div class="flex justify-between">
-            <span class="text-cyan-400/70">S/N:</span>
-            <span class="font-mono font-medium text-cyan-300">{snr} dB</span>
+            <span class="text-gray-300/70">S/N:</span>
+            <span class="font-mono font-medium text-gray-200">{snr} dB</span>
           </div>
         {/if}
       </div>

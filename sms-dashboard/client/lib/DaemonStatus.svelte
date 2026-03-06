@@ -58,12 +58,12 @@
   }[daemonStatus.status] || '⚪';
 </script>
 
-<div class="bg-black/30 rounded-lg p-3 border border-cyan-500/20 backdrop-blur-sm">
+<div class="bg-gray-800 rounded-lg p-3 border border-gray-700">
   <div class="flex items-center justify-between mb-2">
-    <h3 class="text-cyan-400 font-bold text-sm">SMS Daemon Status</h3>
+    <h3 class="text-gray-300 font-bold text-sm">SMS Daemon Status</h3>
     <button 
       on:click={checkDaemonStatus}
-      class="text-xs text-cyan-400/60 hover:text-cyan-400 transition-colors"
+      class="text-xs text-gray-300/60 hover:text-gray-300 transition-colors"
       title="Refresh status"
     >
       🔄
