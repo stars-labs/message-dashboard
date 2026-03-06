@@ -39,11 +39,12 @@ export const controlHandler = {
       if (sync_mode === 'full' && session_id) {
         console.log(`[control.js] Starting FULL STATE SYNC for session ${session_id}`);
         
-        // Step 1: Mark all existing connected modems as pending verification
+        // Step 1: Mark all existing active/connected modems as pending verification
+        // Include 'active' — daemon reports status='active', not 'connected'
         batch.push(env.DB.prepare(`
-          UPDATE modems 
+          UPDATE modems
           SET verification_status = 'pending'
-          WHERE status = 'connected'
+          WHERE status IN ('active', 'connected', 'online')
         `));
         
         // Step 2: Collect all received modem IDs
@@ -182,6 +183,38 @@ export const controlHandler = {
       // Execute all batch operations
       if (batch.length > 0) {
         await env.DB.batch(batch);
+      }
+
+      // SIM eviction: for each modem in this sync, clear any SIM that still points
+      // to that modem but was NOT in the received SIM list. This handles the case
+      // where a physical SIM swap happened — the old SIM must be disassociated.
+      if (sims.length > 0) {
+        const receivedModemIds = [...new Set(modems.map(m => m.equipment_id).filter(id => id))];
+        const receivedIccids = new Set(sims.map(s => s.iccid).filter(id => id));
+
+        for (const modemId of receivedModemIds) {
+          // Find SIMs pointing to this modem that aren't in the received list
+          const stale = await env.DB.prepare(`
+            SELECT iccid FROM sims
+            WHERE current_modem_id = ?
+          `).bind(modemId).all();
+
+          const staleIccids = (stale.results || [])
+            .map(r => r.iccid)
+            .filter(iccid => !receivedIccids.has(iccid));
+
+          if (staleIccids.length > 0) {
+            console.log(`[control.js] Evicting ${staleIccids.length} stale SIM(s) from modem ${modemId}: ${staleIccids.join(', ')}`);
+            const placeholders = staleIccids.map(() => '?').join(', ');
+            await env.DB.prepare(`
+              UPDATE sims
+              SET current_modem_id = NULL,
+                  status = 'inactive',
+                  updated_at = CURRENT_TIMESTAMP
+              WHERE iccid IN (${placeholders})
+            `).bind(...staleIccids).run();
+          }
+        }
       }
       
       // Sync sim_index from modem_state to sims table

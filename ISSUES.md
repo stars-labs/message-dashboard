@@ -53,7 +53,7 @@ The same modem returns ICCID **with `F`** via AT commands and **without `F`** vi
 4. **Daemon deployed**: Done — new daemon (v8.0.0 with ICCID fix) deployed to Orange Pi via NixOS rebuild
 
 ### 2. Stale SIM assignments on multiple modems
-**Status**: Open
+**Status**: Fixed (2026-03-06)
 **Impact**: 2 modems with multiple active SIMs; stale assignments never cleared on SIM swap or modem disappearance
 
 **Affected modems** (queried 2026-03-06):
@@ -84,11 +84,10 @@ The daemon reports modems with `status = 'active'` (not `'connected'`), so disap
 **Bug 2 — No SIM eviction on modem swap** (`control.js:139-180`):
 The server upserts new SIM associations but never clears the previous SIM for a modem. When a physical SIM card is swapped, both old and new SIM end up with `current_modem_id` pointing to the same modem.
 
-**Fix plan**:
-1. **Migration 015** (DB cleanup): clear 6 stale SIMs on offline modem `865827078940772`; clear 1 stale SIM on `865827078942505`
-2. **Server fix** (`control.js`):
-   - Fix reconciliation filter: `WHERE status IN ('active', 'connected')`
-   - Add full-sync SIM eviction: null out SIMs on active modems that weren't in the received SIM list
+**Fix status**: **COMPLETE** (2026-03-06)
+1. **Migration 016** (DB cleanup): cleared 6 stale SIMs on offline modem `865827078940772`; cleared 1 stale SIM on `865827078942505`; marked offline modem as `disconnected`
+2. **Bug 1 fix** (`control.js:47`): reconciliation filter changed to `WHERE status IN ('active', 'connected', 'online')`
+3. **Bug 2 fix** (`control.js`): added SIM eviction loop — after each sync, any SIM pointing to a reported modem but absent from the received SIM list is set to `current_modem_id = NULL, status = 'inactive'`
 
 ---
 
