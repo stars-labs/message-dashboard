@@ -46,10 +46,10 @@ ICCID standard pads to 20 digits with `F`. The daemon creates two records for th
 
 The same modem returns ICCID **with `F`** via AT commands and **without `F`** via D-Bus at different times → creates both records.
 
-**Fix needed**:
-1. **Daemon fix**: Strip trailing `F` in `at_modem.rs:parse_iccid()` (primary fix) and add normalization in `dbus_client.rs` and `native_dbus.rs` as safety
-2. **DB cleanup**: For each pair, keep the non-`F` version (canonical), migrate data from `F` version, then delete it. Update any `messages.phone_iccid` references
-3. **Update tests**: Fix `at_modem.rs:1036-1040` to expect stripped ICCIDs
+**Fix status**:
+1. **Daemon fix**: Done — `at_modem.rs:parse_iccid()`, `native_dbus.rs:get_sim_iccid()`, `dbus_client.rs:get_sim_iccid_busctl()` all strip trailing `F`
+2. **Tests**: Done — `at_modem.rs` tests updated to expect stripped ICCIDs (29/29 passing)
+3. **DB cleanup**: Migration written at `sms-dashboard/migrations/014_cleanup_iccid_duplicates.sql` — see [Release Guide](#release-guide) below
 
 ### 2. Modem `865827078940772` has 6 stale SIM assignments
 **Status**: Open
@@ -70,3 +70,114 @@ These are different ICCIDs (not the trailing `F` issue). Likely SIM cards that w
 **Fix needed**:
 1. DB cleanup: keep only the most recently updated SIM per modem, mark the rest inactive
 2. Investigate if daemon properly clears old SIM assignments on swap
+
+---
+
+## Release Guide
+
+### Deploy order
+
+The daemon fix and DB cleanup must be deployed in the right order to avoid re-creating duplicates.
+
+1. **Apply DB migration** (clean up existing duplicates)
+2. **Deploy daemon** (prevent new duplicates from being created)
+
+If you deploy the daemon first, it will start writing canonical ICCIDs while the DB still has F-suffixed records — the old duplicates remain but no new ones appear. If you clean up the DB first but deploy the daemon later, the old daemon could re-create F-suffixed records before the new daemon takes over. Either order works, but **DB first → daemon second** is cleaner.
+
+### Step 0: Local testing (do this first)
+
+Test the migration on a local copy of production data before touching the real DB.
+
+```bash
+# 0a. Export production D1 to SQL dump
+npx wrangler d1 export sms-dashboard --remote --output=sms-dashboard/dump.sql
+
+# 0b. Import into local D1
+npx wrangler d1 execute sms-dashboard --local --file=sms-dashboard/dump.sql
+
+# 0c. Verify local copy has the duplicates (should return 23)
+npx wrangler d1 execute sms-dashboard --local \
+  --command="SELECT COUNT(*) as f_suffixed FROM sims WHERE iccid LIKE '%F' AND LENGTH(iccid) = 20"
+
+# 0d. Run migration locally
+npx wrangler d1 execute sms-dashboard --local \
+  --file=sms-dashboard/migrations/014_cleanup_iccid_duplicates.sql
+
+# 0e. Verify: SIM count should drop from 121 to ~98
+npx wrangler d1 execute sms-dashboard --local \
+  --command="SELECT COUNT(*) as total_sims FROM sims"
+
+# 0f. Verify: no F-suffixed duplicates remain
+npx wrangler d1 execute sms-dashboard --local \
+  --command="SELECT COUNT(*) as remaining_f FROM sims WHERE iccid LIKE '%F' AND LENGTH(iccid) = 20 AND SUBSTR(iccid, 1, LENGTH(iccid) - 1) IN (SELECT iccid FROM sims WHERE iccid NOT LIKE '%F')"
+
+# 0g. Spot-check: messages should reference canonical ICCIDs
+npx wrangler d1 execute sms-dashboard --local \
+  --command="SELECT COUNT(*) as f_messages FROM messages WHERE phone_iccid LIKE '%F' AND LENGTH(phone_iccid) = 20"
+```
+
+All wrangler commands run from the `sms-dashboard/` directory (where `wrangler.toml` lives). `dump.sql` is gitignored.
+
+### Step 1: DB migration — ICCID duplicate cleanup (production)
+
+**Migration file**: `sms-dashboard/migrations/014_cleanup_iccid_duplicates.sql`
+
+```bash
+# 1a. Pre-flight: verify duplicates exist (should return 23)
+npx wrangler d1 execute sms-dashboard --remote \
+  --command="SELECT COUNT(*) as f_suffixed FROM sims WHERE iccid LIKE '%F' AND LENGTH(iccid) = 20"
+
+# 1b. Optional: check which messages will be affected
+npx wrangler d1 execute sms-dashboard --remote \
+  --command="SELECT COUNT(*) as affected_messages FROM messages WHERE phone_iccid LIKE '%F' AND LENGTH(phone_iccid) = 20"
+
+# 1c. Apply migration
+npx wrangler d1 execute sms-dashboard --remote \
+  --file=sms-dashboard/migrations/014_cleanup_iccid_duplicates.sql
+
+# 1d. Verify: SIM count should drop from 121 to ~98
+npx wrangler d1 execute sms-dashboard --remote \
+  --command="SELECT COUNT(*) as total_sims FROM sims"
+
+# 1e. Verify: no F-suffixed duplicates remain
+npx wrangler d1 execute sms-dashboard --remote \
+  --command="SELECT COUNT(*) as remaining_f FROM sims WHERE iccid LIKE '%F' AND LENGTH(iccid) = 20 AND SUBSTR(iccid, 1, LENGTH(iccid) - 1) IN (SELECT iccid FROM sims WHERE iccid NOT LIKE '%F')"
+```
+
+**What the migration does** (6 steps):
+1. Repoints `messages.phone_iccid` from `...F` → canonical
+2. Repoints `modem_sim_history.sim_iccid` from `...F` → canonical
+3. Repoints `iccid_mappings.iccid` from `...F` → canonical
+4. Merges non-null fields from F-version into canonical SIM (via `COALESCE`)
+5. Deletes the 23 F-suffixed duplicate SIM records
+6. Records migration as schema version 14
+
+**Rollback**: Not provided — this is a data cleanup. If something goes wrong, restore from D1's automatic backups via the Cloudflare dashboard (Settings → Backups).
+
+### Step 2: Deploy daemon with ICCID fix
+
+```bash
+# On NixOS (Orange Pi):
+cd /path/to/message-dashboard
+nixos-rebuild switch --flake .#orange-pi \
+  --target-host root@10.171.150.102 \
+  --build-host root@10.171.150.102 \
+  --use-substitutes --impure
+
+# Or manually build and deploy:
+cd orange-pi-daemon
+cargo build --release --target aarch64-unknown-linux-gnu
+scp target/aarch64-unknown-linux-gnu/release/orange-pi-daemon-rust root@10.171.150.102:/usr/local/bin/
+ssh root@10.171.150.102 systemctl restart sms-daemon
+```
+
+### Step 3: Verify
+
+```bash
+# Check daemon logs for ICCID values (should not end in F)
+ssh root@10.171.150.102 journalctl -u sms-daemon --since '5 min ago' | grep -i iccid
+
+# Check DB for any new F-suffixed records (should return 0)
+npx wrangler d1 execute sms-dashboard --remote \
+  --command="SELECT COUNT(*) FROM sims WHERE iccid LIKE '%F' AND LENGTH(iccid) = 20"
+```

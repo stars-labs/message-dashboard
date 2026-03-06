@@ -1034,14 +1034,14 @@ mod tests {
             AtModemManager::parse_iccid("89860121750097854321\nOK"),
             Some("89860121750097854321".to_string())
         );
-        // ICCID with hex padding (F is common padding character)
+        // ICCID with hex padding (F is stripped as BCD filler)
         assert_eq!(
             AtModemManager::parse_iccid("+QCCID: 8965012306052989707F"),
-            Some("8965012306052989707F".to_string())
+            Some("8965012306052989707".to_string())
         );
         assert_eq!(
             AtModemManager::parse_iccid("AT+QCCID\r\n+QCCID: 8965012306052989681F\r\n\r\nOK\r\n"),
-            Some("8965012306052989681F".to_string())
+            Some("8965012306052989681".to_string())
         );
     }
 

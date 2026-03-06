@@ -268,7 +268,10 @@ impl NativeDBusClient {
             .context("Failed to create SIM proxy")?;
 
         match sim_proxy.sim_identifier().await {
-            Ok(iccid) if !iccid.is_empty() => Ok(Some(iccid)),
+            Ok(iccid) if !iccid.is_empty() => {
+                // Strip trailing 'F' BCD padding (ITU-T E.118)
+                Ok(Some(iccid.trim_end_matches('F').to_string()))
+            }
             _ => Ok(None),
         }
     }
