@@ -1,6 +1,5 @@
 import { nanoid } from 'nanoid';
 import { extractVerificationCode } from '../utils/verification';
-import { aiHandler } from './ai';
 import { findKeywordMatches } from '../api/keywords.js';
 
 export const controlHandler = {
@@ -516,38 +515,6 @@ export const controlHandler = {
               // Process keywords first
               await processMessageKeywords(env.DB, msg);
               
-              // Then process with AI if available
-              if (env.AI) {
-                // Extract verification code with AI
-                try {
-                  await aiHandler.extractCodeDirect(env, {
-                    content: msg.content,
-                    message_id: msg.id
-                  });
-                } catch (error) {
-                  console.error(`Failed to extract code for message ${msg.id}:`, error);
-                }
-                
-                // Classify message
-                try {
-                  await aiHandler.classifyMessageDirect(env, {
-                    content: msg.content,
-                    message_id: msg.id
-                  });
-                } catch (error) {
-                  console.error(`Failed to classify message ${msg.id}:`, error);
-                }
-                
-                // Generate embedding for search
-                try {
-                  await aiHandler.generateEmbeddingDirect(env, {
-                    content: msg.content,
-                    message_id: msg.id
-                  });
-                } catch (error) {
-                  console.error(`Failed to generate embedding for message ${msg.id}:`, error);
-                }
-              }
             } catch (error) {
               console.error(`Message processing error for message ${msg.id}:`, error);
             }
