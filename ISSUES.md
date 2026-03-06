@@ -52,10 +52,18 @@ The same modem returns ICCID **with `F`** via AT commands and **without `F`** vi
 3. **DB cleanup**: Done — migration 014 applied to production; post-deploy window cleanup (19 re-created F SIMs) also cleaned. Final state: 98 SIMs, 0 F-suffixed duplicates.
 4. **Daemon deployed**: Done — new daemon (v8.0.0 with ICCID fix) deployed to Orange Pi via NixOS rebuild
 
-### 2. Modem `865827078940772` has 6 stale SIM assignments
+### 2. Stale SIM assignments on multiple modems
 **Status**: Open
-**Impact**: 6 SIMs marked active on one modem, all with no phone number
+**Impact**: 2 modems with multiple active SIMs; stale assignments never cleared on SIM swap or modem disappearance
 
+**Affected modems** (queried 2026-03-06):
+
+| Modem | Last seen | Active SIMs | Notes |
+|---|---|---|---|
+| `865827078940772` | 2025-12-31 (offline 65+ days) | 6 | All no phone number |
+| `865827078942505` | 2026-03-04 (active) | 2 | 1 current, 1 stale from previous session |
+
+**Modem `865827078940772` stale SIMs:**
 ```
 89852122109190418053  active  2025-12-31 03:59:15
 89860122801362457439  active  2025-12-29 08:02:23
@@ -65,12 +73,22 @@ The same modem returns ICCID **with `F`** via AT commands and **without `F`** vi
 89860122801362457447  active  2025-12-30 06:37:22
 ```
 
-These are different ICCIDs (not the trailing `F` issue). Likely SIM cards that were physically swapped through this modem slot but never deactivated.
+**Root cause** — two bugs in `sms-dashboard/server/handlers/control.js`:
 
-**Root cause**: SIM swap detection trigger may not have been active when these were inserted, or the daemon re-assigned without clearing old records.
-**Fix needed**:
-1. DB cleanup: keep only the most recently updated SIM per modem, mark the rest inactive
-2. Investigate if daemon properly clears old SIM assignments on swap
+**Bug 1 — Reconciliation skips `status = 'active'` modems** (`control.js:43`):
+```sql
+UPDATE modems SET verification_status = 'pending' WHERE status = 'connected'
+```
+The daemon reports modems with `status = 'active'` (not `'connected'`), so disappeared modems with `status = 'active'` are never marked as `absent` and their SIM associations are never cleared.
+
+**Bug 2 — No SIM eviction on modem swap** (`control.js:139-180`):
+The server upserts new SIM associations but never clears the previous SIM for a modem. When a physical SIM card is swapped, both old and new SIM end up with `current_modem_id` pointing to the same modem.
+
+**Fix plan**:
+1. **Migration 015** (DB cleanup): clear 6 stale SIMs on offline modem `865827078940772`; clear 1 stale SIM on `865827078942505`
+2. **Server fix** (`control.js`):
+   - Fix reconciliation filter: `WHERE status IN ('active', 'connected')`
+   - Add full-sync SIM eviction: null out SIMs on active modems that weren't in the received SIM list
 
 ---
 

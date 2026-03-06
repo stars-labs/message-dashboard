@@ -2,13 +2,49 @@
 
 **Platform**: Cloudflare D1 (SQLite-based, global edge replication)
 
+## Data Flow
+
+```
+Orange Pi (Rust Daemon)                  Cloudflare Workers API             Browser (Svelte)
+───────────────────────                  ──────────────────────             ────────────────
+USB Modems → AT Commands                 /api/control/* (API key)           /api/phones
+                                         /api/messages  (API key)           /api/messages
+                                                                            /api/iccid-mappings
+```
+
+### Who writes what
+
+| Table | Written by | Mechanism |
+|-------|-----------|-----------|
+| `modems` | Daemon | `POST /api/control/devices` — upserts IMEI, status every 30s |
+| `modem_state` | Daemon | Same endpoint — upserts signal strength, connection status |
+| `sims` (core fields) | Daemon | Same endpoint — upserts iccid, operator_name, carrier |
+| `sims` (phone_number) | Human | Via `/api/iccid-mappings` frontend UI, or AT+CNUM if SIM stores it |
+| `messages` | Daemon | `POST /api/control/messages` — batch uploads SMS from modems |
+| `daemon_health` | Daemon | `POST /api/control/heartbeat` — every 30s |
+| `sync_history` | Daemon | Written during full/incremental sync in `/api/control/devices` |
+| `modem_sim_history` | DB trigger | `sim_swap_detection` trigger fires automatically on SIM reassignment |
+| ~~`iccid_mappings`~~ | — | Dropped in migration 015. Frontend reads/writes user overrides via `sims.user_*` columns. |
+| `keyword_tags` | Human | Frontend: configure keyword matching rules |
+| `message_tags` | Server (auto) | Auto-tagged when messages arrive, matched against `keyword_tags` |
+| `message_embeddings` | Server (AI) | Generated via `/api/ai/generate-embedding` |
+| `ai_insights`, `chat_*` | Human + Server | AI chat feature, triggered from frontend |
+| `audit_logs` | Server | Logged on write operations |
+
+### Key data flow notes
+
+- **SIM phone numbers are mostly NULL** for Singapore SIMs (Singtel/M1). These operators do not provision the MSISDN on the SIM itself, so AT+CNUM returns empty. The daemon cannot read the number automatically.
+- **`sims.user_*` columns are the manual override** — `user_phone_number`, `user_carrier`, `user_country_code`, `user_notes`, `user_override_enabled`. The frontend "ICCID Mappings" page reads/writes these columns directly via the `iccid-mappings.js` handler querying `sims`. The old `iccid_mappings` table was dropped in migration 015.
+- **`device_view` is the primary read path** — never query `modems`/`sims`/`modem_state` directly from the frontend. The view joins all three and applies user overrides.
+- **Messages have no enforced FK** on `phone_iccid → sims.iccid` (dropped in migration 009). Messages can arrive for ICCIDs not yet in `sims`.
+- **Daemon is the source of truth** for hardware state. The DB reflects what the daemon last reported; stale DB data (e.g. modems offline for weeks still showing `active`) is a known issue (see ISSUES.md #2).
+
 ## Entity Relationship
 
 ```
-modems (97)
-  ├── sims (121)              FK: current_modem_id → modems.equipment_id
-  │     ├── messages (8.4k)   FK: phone_iccid → sims.iccid (implicit)
-  │     └── iccid_mappings    FK: iccid → sims.iccid (implicit)
+modems (98)
+  ├── sims (98)               FK: current_modem_id → modems.equipment_id
+  │     └── messages (8.4k)   FK: phone_iccid → sims.iccid (implicit)
   ├── modem_state (97)        FK: modem_id → modems.equipment_id (1:1)
   └── modem_sim_history (549) FK: modem_id, sim_iccid (SIM swap log)
 
@@ -168,8 +204,8 @@ SIMs enriched with modem_state data (usb_port, signal, connection_status). Falls
 
 ## Feature Tables
 
-### iccid_mappings
-Manual ICCID → phone number mappings (for SIMs where the number isn't auto-detected).
+### ~~iccid_mappings~~ (dropped — migration 015)
+Originally held manual ICCID → phone number mappings. Migration 006 merged its data into `sims.user_*` columns and the handler was updated to query `sims` directly. Dropped in migration 015 as it had 0 rows and no code references.
 
 ### keyword_tags + message_tags
 Keyword-based message tagging system. `keyword_tags` defines rules (keyword, tag, color, priority). `message_tags` is the join table recording matches.
