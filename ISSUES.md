@@ -3,7 +3,7 @@
 ## Database
 
 ### 1. Duplicate SIMs from ICCID trailing `F` padding
-**Status**: Open
+**Status**: Fixed (2026-03-06)
 **Impact**: 121 SIM records instead of ~97 (24 logical duplicates)
 
 ICCID standard pads to 20 digits with `F`. The daemon creates two records for the same physical SIM — one with and one without the trailing `F`.
@@ -46,10 +46,11 @@ ICCID standard pads to 20 digits with `F`. The daemon creates two records for th
 
 The same modem returns ICCID **with `F`** via AT commands and **without `F`** via D-Bus at different times → creates both records.
 
-**Fix status**:
+**Fix status**: **COMPLETE** (2026-03-06)
 1. **Daemon fix**: Done — `at_modem.rs:parse_iccid()`, `native_dbus.rs:get_sim_iccid()`, `dbus_client.rs:get_sim_iccid_busctl()` all strip trailing `F`
 2. **Tests**: Done — `at_modem.rs` tests updated to expect stripped ICCIDs (29/29 passing)
-3. **DB cleanup**: Migration written at `sms-dashboard/migrations/014_cleanup_iccid_duplicates.sql` — see [Release Guide](#release-guide) below
+3. **DB cleanup**: Done — migration 014 applied to production; post-deploy window cleanup (19 re-created F SIMs) also cleaned. Final state: 98 SIMs, 0 F-suffixed duplicates.
+4. **Daemon deployed**: Done — new daemon (v8.0.0 with ICCID fix) deployed to Orange Pi via NixOS rebuild
 
 ### 2. Modem `865827078940772` has 6 stale SIM assignments
 **Status**: Open
