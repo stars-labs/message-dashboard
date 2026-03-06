@@ -346,20 +346,23 @@ impl AtModemManager {
             {
                 if let Some(pos) = line.find(':') {
                     let iccid = line[pos + 1..].trim().trim_matches('"');
-                    // ICCID can contain hex digits (F is padding character)
                     if iccid.len() >= 18 && iccid.chars().all(|c| c.is_ascii_hexdigit()) {
-                        return Some(iccid.to_string());
+                        return Some(Self::normalize_iccid(iccid));
                     }
                 }
             } else if line.len() >= 18
                 && line.len() <= 22
                 && line.chars().all(|c| c.is_ascii_hexdigit())
             {
-                // Raw ICCID line (can contain hex padding)
-                return Some(line.to_string());
+                return Some(Self::normalize_iccid(line));
             }
         }
         None
+    }
+
+    /// Strip trailing 'F' padding from ICCID (BCD filler per ITU-T E.118)
+    fn normalize_iccid(iccid: &str) -> String {
+        iccid.trim_end_matches('F').to_string()
     }
 
     /// Get IMEI
@@ -1031,14 +1034,14 @@ mod tests {
             AtModemManager::parse_iccid("89860121750097854321\nOK"),
             Some("89860121750097854321".to_string())
         );
-        // ICCID with hex padding (F is common padding character)
+        // ICCID with hex padding (F is stripped as BCD filler)
         assert_eq!(
             AtModemManager::parse_iccid("+QCCID: 8965012306052989707F"),
-            Some("8965012306052989707F".to_string())
+            Some("8965012306052989707".to_string())
         );
         assert_eq!(
             AtModemManager::parse_iccid("AT+QCCID\r\n+QCCID: 8965012306052989681F\r\n\r\nOK\r\n"),
-            Some("8965012306052989681F".to_string())
+            Some("8965012306052989681".to_string())
         );
     }
 

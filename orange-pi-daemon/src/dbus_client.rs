@@ -315,8 +315,11 @@ impl DBusClient {
 
         let stdout = String::from_utf8_lossy(&output.stdout);
 
-        // Parse ICCID
-        let iccid = stdout.split('"').nth(1).map(|s| s.to_string());
+        // Parse ICCID, stripping trailing 'F' BCD padding (ITU-T E.118)
+        let iccid = stdout
+            .split('"')
+            .nth(1)
+            .map(|s| s.trim_end_matches('F').to_string());
 
         Ok(iccid)
     }
