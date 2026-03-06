@@ -27,8 +27,8 @@ USB Modems → AT Commands                 /api/control/* (API key)           /a
 | ~~`iccid_mappings`~~ | — | Dropped in migration 015. Frontend reads/writes user overrides via `sims.user_*` columns. |
 | `keyword_tags` | Human | Frontend: configure keyword matching rules |
 | `message_tags` | Server (auto) | Auto-tagged when messages arrive, matched against `keyword_tags` |
-| `message_embeddings` | Server (AI) | Generated via `/api/ai/generate-embedding` |
-| `ai_insights`, `chat_*` | Human + Server | AI chat feature, triggered from frontend |
+| ~~`message_embeddings`~~ | — | Dropped in migration 017 (AI feature removed) |
+| ~~`ai_insights`, `chat_*`~~ | — | Dropped in migration 017 (AI feature removed) |
 | `audit_logs` | Server | Logged on write operations |
 
 ### Key data flow notes
@@ -54,12 +54,6 @@ sync_history (11.4k)          Full/incremental sync log
 keyword_tags (10)             Keyword → tag/color config
   └── message_tags            FK: keyword_tag_id, message_id
 
-chat_conversations            AI chatbot sessions
-  ├── chat_messages           FK: conversation_id
-  └── ai_function_calls       FK: conversation_id
-
-ai_insights                   Per-message AI classification
-message_embeddings            Vectorize embeddings (blob)
 audit_logs                    User action audit trail
 schema_version (4)            Migration tracking
 ```
@@ -215,20 +209,6 @@ SIM swap log — automatically populated by the `sim_swap_detection` trigger on 
 
 ### sync_history
 Logs every daemon sync operation with counts of modems/SIMs received, verified, disconnected, and duration.
-
-## AI Tables
-
-### chat_conversations + chat_messages
-AI chatbot sessions. Messages have role (user/assistant/system) and optional function_calls JSON.
-
-### ai_function_calls
-Tracks AI tool use within conversations (function name, params, result, execution time).
-
-### ai_insights
-Per-message AI classification: spam detection, urgency, sender category, language, extracted entities.
-
-### message_embeddings
-Vector embeddings for semantic search (Cloudflare Vectorize).
 
 ## Other Tables
 
