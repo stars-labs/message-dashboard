@@ -24,11 +24,8 @@ USB Modems → AT Commands                 /api/control/* (API key)           /a
 | `daemon_health` | Daemon | `POST /api/control/heartbeat` — every 30s |
 | `sync_history` | Daemon | Written during full/incremental sync in `/api/control/devices` |
 | `modem_sim_history` | DB trigger | `sim_swap_detection` trigger fires automatically on SIM reassignment |
-| ~~`iccid_mappings`~~ | — | Dropped in migration 015. Frontend reads/writes user overrides via `sims.user_*` columns. |
 | `keyword_tags` | Human | Frontend: configure keyword matching rules |
 | `message_tags` | Server (auto) | Auto-tagged when messages arrive, matched against `keyword_tags` |
-| ~~`message_embeddings`~~ | — | Dropped in migration 017 (AI feature removed) |
-| ~~`ai_insights`, `chat_*`~~ | — | Dropped in migration 017 (AI feature removed) |
 | `audit_logs` | Server | Logged on write operations |
 
 ### Key data flow notes
@@ -197,9 +194,6 @@ Aggregate counts: total/connected modems, total/active SIMs, online devices, avg
 SIMs enriched with modem_state data (usb_port, signal, connection_status). Falls back to `modem_index` when `sim_index` is null.
 
 ## Feature Tables
-
-### ~~iccid_mappings~~ (dropped — migration 015)
-Originally held manual ICCID → phone number mappings. Migration 006 merged its data into `sims.user_*` columns and the handler was updated to query `sims` directly. Dropped in migration 015 as it had 0 rows and no code references.
 
 ### keyword_tags + message_tags
 Keyword-based message tagging system. `keyword_tags` defines rules (keyword, tag, color, priority). `message_tags` is the join table recording matches.
