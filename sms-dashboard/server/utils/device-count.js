@@ -61,7 +61,7 @@ export async function getDeviceStats(db) {
     // Simple counts for UI
     online_count: stats.connected_modems || 0,
     total_count: totalModems,
-    sim_missing_count: Math.max(0, (stats.connected_modems || 0) - (stats.modems_with_sims || 0))
+    sim_missing_count: Math.max(0, (stats.total_modems || 0) - (stats.modems_with_sims || 0))
   };
 }
 

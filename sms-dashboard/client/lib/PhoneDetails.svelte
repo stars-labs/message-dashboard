@@ -39,17 +39,7 @@
       <div>
         <h3 class="text-lg font-semibold data-value high-contrast">
           {#if phone.number}
-            {#if phone.mapped_number}
-              <span class="text-violet-600 flex items-center gap-2 tech-text">
-                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                  <path fill-rule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
-                </svg>
-                {phone.number}
-                <span class="text-xs font-normal text-violet-500">(映射号码)</span>
-              </span>
-            {:else}
               <span class="text-stone-900">{phone.number}</span>
-            {/if}
           {:else}
             <span class="text-orange-400">未设置号码</span>
           {/if}
@@ -60,9 +50,12 @@
               {phone.mapped_carrier || phone.carrier}
             </span>
           {/if}
-          {#if phone.operator_name && !phone.mapped_carrier}
-            {#if phone.carrier} • {/if}
-            <span class="text-stone-500">{phone.operator_name}</span>
+          {#if phone.operator_name}
+            {@const dedupedOp = [...new Set(phone.operator_name.split(/\s+/))].join(' ')}
+            {#if dedupedOp !== phone.carrier}
+              {#if phone.carrier} • {/if}
+              <span class="text-stone-500">{dedupedOp}</span>
+            {/if}
           {/if}
         </p>
       </div>
@@ -109,34 +102,24 @@
           </span>
         </div>
       {/if}
-      {#if phone.mapped_number}
-        <div class="flex justify-between items-center">
-          <span class="text-stone-500">映射来源:</span>
-          <span class="text-violet-600 text-sm flex items-center gap-1 tech-text">
-            <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-              <path fill-rule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
-            </svg>
-            ICCID 映射
-          </span>
-        </div>
-      {/if}
       {#if phone.imei}
         <div class="flex justify-between">
           <span class="text-stone-500">IMEI:</span>
           <span class="font-mono text-xs text-stone-800">{phone.imei}</span>
         </div>
       {/if}
-      {#if phone.mapped_carrier || phone.operator_name}
+      {#if phone.carrier || phone.operator_name}
         <div class="flex justify-between items-center">
           <span class="text-stone-500">运营商:</span>
-          <span>
-            {#if phone.mapped_carrier}
-              <span class="inline-flex px-2 py-1 text-xs rounded-full font-medium {getCarrierColor(phone.mapped_carrier)}">
-                {phone.mapped_carrier}
-              </span>
-            {:else}
-              <span class="text-stone-800">{phone.operator_name} {phone.operator_id ? `(${phone.operator_id})` : ''}</span>
+          <span class="text-stone-800">
+            {phone.carrier || ''}
+            {#if phone.operator_name}
+              {@const dedupedOp = [...new Set(phone.operator_name.split(/\s+/))].join(' ')}
+              {#if dedupedOp !== phone.carrier}
+                {phone.carrier ? ' / ' : ''}{dedupedOp}
+              {/if}
             {/if}
+            {#if phone.operator_id} ({phone.operator_id}){/if}
           </span>
         </div>
       {/if}

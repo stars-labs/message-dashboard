@@ -46,15 +46,11 @@ export const messagesHandler = {
       ]);
       
       const messages = messagesResult.results || messagesResult;
+
       console.log('[Messages Handler] Query results:', {
         phoneIccid,
-        messageCount: messages.length,
+        count: messages.length,
         totalCount: count.total,
-        firstMessage: messages[0] ? {
-          id: messages[0].id,
-          phone_iccid: messages[0].phone_iccid,
-          content: messages[0].content?.substring(0, 50) + '...'
-        } : null
       });
       
       // DEBUG: Verify all messages have the correct ICCID when filtered

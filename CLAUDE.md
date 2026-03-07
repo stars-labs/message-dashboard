@@ -40,7 +40,7 @@ npx wrangler tail sms-dashboard --format pretty       # Live API logs
 
 # Rust daemon
 cd orange-pi-daemon && cargo build --release
-cargo test                                            # Run unit tests (24 tests)
+cargo test                                            # Run unit tests (29 tests)
 RUST_LOG=debug cargo run
 
 # NixOS deploy
@@ -91,8 +91,7 @@ Cloudflare secrets (set via `npx wrangler secret put <NAME>`):
 ### Server gotchas
 - Middleware chain order: CORS → Auth0 JWT → RBAC (order matters)
 - Daemon authenticates with API key header, users with Auth0 JWT
-- 13 handler modules in `server/handlers/` — new endpoints go there
-- AI features use Cloudflare Vectorize + AI bindings (configured in `wrangler.toml`)
+- 10 handler modules in `server/handlers/` — new endpoints go there
 
 ### Network
 - Orange Pi IPs: `10.171.150.102` (internal LAN), `203.116.95.146` (deploy target)

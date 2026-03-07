@@ -89,6 +89,43 @@ The server upserts new SIM associations but never clears the previous SIM for a 
 2. **Bug 1 fix** (`control.js:47`): reconciliation filter changed to `WHERE status IN ('active', 'connected', 'online')`
 3. **Bug 2 fix** (`control.js`): added SIM eviction loop — after each sync, any SIM pointing to a reported modem but absent from the received SIM list is set to `current_modem_id = NULL, status = 'inactive'`
 
+### 3. Multipart SMS stored as separate messages
+**Status**: Open
+**Impact**: Long SMS messages (>160 chars) appear as 2-3 separate messages in the UI instead of one combined message
+
+The GSM network splits long SMS into multiple segments (concatenated SMS / multipart SMS). The daemon's `list_sms_text_mode` in `at_modem.rs` stores each segment as a separate DB row because it doesn't parse the PDU concatenation headers (UDH — User Data Header) that indicate which segments belong together.
+
+All segments share the same `phone_iccid`, `phone_number`, and `timestamp`, but have different `id` values and partial `content`.
+
+**Fix approach**: Handle in the daemon — parse the UDH concatenation info from PDU mode (reference number, total parts, part number) and either:
+1. Buffer segments in the daemon and only upload the combined message once all parts arrive
+2. Include concatenation metadata (ref_id, part_number, total_parts) in the upload so the server can merge them
+
+Option 1 is preferred as it keeps the server simple and avoids pagination count mismatches.
+
+### 4. RBAC not implemented — role checking disabled
+**Status**: Open (future)
+**Impact**: Any Auth0-authenticated user gets full access. No role differentiation.
+
+Currently `USE_AUTH0_ROLES = "false"` in `wrangler.toml`. The RBAC middleware and `sms` role infrastructure exist but are unused.
+
+**When to implement**:
+- When multiple users with different permission levels need access
+- When external users (non-team) need restricted read-only access
+
+**What exists already**:
+- Auth0 role extraction from JWT tokens (`server/handlers/auth0.js:99-121`)
+- RBAC middleware with granular permissions (`server/middleware/rbac.js`)
+- Role config: `AUTH0_SMS_ROLE`, `AUTH0_ALTERNATIVE_SMS_ROLES`, `AUTH0_ROLE_NAMESPACE` in `wrangler.toml`
+- Permission strings: `phones.read`, `phones.write`, `messages.read`, `messages.send`, `keywords.read`, `keywords.write`
+
+**To implement**:
+1. Define roles in Auth0 Dashboard (e.g. `admin`, `viewer`, `operator`)
+2. Create Auth0 Action to add roles to token claims under `https://sexy.qzz.io/roles`
+3. Map roles to permission sets in `server/middleware/rbac.js`
+4. Set `USE_AUTH0_ROLES = "true"` in `wrangler.toml`
+5. Test with accounts that have different roles assigned
+
 ---
 
 ## Release Guide

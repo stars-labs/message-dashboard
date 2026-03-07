@@ -771,24 +771,43 @@ impl AtModemManager {
         Some((index, sender, timestamp))
     }
 
-    /// Convert SMS timestamp to RFC3339
+    /// Convert SMS timestamp to RFC3339 UTC
     fn normalize_sms_timestamp(&self, date: &str, time: &str) -> String {
         // Input: "24/01/15" and "10:30:45+32" (YY/MM/DD and HH:MM:SS+TZ)
+        // TZ offset is in quarter-hours from UTC (e.g. +32 = 32*15min = 8h = UTC+8)
         let date_parts: Vec<&str> = date.split('/').collect();
-        let time_clean = time
-            .split('+')
-            .next()
-            .unwrap_or(time)
-            .split('-')
-            .next()
-            .unwrap_or(time);
+
+        // Parse time and timezone offset (quarter-hours)
+        let (time_clean, offset_minutes) = if let Some(pos) = time.rfind('+') {
+            let t = &time[..pos];
+            let tz_quarters: i32 = time[pos + 1..].parse().unwrap_or(0);
+            (t, tz_quarters * 15)
+        } else if let Some(pos) = time[1..].rfind('-') {
+            let pos = pos + 1;
+            let t = &time[..pos];
+            let tz_quarters: i32 = time[pos + 1..].parse().unwrap_or(0);
+            (t, -(tz_quarters * 15))
+        } else {
+            (time, 0i32)
+        };
 
         if date_parts.len() >= 3 {
             let year = format!("20{}", date_parts[0]);
             let month = date_parts[1];
             let day = date_parts[2];
 
-            return format!("{}-{}-{}T{}Z", year, month, day, time_clean);
+            // Parse local time and convert to UTC using chrono
+            let local_str = format!("{}-{}-{}T{}", year, month, day, time_clean);
+            if let Ok(naive) = chrono::NaiveDateTime::parse_from_str(&local_str, "%Y-%m-%dT%H:%M:%S") {
+                let utc = naive - chrono::Duration::minutes(offset_minutes as i64);
+                return format!("{}Z", utc.format("%Y-%m-%dT%H:%M:%S%.3f"));
+            }
+
+            // Fallback: return with offset if chrono parse fails
+            let tz_hours = offset_minutes.abs() / 60;
+            let tz_mins = offset_minutes.abs() % 60;
+            let sign = if offset_minutes >= 0 { '+' } else { '-' };
+            return format!("{}-{}-{}T{}{}{:02}:{:02}", year, month, day, time_clean, sign, tz_hours, tz_mins);
         }
 
         chrono::Utc::now()
