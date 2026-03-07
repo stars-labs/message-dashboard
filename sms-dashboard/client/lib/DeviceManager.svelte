@@ -43,9 +43,9 @@
   function getTabClass(isActive) {
     const base = "px-4 py-2 text-sm font-medium transition-all duration-200 relative";
     if (isActive) {
-      return `${base} text-gray-100 bg-gray-700 border-b-2 border-blue-400`;
+      return `${base} text-stone-900 bg-stone-200 border-b-2 border-blue-400`;
     }
-    return `${base} text-gray-400 hover:text-gray-200 hover:bg-gray-700`;
+    return `${base} text-stone-500 hover:text-stone-800 hover:bg-stone-200`;
   }
 
   // Get counts for each view
@@ -54,9 +54,9 @@
   $: simCount = sims.length;
 </script>
 
-<div class="{mobile ? 'bg-gray-900' : 'bg-gray-900 border border-gray-700 rounded-lg shadow-xl'}">
+<div class="{mobile ? 'bg-white' : 'bg-white border border-stone-200 rounded-lg shadow-xl'}">
   <!-- Tab Navigation -->
-  <div class="flex border-b border-gray-700">
+  <div class="flex border-b border-stone-200">
     <button
       class={getTabClass(viewMode === 'devices')}
       on:click={() => viewMode = 'devices'}
@@ -64,12 +64,12 @@
       <span class="flex items-center gap-2">
         <span>📱</span>
         <span>设备</span>
-        <span class="px-1.5 py-0.5 bg-gray-700 text-gray-300 rounded text-xs">
+        <span class="px-1.5 py-0.5 bg-stone-200 text-stone-600 rounded text-xs">
           {deviceCount}
         </span>
       </span>
       {#if viewMode === 'devices'}
-        <div class="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-blue-400 to-transparent"></div>
+        <div class="absolute bottom-0 left-0 right-0 h-0.5 bg-orange-400"></div>
       {/if}
     </button>
 
@@ -80,12 +80,12 @@
       <span class="flex items-center gap-2">
         <span>📡</span>
         <span>调制解调器</span>
-        <span class="px-1.5 py-0.5 bg-gray-700 text-gray-300 rounded text-xs">
+        <span class="px-1.5 py-0.5 bg-stone-200 text-stone-600 rounded text-xs">
           {modemCount}
         </span>
       </span>
       {#if viewMode === 'modems'}
-        <div class="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-blue-400 to-transparent"></div>
+        <div class="absolute bottom-0 left-0 right-0 h-0.5 bg-orange-400"></div>
       {/if}
     </button>
 
@@ -96,18 +96,18 @@
       <span class="flex items-center gap-2">
         <span>💳</span>
         <span>SIM 卡</span>
-        <span class="px-1.5 py-0.5 bg-gray-700 text-purple-400 rounded text-xs">
+        <span class="px-1.5 py-0.5 bg-stone-200 text-stone-600 rounded text-xs">
           {simCount}
         </span>
       </span>
       {#if viewMode === 'sims'}
-        <div class="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-purple-400 to-transparent"></div>
+        <div class="absolute bottom-0 left-0 right-0 h-0.5 bg-orange-400"></div>
       {/if}
     </button>
 
     <!-- View Mode Indicator -->
     <div class="ml-auto flex items-center px-4">
-      <span class="text-xs text-gray-500">
+      <span class="text-xs text-stone-400">
         {#if viewMode === 'devices'}
           传统视图 (兼容模式)
         {:else if viewMode === 'modems'}

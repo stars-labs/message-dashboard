@@ -2,117 +2,84 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Base layer - only for global element styles */
 @layer base {
   body {
-    @apply bg-gray-950 min-h-screen text-white antialiased;
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    @apply bg-[#F7F5F2] min-h-screen text-stone-900 antialiased;
+    font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  }
+
+  /* IBM Plex Mono for all numeric data */
+  .font-mono, code, pre {
+    font-family: 'IBM Plex Mono', 'Fira Code', monospace;
   }
 }
 
-/* Components layer - for multi-class patterns */
 @layer components {
-  /* Simple card */
   .glassmorphism {
-    @apply bg-gray-900 border border-gray-700;
+    @apply bg-white border border-stone-200;
   }
 
   .tech-card {
-    @apply bg-gray-900 border border-gray-700 rounded-xl p-6 relative overflow-hidden;
+    @apply bg-white border border-stone-200/80 rounded-xl p-6 relative overflow-hidden;
+    box-shadow: 0 1px 3px rgba(28,25,23,0.06), 0 1px 2px rgba(28,25,23,0.04);
   }
 
-  /* Simple button */
   .tech-button {
-    @apply relative px-4 py-2 rounded-lg font-medium;
-    @apply transition-colors duration-150 border border-gray-600 text-gray-200;
-    @apply bg-gray-700 hover:bg-gray-600;
-    @apply active:bg-gray-800;
+    @apply relative px-4 py-2 rounded-lg font-medium text-sm;
+    @apply transition-all duration-150 border border-stone-200 text-stone-700;
+    @apply bg-white hover:bg-stone-50 hover:border-stone-300;
+    @apply active:bg-stone-100;
   }
 
-  /* Simple input */
   .cyber-input {
-    @apply bg-gray-800 border border-gray-600 rounded-lg px-4 py-2;
-    @apply text-gray-200 placeholder-gray-500;
-    @apply transition-colors duration-150;
-    @apply focus:outline-none focus:border-gray-400 focus:bg-gray-800;
+    @apply bg-white border border-stone-300 rounded-lg px-3 py-2 text-sm;
+    @apply text-stone-900 placeholder-stone-400;
+    @apply transition-all duration-150;
+    @apply focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-400/15;
   }
 
-  /* Cyber select */
   select.cyber-input {
     @apply cursor-pointer pr-10 appearance-none;
-    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2378716c' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
     background-repeat: no-repeat;
     background-position: right 0.5rem center;
     background-size: 1.5em 1.5em;
   }
 
   select.cyber-input option {
-    @apply bg-gray-800 text-gray-200;
+    @apply bg-white text-stone-900;
   }
 }
 
-/* Utilities layer - for single-purpose utilities */
 @layer utilities {
-  /* Text utilities (no glow) */
-  .text-glow {
-    /* intentionally empty - removed glow effect */
-  }
+  .text-glow { }
+  .text-glow-sm { }
+  .text-glow-lg { }
+  .text-glow-xl { }
 
-  .text-glow-sm {
-    /* intentionally empty */
-  }
-
-  .text-glow-lg {
-    /* intentionally empty */
-  }
-
-  .text-glow-xl {
-    /* intentionally empty */
-  }
-
-  /* Data value styling - plain bold */
   .data-value {
-    @apply font-mono text-2xl font-bold text-gray-100 tracking-wide;
+    font-family: 'IBM Plex Mono', monospace;
+    @apply text-2xl font-bold text-stone-900 tracking-tight;
   }
 
-  /* Status utilities */
   .status-online {
-    @apply text-green-400;
+    @apply text-emerald-600;
   }
 
   .status-offline {
-    @apply text-red-400;
+    @apply text-red-500;
   }
 
-  /* Gradient text - plain */
   .gradient-text {
-    @apply text-gray-100 font-semibold;
+    @apply text-stone-900 font-semibold;
   }
 
-  /* Animation utilities - removed */
-  .animate-gradient-x {
-    /* intentionally empty */
-  }
+  .animate-gradient-x { }
+  .animate-gradient-shift { }
+  .bg-grid-cyan { }
+  .bg-circuit { }
+  .holographic { }
 
-  .animate-gradient-shift {
-    /* intentionally empty */
-  }
-
-  /* Background patterns - removed */
-  .bg-grid-cyan {
-    /* intentionally empty */
-  }
-
-  .bg-circuit {
-    /* intentionally empty */
-  }
-
-  /* Holographic effect - removed */
-  .holographic {
-    /* intentionally empty */
-  }
-
-  /* SIM Missing Indicator */
   .sim-missing-badge {
     @apply animate-pulse;
   }
@@ -121,63 +88,54 @@
     @apply scale-105;
   }
 
-  /* Status indicators */
   .status-sim-missing {
-    @apply text-orange-400;
+    @apply text-orange-500;
   }
 
-  /* Warning animation */
   .sim-warning-pulse {
     animation: warning-pulse 2s ease-in-out infinite;
   }
 
-  /* Selected phone - simple highlight */
   .phone-selected {
-    @apply relative border-2 border-blue-500/50 bg-blue-900/20;
+    @apply relative bg-orange-50;
+    border-left: 3px solid theme('colors.orange.500') !important;
   }
 
-  /* Scan line - removed */
   .scan-line::after {
     content: none;
   }
 
-  /* High contrast text - plain */
   .high-contrast {
-    @apply text-white font-semibold;
+    @apply text-stone-900 font-semibold;
   }
 
-  /* Tech text - plain */
   .tech-text {
     @apply font-semibold tracking-wide;
   }
 
-  /* Header text - plain */
   .header-text {
-    @apply text-white font-bold;
+    @apply text-stone-900 font-bold;
   }
 }
 
-/* Keyframes */
 @keyframes warning-pulse {
   0%, 100% { opacity: 0.7; transform: scale(1); }
   50% { opacity: 1; transform: scale(1.02); }
 }
 
-/* Simple scrollbar */
 ::-webkit-scrollbar {
   @apply w-2 h-2;
 }
 
 ::-webkit-scrollbar-track {
-  @apply bg-gray-900;
+  @apply bg-stone-100;
 }
 
 ::-webkit-scrollbar-thumb {
-  @apply rounded-full bg-gray-600 hover:bg-gray-500;
+  @apply rounded-full bg-stone-300 hover:bg-stone-400;
 }
 
-/* Firefox scrollbar */
 * {
   scrollbar-width: thin;
-  scrollbar-color: theme('colors.gray.600') theme('colors.gray.900');
+  scrollbar-color: theme('colors.stone.300') theme('colors.stone.100');
 }
