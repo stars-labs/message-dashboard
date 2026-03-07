@@ -35,9 +35,9 @@
   }
 </script>
 
-<div class="bg-gray-900 border border-gray-800 rounded-lg">
-  <div class="p-4 border-b border-gray-800">
-    <h2 class="text-lg font-bold text-gray-200">
+<div class="bg-white border border-stone-200 rounded-xl shadow-sm flex flex-col h-full min-h-0">
+  <div class="p-4 border-b border-stone-200 flex-shrink-0">
+    <h2 class="text-lg font-semibold text-stone-900">
       {#if selectedPhone}
         {selectedPhone.flag} {selectedPhone.number}
       {:else}
@@ -45,33 +45,33 @@
       {/if}
     </h2>
   </div>
-  
-  <div class="max-h-96 overflow-y-auto p-4">
+
+  <div class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-4">
     {#if displayMessages.length === 0}
       <div class="text-center py-8">
         <div class="text-6xl mb-4">📭</div>
-        <p class="text-gray-500">暂无消息记录</p>
+        <p class="text-stone-400">暂无消息记录</p>
       </div>
     {:else}
       <div class="space-y-3">
         {#each displayMessages as message}
-          <div class="bg-gray-800 rounded-lg p-3 border border-gray-700">
+          <div class="bg-stone-50 rounded-lg p-3 border border-stone-200">
             <div class="flex justify-between items-start mb-2">
               <div class="flex-1">
                 <div class="flex items-center gap-2 mb-2">
-                  <span class="text-xs px-2 py-1 rounded-full bg-blue-600 text-white">
+                  <span class="text-xs px-2 py-1 rounded-full bg-blue-100 text-blue-700 font-medium">
                     {message.source || '未知来源'}
                   </span>
                   {#if message.verificationCode}
-                    <span class="px-2 py-1 bg-green-600 text-white text-sm rounded-full font-mono">
+                    <span class="px-2 py-1 bg-emerald-100 text-emerald-700 text-sm rounded-full font-mono font-semibold">
                       {message.verificationCode}
                     </span>
                   {/if}
                 </div>
-                <div class="bg-gray-900 rounded p-2 text-gray-100">
+                <div class="bg-white rounded p-2 text-stone-800 border border-stone-200 break-words">
                   {message.content}
                 </div>
-                <div class="mt-2 text-xs text-gray-400">
+                <div class="mt-2 text-xs text-stone-400 break-all">
                   接收卡: {message.phone_iccid}
                   {#if message.direction === 'outgoing' || message.type === 'outgoing' || message.type === 'sent'}
                     {#if message.recipient}
@@ -84,7 +84,7 @@
                   {/if}
                 </div>
               </div>
-              <span class="text-xs text-gray-500 ml-2">{formatTime(message.timestamp)}</span>
+              <span class="text-xs text-stone-400 ml-2 shrink-0">{formatTime(message.timestamp)}</span>
             </div>
           </div>
         {/each}

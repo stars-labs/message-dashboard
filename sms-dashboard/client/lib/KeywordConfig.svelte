@@ -123,8 +123,8 @@
 <div class="keyword-config">
   <div class="flex justify-between items-center mb-6">
     <div>
-      <h2 class="text-2xl font-bold text-gray-200">Keyword Highlighting</h2>
-      <p class="text-gray-400 mt-1">Configure keywords to highlight and tag messages automatically</p>
+      <h2 class="text-2xl font-bold text-stone-800">Keyword Highlighting</h2>
+      <p class="text-stone-500 mt-1">Configure keywords to highlight and tag messages automatically</p>
     </div>
     <button
       on:click={showAddKeyword}
@@ -138,22 +138,22 @@
   </div>
 
   {#if error}
-    <div class="bg-red-900/20 border border-red-500/50 text-red-400 p-4 rounded-lg mb-4">
+    <div class="bg-red-50 border border-red-200 text-red-600 p-4 rounded-lg mb-4">
       {error}
     </div>
   {/if}
 
   {#if loading}
     <div class="text-center py-8">
-      <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-gray-400"></div>
-      <p class="text-gray-400 mt-2">Loading keywords...</p>
+      <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-stone-400"></div>
+      <p class="text-stone-500 mt-2">Loading keywords...</p>
     </div>
   {:else if keywords.length === 0}
-    <div class="text-center py-12 bg-gray-900/50 rounded-lg border border-gray-800">
-      <svg class="w-16 h-16 mx-auto text-gray-600 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <div class="text-center py-12 bg-stone-50 rounded-lg border border-stone-200">
+      <svg class="w-16 h-16 mx-auto text-stone-500 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"></path>
       </svg>
-      <p class="text-gray-400 mb-4">No keywords configured yet</p>
+      <p class="text-stone-500 mb-4">No keywords configured yet</p>
       <button
         on:click={showAddKeyword}
         class="tech-button px-6 py-2 rounded-lg"
@@ -165,22 +165,22 @@
     <div class="overflow-x-auto">
       <table class="w-full">
         <thead>
-          <tr class="text-left border-b border-gray-800">
-            <th class="px-4 py-3 text-gray-400 font-medium">Keyword</th>
-            <th class="px-4 py-3 text-gray-400 font-medium">Tag</th>
-            <th class="px-4 py-3 text-gray-400 font-medium">Color</th>
-            <th class="px-4 py-3 text-gray-400 font-medium">Priority</th>
-            <th class="px-4 py-3 text-gray-400 font-medium">Options</th>
-            <th class="px-4 py-3 text-gray-400 font-medium">Usage</th>
-            <th class="px-4 py-3 text-gray-400 font-medium">Status</th>
-            <th class="px-4 py-3 text-gray-400 font-medium">Actions</th>
+          <tr class="text-left border-b border-stone-200">
+            <th class="px-4 py-3 text-stone-500 font-medium">Keyword</th>
+            <th class="px-4 py-3 text-stone-500 font-medium">Tag</th>
+            <th class="px-4 py-3 text-stone-500 font-medium">Color</th>
+            <th class="px-4 py-3 text-stone-500 font-medium">Priority</th>
+            <th class="px-4 py-3 text-stone-500 font-medium">Options</th>
+            <th class="px-4 py-3 text-stone-500 font-medium">Usage</th>
+            <th class="px-4 py-3 text-stone-500 font-medium">Status</th>
+            <th class="px-4 py-3 text-stone-500 font-medium">Actions</th>
           </tr>
         </thead>
         <tbody>
           {#each keywords as keyword}
-            <tr class="border-b border-gray-800 hover:bg-gray-900/50 transition-colors">
+            <tr class="border-b border-stone-200 hover:bg-stone-50 transition-colors">
               <td class="px-4 py-3">
-                <span class="font-mono text-gray-200">{keyword.keyword}</span>
+                <span class="font-mono text-stone-800">{keyword.keyword}</span>
               </td>
               <td class="px-4 py-3">
                 <span 
@@ -193,10 +193,10 @@
               <td class="px-4 py-3">
                 <div class="flex items-center gap-2">
                   <div 
-                    class="w-6 h-6 rounded border border-gray-600"
+                    class="w-6 h-6 rounded border border-stone-300"
                     style="background-color: {keyword.color}"
                   ></div>
-                  <span class="text-xs text-gray-400">{keyword.color}</span>
+                  <span class="text-xs text-stone-500">{keyword.color}</span>
                 </div>
               </td>
               <td class="px-4 py-3 text-center">
@@ -205,20 +205,20 @@
               <td class="px-4 py-3">
                 <div class="flex gap-3 text-xs">
                   {#if keyword.case_sensitive}
-                    <span class="text-yellow-400" title="Case sensitive">Aa</span>
+                    <span class="text-amber-600" title="Case sensitive">Aa</span>
                   {/if}
                   {#if keyword.whole_word}
-                    <span class="text-green-400" title="Whole word only">W</span>
+                    <span class="text-emerald-600" title="Whole word only">W</span>
                   {/if}
                 </div>
               </td>
               <td class="px-4 py-3 text-center">
-                <span class="text-sm text-gray-400">{keyword.usage_count || 0}</span>
+                <span class="text-sm text-stone-500">{keyword.usage_count || 0}</span>
               </td>
               <td class="px-4 py-3">
                 <button
                   on:click={() => toggleKeywordActive(keyword)}
-                  class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {keyword.is_active ? 'bg-blue-600' : 'bg-gray-700'}"
+                  class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {keyword.is_active ? 'bg-blue-600' : 'bg-stone-200'}"
                 >
                   <span class="sr-only">Toggle active</span>
                   <span
@@ -230,7 +230,7 @@
                 <div class="flex gap-2">
                   <button
                     on:click={() => showEditKeyword(keyword)}
-                    class="text-gray-400 hover:text-gray-200 transition-colors"
+                    class="text-stone-500 hover:text-stone-800 transition-colors"
                     title="Edit"
                   >
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -239,7 +239,7 @@
                   </button>
                   <button
                     on:click={() => deleteKeyword(keyword)}
-                    class="text-red-400 hover:text-red-300 transition-colors"
+                    class="text-red-500 hover:text-red-300 transition-colors"
                     title="Delete"
                   >
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -257,60 +257,60 @@
 
   <!-- Add/Edit Dialog -->
   {#if showAddDialog}
-    <div class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50" on:click={() => showAddDialog = false}>
-      <div class="bg-gray-900 border border-gray-800 rounded-lg p-6 max-w-md w-full mx-4" on:click|stopPropagation>
-        <h3 class="text-xl font-bold text-gray-200 mb-4">
+    <div class="fixed inset-0 bg-stone-900/40 backdrop-blur-sm flex items-center justify-center z-50" on:click={() => showAddDialog = false}>
+      <div class="bg-white border border-stone-200 rounded-lg p-6 max-w-md w-full mx-4" on:click|stopPropagation>
+        <h3 class="text-xl font-bold text-stone-800 mb-4">
           {editingKeyword ? 'Edit Keyword' : 'Add New Keyword'}
         </h3>
 
         <div class="space-y-4">
           <div>
-            <label class="block text-sm font-medium text-gray-400 mb-1">Keyword</label>
+            <label class="block text-sm font-medium text-stone-500 mb-1">Keyword</label>
             <input
               type="text"
               bind:value={formData.keyword}
               placeholder="Enter keyword to highlight"
-              class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white focus:border-gray-400 focus:outline-none"
+              class="w-full bg-white border border-stone-200 rounded-lg px-3 py-2 text-stone-900 focus:border-stone-400 focus:outline-none"
             />
           </div>
 
           <div>
-            <label class="block text-sm font-medium text-gray-400 mb-1">Tag</label>
+            <label class="block text-sm font-medium text-stone-500 mb-1">Tag</label>
             <input
               type="text"
               bind:value={formData.tag}
               placeholder="Tag to display"
-              class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white focus:border-gray-400 focus:outline-none"
+              class="w-full bg-white border border-stone-200 rounded-lg px-3 py-2 text-stone-900 focus:border-stone-400 focus:outline-none"
             />
           </div>
 
           <div>
-            <label class="block text-sm font-medium text-gray-400 mb-1">Color</label>
+            <label class="block text-sm font-medium text-stone-500 mb-1">Color</label>
             <div class="flex gap-2">
               <input
                 type="color"
                 bind:value={formData.color}
-                class="h-10 w-20 bg-gray-800 border border-gray-700 rounded cursor-pointer"
+                class="h-10 w-20 bg-white border border-stone-200 rounded cursor-pointer"
               />
               <input
                 type="text"
                 bind:value={formData.color}
                 placeholder="#3B82F6"
-                class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white focus:border-gray-400 focus:outline-none"
+                class="flex-1 bg-white border border-stone-200 rounded-lg px-3 py-2 text-stone-900 focus:border-stone-400 focus:outline-none"
               />
             </div>
           </div>
 
           <div>
-            <label class="block text-sm font-medium text-gray-400 mb-1">Priority</label>
+            <label class="block text-sm font-medium text-stone-500 mb-1">Priority</label>
             <input
               type="number"
               bind:value={formData.priority}
               min="0"
               max="100"
-              class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white focus:border-gray-400 focus:outline-none"
+              class="w-full bg-white border border-stone-200 rounded-lg px-3 py-2 text-stone-900 focus:border-stone-400 focus:outline-none"
             />
-            <p class="text-xs text-gray-500 mt-1">Higher priority keywords take precedence when overlapping</p>
+            <p class="text-xs text-stone-400 mt-1">Higher priority keywords take precedence when overlapping</p>
           </div>
 
           <div class="space-y-2">
@@ -318,18 +318,18 @@
               <input
                 type="checkbox"
                 bind:checked={formData.case_sensitive}
-                class="w-4 h-4 text-blue-500 bg-gray-800 border-gray-600 rounded focus:ring-blue-500"
+                class="w-4 h-4 text-blue-500 bg-stone-50 border-stone-300 rounded focus:ring-blue-500"
               />
-              <span class="text-sm text-gray-400">Case sensitive matching</span>
+              <span class="text-sm text-stone-500">Case sensitive matching</span>
             </label>
 
             <label class="flex items-center gap-2 cursor-pointer">
               <input
                 type="checkbox"
                 bind:checked={formData.whole_word}
-                class="w-4 h-4 text-blue-500 bg-gray-800 border-gray-600 rounded focus:ring-blue-500"
+                class="w-4 h-4 text-blue-500 bg-stone-50 border-stone-300 rounded focus:ring-blue-500"
               />
-              <span class="text-sm text-gray-400">Match whole words only</span>
+              <span class="text-sm text-stone-500">Match whole words only</span>
             </label>
           </div>
         </div>
@@ -337,7 +337,7 @@
         <div class="flex gap-3 mt-6">
           <button
             on:click={() => showAddDialog = false}
-            class="flex-1 px-4 py-2 border border-gray-700 text-gray-400 rounded-lg hover:bg-gray-800 transition-colors"
+            class="flex-1 px-4 py-2 border border-stone-200 text-stone-500 rounded-lg hover:bg-stone-50 transition-colors"
           >
             Cancel
           </button>
@@ -356,10 +356,10 @@
 
 <style>
   .keyword-config {
-    @apply text-white;
+    @apply text-stone-900;
   }
 
   .tech-button {
-    @apply bg-gray-700 text-white font-medium hover:bg-gray-600 transition-colors duration-150;
+    @apply bg-stone-200 text-stone-900 font-medium hover:bg-stone-300 transition-colors duration-150;
   }
 </style>

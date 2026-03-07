@@ -204,42 +204,19 @@
 
 <!-- Desktop Composer -->
 <div
-  class="{showComposer
-    ? 'hidden'
-    : 'hidden lg:block'} tech-card p-4 lg:p-6"
+  class="{showComposer ? 'hidden' : 'hidden lg:flex lg:flex-col'} bg-white border border-stone-200/80 rounded-xl h-full min-h-0"
+  style="box-shadow: 0 1px 3px rgba(28,25,23,0.06);"
 >
-  <div class="flex justify-between items-center mb-4">
-    <h2
-      class="text-lg font-bold text-gray-100"
-    >
-      发送短信
-    </h2>
-    <button
-      class="lg:hidden text-gray-500 hover:text-gray-300"
-      on:click={() => (showComposer = false)}
-      aria-label="关闭发送短信面板"
-    >
-      <svg
-        class="w-6 h-6"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-      >
-        <path
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          stroke-width="2"
-          d="M6 18L18 6M6 6l12 12"
-        />
-      </svg>
-    </button>
+  <div class="p-4 border-b border-stone-200 flex-shrink-0 flex items-center justify-between">
+    <h2 class="text-lg font-bold text-stone-900">发送短信</h2>
   </div>
+  <div class="flex-1 overflow-y-auto p-4">
 
   <!-- Recipient Number -->
   <div class="mb-4 relative recipient-input-container">
     <label
       for="recipient-number"
-      class="block text-sm font-medium text-gray-300 mb-2"
+      class="block text-sm font-medium text-stone-600 mb-2"
     >
       接收号码
     </label>
@@ -252,20 +229,20 @@
           class="px-3 py-2 cyber-input flex items-center gap-1 min-w-[90px] justify-between"
         >
           <span class="font-mono">{selectedCountryCode}</span>
-          <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg class="w-4 h-4 text-stone-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
           </svg>
         </button>
         {#if showCountryDropdown}
-          <div class="absolute top-full left-0 mt-1 tech-card border border-gray-700 rounded-lg shadow-xl shadow-gray-900 max-h-60 overflow-y-auto z-50 min-w-[200px]">
+          <div class="absolute top-full left-0 mt-1 tech-card border border-stone-200 rounded-lg shadow-xl shadow-gray-900 max-h-60 overflow-y-auto z-50 min-w-[200px]">
             <div class="p-2">
               {#each countryCodes as cc}
                 <button
                   on:click={() => selectCountryCode(cc.code)}
-                  class="w-full text-left px-3 py-2 hover:bg-gray-700 rounded-md transition-colors text-sm flex items-center gap-2 {selectedCountryCode === cc.code ? 'bg-gray-700' : ''}"
+                  class="w-full text-left px-3 py-2 hover:bg-stone-200 rounded-md transition-colors text-sm flex items-center gap-2 {selectedCountryCode === cc.code ? 'bg-stone-200' : ''}"
                 >
                   <span class="font-mono w-12">{cc.code}</span>
-                  <span class="text-gray-400">{cc.country}</span>
+                  <span class="text-stone-500">{cc.country}</span>
                 </button>
               {/each}
             </div>
@@ -290,21 +267,21 @@
     <!-- Recipient History Dropdown -->
     {#if showRecipientHistory && filteredRecipients.length > 0}
       <div
-        class="absolute top-full left-0 right-0 mt-1 tech-card border border-gray-700 rounded-lg shadow-xl shadow-gray-900 max-h-48 overflow-y-auto z-50"
+        class="absolute top-full left-0 right-0 mt-1 tech-card border border-stone-200 rounded-lg shadow-xl shadow-gray-900 max-h-48 overflow-y-auto z-50"
       >
         <div class="p-2">
           <div
-            class="text-xs text-gray-500 px-2 py-1 border-b border-gray-700 mb-1"
+            class="text-xs text-stone-400 px-2 py-1 border-b border-stone-200 mb-1"
           >
             历史接收号码
           </div>
           {#each filteredRecipients as recipient}
             <button
               on:click={() => selectRecipient(recipient)}
-              class="w-full text-left px-3 py-2 hover:bg-gray-700 rounded-md transition-colors text-sm flex items-center gap-2"
+              class="w-full text-left px-3 py-2 hover:bg-stone-200 rounded-md transition-colors text-sm flex items-center gap-2"
             >
               <svg
-                class="w-4 h-4 text-gray-500"
+                class="w-4 h-4 text-stone-400"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -328,7 +305,7 @@
   <div class="mb-4 relative sim-input-container">
     <label
       for="sim-selection"
-      class="block text-sm font-medium text-gray-300 mb-2"
+      class="block text-sm font-medium text-stone-600 mb-2"
     >
       发送卡号
     </label>
@@ -353,18 +330,18 @@
     <!-- SIM Cards Dropdown -->
     {#if showSimDropdown && filteredSims.length > 0}
       <div
-        class="absolute top-full left-0 right-0 mt-1 tech-card border border-gray-700 rounded-lg shadow-xl shadow-gray-900 max-h-60 overflow-y-auto z-50"
+        class="absolute top-full left-0 right-0 mt-1 tech-card border border-stone-200 rounded-lg shadow-xl shadow-gray-900 max-h-60 overflow-y-auto z-50"
       >
         <div class="p-2">
           <div
-            class="text-xs text-gray-500 px-2 py-1 border-b border-gray-700 mb-1"
+            class="text-xs text-stone-400 px-2 py-1 border-b border-stone-200 mb-1"
           >
             可用发送卡 ({filteredSims.length})
           </div>
           {#each filteredSims as phone}
             <button
               on:click={() => selectSim(phone)}
-              class="w-full text-left px-3 py-2 hover:bg-gray-700 rounded-md transition-colors text-sm flex items-center gap-2"
+              class="w-full text-left px-3 py-2 hover:bg-stone-200 rounded-md transition-colors text-sm flex items-center gap-2"
             >
               <span class="text-lg">{phone.flag}</span>
               <div class="flex-1">
@@ -372,11 +349,11 @@
                   {(phone.number && phone.number !== "null") ? phone.number : (phone.iccid ? `ICCID: ${phone.iccid.slice(-6)}` : "Unknown")}
                 </div>
                 {#if phone.operator_name}
-                  <div class="text-xs text-gray-500">{phone.operator_name}</div>
+                  <div class="text-xs text-stone-400">{phone.operator_name}</div>
                 {/if}
               </div>
               {#if phone.signal_strength}
-                <div class="text-xs text-gray-500">
+                <div class="text-xs text-stone-400">
                   信号: {phone.signal_strength}%
                 </div>
               {/if}
@@ -391,7 +368,7 @@
   <div class="mb-4">
     <div
       id="template-label"
-      class="block text-sm font-medium text-gray-300 mb-2"
+      class="block text-sm font-medium text-stone-600 mb-2"
     >
       快速模板
     </div>
@@ -403,7 +380,7 @@
       {#each messageTemplates as template}
         <button
           on:click={() => insertTemplate(template.content)}
-          class="px-3 py-1 text-xs bg-gradient-to-r from-purple-100 to-indigo-100 text-purple-700 rounded-full hover:from-purple-200 hover:to-indigo-200 transition-colors"
+          class="px-3 py-1 text-xs bg-stone-100 text-stone-600 border border-stone-200 rounded-full hover:bg-stone-200 transition-colors"
         >
           {template.name}
         </button>
@@ -415,7 +392,7 @@
   <div class="mb-4">
     <label
       for="message-content"
-      class="block text-sm font-medium text-gray-300 mb-2"
+      class="block text-sm font-medium text-stone-600 mb-2"
     >
       短信内容
     </label>
@@ -426,7 +403,7 @@
       rows="4"
       class="w-full px-4 py-2 cyber-input resize-none"
     ></textarea>
-    <div class="mt-1 text-xs text-gray-500">
+    <div class="mt-1 text-xs text-stone-400">
       字数：{messageContent.length} / 500
     </div>
   </div>
@@ -435,15 +412,12 @@
   <button
     on:click={handleSend}
     disabled={sendingStatus === "sending"}
-    class="w-full py-3 bg-gradient-to-r from-purple-500 to-indigo-500 text-white font-medium rounded-lg hover:from-purple-600 hover:to-indigo-600 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed {sendingStatus ===
-    'success'
-      ? 'from-green-500 to-green-600'
-      : ''} {sendingStatus === 'error' ? 'from-red-500 to-red-600' : ''}"
+    class="w-full py-3 font-medium rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed text-white {sendingStatus === 'success' ? 'bg-emerald-500 hover:bg-emerald-600' : sendingStatus === 'error' ? 'bg-red-500 hover:bg-red-600' : 'bg-orange-500 hover:bg-orange-600'}"
   >
     {#if sendingStatus === "sending"}
       <span class="flex items-center justify-center">
         <svg
-          class="animate-spin -ml-1 mr-3 h-5 w-5 text-white"
+          class="animate-spin -ml-1 mr-3 h-5 w-5 text-stone-900"
           fill="none"
           viewBox="0 0 24 24"
         >
@@ -471,13 +445,14 @@
       发送短信
     {/if}
   </button>
+  </div><!-- end scrollable content -->
 </div>
 
 <!-- Mobile Composer Modal -->
 {#if showComposer}
-  <div class="lg:hidden fixed inset-0 bg-black z-50 overflow-y-auto">
+  <div class="lg:hidden fixed inset-0 bg-[#F7F5F2] z-50 overflow-y-auto">
     <div
-      class="sticky top-0 bg-gray-900 border-b border-gray-700 px-4 py-3 flex justify-between items-center"
+      class="sticky top-0 bg-white border-b border-stone-200 px-4 py-3 flex justify-between items-center"
     >
       <h2
         class="text-lg font-bold data-value header-effect-target"
@@ -485,7 +460,7 @@
         发送短信
       </h2>
       <button
-        class="text-gray-500 hover:text-gray-300 p-2"
+        class="text-stone-400 hover:text-stone-600 p-2"
         on:click={() => (showComposer = false)}
         aria-label="关闭发送短信面板"
       >
@@ -510,7 +485,7 @@
       <div class="mb-4 relative recipient-input-container">
         <label
           for="mobile-recipient-number"
-          class="block text-sm font-medium text-gray-300 mb-2"
+          class="block text-sm font-medium text-stone-600 mb-2"
         >
           接收号码
         </label>
@@ -523,20 +498,20 @@
               class="px-3 py-2 cyber-input flex items-center gap-1 min-w-[90px] justify-between"
             >
               <span class="font-mono">{selectedCountryCode}</span>
-              <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg class="w-4 h-4 text-stone-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
               </svg>
             </button>
             {#if showCountryDropdown}
-              <div class="absolute top-full left-0 mt-1 tech-card border border-gray-700 rounded-lg shadow-xl shadow-gray-900 max-h-60 overflow-y-auto z-50 min-w-[200px]">
+              <div class="absolute top-full left-0 mt-1 tech-card border border-stone-200 rounded-lg shadow-xl shadow-gray-900 max-h-60 overflow-y-auto z-50 min-w-[200px]">
                 <div class="p-2">
                   {#each countryCodes as cc}
                     <button
                       on:click={() => selectCountryCode(cc.code)}
-                      class="w-full text-left px-3 py-2 hover:bg-gray-700 rounded-md transition-colors text-sm flex items-center gap-2 {selectedCountryCode === cc.code ? 'bg-gray-700' : ''}"
+                      class="w-full text-left px-3 py-2 hover:bg-stone-200 rounded-md transition-colors text-sm flex items-center gap-2 {selectedCountryCode === cc.code ? 'bg-stone-200' : ''}"
                     >
                       <span class="font-mono w-12">{cc.code}</span>
-                      <span class="text-gray-400">{cc.country}</span>
+                      <span class="text-stone-500">{cc.country}</span>
                     </button>
                   {/each}
                 </div>
@@ -561,21 +536,21 @@
         <!-- Recipient History Dropdown -->
         {#if showRecipientHistory && filteredRecipients.length > 0}
           <div
-            class="absolute top-full left-0 right-0 mt-1 tech-card border border-gray-700 rounded-lg shadow-xl shadow-gray-900 max-h-48 overflow-y-auto z-50"
+            class="absolute top-full left-0 right-0 mt-1 tech-card border border-stone-200 rounded-lg shadow-xl shadow-gray-900 max-h-48 overflow-y-auto z-50"
           >
             <div class="p-2">
               <div
-                class="text-xs text-gray-500 px-2 py-1 border-b border-gray-700 mb-1"
+                class="text-xs text-stone-400 px-2 py-1 border-b border-stone-200 mb-1"
               >
                 历史接收号码
               </div>
               {#each filteredRecipients as recipient}
                 <button
                   on:click={() => selectRecipient(recipient)}
-                  class="w-full text-left px-3 py-2 hover:bg-gray-700 rounded-md transition-colors text-sm flex items-center gap-2"
+                  class="w-full text-left px-3 py-2 hover:bg-stone-200 rounded-md transition-colors text-sm flex items-center gap-2"
                 >
                   <svg
-                    class="w-4 h-4 text-gray-500"
+                    class="w-4 h-4 text-stone-400"
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"
@@ -599,7 +574,7 @@
       <div class="mb-4 relative sim-input-container">
         <label
           for="mobile-sim-selection"
-          class="block text-sm font-medium text-gray-300 mb-2"
+          class="block text-sm font-medium text-stone-600 mb-2"
         >
           发送卡号
         </label>
@@ -624,18 +599,18 @@
         <!-- SIM Cards Dropdown -->
         {#if showSimDropdown && filteredSims.length > 0}
           <div
-            class="absolute top-full left-0 right-0 mt-1 tech-card border border-gray-700 rounded-lg shadow-xl shadow-gray-900 max-h-60 overflow-y-auto z-50"
+            class="absolute top-full left-0 right-0 mt-1 tech-card border border-stone-200 rounded-lg shadow-xl shadow-gray-900 max-h-60 overflow-y-auto z-50"
           >
             <div class="p-2">
               <div
-                class="text-xs text-gray-500 px-2 py-1 border-b border-gray-700 mb-1"
+                class="text-xs text-stone-400 px-2 py-1 border-b border-stone-200 mb-1"
               >
                 可用发送卡 ({filteredSims.length})
               </div>
               {#each filteredSims as phone}
                 <button
                   on:click={() => selectSim(phone)}
-                  class="w-full text-left px-3 py-2 hover:bg-gray-700 rounded-md transition-colors text-sm flex items-center gap-2"
+                  class="w-full text-left px-3 py-2 hover:bg-stone-200 rounded-md transition-colors text-sm flex items-center gap-2"
                 >
                   <span class="text-lg">{phone.flag}</span>
                   <div class="flex-1">
@@ -643,11 +618,11 @@
                       {(phone.number && phone.number !== "null") ? phone.number : (phone.iccid ? `ICCID: ${phone.iccid.slice(-6)}` : "Unknown")}
                     </div>
                     {#if phone.operator_name}
-                      <div class="text-xs text-gray-500">{phone.operator_name}</div>
+                      <div class="text-xs text-stone-400">{phone.operator_name}</div>
                     {/if}
                   </div>
                   {#if phone.signal_strength}
-                    <div class="text-xs text-gray-500">
+                    <div class="text-xs text-stone-400">
                       信号: {phone.signal_strength}%
                     </div>
                   {/if}
@@ -662,7 +637,7 @@
       <div class="mb-4">
         <div
           id="mobile-template-label"
-          class="block text-sm font-medium text-gray-300 mb-2"
+          class="block text-sm font-medium text-stone-600 mb-2"
         >
           快速模板
         </div>
@@ -674,7 +649,7 @@
           {#each messageTemplates as template}
             <button
               on:click={() => insertTemplate(template.content)}
-              class="px-3 py-1 text-xs bg-gradient-to-r from-purple-100 to-indigo-100 text-purple-700 rounded-full hover:from-purple-200 hover:to-indigo-200 transition-colors"
+              class="px-3 py-1 text-xs bg-stone-100 text-stone-600 border border-stone-200 rounded-full hover:bg-stone-200 transition-colors"
             >
               {template.name}
             </button>
@@ -686,7 +661,7 @@
       <div class="mb-4">
         <label
           for="mobile-message-content"
-          class="block text-sm font-medium text-gray-300 mb-2"
+          class="block text-sm font-medium text-stone-600 mb-2"
         >
           短信内容
         </label>
@@ -697,7 +672,7 @@
           rows="4"
           class="w-full px-4 py-2 cyber-input resize-none"
         ></textarea>
-        <div class="mt-1 text-xs text-gray-500">
+        <div class="mt-1 text-xs text-stone-400">
           字数：{messageContent.length} / 500
         </div>
       </div>
@@ -706,7 +681,7 @@
       <button
         on:click={handleSend}
         disabled={sendingStatus === "sending"}
-        class="w-full py-3 bg-gradient-to-r from-purple-500 to-indigo-500 text-white font-medium rounded-lg hover:from-purple-600 hover:to-indigo-600 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed {sendingStatus ===
+        class="w-full py-3 bg-gradient-to-r from-purple-500 to-indigo-500 text-stone-900 font-medium rounded-lg hover:from-purple-600 hover:to-indigo-600 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed {sendingStatus ===
         'success'
           ? 'from-green-500 to-green-600'
           : ''} {sendingStatus === 'error' ? 'from-red-500 to-red-600' : ''}"
@@ -714,7 +689,7 @@
         {#if sendingStatus === "sending"}
           <span class="flex items-center justify-center">
             <svg
-              class="animate-spin -ml-1 mr-3 h-5 w-5 text-white"
+              class="animate-spin -ml-1 mr-3 h-5 w-5 text-stone-900"
               fill="none"
               viewBox="0 0 24 24"
             >
@@ -748,7 +723,7 @@
 
 <!-- Mobile Floating Button -->
 <button
-  class="lg:hidden fixed bottom-6 right-6 w-14 h-14 bg-gradient-to-r from-purple-500 to-indigo-500 text-white rounded-full shadow-lg flex items-center justify-center hover:scale-110 transition-transform z-30"
+  class="lg:hidden fixed bottom-6 right-6 w-14 h-14 bg-orange-500 text-white rounded-full shadow-lg flex items-center justify-center hover:bg-orange-600 hover:scale-110 transition-all z-30"
   on:click={() => (showComposer = true)}
   aria-label="打开发送短信面板"
 >
