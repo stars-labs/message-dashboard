@@ -195,38 +195,20 @@
       return '无效时间';
     }
     
-    // Current time in local timezone
     const now = new Date();
-    
-    // Calculate difference (both dates are already in correct timezone context)
-    const diffMs = now - msgDate;
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMs / 3600000);
-    const diffDays = Math.floor(diffMs / 86400000);
-    
-    // Clean timestamp handling - no debug logs needed
-    
-    if (diffMs < 0) {
-      // Handle future timestamps - show absolute time in local timezone
-      const futureDiffMs = Math.abs(diffMs);
-      if (futureDiffMs < 60000) return '刚刚'; // Within 1 minute, treat as "just now"
-      return msgDate.toLocaleString('zh-CN', { 
-        month: 'short', 
-        day: 'numeric', 
-        hour: '2-digit', 
-        minute: '2-digit',
-        timeZone: 'Asia/Shanghai'
-      });
+
+    // Show fixed timestamp
+    const isToday = msgDate.toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai' }) === now.toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai' });
+
+    const sameYear = msgDate.toLocaleDateString('zh-CN', { year: 'numeric', timeZone: 'Asia/Shanghai' }) === now.toLocaleDateString('zh-CN', { year: 'numeric', timeZone: 'Asia/Shanghai' });
+
+    if (isToday) {
+      return msgDate.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Shanghai' });
     }
-    if (diffMins < 1) return '刚刚';
-    if (diffMins < 60) return `${diffMins}分钟前`;
-    if (diffHours < 24) return `${diffHours}小时前`;
-    if (diffDays < 7) return `${diffDays}天前`;
-    
-    // For older messages, show date in local timezone
-    return msgDate.toLocaleDateString('zh-CN', {
-      timeZone: 'Asia/Shanghai'
-    });
+    if (sameYear) {
+      return msgDate.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Shanghai' });
+    }
+    return msgDate.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Shanghai' });
   }
   
   function getSourceColor(source) {
@@ -387,7 +369,7 @@
                     <div class="mt-2 flex flex-wrap items-center gap-2 text-xs">
                       <span class="text-purple-400 font-bold flex items-center gap-1 tech-text">
                         <span>📱</span>
-                        接收卡: {message.phone_iccid}
+                        接收卡: {message.display_phone_number || message.phone_number || message.phone_iccid}
                       </span>
                       {#if message.phone_number}
                         <span class="text-stone-500">•</span>
@@ -481,7 +463,7 @@
                   {:else}
                     <span class="text-purple-400 font-bold flex items-center gap-1 tech-text">
                       <span>📱</span>
-                      接收卡: {message.phone_iccid}
+                      接收卡: {message.display_phone_number || message.phone_number || message.phone_iccid}
                     </span>
                     {#if message.phone_number}
                       <span class="text-stone-500">•</span>

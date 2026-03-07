@@ -31,7 +31,7 @@ WORKER_URL = "https://sexy.qzz.io"
 # ALLOWED_EMAIL_DOMAINS = "example.com,partner.com"  # Uncomment to restrict domains
 
 # Auth0 Role Configuration
-USE_AUTH0_ROLES = "true"  # Set to "false" to disable role checking
+USE_AUTH0_ROLES = "false"  # TODO: re-enable when RBAC is implemented (see ISSUES.md)
 AUTH0_SMS_ROLE = "sms"    # The role that grants SMS access
 AUTH0_ALTERNATIVE_SMS_ROLES = ""  # No additional roles needed
 AUTH0_ROLE_NAMESPACE = "https://sexy.qzz.io"  # Where to find roles in Auth0 token

@@ -3,6 +3,7 @@
   import { api } from "./api";
   import { COUNTRIES, getCountryFlag, getCountryName, getCarrierColor } from "./countries.js";
 
+  let allMappingsCache = [];
   let mappings = [];
   let loading = false;
   let error = null;
@@ -12,8 +13,6 @@
   let showExportMenu = false;
   let editingMapping = null;
   let searchQuery = "";
-  let currentPage = 1;
-  let totalPages = 1;
 
   // Form data
   let formData = {
@@ -33,17 +32,17 @@
 
     try {
       const response = await api.iccidMappings.list({
-        page: currentPage,
-        search: searchQuery,
+        page: 1,
+        limit: 10000,
       });
 
       if (response && response.success) {
         if (response.data && response.data.results) {
-          mappings = response.data.results || [];
+          allMappingsCache = response.data.results || [];
         } else {
-          mappings = response.data || [];
+          allMappingsCache = response.data || [];
         }
-        totalPages = response.pagination?.totalPages || 1;
+        filterMappings();
       } else {
         error = response?.error || "Failed to load ICCID mappings";
       }
@@ -52,6 +51,20 @@
     } finally {
       loading = false;
     }
+  }
+
+  function filterMappings() {
+    if (!searchQuery.trim()) {
+      mappings = allMappingsCache;
+      return;
+    }
+    const q = searchQuery.trim().toLowerCase();
+    mappings = allMappingsCache.filter((m) =>
+      (m.iccid || "").toLowerCase().includes(q) ||
+      (m.phone_number || "").toLowerCase().includes(q) ||
+      (m.carrier || "").toLowerCase().includes(q) ||
+      (m.notes || m.description || "").toLowerCase().includes(q)
+    );
   }
 
   async function handleAddMapping() {
@@ -182,10 +195,7 @@
     editingMapping = null;
   }
 
-  function handleSearch() {
-    currentPage = 1;
-    loadMappings();
-  }
+  $: if (searchQuery !== undefined) filterMappings();
 
   onMount(() => {
     loadMappings();
@@ -205,34 +215,16 @@
   });
 
   // Export functions
-  async function exportAllMappings(format = 'csv') {
-    try {
-      // Load all mappings without pagination
-      const response = await api.iccidMappings.list({
-        page: 1,
-        limit: 10000 // Get all mappings
-      });
+  function exportAllMappings(format = 'csv') {
+    if (allMappingsCache.length === 0) {
+      error = "No mappings to export";
+      return;
+    }
 
-      if (!response || !response.success) {
-        error = "Failed to load mappings for export";
-        return;
-      }
-
-      const allMappings = response.data?.results || response.data || [];
-      
-      if (allMappings.length === 0) {
-        error = "No mappings to export";
-        return;
-      }
-
-      if (format === 'csv') {
-        exportAsCSV(allMappings);
-      } else if (format === 'json') {
-        exportAsJSON(allMappings);
-      }
-    } catch (err) {
-      error = err.message || "Failed to export mappings";
-      console.error("Export error:", err);
+    if (format === 'csv') {
+      exportAsCSV(allMappingsCache);
+    } else if (format === 'json') {
+      exportAsJSON(allMappingsCache);
     }
   }
 
@@ -354,21 +346,12 @@
 
   <!-- Search Bar -->
   <div class="mb-4">
-    <div class="flex gap-2">
-      <input
-        type="text"
-        bind:value={searchQuery}
-        on:keydown={(e) => e.key === "Enter" && handleSearch()}
-        placeholder="搜索 ICCID、手机号、运营商..."
-        class="flex-1 px-4 py-2 cyber-input"
-      />
-      <button
-        on:click={handleSearch}
-        class="px-6 py-2 tech-button transition-all duration-300"
-      >
-        搜索
-      </button>
-    </div>
+    <input
+      type="text"
+      bind:value={searchQuery}
+      placeholder="搜索 ICCID、手机号、运营商..."
+      class="w-full px-4 py-2 cyber-input"
+    />
   </div>
 
   {#if error}
@@ -502,38 +485,6 @@
       {/if}
     </div>
 
-    <!-- Pagination -->
-    {#if totalPages > 1}
-      <div class="mt-4 flex justify-center gap-2">
-        <button
-          on:click={() => {
-            currentPage = Math.max(1, currentPage - 1);
-            loadMappings();
-          }}
-          disabled={currentPage === 1}
-          class="px-3 py-1 rounded border border-stone-300 {currentPage === 1
-            ? 'bg-stone-100 text-stone-400'
-            : 'bg-stone-100 hover:bg-stone-200 text-stone-600'}"
-        >
-          上一页
-        </button>
-        <span class="px-3 py-1 text-stone-500">
-          第 {currentPage} / {totalPages} 页
-        </span>
-        <button
-          on:click={() => {
-            currentPage = Math.min(totalPages, currentPage + 1);
-            loadMappings();
-          }}
-          disabled={currentPage === totalPages}
-          class="px-3 py-1 rounded border border-stone-300 {currentPage === totalPages
-            ? 'bg-stone-100 text-stone-400'
-            : 'bg-stone-100 hover:bg-stone-200 text-stone-600'}"
-        >
-          下一页
-        </button>
-      </div>
-    {/if}
   {/if}
 </div>
 

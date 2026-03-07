@@ -55,10 +55,6 @@
           phone.iccid.toLowerCase().includes(searchLower)) ||
         (phone.operator_name && 
           phone.operator_name.toLowerCase().includes(searchLower)) ||
-        (phone.mapped_number && 
-          phone.mapped_number.toString().toLowerCase().includes(searchLower)) ||
-        (phone.mapped_carrier && 
-          phone.mapped_carrier.toLowerCase().includes(searchLower)) ||
         (phone.equipment_id &&
           phone.equipment_id.toLowerCase().includes(searchLower));
 
@@ -129,11 +125,11 @@
       号码列表
     </h2>
 
-    <!-- Country Filter -->
-    <div class="mb-3">
+    <!-- Country Filter + Device Count -->
+    <div class="mb-3 flex items-center justify-between">
       <select
         bind:value={selectedCountry}
-        class="w-full px-3 py-2 text-sm cyber-input"
+        class="w-1/2 px-3 py-2 text-sm cyber-input shrink-0"
       >
         {#each COUNTRY_FILTER_TABS as country}
           <option value={country.code}>
@@ -142,6 +138,9 @@
           </option>
         {/each}
       </select>
+      <span class="text-sm text-stone-500">
+        共 <span class="font-mono font-bold text-stone-900">{filteredPhones.length}</span> 个设备
+      </span>
     </div>
 
     <!-- Search -->
@@ -171,23 +170,6 @@
       </label>
     </div>
 
-    <div class="flex items-center justify-between">
-      <div class="text-sm font-bold text-stone-700 tech-text">
-        共 <span class="font-mono text-base font-bold text-stone-900">{filteredPhones.length}</span> 个设备
-      </div>
-      <div class="text-xs text-stone-400 flex items-center gap-3">
-        <span class="flex items-center gap-1">
-          <span class="w-2 h-2 bg-emerald-500 rounded-full"></span>
-          原始号码
-        </span>
-        <span class="flex items-center gap-1">
-          <svg class="w-3 h-3 text-violet-500" fill="currentColor" viewBox="0 0 20 20">
-            <path fill-rule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
-          </svg>
-          <span class="text-violet-500">映射号码</span>
-        </span>
-      </div>
-    </div>
   </div>
 
   <!-- Phone List -->
@@ -292,18 +274,9 @@
                   <!-- Normal phone with SIM -->
                   <span class="text-lg">{phone.flag || "📱"}</span>
                   {#if phone.number}
-                    {#if phone.mapped_number}
-                      <span class="font-medium text-violet-600 text-sm flex items-center gap-1 tech-text">
-                        <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                          <path fill-rule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
-                        </svg>
-                        {phone.number}
-                      </span>
-                    {:else}
                       <span class="font-medium text-stone-800 text-sm tech-text">
                         {phone.number}
                       </span>
-                    {/if}
                   {:else}
                     <span
                       class="font-medium text-orange-600 text-sm flex items-center gap-1 tech-text"
@@ -364,8 +337,11 @@
                   {#if phone.carrier}
                     <span class="font-bold text-stone-700">{phone.carrier}</span>
                   {/if}
-                  {#if phone.operator_name}
-                    <span class="text-stone-500"> • {phone.operator_name}</span>
+                  {#if phone.operator_name && phone.operator_name !== phone.carrier}
+                    {@const dedupedOperator = [...new Set(phone.operator_name.split(/\s+/))].join(' ')}
+                    {#if dedupedOperator !== phone.carrier}
+                      <span class="text-stone-500"> • {dedupedOperator}</span>
+                    {/if}
                   {/if}
                   {#if phone.iccid && phone.iccid.length > 15}
                     <!-- ICCID (long numeric string) -->
@@ -374,7 +350,7 @@
                     >
                   {:else if phone.iccid}
                     <!-- Shorter ICCID -->
-                    <span class="text-violet-600"> • {phone.iccid}</span>
+                    <span class="text-stone-400"> • {phone.iccid}</span>
                   {/if}
                   {#if phone.modem_index != null || phone.sim_index != null}
                     <span class="text-indigo-600 font-medium">

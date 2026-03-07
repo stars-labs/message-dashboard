@@ -1235,7 +1235,7 @@
     {/if}
 
     <!-- Status Alert Banner -->
-    {#if phoneNumbers.some((p) => p.status !== "online" && p.status !== "active" && p.status !== "registered")}
+    {#if phoneNumbers.some((p) => p.status === "searching" || p.status === "failed")}
       <div class="bg-yellow-50 border-b border-yellow-200 px-4 py-2">
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
@@ -1267,15 +1267,6 @@
                   >{phoneNumbers.filter((p) => p.status === "failed")
                     .length}</strong
                 > 张SIM卡连接故障
-              {/if}
-              {#if phoneNumbers.filter((p) => p.status === "offline").length > 0}
-                {#if phoneNumbers.filter((p) => p.status === "searching").length > 0 || phoneNumbers.filter((p) => p.status === "failed").length > 0}
-                  •
-                {/if}
-                <strong
-                  >{phoneNumbers.filter((p) => p.status === "offline")
-                    .length}</strong
-                > 张SIM卡离线
               {/if}
             </span>
           </div>
