@@ -1,6 +1,7 @@
 <script>
   import { onMount } from "svelte";
   import { api } from "./api";
+  import { COUNTRIES, getCountryFlag, getCountryName, getCarrierColor } from "./countries.js";
 
   let mappings = [];
   let loading = false;
@@ -8,6 +9,7 @@
   let showAddForm = false;
   let showEditForm = false;
   let showBulkImport = false;
+  let showExportMenu = false;
   let editingMapping = null;
   let searchQuery = "";
   let currentPage = 1;
@@ -26,39 +28,27 @@
   let bulkImportText = "";
 
   async function loadMappings() {
-    console.debug("[IccidMappings] Loading mappings...");
     loading = true;
     error = null;
 
     try {
-      console.debug("[IccidMappings] Calling API with params:", {
-        page: currentPage,
-        search: searchQuery,
-      });
-      
       const response = await api.iccidMappings.list({
         page: currentPage,
         search: searchQuery,
       });
 
-      console.debug("[IccidMappings] API response:", response);
-
       if (response && response.success) {
-        // Handle D1 response format
         if (response.data && response.data.results) {
           mappings = response.data.results || [];
         } else {
           mappings = response.data || [];
         }
         totalPages = response.pagination?.totalPages || 1;
-        console.debug("[IccidMappings] Loaded mappings:", mappings);
       } else {
         error = response?.error || "Failed to load ICCID mappings";
-        console.error("ICCID mappings API error:", response);
       }
     } catch (err) {
       error = err.message || "Failed to load ICCID mappings";
-      console.error("Failed to load ICCID mappings:", err);
     } finally {
       loading = false;
     }
@@ -198,7 +188,6 @@
   }
 
   onMount(() => {
-    console.debug("[IccidMappings] Component mounted!");
     loadMappings();
     
     // Close export menu when clicking outside
@@ -214,76 +203,6 @@
       document.removeEventListener('click', handleClickOutside);
     };
   });
-
-  // Country list with flags
-  const countries = [
-    { code: "CN", name: "中国", flag: "🇨🇳" },
-    { code: "HK", name: "香港", flag: "🇭🇰" },
-    { code: "SG", name: "新加坡", flag: "🇸🇬" },
-    { code: "US", name: "美国", flag: "🇺🇸" },
-    { code: "UK", name: "英国", flag: "🇬🇧" },
-    { code: "JP", name: "日本", flag: "🇯🇵" },
-    { code: "KR", name: "韩国", flag: "🇰🇷" },
-    { code: "MY", name: "马来西亚", flag: "🇲🇾" },
-    { code: "TH", name: "泰国", flag: "🇹🇭" },
-    { code: "VN", name: "越南", flag: "🇻🇳" },
-    { code: "PH", name: "菲律宾", flag: "🇵🇭" },
-    { code: "ID", name: "印度尼西亚", flag: "🇮🇩" },
-    { code: "IN", name: "印度", flag: "🇮🇳" },
-    { code: "AU", name: "澳大利亚", flag: "🇦🇺" },
-    { code: "NZ", name: "新西兰", flag: "🇳🇿" },
-    { code: "CA", name: "加拿大", flag: "🇨🇦" },
-    { code: "DE", name: "德国", flag: "🇩🇪" },
-    { code: "FR", name: "法国", flag: "🇫🇷" },
-    { code: "IT", name: "意大利", flag: "🇮🇹" },
-    { code: "ES", name: "西班牙", flag: "🇪🇸" },
-    { code: "RU", name: "俄罗斯", flag: "🇷🇺" },
-    { code: "BR", name: "巴西", flag: "🇧🇷" },
-    { code: "MX", name: "墨西哥", flag: "🇲🇽" },
-  ];
-
-  function getCountryFlag(countryCode) {
-    const country = countries.find(c => c.code === countryCode);
-    return country ? country.flag : "🌍";
-  }
-
-  function getCountryName(countryCode) {
-    const country = countries.find(c => c.code === countryCode);
-    return country ? country.name : countryCode || "";
-  }
-
-  // Function to get carrier color class
-  function getCarrierColor(carrier) {
-    if (!carrier) return "";
-    
-    const carrierUpper = carrier.toUpperCase();
-    
-    // Common carrier mappings (dark theme)
-    if (carrierUpper.includes("CMCC") || carrierUpper.includes("中国移动") || carrierUpper.includes("CHINA MOBILE")) {
-      return "bg-blue-900/50 text-blue-300 border border-blue-500/30";
-    }
-    if (carrierUpper.includes("UNICOM") || carrierUpper.includes("中国联通") || carrierUpper.includes("CHINA UNICOM")) {
-      return "bg-orange-900/50 text-orange-300 border border-orange-500/30";
-    }
-    if (carrierUpper.includes("TELECOM") || carrierUpper.includes("中国电信") || carrierUpper.includes("CHINA TELECOM")) {
-      return "bg-red-900/50 text-red-300 border border-red-500/30";
-    }
-    if (carrierUpper.includes("CMHK") || carrierUpper.includes("香港移动")) {
-      return "bg-purple-900/50 text-purple-300 border border-purple-500/30";
-    }
-    if (carrierUpper.includes("SINGTEL")) {
-      return "bg-teal-900/50 text-teal-300 border border-teal-500/30";
-    }
-    if (carrierUpper.includes("STARHUB")) {
-      return "bg-indigo-900/50 text-indigo-300 border border-indigo-500/30";
-    }
-    if (carrierUpper.includes("M1") || carrierUpper.includes("SGP-M1")) {
-      return "bg-green-900/50 text-green-300 border border-green-500/30";
-    }
-    
-    // Default color for unknown carriers
-    return "bg-gray-900/50 text-gray-300 border border-gray-500/30";
-  }
 
   // Export functions
   async function exportAllMappings(format = 'csv') {
@@ -378,11 +297,8 @@
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
   }
-
-  let showExportMenu = false;
 </script>
 
-{console.debug("[IccidMappings] Component rendering")}
 <div class="tech-card p-6">
   <div class="flex justify-between items-center mb-6">
     <h2 class="text-2xl font-bold data-value high-contrast header-effect-target">ICCID 映射管理</h2>
@@ -391,7 +307,7 @@
       <div class="relative export-menu-container">
         <button
           on:click={() => (showExportMenu = !showExportMenu)}
-          class="px-4 py-2 tech-button bg-green-900/80 hover:bg-green-800/90 transition-all duration-300 flex items-center gap-2"
+          class="px-4 py-2 tech-button transition-all duration-300 flex items-center gap-2"
         >
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
@@ -399,13 +315,13 @@
           导出
         </button>
         {#if showExportMenu}
-          <div class="absolute right-0 mt-2 w-48 bg-gray-900 border border-gray-600 rounded-lg shadow-lg z-50">
+          <div class="absolute right-0 mt-2 w-48 bg-white border border-stone-200 rounded-xl shadow-lg z-50 overflow-hidden">
             <button
               on:click={() => {
                 exportAllMappings('csv');
                 showExportMenu = false;
               }}
-              class="w-full px-4 py-2 text-left hover:bg-gray-700 transition-colors"
+              class="w-full px-4 py-2.5 text-left text-sm text-stone-700 hover:bg-stone-50 transition-colors"
             >
               导出为 CSV
             </button>
@@ -414,7 +330,7 @@
                 exportAllMappings('json');
                 showExportMenu = false;
               }}
-              class="w-full px-4 py-2 text-left hover:bg-gray-700 transition-colors"
+              class="w-full px-4 py-2.5 text-left text-sm text-stone-700 hover:bg-stone-50 border-t border-stone-100 transition-colors"
             >
               导出为 JSON
             </button>
@@ -423,7 +339,7 @@
       </div>
       <button
         on:click={() => (showBulkImport = true)}
-        class="px-4 py-2 tech-button bg-gray-900/80 hover:bg-gray-800/90 transition-all duration-300"
+        class="px-4 py-2 tech-button transition-all duration-300"
       >
         批量导入
       </button>
@@ -457,7 +373,7 @@
 
   {#if error}
     <div
-      class="mb-4 p-4 bg-red-900/20 border border-red-500/50 text-red-400 rounded-lg"
+      class="mb-4 p-4 bg-red-50 border border-red-200 text-red-600 rounded-lg"
     >
       {error}
     </div>
@@ -466,13 +382,13 @@
   {#if loading}
     <div class="text-center py-8">
       <div
-        class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-gray-500"
+        class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-stone-500"
       ></div>
-      <p class="mt-2 text-gray-400">加载中...</p>
+      <p class="mt-2 text-stone-500">加载中...</p>
     </div>
   {:else if error}
     <div class="text-center py-8">
-      <p class="text-red-400 mb-4">❌ {error}</p>
+      <p class="text-red-500 mb-4">❌ {error}</p>
       <button
         on:click={loadMappings}
         class="px-4 py-2 tech-button"
@@ -485,62 +401,62 @@
     <div class="overflow-x-auto">
       {#if mappings.length === 0}
         <div class="text-center py-16">
-          <p class="text-gray-400 mb-4">暂无 ICCID 映射数据</p>
-          <p class="text-gray-200/60 text-sm">点击上方"添加映射"按钮创建第一个映射</p>
+          <p class="text-stone-500 mb-4">暂无 ICCID 映射数据</p>
+          <p class="text-stone-800/60 text-sm">点击上方"添加映射"按钮创建第一个映射</p>
         </div>
       {:else}
         <table class="min-w-full">
           <thead>
-            <tr class="border-b border-gray-700">
+            <tr class="border-b border-stone-200">
               <th
-                class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider"
+                class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider"
                 >ICCID</th
               >
               <th
-                class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider"
+                class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider"
                 >手机号</th
               >
               <th
-                class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider"
+                class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider"
                 >国家</th
               >
               <th
-                class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider"
+                class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider"
                 >运营商</th
               >
               <th
-                class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider"
+                class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider"
                 >描述</th
               >
               <th
-                class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider"
+                class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider"
                 >状态</th
               >
               <th
-                class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider"
+                class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider"
                 >创建时间</th
               >
               <th
-                class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider"
+                class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider"
                 >操作</th
               >
             </tr>
           </thead>
-          <tbody class="divide-y divide-cyan-900/30">
+          <tbody class="divide-y divide-stone-100">
             {#each mappings as mapping}
-            <tr class="hover:bg-gray-700/50 transition-colors">
-              <td class="px-4 py-3 text-sm font-mono text-gray-200">{mapping.iccid}</td>
-              <td class="px-4 py-3 text-sm font-medium text-white"
+            <tr class="hover:bg-stone-100 transition-colors">
+              <td class="px-4 py-3 text-sm font-mono text-stone-800">{mapping.iccid}</td>
+              <td class="px-4 py-3 text-sm font-medium text-stone-900"
                 >{mapping.phone_number}</td
               >
               <td class="px-4 py-3 text-sm">
                 {#if mapping.country}
                   <span class="inline-flex items-center gap-1">
                     <span class="text-lg">{getCountryFlag(mapping.country)}</span>
-                    <span class="text-xs text-gray-400">{getCountryName(mapping.country)}</span>
+                    <span class="text-xs text-stone-500">{getCountryName(mapping.country)}</span>
                   </span>
                 {:else}
-                  <span class="text-gray-600">-</span>
+                  <span class="text-stone-500">-</span>
                 {/if}
               </td>
               <td class="px-4 py-3 text-sm">
@@ -549,32 +465,32 @@
                     {mapping.carrier}
                   </span>
                 {:else}
-                  <span class="text-gray-600">-</span>
+                  <span class="text-stone-500">-</span>
                 {/if}
               </td>
-              <td class="px-4 py-3 text-sm text-gray-200">{mapping.notes || mapping.description || "-"}</td>
+              <td class="px-4 py-3 text-sm text-stone-800">{mapping.notes || mapping.description || "-"}</td>
               <td class="px-4 py-3">
                 <span
                   class="inline-flex px-2 py-1 text-xs rounded-full {mapping.is_active
-                    ? 'bg-green-900/50 text-green-300 border border-green-500/30'
-                    : 'bg-gray-900/50 text-gray-300 border border-gray-500/30'}"
+                    ? 'bg-green-50 text-green-700 border border-green-200'
+                    : 'bg-stone-100 text-stone-500 border border-stone-200'}"
                 >
                   {mapping.is_active ? "启用" : "禁用"}
                 </span>
               </td>
-              <td class="px-4 py-3 text-sm text-gray-400/70">
+              <td class="px-4 py-3 text-sm text-stone-400">
                 {new Date(mapping.created_at).toLocaleString()}
               </td>
               <td class="px-4 py-3 text-sm">
                 <button
                   on:click={() => startEdit(mapping)}
-                  class="text-gray-400 hover:text-gray-200 mr-3 transition-colors"
+                  class="text-stone-500 hover:text-stone-800 mr-3 transition-colors"
                 >
                   编辑
                 </button>
                 <button
                   on:click={() => handleDeleteMapping(mapping.id)}
-                  class="text-red-400 hover:text-red-300 transition-colors"
+                  class="text-red-500 hover:text-red-300 transition-colors"
                 >
                   删除
                 </button>
@@ -595,13 +511,13 @@
             loadMappings();
           }}
           disabled={currentPage === 1}
-          class="px-3 py-1 rounded border border-gray-600 {currentPage === 1
-            ? 'bg-gray-900/50 text-gray-600'
-            : 'bg-gray-700/50 hover:bg-gray-700 text-gray-400'}"
+          class="px-3 py-1 rounded border border-stone-300 {currentPage === 1
+            ? 'bg-stone-100 text-stone-400'
+            : 'bg-stone-100 hover:bg-stone-200 text-stone-600'}"
         >
           上一页
         </button>
-        <span class="px-3 py-1 text-gray-400">
+        <span class="px-3 py-1 text-stone-500">
           第 {currentPage} / {totalPages} 页
         </span>
         <button
@@ -610,9 +526,9 @@
             loadMappings();
           }}
           disabled={currentPage === totalPages}
-          class="px-3 py-1 rounded border border-gray-600 {currentPage === totalPages
-            ? 'bg-gray-900/50 text-gray-600'
-            : 'bg-gray-700/50 hover:bg-gray-700 text-gray-400'}"
+          class="px-3 py-1 rounded border border-stone-300 {currentPage === totalPages
+            ? 'bg-stone-100 text-stone-400'
+            : 'bg-stone-100 hover:bg-stone-200 text-stone-600'}"
         >
           下一页
         </button>
@@ -624,7 +540,7 @@
 <!-- Add Mapping Modal -->
 {#if showAddForm}
   <div
-    class="fixed inset-0 bg-black/70 flex items-center justify-center z-50"
+    class="fixed inset-0 bg-stone-900/50 flex items-center justify-center z-50"
   >
     <div class="tech-card p-6 max-w-md w-full mx-4">
       <h3 class="text-lg font-bold mb-4 data-value high-contrast">添加 ICCID 映射</h3>
@@ -633,7 +549,7 @@
         <div>
           <label
             for="create-iccid"
-            class="block text-sm font-medium text-gray-400 mb-1">ICCID</label
+            class="block text-sm font-medium text-stone-500 mb-1">ICCID</label
           >
           <input
             id="create-iccid"
@@ -647,7 +563,7 @@
         <div>
           <label
             for="create-phone-number"
-            class="block text-sm font-medium text-gray-400 mb-1">手机号</label
+            class="block text-sm font-medium text-stone-500 mb-1">手机号</label
           >
           <input
             id="create-phone-number"
@@ -661,7 +577,7 @@
         <div>
           <label
             for="create-country"
-            class="block text-sm font-medium text-gray-400 mb-1"
+            class="block text-sm font-medium text-stone-500 mb-1"
             >国家</label
           >
           <select
@@ -670,7 +586,7 @@
             class="w-full px-3 py-2 cyber-input"
           >
             <option value="">选择国家...</option>
-            {#each countries as country}
+            {#each COUNTRIES as country}
               <option value={country.code}>
                 {country.flag} {country.name}
               </option>
@@ -681,7 +597,7 @@
         <div>
           <label
             for="create-carrier"
-            class="block text-sm font-medium text-gray-400 mb-1"
+            class="block text-sm font-medium text-stone-500 mb-1"
             >运营商（可选）</label
           >
           <input
@@ -696,7 +612,7 @@
         <div>
           <label
             for="create-description"
-            class="block text-sm font-medium text-gray-400 mb-1"
+            class="block text-sm font-medium text-stone-500 mb-1"
             >描述（可选）</label
           >
           <textarea
@@ -715,7 +631,7 @@
             showAddForm = false;
             resetForm();
           }}
-          class="px-4 py-2 border border-gray-600 rounded-lg hover:bg-gray-700/50 text-gray-400 transition-all duration-300"
+          class="px-4 py-2 border border-stone-300 rounded-lg hover:bg-stone-100 text-stone-500 transition-all duration-300"
         >
           取消
         </button>
@@ -733,7 +649,7 @@
 <!-- Edit Mapping Modal -->
 {#if showEditForm}
   <div
-    class="fixed inset-0 bg-black/70 flex items-center justify-center z-50"
+    class="fixed inset-0 bg-stone-900/50 flex items-center justify-center z-50"
   >
     <div class="tech-card p-6 max-w-md w-full mx-4">
       <h3 class="text-lg font-bold mb-4 data-value high-contrast">编辑 ICCID 映射</h3>
@@ -742,21 +658,21 @@
         <div>
           <label
             for="edit-iccid"
-            class="block text-sm font-medium text-gray-400 mb-1">ICCID</label
+            class="block text-sm font-medium text-stone-500 mb-1">ICCID</label
           >
           <input
             id="edit-iccid"
             type="text"
             value={formData.iccid}
             disabled
-            class="w-full px-3 py-2 cyber-input bg-gray-900/50 cursor-not-allowed"
+            class="w-full px-3 py-2 cyber-input bg-stone-50 cursor-not-allowed"
           />
         </div>
 
         <div>
           <label
             for="edit-phone-number"
-            class="block text-sm font-medium text-gray-400 mb-1">手机号</label
+            class="block text-sm font-medium text-stone-500 mb-1">手机号</label
           >
           <input
             id="edit-phone-number"
@@ -770,7 +686,7 @@
         <div>
           <label
             for="edit-country"
-            class="block text-sm font-medium text-gray-400 mb-1"
+            class="block text-sm font-medium text-stone-500 mb-1"
             >国家</label
           >
           <select
@@ -779,7 +695,7 @@
             class="w-full px-3 py-2 cyber-input"
           >
             <option value="">选择国家...</option>
-            {#each countries as country}
+            {#each COUNTRIES as country}
               <option value={country.code}>
                 {country.flag} {country.name}
               </option>
@@ -790,7 +706,7 @@
         <div>
           <label
             for="edit-carrier"
-            class="block text-sm font-medium text-gray-400 mb-1"
+            class="block text-sm font-medium text-stone-500 mb-1"
             >运营商（可选）</label
           >
           <input
@@ -805,7 +721,7 @@
         <div>
           <label
             for="edit-description"
-            class="block text-sm font-medium text-gray-400 mb-1"
+            class="block text-sm font-medium text-stone-500 mb-1"
             >描述（可选）</label
           >
           <textarea
@@ -824,7 +740,7 @@
               bind:checked={formData.is_active}
               class="mr-2"
             />
-            <span class="text-sm font-medium text-gray-400">启用状态</span>
+            <span class="text-sm font-medium text-stone-500">启用状态</span>
           </label>
         </div>
       </div>
@@ -835,7 +751,7 @@
             showEditForm = false;
             resetForm();
           }}
-          class="px-4 py-2 border border-gray-600 rounded-lg hover:bg-gray-700/50 text-gray-400 transition-all duration-300"
+          class="px-4 py-2 border border-stone-300 rounded-lg hover:bg-stone-100 text-stone-500 transition-all duration-300"
         >
           取消
         </button>
@@ -853,19 +769,19 @@
 <!-- Bulk Import Modal -->
 {#if showBulkImport}
   <div
-    class="fixed inset-0 bg-black/70 flex items-center justify-center z-50"
+    class="fixed inset-0 bg-stone-900/50 flex items-center justify-center z-50"
   >
     <div class="tech-card p-6 max-w-2xl w-full mx-4">
       <h3 class="text-lg font-bold mb-4 data-value high-contrast">批量导入 ICCID 映射</h3>
 
       <div class="mb-4">
-        <p class="text-sm text-gray-400/70 mb-2">
+        <p class="text-sm text-stone-400 mb-2">
           支持 CSV 或 JSON 格式。CSV
           格式第一行应为标题行：iccid,phone_number,country,carrier,description
         </p>
-        <p class="text-sm text-gray-400/70">
+        <p class="text-sm text-stone-400">
           JSON 格式示例：<code
-            class="text-gray-200">[{JSON.stringify({
+            class="text-stone-800">[{JSON.stringify({
               iccid: "123456",
               phone_number: "13800138000",
               country: "CN",
@@ -873,7 +789,7 @@
             })}]</code
           >
         </p>
-        <p class="text-sm text-gray-400/70 mt-1">
+        <p class="text-sm text-stone-400 mt-1">
           国家代码：CN=中国, HK=香港, SG=新加坡, US=美国, UK=英国, JP=日本等
         </p>
       </div>
@@ -881,7 +797,7 @@
       <textarea
         bind:value={bulkImportText}
         placeholder="粘贴 CSV 或 JSON 数据..."
-        class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+        class="w-full px-3 py-2 cyber-input"
         rows="10"
       ></textarea>
 
@@ -891,7 +807,7 @@
             showBulkImport = false;
             bulkImportText = "";
           }}
-          class="px-4 py-2 border border-gray-600 rounded-lg hover:bg-gray-700/50 text-gray-400 transition-all duration-300"
+          class="px-4 py-2 border border-stone-300 rounded-lg hover:bg-stone-100 text-stone-500 transition-all duration-300"
         >
           取消
         </button>
