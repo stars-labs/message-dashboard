@@ -1,6 +1,5 @@
 import { auth } from './auth';
 import { pollingService } from './polling-service';
-import { trackApiError, addBreadcrumb, startSpan } from './sentry-utils';
 import { messageCache } from './message-cache';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 
@@ -9,20 +8,6 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ||
 export async function fetchWithAuth(endpoint, options = {}) {
   const token = auth.token || localStorage.getItem('auth_token');
   const fullUrl = `${API_BASE_URL}${endpoint}`;
-  
-  // Start performance tracking
-  let span = null;
-  try {
-    span = startSpan(`api.${options.method || 'GET'} ${endpoint}`, 'http.client');
-  } catch (e) {
-    // Sentry span might not be available in all contexts
-  }
-  
-  // Add breadcrumb for API call
-  addBreadcrumb(`API ${options.method || 'GET'} ${endpoint}`, 'api', {
-    url: fullUrl,
-    method: options.method || 'GET'
-  });
   
   console.debug(`[fetchWithAuth] Making request to: ${fullUrl}`);
   console.debug(`[fetchWithAuth] Options:`, options);
@@ -43,8 +28,6 @@ export async function fetchWithAuth(endpoint, options = {}) {
     
     if (response.status === 401) {
       console.log(`[fetchWithAuth] 401 Unauthorized - logging out`);
-      // Track authentication error
-      trackApiError(endpoint, 401, { error: 'Authentication required' }, options.body);
       // Token expired or invalid, redirect to login
       auth.logout();
       throw new Error('Authentication required');
@@ -61,32 +44,14 @@ export async function fetchWithAuth(endpoint, options = {}) {
         errorData = { error: 'Unknown error' };
       }
       
-      // Track API error
-      trackApiError(endpoint, response.status, errorData, options.body);
-      
       throw new Error(errorData.error || `Request failed with status ${response.status}`);
     }
     
     const responseData = await response.json();
     console.debug(`[fetchWithAuth] Response data:`, responseData);
     
-    // Finish span successfully
-    if (span && typeof span.end === 'function') {
-      span.end();
-    }
-    
     return responseData;
   } catch (error) {
-    // Finish span with error
-    if (span && typeof span.end === 'function') {
-      span.end();
-    }
-    
-    // Track network errors
-    if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
-      trackApiError(endpoint, 0, { error: 'Network error', message: error.message }, options.body);
-    }
-    
     throw error;
   }
 }
