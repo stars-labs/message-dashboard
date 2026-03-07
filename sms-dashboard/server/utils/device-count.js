@@ -21,11 +21,12 @@ export async function getDeviceStats(db) {
   
   // Get daemon status from daemon_health table
   const daemonHealth = await db.prepare(`
-    SELECT 
+    SELECT
       status as daemon_status,
       modem_count as reported_modem_count,
       last_heartbeat,
-      CASE 
+      version,
+      CASE
         WHEN datetime(last_heartbeat) > datetime('now', '-2 minutes') THEN 'healthy'
         WHEN datetime(last_heartbeat) > datetime('now', '-5 minutes') THEN 'warning'
         ELSE 'offline'
@@ -54,11 +55,13 @@ export async function getDeviceStats(db) {
       status: daemonHealth?.daemon_status || 'unknown',
       health: daemonHealth?.health_status || 'offline',
       reported_count: daemonHealth?.reported_modem_count || 0,
-      last_heartbeat: daemonHealth?.last_heartbeat || null
+      last_heartbeat: daemonHealth?.last_heartbeat || null,
+      version: daemonHealth?.version || null
     },
-    // Simple online count for UI
+    // Simple counts for UI
     online_count: stats.connected_modems || 0,
-    total_count: totalModems
+    total_count: totalModems,
+    sim_missing_count: Math.max(0, (stats.connected_modems || 0) - (stats.modems_with_sims || 0))
   };
 }
 

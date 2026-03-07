@@ -1,6 +1,7 @@
 <script>
   import { createEventDispatcher } from "svelte";
   import { api } from "./api";
+  import { COUNTRIES, inferCountryFromNumber } from "./countries.js";
 
   export let phone = null;
   export let show = false;
@@ -14,44 +15,10 @@
   let saving = false;
   let error = null;
 
-  // Country list with flags
-  const countries = [
-    { code: "CN", name: "中国", flag: "🇨🇳" },
-    { code: "HK", name: "香港", flag: "🇭🇰" },
-    { code: "SG", name: "新加坡", flag: "🇸🇬" },
-    { code: "US", name: "美国", flag: "🇺🇸" },
-    { code: "UK", name: "英国", flag: "🇬🇧" },
-    { code: "JP", name: "日本", flag: "🇯🇵" },
-    { code: "KR", name: "韩国", flag: "🇰🇷" },
-    { code: "MY", name: "马来西亚", flag: "🇲🇾" },
-    { code: "TH", name: "泰国", flag: "🇹🇭" },
-    { code: "VN", name: "越南", flag: "🇻🇳" },
-    { code: "PH", name: "菲律宾", flag: "🇵🇭" },
-    { code: "ID", name: "印度尼西亚", flag: "🇮🇩" },
-    { code: "IN", name: "印度", flag: "🇮🇳" },
-    { code: "AU", name: "澳大利亚", flag: "🇦🇺" },
-    { code: "NZ", name: "新西兰", flag: "🇳🇿" },
-    { code: "CA", name: "加拿大", flag: "🇨🇦" },
-    { code: "DE", name: "德国", flag: "🇩🇪" },
-    { code: "FR", name: "法国", flag: "🇫🇷" },
-    { code: "IT", name: "意大利", flag: "🇮🇹" },
-    { code: "ES", name: "西班牙", flag: "🇪🇸" },
-    { code: "RU", name: "俄罗斯", flag: "🇷🇺" },
-    { code: "BR", name: "巴西", flag: "🇧🇷" },
-    { code: "MX", name: "墨西哥", flag: "🇲🇽" },
-  ];
-
   $: if (phone) {
     carrier = phone.carrier || "";
-    // Try to auto-detect country based on phone number or carrier
     if (!country && phoneNumber) {
-      if (phoneNumber.startsWith("+86") || phoneNumber.startsWith("86") || phoneNumber.startsWith("1") && phoneNumber.length === 11) {
-        country = "CN";
-      } else if (phoneNumber.startsWith("+852") || phoneNumber.startsWith("852")) {
-        country = "HK";
-      } else if (phoneNumber.startsWith("+65") || phoneNumber.startsWith("65")) {
-        country = "SG";
-      }
+      country = inferCountryFromNumber(phoneNumber) || "";
     }
     description = `${phone.iccid} - ${phone.operator_name || "Unknown Operator"}`;
   }
@@ -103,30 +70,30 @@
 
 {#if show && phone}
   <div
-    class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+    class="fixed inset-0 bg-stone-900/50 flex items-center justify-center z-50"
   >
-    <div class="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
-      <h2 class="text-xl font-bold mb-4 text-gray-800">设置 ICCID 映射</h2>
+    <div class="tech-card max-w-md w-full mx-4">
+      <h3 class="text-lg font-bold mb-4 data-value high-contrast">设置 ICCID 映射</h3>
 
       <div class="space-y-4">
         <div>
           <label
             for="dialog-iccid"
-            class="block text-sm font-medium text-gray-700 mb-1">ICCID</label
+            class="block text-sm font-medium text-stone-500 mb-1">ICCID</label
           >
           <input
             id="dialog-iccid"
             type="text"
             value={phone.iccid}
             disabled
-            class="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-100 text-gray-600 font-mono text-sm"
+            class="w-full px-3 py-2 cyber-input bg-stone-50 text-stone-500 cursor-not-allowed font-mono text-sm"
           />
         </div>
 
         <div>
           <label
             for="dialog-phone-number"
-            class="block text-sm font-medium text-gray-700 mb-1"
+            class="block text-sm font-medium text-stone-500 mb-1"
           >
             电话号码 <span class="text-red-500">*</span>
           </label>
@@ -135,22 +102,22 @@
             type="tel"
             bind:value={phoneNumber}
             placeholder="+86138xxxxx 或 138xxxxx"
-            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-purple-500 focus:border-purple-500"
+            class="w-full px-3 py-2 cyber-input"
           />
         </div>
 
         <div>
           <label
             for="dialog-country"
-            class="block text-sm font-medium text-gray-700 mb-1">国家</label
+            class="block text-sm font-medium text-stone-500 mb-1">国家</label
           >
           <select
             id="dialog-country"
             bind:value={country}
-            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-purple-500 focus:border-purple-500"
+            class="w-full px-3 py-2 cyber-input"
           >
             <option value="">选择国家...</option>
-            {#each countries as countryOption}
+            {#each COUNTRIES as countryOption}
               <option value={countryOption.code}>
                 {countryOption.flag} {countryOption.name}
               </option>
@@ -161,34 +128,34 @@
         <div>
           <label
             for="dialog-carrier"
-            class="block text-sm font-medium text-gray-700 mb-1">运营商</label
+            class="block text-sm font-medium text-stone-500 mb-1">运营商</label
           >
           <input
             id="dialog-carrier"
             type="text"
             bind:value={carrier}
             placeholder="例如: China Mobile, Singtel"
-            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-purple-500 focus:border-purple-500"
+            class="w-full px-3 py-2 cyber-input"
           />
         </div>
 
         <div>
           <label
             for="dialog-description"
-            class="block text-sm font-medium text-gray-700 mb-1">备注</label
+            class="block text-sm font-medium text-stone-500 mb-1">备注</label
           >
           <input
             id="dialog-description"
             type="text"
             bind:value={description}
             placeholder="可选的描述信息"
-            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-purple-500 focus:border-purple-500"
+            class="w-full px-3 py-2 cyber-input"
           />
         </div>
 
         {#if error}
           <div
-            class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md text-sm"
+            class="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-lg text-sm"
           >
             {error}
           </div>
@@ -199,14 +166,14 @@
         <button
           on:click={close}
           disabled={saving}
-          class="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
+          class="px-4 py-2 tech-button disabled:opacity-50"
         >
           取消
         </button>
         <button
           on:click={handleSave}
           disabled={saving}
-          class="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+          class="px-4 py-2 bg-stone-800 text-white rounded-lg hover:bg-stone-900 transition-colors disabled:opacity-50 flex items-center gap-2"
         >
           {#if saving}
             <svg class="animate-spin h-4 w-4" viewBox="0 0 24 24">

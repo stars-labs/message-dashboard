@@ -29,35 +29,13 @@ export const statsHandler = {
       let actualOnlineDevices = deviceStats.online_count;
       let actualTotalDevices = deviceStats.total_count;
       
-      // Get daemon status from deviceStats
       let daemonStatus = {
         online: deviceStats.daemon.health === 'healthy' || deviceStats.daemon.health === 'warning',
         last_heartbeat: deviceStats.daemon.last_heartbeat ? new Date(deviceStats.daemon.last_heartbeat).getTime() : null,
-        version: null, // Will be set from daemon_health below
+        version: deviceStats.daemon.version,
         device_id: 'orange-pi-main',
         modem_count: deviceStats.daemon.reported_count
       };
-      
-      // Get additional daemon info from database
-      try {
-        const daemonHealth = await env.DB.prepare(`
-          SELECT version FROM daemon_health 
-          WHERE daemon_id = 'orange-pi-main'
-          ORDER BY last_heartbeat DESC
-          LIMIT 1
-        `).first();
-        
-        if (daemonHealth && daemonHealth.version) {
-          daemonStatus.version = daemonHealth.version;
-        }
-        
-        // If daemon reported a modem count, use it as the total
-        if (daemonStatus.online && deviceStats.daemon.reported_count > 0) {
-          actualTotalDevices = deviceStats.daemon.reported_count;
-        }
-      } catch (error) {
-        console.error('[stats.js] Failed to get daemon version:', error);
-      }
       
       return new Response(JSON.stringify({
         success: true,
@@ -69,6 +47,7 @@ export const statsHandler = {
         today_received: stats.today_received,
         online_devices: actualOnlineDevices,
         total_devices: actualTotalDevices,
+        sim_missing_devices: deviceStats.sim_missing_count || 0,
         verification_rate: verificationRate,
         daemon_status: daemonStatus
       }), {

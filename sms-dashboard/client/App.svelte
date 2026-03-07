@@ -11,6 +11,7 @@
   import ErrorBoundary from "./lib/ErrorBoundary.svelte";
   import SentryTest from "./lib/SentryTest.svelte";
   import { api } from "./lib/api.js";
+  import { getPhoneFlag, mapStatsResponse } from "./lib/countries.js";
   // All real-time updates disabled to save costs - manual refresh only
   // import { RealtimeService } from "./lib/websocket-with-fallback.js";
   import { auth } from "./lib/auth.js";
@@ -305,21 +306,7 @@
       if (statsResponse) {
         console.debug('[App] Stats API Response:', statsResponse);
         
-        // Use stats from API which already accounts for daemon's modem count
-        stats = {
-          totalMessages: statsResponse.total_messages || 0,
-          todayMessages: statsResponse.today_messages || 0,
-          totalSent: statsResponse.total_sent || 0,
-          totalReceived: statsResponse.total_received || 0,
-          todaySent: statsResponse.today_sent || 0,
-          todayReceived: statsResponse.today_received || 0,
-          onlineDevices: statsResponse.online_devices || 0,
-          totalDevices: statsResponse.total_devices || 0,
-          verificationRate: Math.round(
-            (statsResponse.verification_rate || 0) * 100,
-          ),
-        };
-        console.debug('[App] Stats from backend - online:', stats.onlineDevices, 'total:', stats.totalDevices);
+        stats = mapStatsResponse(statsResponse);
         
         // Mark that we've loaded stats from backend
         backendStatsLoaded = true;
@@ -976,13 +963,13 @@
 
   function getDaemonStatusClass() {
     const classMap = {
-      'online': 'text-green-400',
-      'warning': 'text-yellow-400',
-      'offline': 'text-red-400',
-      'error': 'text-red-400',
-      'unknown': 'text-gray-400'
+      'online': 'text-emerald-600',
+      'warning': 'text-amber-600',
+      'offline': 'text-red-500',
+      'error': 'text-red-500',
+      'unknown': 'text-stone-400'
     };
-    return classMap[daemonStatus.status] || 'text-gray-400';
+    return classMap[daemonStatus.status] || 'text-stone-400';
   }
 
   function getDaemonStatusIcon() {
@@ -1059,20 +1046,7 @@
         const data = await response.json();
         console.debug('[App] Fetched stats from API:', data);
         
-        // Update all stats from API response
-        stats = {
-          totalMessages: data.total_messages || 0,
-          todayMessages: data.today_messages || 0,
-          totalSent: data.total_sent || 0,
-          totalReceived: data.total_received || 0,
-          todaySent: data.today_sent || 0,
-          todayReceived: data.today_received || 0,
-          onlineDevices: data.online_devices || 0,
-          totalDevices: data.total_devices || 0,
-          verificationRate: Math.round((data.verification_rate || 0) * 100)
-        };
-        
-        console.debug('[App] Updated stats from API:', stats);
+        stats = mapStatsResponse(data);
         
         // Mark that we've loaded stats from backend
         backendStatsLoaded = true;
@@ -1082,123 +1056,41 @@
     }
   }
 
-  function getPhoneFlag(phone) {
-    // First check if phone has country from ICCID mapping
-    if (phone.country) {
-      const countryFlags = {
-        CN: "🇨🇳",
-        HK: "🇭🇰",
-        SG: "🇸🇬",
-        US: "🇺🇸",
-        UK: "🇬🇧",
-        JP: "🇯🇵",
-        KR: "🇰🇷",
-        MY: "🇲🇾",
-        TH: "🇹🇭",
-        VN: "🇻🇳",
-        PH: "🇵🇭",
-        ID: "🇮🇩",
-        IN: "🇮🇳",
-        AU: "🇦🇺",
-        NZ: "🇳🇿",
-        CA: "🇨🇦",
-        DE: "🇩🇪",
-        FR: "🇫🇷",
-        IT: "🇮🇹",
-        ES: "🇪🇸",
-        RU: "🇷🇺",
-        BR: "🇧🇷",
-        MX: "🇲🇽",
-      };
-      return countryFlags[phone.country] || "📱";
-    }
-
-    // Otherwise, try to determine from phone number
-    if (!phone.number) return "📱";
-    
-    const number = phone.number.toString();
-    
-    // China (+86)
-    if (number.startsWith("86") || number.startsWith("+86") || 
-        (number.startsWith("1") && number.length === 11)) {
-      return "🇨🇳";
-    }
-    
-    // Hong Kong (+852)
-    if (number.startsWith("852") || number.startsWith("+852") || 
-        number.startsWith("00852")) {
-      return "🇭🇰";
-    }
-    
-    // Singapore (+65)
-    if (number.startsWith("65") || number.startsWith("+65") || 
-        (number.length === 8 && (number.startsWith("8") || number.startsWith("9")))) {
-      return "🇸🇬";
-    }
-    
-    // USA (+1) - be careful as +1 is shared by many countries
-    if (number.startsWith("+1") || (number.length === 10 && !number.startsWith("1"))) {
-      return "🇺🇸";
-    }
-    
-    // Japan (+81)
-    if (number.startsWith("81") || number.startsWith("+81")) {
-      return "🇯🇵";
-    }
-    
-    // Korea (+82)
-    if (number.startsWith("82") || number.startsWith("+82")) {
-      return "🇰🇷";
-    }
-    
-    // Malaysia (+60)
-    if (number.startsWith("60") || number.startsWith("+60")) {
-      return "🇲🇾";
-    }
-    
-    // Thailand (+66)
-    if (number.startsWith("66") || number.startsWith("+66")) {
-      return "🇹🇭";
-    }
-    
-    // Default
-    return "📱";
-  }
 </script>
 
 {#if loading}
-  <div class="min-h-screen flex items-center justify-center bg-gray-950">
+  <div class="min-h-screen flex items-center justify-center bg-[#F7F5F2]">
     <div class="text-center">
       <div class="inline-flex items-center">
-        <svg class="animate-spin h-8 w-8 text-gray-400 mr-3" fill="none" viewBox="0 0 24 24">
+        <svg class="animate-spin h-8 w-8 text-stone-400 mr-3" fill="none" viewBox="0 0 24 24">
           <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
           <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
         </svg>
-        <span class="text-xl text-gray-300">加载中...</span>
+        <span class="text-xl text-stone-600">加载中...</span>
       </div>
     </div>
   </div>
 {:else if !user}
-  <div class="min-h-screen flex items-center justify-center bg-gray-950">
-    <div class="text-center bg-gray-900 border border-gray-700 rounded-lg p-8">
-      <h1 class="text-2xl font-semibold mb-4 text-gray-100">短信验证码管理系统</h1>
-      <p class="text-gray-400 mb-6">请登录以继续</p>
+  <div class="min-h-screen flex items-center justify-center bg-[#F7F5F2]">
+    <div class="text-center bg-white border border-stone-200 rounded-xl p-10 shadow-sm">
+      <h1 class="text-2xl font-semibold mb-3 text-stone-900">短信验证码管理系统</h1>
+      <p class="text-stone-500 mb-6">请登录以继续</p>
       <button
         on:click={() => auth.login()}
-        class="px-6 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors"
+        class="px-6 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-lg transition-colors font-medium"
       >
         使用 Auth0 登录
       </button>
     </div>
   </div>
 {:else}
-  <div class="min-h-screen bg-gray-950">
+  <div class="min-h-screen lg:h-screen lg:flex lg:flex-col lg:overflow-hidden bg-[#F7F5F2]">
     <!-- Header -->
-    <header class="bg-gray-900 border-b border-gray-700 sticky top-0 z-40">
+    <header class="bg-white border-b border-stone-200 sticky top-0 z-40 lg:flex-shrink-0">
       <div class="px-4">
         <div class="flex justify-between items-center h-16">
           <button
-            class="lg:hidden p-2 -ml-2 text-purple-600 hover:bg-purple-100 rounded-lg transition-colors"
+            class="lg:hidden p-2 -ml-2 text-stone-600 hover:bg-stone-100 rounded-lg transition-colors"
             on:click={() => (showPhoneList = !showPhoneList)}
             aria-label="切换手机列表"
           >
@@ -1216,12 +1108,12 @@
               />
             </svg>
           </button>
-          <h1 class="text-xl font-semibold text-gray-100">
+          <h1 class="text-xl font-semibold text-stone-900">
             短信验证码管理系统
           </h1>
 
           <!-- Navigation -->
-          <div class="hidden lg:flex items-center gap-4 flex-1 justify-center">
+          <div class="hidden lg:flex items-center gap-1 flex-1 justify-center">
             <button
               on:click={() => {
                 currentView = "dashboard";
@@ -1229,8 +1121,8 @@
               }}
               class="px-4 py-2 rounded-lg transition-all {currentView ===
               'dashboard'
-                ? 'bg-gray-700 text-white'
-                : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800'}"
+                ? 'bg-orange-50 text-orange-700 font-semibold'
+                : 'text-stone-500 hover:text-stone-900 hover:bg-stone-100'}"
             >
               消息管理
             </button>
@@ -1242,8 +1134,8 @@
               }}
               class="px-4 py-2 rounded-lg transition-all {currentView ===
               'iccid-mappings'
-                ? 'bg-gray-700 text-white'
-                : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800'}"
+                ? 'bg-orange-50 text-orange-700 font-semibold'
+                : 'text-stone-500 hover:text-stone-900 hover:bg-stone-100'}"
             >
               ICCID 映射
             </button>
@@ -1255,8 +1147,8 @@
               }}
               class="px-4 py-2 rounded-lg transition-all {currentView ===
               'keywords'
-                ? 'bg-gray-700 text-white'
-                : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800'}"
+                ? 'bg-orange-50 text-orange-700 font-semibold'
+                : 'text-stone-500 hover:text-stone-900 hover:bg-stone-100'}"
             >
               关键词高亮
             </button>
@@ -1264,17 +1156,17 @@
 
           <div class="hidden lg:flex items-center gap-4">
             {#if user}
-              <span class="text-sm text-gray-400"
+              <span class="text-sm text-stone-500"
                 >欢迎, {user.name || user.email}</span
               >
               <button
                 on:click={() => auth.logout()}
-                class="text-sm px-3 py-1 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded border border-gray-600"
+                class="text-sm px-3 py-1.5 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-lg border border-stone-200 transition-colors"
               >
                 退出
               </button>
             {/if}
-            <div class="flex items-center gap-4 text-sm text-gray-600">
+            <div class="flex items-center gap-4 text-sm text-stone-500">
               <!-- Daemon Status -->
               <div class="flex items-center gap-2">
                 <span class="text-lg">{getDaemonStatusIcon()}</span>
@@ -1289,9 +1181,9 @@
                     守护进程: 等待连接...
                   {/if}
                 </span>
-                <button 
+                <button
                   on:click={checkDaemonStatus}
-                  class="text-xs text-gray-500 hover:text-gray-300 transition-colors ml-2"
+                  class="text-xs text-stone-400 hover:text-stone-600 transition-colors ml-1"
                   title="刷新状态"
                 >
                   🔄
@@ -1302,6 +1194,8 @@
         </div>
       </div>
     </header>
+    <!-- Content below header fills remaining height on desktop -->
+    <div class="lg:flex-1 lg:min-h-0 lg:flex lg:flex-col lg:overflow-hidden">
 
     <!-- Daemon Status Alert Banner -->
     {#if daemonStatus.status === 'offline' || daemonStatus.status === 'error'}
@@ -1396,14 +1290,14 @@
     {/if}
 
     <!-- Mobile Navigation -->
-    <div class="lg:hidden px-4 py-2 bg-gray-900 border-b border-gray-700">
+    <div class="lg:hidden px-4 py-2 bg-white border-b border-stone-200">
       <div class="flex gap-2">
         <button
           on:click={() => (currentView = "dashboard")}
           class="flex-1 px-3 py-2 rounded-lg text-sm transition-all {currentView ===
           'dashboard'
-            ? 'bg-gray-700 text-white'
-            : 'text-gray-400 hover:bg-gray-800'}"
+            ? 'bg-orange-50 text-orange-700 font-semibold'
+            : 'text-stone-500 hover:bg-stone-100'}"
         >
           消息管理
         </button>
@@ -1414,8 +1308,8 @@
           }}
           class="flex-1 px-3 py-2 rounded-lg text-sm transition-all {currentView ===
           'iccid-mappings'
-            ? 'bg-gray-700 text-white'
-            : 'text-gray-400 hover:bg-gray-800'}"
+            ? 'bg-orange-50 text-orange-700 font-semibold'
+            : 'text-stone-500 hover:bg-stone-100'}"
         >
           ICCID 映射
         </button>
@@ -1426,8 +1320,8 @@
           }}
           class="flex-1 px-3 py-2 rounded-lg text-sm transition-all {currentView ===
           'keywords'
-            ? 'bg-gray-700 text-white'
-            : 'text-gray-400 hover:bg-gray-800'}"
+            ? 'bg-orange-50 text-orange-700 font-semibold'
+            : 'text-stone-500 hover:bg-stone-100'}"
         >
           关键词
         </button>
@@ -1439,9 +1333,9 @@
       <div class="lg:hidden overflow-x-auto px-4 py-4">
         <div class="flex gap-3 min-w-max">
           <div
-            class="bg-gray-800 border border-gray-700 rounded-lg text-white px-4 py-3"
+            class="bg-white border border-stone-200 rounded-lg text-stone-900 px-4 py-3 shadow-sm"
           >
-            <div class="text-xs text-gray-400 font-medium">在线设备</div>
+            <div class="text-xs text-stone-500 font-medium">在线设备</div>
             <div class="text-xl font-bold data-value high-contrast" title="Online: {stats.onlineDevices}, Total: {stats.totalDevices}, Phones: {phoneNumbers.length}">
               {#key stats.onlineDevices + ':' + stats.totalDevices}
                 {stats.onlineDevices}/{stats.totalDevices}
@@ -1449,33 +1343,33 @@
             </div>
           </div>
           <div
-            class="bg-gray-800 border border-gray-700 rounded-lg text-white px-4 py-3"
+            class="bg-white border border-stone-200 rounded-lg text-stone-900 px-4 py-3 shadow-sm"
           >
-            <div class="text-xs text-gray-400 font-medium">今日接收</div>
+            <div class="text-xs text-stone-500 font-medium">今日接收</div>
             <div class="text-xl font-bold data-value high-contrast">{stats.todayReceived || 0}</div>
           </div>
           <div
-            class="bg-gray-800 border border-gray-700 rounded-lg text-white px-4 py-3"
+            class="bg-white border border-stone-200 rounded-lg text-stone-900 px-4 py-3 shadow-sm"
           >
-            <div class="text-xs text-gray-400 font-medium">今日发送</div>
+            <div class="text-xs text-stone-500 font-medium">今日发送</div>
             <div class="text-xl font-bold data-value high-contrast">{stats.todaySent || 0}</div>
           </div>
           <div
-            class="bg-gray-800 border border-gray-700 rounded-lg text-white px-4 py-3"
+            class="bg-white border border-stone-200 rounded-lg text-stone-900 px-4 py-3 shadow-sm"
           >
-            <div class="text-xs text-gray-400 font-medium">总接收</div>
+            <div class="text-xs text-stone-500 font-medium">总接收</div>
             <div class="text-xl font-bold data-value high-contrast">{stats.totalReceived || 0}</div>
           </div>
           <div
-            class="bg-gray-800 border border-gray-700 rounded-lg text-white px-4 py-3"
+            class="bg-white border border-stone-200 rounded-lg text-stone-900 px-4 py-3 shadow-sm"
           >
-            <div class="text-xs text-gray-400 font-medium">总发送</div>
+            <div class="text-xs text-stone-500 font-medium">总发送</div>
             <div class="text-xl font-bold data-value high-contrast">{stats.totalSent || 0}</div>
           </div>
           <div
-            class="bg-gray-800 border border-gray-700 rounded-lg text-white px-4 py-3"
+            class="bg-white border border-stone-200 rounded-lg text-stone-900 px-4 py-3 shadow-sm"
           >
-            <div class="text-xs text-gray-400 font-medium">提取成功率</div>
+            <div class="text-xs text-stone-500 font-medium">提取成功率</div>
             <div class="text-xl font-bold data-value high-contrast">{stats.verificationRate || 0}%</div>
           </div>
         </div>
@@ -1484,66 +1378,45 @@
 
     {#if currentView === "dashboard"}
       <ErrorBoundary componentName="Dashboard">
-        <!-- Desktop Stats -->
-        <div class="hidden lg:block px-8 py-6">
-          <div class="grid grid-cols-2 lg:grid-cols-4 gap-6 hex-pattern">
-            <StatsCard
-            title="在线设备"
-            value={stats.onlineDevices}
-            total={stats.totalDevices}
-            gradient="from-blue-500 to-blue-600"
-            icon="📱"
-          />
-          <StatsCard
-            title="今日接收"
-            value={stats.todayReceived}
-            gradient="from-green-500 to-green-600"
-            icon="📥"
-          />
-          <StatsCard
-            title="今日发送"
-            value={stats.todaySent}
-            gradient="from-blue-500 to-indigo-600"
-            icon="📤"
-          />
-          <StatsCard
-            title="需要SIM卡"
-            value={stats.simMissingDevices}
-            gradient="from-orange-500 to-red-600"
-            icon="📵"
-          />
-        </div>
-
-        <!-- Second row for total stats -->
-        <div class="grid grid-cols-2 lg:grid-cols-4 gap-6 mt-6">
-          <div class="lg:col-span-2">
-            <StatsCard
-              title="总接收消息"
-              value={stats.totalReceived}
-              gradient="from-purple-500 to-purple-600"
-              icon="💬"
-            />
-          </div>
-          <div class="lg:col-span-2">
-            <StatsCard
-              title="总发送消息"
-              value={stats.totalSent}
-              gradient="from-indigo-500 to-indigo-600"
-              icon="📨"
-            />
+        <!-- Desktop Stats Bar -->
+        <div class="hidden lg:block lg:flex-shrink-0 px-8 py-3">
+          <div class="bg-white border border-stone-200 rounded-xl shadow-sm flex divide-x divide-stone-100">
+            <div class="flex-1 px-5 py-3 min-w-0">
+              <div class="text-[10px] font-semibold text-stone-400 uppercase tracking-widest mb-1">在线设备</div>
+              <div class="font-mono text-xl font-bold text-stone-900 leading-none">
+                {stats.onlineDevices}<span class="text-stone-400 font-normal text-sm"> / {stats.totalDevices}</span>
+              </div>
+            </div>
+            <div class="flex-1 px-5 py-3 min-w-0">
+              <div class="text-[10px] font-semibold text-stone-400 uppercase tracking-widest mb-1">今日接收</div>
+              <div class="font-mono text-xl font-bold text-stone-900 leading-none">{stats.todayReceived || 0}</div>
+            </div>
+            <div class="flex-1 px-5 py-3 min-w-0">
+              <div class="text-[10px] font-semibold text-stone-400 uppercase tracking-widest mb-1">今日发送</div>
+              <div class="font-mono text-xl font-bold text-stone-900 leading-none">{stats.todaySent || 0}</div>
+            </div>
+            <div class="flex-1 px-5 py-3 min-w-0">
+              <div class="text-[10px] font-semibold text-stone-400 uppercase tracking-widest mb-1">需要SIM卡</div>
+              <div class="font-mono text-xl font-bold leading-none {stats.simMissingDevices > 0 ? 'text-orange-600' : 'text-stone-900'}">{stats.simMissingDevices || 0}</div>
+            </div>
+            <div class="flex-1 px-5 py-3 min-w-0">
+              <div class="text-[10px] font-semibold text-stone-400 uppercase tracking-widest mb-1">总接收消息</div>
+              <div class="font-mono text-xl font-bold text-stone-900 leading-none">{stats.totalReceived || 0}</div>
+            </div>
+            <div class="flex-1 px-5 py-3 min-w-0">
+              <div class="text-[10px] font-semibold text-stone-400 uppercase tracking-widest mb-1">总发送消息</div>
+              <div class="font-mono text-xl font-bold text-stone-900 leading-none">{stats.totalSent || 0}</div>
+            </div>
           </div>
         </div>
-        
-        <!-- Daemon Status removed - now shown in header only -->
-      </div>
 
       <!-- Main Content -->
-      <div class="lg:px-8 lg:pb-6">
-        <div class="lg:grid lg:grid-cols-4 lg:gap-6 lg:items-start lg:content-start">
+      <div class="lg:flex-1 lg:min-h-0 lg:px-8 lg:pb-4 lg:flex lg:flex-col">
+        <div class="lg:grid lg:grid-cols-4 lg:gap-6 lg:flex-1 lg:min-h-0">
           <!-- Mobile Phone List Overlay -->
           {#if showPhoneList}
             <div
-              class="lg:hidden fixed inset-0 z-50 bg-black/70"
+              class="lg:hidden fixed inset-0 z-50 bg-stone-900/40"
               on:click={() => (showPhoneList = false)}
               on:keydown={(e) => e.key === "Escape" && (showPhoneList = false)}
               role="button"
@@ -1551,7 +1424,7 @@
               aria-label="关闭手机列表"
             >
               <div
-                class="absolute left-0 top-0 bottom-0 w-80 max-w-full bg-gray-900 shadow-xl border-r border-gray-700"
+                class="absolute left-0 top-0 bottom-0 w-80 max-w-full bg-white shadow-xl border-r border-stone-200"
                 on:click|stopPropagation
                 on:keydown|stopPropagation
                 role="dialog"
@@ -1577,7 +1450,7 @@
           {/if}
 
           <!-- Desktop Phone List -->
-          <div class="hidden lg:block lg:col-span-1">
+          <div class="hidden lg:flex lg:flex-col lg:col-span-1 h-full min-h-0">
             <PhoneList
               {phoneNumbers}
               {selectedPhone}
@@ -1592,9 +1465,9 @@
           </div>
 
           <!-- Message View Column -->
-          <div class="lg:col-span-2 flex flex-col gap-4 max-h-[calc(100vh-200px)] overflow-y-auto">
+          <div class="lg:col-span-2 flex flex-col gap-4 h-full min-h-0">
             <!-- Always show SimpleMessageView at the top -->
-            <div class="flex-shrink-0">
+            <div class="flex-1 min-h-0 flex flex-col">
               <SimpleMessageView {messages} {selectedPhone} />
             </div>
             <!-- Show PhoneDetails below if selected -->
@@ -1610,7 +1483,7 @@
           </div>
 
           <!-- Message Composer -->
-          <div class="lg:col-span-1">
+          <div class="lg:col-span-1 h-full min-h-0">
             <MessageComposer
               {selectedPhone}
               {phoneNumbers}
@@ -1624,19 +1497,20 @@
     {:else if currentView === "iccid-mappings"}
       <ErrorBoundary componentName="IccidMappings">
         <!-- ICCID Mappings View -->
-        <div class="px-4 lg:px-8 py-6">
+        <div class="px-4 lg:px-8 py-6 lg:flex-1 lg:min-h-0 lg:overflow-auto">
           <IccidMappings />
         </div>
       </ErrorBoundary>
     {:else if currentView === "keywords"}
       <ErrorBoundary componentName="Keywords">
         <!-- Keywords Configuration View -->
-        <div class="px-4 lg:px-8 py-6">
+        <div class="px-4 lg:px-8 py-6 lg:flex-1 lg:min-h-0 lg:overflow-auto">
           <KeywordConfig />
         </div>
       </ErrorBoundary>
     {/if}
-  </div>
+    </div><!-- end content wrapper -->
+  </div><!-- end outer -->
 {/if}
 
 <!-- ICCID Mapping Dialog -->
