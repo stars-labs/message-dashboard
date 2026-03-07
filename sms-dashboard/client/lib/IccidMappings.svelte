@@ -63,6 +63,7 @@
       (m.iccid || "").toLowerCase().includes(q) ||
       (m.phone_number || "").toLowerCase().includes(q) ||
       (m.carrier || "").toLowerCase().includes(q) ||
+      (m.equipment_id || "").toLowerCase().includes(q) ||
       (m.notes || m.description || "").toLowerCase().includes(q)
     );
   }
@@ -230,14 +231,15 @@
 
   function exportAsCSV(data) {
     // CSV header
-    const headers = ['ICCID', 'Phone Number', 'Country', 'Carrier', 'Status', 'Description', 'Created Time', 'Last Used'];
-    
+    const headers = ['ICCID', 'Phone Number', 'Country', 'Carrier', 'Equipment ID', 'Status', 'Description', 'Created Time', 'Last Used'];
+
     // Convert data to CSV rows
     const rows = data.map(item => [
       item.iccid || '',
       item.phone_number || '',
       getCountryName(item.country) || item.country || '',
       item.carrier || '',
+      item.equipment_id || '',
       item.is_active ? '启用' : '停用',
       item.description || '',
       item.created_at ? new Date(item.created_at).toLocaleString('zh-CN') : '',
@@ -270,6 +272,7 @@
       country: item.country,
       country_name: getCountryName(item.country),
       carrier: item.carrier,
+      equipment_id: item.equipment_id,
       is_active: item.is_active,
       description: item.description,
       created_at: item.created_at,
@@ -409,6 +412,10 @@
               >
               <th
                 class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider"
+                >设备ID</th
+              >
+              <th
+                class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider"
                 >描述</th
               >
               <th
@@ -449,6 +456,13 @@
                   </span>
                 {:else}
                   <span class="text-stone-500">-</span>
+                {/if}
+              </td>
+              <td class="px-4 py-3 text-sm font-mono text-stone-500">
+                {#if mapping.equipment_id}
+                  <span title={mapping.equipment_id}>{mapping.equipment_id}</span>
+                {:else}
+                  <span class="text-stone-300">-</span>
                 {/if}
               </td>
               <td class="px-4 py-3 text-sm text-stone-800">{mapping.notes || mapping.description || "-"}</td>

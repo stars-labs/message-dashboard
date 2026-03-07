@@ -13,7 +13,7 @@ export const iccidMappingsHandler = {
     try {
       // Query from sims table, treating user_override_enabled as the "mapping"
       let query = `
-        SELECT 
+        SELECT
           iccid as id,
           iccid,
           COALESCE(user_phone_number, phone_number) as phone_number,
@@ -21,6 +21,7 @@ export const iccidMappingsHandler = {
           COALESCE(user_country_code, country_code) as country,
           user_notes as notes,
           user_override_enabled as is_active,
+          current_modem_id as equipment_id,
           created_at,
           COALESCE(user_updated_at, updated_at) as updated_at
         FROM sims
@@ -99,7 +100,7 @@ export const iccidMappingsHandler = {
     
     try {
       const mapping = await env.DB.prepare(`
-        SELECT 
+        SELECT
           iccid as id,
           iccid,
           COALESCE(user_phone_number, phone_number) as phone_number,
@@ -107,6 +108,7 @@ export const iccidMappingsHandler = {
           COALESCE(user_country_code, country_code) as country,
           user_notes as notes,
           user_override_enabled as is_active,
+          current_modem_id as equipment_id,
           created_at,
           COALESCE(user_updated_at, updated_at) as updated_at,
           user_updated_by as updated_by
@@ -149,7 +151,7 @@ export const iccidMappingsHandler = {
     
     try {
       const mapping = await env.DB.prepare(`
-        SELECT 
+        SELECT
           iccid as id,
           iccid,
           COALESCE(user_phone_number, phone_number) as phone_number,
@@ -157,6 +159,7 @@ export const iccidMappingsHandler = {
           COALESCE(user_country_code, country_code) as country,
           user_notes as notes,
           user_override_enabled as is_active,
+          current_modem_id as equipment_id,
           created_at,
           COALESCE(user_updated_at, updated_at) as updated_at,
           user_updated_by as updated_by
@@ -256,7 +259,7 @@ export const iccidMappingsHandler = {
       
       // Return the created/updated mapping
       const mapping = await env.DB.prepare(`
-        SELECT 
+        SELECT
           iccid as id,
           iccid,
           COALESCE(user_phone_number, phone_number) as phone_number,
@@ -264,6 +267,7 @@ export const iccidMappingsHandler = {
           COALESCE(user_country_code, country_code) as country,
           user_notes as notes,
           user_override_enabled as is_active,
+          current_modem_id as equipment_id,
           created_at,
           COALESCE(user_updated_at, updated_at) as updated_at
         FROM sims
@@ -323,7 +327,7 @@ export const iccidMappingsHandler = {
       
       // Return updated mapping
       const mapping = await env.DB.prepare(`
-        SELECT 
+        SELECT
           iccid as id,
           iccid,
           COALESCE(user_phone_number, phone_number) as phone_number,
@@ -331,6 +335,7 @@ export const iccidMappingsHandler = {
           COALESCE(user_country_code, country_code) as country,
           user_notes as notes,
           user_override_enabled as is_active,
+          current_modem_id as equipment_id,
           created_at,
           COALESCE(user_updated_at, updated_at) as updated_at
         FROM sims
