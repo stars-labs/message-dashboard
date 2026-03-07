@@ -9,14 +9,12 @@
   import IccidMappingDialog from "./lib/IccidMappingDialog.svelte";
   import KeywordConfig from "./lib/KeywordConfig.svelte";
   import ErrorBoundary from "./lib/ErrorBoundary.svelte";
-  import SentryTest from "./lib/SentryTest.svelte";
   import { api } from "./lib/api.js";
   import { getPhoneFlag, mapStatsResponse } from "./lib/countries.js";
   // All real-time updates disabled to save costs - manual refresh only
   // import { RealtimeService } from "./lib/websocket-with-fallback.js";
   import { auth } from "./lib/auth.js";
   import config from "./lib/config.js";
-  import { trackUserInteraction, addBreadcrumb, captureException } from "./lib/sentry-utils.js";
 
   let selectedPhoneIccid = null;
   let messageViewRef = null;
@@ -152,17 +150,6 @@
       currentView = 'dashboard';
     }
     
-    // Track navigation
-    if (previousView !== currentView) {
-      trackUserInteraction('navigate', `tab-${currentView}`, {
-        from: previousView,
-        to: currentView
-      });
-      addBreadcrumb(`Navigated to ${currentView}`, 'navigation', {
-        from: previousView,
-        to: currentView
-      });
-    }
   }
 
   // Load data using HTTP API directly for better performance
@@ -189,7 +176,6 @@
             .then((r) => r.json())
             .catch((err) => {
               console.error('[App] Failed to fetch phones:', err);
-              captureException(err, { context: { endpoint: '/api/phones' } });
               return { success: false, data: [] };
             }),
           fetch("/api/messages?limit=2000", { headers })
@@ -205,14 +191,12 @@
             })
             .catch((err) => {
               console.error('[App] Failed to fetch messages:', err);
-              captureException(err, { context: { endpoint: '/api/messages' } });
               return { success: false, data: [] };
             }),
           fetch("/api/stats", { headers })
             .then((r) => r.json())
             .catch((err) => {
               console.error('[App] Failed to fetch stats:', err);
-              captureException(err, { context: { endpoint: '/api/stats' } });
               return { success: false };
             }),
         ]);
@@ -1515,7 +1499,3 @@
   }}
 />
 
-<!-- Sentry Test Component (Development Only) -->
-{#if import.meta.env.MODE === 'development'}
-  <SentryTest />
-{/if}
