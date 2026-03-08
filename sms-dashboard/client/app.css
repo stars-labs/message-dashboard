@@ -15,10 +15,6 @@
 }
 
 @layer components {
-  .glassmorphism {
-    @apply bg-white border border-stone-200;
-  }
-
   .tech-card {
     @apply bg-white border border-stone-200/80 rounded-xl p-6 relative overflow-hidden;
     box-shadow: 0 1px 3px rgba(28,25,23,0.06), 0 1px 2px rgba(28,25,23,0.04);
@@ -65,10 +61,6 @@
     @apply text-red-500;
   }
 
-  .gradient-text {
-    @apply text-stone-900 font-semibold;
-  }
-
   .sim-missing-badge {
     @apply animate-pulse;
   }
@@ -79,10 +71,6 @@
 
   .status-sim-missing {
     @apply text-orange-500;
-  }
-
-  .sim-warning-pulse {
-    animation: warning-pulse 2s ease-in-out infinite;
   }
 
   .phone-selected {
@@ -98,14 +86,6 @@
     @apply font-semibold tracking-wide;
   }
 
-  .header-text {
-    @apply text-stone-900 font-bold;
-  }
-}
-
-@keyframes warning-pulse {
-  0%, 100% { opacity: 0.7; transform: scale(1); }
-  50% { opacity: 1; transform: scale(1.02); }
 }
 
 ::-webkit-scrollbar {
