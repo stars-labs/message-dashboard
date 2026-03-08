@@ -34,9 +34,9 @@ bun run build                                         # Production build
 bun run deploy                                        # Build + deploy to CF
 
 # Database
-npx wrangler d1 execute sms-dashboard --local --file=migrations/schema.sql
-npx wrangler d1 execute sms-dashboard --remote --command="SELECT * FROM device_view"
-npx wrangler tail sms-dashboard --format pretty       # Live API logs
+bunx wrangler d1 execute sms-dashboard --local --file=migrations/schema.sql
+bunx wrangler d1 execute sms-dashboard --remote --command="SELECT * FROM device_view"
+bunx wrangler tail sms-dashboard --format pretty       # Live API logs
 
 # Rust daemon
 cd orange-pi-daemon && cargo build --release
@@ -61,7 +61,7 @@ MESSAGE_DB_PATH="/var/lib/sms-daemon/messages.db" # Local SQLite queue
 USE_DBUS="0"                         # Set "1" to use ModemManager D-Bus instead of AT commands
 ```
 
-Cloudflare secrets (set via `npx wrangler secret put <NAME>`):
+Cloudflare secrets (set via `bunx wrangler secret put <NAME>`):
 `AUTH0_DOMAIN`, `AUTH0_CLIENT_ID`, `AUTH0_CLIENT_SECRET`, `API_KEY`
 
 ## Database Schema (Cloudflare D1)

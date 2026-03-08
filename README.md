@@ -111,7 +111,7 @@ Cloudflare D1 with normalized 3NF schema:
 
 ```bash
 # Query remote DB
-npx wrangler d1 execute sms-dashboard --remote --command="SELECT * FROM device_view"
+bunx wrangler d1 execute sms-dashboard --remote --command="SELECT * FROM device_view"
 ```
 
 ## Auth

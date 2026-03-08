@@ -139,13 +139,13 @@ Deploy the SMS dashboard to Cloudflare Workers:
 cd sms-dashboard
 
 # Set up Cloudflare authentication
-npx wrangler login
+bunx wrangler login
 
 # Configure secrets (required)
-npx wrangler secret put AUTH0_DOMAIN          # e.g., your-tenant.auth0.com
-npx wrangler secret put AUTH0_CLIENT_ID       # Auth0 application client ID
-npx wrangler secret put AUTH0_CLIENT_SECRET   # Auth0 application client secret
-npx wrangler secret put API_KEY               # API key for Orange Pi authentication
+bunx wrangler secret put AUTH0_DOMAIN          # e.g., your-tenant.auth0.com
+bunx wrangler secret put AUTH0_CLIENT_ID       # Auth0 application client ID
+bunx wrangler secret put AUTH0_CLIENT_SECRET   # Auth0 application client secret
+bunx wrangler secret put API_KEY               # API key for Orange Pi authentication
 
 # Initialize D1 database (first time only)
 npm run db:init
@@ -157,23 +157,23 @@ npm run db:migrate
 npm run deploy
 
 # View live logs
-npx wrangler tail sms-dashboard
+bunx wrangler tail sms-dashboard
 ```
 
 ### Database Operations
 
 ```bash
 # Execute SQL on local database
-npx wrangler d1 execute sms-dashboard --local --file=migrations/schema.sql
+bunx wrangler d1 execute sms-dashboard --local --file=migrations/schema.sql
 
 # Execute SQL on remote database
-npx wrangler d1 execute sms-dashboard --remote --file=migrations/002_refactor_phones_to_modems_sims.sql
+bunx wrangler d1 execute sms-dashboard --remote --file=migrations/002_refactor_phones_to_modems_sims.sql
 
 # Query remote database (use device_view for backward compatibility)
-npx wrangler d1 execute sms-dashboard --remote --command="SELECT * FROM device_view"
+bunx wrangler d1 execute sms-dashboard --remote --command="SELECT * FROM device_view"
 
 # Run migration validation
-npx wrangler d1 execute sms-dashboard --remote --file=migrations/validate-migration.sql
+bunx wrangler d1 execute sms-dashboard --remote --file=migrations/validate-migration.sql
 ```
 
 ### Database Migration Guide (v2.0)
@@ -184,22 +184,22 @@ The system has been migrated from a monolithic `phones` table to a normalized st
 cd sms-dashboard
 
 # 1. Backup current data (recommended)
-npx wrangler d1 execute sms-dashboard --remote --command="SELECT * FROM phones" > backup-phones.json
+bunx wrangler d1 execute sms-dashboard --remote --command="SELECT * FROM phones" > backup-phones.json
 
 # 2. Run migration scripts in order
-npx wrangler d1 execute sms-dashboard --remote --file=migrations/002_refactor_phones_to_modems_sims.sql
-npx wrangler d1 execute sms-dashboard --remote --file=migrations/003_migrate_phones_data.sql
-npx wrangler d1 execute sms-dashboard --remote --file=migrations/004_cleanup_synthetic_entries.sql
-npx wrangler d1 execute sms-dashboard --remote --file=migrations/005_create_device_view.sql
+bunx wrangler d1 execute sms-dashboard --remote --file=migrations/002_refactor_phones_to_modems_sims.sql
+bunx wrangler d1 execute sms-dashboard --remote --file=migrations/003_migrate_phones_data.sql
+bunx wrangler d1 execute sms-dashboard --remote --file=migrations/004_cleanup_synthetic_entries.sql
+bunx wrangler d1 execute sms-dashboard --remote --file=migrations/005_create_device_view.sql
 
 # 3. Validate migration
 node scripts/validate-migration.js
 
 # 4. If validation passes, drop old table
-npx wrangler d1 execute sms-dashboard --remote --file=migrations/006_drop_phones_table.sql
+bunx wrangler d1 execute sms-dashboard --remote --file=migrations/006_drop_phones_table.sql
 
 # If issues occur, rollback:
-npx wrangler d1 execute sms-dashboard --remote --file=migrations/rollback-to-phones.sql
+bunx wrangler d1 execute sms-dashboard --remote --file=migrations/rollback-to-phones.sql
 ```
 
 ## Orange Pi NixOS Deployment
