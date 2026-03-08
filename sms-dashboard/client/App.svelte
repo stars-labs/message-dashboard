@@ -11,8 +11,6 @@
   import ErrorBoundary from "./lib/ErrorBoundary.svelte";
   import { api } from "./lib/api.js";
   import { getPhoneFlag, mapStatsResponse } from "./lib/countries.js";
-  // All real-time updates disabled to save costs - manual refresh only
-  // import { RealtimeService } from "./lib/websocket-with-fallback.js";
   import { auth } from "./lib/auth.js";
   import config from "./lib/config.js";
 
@@ -41,11 +39,9 @@
     const onlinePhones = phones.filter(p => {
       const hasOnlineStatus = p?.status && ["online", "active", "registered"].includes(p.status);
       if (!hasOnlineStatus) {
-        console.debug(`[calculateOnline] Phone ${p?.iccid} excluded - status: ${p?.status}`);
         return false;
       }
       if (!p.updated_at) {
-        console.debug(`[calculateOnline] Phone ${p?.iccid} excluded - no updated_at`);
         return false;
       }
       
@@ -53,7 +49,6 @@
         const updateTime = new Date(p.updated_at).getTime();
         const isRecent = !isNaN(updateTime) && updateTime > fiveMinutesAgo;
         if (!isRecent) {
-          console.debug(`[calculateOnline] Phone ${p?.iccid} excluded - too old: ${p.updated_at}`);
         }
         return isRecent;
       } catch (e) {
@@ -62,7 +57,6 @@
       }
     });
     
-    console.debug(`[calculateOnline] Result: ${onlinePhones.length}/${phones.length} online (sample phone status: ${phones[0]?.status}, updated_at: ${phones[0]?.updated_at})`);
     return onlinePhones.length;
   }
   
@@ -74,7 +68,6 @@
       return p?.status === 'sim-missing' || (!p?.iccid && !p?.number);
     });
     
-    console.debug(`[calculateSimMissing] Result: ${simMissingPhones.length}/${phones.length} need SIM cards`);
     return simMissingPhones.length;
   }
   
@@ -99,10 +92,6 @@
   let user = null;
   let loading = true;
   let dataLoading = true; // Track data loading separately
-  // Real-time connections disabled - manual refresh only
-  // let wsConnected = false;
-  // let wsUnsubscribers = [];
-  // let wsConnection = null;
   let currentView = "dashboard"; // 'dashboard', 'iccid-mappings', or 'keywords'
   let showIccidMappingDialog = false;
   let phoneToMap = null;
@@ -140,13 +129,10 @@
     const previousView = currentView;
     
     if (hash === 'keywords') {
-      console.debug('[App] Hash routing: switching to keywords view');
       currentView = 'keywords';
     } else if (hash === 'iccid-mappings') {
-      console.debug('[App] Hash routing: switching to ICCID mappings view');
       currentView = 'iccid-mappings';
     } else if (hash === 'dashboard' || hash === '') {
-      console.debug('[App] Hash routing: switching to dashboard view');
       currentView = 'dashboard';
     }
     
@@ -156,7 +142,6 @@
   async function loadData() {
     // Only proceed if user is authenticated
     if (!user || !auth.token) {
-      console.debug("[App] loadData called but user not authenticated, skipping");
       dataLoading = false;
       return;
     }
@@ -180,13 +165,11 @@
             }),
           fetch("/api/messages?limit=2000", { headers })
             .then(async (r) => {
-              console.debug('[App] Messages API response status:', r.status, r.statusText);
               if (!r.ok) {
                 console.error('[App] Messages API response not ok:', r.status, r.statusText);
                 return { success: false, data: [], error: `HTTP ${r.status}` };
               }
               const data = await r.json();
-              console.debug('[App] Raw messages API response:', data);
               return data;
             })
             .catch((err) => {
@@ -226,40 +209,19 @@
         updateSelectedPhone();
       }
       
-      console.debug('[App] Loaded phones:', phoneNumbers.length);
-      console.debug('[App] Phone ICCIDs:', phoneNumbers.map(p => p.iccid));
 
-      // Safely handle messages response
-      console.debug('[App] Processing messages response:', {
-        hasResponse: !!messagesResponse,
-        hasData: !!(messagesResponse && messagesResponse.data),
-        success: messagesResponse?.success,
-        isDataArray: Array.isArray(messagesResponse?.data),
-        dataLength: messagesResponse?.data?.length,
-        hasResults: !!(messagesResponse?.data?.results),
-        resultsLength: messagesResponse?.data?.results?.length
-      });
-      
       if (messagesResponse && messagesResponse.success && messagesResponse.data) {
         // Handle both array and object with results
         if (Array.isArray(messagesResponse.data)) {
           messages = messagesResponse.data;
-          console.debug('[App] Using direct data array:', messages.length, 'messages');
         } else if (messagesResponse.data.results && Array.isArray(messagesResponse.data.results)) {
           messages = messagesResponse.data.results;
-          console.debug('[App] Using data.results array:', messages.length, 'messages');
         } else {
           console.warn('[App] Unexpected messages response format:', messagesResponse);
           messages = [];
         }
       } else {
-        console.error('[App] CRITICAL: Messages API failed!', {
-          response: messagesResponse,
-          success: messagesResponse?.success,
-          hasData: !!(messagesResponse && messagesResponse.data),
-          error: messagesResponse?.error,
-          authToken: !!auth.token
-        });
+        console.error('[App] Messages API failed:', messagesResponse?.error);
         
         // If this is an auth error, try to re-authenticate
         if (messagesResponse?.error && messagesResponse.error.includes('HTTP 401')) {
@@ -271,24 +233,8 @@
         messages = [];
       }
       
-      console.debug('[App] Initial messages loaded:', messages.length);
-      if (messages.length > 0) {
-        console.debug('[App] First message:', messages[0]);
-        console.debug('[App] Message ICCIDs:', [...new Set(messages.map(m => m.phone_iccid))]);
-        console.debug('[App] Message IDs:', messages.slice(0, 5).map(m => m.id));
-        
-        // Update polling service with latest message info
-        const sortedMessages = [...messages].sort((a, b) => 
-          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-        );
-        if (sortedMessages[0]) {
-          // No need to track latest message for WebSocket - it handles all messages
-        }
-      }
-
       // Map API stats to component format
       if (statsResponse) {
-        console.debug('[App] Stats API Response:', statsResponse);
         
         stats = mapStatsResponse(statsResponse);
         
@@ -300,7 +246,6 @@
         
         // The reactive statement will automatically update online device count if needed
         
-        console.debug('[App] Stats after updates:', stats);
       }
 
       // Mark data as loaded
@@ -333,41 +278,20 @@
     }
   }
 
-  // Real-time updates disabled - users must manually refresh
-  // async function startRealtime() {
-  //   // Disabled to save API costs
-  // }
-
   let daemonInterval;
 
   onMount(async () => {
-    // All real-time connections and periodic checks disabled
-    // Users must manually refresh the page for updates
-    
-    // No WebSocket/SSE connection
-    // No periodic daemon status checks
-    // No automatic updates
-    
-    // Don't fetch stats here - it will be fetched after authentication in loadAllData
-    // await fetchStats();
-    
-    // Check if returning from Auth0 callback
     if (window.location.search.includes("token=")) {
       await auth.handleCallback();
     }
-    
-    // Set initial view based on hash
+
     handleHashChange();
-    
-    // Listen for hash changes
     window.addEventListener('hashchange', handleHashChange);
 
-    // Quick authentication check
     try {
       if (auth.isAuthenticated()) {
         user = await auth.getUser();
       } else {
-        // Try to get user info if token exists
         const existingUser = await auth.getUser();
         if (existingUser) {
           user = existingUser;
@@ -377,311 +301,35 @@
       // Authentication check failed
     }
 
-    // Set loading to false immediately to show UI
     loading = false;
 
-    // Load data and start polling ONLY for authenticated users
     if (user) {
-      // Mark daemon as initially connected to prevent "数据过期" message
       daemonStatus.connected = true;
       daemonStatus.lastDataUpdate = Date.now();
 
-      // Load data once on page load - no real-time updates
       loadData().finally(() => {
         dataLoading = false;
       }).catch((error) => {
         console.error("Failed to load data:", error);
       });
-      
-      // Disable periodic daemon health check to reduce API calls
-      // Health status will be updated via WebSocket events
-      // const healthCheckInterval = setInterval(() => {
-      //   updateDaemonHealthStatus();
-      // }, 60000); // Check every minute
-      
-      // Store interval for cleanup
-      // window._daemonHealthInterval = healthCheckInterval;
-      
     } else {
-      // For anonymous users, don't make any API calls
-      console.debug("[App] User not authenticated, skipping data loading and polling");
-      dataLoading = false; // Mark data loading as complete
+      dataLoading = false;
     }
   });
 
-  // All real-time listeners removed - manual refresh only
-  /*
-  function setupRealtimeListeners() {
-    // Listen for new messages via WebSocket/SSE
-    wsUnsubscribers.push(
-      wsConnection.on("message:created", (msg) => {
-        // New message received - only add if it belongs to the selected phone
-        if (selectedPhoneIccid && msg.data.phone_iccid === selectedPhoneIccid) {
-          messages = [msg.data, ...messages];
-        }
-        // Update stats regardless of which phone it's for
-        stats.totalMessages++;
-        stats.todayMessages++;
-      }),
-    );
-
-    // Listen for message updates
-    wsUnsubscribers.push(
-      wsConnection.on("message:updated", (msg) => {
-        // Message updated
-        const index = messages.findIndex((m) => m.id === msg.data.id);
-        if (index !== -1) {
-          messages[index] = msg.data;
-          messages = [...messages];
-        }
-      }),
-    );
-
-    // Listen for bulk message creation
-    wsUnsubscribers.push(
-      wsConnection.on("messages:bulk_created", (msg) => {
-        console.debug('[App] Received bulk messages event:', msg);
-        
-        if (!msg.data || !Array.isArray(msg.data)) {
-          console.warn('[App] Invalid message data received');
-          return;
-        }
-        
-        // Get incoming messages - filter by selected phone if one is selected
-        const allIncomingMessages = msg.data.filter(m => m && m.id);
-        const incomingMessages = selectedPhoneIccid 
-          ? allIncomingMessages.filter(m => m.phone_iccid === selectedPhoneIccid)
-          : allIncomingMessages;
-        
-        if (incomingMessages.length === 0) {
-          // No messages for the selected phone
-          return;
-        }
-        
-        console.debug('[App] Processing', incomingMessages.length, 'messages from polling for phone', selectedPhoneIccid || 'all');
-        
-        // Create a map of existing messages by ID for quick lookup and update
-        const existingMessagesMap = new Map(messages.map(m => [m.id, m]));
-        
-        // Track which messages are truly new
-        const newMessages = [];
-        const updatedMessages = [];
-        
-        // Process each incoming message
-        incomingMessages.forEach(incomingMsg => {
-          const existingMsg = existingMessagesMap.get(incomingMsg.id);
-          
-          if (!existingMsg) {
-            // This is a new message
-            newMessages.push(incomingMsg);
-          } else {
-            // Check if this is actually an update to an existing message
-            // Compare timestamps to avoid false updates
-            const existingTime = new Date(existingMsg.timestamp).getTime();
-            const incomingTime = new Date(incomingMsg.timestamp).getTime();
-            
-            if (Math.abs(existingTime - incomingTime) > 1000 || 
-                existingMsg.content !== incomingMsg.content) {
-              // This looks like an actual update
-              updatedMessages.push(incomingMsg);
-              existingMessagesMap.set(incomingMsg.id, incomingMsg);
-            }
-          }
-        });
-        
-        if (newMessages.length > 0) {
-          console.debug('[App] Found', newMessages.length, 'NEW messages:');
-          newMessages.forEach(m => {
-            console.debug(`  - ${m.id}: "${m.content.substring(0, 30)}..." at ${m.timestamp}`);
-          });
-          
-          // Build new messages array: new messages first, then existing
-          const allMessageIds = new Set();
-          const deduplicatedMessages = [];
-          
-          // Add new messages first
-          newMessages.forEach(m => {
-            if (!allMessageIds.has(m.id)) {
-              allMessageIds.add(m.id);
-              deduplicatedMessages.push(m);
-            }
-          });
-          
-          // Then add existing messages (including any updates)
-          messages.forEach(m => {
-            const updatedMsg = existingMessagesMap.get(m.id);
-            if (!allMessageIds.has(m.id)) {
-              allMessageIds.add(m.id);
-              deduplicatedMessages.push(updatedMsg || m);
-            }
-          });
-          
-          // Update messages array
-          messages = deduplicatedMessages;
-          
-          // Keep only the most recent 200 messages to prevent memory issues
-          if (messages.length > 200) {
-            messages = messages.slice(0, 200);
-          }
-          
-          // Update stats
-          stats.totalMessages += newMessages.length;
-          stats.todayMessages += newMessages.length;
-          
-          // Auto-select phone if no phone is selected
-          if (!selectedPhoneIccid && newMessages.length > 0) {
-            const firstNewMessage = newMessages[0];
-            const matchingPhone = phoneNumbers.find(p => p.iccid === firstNewMessage.phone_iccid);
-            if (matchingPhone) {
-              console.debug('[App] Auto-selecting phone:', matchingPhone.iccid);
-              selectedPhoneIccid = matchingPhone.iccid;
-              handlePhoneSelection();
-            }
-          }
-          
-          // Show notification
-          console.log(`[App] ✅ ${newMessages.length} new message(s) received!`);
-        } else if (updatedMessages.length > 0) {
-          console.debug('[App] Updated', updatedMessages.length, 'existing message(s)');
-          // Trigger reactive update
-          messages = messages;
-        } else {
-          console.debug('[App] No new messages in this update');
-        }
-      }),
-    );
-
-    // Listen for phone updates
-    wsUnsubscribers.push(
-      wsConnection.on("phones:updated", (msg) => {
-        // Phones updated
-        console.debug("Polling update - phones:", msg?.data);
-
-        // Safety check - ensure msg exists and has data
-        if (!msg || !msg.data) {
-          console.warn("[App] Invalid phone update message:", msg);
-          return;
-        }
-
-        // Update daemon status when we receive phone data
-        daemonStatus.lastPhoneUpdate = Date.now();
-        daemonStatus.lastDataUpdate = Date.now();
-
-        // Only update phones if we have valid data
-        if (Array.isArray(msg.data) && msg.data.length > 0) {
-          // Replace all phones with the new data (don't append)
-          // The daemon sends the complete list of phones
-          // Filter out phones without valid ICCIDs
-          phoneNumbers = msg.data
-            .filter(
-              (phone) =>
-                phone.iccid &&
-                phone.iccid.trim() !== "" &&
-                !phone.iccid.startsWith("SIM_"),
-            )
-            .map((updatedPhone) => {
-              console.debug(
-                `Phone update - ${updatedPhone.iccid}: signal=${updatedPhone.signal}, status=${updatedPhone.status}`,
-              );
-              // Ensure we have the proper structure
-              return {
-                ...updatedPhone,
-                flag: getPhoneFlag(updatedPhone)
-              };
-            });
-
-          console.debug("Updated phoneNumbers:", phoneNumbers);
-
-          // Update total devices from daemon count
-          const daemonModemCount = daemonStatus.modem_count || phoneNumbers.length;
-          if (stats.totalDevices !== daemonModemCount) {
-            stats = { ...stats, totalDevices: daemonModemCount };
-          }
-          // Update stats manually (was reactive statement)
-          updateStatsFromPhones();
-          updateSelectedPhone();
-          
-          // Update daemon health status
-          updateDaemonHealthStatus();
-        }
-      }),
-    );
-
-    // Listen for connection status
-    wsUnsubscribers.push(
-      wsConnection.on("connected", () => {
-        pollingConnected = true;
-        console.debug("Polling connected");
-      }),
-    );
-
-    // Listen for message sent responses
-    wsUnsubscribers.push(
-      wsConnection.on("message:sent", (msg) => {
-        // Message sent result received
-        console.debug("Message sent result:", msg.data);
-        if (msg.data.success) {
-          // Create message for local display
-          const sentMessage = {
-            id: `msg-sent-${Date.now()}`,
-            phone_iccid: msg.data.phone_iccid || "",
-            phone_number: msg.data.recipient || "",
-            recipient: msg.data.recipient || "",
-            content: msg.data.content || "",
-            timestamp: new Date().toISOString(),
-            type: "sent",
-            status: "delivered",
-            sms_id: msg.data.sms_id,
-          };
-
-          // Add to local messages
-          messages = [sentMessage, ...messages];
-          stats.totalMessages++;
-          stats.todayMessages++;
-        }
-      }),
-    );
-
-    // Listen for disconnection
-    wsUnsubscribers.push(
-      wsConnection.on("disconnected", () => {
-        pollingConnected = false;
-        console.debug("Polling disconnected");
-      }),
-    );
-  }
-  */
-
-  // All real-time updates disabled - manual refresh only
-
   onDestroy(() => {
-    // Cleanup daemon status interval
     if (daemonInterval) clearInterval(daemonInterval);
-    
-    // Cleanup realtime service
-    wsUnsubscribers.forEach((unsubscribe) => unsubscribe());
-    if (wsConnection) wsConnection.disconnect();
-    
-    // Cleanup health check interval
-    if (window._daemonHealthInterval) {
-      clearInterval(window._daemonHealthInterval);
-    }
-    
-    // Remove hash change listener
     window.removeEventListener('hashchange', handleHashChange);
   });
 
   async function selectPhone(phone) {
-    console.log('[App] selectPhone called with:', phone);
     selectedPhoneIccid = phone?.iccid || null;
     handlePhoneSelection();
-    console.log('[App] selectedPhone after update:', selectedPhone);
     showPhoneList = false;
     
     // Load all messages for the selected phone
     if (phone?.iccid && user && auth.token) {
       try {
-        console.debug('[App] Loading messages for phone:', phone.iccid);
         const token = auth.token;
         const headers = {
           Authorization: `Bearer ${token}`,
@@ -690,36 +338,14 @@
         
         const response = await fetch(`/api/messages?phone_iccid=${phone.iccid}&limit=2000`, { headers });
         const result = await response.json();
-        
-        console.debug('[App] API Response:', {
-          success: result.success,
-          dataLength: result.data?.length,
-          sampleData: result.data?.slice(0, 2)
-        });
-        
+
         if (result.success && result.data) {
-          // Check data format - handle both array and object responses
           const messageData = Array.isArray(result.data) ? result.data : (result.data.results || []);
-          console.debug('[App] Extracted message data:', messageData.length, 'messages');
-          
-          // Merge with existing messages, avoiding duplicates
           const existingIds = new Set(messages.map(m => m.id));
           const phoneMessages = messageData.filter(m => !existingIds.has(m.id));
-          
-          console.debug('[App] Messages for phone:', {
-            iccid: phone.iccid,
-            totalInResponse: messageData.length,
-            newMessages: phoneMessages.length,
-            existingMessages: messages.length
-          });
-          
+
           if (phoneMessages.length > 0) {
             messages = [...messages, ...phoneMessages];
-            console.debug(`[App] Updated total messages: ${messages.length}`);
-          } else if (messageData.length > 0) {
-            console.debug('[App] All messages were already loaded');
-          } else {
-            console.debug('[App] No messages found for this phone');
           }
         }
       } catch (err) {
@@ -732,31 +358,26 @@
   async function loadMessagesForPhone(phoneIccid) {
     // Only proceed if user is authenticated
     if (!user || !auth.token) {
-      console.debug("[App] loadMessagesForPhone called but user not authenticated, skipping");
       return;
     }
     
     if (!phoneIccid) {
       // No phone selected, load ALL messages from all devices
-      console.debug('[App] No phone selected, loading all messages from all devices');
       try {
         const response = await api.getMessages({ 
           limit: 2000 // Load messages from all devices
         });
         
         if (response && response.data) {
-          console.debug(`[App] API returned ${response.data.length} messages from all devices`);
           
           // Debug: Show unique ICCIDs in the messages
           const uniqueIccids = [...new Set(response.data.map(m => m.phone_iccid))];
-          console.debug(`[App] Messages from ${uniqueIccids.length} different devices:`, uniqueIccids);
           
           messages = response.data;
           
           // Sort messages by timestamp (newest first)
           messages.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
           
-          console.debug(`[App] Now displaying ${messages.length} messages from ALL devices`);
         }
       } catch (error) {
         console.error('[App] Failed to load all messages:', error);
@@ -766,7 +387,6 @@
     }
     
     try {
-      console.debug(`[App] Loading messages for phone ICCID: ${phoneIccid}`);
       
       const response = await api.getMessages({ 
         phone_iccid: phoneIccid,
@@ -774,39 +394,10 @@
       });
       
       if (response && response.data) {
-        console.debug(`[App] API returned ${response.data.length} messages for ICCID ${phoneIccid}`);
         
         // DEBUG: Verify all messages have the correct ICCID
-        const wrongIccidMessages = response.data.filter(msg => msg.phone_iccid !== phoneIccid);
-        if (wrongIccidMessages.length > 0) {
-          console.error('[App] WARNING: API returned messages with wrong ICCIDs!');
-          console.error('Expected ICCID:', phoneIccid);
-          console.error('Wrong ICCID messages:', wrongIccidMessages.map(m => ({
-            id: m.id,
-            phone_iccid: m.phone_iccid,
-            content: m.content?.substring(0, 50) + '...'
-          })));
-        }
-        
-        // DEBUG: Log first few messages to verify content
-        console.debug('[App] First 3 messages from API:');
-        response.data.slice(0, 3).forEach((msg, idx) => {
-          console.debug(`  ${idx + 1}. ID: ${msg.id}, ICCID: ${msg.phone_iccid}, Content: "${msg.content?.substring(0, 50)}..."`);
-        });
-        
-        // Replace all messages with the new phone's messages
-        // Don't merge - we want only this phone's messages
         messages = response.data;
-        
-        // Sort messages by timestamp (newest first)
         messages.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-        
-        console.debug(`[App] Now showing ${messages.length} messages for phone ${phoneIccid}`);
-        console.debug('[App] Messages array after update:', messages.slice(0, 3).map(m => ({
-          id: m.id,
-          phone_iccid: m.phone_iccid,
-          content: m.content?.substring(0, 30) + '...'
-        })));
       }
     } catch (error) {
       console.error('[App] Failed to load messages for phone:', error);
@@ -841,7 +432,6 @@
   async function handleMessageSent(event) {
     const newMessage = event.detail;
 
-    console.log("Sending message via WebSocket:", newMessage);
 
     try {
       // Send message using WebSocket API
@@ -909,29 +499,6 @@
     }
     
     daemonStatus.healthCheckTime = now;
-    
-    // Only log if we have the variables defined
-    if (daemonStatus.lastHeartbeat) {
-      console.debug('Daemon health check:', {
-        connected: daemonStatus.connected,
-        heartbeatBased: true,
-        phoneCount: phoneNumbers.length,
-        lastHeartbeat: new Date(daemonStatus.lastHeartbeat).toLocaleString()
-      });
-    } else {
-      const dataIsRecent = daemonStatus.lastDataUpdate > fiveMinutesAgo;
-      const hasActivePhones = phoneNumbers.length > 0 && phoneNumbers.some(phone => {
-        return phone.status === 'active' || phone.status === 'online' || phone.status === 'registered';
-      });
-      
-      console.debug('Daemon health check:', {
-        connected: daemonStatus.connected,
-        dataIsRecent,
-        hasActivePhones,
-        phoneCount: phoneNumbers.length,
-        lastDataUpdate: new Date(daemonStatus.lastDataUpdate).toLocaleString()
-      });
-    }
   }
 
   function getDaemonStatusText() {
@@ -972,7 +539,6 @@
       const response = await fetch('/api/daemon/status');
       if (response.ok) {
         const data = await response.json();
-        console.debug('[App] Daemon status response:', data);
         // Only show modem count when actually online
         const cleanData = {
           ...data,
@@ -1015,7 +581,6 @@
   async function fetchStats() {
     // Only proceed if user is authenticated
     if (!user || !auth.token) {
-      console.debug("[App] fetchStats called but user not authenticated, skipping");
       return;
     }
     
@@ -1028,7 +593,6 @@
       const response = await fetch('/api/stats', { headers });
       if (response.ok) {
         const data = await response.json();
-        console.debug('[App] Fetched stats from API:', data);
         
         stats = mapStatsResponse(data);
         
@@ -1112,7 +676,6 @@
             </button>
             <button
               on:click={() => {
-                console.debug("[App] Switching to ICCID mappings view");
                 currentView = "iccid-mappings";
                 window.location.hash = 'iccid-mappings';
               }}
@@ -1125,7 +688,6 @@
             </button>
             <button
               on:click={() => {
-                console.debug("[App] Switching to keywords view");
                 currentView = "keywords";
                 window.location.hash = 'keywords';
               }}
@@ -1278,7 +840,6 @@
         </button>
         <button
           on:click={() => {
-            console.debug("[App] Switching to ICCID mappings view (mobile)");
             currentView = "iccid-mappings";
           }}
           class="flex-1 px-3 py-2 rounded-lg text-sm transition-all {currentView ===
@@ -1290,7 +851,6 @@
         </button>
         <button
           on:click={() => {
-            console.debug("[App] Switching to keywords view (mobile)");
             currentView = "keywords";
           }}
           class="flex-1 px-3 py-2 rounded-lg text-sm transition-all {currentView ===

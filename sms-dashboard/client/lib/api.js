@@ -1,5 +1,4 @@
 import { auth } from './auth';
-import { pollingService } from './polling-service';
 import { messageCache } from './message-cache';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 
@@ -8,52 +7,33 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ||
 export async function fetchWithAuth(endpoint, options = {}) {
   const token = auth.token || localStorage.getItem('auth_token');
   const fullUrl = `${API_BASE_URL}${endpoint}`;
-  
-  console.debug(`[fetchWithAuth] Making request to: ${fullUrl}`);
-  console.debug(`[fetchWithAuth] Options:`, options);
-  console.debug(`[fetchWithAuth] Token present:`, !!token);
-  
-  try {
-    const response = await fetch(fullUrl, {
-      ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': token ? `Bearer ${token}` : '',
-        ...options.headers,
-      },
-    });
-    
-    console.debug(`[fetchWithAuth] Response status: ${response.status}`);
-    console.debug(`[fetchWithAuth] Response headers:`, Object.fromEntries(response.headers.entries()));
-    
-    if (response.status === 401) {
-      console.log(`[fetchWithAuth] 401 Unauthorized - logging out`);
-      // Token expired or invalid, redirect to login
-      auth.logout();
-      throw new Error('Authentication required');
-    }
-    
-    // Check if response is ok before parsing JSON
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.debug(`[fetchWithAuth] Error response text:`, errorText);
-      let errorData;
-      try {
-        errorData = JSON.parse(errorText);
-      } catch (e) {
-        errorData = { error: 'Unknown error' };
-      }
-      
-      throw new Error(errorData.error || `Request failed with status ${response.status}`);
-    }
-    
-    const responseData = await response.json();
-    console.debug(`[fetchWithAuth] Response data:`, responseData);
-    
-    return responseData;
-  } catch (error) {
-    throw error;
+
+  const response = await fetch(fullUrl, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': token ? `Bearer ${token}` : '',
+      ...options.headers,
+    },
+  });
+
+  if (response.status === 401) {
+    auth.logout();
+    throw new Error('Authentication required');
   }
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    let errorData;
+    try {
+      errorData = JSON.parse(errorText);
+    } catch (e) {
+      errorData = { error: 'Unknown error' };
+    }
+    throw new Error(errorData.error || `Request failed with status ${response.status}`);
+  }
+
+  return await response.json();
 }
 
 // Polling-based API with HTTP fallback
@@ -182,7 +162,6 @@ export const api = {
         try {
           cachedMessages = await messageCache.getCachedMessages(phoneIccid, params.limit || 500);
           lastSyncTime = await messageCache.getLastSyncTime(cacheKey);
-          console.debug(`[API] Cache hit: ${cachedMessages.length} messages, last sync: ${lastSyncTime}`);
         } catch (cacheErr) {
           console.warn('[API] Cache read failed:', cacheErr);
         }
@@ -202,7 +181,6 @@ export const api = {
         const newMessages = response.data || [];
         const serverTime = response.sync?.server_time || new Date().toISOString();
 
-        console.debug(`[API] Fetched ${newMessages.length} ${response.sync?.is_incremental ? 'new' : 'total'} messages from API`);
 
         // Step 3: Cache new messages
         if (newMessages.length > 0) {
@@ -229,7 +207,6 @@ export const api = {
           merged.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
           const limitedMerged = merged.slice(0, params.limit || 500);
 
-          console.debug(`[API] Merged: ${uniqueNewMessages.length} new + ${cachedMessages.length} cached = ${limitedMerged.length} total`);
 
           return {
             success: true,
@@ -245,7 +222,6 @@ export const api = {
 
       // API failed - return cached data if available
       if (cachedMessages.length > 0) {
-        console.debug(`[API] API failed, returning ${cachedMessages.length} cached messages`);
         return {
           success: true,
           data: cachedMessages,
@@ -262,7 +238,6 @@ export const api = {
       try {
         const cachedMessages = await messageCache.getCachedMessages(phoneIccid, params.limit || 500);
         if (cachedMessages.length > 0) {
-          console.debug(`[API] Error recovery: returning ${cachedMessages.length} cached messages`);
           return {
             success: true,
             data: cachedMessages,
@@ -282,7 +257,7 @@ export const api = {
     try {
       return await apiRequest('sendMessage', data);
     } catch (error) {
-      console.warn('Failed to send message via WebSocket:', error);
+      console.warn('Failed to send message :', error);
       // For message sending, we'll prefer WebSocket and show error if it fails
       throw error;
     }
@@ -304,7 +279,7 @@ export const api = {
         verification_rate: 0
       };
     } catch (error) {
-      console.warn('Failed to get stats via WebSocket, using default values:', error);
+      console.warn('Failed to get stats:', error);
       return {
         total_messages: 0,
         today_messages: 0,
@@ -325,7 +300,7 @@ export const api = {
       try {
         return await apiRequest('listIccidMappings', params);
       } catch (error) {
-        console.warn('Failed to list ICCID mappings via WebSocket, using HTTP fallback:', error);
+        console.warn('Failed to list ICCID mappings :', error);
         const query = new URLSearchParams(params).toString();
         return await fetchWithAuth(`/api/iccid-mappings?${query}`);
       }
@@ -335,7 +310,7 @@ export const api = {
       try {
         return await apiRequest('getIccidMapping', { id });
       } catch (error) {
-        console.warn('Failed to get ICCID mapping via WebSocket, using HTTP fallback:', error);
+        console.warn('Failed to get ICCID mapping :', error);
         return await fetchWithAuth(`/api/iccid-mappings/${id}`);
       }
     },
@@ -344,7 +319,7 @@ export const api = {
       try {
         return await apiRequest('getIccidMappingByIccid', { iccid });
       } catch (error) {
-        console.warn('Failed to get ICCID mapping by ICCID via WebSocket, using HTTP fallback:', error);
+        console.warn('Failed to get ICCID mapping by ICCID :', error);
         return await fetchWithAuth(`/api/iccid-mappings/by-iccid/${iccid}`);
       }
     },
@@ -353,7 +328,7 @@ export const api = {
       try {
         return await apiRequest('createIccidMapping', data);
       } catch (error) {
-        console.warn('Failed to create ICCID mapping via WebSocket, using HTTP fallback:', error);
+        console.warn('Failed to create ICCID mapping :', error);
         return await fetchWithAuth('/api/iccid-mappings', {
           method: 'POST',
           body: JSON.stringify(data),
@@ -365,7 +340,7 @@ export const api = {
       try {
         return await apiRequest('updateIccidMapping', { id, ...data });
       } catch (error) {
-        console.warn('Failed to update ICCID mapping via WebSocket, using HTTP fallback:', error);
+        console.warn('Failed to update ICCID mapping :', error);
         return await fetchWithAuth(`/api/iccid-mappings/${id}`, {
           method: 'PUT',
           body: JSON.stringify(data),
@@ -377,7 +352,7 @@ export const api = {
       try {
         return await apiRequest('deleteIccidMapping', { id });
       } catch (error) {
-        console.warn('Failed to delete ICCID mapping via WebSocket, using HTTP fallback:', error);
+        console.warn('Failed to delete ICCID mapping :', error);
         return await fetchWithAuth(`/api/iccid-mappings/${id}`, {
           method: 'DELETE',
         });
@@ -388,7 +363,7 @@ export const api = {
       try {
         return await apiRequest('bulkImportIccidMappings', data);
       } catch (error) {
-        console.warn('Failed to bulk import ICCID mappings via WebSocket, using HTTP fallback:', error);
+        console.warn('Failed to bulk import ICCID mappings :', error);
         return await fetchWithAuth('/api/iccid-mappings/bulk', {
           method: 'POST',
           body: JSON.stringify(data),
