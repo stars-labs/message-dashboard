@@ -130,6 +130,39 @@ device_view (
 )
 ```
 
+### 019_fix_device_view_status_values.sql
+- **Fixes device_view and device_stats status matching**
+- Daemon writes `'active'` but views expected `'registered'` for `connection_status`
+- Result: no device ever got status `'online'`, online count was always 0
+
+## Device Status Mapping
+
+### Raw Values (written by Rust daemon)
+
+| Table | Field | Healthy Value | Unhealthy Value |
+|-------|-------|---------------|-----------------|
+| `modems` | `status` | `'active'` | `'disconnected'` |
+| `sims` | `status` | `'active'` | `'inactive'` |
+| `modem_state` | `connection_status` | `'active'` | — |
+
+### Computed Status (`device_view.status`)
+
+The `device_view` CASE expression combines the three tables into a single status:
+
+| `device_view.status` | Condition |
+|----------------------|-----------|
+| `'online'` | modem active + SIM active + connection active/registered |
+| `'registered'` | modem active + SIM active (no connection state) |
+| `'sim-missing'` | modem active + no SIM card |
+| `'offline'` | modem disconnected |
+| `'error'` | anything else |
+
+### Frontend Display
+
+The client (`App.svelte` → `calculateOnlineDevices()`) counts devices as "online" when:
+1. `status` is `'online'`, `'active'`, or `'registered'`
+2. `updated_at` is within the last 5 minutes (proves daemon is still syncing)
+
 ## Rollback Procedures
 
 If a migration needs to be rolled back:
