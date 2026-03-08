@@ -76,24 +76,16 @@
     return phoneDisplay.includes(searchLower) || (phone.iccid && phone.iccid.toLowerCase().includes(searchLower));
   });
 
-  // Initialize recipientSIM when selectedPhone changes, but only if recipientSIM is empty
-  $: if (selectedPhone && !recipientSIM) {
-    recipientSIM = selectedPhone.iccid;
-    const phone = availablePhones.find(p => p.iccid === selectedPhone.iccid);
-    if (phone) {
-      const phoneDisplay = (phone.number && phone.number !== "null") ? phone.number : (phone.iccid ? `ICCID: ${phone.iccid.slice(-6)}` : "Unknown");
-      const operatorDisplay = phone.operator_name ? ` - ${phone.operator_name}` : "";
-      selectedSimDisplay = `${phone.flag || ""} ${phoneDisplay}${operatorDisplay}`;
-    }
-  }
-  
-  // Also update selectedSimDisplay when selectedPhone changes and recipientSIM is already set
-  $: if (selectedPhone && recipientSIM === selectedPhone.iccid) {
-    const phone = availablePhones.find(p => p.iccid === selectedPhone.iccid);
-    if (phone) {
-      const phoneDisplay = (phone.number && phone.number !== "null") ? phone.number : (phone.iccid ? `ICCID: ${phone.iccid.slice(-6)}` : "Unknown");
-      const operatorDisplay = phone.operator_name ? ` - ${phone.operator_name}` : "";
-      selectedSimDisplay = `${phone.flag || ""} ${phoneDisplay}${operatorDisplay}`;
+  // Sync SIM selection + display when selectedPhone changes
+  $: if (selectedPhone) {
+    if (!recipientSIM || recipientSIM === selectedPhone.iccid) {
+      recipientSIM = selectedPhone.iccid;
+      const phone = availablePhones.find(p => p.iccid === selectedPhone.iccid);
+      if (phone) {
+        const phoneDisplay = (phone.number && phone.number !== "null") ? phone.number : (phone.iccid ? `ICCID: ${phone.iccid.slice(-6)}` : "Unknown");
+        const operatorDisplay = phone.operator_name ? ` - ${phone.operator_name}` : "";
+        selectedSimDisplay = `${phone.flag || ""} ${phoneDisplay}${operatorDisplay}`;
+      }
     }
   }
 

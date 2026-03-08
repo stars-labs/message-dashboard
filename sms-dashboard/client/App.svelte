@@ -72,7 +72,7 @@
   
   // Manual function to update stats - no reactive statements to avoid circular dependencies
   function updateStatsFromPhones() {
-    if (phoneNumbers && phoneNumbers.length > 0 && !dataLoading && !backendStatsLoaded) {
+    if (phoneNumbers && phoneNumbers.length > 0 && !dataLoading) {
       const onlineCount = calculateOnlineDevices(phoneNumbers);
       const simMissingCount = calculateSimMissingDevices(phoneNumbers);
       if (onlineCount !== stats.onlineDevices || simMissingCount !== stats.simMissingDevices) {
@@ -91,6 +91,7 @@
   let currentView = "dashboard"; // 'dashboard', 'iccid-mappings', or 'keywords'
   let showIccidMappingDialog = false;
   let toasts = [];
+  let messageRequestId = 0; // Prevents stale message responses from overwriting newer ones
 
   function showToast(message, type = 'info', duration = 4000) {
     const id = Date.now();
@@ -151,36 +152,28 @@
     }
     
     try {
-      // Use HTTP API directly for initial load to avoid WebSocket timeout delays
-      const token = auth.token;
-      const headers = {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      };
-
-      // Make direct HTTP requests in parallel with error handling
+      // Load data via HTTP API (authenticatedFetch handles 401→logout)
       const [phonesResponse, messagesResponse, statsResponse] =
         await Promise.all([
-          fetch("/api/phones", { headers })
+          auth.authenticatedFetch("/api/phones")
             .then((r) => r.json())
             .catch((err) => {
               console.error('[App] Failed to fetch phones:', err);
               return { success: false, data: [] };
             }),
-          fetch("/api/messages?limit=2000", { headers })
+          auth.authenticatedFetch("/api/messages?limit=2000")
             .then(async (r) => {
               if (!r.ok) {
                 console.error('[App] Messages API response not ok:', r.status, r.statusText);
                 return { success: false, data: [], error: `HTTP ${r.status}` };
               }
-              const data = await r.json();
-              return data;
+              return r.json();
             })
             .catch((err) => {
               console.error('[App] Failed to fetch messages:', err);
               return { success: false, data: [] };
             }),
-          fetch("/api/stats", { headers })
+          auth.authenticatedFetch("/api/stats")
             .then((r) => r.json())
             .catch((err) => {
               console.error('[App] Failed to fetch stats:', err);
@@ -282,8 +275,6 @@
     }
   }
 
-  let daemonInterval;
-
   onMount(async () => {
     if (window.location.search.includes("token=")) {
       await auth.handleCallback();
@@ -322,7 +313,6 @@
   });
 
   onDestroy(() => {
-    if (daemonInterval) clearInterval(daemonInterval);
     window.removeEventListener('hashchange', handleHashChange);
   });
 
@@ -332,51 +322,29 @@
     showPhoneList = false;
   }
   
-  // Load messages for a specific phone
+  // Load messages for a specific phone (race-condition safe)
   async function loadMessagesForPhone(phoneIccid) {
-    // Only proceed if user is authenticated
-    if (!user || !auth.token) {
-      return;
-    }
-    
-    if (!phoneIccid) {
-      // No phone selected, load ALL messages from all devices
-      try {
-        const response = await api.getMessages({ 
-          limit: 2000 // Load messages from all devices
-        });
-        
-        if (response && response.data) {
-          
-          messages = response.data;
-          
-          // Sort messages by timestamp (newest first)
-          messages.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-          
-        }
-      } catch (error) {
-        console.error('[App] Failed to load all messages:', error);
-        messages = [];
-      }
-      return;
-    }
-    
+    if (!user || !auth.token) return;
+
+    const requestId = ++messageRequestId;
+
     try {
-      
-      const response = await api.getMessages({ 
-        phone_iccid: phoneIccid,
-        limit: 500 // Load up to 500 messages for this specific phone
-      });
-      
+      const response = await api.getMessages(
+        phoneIccid
+          ? { phone_iccid: phoneIccid, limit: 500 }
+          : { limit: 2000 }
+      );
+
+      // Discard if user switched phones while we were loading
+      if (requestId !== messageRequestId) return;
+
       if (response && response.data) {
-        
-        // DEBUG: Verify all messages have the correct ICCID
         messages = response.data;
         messages.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
       }
     } catch (error) {
-      console.error('[App] Failed to load messages for phone:', error);
-      // Clear messages on error to avoid showing wrong phone's messages
+      if (requestId !== messageRequestId) return;
+      console.error('[App] Failed to load messages:', error);
       messages = [];
     }
   }
@@ -401,7 +369,6 @@
       updateSelectedPhone();
     }
 
-    // No need to reload - WebSocket will provide updates
   }
 
   async function handleMessageSent(event) {
@@ -409,7 +376,7 @@
 
 
     try {
-      // Send message using WebSocket API
+      // Send message via HTTP API
       const response = await api.sendMessage({
         phone_iccid: newMessage.phone_iccid,
         recipient: newMessage.recipient,
