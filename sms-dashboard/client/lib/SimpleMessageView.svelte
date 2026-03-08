@@ -5,6 +5,7 @@
 
   export let messages = [];
   export let selectedPhone = null;
+  export let isLoading = false;
 
   let activeKeywords = [];
 
@@ -65,10 +66,31 @@
   </div>
 
   <div class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-4">
-    {#if displayMessages.length === 0}
+    {#if isLoading}
+      <!-- Loading skeleton -->
+      <div class="space-y-3">
+        {#each Array(4) as _}
+          <div class="bg-stone-50 rounded-lg p-3 border border-stone-200 animate-pulse">
+            <div class="flex items-center justify-between mb-2">
+              <div class="h-3 bg-stone-200 rounded w-1/3"></div>
+              <div class="h-3 bg-stone-200 rounded w-16"></div>
+            </div>
+            <div class="bg-white rounded p-2 border border-stone-200 space-y-2">
+              <div class="h-3 bg-stone-200 rounded w-full"></div>
+              <div class="h-3 bg-stone-200 rounded w-2/3"></div>
+            </div>
+          </div>
+        {/each}
+      </div>
+    {:else if displayMessages.length === 0}
       <div class="text-center py-8">
-        <div class="text-6xl mb-4">📭</div>
-        <p class="text-stone-400">暂无消息记录</p>
+        {#if !selectedPhone}
+          <div class="text-5xl mb-4">📱</div>
+          <p class="text-stone-400">选择左侧设备以查看消息</p>
+        {:else}
+          <div class="text-5xl mb-4">📭</div>
+          <p class="text-stone-400">此设备暂无消息</p>
+        {/if}
       </div>
     {:else}
       <div class="space-y-3">

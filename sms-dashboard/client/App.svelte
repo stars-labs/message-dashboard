@@ -8,6 +8,7 @@
   import IccidMappingDialog from "./lib/IccidMappingDialog.svelte";
   import KeywordConfig from "./lib/KeywordConfig.svelte";
   import ErrorBoundary from "./lib/ErrorBoundary.svelte";
+  import Toast from "./lib/Toast.svelte";
   import { api } from "./lib/api.js";
   import { getPhoneFlag, mapStatsResponse } from "./lib/countries.js";
   import { auth } from "./lib/auth.js";
@@ -92,6 +93,16 @@
   let dataLoading = true; // Track data loading separately
   let currentView = "dashboard"; // 'dashboard', 'iccid-mappings', or 'keywords'
   let showIccidMappingDialog = false;
+  let toasts = [];
+
+  function showToast(message, type = 'info', duration = 4000) {
+    const id = Date.now();
+    toasts = [...toasts, { id, message, type, duration }];
+  }
+
+  function removeToast(id) {
+    toasts = toasts.filter(t => t.id !== id);
+  }
   let phoneToMap = null;
   let daemonStatus = {
     status: 'unknown',
@@ -458,8 +469,7 @@
       }
     } catch (error) {
       console.error("Failed to send message:", error);
-      // Show error to user
-      alert("Failed to send message: " + error.message);
+      showToast("发送失败: " + error.message, 'error');
     }
   }
 
@@ -1001,7 +1011,7 @@
           <div class="lg:col-span-2 flex flex-col gap-4 h-full min-h-0">
             <!-- Always show SimpleMessageView at the top -->
             <div class="flex-1 min-h-0 flex flex-col">
-              <SimpleMessageView {messages} {selectedPhone} />
+              <SimpleMessageView {messages} {selectedPhone} isLoading={dataLoading} />
             </div>
             <!-- Show PhoneDetails below if selected -->
             {#if selectedPhone}
@@ -1056,4 +1066,9 @@
     showIccidMappingDialog = false;
   }}
 />
+
+<!-- Toast notifications -->
+{#each toasts as toast (toast.id)}
+  <Toast message={toast.message} type={toast.type} duration={toast.duration} onClose={() => removeToast(toast.id)} />
+{/each}
 
