@@ -95,7 +95,7 @@
   let pollInterval = null;
   const POLL_INTERVAL_MS = 15000; // 15 seconds
   let newMessageIds = new Set(); // Track newly arrived message IDs for "新" badge
-  let initialPollDone = false; // Skip new-message detection on first poll (avoids false positives from cache merge)
+  let lastKnownTimestamp = null; // Only flag messages newer than this as "新"
 
   function showToast(message, type = 'info', duration = 4000) {
     const id = Date.now();
@@ -213,6 +213,12 @@
 
       if (messagesResponse && messagesResponse.success && Array.isArray(messagesResponse.data)) {
         messages = messagesResponse.data;
+        // Set high-water mark so polls only flag messages newer than what we loaded
+        const newest = messages.reduce((max, m) => {
+          const t = m.timestamp ? new Date(m.timestamp).getTime() : 0;
+          return t > max ? t : max;
+        }, 0);
+        if (newest > 0) lastKnownTimestamp = new Date(newest).toISOString();
       } else {
         console.error('[App] Messages API failed:', messagesResponse?.error);
         
@@ -335,10 +341,12 @@
       if (requestId !== messageRequestId) return;
 
       if (response && response.data) {
-        // Detect new messages by comparing IDs (only on subsequent polls, not the first)
-        if (initialPollDone && messages.length > 0) {
-          const existingIds = new Set(messages.map(m => m.id));
-          const freshIds = response.data.filter(m => !existingIds.has(m.id)).map(m => m.id);
+        // Detect genuinely new messages: must have a timestamp newer than anything we've seen
+        if (lastKnownTimestamp && messages.length > 0) {
+          const cutoff = new Date(lastKnownTimestamp).getTime();
+          const freshIds = response.data
+            .filter(m => m.timestamp && new Date(m.timestamp).getTime() > cutoff)
+            .map(m => m.id);
           if (freshIds.length > 0) {
             freshIds.forEach(id => newMessageIds.add(id));
             newMessageIds = newMessageIds; // trigger reactivity
@@ -349,7 +357,12 @@
             }, 30000);
           }
         }
-        initialPollDone = true;
+        // Update the high-water mark to the newest timestamp in this batch
+        const newest = response.data.reduce((max, m) => {
+          const t = m.timestamp ? new Date(m.timestamp).getTime() : 0;
+          return t > max ? t : max;
+        }, lastKnownTimestamp ? new Date(lastKnownTimestamp).getTime() : 0);
+        if (newest > 0) lastKnownTimestamp = new Date(newest).toISOString();
         messages = response.data;
       }
     } catch (error) {
