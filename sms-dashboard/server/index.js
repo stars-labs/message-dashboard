@@ -52,19 +52,15 @@ class SimpleRouter {
     const method = request.method;
     const pathname = url.pathname;
 
-    console.log(`[Router] Handling ${method} ${pathname}`);
-
     // Add env and ctx to request
     request.env = env;
     request.ctx = ctx;
 
     // Find matching route
     const routes = this.routes[method] || [];
-    console.log(`[Router] Available routes for ${method}: ${routes.map(r => r.path).join(', ')}`);
 
     for (const route of routes) {
       if (route.path === '*' || route.path === pathname || this.matchPath(route.path, pathname)) {
-        console.log(`[Router] Matched route: ${route.path}`);
         
         // Extract route parameters if any
         if (route.path.includes(':')) {
@@ -93,7 +89,6 @@ class SimpleRouter {
       }
     }
 
-    console.log(`[Router] No matching route found for ${pathname}`);
     return null;
   }
 
@@ -142,44 +137,10 @@ router.options('*', handleCORS);
 // Public API routes
 router.get('/api/health', (request) => healthHandler.check(request));
 router.get('/api/daemon/status', (request) => healthHandler.daemonStatus(request));
-router.post('/api/test-stream', async (request) => {
-  console.log('[Test] Stream test endpoint hit');
-  return new Response('Stream test endpoint works', { status: 200 });
-});
 router.get('/favicon.ico', () => new Response(null, { status: 204 }));
 
-// Debug endpoint to test SSE broadcast
-router.get('/api/debug/sse-broadcast', async (request, env) => {
-  const connectionCount = getActiveConnectionCount();
-  await broadcastSSEEvent('debug:test', {
-    message: 'Test SSE broadcast',
-    timestamp: new Date().toISOString(),
-    connections: connectionCount
-  });
-  return new Response(JSON.stringify({
-    success: true,
-    message: `Broadcasted test event to ${connectionCount} SSE connections`
-  }), {
-    headers: { 'Content-Type': 'application/json' }
-  });
-});
-
-
-// Test route to check HTML response
-router.get('/test-html', () => {
-  return new Response('<html><body>Test HTML</body></html>', {
-    headers: {
-      'Content-Type': 'text/html',
-      'Cache-Control': 'no-cache'
-    }
-  });
-});
-
 // Auth routes
-router.get('/login', (request, env, ctx) => {
-  console.log('[Router] /login route matched - calling auth0Handler.login');
-  return auth0Handler.login(request);
-}); // Redirect directly to Auth0
+router.get('/login', (request) => auth0Handler.login(request));
 router.get('/callback', auth0Handler.callback);
 router.get('/logout', auth0Handler.logout);
 
@@ -535,16 +496,4 @@ export default {
   }
 };
 
-// Stub WebSocketRoom class for migration purposes
-// This will be removed after Durable Objects migration
-export class WebSocketRoom {
-  constructor(state, env) {
-    this.state = state;
-    this.env = env;
-  }
-
-  async fetch(request) {
-    return new Response('WebSocket support removed - migrated to SSE', { status: 410 });
-  }
-}
 
