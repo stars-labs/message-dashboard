@@ -14,7 +14,6 @@
   import { auth } from "./lib/auth.js";
 
   let selectedPhoneIccid = null;
-  let messageViewRef = null;
   let selectedPhone = null;
   
   // Manual function to update selected phone
@@ -47,8 +46,6 @@
       try {
         const updateTime = new Date(p.updated_at).getTime();
         const isRecent = !isNaN(updateTime) && updateTime > fiveMinutesAgo;
-        if (!isRecent) {
-        }
         return isRecent;
       } catch (e) {
         console.warn('Invalid date for phone:', p.iccid, p.updated_at);
@@ -135,8 +132,6 @@
   // Hash routing handler
   function handleHashChange() {
     const hash = window.location.hash.slice(1);
-    const previousView = currentView;
-    
     if (hash === 'keywords') {
       currentView = 'keywords';
     } else if (hash === 'iccid-mappings') {
@@ -378,9 +373,6 @@
         });
         
         if (response && response.data) {
-          
-          // Debug: Show unique ICCIDs in the messages
-          const uniqueIccids = [...new Set(response.data.map(m => m.phone_iccid))];
           
           messages = response.data;
           

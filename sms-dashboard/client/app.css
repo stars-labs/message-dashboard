@@ -53,24 +53,12 @@
     @apply text-2xl font-bold text-stone-900 tracking-tight;
   }
 
-  .status-online {
-    @apply text-emerald-600;
-  }
-
-  .status-offline {
-    @apply text-red-500;
-  }
-
   .sim-missing-badge {
     @apply animate-pulse;
   }
 
   .sim-missing-badge:hover {
     @apply scale-105;
-  }
-
-  .status-sim-missing {
-    @apply text-orange-500;
   }
 
   .phone-selected {
