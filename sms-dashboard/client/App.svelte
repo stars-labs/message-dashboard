@@ -3,7 +3,6 @@
   import PhoneList from "./lib/PhoneList.svelte";
   import SimpleMessageView from "./lib/SimpleMessageView.svelte";
   import MessageComposer from "./lib/MessageComposer.svelte";
-  import StatsCard from "./lib/StatsCard.svelte";
   import IccidMappings from "./lib/IccidMappings.svelte";
   import PhoneDetails from "./lib/PhoneDetails.svelte";
   import IccidMappingDialog from "./lib/IccidMappingDialog.svelte";
@@ -12,7 +11,6 @@
   import { api } from "./lib/api.js";
   import { getPhoneFlag, mapStatsResponse } from "./lib/countries.js";
   import { auth } from "./lib/auth.js";
-  import config from "./lib/config.js";
 
   let selectedPhoneIccid = null;
   let messageViewRef = null;

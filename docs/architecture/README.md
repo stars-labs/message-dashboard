@@ -1,8 +1,8 @@
-# System Architecture (v3.6.0)
+# System Architecture (v8.0.0)
 
 ## Executive Summary
 
-The SMS Dashboard is a distributed system designed for high-performance SMS management across 54+ USB modems. The architecture prioritizes cost efficiency, reliability, and performance through a lock-free Zig daemon, normalized database design, and manual-refresh frontend that minimizes Cloudflare Workers costs.
+The SMS Dashboard is a distributed system designed for high-performance SMS management across 100+ USB modems. The architecture prioritizes cost efficiency, reliability, and performance through an async Rust daemon, normalized database design, and manual-refresh frontend that minimizes Cloudflare Workers costs.
 
 ## Architecture Overview
 
@@ -15,8 +15,8 @@ The SMS Dashboard is a distributed system designed for high-performance SMS mana
 │  │   Orange Pi 5+  │    │  Cloudflare Workers  │    │   Web Frontend  │   │
 │  │                 │    │                      │    │                 │   │
 │  │ ┌─────────────┐ │    │ ┌──────────────────┐ │    │ ┌─────────────┐ │   │
-│  │ │ Zig Daemon  │ │───▶│ │ SMS API Handlers │ │◀───│ │ Svelte App  │ │   │
-│  │ │ v3.6.0      │ │API │ │ Auth0 + RBAC     │ │HTTP│ │ Manual      │ │   │
+│  │ │Rust Daemon │ │───▶│ │ SMS API Handlers │ │◀───│ │ Svelte App  │ │   │
+│  │ │ v8.0.0      │ │API │ │ Auth0 + RBAC     │ │HTTP│ │ Manual      │ │   │
 │  │ │             │ │Key │ └──────────────────┘ │Auth│ │ Refresh     │ │   │
 │  │ └─────┬───────┘ │    │          │           │    │ └─────────────┘ │   │
 │  │       │         │    │ ┌────────▼─────────┐ │    │                 │   │
@@ -43,21 +43,21 @@ The SMS Dashboard is a distributed system designed for high-performance SMS mana
 - **Operating System**: NixOS with declarative configuration
 - **Memory Requirements**: 8GB+ RAM for high modem counts
 
-### 2. Zig SMS Daemon (v3.6.0)
+### 2. Rust SMS Daemon (v8.0.0)
 
-**Architecture**: Lock-free, parallel processing daemon
+**Architecture**: Async Tokio-based daemon with direct AT command interface
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                       Main Process                               │
+│                     Tokio Async Runtime (4 threads)              │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │
-│  │   main.zig   │  │ Event Loop   │  │ Cache Mgmt   │          │
+│  │   main.rs    │  │ Event Loop   │  │ Cache Mgmt   │          │
 │  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘          │
 └─────────┼──────────────────┼──────────────────┼─────────────────┘
           │                  │                  │
           ▼                  ▼                  ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                    Worker Pool (8 threads)                      │
+│                    Worker Pool (6 concurrent readers)           │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐         │
 │  │   Message    │  │Phone Status  │  │Signal Quality│         │
 │  │  Processor   │  │   Updater    │  │   Monitor    │         │
@@ -72,11 +72,11 @@ The SMS Dashboard is a distributed system designed for high-performance SMS mana
           │                  │                  │
           ▼                  ▼                  ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                Lock-Free Data Structures                        │
+│                    Local SQLite Queue                           │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐         │
-│  │Message Queue │  │Signal Cache  │  │Priority Mgr  │         │
-│  │   (MPMC)     │  │ Hash Table   │  │  Adaptive    │         │
-│  │ 8192 slots   │  │ 256 entries  │  │  Timing      │         │
+│  │Message Store │  │Signal Cache  │  │Batch Upload  │         │
+│  │ (SQLite)     │  │ Hash Table   │  │  Queue       │         │
+│  │ Offline buf  │  │ 256 entries  │  │  10-100 msgs │         │
 │  └──────────────┘  └──────────────┘  └──────────────┘         │
 └─────────────────────────────────────────────────────────────────┘
           │                  │                  │
@@ -84,19 +84,20 @@ The SMS Dashboard is a distributed system designed for high-performance SMS mana
 ┌─────────────────────────────────────────────────────────────────┐
 │                    External Interfaces                          │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐         │
-│  │ModemManager  │  │ D-Bus        │  │ HTTP Client  │         │
-│  │   (mmcli)    │  │ (busctl)     │  │ (std.http)   │         │
-│  │ Fallback     │  │ Primary      │  │Native Zig    │         │
+│  │ AT Commands  │  │ D-Bus/zbus   │  │ HTTP Client  │         │
+│  │ (Primary)    │  │ (Fallback)   │  │ (reqwest)    │         │
+│  │ 1-5ms        │  │ 50ms         │  │ Async        │         │
 │  └──────────────┘  └──────────────┘  └──────────────┘         │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
 **Key Innovations**:
-- **Zero-Deadlock Design**: All shared data uses atomic operations
-- **BusctlDBus Integration**: 90% reduction in subprocess overhead vs mmcli
-- **Adaptive Polling**: Priority-based frequency adjustment (High/Medium/Low)
-- **Worker Pool**: 8 parallel threads for concurrent modem processing
-- **Native HTTP**: Zig std.http.Client with connection pooling
+- **Direct AT Commands**: 1-5ms per query (primary interface), D-Bus/ModemManager as fallback (50ms)
+- **Memory Safety**: Rust guarantees with zero-cost abstractions
+- **Async I/O**: Tokio runtime with 4 threads, optimized for ARM
+- **Worker Pool**: 6 concurrent modem readers
+- **Local SQLite Queue**: Buffers messages when network is down, uploads in batches of 10-100
+- **Signal Cache**: 30s TTL, 256-entry hash to avoid redundant modem queries
 
 ### 3. Cloudflare Workers Backend
 
@@ -267,7 +268,7 @@ The SMS Dashboard is a distributed system designed for high-performance SMS mana
 ### 1. Message Collection Flow
 
 ```
-USB Modems → ModemManager → D-Bus → Zig Daemon
+USB Modems → AT Commands → Serial → Rust Daemon
      ↓              ↓         ↓         ↓
    Signal      SIM Cards   Hardware   Lock-Free
    Quality      Status     Details    Processing
@@ -299,13 +300,13 @@ Event Trigger → Health Update → Frontend Poll
 
 ## Performance Characteristics
 
-### Daemon Performance (v3.6.0)
-- **Target Cycle Time**: 50ms per check cycle
-- **Concurrent Modems**: 54+ simultaneously processed
-- **Worker Threads**: 8 parallel processors
-- **Memory Usage**: ~50MB for 54 modems
-- **CPU Utilization**: ~20% on 8-core system
-- **Subprocess Reduction**: 90% fewer calls via BusctlDBus
+### Daemon Performance (v8.0.0)
+- **AT Command Latency**: 1-5ms per query (direct serial)
+- **Concurrent Modems**: 100+ simultaneously processed
+- **Worker Pool**: 6 concurrent readers, Tokio 4-thread runtime (ARM optimized)
+- **Memory Safety**: Rust with zero-cost abstractions
+- **Local Queue**: SQLite buffer for offline resilience, batch upload 10-100 messages
+- **Signal Cache**: 30s TTL, 256-entry hash
 
 ### Database Performance (v2.0.0)
 - **Query Speed**: 50% improvement over v1 monolithic schema

@@ -52,11 +52,6 @@
 }
 
 @layer utilities {
-  .text-glow { }
-  .text-glow-sm { }
-  .text-glow-lg { }
-  .text-glow-xl { }
-
   .data-value {
     font-family: 'IBM Plex Mono', monospace;
     @apply text-2xl font-bold text-stone-900 tracking-tight;
@@ -73,12 +68,6 @@
   .gradient-text {
     @apply text-stone-900 font-semibold;
   }
-
-  .animate-gradient-x { }
-  .animate-gradient-shift { }
-  .bg-grid-cyan { }
-  .bg-circuit { }
-  .holographic { }
 
   .sim-missing-badge {
     @apply animate-pulse;
@@ -99,10 +88,6 @@
   .phone-selected {
     @apply relative bg-orange-50;
     border-left: 3px solid theme('colors.orange.500') !important;
-  }
-
-  .scan-line::after {
-    content: none;
   }
 
   .high-contrast {

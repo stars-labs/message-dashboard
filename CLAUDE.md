@@ -78,8 +78,8 @@ Cloudflare secrets (set via `npx wrangler secret put <NAME>`):
 - **Always use `device_view`** for reading device data — never query raw tables directly
 - **Package manager is `bun`**, not npm — all scripts use `bunx`
 - **No linters/formatters configured** — follow existing code style in each component
-- **No WebSocket/SSE in production** — manual refresh only (cost optimization). The websocket code exists but is commented out in `App.svelte`
-- **Router is custom** — `SimpleRouter` class in `server/index.js`, not itty-router (despite itty-router being in package.json)
+- **No WebSocket/SSE in production** — manual refresh only (cost optimization). All WS/SSE code has been removed.
+- **Router is custom** — `SimpleRouter` class in `server/index.js`, not itty-router
 
 ### Daemon gotchas
 - AT commands are primary interface (1-5ms). D-Bus/ModemManager is fallback only (50ms)

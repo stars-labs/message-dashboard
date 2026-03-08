@@ -37,15 +37,15 @@ The SMS Dashboard system consists of three main components working together:
 │   Orange Pi 5+      │     │  Cloudflare Workers  │     │   Web Frontend  │
 │                     │     │                      │     │                 │
 │ ┌─────────────────┐ │     │ ┌──────────────────┐ │     │ ┌─────────────┐ │
-│ │ ModemManager    │ │     │ │ API Handlers     │ │     │ │ Svelte App  │ │
-│ │ (mmcli)         │ │     │ │ - /control/*     │ │     │ │ - Realtime  │ │
-│ └────────┬────────┘ │     │ │ - /messages/*    │ │     │ │ - WebSocket │ │
+│ │ AT Commands     │ │     │ │ API Handlers     │ │     │ │ Svelte App  │ │
+│ │ (Serial/Direct) │ │     │ │ - /control/*     │ │     │ │ - Manual    │ │
+│ └────────┬────────┘ │     │ │ - /messages/*    │ │     │ │ - Refresh   │ │
 │          │          │     │ └────────┬─────────┘ │     │ └──────┬──────┘ │
 │ ┌────────▼────────┐ │     │          │           │     │        │        │
 │ │ Rust Daemon     │ │     │ ┌────────▼─────────┐ │     │        │        │
 │ │ - Hardware Info │ │────▶│ │ D1 Database      │ │◀────│        │        │
-│ │ - Memory Safe   │ │ API │ │ - modems table   │ │ WS/ │        │        │
-│ │ - Batch Upload  │ │ Key │ │ - sims table     │ │ SSE │        │        │
+│ │ - Memory Safe   │ │ API │ │ - modems table   │ │HTTP │        │        │
+│ │ - Batch Upload  │ │ Key │ │ - sims table     │ │Auth │        │        │
 │ └─────────────────┘ │     │ │ - modem_state    │ │     │        │        │
 │                     │     │ │ - daemon_health  │ │     │        │        │
 │ USB Modems (EC20)  │     │ └──────────────────┘ │     │  Auth0 Users    │
@@ -109,15 +109,10 @@ message-dashboard/
     │   ├── diagnose-phone-issues.js
     │   └── test-phone-data.js
     ├── server/               # Backend source code (Workers)
-    │   ├── index.js          # Main server entry
-    │   ├── auth.js           # Auth0 integration
-    │   ├── api/              # API route handlers
-    │   ├── websocket.js      # WebSocket/SSE handling
-    │   └── utils/            # Utility modules (v2.0)
-    │       ├── api-response.js     # Standardized API responses
-    │       ├── database-setup.js   # Table creation and indexes
-    │       ├── database-wrapper.js # D1 wrapper with caching
-    │       └── device-count.js     # Centralized device statistics
+    │   ├── index.js          # Main server entry (custom SimpleRouter)
+    │   ├── handlers/         # API route handlers
+    │   ├── middleware/        # Auth0, CORS, RBAC middleware
+    │   └── api/              # Keyword API routes
     ├── package.json          # Dependencies
     └── wrangler.toml         # Cloudflare Workers config
 ```
@@ -126,14 +121,14 @@ message-dashboard/
 
 ```bash
 cd sms-dashboard
-npm install
+bun install
 
 # Development
-npm run dev         # Frontend development (Vite)
-npm run dev:api     # Backend development (Wrangler)
+bun run dev         # Frontend development (Vite)
+bun run dev:api     # Backend development (Wrangler)
 
 # Production
-npm run deploy      # Build and deploy to Cloudflare
+bun run deploy      # Build and deploy to Cloudflare
 ```
 
 ## Cloudflare Workers Deployment
