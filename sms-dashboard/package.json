@@ -15,8 +15,6 @@
     "db:migrate": "bunx wrangler d1 execute sms-dashboard --file=./migrations/schema.sql"
   },
   "dependencies": {
-    "chalk": "^5.5.0",
-    "dotenv": "^17.2.1",
     "jose": "^6.0.11",
     "nanoid": "^5.1.5"
   },

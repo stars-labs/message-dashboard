@@ -326,36 +326,10 @@
     window.removeEventListener('hashchange', handleHashChange);
   });
 
-  async function selectPhone(phone) {
+  function selectPhone(phone) {
     selectedPhoneIccid = phone?.iccid || null;
     handlePhoneSelection();
     showPhoneList = false;
-    
-    // Load all messages for the selected phone
-    if (phone?.iccid && user && auth.token) {
-      try {
-        const token = auth.token;
-        const headers = {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        };
-        
-        const response = await fetch(`/api/messages?phone_iccid=${phone.iccid}&limit=2000`, { headers });
-        const result = await response.json();
-
-        if (result.success && result.data) {
-          const messageData = Array.isArray(result.data) ? result.data : (result.data.results || []);
-          const existingIds = new Set(messages.map(m => m.id));
-          const phoneMessages = messageData.filter(m => !existingIds.has(m.id));
-
-          if (phoneMessages.length > 0) {
-            messages = [...messages, ...phoneMessages];
-          }
-        }
-      } catch (err) {
-        console.error('[App] Failed to load messages for phone:', err);
-      }
-    }
   }
   
   // Load messages for a specific phone

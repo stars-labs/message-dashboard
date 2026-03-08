@@ -240,7 +240,7 @@
       getCountryName(item.country) || item.country || '',
       item.carrier || '',
       item.equipment_id || '',
-      item.is_active ? '启用' : '停用',
+      item.is_active ? '启用' : '未启用',
       item.description || '',
       item.created_at ? new Date(item.created_at).toLocaleString('zh-CN') : '',
       item.last_used ? new Date(item.last_used).toLocaleString('zh-CN') : ''
@@ -479,7 +479,7 @@
                     ? 'bg-green-50 text-green-700 border border-green-200'
                     : 'bg-stone-100 text-stone-500 border border-stone-200'}"
                 >
-                  {mapping.is_active ? "启用" : "禁用"}
+                  {mapping.is_active ? "启用" : "未启用"}
                 </span>
               </td>
               <td class="px-4 py-3 text-sm text-stone-400">
