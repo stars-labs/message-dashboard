@@ -92,6 +92,9 @@
   let showIccidMappingDialog = false;
   let toasts = [];
   let messageRequestId = 0; // Prevents stale message responses from overwriting newer ones
+  let pollInterval = null;
+  const POLL_INTERVAL_MS = 15000; // 15 seconds
+  let newMessageIds = new Set(); // Track newly arrived message IDs for "新" badge
 
   function showToast(message, type = 'info', duration = 4000) {
     const id = Date.now();
@@ -294,6 +297,7 @@
 
       loadData().finally(() => {
         dataLoading = false;
+        startPolling();
       }).catch((error) => {
         console.error("Failed to load data:", error);
       });
@@ -303,6 +307,7 @@
   });
 
   onDestroy(() => {
+    stopPolling();
     window.removeEventListener('hashchange', handleHashChange);
   });
 
@@ -329,6 +334,20 @@
       if (requestId !== messageRequestId) return;
 
       if (response && response.data) {
+        // Detect new messages by comparing IDs
+        if (messages.length > 0) {
+          const existingIds = new Set(messages.map(m => m.id));
+          const freshIds = response.data.filter(m => !existingIds.has(m.id)).map(m => m.id);
+          if (freshIds.length > 0) {
+            freshIds.forEach(id => newMessageIds.add(id));
+            newMessageIds = newMessageIds; // trigger reactivity
+            // Auto-clear "新" badges after 30 seconds
+            setTimeout(() => {
+              freshIds.forEach(id => newMessageIds.delete(id));
+              newMessageIds = newMessageIds;
+            }, 30000);
+          }
+        }
         messages = response.data;
       }
     } catch (error) {
@@ -525,6 +544,29 @@
       }
     } catch (error) {
       console.error('Failed to fetch stats from API:', error);
+    }
+  }
+
+  // Background polling for new messages and device status
+  function startPolling() {
+    if (pollInterval) return;
+    pollInterval = setInterval(async () => {
+      if (!user || !auth.token || currentView !== 'dashboard') return;
+      try {
+        // Poll messages for current view
+        await loadMessagesForPhone(selectedPhoneIccid);
+        // Also refresh device status + stats
+        await checkDaemonStatus();
+      } catch (e) {
+        // Silently ignore polling errors
+      }
+    }, POLL_INTERVAL_MS);
+  }
+
+  function stopPolling() {
+    if (pollInterval) {
+      clearInterval(pollInterval);
+      pollInterval = null;
     }
   }
 
@@ -927,7 +969,7 @@
           <div class="lg:col-span-2 flex flex-col gap-4 h-full min-h-0">
             <!-- Always show SimpleMessageView at the top -->
             <div class="flex-1 min-h-0 flex flex-col">
-              <SimpleMessageView {messages} {selectedPhone} isLoading={dataLoading} />
+              <SimpleMessageView {messages} {selectedPhone} isLoading={dataLoading} {newMessageIds} />
             </div>
             <!-- Show PhoneDetails below if selected -->
             {#if selectedPhone}
