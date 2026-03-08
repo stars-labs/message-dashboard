@@ -1,7 +1,23 @@
 <script>
+  import { onMount } from "svelte";
+  import MessageHighlight from "./MessageHighlight.svelte";
+  import { tagActions, keywords as keywordsStore } from "./tag-store.js";
+
   export let messages = [];
   export let selectedPhone = null;
-  
+
+  let activeKeywords = [];
+
+  // Subscribe to keywords store
+  const unsubscribe = keywordsStore.subscribe(value => {
+    activeKeywords = value;
+  });
+
+  onMount(() => {
+    tagActions.loadKeywords();
+    return unsubscribe;
+  });
+
   // Format time as fixed timestamp
   function formatTime(timestamp) {
     if (!timestamp) return '未知时间';
@@ -25,7 +41,7 @@
       return '无效时间';
     }
   }
-  
+
   // Simple filter
   let displayMessages = [];
   $: {
@@ -79,7 +95,7 @@
               <span class="ml-2 shrink-0">{formatTime(message.timestamp)}</span>
             </div>
             <div class="bg-white rounded p-2 text-stone-800 border border-stone-200 break-words">
-              {message.content}
+              <MessageHighlight content={message.content} keywords={activeKeywords} />
             </div>
           </div>
         {/each}

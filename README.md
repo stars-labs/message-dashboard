@@ -11,15 +11,15 @@ Orange Pi 5+ (ARM64, NixOS)          Cloudflare                    Browser
 │                      │     │                     │     │  + TailwindCSS   │
 │  AT Commands / D-Bus │────▶│  D1 Database        │◀────│                  │
 │  100+ USB Modems     │ API │  Auth0 + RBAC       │ JWT │  Manual Refresh  │
-│  Worker Pool (6)     │ Key │  AI / Vectorize     │     │  WebGPU Effects  │
+│  Worker Pool (6)     │ Key │  Keyword Tagging    │     │  Code Extraction │
 └──────────────────────┘     └─────────────────────┘     └──────────────────┘
 ```
 
 **Daemon** collects SMS from USB modems via direct AT commands (with D-Bus/ModemManager fallback), batches them, and uploads to the API. It also syncs device status, signal quality, and handles outbound SMS sending.
 
-**API** runs on Cloudflare Workers with a D1 (SQLite) database. Handles device registration, message storage, keyword tagging, AI-powered search, and a chat assistant. Auth0 JWT for users, API key for daemon.
+**API** runs on Cloudflare Workers with a D1 (SQLite) database. Handles device registration, message storage, keyword tagging, and verification code extraction. Auth0 JWT for users, API key for daemon.
 
-**Frontend** is a Svelte 5 SPA served from the same Worker. Shows device list, signal strength, messages with verification code extraction, ICCID mappings, keyword configuration, and semantic search.
+**Frontend** is a Svelte 5 SPA served from the same Worker. Shows device list, signal strength, messages with verification code extraction, ICCID mappings, and keyword configuration.
 
 ## Project Structure
 
@@ -46,8 +46,7 @@ Orange Pi 5+ (ARM64, NixOS)          Cloudflare                    Browser
 │   │   ├── index.js        # SimpleRouter + middleware chain
 │   │   ├── handlers/       # API endpoint handlers
 │   │   ├── api/            # Route modules (keywords)
-│   │   ├── middleware/     # CORS, Auth0, RBAC
-│   │   └── utils/          # DB wrapper, device counting
+│   │   └── middleware/     # CORS, Auth0, RBAC
 │   ├── migrations/         # D1 SQL migrations
 │   ├── config/             # Auth0 role config
 │   └── wrangler.toml       # Cloudflare Workers config
