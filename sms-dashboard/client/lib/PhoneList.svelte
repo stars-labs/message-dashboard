@@ -14,6 +14,15 @@
   export let isLoading = false;
   export let showSimMissing = true; // Toggle to show/hide modems without SIM cards
 
+  // Debounced search: type into local var, update searchTerm after 200ms
+  let searchInput = searchTerm;
+  let debounceTimer;
+  function handleSearchInput(e) {
+    searchInput = e.target.value;
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => { searchTerm = searchInput; }, 200);
+  }
+
   // Helper function to check if device has SIM card issues
   function hasSimIssue(phone) {
     return phone.status === 'sim-missing' || (!phone.iccid && !phone.number);
@@ -147,7 +156,8 @@
     <div class="mb-3">
       <input
         type="text"
-        bind:value={searchTerm}
+        value={searchInput}
+        on:input={handleSearchInput}
         placeholder="搜索号码或运营商..."
         class="w-full px-3 py-2 text-sm cyber-input"
       />

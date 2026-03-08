@@ -5,12 +5,11 @@ export default {
     "./client/**/*.{svelte,js,ts,jsx,tsx}",
   ],
   safelist: [
-    {
-      pattern: /^(from|to|via)-(red|green|blue|indigo|purple|pink|gray|yellow|orange|sky)-(400|500|600|700|800|900)$/,
-    },
-    {
-      pattern: /^bg-gradient-to-(r|l|t|b|br|bl|tr|tl)$/,
-    }
+    'bg-gradient-to-r',
+    'from-purple-500', 'to-indigo-500',
+    'from-purple-600', 'to-indigo-600',
+    'from-green-500', 'to-green-600',
+    'from-red-500', 'to-red-600',
   ],
   theme: {
     extend: {},
