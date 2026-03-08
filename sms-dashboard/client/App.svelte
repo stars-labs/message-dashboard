@@ -984,7 +984,7 @@
           <div class="lg:col-span-2 flex flex-col gap-4 h-full min-h-0">
             <!-- Always show SimpleMessageView at the top -->
             <div class="flex-1 min-h-0 flex flex-col">
-              <SimpleMessageView {messages} {selectedPhone} isLoading={dataLoading} {newMessageIds} />
+              <SimpleMessageView {messages} {selectedPhone} isLoading={dataLoading} {newMessageIds} onClearPhone={() => selectPhone(null)} />
             </div>
             <!-- Show PhoneDetails below if selected -->
             {#if selectedPhone}

@@ -7,6 +7,7 @@
   export let selectedPhone = null;
   export let isLoading = false;
   export let newMessageIds = new Set();
+  export let onClearPhone = null;
 
   let activeKeywords = [];
 
@@ -57,11 +58,18 @@
 
 <div class="bg-white border border-stone-200 rounded-xl shadow-sm flex flex-col h-full min-h-0">
   <div class="p-4 border-b border-stone-200 flex-shrink-0">
-    <h2 class="text-lg font-semibold text-stone-900">
+    <h2 class="text-lg font-semibold text-stone-900 flex items-center justify-between">
       {#if selectedPhone}
-        {selectedPhone.flag} {selectedPhone.number}
+        <span>{selectedPhone.flag} {selectedPhone.number}</span>
+        {#if onClearPhone}
+          <button
+            on:click={onClearPhone}
+            class="ml-2 px-2 py-0.5 text-xs text-stone-400 hover:text-stone-600 hover:bg-stone-100 rounded transition-colors"
+            title="返回所有设备"
+          >✕ 清除筛选</button>
+        {/if}
       {:else}
-        最新消息 (所有设备)
+        <span>最新消息 (所有设备)</span>
       {/if}
     </h2>
   </div>
