@@ -95,6 +95,7 @@
   let pollInterval = null;
   const POLL_INTERVAL_MS = 15000; // 15 seconds
   let newMessageIds = new Set(); // Track newly arrived message IDs for "新" badge
+  let initialPollDone = false; // Skip new-message detection on first poll (avoids false positives from cache merge)
 
   function showToast(message, type = 'info', duration = 4000) {
     const id = Date.now();
@@ -334,8 +335,8 @@
       if (requestId !== messageRequestId) return;
 
       if (response && response.data) {
-        // Detect new messages by comparing IDs
-        if (messages.length > 0) {
+        // Detect new messages by comparing IDs (only on subsequent polls, not the first)
+        if (initialPollDone && messages.length > 0) {
           const existingIds = new Set(messages.map(m => m.id));
           const freshIds = response.data.filter(m => !existingIds.has(m.id)).map(m => m.id);
           if (freshIds.length > 0) {
@@ -348,6 +349,7 @@
             }, 30000);
           }
         }
+        initialPollDone = true;
         messages = response.data;
       }
     } catch (error) {
