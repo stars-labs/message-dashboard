@@ -231,20 +231,6 @@
             : 'hover:border-l-4 hover:border-l-stone-400'}"
           on:click={() => handlePhoneClick(phone)}
         >
-          {#if selectedPhoneIccid === phone.iccid}
-            <!-- VIP effects -->
-            <div class="vip-sparkle top-left"></div>
-            <div class="vip-sparkle top-right"></div>
-            <div class="vip-sparkle bottom-left"></div>
-            <div class="vip-sparkle bottom-right"></div>
-            <div class="lightning-effect"></div>
-            <div class="particle"></div>
-            <div class="particle"></div>
-            <div class="particle"></div>
-            <div class="particle"></div>
-            <div class="particle"></div>
-            <div class="vip-badge">已选中</div>
-          {/if}
           <div class="flex items-center justify-between">
             <div class="flex-1">
               <div class="flex items-center gap-2">
