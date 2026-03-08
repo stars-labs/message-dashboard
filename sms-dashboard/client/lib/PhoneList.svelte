@@ -343,14 +343,10 @@
                       <span class="text-stone-500"> • {dedupedOperator}</span>
                     {/if}
                   {/if}
-                  {#if phone.iccid && phone.iccid.length > 15}
-                    <!-- ICCID (long numeric string) -->
-                    <span class="text-stone-400 font-mono">
-                      • {phone.iccid.slice(0, 6)}...{phone.iccid.slice(-4)}</span
-                    >
-                  {:else if phone.iccid}
-                    <!-- Shorter ICCID -->
-                    <span class="text-stone-400"> • {phone.iccid}</span>
+                  {#if phone.iccid}
+                    <span class="text-stone-400 font-mono iccid-display" title={phone.iccid}>
+                      • <span class="iccid-full">{phone.iccid}</span><span class="iccid-short">{phone.iccid.slice(0, 6)}...{phone.iccid.slice(-4)}</span>
+                    </span>
                   {/if}
                   {#if phone.modem_index != null || phone.sim_index != null}
                     <span class="text-indigo-600 font-medium">
@@ -384,3 +380,13 @@
   </div>
 </div>
 
+<style>
+  /* Show truncated ICCID by default, full on wider screens */
+  .iccid-full { display: none; }
+  .iccid-short { display: inline; }
+
+  @media (min-width: 1280px) {
+    .iccid-full { display: inline; }
+    .iccid-short { display: none; }
+  }
+</style>
