@@ -235,9 +235,14 @@
       // Map API stats to component format
       if (statsResponse) {
         
-        stats = mapStatsResponse(statsResponse);
+        const prev = stats;
+        stats = {
+          ...mapStatsResponse(statsResponse),
+          // Preserve client-calculated device counts (server returns stale 0 for these)
+          onlineDevices: prev.onlineDevices,
+          simMissingDevices: prev.simMissingDevices,
+        };
         backendStatsLoaded = true;
-        // Re-apply client-calculated device counts (more accurate than cached API stats)
         updateStatsFromPhones();
 
         // Check daemon status
@@ -552,10 +557,14 @@
       if (response.ok) {
         const data = await response.json();
         
-        stats = mapStatsResponse(data);
+        const prev = stats;
+        stats = {
+          ...mapStatsResponse(data),
+          // Preserve client-calculated device counts (server returns stale 0 for these)
+          onlineDevices: prev.onlineDevices,
+          simMissingDevices: prev.simMissingDevices,
+        };
         backendStatsLoaded = true;
-        // Re-apply client-calculated device counts (more accurate than cached API stats)
-        updateStatsFromPhones();
       }
     } catch (error) {
       console.error('Failed to fetch stats from API:', error);
