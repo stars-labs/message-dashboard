@@ -6,6 +6,7 @@
   export let messages = [];
   export let selectedPhone = null;
   export let isLoading = false;
+  export let newMessageIds = new Set();
 
   let activeKeywords = [];
 
@@ -95,9 +96,12 @@
     {:else}
       <div class="space-y-3">
         {#each displayMessages as message}
-          <div class="bg-stone-50 rounded-lg p-3 border border-stone-200">
+          <div class="rounded-lg p-3 border transition-colors duration-500 {newMessageIds.has(message.id) ? 'bg-orange-50 border-orange-300 border-l-4 border-l-orange-500' : 'bg-stone-50 border-stone-200'}">
             <div class="flex items-center justify-between text-xs text-stone-400 mb-2">
               <div class="flex items-center gap-1 min-w-0">
+                {#if newMessageIds.has(message.id)}
+                  <span class="px-1.5 py-0.5 bg-orange-500 text-white rounded text-[10px] font-bold shrink-0">新</span>
+                {/if}
                 <span class="truncate">接收卡: {message.display_phone_number || message.phone_number || message.phone_iccid}</span>
                 {#if message.direction === 'outgoing' || message.type === 'outgoing' || message.type === 'sent'}
                   {#if message.recipient}
