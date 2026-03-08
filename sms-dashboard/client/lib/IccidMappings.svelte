@@ -13,6 +13,7 @@
   let showExportMenu = false;
   let editingMapping = null;
   let searchQuery = "";
+  let successMessage = null;
 
   // Form data
   let formData = {
@@ -161,9 +162,8 @@
         bulkImportText = "";
         await loadMappings();
 
-        alert(
-          `Import complete!\nSuccess: ${response.results.success}\nFailed: ${response.results.failed}`,
-        );
+        successMessage = `导入完成: 成功 ${response.results.success} 条, 失败 ${response.results.failed} 条`;
+        setTimeout(() => { successMessage = null; }, 5000);
       } else {
         error = response.error || "Failed to import mappings";
       }
@@ -356,6 +356,13 @@
       class="w-full px-4 py-2 cyber-input"
     />
   </div>
+
+  {#if successMessage}
+    <div class="mb-4 p-4 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg flex items-center justify-between">
+      <span>✓ {successMessage}</span>
+      <button on:click={() => { successMessage = null; }} class="text-emerald-400 hover:text-emerald-600">&times;</button>
+    </div>
+  {/if}
 
   {#if error}
     <div
