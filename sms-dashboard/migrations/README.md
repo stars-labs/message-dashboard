@@ -56,7 +56,7 @@ This directory contains SQL migration scripts for the SMS Dashboard D1 database.
 npm run db:init
 
 # Run a specific migration locally
-npx wrangler d1 execute sms-dashboard --local --file=migrations/[filename].sql
+bunx wrangler d1 execute sms-dashboard --local --file=migrations/[filename].sql
 ```
 
 ### Production
@@ -65,10 +65,10 @@ npx wrangler d1 execute sms-dashboard --local --file=migrations/[filename].sql
 npm run db:migrate
 
 # Or run a specific migration
-npx wrangler d1 execute sms-dashboard --remote --file=migrations/[filename].sql
+bunx wrangler d1 execute sms-dashboard --remote --file=migrations/[filename].sql
 
 # Validate migration success
-npx wrangler d1 execute sms-dashboard --remote --file=migrations/validate-migration.sql
+bunx wrangler d1 execute sms-dashboard --remote --file=migrations/validate-migration.sql
 ```
 
 ## Database Schema (Current - v2.1)
@@ -136,7 +136,7 @@ If a migration needs to be rolled back:
 
 1. Check current state:
 ```bash
-npx wrangler d1 execute sms-dashboard --remote --command="SELECT name FROM sqlite_master WHERE type='table'"
+bunx wrangler d1 execute sms-dashboard --remote --command="SELECT name FROM sqlite_master WHERE type='table'"
 ```
 
 2. Use appropriate rollback script (if provided)
@@ -146,13 +146,13 @@ npx wrangler d1 execute sms-dashboard --remote --command="SELECT name FROM sqlit
 
 1. **Always backup before major migrations**:
 ```bash
-npx wrangler d1 backup create sms-dashboard
+bunx wrangler d1 backup create sms-dashboard
 ```
 
 2. **Test migrations locally first**:
 ```bash
 npm run db:init
-npx wrangler d1 execute sms-dashboard --local --file=migrations/new_migration.sql
+bunx wrangler d1 execute sms-dashboard --local --file=migrations/new_migration.sql
 ```
 
 3. **Validate after migration**:

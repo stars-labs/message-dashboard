@@ -10,7 +10,7 @@ The `iccid_mappings` table might not exist in the production database.
 
 **Solution**: Run the migration created at `/migrations/0004_add_iccid_mappings.sql`
 ```bash
-npx wrangler d1 migrations apply sms-dashboard
+bunx wrangler d1 migrations apply sms-dashboard
 ```
 
 ### 2. Authentication Issue in fetchWithAuth
@@ -47,10 +47,10 @@ Check if CORS headers are properly set for the API endpoints.
 ### Step 3: Check Database
 ```bash
 # List all tables in the database
-npx wrangler d1 execute sms-dashboard --command "SELECT name FROM sqlite_master WHERE type='table';"
+bunx wrangler d1 execute sms-dashboard --command "SELECT name FROM sqlite_master WHERE type='table';"
 
 # Check if iccid_mappings table exists
-npx wrangler d1 execute sms-dashboard --command "SELECT * FROM iccid_mappings LIMIT 1;"
+bunx wrangler d1 execute sms-dashboard --command "SELECT * FROM iccid_mappings LIMIT 1;"
 ```
 
 ### Step 4: Test API Directly
