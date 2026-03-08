@@ -74,7 +74,7 @@
   
   // Manual function to update stats - no reactive statements to avoid circular dependencies
   function updateStatsFromPhones() {
-    if (phoneNumbers && phoneNumbers.length > 0 && !dataLoading) {
+    if (phoneNumbers && phoneNumbers.length > 0) {
       const onlineCount = calculateOnlineDevices(phoneNumbers);
       const simMissingCount = calculateSimMissingDevices(phoneNumbers);
       if (onlineCount !== stats.onlineDevices || simMissingCount !== stats.simMissingDevices) {
