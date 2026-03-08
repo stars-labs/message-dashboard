@@ -44,7 +44,9 @@
       }
       
       try {
-        const updateTime = new Date(p.updated_at).getTime();
+        // D1 returns timestamps without timezone suffix — treat as UTC
+        const raw = p.updated_at.endsWith('Z') ? p.updated_at : p.updated_at + 'Z';
+        const updateTime = new Date(raw).getTime();
         const isRecent = !isNaN(updateTime) && updateTime > fiveMinutesAgo;
         return isRecent;
       } catch (e) {
