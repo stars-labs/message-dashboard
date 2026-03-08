@@ -36,12 +36,8 @@ export async function fetchWithAuth(endpoint, options = {}) {
   return await response.json();
 }
 
-// Polling-based API with HTTP fallback
+// Route API method names to HTTP endpoints
 async function apiRequest(method, data = {}) {
-  // For polling service, we don't use request-response pattern
-  // All communication is HTTP-based, so skip the polling service request attempt
-  
-  // Fallback to HTTP
   const httpEndpoints = {
     'getPhones': { url: '/api/phones', method: 'GET' },
     'getMessages': { url: '/api/messages', method: 'GET' },
@@ -186,6 +182,8 @@ export const api = {
         if (newMessages.length > 0) {
           try {
             await messageCache.cacheMessages(newMessages);
+            // Prune old messages to keep IndexedDB bounded
+            messageCache.pruneCache(200).catch(() => {});
           } catch (cacheErr) {
             console.warn('[API] Cache write failed:', cacheErr);
           }
@@ -257,8 +255,7 @@ export const api = {
     try {
       return await apiRequest('sendMessage', data);
     } catch (error) {
-      console.warn('Failed to send message :', error);
-      // For message sending, we'll prefer WebSocket and show error if it fails
+      console.warn('Failed to send message:', error);
       throw error;
     }
   },

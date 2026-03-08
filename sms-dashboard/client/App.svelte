@@ -207,16 +207,8 @@
       }
       
 
-      if (messagesResponse && messagesResponse.success && messagesResponse.data) {
-        // Handle both array and object with results
-        if (Array.isArray(messagesResponse.data)) {
-          messages = messagesResponse.data;
-        } else if (messagesResponse.data.results && Array.isArray(messagesResponse.data.results)) {
-          messages = messagesResponse.data.results;
-        } else {
-          console.warn('[App] Unexpected messages response format:', messagesResponse);
-          messages = [];
-        }
+      if (messagesResponse && messagesResponse.success && Array.isArray(messagesResponse.data)) {
+        messages = messagesResponse.data;
       } else {
         console.error('[App] Messages API failed:', messagesResponse?.error);
         
@@ -234,14 +226,12 @@
       if (statsResponse) {
         
         stats = mapStatsResponse(statsResponse);
-        
-        // Mark that we've loaded stats from backend
         backendStatsLoaded = true;
-        
+        // Re-apply client-calculated device counts (more accurate than cached API stats)
+        updateStatsFromPhones();
+
         // Check daemon status
         await checkDaemonStatus();
-        
-        // The reactive statement will automatically update online device count if needed
         
       }
 
@@ -340,7 +330,6 @@
 
       if (response && response.data) {
         messages = response.data;
-        messages.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
       }
     } catch (error) {
       if (requestId !== messageRequestId) return;
@@ -520,25 +509,19 @@
   }
   
   async function fetchStats() {
-    // Only proceed if user is authenticated
     if (!user || !auth.token) {
       return;
     }
-    
+
     try {
-      // Get auth headers
-      const headers = {
-        'Authorization': `Bearer ${auth.token}`
-      };
-      
-      const response = await fetch('/api/stats', { headers });
+      const response = await auth.authenticatedFetch('/api/stats');
       if (response.ok) {
         const data = await response.json();
         
         stats = mapStatsResponse(data);
-        
-        // Mark that we've loaded stats from backend
         backendStatsLoaded = true;
+        // Re-apply client-calculated device counts (more accurate than cached API stats)
+        updateStatsFromPhones();
       }
     } catch (error) {
       console.error('Failed to fetch stats from API:', error);
