@@ -9,7 +9,6 @@ import { messagesHandler } from './handlers/messages';
 import { statsHandler } from './handlers/stats';
 import { iccidMappingsHandler } from './handlers/iccid-mappings';
 import { userOverridesHandler } from './handlers/user-overrides';
-import { updatesHandler } from './handlers/updates';
 import { healthHandler } from './handlers/health';
 import { serveFrontend } from './frontend-handler';
 import { createRoleConfig, hasSmSAccess } from '../config/auth0-roles.js';
@@ -149,13 +148,6 @@ router.get('/api/auth/me', async (request, env, ctx) => {
   const authResponse = await handleAuth0(request, env, ctx);
   if (authResponse) return authResponse;
   return auth0Handler.me(request);
-});
-
-// Polling updates endpoint
-router.get('/api/updates', async (request, env, ctx) => {
-  const authResponse = await handleAuth0(request, env, ctx);
-  if (authResponse) return authResponse;
-  return updatesHandler.poll(request);
 });
 
 // Protected routes - Web UI

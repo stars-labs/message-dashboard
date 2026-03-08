@@ -103,10 +103,6 @@ X-API-Key: <api_key>
 
 ### Updates (Polling)
 
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| GET | `/api/updates` | Bearer | Poll for changes since last check |
-
 ### Control API (Daemon only)
 
 | Method | Path | Auth | Description |
@@ -138,6 +134,6 @@ X-API-Key: <api_key>
 
 ## Notes
 
-- No WebSocket/SSE in production (cost optimization). UI uses polling via `/api/updates`.
+- No WebSocket/SSE in production (cost optimization). UI refreshes data via direct HTTP API calls.
 - RBAC is built but disabled (`USE_AUTH0_ROLES = "false"`). All authenticated users get full access.
 - The daemon syncs device status every 30s and does a full sync every 5min.
