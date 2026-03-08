@@ -98,6 +98,7 @@
   const POLL_INTERVAL_MS = 15000; // 15 seconds
   let newMessageIds = new Set(); // Track newly arrived message IDs for "新" badge
   let lastKnownTimestamp = null; // Only flag messages newer than this as "新"
+  let daemonRefreshing = false;
 
   function showToast(message, type = 'info', duration = 4000) {
     const id = Date.now();
@@ -548,7 +549,16 @@
       };
     }
   }
-  
+
+  async function handleRefreshDaemon() {
+    daemonRefreshing = true;
+    try {
+      await checkDaemonStatus();
+    } finally {
+      daemonRefreshing = false;
+    }
+  }
+
   async function fetchStats() {
     if (!user || !auth.token) {
       return;
@@ -710,7 +720,7 @@
                 <span class="text-lg">{getDaemonStatusIcon()}</span>
                 <span class="{getDaemonStatusClass()} text-sm font-medium">
                   {#if daemonStatus.status === 'online'}
-                    守护进程: {getDaemonStatusText()} ({daemonStatus.modem_count || 0} 设备)
+                    守护进程: {getDaemonStatusText()}
                   {:else if daemonStatus.status === 'warning'}
                     守护进程: {getDaemonStatusText()}
                   {:else if daemonStatus.status === 'offline'}
@@ -720,9 +730,10 @@
                   {/if}
                 </span>
                 <button
-                  on:click={checkDaemonStatus}
-                  class="text-xs text-stone-400 hover:text-stone-600 transition-colors ml-1"
+                  on:click={handleRefreshDaemon}
+                  class="text-xs text-stone-400 hover:text-stone-600 transition-colors ml-1 {daemonRefreshing ? 'animate-spin' : ''}"
                   title="刷新状态"
+                  disabled={daemonRefreshing}
                 >
                   🔄
                 </button>
