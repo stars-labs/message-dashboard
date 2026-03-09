@@ -216,37 +216,17 @@ export const controlHandler = {
         }
       }
       
-      // Sync sim_index from modem_state to sims table
-      // This ensures sim_index is always in sync even if the daemon doesn't send it
-      try {
-        const syncResult = await env.DB.prepare(`
-          UPDATE sims 
-          SET sim_index = (
-            SELECT ms.modem_index 
-            FROM modem_state ms 
-            WHERE ms.modem_id = sims.current_modem_id
-            AND ms.modem_index IS NOT NULL
-          )
-          WHERE current_modem_id IS NOT NULL 
-          AND (sim_index IS NULL OR sim_index != (
-            SELECT ms.modem_index 
-            FROM modem_state ms 
-            WHERE ms.modem_id = sims.current_modem_id
-            AND ms.modem_index IS NOT NULL
-          ))
-          AND EXISTS (
-            SELECT 1 FROM modem_state ms 
-            WHERE ms.modem_id = sims.current_modem_id 
-            AND ms.modem_index IS NOT NULL
-          )
-        `).run();
-        
-        if (syncResult.meta.changes > 0) {
-          console.log(`[control.js] Synchronized sim_index for ${syncResult.meta.changes} SIM cards`);
-        }
-      } catch (syncError) {
-        console.warn('[control.js] Failed to sync sim_index:', syncError);
-      }
+      // DISABLED: sim_index sync from modem_index
+      // Migration 020 populates sim_index from phone_number_list.csv (stable slot numbers).
+      // modem_index changes on reboot, so we no longer sync from it.
+      //
+      // Old logic (removed):
+      // - Synced sim_index from modem_state.modem_index (transient USB enumeration order)
+      // - Caused sim_index to change on daemon restart/reboot
+      //
+      // New logic:
+      // - sim_index is now stable (populated once from CSV via migration 020)
+      // - Represents physical slot number, not transient enumeration order
       
       // Handle reconciliation for full sync
       if (sync_mode === 'full') {
