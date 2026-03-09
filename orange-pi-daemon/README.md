@@ -1,197 +1,158 @@
 # Orange Pi SMS Daemon
 
-A high-performance, memory-safe Rust daemon for managing multiple USB modems.
+Rust daemon for managing 100+ USB modems on Orange Pi hardware. Reads SMS via direct AT commands, buffers locally in SQLite, and uploads to Cloudflare Workers API.
 
-## Features
-
-- ✅ **Memory Safe** - No segfaults, guaranteed by Rust compiler
-- ✅ **Simple** - Single-threaded async/await (no complex concurrency)
-- ✅ **Minimal** - Clean, maintainable codebase
-- ✅ **Reliable** - Robust error handling, automatic retries
-- ✅ **Efficient** - Uses tokio for async I/O, minimal overhead
+**Version**: 8.0.0 | **Runtime**: Tokio (4 threads, ARM-optimized) | **Target**: aarch64-linux (NixOS)
 
 ## Architecture
 
-### Components
+```
+USB Modems (ttyUSB*)
+       |
+       v
+  AT Commands (1-5ms per op)          Fallback: D-Bus/ModemManager (50ms)
+       |
+       v
+  Worker Pool (16 concurrent, 24/batch, 12s timeout)
+       |
+       v
+  SQLite Queue (WAL mode, dedup, 7-day retention)
+       |
+       v
+  Cloudflare Workers API (dynamic batching 10-100, exponential backoff)
+```
 
-1. **ModemManager** (`src/modem_manager.rs`) - Interfaces with ModemManager via native D-Bus
-   - List modems with zero subprocess overhead
-   - Get ICCID, phone number, signal quality
-   - Read/delete SMS messages
-   - Get device details (IMEI, manufacturer, model, firmware)
-   - 100x faster than mmcli (5ms vs 500ms per operation)
+### Concurrent Tasks
 
-2. **API Client** (`src/api_client.rs`) - HTTP client for backend API
-   - Upload phone status data
-   - Upload received messages
-   - Get pending SMS to send (future)
+The daemon spawns 6 async tasks:
 
-3. **Main Loop** (`src/main.rs`) - Event loop
-   - Checks all modems every 5 seconds for new messages
-   - Syncs device status every 10 seconds
-   - Refreshes modem cache every 5 minutes
+| Task | Interval | Purpose |
+|------|----------|---------|
+| Modem Reader | 1s | Read SMS from all modems in parallel, store to SQLite, delete from SIM |
+| Database Uploader | dynamic | Upload pending messages in batches (10-100), backoff on failure |
+| Device Status Sync | 30s | Sync modem/SIM state to API (full every 5min, incremental otherwise) |
+| Statistics Logger | 60s | Log message queue stats, warn if SIM has >200 messages |
+| Auto-Cleanup | 5min | Remove old pending messages (ModemManager deletion bug workaround) |
+| SMS Sender | 10s | Poll API for outbound SMS, route to correct modem via ICCID |
+
+### Source Layout
+
+```
+src/
+  main.rs            Entry point, task spawning, systemd integration
+  modem_manager.rs   Coordinator: AT (default) or D-Bus backend (USE_DBUS=1)
+  at_modem.rs        Direct serial AT commands for Quectel EC20 modems
+  dbus_client.rs     D-Bus abstraction: native zbus -> busctl CLI fallback
+  native_dbus.rs     Zero-overhead D-Bus via zbus v4 (100x faster than mmcli)
+  api_client.rs      HTTP client for Cloudflare Workers API
+  message_store.rs   Local SQLite queue with deduplication and lifecycle tracking
+  sync_manager.rs    Full/incremental sync state machine
+  worker_pool.rs     Semaphore-based parallel modem processing
+  signal_cache.rs    30s TTL signal strength cache (reduces redundant queries)
+  retry_manager.rs   Exponential backoff (1s -> 2s -> 4s -> ... -> 30s cap)
+  sms_sender.rs      Outbound SMS: poll API, route by ICCID, report results
+  types.rs           Data structures (Config, Modem, Sim, Message)
+  lib.rs             Module exports + 24 unit tests
+  benchmark.rs       AT vs D-Bus vs mmcli performance comparison
+```
 
 ## Building
 
-### Local Development
 ```bash
+# Local development
 cd orange-pi-daemon
 cargo build --release
+
+# NixOS
+nix build .#sms-daemon
+
+# Run tests (24 tests)
+cargo test
 ```
 
-### NixOS Build
-```bash
-# From repository root
-nix build .#sms-daemon
-```
+Release profile: `opt-level=3`, LTO, single codegen unit, stripped symbols.
 
 ## Running
 
 ### Environment Variables
-- `SMS_API_URL` - Backend API URL (default: `https://sexy.qzz.io`)
-- `SMS_API_KEY` - API authentication key (required)
-- `CHECK_INTERVAL_SECS` - Check interval in seconds (default: 5)
-- `RUST_LOG` - Log level (default: `info`, options: `trace`, `debug`, `info`, `warn`, `error`)
 
-### Manual Run
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SMS_API_URL` | `https://sexy.qzz.io` | Backend API endpoint |
+| `SMS_API_KEY` | (required) | API authentication key |
+| `MESSAGE_DB_PATH` | `/var/lib/sms-daemon/messages.db` | Local SQLite queue path |
+| `USE_DBUS` | `0` | Set `1` to use ModemManager D-Bus instead of AT commands |
+| `RUST_LOG` | `info` | Log level: `trace`, `debug`, `info`, `warn`, `error` |
+
+### Systemd
+
 ```bash
-export SMS_API_URL="https://sexy.qzz.io"
-export SMS_API_KEY="your-api-key-here"
-cargo run --release
+sudo systemctl enable --now sms-daemon
+journalctl -fu sms-daemon                # Follow logs
 ```
 
-### Systemd Service
+### Manual
+
 ```bash
-# Enable and start
-sudo systemctl enable sms-daemon
-sudo systemctl start sms-daemon
-
-# Check status
-sudo systemctl status sms-daemon
-
-# View logs
-journalctl -fu sms-daemon
+SMS_API_KEY="your-key" cargo run --release
 ```
 
-## Testing
+### CLI Commands
 
-### Check ModemManager
 ```bash
-# List modems
-mmcli -L
-
-# Get modem details
-mmcli -m 0
-
-# Get SIM details
-mmcli -i 0
-
-# List SMS
-mmcli -m 0 --messaging-list-sms
+orange-pi-daemon              # Run daemon (default)
+orange-pi-daemon benchmark    # AT vs D-Bus performance comparison
+orange-pi-daemon cleanup      # Clean old messages from SQLite
 ```
 
-### Test API Connection
-```bash
-# Check API health
-curl https://sexy.qzz.io/api/health
+## Modem Hardware
 
-# Test authentication
-curl -H "x-api-key: YOUR_KEY" https://sexy.qzz.io/api/control/pending-sms
-```
+Each Quectel EC20 modem exposes 4 USB serial ports:
+
+| Port | Function | Used by daemon |
+|------|----------|----------------|
+| ttyUSB0 | DM/diagnostic | No |
+| ttyUSB1 | GPS/NMEA | No |
+| ttyUSB2 | AT commands | Yes |
+| ttyUSB3 | PPP data | No |
+
+The daemon uses `ttyUSB2` for all AT operations via `nix::termios` (no libudev dependency).
 
 ## Performance
 
-- **D-Bus Method**: Native zbus library (zero subprocess overhead)
-- **Fallback**: busctl CLI (90% faster than mmcli)
-- **Operation Speed**: ~5ms per D-Bus operation (vs 500ms with mmcli)
-- **92+ Modems**: Processed in <0.5 seconds (vs 46 seconds with mmcli)
-- **CPU**: ~20% on 8-core CPU
-- **Memory**: ~30MB typical usage
-- **Reliability**: Designed for 100% uptime
+| Metric | Value |
+|--------|-------|
+| AT command latency | ~1-5ms per operation |
+| D-Bus latency | ~50ms per operation |
+| mmcli latency | ~500ms per operation |
+| 92+ modems full scan | <0.5 seconds (AT) vs 46 seconds (mmcli) |
+| Memory | ~30MB typical |
+| CPU | ~20% on 4-core ARM |
+
+## Key Design Decisions
+
+- **AT over D-Bus**: Direct serial AT commands bypass ModemManager overhead. D-Bus is fallback only.
+- **Local SQLite queue**: Messages survive network outages. WAL mode for concurrent read/write. Deduplication via `(phone_iccid, timestamp, content)` unique constraint.
+- **Dynamic batching**: Upload batch size scales 10-100 based on payload size. Shrinks on failures, grows when healthy.
+- **Immediate SIM deletion**: Messages are deleted from SIM right after reading to prevent ModemManager's deletion bug from causing duplicates.
+- **Signal caching**: 30-second TTL cache avoids redundant modem queries during polling cycles.
 
 ## Troubleshooting
 
-### D-Bus Connection Failed
 ```bash
-# Check D-Bus system daemon
-systemctl status dbus
-
-# Restart D-Bus (caution: may affect other services)
-sudo systemctl restart dbus
-
-# Check D-Bus socket
-ls -la /var/run/dbus/system_bus_socket
-
-# Test D-Bus connectivity
-busctl list
-```
-
-### No modems found
-```bash
-# Check ModemManager is running
-systemctl status ModemManager
-
-# Restart ModemManager if needed
-sudo systemctl restart ModemManager
-
-# List modems via D-Bus
-busctl call org.freedesktop.ModemManager1 /org/freedesktop/ModemManager1 org.freedesktop.DBus.ObjectManager GetManagedObjects
-
-# List modems manually
+# Check modem hardware
+lsusb | grep -i quectel
 mmcli -L
 
-# Check USB devices
-lsusb | grep -i modem
+# Check ModemManager
+systemctl status ModemManager
+
+# Debug logging
+RUST_LOG=debug journalctl -fu sms-daemon
+
+# Test API connectivity
+curl -H "x-api-key: KEY" https://sexy.qzz.io/api/control/pending-sms
+
+# Check local message queue
+sqlite3 /var/lib/sms-daemon/messages.db "SELECT status, COUNT(*) FROM messages GROUP BY status"
 ```
-
-### API connection errors
-```bash
-# Test DNS resolution
-nslookup sexy.qzz.io
-
-# Test network connectivity
-ping -c 3 sexy.qzz.io
-
-# Check firewall
-iptables -L -n
-```
-
-### High memory usage
-```bash
-# Check process stats
-ps aux | grep sms-daemon
-
-# Monitor in real-time
-htop
-```
-
-## Development
-
-### Add new features
-1. Update `src/types.rs` for new data structures
-2. Add methods to `ModemManager` or `ApiClient`
-3. Update main loop in `src/main.rs`
-4. Test locally with `cargo run`
-5. Deploy to Orange Pi
-
-### Debug build
-```bash
-# Build with debug symbols
-cargo build
-
-# Run with debug logging
-RUST_LOG=debug cargo run
-```
-
-### Profile performance
-```bash
-# Install cargo-flamegraph
-cargo install flamegraph
-
-# Generate flamegraph
-cargo flamegraph
-```
-
-## License
-
-Same as parent project.

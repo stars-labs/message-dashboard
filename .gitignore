@@ -20,6 +20,9 @@ orange-pi-daemon/main
 orange-pi-daemon/orange-pi-daemon
 orange-pi-daemon/test_connection
 
+# Wrangler local state
+.wrangler/
+
 # Claude Code
 .claude/settings.local.json
 
