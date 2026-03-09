@@ -1,0 +1,410 @@
+/:  Bus 001.Port 001: Dev 001, Class=root_hub, Driver=ehci-platform/1p, 480M
+    |__ Port 001: Dev 057, If 0, Class=Hub, Driver=hub/4p, 480M
+        |__ Port 002: Dev 058, If 0, Class=Hub, Driver=hub/4p, 480M
+        |__ Port 003: Dev 059, If 0, Class=Hub, Driver=hub/4p, 480M
+            |__ Port 002: Dev 061, If 0, Class=Hub, Driver=hub/7p, 480M
+                |__ Port 002: Dev 064, If 0, Class=Hub, Driver=hub/4p, 480M
+                    |__ Port 002: Dev 070, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 070, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 070, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 070, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 070, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                    |__ Port 003: Dev 079, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 079, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 079, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 079, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 079, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                    |__ Port 004: Dev 093, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 093, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 093, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 093, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 093, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                |__ Port 003: Dev 068, If 0, Class=Hub, Driver=hub/4p, 480M
+                    |__ Port 002: Dev 077, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 077, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 077, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 077, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 077, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                    |__ Port 004: Dev 091, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 091, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 091, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 091, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 091, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                |__ Port 004: Dev 074, If 0, Class=Hub, Driver=hub/4p, 480M
+                    |__ Port 004: Dev 087, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 087, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 087, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 087, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 087, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                |__ Port 005: Dev 085, If 0, Class=Hub, Driver=hub/4p, 480M
+                    |__ Port 001: Dev 102, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 102, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 102, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 102, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 102, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                    |__ Port 002: Dev 120, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 120, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 120, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 120, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 120, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                    |__ Port 004: Dev 013, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 013, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 013, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 013, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 013, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                |__ Port 006: Dev 100, If 0, Class=Hub, Driver=hub/4p, 480M
+                    |__ Port 001: Dev 118, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 118, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 118, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 118, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 118, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                    |__ Port 002: Dev 011, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 011, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 011, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 011, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 011, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                    |__ Port 003: Dev 027, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 027, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 027, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 027, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 027, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                    |__ Port 004: Dev 035, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 035, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 035, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 035, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 035, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+            |__ Port 003: Dev 063, If 0, Class=Hub, Driver=hub/7p, 480M
+                |__ Port 002: Dev 069, If 0, Class=Hub, Driver=hub/4p, 480M
+                    |__ Port 001: Dev 078, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 078, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 078, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 078, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 078, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                    |__ Port 002: Dev 092, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 092, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 092, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 092, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 092, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                    |__ Port 003: Dev 108, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 108, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 108, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 108, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 108, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                    |__ Port 004: Dev 127, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 127, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 127, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 127, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 127, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                |__ Port 003: Dev 076, If 0, Class=Hub, Driver=hub/4p, 480M
+                    |__ Port 001: Dev 090, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 090, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 090, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 090, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 090, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                    |__ Port 002: Dev 107, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 107, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 107, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 107, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 107, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                    |__ Port 003: Dev 126, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 126, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 126, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 126, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 126, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                    |__ Port 004: Dev 018, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 018, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 018, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 018, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 018, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                |__ Port 004: Dev 088, If 0, Class=Hub, Driver=hub/4p, 480M
+                    |__ Port 001: Dev 105, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 105, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 105, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 105, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 105, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                    |__ Port 002: Dev 124, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 124, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 124, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 124, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 124, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                    |__ Port 003: Dev 040, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 040, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 040, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 040, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 040, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                    |__ Port 004: Dev 029, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 029, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 029, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 029, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 029, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                |__ Port 005: Dev 104, If 0, Class=Hub, Driver=hub/4p, 480M
+                    |__ Port 001: Dev 123, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 123, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 123, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 123, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 123, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                    |__ Port 002: Dev 015, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 015, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 015, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 015, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 015, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                |__ Port 006: Dev 122, If 0, Class=Hub, Driver=hub/4p, 480M
+                    |__ Port 001: Dev 014, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 014, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 014, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 014, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 014, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                    |__ Port 002: Dev 028, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 028, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 028, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 028, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 028, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                    |__ Port 003: Dev 036, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 036, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 036, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 036, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 036, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                    |__ Port 004: Dev 045, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 045, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 045, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 045, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 045, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+            |__ Port 004: Dev 067, If 0, Class=Hub, Driver=hub/7p, 480M
+                |__ Port 002: Dev 075, If 0, Class=Hub, Driver=hub/4p, 480M
+                    |__ Port 001: Dev 042, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 042, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 042, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 042, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 042, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                    |__ Port 002: Dev 106, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 106, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 106, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 106, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 106, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                    |__ Port 003: Dev 125, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 125, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 125, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 125, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 125, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                    |__ Port 004: Dev 017, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 017, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 017, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 017, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 017, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                |__ Port 003: Dev 086, If 0, Class=Hub, Driver=hub/4p, 480M
+                    |__ Port 001: Dev 103, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 103, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 103, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 103, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 103, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                    |__ Port 003: Dev 121, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 121, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 121, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 121, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 121, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                |__ Port 004: Dev 101, If 0, Class=Hub, Driver=hub/4p, 480M
+                    |__ Port 001: Dev 043, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 043, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 043, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 043, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 043, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                    |__ Port 003: Dev 012, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 012, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 012, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 012, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 012, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                |__ Port 005: Dev 117, If 0, Class=Hub, Driver=hub/4p, 480M
+                    |__ Port 002: Dev 010, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 010, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 010, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 010, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 010, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                    |__ Port 004: Dev 026, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 026, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 026, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 026, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 026, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                |__ Port 006: Dev 009, If 0, Class=Hub, Driver=hub/4p, 480M
+                    |__ Port 001: Dev 025, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 025, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 025, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 025, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 025, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                    |__ Port 003: Dev 034, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 034, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 034, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 034, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 034, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                    |__ Port 004: Dev 037, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 037, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 037, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 037, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 037, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+        |__ Port 004: Dev 060, If 0, Class=Hub, Driver=hub/4p, 480M
+            |__ Port 001: Dev 062, If 0, Class=Hub, Driver=hub/7p, 480M
+                |__ Port 002: Dev 066, If 0, Class=Hub, Driver=hub/4p, 480M
+                    |__ Port 003: Dev 073, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 073, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 073, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 073, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 073, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                    |__ Port 004: Dev 084, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 084, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 084, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 084, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 084, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                |__ Port 003: Dev 071, If 0, Class=Hub, Driver=hub/4p, 480M
+                    |__ Port 001: Dev 082, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 082, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 082, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 082, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 082, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                    |__ Port 002: Dev 098, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 098, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 098, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 098, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 098, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                    |__ Port 003: Dev 115, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 115, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 115, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 115, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 115, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                    |__ Port 004: Dev 008, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 008, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 008, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 008, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 008, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                |__ Port 004: Dev 080, If 0, Class=Hub, Driver=hub/4p, 480M
+                    |__ Port 002: Dev 096, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 096, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 096, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 096, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 096, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                    |__ Port 004: Dev 113, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 113, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 113, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 113, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 113, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                |__ Port 005: Dev 094, If 0, Class=Hub, Driver=hub/4p, 480M
+                    |__ Port 001: Dev 111, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 111, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 111, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 111, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 111, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                    |__ Port 002: Dev 005, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 005, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 005, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 005, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 005, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                    |__ Port 003: Dev 022, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 022, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 022, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 022, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 022, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                    |__ Port 004: Dev 032, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 032, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 032, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 032, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 032, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                |__ Port 006: Dev 109, If 0, Class=Hub, Driver=hub/4p, 480M
+                    |__ Port 001: Dev 003, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 003, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 003, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 003, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 003, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                    |__ Port 003: Dev 020, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 020, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 020, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 020, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 020, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                    |__ Port 004: Dev 030, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 030, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 030, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 030, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 030, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+            |__ Port 002: Dev 065, If 0, Class=Hub, Driver=hub/7p, 480M
+                |__ Port 002: Dev 072, If 0, Class=Hub, Driver=hub/4p, 480M
+                    |__ Port 001: Dev 083, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 083, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 083, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 083, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 083, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                    |__ Port 003: Dev 099, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 099, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 099, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 099, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 099, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                    |__ Port 004: Dev 116, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 116, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 116, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 116, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 116, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                |__ Port 003: Dev 081, If 0, Class=Hub, Driver=hub/4p, 480M
+                    |__ Port 001: Dev 097, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 097, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 097, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 097, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 097, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                    |__ Port 002: Dev 114, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 114, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 114, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 114, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 114, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                    |__ Port 004: Dev 024, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 024, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 024, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 024, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 024, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                |__ Port 004: Dev 095, If 0, Class=Hub, Driver=hub/4p, 480M
+                    |__ Port 001: Dev 112, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 112, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 112, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 112, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 112, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                    |__ Port 002: Dev 006, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 006, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 006, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 006, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 006, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                    |__ Port 003: Dev 023, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 023, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 023, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 023, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 023, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                |__ Port 005: Dev 110, If 0, Class=Hub, Driver=hub/4p, 480M
+                    |__ Port 001: Dev 004, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 004, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 004, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 004, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 004, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                    |__ Port 002: Dev 021, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 021, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 021, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 021, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 002: Dev 021, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                    |__ Port 004: Dev 031, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 031, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 031, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 031, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 004: Dev 031, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                |__ Port 006: Dev 002, If 0, Class=Hub, Driver=hub/4p, 480M
+                    |__ Port 001: Dev 019, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 019, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 019, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 019, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 001: Dev 019, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+                    |__ Port 003: Dev 047, If 0, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 047, If 1, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 047, If 2, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 047, If 3, Class=Vendor Specific Class, Driver=option, 480M
+                    |__ Port 003: Dev 047, If 4, Class=Vendor Specific Class, Driver=qmi_wwan, 480M
+/:  Bus 002.Port 001: Dev 001, Class=root_hub, Driver=ohci-platform/1p, 12M
+/:  Bus 003.Port 001: Dev 001, Class=root_hub, Driver=ehci-platform/1p, 480M
+/:  Bus 004.Port 001: Dev 001, Class=root_hub, Driver=ohci-platform/1p, 12M
+/:  Bus 005.Port 001: Dev 001, Class=root_hub, Driver=xhci-hcd/1p, 480M
+    |__ Port 001: Dev 002, If 0, Class=Hub, Driver=hub/4p, 480M
+        |__ Port 003: Dev 003, If 0, Class=Human Interface Device, Driver=usbhid, 1.5M
+        |__ Port 004: Dev 004, If 0, Class=Human Interface Device, Driver=usbhid, 1.5M
+        |__ Port 004: Dev 004, If 1, Class=Human Interface Device, Driver=usbhid, 1.5M
+/:  Bus 006.Port 001: Dev 001, Class=root_hub, Driver=xhci-hcd/1p, 5000M
+    |__ Port 001: Dev 002, If 0, Class=Hub, Driver=hub/4p, 5000M
