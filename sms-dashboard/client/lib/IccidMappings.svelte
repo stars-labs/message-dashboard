@@ -231,10 +231,11 @@
 
   function exportAsCSV(data) {
     // CSV header
-    const headers = ['ICCID', 'Phone Number', 'Country', 'Carrier', 'Equipment ID', 'Status', 'Description', 'Created Time', 'Last Used'];
+    const headers = ['SIM Index', 'ICCID', 'Phone Number', 'Country', 'Carrier', 'Equipment ID', 'Status', 'Description', 'Created Time', 'Last Used'];
 
     // Convert data to CSV rows
     const rows = data.map(item => [
+      item.sim_index || '',
       item.iccid || '',
       item.phone_number || '',
       getCountryName(item.country) || item.country || '',
@@ -267,6 +268,7 @@
   function exportAsJSON(data) {
     // Format data for JSON export
     const exportData = data.map(item => ({
+      sim_index: item.sim_index,
       iccid: item.iccid,
       phone_number: item.phone_number,
       country: item.country,
@@ -403,6 +405,10 @@
             <tr class="border-b border-stone-200">
               <th
                 class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider"
+                >SIM#</th
+              >
+              <th
+                class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider"
                 >ICCID</th
               >
               <th
@@ -423,7 +429,7 @@
               >
               <th
                 class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider"
-                >描述</th
+                >备注</th
               >
               <th
                 class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider"
@@ -442,6 +448,15 @@
           <tbody class="divide-y divide-stone-100">
             {#each mappings as mapping}
             <tr class="hover:bg-stone-100 transition-colors">
+              <td class="px-4 py-3 text-sm font-semibold text-stone-600">
+                {#if mapping.sim_index}
+                  <span class="inline-flex items-center justify-center w-8 h-8 rounded-full bg-stone-100 border border-stone-200">
+                    {mapping.sim_index}
+                  </span>
+                {:else}
+                  <span class="text-stone-300">-</span>
+                {/if}
+              </td>
               <td class="px-4 py-3 text-sm font-mono text-stone-800">{mapping.iccid}</td>
               <td class="px-4 py-3 text-sm font-medium text-stone-900"
                 >{mapping.phone_number}</td
@@ -475,11 +490,11 @@
               <td class="px-4 py-3 text-sm text-stone-800">{mapping.notes || mapping.description || "-"}</td>
               <td class="px-4 py-3">
                 <span
-                  class="inline-flex px-2 py-1 text-xs rounded-full {mapping.is_active
+                  class="inline-flex px-2 py-1 text-xs rounded-full {mapping.is_active === 'active'
                     ? 'bg-green-50 text-green-700 border border-green-200'
                     : 'bg-stone-100 text-stone-500 border border-stone-200'}"
                 >
-                  {mapping.is_active ? "启用" : "未启用"}
+                  {mapping.is_active === 'active' ? "活动" : "未激活"}
                 </span>
               </td>
               <td class="px-4 py-3 text-sm text-stone-400">

@@ -136,7 +136,8 @@ export const controlHandler = {
         }
       }
       
-      // Update SIMs table
+      // Update modems table with SIM data (daemon-detected hardware state)
+      // Daemon does NOT write to sims table anymore - sims table is user-managed
       for (const sim of sims) {
         if (!sim.iccid) {
           console.warn('[control.js] Skipping SIM without ICCID');
@@ -149,34 +150,30 @@ export const controlHandler = {
           sim.current_modem_id = null;
         }
 
-        const lastVerifiedSession = sync_mode === 'full' ? session_id : null;
-        
-        batch.push(env.DB.prepare(`
-          INSERT INTO sims (
-            iccid, phone_number, current_modem_id, operator_name,
-            operator_id, status, sim_index, 
-            last_verified_session,
-            updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-          ON CONFLICT(iccid) DO UPDATE SET
-            phone_number = excluded.phone_number,
-            current_modem_id = excluded.current_modem_id,
-            operator_name = excluded.operator_name,
-            operator_id = excluded.operator_id,
-            status = excluded.status,
-            sim_index = excluded.sim_index,
-            last_verified_session = COALESCE(excluded.last_verified_session, sims.last_verified_session),
-            updated_at = CURRENT_TIMESTAMP
-        `).bind(
-          sim.iccid,
-          sim.phone_number || null,
-          sim.current_modem_id || null,
-          sim.operator_name || null,
-          sim.operator_id || null,
-          sim.status || 'active',
-          sim.sim_index || null,
-          lastVerifiedSession
-        ));
+        // Check if SIM exists in sims table (user-managed)
+        const simExists = await env.DB.prepare(`SELECT iccid FROM sims WHERE iccid = ?`).bind(sim.iccid).first();
+        if (!simExists) {
+          console.warn(`[control.js] Unknown ICCID ${sim.iccid} detected by daemon - not in sims table`);
+          // Do NOT auto-create; user must add via ICCID mapping page
+          continue;
+        }
+
+        // Update modems table with daemon-detected SIM data
+        if (sim.current_modem_id) {
+          batch.push(env.DB.prepare(`
+            UPDATE modems
+            SET current_iccid = ?,
+                detected_phone_number = ?,
+                operator = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE equipment_id = ?
+          `).bind(
+            sim.iccid,
+            sim.phone_number || null,
+            sim.operator_name || null,
+            sim.current_modem_id
+          ));
+        }
       }
       
       // Execute all batch operations
@@ -192,26 +189,27 @@ export const controlHandler = {
         const receivedIccids = new Set(sims.map(s => s.iccid).filter(id => id));
 
         for (const modemId of receivedModemIds) {
-          // Find SIMs pointing to this modem that aren't in the received list
+          // Find SIMs in this modem that aren't in the received list (check modems.current_iccid)
           const stale = await env.DB.prepare(`
-            SELECT iccid FROM sims
-            WHERE current_modem_id = ?
+            SELECT current_iccid as iccid FROM modems
+            WHERE equipment_id = ? AND current_iccid IS NOT NULL
           `).bind(modemId).all();
 
           const staleIccids = (stale.results || [])
             .map(r => r.iccid)
-            .filter(iccid => !receivedIccids.has(iccid));
+            .filter(iccid => iccid && !receivedIccids.has(iccid));
 
           if (staleIccids.length > 0) {
             console.log(`[control.js] Evicting ${staleIccids.length} stale SIM(s) from modem ${modemId}: ${staleIccids.join(', ')}`);
-            const placeholders = staleIccids.map(() => '?').join(', ');
+            // Clear current_iccid from modems table (daemon-managed)
             await env.DB.prepare(`
-              UPDATE sims
-              SET current_modem_id = NULL,
-                  status = 'inactive',
+              UPDATE modems
+              SET current_iccid = NULL,
+                  detected_phone_number = NULL,
+                  operator = NULL,
                   updated_at = CURRENT_TIMESTAMP
-              WHERE iccid IN (${placeholders})
-            `).bind(...staleIccids).run();
+              WHERE equipment_id = ?
+            `).bind(modemId).run();
           }
         }
       }
@@ -241,18 +239,17 @@ export const controlHandler = {
         `).run();
         
         console.log(`[control.js] Marked ${disconnectResult.meta.changes} modems as disconnected`);
-        
-        // Clear SIM associations for disconnected modems
+
+        // Clear SIM associations for disconnected modems (from modems table, not sims table)
         const clearSimsResult = await env.DB.prepare(`
-          UPDATE sims 
-          SET current_modem_id = NULL
-          WHERE current_modem_id IN (
-            SELECT equipment_id FROM modems 
-            WHERE verification_status = 'absent'
-          )
+          UPDATE modems
+          SET current_iccid = NULL,
+              detected_phone_number = NULL,
+              operator = NULL
+          WHERE verification_status = 'absent'
         `).run();
-        
-        console.log(`[control.js] Cleared ${clearSimsResult.meta.changes} SIM associations`);
+
+        console.log(`[control.js] Cleared ${clearSimsResult.meta.changes} SIM associations from modems table`);
         
         // Record sync history
         await env.DB.prepare(`
@@ -681,18 +678,21 @@ export const controlHandler = {
             continue;
           }
           
-          // Update modems table (hardware data)
+          // Update modems table (hardware data + daemon-detected SIM info)
           await env.DB.prepare(`
             INSERT INTO modems (
-              equipment_id, manufacturer, model, firmware_revision, 
-              hardware_revision, status, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+              equipment_id, manufacturer, model, firmware_revision,
+              hardware_revision, status, current_iccid, detected_phone_number, operator, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(equipment_id) DO UPDATE SET
               manufacturer = COALESCE(excluded.manufacturer, modems.manufacturer),
               model = COALESCE(excluded.model, modems.model),
               firmware_revision = COALESCE(excluded.firmware_revision, modems.firmware_revision),
               hardware_revision = COALESCE(excluded.hardware_revision, modems.hardware_revision),
               status = excluded.status,
+              current_iccid = excluded.current_iccid,
+              detected_phone_number = excluded.detected_phone_number,
+              operator = excluded.operator,
               updated_at = CURRENT_TIMESTAMP
           `).bind(
             phone.imei || `SIM_${phone.iccid}`,  // Use IMEI as equipment_id, fallback to SIM-based ID
@@ -700,35 +700,13 @@ export const controlHandler = {
             phone.model || null,
             phone.firmware_revision || null,
             phone.hardware_revision || null,
-            phone.status || 'active'
-          ).run();
-          
-          // Update sims table (SIM card data)
-          await env.DB.prepare(`
-            INSERT INTO sims (
-              iccid, phone_number, carrier, country_code, 
-              status, operator_name, operator_id, 
-              current_modem_id, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(iccid) DO UPDATE SET
-              phone_number = COALESCE(excluded.phone_number, sims.phone_number),
-              carrier = COALESCE(excluded.carrier, sims.carrier),
-              country_code = COALESCE(excluded.country_code, sims.country_code),
-              status = excluded.status,
-              operator_name = COALESCE(excluded.operator_name, sims.operator_name),
-              operator_id = COALESCE(excluded.operator_id, sims.operator_id),
-              current_modem_id = excluded.current_modem_id,
-              updated_at = CURRENT_TIMESTAMP
-          `).bind(
-            phone.iccid,
-            phone.number || null,
-            phone.carrier || null,
-            phone.country || null,
             phone.status || 'active',
-            phone.operator_name || null,
-            phone.operator_id || null,
-            phone.imei || `SIM_${phone.iccid}`
+            phone.iccid || null,                 // current_iccid - which SIM is inserted
+            phone.number || null,                // detected_phone_number - from AT+CNUM
+            phone.operator_name || null          // operator - from AT+COPS
           ).run();
+
+          // Daemon does NOT write to sims table anymore - sims table is user-managed via ICCID mapping page
           
           // Update modem_state table (real-time status)
           await env.DB.prepare(`
