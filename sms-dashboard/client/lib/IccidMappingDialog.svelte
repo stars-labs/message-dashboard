@@ -12,6 +12,7 @@
   let carrier = "";
   let country = "";
   let description = "";
+  let simIndex = "";
   let saving = false;
   let error = null;
 
@@ -21,6 +22,9 @@
       country = inferCountryFromNumber(phoneNumber) || "";
     }
     description = `${phone.iccid} - ${phone.operator_name || "Unknown Operator"}`;
+    simIndex = phone.sim_index !== null && phone.sim_index !== undefined
+      ? String(phone.sim_index)
+      : "";
   }
 
   async function handleSave() {
@@ -39,6 +43,7 @@
         carrier: carrier || phone.carrier || "",
         country: country || "",
         description: description || "",
+        sim_index: simIndex ? parseInt(simIndex) : null,
       });
 
       if (response.success) {
@@ -63,6 +68,7 @@
     carrier = "";
     country = "";
     description = "";
+    simIndex = "";
     error = null;
     dispatch("close");
   }
@@ -151,6 +157,27 @@
             placeholder="可选的描述信息"
             class="w-full px-3 py-2 cyber-input"
           />
+        </div>
+
+        <div>
+          <label
+            for="dialog-sim-index"
+            class="block text-sm font-medium text-stone-500 mb-1"
+          >
+            SIM 索引 (sim_index)
+          </label>
+          <input
+            id="dialog-sim-index"
+            type="number"
+            bind:value={simIndex}
+            placeholder="1-95"
+            min="1"
+            max="95"
+            class="w-full px-3 py-2 cyber-input"
+          />
+          <p class="text-xs text-stone-400 mt-1">
+            物理插槽编号（1-95），留空则不修改
+          </p>
         </div>
 
         {#if error}
