@@ -201,7 +201,7 @@ export const iccidMappingsHandler = {
     const data = await request.json();
     
     try {
-      const { iccid, phone_number, carrier, country, notes } = data;
+      const { iccid, phone_number, carrier, country, notes, sim_index } = data;
       
       if (!iccid || !phone_number) {
         return new Response(JSON.stringify({ 
@@ -221,8 +221,8 @@ export const iccidMappingsHandler = {
       if (!simExists) {
         // Create new SIM entry if it doesn't exist
         await env.DB.prepare(`
-          INSERT INTO sims (iccid, phone_number, carrier, country_code, user_phone_number, user_carrier, user_country_code, user_notes, user_override_enabled, user_updated_at, user_updated_by, status)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, TRUE, CURRENT_TIMESTAMP, ?, 'active')
+          INSERT INTO sims (iccid, phone_number, carrier, country_code, user_phone_number, user_carrier, user_country_code, user_notes, user_override_enabled, sim_index, user_updated_at, user_updated_by, status)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, TRUE, ?, CURRENT_TIMESTAMP, ?, 'active')
         `).bind(
           iccid,
           phone_number, // system phone number
@@ -232,29 +232,42 @@ export const iccidMappingsHandler = {
           carrier || null,
           country || null,
           notes || null,
+          sim_index || null,
           user?.email || 'system'
         ).run();
       } else {
         // Update existing SIM with user override
-        await env.DB.prepare(`
-          UPDATE sims 
-          SET 
-            user_phone_number = ?,
-            user_carrier = ?,
-            user_country_code = ?,
-            user_notes = ?,
-            user_override_enabled = TRUE,
-            user_updated_at = CURRENT_TIMESTAMP,
-            user_updated_by = ?
-          WHERE iccid = ?
-        `).bind(
+        const updateFields = [
+          'user_phone_number = ?',
+          'user_carrier = ?',
+          'user_country_code = ?',
+          'user_notes = ?',
+          'user_override_enabled = TRUE',
+          'user_updated_at = CURRENT_TIMESTAMP',
+          'user_updated_by = ?'
+        ];
+
+        const bindValues = [
           phone_number,
           carrier || null,
           country || null,
           notes || null,
-          user?.email || 'system',
-          iccid
-        ).run();
+          user?.email || 'system'
+        ];
+
+        // Only update sim_index if provided
+        if (sim_index !== null && sim_index !== undefined) {
+          updateFields.push('sim_index = ?');
+          bindValues.push(sim_index);
+        }
+
+        bindValues.push(iccid); // WHERE clause
+
+        await env.DB.prepare(`
+          UPDATE sims
+          SET ${updateFields.join(', ')}
+          WHERE iccid = ?
+        `).bind(...bindValues).run();
       }
       
       // Return the created/updated mapping
