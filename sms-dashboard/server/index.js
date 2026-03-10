@@ -8,7 +8,6 @@ import { phonesHandler } from './handlers/phones';
 import { messagesHandler } from './handlers/messages';
 import { statsHandler } from './handlers/stats';
 import { iccidMappingsHandler } from './handlers/iccid-mappings';
-import { userOverridesHandler } from './handlers/user-overrides';
 import { healthHandler } from './handlers/health';
 import { serveFrontend } from './frontend-handler';
 import { createRoleConfig, hasSmSAccess } from '../config/auth0-roles.js';
@@ -248,42 +247,8 @@ router.post('/api/iccid-mappings/bulk', async (request, env, ctx) => {
   return iccidMappingsHandler.bulkImport(request);
 });
 
-// User Overrides routes (for phone number overrides)
-router.get('/api/user-overrides', async (request, env, ctx) => {
-  const authResponse = await handleAuth0(request, env, ctx);
-  if (authResponse) return authResponse;
-  await enrichUserPermissions(request, env, ctx);
-  const permResponse = await requirePermission('phones.read')(request, env, ctx);
-  if (permResponse) return permResponse;
-  return userOverridesHandler.list(request);
-});
-
-router.get('/api/user-overrides/sim', async (request, env, ctx) => {
-  const authResponse = await handleAuth0(request, env, ctx);
-  if (authResponse) return authResponse;
-  await enrichUserPermissions(request, env, ctx);
-  const permResponse = await requirePermission('phones.read')(request, env, ctx);
-  if (permResponse) return permResponse;
-  return userOverridesHandler.get(request);
-});
-
-router.put('/api/user-overrides/sim', async (request, env, ctx) => {
-  const authResponse = await handleAuth0(request, env, ctx);
-  if (authResponse) return authResponse;
-  await enrichUserPermissions(request, env, ctx);
-  const permResponse = await requirePermission('phones.write')(request, env, ctx);
-  if (permResponse) return permResponse;
-  return userOverridesHandler.update(request);
-});
-
-router.delete('/api/user-overrides/sim', async (request, env, ctx) => {
-  const authResponse = await handleAuth0(request, env, ctx);
-  if (authResponse) return authResponse;
-  await enrichUserPermissions(request, env, ctx);
-  const permResponse = await requirePermission('phones.write')(request, env, ctx);
-  if (permResponse) return permResponse;
-  return userOverridesHandler.remove(request);
-});
+// User Overrides routes removed - obsolete with new schema (user-authoritative sims table)
+// All SIM management now goes through /api/iccid-mappings endpoints
 
 // Control server routes - API Key auth
 router.post('/api/control/messages', async (request) => {

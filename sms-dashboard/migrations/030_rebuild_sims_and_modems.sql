@@ -40,7 +40,7 @@ SELECT
   m.equipment_id,
   m.manufacturer,
   m.model,
-  m.primary_port,
+  m.usb_port as primary_port,         -- Use usb_port for backward compatibility
   m.status as modem_status,
   s.iccid,
   s.phone_number as number,
@@ -53,11 +53,11 @@ SELECT
   END as sim_status,                  -- Computed: active if modem has this SIM
   s.sim_index,
   s.notes,
-  ms.signal_quality,
+  ms.signal_percent as signal_quality,  -- Rename for backward compatibility
   ms.connection_status,
   ms.network_type,
   m.created_at,
   s.updated_at
 FROM modems m
 LEFT JOIN sims s ON m.current_iccid = s.iccid  -- Join on daemon's detected SIM
-LEFT JOIN modem_state ms ON ms.equipment_id = m.equipment_id;
+LEFT JOIN modem_state ms ON ms.modem_id = m.equipment_id;

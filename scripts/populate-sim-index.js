@@ -4,8 +4,8 @@
 import fs from 'fs';
 import { parse } from 'csv-parse/sync';
 
-const API_URL = 'https://sexy.qzz.io';
-const CSV_PATH = './phone_number_list.csv';
+const API_URL = 'http://localhost:8787';  // Local API for testing
+const CSV_PATH = '../phone_number_list.csv';
 
 // Helper function to derive country code from phone number
 function deriveCountryCode(phone) {
@@ -26,7 +26,7 @@ async function main() {
 
   console.log(`Found ${records.length} records in CSV`);
 
-  // Update via API (no auth needed for iccid-mappings create endpoint with matching ICCID)
+  // Update via API
   let successCount = 0;
   let errorCount = 0;
 
