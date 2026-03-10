@@ -11,17 +11,23 @@
   let phoneNumber = "";
   let carrier = "";
   let country = "";
-  let description = "";
+  let notes = "";
+  let imei = "";
   let simIndex = "";
+  let status = "";
   let saving = false;
   let error = null;
 
   $: if (phone) {
+    phoneNumber = phone.phone_number || phone.number || "";
     carrier = phone.carrier || "";
+    country = phone.country || "";
+    notes = phone.notes || "";
+    imei = phone.equipment_id || phone.imei || "";
+    status = phone.is_active || phone.status || "inactive";
     if (!country && phoneNumber) {
       country = inferCountryFromNumber(phoneNumber) || "";
     }
-    description = `${phone.iccid} - ${phone.operator_name || "Unknown Operator"}`;
     simIndex = phone.sim_index !== null && phone.sim_index !== undefined
       ? String(phone.sim_index)
       : "";
@@ -33,6 +39,11 @@
       return;
     }
 
+    if (!simIndex || parseInt(simIndex) < 1 || parseInt(simIndex) > 95) {
+      error = "请输入有效的 SIM 索引 (1-95)";
+      return;
+    }
+
     saving = true;
     error = null;
 
@@ -40,10 +51,12 @@
       const response = await api.iccidMappings.create({
         iccid: phone.iccid,
         phone_number: phoneNumber,
-        carrier: carrier || phone.carrier || "",
-        country: country || "",
-        description: description || "",
         sim_index: simIndex ? parseInt(simIndex) : null,
+        country_code: country || null,
+        carrier: carrier || null,
+        imei: imei || null,
+        notes: notes || null,
+        // NO status field - computed dynamically by API
       });
 
       if (response.success) {
@@ -67,8 +80,10 @@
     phoneNumber = "";
     carrier = "";
     country = "";
-    description = "";
+    notes = "";
+    imei = "";
     simIndex = "";
+    status = "";
     error = null;
     dispatch("close");
   }
@@ -147,24 +162,10 @@
 
         <div>
           <label
-            for="dialog-description"
-            class="block text-sm font-medium text-stone-500 mb-1">备注</label
-          >
-          <input
-            id="dialog-description"
-            type="text"
-            bind:value={description}
-            placeholder="可选的描述信息"
-            class="w-full px-3 py-2 cyber-input"
-          />
-        </div>
-
-        <div>
-          <label
             for="dialog-sim-index"
             class="block text-sm font-medium text-stone-500 mb-1"
           >
-            SIM 索引 (sim_index)
+            SIM 索引 (sim_index) <span class="text-red-500">*</span>
           </label>
           <input
             id="dialog-sim-index"
@@ -173,11 +174,51 @@
             placeholder="1-95"
             min="1"
             max="95"
+            required
             class="w-full px-3 py-2 cyber-input"
           />
           <p class="text-xs text-stone-400 mt-1">
-            物理插槽编号（1-95），留空则不修改
+            物理插槽编号（1-95）
           </p>
+        </div>
+
+        <div>
+          <label
+            for="dialog-imei"
+            class="block text-sm font-medium text-stone-500 mb-1">IMEI (设备绑定)</label
+          >
+          <input
+            id="dialog-imei"
+            type="text"
+            bind:value={imei}
+            placeholder="可选 - 指定此SIM卡应该在哪个设备"
+            class="w-full px-3 py-2 cyber-input font-mono text-sm"
+          />
+        </div>
+
+        <div>
+          <label
+            for="dialog-notes"
+            class="block text-sm font-medium text-stone-500 mb-1">备注</label
+          >
+          <textarea
+            id="dialog-notes"
+            bind:value={notes}
+            placeholder="可选的备注信息"
+            rows="2"
+            class="w-full px-3 py-2 cyber-input resize-none"
+          ></textarea>
+        </div>
+
+        <!-- Status display (read-only, computed from hardware) -->
+        <div>
+          <label class="block text-sm font-medium text-stone-500 mb-1">状态</label>
+          <div class="text-sm px-3 py-2 bg-stone-50 rounded-lg border border-stone-200">
+            <span class:text-green-600={status === 'active'} class:text-stone-400={status === 'inactive'}>
+              {status === 'active' ? '✓ 活动' : '○ 未激活'}
+            </span>
+            <span class="text-stone-400 ml-2">(自动检测)</span>
+          </div>
         </div>
 
         {#if error}
