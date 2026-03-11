@@ -264,7 +264,8 @@ export const api = {
   async getStats() {
     try {
       const response = await apiRequest('getStats');
-      return response.success ? response.data : {
+      // Stats API returns data at root level, not under .data
+      return response.success ? response : {
         total_messages: 0,
         today_messages: 0,
         total_sent: 0,

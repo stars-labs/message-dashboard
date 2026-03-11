@@ -9,11 +9,15 @@
   let error = null;
   let showAddForm = false;
   let showEditForm = false;
-  let showBulkImport = false;
-  let showExportMenu = false;
   let editingMapping = null;
   let searchQuery = "";
+  let statusFilter = "all"; // "all", "active", "inactive"
   let successMessage = null;
+
+  // Computed stats
+  $: activeCount = allMappingsCache.filter(m => m.is_active === 'active').length;
+  $: inactiveCount = allMappingsCache.filter(m => m.is_active === 'inactive' || !m.is_active).length;
+  $: totalCount = allMappingsCache.length;
 
   // Form data
   let formData = {
@@ -22,10 +26,9 @@
     carrier: "",
     country: "",
     description: "",
+    sim_index: "",
+    imei: "",
   };
-
-  // Bulk import data
-  let bulkImportText = "";
 
   async function loadMappings() {
     loading = true;
@@ -55,18 +58,28 @@
   }
 
   function filterMappings() {
-    if (!searchQuery.trim()) {
-      mappings = allMappingsCache;
-      return;
+    let filtered = allMappingsCache;
+
+    // Filter by status
+    if (statusFilter === "active") {
+      filtered = filtered.filter(m => m.is_active === 'active');
+    } else if (statusFilter === "inactive") {
+      filtered = filtered.filter(m => m.is_active === 'inactive' || !m.is_active);
     }
-    const q = searchQuery.trim().toLowerCase();
-    mappings = allMappingsCache.filter((m) =>
-      (m.iccid || "").toLowerCase().includes(q) ||
-      (m.phone_number || "").toLowerCase().includes(q) ||
-      (m.carrier || "").toLowerCase().includes(q) ||
-      (m.equipment_id || "").toLowerCase().includes(q) ||
-      (m.notes || m.description || "").toLowerCase().includes(q)
-    );
+
+    // Filter by search query
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      filtered = filtered.filter((m) =>
+        (m.iccid || "").toLowerCase().includes(q) ||
+        (m.phone_number || "").toLowerCase().includes(q) ||
+        (m.carrier || "").toLowerCase().includes(q) ||
+        (m.equipment_id || "").toLowerCase().includes(q) ||
+        (m.notes || m.description || "").toLowerCase().includes(q)
+      );
+    }
+
+    mappings = filtered;
   }
 
   async function handleAddMapping() {
@@ -92,7 +105,8 @@
         carrier: formData.carrier,
         country: formData.country,
         description: formData.description,
-        is_active: formData.is_active,
+        sim_index: formData.sim_index,
+        imei: formData.imei,
       });
 
       if (response.success) {
@@ -125,53 +139,6 @@
     }
   }
 
-  async function handleBulkImport() {
-    try {
-      // Parse CSV or JSON format
-      let mappingsData = [];
-
-      // Try to parse as JSON first
-      try {
-        mappingsData = JSON.parse(bulkImportText);
-      } catch {
-        // Parse as CSV
-        const lines = bulkImportText.trim().split("\n");
-        const headers = lines[0]
-          .toLowerCase()
-          .split(",")
-          .map((h) => h.trim());
-
-        for (let i = 1; i < lines.length; i++) {
-          const values = lines[i].split(",").map((v) => v.trim());
-          const mapping = {};
-
-          headers.forEach((header, index) => {
-            mapping[header] = values[index] || "";
-          });
-
-          mappingsData.push(mapping);
-        }
-      }
-
-      const response = await api.iccidMappings.bulkImport({
-        mappings: mappingsData,
-      });
-
-      if (response.success) {
-        showBulkImport = false;
-        bulkImportText = "";
-        await loadMappings();
-
-        successMessage = `导入完成: 成功 ${response.results.success} 条, 失败 ${response.results.failed} 条`;
-        setTimeout(() => { successMessage = null; }, 5000);
-      } else {
-        error = response.error || "Failed to import mappings";
-      }
-    } catch (err) {
-      error = err.message;
-    }
-  }
-
   function startEdit(mapping) {
     editingMapping = mapping;
     formData = {
@@ -180,7 +147,8 @@
       carrier: mapping.carrier || "",
       country: mapping.country || "",
       description: mapping.notes || mapping.description || "",
-      is_active: mapping.is_active,
+      sim_index: mapping.sim_index || "",
+      imei: mapping.equipment_id || "",
     };
     showEditForm = true;
   }
@@ -192,154 +160,23 @@
       carrier: "",
       country: "",
       description: "",
+      sim_index: "",
+      imei: "",
     };
     editingMapping = null;
   }
 
-  $: if (searchQuery !== undefined) filterMappings();
+  $: if (searchQuery !== undefined || statusFilter !== undefined) filterMappings();
 
   onMount(() => {
     loadMappings();
-    
-    // Close export menu when clicking outside
-    const handleClickOutside = (event) => {
-      if (showExportMenu && !event.target.closest('.export-menu-container')) {
-        showExportMenu = false;
-      }
-    };
-    
-    document.addEventListener('click', handleClickOutside);
-    
-    return () => {
-      document.removeEventListener('click', handleClickOutside);
-    };
   });
-
-  // Export functions
-  function exportAllMappings(format = 'csv') {
-    if (allMappingsCache.length === 0) {
-      error = "No mappings to export";
-      return;
-    }
-
-    if (format === 'csv') {
-      exportAsCSV(allMappingsCache);
-    } else if (format === 'json') {
-      exportAsJSON(allMappingsCache);
-    }
-  }
-
-  function exportAsCSV(data) {
-    // CSV header
-    const headers = ['SIM Index', 'ICCID', 'Phone Number', 'Country', 'Carrier', 'Equipment ID', 'Status', 'Description', 'Created Time', 'Last Used'];
-
-    // Convert data to CSV rows
-    const rows = data.map(item => [
-      item.sim_index || '',
-      item.iccid || '',
-      item.phone_number || '',
-      getCountryName(item.country) || item.country || '',
-      item.carrier || '',
-      item.equipment_id || '',
-      item.is_active ? '启用' : '未启用',
-      item.description || '',
-      item.created_at ? new Date(item.created_at).toLocaleString('zh-CN') : '',
-      item.last_used ? new Date(item.last_used).toLocaleString('zh-CN') : ''
-    ]);
-    
-    // Combine headers and rows
-    const csvContent = [
-      headers.join(','),
-      ...rows.map(row => row.map(cell => `"${cell.replace(/"/g, '""')}"`).join(','))
-    ].join('\n');
-    
-    // Create download
-    const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `iccid_mappings_${new Date().toISOString().split('T')[0]}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  }
-
-  function exportAsJSON(data) {
-    // Format data for JSON export
-    const exportData = data.map(item => ({
-      sim_index: item.sim_index,
-      iccid: item.iccid,
-      phone_number: item.phone_number,
-      country: item.country,
-      country_name: getCountryName(item.country),
-      carrier: item.carrier,
-      equipment_id: item.equipment_id,
-      is_active: item.is_active,
-      description: item.description,
-      created_at: item.created_at,
-      last_used: item.last_used
-    }));
-    
-    const jsonContent = JSON.stringify(exportData, null, 2);
-    
-    // Create download
-    const blob = new Blob([jsonContent], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `iccid_mappings_${new Date().toISOString().split('T')[0]}.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  }
 </script>
 
 <div class="tech-card p-6">
   <div class="flex justify-between items-center mb-6">
     <h2 class="text-2xl font-bold data-value high-contrast header-effect-target">ICCID 映射管理</h2>
     <div class="flex gap-2">
-      <!-- Export button with dropdown -->
-      <div class="relative export-menu-container">
-        <button
-          on:click={() => (showExportMenu = !showExportMenu)}
-          class="px-4 py-2 tech-button transition-all duration-300 flex items-center gap-2"
-        >
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
-          </svg>
-          导出
-        </button>
-        {#if showExportMenu}
-          <div class="absolute right-0 mt-2 w-48 bg-white border border-stone-200 rounded-xl shadow-lg z-50 overflow-hidden">
-            <button
-              on:click={() => {
-                exportAllMappings('csv');
-                showExportMenu = false;
-              }}
-              class="w-full px-4 py-2.5 text-left text-sm text-stone-700 hover:bg-stone-50 transition-colors"
-            >
-              导出为 CSV
-            </button>
-            <button
-              on:click={() => {
-                exportAllMappings('json');
-                showExportMenu = false;
-              }}
-              class="w-full px-4 py-2.5 text-left text-sm text-stone-700 hover:bg-stone-50 border-t border-stone-100 transition-colors"
-            >
-              导出为 JSON
-            </button>
-          </div>
-        {/if}
-      </div>
-      <button
-        on:click={() => (showBulkImport = true)}
-        class="px-4 py-2 tech-button transition-all duration-300"
-      >
-        批量导入
-      </button>
       <button
         on:click={() => (showAddForm = true)}
         class="px-4 py-2 tech-button transition-all duration-300"
@@ -349,13 +186,31 @@
     </div>
   </div>
 
-  <!-- Search Bar -->
-  <div class="mb-4">
+  <!-- Filter and Search Bar -->
+  <div class="mb-4 flex gap-2">
+    <button
+      on:click={() => statusFilter = "all"}
+      class="px-4 py-2 rounded-lg transition-colors whitespace-nowrap {statusFilter === 'all' ? 'bg-stone-800 text-white' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'}"
+    >
+      全部 ({totalCount})
+    </button>
+    <button
+      on:click={() => statusFilter = "active"}
+      class="px-4 py-2 rounded-lg transition-colors whitespace-nowrap {statusFilter === 'active' ? 'bg-green-600 text-white' : 'bg-green-50 text-green-600 hover:bg-green-100'}"
+    >
+      活动 ({activeCount})
+    </button>
+    <button
+      on:click={() => statusFilter = "inactive"}
+      class="px-4 py-2 rounded-lg transition-colors whitespace-nowrap {statusFilter === 'inactive' ? 'bg-stone-500 text-white' : 'bg-stone-50 text-stone-500 hover:bg-stone-100'}"
+    >
+      未激活 ({inactiveCount})
+    </button>
     <input
       type="text"
       bind:value={searchQuery}
       placeholder="搜索 ICCID、手机号、运营商..."
-      class="w-full px-4 py-2 cyber-input"
+      class="flex-1 px-4 py-2 cyber-input"
     />
   </div>
 
@@ -585,7 +440,7 @@
           <label
             for="create-carrier"
             class="block text-sm font-medium text-stone-500 mb-1"
-            >运营商（可选）</label
+            >运营商</label
           >
           <input
             id="create-carrier"
@@ -593,6 +448,39 @@
             bind:value={formData.carrier}
             placeholder="例如：中国移动"
             class="w-full px-3 py-2 cyber-input"
+          />
+        </div>
+
+        <div>
+          <label
+            for="create-sim-index"
+            class="block text-sm font-medium text-stone-500 mb-1"
+            >SIM 索引 <span class="text-red-500">*</span></label
+          >
+          <input
+            id="create-sim-index"
+            type="number"
+            bind:value={formData.sim_index}
+            placeholder="1-95"
+            min="1"
+            max="95"
+            required
+            class="w-full px-3 py-2 cyber-input"
+          />
+        </div>
+
+        <div>
+          <label
+            for="create-imei"
+            class="block text-sm font-medium text-stone-500 mb-1"
+            >IMEI</label
+          >
+          <input
+            id="create-imei"
+            type="text"
+            bind:value={formData.imei}
+            placeholder="设备 IMEI 号"
+            class="w-full px-3 py-2 cyber-input font-mono text-sm"
           />
         </div>
 
@@ -694,7 +582,7 @@
           <label
             for="edit-carrier"
             class="block text-sm font-medium text-stone-500 mb-1"
-            >运营商（可选）</label
+            >运营商</label
           >
           <input
             id="edit-carrier"
@@ -702,6 +590,39 @@
             bind:value={formData.carrier}
             placeholder="例如：中国移动"
             class="w-full px-3 py-2 cyber-input"
+          />
+        </div>
+
+        <div>
+          <label
+            for="edit-sim-index"
+            class="block text-sm font-medium text-stone-500 mb-1"
+            >SIM 索引 <span class="text-red-500">*</span></label
+          >
+          <input
+            id="edit-sim-index"
+            type="number"
+            bind:value={formData.sim_index}
+            placeholder="1-95"
+            min="1"
+            max="95"
+            required
+            class="w-full px-3 py-2 cyber-input"
+          />
+        </div>
+
+        <div>
+          <label
+            for="edit-imei"
+            class="block text-sm font-medium text-stone-500 mb-1"
+            >IMEI</label
+          >
+          <input
+            id="edit-imei"
+            type="text"
+            bind:value={formData.imei}
+            placeholder="设备 IMEI 号"
+            class="w-full px-3 py-2 cyber-input font-mono text-sm"
           />
         </div>
 
@@ -718,17 +639,6 @@
             class="w-full px-3 py-2 cyber-input"
             rows="3"
           ></textarea>
-        </div>
-
-        <div>
-          <label class="flex items-center">
-            <input
-              type="checkbox"
-              bind:checked={formData.is_active}
-              class="mr-2"
-            />
-            <span class="text-sm font-medium text-stone-500">启用状态</span>
-          </label>
         </div>
       </div>
 
@@ -753,58 +663,3 @@
   </div>
 {/if}
 
-<!-- Bulk Import Modal -->
-{#if showBulkImport}
-  <div
-    class="fixed inset-0 bg-stone-900/50 flex items-center justify-center z-50"
-  >
-    <div class="tech-card p-6 max-w-2xl w-full mx-4">
-      <h3 class="text-lg font-bold mb-4 data-value high-contrast">批量导入 ICCID 映射</h3>
-
-      <div class="mb-4">
-        <p class="text-sm text-stone-400 mb-2">
-          支持 CSV 或 JSON 格式。CSV
-          格式第一行应为标题行：iccid,phone_number,country,carrier,description
-        </p>
-        <p class="text-sm text-stone-400">
-          JSON 格式示例：<code
-            class="text-stone-800">[{JSON.stringify({
-              iccid: "123456",
-              phone_number: "13800138000",
-              country: "CN",
-              carrier: "中国移动",
-            })}]</code
-          >
-        </p>
-        <p class="text-sm text-stone-400 mt-1">
-          国家代码：CN=中国, HK=香港, SG=新加坡, US=美国, UK=英国, JP=日本等
-        </p>
-      </div>
-
-      <textarea
-        bind:value={bulkImportText}
-        placeholder="粘贴 CSV 或 JSON 数据..."
-        class="w-full px-3 py-2 cyber-input"
-        rows="10"
-      ></textarea>
-
-      <div class="mt-6 flex justify-end gap-3">
-        <button
-          on:click={() => {
-            showBulkImport = false;
-            bulkImportText = "";
-          }}
-          class="px-4 py-2 border border-stone-300 rounded-lg hover:bg-stone-100 text-stone-500 transition-all duration-300"
-        >
-          取消
-        </button>
-        <button
-          on:click={handleBulkImport}
-          class="px-4 py-2 tech-button transition-all duration-300"
-        >
-          导入
-        </button>
-      </div>
-    </div>
-  </div>
-{/if}
