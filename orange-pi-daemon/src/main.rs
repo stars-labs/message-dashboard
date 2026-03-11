@@ -148,6 +148,7 @@ async fn main() -> Result<()> {
     let worker_pool = Arc::new(WorkerPool::new(
         worker_config.clone(),
         modem_manager.clone(),
+        message_store.clone(),
     ));
     info!(
         "👷 Worker pool initialized with {} parallel workers (batch size: {})",

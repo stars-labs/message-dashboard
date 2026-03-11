@@ -961,19 +961,27 @@ impl AtModemManager {
                 .to_string();
         }
 
-        let swap_nibbles = |b: u8| -> u8 { ((b & 0x0F) << 4) | ((b >> 4) & 0x0F) };
+        // Semi-octet BCD decoding: each byte has nibbles swapped (low nibble first)
+        // After swapping, decode as BCD: (high_nibble * 10) + low_nibble
+        let decode_bcd = |b: u8| -> u32 {
+            let swapped = ((b & 0x0F) << 4) | ((b >> 4) & 0x0F);
+            let high = (swapped >> 4) & 0x0F;
+            let low = swapped & 0x0F;
+            (high * 10 + low) as u32
+        };
 
-        let year = swap_nibbles(bytes[0]) as i32 + 2000;
-        let month = swap_nibbles(bytes[1]) as u32;
-        let day = swap_nibbles(bytes[2]) as u32;
-        let hour = swap_nibbles(bytes[3]) as u32;
-        let minute = swap_nibbles(bytes[4]) as u32;
-        let second = swap_nibbles(bytes[5]) as u32;
+        let year = decode_bcd(bytes[0]) as i32 + 2000;
+        let month = decode_bcd(bytes[1]);
+        let day = decode_bcd(bytes[2]);
+        let hour = decode_bcd(bytes[3]);
+        let minute = decode_bcd(bytes[4]);
+        let second = decode_bcd(bytes[5]);
 
-        // Timezone (in quarter hours)
+        // Timezone (in quarter hours, also BCD encoded)
+        // Bit 7 of original byte = sign (0=positive, 1=negative)
         let tz_byte = bytes[6];
-        let tz_quarters = swap_nibbles(tz_byte & 0x7F) as i32;
-        let tz_sign = if (tz_byte & 0x08) != 0 { -1 } else { 1 };
+        let tz_sign = if (tz_byte & 0x80) != 0 { -1 } else { 1 };
+        let tz_quarters = decode_bcd(tz_byte & 0x7F) as i32; // Mask out sign bit before BCD decode
         let tz_offset_minutes = tz_sign * tz_quarters * 15;
 
         // Convert to UTC
