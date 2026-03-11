@@ -108,6 +108,10 @@ async fn main() -> Result<()> {
     // Initialize message store (SQLite database)
     let message_store = Arc::new(MessageStore::new(&db_path)?);
 
+    // Note: Multipart SMS assembly is handled inline in modem_manager.rs
+    // No separate assembler instance needed - PDU parser extracts concat info
+    // and messages are assembled during the read operation
+
     // Clean up old pending messages on startup
     let cleaned = message_store.cleanup_all_old_pending()?;
     if cleaned > 0 {
@@ -549,6 +553,32 @@ async fn main() -> Result<()> {
                         "✅ Marked {} old uploaded messages as deleted (stale paths)",
                         marked
                     );
+                }
+            }
+        }
+    });
+
+    // TASK 5b: MULTIPART SEGMENTS CLEANUP (every 5 minutes)
+    // Clean up incomplete multipart SMS segments older than 5 minutes
+    let segment_cleanup_store = message_store.clone();
+
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(300)).await; // Every 5 minutes
+
+            // Clean up segments older than 5 minutes (300 seconds)
+            match segment_cleanup_store.cleanup_old_segments(300) {
+                Ok(deleted) if deleted > 0 => {
+                    warn!(
+                        "🧹 SEGMENT-CLEANUP: Removed {} expired multipart segments (>5min old)",
+                        deleted
+                    );
+                }
+                Ok(_) => {
+                    debug!("🧹 Segment cleanup: No expired multipart segments");
+                }
+                Err(e) => {
+                    error!("❌ Segment cleanup failed: {}", e);
                 }
             }
         }

@@ -7,6 +7,7 @@ pub mod modem_manager;
 pub mod native_dbus;
 pub mod retry_manager;
 pub mod signal_cache;
+pub mod sms_assembler;
 pub mod sms_sender;
 pub mod sync_manager;
 pub mod types;

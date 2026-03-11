@@ -298,30 +298,89 @@ impl ModemManager {
                 let port = self.get_port(modem_id).await;
                 let sms_list = self.at_modem.list_sms(&port).await?;
 
-                let messages: Vec<MessageWithPath> = sms_list
-                    .into_iter()
-                    .map(|sms| MessageWithPath {
-                        message: Message {
-                            phone_iccid: iccid.to_string(),
-                            phone_number: sms.sender,
-                            content: sms.text,
-                            timestamp: sms.timestamp,
-                            direction: "received".to_string(),
-                        },
-                        modem_id: modem_id.to_string(),
-                        sms_path: format!(
-                            "at:{}",
-                            sms.part_indices
-                                .iter()
-                                .map(|i| i.to_string())
-                                .collect::<Vec<_>>()
-                                .join(",")
-                        ),
-                    })
-                    .collect();
+                // Group multipart messages by (sender, ref_id, total_parts)
+                // Messages with concat_info are buffered, messages without are returned immediately
+                let mut multipart_groups: HashMap<(String, u8, u8), Vec<crate::at_modem::AtSms>> = HashMap::new();
+                let mut complete_messages: Vec<MessageWithPath> = Vec::new();
 
-                debug!("Got {} messages via AT from {}", messages.len(), modem_id);
-                Ok(messages)
+                for sms in sms_list {
+                    if let Some(ref concat_info) = sms.concat_info {
+                        // This is part of a multipart message - buffer it
+                        let key = (sms.sender.clone(), concat_info.ref_id, concat_info.total_parts);
+                        multipart_groups.entry(key).or_insert_with(Vec::new).push(sms);
+                    } else {
+                        // Single-part message - convert immediately
+                        complete_messages.push(MessageWithPath {
+                            message: Message {
+                                phone_iccid: iccid.to_string(),
+                                phone_number: sms.sender,
+                                content: sms.text,
+                                timestamp: sms.timestamp,
+                                direction: "received".to_string(),
+                            },
+                            modem_id: modem_id.to_string(),
+                            sms_path: format!("at:{}", sms.index),
+                        });
+                    }
+                }
+
+                // Assemble complete multipart groups
+                for ((sender, ref_id, total_parts), mut parts) in multipart_groups {
+                    if parts.len() == total_parts as usize {
+                        // All parts present - assemble
+                        parts.sort_by_key(|p| p.concat_info.as_ref().map(|c| c.part_number).unwrap_or(0));
+
+                        let combined_text = parts.iter().map(|p| p.text.as_str()).collect::<Vec<_>>().join("");
+                        let timestamp = parts[0].timestamp.clone();
+                        let all_indices: Vec<u32> = parts.iter().map(|p| p.index).collect();
+
+                        debug!(
+                            "Assembled multipart message: {} parts, {} chars, ref_id={}",
+                            parts.len(), combined_text.len(), ref_id
+                        );
+
+                        complete_messages.push(MessageWithPath {
+                            message: Message {
+                                phone_iccid: iccid.to_string(),
+                                phone_number: sender,
+                                content: combined_text,
+                                timestamp,
+                                direction: "received".to_string(),
+                            },
+                            modem_id: modem_id.to_string(),
+                            sms_path: format!(
+                                "at:{}",
+                                all_indices
+                                    .iter()
+                                    .map(|i| i.to_string())
+                                    .collect::<Vec<_>>()
+                                    .join(",")
+                            ),
+                        });
+                    } else {
+                        // Incomplete multipart message - store parts individually as fallback
+                        warn!(
+                            "Incomplete multipart message: {}/{} parts for ref_id={} from {} - storing parts separately",
+                            parts.len(), total_parts, ref_id, sender
+                        );
+                        for part in parts {
+                            complete_messages.push(MessageWithPath {
+                                message: Message {
+                                    phone_iccid: iccid.to_string(),
+                                    phone_number: part.sender,
+                                    content: part.text,
+                                    timestamp: part.timestamp,
+                                    direction: "received".to_string(),
+                                },
+                                modem_id: modem_id.to_string(),
+                                sms_path: format!("at:{}", part.index),
+                            });
+                        }
+                    }
+                }
+
+                debug!("Got {} messages via AT from {} (after multipart assembly)", complete_messages.len(), modem_id);
+                Ok(complete_messages)
             }
             BackendMode::DBus => {
                 let client = self
