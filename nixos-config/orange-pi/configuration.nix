@@ -509,6 +509,7 @@
     usbutils # Provides lsusb command
     ldns
     claude-code
+    modemmanager
   ];
 
   # This value determines the NixOS release compatibility
