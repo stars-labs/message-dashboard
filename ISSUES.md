@@ -2,21 +2,7 @@
 
 ## Open
 
-### 1. Multipart SMS stored as separate messages
-**Status**: Open
-**Impact**: Long SMS messages (>160 chars) appear as 2-3 separate messages in the UI instead of one combined message
-
-The GSM network splits long SMS into multiple segments (concatenated SMS / multipart SMS). The daemon's `list_sms_text_mode` in `at_modem.rs` stores each segment as a separate DB row because it doesn't parse the PDU concatenation headers (UDH — User Data Header) that indicate which segments belong together.
-
-All segments share the same `phone_iccid`, `phone_number`, and `timestamp`, but have different `id` values and partial `content`.
-
-**Fix approach**: Handle in the daemon — parse the UDH concatenation info from PDU mode (reference number, total parts, part number) and either:
-1. Buffer segments in the daemon and only upload the combined message once all parts arrive
-2. Include concatenation metadata (ref_id, part_number, total_parts) in the upload so the server can merge them
-
-Option 1 is preferred as it keeps the server simple and avoids pagination count mismatches.
-
-### 2. RBAC not implemented — role checking disabled
+### 1. RBAC not implemented — role checking disabled
 **Status**: Open (future)
 **Impact**: Any Auth0-authenticated user gets full access. No role differentiation.
 
@@ -42,6 +28,20 @@ Currently `USE_AUTH0_ROLES = "false"` in `wrangler.toml`. The RBAC middleware an
 ---
 
 ## Resolved
+
+### Multipart SMS stored as separate messages — Fixed 2026-03-11
+**Impact**: Long SMS messages (>160 chars) appeared as 2-3 separate messages in the UI.
+
+**Solution**: Implemented PDU mode SMS parser with UDH (User Data Header) extraction to detect and assemble multipart messages.
+- PDU parser extracts concatenation metadata (ref_id, total_parts, part_number)
+- Messages grouped and assembled inline during read operation in `modem_manager.rs`
+- Fallback to text mode if PDU parsing fails
+- All parts deleted together from SIM storage
+- Background cleanup task removes orphaned segments after 5 minutes
+
+**Result**: Long messages now appear as single entries in UI, message counts are accurate.
+
+**Commit**: a753b5c - feat(daemon): implement multipart SMS assembly
 
 ### ICCID trailing `F` padding — Fixed 2026-03-06
 Daemon created duplicate SIM records (with/without BCD padding `F`). Fixed by stripping trailing `F` in all 3 ICCID entry points (`at_modem.rs`, `native_dbus.rs`, `dbus_client.rs`). Migration 014 cleaned 23 duplicates.
