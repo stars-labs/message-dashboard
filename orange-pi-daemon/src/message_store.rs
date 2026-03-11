@@ -98,6 +98,31 @@ impl MessageStore {
             [],
         )?;
 
+        // Create multipart SMS segments table for buffering incomplete messages
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS multipart_segments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                phone_iccid TEXT NOT NULL,
+                sender TEXT NOT NULL,
+                ref_id INTEGER NOT NULL,
+                total_parts INTEGER NOT NULL,
+                part_number INTEGER NOT NULL,
+                content TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                sms_index INTEGER NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(phone_iccid, ref_id, part_number)
+            )",
+            [],
+        )?;
+
+        // Create index for querying message groups
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_multipart_group
+             ON multipart_segments(phone_iccid, sender, ref_id, total_parts)",
+            [],
+        )?;
+
         info!("📊 Message store initialized at: {}", db_path);
 
         Ok(Self {
@@ -557,6 +582,157 @@ impl MessageStore {
 
         if deleted > 0 {
             info!("🧹 Cleaned up {} messages with empty content", deleted);
+        }
+
+        Ok(deleted)
+    }
+
+    // ============================================================================
+    // Multipart SMS segment management
+    // ============================================================================
+
+    /// Store an incomplete message part
+    pub fn store_segment(
+        &self,
+        iccid: &str,
+        sender: &str,
+        ref_id: u8,
+        total_parts: u8,
+        part_number: u8,
+        content: &str,
+        timestamp: &str,
+        sms_index: u32,
+    ) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+
+        conn.execute(
+            "INSERT OR REPLACE INTO multipart_segments
+             (phone_iccid, sender, ref_id, total_parts, part_number, content, timestamp, sms_index)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                iccid,
+                sender,
+                ref_id as i64,
+                total_parts as i64,
+                part_number as i64,
+                content,
+                timestamp,
+                sms_index as i64,
+            ],
+        )?;
+
+        debug!(
+            "Stored segment {}/{} (ref_id={}) for iccid={}",
+            part_number, total_parts, ref_id, iccid
+        );
+
+        Ok(())
+    }
+
+    /// Get all parts for a message group
+    /// Returns: Vec<(part_number, content, timestamp, sms_index)>
+    pub fn get_segments(
+        &self,
+        iccid: &str,
+        sender: &str,
+        ref_id: u8,
+        total_parts: u8,
+    ) -> Result<Vec<(u8, String, String, u32)>> {
+        let conn = self.conn.lock().unwrap();
+
+        let mut stmt = conn.prepare(
+            "SELECT part_number, content, timestamp, sms_index
+             FROM multipart_segments
+             WHERE phone_iccid = ?1
+               AND sender = ?2
+               AND ref_id = ?3
+               AND total_parts = ?4
+             ORDER BY part_number ASC",
+        )?;
+
+        let segments = stmt
+            .query_map(
+                params![iccid, sender, ref_id as i64, total_parts as i64],
+                |row| {
+                    Ok((
+                        row.get::<_, i64>(0)? as u8,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get::<_, i64>(3)? as u32,
+                    ))
+                },
+            )?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(segments)
+    }
+
+    /// Delete segments after successful assembly
+    pub fn delete_segments(&self, iccid: &str, ref_id: u8) -> Result<usize> {
+        let conn = self.conn.lock().unwrap();
+
+        let deleted = conn.execute(
+            "DELETE FROM multipart_segments
+             WHERE phone_iccid = ?1
+               AND ref_id = ?2",
+            params![iccid, ref_id as i64],
+        )?;
+
+        if deleted > 0 {
+            debug!(
+                "Deleted {} segments for ref_id={}, iccid={}",
+                deleted, ref_id, iccid
+            );
+        }
+
+        Ok(deleted)
+    }
+
+    /// Get all incomplete segments (for recovery on startup)
+    /// Returns: Vec<(iccid, sender, ref_id, total_parts, part_number, content, timestamp, sms_index)>
+    pub fn get_all_segments(&self) -> Result<Vec<(String, String, u8, u8, u8, String, String, u32)>> {
+        let conn = self.conn.lock().unwrap();
+
+        let mut stmt = conn.prepare(
+            "SELECT phone_iccid, sender, ref_id, total_parts, part_number, content, timestamp, sms_index
+             FROM multipart_segments
+             ORDER BY phone_iccid, ref_id, part_number",
+        )?;
+
+        let segments = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get::<_, i64>(2)? as u8,
+                    row.get::<_, i64>(3)? as u8,
+                    row.get::<_, i64>(4)? as u8,
+                    row.get(5)?,
+                    row.get(6)?,
+                    row.get::<_, i64>(7)? as u32,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(segments)
+    }
+
+    /// Cleanup segments older than timeout_secs
+    /// Returns count of segments deleted
+    pub fn cleanup_old_segments(&self, timeout_secs: i64) -> Result<usize> {
+        let conn = self.conn.lock().unwrap();
+
+        let deleted = conn.execute(
+            "DELETE FROM multipart_segments
+             WHERE datetime(created_at) < datetime('now', ?1 || ' seconds')",
+            params![format!("-{}", timeout_secs)],
+        )?;
+
+        if deleted > 0 {
+            warn!(
+                "🧹 Cleaned up {} expired multipart segments (timeout={}s)",
+                deleted, timeout_secs
+            );
         }
 
         Ok(deleted)

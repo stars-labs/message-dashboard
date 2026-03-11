@@ -11,7 +11,6 @@ use nix::sys::termios::{self, BaudRate, SetArg};
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
-use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
@@ -26,6 +25,16 @@ pub struct AtSms {
     pub sender: String,
     pub timestamp: String,
     pub text: String,
+    /// Concatenation info for multipart messages (from UDH)
+    pub concat_info: Option<ConcatInfo>,
+}
+
+/// Concatenation info from PDU User Data Header (UDH)
+#[derive(Debug, Clone)]
+pub struct ConcatInfo {
+    pub ref_id: u8,       // Reference ID (groups parts together)
+    pub total_parts: u8,  // Total number of parts
+    pub part_number: u8,  // This part's number (1-indexed)
 }
 
 /// Modem device info from AT commands
@@ -619,11 +628,29 @@ impl AtModemManager {
     }
 
     /// List all SMS messages, merging concatenated parts using PDU metadata.
+    /// Tries PDU mode first (for multipart detection), falls back to text mode on error.
     pub async fn list_sms(&self, port: &str) -> Result<Vec<AtSms>> {
-        // Original behavior: rely solely on text mode listing (no concat merging)
-        let messages = self.list_sms_text_mode(port).await?;
-        debug!("Found {} SMS messages on {}", messages.len(), port);
-        Ok(messages)
+        // Try PDU mode first for proper multipart SMS detection
+        match self.list_sms_pdu_mode(port).await {
+            Ok(messages) if !messages.is_empty() => {
+                debug!("PDU mode: got {} messages from {}", messages.len(), port);
+                Ok(messages)
+            }
+            Ok(_) => {
+                // PDU mode succeeded but returned no messages - try text mode
+                debug!("PDU mode returned empty, trying text mode on {}", port);
+                let messages = self.list_sms_text_mode(port).await?;
+                debug!("Text mode: got {} messages from {}", messages.len(), port);
+                Ok(messages)
+            }
+            Err(e) => {
+                // PDU mode failed - fall back to text mode
+                warn!("PDU mode failed on {}: {} - falling back to text mode", port, e);
+                let messages = self.list_sms_text_mode(port).await?;
+                debug!("Text mode fallback: got {} messages from {}", messages.len(), port);
+                Ok(messages)
+            }
+        }
     }
 
     /// Text-mode listing used as the primary decode path (preserves existing behavior).
@@ -666,6 +693,7 @@ impl AtModemManager {
                                 sender: sms.1,
                                 timestamp: sms.2,
                                 text,
+                                concat_info: None,  // Text mode doesn't provide concatenation info
                             });
                         }
                     }
@@ -675,6 +703,333 @@ impl AtModemManager {
         }
 
         Ok(messages)
+    }
+
+    /// List SMS messages in PDU mode to extract concatenation info
+    async fn list_sms_pdu_mode(&self, port: &str) -> Result<Vec<AtSms>> {
+        // Set PDU mode
+        self.send_at_command(port, "AT+CMGF=0", self.timeout)
+            .await?;
+
+        // List all messages in PDU format (longer timeout for many messages)
+        let response = self
+            .send_at_command(port, "AT+CMGL=4", Duration::from_secs(10))
+            .await?;
+
+        let mut messages = Vec::new();
+        let lines: Vec<&str> = response.lines().collect();
+        let mut i = 0;
+
+        while i < lines.len() {
+            let line = lines[i].trim();
+
+            // Parse "+CMGL: 0,1,,23" (index, status, alpha, length)
+            if line.contains("+CMGL:") {
+                if let Some(index) = Self::parse_cmgl_pdu_header(line) {
+                    i += 1;
+                    if i < lines.len() {
+                        let pdu_hex = lines[i].trim();
+                        if !pdu_hex.is_empty() && pdu_hex != "OK" && !pdu_hex.contains("+CMGL:")
+                        {
+                            // Parse the PDU and extract message
+                            if let Ok(sms) = Self::parse_pdu_sms(index, pdu_hex) {
+                                messages.push(sms);
+                            }
+                        }
+                    }
+                }
+            }
+            i += 1;
+        }
+
+        Ok(messages)
+    }
+
+    /// Parse PDU CMGL header to extract message index
+    fn parse_cmgl_pdu_header(line: &str) -> Option<u32> {
+        // +CMGL: 0,1,,23
+        let parts: Vec<&str> = line.split(',').collect();
+        if parts.is_empty() {
+            return None;
+        }
+
+        // Extract index from "+CMGL: 0"
+        let index_part = parts[0].split(':').last()?.trim();
+        index_part.parse::<u32>().ok()
+    }
+
+    /// Parse a PDU SMS message
+    fn parse_pdu_sms(index: u32, pdu_hex: &str) -> Result<AtSms> {
+        // Decode hex string to bytes
+        let pdu_bytes: Vec<u8> = (0..pdu_hex.len())
+            .step_by(2)
+            .filter_map(|i| u8::from_str_radix(&pdu_hex[i..(i + 2).min(pdu_hex.len())], 16).ok())
+            .collect();
+
+        if pdu_bytes.len() < 10 {
+            return Err(anyhow!("PDU too short"));
+        }
+
+        let mut pos = 0;
+
+        // SMSC length (skip SMSC address)
+        let smsc_len = pdu_bytes[pos] as usize;
+        pos += 1 + smsc_len;
+
+        if pos >= pdu_bytes.len() {
+            return Err(anyhow!("PDU truncated after SMSC"));
+        }
+
+        // PDU type
+        let pdu_type = pdu_bytes[pos];
+        pos += 1;
+
+        // Sender address length (in digits)
+        if pos >= pdu_bytes.len() {
+            return Err(anyhow!("PDU truncated at sender length"));
+        }
+        let sender_len = pdu_bytes[pos] as usize;
+        pos += 1;
+
+        // Sender type of address
+        if pos >= pdu_bytes.len() {
+            return Err(anyhow!("PDU truncated at sender type"));
+        }
+        pos += 1; // Skip type
+
+        // Sender address (BCD encoded, 2 digits per byte)
+        let sender_bytes = (sender_len + 1) / 2;
+        if pos + sender_bytes > pdu_bytes.len() {
+            return Err(anyhow!("PDU truncated at sender address"));
+        }
+        let sender = Self::decode_bcd_phone(&pdu_bytes[pos..pos + sender_bytes], sender_len);
+        pos += sender_bytes;
+
+        // PID (Protocol Identifier)
+        if pos >= pdu_bytes.len() {
+            return Err(anyhow!("PDU truncated at PID"));
+        }
+        pos += 1;
+
+        // DCS (Data Coding Scheme)
+        if pos >= pdu_bytes.len() {
+            return Err(anyhow!("PDU truncated at DCS"));
+        }
+        let dcs = pdu_bytes[pos];
+        pos += 1;
+
+        // Timestamp (7 bytes in semi-octets)
+        if pos + 7 > pdu_bytes.len() {
+            return Err(anyhow!("PDU truncated at timestamp"));
+        }
+        let timestamp = Self::decode_pdu_timestamp(&pdu_bytes[pos..pos + 7]);
+        pos += 7;
+
+        // User Data Length
+        if pos >= pdu_bytes.len() {
+            return Err(anyhow!("PDU truncated at UDL"));
+        }
+        let udl = pdu_bytes[pos] as usize;
+        pos += 1;
+
+        // Check for UDH (User Data Header)
+        let has_udh = (pdu_type & 0x40) != 0;
+        let mut concat_info = None;
+        let mut text_start = pos;
+
+        if has_udh {
+            if pos >= pdu_bytes.len() {
+                return Err(anyhow!("PDU truncated at UDHL"));
+            }
+            let udhl = pdu_bytes[pos] as usize;
+            pos += 1;
+
+            // Extract concatenation info from UDH
+            concat_info = Self::extract_udh_concat(&pdu_bytes[pos..pos + udhl]);
+            pos += udhl;
+            text_start = pos;
+        }
+
+        // Decode message text
+        let text = if (dcs & 0x0C) == 0x08 {
+            // UCS2 encoding
+            Self::decode_pdu_ucs2(&pdu_bytes[text_start..], udl, has_udh)
+        } else {
+            // 7-bit GSM encoding
+            Self::decode_pdu_7bit(&pdu_bytes[text_start..], udl, has_udh)
+        };
+
+        Ok(AtSms {
+            index,
+            part_indices: vec![index],
+            sender,
+            timestamp,
+            text,
+            concat_info,
+        })
+    }
+
+    /// Extract concatenation info from UDH
+    fn extract_udh_concat(udh_bytes: &[u8]) -> Option<ConcatInfo> {
+        let mut pos = 0;
+        while pos < udh_bytes.len() {
+            let iei = udh_bytes[pos];
+            pos += 1;
+
+            if pos >= udh_bytes.len() {
+                break;
+            }
+            let iedl = udh_bytes[pos] as usize;
+            pos += 1;
+
+            if pos + iedl > udh_bytes.len() {
+                break;
+            }
+
+            // IEI 0x00: Concatenated short message, 8-bit reference
+            // IEI 0x08: Concatenated short message, 16-bit reference
+            if iei == 0x00 && iedl == 3 {
+                let ref_id = udh_bytes[pos];
+                let total_parts = udh_bytes[pos + 1];
+                let part_number = udh_bytes[pos + 2];
+                return Some(ConcatInfo {
+                    ref_id,
+                    total_parts,
+                    part_number,
+                });
+            } else if iei == 0x08 && iedl == 4 {
+                // Use only lower byte of 16-bit reference for simplicity
+                let ref_id = udh_bytes[pos + 1];
+                let total_parts = udh_bytes[pos + 2];
+                let part_number = udh_bytes[pos + 3];
+                return Some(ConcatInfo {
+                    ref_id,
+                    total_parts,
+                    part_number,
+                });
+            }
+
+            pos += iedl;
+        }
+        None
+    }
+
+    /// Decode BCD-encoded phone number
+    fn decode_bcd_phone(bytes: &[u8], digit_count: usize) -> String {
+        let mut phone = String::new();
+        for (i, byte) in bytes.iter().enumerate() {
+            let digit1 = byte & 0x0F;
+            let digit2 = (byte >> 4) & 0x0F;
+
+            if i * 2 < digit_count && digit1 != 0x0F {
+                phone.push(char::from_digit(digit1 as u32, 10).unwrap_or('?'));
+            }
+            if i * 2 + 1 < digit_count && digit2 != 0x0F {
+                phone.push(char::from_digit(digit2 as u32, 10).unwrap_or('?'));
+            }
+        }
+        phone
+    }
+
+    /// Decode PDU timestamp to ISO 8601 format
+    fn decode_pdu_timestamp(bytes: &[u8]) -> String {
+        if bytes.len() < 7 {
+            return chrono::Utc::now()
+                .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+                .to_string();
+        }
+
+        let swap_nibbles = |b: u8| -> u8 { ((b & 0x0F) << 4) | ((b >> 4) & 0x0F) };
+
+        let year = swap_nibbles(bytes[0]) as i32 + 2000;
+        let month = swap_nibbles(bytes[1]) as u32;
+        let day = swap_nibbles(bytes[2]) as u32;
+        let hour = swap_nibbles(bytes[3]) as u32;
+        let minute = swap_nibbles(bytes[4]) as u32;
+        let second = swap_nibbles(bytes[5]) as u32;
+
+        // Timezone (in quarter hours)
+        let tz_byte = bytes[6];
+        let tz_quarters = swap_nibbles(tz_byte & 0x7F) as i32;
+        let tz_sign = if (tz_byte & 0x08) != 0 { -1 } else { 1 };
+        let tz_offset_minutes = tz_sign * tz_quarters * 15;
+
+        // Convert to UTC
+        let naive = chrono::NaiveDate::from_ymd_opt(year, month, day)
+            .and_then(|d| d.and_hms_opt(hour, minute, second))
+            .unwrap_or_else(|| chrono::Utc::now().naive_utc());
+
+        let dt = chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(
+            naive - chrono::Duration::minutes(tz_offset_minutes as i64),
+            chrono::Utc,
+        );
+
+        dt.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
+    }
+
+    /// Decode 7-bit GSM encoded text
+    fn decode_pdu_7bit(bytes: &[u8], udl: usize, has_udh: bool) -> String {
+        // For 7-bit encoding with UDH, we need to skip the fill bits
+        let fill_bits = if has_udh {
+            if bytes.is_empty() {
+                return String::new();
+            }
+            let udhl = bytes[0] as usize;
+            // Calculate fill bits: (7 - ((udhl + 1) * 8) % 7) % 7
+            (7 - ((udhl + 1) * 8) % 7) % 7
+        } else {
+            0
+        };
+
+        let mut result = String::new();
+        let mut bit_pos = fill_bits;
+
+        for _ in 0..udl {
+            let byte_pos = bit_pos / 8;
+            let shift = bit_pos % 8;
+
+            if byte_pos >= bytes.len() {
+                break;
+            }
+
+            let mut char_val = (bytes[byte_pos] >> shift) & 0x7F;
+            if shift > 1 && byte_pos + 1 < bytes.len() {
+                char_val |= (bytes[byte_pos + 1] << (8 - shift)) & 0x7F;
+            }
+
+            // GSM 7-bit default alphabet (simplified - just handle ASCII range)
+            if char_val < 128 {
+                result.push(char_val as char);
+            } else {
+                result.push('?');
+            }
+
+            bit_pos += 7;
+        }
+
+        result
+    }
+
+    /// Decode UCS2 (UTF-16BE) encoded text
+    fn decode_pdu_ucs2(bytes: &[u8], _udl: usize, has_udh: bool) -> String {
+        let start = if has_udh && !bytes.is_empty() {
+            let udhl = bytes[0] as usize;
+            udhl + 1
+        } else {
+            0
+        };
+
+        if start >= bytes.len() {
+            return String::new();
+        }
+
+        let text_bytes = &bytes[start..];
+        let u16_count = text_bytes.len() / 2;
+        let u16_values: Vec<u16> = (0..u16_count)
+            .map(|i| u16::from_be_bytes([text_bytes[i * 2], text_bytes[i * 2 + 1]]))
+            .collect();
+
+        String::from_utf16(&u16_values).unwrap_or_else(|_| String::from("?"))
     }
 
     /// Decode SMS content - handles UCS2 hex encoding for Chinese/Unicode
