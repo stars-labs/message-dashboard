@@ -58,27 +58,15 @@
     return onlinePhones.length;
   }
   
-  // Centralized function to calculate SIM missing devices
-  function calculateSimMissingDevices(phones) {
-    if (!phones || phones.length === 0) return 0;
-    
-    const simMissingPhones = phones.filter(p => {
-      return p?.status === 'sim-missing' || (!p?.iccid && !p?.number);
-    });
-    
-    return simMissingPhones.length;
-  }
-  
   // Track if we've loaded stats from backend (to prevent race conditions)
   let backendStatsLoaded = false;
-  
+
   // Manual function to update stats - no reactive statements to avoid circular dependencies
   function updateStatsFromPhones() {
     if (phoneNumbers && phoneNumbers.length > 0) {
       const onlineCount = calculateOnlineDevices(phoneNumbers);
-      const simMissingCount = calculateSimMissingDevices(phoneNumbers);
-      if (onlineCount !== stats.onlineDevices || simMissingCount !== stats.simMissingDevices) {
-        stats = { ...stats, onlineDevices: onlineCount, simMissingDevices: simMissingCount };
+      if (onlineCount !== stats.onlineDevices) {
+        stats = { ...stats, onlineDevices: onlineCount };
       }
     }
   }
@@ -133,7 +121,6 @@
     onlineDevices: 0,
     totalDevices: 0,
     verificationRate: 0,
-    simMissingDevices: 0,
   };
   
   
@@ -237,13 +224,8 @@
       
       // Map API stats to component format
       if (statsResponse) {
-        
-        const prev = stats;
         stats = {
           ...mapStatsResponse(statsResponse),
-          // Preserve client-calculated device counts (server returns stale 0 for these)
-          onlineDevices: prev.onlineDevices,
-          simMissingDevices: prev.simMissingDevices,
         };
         backendStatsLoaded = true;
         updateStatsFromPhones();
@@ -568,13 +550,9 @@
       const response = await auth.authenticatedFetch('/api/stats');
       if (response.ok) {
         const data = await response.json();
-        
-        const prev = stats;
+
         stats = {
           ...mapStatsResponse(data),
-          // Preserve client-calculated device counts (server returns stale 0 for these)
-          onlineDevices: prev.onlineDevices,
-          simMissingDevices: prev.simMissingDevices,
         };
         backendStatsLoaded = true;
       }
@@ -932,10 +910,6 @@
             <div class="flex-1 px-5 py-3 min-w-0">
               <div class="text-[10px] font-semibold text-stone-400 uppercase tracking-widest mb-1">今日发送</div>
               <div class="font-mono text-xl font-bold text-stone-900 leading-none">{stats.todaySent || 0}</div>
-            </div>
-            <div class="flex-1 px-5 py-3 min-w-0">
-              <div class="text-[10px] font-semibold text-stone-400 uppercase tracking-widest mb-1">需要SIM卡</div>
-              <div class="font-mono text-xl font-bold leading-none {stats.simMissingDevices > 0 ? 'text-orange-600' : 'text-stone-900'}">{stats.simMissingDevices || 0}</div>
             </div>
             <div class="flex-1 px-5 py-3 min-w-0">
               <div class="text-[10px] font-semibold text-stone-400 uppercase tracking-widest mb-1">总接收消息</div>

@@ -106,7 +106,6 @@ export function mapStatsResponse(data) {
     todayReceived: data.today_received || 0,
     onlineDevices: data.online_devices || 0,
     totalDevices: data.total_devices || 0,
-    simMissingDevices: data.sim_missing_devices || 0,
     verificationRate: Math.round((data.verification_rate || 0) * 100),
   };
 }
