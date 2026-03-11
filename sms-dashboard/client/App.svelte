@@ -334,18 +334,24 @@
         // Detect genuinely new messages: must have a timestamp newer than anything we've seen
         if (lastKnownTimestamp && messages.length > 0) {
           const cutoff = new Date(lastKnownTimestamp).getTime();
+          console.log('[New Message Detection] lastKnownTimestamp:', lastKnownTimestamp, 'cutoff:', new Date(cutoff));
           const freshIds = response.data
             .filter(m => m.timestamp && new Date(m.timestamp).getTime() > cutoff)
             .map(m => m.id);
+          console.log('[New Message Detection] Found', freshIds.length, 'new messages:', freshIds);
           if (freshIds.length > 0) {
             freshIds.forEach(id => newMessageIds.add(id));
             newMessageIds = newMessageIds; // trigger reactivity
+            console.log('[New Message Detection] Added new message IDs, newMessageIds size:', newMessageIds.size);
             // Auto-clear "新" badges after 30 seconds
             setTimeout(() => {
               freshIds.forEach(id => newMessageIds.delete(id));
               newMessageIds = newMessageIds;
+              console.log('[New Message Detection] Auto-cleared badges after 30s');
             }, 30000);
           }
+        } else {
+          console.log('[New Message Detection] Skipped - lastKnownTimestamp:', lastKnownTimestamp, 'messages.length:', messages.length);
         }
         // Update the high-water mark to the newest timestamp in this batch
         const newest = response.data.reduce((max, m) => {
