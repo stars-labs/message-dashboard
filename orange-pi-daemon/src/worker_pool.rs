@@ -66,6 +66,7 @@ pub struct ModemResult {
 pub struct WorkerPool {
     config: WorkerPoolConfig,
     modem_manager: Arc<ModemManager>,
+    message_store: Arc<crate::message_store::MessageStore>,
     semaphore: Arc<Semaphore>,
     stats: Arc<RwLock<WorkerPoolStats>>,
     /// Flag to prevent concurrent processing calls
@@ -74,7 +75,11 @@ pub struct WorkerPool {
 
 impl WorkerPool {
     /// Create a new worker pool
-    pub fn new(config: WorkerPoolConfig, modem_manager: Arc<ModemManager>) -> Self {
+    pub fn new(
+        config: WorkerPoolConfig,
+        modem_manager: Arc<ModemManager>,
+        message_store: Arc<crate::message_store::MessageStore>,
+    ) -> Self {
         let semaphore = Arc::new(Semaphore::new(config.num_workers));
 
         info!(
@@ -85,6 +90,7 @@ impl WorkerPool {
         Self {
             config,
             modem_manager,
+            message_store,
             semaphore,
             stats: Arc::new(RwLock::new(WorkerPoolStats::default())),
             processing: Arc::new(AtomicBool::new(false)),
@@ -141,6 +147,7 @@ impl WorkerPool {
                 let tx = tx.clone();
                 let semaphore = self.semaphore.clone();
                 let modem_manager = self.modem_manager.clone();
+                let message_store = self.message_store.clone();
                 let timeout = self.config.modem_timeout;
                 let stats = self.stats.clone();
 
@@ -151,7 +158,7 @@ impl WorkerPool {
 
                     let result = tokio::time::timeout(
                         timeout,
-                        Self::process_single_modem(modem_id.clone(), modem_manager),
+                        Self::process_single_modem(modem_id.clone(), modem_manager, message_store),
                     )
                     .await;
 
@@ -241,6 +248,7 @@ impl WorkerPool {
     async fn process_single_modem(
         modem_id: String,
         modem_manager: Arc<ModemManager>,
+        message_store: Arc<crate::message_store::MessageStore>,
     ) -> Result<ModemResult> {
         debug!("Processing modem {}", modem_id);
 
@@ -305,7 +313,7 @@ impl WorkerPool {
 
         // Get messages with paths for later deletion
         let messages_with_paths = modem_manager
-            .get_new_messages_with_paths(&modem_id, &iccid)
+            .get_new_messages_with_paths(&modem_id, &iccid, &message_store)
             .await
             .unwrap_or_default();
 
