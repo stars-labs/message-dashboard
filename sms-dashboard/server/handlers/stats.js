@@ -47,7 +47,6 @@ export const statsHandler = {
         today_received: stats.today_received,
         online_devices: actualOnlineDevices,
         total_devices: actualTotalDevices,
-        sim_missing_devices: deviceStats.sim_missing_count || 0,
         verification_rate: verificationRate,
         daemon_status: daemonStatus
       }), {
