@@ -457,9 +457,13 @@
   # Enable systemd-resolved for better DNS handling
   services.resolved = {
     enable = true;
-    dnssec = "false"; # Disable DNSSEC completely as it's causing validation failures
-    dnsovertls = "opportunistic"; # Use DNS over TLS when available
-    llmnr = "false"; # Disable LLMNR for security (multicast name resolution)
+    settings = {
+      Resolve = {
+        DNSSEC = "false"; # Disable DNSSEC completely as it's causing validation failures
+        DNSOverTLS = "opportunistic"; # Use DNS over TLS when available
+        LLMNR = "false"; # Disable LLMNR for security (multicast name resolution)
+      };
+    };
   };
 
   # =============================================================================

@@ -288,10 +288,12 @@ impl ModemManager {
     }
 
     /// Get new SMS messages with paths/indices
+    /// Handles multipart message assembly across polling cycles using persistent storage
     pub async fn get_new_messages_with_paths(
         &self,
         modem_id: &str,
         iccid: &str,
+        message_store: &crate::message_store::MessageStore,
     ) -> Result<Vec<MessageWithPath>> {
         match self.mode {
             BackendMode::AtCommand => {
@@ -324,57 +326,74 @@ impl ModemManager {
                     }
                 }
 
-                // Assemble complete multipart groups
-                for ((sender, ref_id, total_parts), mut parts) in multipart_groups {
-                    if parts.len() == total_parts as usize {
-                        // All parts present - assemble
-                        parts.sort_by_key(|p| p.concat_info.as_ref().map(|c| c.part_number).unwrap_or(0));
+                // Process multipart groups with persistent buffering
+                for ((sender, ref_id, total_parts), parts) in multipart_groups {
+                    // Store new parts to database
+                    for part in &parts {
+                        let concat_info = part.concat_info.as_ref().unwrap();
+                        if let Err(e) = message_store.store_segment(
+                            iccid,
+                            &sender,
+                            ref_id,
+                            total_parts,
+                            concat_info.part_number,
+                            &part.text,
+                            &part.timestamp,
+                            part.index,
+                        ) {
+                            warn!("Failed to store segment: {}", e);
+                        }
+                    }
 
-                        let combined_text = parts.iter().map(|p| p.text.as_str()).collect::<Vec<_>>().join("");
-                        let timestamp = parts[0].timestamp.clone();
-                        let all_indices: Vec<u32> = parts.iter().map(|p| p.index).collect();
+                    // Check if all parts are now available (including previously buffered ones)
+                    match message_store.get_segments(iccid, &sender, ref_id, total_parts) {
+                        Ok(segments) if segments.len() == total_parts as usize => {
+                            // All parts present - assemble!
+                            let mut all_parts: Vec<(u8, String, String, u32)> = segments;
+                            all_parts.sort_by_key(|(part_num, _, _, _)| *part_num);
 
-                        debug!(
-                            "Assembled multipart message: {} parts, {} chars, ref_id={}",
-                            parts.len(), combined_text.len(), ref_id
-                        );
+                            let combined_text = all_parts.iter().map(|(_, content, _, _)| content.as_str()).collect::<Vec<_>>().join("");
+                            let timestamp = all_parts[0].2.clone();
+                            let all_indices: Vec<u32> = all_parts.iter().map(|(_, _, _, idx)| *idx).collect();
 
-                        complete_messages.push(MessageWithPath {
-                            message: Message {
-                                phone_iccid: iccid.to_string(),
-                                phone_number: sender,
-                                content: combined_text,
-                                timestamp,
-                                direction: "received".to_string(),
-                            },
-                            modem_id: modem_id.to_string(),
-                            sms_path: format!(
-                                "at:{}",
-                                all_indices
-                                    .iter()
-                                    .map(|i| i.to_string())
-                                    .collect::<Vec<_>>()
-                                    .join(",")
-                            ),
-                        });
-                    } else {
-                        // Incomplete multipart message - store parts individually as fallback
-                        warn!(
-                            "Incomplete multipart message: {}/{} parts for ref_id={} from {} - storing parts separately",
-                            parts.len(), total_parts, ref_id, sender
-                        );
-                        for part in parts {
+                            info!(
+                                "✅ Assembled multipart message: {} parts, {} chars, ref_id={} from {}",
+                                all_parts.len(), combined_text.len(), ref_id, sender
+                            );
+
                             complete_messages.push(MessageWithPath {
                                 message: Message {
                                     phone_iccid: iccid.to_string(),
-                                    phone_number: part.sender,
-                                    content: part.text,
-                                    timestamp: part.timestamp,
+                                    phone_number: sender.clone(),
+                                    content: combined_text,
+                                    timestamp,
                                     direction: "received".to_string(),
                                 },
                                 modem_id: modem_id.to_string(),
-                                sms_path: format!("at:{}", part.index),
+                                sms_path: format!(
+                                    "at:{}",
+                                    all_indices
+                                        .iter()
+                                        .map(|i| i.to_string())
+                                        .collect::<Vec<_>>()
+                                        .join(",")
+                                ),
                             });
+
+                            // Delete assembled segments from buffer
+                            if let Err(e) = message_store.delete_segments(iccid, ref_id) {
+                                warn!("Failed to delete segments: {}", e);
+                            }
+                        }
+                        Ok(segments) => {
+                            // Still incomplete - parts buffered in database
+                            debug!(
+                                "Buffering multipart message: {}/{} parts for ref_id={} from {}",
+                                segments.len(), total_parts, ref_id, sender
+                            );
+                        }
+                        Err(e) => {
+                            warn!("Failed to check buffered segments: {}", e);
                         }
                     }
                 }
@@ -413,8 +432,13 @@ impl ModemManager {
     }
 
     /// Get new SMS messages (deprecated)
-    pub async fn get_new_messages(&self, modem_id: &str, iccid: &str) -> Result<Vec<Message>> {
-        let messages_with_paths = self.get_new_messages_with_paths(modem_id, iccid).await?;
+    pub async fn get_new_messages(
+        &self,
+        modem_id: &str,
+        iccid: &str,
+        message_store: &crate::message_store::MessageStore,
+    ) -> Result<Vec<Message>> {
+        let messages_with_paths = self.get_new_messages_with_paths(modem_id, iccid, message_store).await?;
         Ok(messages_with_paths.into_iter().map(|m| m.message).collect())
     }
 

@@ -1,5 +1,6 @@
 // Test program to verify SMS deletion on SIM cards
 use anyhow::Result;
+use orange_pi_daemon_rust::message_store::MessageStore;
 use orange_pi_daemon_rust::modem_manager::ModemManager;
 use std::sync::Arc;
 use tracing::{error, info, warn};
@@ -11,6 +12,9 @@ async fn main() -> Result<()> {
 
     info!("🔬 SMS Deletion Test Program");
     info!("=============================");
+
+    // Initialize MessageStore
+    let message_store = Arc::new(MessageStore::new("/tmp/test_messages.db")?);
 
     // Initialize ModemManager with native D-Bus
     let modem_manager = Arc::new(ModemManager::new().await);
@@ -57,7 +61,7 @@ async fn main() -> Result<()> {
     // Get messages from this modem
     info!("\n📥 Getting messages from modem...");
     let messages = modem_manager
-        .get_new_messages_with_paths(&modem_id, &iccid)
+        .get_new_messages_with_paths(&modem_id, &iccid, &message_store)
         .await?;
     info!("Found {} messages on SIM card", messages.len());
 
@@ -155,7 +159,7 @@ async fn main() -> Result<()> {
     // Check if message still exists
     info!("\n🔍 Checking if message still exists...");
     let remaining = modem_manager
-        .get_new_messages_with_paths(&modem_id, &iccid)
+        .get_new_messages_with_paths(&modem_id, &iccid, &message_store)
         .await?;
     let still_exists = remaining.iter().any(|m| m.sms_path == first_msg.sms_path);
 
