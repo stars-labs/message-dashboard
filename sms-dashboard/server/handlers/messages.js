@@ -19,11 +19,11 @@ export const messagesHandler = {
 
     try {
       let query = `
-        SELECT 
+        SELECT
           m.*,
           COALESCE(dv.number, m.phone_number) as display_phone_number,
           dv.carrier as phone_carrier,
-          dv.status as phone_status,
+          dv.sim_status as phone_status,
           NULL as mapped_number
         FROM messages m
         LEFT JOIN device_view dv ON m.phone_iccid = dv.iccid

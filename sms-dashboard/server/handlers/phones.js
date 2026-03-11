@@ -9,42 +9,32 @@ export const phonesHandler = {
       }
       
       const { results } = await env.DB.prepare(`
-        SELECT 
+        SELECT
           dv.id,
+          dv.equipment_id as imei,
           dv.iccid,
-          dv.number as number,
-          dv.country as country,
-          dv.flag,
-          dv.carrier as carrier,
-          dv.status,
-          dv.signal,
-          dv.rssi,
-          dv.rsrq,
-          dv.rsrp,
-          dv.snr,
-          dv.operator_name,
-          dv.operator_id,
-          dv.imei,
-          dv.access_tech,
-          dv.modem_index,
+          dv.number,
+          dv.country,
+          dv.carrier,
+          dv.sim_status as status,
+          dv.signal_quality as signal,
+          dv.connection_status,
+          dv.network_type,
+          dv.operator,
+          dv.manufacturer,
+          dv.model,
+          dv.primary_port as usb_port,
+          dv.modem_status,
           dv.sim_index,
-          dv.modem_updated_at as created_at,
+          dv.notes,
+          dv.created_at,
           dv.updated_at,
           NULL as mapped_number,
           NULL as mapped_carrier,
           NULL as mapped_country,
-          NULL as mapping_notes,
-          -- Additional modem/SIM info for frontend
-          dv.modem_id,
-          dv.modem_manufacturer,
-          dv.modem_model,
-          dv.modem_status,
-          dv.sim_iccid,
-          dv.sim_phone_number,
-          dv.sim_status,
-          dv.usb_port
+          NULL as mapping_notes
         FROM device_view dv
-        ORDER BY dv.usb_port, dv.iccid
+        ORDER BY dv.primary_port, dv.iccid
       `).all();
       
       return new Response(JSON.stringify({
@@ -75,33 +65,29 @@ export const phonesHandler = {
     
     try {
       const phone = await env.DB.prepare(`
-        SELECT 
+        SELECT
           dv.id,
+          dv.equipment_id as imei,
           dv.iccid,
-          dv.number as number,
+          dv.number,
           dv.country,
-          dv.flag,
-          dv.carrier as carrier,
-          dv.status,
-          dv.signal,
-          dv.rssi,
-          dv.rsrq,
-          dv.rsrp,
-          dv.snr,
-          dv.operator_name,
-          dv.operator_id,
-          dv.imei,
-          dv.access_tech,
-          dv.modem_index,
+          dv.carrier,
+          dv.sim_status as status,
+          dv.signal_quality as signal,
+          dv.connection_status,
+          dv.network_type,
+          dv.operator,
+          dv.manufacturer,
+          dv.model,
+          dv.primary_port as usb_port,
+          dv.modem_status,
           dv.sim_index,
-          dv.modem_updated_at as created_at,
+          dv.notes,
+          dv.created_at,
           dv.updated_at,
           NULL as mapped_number,
           NULL as mapped_carrier,
-          NULL as mapping_notes,
-          dv.modem_id,
-          dv.modem_status,
-          dv.sim_status
+          NULL as mapping_notes
         FROM device_view dv
         WHERE dv.iccid = ? OR dv.id = ?
       `).bind(phoneId, phoneId).first();

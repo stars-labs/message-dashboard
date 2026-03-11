@@ -177,9 +177,6 @@
             required
             class="w-full px-3 py-2 cyber-input"
           />
-          <p class="text-xs text-stone-400 mt-1">
-            物理插槽编号（1-95）
-          </p>
         </div>
 
         <div>
