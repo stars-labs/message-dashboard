@@ -1442,16 +1442,7 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_port_conversion() {
-        assert_eq!(AtModemManager::port_to_modem_id("/dev/ttyUSB2"), "0");
-        assert_eq!(AtModemManager::port_to_modem_id("/dev/ttyUSB6"), "1");
-        assert_eq!(AtModemManager::port_to_modem_id("/dev/ttyUSB10"), "2");
-
-        assert_eq!(AtModemManager::modem_id_to_port("0"), "/dev/ttyUSB2");
-        assert_eq!(AtModemManager::modem_id_to_port("1"), "/dev/ttyUSB6");
-        assert_eq!(AtModemManager::modem_id_to_port("2"), "/dev/ttyUSB10");
-    }
+    // test_port_conversion moved to tests/at_modem_tests.rs (tests public API)
 
     #[test]
     fn test_ucs2_decode() {
