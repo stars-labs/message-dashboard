@@ -76,17 +76,18 @@ export const controlHandler = {
         
         batch.push(env.DB.prepare(`
           INSERT INTO modems (
-            equipment_id, manufacturer, model, firmware_revision, 
-            hardware_revision, status, 
+            equipment_id, manufacturer, model, firmware_revision,
+            hardware_revision, status, sim_read_status,
             verification_status, last_verified_session,
             updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
           ON CONFLICT(equipment_id) DO UPDATE SET
             manufacturer = excluded.manufacturer,
             model = excluded.model,
             firmware_revision = excluded.firmware_revision,
             hardware_revision = excluded.hardware_revision,
             status = excluded.status,
+            sim_read_status = excluded.sim_read_status,
             verification_status = COALESCE(excluded.verification_status, modems.verification_status),
             last_verified_session = COALESCE(excluded.last_verified_session, modems.last_verified_session),
             updated_at = CURRENT_TIMESTAMP
@@ -97,6 +98,7 @@ export const controlHandler = {
           modem.firmware_revision || null,
           modem.hardware_revision || null,
           modem.status || 'unknown',
+          modem.sim_read_status || null,
           verificationStatus,
           lastVerifiedSession
         ));
@@ -136,6 +138,16 @@ export const controlHandler = {
         }
       }
       
+      // Clear stale current_iccid for modems with failed SIM reads
+      for (const modem of modems) {
+        if (modem.sim_read_status === 'failed' && modem.equipment_id) {
+          batch.push(env.DB.prepare(`
+            UPDATE modems SET current_iccid = NULL, detected_phone_number = NULL
+            WHERE equipment_id = ? AND sim_read_status = 'failed'
+          `).bind(modem.equipment_id));
+        }
+      }
+
       // Update modems table with SIM data (daemon-detected hardware state)
       // Daemon does NOT write to sims table anymore - sims table is user-managed
       for (const sim of sims) {
@@ -245,7 +257,8 @@ export const controlHandler = {
           UPDATE modems
           SET current_iccid = NULL,
               detected_phone_number = NULL,
-              operator = NULL
+              operator = NULL,
+              sim_read_status = NULL
           WHERE verification_status = 'absent'
         `).run();
 
