@@ -1,10 +1,21 @@
 # SMS Dashboard — Project Context
 
+## Compact Instructions
+
+When compressing, preserve in priority order:
+
+1. Architecture decisions (NEVER summarize)
+2. Modified files and their key changes
+3. Current verification status (pass/fail)
+4. Open TODOs and rollback notes
+5. Tool outputs (can delete, keep pass/fail only)
+
 ## Overview
 Distributed SMS management system for **100+ USB modems** on Orange Pi hardware.
 - **Production URL**: https://sexy.qzz.io
-- **Daemon version**: v8.0.0 (Rust, direct AT commands)
-- **Orange Pi target**: 203.116.95.146 (aarch64-linux, NixOS)
+- **Daemon version**: v8.0.0 (Rust, direct AT commands, ~7000 LOC)
+- **Orange Pi SSH**: `root@10.171.150.102` (internal LAN, NixOS aarch64)
+- **Orange Pi public**: `203.116.95.146` (deploy target)
 
 ## Architecture
 ```
@@ -13,10 +24,21 @@ Orange Pi (Rust Daemon) → Cloudflare Workers API → Svelte 5 Frontend
 USB Modems (AT/D-Bus)    D1 Database (SQLite)     Auth0 + RBAC
 ```
 
+### Data Model (SIM-Centric)
+```
+sims (user inventory, 95 rows)     ← Source of truth, daemon NEVER writes
+  └─ device_view                   ← PRIMARY read view, all queries use this
+       ├─ LEFT JOIN modems         ← Daemon-detected hardware (by current_iccid)
+       └─ LEFT JOIN modem_state    ← Volatile signal/connection data
+```
+- **Active** = SIM's ICCID found in a modem's `current_iccid` field
+- **Inactive** = SIM exists in inventory but not currently in any modem
+- Primary ID is `iccid` (stable), not `equipment_id` (changes with USB position)
+
 ## Key Directories
 | Path | Purpose | Tech |
 |------|---------|------|
-| `orange-pi-daemon/` | Hardware daemon (~5700 LOC) | Rust + Tokio async |
+| `orange-pi-daemon/` | Hardware daemon (~7000 LOC) | Rust + Tokio async |
 | `sms-dashboard/client/` | Frontend SPA | Svelte 5 + TailwindCSS + Vite 7 |
 | `sms-dashboard/server/` | Backend API (JS) | Cloudflare Workers |
 | `sms-dashboard/migrations/` | DB migrations (~25 files) | SQL (D1) |
@@ -40,7 +62,7 @@ bunx wrangler tail sms-dashboard --format pretty       # Live API logs
 
 # Rust daemon
 cd orange-pi-daemon && cargo build --release
-cargo test                                            # Run unit tests (29 tests)
+cargo test                                            # Run unit tests (61 tests)
 RUST_LOG=debug cargo run
 
 # NixOS deploy
@@ -65,12 +87,12 @@ Cloudflare secrets (set via `bunx wrangler secret put <NAME>`):
 `AUTH0_DOMAIN`, `AUTH0_CLIENT_ID`, `AUTH0_CLIENT_SECRET`, `API_KEY`
 
 ## Database Schema (Cloudflare D1)
-- `modems` — hardware devices (PK: equipment_id/IMEI)
-- `sims` — SIM cards (PK: iccid), FK to modems
+- **`sims`** — user SIM inventory (PK: iccid). Source of truth for phone_number, carrier, sim_index. Daemon NEVER writes here.
+- `modems` — daemon-detected hardware (PK: equipment_id/IMEI). `current_iccid` links to which SIM is inserted.
 - `modem_state` — volatile signal/connection data, FK to modems
 - `messages` — SMS content, FK to sims
 - `daemon_health` — heartbeat monitoring
-- `device_view` — backward-compat view joining modems+sims+state
+- **`device_view`** — SIM-centric read view (sims LEFT JOIN modems LEFT JOIN modem_state). Use for ALL reads.
 
 ## Gotchas and Patterns
 
@@ -91,8 +113,15 @@ Cloudflare secrets (set via `bunx wrangler secret put <NAME>`):
 ### Server gotchas
 - Middleware chain order: CORS → Auth0 JWT → RBAC (order matters)
 - Daemon authenticates with API key header, users with Auth0 JWT
-- 10 handler modules in `server/handlers/` — new endpoints go there
+- 8 handler modules in `server/handlers/` — new endpoints go there
 
 ### Network
-- Orange Pi IPs: `10.171.150.102` (internal LAN), `203.116.95.146` (deploy target)
+- Orange Pi IPs: `10.171.150.102` (SSH/internal LAN), `203.116.95.146` (public/deploy target)
 - Sync intervals: device status every 30s, full sync every 5min (keeps under CF rate limits)
+
+### SIM detection gotchas
+- **Modem ID = USB port position**, not physical modem. `modem 14` means ttyUSB58, not a specific device.
+- **`AT+CNUM` usually returns empty** — most carriers don't program MSISDN. Phone numbers come from `sims` table inventory.
+- **Daemon modem cache is static** — built once at startup. Restart daemon after plugging/unplugging modems: `systemctl restart sms-daemon`
+- **"Offline" SIM usually means ICCID mismatch** — physical SIM doesn't match inventory, not a hardware failure.
+- **USB hub at 5-tier max** — ~71 of 95 modems enumerate. Remaining fail due to USB topology/power limits.
