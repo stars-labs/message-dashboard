@@ -10,17 +10,15 @@ export async function getDeviceStats(db) {
       (SELECT COUNT(*) FROM modems WHERE status IN ('connected', 'registered', 'active')) as connected_modems,
       (SELECT COUNT(*) FROM modems WHERE status = 'disconnected') as disconnected_modems,
       (SELECT COUNT(*) FROM modems) as total_modems,
-      (SELECT COUNT(*) FROM sims s
-       JOIN modems m ON s.iccid = m.current_iccid
-       WHERE m.status = 'active') as active_sims,
-      (SELECT COUNT(*) FROM sims s
-       WHERE NOT EXISTS (SELECT 1 FROM modems m WHERE m.current_iccid = s.iccid AND m.status = 'active')) as inactive_sims,
+      (SELECT COUNT(*) FROM device_view WHERE sim_status = 'active') as active_sims,
+      (SELECT COUNT(*) FROM device_view WHERE sim_status = 'inactive') as inactive_sims,
+      (SELECT COUNT(*) FROM device_view WHERE sim_status = 'modem_only') as modem_only_sims,
       (SELECT COUNT(DISTINCT equipment_id) FROM modems WHERE current_iccid IS NOT NULL) as modems_with_sims
   `).first();
   
   // Calculate totals
   const totalModems = stats.total_modems || 0;
-  const totalSims = (stats.active_sims || 0) + (stats.inactive_sims || 0);
+  const totalSims = (stats.active_sims || 0) + (stats.inactive_sims || 0) + (stats.modem_only_sims || 0);
   
   // Get daemon status from daemon_health table
   const daemonHealth = await db.prepare(`
@@ -51,7 +49,8 @@ export async function getDeviceStats(db) {
     sims: {
       total: totalSims,
       active: stats.active_sims || 0,
-      inactive: stats.inactive_sims || 0
+      inactive: stats.inactive_sims || 0,
+      modem_only: stats.modem_only_sims || 0
     },
     // Daemon reported values (for comparison)
     daemon: {
