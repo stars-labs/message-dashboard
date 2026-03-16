@@ -55,6 +55,8 @@ pub struct Modem {
     pub network_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub access_tech: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sim_read_status: Option<String>,  // "ok" or "failed"
 }
 
 // Normalized SIM data - matches server schema
@@ -101,6 +103,7 @@ pub struct Phone {
     pub sim_index: Option<i32>,
     pub device_path: Option<String>,
     pub usb_port: Option<String>,
+    pub sim_read_status: Option<String>,
 }
 
 #[derive(Debug, Clone)]

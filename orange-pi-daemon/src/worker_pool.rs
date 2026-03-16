@@ -252,41 +252,25 @@ impl WorkerPool {
     ) -> Result<ModemResult> {
         debug!("Processing modem {}", modem_id);
 
-        // Get ICCID
+        // Get ICCID (may fail — that's ok, IMEI is the gate now)
         let iccid = modem_manager
             .get_iccid(&modem_id)
             .await
-            .context("Failed to get ICCID")?;
+            .unwrap_or(None);
 
-        if iccid.is_none() {
-            debug!("Modem {} has no SIM card", modem_id);
-            return Ok(ModemResult {
-                modem_id,
-                iccid: None,
-                phone: None,
-                sim: None,
-                messages: vec![],
-                messages_with_paths: vec![],
-                error: Some("No SIM card".to_string()),
-            });
-        }
-
-        let iccid = iccid.unwrap();
-
-        // Get device details - skip if no valid IMEI
+        // Get device details — IMEI is the gate
         let device_details = modem_manager
             .get_device_details(&modem_id)
             .await
             .context("Failed to get device details")?;
 
-        // Skip modems without valid IMEI (no SIM or during SIM swap)
         let (equipment_id, manufacturer, model, firmware, hardware) = match device_details {
             Some(details) => details,
             None => {
                 debug!("Modem {} has no valid IMEI, skipping", modem_id);
                 return Ok(ModemResult {
                     modem_id,
-                    iccid: Some(iccid),
+                    iccid: None,
                     phone: None,
                     sim: None,
                     messages: vec![],
@@ -296,36 +280,42 @@ impl WorkerPool {
             }
         };
 
-        // Get signal quality (cached)
+        // Get signal quality (cached) — always, even without ICCID
         let signal_data = modem_manager
             .get_signal_quality(&modem_id)
             .await
             .unwrap_or_default();
 
-        // Get phone number
-        let phone_number = modem_manager
-            .get_phone_number(&modem_id)
-            .await
-            .unwrap_or(None);
-
-        // Get operator
+        // Get operator — always
         let operator = modem_manager.get_operator(&modem_id).await.unwrap_or(None);
 
-        // Get messages with paths for later deletion
-        let messages_with_paths = modem_manager
-            .get_new_messages_with_paths(&modem_id, &iccid, &message_store)
-            .await
-            .unwrap_or_default();
+        let sim_read_status = if iccid.is_some() { "ok" } else { "failed" };
 
-        // Extract just the messages for the result
-        let messages: Vec<Message> = messages_with_paths
-            .iter()
-            .map(|m| m.message.clone())
-            .collect();
+        // Only get phone number and messages if ICCID is available
+        let (phone_number, messages, messages_with_paths) = if let Some(ref iccid_val) = iccid {
+            let phone_number = modem_manager
+                .get_phone_number(&modem_id)
+                .await
+                .unwrap_or(None);
 
-        // Build Phone struct
+            let msgs_with_paths = modem_manager
+                .get_new_messages_with_paths(&modem_id, iccid_val, &message_store)
+                .await
+                .unwrap_or_default();
+
+            let msgs: Vec<Message> = msgs_with_paths
+                .iter()
+                .map(|m| m.message.clone())
+                .collect();
+
+            (phone_number, msgs, msgs_with_paths)
+        } else {
+            (None, vec![], vec![])
+        };
+
+        // Build Phone struct — always built when IMEI succeeds
         let phone = Phone {
-            iccid: iccid.clone(),
+            iccid: iccid.clone().unwrap_or_default(),
             number: phone_number.clone(),
             signal: Some(signal_data.percent),
             operator_name: operator.clone(),
@@ -348,24 +338,25 @@ impl WorkerPool {
             sim_index: None,
             device_path: None,
             usb_port: None,
+            sim_read_status: Some(sim_read_status.to_string()),
         };
 
-        // Build Sim struct
-        let sim = Sim {
-            iccid: iccid.clone(),
+        // Build Sim struct — only when ICCID is available
+        let sim = iccid.as_ref().map(|iccid_val| Sim {
+            iccid: iccid_val.clone(),
             phone_number: phone_number.clone(),
             current_modem_id: Some(equipment_id),
             operator_name: operator,
             operator_id: None,
             status: "active".to_string(),
             sim_index: None,
-        };
+        });
 
         Ok(ModemResult {
             modem_id,
-            iccid: Some(iccid),
+            iccid,
             phone: Some(phone),
-            sim: Some(sim),
+            sim,
             messages,
             messages_with_paths,
             error: None,
