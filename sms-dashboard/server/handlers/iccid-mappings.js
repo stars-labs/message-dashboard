@@ -11,48 +11,45 @@ export const iccidMappingsHandler = {
     const offset = (page - 1) * limit;
 
     try {
-      // Query from sims table, compute status dynamically from modems.current_iccid
       let query = `
         SELECT
-          s.iccid as id,
-          s.iccid,
-          s.sim_index,
-          s.phone_number,
-          s.country_code as country,
-          s.carrier,
-          s.imei as equipment_id,
-          s.notes,
-          CASE
-            WHEN m.current_iccid IS NOT NULL THEN 'active'
-            ELSE 'inactive'
-          END as is_active,
-          s.created_at,
-          s.updated_at,
-          s.updated_by
-        FROM sims s
-        LEFT JOIN modems m ON s.iccid = m.current_iccid
+          iccid as id,
+          iccid,
+          sim_index,
+          number as phone_number,
+          country,
+          carrier,
+          equipment_id,
+          notes,
+          sim_status as is_active,
+          sim_read_status,
+          signal_quality,
+          modem_status,
+          created_at,
+          updated_at
+        FROM device_view
         WHERE 1=1
       `;
       const params = [];
 
       if (search) {
-        query += ` AND (s.iccid LIKE ? OR s.phone_number LIKE ? OR s.carrier LIKE ? OR s.notes LIKE ?)`;
+        query += ` AND (iccid LIKE ? OR number LIKE ? OR carrier LIKE ? OR notes LIKE ?)`;
         const searchPattern = `%${search}%`;
         params.push(searchPattern, searchPattern, searchPattern, searchPattern);
       }
 
-      query += ` ORDER BY s.sim_index ASC LIMIT ? OFFSET ?`;
+      query += ` ORDER BY sim_index ASC LIMIT ? OFFSET ?`;
       params.push(limit, offset);
 
       const result = await env.DB.prepare(query).bind(...params).all();
       const mappings = result.results || result;
 
       // Get total count
-      let countQuery = `SELECT COUNT(*) as total FROM sims WHERE 1=1`;
+      let countQuery = `SELECT COUNT(*) as total FROM device_view WHERE 1=1`;
       const countParams = [];
 
       if (search) {
-        countQuery += ` AND (iccid LIKE ? OR phone_number LIKE ? OR carrier LIKE ? OR notes LIKE ?)`;
+        countQuery += ` AND (iccid LIKE ? OR number LIKE ? OR carrier LIKE ? OR notes LIKE ?)`;
         const searchPattern = `%${search}%`;
         countParams.push(searchPattern, searchPattern, searchPattern, searchPattern);
       }
@@ -94,24 +91,12 @@ export const iccidMappingsHandler = {
     try {
       const mapping = await env.DB.prepare(`
         SELECT
-          s.iccid as id,
-          s.iccid,
-          s.sim_index,
-          s.phone_number,
-          s.country_code as country,
-          s.carrier,
-          s.imei as equipment_id,
-          s.notes,
-          CASE
-            WHEN m.current_iccid IS NOT NULL THEN 'active'
-            ELSE 'inactive'
-          END as is_active,
-          s.created_at,
-          s.updated_at,
-          s.updated_by
-        FROM sims s
-        LEFT JOIN modems m ON s.iccid = m.current_iccid
-        WHERE s.iccid = ?
+          iccid as id, iccid, sim_index, number as phone_number,
+          country, carrier, equipment_id, notes,
+          sim_status as is_active, sim_read_status, signal_quality, modem_status,
+          created_at, updated_at
+        FROM device_view
+        WHERE iccid = ?
       `).bind(id).first();
 
       if (!mapping) {
@@ -150,24 +135,12 @@ export const iccidMappingsHandler = {
     try {
       const mapping = await env.DB.prepare(`
         SELECT
-          s.iccid as id,
-          s.iccid,
-          s.sim_index,
-          s.phone_number,
-          s.country_code as country,
-          s.carrier,
-          s.imei as equipment_id,
-          s.notes,
-          CASE
-            WHEN m.current_iccid IS NOT NULL THEN 'active'
-            ELSE 'inactive'
-          END as is_active,
-          s.created_at,
-          s.updated_at,
-          s.updated_by
-        FROM sims s
-        LEFT JOIN modems m ON s.iccid = m.current_iccid
-        WHERE s.iccid = ?
+          iccid as id, iccid, sim_index, number as phone_number,
+          country, carrier, equipment_id, notes,
+          sim_status as is_active, sim_read_status, signal_quality, modem_status,
+          created_at, updated_at
+        FROM device_view
+        WHERE iccid = ?
       `).bind(iccid).first();
 
       if (!mapping) {
