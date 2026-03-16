@@ -11,11 +11,12 @@
   let showEditForm = false;
   let editingMapping = null;
   let searchQuery = "";
-  let statusFilter = "all"; // "all", "active", "inactive"
+  let statusFilter = "all"; // "all", "active", "error", "inactive"
   let successMessage = null;
 
   // Computed stats
   $: activeCount = allMappingsCache.filter(m => m.is_active === 'active').length;
+  $: errorCount = allMappingsCache.filter(m => m.is_active === 'modem_only').length;
   $: inactiveCount = allMappingsCache.filter(m => m.is_active === 'inactive' || !m.is_active).length;
   $: totalCount = allMappingsCache.length;
 
@@ -63,6 +64,8 @@
     // Filter by status
     if (statusFilter === "active") {
       filtered = filtered.filter(m => m.is_active === 'active');
+    } else if (statusFilter === "error") {
+      filtered = filtered.filter(m => m.is_active === 'modem_only');
     } else if (statusFilter === "inactive") {
       filtered = filtered.filter(m => m.is_active === 'inactive' || !m.is_active);
     }
@@ -201,6 +204,12 @@
       活动 ({activeCount})
     </button>
     <button
+      on:click={() => statusFilter = "error"}
+      class="px-4 py-2 rounded-lg transition-colors whitespace-nowrap {statusFilter === 'error' ? 'bg-amber-600 text-white' : 'bg-amber-50 text-amber-600 hover:bg-amber-100'}"
+    >
+      异常 ({errorCount})
+    </button>
+    <button
       on:click={() => statusFilter = "inactive"}
       class="px-4 py-2 rounded-lg transition-colors whitespace-nowrap {statusFilter === 'inactive' ? 'bg-stone-500 text-white' : 'bg-stone-50 text-stone-500 hover:bg-stone-100'}"
     >
@@ -258,46 +267,18 @@
         <table class="min-w-full">
           <thead>
             <tr class="border-b border-stone-200">
-              <th
-                class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider"
-                >SIM#</th
-              >
-              <th
-                class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider"
-                >ICCID</th
-              >
-              <th
-                class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider"
-                >手机号</th
-              >
-              <th
-                class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider"
-                >国家</th
-              >
-              <th
-                class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider"
-                >运营商</th
-              >
-              <th
-                class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider"
-                >设备ID</th
-              >
-              <th
-                class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider"
-                >备注</th
-              >
-              <th
-                class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider"
-                >状态</th
-              >
-              <th
-                class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider"
-                >创建时间</th
-              >
-              <th
-                class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider"
-                >操作</th
-              >
+              <th class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">SIM#</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">ICCID</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">手机号</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">国家</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">运营商</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">设备ID</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">备注</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">Modem</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">SIM读取</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">信号</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">状态</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">操作</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-stone-100">
@@ -343,17 +324,55 @@
                 {/if}
               </td>
               <td class="px-4 py-3 text-sm text-stone-800">{mapping.notes || mapping.description || "-"}</td>
+              <!-- Modem indicator -->
+              <td class="px-4 py-3">
+                {#if mapping.equipment_id && mapping.modem_status && mapping.modem_status !== 'disconnected'}
+                  <span class="inline-flex items-center gap-1 text-xs">
+                    <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+                    <span class="text-emerald-700">UP</span>
+                  </span>
+                {:else if mapping.equipment_id}
+                  <span class="inline-flex items-center gap-1 text-xs">
+                    <span class="w-2 h-2 rounded-full bg-red-500"></span>
+                    <span class="text-red-600">DOWN</span>
+                  </span>
+                {:else}
+                  <span class="text-stone-300 text-xs">—</span>
+                {/if}
+              </td>
+              <!-- SIM Read indicator -->
+              <td class="px-4 py-3">
+                {#if mapping.sim_read_status === 'ok'}
+                  <span class="inline-flex px-2 py-0.5 text-xs rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">OK</span>
+                {:else if mapping.sim_read_status === 'failed'}
+                  <span class="inline-flex px-2 py-0.5 text-xs rounded-full bg-red-50 text-red-600 border border-red-200">FAIL</span>
+                {:else}
+                  <span class="text-stone-300 text-xs">—</span>
+                {/if}
+              </td>
+              <!-- Signal -->
+              <td class="px-4 py-3">
+                {#if mapping.signal_quality != null}
+                  <span class="text-xs font-mono {mapping.signal_quality >= 60 ? 'text-emerald-600' : mapping.signal_quality >= 30 ? 'text-amber-600' : 'text-red-600'}">
+                    {mapping.signal_quality}%
+                  </span>
+                {:else}
+                  <span class="text-stone-300 text-xs">—</span>
+                {/if}
+              </td>
+              <!-- Summary status badge -->
               <td class="px-4 py-3">
                 <span
-                  class="inline-flex px-2 py-1 text-xs rounded-full {mapping.is_active === 'active'
-                    ? 'bg-green-50 text-green-700 border border-green-200'
-                    : 'bg-stone-100 text-stone-500 border border-stone-200'}"
+                  class="inline-flex px-2 py-1 text-xs rounded-full {
+                    mapping.is_active === 'active'
+                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                      : mapping.is_active === 'modem_only'
+                        ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                        : 'bg-stone-100 text-stone-500 border border-stone-200'
+                  }"
                 >
-                  {mapping.is_active === 'active' ? "活动" : "未激活"}
+                  {mapping.is_active === 'active' ? '活动' : mapping.is_active === 'modem_only' ? '异常' : '未激活'}
                 </span>
-              </td>
-              <td class="px-4 py-3 text-sm text-stone-400">
-                {new Date(mapping.created_at).toLocaleString()}
               </td>
               <td class="px-4 py-3 text-sm">
                 <button
