@@ -471,6 +471,7 @@ async fn main() -> Result<()> {
                             connection_status: Some(p.status.clone()),
                             network_type: None,
                             access_tech: p.access_tech.clone(),
+                            sim_read_status: p.sim_read_status.clone(),
                         })
                         .collect();
 

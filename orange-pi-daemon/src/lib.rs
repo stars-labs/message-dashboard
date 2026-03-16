@@ -138,6 +138,7 @@ mod tests {
             connection_status: Some("active".to_string()),
             network_type: Some("LTE".to_string()),
             access_tech: Some("4G".to_string()),
+            sim_read_status: Some("ok".to_string()),
         };
 
         assert_eq!(modem.status, "connected");

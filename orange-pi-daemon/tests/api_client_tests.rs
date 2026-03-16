@@ -42,6 +42,7 @@ fn create_test_modem(equipment_id: &str) -> Modem {
         connection_status: Some("connected".to_string()),
         network_type: Some("LTE".to_string()),
         access_tech: Some("LTE".to_string()),
+        sim_read_status: Some("ok".to_string()),
     }
 }
 
