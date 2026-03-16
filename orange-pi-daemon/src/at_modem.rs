@@ -803,14 +803,27 @@ impl AtModemManager {
         if pos >= pdu_bytes.len() {
             return Err(anyhow!("PDU truncated at sender type"));
         }
-        pos += 1; // Skip type
+        let sender_toa = pdu_bytes[pos];
+        pos += 1;
 
-        // Sender address (BCD encoded, 2 digits per byte)
+        // Type-of-number (bits 6-4): 0x05 = alphanumeric (GSM 7-bit encoded)
+        let sender_ton = (sender_toa >> 4) & 0x07;
+
+        // Sender address bytes: for BCD it's (digits+1)/2, for alphanumeric sender_len
+        // is the number of useful semi-octets (which maps to the same byte count formula)
         let sender_bytes = (sender_len + 1) / 2;
         if pos + sender_bytes > pdu_bytes.len() {
             return Err(anyhow!("PDU truncated at sender address"));
         }
-        let sender = Self::decode_bcd_phone(&pdu_bytes[pos..pos + sender_bytes], sender_len);
+        let sender = if sender_ton == 0x05 {
+            // Alphanumeric sender: bytes are GSM 7-bit packed
+            // sender_len is in "digits" but for alphanumeric it means usable semi-octets,
+            // the number of septets (chars) = sender_len * 4 / 7
+            let num_septets = (sender_len * 4) / 7;
+            Self::decode_pdu_7bit(&pdu_bytes[pos..pos + sender_bytes], num_septets, 0)
+        } else {
+            Self::decode_bcd_phone(&pdu_bytes[pos..pos + sender_bytes], sender_len)
+        };
         pos += sender_bytes;
 
         // PID (Protocol Identifier)
@@ -936,18 +949,35 @@ impl AtModemManager {
         None
     }
 
+    /// Map a BCD nibble (0x0-0xF) to its character per GSM 03.40 Section 9.1.2.3
+    fn bcd_nibble_to_char(nibble: u8) -> Option<char> {
+        match nibble {
+            0x0..=0x9 => Some((b'0' + nibble) as char),
+            0xA => Some('*'),
+            0xB => Some('#'),
+            0xC => Some('a'),
+            0xD => Some('b'),
+            0xE | 0xF => None, // reserved / filler
+            _ => None,
+        }
+    }
+
     /// Decode BCD-encoded phone number
     fn decode_bcd_phone(bytes: &[u8], digit_count: usize) -> String {
         let mut phone = String::new();
         for (i, byte) in bytes.iter().enumerate() {
-            let digit1 = byte & 0x0F;
-            let digit2 = (byte >> 4) & 0x0F;
+            let nibble_lo = byte & 0x0F;
+            let nibble_hi = (byte >> 4) & 0x0F;
 
-            if i * 2 < digit_count && digit1 != 0x0F {
-                phone.push(char::from_digit(digit1 as u32, 10).unwrap_or('?'));
+            if i * 2 < digit_count {
+                if let Some(ch) = Self::bcd_nibble_to_char(nibble_lo) {
+                    phone.push(ch);
+                }
             }
-            if i * 2 + 1 < digit_count && digit2 != 0x0F {
-                phone.push(char::from_digit(digit2 as u32, 10).unwrap_or('?'));
+            if i * 2 + 1 < digit_count {
+                if let Some(ch) = Self::bcd_nibble_to_char(nibble_hi) {
+                    phone.push(ch);
+                }
             }
         }
         phone
@@ -997,6 +1027,45 @@ impl AtModemManager {
         dt.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
     }
 
+    /// GSM 03.38 default alphabet (7-bit) → Unicode mapping.
+    /// Positions that match ASCII are identical; others map to GSM-specific chars.
+    const GSM_DEFAULT_ALPHABET: [char; 128] = [
+        '@',  '£',  '$',  '¥',  'è',  'é',  'ù',  'ì',  // 0x00-0x07
+        'ò',  'Ç',  '\n', 'Ø',  'ø',  '\r', 'Å',  'å',  // 0x08-0x0F
+        'Δ',  '_',  'Φ',  'Γ',  'Λ',  'Ω',  'Π',  'Ψ',  // 0x10-0x17
+        'Σ',  'Θ',  'Ξ',  ' ',  'Æ',  'æ',  'ß',  'É',  // 0x18-0x1F (0x1B=ESC→space fallback)
+        ' ',  '!',  '"',  '#',  '¤',  '%',  '&',  '\'', // 0x20-0x27
+        '(',  ')',  '*',  '+',  ',',  '-',  '.',  '/',   // 0x28-0x2F
+        '0',  '1',  '2',  '3',  '4',  '5',  '6',  '7',  // 0x30-0x37
+        '8',  '9',  ':',  ';',  '<',  '=',  '>',  '?',  // 0x38-0x3F
+        '¡',  'A',  'B',  'C',  'D',  'E',  'F',  'G',  // 0x40-0x47
+        'H',  'I',  'J',  'K',  'L',  'M',  'N',  'O',  // 0x48-0x4F
+        'P',  'Q',  'R',  'S',  'T',  'U',  'V',  'W',  // 0x50-0x57
+        'X',  'Y',  'Z',  'Ä',  'Ö',  'Ñ',  'Ü',  '§',  // 0x58-0x5F
+        '¿',  'a',  'b',  'c',  'd',  'e',  'f',  'g',  // 0x60-0x67
+        'h',  'i',  'j',  'k',  'l',  'm',  'n',  'o',  // 0x68-0x6F
+        'p',  'q',  'r',  's',  't',  'u',  'v',  'w',  // 0x70-0x77
+        'x',  'y',  'z',  'ä',  'ö',  'ñ',  'ü',  'à',  // 0x78-0x7F
+    ];
+
+    /// GSM 03.38 extension table (reached via ESC 0x1B prefix).
+    /// Returns None for undefined extension codes.
+    fn gsm_extension_char(code: u8) -> Option<char> {
+        match code {
+            0x0A => Some('\u{000C}'), // form feed (page break)
+            0x14 => Some('^'),
+            0x28 => Some('{'),
+            0x29 => Some('}'),
+            0x2F => Some('\\'),
+            0x3C => Some('['),
+            0x3D => Some('~'),
+            0x3E => Some(']'),
+            0x40 => Some('|'),
+            0x65 => Some('€'),
+            _ => None, // undefined extension
+        }
+    }
+
     /// Decode 7-bit GSM encoded text
     /// bytes: text data (UDH already removed by caller)
     /// udl: User Data Length in septets (characters)
@@ -1012,6 +1081,7 @@ impl AtModemManager {
 
         let mut result = String::new();
         let mut bit_pos = fill_bits;
+        let mut escape_next = false;
 
         for _ in 0..udl {
             let byte_pos = bit_pos / 8;
@@ -1026,11 +1096,19 @@ impl AtModemManager {
                 char_val |= (bytes[byte_pos + 1] << (8 - shift)) & 0x7F;
             }
 
-            // GSM 7-bit default alphabet (simplified - just handle ASCII range)
-            if char_val < 128 {
-                result.push(char_val as char);
+            if escape_next {
+                escape_next = false;
+                if let Some(ext_char) = Self::gsm_extension_char(char_val) {
+                    result.push(ext_char);
+                } else {
+                    // Unknown extension: output space as fallback
+                    result.push(' ');
+                }
+            } else if char_val == 0x1B {
+                // ESC: next septet is extension character
+                escape_next = true;
             } else {
-                result.push('?');
+                result.push(Self::GSM_DEFAULT_ALPHABET[char_val as usize]);
             }
 
             bit_pos += 7;
@@ -1781,9 +1859,10 @@ mod tests {
     fn test_decode_pdu_7bit_boundary_conditions() {
         // Test boundary: exactly 160 characters (single SMS limit)
         // 160 septets = 140 bytes when packed
+        // Note: use chars().count() not len() because GSM chars may be multi-byte UTF-8
         let bytes = vec![0x41; 140]; // 'A' repeated (simplified)
         let result = AtModemManager::decode_pdu_7bit(&bytes, 160, 0);
-        assert_eq!(result.len(), 160);
+        assert_eq!(result.chars().count(), 160);
     }
 
     #[test]
@@ -1822,5 +1901,161 @@ mod tests {
         // Check that UCS-2 decoding happened (should contain Chinese characters)
         assert!(sms.text.contains("你") || sms.text.contains("好") || sms.text.len() >= 2);
         assert!(sms.concat_info.is_none());
+    }
+
+    // ============================================================================
+    // BCD PHONE NUMBER TESTS — hex nibbles A-F
+    // ============================================================================
+
+    #[test]
+    fn test_decode_bcd_phone_with_hex_nibbles() {
+        // Nibble 0xA = '*', 0xB = '#'
+        // Byte 0xBA → low=A(*), high=B(#) → "*#"
+        let bytes = vec![0xBA];
+        let result = AtModemManager::decode_bcd_phone(&bytes, 2);
+        assert_eq!(result, "*#");
+    }
+
+    #[test]
+    fn test_decode_bcd_phone_mixed_digits_and_hex() {
+        // "1*2#" → BCD bytes: 0xA1, 0x2B (low nibble first per BCD swap)
+        // Wait — BCD encoding: "1*" → low=1, high=A → byte 0xA1
+        //                       "2#" → low=2, high=B → byte 0xB2
+        let bytes = vec![0xA1, 0xB2];
+        let result = AtModemManager::decode_bcd_phone(&bytes, 4);
+        assert_eq!(result, "1*2#");
+    }
+
+    #[test]
+    fn test_decode_bcd_phone_nibble_c_d() {
+        // 0xC = 'a', 0xD = 'b'
+        let bytes = vec![0xDC];
+        let result = AtModemManager::decode_bcd_phone(&bytes, 2);
+        assert_eq!(result, "ab");
+    }
+
+    #[test]
+    fn test_decode_bcd_phone_nibble_e_skipped() {
+        // 0xE is reserved — should be skipped (not produce '?')
+        let bytes = vec![0xE1]; // low=1, high=E(skip)
+        let result = AtModemManager::decode_bcd_phone(&bytes, 2);
+        assert_eq!(result, "1"); // only digit 1, E skipped
+    }
+
+    // ============================================================================
+    // GSM 7-BIT ALPHABET TESTS
+    // ============================================================================
+
+    #[test]
+    fn test_decode_pdu_7bit_backward_compat() {
+        // "Hello" in GSM 7-bit: H=0x48, e=0x65, l=0x6C, l=0x6C, o=0x6F
+        // Same positions in ASCII and GSM, so this must still work
+        let bytes = vec![0xC8, 0x32, 0x9B, 0xFD, 0x06];
+        let result = AtModemManager::decode_pdu_7bit(&bytes, 5, 0);
+        assert_eq!(result, "Hello");
+    }
+
+    #[test]
+    fn test_decode_pdu_7bit_gsm_alphabet_at_sign() {
+        // '@' is at GSM position 0x00 (NOT 0x40 like ASCII)
+        // Single septet 0x00 packed into one byte
+        let bytes = vec![0x00];
+        let result = AtModemManager::decode_pdu_7bit(&bytes, 1, 0);
+        assert_eq!(result, "@");
+    }
+
+    #[test]
+    fn test_decode_pdu_7bit_gsm_special_chars() {
+        // Test positions that differ from ASCII:
+        // GSM 0x01 = '£', GSM 0x02 = '$', GSM 0x05 = 'é'
+        // Pack 3 septets: 0x01, 0x02, 0x05
+        // Septet packing:
+        //   byte0: septet0(0x01) | septet1_low1<<7 = 0x01 | (0x02&1)<<7 = 0x01 | 0x00 = 0x01
+        //   byte1: septet1>>1 | septet2_low2<<6 = 0x01 | (0x05&3)<<6 = 0x01 | 0x40 = 0x41
+        //   byte2: septet2>>2 = 0x01
+        let bytes = vec![0x01, 0x41, 0x01];
+        let result = AtModemManager::decode_pdu_7bit(&bytes, 3, 0);
+        assert_eq!(result, "£$é");
+    }
+
+    #[test]
+    fn test_decode_pdu_7bit_gsm_inverted_marks() {
+        // GSM 0x40 = '¡' (NOT '@'), GSM 0x60 = '¿'
+        // Pack 2 septets: 0x40, 0x60
+        // byte0: 0x40 | (0x60 & 0x01) << 7 = 0x40
+        // byte1: 0x60 >> 1 = 0x30
+        let bytes = vec![0x40, 0x30];
+        let result = AtModemManager::decode_pdu_7bit(&bytes, 2, 0);
+        assert_eq!(result, "¡¿");
+    }
+
+    #[test]
+    fn test_decode_pdu_7bit_escape_sequences() {
+        // ESC (0x1B) + 0x3C = '[', ESC + 0x3E = ']'
+        // 4 septets: 0x1B, 0x3C, 0x1B, 0x3E
+        // Septet packing (7 bits each):
+        //   bit_pos 0:  0x1B → byte0 bits 0-6
+        //   bit_pos 7:  0x3C → byte0 bit7 + byte1 bits 0-5
+        //   bit_pos 14: 0x1B → byte1 bits 6-7 + byte2 bits 0-4
+        //   bit_pos 21: 0x3E → byte2 bits 5-7 + byte3 bits 0-3
+        // byte0: 0x1B | (0x3C & 0x01) << 7 = 0x1B | 0x00 = 0x1B
+        // byte1: (0x3C >> 1) | (0x1B & 0x03) << 6 = 0x1E | 0xC0 = 0xDE
+        // byte2: (0x1B >> 2) | (0x3E & 0x07) << 5 = 0x06 | 0xC0 = 0xC6
+        // byte3: 0x3E >> 3 = 0x07
+        let bytes = vec![0x1B, 0xDE, 0xC6, 0x07];
+        // 4 septets consumed but ESC pairs produce 2 output chars
+        let result = AtModemManager::decode_pdu_7bit(&bytes, 4, 0);
+        assert_eq!(result, "[]");
+    }
+
+    #[test]
+    fn test_decode_pdu_7bit_euro_sign() {
+        // ESC (0x1B) + 0x65 = '€'
+        // 2 septets: 0x1B, 0x65
+        // byte0: 0x1B | (0x65 & 0x01) << 7 = 0x1B | 0x80 = 0x9B
+        // byte1: 0x65 >> 1 = 0x32
+        let bytes = vec![0x9B, 0x32];
+        let result = AtModemManager::decode_pdu_7bit(&bytes, 2, 0);
+        assert_eq!(result, "€");
+    }
+
+    #[test]
+    fn test_decode_pdu_7bit_high_positions() {
+        // GSM 0x7B = 'ä', 0x7C = 'ö', 0x7D = 'ñ', 0x7E = 'ü', 0x7F = 'à'
+        // Pack 2 septets: 0x7B, 0x7C
+        // byte0: 0x7B | (0x7C & 0x01) << 7 = 0x7B | 0x00 = 0x7B
+        // byte1: 0x7C >> 1 = 0x3E
+        let bytes = vec![0x7B, 0x3E];
+        let result = AtModemManager::decode_pdu_7bit(&bytes, 2, 0);
+        assert_eq!(result, "äö");
+    }
+
+    // ============================================================================
+    // ALPHANUMERIC SENDER TESTS
+    // ============================================================================
+
+    #[test]
+    fn test_parse_pdu_sms_alphanumeric_sender() {
+        // PDU with alphanumeric sender "Google"
+        // SMSC: 00
+        // PDU Type: 04
+        // Sender length: 0C (12 semi-octets → 6 bytes → (12*4)/7 = 6 septets)
+        // Sender TOA: D0 (TON=5 alphanumeric, NPI=0)
+        // Sender: C7F7FBCC2E03 ("Google" in GSM 7-bit packed)
+        //   G=0x47, o=0x6F, o=0x6F, g=0x67, l=0x6C, e=0x65
+        //   byte0: 0x47 | (0x6F & 0x01) << 7 = 0x47 | 0x80 = 0xC7
+        //   byte1: 0x6F >> 1 | (0x6F & 0x03) << 6 = 0x37 | 0xC0 = 0xF7
+        //   byte2: 0x6F >> 2 | (0x67 & 0x07) << 5 = 0x1B | 0xE0 = 0xFB
+        //   byte3: 0x67 >> 3 | (0x6C & 0x0F) << 4 = 0x0C | 0xC0 = 0xCC
+        //   byte4: 0x6C >> 4 | (0x65 & 0x1F) << 3 = 0x06 | 0x28 = 0x2E
+        //   byte5: 0x65 >> 5 = 0x03
+        // PID: 00, DCS: 00, Timestamp: 42301141030023, UDL: 05
+        // Text: C8329BFD06 ("Hello")
+        let pdu = "00040CD0C7F7FBCC2E0300004230114103002305C8329BFD06";
+        let result = AtModemManager::parse_pdu_sms(1, pdu);
+        assert!(result.is_ok());
+        let sms = result.unwrap();
+        assert_eq!(sms.sender, "Google");
+        assert_eq!(sms.text, "Hello");
     }
 }
