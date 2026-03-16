@@ -14,6 +14,7 @@ Expose per-modem diagnostic indicators (Modem alive, SIM read status, Signal) on
 - **`sims.imei` provides fallback linking**: the user-maintained IMEI field in the inventory links SIMs to modems when ICCID-based matching fails
 - **Extend `modems` table** (not a new table): add `sim_read_status` column
 - **ICCID Mapping page** is the target UI: it's the inventory view where users manage fixed SIM+modem assignments
+- **`sims.imei` must be UNIQUE**: prevents ambiguous fallback join results
 
 ## Architecture
 
@@ -42,7 +43,7 @@ device_view (dual join):
 | OK   | FAIL  | `modem_only` | UP (green)| FAIL (red)   | Modem alive, SIM read issue     |
 | —    | —     | `inactive`   | — (gray)  | — (gray)     | SIM not in any modem            |
 
-Previously-seen modems that stop reporting transition to disconnected status via the existing full-sync reconciliation mechanism.
+Previously-seen modems that stop reporting transition to disconnected status via the existing full-sync reconciliation mechanism (which now also clears `sim_read_status`).
 
 ---
 
@@ -82,9 +83,19 @@ New: `valid_modems: HashMap<String, Option<String>>` (modem_id → optional icci
 
 The `modem_ids` vec used by all 6 background tasks is derived from this map's keys, so IMEI-only modems participate in the 30s sync cycle, message reading (will find no messages without ICCID, which is fine), etc.
 
-### 1.3 `api_client.rs` — Payload includes `sim_read_status`
+**SMS sender reverse cache**: The existing `sender_modem_cache` (line ~592 in `main.rs`) builds a `HashMap<iccid, modem_id>` from `valid_modems`. With `Option<String>` values, this must filter out `None` values:
+```rust
+let sender_modem_cache: HashMap<String, String> = valid_modems
+    .iter()
+    .filter_map(|(modem_id, iccid)| {
+        iccid.as_ref().map(|i| (i.clone(), modem_id.clone()))
+    })
+    .collect();
+```
 
-Add `sim_read_status: String` to the `Modem` struct. Values: `"ok"` or `"failed"`.
+### 1.3 `api_client.rs` / `types.rs` — Payload includes `sim_read_status`
+
+Add `sim_read_status: String` to both the `Phone` struct and the `Modem` struct in `types.rs`. The Phone-to-Modem conversion in `main.rs` (Task 3, line ~456) must map the field through.
 
 The sync payload now includes IMEI-only modems:
 ```json
@@ -95,7 +106,6 @@ The sync payload now includes IMEI-only modems:
       "manufacturer": "Quectel",
       "model": "EC20",
       "sim_read_status": "failed",
-      "current_iccid": null,
       "signal_percent": 65,
       ...
     }
@@ -104,9 +114,14 @@ The sync payload now includes IMEI-only modems:
 }
 ```
 
+Note: `current_iccid` is not in the `Modem` struct — it is set server-side from the `Sim` struct. For IMEI-only modems with no `Sim`, the server must explicitly clear stale `current_iccid` (see Section 2.2).
+
 ### 1.4 Phone/Sim struct changes
 
 `Phone` struct gains:
+- `sim_read_status: String` — `"ok"` or `"failed"`
+
+`Modem` struct gains:
 - `sim_read_status: String` — `"ok"` or `"failed"`
 
 No changes to `Sim` struct — it's simply not created when ICCID fails.
@@ -115,30 +130,25 @@ No changes to `Sim` struct — it's simply not created when ICCID fails.
 
 ## Layer 2: Database Changes
 
-### 2.1 Migration — Add column
+### 2.1 Migration `032_add_modem_health_indicators.sql`
 
 ```sql
+-- Add sim_read_status to modems table
 ALTER TABLE modems ADD COLUMN sim_read_status TEXT DEFAULT NULL;
--- 'ok': ICCID read succeeded
--- 'failed': modem alive, ICCID read failed
--- NULL: legacy data / unknown
-```
+-- Values: 'ok' (ICCID read succeeded), 'failed' (modem alive, ICCID read failed), NULL (legacy/unknown)
 
-### 2.2 `control.js` — Store `sim_read_status`
+-- Enforce unique IMEI in sims table to prevent ambiguous fallback join
+-- First check for duplicates and clear them (keep the one with lowest sim_index)
+UPDATE sims SET imei = NULL
+WHERE rowid NOT IN (
+  SELECT MIN(rowid) FROM sims WHERE imei IS NOT NULL GROUP BY imei
+) AND imei IS NOT NULL;
 
-In the modem upsert:
-```sql
-INSERT INTO modems (equipment_id, ..., sim_read_status, updated_at)
-VALUES (?, ..., ?, CURRENT_TIMESTAMP)
-ON CONFLICT(equipment_id) DO UPDATE SET
-  ..., sim_read_status = excluded.sim_read_status, updated_at = CURRENT_TIMESTAMP
-```
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sims_imei_unique ON sims(imei) WHERE imei IS NOT NULL;
+DROP INDEX IF EXISTS idx_sims_imei;
 
-No other handler logic changes — IMEI-only modems are already valid rows since `equipment_id` is the PK. The SIM association loop already checks for ICCID presence before updating `current_iccid`, so IMEI-only modems naturally get `current_iccid = NULL`.
-
-### 2.3 `device_view` — Dual join
-
-```sql
+-- Recreate device_view with dual join
+DROP VIEW IF EXISTS device_view;
 CREATE VIEW device_view AS
 SELECT
   s.iccid as id,
@@ -173,9 +183,36 @@ LEFT JOIN modem_state ms_iccid ON ms_iccid.modem_id = m_iccid.equipment_id
 LEFT JOIN modem_state ms_imei ON ms_imei.modem_id = m_imei.equipment_id
   AND m_iccid.equipment_id IS NULL
 ORDER BY s.sim_index ASC;
+-- Note: the double LEFT JOIN is fine for ~95 SIM rows. The AND m_iccid.equipment_id IS NULL
+-- condition prevents SQLite from using an index on m_imei, but at this scale it's negligible.
 ```
 
-The `m_imei` join condition `AND m_iccid.equipment_id IS NULL` ensures the IMEI fallback only activates when the primary ICCID-based join didn't match. This prevents double-counting when both paths match the same modem.
+### 2.2 `control.js` — Store `sim_read_status` and clear stale `current_iccid`
+
+**Modem upsert**: Add `sim_read_status` to the existing INSERT/ON CONFLICT statement in `control.js` (lines ~78-102). Add it as a new column in the INSERT column list and the ON CONFLICT UPDATE SET clause.
+
+**Stale ICCID clearing**: After the modem upsert loop, for each modem in the sync that has `sim_read_status = 'failed'`, explicitly clear `current_iccid`:
+```sql
+UPDATE modems SET current_iccid = NULL, detected_phone_number = NULL
+WHERE equipment_id = ? AND sim_read_status = 'failed'
+```
+This prevents stale `current_iccid` values from a previous successful read from persisting when the SIM read subsequently fails.
+
+**Full-sync reconciliation**: When marking modems as disconnected/absent (lines ~244-252), also clear `sim_read_status`:
+```sql
+UPDATE modems SET status = 'disconnected', current_iccid = NULL,
+  detected_phone_number = NULL, operator = NULL, sim_read_status = NULL
+WHERE verification_status = 'pending'
+```
+
+### 2.3 Stats update — `device-count.js`
+
+Add `modem_only_count` to the stats query:
+```sql
+(SELECT COUNT(*) FROM device_view WHERE sim_status = 'modem_only') as modem_only_sims
+```
+
+The `modem_only` modems are NOT counted as `active_sims` (correct — the SIM is not provably active). The new count gives the frontend a way to show how many modems have SIM read failures.
 
 ---
 
@@ -183,28 +220,28 @@ The `m_imei` join condition `AND m_iccid.equipment_id IS NULL` ensures the IMEI 
 
 ### 3.1 ICCID Mappings handler
 
-The existing query in `iccid-mappings.js` needs to use the updated `device_view` or replicate the dual-join logic. Since `device_view` already includes all the new fields, the handler just needs to select the new columns:
+Query `device_view` directly (not sims JOIN device_view, which would be redundant):
 
 ```sql
 SELECT
-  s.iccid as id, s.sim_index, s.phone_number, s.country_code as country,
-  s.carrier, s.imei as equipment_id, s.notes,
-  -- New: use device_view's computed status instead of inline CASE
-  dv.sim_status as is_active,
-  dv.sim_read_status,
-  dv.signal_quality,
-  dv.modem_status,
-  s.created_at, s.updated_at, s.updated_by
-FROM sims s
-LEFT JOIN device_view dv ON s.iccid = dv.iccid
-ORDER BY s.sim_index ASC
+  iccid as id, sim_index, number as phone_number, country,
+  carrier, equipment_id, notes,
+  sim_status as is_active,
+  sim_read_status, signal_quality, modem_status,
+  created_at, updated_at
+FROM device_view
+ORDER BY sim_index ASC
 ```
 
-Alternatively, query `device_view` directly with the additional columns.
+The `is_active` field now returns `'active'`, `'modem_only'`, or `'inactive'` instead of the previous binary.
 
 ### 3.2 Phones handler
 
 No changes — `PhoneList.svelte` already handles the fields it gets. The new `modem_only` status value will be treated as non-active by existing client-side filtering.
+
+### 3.3 Stats handler
+
+Return the new `modem_only_sims` count from `device-count.js`.
 
 ---
 
@@ -227,16 +264,18 @@ Current: `All` / `Active (N)` / `Inactive (N)`
 
 New: `All (N)` / `Active (N)` / `Error (N)` / `Inactive (N)`
 
-- **Active**: `sim_status = 'active'`
-- **Error**: `sim_status = 'modem_only'` (modem alive, SIM read failed)
-- **Inactive**: `sim_status = 'inactive'`
+- **Active**: `is_active === 'active'`
+- **Error**: `is_active === 'modem_only'` (modem alive, SIM read failed)
+- **Inactive**: `is_active === 'inactive'`
+
+Note: Without the Error tab, `modem_only` rows would fall through both existing Active and Inactive filters (since it matches neither `=== 'active'` nor `=== 'inactive'`). The Error tab is required, not optional.
 
 ### 4.3 Status badge colors
 
 ```
-active     → green  (bg-emerald-100 text-emerald-800)
-modem_only → amber  (bg-amber-100 text-amber-800), label: "Error"
-inactive   → gray   (bg-gray-100 text-gray-800)
+active     → green  (bg-emerald-100 text-emerald-800), label: "Active" / "活动"
+modem_only → amber  (bg-amber-100 text-amber-800), label: "Error" / "异常"
+inactive   → gray   (bg-gray-100 text-gray-800), label: "Inactive" / "未激活"
 ```
 
 ### 4.4 No changes to other pages
@@ -252,14 +291,18 @@ inactive   → gray   (bg-gray-100 text-gray-800)
 - `process_single_modem` with ICCID None but IMEI Some → returns Phone with `sim_read_status: "failed"`
 - `process_single_modem` with both ICCID and IMEI None → returns error result
 - Startup cache includes IMEI-only modems
+- SMS sender reverse cache excludes IMEI-only modems (no ICCID to map)
 
 ### API integration tests
-- POST `/api/control/devices` with modem having `sim_read_status: "failed"` and `current_iccid: null` → modem row created
+- POST `/api/control/devices` with modem having `sim_read_status: "failed"` and no SIM entry → modem row created, `current_iccid` is NULL
 - `device_view` returns `sim_status = 'modem_only'` when `sims.imei` matches a modem without ICCID
+- Full-sync reconciliation clears `sim_read_status` for absent modems
+- Stats endpoint returns `modem_only_sims` count
 
 ### Frontend
-- Verify multi-indicator columns render correctly for all 4 states
-- Filter tabs show correct counts
+- Verify multi-indicator columns render correctly for all states (active, modem_only, inactive)
+- Filter tabs show correct counts, including Error tab
+- `modem_only` rows appear in Error tab, not in Active or Inactive
 - Search works across new status values
 
 ---
@@ -267,6 +310,7 @@ inactive   → gray   (bg-gray-100 text-gray-800)
 ## Migration Safety
 
 - `ALTER TABLE ADD COLUMN` with `DEFAULT NULL` is non-breaking — existing rows get NULL
+- UNIQUE index on `sims.imei` — migration handles existing duplicates by clearing all but the lowest `sim_index` entry
 - View recreation is idempotent (DROP VIEW IF EXISTS + CREATE VIEW)
 - Daemon change is backwards-compatible — server ignores unknown fields, and `sim_read_status` being absent is treated as NULL
-- Deploy order: migration first → server deploy → daemon deploy
+- Deploy order: **migration first → server deploy → frontend deploy → daemon deploy** (frontend can deploy any time after server since unknown fields are ignored by the client)
