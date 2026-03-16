@@ -157,7 +157,7 @@ async fn main() -> Result<()> {
 
     // Build initial modem cache
     info!("🔄 Building initial modem cache...");
-    let mut valid_modems: HashMap<String, String> = HashMap::new();
+    let mut valid_modems: HashMap<String, Option<String>> = HashMap::new();
     match modem_manager.list_modems().await {
         Ok(modems) => {
             info!(
@@ -165,60 +165,47 @@ async fn main() -> Result<()> {
                 modems.len()
             );
             for modem_id in modems {
-                match modem_manager.get_iccid(&modem_id).await {
-                    Ok(Some(iccid)) => {
-                        valid_modems.insert(modem_id.clone(), iccid.clone());
-                        // Best-effort IMEI lookup for logging/diagnostics
-                        let imei = match modem_manager.get_device_details(&modem_id).await {
-                            Ok(Some((imei, ..))) => Some(imei),
-                            Ok(None) => None,
-                            Err(e) => {
-                                warn!("⚠️  Failed to get IMEI for modem {}: {}", modem_id, e);
-                                None
-                            }
-                        };
-
-                        match imei {
-                            Some(imei) => {
-                                info!(
-                                    "✅ Cached modem {} with ICCID {} (IMEI {})",
-                                    modem_id, iccid, imei
-                                );
-                            }
-                            None => {
-                                info!(
-                                    "✅ Cached modem {} with ICCID {} (IMEI unknown)",
-                                    modem_id, iccid
-                                );
-                            }
-                        }
+                // Try IMEI first — this is the gate
+                let imei = match modem_manager.get_device_details(&modem_id).await {
+                    Ok(Some((imei, ..))) => Some(imei),
+                    Ok(None) => None,
+                    Err(e) => {
+                        warn!("⚠️  Failed to get IMEI for modem {}: {}", modem_id, e);
+                        None
                     }
-                    Ok(None) => {
-                        // Log IMEI for SIM-less modems for easier troubleshooting
-                        let imei = match modem_manager.get_device_details(&modem_id).await {
-                            Ok(Some((imei, ..))) => Some(imei),
-                            Ok(None) => None,
-                            Err(e) => {
-                                warn!("⚠️  Failed to get IMEI for modem {}: {}", modem_id, e);
-                                None
-                            }
-                        };
+                };
 
-                        match imei {
-                            Some(imei) => {
-                                warn!("⚠️  Modem {} has no SIM card (IMEI {})", modem_id, imei);
-                            }
-                            None => {
-                                warn!(
-                                    "⚠️  Modem {} has no SIM card (IMEI unknown)",
-                                    modem_id
-                                );
-                            }
-                        }
-                    }
+                if imei.is_none() {
+                    warn!("⚠️  Modem {} has no valid IMEI, skipping", modem_id);
+                    continue;
+                }
+
+                // Try ICCID — optional, modem is still valid without it
+                let iccid = match modem_manager.get_iccid(&modem_id).await {
+                    Ok(Some(iccid)) => Some(iccid),
+                    Ok(None) => None,
                     Err(e) => {
                         warn!("⚠️  Failed to get ICCID for modem {}: {}", modem_id, e);
+                        None
                     }
+                };
+
+                valid_modems.insert(modem_id.clone(), iccid.clone());
+
+                match (&imei, &iccid) {
+                    (Some(imei), Some(iccid)) => {
+                        info!(
+                            "✅ Cached modem {} with ICCID {} (IMEI {})",
+                            modem_id, iccid, imei
+                        );
+                    }
+                    (Some(imei), None) => {
+                        warn!(
+                            "⚠️  Cached modem {} without ICCID (IMEI {}) — SIM read failed",
+                            modem_id, imei
+                        );
+                    }
+                    _ => unreachable!(),
                 }
             }
         }
@@ -229,7 +216,7 @@ async fn main() -> Result<()> {
     }
 
     if valid_modems.is_empty() {
-        error!("❌ No modems with SIM cards found!");
+        error!("❌ No modems with valid IMEI found!");
         error!("💡 Check: mmcli -L");
         return Ok(());
     }
@@ -592,7 +579,9 @@ async fn main() -> Result<()> {
     let sender_modem_manager = modem_manager.clone();
     let sender_modem_cache: HashMap<String, String> = valid_modems
         .iter()
-        .map(|(modem_id, iccid)| (iccid.clone(), modem_id.clone()))
+        .filter_map(|(modem_id, iccid)| {
+            iccid.as_ref().map(|i| (i.clone(), modem_id.clone()))
+        })
         .collect();
 
     tokio::spawn(async move {
