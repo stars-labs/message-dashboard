@@ -2,6 +2,7 @@ use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
 // Import from the library crate
@@ -232,12 +233,18 @@ async fn main() -> Result<()> {
         valid_modems.len()
     );
 
+    // Shared buffer: Task 1 (modem reader) writes latest ModemReport results here,
+    // Task 3 (device sync) reads from it. This avoids two pools fighting over serial ports.
+    let latest_devices: Arc<RwLock<Vec<ModemReport>>> =
+        Arc::new(RwLock::new(Vec::new()));
+
     // TASK 1: MODEM READER (Fast Loop - every 1 second)
     // Reads SMS from modems and saves to database, then deletes from SIM immediately
     let modem_reader_store = message_store.clone();
     let modem_reader_manager = modem_manager.clone();
     let modem_reader_pool = worker_pool.clone();
     let modem_reader_ids = modem_ids.clone();
+    let reader_devices = latest_devices.clone();
 
     tokio::spawn(async move {
         loop {
@@ -249,10 +256,15 @@ async fn main() -> Result<()> {
                 .await
             {
                 Ok(results) => {
+                    // Collect modem reports for the device sync task
+                    let mut reports = Vec::new();
                     let mut count = 0;
                     let mut deleted_count = 0;
                     let mut deletion_failed_count = 0;
                     for result in results {
+                        if let Some(report) = result.report.clone() {
+                            reports.push(report);
+                        }
                         for msg_with_path in result.messages_with_paths {
                             // Save to SQLite immediately
                             match modem_reader_store.store_message(
@@ -299,6 +311,12 @@ async fn main() -> Result<()> {
                     if count > 0 {
                         info!("📥 Modem reader: Stored {} new messages in {:?} (deleted: {}, failed: {})",
                               count, start.elapsed(), deleted_count, deletion_failed_count);
+                    }
+
+                    // Update shared buffer for device sync task
+                    if !reports.is_empty() {
+                        let mut devices = reader_devices.write().await;
+                        *devices = reports;
                     }
                 }
                 Err(e) => {
@@ -402,86 +420,48 @@ async fn main() -> Result<()> {
     });
 
     // TASK 3: DEVICE STATUS SYNC (Slow Loop - every 30 seconds)
-    // Syncs device status and phone information to API
+    // Reads latest device data from shared buffer (populated by Task 1) and syncs to API.
+    // This avoids a second process_modems() call that would fight over serial ports.
     let sync_client = api_client.clone();
     let sync_manager_arc = Arc::new(tokio::sync::Mutex::new(SyncManager::new(
         session_id.clone(),
         300,
     )));
-    let sync_pool = worker_pool.clone();
-    let sync_ids = modem_ids.clone();
+    let sync_devices = latest_devices.clone();
 
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_secs(30)).await;
 
-            // Collect device status
-            let mut all_phones = Vec::new();
-            let mut all_sims = Vec::new();
+            // Read latest modem reports from shared buffer (populated by Task 1)
+            let all_reports = {
+                let devices = sync_devices.read().await;
+                devices.clone()
+            };
 
-            match sync_pool.process_modems(sync_ids.clone()).await {
-                Ok(results) => {
-                    for result in results {
-                        if let Some(phone) = result.phone {
-                            all_phones.push(phone);
-                        }
-                        if let Some(sim) = result.sim {
-                            all_sims.push(sim);
-                        }
-                    }
+            // Determine sync mode
+            let mut sync_manager = sync_manager_arc.lock().await;
+            let sync_mode = if sync_manager.needs_full_sync() {
+                SyncMode::Full
+            } else {
+                SyncMode::Incremental
+            };
 
-                    // Determine sync mode
-                    let mut sync_manager = sync_manager_arc.lock().await;
-                    let sync_mode = if sync_manager.needs_full_sync() {
-                        SyncMode::Full
-                    } else {
-                        SyncMode::Incremental
-                    };
-
-                    // Convert Phone to Modem for API
-                    let modems: Vec<Modem> = all_phones
-                        .iter()
-                        .map(|p| Modem {
-                            equipment_id: p.imei.clone().unwrap_or_else(|| "unknown".to_string()),
-                            manufacturer: p.manufacturer.clone(),
-                            model: p.model.clone(),
-                            firmware_revision: p.firmware_revision.clone(),
-                            hardware_revision: p.hardware_revision.clone(),
-                            status: p.status.clone(),
-                            signal: p.signal,
-                            rssi: p.rssi,
-                            rsrq: p.rsrq,
-                            rsrp: p.rsrp,
-                            snr: p.snr,
-                            modem_index: p.modem_index,
-                            usb_port: p.usb_port.as_ref().and_then(|s| s.parse::<i32>().ok()),
-                            connection_status: Some(p.status.clone()),
-                            network_type: None,
-                            access_tech: p.access_tech.clone(),
-                            sim_read_status: p.sim_read_status.clone(),
-                        })
-                        .collect();
-
-                    // Upload device status
-                    match sync_client
-                        .upload_devices(&modems, &all_sims, sync_mode, &session_id)
-                        .await
-                    {
-                        Ok(_) => {
-                            info!(
-                                "📊 Status sync: Updated {} devices (mode: {:?})",
-                                all_phones.len(),
-                                sync_mode
-                            );
-                            sync_manager.record_success(sync_mode);
-                        }
-                        Err(e) => {
-                            warn!("Status sync failed: {}", e);
-                        }
-                    }
+            // Upload modem reports directly (no conversion needed)
+            match sync_client
+                .upload_modem_reports(&all_reports, sync_mode, &session_id)
+                .await
+            {
+                Ok(_) => {
+                    info!(
+                        "📊 Status sync: Updated {} devices (mode: {:?})",
+                        all_reports.len(),
+                        sync_mode
+                    );
+                    sync_manager.record_success(sync_mode);
                 }
                 Err(e) => {
-                    warn!("Failed to collect device status: {}", e);
+                    warn!("Status sync failed: {}", e);
                 }
             }
         }

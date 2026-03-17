@@ -106,6 +106,32 @@ pub struct Phone {
     pub sim_read_status: Option<String>,
 }
 
+/// Flat modem report for the new single-struct API (migration 033+)
+/// One struct per modem, sent as `{ modem_reports: [...] }` to the server
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModemReport {
+    pub equipment_id: String,
+    pub manufacturer: Option<String>,
+    pub model: Option<String>,
+    pub firmware_revision: Option<String>,
+    pub hardware_revision: Option<String>,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detected_iccid: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detected_phone_number: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detected_operator: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signal_percent: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rssi: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub modem_index: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usb_port: Option<i32>,
+}
+
 #[derive(Debug, Clone)]
 pub struct SignalData {
     pub percent: i32,

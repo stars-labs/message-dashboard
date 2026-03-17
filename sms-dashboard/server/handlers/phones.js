@@ -18,8 +18,6 @@ export const phonesHandler = {
           dv.carrier,
           dv.sim_status as status,
           dv.signal_quality as signal,
-          dv.connection_status,
-          dv.network_type,
           dv.operator,
           dv.manufacturer,
           dv.model,
@@ -28,11 +26,7 @@ export const phonesHandler = {
           dv.sim_index,
           dv.notes,
           dv.created_at,
-          dv.updated_at,
-          NULL as mapped_number,
-          NULL as mapped_carrier,
-          NULL as mapped_country,
-          NULL as mapping_notes
+          dv.updated_at
         FROM device_view dv
         ORDER BY dv.primary_port, dv.iccid
       `).all();
@@ -74,8 +68,6 @@ export const phonesHandler = {
           dv.carrier,
           dv.sim_status as status,
           dv.signal_quality as signal,
-          dv.connection_status,
-          dv.network_type,
           dv.operator,
           dv.manufacturer,
           dv.model,
@@ -84,10 +76,7 @@ export const phonesHandler = {
           dv.sim_index,
           dv.notes,
           dv.created_at,
-          dv.updated_at,
-          NULL as mapped_number,
-          NULL as mapped_carrier,
-          NULL as mapping_notes
+          dv.updated_at
         FROM device_view dv
         WHERE dv.iccid = ? OR dv.id = ?
       `).bind(phoneId, phoneId).first();

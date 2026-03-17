@@ -147,6 +147,36 @@ mod tests {
     }
 
     #[test]
+    fn test_modem_report_structure() {
+        let report = ModemReport {
+            equipment_id: "IMEI123456789".to_string(),
+            manufacturer: Some("Quectel".to_string()),
+            model: Some("EC20".to_string()),
+            firmware_revision: Some("1.0.0".to_string()),
+            hardware_revision: None,
+            status: "active".to_string(),
+            detected_iccid: Some("89860121750097854321".to_string()),
+            detected_phone_number: Some("+1234567890".to_string()),
+            detected_operator: Some("Test Operator".to_string()),
+            signal_percent: Some(75),
+            rssi: Some(-65),
+            modem_index: Some(14),
+            usb_port: None,
+        };
+
+        assert_eq!(report.equipment_id, "IMEI123456789");
+        assert_eq!(report.status, "active");
+        assert_eq!(report.signal_percent, Some(75));
+        assert_eq!(report.detected_iccid, Some("89860121750097854321".to_string()));
+
+        // Test serialization — modem_reports format
+        let json = serde_json::to_value(&report).unwrap();
+        assert_eq!(json["equipment_id"], "IMEI123456789");
+        assert_eq!(json["detected_iccid"], "89860121750097854321");
+        assert!(json.get("usb_port").is_none()); // skip_serializing_if = None
+    }
+
+    #[test]
     fn test_sim_structure() {
         let sim = Sim {
             iccid: "89860121750097854321".to_string(),

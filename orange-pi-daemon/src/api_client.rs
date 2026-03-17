@@ -83,9 +83,66 @@ impl ApiClient {
         Ok(())
     }
 
-    /// Upload phone status data (LEGACY - use upload_devices instead)
+    /// Upload modem reports using the new single-struct format (migration 033+)
+    pub async fn upload_modem_reports(
+        &self,
+        reports: &[ModemReport],
+        sync_mode: SyncMode,
+        session_id: &str,
+    ) -> Result<()> {
+        if reports.is_empty() {
+            warn!("⚠️  Attempted to upload empty modem_reports list");
+            return Ok(());
+        }
+
+        let url = format!("{}/api/control/devices", self.config.api_url);
+        let timestamp = chrono::Utc::now()
+            .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+            .to_string();
+
+        info!(
+            "📤 Uploading {} modem_reports (mode: {}, session: {})",
+            reports.len(),
+            sync_mode.as_str(),
+            session_id
+        );
+
+        let payload = json!({
+            "sync_mode": sync_mode.as_str(),
+            "session_id": session_id,
+            "timestamp": timestamp,
+            "modem_reports": reports,
+        });
+
+        let response = self
+            .client
+            .post(&url)
+            .header("x-api-key", &self.config.api_key)
+            .header("x-daemon-version", "rust-3.0.0-reports")
+            .json(&payload)
+            .send()
+            .await
+            .context("Failed to send modem reports")?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response
+                .text()
+                .await
+                .unwrap_or_else(|_| String::from("(no body)"));
+            anyhow::bail!("API returned error: {} - {}", status, body);
+        }
+
+        info!(
+            "✅ Successfully uploaded modem reports (mode: {})",
+            sync_mode.as_str()
+        );
+        Ok(())
+    }
+
+    /// Upload phone status data (LEGACY - use upload_modem_reports instead)
     /// Kept for backward compatibility only
-    #[deprecated(note = "Use upload_devices instead")]
+    #[deprecated(note = "Use upload_modem_reports instead")]
     pub async fn upload_phones(&self, phones: &[Phone]) -> Result<()> {
         if phones.is_empty() {
             return Ok(());
