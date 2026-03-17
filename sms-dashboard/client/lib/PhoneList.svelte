@@ -52,14 +52,16 @@
     switch (status) {
       case "online":
       case "active":
-      case "registered":
-      case "connected":
         return "bg-emerald-500";
+      case "sim_error":
+        return "bg-red-500";
+      case "iccid_mismatch":
+        return "bg-amber-500";
       case "offline":
+      case "no_modem":
+      case "unassigned":
       case "inactive":
         return "bg-stone-400";
-      case "error":
-        return "bg-red-500";
       default:
         return "bg-stone-400";
     }

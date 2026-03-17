@@ -11,15 +11,12 @@ export async function getDeviceStats(db) {
       (SELECT COUNT(*) FROM modems WHERE status = 'disconnected') as disconnected_modems,
       (SELECT COUNT(*) FROM modems) as total_modems,
       (SELECT COUNT(*) FROM device_view WHERE sim_status = 'active') as active_sims,
-      (SELECT COUNT(*) FROM device_view WHERE sim_status = 'inactive') as inactive_sims,
-      (SELECT COUNT(*) FROM device_view WHERE sim_status = 'modem_only') as modem_only_sims,
-      (SELECT COUNT(DISTINCT equipment_id) FROM modems WHERE current_iccid IS NOT NULL) as modems_with_sims
+      (SELECT COUNT(*) FROM device_view WHERE sim_status IN ('no_modem', 'unassigned')) as inactive_sims,
+      (SELECT COUNT(*) FROM device_view WHERE sim_status IN ('sim_error', 'iccid_mismatch', 'offline')) as error_sims
   `).first();
-  
-  // Calculate totals
-  const totalModems = stats.total_modems || 0;
-  const totalSims = (stats.active_sims || 0) + (stats.inactive_sims || 0) + (stats.modem_only_sims || 0);
-  
+
+  const totalSims = (stats.active_sims || 0) + (stats.inactive_sims || 0) + (stats.error_sims || 0);
+
   // Get daemon status from daemon_health table
   const daemonHealth = await db.prepare(`
     SELECT
@@ -37,22 +34,19 @@ export async function getDeviceStats(db) {
     ORDER BY last_heartbeat DESC
     LIMIT 1
   `).first();
-  
+
   return {
-    // Actual counts from database
     modems: {
-      total: totalModems,
+      total: stats.total_modems || 0,
       connected: stats.connected_modems || 0,
       disconnected: stats.disconnected_modems || 0,
-      with_sims: stats.modems_with_sims || 0
     },
     sims: {
       total: totalSims,
       active: stats.active_sims || 0,
       inactive: stats.inactive_sims || 0,
-      modem_only: stats.modem_only_sims || 0
+      error: stats.error_sims || 0
     },
-    // Daemon reported values (for comparison)
     daemon: {
       status: daemonHealth?.daemon_status || 'unknown',
       health: daemonHealth?.health_status || 'offline',
@@ -60,9 +54,9 @@ export async function getDeviceStats(db) {
       last_heartbeat: daemonHealth?.last_heartbeat || null,
       version: daemonHealth?.version || null
     },
-    // Simple counts for UI (SIM-based, not modem-based)
-    online_count: stats.active_sims || 0,  // SIMs in active modems
-    total_count: totalSims                  // Total SIMs in inventory
+    // Simple counts for UI
+    online_count: stats.active_sims || 0,
+    total_count: totalSims
   };
 }
 

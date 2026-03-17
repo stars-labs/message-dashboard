@@ -22,9 +22,9 @@ export const iccidMappingsHandler = {
           equipment_id,
           notes,
           sim_status as is_active,
-          sim_read_status,
           signal_quality,
           modem_status,
+          detected_iccid,
           created_at,
           updated_at
         FROM device_view
@@ -93,7 +93,7 @@ export const iccidMappingsHandler = {
         SELECT
           iccid as id, iccid, sim_index, number as phone_number,
           country, carrier, equipment_id, notes,
-          sim_status as is_active, sim_read_status, signal_quality, modem_status,
+          sim_status as is_active, signal_quality, modem_status, detected_iccid,
           created_at, updated_at
         FROM device_view
         WHERE iccid = ?
@@ -137,7 +137,7 @@ export const iccidMappingsHandler = {
         SELECT
           iccid as id, iccid, sim_index, number as phone_number,
           country, carrier, equipment_id, notes,
-          sim_status as is_active, sim_read_status, signal_quality, modem_status,
+          sim_status as is_active, signal_quality, modem_status, detected_iccid,
           created_at, updated_at
         FROM device_view
         WHERE iccid = ?
@@ -227,26 +227,15 @@ export const iccidMappingsHandler = {
         ).run();
       }
 
-      // Return updated mapping with computed status
+      // Return updated mapping with computed status from device_view
       const mapping = await env.DB.prepare(`
         SELECT
-          s.iccid,
-          s.sim_index,
-          s.phone_number,
-          s.country_code,
-          s.carrier,
-          s.imei,
-          s.notes,
-          s.created_at,
-          s.updated_at,
-          s.updated_by,
-          CASE
-            WHEN m.current_iccid IS NOT NULL THEN 'active'
-            ELSE 'inactive'
-          END as status
-        FROM sims s
-        LEFT JOIN modems m ON s.iccid = m.current_iccid
-        WHERE s.iccid = ?
+          iccid, sim_index, number as phone_number,
+          country as country_code, carrier, equipment_id as imei,
+          notes, sim_status as status,
+          created_at, updated_at
+        FROM device_view
+        WHERE iccid = ?
       `).bind(iccid).first();
 
       return new Response(JSON.stringify({
@@ -302,27 +291,15 @@ export const iccidMappingsHandler = {
         id
       ).run();
 
-      // Return updated mapping with computed status
+      // Return updated mapping with computed status from device_view
       const mapping = await env.DB.prepare(`
         SELECT
-          s.iccid as id,
-          s.iccid,
-          s.sim_index,
-          s.phone_number,
-          s.country_code as country,
-          s.carrier,
-          s.imei as equipment_id,
-          s.notes,
-          CASE
-            WHEN m.current_iccid IS NOT NULL THEN 'active'
-            ELSE 'inactive'
-          END as is_active,
-          s.created_at,
-          s.updated_at,
-          s.updated_by
-        FROM sims s
-        LEFT JOIN modems m ON s.iccid = m.current_iccid
-        WHERE s.iccid = ?
+          iccid as id, iccid, sim_index, number as phone_number,
+          country, carrier, equipment_id, notes,
+          sim_status as is_active,
+          created_at, updated_at
+        FROM device_view
+        WHERE iccid = ?
       `).bind(id).first();
 
       if (!mapping) {

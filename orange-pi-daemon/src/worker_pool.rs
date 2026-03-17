@@ -55,8 +55,7 @@ impl WorkerPoolStats {
 pub struct ModemResult {
     pub modem_id: String,
     pub iccid: Option<String>,
-    pub phone: Option<Phone>,
-    pub sim: Option<Sim>,
+    pub report: Option<ModemReport>,
     pub messages: Vec<Message>,
     pub messages_with_paths: Vec<MessageWithPath>, // Track SMS paths for deletion
     pub error: Option<String>,
@@ -176,8 +175,7 @@ impl WorkerPool {
                             ModemResult {
                                 modem_id,
                                 iccid: None,
-                                phone: None,
-                                sim: None,
+                                report: None,
                                 messages: vec![],
                                 messages_with_paths: vec![],
                                 error: Some(e.to_string()),
@@ -191,8 +189,7 @@ impl WorkerPool {
                             ModemResult {
                                 modem_id,
                                 iccid: None,
-                                phone: None,
-                                sim: None,
+                                report: None,
                                 messages: vec![],
                                 messages_with_paths: vec![],
                                 error: Some("Timeout".to_string()),
@@ -271,8 +268,7 @@ impl WorkerPool {
                 return Ok(ModemResult {
                     modem_id,
                     iccid: None,
-                    phone: None,
-                    sim: None,
+                    report: None,
                     messages: vec![],
                     messages_with_paths: vec![],
                     error: Some("No valid IMEI".to_string()),
@@ -288,8 +284,6 @@ impl WorkerPool {
 
         // Get operator — always
         let operator = modem_manager.get_operator(&modem_id).await.unwrap_or(None);
-
-        let sim_read_status = if iccid.is_some() { "ok" } else { "failed" };
 
         // Only get phone number and messages if ICCID is available
         let (phone_number, messages, messages_with_paths) = if let Some(ref iccid_val) = iccid {
@@ -313,50 +307,27 @@ impl WorkerPool {
             (None, vec![], vec![])
         };
 
-        // Build Phone struct — always built when IMEI succeeds
-        let phone = Phone {
-            iccid: iccid.clone().unwrap_or_default(),
-            number: phone_number.clone(),
-            signal: Some(signal_data.percent),
-            operator_name: operator.clone(),
+        // Build ModemReport — single flat struct for the API
+        let report = ModemReport {
+            equipment_id,
+            manufacturer,
+            model,
+            firmware_revision: firmware,
+            hardware_revision: hardware,
             status: "active".to_string(),
-            manufacturer: manufacturer.clone(),
-            model: model.clone(),
-            firmware_revision: firmware.clone(),
-            hardware_revision: hardware.clone(),
-            imei: Some(equipment_id.clone()),
-            country: None,
-            flag: None,
-            carrier: operator.clone(),
+            detected_iccid: iccid.clone(),
+            detected_phone_number: phone_number,
+            detected_operator: operator,
+            signal_percent: Some(signal_data.percent),
             rssi: Some(signal_data.rssi),
-            rsrq: None,
-            rsrp: None,
-            snr: None,
-            operator_id: None,
-            access_tech: None,
             modem_index: modem_id.parse::<i32>().ok(),
-            sim_index: None,
-            device_path: None,
             usb_port: None,
-            sim_read_status: Some(sim_read_status.to_string()),
         };
-
-        // Build Sim struct — only when ICCID is available
-        let sim = iccid.as_ref().map(|iccid_val| Sim {
-            iccid: iccid_val.clone(),
-            phone_number: phone_number.clone(),
-            current_modem_id: Some(equipment_id),
-            operator_name: operator,
-            operator_id: None,
-            status: "active".to_string(),
-            sim_index: None,
-        });
 
         Ok(ModemResult {
             modem_id,
             iccid,
-            phone: Some(phone),
-            sim,
+            report: Some(report),
             messages,
             messages_with_paths,
             error: None,

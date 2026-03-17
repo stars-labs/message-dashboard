@@ -19,164 +19,209 @@ export const controlHandler = {
       });
     }
     
-    // Parse request body with sync metadata
-    const { 
+    // Parse request body
+    const body = await request.json();
+    const {
       sync_mode = 'incremental',
       session_id = null,
       timestamp = new Date().toISOString(),
-      modems = [], 
-      sims = [] 
-    } = await request.json();
-    
-    console.log(`[control.js] Received ${modems.length} modems and ${sims.length} SIMs (mode: ${sync_mode}, session: ${session_id})`);
-    
+    } = body;
+
     try {
-      // Prepare batch operations for better performance
-      const batch = [];
-      
-      // Handle full state synchronization
-      if (sync_mode === 'full' && session_id) {
-        console.log(`[control.js] Starting FULL STATE SYNC for session ${session_id}`);
-        
-        // Step 1: Mark all existing active/connected modems as pending verification
-        // Include 'active' — daemon reports status='active', not 'connected'
-        batch.push(env.DB.prepare(`
-          UPDATE modems
-          SET verification_status = 'pending'
-          WHERE status IN ('active', 'connected', 'online')
-        `));
-        
-        // Step 2: Collect all received modem IDs
-        const receivedModemIds = new Set(modems.map(m => m.equipment_id).filter(id => id));
-        const receivedIccids = new Set(sims.map(s => s.iccid).filter(id => id));
-        
-        console.log(`[control.js] Full sync received ${receivedModemIds.size} modems, ${receivedIccids.size} SIMs`);
-        
-        // Process modems and SIMs (will be updated below)
-      }
-      
-      // Update modems table
-      for (const modem of modems) {
-        if (!modem.equipment_id) {
-          console.warn('[control.js] Skipping modem without equipment_id');
-          continue;
-        }
+      // Format detection: new path (modem_reports) vs legacy path (modems + sims)
+      if (body.modem_reports) {
+        // === NEW PATH: Single-loop modem_reports ===
+        const reports = body.modem_reports;
+        console.log(`[control.js] Received ${reports.length} modem_reports (mode: ${sync_mode}, session: ${session_id})`);
 
-        // Validate against fake MODEM_ entries
-        if (modem.equipment_id.startsWith('MODEM_') &&
-            (!modem.manufacturer || modem.manufacturer === null) &&
-            (!modem.model || modem.model === null)) {
-          console.warn(`[control.js] Rejecting fake modem entry: ${modem.equipment_id} (no manufacturer/model)`);
-          continue;
-        }
+        const batch = [];
 
-        // Include verification status in full sync mode
-        const verificationStatus = sync_mode === 'full' ? 'verified' : null;
-        const lastVerifiedSession = sync_mode === 'full' ? session_id : null;
-        
-        batch.push(env.DB.prepare(`
-          INSERT INTO modems (
-            equipment_id, manufacturer, model, firmware_revision,
-            hardware_revision, status, sim_read_status,
-            verification_status, last_verified_session,
-            updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-          ON CONFLICT(equipment_id) DO UPDATE SET
-            manufacturer = excluded.manufacturer,
-            model = excluded.model,
-            firmware_revision = excluded.firmware_revision,
-            hardware_revision = excluded.hardware_revision,
-            status = excluded.status,
-            sim_read_status = excluded.sim_read_status,
-            verification_status = COALESCE(excluded.verification_status, modems.verification_status),
-            last_verified_session = COALESCE(excluded.last_verified_session, modems.last_verified_session),
-            updated_at = CURRENT_TIMESTAMP
-        `).bind(
-          modem.equipment_id,
-          modem.manufacturer || null,
-          modem.model || null,
-          modem.firmware_revision || null,
-          modem.hardware_revision || null,
-          modem.status || 'unknown',
-          modem.sim_read_status || null,
-          verificationStatus,
-          lastVerifiedSession
-        ));
-        
-        // Update modem_state if we have signal data
-        if (modem.signal !== null || modem.signal !== undefined) {
+        // Full sync: mark all active modems as pending verification
+        if (sync_mode === 'full' && session_id) {
+          console.log(`[control.js] Starting FULL STATE SYNC for session ${session_id}`);
           batch.push(env.DB.prepare(`
-            INSERT INTO modem_state (
-              modem_id, modem_index, usb_port, signal_percent, rssi, rsrq, rsrp, snr,
-              connection_status, network_type, access_tech, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(modem_id) DO UPDATE SET
-              modem_index = excluded.modem_index,
-              usb_port = excluded.usb_port,
+            UPDATE modems
+            SET verification_status = 'pending'
+            WHERE status IN ('active', 'connected', 'online')
+          `));
+        }
+
+        // Single upsert per modem report — no SIM association loop, no eviction
+        for (const report of reports) {
+          if (!report.equipment_id) {
+            console.warn('[control.js] Skipping report without equipment_id');
+            continue;
+          }
+
+          if (report.equipment_id.startsWith('MODEM_') &&
+              (!report.manufacturer || report.manufacturer === null) &&
+              (!report.model || report.model === null)) {
+            console.warn(`[control.js] Rejecting fake modem entry: ${report.equipment_id}`);
+            continue;
+          }
+
+          const verificationStatus = sync_mode === 'full' ? 'verified' : null;
+          const lastVerifiedSession = sync_mode === 'full' ? session_id : null;
+
+          batch.push(env.DB.prepare(`
+            INSERT INTO modems (
+              equipment_id, manufacturer, model, firmware_revision,
+              hardware_revision, detected_iccid, detected_phone_number,
+              detected_operator, signal_percent, rssi,
+              modem_index, usb_port, status,
+              verification_status, last_verified_session,
+              updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(equipment_id) DO UPDATE SET
+              manufacturer = excluded.manufacturer,
+              model = excluded.model,
+              firmware_revision = excluded.firmware_revision,
+              hardware_revision = excluded.hardware_revision,
+              detected_iccid = excluded.detected_iccid,
+              detected_phone_number = excluded.detected_phone_number,
+              detected_operator = excluded.detected_operator,
               signal_percent = excluded.signal_percent,
               rssi = excluded.rssi,
-              rsrq = excluded.rsrq,
-              rsrp = excluded.rsrp,
-              snr = excluded.snr,
-              connection_status = excluded.connection_status,
-              network_type = excluded.network_type,
-              access_tech = excluded.access_tech,
+              modem_index = excluded.modem_index,
+              usb_port = excluded.usb_port,
+              status = excluded.status,
+              verification_status = COALESCE(excluded.verification_status, modems.verification_status),
+              last_verified_session = COALESCE(excluded.last_verified_session, modems.last_verified_session),
+              updated_at = CURRENT_TIMESTAMP
+          `).bind(
+            report.equipment_id,
+            report.manufacturer || null,
+            report.model || null,
+            report.firmware_revision || null,
+            report.hardware_revision || null,
+            report.detected_iccid || null,
+            report.detected_phone_number || null,
+            report.detected_operator || null,
+            report.signal_percent ?? null,
+            report.rssi ?? null,
+            report.modem_index ?? null,
+            report.usb_port ?? null,
+            report.status || 'active',
+            verificationStatus,
+            lastVerifiedSession
+          ));
+        }
+
+        // Execute batch
+        if (batch.length > 0) {
+          await env.DB.batch(batch);
+        }
+
+        // Reconciliation for full sync
+        if (sync_mode === 'full') {
+          console.log('[control.js] Reconciling disconnected modems...');
+
+          const disconnectResult = await env.DB.prepare(`
+            UPDATE modems
+            SET status = 'disconnected',
+                verification_status = 'absent'
+            WHERE verification_status = 'pending'
+          `).run();
+
+          console.log(`[control.js] Marked ${disconnectResult.meta.changes} modems as disconnected`);
+
+          // Clear detected data for disconnected modems
+          await env.DB.prepare(`
+            UPDATE modems
+            SET detected_iccid = NULL,
+                detected_phone_number = NULL,
+                detected_operator = NULL,
+                signal_percent = NULL,
+                rssi = NULL
+            WHERE verification_status = 'absent'
+          `).run();
+
+          // Record sync history
+          await env.DB.prepare(`
+            INSERT INTO sync_history (
+              daemon_id, session_id, sync_mode, sync_timestamp,
+              modems_received, sims_received, modems_disconnected,
+              status, created_at
+            ) VALUES (
+              'orange-pi-main', ?, ?, ?, ?, 0, ?, 'completed', CURRENT_TIMESTAMP
+            )
+          `).bind(
+            session_id, sync_mode, timestamp,
+            reports.length, disconnectResult.meta.changes
+          ).run();
+        }
+
+      } else {
+        // === LEGACY PATH: modems[] + sims[] ===
+        const { modems = [], sims = [] } = body;
+        console.log(`[control.js] [legacy] Received ${modems.length} modems and ${sims.length} SIMs (mode: ${sync_mode}, session: ${session_id})`);
+
+        const batch = [];
+
+        if (sync_mode === 'full' && session_id) {
+          console.log(`[control.js] Starting FULL STATE SYNC for session ${session_id}`);
+          batch.push(env.DB.prepare(`
+            UPDATE modems
+            SET verification_status = 'pending'
+            WHERE status IN ('active', 'connected', 'online')
+          `));
+        }
+
+        // Update modems table
+        for (const modem of modems) {
+          if (!modem.equipment_id) continue;
+          if (modem.equipment_id.startsWith('MODEM_') &&
+              (!modem.manufacturer || modem.manufacturer === null) &&
+              (!modem.model || modem.model === null)) continue;
+
+          const verificationStatus = sync_mode === 'full' ? 'verified' : null;
+          const lastVerifiedSession = sync_mode === 'full' ? session_id : null;
+
+          batch.push(env.DB.prepare(`
+            INSERT INTO modems (
+              equipment_id, manufacturer, model, firmware_revision,
+              hardware_revision, status, sim_read_status,
+              signal_percent, rssi,
+              verification_status, last_verified_session,
+              updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(equipment_id) DO UPDATE SET
+              manufacturer = excluded.manufacturer,
+              model = excluded.model,
+              firmware_revision = excluded.firmware_revision,
+              hardware_revision = excluded.hardware_revision,
+              status = excluded.status,
+              sim_read_status = excluded.sim_read_status,
+              signal_percent = excluded.signal_percent,
+              rssi = excluded.rssi,
+              verification_status = COALESCE(excluded.verification_status, modems.verification_status),
+              last_verified_session = COALESCE(excluded.last_verified_session, modems.last_verified_session),
               updated_at = CURRENT_TIMESTAMP
           `).bind(
             modem.equipment_id,
-            modem.modem_index || null,
-            modem.usb_port || null,
-            modem.signal || null,
-            modem.rssi || null,
-            modem.rsrq || null,
-            modem.rsrp || null,
-            modem.snr || null,
-            modem.connection_status || 'registered',
-            modem.network_type || null,
-            modem.access_tech || null
+            modem.manufacturer || null,
+            modem.model || null,
+            modem.firmware_revision || null,
+            modem.hardware_revision || null,
+            modem.status || 'unknown',
+            modem.sim_read_status || null,
+            modem.signal ?? null,
+            modem.rssi ?? null,
+            verificationStatus,
+            lastVerifiedSession
           ));
         }
-      }
-      
-      // Clear stale current_iccid for modems with failed SIM reads
-      for (const modem of modems) {
-        if (modem.sim_read_status === 'failed' && modem.equipment_id) {
-          batch.push(env.DB.prepare(`
-            UPDATE modems SET current_iccid = NULL, detected_phone_number = NULL
-            WHERE equipment_id = ? AND sim_read_status = 'failed'
-          `).bind(modem.equipment_id));
-        }
-      }
 
-      // Update modems table with SIM data (daemon-detected hardware state)
-      // Daemon does NOT write to sims table anymore - sims table is user-managed
-      for (const sim of sims) {
-        if (!sim.iccid) {
-          console.warn('[control.js] Skipping SIM without ICCID');
-          continue;
-        }
+        // Process SIMs — write detected_iccid/detected_operator to modems table
+        for (const sim of sims) {
+          if (!sim.iccid || !sim.current_modem_id) continue;
+          if (sim.current_modem_id.startsWith('MODEM_')) continue;
 
-        // Validate that SIM isn't pointing to a fake modem
-        if (sim.current_modem_id && sim.current_modem_id.startsWith('MODEM_')) {
-          console.warn(`[control.js] SIM ${sim.iccid} points to fake modem ${sim.current_modem_id}, clearing association`);
-          sim.current_modem_id = null;
-        }
-
-        // Check if SIM exists in sims table (user-managed)
-        const simExists = await env.DB.prepare(`SELECT iccid FROM sims WHERE iccid = ?`).bind(sim.iccid).first();
-        if (!simExists) {
-          console.warn(`[control.js] Unknown ICCID ${sim.iccid} detected by daemon - not in sims table`);
-          // Do NOT auto-create; user must add via ICCID mapping page
-          continue;
-        }
-
-        // Update modems table with daemon-detected SIM data
-        if (sim.current_modem_id) {
           batch.push(env.DB.prepare(`
             UPDATE modems
-            SET current_iccid = ?,
+            SET detected_iccid = ?,
                 detected_phone_number = ?,
-                operator = ?,
+                detected_operator = ?,
                 updated_at = CURRENT_TIMESTAMP
             WHERE equipment_id = ?
           `).bind(
@@ -186,115 +231,73 @@ export const controlHandler = {
             sim.current_modem_id
           ));
         }
-      }
-      
-      // Execute all batch operations
-      if (batch.length > 0) {
-        await env.DB.batch(batch);
-      }
 
-      // SIM eviction: for each modem in this sync, clear any SIM that still points
-      // to that modem but was NOT in the received SIM list. This handles the case
-      // where a physical SIM swap happened — the old SIM must be disassociated.
-      if (sims.length > 0) {
-        const receivedModemIds = [...new Set(modems.map(m => m.equipment_id).filter(id => id))];
-        const receivedIccids = new Set(sims.map(s => s.iccid).filter(id => id));
-
-        for (const modemId of receivedModemIds) {
-          // Find SIMs in this modem that aren't in the received list (check modems.current_iccid)
-          const stale = await env.DB.prepare(`
-            SELECT current_iccid as iccid FROM modems
-            WHERE equipment_id = ? AND current_iccid IS NOT NULL
-          `).bind(modemId).all();
-
-          const staleIccids = (stale.results || [])
-            .map(r => r.iccid)
-            .filter(iccid => iccid && !receivedIccids.has(iccid));
-
-          if (staleIccids.length > 0) {
-            console.log(`[control.js] Evicting ${staleIccids.length} stale SIM(s) from modem ${modemId}: ${staleIccids.join(', ')}`);
-            // Clear current_iccid from modems table (daemon-managed)
-            await env.DB.prepare(`
-              UPDATE modems
-              SET current_iccid = NULL,
-                  detected_phone_number = NULL,
-                  operator = NULL,
-                  updated_at = CURRENT_TIMESTAMP
+        // Clear detected_iccid for modems with failed SIM reads
+        for (const modem of modems) {
+          if (modem.sim_read_status === 'failed' && modem.equipment_id) {
+            batch.push(env.DB.prepare(`
+              UPDATE modems SET detected_iccid = NULL, detected_phone_number = NULL
               WHERE equipment_id = ?
-            `).bind(modemId).run();
+            `).bind(modem.equipment_id));
           }
         }
-      }
-      
-      // DISABLED: sim_index sync from modem_index
-      // Migration 020 populates sim_index from phone_number_list.csv (stable slot numbers).
-      // modem_index changes on reboot, so we no longer sync from it.
-      //
-      // Old logic (removed):
-      // - Synced sim_index from modem_state.modem_index (transient USB enumeration order)
-      // - Caused sim_index to change on daemon restart/reboot
-      //
-      // New logic:
-      // - sim_index is now stable (populated once from CSV via migration 020)
-      // - Represents physical slot number, not transient enumeration order
-      
-      // Handle reconciliation for full sync
-      if (sync_mode === 'full') {
-        console.log('[control.js] Reconciling disconnected modems...');
-        
-        // Mark modems not in this sync as disconnected
-        const disconnectResult = await env.DB.prepare(`
-          UPDATE modems 
-          SET status = 'disconnected',
-              verification_status = 'absent'
-          WHERE verification_status = 'pending'
-        `).run();
-        
-        console.log(`[control.js] Marked ${disconnectResult.meta.changes} modems as disconnected`);
 
-        // Clear SIM associations for disconnected modems (from modems table, not sims table)
-        const clearSimsResult = await env.DB.prepare(`
-          UPDATE modems
-          SET current_iccid = NULL,
-              detected_phone_number = NULL,
-              operator = NULL,
-              sim_read_status = NULL
-          WHERE verification_status = 'absent'
-        `).run();
+        if (batch.length > 0) {
+          await env.DB.batch(batch);
+        }
 
-        console.log(`[control.js] Cleared ${clearSimsResult.meta.changes} SIM associations from modems table`);
-        
-        // Record sync history
-        await env.DB.prepare(`
-          INSERT INTO sync_history (
-            daemon_id, session_id, sync_mode, sync_timestamp,
-            modems_received, sims_received, modems_disconnected,
-            status, created_at
-          ) VALUES (
-            'orange-pi-main', ?, ?, ?, ?, ?, ?, 'completed', CURRENT_TIMESTAMP
-          )
-        `).bind(
-          session_id,
-          sync_mode,
-          timestamp,
-          modems.length,
-          sims.length,
-          disconnectResult.meta.changes
-        ).run();
-      }
-      
-      // Update daemon heartbeat
-      const clientIp = request.headers.get('CF-Connecting-IP') || 
-                      request.headers.get('X-Forwarded-For') || 
+        // Reconciliation for full sync
+        if (sync_mode === 'full') {
+          console.log('[control.js] Reconciling disconnected modems...');
+
+          const disconnectResult = await env.DB.prepare(`
+            UPDATE modems
+            SET status = 'disconnected',
+                verification_status = 'absent'
+            WHERE verification_status = 'pending'
+          `).run();
+
+          console.log(`[control.js] Marked ${disconnectResult.meta.changes} modems as disconnected`);
+
+          // Clear detected data for disconnected modems
+          await env.DB.prepare(`
+            UPDATE modems
+            SET detected_iccid = NULL,
+                detected_phone_number = NULL,
+                detected_operator = NULL,
+                signal_percent = NULL,
+                rssi = NULL
+            WHERE verification_status = 'absent'
+          `).run();
+
+          await env.DB.prepare(`
+            INSERT INTO sync_history (
+              daemon_id, session_id, sync_mode, sync_timestamp,
+              modems_received, sims_received, modems_disconnected,
+              status, created_at
+            ) VALUES (
+              'orange-pi-main', ?, ?, ?, ?, ?, ?, 'completed', CURRENT_TIMESTAMP
+            )
+          `).bind(
+            session_id, sync_mode, timestamp,
+            modems.length, sims.length, disconnectResult.meta.changes
+          ).run();
+        }
+      } // end legacy path
+
+      // Update daemon heartbeat (shared by both paths)
+      const modemCount = body.modem_reports ? body.modem_reports.length : (body.modems || []).length;
+      const clientIp = request.headers.get('CF-Connecting-IP') ||
+                      request.headers.get('X-Forwarded-For') ||
                       'unknown';
-      
+
       await env.DB.prepare(`
         INSERT INTO daemon_health (
-          daemon_id, last_heartbeat, status, modem_count, last_ip, 
+          daemon_id, last_heartbeat, status, modem_count, last_ip,
           current_session_id, last_full_sync, sync_mode,
           updated_at
         ) VALUES (
-          'orange-pi-main', CURRENT_TIMESTAMP, 'online', ?, ?, ?, 
+          'orange-pi-main', CURRENT_TIMESTAMP, 'online', ?, ?, ?,
           ${sync_mode === 'full' ? 'CURRENT_TIMESTAMP' : 'NULL'},
           ?, CURRENT_TIMESTAMP
         )
@@ -304,33 +307,27 @@ export const controlHandler = {
           modem_count = excluded.modem_count,
           last_ip = excluded.last_ip,
           current_session_id = COALESCE(?, daemon_health.current_session_id),
-          last_full_sync = CASE 
-            WHEN ? = 'full' THEN CURRENT_TIMESTAMP 
-            ELSE daemon_health.last_full_sync 
+          last_full_sync = CASE
+            WHEN ? = 'full' THEN CURRENT_TIMESTAMP
+            ELSE daemon_health.last_full_sync
           END,
           sync_mode = ?,
           updated_at = CURRENT_TIMESTAMP
       `).bind(
-        modems.length, 
-        clientIp, 
+        modemCount,
+        clientIp,
         session_id,
         sync_mode,
         session_id,
         sync_mode,
         sync_mode
       ).run();
-      
-      // WebSocket broadcast removed for cost savings - manual refresh only
-      // Users must refresh the page to see updates
-      
+
       return new Response(JSON.stringify({
         success: true,
         sync_mode,
         session_id,
-        processed: {
-          modems: modems.length,
-          sims: sims.length
-        }
+        processed: { modem_reports: modemCount }
       }), {
         headers: { 'Content-Type': 'application/json' }
       });

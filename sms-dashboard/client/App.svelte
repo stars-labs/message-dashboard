@@ -35,7 +35,7 @@
     
     const fiveMinutesAgo = Date.now() - (5 * 60 * 1000);
     const onlinePhones = phones.filter(p => {
-      const hasOnlineStatus = p?.status && ["online", "active", "registered"].includes(p.status);
+      const hasOnlineStatus = p?.status === 'active';
       if (!hasOnlineStatus) {
         return false;
       }
@@ -449,7 +449,7 @@
     } else {
       // Fallback to data-based detection if no heartbeat
       const hasRecentPhoneData = phoneNumbers.some(phone => {
-        return phone.status === 'active' || phone.status === 'online' || phone.status === 'registered';
+        return phone.status === 'active';
       });
       
       const dataIsRecent = daemonStatus.lastDataUpdate > fiveMinutesAgo;
@@ -768,7 +768,7 @@
     {/if}
 
     <!-- Status Alert Banner -->
-    {#if phoneNumbers.some((p) => p.status === "searching" || p.status === "failed")}
+    {#if phoneNumbers.some((p) => ['sim_error', 'iccid_mismatch'].includes(p.status))}
       <div class="bg-yellow-50 border-b border-yellow-200 px-4 py-2">
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
@@ -786,20 +786,20 @@
               />
             </svg>
             <span class="text-sm text-yellow-800">
-              {#if phoneNumbers.filter((p) => p.status === "searching").length > 0}
+              {#if phoneNumbers.filter((p) => p.status === "sim_error").length > 0}
                 <strong
-                  >{phoneNumbers.filter((p) => p.status === "searching")
+                  >{phoneNumbers.filter((p) => p.status === "sim_error")
                     .length}</strong
-                > 张SIM卡正在搜索网络
+                > 张SIM卡读取失败
               {/if}
-              {#if phoneNumbers.filter((p) => p.status === "failed").length > 0}
-                {#if phoneNumbers.filter((p) => p.status === "searching").length > 0}
+              {#if phoneNumbers.filter((p) => p.status === "iccid_mismatch").length > 0}
+                {#if phoneNumbers.filter((p) => p.status === "sim_error").length > 0}
                   •
                 {/if}
                 <strong
-                  >{phoneNumbers.filter((p) => p.status === "failed")
+                  >{phoneNumbers.filter((p) => p.status === "iccid_mismatch")
                     .length}</strong
-                > 张SIM卡连接故障
+                > 张SIM卡ICCID不匹配
               {/if}
             </span>
           </div>

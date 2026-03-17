@@ -14,10 +14,10 @@
   let statusFilter = "all"; // "all", "active", "error", "inactive"
   let successMessage = null;
 
-  // Computed stats
+  // Computed stats (6-state: active, offline, sim_error, iccid_mismatch, no_modem, unassigned)
   $: activeCount = allMappingsCache.filter(m => m.is_active === 'active').length;
-  $: errorCount = allMappingsCache.filter(m => m.is_active === 'modem_only').length;
-  $: inactiveCount = allMappingsCache.filter(m => m.is_active === 'inactive' || !m.is_active).length;
+  $: errorCount = allMappingsCache.filter(m => ['sim_error', 'iccid_mismatch', 'offline'].includes(m.is_active)).length;
+  $: inactiveCount = allMappingsCache.filter(m => ['no_modem', 'unassigned'].includes(m.is_active) || !m.is_active).length;
   $: totalCount = allMappingsCache.length;
 
   // Form data
@@ -65,9 +65,9 @@
     if (statusFilter === "active") {
       filtered = filtered.filter(m => m.is_active === 'active');
     } else if (statusFilter === "error") {
-      filtered = filtered.filter(m => m.is_active === 'modem_only');
+      filtered = filtered.filter(m => ['sim_error', 'iccid_mismatch', 'offline'].includes(m.is_active));
     } else if (statusFilter === "inactive") {
-      filtered = filtered.filter(m => m.is_active === 'inactive' || !m.is_active);
+      filtered = filtered.filter(m => ['no_modem', 'unassigned'].includes(m.is_active) || !m.is_active);
     }
 
     // Filter by search query
@@ -275,7 +275,6 @@
               <th class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">设备ID</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">备注</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">Modem</th>
-              <th class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">SIM读取</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">信号</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">状态</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">操作</th>
@@ -340,16 +339,6 @@
                   <span class="text-stone-300 text-xs">—</span>
                 {/if}
               </td>
-              <!-- SIM Read indicator -->
-              <td class="px-4 py-3">
-                {#if mapping.sim_read_status === 'ok'}
-                  <span class="inline-flex px-2 py-0.5 text-xs rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">OK</span>
-                {:else if mapping.sim_read_status === 'failed'}
-                  <span class="inline-flex px-2 py-0.5 text-xs rounded-full bg-red-50 text-red-600 border border-red-200">FAIL</span>
-                {:else}
-                  <span class="text-stone-300 text-xs">—</span>
-                {/if}
-              </td>
               <!-- Signal -->
               <td class="px-4 py-3">
                 {#if mapping.signal_quality != null}
@@ -360,18 +349,27 @@
                   <span class="text-stone-300 text-xs">—</span>
                 {/if}
               </td>
-              <!-- Summary status badge -->
+              <!-- Summary status badge (6 states) -->
               <td class="px-4 py-3">
                 <span
                   class="inline-flex px-2 py-1 text-xs rounded-full {
                     mapping.is_active === 'active'
                       ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                      : mapping.is_active === 'modem_only'
-                        ? 'bg-amber-50 text-amber-700 border border-amber-200'
-                        : 'bg-stone-100 text-stone-500 border border-stone-200'
+                      : mapping.is_active === 'offline'
+                        ? 'bg-stone-100 text-stone-500 border border-stone-200'
+                        : mapping.is_active === 'sim_error'
+                          ? 'bg-red-50 text-red-600 border border-red-200'
+                          : mapping.is_active === 'iccid_mismatch'
+                            ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                            : 'bg-stone-50 text-stone-400 border border-stone-200'
                   }"
                 >
-                  {mapping.is_active === 'active' ? '活动' : mapping.is_active === 'modem_only' ? '异常' : '未激活'}
+                  {mapping.is_active === 'active' ? '活动'
+                    : mapping.is_active === 'offline' ? '离线'
+                    : mapping.is_active === 'sim_error' ? 'SIM错误'
+                    : mapping.is_active === 'iccid_mismatch' ? 'ICCID不匹配'
+                    : mapping.is_active === 'no_modem' ? '无设备'
+                    : '未分配'}
                 </span>
               </td>
               <td class="px-4 py-3 text-sm">
