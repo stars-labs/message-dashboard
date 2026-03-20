@@ -11,7 +11,12 @@
   let showEditForm = false;
   let editingMapping = null;
   let searchQuery = "";
-  let statusFilter = "all"; // "all", "active", "error", "inactive"
+  export let initialStatusFilter = "all";
+  let statusFilter = initialStatusFilter;
+  $: if (initialStatusFilter !== statusFilter && initialStatusFilter !== "all") {
+    statusFilter = initialStatusFilter;
+    filterMappings();
+  }
   let successMessage = null;
 
   // Computed stats (6-state: active, offline, sim_error, iccid_mismatch, no_modem, unassigned)

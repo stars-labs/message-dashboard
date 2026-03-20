@@ -56,7 +56,7 @@ UPDATE sims SET user_phone_number = '+8616670528580', user_carrier = '联通', u
 UPDATE sims SET user_phone_number = '+8615810920390', user_carrier = '移动', user_country_code = 'CN', user_override_enabled = TRUE, user_updated_at = CURRENT_TIMESTAMP WHERE iccid = '898600110122F0009637';
 UPDATE sims SET user_phone_number = '+8615810920961', user_carrier = '移动', user_country_code = 'CN', user_override_enabled = TRUE, user_updated_at = CURRENT_TIMESTAMP WHERE iccid = '898600110122F0009638';
 UPDATE sims SET user_phone_number = '+8615811250585', user_carrier = '移动', user_country_code = 'CN', user_override_enabled = TRUE, user_updated_at = CURRENT_TIMESTAMP WHERE iccid = '898600110122F0070826';
-UPDATE sims SET user_phone_number = '+8615810313390', user_carrier = '移动', user_country_code = 'CN', user_override_enabled = TRUE, user_updated_at = CURRENT_TIMESTAMP WHERE iccid = '898600110122F0072003';
+UPDATE sims SET user_phone_number = '+8615810313390', user_carrier = '移动', user_country_code = 'CN', user_override_enabled = TRUE, user_updated_at = CURRENT_TIMESTAMP WHERE iccid = '898600110125F0005745';
 UPDATE sims SET user_phone_number = '+8615810653831', user_carrier = '移动', user_country_code = 'CN', user_override_enabled = TRUE, user_updated_at = CURRENT_TIMESTAMP WHERE iccid = '898600110122F0072004';
 UPDATE sims SET user_phone_number = '+8613162215697', user_carrier = '联通', user_country_code = 'CN', user_override_enabled = TRUE, user_updated_at = CURRENT_TIMESTAMP WHERE iccid = '89860123801033340435';
 UPDATE sims SET user_phone_number = '+8613121558009', user_carrier = '联通', user_country_code = 'CN', user_override_enabled = TRUE, user_updated_at = CURRENT_TIMESTAMP WHERE iccid = '89860123801377761568';

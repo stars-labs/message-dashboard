@@ -79,6 +79,7 @@
   let loading = true;
   let dataLoading = true; // Track data loading separately
   let currentView = "dashboard"; // 'dashboard', 'iccid-mappings', or 'keywords'
+  let iccidMappingsFilter = "all";
   let showIccidMappingDialog = false;
   let toasts = [];
   let messageRequestId = 0; // Prevents stale message responses from overwriting newer ones
@@ -662,6 +663,7 @@
             </button>
             <button
               on:click={() => {
+                iccidMappingsFilter = "all";
                 currentView = "iccid-mappings";
                 window.location.hash = 'iccid-mappings';
               }}
@@ -804,7 +806,7 @@
             </span>
           </div>
           <button
-            on:click={() => (currentView = "dashboard")}
+            on:click={() => { iccidMappingsFilter = "error"; currentView = "iccid-mappings"; }}
             class="text-xs text-yellow-600 hover:text-yellow-700 underline"
           >
             查看详情
@@ -1016,7 +1018,7 @@
       <ErrorBoundary componentName="IccidMappings">
         <!-- ICCID Mappings View -->
         <div class="px-4 lg:px-8 py-6 lg:flex-1 lg:min-h-0 lg:overflow-auto">
-          <IccidMappings />
+          <IccidMappings initialStatusFilter={iccidMappingsFilter} />
         </div>
       </ErrorBoundary>
     {:else if currentView === "keywords"}
