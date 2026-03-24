@@ -1322,15 +1322,21 @@ impl AtModemManager {
             // Set UCS2 character set and message format for Unicode messages
             self.send_at_command(port, "AT+CSCS=\"UCS2\"", self.timeout)
                 .await?;
-            // Set message parameters: validity period, DCS=8 for UCS2
-            self.send_at_command(port, "AT+CSMP=17,167,0,8", self.timeout)
+            // Set message parameters: No retry, request delivery report, DCS=8 for UCS2
+            // CSMP format: <fo>,<vp>,<pid>,<dcs>
+            // fo=49 (0x31): TP-SRR=1 (status report), TP-VPF=00 (no validity period)
+            // vp=0: Not used when TP-VPF=00
+            // This prevents modem from retrying SMS sends automatically
+            self.send_at_command(port, "AT+CSMP=49,0,0,8", self.timeout)
                 .await?;
         } else {
             // Set GSM character set for ASCII messages
             self.send_at_command(port, "AT+CSCS=\"GSM\"", self.timeout)
                 .await?;
-            // Reset message parameters to default GSM 7-bit
-            self.send_at_command(port, "AT+CSMP=17,167,0,0", self.timeout)
+            // Set message parameters: No retry, request delivery report, GSM 7-bit
+            // fo=49 (0x31): TP-SRR=1 (status report), TP-VPF=00 (no validity period)
+            // This prevents modem from retrying SMS sends automatically
+            self.send_at_command(port, "AT+CSMP=49,0,0,0", self.timeout)
                 .await?;
         }
 
