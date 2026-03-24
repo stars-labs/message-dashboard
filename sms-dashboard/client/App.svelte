@@ -853,85 +853,43 @@
     </div>
 
     {#if currentView === "dashboard"}
-      <!-- Mobile Stats (Horizontal Scroll) -->
-      <div class="lg:hidden overflow-x-auto px-4 py-4">
-        <div class="flex gap-3 min-w-max">
-          <div
-            class="bg-white border border-stone-200 rounded-lg text-stone-900 px-4 py-3 shadow-sm"
-          >
-            <div class="text-xs text-stone-500 font-medium">在线设备</div>
-            <div class="text-xl font-bold data-value high-contrast" title="Online: {stats.onlineDevices}, Total: {stats.totalDevices}, Phones: {phoneNumbers.length}">
-              {#key stats.onlineDevices + ':' + stats.totalDevices}
-                {stats.onlineDevices}/{stats.totalDevices}
-              {/key}
-            </div>
-          </div>
-          <div
-            class="bg-white border border-stone-200 rounded-lg text-stone-900 px-4 py-3 shadow-sm"
-          >
-            <div class="text-xs text-stone-500 font-medium">今日接收</div>
-            <div class="text-xl font-bold data-value high-contrast">{stats.todayReceived || 0}</div>
-          </div>
-          <div
-            class="bg-white border border-stone-200 rounded-lg text-stone-900 px-4 py-3 shadow-sm"
-          >
-            <div class="text-xs text-stone-500 font-medium">今日发送</div>
-            <div class="text-xl font-bold data-value high-contrast">{stats.todaySent || 0}</div>
-          </div>
-          <div
-            class="bg-white border border-stone-200 rounded-lg text-stone-900 px-4 py-3 shadow-sm"
-          >
-            <div class="text-xs text-stone-500 font-medium">总接收</div>
-            <div class="text-xl font-bold data-value high-contrast">{stats.totalReceived || 0}</div>
-          </div>
-          <div
-            class="bg-white border border-stone-200 rounded-lg text-stone-900 px-4 py-3 shadow-sm"
-          >
-            <div class="text-xs text-stone-500 font-medium">总发送</div>
-            <div class="text-xl font-bold data-value high-contrast">{stats.totalSent || 0}</div>
-          </div>
-          <div
-            class="bg-white border border-stone-200 rounded-lg text-stone-900 px-4 py-3 shadow-sm"
-          >
-            <div class="text-xs text-stone-500 font-medium">提取成功率</div>
-            <div class="text-xl font-bold data-value high-contrast">{stats.verificationRate || 0}%</div>
-          </div>
-        </div>
-      </div>
-    {/if}
-
-    {#if currentView === "dashboard"}
       <ErrorBoundary componentName="Dashboard">
-        <!-- Desktop Stats Bar -->
-        <div class="hidden lg:block lg:flex-shrink-0 px-8 py-3">
-          <div class="bg-white border border-stone-200 rounded-xl shadow-sm flex divide-x divide-stone-100">
-            <div class="flex-1 px-5 py-3 min-w-0">
-              <div class="text-[10px] font-semibold text-stone-400 uppercase tracking-widest mb-1">在线设备</div>
-              <div class="font-mono text-xl font-bold text-stone-900 leading-none">
-                {stats.onlineDevices}<span class="text-stone-400 font-normal text-sm"> / {stats.totalDevices}</span>
+        <!-- Stats Bar -->
+        <div class="lg:flex-shrink-0 px-2 sm:px-4 lg:px-8 py-2 sm:py-3 overflow-x-auto">
+          <div class="bg-white border border-stone-200 rounded-xl shadow-sm flex divide-x divide-stone-100 min-w-max lg:min-w-0">
+            <div class="flex-1 px-3 sm:px-4 lg:px-5 py-2 sm:py-3 min-w-0">
+              <div class="text-[9px] sm:text-[10px] font-semibold text-stone-400 uppercase tracking-wider sm:tracking-widest mb-0.5 sm:mb-1 whitespace-nowrap">在线</div>
+              <div class="font-mono text-lg sm:text-xl font-bold text-stone-900 leading-none whitespace-nowrap" title="Online: {stats.onlineDevices}, Total: {stats.totalDevices}, Phones: {phoneNumbers.length}">
+                {#key stats.onlineDevices + ':' + stats.totalDevices}
+                  {stats.onlineDevices}<span class="text-stone-400 font-normal text-xs sm:text-sm"> / {stats.totalDevices}</span>
+                {/key}
               </div>
             </div>
-            <div class="flex-1 px-5 py-3 min-w-0">
-              <div class="text-[10px] font-semibold text-stone-400 uppercase tracking-widest mb-1">今日接收</div>
-              <div class="font-mono text-xl font-bold text-stone-900 leading-none">{stats.todayReceived || 0}</div>
+            <div class="flex-1 px-3 sm:px-4 lg:px-5 py-2 sm:py-3 min-w-0">
+              <div class="text-[9px] sm:text-[10px] font-semibold text-stone-400 uppercase tracking-wider sm:tracking-widest mb-0.5 sm:mb-1 whitespace-nowrap">今日接收</div>
+              <div class="font-mono text-lg sm:text-xl font-bold text-stone-900 leading-none whitespace-nowrap">{stats.todayReceived || 0}</div>
             </div>
-            <div class="flex-1 px-5 py-3 min-w-0">
-              <div class="text-[10px] font-semibold text-stone-400 uppercase tracking-widest mb-1">今日发送</div>
-              <div class="font-mono text-xl font-bold text-stone-900 leading-none">{stats.todaySent || 0}</div>
+            <div class="flex-1 px-3 sm:px-4 lg:px-5 py-2 sm:py-3 min-w-0">
+              <div class="text-[9px] sm:text-[10px] font-semibold text-stone-400 uppercase tracking-wider sm:tracking-widest mb-0.5 sm:mb-1 whitespace-nowrap">今日发送</div>
+              <div class="font-mono text-lg sm:text-xl font-bold text-stone-900 leading-none whitespace-nowrap">{stats.todaySent || 0}</div>
             </div>
-            <div class="flex-1 px-5 py-3 min-w-0">
-              <div class="text-[10px] font-semibold text-stone-400 uppercase tracking-widest mb-1">总接收消息</div>
-              <div class="font-mono text-xl font-bold text-stone-900 leading-none">{stats.totalReceived || 0}</div>
+            <div class="flex-1 px-3 sm:px-4 lg:px-5 py-2 sm:py-3 min-w-0">
+              <div class="text-[9px] sm:text-[10px] font-semibold text-stone-400 uppercase tracking-wider sm:tracking-widest mb-0.5 sm:mb-1 whitespace-nowrap">总接收</div>
+              <div class="font-mono text-lg sm:text-xl font-bold text-stone-900 leading-none whitespace-nowrap">{stats.totalReceived || 0}</div>
             </div>
-            <div class="flex-1 px-5 py-3 min-w-0">
-              <div class="text-[10px] font-semibold text-stone-400 uppercase tracking-widest mb-1">总发送消息</div>
-              <div class="font-mono text-xl font-bold text-stone-900 leading-none">{stats.totalSent || 0}</div>
+            <div class="flex-1 px-3 sm:px-4 lg:px-5 py-2 sm:py-3 min-w-0">
+              <div class="text-[9px] sm:text-[10px] font-semibold text-stone-400 uppercase tracking-wider sm:tracking-widest mb-0.5 sm:mb-1 whitespace-nowrap">总发送</div>
+              <div class="font-mono text-lg sm:text-xl font-bold text-stone-900 leading-none whitespace-nowrap">{stats.totalSent || 0}</div>
+            </div>
+            <div class="flex-1 px-3 sm:px-4 lg:px-5 py-2 sm:py-3 min-w-0">
+              <div class="text-[9px] sm:text-[10px] font-semibold text-stone-400 uppercase tracking-wider sm:tracking-widest mb-0.5 sm:mb-1 whitespace-nowrap">成功率</div>
+              <div class="font-mono text-lg sm:text-xl font-bold text-stone-900 leading-none whitespace-nowrap">{stats.verificationRate || 0}%</div>
             </div>
           </div>
         </div>
 
       <!-- Main Content -->
-      <div class="lg:flex-1 lg:min-h-0 lg:px-8 lg:pb-4 lg:flex lg:flex-col">
+      <div class="px-2 sm:px-4 lg:px-8 lg:flex-1 lg:min-h-0 lg:pb-4 lg:flex lg:flex-col">
         <div class="lg:grid lg:grid-cols-4 lg:gap-6 lg:flex-1 lg:min-h-0">
           <!-- Mobile Phone List Overlay -->
           {#if showPhoneList}
@@ -1017,7 +975,7 @@
     {:else if currentView === "iccid-mappings"}
       <ErrorBoundary componentName="IccidMappings">
         <!-- ICCID Mappings View -->
-        <div class="px-4 lg:px-8 py-6 lg:flex-1 lg:min-h-0 lg:overflow-auto">
+        <div class="px-2 sm:px-4 lg:px-8 py-6 lg:flex-1 lg:min-h-0 lg:overflow-auto">
           <IccidMappings initialStatusFilter={iccidMappingsFilter} />
         </div>
       </ErrorBoundary>
