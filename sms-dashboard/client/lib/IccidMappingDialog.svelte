@@ -91,12 +91,14 @@
 
 {#if show && phone}
   <div
-    class="fixed inset-0 bg-stone-900/50 flex items-center justify-center z-50"
+    class="fixed inset-0 bg-stone-900/50 flex items-center justify-center z-50 p-4"
   >
-    <div class="tech-card max-w-md w-full mx-4">
-      <h3 class="text-lg font-bold mb-4 data-value high-contrast">设置 ICCID 映射</h3>
+    <div class="tech-card max-w-md w-full max-h-full flex flex-col">
+      <div class="p-4 sm:p-6 flex-shrink-0 border-b border-stone-100">
+        <h3 class="text-lg font-bold data-value high-contrast">设置 ICCID 映射</h3>
+      </div>
 
-      <div class="space-y-4">
+      <div class="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
         <div>
           <label
             for="dialog-iccid"
@@ -227,7 +229,7 @@
         {/if}
       </div>
 
-      <div class="mt-6 flex justify-end gap-3">
+      <div class="p-4 sm:p-6 mt-auto flex justify-end gap-3 flex-shrink-0 border-t border-stone-100 bg-stone-50/50 rounded-b-xl">
         <button
           on:click={close}
           disabled={saving}

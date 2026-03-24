@@ -181,13 +181,13 @@
   });
 </script>
 
-<div class="tech-card p-6">
-  <div class="flex justify-between items-center mb-6">
-    <h2 class="text-2xl font-bold data-value high-contrast header-effect-target">ICCID 映射管理</h2>
-    <div class="flex gap-2">
+<div class="tech-card p-4 sm:p-6">
+  <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+    <h2 class="text-xl sm:text-2xl font-bold data-value high-contrast header-effect-target">ICCID 映射管理</h2>
+    <div class="flex gap-2 w-full sm:w-auto">
       <button
         on:click={() => (showAddForm = true)}
-        class="px-4 py-2 tech-button transition-all duration-300"
+        class="w-full sm:w-auto px-4 py-2 tech-button transition-all duration-300"
       >
         添加映射
       </button>
@@ -195,36 +195,38 @@
   </div>
 
   <!-- Filter and Search Bar -->
-  <div class="mb-4 flex gap-2">
-    <button
-      on:click={() => statusFilter = "all"}
-      class="px-4 py-2 rounded-lg transition-colors whitespace-nowrap {statusFilter === 'all' ? 'bg-stone-800 text-white' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'}"
-    >
-      全部 ({totalCount})
-    </button>
-    <button
-      on:click={() => statusFilter = "active"}
-      class="px-4 py-2 rounded-lg transition-colors whitespace-nowrap {statusFilter === 'active' ? 'bg-green-600 text-white' : 'bg-green-50 text-green-600 hover:bg-green-100'}"
-    >
-      活动 ({activeCount})
-    </button>
-    <button
-      on:click={() => statusFilter = "error"}
-      class="px-4 py-2 rounded-lg transition-colors whitespace-nowrap {statusFilter === 'error' ? 'bg-amber-600 text-white' : 'bg-amber-50 text-amber-600 hover:bg-amber-100'}"
-    >
-      异常 ({errorCount})
-    </button>
-    <button
-      on:click={() => statusFilter = "inactive"}
-      class="px-4 py-2 rounded-lg transition-colors whitespace-nowrap {statusFilter === 'inactive' ? 'bg-stone-500 text-white' : 'bg-stone-50 text-stone-500 hover:bg-stone-100'}"
-    >
-      未激活 ({inactiveCount})
-    </button>
+  <div class="mb-4 flex flex-col sm:flex-row gap-2">
+    <div class="flex flex-wrap gap-2">
+      <button
+        on:click={() => statusFilter = "all"}
+        class="px-3 sm:px-4 py-2 text-sm sm:text-base rounded-lg transition-colors whitespace-nowrap {statusFilter === 'all' ? 'bg-stone-800 text-white' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'}"
+      >
+        全部 ({totalCount})
+      </button>
+      <button
+        on:click={() => statusFilter = "active"}
+        class="px-3 sm:px-4 py-2 text-sm sm:text-base rounded-lg transition-colors whitespace-nowrap {statusFilter === 'active' ? 'bg-green-600 text-white' : 'bg-green-50 text-green-600 hover:bg-green-100'}"
+      >
+        活动 ({activeCount})
+      </button>
+      <button
+        on:click={() => statusFilter = "error"}
+        class="px-3 sm:px-4 py-2 text-sm sm:text-base rounded-lg transition-colors whitespace-nowrap {statusFilter === 'error' ? 'bg-amber-600 text-white' : 'bg-amber-50 text-amber-600 hover:bg-amber-100'}"
+      >
+        异常 ({errorCount})
+      </button>
+      <button
+        on:click={() => statusFilter = "inactive"}
+        class="px-3 sm:px-4 py-2 text-sm sm:text-base rounded-lg transition-colors whitespace-nowrap {statusFilter === 'inactive' ? 'bg-stone-500 text-white' : 'bg-stone-50 text-stone-500 hover:bg-stone-100'}"
+      >
+        未激活 ({inactiveCount})
+      </button>
+    </div>
     <input
       type="text"
       bind:value={searchQuery}
       placeholder="搜索 ICCID、手机号、运营商..."
-      class="flex-1 px-4 py-2 cyber-input"
+      class="flex-1 px-4 py-2 cyber-input w-full"
     />
   </div>
 
@@ -261,8 +263,8 @@
       </button>
     </div>
   {:else}
-    <!-- Mappings Table -->
-    <div class="overflow-x-auto">
+    <!-- Mappings Table (Desktop) -->
+    <div class="hidden sm:block overflow-x-auto">
       {#if mappings.length === 0}
         <div class="text-center py-16">
           <p class="text-stone-500 mb-4">暂无 ICCID 映射数据</p>
@@ -398,18 +400,122 @@
       {/if}
     </div>
 
+    <!-- Mappings List (Mobile) -->
+    <div class="sm:hidden space-y-3">
+      {#if mappings.length === 0}
+        <div class="text-center py-12 bg-stone-50 rounded-xl border border-stone-100">
+          <p class="text-stone-500 mb-2">暂无 ICCID 映射数据</p>
+          <p class="text-stone-800/60 text-xs">点击上方"添加映射"按钮创建第一个映射</p>
+        </div>
+      {:else}
+        {#each mappings as mapping}
+          <div class="bg-white border border-stone-200 rounded-xl p-4 shadow-sm">
+            <div class="flex justify-between items-start mb-3">
+              <div class="flex items-center gap-2">
+                {#if mapping.sim_index}
+                  <span class="inline-flex items-center justify-center w-6 h-6 text-xs font-bold rounded-full bg-stone-100 border border-stone-200 text-stone-600">
+                    {mapping.sim_index}
+                  </span>
+                {/if}
+                <span class="font-medium text-stone-900">{mapping.phone_number || '无号码'}</span>
+              </div>
+              <span
+                class="inline-flex px-2 py-0.5 text-[10px] font-medium rounded-full {
+                  mapping.is_active === 'active'
+                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                    : mapping.is_active === 'offline'
+                      ? 'bg-stone-100 text-stone-500 border border-stone-200'
+                      : mapping.is_active === 'sim_error'
+                        ? 'bg-red-50 text-red-600 border border-red-200'
+                        : mapping.is_active === 'iccid_mismatch'
+                          ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                          : 'bg-stone-50 text-stone-400 border border-stone-200'
+                }"
+              >
+                {mapping.is_active === 'active' ? '活动'
+                  : mapping.is_active === 'offline' ? '离线'
+                  : mapping.is_active === 'sim_error' ? 'SIM错误'
+                  : mapping.is_active === 'iccid_mismatch' ? 'ICCID不匹配'
+                  : mapping.is_active === 'no_modem' ? '无设备'
+                  : '未分配'}
+              </span>
+            </div>
+            
+            <div class="space-y-1.5 mb-3">
+              <div class="flex items-center justify-between text-xs">
+                <span class="text-stone-500">ICCID</span>
+                <span class="font-mono text-stone-800">{mapping.iccid ? (mapping.iccid.length > 10 ? mapping.iccid.substring(0, 6) + '...' + mapping.iccid.substring(mapping.iccid.length - 4) : mapping.iccid) : '-'}</span>
+              </div>
+              <div class="flex items-center justify-between text-xs">
+                <span class="text-stone-500">国家/运营商</span>
+                <div class="flex items-center gap-1">
+                  {#if mapping.country}
+                    <span>{getCountryFlag(mapping.country)}</span>
+                  {/if}
+                  <span class="text-stone-800">{mapping.carrier || '-'}</span>
+                </div>
+              </div>
+              <div class="flex items-center justify-between text-xs">
+                <span class="text-stone-500">Modem/信号</span>
+                <div class="flex items-center gap-2">
+                  {#if mapping.equipment_id && mapping.modem_status && mapping.modem_status !== 'disconnected'}
+                    <span class="inline-flex items-center gap-1">
+                      <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                      <span class="text-emerald-700">UP</span>
+                    </span>
+                  {:else if mapping.equipment_id}
+                    <span class="inline-flex items-center gap-1">
+                      <span class="w-1.5 h-1.5 rounded-full bg-red-500"></span>
+                      <span class="text-red-600">DOWN</span>
+                    </span>
+                  {:else}
+                    <span class="text-stone-300">—</span>
+                  {/if}
+                  {#if mapping.signal_quality != null}
+                    <span class="font-mono {mapping.signal_quality >= 60 ? 'text-emerald-600' : mapping.signal_quality >= 30 ? 'text-amber-600' : 'text-red-600'}">
+                      {mapping.signal_quality}%
+                    </span>
+                  {/if}
+                </div>
+              </div>
+              {#if mapping.notes || mapping.description}
+                <div class="text-xs text-stone-600 bg-stone-50 p-2 rounded border border-stone-100 mt-2">
+                  {mapping.notes || mapping.description}
+                </div>
+              {/if}
+            </div>
+            
+            <div class="flex justify-end gap-3 pt-3 border-t border-stone-100">
+              <button
+                on:click={() => startEdit(mapping)}
+                class="text-xs font-medium text-stone-600 hover:text-stone-900 px-3 py-1.5 bg-stone-100 hover:bg-stone-200 rounded-md transition-colors"
+              >
+                编辑
+              </button>
+              <button
+                on:click={() => handleDeleteMapping(mapping.id)}
+                class="text-xs font-medium text-red-600 hover:text-red-700 px-3 py-1.5 bg-red-50 hover:bg-red-100 rounded-md transition-colors"
+              >
+                删除
+              </button>
+            </div>
+          </div>
+        {/each}
+      {/if}
+    </div>
+
   {/if}
 </div>
 
 <!-- Add Mapping Modal -->
 {#if showAddForm}
   <div
-    class="fixed inset-0 bg-stone-900/50 flex items-center justify-center z-50"
+    class="fixed inset-0 bg-stone-900/50 flex items-center justify-center z-50 p-4"
   >
-    <div class="tech-card p-6 max-w-md w-full mx-4">
-      <h3 class="text-lg font-bold mb-4 data-value high-contrast">添加 ICCID 映射</h3>
+    <div class="tech-card p-4 sm:p-6 max-w-md w-full max-h-full flex flex-col">
+      <h3 class="text-lg font-bold mb-4 data-value high-contrast flex-shrink-0">添加 ICCID 映射</h3>
 
-      <div class="space-y-4">
+      <div class="space-y-4 overflow-y-auto flex-1 min-h-0 pr-2">
         <div>
           <label
             for="create-iccid"
@@ -522,7 +628,7 @@
         </div>
       </div>
 
-      <div class="mt-6 flex justify-end gap-3">
+      <div class="mt-6 flex justify-end gap-3 flex-shrink-0 pt-4 border-t border-stone-100">
         <button
           on:click={() => {
             showAddForm = false;
@@ -546,12 +652,12 @@
 <!-- Edit Mapping Modal -->
 {#if showEditForm}
   <div
-    class="fixed inset-0 bg-stone-900/50 flex items-center justify-center z-50"
+    class="fixed inset-0 bg-stone-900/50 flex items-center justify-center z-50 p-4"
   >
-    <div class="tech-card p-6 max-w-md w-full mx-4">
-      <h3 class="text-lg font-bold mb-4 data-value high-contrast">编辑 ICCID 映射</h3>
+    <div class="tech-card p-4 sm:p-6 max-w-md w-full max-h-full flex flex-col">
+      <h3 class="text-lg font-bold mb-4 data-value high-contrast flex-shrink-0">编辑 ICCID 映射</h3>
 
-      <div class="space-y-4">
+      <div class="space-y-4 overflow-y-auto flex-1 min-h-0 pr-2">
         <div>
           <label
             for="edit-iccid"
@@ -664,7 +770,7 @@
         </div>
       </div>
 
-      <div class="mt-6 flex justify-end gap-3">
+      <div class="mt-6 flex justify-end gap-3 flex-shrink-0 pt-4 border-t border-stone-100">
         <button
           on:click={() => {
             showEditForm = false;

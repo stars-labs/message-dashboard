@@ -153,20 +153,20 @@ export const messagesHandler = {
 
       // Get phone details - check for active statuses
       const phone = await env.DB.prepare(`
-        SELECT * FROM device_view WHERE iccid = ? AND status IN ('registered', 'active', 'online')
+        SELECT * FROM device_view WHERE iccid = ? AND sim_status = 'active'
       `).bind(phone_iccid).first();
 
 
       if (!phone) {
         // Check if phone exists with any status
         const anyPhone = await env.DB.prepare(`
-          SELECT iccid, status FROM device_view WHERE iccid = ?
+          SELECT iccid, sim_status FROM device_view WHERE iccid = ?
         `).bind(phone_iccid).first();
         
         if (anyPhone) {
           return new Response(JSON.stringify({
             success: false,
-            error: `Phone found but status is '${anyPhone.status}' (not active)`
+            error: `Phone found but status is '${anyPhone.sim_status}' (not active)`
           }), {
             status: 400,
             headers: { 'Content-Type': 'application/json' }
