@@ -852,6 +852,14 @@ export const controlHandler = {
   // This endpoint is polled regularly by the daemon, serving as both:
   // 1. A heartbeat to track daemon health
   // 2. A way to get pending SMS messages to send
+  //
+  // SMS Status Flow:
+  //   'sending' (created by user)
+  //   → 'processing' (atomically set when daemon fetches)
+  //   → 'sent'/'failed' (reported by daemon after modem response)
+  //
+  // The atomic transition to 'processing' prevents duplicate sends in the race condition
+  // where daemon polls again before the SMS send completes and status is updated to 'sent'.
   async heartbeatAndGetPendingSMS(request) {
     const { env } = request;
     
@@ -905,20 +913,49 @@ export const controlHandler = {
           updated_at = CURRENT_TIMESTAMP
       `).bind(clientIp, daemonVersion).run();
       
-      // Get pending SMS messages (status = 'sending')
-      const stmt = env.DB.prepare(`
-        SELECT id, phone_iccid, phone_number, content, recipient, created_at
-        FROM messages 
+      // Get pending SMS messages and atomically mark as 'processing' to prevent duplicate sends
+      // This prevents the race condition where daemon polls again before status update completes
+
+      // First, get IDs of pending messages
+      const pendingIds = await env.DB.prepare(`
+        SELECT id
+        FROM messages
         WHERE type = 'sent' AND status = 'sending'
         ORDER BY created_at ASC
         LIMIT 50
-      `);
-      
-      const { results } = await stmt.all();
-      
+      `).all();
+
+      if (!pendingIds.results || pendingIds.results.length === 0) {
+        return new Response(JSON.stringify({
+          success: true,
+          pending_messages: []
+        }), {
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      // Atomically update status to 'processing' and fetch message details
+      const ids = pendingIds.results.map(row => row.id);
+      const placeholders = ids.map(() => '?').join(',');
+
+      // Update to 'processing' status
+      await env.DB.prepare(`
+        UPDATE messages
+        SET status = 'processing', updated_at = CURRENT_TIMESTAMP
+        WHERE id IN (${placeholders})
+      `).bind(...ids).run();
+
+      // Fetch the updated messages
+      const messages = await env.DB.prepare(`
+        SELECT id, phone_iccid, phone_number, content, recipient, created_at
+        FROM messages
+        WHERE id IN (${placeholders})
+        ORDER BY created_at ASC
+      `).bind(...ids).all();
+
       return new Response(JSON.stringify({
         success: true,
-        pending_messages: results || []
+        pending_messages: messages.results || []
       }), {
         headers: { 'Content-Type': 'application/json' }
       });
