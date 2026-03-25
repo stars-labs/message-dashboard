@@ -110,15 +110,16 @@
                 {#if newMessageIds.has(message.id)}
                   <span class="px-1.5 py-0.5 bg-orange-500 text-white rounded text-[10px] font-bold shrink-0">新</span>
                 {/if}
-                <span class="truncate">接收卡: {message.display_phone_number || message.phone_number || message.phone_iccid}</span>
-                {#if message.direction === 'outgoing' || message.type === 'outgoing' || message.type === 'sent'}
-                  {#if message.recipient}
-                    <span class="shrink-0">• 接收方: {message.recipient}</span>
-                  {:else if message.phone_number}
-                    <span class="shrink-0">• 接收方: {message.phone_number}</span>
+                {#if message.type === 'sent'}
+                  <!-- For sent messages: show recipient as 接收卡, sender as 发送方 -->
+                  <span class="truncate">接收卡: {message.recipient}</span>
+                  <span class="shrink-0">• 发送方: {message.display_phone_number || message.phone_number || message.phone_iccid}</span>
+                {:else}
+                  <!-- For received messages: show our SIM as 接收卡, sender as 发送方 -->
+                  <span class="truncate">接收卡: {message.display_phone_number || message.phone_iccid}</span>
+                  {#if message.phone_number}
+                    <span class="shrink-0">• 发送方: {message.phone_number}</span>
                   {/if}
-                {:else if message.phone_number}
-                  <span class="shrink-0">• 发送方: {message.phone_number}</span>
                 {/if}
                 {#if message.verificationCode}
                   <span class="px-1.5 py-0.5 bg-emerald-100 text-emerald-700 rounded-full font-mono font-semibold shrink-0">

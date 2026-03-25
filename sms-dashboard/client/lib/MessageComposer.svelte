@@ -78,14 +78,13 @@
 
   // Sync SIM selection + display when selectedPhone changes
   $: if (selectedPhone) {
-    if (!recipientSIM || recipientSIM === selectedPhone.iccid) {
-      recipientSIM = selectedPhone.iccid;
-      const phone = availablePhones.find(p => p.iccid === selectedPhone.iccid);
-      if (phone) {
-        const phoneDisplay = (phone.number && phone.number !== "null") ? phone.number : (phone.iccid ? `ICCID: ${phone.iccid.slice(-6)}` : "Unknown");
-        const operatorDisplay = phone.operator_name ? ` - ${phone.operator_name}` : "";
-        selectedSimDisplay = `${phone.flag || ""} ${phoneDisplay}${operatorDisplay}`;
-      }
+    // Always update the sender SIM when a different phone is selected in the list
+    recipientSIM = selectedPhone.iccid;
+    const phone = availablePhones.find(p => p.iccid === selectedPhone.iccid);
+    if (phone) {
+      const phoneDisplay = (phone.number && phone.number !== "null") ? phone.number : (phone.iccid ? `ICCID: ${phone.iccid.slice(-6)}` : "Unknown");
+      const operatorDisplay = phone.operator_name ? ` - ${phone.operator_name}` : "";
+      selectedSimDisplay = `${phone.flag || ""} ${phoneDisplay}${operatorDisplay}`;
     }
   }
 
@@ -204,6 +203,69 @@
   </div>
   <div class="flex-1 overflow-y-auto p-4">
 
+  <!-- SIM Card Selection -->
+  <div class="mb-4 relative sim-input-container">
+    <label
+      for="sim-selection"
+      class="block text-sm font-medium text-stone-600 mb-2"
+    >
+      发送卡号
+    </label>
+    <input
+      id="sim-selection"
+      type="text"
+      value={selectedSimDisplay}
+      on:focus={() => {
+        showSimDropdown = true;
+        simSearch = "";
+      }}
+      on:input={(e) => {
+        showSimDropdown = true;
+        simSearch = e.target.value;
+        selectedSimDisplay = e.target.value;
+        recipientSIM = "";
+      }}
+      placeholder="输入卡号筛选或选择发送卡..."
+      class="w-full px-4 py-2 cyber-input"
+    />
+
+    <!-- SIM Cards Dropdown -->
+    {#if showSimDropdown && filteredSims.length > 0}
+      <div
+        class="absolute top-full left-0 right-0 mt-1 tech-card border border-stone-200 rounded-lg shadow-xl shadow-gray-900 max-h-60 overflow-y-auto z-50"
+      >
+        <div class="p-2">
+          <div
+            class="text-xs text-stone-400 px-2 py-1 border-b border-stone-200 mb-1"
+          >
+            可用发送卡 ({filteredSims.length})
+          </div>
+          {#each filteredSims as phone}
+            <button
+              on:click={() => selectSim(phone)}
+              class="w-full text-left px-3 py-2 hover:bg-stone-200 rounded-md transition-colors text-sm flex items-center gap-2"
+            >
+              <span class="text-lg">{phone.flag}</span>
+              <div class="flex-1">
+                <div class="font-mono">
+                  {(phone.number && phone.number !== "null") ? phone.number : (phone.iccid ? `ICCID: ${phone.iccid.slice(-6)}` : "Unknown")}
+                </div>
+                {#if phone.operator_name}
+                  <div class="text-xs text-stone-400">{phone.operator_name}</div>
+                {/if}
+              </div>
+              {#if phone.signal_strength}
+                <div class="text-xs text-stone-400">
+                  信号: {phone.signal_strength}%
+                </div>
+              {/if}
+            </button>
+          {/each}
+        </div>
+      </div>
+    {/if}
+  </div>
+
   <!-- Recipient Number -->
   <div class="mb-4 relative recipient-input-container">
     <label
@@ -286,69 +348,6 @@
                 />
               </svg>
               <span class="font-mono">{recipient}</span>
-            </button>
-          {/each}
-        </div>
-      </div>
-    {/if}
-  </div>
-
-  <!-- SIM Card Selection -->
-  <div class="mb-4 relative sim-input-container">
-    <label
-      for="sim-selection"
-      class="block text-sm font-medium text-stone-600 mb-2"
-    >
-      发送卡号
-    </label>
-    <input
-      id="sim-selection"
-      type="text"
-      value={selectedSimDisplay}
-      on:focus={() => {
-        showSimDropdown = true;
-        simSearch = "";
-      }}
-      on:input={(e) => {
-        showSimDropdown = true;
-        simSearch = e.target.value;
-        selectedSimDisplay = e.target.value;
-        recipientSIM = "";
-      }}
-      placeholder="输入卡号筛选或选择发送卡..."
-      class="w-full px-4 py-2 cyber-input"
-    />
-    
-    <!-- SIM Cards Dropdown -->
-    {#if showSimDropdown && filteredSims.length > 0}
-      <div
-        class="absolute top-full left-0 right-0 mt-1 tech-card border border-stone-200 rounded-lg shadow-xl shadow-gray-900 max-h-60 overflow-y-auto z-50"
-      >
-        <div class="p-2">
-          <div
-            class="text-xs text-stone-400 px-2 py-1 border-b border-stone-200 mb-1"
-          >
-            可用发送卡 ({filteredSims.length})
-          </div>
-          {#each filteredSims as phone}
-            <button
-              on:click={() => selectSim(phone)}
-              class="w-full text-left px-3 py-2 hover:bg-stone-200 rounded-md transition-colors text-sm flex items-center gap-2"
-            >
-              <span class="text-lg">{phone.flag}</span>
-              <div class="flex-1">
-                <div class="font-mono">
-                  {(phone.number && phone.number !== "null") ? phone.number : (phone.iccid ? `ICCID: ${phone.iccid.slice(-6)}` : "Unknown")}
-                </div>
-                {#if phone.operator_name}
-                  <div class="text-xs text-stone-400">{phone.operator_name}</div>
-                {/if}
-              </div>
-              {#if phone.signal_strength}
-                <div class="text-xs text-stone-400">
-                  信号: {phone.signal_strength}%
-                </div>
-              {/if}
             </button>
           {/each}
         </div>
@@ -473,6 +472,69 @@
     </div>
 
     <div class="p-4">
+      <!-- SIM Card Selection -->
+      <div class="mb-4 relative sim-input-container">
+        <label
+          for="mobile-sim-selection"
+          class="block text-sm font-medium text-stone-600 mb-2"
+        >
+          发送卡号
+        </label>
+        <input
+          id="mobile-sim-selection"
+          type="text"
+          value={selectedSimDisplay}
+          on:focus={() => {
+            showSimDropdown = true;
+            simSearch = "";
+          }}
+          on:input={(e) => {
+            showSimDropdown = true;
+            simSearch = e.target.value;
+            selectedSimDisplay = e.target.value;
+            recipientSIM = "";
+          }}
+          placeholder="输入卡号筛选或选择发送卡..."
+          class="w-full px-4 py-2 cyber-input"
+        />
+
+        <!-- SIM Cards Dropdown -->
+        {#if showSimDropdown && filteredSims.length > 0}
+          <div
+            class="absolute top-full left-0 right-0 mt-1 tech-card border border-stone-200 rounded-lg shadow-xl shadow-gray-900 max-h-60 overflow-y-auto z-50"
+          >
+            <div class="p-2">
+              <div
+                class="text-xs text-stone-400 px-2 py-1 border-b border-stone-200 mb-1"
+              >
+                可用发送卡 ({filteredSims.length})
+              </div>
+              {#each filteredSims as phone}
+                <button
+                  on:click={() => selectSim(phone)}
+                  class="w-full text-left px-3 py-2 hover:bg-stone-200 rounded-md transition-colors text-sm flex items-center gap-2"
+                >
+                  <span class="text-lg">{phone.flag}</span>
+                  <div class="flex-1">
+                    <div class="font-mono">
+                      {(phone.number && phone.number !== "null") ? phone.number : (phone.iccid ? `ICCID: ${phone.iccid.slice(-6)}` : "Unknown")}
+                    </div>
+                    {#if phone.operator_name}
+                      <div class="text-xs text-stone-400">{phone.operator_name}</div>
+                    {/if}
+                  </div>
+                  {#if phone.signal_strength}
+                    <div class="text-xs text-stone-400">
+                      信号: {phone.signal_strength}%
+                    </div>
+                  {/if}
+                </button>
+              {/each}
+            </div>
+          </div>
+        {/if}
+      </div>
+
       <!-- Recipient Number -->
       <div class="mb-4 relative recipient-input-container">
         <label
@@ -555,69 +617,6 @@
                     />
                   </svg>
                   <span class="font-mono">{recipient}</span>
-                </button>
-              {/each}
-            </div>
-          </div>
-        {/if}
-      </div>
-
-      <!-- SIM Card Selection -->
-      <div class="mb-4 relative sim-input-container">
-        <label
-          for="mobile-sim-selection"
-          class="block text-sm font-medium text-stone-600 mb-2"
-        >
-          发送卡号
-        </label>
-        <input
-          id="mobile-sim-selection"
-          type="text"
-          value={selectedSimDisplay}
-          on:focus={() => {
-            showSimDropdown = true;
-            simSearch = "";
-          }}
-          on:input={(e) => {
-            showSimDropdown = true;
-            simSearch = e.target.value;
-            selectedSimDisplay = e.target.value;
-            recipientSIM = "";
-          }}
-          placeholder="输入卡号筛选或选择发送卡..."
-          class="w-full px-4 py-2 cyber-input"
-        />
-        
-        <!-- SIM Cards Dropdown -->
-        {#if showSimDropdown && filteredSims.length > 0}
-          <div
-            class="absolute top-full left-0 right-0 mt-1 tech-card border border-stone-200 rounded-lg shadow-xl shadow-gray-900 max-h-60 overflow-y-auto z-50"
-          >
-            <div class="p-2">
-              <div
-                class="text-xs text-stone-400 px-2 py-1 border-b border-stone-200 mb-1"
-              >
-                可用发送卡 ({filteredSims.length})
-              </div>
-              {#each filteredSims as phone}
-                <button
-                  on:click={() => selectSim(phone)}
-                  class="w-full text-left px-3 py-2 hover:bg-stone-200 rounded-md transition-colors text-sm flex items-center gap-2"
-                >
-                  <span class="text-lg">{phone.flag}</span>
-                  <div class="flex-1">
-                    <div class="font-mono">
-                      {(phone.number && phone.number !== "null") ? phone.number : (phone.iccid ? `ICCID: ${phone.iccid.slice(-6)}` : "Unknown")}
-                    </div>
-                    {#if phone.operator_name}
-                      <div class="text-xs text-stone-400">{phone.operator_name}</div>
-                    {/if}
-                  </div>
-                  {#if phone.signal_strength}
-                    <div class="text-xs text-stone-400">
-                      信号: {phone.signal_strength}%
-                    </div>
-                  {/if}
                 </button>
               {/each}
             </div>
