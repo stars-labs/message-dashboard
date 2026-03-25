@@ -404,12 +404,16 @@
       });
 
       if (response.success) {
+        // Find the sender's phone number from the selected SIM's ICCID
+        const senderPhone = phoneNumbers.find(p => p.iccid === newMessage.phone_iccid);
+        const senderNumber = senderPhone?.number || newMessage.phone_iccid;
+
         // Add to local messages immediately with sending status using backend ID
         const sentMessage = {
           id: response.messageId, // Use the actual message ID from backend
           phone_iccid: newMessage.phone_iccid,
-          phone_number: newMessage.recipient,
-          recipient: newMessage.recipient,
+          phone_number: senderNumber, // CORRECT: Sender's number (发送卡号)
+          recipient: newMessage.recipient, // CORRECT: Recipient's number (接收号码)
           content: newMessage.content,
           timestamp: new Date().toISOString(),
           type: "sent",
