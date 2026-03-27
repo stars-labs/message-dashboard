@@ -184,6 +184,7 @@
                 # Frontend development
                 nodejs_20
                 nodePackages.npm
+                oxlint
 
                 # Rust development
                 cargo
