@@ -11,10 +11,16 @@ use nix::sys::termios::{self, BaudRate, SetArg};
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
+use std::os::unix::io::AsRawFd;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
+
+// USBDEVFS_RESET = _IO('U', 20): re-enumerates a USB device via its usbfs node.
+// Equivalent to what `usbreset` does — recovers a wedged modem at the USB level.
+nix::ioctl_none!(usbdevfs_reset, b'U', 20);
 
 /// SMS message from AT command interface
 #[derive(Debug, Clone)]
@@ -104,12 +110,10 @@ impl AtModemManager {
 
     /// Discover all Quectel EC20 AT command ports
     /// EC20 uses ttyUSB2 for AT commands (every 4th port starting at 2)
-    pub async fn discover_modems(&self) -> Result<Vec<String>> {
-        let mut ports = Vec::new();
-        let mut probe_failed_count = 0;
-
-        // Scan /dev/ttyUSB* for AT command ports without an arbitrary upper bound
-        // EC20 pattern: ttyUSB2, ttyUSB6, ttyUSB10, ... (every 4th, offset 2)
+    /// Enumerate candidate AT-command ports present in /dev.
+    /// EC20/EC25 pattern: each modem exposes 4 ttyUSB ports and the AT port is the
+    /// 3rd (offset 2), so AT ports are ttyUSB2, ttyUSB6, ttyUSB10, … (num % 4 == 2).
+    pub fn candidate_at_ports() -> Result<Vec<String>> {
         let mut at_ports: Vec<String> = fs::read_dir("/dev")
             .map_err(|e| anyhow!("Failed to read /dev for modem discovery: {}", e))?
             .filter_map(|entry| entry.ok())
@@ -119,11 +123,7 @@ impl AtModemManager {
                 if !name.starts_with("ttyUSB") {
                     return None;
                 }
-
-                let num_str = name.trim_start_matches("ttyUSB");
-                let num = num_str.parse::<u32>().ok()?;
-
-                // EC20 AT ports are every 4th port starting at 2
+                let num = name.trim_start_matches("ttyUSB").parse::<u32>().ok()?;
                 if num >= 2 && num % 4 == 2 {
                     Some(format!("/dev/ttyUSB{}", num))
                 } else {
@@ -131,8 +131,16 @@ impl AtModemManager {
                 }
             })
             .collect();
-
         at_ports.sort();
+        Ok(at_ports)
+    }
+
+    /// Discover all Quectel AT command ports that currently respond to AT.
+    pub async fn discover_modems(&self) -> Result<Vec<String>> {
+        let mut ports = Vec::new();
+        let mut probe_failed_count = 0;
+
+        let at_ports = Self::candidate_at_ports()?;
         let existing_count = at_ports.len();
 
         for port_path in at_ports {
@@ -184,7 +192,7 @@ impl AtModemManager {
     }
 
     /// Quick probe to check if port responds to AT command
-    async fn probe_port(&self, port: &str) -> bool {
+    pub async fn probe_port(&self, port: &str) -> bool {
         match self
             .send_at_command(port, "AT", Duration::from_millis(500))
             .await
@@ -194,8 +202,89 @@ impl AtModemManager {
         }
     }
 
+    /// Actively USB-reset the modem backing `port`, then wait for it to re-enumerate
+    /// and confirm it answers AT again. Recovers a wedged modem whose ttyUSB exists
+    /// but stopped responding. Returns Ok(true) if the modem answers AT after reset.
+    ///
+    /// Requires write access to the modem's usbfs node (/dev/bus/usb/BBB/DDD); on the
+    /// Orange Pi this is granted to the `dialout` group via a udev rule.
+    pub async fn reset_usb_port(&self, port: &str) -> Result<bool> {
+        let node = Self::usbfs_node_for_port(port)?;
+        info!("🔌 USB-resetting {} via {}", port, node.display());
+
+        let node_for_blocking = node.clone();
+        tokio::task::spawn_blocking(move || Self::reset_usb_sync(&node_for_blocking)).await??;
+
+        // The device disappears and re-enumerates; the kernel rebuilds the same
+        // ttyUSB node within a few seconds. Poll AT until it answers or we give up.
+        for attempt in 0..10 {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            if Path::new(port).exists() && self.probe_port(port).await {
+                debug!("✅ {} answered AT {}s after reset", port, attempt + 1);
+                return Ok(true);
+            }
+        }
+        warn!("⚠️  {} did not recover within 10s after USB reset", port);
+        Ok(false)
+    }
+
+    /// Issue the USBDEVFS_RESET ioctl on a usbfs node (blocking).
+    fn reset_usb_sync(node: &Path) -> Result<()> {
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(node)
+            .map_err(|e| anyhow!("Failed to open usbfs node {}: {}", node.display(), e))?;
+        // SAFETY: fd is a valid open usbfs device node; USBDEVFS_RESET takes no argument.
+        unsafe {
+            usbdevfs_reset(file.as_raw_fd())
+                .map_err(|e| anyhow!("USBDEVFS_RESET on {} failed: {}", node.display(), e))?;
+        }
+        Ok(())
+    }
+
+    /// Resolve a /dev/ttyUSBN port to its usbfs device node (/dev/bus/usb/BBB/DDD)
+    /// by walking up the sysfs device tree to the USB device that owns the interface.
+    fn usbfs_node_for_port(port: &str) -> Result<PathBuf> {
+        let dev_name = port
+            .strip_prefix("/dev/")
+            .ok_or_else(|| anyhow!("Unexpected port path: {}", port))?;
+        let device_link = format!("/sys/class/tty/{}/device", dev_name);
+        let mut dir = fs::canonicalize(&device_link)
+            .map_err(|e| anyhow!("Cannot resolve sysfs device for {}: {}", port, e))?;
+
+        // The tty hangs off a USB *interface* (e.g. 3-1.3.2.6:1.2). Walk up until we
+        // reach the USB *device* dir, which carries busnum/devnum.
+        loop {
+            if dir.join("busnum").is_file() && dir.join("devnum").is_file() {
+                let busnum = Self::read_sysfs_u8(&dir.join("busnum"))?;
+                let devnum = Self::read_sysfs_u8(&dir.join("devnum"))?;
+                return Ok(PathBuf::from(Self::usbfs_node_path(busnum, devnum)));
+            }
+            match dir.parent() {
+                Some(parent) if parent.starts_with("/sys") && parent != dir => {
+                    dir = parent.to_path_buf();
+                }
+                _ => return Err(anyhow!("No USB device (busnum/devnum) found above {}", port)),
+            }
+        }
+    }
+
+    /// Format the usbfs node path for a given bus/device number.
+    fn usbfs_node_path(busnum: u8, devnum: u8) -> String {
+        format!("/dev/bus/usb/{:03}/{:03}", busnum, devnum)
+    }
+
+    fn read_sysfs_u8(path: &Path) -> Result<u8> {
+        let raw = fs::read_to_string(path)
+            .map_err(|e| anyhow!("read {} failed: {}", path.display(), e))?;
+        raw.trim()
+            .parse::<u8>()
+            .map_err(|e| anyhow!("parse {} ('{}') failed: {}", path.display(), raw.trim(), e))
+    }
+
     /// Initialize IMS settings on modem
-    async fn init_ims(&self, port: &str) -> Result<()> {
+    pub async fn init_ims(&self, port: &str) -> Result<()> {
         // Enable IMS (IP Multimedia Subsystem)
         match self
             .send_at_command(port, "AT+QCFG=\"ims\",1", Duration::from_millis(1000))
@@ -1920,6 +2009,19 @@ mod tests {
         let bytes = vec![0xBA];
         let result = AtModemManager::decode_bcd_phone(&bytes, 2);
         assert_eq!(result, "*#");
+    }
+
+    #[test]
+    fn test_usbfs_node_path_zero_pads() {
+        assert_eq!(AtModemManager::usbfs_node_path(3, 7), "/dev/bus/usb/003/007");
+        assert_eq!(
+            AtModemManager::usbfs_node_path(1, 120),
+            "/dev/bus/usb/001/120"
+        );
+        assert_eq!(
+            AtModemManager::usbfs_node_path(255, 255),
+            "/dev/bus/usb/255/255"
+        );
     }
 
     #[test]

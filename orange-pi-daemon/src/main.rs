@@ -224,6 +224,10 @@ async fn main() -> Result<()> {
 
     let modem_ids: Vec<String> = valid_modems.keys().cloned().collect();
 
+    // Live modem set, shared and mutable: the reader loop reads it each tick and the
+    // re-discovery task (Task 7) appends modems that appear or recover after startup.
+    let modem_set: Arc<RwLock<Vec<String>>> = Arc::new(RwLock::new(modem_ids.clone()));
+
     // Notify systemd that we're ready
     let _ = sd_notify::notify(true, &[sd_notify::NotifyState::Ready]);
     info!("🔔 Notified systemd - daemon is ready");
@@ -243,18 +247,18 @@ async fn main() -> Result<()> {
     let modem_reader_store = message_store.clone();
     let modem_reader_manager = modem_manager.clone();
     let modem_reader_pool = worker_pool.clone();
-    let modem_reader_ids = modem_ids.clone();
+    let modem_reader_set = modem_set.clone();
     let reader_devices = latest_devices.clone();
 
     tokio::spawn(async move {
         loop {
             let start = Instant::now();
 
+            // Snapshot the current live modem set (Task 7 may have grown it).
+            let current_ids = modem_reader_set.read().await.clone();
+
             // Read from all modems in parallel
-            match modem_reader_pool
-                .process_modems(modem_reader_ids.clone())
-                .await
-            {
+            match modem_reader_pool.process_modems(current_ids).await {
                 Ok(results) => {
                     // Collect modem reports for the device sync task
                     let mut reports = Vec::new();
@@ -582,6 +586,42 @@ async fn main() -> Result<()> {
 
             // Poll every 10 seconds for pending SMS
             tokio::time::sleep(Duration::from_secs(10)).await;
+        }
+    });
+
+    // TASK 7: DYNAMIC MODEM RE-DISCOVERY (every 60 seconds)
+    // Picks up modems that enumerate after startup and actively USB-resets wedged ones
+    // (present ttyUSB but silent on AT), merging any newly-found modems into the live
+    // set with no daemon restart. Cannot recover modems that never enumerate a ttyUSB
+    // (steady-state USB power/topology failures) — those need a hardware fix.
+    let rediscover_manager = modem_manager.clone();
+    let rediscover_set = modem_set.clone();
+
+    tokio::spawn(async move {
+        info!("🔎 Modem re-discovery task started - scanning every 60 seconds");
+        loop {
+            tokio::time::sleep(Duration::from_secs(60)).await;
+
+            let known: std::collections::HashSet<String> =
+                rediscover_set.read().await.iter().cloned().collect();
+
+            match rediscover_manager.rediscover_and_merge(&known).await {
+                Ok(added) if !added.is_empty() => {
+                    let mut set = rediscover_set.write().await;
+                    for id in &added {
+                        if !set.contains(id) {
+                            set.push(id.clone());
+                        }
+                    }
+                    info!(
+                        "🔎 Re-discovery: added {} new modem(s), now {} total",
+                        added.len(),
+                        set.len()
+                    );
+                }
+                Ok(_) => debug!("🔎 Re-discovery: no new modems"),
+                Err(e) => warn!("🔎 Re-discovery failed: {}", e),
+            }
         }
     });
 

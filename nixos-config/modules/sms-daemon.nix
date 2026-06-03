@@ -182,6 +182,9 @@ in
           # RestartPreventExitStatus = "1";  # Only prevent restart on config errors
           StartLimitIntervalSec = "300";
           StartLimitBurst = "5";
+          # preStart waits up to max_wait=180s for USB enumeration to settle;
+          # raise the start timeout above that so systemd doesn't abort it.
+          TimeoutStartSec = "300s";
 
           # Working directory
           WorkingDirectory = "/var/lib/sms-daemon";
@@ -363,11 +366,35 @@ in
         echo "ModemManager mode: $modem_count modem(s) detected"
         logger -t sms-daemon "Starting SMS daemon (D-Bus mode: $modem_count modems)"
       '' else ''
-        # AT command mode: check for USB serial ports
-        usb_ports=$(ls /dev/ttyUSB* 2>/dev/null | wc -l || echo "0")
-        at_ports=$((usb_ports / 4))  # Each modem has 4 ports
-        echo "AT command mode: $at_ports modem(s) detected ($usb_ports USB ports)"
-        logger -t sms-daemon "Starting SMS daemon (AT mode: $at_ports modems)"
+        # AT command mode: wait for USB enumeration to settle before starting.
+        #
+        # The daemon builds its modem cache ONCE at startup. On boot (or after a
+        # USB topology change) the kernel keeps enumerating ttyUSB ports for tens
+        # of seconds; starting before that finishes freezes the cache at a low
+        # count (observed: 10 instead of 60). We poll until the port count stays
+        # unchanged for several consecutive checks, with a hard timeout fallback.
+        poll_interval=5      # seconds between polls
+        settle_target=4      # consecutive stable polls required (~20s steady)
+        max_wait=180         # hard cap so boot never hangs
+        last=-1
+        stable=0
+        elapsed=0
+        while [ "$elapsed" -lt "$max_wait" ]; do
+          count=$(ls /dev/ttyUSB* 2>/dev/null | wc -l)
+          if [ "$count" -gt 0 ] && [ "$count" -eq "$last" ]; then
+            stable=$((stable + 1))
+          else
+            stable=0
+          fi
+          last=$count
+          [ "$stable" -ge "$settle_target" ] && break
+          sleep "$poll_interval"
+          elapsed=$((elapsed + poll_interval))
+        done
+        usb_ports=$last
+        at_ports=$((usb_ports / 4))  # Each modem exposes ~4 ports
+        echo "AT command mode: USB settled at $usb_ports ports ($at_ports modems) after ''${elapsed}s"
+        logger -t sms-daemon "Starting SMS daemon (AT mode: $at_ports modems, USB settled in ''${elapsed}s)"
       '';
 
       # Post-stop cleanup
@@ -383,6 +410,14 @@ in
     # ModemManager: only enable in D-Bus mode
     # In AT command mode, ModemManager is disabled for better performance
     networking.modemmanager.enable = cfg.useDBus;
+
+    # Allow the daemon (member of the dialout group) to issue USBDEVFS_RESET on the
+    # Quectel modem USB device nodes (/dev/bus/usb/BBB/DDD). This backs the active
+    # USB-reset recovery for wedged modems. Scoped to vendor 2c7c (Quectel) so we
+    # don't broaden write access to unrelated USB devices.
+    services.udev.extraRules = mkIf (!cfg.useDBus) ''
+      SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="2c7c", GROUP="dialout", MODE="0664"
+    '';
 
   };
 }
