@@ -231,8 +231,8 @@
   # =============================================================================
 
   boot = {
-    # Use hardened kernel packages for enhanced security
-    kernelPackages = lib.mkForce pkgs.linuxPackages_hardened;
+    # hardened kernel removed upstream (unmaintained); use latest mainline
+    kernelPackages = lib.mkForce pkgs.linuxPackages_latest;
 
     # Load watchdog kernel module (Orange Pi usually uses sunxi_wdt)
     kernelModules = [ "sunxi_wdt" ]; # Allwinner watchdog for Orange Pi
