@@ -143,38 +143,55 @@ impl ModemManager {
             return Ok(Vec::new());
         }
 
-        // Snapshot the set of modems already accounted for (caller's live set + cache).
-        let active: std::collections::HashSet<String> = {
+        // Snapshot ports already served (so we skip whole devices that are working).
+        let active_ports: std::collections::HashSet<String> = {
             let cache = self.port_cache.read().await;
-            known.iter().cloned().chain(cache.keys().cloned()).collect()
+            cache.values().cloned().collect()
         };
 
-        // Probe/reset only NON-active candidates, holding no lock.
+        // Walk each physical modem (USB device); skip ones that already have a working
+        // port. For the rest, probe ports in order to find AT; if all are silent, try a
+        // USB reset on the first port then re-probe. Holds no lock during serial I/O.
         let mut found: Vec<(String, String)> = Vec::new();
         let mut reset_recovered = 0;
-        for port in AtModemManager::candidate_at_ports()? {
-            let id = AtModemManager::port_to_modem_id(&port);
-            if active.contains(&id) {
-                continue;
+        for (_dev, dev_ports) in AtModemManager::ttyusb_by_usb_device()? {
+            if dev_ports.iter().any(|p| active_ports.contains(p)) {
+                continue; // this modem is already online — don't touch it
             }
-            let responsive = if self.at_modem.probe_port(&port).await {
-                true
-            } else {
-                match self.at_modem.reset_usb_port(&port).await {
-                    Ok(true) => {
-                        reset_recovered += 1;
-                        true
-                    }
-                    Ok(false) => false,
-                    Err(e) => {
-                        debug!("Cannot reset {}: {}", port, e);
-                        false
+
+            let probe_order = AtModemManager::at_probe_order(&dev_ports);
+            let mut at_port: Option<String> = None;
+            for p in &probe_order {
+                if self.at_modem.probe_port(p).await {
+                    at_port = Some(p.clone());
+                    break;
+                }
+            }
+            // All ports silent — attempt a USB reset on the first port, then re-probe.
+            if at_port.is_none() {
+                if let Some(first) = dev_ports.first() {
+                    match self.at_modem.reset_usb_port(first).await {
+                        Ok(true) => {
+                            reset_recovered += 1;
+                            for p in &probe_order {
+                                if self.at_modem.probe_port(p).await {
+                                    at_port = Some(p.clone());
+                                    break;
+                                }
+                            }
+                        }
+                        Ok(false) => {}
+                        Err(e) => debug!("Cannot reset {}: {}", first, e),
                     }
                 }
-            };
-            if responsive {
-                let _ = self.at_modem.init_ims(&port).await;
-                found.push((id, port));
+            }
+
+            if let Some(port) = at_port {
+                let id = AtModemManager::port_to_modem_id(&port);
+                if !known.contains(&id) {
+                    let _ = self.at_modem.init_ims(&port).await;
+                    found.push((id, port));
+                }
             }
         }
 
