@@ -125,6 +125,94 @@ impl ModemManager {
         }
     }
 
+    /// Find modems that are NOT already active and bring them online, merging them into
+    /// the port cache. For a candidate AT port that is silent, attempt one USB reset +
+    /// re-probe (recovers modems wedged at the USB level). Returns the modem_ids added.
+    ///
+    /// Deliberately skips modems already in `known` or the cache: re-probing a healthy,
+    /// busy modem could collide with the reader loop on the serial port and trigger a
+    /// needless reset. The serial probes/resets run WITHOUT holding the cache lock so
+    /// the reader's `get_port` is never blocked; the lock is taken only to insert.
+    ///
+    /// AT-command mode only; in D-Bus mode ModemManager handles its own hotplug.
+    pub async fn rediscover_and_merge(
+        &self,
+        known: &std::collections::HashSet<String>,
+    ) -> Result<Vec<String>> {
+        if self.mode != BackendMode::AtCommand {
+            return Ok(Vec::new());
+        }
+
+        // Snapshot ports already served (so we skip whole devices that are working).
+        let active_ports: std::collections::HashSet<String> = {
+            let cache = self.port_cache.read().await;
+            cache.values().cloned().collect()
+        };
+
+        // Walk each physical modem (USB device); skip ones that already have a working
+        // port. For the rest, probe ports in order to find AT; if all are silent, try a
+        // USB reset on the first port then re-probe. Holds no lock during serial I/O.
+        let mut found: Vec<(String, String)> = Vec::new();
+        let mut reset_recovered = 0;
+        for (_dev, dev_ports) in AtModemManager::ttyusb_by_usb_device()? {
+            if dev_ports.iter().any(|p| active_ports.contains(p)) {
+                continue; // this modem is already online — don't touch it
+            }
+
+            let probe_order = AtModemManager::at_probe_order(&dev_ports);
+            let mut at_port: Option<String> = None;
+            for p in &probe_order {
+                if self.at_modem.probe_port(p).await {
+                    at_port = Some(p.clone());
+                    break;
+                }
+            }
+            // All ports silent — attempt a USB reset on the first port, then re-probe.
+            if at_port.is_none() {
+                if let Some(first) = dev_ports.first() {
+                    match self.at_modem.reset_usb_port(first).await {
+                        Ok(true) => {
+                            reset_recovered += 1;
+                            for p in &probe_order {
+                                if self.at_modem.probe_port(p).await {
+                                    at_port = Some(p.clone());
+                                    break;
+                                }
+                            }
+                        }
+                        Ok(false) => {}
+                        Err(e) => debug!("Cannot reset {}: {}", first, e),
+                    }
+                }
+            }
+
+            if let Some(port) = at_port {
+                let id = AtModemManager::port_to_modem_id(&port);
+                if !known.contains(&id) {
+                    let _ = self.at_modem.init_ims(&port).await;
+                    found.push((id, port));
+                }
+            }
+        }
+
+        if found.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut cache = self.port_cache.write().await;
+        let mut added = Vec::new();
+        for (id, port) in found {
+            if !cache.contains_key(&id) {
+                added.push(id.clone());
+            }
+            cache.insert(id, port);
+        }
+        if reset_recovered > 0 {
+            info!("Recovered {} wedged modem(s) via USB reset", reset_recovered);
+        }
+        Ok(added)
+    }
+
     /// Get port for modem ID
     async fn get_port(&self, modem_id: &str) -> String {
         if let Some(port) = self.port_cache.read().await.get(modem_id) {

@@ -231,8 +231,8 @@
   # =============================================================================
 
   boot = {
-    # Use hardened kernel packages for enhanced security
-    kernelPackages = lib.mkForce pkgs.linuxPackages_hardened;
+    # hardened kernel removed upstream (unmaintained); use latest mainline
+    kernelPackages = lib.mkForce pkgs.linuxPackages_latest;
 
     # Load watchdog kernel module (Orange Pi usually uses sunxi_wdt)
     kernelModules = [ "sunxi_wdt" ]; # Allwinner watchdog for Orange Pi
@@ -252,6 +252,7 @@
       # USB optimization for 100 modems
       "usbcore.usbfs_memory_mb=1024" # Increase USB buffer (default 16MB, 1GB for 100 modems)
       "usbcore.autosuspend=-1" # Disable USB autosuspend
+      "usbcore.old_scheme_first=1" # Try legacy enumeration handshake first (helps marginal modems)
       "xhci_hcd.quirks=270336" # USB controller quirk for stability (from dotfiles)
       "log_buf_len=4M" # Increase kernel message buffer
       "elevator=noop" # Optimize for throughput

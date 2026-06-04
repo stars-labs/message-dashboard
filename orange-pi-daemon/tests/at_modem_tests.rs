@@ -8,27 +8,27 @@ use orange_pi_daemon_rust::at_modem::{AtModemManager, AtModemInfo, ModemHealth};
 
 #[test]
 fn test_port_conversion() {
-    // Test modem_id <-> port conversion (public static methods)
-    assert_eq!(AtModemManager::port_to_modem_id("/dev/ttyUSB2"), "0");
-    assert_eq!(AtModemManager::port_to_modem_id("/dev/ttyUSB6"), "1");
-    assert_eq!(AtModemManager::port_to_modem_id("/dev/ttyUSB10"), "2");
-    assert_eq!(AtModemManager::port_to_modem_id("/dev/ttyUSB50"), "12");
+    // modem_id is now the AT port's ttyUSB index (no fixed 4-ports-per-modem math),
+    // so discovery works for both default (AT@offset2) and slimmed (AT@offset0) modems.
+    assert_eq!(AtModemManager::port_to_modem_id("/dev/ttyUSB2"), "2");
+    assert_eq!(AtModemManager::port_to_modem_id("/dev/ttyUSB6"), "6");
+    assert_eq!(AtModemManager::port_to_modem_id("/dev/ttyUSB10"), "10");
+    assert_eq!(AtModemManager::port_to_modem_id("/dev/ttyUSB0"), "0");
 
-    assert_eq!(AtModemManager::modem_id_to_port("0"), "/dev/ttyUSB2");
-    assert_eq!(AtModemManager::modem_id_to_port("1"), "/dev/ttyUSB6");
-    assert_eq!(AtModemManager::modem_id_to_port("2"), "/dev/ttyUSB10");
-    assert_eq!(AtModemManager::modem_id_to_port("12"), "/dev/ttyUSB50");
+    assert_eq!(AtModemManager::modem_id_to_port("2"), "/dev/ttyUSB2");
+    assert_eq!(AtModemManager::modem_id_to_port("6"), "/dev/ttyUSB6");
+    assert_eq!(AtModemManager::modem_id_to_port("10"), "/dev/ttyUSB10");
+    assert_eq!(AtModemManager::modem_id_to_port("0"), "/dev/ttyUSB0");
 }
 
 #[test]
 fn test_port_conversion_boundary_cases() {
-    // Test valid boundary cases (avoid invalid inputs that cause panics)
-    assert_eq!(AtModemManager::port_to_modem_id("/dev/ttyUSB2"), "0");
-    assert_eq!(AtModemManager::port_to_modem_id("/dev/ttyUSB102"), "25");
-
-    assert_eq!(AtModemManager::modem_id_to_port("0"), "/dev/ttyUSB2");
-    assert_eq!(AtModemManager::modem_id_to_port("25"), "/dev/ttyUSB102");
-    assert_eq!(AtModemManager::modem_id_to_port("99"), "/dev/ttyUSB398");
+    // Round-trips across the full range, including offset-0 (slimmed) ports.
+    for n in ["0", "1", "2", "6", "25", "102", "240"] {
+        let port = AtModemManager::modem_id_to_port(n);
+        assert_eq!(port, format!("/dev/ttyUSB{}", n));
+        assert_eq!(AtModemManager::port_to_modem_id(&port), n);
+    }
 }
 
 // ============================================================================
