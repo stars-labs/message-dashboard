@@ -122,77 +122,106 @@ bunx wrangler d1 execute sms-dashboard --remote --command="SELECT * FROM device_
 
 ### Current Setup (~67 modems active)
 
+The 100-port hub is internally divided into 5 independent USB blocks, each connected by a separate cable to the intermediate hubs under the small hub.
+
 ```
 Orange Pi  (EHCI usb1, USB 2.0 480M)
-└── Juyoc 10-port hub  ["small hub", 1-1]
-     └── Juyoc 100-port hub-1  [1200W, MTT, 1-1.3 / 1-1.4]
-          ├── sub-hub 1-1.3.1.x  →  EC20 × ~15
-          ├── sub-hub 1-1.3.3.x  →  EC20 × ~10
-          ├── sub-hub 1-1.3.4.x  →  EC20 × ~10
-          ├── sub-hub 1-1.4.1.x  →  EC20 × ~16
-          └── sub-hub 1-1.4.2.x  →  EC20 × ~16
+└── 1-1   Juyoc small hub (4-port)
+     ├── 1-1.2  4-port intermediate hub  [currently EMPTY]
+     ├── 1-1.3  4-port intermediate hub
+     │    ├── 1-1.3.1  ← hub-1 cable 1  (7-port MTT)
+     │    │    ├── 1-1.3.1.2.x  EC20 × 4
+     │    │    ├── 1-1.3.1.3.x  EC20 × 4
+     │    │    ├── 1-1.3.1.4.x  EC20 × 3
+     │    │    ├── 1-1.3.1.5.x  EC20 × 2
+     │    │    └── 1-1.3.1.6.x  EC20 × 3
+     │    ├── 1-1.3.2  [EMPTY]
+     │    ├── 1-1.3.3  ← hub-1 cable 2  (7-port MTT)
+     │    │    ├── 1-1.3.3.2.x  EC20 × 3
+     │    │    ├── 1-1.3.3.3.x  EC20 × 1
+     │    │    ├── 1-1.3.3.4.x  EC20 × 1
+     │    │    ├── 1-1.3.3.5.x  EC20 × 2
+     │    │    └── 1-1.3.3.6.x  EC20 × 3
+     │    └── 1-1.3.4  ← hub-1 cable 3  (7-port MTT)
+     │         ├── 1-1.3.4.2.x  EC20 × 3
+     │         ├── 1-1.3.4.3.x  EC20 × 2
+     │         ├── 1-1.3.4.4.x  EC20 × 1
+     │         ├── 1-1.3.4.5.x  EC20 × 2
+     │         └── 1-1.3.4.6.x  EC20 × 4
+     └── 1-1.4  4-port intermediate hub
+          ├── 1-1.4.1  [EMPTY]
+          ├── 1-1.4.2  ← hub-1 cables 4+5  (7-port MTT)
+          │    ├── 1-1.4.2.2.x  EC20 × 4
+          │    ├── 1-1.4.2.3.x  EC20 × 3
+          │    ├── 1-1.4.2.4.x  EC20 × 2
+          │    ├── 1-1.4.2.5.x  EC20 × 3
+          │    └── 1-1.4.2.6.x  EC20 × 3
+          ├── 1-1.4.3  [EMPTY]
+          └── 1-1.4.4  [EMPTY]
 ```
 
 > All modems run on **Bus 001 (EHCI, USB 2.0)**. The xHCI controllers (Bus 005/006) are intentionally unused — EC20 is USB 2.0 only, and xHCI exhausts per-device context memory at scale (`error -12`, ENOMEM).
-> USB path format: `1-1.A.B.C.D` = Bus1 → small-hub port A → big-hub port B → sub-hub port C → modem port D.
+> USB path format: `1-1.A.B.C.D` = Bus1 → small-hub port A → intermediate-hub port B → big-hub-block port C → modem port D.
 > Full SIM ↔ IMEI ↔ USB path table: [`sim-ec20-usb-location.md`](sim-ec20-usb-location.md)
 
 ---
 
-### Target Setup — Adding Hub-2 (~120+ modems)
+### Target Setup — Adding Hub-2 (same usb1 bus)
+
+Hub-2's 5 cables slot into the 7 currently empty ports across the existing intermediate hubs. Both hub-1 and hub-2 share the same `usb1` bus (127-address limit shared).
 
 ```
 Orange Pi  (EHCI usb1, USB 2.0 480M)
-└── Juyoc 10-port hub  ["small hub", 1-1]
-     ├── Port X → Juyoc 100-port hub-1  [1200W, existing]
-     │             └── ~50 EC20 modems  (half of current)
-     └── Port Y → Juyoc 100-port hub-2  [1200W, NEW]
-                   └── ~50 EC20 modems  (moved from hub-1)
+└── 1-1   Juyoc small hub (4-port)
+     ├── 1-1.2  4-port intermediate hub
+     │    ├── 1-1.2.1  ← hub-2 cable 1  (7-port MTT)
+     │    ├── 1-1.2.2  ← hub-2 cable 2  (7-port MTT)
+     │    ├── 1-1.2.3  ← hub-2 cable 3  (7-port MTT)
+     │    └── 1-1.2.4  ← hub-2 cable 4  (7-port MTT)
+     ├── 1-1.3  4-port intermediate hub
+     │    ├── 1-1.3.1  ← hub-1 cable 1  (existing)
+     │    ├── 1-1.3.2  ← hub-2 cable 5  (7-port MTT)
+     │    ├── 1-1.3.3  ← hub-1 cable 2  (existing)
+     │    └── 1-1.3.4  ← hub-1 cable 3  (existing)
+     └── 1-1.4  4-port intermediate hub
+          ├── 1-1.4.1  [still free — future usb3 migration anchor]
+          ├── 1-1.4.2  ← hub-1 cables 4+5  (existing)
+          ├── 1-1.4.3  [still free]
+          └── 1-1.4.4  [still free]
 ```
+
+> ⚠️ **Address budget**: Bus 001 currently has ~76 device nodes, limit is 127. Hub-2 tree adds ~6 hub nodes + ~5 per new EC20. Headroom for ~8-9 additional modems before hitting the bus limit. To truly scale beyond this, move hub-2 to `usb3` (separate EHCI controller, independent 127-address space) once a second small hub is available.
 
 ---
 
-### Expansion Plan: Adding Hub-2
+### Migration Steps
 
-**Why split across two hubs**: the USB bus has a hard 127-address limit. Each EC20 consumes ~5 addresses (4 interfaces + device node), so 67 modems already uses ~400+ addresses across hubs and sub-hubs. Splitting into two subtrees on different small-hub ports doesn't extend the bus limit, but reduces congestion per subtree and makes it easier to later move hub-2 to `usb3` (a second EHCI controller) to truly double capacity.
-
-#### Pre-checks (before touching hardware)
-
-1. **Confirm small hub has a free port** — currently ports 3 and 4 are used (`1-1.3`, `1-1.4`). Check physically and via:
-   ```bash
-   ssh root@10.171.150.102 'lsusb -t | head -10'
-   ```
-
-2. **Confirm hub-2 is the same Juyoc 1200W MTT model** (VID `1a40:0201`). MTT (Multi-Transaction Translator) is required — a non-MTT hub serialises all USB 2.0 traffic through one TT, which destroys throughput with 50+ modems.
-
-3. **Check current USB address count**:
-   ```bash
-   ssh root@10.171.150.102 'lsusb | wc -l'
-   # Each EC20 = 5 lines; hubs = 1 line each. Total / 5 ≈ modem count.
-   ```
-
-#### Migration steps
+**Pre-check** (verify before touching hardware):
+```bash
+# Confirm available ports
+ssh root@10.171.150.102 'lsusb -t | grep "Bus 001" -A 8'
+# Current bus address usage (limit = 127)
+ssh root@10.171.150.102 'lsusb | grep "Bus 001" | wc -l'
+```
 
 | Step | Action | Command |
 |------|--------|---------|
-| 1 | Stop daemon to prevent partial state | `systemctl stop sms-daemon` |
-| 2 | Plug hub-2 into a free port on the small hub. Power on, leave empty | — |
-| 3 | Verify hub-2 enumerates | `lsusb \| grep 1a40` |
-| 4 | Move modems — unplug **entire sub-hub groups** from hub-1 into hub-2 (e.g. move all modems on `1-1.3.3` and `1-1.3.4` groups together, keeping cables tidy) | — |
+| 1 | Stop daemon | `systemctl stop sms-daemon` |
+| 2 | Connect hub-2 cables: 4 into `1-1.2` ports 1-4, 1 into `1-1.3.2`. Power on, leave modems unplugged | — |
+| 3 | Verify hub-2 enumerates (5 new MTT hubs should appear) | `lsusb \| grep 1a40` |
+| 4 | Move modems from hub-1 to hub-2 — **move entire 7-port block groups**, not individual modems | — |
 | 5 | Start daemon | `systemctl start sms-daemon` |
-| 6 | Verify online count increased | `journalctl -u sms-daemon -f` |
-| 7 | Re-scan IMEI↔USB mapping to regenerate location table | stop daemon → run AT+CGSN scan → start daemon |
-
-> **Move by sub-hub groups, not individual modems** — each small 4-port sub-hub and its modems is one physical bundle. Moving a whole group keeps the wiring tidy and the location table easy to reconstruct.
+| 6 | Verify online count | `journalctl -u sms-daemon -f` |
+| 7 | Re-scan IMEI↔USB to regenerate `sim-ec20-usb-location.md` | stop daemon → AT+CGSN scan → start daemon |
 
 #### Risks
 
 | Risk | Mitigation |
 |------|-----------|
-| Still hitting 127-address bus limit after split | If so, move hub-2's cable from the small hub to `usb3` (second EHCI controller on Orange Pi) — this puts hub-2 on a completely separate bus with its own 127-address space |
-| ttyUSB numbers reshuffle after replug | Expected and harmless — USB path (`1-1.x.x.x.x`) is the stable identifier; ttyUSB is volatile per-boot |
-| Queued messages lost during modem move | Stop daemon first (step 1); local SQLite queue survives daemon restarts |
-| hub-2 is non-MTT | Check `lsusb -v \| grep -i "transaction translator"` before installing — non-MTT will cause severe slowdown |
+| Bus 001 hits 127-address limit after adding hub-2 | Expected at ~8-9 new modems. Next step: move hub-2 to `usb3` (second EHCI, independent bus) |
+| ttyUSB numbers reshuffle | Expected — use USB path as stable ID, not ttyUSB |
+| Queued messages lost during move | Stop daemon first; local SQLite queue persists across restarts |
+| hub-2 is non-MTT | Verify with `lsusb -v \| grep -i translator` — non-MTT serialises all traffic, kills throughput |
 
 ## Key Design Decisions
 
