@@ -307,6 +307,9 @@ impl WorkerPool {
             (None, vec![], vec![])
         };
 
+        // Stable physical USB topology path (e.g. 1-1.4.2.2.2) — survives reboot/replug
+        let usb_path = modem_manager.get_usb_path(&modem_id).await;
+
         // Build ModemReport — single flat struct for the API
         let report = ModemReport {
             equipment_id,
@@ -322,6 +325,7 @@ impl WorkerPool {
             rssi: Some(signal_data.rssi),
             modem_index: modem_id.parse::<i32>().ok(),
             usb_port: None,
+            usb_path,
         };
 
         Ok(ModemResult {

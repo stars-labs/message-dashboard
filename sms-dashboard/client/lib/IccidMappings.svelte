@@ -83,6 +83,7 @@
         (m.phone_number || "").toLowerCase().includes(q) ||
         (m.carrier || "").toLowerCase().includes(q) ||
         (m.equipment_id || "").toLowerCase().includes(q) ||
+        (m.usb_path || "").toLowerCase().includes(q) ||
         (m.notes || m.description || "").toLowerCase().includes(q)
       );
     }
@@ -281,6 +282,7 @@
               <th class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">运营商</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">设备ID</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">备注</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">USB 位置</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">Modem</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">信号</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">状态</th>
@@ -330,6 +332,14 @@
                 {/if}
               </td>
               <td class="px-4 py-3 text-sm text-stone-800">{mapping.notes || mapping.description || "-"}</td>
+              <!-- USB physical path (stable across reboot/replug) -->
+              <td class="px-4 py-3 text-sm font-mono text-stone-500">
+                {#if mapping.usb_path}
+                  <span title={mapping.usb_path}>{mapping.usb_path}</span>
+                {:else}
+                  <span class="text-stone-300">-</span>
+                {/if}
+              </td>
               <!-- Modem indicator -->
               <td class="px-4 py-3">
                 {#if mapping.equipment_id && mapping.modem_status && mapping.modem_status !== 'disconnected'}
@@ -478,6 +488,12 @@
                   {/if}
                 </div>
               </div>
+              {#if mapping.usb_path}
+                <div class="flex items-center justify-between text-xs">
+                  <span class="text-stone-500">USB 位置</span>
+                  <span class="font-mono text-stone-800">{mapping.usb_path}</span>
+                </div>
+              {/if}
               {#if mapping.notes || mapping.description}
                 <div class="text-xs text-stone-600 bg-stone-50 p-2 rounded border border-stone-100 mt-2">
                   {mapping.notes || mapping.description}

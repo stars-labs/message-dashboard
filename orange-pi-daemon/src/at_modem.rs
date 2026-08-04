@@ -163,6 +163,29 @@ impl AtModemManager {
             .collect())
     }
 
+    /// Resolve a `/dev/ttyUSBN` AT port to its stable USB topology path (e.g. `1-1.4.2.2.2`).
+    ///
+    /// The topology path encodes the physical socket (root port → hub port → … → port) and
+    /// is stable across reboot/replug/daemon-restart — unlike the ttyUSB number or modem
+    /// index, which the kernel reshuffles on every enumeration. Same walk as
+    /// `ttyusb_by_usb_device`: from `/sys/class/tty/<name>/device`, ascend to the first
+    /// ancestor carrying an `idVendor` file (the USB *device* dir) and return its name.
+    pub fn usb_topology_for_port(port: &str) -> Option<String> {
+        let name = port.trim_start_matches("/dev/");
+        let link = format!("/sys/class/tty/{}/device", name);
+        let canon = fs::canonicalize(&link).ok()?;
+        let mut dir = canon.as_path();
+        loop {
+            if dir.join("idVendor").is_file() {
+                return dir.file_name().map(|f| f.to_string_lossy().into_owned());
+            }
+            match dir.parent() {
+                Some(p) if p.starts_with("/sys") && p != dir => dir = p,
+                _ => return None,
+            }
+        }
+    }
+
     /// Order a modem's ttyUSB ports so the real AT command port is tried first.
     ///
     /// EC20 compositions place the AT port at a known slot: the default 4-port layout

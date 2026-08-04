@@ -117,6 +117,11 @@ Cloudflare secrets (set via `bunx wrangler secret put <NAME>`):
 
 ### Network
 - Orange Pi IPs: `10.171.150.102` (SSH/internal LAN), `203.116.95.146` (public/deploy target)
+- **SSH over FortiClient VPN**: the tunnel's broad `10.171/16` route via `ppp0` is wrong for the Orange Pi. Before `ssh root@10.171.150.102`, add a host route through the correct gateway:
+  ```sh
+  sudo route add -host 10.171.150.102 10.171.121.1
+  ```
+  Symptom when missing: ping = 100% loss, SSH exits 255. The route persists until the VPN reconnects, so re-run it after each FortiClient reconnect.
 - Sync intervals: device status every 30s, full sync every 5min (keeps under CF rate limits)
 
 ### SIM detection gotchas
@@ -124,4 +129,24 @@ Cloudflare secrets (set via `bunx wrangler secret put <NAME>`):
 - **`AT+CNUM` usually returns empty** — most carriers don't program MSISDN. Phone numbers come from `sims` table inventory.
 - **Daemon modem cache is static** — built once at startup. Restart daemon after plugging/unplugging modems: `systemctl restart sms-daemon`
 - **"Offline" SIM usually means ICCID mismatch** — physical SIM doesn't match inventory, not a hardware failure.
-- **USB hub at 5-tier max** — ~71 of 95 modems enumerate. Remaining fail due to USB topology/power limits.
+
+### USB topology (verified 2026-06-15, replaces the old "5-tier/power limit" guess)
+The Orange Pi SoC exposes multiple internal USB host controllers (root hubs created by the kernel, NOT physical ports you plug into):
+- `usb1`, `usb3` → **EHCI** (USB 2.0, 480M, driver `ehci-platform`)
+- `usb5`, `usb6` → **xHCI** (USB 3.x, driver `xhci-hcd`)
+- `usb2`, `usb4` → OHCI (USB 1.x, unused)
+
+**ALWAYS connect modems to an EHCI controller (`usb1`), never xHCI.** Reasons (first-principles, evidenced):
+- EC20 modems are **USB 2.0 devices** (480M cap) — xHCI's 5Gbps gives **zero benefit**.
+- The real constraint is *device count*, not bandwidth (100+ modems, each only a few KB of AT/SMS traffic).
+- xHCI allocates a large per-device context/scratchpad and **runs out of resources** with many low-speed devices → `can't set config #1, error -12` (ENOMEM). Observed when a hub was briefly tried on xHCI; every modem failed to configure.
+- EHCI's resource model is linear/predictable → all working modems enumerate fine at 480M.
+
+**Current working chain (the only one in use):** `usb1` (EHCI) → small Juyoc hub `1-1` (Terminus `1a40`, 4-port) → big Juyoc hubs (`1a40:0201`, 7-port MTT, e.g. `1-1.3.1`) → EC20 modems (`2c7c`). All 65 working modems live on this `usb1` tree.
+
+**Why ~30 modems stay offline (NOT power, NOT xHCI):** over-current events = 0. Real causes seen in `dmesg`:
+- USB **127-address-per-bus limit**: each EC20 = 5 interfaces + hubs; the `usb1` tree already has ~450+ device nodes, so address space is tight.
+- Deep-tier **signal-integrity failures** on specific ports: `error -32` (EPIPE, drops to full-speed) and `error -71` (EPROTO) on ports like `1-1.3.1.4.4`, `1-1.3.1.3.1`.
+- To scale past this, spread modems across a **second physical EHCI controller (`usb3`)** instead of stacking everything on `usb1` — don't add xHCI.
+
+Vendor IDs: `1a40` = Terminus hub chips (Juyoc hubs), `2c7c` = Quectel modems (EC20 descriptors may misreport as EC25/`0125`), `05e3` = Genesys hub (the one wired to xHCI — leave unused).

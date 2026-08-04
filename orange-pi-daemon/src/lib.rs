@@ -162,6 +162,7 @@ mod tests {
             rssi: Some(-65),
             modem_index: Some(14),
             usb_port: None,
+            usb_path: Some("1-1.4.2.2.2".to_string()),
         };
 
         assert_eq!(report.equipment_id, "IMEI123456789");
@@ -174,6 +175,16 @@ mod tests {
         assert_eq!(json["equipment_id"], "IMEI123456789");
         assert_eq!(json["detected_iccid"], "89860121750097854321");
         assert!(json.get("usb_port").is_none()); // skip_serializing_if = None
+        assert_eq!(json["usb_path"], "1-1.4.2.2.2");
+
+        // Round-trip back into the struct
+        let parsed: ModemReport = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed.usb_path, Some("1-1.4.2.2.2".to_string()));
+
+        // usb_path = None must be omitted from the wire format
+        let report_no_path = ModemReport { usb_path: None, ..report };
+        let json_no_path = serde_json::to_value(&report_no_path).unwrap();
+        assert!(json_no_path.get("usb_path").is_none());
     }
 
     #[test]

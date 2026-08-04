@@ -221,6 +221,12 @@ impl ModemManager {
         AtModemManager::modem_id_to_port(modem_id)
     }
 
+    /// Get the stable USB topology path (e.g. `1-1.4.2.2.2`) for a modem ID.
+    pub async fn get_usb_path(&self, modem_id: &str) -> Option<String> {
+        let port = self.get_port(modem_id).await;
+        AtModemManager::usb_topology_for_port(&port)
+    }
+
     /// Get ICCID
     pub async fn get_iccid(&self, modem_id: &str) -> Result<Option<String>> {
         match self.mode {

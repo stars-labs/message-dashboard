@@ -130,6 +130,8 @@ pub struct ModemReport {
     pub modem_index: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usb_port: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usb_path: Option<String>,
 }
 
 #[derive(Debug, Clone)]
