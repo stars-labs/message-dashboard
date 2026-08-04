@@ -118,6 +118,82 @@ bunx wrangler d1 execute sms-dashboard --remote --command="SELECT * FROM device_
 - **Users → Frontend**: Auth0 JWT with RBAC (`sms` role required)
 - **Daemon → API**: API key (stored in SOPS secrets, set via `wrangler secret put API_KEY`)
 
+## Hardware / USB Topology
+
+### Current Setup (~67 modems active)
+
+```
+Orange Pi  (EHCI usb1, USB 2.0 480M)
+└── Juyoc 10-port hub  ["small hub", 1-1]
+     └── Juyoc 100-port hub-1  [1200W, MTT, 1-1.3 / 1-1.4]
+          ├── sub-hub 1-1.3.1.x  →  EC20 × ~15
+          ├── sub-hub 1-1.3.3.x  →  EC20 × ~10
+          ├── sub-hub 1-1.3.4.x  →  EC20 × ~10
+          ├── sub-hub 1-1.4.1.x  →  EC20 × ~16
+          └── sub-hub 1-1.4.2.x  →  EC20 × ~16
+```
+
+> All modems run on **Bus 001 (EHCI, USB 2.0)**. The xHCI controllers (Bus 005/006) are intentionally unused — EC20 is USB 2.0 only, and xHCI exhausts per-device context memory at scale (`error -12`, ENOMEM).
+> USB path format: `1-1.A.B.C.D` = Bus1 → small-hub port A → big-hub port B → sub-hub port C → modem port D.
+> Full SIM ↔ IMEI ↔ USB path table: [`sim-ec20-usb-location.md`](sim-ec20-usb-location.md)
+
+---
+
+### Target Setup — Adding Hub-2 (~120+ modems)
+
+```
+Orange Pi  (EHCI usb1, USB 2.0 480M)
+└── Juyoc 10-port hub  ["small hub", 1-1]
+     ├── Port X → Juyoc 100-port hub-1  [1200W, existing]
+     │             └── ~50 EC20 modems  (half of current)
+     └── Port Y → Juyoc 100-port hub-2  [1200W, NEW]
+                   └── ~50 EC20 modems  (moved from hub-1)
+```
+
+---
+
+### Expansion Plan: Adding Hub-2
+
+**Why split across two hubs**: the USB bus has a hard 127-address limit. Each EC20 consumes ~5 addresses (4 interfaces + device node), so 67 modems already uses ~400+ addresses across hubs and sub-hubs. Splitting into two subtrees on different small-hub ports doesn't extend the bus limit, but reduces congestion per subtree and makes it easier to later move hub-2 to `usb3` (a second EHCI controller) to truly double capacity.
+
+#### Pre-checks (before touching hardware)
+
+1. **Confirm small hub has a free port** — currently ports 3 and 4 are used (`1-1.3`, `1-1.4`). Check physically and via:
+   ```bash
+   ssh root@10.171.150.102 'lsusb -t | head -10'
+   ```
+
+2. **Confirm hub-2 is the same Juyoc 1200W MTT model** (VID `1a40:0201`). MTT (Multi-Transaction Translator) is required — a non-MTT hub serialises all USB 2.0 traffic through one TT, which destroys throughput with 50+ modems.
+
+3. **Check current USB address count**:
+   ```bash
+   ssh root@10.171.150.102 'lsusb | wc -l'
+   # Each EC20 = 5 lines; hubs = 1 line each. Total / 5 ≈ modem count.
+   ```
+
+#### Migration steps
+
+| Step | Action | Command |
+|------|--------|---------|
+| 1 | Stop daemon to prevent partial state | `systemctl stop sms-daemon` |
+| 2 | Plug hub-2 into a free port on the small hub. Power on, leave empty | — |
+| 3 | Verify hub-2 enumerates | `lsusb \| grep 1a40` |
+| 4 | Move modems — unplug **entire sub-hub groups** from hub-1 into hub-2 (e.g. move all modems on `1-1.3.3` and `1-1.3.4` groups together, keeping cables tidy) | — |
+| 5 | Start daemon | `systemctl start sms-daemon` |
+| 6 | Verify online count increased | `journalctl -u sms-daemon -f` |
+| 7 | Re-scan IMEI↔USB mapping to regenerate location table | stop daemon → run AT+CGSN scan → start daemon |
+
+> **Move by sub-hub groups, not individual modems** — each small 4-port sub-hub and its modems is one physical bundle. Moving a whole group keeps the wiring tidy and the location table easy to reconstruct.
+
+#### Risks
+
+| Risk | Mitigation |
+|------|-----------|
+| Still hitting 127-address bus limit after split | If so, move hub-2's cable from the small hub to `usb3` (second EHCI controller on Orange Pi) — this puts hub-2 on a completely separate bus with its own 127-address space |
+| ttyUSB numbers reshuffle after replug | Expected and harmless — USB path (`1-1.x.x.x.x`) is the stable identifier; ttyUSB is volatile per-boot |
+| Queued messages lost during modem move | Stop daemon first (step 1); local SQLite queue survives daemon restarts |
+| hub-2 is non-MTT | Check `lsusb -v \| grep -i "transaction translator"` before installing — non-MTT will cause severe slowdown |
+
 ## Key Design Decisions
 
 - **AT commands over ModemManager**: 1-5ms vs 50-500ms per operation, essential for 100+ modems
