@@ -127,14 +127,16 @@ export const controlHandler = {
 
           console.log(`[control.js] Marked ${disconnectResult.meta.changes} modems as disconnected`);
 
-          // Clear detected data for disconnected modems
+          // Clear detected data for disconnected modems. usb_path is detected
+          // state too — a modem we can't see is not at that socket any more.
           await env.DB.prepare(`
             UPDATE modems
             SET detected_iccid = NULL,
                 detected_phone_number = NULL,
                 detected_operator = NULL,
                 signal_percent = NULL,
-                rssi = NULL
+                rssi = NULL,
+                usb_path = NULL
             WHERE verification_status = 'absent'
           `).run();
 
@@ -261,14 +263,16 @@ export const controlHandler = {
 
           console.log(`[control.js] Marked ${disconnectResult.meta.changes} modems as disconnected`);
 
-          // Clear detected data for disconnected modems
+          // Clear detected data for disconnected modems. usb_path is detected
+          // state too — a modem we can't see is not at that socket any more.
           await env.DB.prepare(`
             UPDATE modems
             SET detected_iccid = NULL,
                 detected_phone_number = NULL,
                 detected_operator = NULL,
                 signal_percent = NULL,
-                rssi = NULL
+                rssi = NULL,
+                usb_path = NULL
             WHERE verification_status = 'absent'
           `).run();
 
@@ -585,8 +589,9 @@ export const controlHandler = {
         // Mark stale modems (not updated in last 10 minutes) as disconnected
         console.log(`[control.js] Marking stale modems offline (not updated in 10 minutes)`);
         const staleResult = await env.DB.prepare(`
-          UPDATE modems 
+          UPDATE modems
           SET status = 'disconnected',
+              usb_path = NULL,
               updated_at = CURRENT_TIMESTAMP
           WHERE status IN ('connected', 'online', 'active', 'registered')
             AND datetime(updated_at) < datetime('now', '-10 minutes')
@@ -646,8 +651,9 @@ export const controlHandler = {
         
         // Update all modems to disconnected status
         const result = await env.DB.prepare(`
-          UPDATE modems 
-          SET status = 'disconnected', 
+          UPDATE modems
+          SET status = 'disconnected',
+              usb_path = NULL,
               updated_at = CURRENT_TIMESTAMP
           WHERE status != 'disconnected'
         `).run();

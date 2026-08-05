@@ -130,23 +130,74 @@ Cloudflare secrets (set via `bunx wrangler secret put <NAME>`):
 - **Daemon modem cache is static** — built once at startup. Restart daemon after plugging/unplugging modems: `systemctl restart sms-daemon`
 - **"Offline" SIM usually means ICCID mismatch** — physical SIM doesn't match inventory, not a hardware failure.
 
-### USB topology (verified 2026-06-15, replaces the old "5-tier/power limit" guess)
-The Orange Pi SoC exposes multiple internal USB host controllers (root hubs created by the kernel, NOT physical ports you plug into):
-- `usb1`, `usb3` → **EHCI** (USB 2.0, 480M, driver `ehci-platform`)
-- `usb5`, `usb6` → **xHCI** (USB 3.x, driver `xhci-hcd`)
-- `usb2`, `usb4` → OHCI (USB 1.x, unused)
+### USB address budget — THE binding constraint (verified 2026-08-05)
 
-**ALWAYS connect modems to an EHCI controller (`usb1`), never xHCI.** Reasons (first-principles, evidenced):
-- EC20 modems are **USB 2.0 devices** (480M cap) — xHCI's 5Gbps gives **zero benefit**.
-- The real constraint is *device count*, not bandwidth (100+ modems, each only a few KB of AT/SMS traffic).
-- xHCI allocates a large per-device context/scratchpad and **runs out of resources** with many low-speed devices → `can't set config #1, error -12` (ENOMEM). Observed when a hub was briefly tried on xHCI; every modem failed to configure.
-- EHCI's resource model is linear/predictable → all working modems enumerate fine at 480M.
+This is the foundation the whole 100-modem system rests on. **Sockets are never the limit; USB addresses are.**
 
-**Current working chain (the only one in use):** `usb1` (EHCI) → small Juyoc hub `1-1` (Terminus `1a40`, 4-port) → big Juyoc hubs (`1a40:0201`, 7-port MTT, e.g. `1-1.3.1`) → EC20 modems (`2c7c`). All 65 working modems live on this `usb1` tree.
+**Mechanism (verified).** A USB token packet's ADDR field is **7 bits** → 128 values, and address 0 is reserved for devices that have not yet been assigned one → **127 usable addresses per bus**. Linux mirrors the protocol exactly: `DECLARE_BITMAP(devmap, 128)` in `struct usb_bus`, and `choose_devnum()` (`drivers/usb/core/hub.c`) does `find_next_zero_bit(bus->devmap, 128, ...)`, only assigning when `devnum < 128` — when full, `udev->devnum` stays 0 and enumeration fails.
 
-**Why ~30 modems stay offline (NOT power, NOT xHCI):** over-current events = 0. Real causes seen in `dmesg`:
-- USB **127-address-per-bus limit**: each EC20 = 5 interfaces + hubs; the `usb1` tree already has ~450+ device nodes, so address space is tight.
-- Deep-tier **signal-integrity failures** on specific ports: `error -32` (EPIPE, drops to full-speed) and `error -71` (EPROTO) on ports like `1-1.3.1.4.4`, `1-1.3.1.3.1`.
-- To scale past this, spread modems across a **second physical EHCI controller (`usb3`)** instead of stacking everything on `usb1` — don't add xHCI.
+- **This is a protocol limit, not a kernel policy and not a USB-2.0 quirk.** No sysctl or module param can raise it. EHCI/OHCI/xHCI are host-controller *register interfaces*, not the wire protocol — moving EHCI→xHCI does **not** buy more addresses. The only way to get more is **more host controllers (more buses)**.
+- **Every hub chip costs 1 address. An EC20 costs exactly 1** — its 5 USB interfaces (4× `option` + 1× `qmi_wwan`) share one device address.
 
-Vendor IDs: `1a40` = Terminus hub chips (Juyoc hubs), `2c7c` = Quectel modems (EC20 descriptors may misreport as EC25/`0125`), `05e3` = Genesys hub (the one wired to xHCI — leave unused).
+**Measured hub cost** — the label is sockets, the cost is chips:
+
+| Hardware (label) | Internal chips | Addresses | Sockets |
+|---|---|---|---|
+| "10-port" small hub | 4× `1a40:0101` cascaded: `1-1` → `1-1.2`/`1-1.3`/`1-1.4` | 4 | 10 |
+| "100-port" hub — **per cable** | 1× `1a40:0201` 7-port MTT + 5× `1a40:0101` leaf | **6** | **20** |
+| "100-port" hub — all 5 cables | | 30 | 100 |
+| EC20 modem | — | 1 | — |
+
+**Capacity per bus** with N cables from a 100-port hub behind the small hub:
+`1 (root) + 4 (small hub) + 6N + modems ≤ 127`, and `modems ≤ 20N`
+
+| N cables | hub cost | max modems |
+|---|---|---|
+| 4 | 29 | 80 (socket-limited) |
+| **5** | **35** | **92 ← peak** |
+| 6 | 41 | 86 |
+| 10 | 65 | **62** |
+
+**Past 5 cables, adding cables REDUCES capacity.** Concretely: 77 modems fit on 4 cables (106/127) but do **not** fit on 10 cables (142 > 127). **Fill a cable's 20 sockets before connecting another** — a half-empty block burns 6 addresses for nothing. 95 modems cannot fit on one bus (peak 92); two buses are mandatory.
+
+**Bus ↔ physical socket** (verified via device-tree PHY phandles — controllers sharing a phandle share one physical connector). Board: Orange Pi 5 Plus (RK3588).
+
+| Physical socket | Buses | Type |
+|---|---|---|
+| **A** | `usb1` (EHCI 480M) + `usb2` (OHCI 12M) — PHY `0x29` | USB 2.0 |
+| **B** | `usb3` (EHCI 480M) + `usb4` (OHCI 12M) — PHY `0x2b` | USB 2.0 |
+| **C** | `usb5` + `usb6` — same controller `fc400000.usb` | USB 3.0 xHCI — **leave unused** |
+
+Each bus has its own independent 127-address pool. Prefer EHCI: EC20 is USB 2.0 (480M cap) so xHCI's 5Gbps adds nothing, and xHCI's large per-device context ran out of resources with many devices (`error -12` ENOMEM, every modem failed to configure).
+
+### USB failure modes — two distinct causes, do not conflate
+
+**A. Signal integrity (verified).** `error -71` (EPROTO), `error -32` (EPIPE), `Cannot enable. Maybe the USB cable is bad?`. **Count the path segments to get the blast radius:**
+- `1-1.4-port1` (2 segments) = a small-hub port → **an entire 20-socket block dies at once**, all its modems vanish together
+- `1-1.3.3.4-port1` (4 segments) = a leaf-hub port → **a single modem**
+
+Repeated retries on one port (39× observed) indicate an *intermittent* fault, not a hard break.
+
+**B. Address exhaustion (verified).** When devnums 1–127 are all allocated, nothing new can enumerate. **It does NOT print "not accepting address"** — that message only appears *after* an address was allocated and `SET_ADDRESS` sent. Real exhaustion takes the `-ENOTCONN` path in `choose_devnum()`/`hub_port_init()`. Check with `lsusb | grep -c "Bus 001"`, not by reading error text.
+
+### ⚠️ UNVERIFIED HYPOTHESIS — passive USB extension cables (raised 2026-08-05, NOT tested)
+
+Passive extension cables are in use between 100-port hub sockets and EC20 modules to relieve physical crowding (hub sockets are too closely spaced).
+
+- **Verified fact:** the USB spec prohibits A-plug-to-A-socket extension cables — they *"violate the cable length requirements of USB."*
+- **Verified fact:** a passive cable adds **no** tier and consumes **no** address — it is invisible to `lsusb`. It does not affect the address budget.
+- **GUESS, not confirmed:** that these cables are causing the per-modem enumeration failures. Suspected mechanism is voltage drop across thin conductors during LTE TX current bursts → module brownout → repeated re-enumeration, which would fit the observed "retry many times on one socket" pattern.
+
+**Do not treat this as diagnosed.** To test it: pick a port that repeatedly logs `Cannot enable` (e.g. `1-1.3.3.4-port1`), remove its extension cable, plug the module straight into the hub, restart the daemon, and see whether that one socket stabilises. If it does, the hypothesis holds for that class of failure.
+
+### USB diagnostics
+```bash
+lsusb | grep -c "Bus 001"                        # addresses used on bus1 (limit 127)
+lsusb | grep "Bus 001" | grep -c 1a40            # how many of those are hub chips
+lsusb | grep -c 2c7c                             # EC20 count
+dmesg | grep -oE "usb [0-9.-]+-port[0-9]+: (Cannot enable|unable to enumerate)" | sort | uniq -c | sort -rn
+```
+
+Vendor IDs: `1a40:0101` = Terminus 4-port hub chip, `1a40:0201` = Terminus 7-port MTT hub chip, `2c7c` = Quectel EC20 (descriptors may misreport as `0125`), `05e3` = Genesys hub (wired to xHCI — leave unused).
+
+Long-form analysis with topology diagrams: README → "Hardware / USB Topology".

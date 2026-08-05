@@ -332,22 +332,12 @@
                 {/if}
               </td>
               <td class="px-4 py-3 text-sm text-stone-800">{mapping.notes || mapping.description || "-"}</td>
-              <!-- USB physical path. Stable across reboot/replug, but when the modem
-                   is DOWN this is only the LAST KNOWN location — the modem is not
-                   enumerated there now, so don't render it as current fact. -->
-              <td class="px-4 py-3 text-sm font-mono">
+              <!-- USB physical path — where the modem is enumerated right now.
+                   Server NULLs this when a modem goes disconnected, so a value
+                   here always reflects a currently-present device. -->
+              <td class="px-4 py-3 text-sm font-mono text-stone-500">
                 {#if mapping.usb_path}
-                  {#if mapping.equipment_id && mapping.modem_status && mapping.modem_status !== 'disconnected'}
-                    <span class="text-stone-500" title={mapping.usb_path}>{mapping.usb_path}</span>
-                  {:else}
-                    <span
-                      class="text-stone-300"
-                      title={`上次已知位置 ${mapping.usb_path} — 当前未枚举,可能已移动或所在 hub 未上线`}
-                    >
-                      {mapping.usb_path}
-                      <span class="text-[10px]">(上次)</span>
-                    </span>
-                  {/if}
+                  <span title={mapping.usb_path}>{mapping.usb_path}</span>
                 {:else}
                   <span class="text-stone-300">-</span>
                 {/if}
@@ -501,10 +491,9 @@
                 </div>
               </div>
               {#if mapping.usb_path}
-                {@const modemUp = mapping.equipment_id && mapping.modem_status && mapping.modem_status !== 'disconnected'}
                 <div class="flex items-center justify-between text-xs">
-                  <span class="text-stone-500">USB 位置{modemUp ? '' : '(上次)'}</span>
-                  <span class="font-mono {modemUp ? 'text-stone-800' : 'text-stone-400'}">{mapping.usb_path}</span>
+                  <span class="text-stone-500">USB 位置</span>
+                  <span class="font-mono text-stone-800">{mapping.usb_path}</span>
                 </div>
               {/if}
               {#if mapping.notes || mapping.description}
