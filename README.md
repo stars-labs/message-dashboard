@@ -120,97 +120,187 @@ bunx wrangler d1 execute sms-dashboard --remote --command="SELECT * FROM device_
 
 ## Hardware / USB Topology
 
-### Current Setup (~67 modems active)
+### USB Controllers (buses) on the Orange Pi
 
-The 100-port hub is internally divided into 5 independent USB blocks, each connected by a separate cable to the intermediate hubs under the small hub.
+A **bus = one USB host controller**, and the 127-address limit applies **per bus**. Each USB 2.0 physical socket is served by a paired EHCI (high-speed) + OHCI (low/full-speed) controller:
+
+| Bus | Hardware address | Controller | Physical socket |
+|-----|-----------------|-----------|-----------------|
+| `usb1` | `fc800000.usb` | EHCI 480M | **Socket A** — hub-1 + hub-2 (saturated) |
+| `usb2` | `fc840000.usb` | OHCI 12M | Socket A (low-speed half) |
+| `usb3` | `fc880000.usb` | EHCI 480M | **Socket B — FREE, expansion target** |
+| `usb4` | `fc8c0000.usb` | OHCI 12M | Socket B (low-speed half) |
+| `usb5`/`usb6` | `fc400000.usb` | xHCI | USB 3.0 socket — intentionally unused |
+
+> xHCI is avoided: EC20 is USB 2.0 only, so 5Gbps gives zero benefit, and xHCI exhausts per-device context memory at scale (`error -12`, ENOMEM).
+> The EHCI/OHCI socket pairing above is inferred from the standard Rockchip layout — confirm by plugging a device in and checking which bus it appears on.
+
+### Hub Internals — sockets vs. chips
+
+The number on the label is the count of **external sockets you can plug into**. Internally each enclosure is a **cascade of Terminus hub chips**, and *every chip costs one USB address before a single modem is plugged in*. Sockets are what you see; chips are what the kernel counts.
+
+**"100-port" big hub** — 5 independent blocks, one cable each:
 
 ```
-Orange Pi  (EHCI usb1, USB 2.0 480M)
-└── 1-1   Juyoc small hub (4-port)
-     ├── 1-1.2  4-port intermediate hub  [currently EMPTY]
-     ├── 1-1.3  4-port intermediate hub
-     │    ├── 1-1.3.1  ← hub-1 cable 1  (7-port MTT)
-     │    │    ├── 1-1.3.1.2.x  EC20 × 4
-     │    │    ├── 1-1.3.1.3.x  EC20 × 4
-     │    │    ├── 1-1.3.1.4.x  EC20 × 3
-     │    │    ├── 1-1.3.1.5.x  EC20 × 2
-     │    │    └── 1-1.3.1.6.x  EC20 × 3
-     │    ├── 1-1.3.2  [EMPTY]
-     │    ├── 1-1.3.3  ← hub-1 cable 2  (7-port MTT)
-     │    │    ├── 1-1.3.3.2.x  EC20 × 3
-     │    │    ├── 1-1.3.3.3.x  EC20 × 1
-     │    │    ├── 1-1.3.3.4.x  EC20 × 1
-     │    │    ├── 1-1.3.3.5.x  EC20 × 2
-     │    │    └── 1-1.3.3.6.x  EC20 × 3
-     │    └── 1-1.3.4  ← hub-1 cable 3  (7-port MTT)
-     │         ├── 1-1.3.4.2.x  EC20 × 3
-     │         ├── 1-1.3.4.3.x  EC20 × 2
-     │         ├── 1-1.3.4.4.x  EC20 × 1
-     │         ├── 1-1.3.4.5.x  EC20 × 2
-     │         └── 1-1.3.4.6.x  EC20 × 4
-     └── 1-1.4  4-port intermediate hub
-          ├── 1-1.4.1  [EMPTY]
-          ├── 1-1.4.2  ← hub-1 cables 4+5  (7-port MTT)
-          │    ├── 1-1.4.2.2.x  EC20 × 4
-          │    ├── 1-1.4.2.3.x  EC20 × 3
-          │    ├── 1-1.4.2.4.x  EC20 × 2
-          │    ├── 1-1.4.2.5.x  EC20 × 3
-          │    └── 1-1.4.2.6.x  EC20 × 3
-          ├── 1-1.4.3  [EMPTY]
-          └── 1-1.4.4  [EMPTY]
+1 block (1 cable) = 1× 1a40:0201  7-port MTT chip
+                     └── MTT ports 2,3,4,5,6 → 5× 1a40:0101 4-port leaf chips
+                          └── 5 × 4 = 20 external sockets
 ```
 
-> All modems run on **Bus 001 (EHCI, USB 2.0)**. The xHCI controllers (Bus 005/006) are intentionally unused — EC20 is USB 2.0 only, and xHCI exhausts per-device context memory at scale (`error -12`, ENOMEM).
-> USB path format: `1-1.A.B.C.D` = Bus1 → small-hub port A → intermediate-hub port B → big-hub-block port C → modem port D.
+| | Sockets | Chips (= addresses) |
+|---|---------|--------------------|
+| Per block (per cable) | **20** | 1 MTT + 5 leaf = **6** |
+| Per 100-port hub (5 blocks) | **100** | **30** |
+
+**"10-port" small hub** — 4× `1a40:0101` 4-port chips, verified port wiring:
+
+| Chip | Downstream ports used | External sockets exposed |
+|------|----------------------|------------------------|
+| `1-1` (upstream) | 2, 3, 4 → the 3 chips below | 0 |
+| `1-1.2` | 1, 2, 3, 4 (full) | 4 |
+| `1-1.3` | 1, 2, 3, 4 (full) | 4 |
+| `1-1.4` | 1 | 2 |
+| | | **10 sockets, 4 addresses** |
+
+**An EC20 costs exactly 1 address** — its 5 USB interfaces (4× `option` + 1× `qmi_wwan`) share a single device address.
+
+> **Sockets are never the constraint — addresses are.** Two 100-port hubs expose 200 sockets, but their 60 chip-addresses plus the small hub leave only `127 − 1 − 64 = 62` addresses for modems.
+
+### Current State (2026-08-05) — Bus 001 SATURATED
+
+```
+Bus 001 = 127 / 127 addresses  ← HARD LIMIT REACHED, verified exactly
+    1   root hub
+    4   small-hub chips        (the "10-port" enclosure)
+    9   MTT block chips        ← only 9 of 10 cables enumerated
+   45   leaf 4-port chips      (9 blocks × 5)
+   68   EC20 modems            ← 127 − 59 hub/root addresses = 68 online
+```
+
+> **One entire cable failed to enumerate.** Two 100-port hubs = 10 cables, but only 9 MTT blocks appear. The 10th block (`1-1.4.2`) died on a *signal-integrity* error, not address exhaustion — see the two distinct failure modes below. Its 20 sockets are unusable, so every modem on it is invisible to the host.
+
+```
+Orange Pi socket A → usb1 (EHCI)
+└── 1-1   "10-port" small hub, upstream chip
+     │      (ports 2,3,4 → internal chips; no external socket)
+     ├── 1-1.2  chip — 4 external sockets, ALL occupied
+     │    ├── 1-1.2.1  MTT block → 11 EC20
+     │    ├── 1-1.2.2  MTT block →  9 EC20
+     │    ├── 1-1.2.3  MTT block →  8 EC20
+     │    └── 1-1.2.4  MTT block →  6 EC20   (2 empty leaf chips)
+     ├── 1-1.3  chip — 4 external sockets, ALL occupied
+     │    ├── 1-1.3.1  MTT block →  0 EC20   ← 6 addresses wasted, 20 sockets idle
+     │    ├── 1-1.3.2  MTT block →  8 EC20
+     │    ├── 1-1.3.3  MTT block →  6 EC20   (2 empty leaf chips)
+     │    └── 1-1.3.4  MTT block →  9 EC20
+     └── 1-1.4  chip — 2 external sockets
+          ├── 1-1.4.1  MTT block → 11 EC20
+          └── (port 2)  ← the ONLY free socket on the small hub
+```
+
+Cable accounting: 9 of the small hub's 10 sockets are occupied, giving 9 MTT blocks (4+4+1). Two 100-port hubs should supply 10 cables — the 10th either isn't plugged in or failed to enumerate.
+
+> USB path format: `1-1.A.B.C.D` = Bus1 → small-hub chip port A → MTT block port B → leaf sub-hub port C → modem port D.
 > Full SIM ↔ IMEI ↔ USB path table: [`sim-ec20-usb-location.md`](sim-ec20-usb-location.md)
+
+### Two distinct failure modes — don't conflate them
+
+**A. Signal integrity (the problem today).** Deep hub tiers produce protocol errors that kill whole blocks:
+
+```
+usb 1-1.4.2: device descriptor read/8, error -71     ← the MTT chip itself
+usb 1-1.4-port2: unable to enumerate USB device      ← whole block dropped, 20 sockets lost
+usb 1-1.3.2.4-port4: unable to enumerate USB device
+```
+
+Measured error counts: **79× `error -71` (EPROTO)**, **36× `error -32` (EPIPE)**, **0× `error -12` (ENOMEM)**.
+
+Two proofs this is *not* address exhaustion:
+- `device not accepting address N` is only printed *after* the kernel has already allocated address N and sent `SET_ADDRESS` — an address was available.
+- On real devnum exhaustion, `choose_devnum()` in `drivers/usb/core/hub.c` finds no free bit, `devnum` stays 0, and `hub_port_init` bails out early with `-ENOTCONN`. That path never prints "not accepting address".
+
+Tier depth is the likely driver — every level adds propagation delay and jitter:
+
+```
+tier 1  root hub              tier 4  1-1.2.1      MTT chip
+tier 2  1-1    small-hub up   tier 5  1-1.2.1.5    leaf chip
+tier 3  1-1.2  small-hub int  tier 6  1-1.2.1.5.2  EC20
+```
+
+USB 2.0 permits 7 tiers (root + 5 external hubs + device). This chain uses **4 external hub levels — legal, but close to the limit**.
+
+**B. Address exhaustion (the future wall).** Verified by reading every `devnum` in sysfs: **devnums 1–127 are all allocated, zero gaps**. Nothing new can enumerate on this bus from now on, regardless of signal quality.
+
+The address field in a USB token packet is **7 bits** → 128 values, and **address 0 is reserved** for devices that have not yet been assigned one, leaving 127 usable. Hubs are USB devices and consume addresses from the same pool — verified here, where all 58 hub chips hold their own devnum. Reference: [USB in a NutShell, Ch. 3](https://www.beyondlogic.org/usbnutshell/usb3.shtml).
 
 ---
 
-### Target Setup — Adding Hub-2 (same usb1 bus)
+### Why two 100-port hubs on one bus cannot work
 
-Hub-2's 5 cables slot into the 7 currently empty ports across the existing intermediate hubs. Both hub-1 and hub-2 share the same `usb1` bus (127-address limit shared).
+Each 100-port hub costs **30 addresses** of pure hub overhead (5 blocks × 6 chips). Putting both on `usb1`:
 
 ```
-Orange Pi  (EHCI usb1, USB 2.0 480M)
-└── 1-1   Juyoc small hub (4-port)
-     ├── 1-1.2  4-port intermediate hub
-     │    ├── 1-1.2.1  ← hub-2 cable 1  (7-port MTT)
-     │    ├── 1-1.2.2  ← hub-2 cable 2  (7-port MTT)
-     │    ├── 1-1.2.3  ← hub-2 cable 3  (7-port MTT)
-     │    └── 1-1.2.4  ← hub-2 cable 4  (7-port MTT)
-     ├── 1-1.3  4-port intermediate hub
-     │    ├── 1-1.3.1  ← hub-1 cable 1  (existing)
-     │    ├── 1-1.3.2  ← hub-2 cable 5  (7-port MTT)
-     │    ├── 1-1.3.3  ← hub-1 cable 2  (existing)
-     │    └── 1-1.3.4  ← hub-1 cable 3  (existing)
-     └── 1-1.4  4-port intermediate hub
-          ├── 1-1.4.1  [still free — future usb3 migration anchor]
-          ├── 1-1.4.2  ← hub-1 cables 4+5  (existing)
-          ├── 1-1.4.3  [still free]
-          └── 1-1.4.4  [still free]
+1 root + 4 (small hub) + 60 (two 100-port hubs, all 10 cables) = 65 addresses
+127 − 65 = 62 modem slots
+
+Today only 9 of 10 cables enumerated, so: 1 + 4 + 54 = 59  →  68 modems online
 ```
 
-> ⚠️ **Address budget**: Bus 001 currently has ~76 device nodes, limit is 127. Hub-2 tree adds ~6 hub nodes + ~5 per new EC20. Headroom for ~8-9 additional modems before hitting the bus limit. To truly scale beyond this, move hub-2 to `usb3` (separate EHCI controller, independent 127-address space) once a second small hub is available.
+**More cables actively costs you modems.** Splitting across two hubs on the same bus is self-defeating: the 200 sockets are unreachable because hub chips eat the address budget. To exceed ~68, hub-2 must move to its own bus.
+
+### Target Setup — hub-2 on Bus 003 (socket B)
+
+```
+Socket A → usb1 (EHCI)              Socket B → usb3 (EHCI)
+└── small hub      (4 addr)         └── hub-2  (30 addr)
+     └── hub-1     (30 addr)             └── up to ~96 EC20
+          └── up to ~92 EC20
+```
+
+| Bus | Root + hub overhead | Modem capacity |
+|-----|--------------------|----------------|
+| `usb1` — small hub + hub-1 | 35 | **~92** |
+| `usb3` — hub-2 | 31 | **~96** |
+
+That covers all 95 SIMs with headroom.
+
+**Constraint**: the `usb3` root hub has only **1 port**, so fanning out all 5 hub-2 cables needs a second small hub on socket B. Without one, plugging **a single hub-2 cable** straight into socket B still gives that block a fresh 127-address bus — **20 usable sockets for only 7 addresses** of overhead.
+
+---
+
+### Immediate Zero-Cost Win — reclaim wasted addresses
+
+9 leaf sub-hubs and 1 entire MTT block are enumerated with **zero modems attached**, each still holding an address:
+
+| Empty hub | Addresses reclaimed |
+|-----------|--------------------|
+| `1-1.3.1` block + its 5 empty leaf sub-hubs | 6 |
+| `1-1.3.3.3`, `1-1.3.3.4` | 2 |
+| `1-1.2.4.5`, `1-1.2.4.6` | 2 |
+
+Unplugging these frees ~10 addresses → ~10 more modems can enumerate, with no new hardware.
 
 ---
 
 ### Migration Steps
 
-**Pre-check** (verify before touching hardware):
+**Pre-check**:
 ```bash
-# Confirm available ports
-ssh root@10.171.150.102 'lsusb -t | grep "Bus 001" -A 8'
-# Current bus address usage (limit = 127)
-ssh root@10.171.150.102 'lsusb | grep "Bus 001" | wc -l'
+# Bus 001 address usage (limit = 127)
+ssh root@10.171.150.102 'lsusb | grep -c "Bus 001"'
+# Hub vs modem split
+ssh root@10.171.150.102 'echo "hubs: $(lsusb | grep "Bus 001" | grep -c 1a40)  modems: $(lsusb | grep -c 2c7c)"'
+# Enumeration failures
+ssh root@10.171.150.102 'dmesg | grep -iE "unable to enumerate|not accepting address" | tail'
 ```
 
 | Step | Action | Command |
 |------|--------|---------|
 | 1 | Stop daemon | `systemctl stop sms-daemon` |
-| 2 | Connect hub-2 cables: 4 into `1-1.2` ports 1-4, 1 into `1-1.3.2`. Power on, leave modems unplugged | — |
-| 3 | Verify hub-2 enumerates (5 new MTT hubs should appear) | `lsusb \| grep 1a40` |
-| 4 | Move modems from hub-1 to hub-2 — **move entire 7-port block groups**, not individual modems | — |
-| 5 | Start daemon | `systemctl start sms-daemon` |
+| 2 | Move hub-2's cables from socket A's small hub to socket B (`usb3`) | — |
+| 3 | Verify hub-2 appears on Bus 003 | `lsusb -t \| grep -A5 "Bus 003"` |
+| 4 | Confirm Bus 001 address usage dropped | `lsusb \| grep -c "Bus 001"` |
+| 5 | Start daemon (rebuilds its static modem cache) | `systemctl start sms-daemon` |
 | 6 | Verify online count | `journalctl -u sms-daemon -f` |
 | 7 | Re-scan IMEI↔USB to regenerate `sim-ec20-usb-location.md` | stop daemon → AT+CGSN scan → start daemon |
 
@@ -218,10 +308,11 @@ ssh root@10.171.150.102 'lsusb | grep "Bus 001" | wc -l'
 
 | Risk | Mitigation |
 |------|-----------|
-| Bus 001 hits 127-address limit after adding hub-2 | Expected at ~8-9 new modems. Next step: move hub-2 to `usb3` (second EHCI, independent bus) |
-| ttyUSB numbers reshuffle | Expected — use USB path as stable ID, not ttyUSB |
-| Queued messages lost during move | Stop daemon first; local SQLite queue persists across restarts |
-| hub-2 is non-MTT | Verify with `lsusb -v \| grep -i translator` — non-MTT serialises all traffic, kills throughput |
+| `usb3` root hub has only 1 port | Needs a second small hub for all 5 cables; a single cable still yields 20 sockets on a fresh bus |
+| ttyUSB numbers reshuffle after any replug | Expected — USB path is the stable ID, ttyUSB is volatile per boot |
+| Daemon keeps a **static** modem cache | Always restart the daemon after any physical change |
+| Queued messages lost during move | Stop daemon first; the local SQLite queue persists across restarts |
+| hub-2 is non-MTT | Verify with `lsusb -v \| grep -i translator` — non-MTT serialises all traffic |
 
 ## Key Design Decisions
 
