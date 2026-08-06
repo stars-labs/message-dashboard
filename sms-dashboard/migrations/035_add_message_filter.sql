@@ -46,6 +46,9 @@ ALTER TABLE messages ADD COLUMN filter_rule_id INTEGER REFERENCES filter_rules(i
 CREATE INDEX IF NOT EXISTS idx_messages_filter_ts       ON messages(filter_status, timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_iccid_filter_ts ON messages(phone_iccid, filter_status, timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_filter_rules_active      ON filter_rules(is_active);
+-- Supports the per-rule hit count on the rules screen, and the "release every row
+-- this rule hides" step run whenever a rule is edited or deleted.
+CREATE INDEX IF NOT EXISTS idx_messages_filter_rule_id  ON messages(filter_rule_id);
 
 -- Seed rules.
 --

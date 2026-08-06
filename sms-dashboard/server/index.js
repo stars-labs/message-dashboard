@@ -12,6 +12,7 @@ import { healthHandler } from './handlers/health';
 import { serveFrontend } from './frontend-handler';
 import { createRoleConfig, hasSmSAccess } from '../config/auth0-roles.js';
 import { setupKeywordRoutes } from './api/keywords.js';
+import { setupFilterRoutes } from './api/filters.js';
 
 // Simple router implementation without itty-router
 class SimpleRouter {
@@ -358,6 +359,9 @@ router.post('/api/control/heartbeat', async (request) => {
 
 // Setup keyword routes
 setupKeywordRoutes(router);
+
+// Setup spam/marketing filter rule routes
+setupFilterRoutes(router);
 
 // Login page route - removed duplicate, using auth0Handler.login above
 
