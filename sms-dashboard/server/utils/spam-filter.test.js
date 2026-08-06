@@ -154,6 +154,55 @@ describe('classifyMessage — messages that must never be filtered', () => {
   });
 });
 
+// 10010 is 2,864 of the 8,624 messages in the real table, but 14 of those are
+// genuine 联通网上营业厅 login codes. Blanket-blocking the shortcode would hide them,
+// so a labelled code overrides every rule.
+describe('classifyMessage — OTP safety guard', () => {
+  test('keeps a real 10010 verification code even though 10010 is blocked', () => {
+    const msg = received({
+      content: '验证码：754852，感谢您使用网上营业厅【中国联通】',
+      phone_number: '10010',
+    });
+    expect(classifyMessage(msg, RULES)).toEqual({
+      filter_status: 'clean',
+      filter_rule_id: null,
+    });
+  });
+
+  test('still filters 10010 marketing that carries no labelled code', () => {
+    const msg = received({
+      content:
+        '【中国联通】尊敬的用户，您在中国联通订购的"广东在网得24个月沃视频月卡优惠"(方案编号: 25GD300965)，将于2026-08-31到期。',
+      phone_number: '10010',
+    });
+    expect(classifyMessage(msg, RULES)).toEqual({
+      filter_status: 'filtered',
+      filter_rule_id: 5,
+    });
+  });
+
+  test('the guard beats body-keyword rules too, not just sender rules', () => {
+    const msg = received({
+      content: '中国海关提示，请勿携带下列物品。您的验证码是 445566',
+      phone_number: '10086',
+    });
+    expect(classifyMessage(msg, RULES).filter_status).toBe('clean');
+  });
+
+  test('protects English OTPs, which the Singapore SIMs receive', () => {
+    const msg = received({
+      content: 'Your Google verification code is 123456',
+      phone_number: '10010',
+    });
+    expect(classifyMessage(msg, RULES).filter_status).toBe('clean');
+  });
+
+  test('a bare year is not a labelled code, so it does not rescue marketing', () => {
+    const msg = received({ content: '优惠将于2026-08-31到期', phone_number: '10086' });
+    expect(classifyMessage(msg, RULES).filter_status).toBe('filtered');
+  });
+});
+
 describe('classifyMessage — malformed input', () => {
   test('tolerates a missing body', () => {
     expect(classifyMessage(received({ content: null }), RULES).filter_status).toBe('clean');

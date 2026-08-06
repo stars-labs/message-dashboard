@@ -1,5 +1,7 @@
 // Spam/marketing SMS classification.
 //
+import { hasLabelledCode } from './verification.js';
+
 // This module is the ONLY place that decides whether a message is spam.
 // Callers (ingest in handlers/control.js, backfill in api/filters.js) may use SQL
 // to narrow down which rows are worth looking at, but the verdict always comes
@@ -60,6 +62,15 @@ export function classifyMessage(message, rules) {
   if (!Array.isArray(rules) || rules.length === 0) return clean();
 
   const content = typeof message.content === 'string' ? message.content : '';
+
+  // OTP safety guard, and the whole point of the dashboard: a message that
+  // explicitly announces a verification code outranks every rule.
+  //
+  // Without this, the '10010' sender rule would hide 14 genuine 网上营业厅 login
+  // codes along with the 2,850 marketing messages from the same shortcode.
+  // Only LABELLED codes count — see verification.js on why the bare-digit
+  // fallback must not be used here.
+  if (hasLabelledCode(content)) return clean();
   const sender = normalizeSender(message.phone_number);
 
   for (const rule of rules) {
