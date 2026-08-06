@@ -5,7 +5,11 @@
  */
 
 const DB_NAME = 'sms-dashboard-cache';
-const DB_VERSION = 1;
+// v2: spam filtering added. Every existing cache holds marketing SMS that the
+// server now hides, and cached rows have no filter_status at all. Without this
+// bump those messages keep rendering from IndexedDB and the filter looks broken.
+// Raise this again whenever a change makes previously cached rows wrong.
+const DB_VERSION = 2;
 const MESSAGES_STORE = 'messages';
 const META_STORE = 'meta';
 
@@ -33,6 +37,18 @@ async function initDB() {
 
     request.onupgradeneeded = (event) => {
       const database = event.target.result;
+
+      // Any upgrade discards the cache rather than trying to migrate rows. The
+      // cache is a disposable copy of the server's data, so refetching is always
+      // cheaper and safer than reasoning about what stale rows are missing.
+      if (event.oldVersion > 0) {
+        for (const name of [MESSAGES_STORE, META_STORE]) {
+          if (database.objectStoreNames.contains(name)) {
+            database.deleteObjectStore(name);
+          }
+        }
+        console.debug(`[MessageCache] cleared cache upgrading v${event.oldVersion} -> v${DB_VERSION}`);
+      }
 
       // Messages store with indexes
       if (!database.objectStoreNames.contains(MESSAGES_STORE)) {

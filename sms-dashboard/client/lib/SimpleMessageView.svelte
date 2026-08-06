@@ -8,8 +8,22 @@
   export let isLoading = false;
   export let newMessageIds = new Set();
   export let onClearPhone = null;
+  /** Whether spam/marketing messages are currently being shown. */
+  export let showFiltered = false;
+  /** How many messages the filter is hiding, from pagination.filtered_count. */
+  export let filteredCount = 0;
+  /** Called when the user flips the toggle; the parent refetches. */
+  export let onToggleFiltered = null;
+  /** Filter rules, used to name the rule that hid a message. */
+  export let filterRules = [];
 
   let activeKeywords = [];
+
+  // id -> readable label, so a hidden message can say WHY it was hidden.
+  let ruleLabels = {};
+  $: ruleLabels = Object.fromEntries(
+    (filterRules || []).map(r => [r.id, r.note || r.pattern])
+  );
 
   // Subscribe to keywords store
   const unsubscribe = keywordsStore.subscribe(value => {
@@ -58,20 +72,39 @@
 
 <div class="bg-white border border-stone-200 rounded-xl shadow-sm flex flex-col h-full min-h-0">
   <div class="p-4 border-b border-stone-200 flex-shrink-0">
-    <h2 class="text-lg font-semibold text-stone-900 flex items-center justify-between">
-      {#if selectedPhone}
-        <span>{selectedPhone.flag} {selectedPhone.number}</span>
-        {#if onClearPhone}
+    <div class="flex items-center justify-between gap-2">
+      <h2 class="text-lg font-semibold text-stone-900 truncate">
+        {#if selectedPhone}
+          <span>{selectedPhone.flag} {selectedPhone.number}</span>
+        {:else}
+          <span>最新消息 (所有设备)</span>
+        {/if}
+      </h2>
+
+      <div class="flex items-center gap-2 shrink-0">
+        <!-- Spam is hidden by default, but never silently: the count is always
+             visible and one click reveals what was hidden and why. -->
+        {#if onToggleFiltered && (filteredCount > 0 || showFiltered)}
+          <button
+            on:click={onToggleFiltered}
+            class="px-2 py-1 text-xs rounded-md border transition-colors {showFiltered
+              ? 'bg-amber-50 border-amber-300 text-amber-700 hover:bg-amber-100'
+              : 'bg-stone-50 border-stone-200 text-stone-500 hover:bg-stone-100 hover:text-stone-700'}"
+            title={showFiltered ? '点击隐藏垃圾短信' : '点击查看被过滤的垃圾短信'}
+          >
+            {showFiltered ? '隐藏已过滤' : `已过滤 ${filteredCount} 条`}
+          </button>
+        {/if}
+
+        {#if selectedPhone && onClearPhone}
           <button
             on:click={onClearPhone}
-            class="ml-2 px-2 py-0.5 text-xs text-stone-400 hover:text-stone-600 hover:bg-stone-100 rounded transition-colors"
+            class="px-2 py-1 text-xs text-stone-400 hover:text-stone-600 hover:bg-stone-100 rounded-md transition-colors"
             title="返回所有设备"
           >✕ 清除筛选</button>
         {/if}
-      {:else}
-        <span>最新消息 (所有设备)</span>
-      {/if}
-    </h2>
+      </div>
+    </div>
   </div>
 
   <div class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-4">
@@ -104,11 +137,24 @@
     {:else}
       <div class="space-y-3">
         {#each displayMessages as message}
-          <div class="rounded-lg p-3 border transition-colors duration-500 {newMessageIds.has(message.id) ? 'bg-orange-50 border-orange-300 border-l-4 border-l-orange-500' : 'bg-stone-50 border-stone-200'}">
+          <div class="rounded-lg p-3 border transition-colors duration-500 {message.filter_status === 'filtered'
+            ? 'bg-stone-100/70 border-stone-200 border-dashed opacity-70'
+            : newMessageIds.has(message.id)
+              ? 'bg-orange-50 border-orange-300 border-l-4 border-l-orange-500'
+              : 'bg-stone-50 border-stone-200'}">
             <div class="flex items-center justify-between text-xs text-stone-400 mb-2">
               <div class="flex items-center gap-1 min-w-0">
                 {#if newMessageIds.has(message.id)}
                   <span class="px-1.5 py-0.5 bg-orange-500 text-white rounded text-[10px] font-bold shrink-0">新</span>
+                {/if}
+                {#if message.filter_status === 'filtered'}
+                  <!-- Name the rule, so a wrongly hidden message points at its cause. -->
+                  <span
+                    class="px-1.5 py-0.5 bg-stone-200 text-stone-600 rounded text-[10px] font-medium shrink-0"
+                    title={ruleLabels[message.filter_rule_id] ? `匹配规则: ${ruleLabels[message.filter_rule_id]}` : '已被垃圾过滤规则隐藏'}
+                  >
+                    已过滤{ruleLabels[message.filter_rule_id] ? `: ${ruleLabels[message.filter_rule_id]}` : ''}
+                  </span>
                 {/if}
                 {#if message.type === 'sent'}
                   <!-- For sent messages: show recipient as 接收卡, sender as 发送方 -->

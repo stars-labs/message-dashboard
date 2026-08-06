@@ -86,6 +86,25 @@
   let pollInterval = null;
   const POLL_INTERVAL_MS = 15000; // 15 seconds
   let newMessageIds = new Set(); // Track newly arrived message IDs for "新" badge
+
+  // Spam/marketing filtering. Hidden by default; the count is always shown so the
+  // filter is never silent, and toggling refetches with include_filtered=1.
+  let showFiltered = false;
+  let filteredCount = 0;
+  let filterRules = []; // Loaded lazily, only to name the rule that hid a message
+
+  async function toggleFiltered() {
+    showFiltered = !showFiltered;
+    if (showFiltered && filterRules.length === 0) {
+      try {
+        const response = await api.get('/api/filters');
+        filterRules = response?.filters || [];
+      } catch (error) {
+        console.warn('[App] Could not load filter rules for labels:', error);
+      }
+    }
+    await loadMessagesForPhone(selectedPhoneIccid);
+  }
   let lastKnownTimestamp = null; // Only flag messages newer than this as "新"
   let daemonRefreshing = false;
 
@@ -322,14 +341,18 @@
     const requestId = ++messageRequestId;
 
     try {
-      const response = await api.getMessages(
-        phoneIccid
-          ? { phone_iccid: phoneIccid, limit: 500 }
-          : { limit: 2000 }
-      );
+      const response = await api.getMessages({
+        ...(phoneIccid ? { phone_iccid: phoneIccid, limit: 500 } : { limit: 2000 }),
+        ...(showFiltered ? { include_filtered: 1 } : {})
+      });
 
       // Discard if user switched phones while we were loading
       if (requestId !== messageRequestId) return;
+
+      // Keep the badge count fresh even when the offline cache served the list.
+      if (response?.pagination?.filtered_count !== undefined) {
+        filteredCount = response.pagination.filtered_count;
+      }
 
       if (response && response.data) {
         // Detect genuinely new messages: must have a timestamp newer than anything we've seen
@@ -950,7 +973,17 @@
           <div class="lg:col-span-2 flex flex-col gap-4 h-full min-h-0">
             <!-- Always show SimpleMessageView at the top -->
             <div class="flex-1 min-h-0 flex flex-col">
-              <SimpleMessageView {messages} {selectedPhone} isLoading={dataLoading} {newMessageIds} onClearPhone={() => selectPhone(null)} />
+              <SimpleMessageView
+                {messages}
+                {selectedPhone}
+                isLoading={dataLoading}
+                {newMessageIds}
+                onClearPhone={() => selectPhone(null)}
+                {showFiltered}
+                {filteredCount}
+                {filterRules}
+                onToggleFiltered={toggleFiltered}
+              />
             </div>
             <!-- Show PhoneDetails below if selected -->
             {#if selectedPhone}

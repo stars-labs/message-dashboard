@@ -149,6 +149,12 @@ export const api = {
     const cacheKey = phoneIccid || 'global';
     const forceRefresh = params.force_refresh || false;
 
+    // Auditing view ("显示已过滤"). Bypass IndexedDB entirely — neither read nor
+    // write — so spam never lands in the cache that backs the default view.
+    if (params.include_filtered) {
+      return await apiRequest('getMessages', params);
+    }
+
     try {
       // Step 1: Get cached messages first for immediate display
       let cachedMessages = [];
