@@ -3,6 +3,23 @@
 
 import { createRoleConfig, hasSmSAccess } from '../../config/auth0-roles.js';
 
+/**
+ * Every permission the SMS role grants. Single definition — this list was
+ * previously copy-pasted in three places, so adding a permission meant editing
+ * all three and any miss produced a silent 403.
+ */
+export const SMS_PERMISSIONS = [
+  'phones.read',
+  'messages.read',
+  'messages.send',
+  'keywords.read',
+  'keywords.write',
+  'keywords.delete',
+  'filters.read',
+  'filters.write',
+  'filters.delete',
+];
+
 export function requirePermission(permission) {
   return async function(request) {
     const { user, env } = request;
@@ -25,7 +42,7 @@ export function requirePermission(permission) {
       const userRoles = user.roles || [];
       
       // For SMS-related permissions, check if user has the SMS role
-      const smsPermissions = ['phones.read', 'messages.read', 'messages.send', 'keywords.read', 'keywords.write', 'keywords.delete'];
+      const smsPermissions = SMS_PERMISSIONS;
       if (smsPermissions.includes(permission)) {
         if (!hasSmSAccess(userRoles, roleConfig)) {
           const requiredRoles = [roleConfig.SMS_ROLE, ...roleConfig.ALTERNATIVE_SMS_ROLES].filter(r => r);
@@ -65,13 +82,13 @@ export async function enrichUserPermissions(request) {
     // When Auth0 roles are enabled, check roles strictly
     const userRoles = user.roles || [];
     if (hasSmSAccess(userRoles, roleConfig)) {
-      user.permissions = ['phones.read', 'messages.read', 'messages.send', 'keywords.read', 'keywords.write', 'keywords.delete'];
+      user.permissions = [...SMS_PERMISSIONS];
     } else {
       user.permissions = [];
     }
   } else {
     // Only grant permissions when Auth0 roles are explicitly disabled
-    user.permissions = ['phones.read', 'messages.read', 'messages.send', 'keywords.read', 'keywords.write', 'keywords.delete'];
+    user.permissions = [...SMS_PERMISSIONS];
   }
   
   return;
