@@ -167,9 +167,9 @@
                     <span class="shrink-0">• 发送方: {message.phone_number}</span>
                   {/if}
                 {/if}
-                {#if message.verificationCode}
+                {#if message.verification_code}
                   <span class="px-1.5 py-0.5 bg-emerald-100 text-emerald-700 rounded-full font-mono font-semibold shrink-0">
-                    {message.verificationCode}
+                    {message.verification_code}
                   </span>
                 {/if}
               </div>
