@@ -5,6 +5,7 @@
   "main": "src/index.js",
   "type": "module",
   "scripts": {
+    "test": "bun test",
     "dev": "bunx vite",
     "dev:api": "bunx wrangler dev",
     "build": "bunx vite build",
