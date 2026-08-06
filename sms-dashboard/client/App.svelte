@@ -7,6 +7,7 @@
   import PhoneDetails from "./lib/PhoneDetails.svelte";
   import IccidMappingDialog from "./lib/IccidMappingDialog.svelte";
   import KeywordConfig from "./lib/KeywordConfig.svelte";
+  import FilterRules from "./lib/FilterRules.svelte";
   import ErrorBoundary from "./lib/ErrorBoundary.svelte";
   import Toast from "./lib/Toast.svelte";
   import { api } from "./lib/api.js";
@@ -149,6 +150,8 @@
     const hash = window.location.hash.slice(1);
     if (hash === 'keywords') {
       currentView = 'keywords';
+    } else if (hash === 'filters') {
+      currentView = 'filters';
     } else if (hash === 'iccid-mappings') {
       currentView = 'iccid-mappings';
     } else if (hash === 'dashboard' || hash === '') {
@@ -713,6 +716,18 @@
             >
               关键词高亮
             </button>
+            <button
+              on:click={() => {
+                currentView = "filters";
+                window.location.hash = 'filters';
+              }}
+              class="px-4 py-2 rounded-lg transition-all {currentView ===
+              'filters'
+                ? 'bg-orange-50 text-orange-700 font-semibold'
+                : 'text-stone-500 hover:text-stone-900 hover:bg-stone-100'}"
+            >
+              垃圾过滤
+            </button>
           </div>
 
           <div class="hidden lg:flex items-center gap-4">
@@ -876,6 +891,17 @@
         >
           关键词
         </button>
+        <button
+          on:click={() => {
+            currentView = "filters";
+          }}
+          class="flex-1 px-3 py-2 rounded-lg text-sm transition-all {currentView ===
+          'filters'
+            ? 'bg-orange-50 text-orange-700 font-semibold'
+            : 'text-stone-500 hover:bg-stone-100'}"
+        >
+          垃圾过滤
+        </button>
       </div>
     </div>
 
@@ -1021,6 +1047,13 @@
         <!-- Keywords Configuration View -->
         <div class="px-4 lg:px-8 py-6 lg:flex-1 lg:min-h-0 lg:overflow-auto">
           <KeywordConfig />
+        </div>
+      </ErrorBoundary>
+    {:else if currentView === "filters"}
+      <ErrorBoundary componentName="FilterRules">
+        <!-- Spam/marketing filter rules -->
+        <div class="px-4 lg:px-8 py-6 lg:flex-1 lg:min-h-0 lg:overflow-auto">
+          <FilterRules />
         </div>
       </ErrorBoundary>
     {/if}
