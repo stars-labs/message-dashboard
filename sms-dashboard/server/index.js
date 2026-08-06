@@ -13,6 +13,8 @@ import { serveFrontend } from './frontend-handler';
 import { createRoleConfig, hasSmSAccess } from '../config/auth0-roles.js';
 import { setupKeywordRoutes } from './api/keywords.js';
 import { setupFilterRoutes } from './api/filters.js';
+import { purgeExpiredMessages } from './utils/message-retention.js';
+import { sweepPending } from './utils/spam-backfill.js';
 
 // Simple router implementation without itty-router
 class SimpleRouter {
@@ -453,6 +455,28 @@ export default {
         status: 500,
         headers: { 'Content-Type': 'application/json' }
       });
+    }
+  },
+
+  // Nightly maintenance (cron in wrangler.toml).
+  async scheduled(event, env, ctx) {
+    console.log(`[scheduled] cron ${event.cron} firing`);
+
+    // Retention first: no point classifying messages that are about to be deleted.
+    try {
+      const purge = await purgeExpiredMessages(env.DB);
+      console.log(`[scheduled] retention: deleted ${purge.deleted}, exhausted=${purge.exhausted}`);
+    } catch (error) {
+      console.error('[scheduled] retention failed:', error);
+    }
+
+    // Then finish any classification a request-scoped sweep ran out of time for.
+    // 'pending' is the cursor, so this self-heals an interrupted backfill.
+    try {
+      const sweep = await sweepPending(env.DB);
+      console.log(`[scheduled] classification: swept ${sweep.processed}, ${sweep.remaining} remaining`);
+    } catch (error) {
+      console.error('[scheduled] classification sweep failed:', error);
     }
   }
 };
