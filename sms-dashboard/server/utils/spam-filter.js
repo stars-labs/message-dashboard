@@ -18,6 +18,17 @@ export const FILTER_STATUS = {
   FILTERED: 'filtered',
 };
 
+/**
+ * Statuses the default message list shows.
+ *
+ * Note this is "not filtered", not "clean": an unswept row must stay VISIBLE.
+ * Requiring 'clean' would make every message vanish the moment migration 035
+ * lands (it defaults all existing rows to 'pending') and only trickle back as
+ * the backfill progressed — indistinguishable from data loss. Showing a message
+ * that later turns out to be spam is the harmless direction.
+ */
+export const VISIBLE_FILTER_STATUSES = [FILTER_STATUS.CLEAN, FILTER_STATUS.PENDING];
+
 /** Rule kinds allowed in filter_rules.rule_type. */
 export const RULE_TYPE = {
   /** Substring match against the message body. */

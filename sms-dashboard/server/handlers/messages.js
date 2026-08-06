@@ -1,5 +1,6 @@
 import { nanoid } from 'nanoid';
 import { extractVerificationCode } from '../utils/verification';
+import { FILTER_STATUS, VISIBLE_FILTER_STATUSES } from '../utils/spam-filter.js';
 
 export const messagesHandler = {
   // List messages with pagination
@@ -9,16 +10,41 @@ export const messagesHandler = {
     const phoneIccid = url.searchParams.get('phone_iccid');
     const limit = parseInt(url.searchParams.get('limit') || '50');
     const offset = parseInt(url.searchParams.get('offset') || '0');
-    
+    // Spam/marketing messages are hidden unless explicitly asked for.
+    const includeFiltered = url.searchParams.get('include_filtered') === '1';
+
     console.log('[Messages Handler] List request:', {
       phoneIccid,
       limit,
       offset,
+      includeFiltered,
       url: url.toString()
     });
 
     try {
-      let query = `
+      // Built once and shared by both queries so they can never disagree about
+      // which rows they are talking about. Each query keeps its OWN bind array.
+      const conditions = [];
+      const scopeParams = [];
+
+      if (phoneIccid) {
+        conditions.push(`phone_iccid = ?`);
+        scopeParams.push(phoneIccid);
+      }
+
+      const listConditions = [...conditions];
+      const listParams = [...scopeParams];
+
+      if (!includeFiltered) {
+        const placeholders = VISIBLE_FILTER_STATUSES.map(() => '?').join(', ');
+        listConditions.push(`filter_status IN (${placeholders})`);
+        listParams.push(...VISIBLE_FILTER_STATUSES);
+      }
+
+      const listWhere = listConditions.length ? `WHERE ${listConditions.map(c => `m.${c}`).join(' AND ')}` : '';
+      const countWhere = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+      const query = `
         SELECT
           m.*,
           COALESCE(dv.number, m.phone_number) as display_phone_number,
@@ -27,30 +53,35 @@ export const messagesHandler = {
           NULL as mapped_number
         FROM messages m
         LEFT JOIN device_view dv ON m.phone_iccid = dv.iccid
+        ${listWhere}
+        ORDER BY m.timestamp DESC
+        LIMIT ? OFFSET ?
       `;
-      let countQuery = `SELECT COUNT(*) as total FROM messages`;
-      const params = [];
+      listParams.push(limit, offset);
 
-      if (phoneIccid) {
-        query += ` WHERE m.phone_iccid = ?`;
-        countQuery += ` WHERE phone_iccid = ?`;
-        params.push(phoneIccid);
-      }
-
-      query += ` ORDER BY m.timestamp DESC LIMIT ? OFFSET ?`;
-      params.push(limit, offset);
+      // One aggregate gives both counts, so the "已过滤 N 条" badge costs no extra
+      // round trip. FILTER_STATUS.FILTERED is a module constant, not user input.
+      const countQuery = `
+        SELECT
+          COALESCE(SUM(CASE WHEN filter_status =  '${FILTER_STATUS.FILTERED}' THEN 1 ELSE 0 END), 0) AS filtered,
+          COALESCE(SUM(CASE WHEN filter_status <> '${FILTER_STATUS.FILTERED}' THEN 1 ELSE 0 END), 0) AS visible
+        FROM messages
+        ${countWhere}
+      `;
 
       const [messagesResult, count] = await Promise.all([
-        env.DB.prepare(query).bind(...params).all(),
-        env.DB.prepare(countQuery).bind(...(phoneIccid ? [phoneIccid] : [])).first()
+        env.DB.prepare(query).bind(...listParams).all(),
+        env.DB.prepare(countQuery).bind(...scopeParams).first()
       ]);
-      
+
       const messages = messagesResult.results || messagesResult;
+      const total = includeFiltered ? count.visible + count.filtered : count.visible;
 
       console.log('[Messages Handler] Query results:', {
         phoneIccid,
         count: messages.length,
-        totalCount: count.total,
+        totalCount: total,
+        filteredCount: count.filtered,
       });
       
       // DEBUG: Verify all messages have the correct ICCID when filtered
@@ -74,7 +105,9 @@ export const messagesHandler = {
         success: true,
         data: messages,
         pagination: {
-          total: count.total,
+          total,
+          filtered_count: count.filtered,
+          include_filtered: includeFiltered,
           limit,
           offset
         }
