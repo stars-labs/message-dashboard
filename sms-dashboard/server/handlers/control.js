@@ -1,6 +1,7 @@
 import { nanoid } from 'nanoid';
 import { extractVerificationCode } from '../utils/verification';
 import { findKeywordMatches } from '../api/keywords.js';
+import { classifyMessage, loadActiveRules } from '../utils/spam-filter.js';
 
 export const controlHandler = {
   // New clean endpoint for separate modems and SIMs with state reconciliation
@@ -396,9 +397,15 @@ export const controlHandler = {
       `);
       
       const insertStmt = env.DB.prepare(`
-        INSERT INTO messages (id, phone_iccid, phone_number, content, timestamp, type, verification_code, status, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, 'received', ?, 'received', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        INSERT INTO messages (id, phone_iccid, phone_number, content, timestamp, type, verification_code, status, created_at, updated_at, filter_status, filter_rule_id)
+        VALUES (?, ?, ?, ?, ?, 'received', ?, 'received', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?)
       `);
+
+      // Spam rules are loaded ONCE per upload, not per message. Classification is
+      // done inline rather than in ctx.waitUntil: the row must never be readable
+      // while still 'pending', or marketing SMS would flash into the default list
+      // in the window before a background task caught up.
+      const filterRules = await loadActiveRules(env.DB);
       
       // First, deduplicate within the entire request
       const uniqueMessages = [];
@@ -469,8 +476,7 @@ export const controlHandler = {
             return null;
           }
           
-          // Only add to newMessages if we're actually inserting it
-          newMessages.push({
+          const record = {
             id: messageId,
             phone_iccid: phone_iccid,
             phone_number: phoneNumber,
@@ -478,8 +484,15 @@ export const controlHandler = {
             timestamp,
             type: 'received',
             verification_code: verificationCode
-          });
-          
+          };
+
+          // Spam/marketing verdict. phone_number carries the SENDER's number for
+          // received messages, which is what the sender rules match on.
+          const verdict = classifyMessage(record, filterRules);
+
+          // Only add to newMessages if we're actually inserting it
+          newMessages.push(record);
+
           // Insert the message
           const result = await insertStmt.bind(
             messageId,
@@ -487,7 +500,9 @@ export const controlHandler = {
             phoneNumber,
             msg.content,
             timestamp,
-            verificationCode
+            verificationCode,
+            verdict.filter_status,
+            verdict.filter_rule_id
           ).run();
           
           return result;
