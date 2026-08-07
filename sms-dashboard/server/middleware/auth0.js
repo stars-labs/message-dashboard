@@ -1,4 +1,6 @@
 import { auth0Handler } from '../handlers/auth0';
+import { createRoleConfig, rolesFromToken } from '../../config/auth0-roles.js';
+import { extractSessionToken } from '../utils/session-token.js';
 
 // Auth0 authentication middleware
 export async function handleAuth0(request) {
@@ -16,17 +18,23 @@ export async function handleAuth0(request) {
     return; // Continue to handler
   }
   
-  // Check for Authorization header
-  const authHeader = request.headers.get('Authorization');
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  // Credential comes from the HttpOnly auth_token cookie for browsers, or an
+  // Authorization header for programmatic callers presenting an Auth0 JWT.
+  // See docs/SECURITY-REVIEW.md finding 4.
+  const credential = extractSessionToken(
+    request.headers.get('Authorization'),
+    request.headers.get('Cookie')
+  );
+
+  if (!credential) {
     return new Response(JSON.stringify({ error: 'No token provided' }), {
       status: 401,
       headers: { 'Content-Type': 'application/json' }
     });
   }
-  
-  const token = authHeader.substring(7);
-  
+
+  const token = credential.token;
+
   try {
     // First check if it's a session token in KV store
     const sessionData = await env.SESSIONS.get(token);
@@ -64,11 +72,9 @@ export async function handleAuth0(request) {
       email: jwtPayload.email,
       name: jwtPayload.name || jwtPayload.nickname,
       picture: jwtPayload.picture,
-      // Extract roles from JWT payload
-      roles: jwtPayload.roles || 
-             jwtPayload['https://sexy.qzz.io/roles'] || 
-             jwtPayload['https://sexy.qzz.io/app_metadata']?.roles ||
-             []
+      // Namespaced claim only — see config/auth0-roles.js and
+      // docs/SECURITY-REVIEW.md finding 5.
+      roles: rolesFromToken(jwtPayload, createRoleConfig(env))
     };
     
     // Store the full Auth0 token payload for role checking

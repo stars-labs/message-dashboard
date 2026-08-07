@@ -135,5 +135,7 @@ X-API-Key: <api_key>
 ## Notes
 
 - No WebSocket/SSE in production (cost optimization). UI refreshes data via direct HTTP API calls.
-- RBAC is built but disabled (`USE_AUTH0_ROLES = "false"`). All authenticated users get full access.
+- RBAC is enforced and fails closed. Every endpoint requires the `sms` role (or an
+  alternative role) — a user without it gets 403, and there is no setting that grants
+  access without a role.
 - The daemon syncs device status every 30s and does a full sync every 5min.

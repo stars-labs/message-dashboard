@@ -44,12 +44,17 @@ Edit your `wrangler.toml` file:
 
 ```toml
 # Auth0 Role Configuration
-USE_AUTH0_ROLES = "true"
-AUTH0_SMS_ROLE = "sms"
-AUTH0_ALTERNATIVE_SMS_ROLES = "admin,operator"
-AUTH0_ROLE_NAMESPACE = "https://sexy.qzz.io/roles"  # Must match the namespace in your Action
-AUTH0_ALLOW_NO_ROLES = "false"
+AUTH0_ADMIN_ROLE = "sms-admin"
+AUTH0_VIEWER_ROLE = "sms-viewer"
+AUTH0_ROLE_NAMESPACE = "https://sexy.qzz.io/roles"  # FULL claim URI; must match your Action
+
+# Only these email domains may complete login. Addresses must also be email_verified.
+ALLOWED_EMAIL_DOMAINS = "poloniex.com,bitgc.io,tron.network,htx-inc.com"
 ```
+
+> There is no `USE_AUTH0_ROLES` or `AUTH0_ALLOW_NO_ROLES` setting any more. Role
+> checking is always on and cannot be disabled from configuration — see
+> [Security Review finding 1](../SECURITY-REVIEW.md).
 
 ## Step 4: Assign the SMS Role to Users
 
@@ -58,7 +63,7 @@ AUTH0_ALLOW_NO_ROLES = "false"
 2. Click on a user who should have SMS access
 3. Go to the **Roles** tab
 4. Click **Assign Roles**
-5. Select the `sms` role
+5. Select `sms-admin` or `sms-viewer`
 6. Click **Assign**
 
 ### For New Users (Optional - Auto-assign):
@@ -106,13 +111,21 @@ npm run deploy
 2. Check that the namespace in the Action matches `AUTH0_ROLE_NAMESPACE`
 3. Ensure the user actually has roles assigned
 
-### Quick disable for testing:
-If you need to temporarily disable role checking:
+### If you are locked out
+Role checking cannot be disabled — there is deliberately no override flag. Recovery is
+an Auth0 dashboard change and needs **no redeploy**, because role changes take effect on
+the next login:
 
-```toml
-# In wrangler.toml
-USE_AUTH0_ROLES = "false"  # This disables all role checking
-```
+1. **User Management → Users →** your user **→ Roles → Assign Roles →** `sms`
+2. Log out and back in.
+
+If *nobody* can log in, the Action almost certainly is not emitting the claim — verify
+it is deployed and active in the Login flow (Step 2), and that its namespace matches
+`AUTH0_ROLE_NAMESPACE` exactly.
+
+Also confirm the address is `email_verified` and on a domain in
+`ALLOWED_EMAIL_DOMAINS`; both denials are recorded in the `audit_logs` table with a
+`reason`, which is the fastest way to tell the two apart.
 
 ## Optional: Create Additional Roles
 
@@ -122,7 +135,10 @@ You can create more roles for different access levels:
 2. **operator** - Can send/read messages but limited admin features
 3. **viewer** - Read-only access (would need code changes)
 
-Just add them to `AUTH0_ALTERNATIVE_SMS_ROLES` in your config.
+There are deliberately only two roles. Adding a third means adding it to
+`ROLE_PERMISSIONS` in `config/auth0-roles.js` with an explicit permission list — role
+names are not a config-only knob, because a role with no declared permissions grants
+nothing.
 
 ## Next Steps
 
@@ -132,4 +148,7 @@ Just add them to `AUTH0_ALTERNATIVE_SMS_ROLES` in your config.
 
 ---
 
-**Need Help?** The current configuration allows any authenticated user to access the dashboard if `USE_AUTH0_ROLES` is set to `"false"`. This is useful for initial testing.
+**Need Help?** Every user must hold `sms-admin` or `sms-viewer` (names from
+`AUTH0_ADMIN_ROLE` / `AUTH0_VIEWER_ROLE`) and a verified address on an allowed domain. There is no
+configuration that grants access without a role. If a user cannot get in, check
+`audit_logs` for a `login_denied` row — its `reason` says which gate rejected them.

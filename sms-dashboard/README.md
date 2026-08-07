@@ -180,9 +180,15 @@ bunx wrangler tail sms-dashboard
 [vars]
 ENVIRONMENT = "production"
 WORKER_URL = "https://your-domain.com"
-USE_AUTH0_ROLES = "true"
-AUTH0_SMS_ROLE = "sms"
+AUTH0_ADMIN_ROLE = "sms-admin"
+AUTH0_VIEWER_ROLE = "sms-viewer"
+AUTH0_ROLE_NAMESPACE = "https://your-domain.com/roles"  # FULL claim URI
+ALLOWED_EMAIL_DOMAINS = "poloniex.com,bitgc.io,tron.network,htx-inc.com"
 ```
+
+Role checking is always on and cannot be disabled by configuration. Users need the `sms`
+role plus a verified address on an allowed domain — see
+[docs/SECURITY-REVIEW.md](../docs/SECURITY-REVIEW.md).
 
 ## 📊 Performance
 

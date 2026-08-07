@@ -13,21 +13,23 @@ Instead of using database permission tables, the SMS Dashboard uses Auth0 roles 
 Configure these in `wrangler.toml` or as Cloudflare Worker environment variables:
 
 ```toml
-# Enable/disable Auth0 role checking
-USE_AUTH0_ROLES = "true"  # Set to "false" to disable role checking
-
 # The primary role that grants SMS access
-AUTH0_SMS_ROLE = "sms"
+AUTH0_ADMIN_ROLE = "sms-admin"
+AUTH0_VIEWER_ROLE = "sms-viewer"
 
-# Additional roles that grant SMS access (comma-separated)
-AUTH0_ALTERNATIVE_SMS_ROLES = "admin,operator"
 
-# Where to find roles in the Auth0 token
+# FULL claim URI holding the roles array (must match your Auth0 Action)
 AUTH0_ROLE_NAMESPACE = "https://yourapp.com/roles"
 
-# Allow users without roles (testing only)
-AUTH0_ALLOW_NO_ROLES = "false"
+# Only these email domains may log in; addresses must also be email_verified
+ALLOWED_EMAIL_DOMAINS = "poloniex.com,bitgc.io,tron.network,htx-inc.com"
 ```
+
+Role checking is **always on**. There is no setting that disables it: the former
+`USE_AUTH0_ROLES` and `AUTH0_ALLOW_NO_ROLES` flags existed only to turn authorization
+off, and production shipped with role checking disabled, which granted every
+authenticated user full access to all SMS bodies and verification codes. See
+[Security Review finding 1](../SECURITY-REVIEW.md).
 
 ### 2. Auth0 Setup
 
@@ -35,7 +37,7 @@ AUTH0_ALLOW_NO_ROLES = "false"
 
 1. Go to your Auth0 Dashboard
 2. Navigate to **User Management** → **Roles**
-3. Create a new role called `sms` (or whatever you set in `AUTH0_SMS_ROLE`)
+3. Create both roles: `sms-admin` and `sms-viewer` (names come from `AUTH0_ADMIN_ROLE` / `AUTH0_VIEWER_ROLE`)
 4. Assign this role to users who should have SMS access
 
 #### Option B: Using Auth0 Rules (Legacy)
@@ -83,7 +85,7 @@ exports.onExecutePostLogin = async (event, api) => {
 1. Go to **User Management** → **Users**
 2. Select a user
 3. Go to the **Roles** tab
-4. Assign the `sms` role (or your configured role)
+4. Assign `sms-admin` or `sms-viewer`
 
 #### Via Auth0 Management API:
 ```bash
@@ -107,19 +109,21 @@ curl -X POST \
 
 ### With Roles Enabled (Default)
 
-Users must have one of these roles to access SMS features:
-- `sms` (primary role)
-- `admin` (alternative role)
-- `operator` (alternative role)
+Users must hold one of these two roles. They are mutually exclusive — changing a role via
+用户管理 assigns the new one and removes the other.
 
-### Without Roles (Testing Mode)
+- `sms-viewer` — read messages, see the SIM list, send SMS
+- `sms-admin` — everything above, plus keyword/filter/ICCID editing and user administration
 
-Set these environment variables:
-```toml
-USE_AUTH0_ROLES = "false"  # Disables role checking
-# OR
-AUTH0_ALLOW_NO_ROLES = "true"  # Allows users without any roles
-```
+The names come from `AUTH0_ADMIN_ROLE` / `AUTH0_VIEWER_ROLE`; the permission table they
+map onto is fixed in `config/auth0-roles.js`. Any role Auth0 reports that is not one of
+these two grants nothing — including the retired `sms` role.
+
+### Without Roles
+
+There is no testing mode and no way to grant access without a role. A user with no
+matching role is denied at login and at every API call. To give someone access, assign
+them `sms-viewer` (or `sms-admin`) in Auth0 — it takes effect on their next login, with no redeploy.
 
 ## Permissions Granted
 
@@ -144,4 +148,8 @@ Users with the SMS role automatically get these permissions:
 
 ### All users have access
 
-Check if `USE_AUTH0_ROLES` is set to `"true"` (not `true` without quotes)
+This should no longer be possible — the role gate fails closed and has no off switch. If
+you do observe it, treat it as a security incident rather than a configuration question:
+check that `server/middleware/rbac.js` still denies by default (its tests in
+`rbac.test.js` pin this) and that `AUTH0_ROLE_NAMESPACE` points at a claim your Action
+actually sets, since a wrong claim yields no roles and therefore denial, not access.

@@ -33,14 +33,28 @@ id = "4d7e71fcf5c44a469aa63e28f60cb6d7"
 ENVIRONMENT = "production"
 DEFAULT_USER_GROUP = "viewer"
 WORKER_URL = "https://sexy.qzz.io"
-# ALLOWED_EMAIL_DOMAINS = "example.com,partner.com"  # Uncomment to restrict domains
+
+# Second layer behind the role check: only these email domains may complete login.
+# Enforced in server/handlers/auth0.js, which also requires the address to be
+# email_verified so an unverified claim from one connection cannot impersonate a
+# domain on this list.
+ALLOWED_EMAIL_DOMAINS = "poloniex.com,bitgc.io,tron.network,htx-inc.com"
 
 # Auth0 Role Configuration
-USE_AUTH0_ROLES = "false"  # TODO: re-enable when RBAC is implemented (see ISSUES.md)
-AUTH0_SMS_ROLE = "sms"    # The role that grants SMS access
-AUTH0_ALTERNATIVE_SMS_ROLES = ""  # No additional roles needed
-AUTH0_ROLE_NAMESPACE = "https://sexy.qzz.io"  # Where to find roles in Auth0 token
-AUTH0_ALLOW_NO_ROLES = "false"  # Set to "true" to allow access without roles (testing only)
+#
+# There is deliberately no USE_AUTH0_ROLES or AUTH0_ALLOW_NO_ROLES switch any more.
+# Both existed only to turn authorization off, and production shipped with
+# USE_AUTH0_ROLES="false", which granted every authenticated user every permission.
+# The gate now fails closed in code; see docs/SECURITY-REVIEW.md finding 1.
+# Two roles, defined in config/auth0-roles.js:
+#   viewer -> read messages, read the SIM list, send SMS
+#   admin  -> everything, including managing other users' roles
+# New users are auto-assigned `sms-viewer` on first login (after the verified-email and
+# allowed-domain checks pass). Roles are additive and anything unrecognised grants
+# nothing, so a session minted before this split re-authenticates.
+AUTH0_ADMIN_ROLE = "sms-admin"
+AUTH0_VIEWER_ROLE = "sms-viewer"
+AUTH0_ROLE_NAMESPACE = "https://sexy.qzz.io/roles"  # FULL claim URI holding the roles array
 
 # wrangler.toml (wrangler v3.88.0^)
 [observability.logs]

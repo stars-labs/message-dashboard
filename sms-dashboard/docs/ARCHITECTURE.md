@@ -100,7 +100,10 @@ Daemon requests use `X-API-Key` header instead of JWT.
 
 - **Users**: Auth0 OAuth2 → JWT in `Authorization: Bearer` header
 - **Daemon**: Static API key in `X-API-Key` header (set via `wrangler secret put API_KEY`)
-- **RBAC**: Infrastructure exists but disabled (`USE_AUTH0_ROLES = "false"`)
+- **RBAC**: Enforced, fails closed. Users need the `sms` role (or one of
+  `AUTH0_ALTERNATIVE_SMS_ROLES`), read from the namespaced `AUTH0_ROLE_NAMESPACE` claim
+  only, plus a verified email on an `ALLOWED_EMAIL_DOMAINS` domain. No configuration can
+  disable the check
 
 ## Sync Flow (Daemon → Server)
 

@@ -5,14 +5,16 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ||
   (typeof window !== 'undefined' ? window.location.origin : 'https://sms-dashboard-api.workers.dev');
 
 export async function fetchWithAuth(endpoint, options = {}) {
-  const token = auth.token || localStorage.getItem('auth_token');
   const fullUrl = `${API_BASE_URL}${endpoint}`;
 
+  // Credentials travel as the HttpOnly auth_token cookie, which the browser attaches
+  // itself — there is no token for JavaScript to read or forward.
+  // See docs/SECURITY-REVIEW.md finding 4.
   const response = await fetch(fullUrl, {
     ...options,
+    credentials: 'same-origin',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': token ? `Bearer ${token}` : '',
       ...options.headers,
     },
   });
@@ -30,7 +32,11 @@ export async function fetchWithAuth(endpoint, options = {}) {
     } catch (e) {
       errorData = { error: 'Unknown error' };
     }
-    throw new Error(errorData.error || `Request failed with status ${response.status}`);
+    // Include `detail` when the server sends one. Without it an upstream failure
+    // surfaced as a bare "Auth0 Management API request failed" with the actual cause
+    // (missing scope, bad credentials, absent role) only visible in the Worker logs.
+    const base = errorData.error || `Request failed with status ${response.status}`;
+    throw new Error(errorData.detail ? `${base}: ${errorData.detail}` : base);
   }
 
   return await response.json();
@@ -127,9 +133,9 @@ export const api = {
     auth.logout();
   },
   
-  getAuthToken() {
-    return auth.token;
-  },
+  // No getAuthToken(): the session is an HttpOnly cookie that JavaScript cannot read,
+  // and callers do not need it — fetch sends it automatically.
+  // See docs/SECURITY-REVIEW.md finding 4.
   
   // Phones
   async getPhones() {
@@ -377,13 +383,6 @@ export const api = {
   }
 };
 
-// Check for auth token in URL on page load
-if (typeof window !== 'undefined') {
-  const urlParams = new URLSearchParams(window.location.search);
-  const token = urlParams.get('token');
-  
-  if (token) {
-    localStorage.setItem('auth_token', token);
-    window.history.replaceState({}, document.title, window.location.pathname);
-  }
-}
+// Nothing to pick up from the URL any more: the login callback delivers the session as
+// an HttpOnly cookie rather than a `?token=` parameter.
+// See docs/SECURITY-REVIEW.md finding 4.

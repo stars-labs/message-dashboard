@@ -9,12 +9,14 @@ import { messagesHandler } from './handlers/messages';
 import { statsHandler } from './handlers/stats';
 import { iccidMappingsHandler } from './handlers/iccid-mappings';
 import { healthHandler } from './handlers/health';
+import { usersHandler } from './handlers/users';
 import { serveFrontend } from './frontend-handler';
-import { createRoleConfig, hasSmSAccess } from '../config/auth0-roles.js';
+import { createRoleConfig, hasAnyRole } from '../config/auth0-roles.js';
 import { setupKeywordRoutes } from './api/keywords.js';
 import { setupFilterRoutes } from './api/filters.js';
 import { purgeExpiredMessages } from './utils/message-retention.js';
 import { sweepPending } from './utils/spam-backfill.js';
+import { readCookie } from './utils/session-token.js';
 
 // Simple router implementation without itty-router
 class SimpleRouter {
@@ -72,7 +74,16 @@ class SimpleRouter {
           for (let i = 0; i < patternParts.length; i++) {
             if (patternParts[i].startsWith(':')) {
               const paramName = patternParts[i].substring(1);
-              params[paramName] = pathParts[i];
+              // Decode: `pathname` keeps percent-encoding, and Auth0 user ids contain
+              // '|' (auth0|abc -> auth0%7Cabc). Passing the raw segment on meant it got
+              // encoded a second time downstream (auth0%257Cabc), addressing the wrong
+              // user. Malformed encoding falls back to the raw value rather than
+              // throwing out of the router.
+              try {
+                params[paramName] = decodeURIComponent(pathParts[i]);
+              } catch {
+                params[paramName] = pathParts[i];
+              }
             }
           }
           
@@ -154,6 +165,10 @@ router.get('/logout', auth0Handler.logout);
 router.get('/api/auth/me', async (request, env, ctx) => {
   const authResponse = await handleAuth0(request, env, ctx);
   if (authResponse) return authResponse;
+  // Attaches user.permissions, which the client uses to decide which nav items and
+  // write controls to render. Without this the response carried roles but no
+  // permissions, so the SPA had nothing to gate on.
+  await enrichUserPermissions(request, env, ctx);
   return auth0Handler.me(request);
 });
 
@@ -183,6 +198,27 @@ router.post('/api/messages/send', async (request, env, ctx) => {
   const permResponse = await requirePermission('messages.send')(request, env, ctx);
   if (permResponse) return permResponse;
   return messagesHandler.send(request);
+});
+
+// User + role administration. Admin-only: `users.read`/`users.write` appear solely in
+// the admin role's permission set. PUT is a privilege-escalation primitive — see
+// server/handlers/users.js for the guards it carries.
+router.get('/api/users', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  await enrichUserPermissions(request, env, ctx);
+  const permResponse = await requirePermission('users.read')(request, env, ctx);
+  if (permResponse) return permResponse;
+  return usersHandler.list(request);
+});
+
+router.put('/api/users/:id/role', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  await enrichUserPermissions(request, env, ctx);
+  const permResponse = await requirePermission('users.write')(request, env, ctx);
+  if (permResponse) return permResponse;
+  return usersHandler.setRole(request);
 });
 
 router.get('/api/stats', async (request, env, ctx) => {
@@ -384,17 +420,10 @@ router.get('*', async (request, env, ctx) => {
 
   // For the main app, check if user is authenticated and has the SMS role
   if (url.pathname === '/' || url.pathname === '/index.html') {
-    // Check for session token in cookies
-    const cookieHeader = request.headers.get('Cookie');
-    let token = null;
-
-    if (cookieHeader) {
-      const cookies = cookieHeader.split(';').map(c => c.trim());
-      const authCookie = cookies.find(c => c.startsWith('auth_token='));
-      if (authCookie) {
-        token = authCookie.split('=')[1];
-      }
-    }
+    // Shared cookie reader rather than a second inline parser: the previous
+    // `authCookie.split('=')[1]` truncated any value containing '=', and
+    // `startsWith('auth_token=')` would also have matched a differently named cookie.
+    const token = readCookie(request.headers.get('Cookie'), 'auth_token');
 
     if (!token) {
       // No token - redirect to login
@@ -420,7 +449,7 @@ router.get('*', async (request, env, ctx) => {
     const user = session.user;
     const userRoles = user.roles || [];
 
-    if (!hasSmSAccess(userRoles, roleConfig)) {
+    if (!hasAnyRole(userRoles, roleConfig)) {
       // User doesn't have SMS role - redirect to login with error
       return Response.redirect(new URL('/login?error=no_role', request.url).toString(), 302);
     }

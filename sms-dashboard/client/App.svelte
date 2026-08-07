@@ -8,6 +8,7 @@
   import IccidMappingDialog from "./lib/IccidMappingDialog.svelte";
   import KeywordConfig from "./lib/KeywordConfig.svelte";
   import FilterRules from "./lib/FilterRules.svelte";
+  import UserManagement from "./lib/UserManagement.svelte";
   import ErrorBoundary from "./lib/ErrorBoundary.svelte";
   import Toast from "./lib/Toast.svelte";
   import { api } from "./lib/api.js";
@@ -145,25 +146,52 @@
   };
   
   
+  // Permission gate. `user.permissions` comes from /api/auth/me, which derives it from
+  // the caller's Auth0 roles. This is UX only — the server enforces the same rules on
+  // every endpoint, so hiding a control is a convenience, never a security boundary.
+  $: can = (permission) => user?.permissions?.includes(permission) ?? false;
+
+  // Which permission each view requires. Used both for nav visibility and for the hash
+  // guard below, so the two cannot disagree.
+  const VIEW_PERMISSION = {
+    dashboard: 'messages.read',
+    'iccid-mappings': 'phones.write',
+    keywords: 'keywords.read',
+    filters: 'filters.read',
+    users: 'users.read',
+  };
+
+  function navigate(view) {
+    currentView = view;
+    window.location.hash = view;
+  }
+
   // Hash routing handler
   function handleHashChange() {
     const hash = window.location.hash.slice(1);
-    if (hash === 'keywords') {
-      currentView = 'keywords';
-    } else if (hash === 'filters') {
-      currentView = 'filters';
-    } else if (hash === 'iccid-mappings') {
-      currentView = 'iccid-mappings';
-    } else if (hash === 'dashboard' || hash === '') {
+    const requested = hash === '' ? 'dashboard' : hash;
+
+    if (!(requested in VIEW_PERMISSION)) return;
+
+    // A viewer typing #keywords would otherwise land on a page whose every API call
+    // 403s, which looks like a broken app rather than a permission boundary.
+    if (user && !can(VIEW_PERMISSION[requested])) {
       currentView = 'dashboard';
+      window.location.hash = 'dashboard';
+      return;
     }
-    
+
+    currentView = requested;
   }
+
+  // Re-run the guard once permissions arrive: onMount fires handleHashChange before
+  // getUser() resolves, so a deep link is validated only after `user` is known.
+  $: if (user) handleHashChange();
 
   // Load data using HTTP API directly for better performance
   async function loadData() {
     // Only proceed if user is authenticated
-    if (!user || !auth.token) {
+    if (!user) {
       dataLoading = false;
       return;
     }
@@ -289,22 +317,14 @@
   }
 
   onMount(async () => {
-    if (window.location.search.includes("token=")) {
-      await auth.handleCallback();
-    }
-
     handleHashChange();
     window.addEventListener('hashchange', handleHashChange);
 
+    // No callback step and no token to pick out of the URL: the session arrives as an
+    // HttpOnly cookie, so asking the server who we are is the only check.
+    // See docs/SECURITY-REVIEW.md finding 4.
     try {
-      if (auth.isAuthenticated()) {
-        user = await auth.getUser();
-      } else {
-        const existingUser = await auth.getUser();
-        if (existingUser) {
-          user = existingUser;
-        }
-      }
+      user = await auth.getUser();
     } catch (error) {
       // Authentication check failed
     }
@@ -339,7 +359,7 @@
   
   // Load messages for a specific phone (race-condition safe)
   async function loadMessagesForPhone(phoneIccid) {
-    if (!user || !auth.token) return;
+    if (!user) return;
 
     const requestId = ++messageRequestId;
 
@@ -545,7 +565,7 @@
         };
         
         // Only fetch stats if user is authenticated (stats API requires auth)
-        if (user && auth.token) {
+        if (user) {
           await fetchStats();
         }
       } else {
@@ -579,7 +599,7 @@
   }
 
   async function fetchStats() {
-    if (!user || !auth.token) {
+    if (!user) {
       return;
     }
 
@@ -602,7 +622,7 @@
   function startPolling() {
     if (pollInterval) return;
     pollInterval = setInterval(async () => {
-      if (!user || !auth.token || currentView !== 'dashboard') return;
+      if (!user || currentView !== 'dashboard') return;
       try {
         // Poll messages for current view
         await loadMessagesForPhone(selectedPhoneIccid);
@@ -677,13 +697,12 @@
             短信验证码管理系统
           </h1>
 
-          <!-- Navigation -->
+          <!-- Navigation. Each entry is gated on the same permission the hash guard
+               uses, so nav and routing cannot disagree. Server-side checks are the real
+               boundary; this only avoids showing a viewer pages that would 403. -->
           <div class="hidden lg:flex items-center gap-1 flex-1 justify-center">
             <button
-              on:click={() => {
-                currentView = "dashboard";
-                window.location.hash = 'dashboard';
-              }}
+              on:click={() => navigate("dashboard")}
               class="px-4 py-2 rounded-lg transition-all {currentView ===
               'dashboard'
                 ? 'bg-orange-50 text-orange-700 font-semibold'
@@ -691,43 +710,53 @@
             >
               消息管理
             </button>
-            <button
-              on:click={() => {
-                iccidMappingsFilter = "all";
-                currentView = "iccid-mappings";
-                window.location.hash = 'iccid-mappings';
-              }}
-              class="px-4 py-2 rounded-lg transition-all {currentView ===
-              'iccid-mappings'
-                ? 'bg-orange-50 text-orange-700 font-semibold'
-                : 'text-stone-500 hover:text-stone-900 hover:bg-stone-100'}"
-            >
-              ICCID 映射
-            </button>
-            <button
-              on:click={() => {
-                currentView = "keywords";
-                window.location.hash = 'keywords';
-              }}
-              class="px-4 py-2 rounded-lg transition-all {currentView ===
-              'keywords'
-                ? 'bg-orange-50 text-orange-700 font-semibold'
-                : 'text-stone-500 hover:text-stone-900 hover:bg-stone-100'}"
-            >
-              关键词高亮
-            </button>
-            <button
-              on:click={() => {
-                currentView = "filters";
-                window.location.hash = 'filters';
-              }}
-              class="px-4 py-2 rounded-lg transition-all {currentView ===
-              'filters'
-                ? 'bg-orange-50 text-orange-700 font-semibold'
-                : 'text-stone-500 hover:text-stone-900 hover:bg-stone-100'}"
-            >
-              垃圾过滤
-            </button>
+            {#if can('phones.write')}
+              <button
+                on:click={() => {
+                  iccidMappingsFilter = "all";
+                  navigate("iccid-mappings");
+                }}
+                class="px-4 py-2 rounded-lg transition-all {currentView ===
+                'iccid-mappings'
+                  ? 'bg-orange-50 text-orange-700 font-semibold'
+                  : 'text-stone-500 hover:text-stone-900 hover:bg-stone-100'}"
+              >
+                ICCID 映射
+              </button>
+            {/if}
+            {#if can('keywords.read')}
+              <button
+                on:click={() => navigate("keywords")}
+                class="px-4 py-2 rounded-lg transition-all {currentView ===
+                'keywords'
+                  ? 'bg-orange-50 text-orange-700 font-semibold'
+                  : 'text-stone-500 hover:text-stone-900 hover:bg-stone-100'}"
+              >
+                关键词高亮
+              </button>
+            {/if}
+            {#if can('filters.read')}
+              <button
+                on:click={() => navigate("filters")}
+                class="px-4 py-2 rounded-lg transition-all {currentView ===
+                'filters'
+                  ? 'bg-orange-50 text-orange-700 font-semibold'
+                  : 'text-stone-500 hover:text-stone-900 hover:bg-stone-100'}"
+              >
+                垃圾过滤
+              </button>
+            {/if}
+            {#if can('users.read')}
+              <button
+                on:click={() => navigate("users")}
+                class="px-4 py-2 rounded-lg transition-all {currentView ===
+                'users'
+                  ? 'bg-orange-50 text-orange-700 font-semibold'
+                  : 'text-stone-500 hover:text-stone-900 hover:bg-stone-100'}"
+              >
+                用户管理
+              </button>
+            {/if}
           </div>
 
           <div class="hidden lg:flex items-center gap-4">
@@ -847,12 +876,16 @@
               {/if}
             </span>
           </div>
-          <button
-            on:click={() => { iccidMappingsFilter = "error"; currentView = "iccid-mappings"; }}
-            class="text-xs text-yellow-600 hover:text-yellow-700 underline"
-          >
-            查看详情
-          </button>
+          {#if can('phones.write')}
+            <!-- Deep-links into the ICCID page, which a viewer cannot open — the hash
+                 guard would bounce them straight back to the dashboard. -->
+            <button
+              on:click={() => { iccidMappingsFilter = "error"; navigate("iccid-mappings"); }}
+              class="text-xs text-yellow-600 hover:text-yellow-700 underline"
+            >
+              查看详情
+            </button>
+          {/if}
         </div>
       </div>
     {/if}
@@ -861,7 +894,7 @@
     <div class="lg:hidden px-4 py-2 bg-white border-b border-stone-200">
       <div class="flex gap-2">
         <button
-          on:click={() => (currentView = "dashboard")}
+          on:click={() => navigate("dashboard")}
           class="flex-1 px-3 py-2 rounded-lg text-sm transition-all {currentView ===
           'dashboard'
             ? 'bg-orange-50 text-orange-700 font-semibold'
@@ -869,39 +902,50 @@
         >
           消息管理
         </button>
-        <button
-          on:click={() => {
-            currentView = "iccid-mappings";
-          }}
-          class="flex-1 px-3 py-2 rounded-lg text-sm transition-all {currentView ===
-          'iccid-mappings'
-            ? 'bg-orange-50 text-orange-700 font-semibold'
-            : 'text-stone-500 hover:bg-stone-100'}"
-        >
-          ICCID 映射
-        </button>
-        <button
-          on:click={() => {
-            currentView = "keywords";
-          }}
-          class="flex-1 px-3 py-2 rounded-lg text-sm transition-all {currentView ===
-          'keywords'
-            ? 'bg-orange-50 text-orange-700 font-semibold'
-            : 'text-stone-500 hover:bg-stone-100'}"
-        >
-          关键词
-        </button>
-        <button
-          on:click={() => {
-            currentView = "filters";
-          }}
-          class="flex-1 px-3 py-2 rounded-lg text-sm transition-all {currentView ===
-          'filters'
-            ? 'bg-orange-50 text-orange-700 font-semibold'
-            : 'text-stone-500 hover:bg-stone-100'}"
-        >
-          垃圾过滤
-        </button>
+        {#if can('phones.write')}
+          <button
+            on:click={() => navigate("iccid-mappings")}
+            class="flex-1 px-3 py-2 rounded-lg text-sm transition-all {currentView ===
+            'iccid-mappings'
+              ? 'bg-orange-50 text-orange-700 font-semibold'
+              : 'text-stone-500 hover:bg-stone-100'}"
+          >
+            ICCID 映射
+          </button>
+        {/if}
+        {#if can('keywords.read')}
+          <button
+            on:click={() => navigate("keywords")}
+            class="flex-1 px-3 py-2 rounded-lg text-sm transition-all {currentView ===
+            'keywords'
+              ? 'bg-orange-50 text-orange-700 font-semibold'
+              : 'text-stone-500 hover:bg-stone-100'}"
+          >
+            关键词
+          </button>
+        {/if}
+        {#if can('filters.read')}
+          <button
+            on:click={() => navigate("filters")}
+            class="flex-1 px-3 py-2 rounded-lg text-sm transition-all {currentView ===
+            'filters'
+              ? 'bg-orange-50 text-orange-700 font-semibold'
+              : 'text-stone-500 hover:bg-stone-100'}"
+          >
+            垃圾过滤
+          </button>
+        {/if}
+        {#if can('users.read')}
+          <button
+            on:click={() => navigate("users")}
+            class="flex-1 px-3 py-2 rounded-lg text-sm transition-all {currentView ===
+            'users'
+              ? 'bg-orange-50 text-orange-700 font-semibold'
+              : 'text-stone-500 hover:bg-stone-100'}"
+          >
+            用户管理
+          </button>
+        {/if}
       </div>
     </div>
 
@@ -1023,15 +1067,19 @@
             {/if}
           </div>
 
-          <!-- Message Composer -->
-          <div class="lg:col-span-1 h-full min-h-0">
-            <MessageComposer
-              {selectedPhone}
-              {phoneNumbers}
-              {messages}
-              on:messageSent={handleMessageSent}
-            />
-          </div>
+          <!-- Message Composer. Viewers currently DO hold messages.send, so this stays
+               visible for them — gated anyway so the UI follows the permission model if
+               that decision is ever revisited. -->
+          {#if can('messages.send')}
+            <div class="lg:col-span-1 h-full min-h-0">
+              <MessageComposer
+                {selectedPhone}
+                {phoneNumbers}
+                {messages}
+                on:messageSent={handleMessageSent}
+              />
+            </div>
+          {/if}
         </div>
       </div>
       </ErrorBoundary>
@@ -1054,6 +1102,12 @@
         <!-- Spam/marketing filter rules -->
         <div class="px-4 lg:px-8 py-6 lg:flex-1 lg:min-h-0 lg:overflow-auto">
           <FilterRules />
+        </div>
+      </ErrorBoundary>
+    {:else if currentView === "users"}
+      <ErrorBoundary componentName="UserManagement">
+        <div class="px-4 lg:px-8 py-6 lg:flex-1 lg:min-h-0 lg:overflow-auto">
+          <UserManagement currentUserId={user?.id ?? null} />
         </div>
       </ErrorBoundary>
     {/if}
