@@ -19,6 +19,28 @@
   }
   let successMessage = null;
 
+  // Single definition of how a mapping's is_active maps to what the user sees.
+  // Previously the label and the badge colours were written out twice — once in the
+  // desktop table and once in the mobile card — so adding the mobile status bar
+  // would have made a third copy to keep in sync.
+  //
+  // Colours are the exact ones the badges already used, so nothing changes visually.
+  //
+  // These MUST stay complete literal class names: Tailwind finds classes by scanning
+  // source text, so a template like `bg-${c}-500` would compile to nothing.
+  const STATUS_META = {
+    active:         { label: '活动',        badge: 'bg-emerald-50 text-emerald-700 border-emerald-200', bar: 'bg-emerald-500', text: 'text-emerald-700' },
+    offline:        { label: '离线',        badge: 'bg-stone-100 text-stone-500 border-stone-200',      bar: 'bg-stone-300',   text: 'text-stone-500'   },
+    sim_error:      { label: 'SIM错误',     badge: 'bg-red-50 text-red-600 border-red-200',             bar: 'bg-red-500',     text: 'text-red-600'     },
+    iccid_mismatch: { label: 'ICCID不匹配', badge: 'bg-amber-50 text-amber-700 border-amber-200',       bar: 'bg-amber-500',   text: 'text-amber-700'   },
+    no_modem:       { label: '无设备',      badge: 'bg-stone-50 text-stone-400 border-stone-200',       bar: 'bg-stone-200',   text: 'text-stone-400'   },
+  };
+  const STATUS_UNASSIGNED = { label: '未分配', badge: 'bg-stone-50 text-stone-400 border-stone-200', bar: 'bg-stone-200', text: 'text-stone-400' };
+
+  function statusMeta(status) {
+    return STATUS_META[status] ?? STATUS_UNASSIGNED;
+  }
+
   // Computed stats (6-state: active, offline, sim_error, iccid_mismatch, no_modem, unassigned)
   $: activeCount = allMappingsCache.filter(m => m.is_active === 'active').length;
   $: errorCount = allMappingsCache.filter(m => ['sim_error', 'iccid_mismatch', 'offline'].includes(m.is_active)).length;
@@ -370,25 +392,8 @@
               </td>
               <!-- Summary status badge (6 states) -->
               <td class="px-4 py-3">
-                <span
-                  class="inline-flex px-2 py-1 text-xs rounded-full {
-                    mapping.is_active === 'active'
-                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                      : mapping.is_active === 'offline'
-                        ? 'bg-stone-100 text-stone-500 border border-stone-200'
-                        : mapping.is_active === 'sim_error'
-                          ? 'bg-red-50 text-red-600 border border-red-200'
-                          : mapping.is_active === 'iccid_mismatch'
-                            ? 'bg-amber-50 text-amber-700 border border-amber-200'
-                            : 'bg-stone-50 text-stone-400 border border-stone-200'
-                  }"
-                >
-                  {mapping.is_active === 'active' ? '活动'
-                    : mapping.is_active === 'offline' ? '离线'
-                    : mapping.is_active === 'sim_error' ? 'SIM错误'
-                    : mapping.is_active === 'iccid_mismatch' ? 'ICCID不匹配'
-                    : mapping.is_active === 'no_modem' ? '无设备'
-                    : '未分配'}
+                <span class="inline-flex px-2 py-1 text-xs rounded-full border {statusMeta(mapping.is_active).badge}">
+                  {statusMeta(mapping.is_active).label}
                 </span>
               </td>
               <td class="px-4 py-3 text-sm">
@@ -431,25 +436,8 @@
                 {/if}
                 <span class="font-medium text-stone-900">{mapping.phone_number || '无号码'}</span>
               </div>
-              <span
-                class="inline-flex px-2 py-0.5 text-[10px] font-medium rounded-full {
-                  mapping.is_active === 'active'
-                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                    : mapping.is_active === 'offline'
-                      ? 'bg-stone-100 text-stone-500 border border-stone-200'
-                      : mapping.is_active === 'sim_error'
-                        ? 'bg-red-50 text-red-600 border border-red-200'
-                        : mapping.is_active === 'iccid_mismatch'
-                          ? 'bg-amber-50 text-amber-700 border border-amber-200'
-                          : 'bg-stone-50 text-stone-400 border border-stone-200'
-                }"
-              >
-                {mapping.is_active === 'active' ? '活动'
-                  : mapping.is_active === 'offline' ? '离线'
-                  : mapping.is_active === 'sim_error' ? 'SIM错误'
-                  : mapping.is_active === 'iccid_mismatch' ? 'ICCID不匹配'
-                  : mapping.is_active === 'no_modem' ? '无设备'
-                  : '未分配'}
+              <span class="inline-flex px-2 py-0.5 text-[10px] font-medium rounded-full border {statusMeta(mapping.is_active).badge}">
+                {statusMeta(mapping.is_active).label}
               </span>
             </div>
             
