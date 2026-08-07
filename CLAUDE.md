@@ -24,16 +24,38 @@ Orange Pi (Rust Daemon) → Cloudflare Workers API → Svelte 5 Frontend
 USB Modems (AT/D-Bus)    D1 Database (SQLite)     Auth0 + RBAC
 ```
 
-### Data Model (SIM-Centric)
+### Data Model (SIM-Centric) — verified against live D1, 2026-08-06
 ```
 sims (user inventory, 95 rows)     ← Source of truth, daemon NEVER writes
-  └─ device_view                   ← PRIMARY read view, all queries use this
-       ├─ LEFT JOIN modems         ← Daemon-detected hardware (by current_iccid)
-       └─ LEFT JOIN modem_state    ← Volatile signal/connection data
+  └─ device_view (95 rows)         ← PRIMARY read view, all queries use this
+       └─ LEFT JOIN modems  ON sims.imei = modems.equipment_id
+                                   ← Daemon-detected hardware + signal data
 ```
-- **Active** = SIM's ICCID found in a modem's `current_iccid` field
-- **Inactive** = SIM exists in inventory but not currently in any modem
-- Primary ID is `iccid` (stable), not `equipment_id` (changes with USB position)
+**The join key is IMEI, not ICCID.** `modems.equipment_id` *holds the IMEI* — it is burned into the
+hardware and does **not** change with USB position (`usb_port`, `modem_index` and `usb_path` are the
+position-dependent fields). `sims.iccid` is the primary ID for a *SIM*; `equipment_id`/IMEI is the
+primary ID for a *modem*, and the view is stitched together by the latter.
+
+`device_view.sim_status` is a 6-state CASE (migration `033`/`034`), evaluated in this order:
+
+| State | Condition | Live count |
+|---|---|---|
+| `unassigned` | `sims.imei IS NULL` — inventory row with no modem assigned | 0 |
+| `no_modem` | no matching `modems` row for that IMEI | 0 |
+| `offline` | `modems.status = 'disconnected'` | **18** |
+| `sim_error` | `detected_iccid IS NULL` — modem present, SIM unreadable | 0 |
+| `active` | `detected_iccid = sims.iccid` | **77** |
+| `iccid_mismatch` | detected ICCID ≠ inventory ICCID | 0 |
+
+77 active exactly matches the 77 modems enumerated on USB; `usb_path` is non-NULL for those same 77.
+
+⚠️ **`modem_state` no longer exists** — dropped in `033_clean_schema_refactor.sql`; its
+`signal_percent`/`rssi` were merged into `modems`. Absent from the live schema.
+
+⚠️ **`modems.current_iccid` is a DEAD legacy column — never query it.** Migration `033` copied it
+into `detected_iccid` and nothing writes it since. Proof: it is populated on **68** rows while
+`detected_iccid` is populated on **77**. It returns stale data rather than an error, so a query
+against it looks like it works. **Use `detected_iccid`.**
 
 ## Key Directories
 | Path | Purpose | Tech |
@@ -87,12 +109,13 @@ Cloudflare secrets (set via `bunx wrangler secret put <NAME>`):
 `AUTH0_DOMAIN`, `AUTH0_CLIENT_ID`, `AUTH0_CLIENT_SECRET`, `API_KEY`
 
 ## Database Schema (Cloudflare D1)
-- **`sims`** — user SIM inventory (PK: iccid). Source of truth for phone_number, carrier, sim_index. Daemon NEVER writes here.
-- `modems` — daemon-detected hardware (PK: equipment_id/IMEI). `current_iccid` links to which SIM is inserted.
-- `modem_state` — volatile signal/connection data, FK to modems
+- **`sims`** — user SIM inventory (PK: iccid), 95 rows. Source of truth for phone_number, carrier, sim_index. Daemon NEVER writes here.
+- `modems` — daemon-detected hardware (PK: equipment_id = IMEI), 97 rows (more than the 77 live modems — stale rows persist for hardware no longer plugged in). **`detected_iccid`** says which SIM is inserted; it also carries `signal_percent`/`rssi` and `usb_path`.
+  - ⚠️ `current_iccid` is a dead legacy column, frozen since migration `033` — **never query it**, use `detected_iccid`.
 - `messages` — SMS content, FK to sims
 - `daemon_health` — heartbeat monitoring
-- **`device_view`** — SIM-centric read view (sims LEFT JOIN modems LEFT JOIN modem_state). Use for ALL reads.
+- **`device_view`** — SIM-centric read view: `sims LEFT JOIN modems ON sims.imei = modems.equipment_id`. Use for ALL reads.
+- ⚠️ `modem_state` was **dropped** in migration `033` — its signal data now lives on `modems`.
 
 ## Gotchas and Patterns
 
@@ -122,6 +145,7 @@ Cloudflare secrets (set via `bunx wrangler secret put <NAME>`):
   sudo route add -host 10.171.150.102 10.171.121.1
   ```
   Symptom when missing: ping = 100% loss, SSH exits 255. The route persists until the VPN reconnects, so re-run it after each FortiClient reconnect.
+  **Only needed when on the VPN.** From the office LAN, `ssh root@10.171.150.102` works with no route hack (verified 2026-08-06, ~5.7ms RTT). Test with `ping -c2` first and skip the `sudo route` step if it already replies.
 - Sync intervals: device status every 30s, full sync every 5min (keeps under CF rate limits)
 
 ### SIM detection gotchas
@@ -148,8 +172,11 @@ This is the foundation the whole 100-modem system rests on. **Sockets are never 
 | "100-port" hub — all 5 cables | | 30 | 100 |
 | EC20 modem | — | 1 | — |
 
+**Every root hub has exactly 1 port** (`maxchild=1`, verified 2026-08-06). So one physical socket accepts exactly **one** upstream cable. A single 100-port-hub cable can be plugged in directly (cost 6 addresses, 20 sockets); attaching a **second** cable to the same socket requires inserting the small hub first, which costs 4 more addresses.
+
 **Capacity per bus** with N cables from a 100-port hub behind the small hub:
 `1 (root) + 4 (small hub) + 6N + modems ≤ 127`, and `modems ≤ 20N`
+(Direct-connect, no small hub, only possible for N=1: `1 + 6 + modems ≤ 127`, `modems ≤ 20`.)
 
 | N cables | hub cost | max modems |
 |---|---|---|
@@ -162,13 +189,32 @@ This is the foundation the whole 100-modem system rests on. **Sockets are never 
 
 **Bus ↔ physical socket** (verified via device-tree PHY phandles — controllers sharing a phandle share one physical connector). Board: Orange Pi 5 Plus (RK3588).
 
-| Physical socket | Buses | Type |
-|---|---|---|
-| **A** | `usb1` (EHCI 480M) + `usb2` (OHCI 12M) — PHY `0x29` | USB 2.0 |
-| **B** | `usb3` (EHCI 480M) + `usb4` (OHCI 12M) — PHY `0x2b` | USB 2.0 |
-| **C** | `usb5` + `usb6` — same controller `fc400000.usb` | USB 3.0 xHCI — **leave unused** |
+| Physical socket | Buses | Controller (as probed) | Type |
+|---|---|---|---|
+| **A** | `usb1` (EHCI 480M) + `usb2` (OHCI 12M) — PHY `0x29` | `fc800000.usb` / `fc840000.usb` | USB 2.0 |
+| **B** | `usb3` (EHCI 480M) + `usb4` (OHCI 12M) — PHY `0x2b` | `fc880000.usb` / `fc8c0000.usb` | USB 2.0 |
+| **C** | `usb5` (480M) + `usb6` (5000M) | both `xhci-hcd.5.auto` — **one** controller instance | USB 3.0 xHCI — **leave unused** |
 
 Each bus has its own independent 127-address pool. Prefer EHCI: EC20 is USB 2.0 (480M cap) so xHCI's 5Gbps adds nothing, and xHCI's large per-device context ran out of resources with many devices (`error -12` ENOMEM, every modem failed to configure).
+
+**Why EHCI needs two buses per socket but xHCI also shows two.** Different reasons — don't conflate. EHCI only speaks High-Speed, so Full/Low-Speed devices on the same pins must be handled by a separate *companion* OHCI controller → two controllers, two buses. xHCI speaks all speeds from one controller, but registers **two buses anyway** (one for the USB-2 pairs, one for the SuperSpeed pairs) because those are physically separate wire pairs. So `usb5`/`usb6` sharing `xhci-hcd.5.auto` is one chip, two buses; `usb1`/`usb2` are genuinely two chips.
+
+### Current deployment state (measured 2026-08-06)
+
+**77 modems live** (66 on bus1 + 11 on bus3) against a 95-SIM inventory → **18 short**. Both EHCI sockets are now in use; bus3 is no longer a plan.
+
+| bus | addresses used /127 | hub chips | EC20 | cables | signal-error lines this boot |
+|---|---|---|---|---|---|
+| **001** | **107** | 40 (= 4 small hub + 6 cables × 6) | **66** | 6, behind small hub | **246** |
+| **003** | **18** | 6 (one cable, direct — no small hub) | **11** | 1 | **0** |
+| 005 / 006 | 2 / 2 | 1× Genesys `05e3` | 0 | — | — |
+
+Over-current events: **0** (again — never the power supply).
+
+- **bus1 is address-bound, not socket-bound.** 6 cables = 120 sockets, only 66 filled → **54 sockets are permanently unusable** because just 20 addresses remain. Ceiling is 86 (matches the N=6 row above). This is the "past 5 cables it gets worse" rule already realised in hardware — the 6th cable bought 20 sockets that cannot be populated.
+- **Put the remaining 18 modems on bus3, none on bus1.** bus3 has 109 free addresses and zero errors; its single cable has only 9 free sockets, so a 2nd cable is needed → insert the small hub (`1 + 4 + 12 = 17` addresses, 40 sockets). Re-seating the existing cable under the small hub re-enumerates everything on bus3 — restart the daemon afterwards.
+- **`device not accepting address` was observed on bus1 with 20 addresses still free** — direct confirmation of the failure-mode rule below: that string never means exhaustion.
+- **Unexplained (2026-08-06):** 306 `ttyUSB` nodes vs 308 expected (77 × 4). Two interfaces missing somewhere; not chased down.
 
 ### USB failure modes — two distinct causes, do not conflate
 
@@ -190,13 +236,28 @@ Passive extension cables are in use between 100-port hub sockets and EC20 module
 
 **Do not treat this as diagnosed.** To test it: pick a port that repeatedly logs `Cannot enable` (e.g. `1-1.3.3.4-port1`), remove its extension cable, plug the module straight into the hub, restart the daemon, and see whether that one socket stabilises. If it does, the hypothesis holds for that class of failure.
 
+**Natural A/B pair now available (2026-08-06).** bus1 logs **246** signal-error lines, bus3 logs **0** — same filter, and it demonstrably matches on bus1, so bus3's zero is real absence, not a broken filter. If bus3's 11 modules are plugged **straight into** their hub while bus1's use extension cables, that is strong evidence for the hypothesis and nearly free to check. **The cabling of bus3 has not been confirmed** — establish that before drawing any conclusion.
+
 ### USB diagnostics
+
+Both EHCI buses carry modems now — **never report a number without saying which bus it came from.**
+
 ```bash
-lsusb | grep -c "Bus 001"                        # addresses used on bus1 (limit 127)
-lsusb | grep "Bus 001" | grep -c 1a40            # how many of those are hub chips
-lsusb | grep -c 2c7c                             # EC20 count
-dmesg | grep -oE "usb [0-9.-]+-port[0-9]+: (Cannot enable|unable to enumerate)" | sort | uniq -c | sort -rn
+lsusb | awk '{print $2}' | sort | uniq -c        # addresses used PER BUS (limit 127 each)
+lsusb | grep "Bus 003" | grep -c 1a40            # hub chips on a given bus
+lsusb | grep -c 2c7c                             # EC20 count (all buses)
+lsusb -t                                         # tier structure; confirms cable/leaf-hub layout
+
+# per-bus signal errors — run on a known-bad bus first to prove the filter matches
+dmesg | grep -cE "usb 3-[0-9.]+.*(Cannot enable|not accepting address|unable to enumerate|error -(71|32|12))"
+
+# controllers and their root-hub port counts
+for d in /sys/bus/usb/devices/usb*; do
+  echo "$(basename $d) bus=$(cat $d/busnum) speed=$(cat $d/speed) ports=$(cat $d/maxchild) $(basename $(readlink -f $d/../driver))"
+done
 ```
+
+**Shell gotcha when counting per-cable occupancy:** a glob `*` matches dots, so `/sys/bus/usb/devices/3-1.*` matches `3-1.2` **and** `3-1.2.3`. Naively summing "direct children" plus "grandchildren" double-counts every modem (produced a bogus `free = -2` on 2026-08-06). Match depth explicitly, e.g. `3-1.[0-9]` vs `3-1.[0-9].[0-9]`, or derive counts from `lsusb -t`.
 
 Vendor IDs: `1a40:0101` = Terminus 4-port hub chip, `1a40:0201` = Terminus 7-port MTT hub chip, `2c7c` = Quectel EC20 (descriptors may misreport as `0125`), `05e3` = Genesys hub (wired to xHCI — leave unused).
 
