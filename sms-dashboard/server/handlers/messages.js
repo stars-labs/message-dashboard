@@ -1,6 +1,7 @@
 import { nanoid } from 'nanoid';
 import { extractVerificationCode } from '../utils/verification';
 import { FILTER_STATUS, VISIBLE_FILTER_STATUSES } from '../utils/spam-filter.js';
+import { normalizeRecipient } from '../utils/recipient.js';
 
 export const messagesHandler = {
   // List messages with pagination
@@ -170,10 +171,10 @@ export const messagesHandler = {
 
     try {
       const body = await request.json();
-      const { phone_iccid, recipient, content } = body;
-      
+      const { phone_iccid, content } = body;
+
       // Validate input
-      if (!phone_iccid || !recipient || !content) {
+      if (!phone_iccid || !body.recipient || !content) {
         return new Response(JSON.stringify({
           success: false,
           error: 'Missing required fields: phone_iccid, recipient, and content are required'
@@ -182,7 +183,25 @@ export const messagesHandler = {
           headers: { 'Content-Type': 'application/json' }
         });
       }
-      
+
+      // The recipient ends up inside an `AT+CMGS="..."` command on the daemon, where a
+      // CR would terminate the command and let the rest execute as AT commands. Only
+      // E.164 gets past here, and the NORMALISED value is what we store — never
+      // body.recipient. See docs/SECURITY-REVIEW.md finding 3.
+      const recipientCheck = normalizeRecipient(body.recipient);
+
+      if (!recipientCheck.ok) {
+        return new Response(JSON.stringify({
+          success: false,
+          error: `Invalid recipient: ${recipientCheck.reason}`
+        }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      const recipient = recipientCheck.value;
+
 
       // Get phone details - check for active statuses
       const phone = await env.DB.prepare(`
