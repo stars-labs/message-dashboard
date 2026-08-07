@@ -1,5 +1,6 @@
 import { handleAuth0 } from '../middleware/auth0.js';
 import { requirePermission, enrichUserPermissions } from '../middleware/rbac.js';
+import { DEFAULT_KEYWORD_COLOR, normalizeKeywordColor } from '../utils/keyword-color.js';
 
 /**
  * Ensure keyword tables exist in the database
@@ -148,6 +149,18 @@ export function setupKeywordRoutes(router) {
                 });
             }
 
+            // The colour is applied to a CSS custom property in every operator's
+            // browser, so it is only ever a hex literal.
+            // See docs/SECURITY-REVIEW.md finding 2.
+            const colorCheck = normalizeKeywordColor(color);
+
+            if (!colorCheck.ok) {
+                return new Response(JSON.stringify({ error: `Invalid color: ${colorCheck.reason}` }), {
+                    status: 400,
+                    headers: { 'Content-Type': 'application/json' }
+                });
+            }
+
             // Check for duplicate keyword
             const existing = await env.DB.prepare(
                 'SELECT id FROM keyword_tags WHERE keyword = ? AND is_active = TRUE'
@@ -168,7 +181,7 @@ export function setupKeywordRoutes(router) {
             `).bind(
                 keyword,
                 tag,
-                color || '#3B82F6',
+                colorCheck.value,
                 priority || 0,
                 case_sensitive || false,
                 whole_word || false,
@@ -226,17 +239,42 @@ export function setupKeywordRoutes(router) {
                 });
             }
 
+            // A supplied colour must be a hex literal (400 otherwise, so the client
+            // gets told). An omitted colour keeps the stored one — but a row written
+            // before this validation existed may hold a payload, so that value is run
+            // through the same check and falls back to the default instead of 400ing.
+            // Rejecting it would make such a row impossible to edit via the API.
+            // See docs/SECURITY-REVIEW.md finding 2.
+            const colorSupplied = !(color === undefined || color === null || color === '');
+            let resolvedColor;
+
+            if (colorSupplied) {
+                const colorCheck = normalizeKeywordColor(color);
+
+                if (!colorCheck.ok) {
+                    return new Response(JSON.stringify({ error: `Invalid color: ${colorCheck.reason}` }), {
+                        status: 400,
+                        headers: { 'Content-Type': 'application/json' }
+                    });
+                }
+
+                resolvedColor = colorCheck.value;
+            } else {
+                const storedCheck = normalizeKeywordColor(existing.color);
+                resolvedColor = storedCheck.ok ? storedCheck.value : DEFAULT_KEYWORD_COLOR;
+            }
+
             // Update keyword tag
             await env.DB.prepare(`
                 UPDATE keyword_tags
-                SET keyword = ?, tag = ?, color = ?, priority = ?, 
+                SET keyword = ?, tag = ?, color = ?, priority = ?,
                     case_sensitive = ?, whole_word = ?, is_active = ?,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
             `).bind(
                 keyword || existing.keyword,
                 tag || existing.tag,
-                color || existing.color,
+                resolvedColor,
                 priority !== undefined ? priority : existing.priority,
                 case_sensitive !== undefined ? case_sensitive : existing.case_sensitive,
                 whole_word !== undefined ? whole_word : existing.whole_word,
