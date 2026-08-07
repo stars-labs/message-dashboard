@@ -578,6 +578,14 @@ impl ModemManager {
 
     /// Send SMS
     pub async fn send_sms(&self, modem_id: &str, recipient: &str, content: &str) -> Result<()> {
+        // Single choke point for outbound sends, so both backends get the same
+        // guarantee. The AT backend interpolates these into serial command strings
+        // where a CR is an injection (docs/SECURITY-REVIEW.md finding 3); the D-Bus
+        // backend passes them as typed arguments and is not injectable, but there is no
+        // reason to accept a malformed number on either path.
+        AtModemManager::validate_recipient(recipient)?;
+        AtModemManager::validate_message_body(content)?;
+
         match self.mode {
             BackendMode::AtCommand => {
                 let port = self.get_port(modem_id).await;

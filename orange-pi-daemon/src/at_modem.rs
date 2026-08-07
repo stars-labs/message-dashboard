@@ -1493,8 +1493,64 @@ impl AtModemManager {
         text.chars().any(|c| !c.is_ascii())
     }
 
+    /// Validate an SMS recipient before it is interpolated into an AT command.
+    ///
+    /// AT commands are CR-terminated, so a CR anywhere in the recipient ends the
+    /// `AT+CMGS="..."` command and the modem parses the remaining bytes as a new
+    /// command. The recipient arrives from an API request body and is therefore
+    /// untrusted; see docs/SECURITY-REVIEW.md finding 3.
+    ///
+    /// This allow-lists E.164 rather than escaping: a phone number has no legitimate
+    /// use for quotes or control characters, so anything outside `+` and digits is
+    /// rejected outright. Rejecting is deliberate — silently stripping characters
+    /// would send the message to a *different* number than the caller asked for.
+    pub(crate) fn validate_recipient(recipient: &str) -> Result<()> {
+        let digits = recipient.strip_prefix('+').unwrap_or(recipient);
+
+        if digits.len() < 6 || digits.len() > 15 {
+            return Err(anyhow!(
+                "Invalid SMS recipient: expected 6-15 digits, got {} character(s)",
+                digits.len()
+            ));
+        }
+
+        if !digits.bytes().all(|b| b.is_ascii_digit()) {
+            // Do not echo the raw value; it may contain control characters.
+            return Err(anyhow!(
+                "Invalid SMS recipient: must be E.164 (optional leading '+' then digits only)"
+            ));
+        }
+
+        Ok(())
+    }
+
+    /// Validate an outbound SMS body before it is written to the modem.
+    ///
+    /// The body is terminated by Ctrl-Z (0x1A), so a literal 0x1A inside it ends SMS
+    /// entry early and returns the modem to command mode — making every trailing byte
+    /// an AT command. ESC (0x1B) aborts entry, and NUL is never legitimate. Newlines
+    /// ARE allowed: a multi-line SMS body is normal.
+    pub(crate) fn validate_message_body(message: &str) -> Result<()> {
+        if let Some(c) = message
+            .chars()
+            .find(|&c| c == '\x1A' || c == '\x1B' || c == '\0')
+        {
+            return Err(anyhow!(
+                "Invalid SMS body: contains control character U+{:04X}",
+                c as u32
+            ));
+        }
+
+        Ok(())
+    }
+
     /// Send SMS
     pub async fn send_sms(&self, port: &str, recipient: &str, message: &str) -> Result<()> {
+        // Validate before touching the modem: both values are interpolated into AT
+        // command strings below, and both originate from an API request body.
+        Self::validate_recipient(recipient)?;
+        Self::validate_message_body(message)?;
+
         // Set text mode
         self.send_at_command(port, "AT+CMGF=1", self.timeout)
             .await?;
@@ -1542,6 +1598,11 @@ impl AtModemManager {
         timeout: Duration,
         use_ucs2: bool,
     ) -> Result<()> {
+        // Re-checked at the sink rather than trusting send_sms: this is the function
+        // that actually writes to the serial port, so the invariant belongs here too.
+        Self::validate_recipient(recipient)?;
+        Self::validate_message_body(message)?;
+
         let mut file = Self::open_serial(port)?;
 
         // In UCS2 mode, BOTH phone number and message must be UCS2 hex encoded
@@ -1687,6 +1748,63 @@ impl AtModemManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // An AT command is terminated by CR, so a CR inside the recipient ends the CMGS
+    // command and everything after it is parsed by the modem as a fresh command. The
+    // recipient reaches here from an API request body, so it is untrusted.
+    // See docs/SECURITY-REVIEW.md finding 3.
+    #[test]
+    fn test_validate_recipient_accepts_e164() {
+        assert!(AtModemManager::validate_recipient("+6512345678").is_ok());
+        assert!(AtModemManager::validate_recipient("6512345678").is_ok());
+        assert!(AtModemManager::validate_recipient("+861380013800").is_ok());
+        assert!(AtModemManager::validate_recipient("123456").is_ok()); // 6 digits, minimum
+        assert!(AtModemManager::validate_recipient("+123456789012345").is_ok()); // 15, maximum
+    }
+
+    #[test]
+    fn test_validate_recipient_rejects_at_injection() {
+        // The exact payload from the security review: terminate CMGS, then wipe the SIM.
+        assert!(AtModemManager::validate_recipient("+6512345678\r\nAT+CMGD=1,4\r").is_err());
+        // Bare CR is enough on its own.
+        assert!(AtModemManager::validate_recipient("+6512345678\rAT+CMGD=1,4").is_err());
+        assert!(AtModemManager::validate_recipient("+6512345678\n").is_err());
+        // Closing the quoted argument early.
+        assert!(AtModemManager::validate_recipient("+65123\"").is_err());
+        // Other control characters that the modem's line discipline may act on.
+        assert!(AtModemManager::validate_recipient("+65123\x1A").is_err());
+        assert!(AtModemManager::validate_recipient("+65123\x1B").is_err());
+        assert!(AtModemManager::validate_recipient("+65123\0").is_err());
+    }
+
+    #[test]
+    fn test_validate_recipient_rejects_malformed() {
+        assert!(AtModemManager::validate_recipient("").is_err());
+        assert!(AtModemManager::validate_recipient("+").is_err());
+        assert!(AtModemManager::validate_recipient("12345").is_err()); // too short
+        assert!(AtModemManager::validate_recipient("+1234567890123456").is_err()); // too long
+        assert!(AtModemManager::validate_recipient("+65 1234 5678").is_err()); // spaces
+        assert!(AtModemManager::validate_recipient("+65-1234-5678").is_err()); // punctuation
+        assert!(AtModemManager::validate_recipient("not-a-number").is_err());
+        // A '+' is only valid as the leading character.
+        assert!(AtModemManager::validate_recipient("65+12345678").is_err());
+    }
+
+    // The body is terminated by Ctrl-Z (0x1A). A literal 0x1A inside the body ends SMS
+    // entry early and returns the modem to command mode, so trailing bytes become AT
+    // commands — the same injection as above, via a different field.
+    #[test]
+    fn test_validate_message_body_rejects_terminators() {
+        assert!(AtModemManager::validate_message_body("hello").is_ok());
+        assert!(AtModemManager::validate_message_body("你好，验证码 1234").is_ok());
+        // Newlines are legitimate in a multi-line SMS body.
+        assert!(AtModemManager::validate_message_body("line one\nline two").is_ok());
+        assert!(AtModemManager::validate_message_body("line one\r\nline two").is_ok());
+
+        assert!(AtModemManager::validate_message_body("x\x1AAT+CMGD=1,4\r").is_err());
+        assert!(AtModemManager::validate_message_body("x\x1B").is_err());
+        assert!(AtModemManager::validate_message_body("x\0y").is_err());
+    }
 
     #[test]
     fn test_parse_iccid() {
