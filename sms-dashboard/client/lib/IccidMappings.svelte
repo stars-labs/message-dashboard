@@ -28,14 +28,18 @@
   //
   // These MUST stay complete literal class names: Tailwind finds classes by scanning
   // source text, so a template like `bg-${c}-500` would compile to nothing.
+  // `tone` is the mobile card's text colour and is deliberately NOT the badge colour.
+  // A healthy row stays grey: most of the 95 SIMs are fine, so colouring every one of
+  // them green makes green meaningless and the list impossible to scan. Only a state
+  // that needs attention is tinted, so the eye lands on problems.
   const STATUS_META = {
-    active:         { label: '活动',        badge: 'bg-emerald-50 text-emerald-700 border-emerald-200', bar: 'bg-emerald-500', text: 'text-emerald-700' },
-    offline:        { label: '离线',        badge: 'bg-stone-100 text-stone-500 border-stone-200',      bar: 'bg-stone-300',   text: 'text-stone-500'   },
-    sim_error:      { label: 'SIM错误',     badge: 'bg-red-50 text-red-600 border-red-200',             bar: 'bg-red-500',     text: 'text-red-600'     },
-    iccid_mismatch: { label: 'ICCID不匹配', badge: 'bg-amber-50 text-amber-700 border-amber-200',       bar: 'bg-amber-500',   text: 'text-amber-700'   },
-    no_modem:       { label: '无设备',      badge: 'bg-stone-50 text-stone-400 border-stone-200',       bar: 'bg-stone-200',   text: 'text-stone-400'   },
+    active:         { label: '活动',        badge: 'bg-emerald-50 text-emerald-700 border-emerald-200', bar: 'bg-emerald-500', text: 'text-emerald-700', tone: 'text-stone-500' },
+    offline:        { label: '离线',        badge: 'bg-stone-100 text-stone-500 border-stone-200',      bar: 'bg-stone-300',   text: 'text-stone-500',   tone: 'text-stone-500' },
+    sim_error:      { label: 'SIM错误',     badge: 'bg-red-50 text-red-600 border-red-200',             bar: 'bg-red-500',     text: 'text-red-600',     tone: 'text-red-600'   },
+    iccid_mismatch: { label: 'ICCID不匹配', badge: 'bg-amber-50 text-amber-700 border-amber-200',       bar: 'bg-amber-500',   text: 'text-amber-700',   tone: 'text-amber-700' },
+    no_modem:       { label: '无设备',      badge: 'bg-stone-50 text-stone-400 border-stone-200',       bar: 'bg-stone-200',   text: 'text-stone-400',   tone: 'text-stone-400' },
   };
-  const STATUS_UNASSIGNED = { label: '未分配', badge: 'bg-stone-50 text-stone-400 border-stone-200', bar: 'bg-stone-200', text: 'text-stone-400' };
+  const STATUS_UNASSIGNED = { label: '未分配', badge: 'bg-stone-50 text-stone-400 border-stone-200', bar: 'bg-stone-200', text: 'text-stone-400', tone: 'text-stone-400' };
 
   function statusMeta(status) {
     return STATUS_META[status] ?? STATUS_UNASSIGNED;
@@ -426,85 +430,85 @@
         </div>
       {:else}
         {#each mappings as mapping}
-          <div class="bg-white border border-stone-200 rounded-xl p-4 shadow-sm">
-            <div class="flex justify-between items-start mb-3">
-              <div class="flex items-center gap-2">
-                {#if mapping.sim_index}
-                  <span class="inline-flex items-center justify-center w-6 h-6 text-xs font-bold rounded-full bg-stone-100 border border-stone-200 text-stone-600">
-                    {mapping.sim_index}
-                  </span>
-                {/if}
-                <span class="font-medium text-stone-900">{mapping.phone_number || '无号码'}</span>
+          <!--
+            Compact 3-line card. The old layout spent 42px of its ~204px on a row that
+            held nothing but 编辑/删除, and another ~94px on four "label — value" rows
+            whose labels were redundant with their values. Both are gone, so roughly
+            twice as many cards fit on a phone screen.
+
+            Status is carried by the 3px left bar rather than a pill in the header:
+            a pill plus two icons overflows a 320px screen once the label is as long
+            as ICCID不匹配. The bar costs no horizontal space, and the status is still
+            spelled out in text on line 2, so it is never colour-only.
+          -->
+          <div class="relative bg-white border border-stone-200 rounded-xl p-3 pl-4 shadow-sm overflow-hidden">
+            <span class="absolute left-0 top-0 bottom-0 w-[3px] {statusMeta(mapping.is_active).bar}" aria-hidden="true"></span>
+
+            <!-- Line 1: identity, then the actions pushed right -->
+            <div class="flex items-center gap-2">
+              {#if mapping.sim_index}
+                <span class="inline-flex items-center justify-center w-6 h-6 shrink-0 text-xs font-bold rounded-full bg-stone-100 border border-stone-200 text-stone-600">
+                  {mapping.sim_index}
+                </span>
+              {/if}
+              <span class="font-medium text-stone-900 truncate">{mapping.phone_number || '无号码'}</span>
+
+              <!-- -my-1 lets the 32px tap targets overflow the 24px row instead of
+                   growing it, so reach stays usable without costing card height. -->
+              <div class="ml-auto flex items-center gap-0.5 shrink-0 -my-1">
+                <button
+                  on:click={() => startEdit(mapping)}
+                  aria-label="编辑 {mapping.phone_number || mapping.iccid}"
+                  class="p-2 text-stone-400 hover:text-stone-800 hover:bg-stone-100 rounded-lg transition-colors"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                  </svg>
+                </button>
+                <button
+                  on:click={() => handleDeleteMapping(mapping.id)}
+                  aria-label="删除 {mapping.phone_number || mapping.iccid}"
+                  class="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                </button>
               </div>
-              <span class="inline-flex px-2 py-0.5 text-[10px] font-medium rounded-full border {statusMeta(mapping.is_active).badge}">
-                {statusMeta(mapping.is_active).label}
+            </div>
+
+            <!--
+              One quiet line instead of two busy ones. Everything is grey by default;
+              only a status that needs attention, a DOWN modem, or a weak signal gets
+              tinted. On a healthy list that means zero colour except the status bars,
+              so the few problem rows are the only thing that stands out.
+            -->
+            <div class="mt-1 flex items-center gap-1.5 text-xs text-stone-500 min-w-0">
+              <span class="shrink-0 {statusMeta(mapping.is_active).tone}">{statusMeta(mapping.is_active).label}</span>
+
+              <span class="flex items-center gap-1 min-w-0">
+                {#if mapping.country}<span class="shrink-0 opacity-70">{getCountryFlag(mapping.country)}</span>{/if}
+                <span class="truncate">{mapping.carrier || '-'}</span>
               </span>
-            </div>
-            
-            <div class="space-y-1.5 mb-3">
-              <div class="flex items-center justify-between text-xs">
-                <span class="text-stone-500">ICCID</span>
-                <span class="font-mono text-stone-800">{mapping.iccid ? (mapping.iccid.length > 10 ? mapping.iccid.substring(0, 6) + '...' + mapping.iccid.substring(mapping.iccid.length - 4) : mapping.iccid) : '-'}</span>
-              </div>
-              <div class="flex items-center justify-between text-xs">
-                <span class="text-stone-500">国家/运营商</span>
-                <div class="flex items-center gap-1">
-                  {#if mapping.country}
-                    <span>{getCountryFlag(mapping.country)}</span>
-                  {/if}
-                  <span class="text-stone-800">{mapping.carrier || '-'}</span>
-                </div>
-              </div>
-              <div class="flex items-center justify-between text-xs">
-                <span class="text-stone-500">Modem/信号</span>
-                <div class="flex items-center gap-2">
-                  {#if mapping.equipment_id && mapping.modem_status && mapping.modem_status !== 'disconnected'}
-                    <span class="inline-flex items-center gap-1">
-                      <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                      <span class="text-emerald-700">UP</span>
-                    </span>
-                  {:else if mapping.equipment_id}
-                    <span class="inline-flex items-center gap-1">
-                      <span class="w-1.5 h-1.5 rounded-full bg-red-500"></span>
-                      <span class="text-red-600">DOWN</span>
-                    </span>
-                  {:else}
-                    <span class="text-stone-300">—</span>
-                  {/if}
-                  {#if mapping.signal_quality != null}
-                    <span class="font-mono {mapping.signal_quality >= 60 ? 'text-emerald-600' : mapping.signal_quality >= 30 ? 'text-amber-600' : 'text-red-600'}">
-                      {mapping.signal_quality}%
-                    </span>
-                  {/if}
-                </div>
-              </div>
+
+              <!-- Only surface the link when something is wrong with it. A working
+                   modem needs no annotation; 活动 already says so. -->
+              {#if mapping.equipment_id && mapping.modem_status === 'disconnected'}
+                <span class="shrink-0 text-red-600">DOWN</span>
+              {:else if mapping.signal_quality != null && mapping.signal_quality < 60}
+                <span class="shrink-0 font-mono {mapping.signal_quality >= 30 ? 'text-amber-600' : 'text-red-600'}">{mapping.signal_quality}%</span>
+              {/if}
+
               {#if mapping.usb_path}
-                <div class="flex items-center justify-between text-xs">
-                  <span class="text-stone-500">USB 位置</span>
-                  <span class="font-mono text-stone-800">{mapping.usb_path}</span>
-                </div>
-              {/if}
-              {#if mapping.notes || mapping.description}
-                <div class="text-xs text-stone-600 bg-stone-50 p-2 rounded border border-stone-100 mt-2">
-                  {mapping.notes || mapping.description}
-                </div>
+                <span class="ml-auto shrink-0 font-mono text-stone-400">{mapping.usb_path}</span>
               {/if}
             </div>
-            
-            <div class="flex justify-end gap-3 pt-3 border-t border-stone-100">
-              <button
-                on:click={() => startEdit(mapping)}
-                class="text-xs font-medium text-stone-600 hover:text-stone-900 px-3 py-1.5 bg-stone-100 hover:bg-stone-200 rounded-md transition-colors"
-              >
-                编辑
-              </button>
-              <button
-                on:click={() => handleDeleteMapping(mapping.id)}
-                class="text-xs font-medium text-red-600 hover:text-red-700 px-3 py-1.5 bg-red-50 hover:bg-red-100 rounded-md transition-colors"
-              >
-                删除
-              </button>
-            </div>
+
+            {#if mapping.notes || mapping.description}
+              <div class="mt-2 text-xs text-stone-600 bg-stone-50 px-2 py-1.5 rounded border border-stone-100">
+                {mapping.notes || mapping.description}
+              </div>
+            {/if}
           </div>
         {/each}
       {/if}
