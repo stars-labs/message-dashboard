@@ -1,5 +1,6 @@
 <script>
   import { onMount } from 'svelte';
+  import { isForeignError, toError } from './error-origin.js';
 
   export let componentName = 'Unknown';
   export let fallback = null;
@@ -22,15 +23,31 @@
   }
 
   onMount(() => {
+    // These are GLOBAL listeners, so they see every error on the page — including ones
+    // thrown by browser extensions. A MetaMask injection failure used to blank the whole
+    // dashboard. Foreign errors are left alone: not shown, and not preventDefault()ed, so
+    // they still reach the console for whoever actually owns them.
     const handleWindowError = (event) => {
-      if (event.error) {
-        handleError(event.error);
-        event.preventDefault();
+      if (!event.error) return;
+
+      if (isForeignError({
+        message: event.message ?? event.error?.message,
+        filename: event.filename,
+        stack: event.error?.stack,
+      })) {
+        return;
       }
+
+      handleError(event.error);
+      event.preventDefault();
     };
 
     const handleUnhandledRejection = (event) => {
-      handleError(new Error(event.reason || 'Unhandled promise rejection'));
+      const error = toError(event.reason);
+
+      if (isForeignError({ message: error.message, stack: error.stack })) return;
+
+      handleError(error);
       event.preventDefault();
     };
 
