@@ -1,0 +1,4 @@
+[test]
+# Installs a DOM and registers the Svelte compiler as a Bun loader, so that
+# `.svelte` imports work in component tests. See test/setup.js.
+preload = ["./test/setup.js"]
