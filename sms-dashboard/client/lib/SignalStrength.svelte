@@ -1,13 +1,15 @@
 <script>
-  export let signal = 0; // 0-100 signal strength
-  export let status = "offline";
-  export let rssi = null; // RSSI in dBm
-  export let rsrq = null; // RSRQ in dB
-  export let rsrp = null; // RSRP in dBm
-  export let snr = null; // SNR in dB
-  export let compact = false; // Compact mode for list view
-  export const daemonConnected = true; // Whether daemon is connected (external reference only)
-  export let isInitialLoad = false; // Whether this is the initial page load
+  let {
+    signal = 0, // 0-100 signal strength
+    status = "offline",
+    rssi = null, // RSSI in dBm
+    rsrq = null, // RSRQ in dB
+    rsrp = null, // RSRP in dBm
+    snr = null, // SNR in dB
+    compact = false, // Compact mode for list view
+    daemonConnected = true, // Whether daemon is connected (external reference only)
+    isInitialLoad = false, // Whether this is the initial page load
+  } = $props();
 
   // Calculate signal bars (0-4) based on signal percentage
   function getSignalBars(signal) {
@@ -47,10 +49,10 @@
     return "text-stone-400";
   }
 
-  $: bars = getSignalBars(signal) || 0;
-  $: quality = getSignalQuality(signal);
-  $: color = getSignalColor(signal);
-  $: textColor = getTextColor(signal);
+  let bars = $derived(getSignalBars(signal) || 0);
+  let quality = $derived(getSignalQuality(signal));
+  let color = $derived(getSignalColor(signal));
+  let textColor = $derived(getTextColor(signal));
 </script>
 
 {#if compact}

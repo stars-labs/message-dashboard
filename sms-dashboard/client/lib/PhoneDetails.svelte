@@ -1,14 +1,18 @@
 <script>
   import SignalStrength from './SignalStrength.svelte';
   import { getCarrierColor } from './countries.js';
-  export let phone = null;
-  export let mobile = false;
-  export let daemonStatus = { connected: false, lastDataUpdate: null };
-  export let showInsights = true;
-  
+  let {
+    phone = null,
+    mobile = false,
+    daemonStatus = { connected: false, lastDataUpdate: null },
+    showInsights = true,
+  } = $props();
+
   // Track if we're in initial loading state
-  $: isInitialLoad = daemonStatus.connected && Date.now() - (daemonStatus.lastDataUpdate || Date.now()) < 5000;
-  
+  let isInitialLoad = $derived(
+    daemonStatus.connected && Date.now() - (daemonStatus.lastDataUpdate || Date.now()) < 5000
+  );
+
   function getEffectiveStatus(phone) {
     if (!phone) return 'unknown';
     

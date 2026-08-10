@@ -5,18 +5,18 @@
 
   // The signed-in admin's own id, so we can disable their own row — the server refuses
   // a self-role-change (see server/handlers/users.js) and the UI should not offer it.
-  export let currentUserId = null;
+  let { currentUserId = null } = $props();
 
-  let users = [];
+  let users = $state([]);
   // Role NAMES are deployment config (currently sms-admin / sms-viewer), so nothing here
   // may compare against a hardcoded "admin". The server tells us which name is which.
-  let knownRoles = [];
-  let adminRole = null;
-  let viewerRole = null;
-  let loading = true;
-  let error = null;
-  let savingId = null;
-  let notice = null;
+  let knownRoles = $state([]);
+  let adminRole = $state(null);
+  let viewerRole = $state(null);
+  let loading = $state(true);
+  let error = $state(null);
+  let savingId = $state(null);
+  let notice = $state(null);
 
   const roleLabel = (role) =>
     role === adminRole ? "管理员" : role === viewerRole ? "查看者" : role;
@@ -72,7 +72,7 @@
       </p>
     </div>
     <button
-      on:click={load}
+      onclick={load}
       disabled={loading}
       class="px-3 py-1.5 text-sm rounded-lg border border-stone-200 text-stone-600 hover:bg-stone-50 disabled:opacity-50"
     >
@@ -135,7 +135,7 @@
                   <div class="inline-flex gap-1">
                     {#each knownRoles as role}
                       <button
-                        on:click={() => changeRole(u, role)}
+                        onclick={() => changeRole(u, role)}
                         disabled={savingId === u.id || u.role === role}
                         class="px-2 py-1 text-xs rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed {u.role ===
                         role
