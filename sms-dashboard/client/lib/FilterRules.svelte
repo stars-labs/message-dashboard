@@ -135,40 +135,60 @@
 </script>
 
 <div class="space-y-4">
+
+  <!-- Guarantee banner — hoisted to the very top so users see it before
+       deciding whether to enable filtering. The old position (page description
+       second line, small text) meant users couldn't find the safety guarantee. -->
+  <div class="flex items-start gap-3 px-4 py-3 bg-emerald-50 border border-emerald-200 rounded-xl text-sm text-emerald-800">
+    <svg class="w-5 h-5 shrink-0 mt-0.5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+        d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+    </svg>
+    <span><strong>含验证码的短信永不隐藏</strong>，即使发送方在黑名单里。开启过滤不会漏掉任何验证码。</span>
+  </div>
+
   <div class="bg-white border border-stone-200 rounded-xl shadow-sm p-4">
     <div class="flex items-start justify-between gap-4">
       <div>
         <h2 class="text-lg font-semibold text-stone-900">垃圾过滤规则</h2>
-        <p class="text-sm text-stone-500 mt-1">
-          命中规则的短信默认不显示，可在消息列表点「已过滤 N 条」查看。
-          <span class="text-stone-600">含验证码的短信永不隐藏</span>，即使发送方在黑名单里。
-        </p>
+        <p class="text-sm text-stone-500 mt-1">命中规则的短信默认不显示，可在消息列表点「已过滤 N 条」查看。</p>
       </div>
       <div class="flex items-center gap-2 shrink-0">
-        {#if pending > 0}
-          <button
-            onclick={() => continueSweep(false)}
-            disabled={saving}
-            class="px-3 py-1.5 text-sm rounded-lg bg-amber-50 border border-amber-300 text-amber-700 hover:bg-amber-100 disabled:opacity-50"
-          >
-            继续处理 {pending} 条
-          </button>
-        {/if}
         <button
           onclick={() => continueSweep(true)}
           disabled={saving}
           class="px-3 py-1.5 text-sm rounded-lg border border-stone-300 text-stone-600 hover:bg-stone-100 disabled:opacity-50"
           title="按当前规则重新判定所有历史消息"
-        >
-          全部重新分类
-        </button>
+        >全部重新分类</button>
       </div>
     </div>
+
+    <!-- Reclassification progress — permanent UI, not a toast.
+         Shown whenever there are pending messages so progress survives
+         a page refresh and users can track large sweeps. -->
+    {#if pending > 0}
+      <div class="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-xl">
+        <div class="flex items-center justify-between mb-1.5">
+          <span class="text-sm font-medium text-amber-800">正在重新判定历史短信</span>
+          <span class="text-xs font-mono text-amber-700 tabular-nums">{pending} 条待处理</span>
+        </div>
+        <div class="h-1.5 bg-amber-200 rounded-full overflow-hidden">
+          <div class="h-full bg-amber-500 rounded-full animate-pulse" style="width: 60%"></div>
+        </div>
+        <div class="flex items-center justify-between mt-2">
+          <span class="text-xs text-amber-700">{notice || '处理中，完成后会停止'}</span>
+          <button onclick={() => continueSweep(false)} disabled={saving}
+            class="text-xs font-medium text-amber-800 hover:underline disabled:opacity-50">
+            继续处理 →
+          </button>
+        </div>
+      </div>
+    {/if}
 
     {#if error}
       <div class="mt-3 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">{error}</div>
     {/if}
-    {#if notice}
+    {#if notice && pending === 0}
       <div class="mt-3 p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg text-sm">{notice}</div>
     {/if}
   </div>

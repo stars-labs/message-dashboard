@@ -415,7 +415,7 @@
     {#if sendingStatus === "sending"}
       <span class="flex items-center justify-center">
         <svg
-          class="animate-spin -ml-1 mr-3 h-5 w-5 text-stone-900"
+          class="animate-spin -ml-1 mr-3 h-5 w-5 text-white"
           fill="none"
           viewBox="0 0 24 24"
         >
@@ -679,15 +679,18 @@
       <button
         onclick={handleSend}
         disabled={sendingStatus === "sending"}
-        class="w-full py-3 bg-gradient-to-r from-purple-500 to-indigo-500 text-stone-900 font-medium rounded-lg hover:from-purple-600 hover:to-indigo-600 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed {sendingStatus ===
-        'success'
-          ? 'from-green-500 to-green-600'
-          : ''} {sendingStatus === 'error' ? 'from-red-500 to-red-600' : ''}"
+        class="w-full py-3 font-medium rounded-lg transition-all duration-300 text-white
+          disabled:opacity-50 disabled:cursor-not-allowed
+          {sendingStatus === 'success'
+            ? 'bg-emerald-500 hover:bg-emerald-600'
+            : sendingStatus === 'error'
+              ? 'bg-red-500 hover:bg-red-600'
+              : 'bg-orange-500 hover:bg-orange-600'}"
       >
         {#if sendingStatus === "sending"}
           <span class="flex items-center justify-center">
             <svg
-              class="animate-spin -ml-1 mr-3 h-5 w-5 text-stone-900"
+              class="animate-spin -ml-1 mr-3 h-5 w-5 text-white"
               fill="none"
               viewBox="0 0 24 24"
             >
