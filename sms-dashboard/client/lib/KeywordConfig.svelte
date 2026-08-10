@@ -2,21 +2,21 @@
   import { onMount } from 'svelte';
   import { api } from './api.js';
 
-  let keywords = [];
-  let loading = false;
-  let error = null;
-  let showAddDialog = false;
-  let editingKeyword = null;
+  let keywords = $state([]);
+  let loading = $state(false);
+  let error = $state(null);
+  let showAddDialog = $state(false);
+  let editingKeyword = $state(null);
 
   // Form data
-  let formData = {
+  let formData = $state({
     keyword: '',
     tag: '',
     color: '#3B82F6',
     priority: 0,
     case_sensitive: false,
     whole_word: false
-  };
+  });
 
   onMount(() => {
     loadKeywords();
@@ -25,7 +25,7 @@
   async function loadKeywords() {
     loading = true;
     error = null;
-    
+
     try {
       const response = await api.get('/api/keywords');
       if (response.keywords) {
@@ -67,7 +67,7 @@
 
   async function saveKeyword() {
     error = null;
-    
+
     try {
       if (editingKeyword) {
         // Update existing keyword
@@ -76,7 +76,7 @@
         // Create new keyword
         await api.post('/api/keywords', formData);
       }
-      
+
       showAddDialog = false;
       await loadKeywords();
     } catch (err) {
@@ -96,7 +96,7 @@
     if (!confirm(`Are you sure you want to delete the keyword "${keyword.keyword}"?`)) {
       return;
     }
-    
+
     try {
       await api.delete(`/api/keywords/${keyword.id}`);
       await loadKeywords();
@@ -127,7 +127,7 @@
       <p class="text-stone-500 mt-1">Configure keywords to highlight and tag messages automatically</p>
     </div>
     <button
-      on:click={showAddKeyword}
+      onclick={showAddKeyword}
       class="tech-button px-4 py-2 rounded-lg flex items-center gap-2"
     >
       <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -155,7 +155,7 @@
       </svg>
       <p class="text-stone-500 mb-4">No keywords configured yet</p>
       <button
-        on:click={showAddKeyword}
+        onclick={showAddKeyword}
         class="tech-button px-6 py-2 rounded-lg"
       >
         Add Your First Keyword
@@ -217,7 +217,7 @@
               </td>
               <td class="px-4 py-3">
                 <button
-                  on:click={() => toggleKeywordActive(keyword)}
+                  onclick={() => toggleKeywordActive(keyword)}
                   class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {keyword.is_active ? 'bg-blue-600' : 'bg-stone-200'}"
                 >
                   <span class="sr-only">Toggle active</span>
@@ -229,7 +229,7 @@
               <td class="px-4 py-3">
                 <div class="flex gap-2">
                   <button
-                    on:click={() => showEditKeyword(keyword)}
+                    onclick={() => showEditKeyword(keyword)}
                     class="text-stone-500 hover:text-stone-800 transition-colors"
                     title="Edit"
                   >
@@ -238,7 +238,7 @@
                     </svg>
                   </button>
                   <button
-                    on:click={() => deleteKeyword(keyword)}
+                    onclick={() => deleteKeyword(keyword)}
                     class="text-red-500 hover:text-red-300 transition-colors"
                     title="Delete"
                   >
@@ -257,8 +257,8 @@
 
   <!-- Add/Edit Dialog -->
   {#if showAddDialog}
-    <div class="fixed inset-0 bg-stone-900/40 backdrop-blur-sm flex items-center justify-center z-50" on:click={() => showAddDialog = false}>
-      <div class="bg-white border border-stone-200 rounded-lg p-6 max-w-md w-full mx-4" on:click|stopPropagation>
+    <div class="fixed inset-0 bg-stone-900/40 backdrop-blur-sm flex items-center justify-center z-50" onclick={() => showAddDialog = false}>
+      <div class="bg-white border border-stone-200 rounded-lg p-6 max-w-md w-full mx-4" onclick={(e) => e.stopPropagation()}>
         <h3 class="text-xl font-bold text-stone-800 mb-4">
           {editingKeyword ? 'Edit Keyword' : 'Add New Keyword'}
         </h3>
@@ -336,13 +336,13 @@
 
         <div class="flex gap-3 mt-6">
           <button
-            on:click={() => showAddDialog = false}
+            onclick={() => showAddDialog = false}
             class="flex-1 px-4 py-2 border border-stone-200 text-stone-500 rounded-lg hover:bg-stone-50 transition-colors"
           >
             Cancel
           </button>
           <button
-            on:click={saveKeyword}
+            onclick={saveKeyword}
             class="flex-1 tech-button px-4 py-2 rounded-lg"
             disabled={!formData.keyword || !formData.tag}
           >

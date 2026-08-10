@@ -7,22 +7,24 @@
     { value: 'sender', label: '发送方号码', hint: '来自这个号码的短信一律隐藏，只填数字，例如 10086' },
   ];
 
-  let rules = [];
-  let pending = 0;
-  let loading = true;
-  let saving = false;
-  let error = null;
-  let notice = null;
+  let rules = $state([]);
+  let pending = $state(0);
+  let loading = $state(true);
+  let saving = $state(false);
+  let error = $state(null);
+  let notice = $state(null);
 
-  let editingId = null;
-  let form = { rule_type: 'body_keyword', pattern: '', note: '' };
+  let editingId = $state(null);
+  let form = $state({ rule_type: 'body_keyword', pattern: '', note: '' });
 
-  $: grouped = RULE_TYPES.map((t) => ({
-    ...t,
-    items: rules.filter((r) => r.rule_type === t.value),
-  }));
+  let grouped = $derived(
+    RULE_TYPES.map((t) => ({
+      ...t,
+      items: rules.filter((r) => r.rule_type === t.value),
+    }))
+  );
 
-  $: activeHint = RULE_TYPES.find((t) => t.value === form.rule_type)?.hint ?? '';
+  let activeHint = $derived(RULE_TYPES.find((t) => t.value === form.rule_type)?.hint ?? '');
 
   onMount(loadRules);
 
@@ -145,7 +147,7 @@
       <div class="flex items-center gap-2 shrink-0">
         {#if pending > 0}
           <button
-            on:click={() => continueSweep(false)}
+            onclick={() => continueSweep(false)}
             disabled={saving}
             class="px-3 py-1.5 text-sm rounded-lg bg-amber-50 border border-amber-300 text-amber-700 hover:bg-amber-100 disabled:opacity-50"
           >
@@ -153,7 +155,7 @@
           </button>
         {/if}
         <button
-          on:click={() => continueSweep(true)}
+          onclick={() => continueSweep(true)}
           disabled={saving}
           class="px-3 py-1.5 text-sm rounded-lg border border-stone-300 text-stone-600 hover:bg-stone-100 disabled:opacity-50"
           title="按当前规则重新判定所有历史消息"
@@ -207,7 +209,7 @@
       </div>
       <div class="flex gap-2">
         <button
-          on:click={save}
+          onclick={save}
           disabled={saving}
           class="px-4 py-2 bg-orange-500 text-white rounded-lg text-sm hover:bg-orange-600 disabled:opacity-50"
         >
@@ -215,7 +217,7 @@
         </button>
         {#if editingId}
           <button
-            on:click={resetForm}
+            onclick={resetForm}
             disabled={saving}
             class="px-3 py-2 border border-stone-300 rounded-lg text-sm text-stone-600 hover:bg-stone-100"
           >
@@ -258,7 +260,7 @@
                   <td class="px-4 py-2 text-right text-stone-600 tabular-nums">{rule.hit_count}</td>
                   <td class="px-4 py-2 text-center">
                     <button
-                      on:click={() => toggleActive(rule)}
+                      onclick={() => toggleActive(rule)}
                       disabled={saving}
                       class="px-2 py-0.5 rounded text-xs {rule.is_active
                         ? 'bg-emerald-100 text-emerald-700'
@@ -270,14 +272,14 @@
                   </td>
                   <td class="px-4 py-2 text-right whitespace-nowrap">
                     <button
-                      on:click={() => startEdit(rule)}
+                      onclick={() => startEdit(rule)}
                       disabled={saving}
                       class="px-2 py-0.5 text-xs text-stone-500 hover:text-stone-800 hover:bg-stone-100 rounded disabled:opacity-50"
                     >
                       编辑
                     </button>
                     <button
-                      on:click={() => remove(rule)}
+                      onclick={() => remove(rule)}
                       disabled={saving}
                       class="px-2 py-0.5 text-xs text-red-500 hover:text-red-700 hover:bg-red-50 rounded disabled:opacity-50"
                     >

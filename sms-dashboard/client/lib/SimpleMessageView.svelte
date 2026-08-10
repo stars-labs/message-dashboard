@@ -3,26 +3,27 @@
   import MessageHighlight from "./MessageHighlight.svelte";
   import { tagActions, keywords as keywordsStore } from "./tag-store.js";
 
-  export let messages = [];
-  export let selectedPhone = null;
-  export let isLoading = false;
-  export let newMessageIds = new Set();
-  export let onClearPhone = null;
-  /** Whether spam/marketing messages are currently being shown. */
-  export let showFiltered = false;
-  /** How many messages the filter is hiding, from pagination.filtered_count. */
-  export let filteredCount = 0;
-  /** Called when the user flips the toggle; the parent refetches. */
-  export let onToggleFiltered = null;
-  /** Filter rules, used to name the rule that hid a message. */
-  export let filterRules = [];
+  let {
+    messages = [],
+    selectedPhone = null,
+    isLoading = false,
+    newMessageIds = new Set(),
+    onClearPhone = null,
+    /** Whether spam/marketing messages are currently being shown. */
+    showFiltered = false,
+    /** How many messages the filter is hiding, from pagination.filtered_count. */
+    filteredCount = 0,
+    /** Called when the user flips the toggle; the parent refetches. */
+    onToggleFiltered = null,
+    /** Filter rules, used to name the rule that hid a message. */
+    filterRules = [],
+  } = $props();
 
-  let activeKeywords = [];
+  let activeKeywords = $state([]);
 
   // id -> readable label, so a hidden message can say WHY it was hidden.
-  let ruleLabels = {};
-  $: ruleLabels = Object.fromEntries(
-    (filterRules || []).map(r => [r.id, r.note || r.pattern])
+  let ruleLabels = $derived(
+    Object.fromEntries((filterRules || []).map(r => [r.id, r.note || r.pattern]))
   );
 
   // Subscribe to keywords store
@@ -60,14 +61,11 @@
   }
 
   // Simple filter
-  let displayMessages = [];
-  $: {
-    if (selectedPhone) {
-      displayMessages = (messages || []).filter(msg => msg.phone_iccid === selectedPhone.iccid);
-    } else {
-      displayMessages = messages || [];
-    }
-  }
+  let displayMessages = $derived(
+    selectedPhone
+      ? (messages || []).filter(msg => msg.phone_iccid === selectedPhone.iccid)
+      : (messages || [])
+  );
 </script>
 
 <div class="bg-white border border-stone-200 rounded-xl shadow-sm flex flex-col h-full min-h-0">
@@ -86,7 +84,7 @@
              visible and one click reveals what was hidden and why. -->
         {#if onToggleFiltered && (filteredCount > 0 || showFiltered)}
           <button
-            on:click={onToggleFiltered}
+            onclick={onToggleFiltered}
             class="px-2 py-1 text-xs rounded-md border transition-colors {showFiltered
               ? 'bg-amber-50 border-amber-300 text-amber-700 hover:bg-amber-100'
               : 'bg-stone-50 border-stone-200 text-stone-500 hover:bg-stone-100 hover:text-stone-700'}"
@@ -98,7 +96,7 @@
 
         {#if selectedPhone && onClearPhone}
           <button
-            on:click={onClearPhone}
+            onclick={onClearPhone}
             class="px-2 py-1 text-xs text-stone-400 hover:text-stone-600 hover:bg-stone-100 rounded-md transition-colors"
             title="返回所有设备"
           >✕ 清除筛选</button>

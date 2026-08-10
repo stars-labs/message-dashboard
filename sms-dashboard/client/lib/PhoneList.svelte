@@ -2,19 +2,21 @@
   import SignalStrength from "./SignalStrength.svelte";
   import { COUNTRY_FILTER_TABS, inferCountryFromNumber } from "./countries.js";
 
-  export let phoneNumbers = [];
-  export const selectedPhone = null; // External reference only
-  export let selectedPhoneIccid = null;
-  export let selectedCountry = "all";
-  export let searchTerm = "";
-  export let onSelectPhone = null;
-  export let mobile = false;
-  export let onSetIccidMapping = null;
-  export let daemonStatus = { connected: false, lastDataUpdate: null };
-  export let isLoading = false;
+  let {
+    phoneNumbers = [],
+    selectedPhone = null, // External reference only
+    selectedPhoneIccid = $bindable(null),
+    selectedCountry = $bindable("all"),
+    searchTerm = $bindable(""),
+    onSelectPhone = null,
+    mobile = false,
+    onSetIccidMapping = null,
+    daemonStatus = { connected: false, lastDataUpdate: null },
+    isLoading = false,
+  } = $props();
 
   // Debounced search: type into local var, update searchTerm after 200ms
-  let searchInput = searchTerm;
+  let searchInput = $state(searchTerm);
   let debounceTimer;
   function handleSearchInput(e) {
     searchInput = e.target.value;
@@ -22,8 +24,8 @@
     debounceTimer = setTimeout(() => { searchTerm = searchInput; }, 200);
   }
 
-  $: filteredPhones = phoneNumbers
-    .filter((phone) => {
+  let filteredPhones = $derived(
+    phoneNumbers.filter((phone) => {
       // Get the effective country
       const effectiveCountry = inferCountryFromNumber(phone);
 
@@ -46,7 +48,8 @@
           phone.equipment_id.toLowerCase().includes(searchLower));
 
       return matchesCountry && matchesSearch;
-    });
+    })
+  );
 
   function getStatusColor(status) {
     switch (status) {
@@ -136,7 +139,7 @@
       <input
         type="text"
         value={searchInput}
-        on:input={handleSearchInput}
+        oninput={handleSearchInput}
         placeholder="搜索号码或运营商..."
         class="w-full px-3 py-2 text-sm cyber-input"
       />
@@ -201,7 +204,7 @@
           phone.iccid
             ? 'phone-selected'
             : 'hover:border-l-4 hover:border-l-stone-400'}"
-          on:click={() => handlePhoneClick(phone)}
+          onclick={() => handlePhoneClick(phone)}
         >
           <div class="flex items-center justify-between">
             <div class="flex-1">
@@ -234,9 +237,10 @@
                   {#if phone.iccid && onSetIccidMapping}
                     <span
                       class="text-xs tech-button px-2 py-1 cursor-pointer"
-                      on:click|stopPropagation={() => onSetIccidMapping(phone)}
-                      on:keydown|stopPropagation={(e) =>
-                        e.key === "Enter" && onSetIccidMapping(phone)}
+                      onclick={(e) => { e.stopPropagation(); onSetIccidMapping(phone); }}
+                      onkeydown={(e) => {
+                        if (e.key === "Enter") { e.stopPropagation(); onSetIccidMapping(phone); }
+                      }}
                       role="button"
                       tabindex="0"
                     >
