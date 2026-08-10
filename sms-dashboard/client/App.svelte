@@ -84,6 +84,7 @@
   let currentView = $state("dashboard"); // 'dashboard', 'iccid-mappings', or 'keywords'
   let iccidMappingsFilter = $state("all");
   let showIccidMappingDialog = $state(false);
+  let showMoreMenu = $state(false); // iOS bottom tab: 更多 sheet
   let toasts = $state([]);
   let messageRequestId = 0; // Prevents stale message responses from overwriting newer ones
   let pollInterval = null;
@@ -652,28 +653,46 @@
 </script>
 
 {#if loading}
+  <!-- Loading: three breathing dots, matches the empty-state pattern -->
   <div class="min-h-screen flex items-center justify-center bg-[#F7F5F2]">
-    <div class="text-center">
-      <div class="inline-flex items-center">
-        <svg class="animate-spin h-8 w-8 text-stone-400 mr-3" fill="none" viewBox="0 0 24 24">
-          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-        </svg>
-        <span class="text-xl text-stone-600">加载中...</span>
-      </div>
+    <div class="flex gap-2">
+      <span class="w-3 h-3 rounded-full bg-emerald-400 animate-pulse"></span>
+      <span class="w-3 h-3 rounded-full bg-emerald-200 animate-pulse [animation-delay:.2s]"></span>
+      <span class="w-3 h-3 rounded-full bg-emerald-100 animate-pulse [animation-delay:.4s]"></span>
     </div>
   </div>
+
 {:else if !user}
+  <!-- Login: product mark + tagline + button + daemon status footnote (§9) -->
   <div class="min-h-screen flex items-center justify-center bg-[#F7F5F2]">
-    <div class="text-center bg-white border border-stone-200 rounded-xl p-10 shadow-sm">
-      <h1 class="text-2xl font-semibold mb-3 text-stone-900">短信验证码管理系统</h1>
-      <p class="text-stone-500 mb-6">请登录以继续</p>
-      <button
-        onclick={() => auth.login()}
-        class="px-6 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-lg transition-colors font-medium"
-      >
-        使用 Auth0 登录
-      </button>
+    <div class="w-full max-w-[460px] mx-4">
+      <div class="bg-white border border-stone-200 rounded-2xl p-10 shadow-raised text-center">
+        <!-- Product mark: favicon + title -->
+        <div class="flex items-center justify-center gap-2.5 mb-5">
+          <img src="/favicon.svg" alt="" class="w-[52px] h-[52px] rounded-xl" />
+        </div>
+        <h1 class="text-lg font-semibold text-stone-900 tracking-tight">验证码中心</h1>
+        <p class="text-sm text-stone-500 mt-2 mb-6 leading-relaxed">
+          需要公司邮箱和 sms 角色。<br>首次登录后默认为查看者。
+        </p>
+        <button
+          onclick={() => auth.login()}
+          class="w-full px-6 py-3 bg-orange-500 hover:bg-orange-600 text-white font-medium rounded-xl
+            transition-colors shadow-focus"
+        >
+          使用 Auth0 登录
+        </button>
+        <p class="mt-5 text-[11px] font-mono text-stone-400">
+          95 modems ·
+          {#if daemonStatus.status === 'online'}
+            守护进程在线
+          {:else if daemonStatus.status === 'offline'}
+            守护进程离线
+          {:else}
+            检测中…
+          {/if}
+        </p>
+      </div>
     </div>
   </div>
 {:else}
@@ -808,42 +827,38 @@
         </div>
       </div>
     </header>
-    <!-- Content below header fills remaining height on desktop -->
-    <div class="lg:flex-1 lg:min-h-0 lg:flex lg:flex-col lg:overflow-hidden">
+    <!-- Content below header fills remaining height on desktop.
+         pb-[74px] on mobile gives space for the fixed bottom tab bar. -->
+    <div class="pb-[74px] lg:pb-0 lg:flex-1 lg:min-h-0 lg:flex lg:flex-col lg:overflow-hidden">
 
-    <!-- Daemon Status Alert Banner -->
+    <!-- Daemon offline / error banner (§9 error state).
+         "下面显示的是那时的数据" — reassures users the existing data is still visible.
+         No "查看硬件诊断" button — that page doesn't exist. -->
     {#if daemonStatus.status === 'offline' || daemonStatus.status === 'error'}
-      <div class="bg-red-50 border-b border-red-200 px-4 py-2">
-        <div class="flex items-center justify-between">
-          <div class="flex items-center gap-2">
-            <svg
-              class="w-5 h-5 text-red-600 flex-shrink-0"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-              />
-            </svg>
-            <span class="text-sm text-red-800">
-              <strong>守护进程{daemonStatus.status === 'error' ? '错误' : '离线'}</strong> - {daemonStatus.message || '设备数据可能不是最新的'}
+      <div class="bg-red-50 border-b border-red-200 px-4 py-3">
+        <div class="flex items-start gap-3">
+          <span class="mt-0.5 shrink-0">
+            <span class="inline-block w-2.5 h-2.5 rounded-full bg-red-500"></span>
+          </span>
+          <div class="flex-1 min-w-0">
+            <p class="text-sm font-semibold text-red-800">
+              守护进程{daemonStatus.status === 'error' ? '错误' : '离线'}
+            </p>
+            <p class="text-xs text-red-600 mt-0.5 leading-relaxed">
               {#if daemonStatus.last_heartbeat}
-                • 最后心跳: {formatTimeAgo(daemonStatus.last_heartbeat)}
+                最后一次心跳是 <strong>{formatTimeAgo(daemonStatus.last_heartbeat)}</strong>。
+                下面显示的是那时的数据，新短信不会进来。
+              {:else}
+                {daemonStatus.message || '设备数据可能不是最新的。历史消息仍可查看。'}
               {/if}
-            </span>
+            </p>
+            <p class="text-xs text-red-500 mt-1">通常是 Orange Pi 掉线或 USB 集线器断电。</p>
           </div>
-          <div class="flex items-center gap-2">
-            <button
-              onclick={() => window.location.reload()}
-              class="text-xs text-red-600 hover:text-red-700 underline"
-            >
-              刷新页面
-            </button>
-          </div>
+          <button onclick={() => window.location.reload()}
+            class="shrink-0 px-3 py-1.5 text-xs font-medium text-red-700 border border-red-300
+              rounded-lg hover:bg-red-100 transition-colors">
+            重新连接
+          </button>
         </div>
       </div>
     {/if}
@@ -898,64 +913,12 @@
       </div>
     {/if}
 
-    <!-- Mobile Navigation -->
-    <div class="lg:hidden px-4 py-2 bg-white border-b border-stone-200">
-      <div class="flex gap-2">
-        <button
-          onclick={() => navigate("dashboard")}
-          class="flex-1 px-3 py-2 rounded-lg text-sm transition-all {currentView ===
-          'dashboard'
-            ? 'bg-orange-50 text-orange-700 font-semibold'
-            : 'text-stone-500 hover:bg-stone-100'}"
-        >
-          消息管理
-        </button>
-        {#if can('phones.write')}
-          <button
-            onclick={() => navigate("iccid-mappings")}
-            class="flex-1 px-3 py-2 rounded-lg text-sm transition-all {currentView ===
-            'iccid-mappings'
-              ? 'bg-orange-50 text-orange-700 font-semibold'
-              : 'text-stone-500 hover:bg-stone-100'}"
-          >
-            ICCID 映射
-          </button>
-        {/if}
-        {#if can('keywords.read')}
-          <button
-            onclick={() => navigate("keywords")}
-            class="flex-1 px-3 py-2 rounded-lg text-sm transition-all {currentView ===
-            'keywords'
-              ? 'bg-orange-50 text-orange-700 font-semibold'
-              : 'text-stone-500 hover:bg-stone-100'}"
-          >
-            关键词
-          </button>
-        {/if}
-        {#if can('filters.read')}
-          <button
-            onclick={() => navigate("filters")}
-            class="flex-1 px-3 py-2 rounded-lg text-sm transition-all {currentView ===
-            'filters'
-              ? 'bg-orange-50 text-orange-700 font-semibold'
-              : 'text-stone-500 hover:bg-stone-100'}"
-          >
-            垃圾过滤
-          </button>
-        {/if}
-        {#if can('users.read')}
-          <button
-            onclick={() => navigate("users")}
-            class="flex-1 px-3 py-2 rounded-lg text-sm transition-all {currentView ===
-            'users'
-              ? 'bg-orange-50 text-orange-700 font-semibold'
-              : 'text-stone-500 hover:bg-stone-100'}"
-          >
-            用户管理
-          </button>
-        {/if}
-      </div>
-    </div>
+    <!-- Mobile nav: bottom tab bar (rendered at the bottom of the outer div).
+         The old horizontal button row crammed 5 items into 390px with ~32px
+         tap targets (below the 44px iOS minimum) and wrapped on narrow screens.
+         Replaced by a 4-tab bottom bar: 验证码 / 设备 / 发送 / 更多.
+         "更多" is a sheet that lists 规则 and 用户管理 per permission. -->
+
 
     {#if currentView === "dashboard"}
       <ErrorBoundary componentName="Dashboard">
@@ -1141,6 +1104,128 @@
       </ErrorBoundary>
     {/if}
     </div><!-- end content wrapper -->
+
+    <!-- ── iOS bottom tab bar ────────────────────────────────────────────── -->
+    <!-- lg:hidden: desktop uses the top nav. pb-safe = env(safe-area-inset-bottom)
+         approximated as pb-5 for devices with home indicator. -->
+    <nav class="lg:hidden fixed bottom-0 left-0 right-0 z-40
+      bg-white border-t border-stone-200 pb-5
+      flex items-stretch"
+      style="box-shadow: 0 -1px 0 rgba(28,25,23,.06);">
+
+      <!-- 验证码 tab -->
+      <button onclick={() => { navigate('dashboard'); showMoreMenu = false; }}
+        class="flex-1 flex flex-col items-center justify-center gap-0.5 pt-2 pb-0.5 min-h-[52px]
+          transition-colors {currentView === 'dashboard' ? 'text-[#c2410c]' : 'text-stone-400'}">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round"
+            d="M7 8h10M7 12h6m-6 4h10M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z"/>
+        </svg>
+        <span class="text-[10px] font-semibold leading-none">验证码</span>
+      </button>
+
+      <!-- 设备 tab — links to iccid-mappings; gated to phones.write -->
+      {#if can('phones.write')}
+        <button onclick={() => { navigate('iccid-mappings'); showMoreMenu = false; }}
+          class="flex-1 flex flex-col items-center justify-center gap-0.5 pt-2 pb-0.5 min-h-[52px]
+            transition-colors {currentView === 'iccid-mappings' ? 'text-[#c2410c]' : 'text-stone-400'}">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round"
+              d="M12 18h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"/>
+          </svg>
+          <span class="text-[10px] font-semibold leading-none">设备</span>
+        </button>
+      {/if}
+
+      <!-- 发送 tab — opens the mobile composer -->
+      <button onclick={() => { navigate('dashboard'); showMoreMenu = false; showPhoneList = false; }}
+        class="flex-1 flex flex-col items-center justify-center gap-0.5 pt-2 pb-0.5 min-h-[52px]
+          transition-colors text-stone-400 hover:text-stone-600">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round"
+            d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
+        </svg>
+        <span class="text-[10px] font-semibold leading-none">发送</span>
+      </button>
+
+      <!-- 更多 tab — reveals a sheet with 规则 + 用户管理 -->
+      <button onclick={() => { showMoreMenu = !showMoreMenu; }}
+        class="flex-1 flex flex-col items-center justify-center gap-0.5 pt-2 pb-0.5 min-h-[52px]
+          transition-colors {showMoreMenu ? 'text-[#c2410c]' : 'text-stone-400'}">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round"
+            d="M4 6h16M4 12h16M4 18h16"/>
+        </svg>
+        <span class="text-[10px] font-semibold leading-none">更多</span>
+      </button>
+    </nav>
+
+    <!-- ── 更多 bottom sheet ────────────────────────────────────────────── -->
+    {#if showMoreMenu}
+      <div class="lg:hidden fixed inset-0 z-30 bg-stone-900/20"
+        onclick={() => showMoreMenu = false}
+        role="presentation">
+      </div>
+      <div class="lg:hidden fixed bottom-[74px] left-0 right-0 z-40 bg-white border-t border-stone-200 rounded-t-2xl
+        shadow-[0_-8px_30px_rgba(28,25,23,.18)]">
+        <div class="p-4 space-y-1">
+          <p class="text-[11px] font-semibold text-stone-400 uppercase tracking-widest px-3 mb-2">规则</p>
+
+          {#if can('keywords.read')}
+            <button onclick={() => { navigate('keywords'); showMoreMenu = false; }}
+              class="w-full flex items-center justify-between px-3 py-3 rounded-xl hover:bg-stone-50 transition-colors text-left">
+              <div>
+                <div class="text-sm font-medium text-stone-800">关键词高亮</div>
+                <div class="text-xs text-stone-400 mt-0.5">标色识别验证码类型</div>
+              </div>
+              <svg class="w-4 h-4 text-stone-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+              </svg>
+            </button>
+          {/if}
+
+          {#if can('filters.read')}
+            <button onclick={() => { navigate('filters'); showMoreMenu = false; }}
+              class="w-full flex items-center justify-between px-3 py-3 rounded-xl hover:bg-stone-50 transition-colors text-left">
+              <div>
+                <div class="text-sm font-medium text-stone-800">垃圾过滤</div>
+                <div class="text-xs text-stone-400 mt-0.5">隐藏非验证码推广短信</div>
+              </div>
+              <svg class="w-4 h-4 text-stone-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+              </svg>
+            </button>
+          {/if}
+
+          {#if can('users.read')}
+            <div class="border-t border-stone-100 my-2"></div>
+            <p class="text-[11px] font-semibold text-stone-400 uppercase tracking-widest px-3 mb-2">管理</p>
+            <button onclick={() => { navigate('users'); showMoreMenu = false; }}
+              class="w-full flex items-center justify-between px-3 py-3 rounded-xl hover:bg-stone-50 transition-colors text-left">
+              <div>
+                <div class="text-sm font-medium text-stone-800">用户管理</div>
+                <div class="text-xs text-stone-400 mt-0.5">管理员 / 查看者角色</div>
+              </div>
+              <svg class="w-4 h-4 text-stone-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+              </svg>
+            </button>
+          {/if}
+
+          <div class="border-t border-stone-100 my-2"></div>
+          <p class="text-[11px] font-semibold text-stone-400 uppercase tracking-widest px-3 mb-2">账户</p>
+          <button onclick={() => auth.logout()}
+            class="w-full flex items-center justify-between px-3 py-3 rounded-xl hover:bg-stone-50 transition-colors text-left">
+            <div class="text-sm font-medium text-stone-700">退出登录</div>
+            <svg class="w-4 h-4 text-stone-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+    {/if}
+
   </div><!-- end outer -->
 {/if}
 
