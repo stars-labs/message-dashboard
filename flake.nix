@@ -159,6 +159,65 @@
 
           # Alias for backward compatibility
           orange-pi-daemon-rust = sms-daemon;
+
+          # Dev convenience commands. These land on $PATH inside the devShell (via
+          # direnv `use flake`), so they work from anywhere in the repo tree.
+          #
+          # `bun` deliberately is NOT declared here: it already comes from the
+          # nix-darwin/NixOS system config, and declaring a second one would mean two
+          # answers to "which bun does this project use".
+
+          # Runs the Cloudflare Worker locally with Auth0 secrets injected.
+          #
+          # Secrets never touch disk. `sops exec-env` decrypts into this process's
+          # environment only, and the values are forwarded to Wrangler as `--var`
+          # flags, which inject them into the Workers `env` bindings object that
+          # server/handlers/auth0.js reads. Wrangler's other mechanism, a `.dev.vars`
+          # file, would mean writing plaintext credentials into the repo — even with
+          # `trap` cleanup a crash would leave them on disk.
+          dev-api = pkgs.writeShellApplication {
+            name = "dev-api";
+            runtimeInputs = with pkgs; [
+              sops
+              git
+            ];
+            text = ''
+              repo_root="$(git rev-parse --show-toplevel)"
+              secrets="$repo_root/secrets/dev-vars.yaml"
+
+              if [ ! -f "$secrets" ]; then
+                echo "dev-api: $secrets is missing." >&2
+                echo "Create it with:  sops \"$secrets\"" >&2
+                echo "Required keys: AUTH0_DOMAIN, AUTH0_CLIENT_ID, AUTH0_CLIENT_SECRET, API_KEY" >&2
+                exit 1
+              fi
+
+              cd "$repo_root/sms-dashboard"
+
+              # The single quotes are deliberate: these $VARs must stay unexpanded here
+              # so they expand in the shell `sops exec-env` spawns, which is the only
+              # process that ever holds the decrypted values.
+              # shellcheck disable=SC2016
+              exec sops exec-env "$secrets" '
+                exec bunx wrangler dev \
+                  --var AUTH0_DOMAIN:"$AUTH0_DOMAIN" \
+                  --var AUTH0_CLIENT_ID:"$AUTH0_CLIENT_ID" \
+                  --var AUTH0_CLIENT_SECRET:"$AUTH0_CLIENT_SECRET" \
+                  --var API_KEY:"$API_KEY"
+              '
+            '';
+          };
+
+          # Frontend dev server. The vite invocation itself stays in package.json so
+          # there is one definition of how the frontend starts; this only saves the cd.
+          dev-frontend = pkgs.writeShellApplication {
+            name = "dev-frontend";
+            runtimeInputs = with pkgs; [ git ];
+            text = ''
+              cd "$(git rev-parse --show-toplevel)/sms-dashboard"
+              exec bun run dev
+            '';
+          };
         in
         {
           packages = {
@@ -170,7 +229,12 @@
 
           devShells = {
             default = pkgs.mkShell {
-              packages = with pkgs; [
+              packages = [
+                # Dev commands (defined above) — on $PATH anywhere in the repo
+                dev-api
+                dev-frontend
+              ]
+              ++ (with pkgs; [
                 # Nix tools
                 nixfmt-rfc-style
                 nixd
@@ -196,7 +260,7 @@
                 jq
                 pkg-config
                 openssl
-              ];
+              ]);
 
               shellHook = ''
                 echo "SMS Dashboard Development Environment"
@@ -204,6 +268,10 @@
                 echo "Available projects:"
                 echo "  • Web Dashboard: cd sms-dashboard"
                 echo "  • Orange Pi Daemon (Rust): cd orange-pi-daemon"
+                echo ""
+                echo "Dev commands (work from anywhere in the repo):"
+                echo "  • dev-frontend  — Vite dev server on :8080"
+                echo "  • dev-api       — Wrangler + Auth0 secrets via SOPS on :8787"
                 echo ""
 
                 # Ensure Ansible finds collections installed by ansible-galaxy (SOPS, general)
