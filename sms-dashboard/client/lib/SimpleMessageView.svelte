@@ -49,7 +49,7 @@
   let contentFilter = $state('code');
 
   // Messages shown in the list, after both dimensions of filtering.
-  let displayMessages = $derived(() => {
+  let displayMessages = $derived.by(() => {
     let base = messages || [];
     // Narrow to the selected card if one is chosen.
     if (selectedPhone) {

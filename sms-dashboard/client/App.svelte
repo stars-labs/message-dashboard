@@ -418,12 +418,20 @@
           return t > max ? t : max;
         }, lastKnownTimestamp ? new Date(lastKnownTimestamp).getTime() : 0);
         if (newest > 0) lastKnownTimestamp = new Date(newest).toISOString();
-        messages = response.data;
+        // Only replace the message list when the response contains data.
+        // api.getMessages uses IndexedDB-backed incremental sync, so an empty
+        // response means "nothing new since last sync" — not "there are no messages".
+        // Replacing with [] in that case erases the data loadData() already loaded.
+        if (response.data.length > 0) {
+          messages = response.data;
+        }
       }
     } catch (error) {
       if (requestId !== messageRequestId) return;
       console.error('[App] Failed to load messages:', error);
-      messages = [];
+      // Do not clear messages on poll failure — keep whatever is already loaded.
+      // Clearing on transient errors (e.g. network blip, wrangler restart) blanks
+      // the UI even though the previous data is still valid.
     }
   }
 
