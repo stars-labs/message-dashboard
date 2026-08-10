@@ -13,10 +13,9 @@
   // logic lives in message-highlight.js so it can be unit tested.
   import { getSegments } from './message-highlight.js';
 
-  export let content = '';
-  export let keywords = [];
+  let { content = '', keywords = [] } = $props();
 
-  $: segments = getSegments(content, keywords);
+  let segments = $derived(getSegments(content, keywords));
 </script>
 
 <!-- Deliberately one line with no whitespace between block tags: segments are adjacent

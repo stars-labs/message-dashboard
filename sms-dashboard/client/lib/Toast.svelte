@@ -1,12 +1,9 @@
 <script>
   import { onMount } from 'svelte';
 
-  export let message = '';
-  export let type = 'info'; // 'success' | 'error' | 'info'
-  export let duration = 4000;
-  export let onClose = () => {};
+  let { message = '', type = 'info', duration = 4000, onClose = () => {} } = $props();
 
-  let visible = false;
+  let visible = $state(false);
 
   onMount(() => {
     // Trigger enter animation
@@ -42,7 +39,7 @@
     <span class="text-lg font-bold shrink-0">{icons[type] || icons.info}</span>
     <span class="text-sm">{message}</span>
     <button
-      on:click={dismiss}
+      onclick={dismiss}
       class="ml-auto shrink-0 opacity-50 hover:opacity-100 transition-opacity text-lg leading-none"
     >
       &times;

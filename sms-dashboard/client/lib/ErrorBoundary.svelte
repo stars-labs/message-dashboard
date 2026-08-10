@@ -2,12 +2,11 @@
   import { onMount } from 'svelte';
   import { isForeignError, toError } from './error-origin.js';
 
-  export let componentName = 'Unknown';
-  export let fallback = null;
+  let { componentName = 'Unknown', children } = $props();
 
-  let hasError = false;
-  let errorMessage = '';
-  let errorDetails = null;
+  let hasError = $state(false);
+  let errorMessage = $state('');
+  let errorDetails = $state(null);
 
   function handleError(error) {
     hasError = true;
@@ -16,7 +15,7 @@
     console.error(`[ErrorBoundary] Error in ${componentName}:`, error);
   }
 
-  export function reset() {
+  function reset() {
     hasError = false;
     errorMessage = '';
     errorDetails = null;
@@ -62,40 +61,32 @@
 </script>
 
 {#if hasError}
-  {#if fallback}
-    <svelte:component this={fallback}
-      error={errorDetails}
-      message={errorMessage}
-      onReset={reset}
-    />
-  {:else}
-    <div class="error-boundary p-4 bg-red-50 border border-red-200 rounded-lg">
-      <h3 class="text-red-800 font-semibold mb-2">Something went wrong</h3>
-      <p class="text-red-600 mb-3">{errorMessage}</p>
-      <button
-        onclick={reset}
-        class="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
-      >
-        Try Again
-      </button>
-      {#if import.meta.env.MODE === 'development' && errorDetails}
-        <details class="mt-4">
-          <summary class="cursor-pointer text-red-700 hover:underline">
-            Error Details (Development Only)
-          </summary>
-          <pre class="mt-2 p-2 bg-red-100 rounded text-xs overflow-auto">
+  <div class="error-boundary p-4 bg-red-50 border border-red-200 rounded-lg">
+    <h3 class="text-red-800 font-semibold mb-2">Something went wrong</h3>
+    <p class="text-red-600 mb-3">{errorMessage}</p>
+    <button
+      onclick={reset}
+      class="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
+    >
+      Try Again
+    </button>
+    {#if import.meta.env.MODE === 'development' && errorDetails}
+      <details class="mt-4">
+        <summary class="cursor-pointer text-red-700 hover:underline">
+          Error Details (Development Only)
+        </summary>
+        <pre class="mt-2 p-2 bg-red-100 rounded text-xs overflow-auto">
 {JSON.stringify({
   message: errorDetails.message,
   stack: errorDetails.stack,
   name: errorDetails.name
 }, null, 2)}
-          </pre>
-        </details>
-      {/if}
-    </div>
-  {/if}
+        </pre>
+      </details>
+    {/if}
+  </div>
 {:else}
-  <slot />
+  {@render children?.()}
 {/if}
 
 <style>
