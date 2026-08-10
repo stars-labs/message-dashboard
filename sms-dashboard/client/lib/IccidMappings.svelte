@@ -3,21 +3,26 @@
   import { api } from "./api";
   import { COUNTRIES, getCountryFlag, getCountryName, getCarrierColor } from "./countries.js";
 
-  let allMappingsCache = [];
-  let mappings = [];
-  let loading = false;
-  let error = null;
-  let showAddForm = false;
-  let showEditForm = false;
-  let editingMapping = null;
-  let searchQuery = "";
-  export let initialStatusFilter = "all";
-  let statusFilter = initialStatusFilter;
-  $: if (initialStatusFilter !== statusFilter && initialStatusFilter !== "all") {
-    statusFilter = initialStatusFilter;
-    filterMappings();
-  }
-  let successMessage = null;
+  let allMappingsCache = $state([]);
+  let mappings = $state([]);
+  let loading = $state(false);
+  let error = $state(null);
+  let showAddForm = $state(false);
+  let showEditForm = $state(false);
+  let editingMapping = $state(null);
+  let searchQuery = $state("");
+  let { initialStatusFilter = "all" } = $props();
+  let statusFilter = $state(initialStatusFilter);
+  // Re-sync the local status filter when the parent passes a new one. The legacy
+  // version used a reactive `$: if (...)` block that also called filterMappings();
+  // an $effect tracks the same dependency and runs the same side effect.
+  $effect(() => {
+    if (initialStatusFilter !== statusFilter && initialStatusFilter !== "all") {
+      statusFilter = initialStatusFilter;
+      filterMappings();
+    }
+  });
+  let successMessage = $state(null);
 
   // Single definition of how a mapping's is_active maps to what the user sees.
   // Previously the label and the badge colours were written out twice — once in the
@@ -46,13 +51,13 @@
   }
 
   // Computed stats (6-state: active, offline, sim_error, iccid_mismatch, no_modem, unassigned)
-  $: activeCount = allMappingsCache.filter(m => m.is_active === 'active').length;
-  $: errorCount = allMappingsCache.filter(m => ['sim_error', 'iccid_mismatch', 'offline'].includes(m.is_active)).length;
-  $: inactiveCount = allMappingsCache.filter(m => ['no_modem', 'unassigned'].includes(m.is_active) || !m.is_active).length;
-  $: totalCount = allMappingsCache.length;
+  let activeCount = $derived(allMappingsCache.filter(m => m.is_active === 'active').length);
+  let errorCount = $derived(allMappingsCache.filter(m => ['sim_error', 'iccid_mismatch', 'offline'].includes(m.is_active)).length);
+  let inactiveCount = $derived(allMappingsCache.filter(m => ['no_modem', 'unassigned'].includes(m.is_active) || !m.is_active).length);
+  let totalCount = $derived(allMappingsCache.length);
 
   // Form data
-  let formData = {
+  let formData = $state({
     iccid: "",
     phone_number: "",
     carrier: "",
@@ -60,7 +65,7 @@
     description: "",
     sim_index: "",
     imei: "",
-  };
+  });
 
   async function loadMappings() {
     loading = true;
@@ -201,7 +206,11 @@
     editingMapping = null;
   }
 
-  $: if (searchQuery !== undefined || statusFilter !== undefined) filterMappings();
+  // Re-filter whenever the search box or status filter changes. The `undefined`
+  // guards are vestigial; left in to preserve the original trigger surface.
+  $effect(() => {
+    if (searchQuery !== undefined || statusFilter !== undefined) filterMappings();
+  });
 
   onMount(() => {
     loadMappings();
@@ -213,7 +222,7 @@
     <h2 class="text-xl sm:text-2xl font-bold data-value high-contrast header-effect-target">ICCID 映射管理</h2>
     <div class="flex gap-2 w-full sm:w-auto">
       <button
-        on:click={() => (showAddForm = true)}
+        onclick={() => (showAddForm = true)}
         class="w-full sm:w-auto px-4 py-2 tech-button transition-all duration-300"
       >
         添加映射
@@ -225,25 +234,25 @@
   <div class="mb-4 flex flex-col sm:flex-row gap-2">
     <div class="flex flex-wrap gap-2">
       <button
-        on:click={() => statusFilter = "all"}
+        onclick={() => statusFilter = "all"}
         class="px-3 sm:px-4 py-2 text-sm sm:text-base rounded-lg transition-colors whitespace-nowrap {statusFilter === 'all' ? 'bg-stone-800 text-white' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'}"
       >
         全部 ({totalCount})
       </button>
       <button
-        on:click={() => statusFilter = "active"}
+        onclick={() => statusFilter = "active"}
         class="px-3 sm:px-4 py-2 text-sm sm:text-base rounded-lg transition-colors whitespace-nowrap {statusFilter === 'active' ? 'bg-green-600 text-white' : 'bg-green-50 text-green-600 hover:bg-green-100'}"
       >
         活动 ({activeCount})
       </button>
       <button
-        on:click={() => statusFilter = "error"}
+        onclick={() => statusFilter = "error"}
         class="px-3 sm:px-4 py-2 text-sm sm:text-base rounded-lg transition-colors whitespace-nowrap {statusFilter === 'error' ? 'bg-amber-600 text-white' : 'bg-amber-50 text-amber-600 hover:bg-amber-100'}"
       >
         异常 ({errorCount})
       </button>
       <button
-        on:click={() => statusFilter = "inactive"}
+        onclick={() => statusFilter = "inactive"}
         class="px-3 sm:px-4 py-2 text-sm sm:text-base rounded-lg transition-colors whitespace-nowrap {statusFilter === 'inactive' ? 'bg-stone-500 text-white' : 'bg-stone-50 text-stone-500 hover:bg-stone-100'}"
       >
         未激活 ({inactiveCount})
@@ -260,7 +269,7 @@
   {#if successMessage}
     <div class="mb-4 p-4 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg flex items-center justify-between">
       <span>✓ {successMessage}</span>
-      <button on:click={() => { successMessage = null; }} class="text-emerald-400 hover:text-emerald-600">&times;</button>
+      <button onclick={() => { successMessage = null; }} class="text-emerald-400 hover:text-emerald-600">&times;</button>
     </div>
   {/if}
 
@@ -283,7 +292,7 @@
     <div class="text-center py-8">
       <p class="text-red-500 mb-4">❌ {error}</p>
       <button
-        on:click={loadMappings}
+        onclick={loadMappings}
         class="px-4 py-2 tech-button"
       >
         重试
@@ -402,13 +411,13 @@
               </td>
               <td class="px-4 py-3 text-sm">
                 <button
-                  on:click={() => startEdit(mapping)}
+                  onclick={() => startEdit(mapping)}
                   class="text-stone-500 hover:text-stone-800 mr-3 transition-colors"
                 >
                   编辑
                 </button>
                 <button
-                  on:click={() => handleDeleteMapping(mapping.id)}
+                  onclick={() => handleDeleteMapping(mapping.id)}
                   class="text-red-500 hover:text-red-300 transition-colors"
                 >
                   删除
@@ -457,7 +466,7 @@
                    growing it, so reach stays usable without costing card height. -->
               <div class="ml-auto flex items-center gap-0.5 shrink-0 -my-1">
                 <button
-                  on:click={() => startEdit(mapping)}
+                  onclick={() => startEdit(mapping)}
                   aria-label="编辑 {mapping.phone_number || mapping.iccid}"
                   class="p-2 text-stone-400 hover:text-stone-800 hover:bg-stone-100 rounded-lg transition-colors"
                 >
@@ -466,7 +475,7 @@
                   </svg>
                 </button>
                 <button
-                  on:click={() => handleDeleteMapping(mapping.id)}
+                  onclick={() => handleDeleteMapping(mapping.id)}
                   aria-label="删除 {mapping.phone_number || mapping.iccid}"
                   class="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                 >
@@ -640,7 +649,7 @@
 
       <div class="mt-6 flex justify-end gap-3 flex-shrink-0 pt-4 border-t border-stone-100">
         <button
-          on:click={() => {
+          onclick={() => {
             showAddForm = false;
             resetForm();
           }}
@@ -649,7 +658,7 @@
           取消
         </button>
         <button
-          on:click={handleAddMapping}
+          onclick={handleAddMapping}
           class="px-4 py-2 tech-button transition-all duration-300"
         >
           添加
@@ -782,7 +791,7 @@
 
       <div class="mt-6 flex justify-end gap-3 flex-shrink-0 pt-4 border-t border-stone-100">
         <button
-          on:click={() => {
+          onclick={() => {
             showEditForm = false;
             resetForm();
           }}
@@ -791,7 +800,7 @@
           取消
         </button>
         <button
-          on:click={handleEditMapping}
+          onclick={handleEditMapping}
           class="px-4 py-2 tech-button transition-all duration-300"
         >
           保存

@@ -420,8 +420,7 @@
     showIccidMappingDialog = true;
   }
 
-  async function handleIccidMappingSuccess(event) {
-    const { phone_iccid, phone_number } = event.detail;
+  async function handleIccidMappingSuccess({ phone_iccid, phone_number }) {
 
     // Update the phone in our local list
     const phoneIndex = phoneNumbers.findIndex((p) => p.iccid === phone_iccid);
@@ -437,8 +436,7 @@
 
   }
 
-  async function handleMessageSent(event) {
-    const newMessage = event.detail;
+  async function handleMessageSent(newMessage) {
 
 
     try {
@@ -1076,7 +1074,7 @@
                 {selectedPhone}
                 {phoneNumbers}
                 {messages}
-                on:messageSent={handleMessageSent}
+                onmessagesent={handleMessageSent}
               />
             </div>
           {/if}
@@ -1119,8 +1117,8 @@
 <IccidMappingDialog
   phone={phoneToMap}
   bind:show={showIccidMappingDialog}
-  on:success={handleIccidMappingSuccess}
-  on:close={() => {
+  onsuccess={handleIccidMappingSuccess}
+  onclose={() => {
     phoneToMap = null;
     showIccidMappingDialog = false;
   }}

@@ -1,24 +1,25 @@
 <script>
-  import { createEventDispatcher, onMount } from "svelte";
+  import { onMount } from "svelte";
 
-  export let selectedPhone = null;
-  export let phoneNumbers = [];
-  export let messages = [];
+  let {
+    selectedPhone = null,
+    phoneNumbers = [],
+    messages = [],
+    onmessagesent = null,
+  } = $props();
 
-  const dispatch = createEventDispatcher();
-
-  let recipientNumber = "";
-  let recipientSIM = "";
-  let messageContent = "";
-  let sendingStatus = "";
-  let showComposer = false;
-  let showRecipientHistory = false;
-  let recipientSearch = "";
-  let simSearch = "";
-  let showSimDropdown = false;
-  let selectedSimDisplay = "";
-  let selectedCountryCode = "+65"; // Default to Singapore
-  let showCountryDropdown = false;
+  let recipientNumber = $state("");
+  let recipientSIM = $state("");
+  let messageContent = $state("");
+  let sendingStatus = $state("");
+  let showComposer = $state(false);
+  let showRecipientHistory = $state(false);
+  let recipientSearch = $state("");
+  let simSearch = $state("");
+  let showSimDropdown = $state(false);
+  let selectedSimDisplay = $state("");
+  let selectedCountryCode = $state("+65"); // Default to Singapore
+  let showCountryDropdown = $state(false);
 
   // Common country codes
   const countryCodes = [
@@ -51,42 +52,48 @@
   }
 
   // Get unique recipient numbers from sent messages
-  $: recipientHistory = [
+  let recipientHistory = $state([
     ...new Set(
       messages
         .filter((msg) => msg.type === "sent" && msg.recipient)
         .map((msg) => msg.recipient),
     ),
-  ].slice(0, 20); // Keep last 20 unique recipients
+  ].slice(0, 20)); // Keep last 20 unique recipients
 
   // Filter recipient history based on search
-  $: filteredRecipients = recipientHistory.filter(
-    (num) => num.includes(recipientSearch) || recipientSearch === "",
+  let filteredRecipients = $derived(
+    recipientHistory.filter(
+      (num) => num.includes(recipientSearch) || recipientSearch === "",
+    )
   );
 
   // Filter available SIM cards based on search
   // Include phones that are online, registered, or have any other active status
-  $: availablePhones = phoneNumbers.filter((p) => p.iccid && (p.status === "online" || p.status === "registered" || (!p.status || (p.status !== "offline" && p.status !== "error" && p.status !== "sim-missing"))));
-  
-  $: filteredSims = availablePhones.filter(phone => {
+  let availablePhones = $derived(phoneNumbers.filter((p) => p.iccid && (p.status === "online" || p.status === "registered" || (!p.status || (p.status !== "offline" && p.status !== "error" && p.status !== "sim-missing")))));
+
+  let filteredSims = $derived(availablePhones.filter(phone => {
     if (!simSearch) return true;
     const searchLower = simSearch.toLowerCase();
     const phoneNumber = (phone.number && phone.number !== "null") ? phone.number : (phone.iccid ? `ICCID: ${phone.iccid.slice(-6)}` : "Unknown");
     const phoneDisplay = `${phone.flag || ''} ${phoneNumber} ${phone.operator_name || ""}`.toLowerCase();
     return phoneDisplay.includes(searchLower) || (phone.iccid && phone.iccid.toLowerCase().includes(searchLower));
-  });
+  }));
 
-  // Sync SIM selection + display when selectedPhone changes
-  $: if (selectedPhone) {
-    // Always update the sender SIM when a different phone is selected in the list
-    recipientSIM = selectedPhone.iccid;
-    const phone = availablePhones.find(p => p.iccid === selectedPhone.iccid);
-    if (phone) {
-      const phoneDisplay = (phone.number && phone.number !== "null") ? phone.number : (phone.iccid ? `ICCID: ${phone.iccid.slice(-6)}` : "Unknown");
-      const operatorDisplay = phone.operator_name ? ` - ${phone.operator_name}` : "";
-      selectedSimDisplay = `${phone.flag || ""} ${phoneDisplay}${operatorDisplay}`;
+  // Sync SIM selection + display when selectedPhone changes. The legacy version
+  // was a reactive `$: if (selectedPhone)` block; $effect tracks the same prop
+  // and runs the same side effects after each change.
+  $effect(() => {
+    if (selectedPhone) {
+      // Always update the sender SIM when a different phone is selected in the list
+      recipientSIM = selectedPhone.iccid;
+      const phone = availablePhones.find(p => p.iccid === selectedPhone.iccid);
+      if (phone) {
+        const phoneDisplay = (phone.number && phone.number !== "null") ? phone.number : (phone.iccid ? `ICCID: ${phone.iccid.slice(-6)}` : "Unknown");
+        const operatorDisplay = phone.operator_name ? ` - ${phone.operator_name}` : "";
+        selectedSimDisplay = `${phone.flag || ""} ${phoneDisplay}${operatorDisplay}`;
+      }
     }
-  }
+  });
 
   function handleSend() {
     if (!recipientNumber || !recipientSIM || !messageContent) {
@@ -123,8 +130,8 @@
       status: "sending",
     };
 
-    // Dispatch to parent (App.svelte) which will handle WebSocket/HTTP sending
-    dispatch("messageSent", sentMessage);
+    // Hand the composed message to the parent (App.svelte), which does the HTTP send.
+    onmessagesent?.(sentMessage);
 
     // Set success status and clear form
     sendingStatus = "success";
@@ -191,7 +198,7 @@
   }
 </script>
 
-<svelte:window on:click={handleClickOutside} />
+<svelte:window onclick={handleClickOutside} />
 
 <!-- Desktop Composer -->
 <div
@@ -215,11 +222,11 @@
       id="sim-selection"
       type="text"
       value={selectedSimDisplay}
-      on:focus={() => {
+      onfocus={() => {
         showSimDropdown = true;
         simSearch = "";
       }}
-      on:input={(e) => {
+      oninput={(e) => {
         showSimDropdown = true;
         simSearch = e.target.value;
         selectedSimDisplay = e.target.value;
@@ -242,7 +249,7 @@
           </div>
           {#each filteredSims as phone}
             <button
-              on:click={() => selectSim(phone)}
+              onclick={() => selectSim(phone)}
               class="w-full text-left px-3 py-2 hover:bg-stone-200 rounded-md transition-colors text-sm flex items-center gap-2"
             >
               <span class="text-lg">{phone.flag}</span>
@@ -279,7 +286,7 @@
       <div class="relative country-code-container">
         <button
           type="button"
-          on:click={() => showCountryDropdown = !showCountryDropdown}
+          onclick={() => showCountryDropdown = !showCountryDropdown}
           class="px-3 py-2 cyber-input flex items-center gap-1 min-w-[90px] justify-between"
         >
           <span class="font-mono">{selectedCountryCode}</span>
@@ -292,7 +299,7 @@
             <div class="p-2">
               {#each countryCodes as cc}
                 <button
-                  on:click={() => selectCountryCode(cc.code)}
+                  onclick={() => selectCountryCode(cc.code)}
                   class="w-full text-left px-3 py-2 hover:bg-stone-200 rounded-md transition-colors text-sm flex items-center gap-2 {selectedCountryCode === cc.code ? 'bg-stone-200' : ''}"
                 >
                   <span class="font-mono w-12">{cc.code}</span>
@@ -308,8 +315,8 @@
         id="recipient-number"
         type="text"
         bind:value={recipientNumber}
-        on:focus={() => (showRecipientHistory = true)}
-        on:input={(e) => {
+        onfocus={() => (showRecipientHistory = true)}
+        oninput={(e) => {
           showRecipientHistory = true;
           recipientSearch = e.target.value;
         }}
@@ -331,7 +338,7 @@
           </div>
           {#each filteredRecipients as recipient}
             <button
-              on:click={() => selectRecipient(recipient)}
+              onclick={() => selectRecipient(recipient)}
               class="w-full text-left px-3 py-2 hover:bg-stone-200 rounded-md transition-colors text-sm flex items-center gap-2"
             >
               <svg
@@ -370,7 +377,7 @@
     >
       {#each messageTemplates as template}
         <button
-          on:click={() => insertTemplate(template.content)}
+          onclick={() => insertTemplate(template.content)}
           class="px-3 py-1 text-xs bg-stone-100 text-stone-600 border border-stone-200 rounded-full hover:bg-stone-200 transition-colors"
         >
           {template.name}
@@ -401,7 +408,7 @@
 
   <!-- Send Button -->
   <button
-    on:click={handleSend}
+    onclick={handleSend}
     disabled={sendingStatus === "sending"}
     class="w-full py-3 font-medium rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed text-white {sendingStatus === 'success' ? 'bg-emerald-500 hover:bg-emerald-600' : sendingStatus === 'error' ? 'bg-red-500 hover:bg-red-600' : 'bg-orange-500 hover:bg-orange-600'}"
   >
@@ -452,7 +459,7 @@
       </h2>
       <button
         class="text-stone-400 hover:text-stone-600 p-2"
-        on:click={() => (showComposer = false)}
+        onclick={() => (showComposer = false)}
         aria-label="关闭发送短信面板"
       >
         <svg
@@ -484,11 +491,11 @@
           id="mobile-sim-selection"
           type="text"
           value={selectedSimDisplay}
-          on:focus={() => {
+          onfocus={() => {
             showSimDropdown = true;
             simSearch = "";
           }}
-          on:input={(e) => {
+          oninput={(e) => {
             showSimDropdown = true;
             simSearch = e.target.value;
             selectedSimDisplay = e.target.value;
@@ -511,7 +518,7 @@
               </div>
               {#each filteredSims as phone}
                 <button
-                  on:click={() => selectSim(phone)}
+                  onclick={() => selectSim(phone)}
                   class="w-full text-left px-3 py-2 hover:bg-stone-200 rounded-md transition-colors text-sm flex items-center gap-2"
                 >
                   <span class="text-lg">{phone.flag}</span>
@@ -548,7 +555,7 @@
           <div class="relative country-code-container">
             <button
               type="button"
-              on:click={() => showCountryDropdown = !showCountryDropdown}
+              onclick={() => showCountryDropdown = !showCountryDropdown}
               class="px-3 py-2 cyber-input flex items-center gap-1 min-w-[90px] justify-between"
             >
               <span class="font-mono">{selectedCountryCode}</span>
@@ -561,7 +568,7 @@
                 <div class="p-2">
                   {#each countryCodes as cc}
                     <button
-                      on:click={() => selectCountryCode(cc.code)}
+                      onclick={() => selectCountryCode(cc.code)}
                       class="w-full text-left px-3 py-2 hover:bg-stone-200 rounded-md transition-colors text-sm flex items-center gap-2 {selectedCountryCode === cc.code ? 'bg-stone-200' : ''}"
                     >
                       <span class="font-mono w-12">{cc.code}</span>
@@ -577,8 +584,8 @@
             id="mobile-recipient-number"
             type="text"
             bind:value={recipientNumber}
-            on:focus={() => (showRecipientHistory = true)}
-            on:input={(e) => {
+            onfocus={() => (showRecipientHistory = true)}
+            oninput={(e) => {
               showRecipientHistory = true;
               recipientSearch = e.target.value;
             }}
@@ -600,7 +607,7 @@
               </div>
               {#each filteredRecipients as recipient}
                 <button
-                  on:click={() => selectRecipient(recipient)}
+                  onclick={() => selectRecipient(recipient)}
                   class="w-full text-left px-3 py-2 hover:bg-stone-200 rounded-md transition-colors text-sm flex items-center gap-2"
                 >
                   <svg
@@ -639,7 +646,7 @@
         >
           {#each messageTemplates as template}
             <button
-              on:click={() => insertTemplate(template.content)}
+              onclick={() => insertTemplate(template.content)}
               class="px-3 py-1 text-xs bg-stone-100 text-stone-600 border border-stone-200 rounded-full hover:bg-stone-200 transition-colors"
             >
               {template.name}
@@ -670,7 +677,7 @@
 
       <!-- Send Button -->
       <button
-        on:click={handleSend}
+        onclick={handleSend}
         disabled={sendingStatus === "sending"}
         class="w-full py-3 bg-gradient-to-r from-purple-500 to-indigo-500 text-stone-900 font-medium rounded-lg hover:from-purple-600 hover:to-indigo-600 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed {sendingStatus ===
         'success'
@@ -715,7 +722,7 @@
 <!-- Mobile Floating Button -->
 <button
   class="lg:hidden fixed bottom-6 right-6 w-14 h-14 bg-orange-500 text-white rounded-full shadow-lg flex items-center justify-center hover:bg-orange-600 hover:scale-110 transition-all z-30"
-  on:click={() => (showComposer = true)}
+  onclick={() => (showComposer = true)}
   aria-label="打开发送短信面板"
 >
   <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">

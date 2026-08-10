@@ -1,24 +1,29 @@
 <script>
-  import { createEventDispatcher } from "svelte";
   import { api } from "./api";
   import { COUNTRIES, inferCountryFromNumber } from "./countries.js";
 
-  export let phone = null;
-  export let show = false;
+  let {
+    phone = null,
+    show = $bindable(false),
+    onsuccess = null,
+    onclose = null,
+  } = $props();
 
-  const dispatch = createEventDispatcher();
+  let phoneNumber = $state("");
+  let carrier = $state("");
+  let country = $state("");
+  let notes = $state("");
+  let imei = $state("");
+  let simIndex = $state("");
+  let status = $state("");
+  let saving = $state(false);
+  let error = $state(null);
 
-  let phoneNumber = "";
-  let carrier = "";
-  let country = "";
-  let notes = "";
-  let imei = "";
-  let simIndex = "";
-  let status = "";
-  let saving = false;
-  let error = null;
-
-  $: if (phone) {
+  // Repopulate the form fields whenever a new phone is passed in. The legacy
+  // version used a reactive `$: if (phone)` block; $effect tracks the same
+  // dependency and runs after every change to `phone`.
+  $effect(() => {
+    if (!phone) return;
     phoneNumber = phone.phone_number || phone.number || "";
     carrier = phone.carrier || "";
     country = phone.country || "";
@@ -31,7 +36,7 @@
     simIndex = phone.sim_index !== null && phone.sim_index !== undefined
       ? String(phone.sim_index)
       : "";
-  }
+  });
 
   async function handleSave() {
     if (!phoneNumber.trim()) {
@@ -60,7 +65,7 @@
       });
 
       if (response.success) {
-        dispatch("success", {
+        onsuccess?.({
           phone_iccid: phone.iccid,
           phone_number: phoneNumber,
         });
@@ -85,7 +90,7 @@
     simIndex = "";
     status = "";
     error = null;
-    dispatch("close");
+    onclose?.();
   }
 </script>
 
@@ -231,14 +236,14 @@
 
       <div class="p-4 sm:p-6 mt-auto flex justify-end gap-3 flex-shrink-0 border-t border-stone-100 bg-stone-50/50 rounded-b-xl">
         <button
-          on:click={close}
+          onclick={close}
           disabled={saving}
           class="px-4 py-2 tech-button disabled:opacity-50"
         >
           取消
         </button>
         <button
-          on:click={handleSave}
+          onclick={handleSave}
           disabled={saving}
           class="px-4 py-2 bg-stone-800 text-white rounded-lg hover:bg-stone-900 transition-colors disabled:opacity-50 flex items-center gap-2"
         >
