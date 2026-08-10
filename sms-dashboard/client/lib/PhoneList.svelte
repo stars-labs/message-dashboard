@@ -1,10 +1,12 @@
 <script>
   import SignalStrength from "./SignalStrength.svelte";
   import { COUNTRY_FILTER_TABS, inferCountryFromNumber } from "./countries.js";
+  import { getStatusMeta, isAnomalous } from "./device-status.js";
+  import { formatCardNumber } from "./card-number.js";
 
   let {
     phoneNumbers = [],
-    selectedPhone = null, // External reference only
+    selectedPhone = null,
     selectedPhoneIccid = $bindable(null),
     selectedCountry = $bindable("all"),
     searchTerm = $bindable(""),
@@ -15,7 +17,8 @@
     isLoading = false,
   } = $props();
 
-  // Debounced search: type into local var, update searchTerm after 200ms
+  // Debounced local search: the parent bind:searchTerm is updated after 200 ms
+  // so the full list re-filter only runs when the user pauses.
   let searchInput = $state(searchTerm);
   let debounceTimer;
   function handleSearchInput(e) {
@@ -24,285 +27,229 @@
     debounceTimer = setTimeout(() => { searchTerm = searchInput; }, 200);
   }
 
+  // Status filter chips: all / online / anomaly
+  let statusChip = $state('all'); // 'all' | 'online' | 'error'
+
   let filteredPhones = $derived(
-    phoneNumbers.filter((phone) => {
-      // Get the effective country
-      const effectiveCountry = inferCountryFromNumber(phone);
+    phoneNumbers
+      .filter((phone) => {
+        const effectiveCountry = inferCountryFromNumber(phone);
+        const matchesCountry = selectedCountry === 'all' || effectiveCountry === selectedCountry;
 
-      // Country filter
-      const matchesCountry =
-        selectedCountry === "all" ||
-        effectiveCountry === selectedCountry;
+        const q = searchTerm.trim().toLowerCase();
+        const matchesSearch = !q ||
+          String(phone.sim_index ?? '').includes(q) ||
+          (phone.number && phone.number.toLowerCase().includes(q)) ||
+          (phone.carrier && phone.carrier.toLowerCase().includes(q)) ||
+          (phone.iccid && phone.iccid.toLowerCase().includes(q)) ||
+          (phone.operator_name && phone.operator_name.toLowerCase().includes(q));
 
-      const searchLower = searchTerm.toLowerCase();
-      const matchesSearch =
-        searchTerm === "" ||
-        (phone.number && phone.number.toString().toLowerCase().includes(searchLower)) ||
-        (phone.carrier &&
-          phone.carrier.toLowerCase().includes(searchLower)) ||
-        (phone.iccid &&
-          phone.iccid.toLowerCase().includes(searchLower)) ||
-        (phone.operator_name &&
-          phone.operator_name.toLowerCase().includes(searchLower)) ||
-        (phone.equipment_id &&
-          phone.equipment_id.toLowerCase().includes(searchLower));
+        const matchesChip =
+          statusChip === 'all' ||
+          (statusChip === 'online' && phone.status === 'active') ||
+          (statusChip === 'error' && isAnomalous(phone.status));
 
-      return matchesCountry && matchesSearch;
-    })
+        return matchesCountry && matchesSearch && matchesChip;
+      })
+      // Anomalous cards sort to the top within any filter.
+      .sort((a, b) => {
+        const ao = getStatusMeta(a.status).sortOrder;
+        const bo = getStatusMeta(b.status).sortOrder;
+        if (ao !== bo) return ao - bo;
+        return (a.sim_index ?? 999) - (b.sim_index ?? 999);
+      })
   );
 
-  function getStatusColor(status) {
-    switch (status) {
-      case "online":
-      case "active":
-        return "bg-emerald-500";
-      case "sim_error":
-        return "bg-red-500";
-      case "iccid_mismatch":
-        return "bg-amber-500";
-      case "offline":
-      case "no_modem":
-      case "unassigned":
-      case "inactive":
-        return "bg-stone-400";
-      default:
-        return "bg-stone-400";
-    }
+  // Status chip counts — always computed from the full list (not filteredPhones)
+  // so the badge numbers don't change when a chip is selected.
+  let onlineCount  = $derived(phoneNumbers.filter(p => p.status === 'active').length);
+  let errorCount   = $derived(phoneNumbers.filter(p => isAnomalous(p.status)).length);
+
+  // Highlight query matches in a string: wrap hits with <mark>.
+  // The returned string is safe to pass to {@html} because it only
+  // wraps user-supplied text in a known-safe tag with no attributes.
+  function highlight(text, q) {
+    if (!q || !text) return text || '';
+    const safe = text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return text.replace(new RegExp(`(${safe})`, 'gi'), '<mark class="bg-[#fed7aa] rounded-[2px]">$1</mark>');
   }
 
   function handlePhoneClick(phone) {
-    // Toggle selection - if clicking the same phone, unselect it
     if (selectedPhoneIccid === phone.iccid) {
       selectedPhoneIccid = null;
-      if (onSelectPhone) {
-        onSelectPhone(null);
-      }
+      onSelectPhone?.(null);
     } else {
       selectedPhoneIccid = phone.iccid;
-      if (onSelectPhone) {
-        onSelectPhone(phone);
-      }
+      onSelectPhone?.(phone);
     }
-  }
-
-  function getEffectiveStatus(phone) {
-    // During loading, trust the phone status if it exists
-    if (isLoading && phone.status) {
-      return phone.status;
-    }
-
-    if (!daemonStatus.connected) {
-      return "unknown";
-    }
-
-    // If daemon is connected but no recent data update, show as stale
-    if (daemonStatus.lastDataUpdate) {
-      const timeSinceUpdate = Date.now() - daemonStatus.lastDataUpdate;
-      if (timeSinceUpdate > 120000) {
-        // 2 minutes
-        return "stale";
-      }
-    }
-
-    return phone.status || "offline";
   }
 </script>
 
-<div class="bg-white border border-stone-200/80 rounded-xl flex flex-col h-full min-h-0" style="box-shadow: 0 1px 3px rgba(28,25,23,0.06);">
-  <div class="p-4 border-b border-stone-200 flex-shrink-0">
-    <h2
-      class="text-base lg:text-lg font-bold data-value high-contrast mb-3 header-effect-target"
-    >
-      号码列表
-    </h2>
+<div class="bg-white border border-stone-200/80 rounded-xl flex flex-col h-full min-h-0"
+  style="box-shadow: 0 1px 3px rgba(28,25,23,0.06);">
 
-    <!-- Country Filter + Device Count -->
-    <div class="mb-3 flex items-center justify-between">
-      <select
-        bind:value={selectedCountry}
-        class="w-1/2 px-3 py-2 text-sm cyber-input shrink-0"
-      >
-        {#each COUNTRY_FILTER_TABS as country}
-          <option value={country.code}>
-            {country.flag}
-            {country.name}
-          </option>
-        {/each}
-      </select>
-      <span class="text-sm text-stone-500">
-        共 <span class="font-mono font-bold text-stone-900">{filteredPhones.length}</span> 个设备
-      </span>
-    </div>
+  <!-- Header: search + filter chips -->
+  <div class="p-3 border-b border-stone-200 flex-shrink-0 space-y-2">
 
     <!-- Search -->
-    <div class="mb-3">
+    <div class="relative">
+      <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-stone-400 pointer-events-none"
+        fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round"
+          d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+      </svg>
       <input
         type="text"
         value={searchInput}
         oninput={handleSearchInput}
-        placeholder="搜索号码或运营商..."
-        class="w-full px-3 py-2 text-sm cyber-input"
+        placeholder="卡号 / 号码 / 运营商 / ICCID"
+        class="w-full pl-8 pr-3 py-1.5 text-sm bg-stone-50 border border-stone-200 rounded-lg
+          focus:outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100 transition-colors"
       />
     </div>
 
+    <!-- Status chips -->
+    <div class="flex items-center gap-1.5">
+      <button
+        onclick={() => { statusChip = 'all'; }}
+        class="px-2.5 py-1 text-xs rounded-md font-medium transition-colors
+          {statusChip === 'all'
+            ? 'bg-stone-800 text-white'
+            : 'bg-stone-100 text-stone-600 hover:bg-stone-200'}"
+      >全部 <span class="font-mono tabular-nums">{phoneNumbers.length}</span></button>
+      <button
+        onclick={() => { statusChip = 'online'; }}
+        class="px-2.5 py-1 text-xs rounded-md font-medium transition-colors
+          {statusChip === 'online'
+            ? 'bg-stone-800 text-white'
+            : 'bg-stone-50 border border-stone-200 text-stone-500 hover:bg-stone-100'}"
+      >在线 <span class="font-mono tabular-nums">{onlineCount}</span></button>
+      {#if errorCount > 0}
+        <button
+          onclick={() => { statusChip = 'error'; }}
+          class="px-2.5 py-1 text-xs rounded-md font-medium transition-colors
+            {statusChip === 'error'
+              ? 'bg-red-600 text-white'
+              : 'bg-red-50 border border-red-200 text-red-700 hover:bg-red-100'}"
+        >异常 <span class="font-mono tabular-nums">{errorCount}</span></button>
+      {/if}
+    </div>
   </div>
 
-  <!-- Phone List -->
+  <!-- List -->
   <div class="flex-1 min-h-0 overflow-y-auto">
     {#if isLoading}
-      <!-- Loading skeleton -->
-      {#each [1, 2, 3, 4, 5] as index}
-        <div class="w-full p-3 border-b">
-          <div class="animate-pulse">
-            <div class="flex items-center justify-between">
-              <div class="flex-1">
-                <div class="flex items-center gap-2">
-                  <div class="w-6 h-6 bg-stone-200 rounded"></div>
-                  <div class="h-4 bg-stone-200 rounded w-32"></div>
-                </div>
-                <div class="h-3 bg-stone-200 rounded w-48 mt-2"></div>
-              </div>
-              <div class="flex gap-0.5 items-end">
-                {#each [1, 2, 3, 4] as bar}
-                  <div
-                    class="w-1 bg-stone-200 rounded-sm"
-                    style="height: {Number.isFinite(bar) ? 4 + bar * 3 : 4}px"
-                  ></div>
-                {/each}
-              </div>
-            </div>
+      {#each [1,2,3,4,5] as _}
+        <div class="flex items-center gap-2 px-3 py-2.5 border-b border-stone-100 animate-pulse">
+          <div class="w-1.5 h-1.5 rounded-full bg-stone-200 shrink-0"></div>
+          <div class="w-6 h-3.5 bg-stone-200 rounded shrink-0"></div>
+          <div class="flex-1 space-y-1">
+            <div class="h-3 bg-stone-200 rounded w-28"></div>
+            <div class="h-2.5 bg-stone-200 rounded w-36"></div>
+          </div>
+          <div class="flex gap-0.5 items-end shrink-0">
+            {#each [1,2,3,4] as bar}
+              <div class="w-0.5 bg-stone-200 rounded-sm" style="height: {4+bar*3}px"></div>
+            {/each}
           </div>
         </div>
       {/each}
+
     {:else if filteredPhones.length === 0}
-      <div class="p-4 text-center text-stone-400">
-        <svg
-          class="w-12 h-12 mx-auto mb-2 text-stone-300"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="2"
-            d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"
-          />
-        </svg>
+      <div class="p-6 text-center">
         {#if phoneNumbers.length === 0}
-          <p class="text-sm text-red-500 mb-2">无法加载设备数据</p>
-          <p class="text-xs text-stone-400">请检查网络连接或重新登录</p>
+          <p class="text-sm text-red-500">无法加载设备数据</p>
+          <p class="text-xs text-stone-400 mt-1">请检查网络连接或重新登录</p>
         {:else}
-          <p class="text-sm">无匹配的设备</p>
-          <p class="text-xs text-stone-400">尝试调整筛选条件</p>
+          <p class="text-sm text-stone-400">无匹配设备</p>
+          <button onclick={() => { statusChip = 'all'; searchTerm = ''; searchInput = ''; }}
+            class="text-xs text-action-text mt-1 hover:underline">清除筛选</button>
         {/if}
       </div>
+
     {:else}
       {#each filteredPhones as phone}
-        <button
-          class="w-full p-3 border-b border-stone-200 hover:bg-stone-50 active:bg-stone-100 transition-all duration-150 text-left relative {selectedPhoneIccid ===
-          phone.iccid
-            ? 'phone-selected'
-            : 'hover:border-l-4 hover:border-l-stone-400'}"
+        {@const meta = getStatusMeta(phone.status)}
+        {@const selected = selectedPhoneIccid === phone.iccid}
+        {@const q = searchTerm.trim().toLowerCase()}
+        {@const anomalous = isAnomalous(phone.status)}
+        {@const iccidTail = phone.iccid ? phone.iccid.slice(-4) : ''}
+
+        <!-- Using div+role rather than <button> here because the row may contain
+             a nested <button> (the 映射 action), and a button inside a button is
+             invalid HTML. The keyboard handler provides equivalent accessibility. -->
+        <div
+          role="button"
+          tabindex="0"
           onclick={() => handlePhoneClick(phone)}
+          onkeydown={(e) => e.key === 'Enter' && handlePhoneClick(phone)}
+          class="w-full flex items-center gap-2 px-3 py-2.5 border-b text-left cursor-pointer
+            transition-all duration-150
+            {selected
+              ? 'bg-[#fff7ed] border-stone-200'
+              : anomalous
+                ? `${meta.rowClass} border-stone-100 hover:brightness-95`
+                : 'bg-white border-stone-100 hover:bg-stone-50'}
+            {selected ? 'shadow-[inset_3px_0_0_#f97316]' : ''}"
         >
-          <div class="flex items-center justify-between">
-            <div class="flex-1">
-              <div class="flex items-center gap-2">
-                <!-- All records are SIMs with phone numbers -->
-                <span class="text-lg">{phone.flag || "📱"}</span>
-                {#if phone.number}
-                    <span class="font-medium text-stone-800 text-sm tech-text">
-                      {phone.number}
-                    </span>
-                {:else}
-                  <span
-                    class="font-medium text-orange-600 text-sm flex items-center gap-1 tech-text"
-                  >
-                    <svg
-                      class="w-4 h-4"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        stroke-width="2"
-                        d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                      />
-                    </svg>
-                    未设置号码
-                  </span>
-                  {#if phone.iccid && onSetIccidMapping}
-                    <span
-                      class="text-xs tech-button px-2 py-1 cursor-pointer"
-                      onclick={(e) => { e.stopPropagation(); onSetIccidMapping(phone); }}
-                      onkeydown={(e) => {
-                        if (e.key === "Enter") { e.stopPropagation(); onSetIccidMapping(phone); }
-                      }}
-                      role="button"
-                      tabindex="0"
-                    >
-                      设置映射
-                    </span>
-                  {/if}
+          <!-- Status dot -->
+          <span class="w-1.5 h-1.5 rounded-full shrink-0 {meta.dotClass}"></span>
+
+          <!-- Card number: the primary identifier -->
+          <span class="font-mono text-sm font-semibold tabular-nums w-6 text-right shrink-0
+            {phone.status === 'active' ? 'text-stone-800' : 'text-stone-400'}">
+            {formatCardNumber(phone.sim_index)}
+          </span>
+
+          <!-- Main info -->
+          <div class="flex-1 min-w-0">
+            <!-- Primary line: flag + number -->
+            <div class="flex items-center gap-1 text-sm font-medium font-mono leading-snug">
+              {#if phone.flag}<span class="text-base leading-none">{phone.flag}</span>{/if}
+              {#if phone.number}
+                <!-- eslint-disable-next-line svelte/no-at-html-tags -->
+                <span class="truncate text-stone-800 text-[13px]">{@html highlight(phone.number, q)}</span>
+              {:else}
+                <span class="text-amber-600 text-xs">未设置号码</span>
+                {#if phone.iccid && onSetIccidMapping}
+                  <button
+                    onclick={(e) => { e.stopPropagation(); onSetIccidMapping(phone); }}
+                    onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); onSetIccidMapping(phone); } }}
+                    class="ml-1 px-1.5 py-0.5 text-[10px] font-medium rounded bg-amber-50 border
+                      border-amber-200 text-amber-700 hover:bg-amber-100 transition-colors shrink-0"
+                  >映射</button>
                 {/if}
-              </div>
-              <div class="text-xs text-stone-400 mt-0.5">
-                <!-- All records are SIMs with metadata -->
-                {#if phone.carrier}
-                  <span class="font-bold text-stone-700">{phone.carrier}</span>
-                {/if}
-                {#if phone.operator_name && phone.operator_name !== phone.carrier}
-                  {@const dedupedOperator = [...new Set(phone.operator_name.split(/\s+/))].join(' ')}
-                  {#if dedupedOperator !== phone.carrier}
-                    <span class="text-stone-500"> • {dedupedOperator}</span>
-                  {/if}
-                {/if}
-                {#if phone.iccid}
-                  <span class="text-stone-400 font-mono iccid-display" title={phone.iccid}>
-                    • <span class="iccid-full">{phone.iccid}</span><span class="iccid-short">{phone.iccid.slice(0, 6)}...{phone.iccid.slice(-4)}</span>
-                  </span>
-                {/if}
-                {#if phone.modem_index != null || phone.sim_index != null}
-                  <span class="text-indigo-600 font-medium">
-                    {#if phone.modem_index != null}
-                      • M{phone.modem_index}
-                    {/if}
-                    {#if phone.sim_index != null}
-                      /S{phone.sim_index}
-                    {/if}
-                  </span>
-                {/if}
-              </div>
+              {/if}
             </div>
+            <!-- Secondary line: carrier · ICCID tail -->
+            <div class="text-[11px] text-stone-400 font-mono leading-snug truncate mt-0.5">
+              {#if phone.carrier}
+                <!-- eslint-disable-next-line svelte/no-at-html-tags -->
+                <span class="text-stone-500">{@html highlight(phone.carrier, q)}</span>
+              {/if}
+              {#if iccidTail}
+                <span class="text-stone-300"> · …{iccidTail}</span>
+              {/if}
+              {#if anomalous}
+                <span class="ml-1 text-[10px] font-medium {meta.badgeClass.includes('red') ? 'text-red-600' : 'text-amber-600'}">
+                  {meta.label}
+                </span>
+              {/if}
+            </div>
+          </div>
+
+          <!-- Signal bars -->
+          <div class="shrink-0">
             <SignalStrength
               signal={phone.signal || 0}
-              status={getEffectiveStatus(phone)}
+              status={phone.status || 'offline'}
               compact={true}
               daemonConnected={daemonStatus.connected}
               isInitialLoad={isLoading}
             />
           </div>
-          {#if phone.lastActive && !mobile}
-            <div class="text-xs text-stone-400 mt-1">
-              最后活跃: {new Date(phone.lastActive).toLocaleString("zh-CN")}
-            </div>
-          {/if}
-        </button>
+        </div>
       {/each}
     {/if}
   </div>
 </div>
-
-<style>
-  /* Show truncated ICCID by default, full on wider screens */
-  .iccid-full { display: none; }
-  .iccid-short { display: inline; }
-
-  @media (min-width: 1280px) {
-    .iccid-full { display: inline; }
-    .iccid-short { display: none; }
-  }
-</style>

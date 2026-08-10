@@ -14,6 +14,7 @@
   import { api } from "./lib/api.js";
   import { getPhoneFlag, mapStatsResponse } from "./lib/countries.js";
   import { auth } from "./lib/auth.js";
+  import { isAnomalous } from "./lib/device-status.js";
 
   let selectedPhoneIccid = $state(null);
   let selectedPhone = $state(null);
@@ -145,6 +146,13 @@
     verificationRate: 0,
   });
 
+  // Anomaly counts for the health strip, derived from the live phone list.
+  // Computed here (in App) so the same numbers feed both the health strip and
+  // the status-alert banner without duplicating the filter logic.
+  let anomalySimError    = $derived(phoneNumbers.filter(p => p.status === 'sim_error').length);
+  let anomalyMismatch    = $derived(phoneNumbers.filter(p => p.status === 'iccid_mismatch').length);
+  let anomalyOffline     = $derived(phoneNumbers.filter(p => p.status === 'offline').length);
+  let anomalyTotal       = $derived(phoneNumbers.filter(p => isAnomalous(p.status)).length);
 
   // Permission gate. `user.permissions` comes from /api/auth/me, which derives it from
   // the caller's Auth0 roles. This is UX only — the server enforces the same rules on
@@ -951,37 +959,64 @@
 
     {#if currentView === "dashboard"}
       <ErrorBoundary componentName="Dashboard">
-        <!-- Stats Bar -->
-        <div class="lg:flex-shrink-0 px-2 sm:px-4 lg:px-8 py-2 sm:py-3 overflow-x-auto">
-          <div class="bg-white border border-stone-200 rounded-xl shadow-sm flex divide-x divide-stone-100 min-w-max lg:min-w-0">
-            <div class="flex-1 px-3 sm:px-4 lg:px-5 py-2 sm:py-3 min-w-0">
-              <div class="text-[9px] sm:text-[10px] font-semibold text-stone-400 uppercase tracking-wider sm:tracking-widest mb-0.5 sm:mb-1 whitespace-nowrap">在线</div>
-              <div class="font-mono text-lg sm:text-xl font-bold text-stone-900 leading-none whitespace-nowrap" title="Online: {stats.onlineDevices}, Total: {stats.totalDevices}, Phones: {phoneNumbers.length}">
-                {#key stats.onlineDevices + ':' + stats.totalDevices}
-                  {stats.onlineDevices}<span class="text-stone-400 font-normal text-xs sm:text-sm"> / {stats.totalDevices}</span>
-                {/key}
+        <!-- Health Strip: replaces the 6 vanity numbers (today-received, today-sent,
+             total-received, total-sent, success-rate) that drove zero user actions.
+             One number that matters (online / total) + three anomaly chips that name
+             what needs attention and link directly to the ICCID page. -->
+        <div class="lg:flex-shrink-0 px-2 sm:px-4 lg:px-8 py-2 flex-shrink-0">
+          <div class="bg-white border border-stone-200 rounded-xl shadow-raised flex items-center gap-4 sm:gap-6 px-4 sm:px-5 py-2.5 overflow-x-auto">
+
+            <!-- Online count -->
+            <div class="flex items-baseline gap-1.5 shrink-0">
+              <span class="font-mono text-[22px] font-semibold text-stone-900 leading-none tabular-nums">
+                {stats.onlineDevices}
+              </span>
+              <span class="font-mono text-sm text-stone-400">/ {stats.totalDevices || phoneNumbers.length}</span>
+              <span class="text-xs text-stone-500 ml-0.5">张卡在线</span>
+            </div>
+
+            <!-- Anomaly chips — only rendered when the count is non-zero so the
+                 strip stays uncluttered when everything is healthy. Each links to
+                 the ICCID page pre-filtered to the anomaly group. -->
+            {#if anomalySimError > 0 || anomalyMismatch > 0 || anomalyOffline > 0}
+              <div class="h-4 w-px bg-stone-200 shrink-0"></div>
+              <div class="flex items-center gap-3 shrink-0">
+                {#if anomalySimError > 0}
+                  <span class="flex items-center gap-1.5 text-xs text-stone-600">
+                    <span class="inline-block w-2 h-2 rounded-sm bg-red-500 shrink-0"></span>
+                    读卡失败 <strong class="font-mono tabular-nums">{anomalySimError}</strong>
+                  </span>
+                {/if}
+                {#if anomalyMismatch > 0}
+                  <span class="flex items-center gap-1.5 text-xs text-stone-600">
+                    <span class="inline-block w-2 h-2 rounded-sm bg-amber-500 shrink-0"></span>
+                    ICCID 不匹配 <strong class="font-mono tabular-nums">{anomalyMismatch}</strong>
+                  </span>
+                {/if}
+                {#if anomalyOffline > 0}
+                  <span class="flex items-center gap-1.5 text-xs text-stone-600">
+                    <span class="inline-block w-2 h-2 rounded-sm bg-stone-300 shrink-0"></span>
+                    离线 <strong class="font-mono tabular-nums">{anomalyOffline}</strong>
+                  </span>
+                {/if}
               </div>
-            </div>
-            <div class="flex-1 px-3 sm:px-4 lg:px-5 py-2 sm:py-3 min-w-0">
-              <div class="text-[9px] sm:text-[10px] font-semibold text-stone-400 uppercase tracking-wider sm:tracking-widest mb-0.5 sm:mb-1 whitespace-nowrap">今日接收</div>
-              <div class="font-mono text-lg sm:text-xl font-bold text-stone-900 leading-none whitespace-nowrap">{stats.todayReceived || 0}</div>
-            </div>
-            <div class="flex-1 px-3 sm:px-4 lg:px-5 py-2 sm:py-3 min-w-0">
-              <div class="text-[9px] sm:text-[10px] font-semibold text-stone-400 uppercase tracking-wider sm:tracking-widest mb-0.5 sm:mb-1 whitespace-nowrap">今日发送</div>
-              <div class="font-mono text-lg sm:text-xl font-bold text-stone-900 leading-none whitespace-nowrap">{stats.todaySent || 0}</div>
-            </div>
-            <div class="flex-1 px-3 sm:px-4 lg:px-5 py-2 sm:py-3 min-w-0">
-              <div class="text-[9px] sm:text-[10px] font-semibold text-stone-400 uppercase tracking-wider sm:tracking-widest mb-0.5 sm:mb-1 whitespace-nowrap">总接收</div>
-              <div class="font-mono text-lg sm:text-xl font-bold text-stone-900 leading-none whitespace-nowrap">{stats.totalReceived || 0}</div>
-            </div>
-            <div class="flex-1 px-3 sm:px-4 lg:px-5 py-2 sm:py-3 min-w-0">
-              <div class="text-[9px] sm:text-[10px] font-semibold text-stone-400 uppercase tracking-wider sm:tracking-widest mb-0.5 sm:mb-1 whitespace-nowrap">总发送</div>
-              <div class="font-mono text-lg sm:text-xl font-bold text-stone-900 leading-none whitespace-nowrap">{stats.totalSent || 0}</div>
-            </div>
-            <div class="flex-1 px-3 sm:px-4 lg:px-5 py-2 sm:py-3 min-w-0">
-              <div class="text-[9px] sm:text-[10px] font-semibold text-stone-400 uppercase tracking-wider sm:tracking-widest mb-0.5 sm:mb-1 whitespace-nowrap">成功率</div>
-              <div class="font-mono text-lg sm:text-xl font-bold text-stone-900 leading-none whitespace-nowrap">{stats.verificationRate || 0}%</div>
-            </div>
+
+              {#if can('phones.write')}
+                <button
+                  onclick={() => { iccidMappingsFilter = "error"; navigate("iccid-mappings"); }}
+                  class="text-xs text-action-text font-medium border-b border-[#fdba74] hover:border-orange-400 transition-colors shrink-0"
+                >
+                  处理 →
+                </button>
+              {/if}
+            {:else if phoneNumbers.length > 0}
+              <div class="h-4 w-px bg-stone-200 shrink-0"></div>
+              <span class="flex items-center gap-1.5 text-xs text-emerald-600">
+                <span class="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0"></span>
+                全部正常
+              </span>
+            {/if}
+
           </div>
         </div>
 
@@ -1055,16 +1090,10 @@
                 onToggleFiltered={toggleFiltered}
               />
             </div>
-            <!-- Show PhoneDetails below if selected -->
-            {#if selectedPhone}
-              <div class="flex-shrink-0">
-                <PhoneDetails
-                  phone={selectedPhone}
-                  mobile={false}
-                  {daemonStatus}
-                />
-              </div>
-            {/if}
+            <!-- PhoneDetails removed: ICCID, IMEI, 模块位置, 信号 are all shown in
+                 PhoneList and the message list header. Displaying them a third time
+                 here consumed vertical space without adding information.
+                 These fields are still available in the ICCID 映射 page. -->
           </div>
 
           <!-- Message Composer. Viewers currently DO hold messages.send, so this stays
