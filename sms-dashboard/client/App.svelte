@@ -15,8 +15,8 @@
   import { getPhoneFlag, mapStatsResponse } from "./lib/countries.js";
   import { auth } from "./lib/auth.js";
 
-  let selectedPhoneIccid = null;
-  let selectedPhone = null;
+  let selectedPhoneIccid = $state(null);
+  let selectedPhone = $state(null);
   
   // Manual function to update selected phone
   function updateSelectedPhone() {
@@ -61,39 +61,39 @@
   }
   
   // Track if we've loaded stats from backend (to prevent race conditions)
-  let backendStatsLoaded = false;
+  let backendStatsLoaded = $state(false);
 
   // Manual function to update stats - no reactive statements to avoid circular dependencies
   function updateStatsFromPhones() {
     if (phoneNumbers && phoneNumbers.length > 0) {
       const onlineCount = calculateOnlineDevices(phoneNumbers);
       if (onlineCount !== stats.onlineDevices) {
-        stats = { ...stats, onlineDevices: onlineCount };
+        stats.onlineDevices = onlineCount;
       }
     }
   }
-  let selectedCountry = "all";
-  let searchTerm = "";
-  let showPhoneList = false;
-  let messages = [];
-  let phoneNumbers = [];
-  let user = null;
-  let loading = true;
-  let dataLoading = true; // Track data loading separately
-  let currentView = "dashboard"; // 'dashboard', 'iccid-mappings', or 'keywords'
-  let iccidMappingsFilter = "all";
-  let showIccidMappingDialog = false;
-  let toasts = [];
+  let selectedCountry = $state("all");
+  let searchTerm = $state("");
+  let showPhoneList = $state(false);
+  let messages = $state([]);
+  let phoneNumbers = $state([]);
+  let user = $state(null);
+  let loading = $state(true);
+  let dataLoading = $state(true); // Track data loading separately
+  let currentView = $state("dashboard"); // 'dashboard', 'iccid-mappings', or 'keywords'
+  let iccidMappingsFilter = $state("all");
+  let showIccidMappingDialog = $state(false);
+  let toasts = $state([]);
   let messageRequestId = 0; // Prevents stale message responses from overwriting newer ones
   let pollInterval = null;
   const POLL_INTERVAL_MS = 15000; // 15 seconds
-  let newMessageIds = new Set(); // Track newly arrived message IDs for "新" badge
+  let newMessageIds = $state(new Set()); // Track newly arrived message IDs for "新" badge
 
   // Spam/marketing filtering. Hidden by default; the count is always shown so the
   // filter is never silent, and toggling refetches with include_filtered=1.
-  let showFiltered = false;
-  let filteredCount = 0;
-  let filterRules = []; // Loaded lazily, only to name the rule that hid a message
+  let showFiltered = $state(false);
+  let filteredCount = $state(0);
+  let filterRules = $state([]); // Loaded lazily, only to name the rule that hid a message
 
   async function toggleFiltered() {
     showFiltered = !showFiltered;
@@ -107,19 +107,19 @@
     }
     await loadMessagesForPhone(selectedPhoneIccid);
   }
-  let lastKnownTimestamp = null; // Only flag messages newer than this as "新"
-  let daemonRefreshing = false;
+  let lastKnownTimestamp = $state(null); // Only flag messages newer than this as "新"
+  let daemonRefreshing = $state(false);
 
   function showToast(message, type = 'info', duration = 4000) {
     const id = Date.now();
-    toasts = [...toasts, { id, message, type, duration }];
+    toasts.push({ id, message, type, duration });
   }
 
   function removeToast(id) {
     toasts = toasts.filter(t => t.id !== id);
   }
-  let phoneToMap = null;
-  let daemonStatus = {
+  let phoneToMap = $state(null);
+  let daemonStatus = $state({
     status: 'unknown',
     message: 'Checking daemon status...',
     modem_count: 0,
@@ -131,9 +131,9 @@
     lastDataUpdate: Date.now(),
     lastPhoneUpdate: Date.now(),
     healthCheckTime: Date.now(),
-  };
+  });
 
-  let stats = {
+  let stats = $state({
     totalMessages: 0,
     todayMessages: 0,
     totalSent: 0,
@@ -143,13 +143,16 @@
     onlineDevices: 0,
     totalDevices: 0,
     verificationRate: 0,
-  };
-  
-  
+  });
+
+
   // Permission gate. `user.permissions` comes from /api/auth/me, which derives it from
   // the caller's Auth0 roles. This is UX only — the server enforces the same rules on
   // every endpoint, so hiding a control is a convenience, never a security boundary.
-  $: can = (permission) => user?.permissions?.includes(permission) ?? false;
+  // Reading `user` inside the function body is enough for runes to re-track it.
+  function can(permission) {
+    return user?.permissions?.includes(permission) ?? false;
+  }
 
   // Which permission each view requires. Used both for nav visibility and for the hash
   // guard below, so the two cannot disagree.
@@ -186,7 +189,9 @@
 
   // Re-run the guard once permissions arrive: onMount fires handleHashChange before
   // getUser() resolves, so a deep link is validated only after `user` is known.
-  $: if (user) handleHashChange();
+  $effect(() => {
+    if (user) handleHashChange();
+  });
 
   // Load data using HTTP API directly for better performance
   async function loadData() {
@@ -388,14 +393,12 @@
           console.log('[New Message Detection] Found', freshIds.length, 'new messages:', freshIds);
           if (freshIds.length > 0) {
             freshIds.forEach(id => newMessageIds.add(id));
-            newMessageIds = newMessageIds; // trigger reactivity
             console.log('[New Message Detection] Added new message IDs, newMessageIds size:', newMessageIds.size);
-            // Auto-clear "新" badges after 30 seconds
+            // Auto-clear "新" badges after 10 seconds (design: highlight fades to a normal row)
             setTimeout(() => {
               freshIds.forEach(id => newMessageIds.delete(id));
-              newMessageIds = newMessageIds;
-              console.log('[New Message Detection] Auto-cleared badges after 30s');
-            }, 30000);
+              console.log('[New Message Detection] Auto-cleared badges after 10s');
+            }, 10000);
           }
         } else {
           console.log('[New Message Detection] Skipped - lastKnownTimestamp:', lastKnownTimestamp, 'messages.length:', messages.length);
@@ -429,7 +432,6 @@
         ...phoneNumbers[phoneIndex],
         number: phone_number,
       };
-      phoneNumbers = [...phoneNumbers]; // Trigger reactivity
       updateStatsFromPhones();
       updateSelectedPhone();
     }
@@ -659,7 +661,7 @@
       <h1 class="text-2xl font-semibold mb-3 text-stone-900">短信验证码管理系统</h1>
       <p class="text-stone-500 mb-6">请登录以继续</p>
       <button
-        on:click={() => auth.login()}
+        onclick={() => auth.login()}
         class="px-6 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-lg transition-colors font-medium"
       >
         使用 Auth0 登录
@@ -674,7 +676,7 @@
         <div class="flex justify-between items-center h-16">
           <button
             class="lg:hidden p-2 -ml-2 text-stone-600 hover:bg-stone-100 rounded-lg transition-colors"
-            on:click={() => (showPhoneList = !showPhoneList)}
+            onclick={() => (showPhoneList = !showPhoneList)}
             aria-label="切换手机列表"
           >
             <svg
@@ -700,7 +702,7 @@
                boundary; this only avoids showing a viewer pages that would 403. -->
           <div class="hidden lg:flex items-center gap-1 flex-1 justify-center">
             <button
-              on:click={() => navigate("dashboard")}
+              onclick={() => navigate("dashboard")}
               class="px-4 py-2 rounded-lg transition-all {currentView ===
               'dashboard'
                 ? 'bg-orange-50 text-orange-700 font-semibold'
@@ -710,7 +712,7 @@
             </button>
             {#if can('phones.write')}
               <button
-                on:click={() => {
+                onclick={() => {
                   iccidMappingsFilter = "all";
                   navigate("iccid-mappings");
                 }}
@@ -724,7 +726,7 @@
             {/if}
             {#if can('keywords.read')}
               <button
-                on:click={() => navigate("keywords")}
+                onclick={() => navigate("keywords")}
                 class="px-4 py-2 rounded-lg transition-all {currentView ===
                 'keywords'
                   ? 'bg-orange-50 text-orange-700 font-semibold'
@@ -735,7 +737,7 @@
             {/if}
             {#if can('filters.read')}
               <button
-                on:click={() => navigate("filters")}
+                onclick={() => navigate("filters")}
                 class="px-4 py-2 rounded-lg transition-all {currentView ===
                 'filters'
                   ? 'bg-orange-50 text-orange-700 font-semibold'
@@ -746,7 +748,7 @@
             {/if}
             {#if can('users.read')}
               <button
-                on:click={() => navigate("users")}
+                onclick={() => navigate("users")}
                 class="px-4 py-2 rounded-lg transition-all {currentView ===
                 'users'
                   ? 'bg-orange-50 text-orange-700 font-semibold'
@@ -763,7 +765,7 @@
                 >欢迎, {user.name || user.email}</span
               >
               <button
-                on:click={() => auth.logout()}
+                onclick={() => auth.logout()}
                 class="text-sm px-3 py-1.5 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-lg border border-stone-200 transition-colors"
               >
                 退出
@@ -785,7 +787,7 @@
                   {/if}
                 </span>
                 <button
-                  on:click={handleRefreshDaemon}
+                  onclick={handleRefreshDaemon}
                   class="text-xs text-stone-400 hover:text-stone-600 transition-colors ml-1 {daemonRefreshing ? 'animate-spin' : ''}"
                   title="刷新状态"
                   disabled={daemonRefreshing}
@@ -828,7 +830,7 @@
           </div>
           <div class="flex items-center gap-2">
             <button
-              on:click={() => window.location.reload()}
+              onclick={() => window.location.reload()}
               class="text-xs text-red-600 hover:text-red-700 underline"
             >
               刷新页面
@@ -878,7 +880,7 @@
             <!-- Deep-links into the ICCID page, which a viewer cannot open — the hash
                  guard would bounce them straight back to the dashboard. -->
             <button
-              on:click={() => { iccidMappingsFilter = "error"; navigate("iccid-mappings"); }}
+              onclick={() => { iccidMappingsFilter = "error"; navigate("iccid-mappings"); }}
               class="text-xs text-yellow-600 hover:text-yellow-700 underline"
             >
               查看详情
@@ -892,7 +894,7 @@
     <div class="lg:hidden px-4 py-2 bg-white border-b border-stone-200">
       <div class="flex gap-2">
         <button
-          on:click={() => navigate("dashboard")}
+          onclick={() => navigate("dashboard")}
           class="flex-1 px-3 py-2 rounded-lg text-sm transition-all {currentView ===
           'dashboard'
             ? 'bg-orange-50 text-orange-700 font-semibold'
@@ -902,7 +904,7 @@
         </button>
         {#if can('phones.write')}
           <button
-            on:click={() => navigate("iccid-mappings")}
+            onclick={() => navigate("iccid-mappings")}
             class="flex-1 px-3 py-2 rounded-lg text-sm transition-all {currentView ===
             'iccid-mappings'
               ? 'bg-orange-50 text-orange-700 font-semibold'
@@ -913,7 +915,7 @@
         {/if}
         {#if can('keywords.read')}
           <button
-            on:click={() => navigate("keywords")}
+            onclick={() => navigate("keywords")}
             class="flex-1 px-3 py-2 rounded-lg text-sm transition-all {currentView ===
             'keywords'
               ? 'bg-orange-50 text-orange-700 font-semibold'
@@ -924,7 +926,7 @@
         {/if}
         {#if can('filters.read')}
           <button
-            on:click={() => navigate("filters")}
+            onclick={() => navigate("filters")}
             class="flex-1 px-3 py-2 rounded-lg text-sm transition-all {currentView ===
             'filters'
               ? 'bg-orange-50 text-orange-700 font-semibold'
@@ -935,7 +937,7 @@
         {/if}
         {#if can('users.read')}
           <button
-            on:click={() => navigate("users")}
+            onclick={() => navigate("users")}
             class="flex-1 px-3 py-2 rounded-lg text-sm transition-all {currentView ===
             'users'
               ? 'bg-orange-50 text-orange-700 font-semibold'
@@ -990,16 +992,16 @@
           {#if showPhoneList}
             <div
               class="lg:hidden fixed inset-0 z-50 bg-stone-900/40"
-              on:click={() => (showPhoneList = false)}
-              on:keydown={(e) => e.key === "Escape" && (showPhoneList = false)}
+              onclick={() => (showPhoneList = false)}
+              onkeydown={(e) => e.key === "Escape" && (showPhoneList = false)}
               role="button"
               tabindex="0"
               aria-label="关闭手机列表"
             >
               <div
                 class="absolute left-0 top-0 bottom-0 w-80 max-w-full bg-white shadow-xl border-r border-stone-200"
-                on:click|stopPropagation
-                on:keydown|stopPropagation
+                onclick={(e) => e.stopPropagation()}
+                onkeydown={(e) => e.stopPropagation()}
                 role="dialog"
                 tabindex="-1"
                 aria-label="手机列表"
