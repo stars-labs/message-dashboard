@@ -49,8 +49,10 @@
 
 @layer utilities {
   .data-value {
+    /* mono font only — size/weight are set at the call site so this class
+       does not clobber headings that apply it alongside text-lg or text-sm.
+       Bug: the old @apply text-2xl overrode any other text-* on the element. */
     font-family: 'IBM Plex Mono', monospace;
-    @apply text-2xl font-bold text-stone-900 tracking-tight;
   }
 
   .sim-missing-badge {
