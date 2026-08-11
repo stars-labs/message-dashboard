@@ -67,15 +67,6 @@
   let offlineCount = $derived(phoneNumbers.filter(p => p.status === 'offline').length);
   let errorCount   = $derived(phoneNumbers.filter(p => isAnomalous(p.status)).length);
 
-  // Highlight query matches in a string: wrap hits with <mark>.
-  // The returned string is safe to pass to {@html} because it only
-  // wraps user-supplied text in a known-safe tag with no attributes.
-  function highlight(text, q) {
-    if (!q || !text) return text || '';
-    const safe = text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return text.replace(new RegExp(`(${safe})`, 'gi'), '<mark class="bg-[#fed7aa] rounded-[2px]">$1</mark>');
-  }
-
   function handlePhoneClick(phone) {
     if (!mobile && selectedPhoneIccid === phone.iccid) {
       selectedPhoneIccid = null;
@@ -246,8 +237,7 @@
             <div class="flex items-center gap-1 text-sm font-medium font-mono leading-snug">
               {#if phone.flag}<span class="text-base leading-none">{phone.flag}</span>{/if}
               {#if phone.number}
-                <!-- eslint-disable-next-line svelte/no-at-html-tags -->
-                <span class="truncate text-stone-800 text-[13px]">{@html highlight(phone.number, q)}</span>
+                <span class="truncate text-stone-800 text-[13px]">{phone.number}</span>
               {:else}
                 <span class="text-amber-600 text-xs">未设置号码</span>
                 {#if phone.iccid && onSetIccidMapping}
@@ -263,13 +253,12 @@
             <!-- Mobile keeps long ICCIDs out of the scan path unless they matched the search. -->
             <div class="flex items-baseline gap-1 text-stone-400 font-mono leading-snug mt-0.5 min-w-0">
               {#if phone.carrier}
-                <!-- eslint-disable-next-line svelte/no-at-html-tags -->
-                <span class="text-[11px] text-stone-500 shrink-0">{@html highlight(phone.carrier, q)}</span>
+                <span class="text-[11px] text-stone-500 shrink-0">{phone.carrier}</span>
               {/if}
               {#if phone.iccid}
                 {#if !mobile || (q && phone.iccid.toLowerCase().includes(q))}
                   <span class="text-[10px] tracking-tight truncate" title="ICCID: {phone.iccid}">
-                    {phone.carrier ? '· ' : ''}{@html highlight(phone.iccid, q)}
+                    {phone.carrier ? '· ' : ''}{phone.iccid}
                   </span>
                 {/if}
               {/if}
