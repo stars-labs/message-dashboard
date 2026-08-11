@@ -4,6 +4,7 @@
   import { tagActions, keywords as keywordsStore } from "./tag-store.js";
   import { copyCode } from "./clipboard.js";
   import { formatCardNumber, cardLabel } from "./card-number.js";
+  import { getCountryFlag } from "./countries.js";
 
   let {
     messages = [],
@@ -139,34 +140,32 @@
         </div>
 
         <!-- Vertical divider -->
-        <div class="w-px h-4 bg-stone-200 mx-0.5"></div>
+        <div class="w-px h-[18px] bg-stone-200 mx-1"></div>
 
-        <!-- Spam toggle — disabled (shows 0) in code mode since verified messages are never hidden -->
+        <!-- Spam toggle — per design: checkbox + "隐藏垃圾 N" label.
+             Disabled in code mode (verified messages are never rule-hidden). -->
         <button
           onclick={contentFilter === 'all' ? onToggleFiltered : null}
           disabled={contentFilter === 'code'}
-          class="flex items-center gap-1.5 px-2 py-1 rounded-md text-xs border transition-colors
-            {contentFilter === 'code'
-              ? 'border-stone-100 bg-stone-50 text-stone-300 cursor-default'
-              : showFiltered
-                ? 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100'
-                : 'border-stone-200 bg-stone-50 text-stone-500 hover:bg-stone-100'}"
-          title={contentFilter === 'code' ? '验证码视图下垃圾短信已全部屏蔽' : showFiltered ? '点击隐藏垃圾短信' : '点击查看被规则隐藏的短信'}
+          class="flex items-center gap-1.5 text-xs transition-colors
+            {contentFilter === 'code' ? 'text-stone-300 cursor-default' : 'text-stone-600 hover:text-stone-900'}"
+          title={contentFilter === 'code' ? '验证码视图下垃圾短信已全部屏蔽' : !showFiltered ? '点击查看被规则隐藏的短信' : '点击隐藏垃圾短信'}
         >
-          <!-- Eye-slash icon -->
-          <svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-            {#if showFiltered || contentFilter === 'code'}
-              <path stroke-linecap="round" stroke-linejoin="round"
-                d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
-            {:else}
-              <path stroke-linecap="round" stroke-linejoin="round"
-                d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
-              <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+          <!-- Checkbox: filled when hiding spam (= checked state = hiding enabled) -->
+          <span class="inline-flex items-center justify-center w-[13px] h-[13px] rounded-[3px] border transition-colors shrink-0
+            {contentFilter === 'code'
+              ? 'border-stone-200 bg-white'
+              : !showFiltered
+                ? 'border-stone-500 bg-stone-500'
+                : 'border-stone-300 bg-white'}">
+            {#if !showFiltered && contentFilter !== 'code'}
+              <!-- Checkmark -->
+              <svg class="w-2.5 h-2.5 text-white" viewBox="0 0 12 12" fill="none">
+                <path d="M2 6l3 3 5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
             {/if}
-          </svg>
-          <span class="font-mono font-semibold tabular-nums">
-            {contentFilter === 'code' ? 0 : filteredCount}
           </span>
+          <span>隐藏垃圾 <strong class="font-mono tabular-nums">{contentFilter === 'code' ? 0 : filteredCount}</strong></span>
         </button>
       </div>
     </div>
@@ -301,8 +300,9 @@
               <!-- Single-card view: just show the time -->
               <span class="font-mono text-xs text-stone-400">{formatTime(message.timestamp)}</span>
             {:else}
-              <!-- All-cards view: flag + number, then card + time -->
+              <!-- All-cards view: flag + number (top), card label + time (bottom) -->
               <div class="font-mono text-xs text-stone-700">
+                {#if message.phone_country}{getCountryFlag(message.phone_country)}{/if}
                 {message.display_phone_number
                   ? message.display_phone_number
                   : message.phone_iccid?.slice(-8) || '—'}
@@ -362,6 +362,7 @@
               ·
             {/if}
             {#if message.display_phone_number}
+              {#if message.phone_country}{getCountryFlag(message.phone_country)}{/if}
               {message.display_phone_number}
             {/if}
             {#if isFiltered}

@@ -52,6 +52,7 @@ export const messagesHandler = {
           dv.carrier as phone_carrier,
           dv.sim_status as phone_status,
           dv.sim_index as phone_sim_index,
+          dv.country as phone_country,
           NULL as mapped_number
         FROM messages m
         LEFT JOIN device_view dv ON m.phone_iccid = dv.iccid

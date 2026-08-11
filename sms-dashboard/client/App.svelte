@@ -85,6 +85,7 @@
   let iccidMappingsFilter = $state("all");
   let showIccidMappingDialog = $state(false);
   let showMoreMenu = $state(false); // iOS bottom tab: 更多 sheet
+  let showSendDrawer = $state(false); // desktop: send drawer (<1600px)
   let toasts = $state([]);
   let messageRequestId = 0; // Prevents stale message responses from overwriting newer ones
   let pollInterval = null;
@@ -705,134 +706,110 @@
   </div>
 {:else}
   <div class="min-h-screen lg:h-screen lg:flex lg:flex-col lg:overflow-hidden bg-[#F7F5F2]">
-    <!-- Header -->
+    <!-- Header — matches design §一 exactly:
+         product mark · title · nav (4 items) · daemon pill · send button · avatar -->
     <header class="bg-white border-b border-stone-200 sticky top-0 z-40 lg:flex-shrink-0">
-      <div class="px-4">
-        <div class="flex justify-between items-center h-16">
-          <button
-            class="lg:hidden p-2 -ml-2 text-stone-600 hover:bg-stone-100 rounded-lg transition-colors"
-            onclick={() => (showPhoneList = !showPhoneList)}
-            aria-label="切换手机列表"
-          >
-            <svg
-              class="w-6 h-6"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M4 6h16M4 12h16M4 18h16"
-              />
-            </svg>
-          </button>
-          <h1 class="text-xl font-semibold text-stone-900">
-            短信验证码管理系统
-          </h1>
+      <div class="px-5 flex items-center h-[52px] gap-6">
 
-          <!-- Navigation. Each entry is gated on the same permission the hash guard
-               uses, so nav and routing cannot disagree. Server-side checks are the real
-               boundary; this only avoids showing a viewer pages that would 403. -->
-          <div class="hidden lg:flex items-center gap-1 flex-1 justify-center">
-            <button
-              onclick={() => navigate("dashboard")}
-              class="px-4 py-2 rounded-lg transition-all {currentView ===
-              'dashboard'
-                ? 'bg-orange-50 text-orange-700 font-semibold'
-                : 'text-stone-500 hover:text-stone-900 hover:bg-stone-100'}"
-            >
-              消息管理
-            </button>
-            {#if can('phones.write')}
-              <button
-                onclick={() => {
-                  iccidMappingsFilter = "all";
-                  navigate("iccid-mappings");
-                }}
-                class="px-4 py-2 rounded-lg transition-all {currentView ===
-                'iccid-mappings'
-                  ? 'bg-orange-50 text-orange-700 font-semibold'
-                  : 'text-stone-500 hover:text-stone-900 hover:bg-stone-100'}"
-              >
-                ICCID 映射
-              </button>
-            {/if}
-            {#if can('keywords.read')}
-              <button
-                onclick={() => navigate("keywords")}
-                class="px-4 py-2 rounded-lg transition-all {currentView ===
-                'keywords'
-                  ? 'bg-orange-50 text-orange-700 font-semibold'
-                  : 'text-stone-500 hover:text-stone-900 hover:bg-stone-100'}"
-              >
-                关键词高亮
-              </button>
-            {/if}
-            {#if can('filters.read')}
-              <button
-                onclick={() => navigate("filters")}
-                class="px-4 py-2 rounded-lg transition-all {currentView ===
-                'filters'
-                  ? 'bg-orange-50 text-orange-700 font-semibold'
-                  : 'text-stone-500 hover:text-stone-900 hover:bg-stone-100'}"
-              >
-                垃圾过滤
-              </button>
-            {/if}
-            {#if can('users.read')}
-              <button
-                onclick={() => navigate("users")}
-                class="px-4 py-2 rounded-lg transition-all {currentView ===
-                'users'
-                  ? 'bg-orange-50 text-orange-700 font-semibold'
-                  : 'text-stone-500 hover:text-stone-900 hover:bg-stone-100'}"
-              >
-                用户管理
-              </button>
-            {/if}
-          </div>
-
-          <div class="hidden lg:flex items-center gap-4">
-            {#if user}
-              <span class="text-sm text-stone-500"
-                >欢迎, {user.name || user.email}</span
-              >
-              <button
-                onclick={() => auth.logout()}
-                class="text-sm px-3 py-1.5 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-lg border border-stone-200 transition-colors"
-              >
-                退出
-              </button>
-            {/if}
-            <div class="flex items-center gap-4 text-sm text-stone-500">
-              <!-- Daemon Status -->
-              <div class="flex items-center gap-2">
-                <span class="text-lg">{getDaemonStatusIcon()}</span>
-                <span class="{getDaemonStatusClass()} text-sm font-medium">
-                  {#if daemonStatus.status === 'online'}
-                    守护进程: {getDaemonStatusText()}
-                  {:else if daemonStatus.status === 'warning'}
-                    守护进程: {getDaemonStatusText()}
-                  {:else if daemonStatus.status === 'offline'}
-                    守护进程: {getDaemonStatusText()}
-                  {:else}
-                    守护进程: 等待连接...
-                  {/if}
-                </span>
-                <button
-                  onclick={handleRefreshDaemon}
-                  class="text-xs text-stone-400 hover:text-stone-600 transition-colors ml-1 {daemonRefreshing ? 'animate-spin' : ''}"
-                  title="刷新状态"
-                  disabled={daemonRefreshing}
-                >
-                  🔄
-                </button>
-              </div>
-            </div>
-          </div>
+        <!-- Product mark + title -->
+        <div class="flex items-center gap-2 shrink-0">
+          <img src="/favicon.svg" alt="" class="w-[22px] h-[22px] rounded-[6px]" />
+          <span class="text-sm font-semibold text-stone-900 tracking-[-0.005em]">验证码中心</span>
         </div>
+
+        <!-- Nav — 4 items per design (desktop only) -->
+        <nav class="hidden lg:flex items-center gap-0.5 flex-1">
+          <button onclick={() => navigate("dashboard")}
+            class="text-sm px-3 py-1.5 rounded-[7px] transition-all
+              {currentView === 'dashboard'
+                ? 'bg-stone-100 font-semibold text-stone-900'
+                : 'text-stone-500 hover:text-stone-900 hover:bg-stone-50'}">
+            消息
+          </button>
+          {#if can('phones.write')}
+            <button onclick={() => { iccidMappingsFilter = 'all'; navigate('iccid-mappings'); }}
+              class="text-sm px-3 py-1.5 rounded-[7px] transition-all
+                {currentView === 'iccid-mappings'
+                  ? 'bg-stone-100 font-semibold text-stone-900'
+                  : 'text-stone-500 hover:text-stone-900 hover:bg-stone-50'}">
+              设备与卡
+            </button>
+          {/if}
+          {#if can('keywords.read') || can('filters.read')}
+            <button onclick={() => navigate(can('keywords.read') ? 'keywords' : 'filters')}
+              class="text-sm px-3 py-1.5 rounded-[7px] transition-all
+                {(currentView === 'keywords' || currentView === 'filters')
+                  ? 'bg-stone-100 font-semibold text-stone-900'
+                  : 'text-stone-500 hover:text-stone-900 hover:bg-stone-50'}">
+              规则
+            </button>
+          {/if}
+          {#if can('users.read')}
+            <button onclick={() => navigate('users')}
+              class="text-sm px-3 py-1.5 rounded-[7px] transition-all
+                {currentView === 'users'
+                  ? 'bg-stone-100 font-semibold text-stone-900'
+                  : 'text-stone-500 hover:text-stone-900 hover:bg-stone-50'}">
+              用户
+            </button>
+          {/if}
+        </nav>
+
+        <!-- Right side: daemon pill + send button + avatar -->
+        <div class="hidden lg:flex items-center gap-3 ml-auto shrink-0">
+
+          <!-- Daemon status pill -->
+          <button onclick={handleRefreshDaemon} disabled={daemonRefreshing}
+            class="flex items-center gap-1.5 px-2.5 py-[5px] bg-stone-50 border border-stone-200
+              rounded-[7px] text-xs transition-colors hover:bg-stone-100 {daemonRefreshing ? 'opacity-60' : ''}">
+            <span class="w-1.5 h-1.5 rounded-full shrink-0
+              {daemonStatus.status === 'online' ? 'bg-emerald-500' :
+               daemonStatus.status === 'offline' || daemonStatus.status === 'error' ? 'bg-red-500' :
+               'bg-stone-400'}"></span>
+            <span class="text-stone-700 font-medium">守护进程{
+              daemonStatus.status === 'online' ? '在线' :
+              daemonStatus.status === 'offline' ? '离线' :
+              daemonStatus.status === 'error' ? '错误' : '检测中'
+            }</span>
+            {#if daemonStatus.last_heartbeat && daemonStatus.status === 'online'}
+              <span class="text-stone-400">· {formatTimeAgo(daemonStatus.last_heartbeat)}</span>
+            {/if}
+          </button>
+
+          <!-- Send button — only on <1600px (≥1600px has resident 3rd column) -->
+          {#if can('messages.send')}
+            <button onclick={() => showSendDrawer = !showSendDrawer}
+              class="2xl:hidden flex items-center gap-1.5 px-3.5 py-[7px] bg-orange-500
+                hover:bg-orange-600 text-white text-sm font-medium rounded-[8px] transition-colors">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/>
+              </svg>
+              发送短信
+            </button>
+          {/if}
+
+          <!-- Avatar -->
+          {#if user}
+            {@const initials = (user.name || user.email || '?')[0].toUpperCase()}
+            <button onclick={() => auth.logout()} title="退出登录"
+              class="w-[26px] h-[26px] rounded-full bg-stone-200 hover:bg-stone-300 flex items-center
+                justify-center text-[11px] font-semibold text-stone-700 transition-colors shrink-0">
+              {initials}
+            </button>
+          {/if}
+        </div>
+
+        <!-- Mobile: hamburger (keep for phone list toggle) -->
+        <button
+          class="lg:hidden ml-auto p-1.5 -mr-1.5 text-stone-600 hover:bg-stone-100 rounded-lg transition-colors"
+          onclick={() => (showPhoneList = !showPhoneList)}
+          aria-label="切换手机列表"
+        >
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+          </svg>
+        </button>
+
       </div>
     </header>
     <!-- Content below header fills remaining height on desktop.
@@ -930,20 +907,17 @@
 
     {#if currentView === "dashboard"}
       <ErrorBoundary componentName="Dashboard">
-        <!-- Health Strip: replaces the 6 vanity numbers (today-received, today-sent,
-             total-received, total-sent, success-rate) that drove zero user actions.
-             One number that matters (online / total) + three anomaly chips that name
-             what needs attention and link directly to the ICCID page. -->
-        <div class="lg:flex-shrink-0 px-2 sm:px-4 lg:px-8 py-2 flex-shrink-0">
-          <div class="bg-white border border-stone-200 rounded-xl shadow-raised flex items-center gap-4 sm:gap-6 px-4 sm:px-5 py-2.5 overflow-x-auto">
+        <!-- Health Strip — flat full-width bar, 40px, matches design §一 exactly. -->
+        <div class="lg:flex-shrink-0 bg-white border-b border-stone-200 flex-shrink-0">
+          <div class="flex items-center gap-6 px-5 h-10 overflow-x-auto">
 
-            <!-- Online count -->
+            <!-- Online count: 22px bold mono + /95 small + label -->
             <div class="flex items-baseline gap-1.5 shrink-0">
-              <span class="font-mono text-[22px] font-semibold text-stone-900 leading-none tabular-nums">
+              <span class="font-mono text-[22px] font-semibold text-stone-900 leading-none tabular-nums tracking-[-0.02em]">
                 {stats.onlineDevices}
               </span>
               <span class="font-mono text-sm text-stone-400">/ {stats.totalDevices || phoneNumbers.length}</span>
-              <span class="text-xs text-stone-500 ml-0.5">张卡在线</span>
+              <span class="text-xs text-stone-600">张卡在线</span>
             </div>
 
             <!-- Anomaly chips — only rendered when the count is non-zero so the
@@ -991,9 +965,12 @@
           </div>
         </div>
 
-      <!-- Main Content -->
-      <div class="px-2 sm:px-4 lg:px-8 lg:flex-1 lg:min-h-0 lg:pb-4 lg:flex lg:flex-col">
-        <div class="lg:grid lg:grid-cols-4 lg:gap-6 lg:flex-1 lg:min-h-0">
+      <!-- Main Content.
+           Desktop grid: 2xl (≥1600px) = 3 cols (phone · messages · send),
+           lg-2xl (<1600px) = 2 cols (phone · messages), send is a drawer. -->
+      <div class="px-2 sm:px-4 lg:px-6 lg:flex-1 lg:min-h-0 lg:pb-4 lg:flex lg:flex-col">
+        <div class="lg:grid lg:gap-4 lg:flex-1 lg:min-h-0
+          {can('messages.send') ? '2xl:grid-cols-[288px_1fr_352px] lg:grid-cols-[288px_1fr]' : 'lg:grid-cols-[288px_1fr]'}">
           <!-- Mobile Phone List Overlay -->
           {#if showPhoneList}
             <div
@@ -1030,8 +1007,8 @@
             </div>
           {/if}
 
-          <!-- Desktop Phone List -->
-          <div class="hidden lg:flex lg:flex-col lg:col-span-1 h-full min-h-0">
+          <!-- Desktop Phone List — fixed 288px column -->
+          <div class="hidden lg:flex lg:flex-col h-full min-h-0">
             <PhoneList
               {phoneNumbers}
               {selectedPhone}
@@ -1045,9 +1022,8 @@
             />
           </div>
 
-          <!-- Message View Column -->
-          <div class="lg:col-span-2 flex flex-col gap-4 h-full min-h-0">
-            <!-- Always show SimpleMessageView at the top -->
+          <!-- Message View Column — fills remaining space -->
+          <div class="flex flex-col h-full min-h-0">
             <div class="flex-1 min-h-0 flex flex-col">
               <SimpleMessageView
                 {messages}
@@ -1061,17 +1037,11 @@
                 onToggleFiltered={toggleFiltered}
               />
             </div>
-            <!-- PhoneDetails removed: ICCID, IMEI, 模块位置, 信号 are all shown in
-                 PhoneList and the message list header. Displaying them a third time
-                 here consumed vertical space without adding information.
-                 These fields are still available in the ICCID 映射 page. -->
           </div>
 
-          <!-- Message Composer. Viewers currently DO hold messages.send, so this stays
-               visible for them — gated anyway so the UI follows the permission model if
-               that decision is ever revisited. -->
+          <!-- Send panel: resident 3rd column at ≥1600px, hidden below -->
           {#if can('messages.send')}
-            <div class="lg:col-span-1 h-full min-h-0">
+            <div class="hidden 2xl:flex 2xl:flex-col h-full min-h-0">
               <MessageComposer
                 {selectedPhone}
                 {phoneNumbers}
@@ -1112,6 +1082,35 @@
       </ErrorBoundary>
     {/if}
     </div><!-- end content wrapper -->
+
+    <!-- ── Send drawer (<1600px, desktop only) ──────────────────────────── -->
+    {#if showSendDrawer && can('messages.send')}
+      <div class="hidden lg:block 2xl:hidden fixed inset-0 z-30 bg-stone-900/28"
+        onclick={() => showSendDrawer = false}
+        role="presentation">
+      </div>
+      <div class="hidden lg:flex 2xl:hidden fixed top-0 right-0 bottom-0 z-40 w-[400px] flex-col
+        bg-white border-l border-stone-200"
+        style="box-shadow: -16px 0 40px rgba(28,25,23,.16);">
+        <div class="flex items-center justify-between px-5 py-4 border-b border-stone-200 flex-shrink-0">
+          <h3 class="text-sm font-semibold text-stone-900">发送短信</h3>
+          <button onclick={() => showSendDrawer = false}
+            class="p-1.5 text-stone-400 hover:text-stone-700 hover:bg-stone-100 rounded-lg transition-colors">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+        <div class="flex-1 min-h-0 overflow-y-auto">
+          <MessageComposer
+            {selectedPhone}
+            {phoneNumbers}
+            {messages}
+            onmessagesent={handleMessageSent}
+          />
+        </div>
+      </div>
+    {/if}
 
     <!-- ── iOS bottom tab bar ────────────────────────────────────────────── -->
     <!-- lg:hidden: desktop uses the top nav. pb-safe = env(safe-area-inset-bottom)
