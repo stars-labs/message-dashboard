@@ -214,6 +214,31 @@ fn test_store_single_segment() {
 }
 
 #[test]
+fn test_store_segment_preserves_sms_storage() {
+    let store = MessageStore::new(":memory:").unwrap();
+
+    store
+        .store_segment_in_storage(
+            "iccid_001",
+            "+1234567890",
+            42,
+            2,
+            1,
+            "Part 1",
+            "2024-01-01T12:00:00.000Z",
+            "SM",
+            7,
+        )
+        .unwrap();
+
+    let segments = store
+        .get_segments_with_storage("iccid_001", "+1234567890", 42, 2)
+        .unwrap();
+    assert_eq!(segments[0].3, "SM");
+    assert_eq!(segments[0].4, 7);
+}
+
+#[test]
 fn test_get_segments_incomplete() {
     let store = MessageStore::new(":memory:").unwrap();
 

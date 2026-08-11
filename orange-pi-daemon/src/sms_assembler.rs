@@ -203,6 +203,7 @@ mod tests {
 
     fn make_test_sms(index: u32, part_num: u8, total: u8, ref_id: u8, text: &str) -> AtSms {
         AtSms {
+            storage: "ME".to_string(),
             index,
             part_indices: vec![index],
             sender: "+1234567890".to_string(),
@@ -220,6 +221,7 @@ mod tests {
     fn test_single_part_message() {
         let mut assembler = SmsAssembler::new();
         let sms = AtSms {
+            storage: "ME".to_string(),
             index: 1,
             part_indices: vec![1],
             sender: "+1234567890".to_string(),

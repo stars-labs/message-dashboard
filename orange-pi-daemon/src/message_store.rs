@@ -109,12 +109,30 @@ impl MessageStore {
                 part_number INTEGER NOT NULL,
                 content TEXT NOT NULL,
                 timestamp TEXT NOT NULL,
+                sms_storage TEXT NOT NULL DEFAULT 'ME',
                 sms_index INTEGER NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(phone_iccid, ref_id, part_number)
             )",
             [],
         )?;
+
+        // Existing databases predate storage-aware ME/SM polling. Their buffered
+        // segments came from EC20's MT view, which is an alias for ME.
+        let has_sms_storage = {
+            let mut stmt = conn.prepare("PRAGMA table_info(multipart_segments)")?;
+            let columns = stmt
+                .query_map([], |row| row.get::<_, String>(1))?
+                .collect::<Result<Vec<_>, _>>()?;
+            columns.iter().any(|column| column == "sms_storage")
+        };
+        if !has_sms_storage {
+            conn.execute(
+                "ALTER TABLE multipart_segments
+                 ADD COLUMN sms_storage TEXT NOT NULL DEFAULT 'ME'",
+                [],
+            )?;
+        }
 
         // Create index for querying message groups
         conn.execute(
@@ -603,12 +621,38 @@ impl MessageStore {
         timestamp: &str,
         sms_index: u32,
     ) -> Result<()> {
+        self.store_segment_in_storage(
+            iccid,
+            sender,
+            ref_id,
+            total_parts,
+            part_number,
+            content,
+            timestamp,
+            "ME",
+            sms_index,
+        )
+    }
+
+    /// Store an incomplete message part together with its CPMS location.
+    pub fn store_segment_in_storage(
+        &self,
+        iccid: &str,
+        sender: &str,
+        ref_id: u8,
+        total_parts: u8,
+        part_number: u8,
+        content: &str,
+        timestamp: &str,
+        sms_storage: &str,
+        sms_index: u32,
+    ) -> Result<()> {
         let conn = self.conn.lock().unwrap();
 
         conn.execute(
             "INSERT OR REPLACE INTO multipart_segments
-             (phone_iccid, sender, ref_id, total_parts, part_number, content, timestamp, sms_index)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+             (phone_iccid, sender, ref_id, total_parts, part_number, content, timestamp, sms_storage, sms_index)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 iccid,
                 sender,
@@ -617,6 +661,7 @@ impl MessageStore {
                 part_number as i64,
                 content,
                 timestamp,
+                sms_storage,
                 sms_index as i64,
             ],
         )?;
@@ -638,10 +683,25 @@ impl MessageStore {
         ref_id: u8,
         total_parts: u8,
     ) -> Result<Vec<(u8, String, String, u32)>> {
+        Ok(self
+            .get_segments_with_storage(iccid, sender, ref_id, total_parts)?
+            .into_iter()
+            .map(|(part, content, timestamp, _, index)| (part, content, timestamp, index))
+            .collect())
+    }
+
+    /// Get buffered parts including their CPMS storage and index.
+    pub fn get_segments_with_storage(
+        &self,
+        iccid: &str,
+        sender: &str,
+        ref_id: u8,
+        total_parts: u8,
+    ) -> Result<Vec<(u8, String, String, String, u32)>> {
         let conn = self.conn.lock().unwrap();
 
         let mut stmt = conn.prepare(
-            "SELECT part_number, content, timestamp, sms_index
+            "SELECT part_number, content, timestamp, sms_storage, sms_index
              FROM multipart_segments
              WHERE phone_iccid = ?1
                AND sender = ?2
@@ -658,7 +718,8 @@ impl MessageStore {
                         row.get::<_, i64>(0)? as u8,
                         row.get(1)?,
                         row.get(2)?,
-                        row.get::<_, i64>(3)? as u32,
+                        row.get(3)?,
+                        row.get::<_, i64>(4)? as u32,
                     ))
                 },
             )?
@@ -689,12 +750,14 @@ impl MessageStore {
     }
 
     /// Get all incomplete segments (for recovery on startup)
-    /// Returns: Vec<(iccid, sender, ref_id, total_parts, part_number, content, timestamp, sms_index)>
-    pub fn get_all_segments(&self) -> Result<Vec<(String, String, u8, u8, u8, String, String, u32)>> {
+    /// Returns buffered segment metadata including CPMS storage and index.
+    pub fn get_all_segments(
+        &self,
+    ) -> Result<Vec<(String, String, u8, u8, u8, String, String, String, u32)>> {
         let conn = self.conn.lock().unwrap();
 
         let mut stmt = conn.prepare(
-            "SELECT phone_iccid, sender, ref_id, total_parts, part_number, content, timestamp, sms_index
+            "SELECT phone_iccid, sender, ref_id, total_parts, part_number, content, timestamp, sms_storage, sms_index
              FROM multipart_segments
              ORDER BY phone_iccid, ref_id, part_number",
         )?;
@@ -709,7 +772,8 @@ impl MessageStore {
                     row.get::<_, i64>(4)? as u8,
                     row.get(5)?,
                     row.get(6)?,
-                    row.get::<_, i64>(7)? as u32,
+                    row.get(7)?,
+                    row.get::<_, i64>(8)? as u32,
                 ))
             })?
             .collect::<Result<Vec<_>, _>>()?;

@@ -21,6 +21,43 @@ pub enum BackendMode {
     DBus,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::ModemManager;
+
+    #[test]
+    fn test_format_storage_aware_at_sms_path() {
+        let path = ModemManager::format_at_sms_path(&[
+            ("ME".to_string(), 5),
+            ("SM".to_string(), 7),
+        ]);
+        assert_eq!(path, "at:ME:5,SM:7");
+    }
+
+    #[test]
+    fn test_parse_storage_aware_at_sms_path() {
+        assert_eq!(
+            ModemManager::parse_at_sms_path("at:ME:5,sm:7").unwrap(),
+            vec![(Some("ME".to_string()), 5), (Some("SM".to_string()), 7)]
+        );
+    }
+
+    #[test]
+    fn test_parse_legacy_at_sms_path() {
+        assert_eq!(
+            ModemManager::parse_at_sms_path("at:5,7").unwrap(),
+            vec![(None, 5), (None, 7)]
+        );
+    }
+
+    #[test]
+    fn test_parse_at_sms_path_rejects_status_report_storage() {
+        assert!(ModemManager::parse_at_sms_path("at:SR:5").is_err());
+        assert!(ModemManager::parse_at_sms_path("at:ME:not-a-number").is_err());
+        assert!(ModemManager::parse_at_sms_path("at:").is_err());
+    }
+}
+
 #[derive(Clone)]
 pub struct ModemManager {
     /// AT command backend
@@ -415,7 +452,7 @@ impl ModemManager {
                                 direction: "received".to_string(),
                             },
                             modem_id: modem_id.to_string(),
-                            sms_path: format!("at:{}", sms.index),
+                            sms_path: Self::format_at_sms_path(&[(sms.storage, sms.index)]),
                         });
                     }
                 }
@@ -425,7 +462,7 @@ impl ModemManager {
                     // Store new parts to database
                     for part in &parts {
                         let concat_info = part.concat_info.as_ref().unwrap();
-                        if let Err(e) = message_store.store_segment(
+                        if let Err(e) = message_store.store_segment_in_storage(
                             iccid,
                             &sender,
                             ref_id,
@@ -433,6 +470,7 @@ impl ModemManager {
                             concat_info.part_number,
                             &part.text,
                             &part.timestamp,
+                            &part.storage,
                             part.index,
                         ) {
                             warn!("Failed to store segment: {}", e);
@@ -440,15 +478,24 @@ impl ModemManager {
                     }
 
                     // Check if all parts are now available (including previously buffered ones)
-                    match message_store.get_segments(iccid, &sender, ref_id, total_parts) {
+                    match message_store
+                        .get_segments_with_storage(iccid, &sender, ref_id, total_parts)
+                    {
                         Ok(segments) if segments.len() == total_parts as usize => {
                             // All parts present - assemble!
-                            let mut all_parts: Vec<(u8, String, String, u32)> = segments;
-                            all_parts.sort_by_key(|(part_num, _, _, _)| *part_num);
+                            let mut all_parts: Vec<(u8, String, String, String, u32)> = segments;
+                            all_parts.sort_by_key(|(part_num, _, _, _, _)| *part_num);
 
-                            let combined_text = all_parts.iter().map(|(_, content, _, _)| content.as_str()).collect::<Vec<_>>().join("");
+                            let combined_text = all_parts
+                                .iter()
+                                .map(|(_, content, _, _, _)| content.as_str())
+                                .collect::<Vec<_>>()
+                                .join("");
                             let timestamp = all_parts[0].2.clone();
-                            let all_indices: Vec<u32> = all_parts.iter().map(|(_, _, _, idx)| *idx).collect();
+                            let all_locations: Vec<(String, u32)> = all_parts
+                                .iter()
+                                .map(|(_, _, _, storage, index)| (storage.clone(), *index))
+                                .collect();
 
                             info!(
                                 "✅ Assembled multipart message: {} parts, {} chars, ref_id={} from {}",
@@ -464,14 +511,7 @@ impl ModemManager {
                                     direction: "received".to_string(),
                                 },
                                 modem_id: modem_id.to_string(),
-                                sms_path: format!(
-                                    "at:{}",
-                                    all_indices
-                                        .iter()
-                                        .map(|i| i.to_string())
-                                        .collect::<Vec<_>>()
-                                        .join(",")
-                                ),
+                                sms_path: Self::format_at_sms_path(&all_locations),
                             });
 
                             // Delete assembled segments from buffer
@@ -540,23 +580,23 @@ impl ModemManager {
     pub async fn delete_sms(&self, modem_id: &str, sms_path: &str) -> Result<()> {
         match self.mode {
             BackendMode::AtCommand => {
-                // Parse AT index from path "at:123"
-                let index_str = sms_path
-                    .strip_prefix("at:")
-                    .ok_or_else(|| anyhow!("Invalid AT SMS path: {}", sms_path))?;
-                let indices: Vec<u32> = index_str
-                    .split(',')
-                    .filter(|s| !s.is_empty())
-                    .map(|s| {
-                        s.parse::<u32>()
-                            .map_err(|_| anyhow!("Invalid SMS index: {}", s))
-                    })
-                    .collect::<Result<_, _>>()?;
+                let locations = Self::parse_at_sms_path(sms_path)?;
 
                 let port = self.get_port(modem_id).await;
-                for idx in indices {
-                    self.at_modem.delete_sms(&port, idx).await?;
-                    debug!("Deleted SMS {} via AT from {}", idx, modem_id);
+                for (storage, index) in locations {
+                    if let Some(storage) = storage {
+                        self.at_modem
+                            .delete_sms_from_storage(&port, &storage, index)
+                            .await?;
+                        debug!(
+                            "Deleted SMS {}:{} via AT from {}",
+                            storage, index, modem_id
+                        );
+                    } else {
+                        // Backward compatibility for rows created before storage-aware paths.
+                        self.at_modem.delete_sms(&port, index).await?;
+                        debug!("Deleted legacy SMS {} via AT from {}", index, modem_id);
+                    }
                 }
                 Ok(())
             }
@@ -574,6 +614,46 @@ impl ModemManager {
                 }
             }
         }
+    }
+
+    fn format_at_sms_path(locations: &[(String, u32)]) -> String {
+        let encoded = locations
+            .iter()
+            .map(|(storage, index)| format!("{}:{}", storage.to_ascii_uppercase(), index))
+            .collect::<Vec<_>>()
+            .join(",");
+        format!("at:{}", encoded)
+    }
+
+    /// Parse both storage-aware `at:ME:5,SM:7` paths and legacy `at:5,7` paths.
+    fn parse_at_sms_path(sms_path: &str) -> Result<Vec<(Option<String>, u32)>> {
+        let encoded = sms_path
+            .strip_prefix("at:")
+            .ok_or_else(|| anyhow!("Invalid AT SMS path: {}", sms_path))?;
+        if encoded.is_empty() {
+            return Err(anyhow!("AT SMS path contains no locations: {}", sms_path));
+        }
+
+        encoded
+            .split(',')
+            .map(|location| {
+                if let Some((storage, index)) = location.split_once(':') {
+                    let storage = storage.to_ascii_uppercase();
+                    if !matches!(storage.as_str(), "ME" | "SM" | "MT") {
+                        return Err(anyhow!("Invalid SMS storage in path: {}", storage));
+                    }
+                    let index = index
+                        .parse::<u32>()
+                        .map_err(|_| anyhow!("Invalid SMS index: {}", index))?;
+                    Ok((Some(storage), index))
+                } else {
+                    let index = location
+                        .parse::<u32>()
+                        .map_err(|_| anyhow!("Invalid SMS index: {}", location))?;
+                    Ok((None, index))
+                }
+            })
+            .collect()
     }
 
     /// Send SMS
