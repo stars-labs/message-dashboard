@@ -706,9 +706,9 @@
       <div class="px-4 lg:px-5 flex items-center h-[52px] gap-3 lg:gap-6">
 
         <!-- Product mark + title -->
-        <div class="flex items-center gap-2 shrink-0">
-          <img src="/favicon.svg" alt="" class="w-[22px] h-[22px] rounded-[6px]" />
-          <span class="text-sm font-semibold text-stone-900 tracking-[-0.005em]">验证码中心</span>
+        <div class="flex items-center gap-2.5 shrink-0">
+          <img src="/favicon.svg" alt="" class="w-[30px] h-[30px] rounded-[8px]" />
+          <span class="text-[17px] leading-none font-semibold text-stone-900 tracking-[-0.01em]">验证码中心</span>
         </div>
 
         <!-- Nav — 4 items per design (desktop only) -->
