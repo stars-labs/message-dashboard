@@ -968,7 +968,7 @@
       <!-- Main Content.
            Desktop grid: 2xl (≥1600px) = 3 cols (phone · messages · send),
            lg-2xl (<1600px) = 2 cols (phone · messages), send is a drawer. -->
-      <div class="px-2 sm:px-4 lg:px-6 lg:flex-1 lg:min-h-0 lg:pb-4 lg:flex lg:flex-col">
+      <div class="px-2 sm:px-4 lg:px-5 lg:pt-4 lg:pb-4 lg:flex-1 lg:min-h-0 lg:flex lg:flex-col">
         <div class="lg:grid lg:gap-4 lg:flex-1 lg:min-h-0 lg:grid-cols-[288px_1fr] {can('messages.send') ? '2xl:grid-cols-[288px_1fr_352px]' : ''}">
           <!-- Mobile Phone List Overlay -->
           {#if showPhoneList}
