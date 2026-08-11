@@ -58,6 +58,8 @@ describe('hasVerificationCode — contextual OTPs without an explicit label', ()
     ['4821 is valid for 5 minutes'],
     ['620914. Do not share it with anyone'],
     ['445566，请勿泄露给他人'],
+    ['【微博】672868。仅用于解除账号异常，5分钟内有效。'],
+    ['【微博】920629。仅用于解除账号异常，5分钟内有效。'],
   ])('detects %j', (content) => {
     expect(hasVerificationCode(content)).toBe(true);
   });
@@ -114,6 +116,7 @@ describe('extractVerificationCode', () => {
     ['Use code 2026 to complete your purchase'],
     ['Your card ending 9016 expires in 5 minutes'],
     ['Order 123456: do not share your delivery details'],
+    ['优惠码 2026。仅用于本次促销，活动5分钟内有效'],
   ])('does not treat non-OTP numbers as codes: %j', (content) => {
     expect(extractVerificationCode(content)).toBeNull();
   });

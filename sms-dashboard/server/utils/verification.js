@@ -52,6 +52,11 @@ export const VERIFICATION_CODE_PATTERNS = [
     pattern: /\b(\d{4,8})\b[^\n.]{0,8}?[.!,:;]?\s*(?:do\s+not|never)\s+share\s+(?:it|this|the\s+(?:code|otp|pin|passcode)|with\b)/i,
   },
   {
+    reason: 'zh_purpose_expiry',
+    pattern:
+      /(\d{4,8})[。．.!！]?\s*(?:仅|僅|只)?用于[^\n。]{1,24}[，,]\s*\d+\s*分(?:钟|鐘)内有效/,
+  },
+  {
     reason: 'zh_expiry_or_security',
     pattern: /(\d{4,8})[^\n。]{0,24}?(?:\d+\s*分钟内有效|\d+\s*分鐘內有效|有效期(?:为|為)?\s*\d+\s*分钟|有效期(?:为|為)?\s*\d+\s*分鐘|请勿(?:向他人)?泄露|請勿(?:向他人)?洩露|不要告知他人|切勿转发|切勿轉發)/,
   },
