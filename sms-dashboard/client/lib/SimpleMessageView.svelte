@@ -167,34 +167,33 @@
           >全部短信</button>
         </div>
 
-        <!-- Vertical divider -->
-        <div class="w-px h-[18px] bg-stone-200 mx-1"></div>
+        <!-- The spam control has no action in verification-code mode and no
+             value when the count is zero, so do not reserve mobile space for it. -->
+        {#if contentFilter === 'all' && (filteredCount > 0 || showFiltered)}
+          <div class="w-px h-[18px] bg-stone-200 mx-0.5 lg:mx-1"></div>
 
-        <!-- Spam toggle — per design: checkbox + "隐藏垃圾 N" label.
-             Disabled in code mode (verified messages are never rule-hidden). -->
-        <button
-          onclick={contentFilter === 'all' ? onToggleFiltered : null}
-          disabled={contentFilter === 'code'}
-          class="flex items-center gap-1.5 text-xs transition-colors
-            {contentFilter === 'code' ? 'text-stone-300 cursor-default' : 'text-stone-600 hover:text-stone-900'}"
-          title={contentFilter === 'code' ? '验证码视图下垃圾短信已全部屏蔽' : !showFiltered ? '点击查看被规则隐藏的短信' : '点击隐藏垃圾短信'}
-        >
-          <!-- Checkbox: filled when hiding spam (= checked state = hiding enabled) -->
-          <span class="inline-flex items-center justify-center w-[13px] h-[13px] rounded-[3px] border transition-colors shrink-0
-            {contentFilter === 'code'
-              ? 'border-stone-200 bg-white'
-              : !showFiltered
+          <button
+            onclick={onToggleFiltered}
+            aria-pressed={showFiltered}
+            aria-label={!showFiltered ? `显示 ${filteredCount} 条垃圾短信` : '隐藏垃圾短信'}
+            class="flex items-center gap-1.5 text-xs text-stone-600 hover:text-stone-900 transition-colors"
+            title={!showFiltered ? '点击查看被规则隐藏的短信' : '点击隐藏垃圾短信'}
+          >
+            <!-- Checkbox: filled when hiding spam (= checked state = hiding enabled) -->
+            <span class="inline-flex items-center justify-center w-[13px] h-[13px] rounded-[3px] border transition-colors shrink-0
+              {!showFiltered
                 ? 'border-stone-500 bg-stone-500'
                 : 'border-stone-300 bg-white'}">
-            {#if !showFiltered && contentFilter !== 'code'}
-              <!-- Checkmark -->
-              <svg class="w-2.5 h-2.5 text-white" viewBox="0 0 12 12" fill="none">
-                <path d="M2 6l3 3 5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-            {/if}
-          </span>
-          <span>隐藏垃圾 <strong class="font-mono tabular-nums">{contentFilter === 'code' ? 0 : filteredCount}</strong></span>
-        </button>
+              {#if !showFiltered}
+                <svg class="w-2.5 h-2.5 text-white" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                  <path d="M2 6l3 3 5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              {/if}
+            </span>
+            <span class="lg:hidden">垃圾 <strong class="font-mono tabular-nums">{filteredCount}</strong></span>
+            <span class="hidden lg:inline">隐藏垃圾 <strong class="font-mono tabular-nums">{filteredCount}</strong></span>
+          </button>
+        {/if}
       </div>
     </div>
   </div>
