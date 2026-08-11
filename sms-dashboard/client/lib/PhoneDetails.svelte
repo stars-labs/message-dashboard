@@ -1,151 +1,136 @@
 <script>
   import SignalStrength from './SignalStrength.svelte';
-  import { getCarrierColor } from './countries.js';
+  import { formatCardNumber } from './card-number.js';
+  import { getStatusMeta } from './device-status.js';
+
   let {
     phone = null,
     mobile = false,
     daemonStatus = { connected: false, lastDataUpdate: null },
-    showInsights = true,
   } = $props();
 
-  // Track if we're in initial loading state
-  let isInitialLoad = $derived(
-    daemonStatus.connected && Date.now() - (daemonStatus.lastDataUpdate || Date.now()) < 5000
+  let statusMeta = $derived(getStatusMeta(phone?.status));
+  let signal = $derived(Number(phone?.signal) || 0);
+  let operator = $derived(phone?.operator_name || phone?.operator || phone?.carrier || '—');
+  let moduleName = $derived(
+    [phone?.manufacturer, phone?.model].filter(Boolean).join(' ') || '—'
+  );
+  let location = $derived(
+    [
+      phone?.usb_port ? `USB ${phone.usb_port}` : null,
+      phone?.modem_index != null ? `模块 ${phone.modem_index}` : null,
+    ].filter(Boolean).join(' · ') || '—'
   );
 
-  function getEffectiveStatus(phone) {
-    if (!phone) return 'unknown';
-    
-    // During initial load with optimistic daemon status, trust the phone status
-    if (daemonStatus.connected && phone.status) {
-      return phone.status;
-    }
-    
-    if (!daemonStatus.connected) {
-      return 'unknown';
-    }
-    
-    // If daemon is connected but no recent data update, show as stale
-    if (daemonStatus.lastDataUpdate) {
-      const timeSinceUpdate = Date.now() - daemonStatus.lastDataUpdate;
-      if (timeSinceUpdate > 120000) { // 2 minutes
-        return 'stale';
-      }
-    }
-    
-    return phone.status || 'offline';
+  function formatUpdatedAt(value) {
+    if (!value) return '—';
+    const normalized = typeof value === 'string' && !value.endsWith('Z')
+      ? `${value}Z`
+      : value;
+    const date = new Date(normalized);
+    if (Number.isNaN(date.getTime())) return '—';
+    return date.toLocaleString('zh-CN', {
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
   }
 </script>
 
 {#if phone}
-  <div class="tech-card p-4 {mobile ? 'mx-4 mb-4' : 'mb-4'}">
-    <div class="flex items-start justify-between mb-4">
-      <div>
-        <h3 class="text-lg font-semibold data-value high-contrast">
-          {#if phone.number}
-              <span class="text-stone-900">{phone.number}</span>
-          {:else}
-            <span class="text-orange-400">未设置号码</span>
-          {/if}
-        </h3>
-        <p class="text-sm text-stone-500 mt-1">
-          {#if phone.mapped_carrier || phone.carrier}
-            <span class="inline-flex px-2 py-1 text-xs rounded-full font-medium {getCarrierColor(phone.mapped_carrier || phone.carrier)}">
-              {phone.mapped_carrier || phone.carrier}
-            </span>
-          {/if}
-          {#if phone.operator_name}
-            {@const dedupedOp = [...new Set(phone.operator_name.split(/\s+/))].join(' ')}
-            {#if dedupedOp !== phone.carrier}
-              {#if phone.carrier} • {/if}
-              <span class="text-stone-500">{dedupedOp}</span>
-            {/if}
-          {/if}
-        </p>
-      </div>
-      <div class="flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium {['online', 'active', 'registered', 'connected'].includes(getEffectiveStatus(phone)) ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : getEffectiveStatus(phone) === 'unknown' ? 'bg-stone-100 text-stone-500 border border-stone-200' : getEffectiveStatus(phone) === 'stale' ? 'bg-orange-50 text-orange-700 border border-orange-200' : 'bg-stone-100 text-stone-500 border border-stone-200'}">
-        <div class="w-2 h-2 rounded-full {['online', 'active', 'registered', 'connected'].includes(getEffectiveStatus(phone)) ? 'bg-emerald-500 animate-pulse' : getEffectiveStatus(phone) === 'unknown' ? 'bg-stone-400' : getEffectiveStatus(phone) === 'stale' ? 'bg-orange-500' : 'bg-stone-400'}"></div>
-        {['online', 'active', 'registered', 'connected'].includes(getEffectiveStatus(phone)) ? '在线' : getEffectiveStatus(phone) === 'unknown' ? '数据过期' : getEffectiveStatus(phone) === 'stale' ? '数据陈旧' : '离线'}
-      </div>
-    </div>
-    
-    <!-- Signal Strength Details -->
-    <SignalStrength 
-      signal={phone.signal || 0}
-      status={getEffectiveStatus(phone)}
-      rssi={phone.rssi}
-      rsrq={phone.rsrq}
-      rsrp={phone.rsrp}
-      snr={phone.snr}
-      compact={false}
-      daemonConnected={daemonStatus.connected}
-      isInitialLoad={isInitialLoad}
-    />
-    
-    <!-- Additional Phone Info -->
-    <div class="mt-4 space-y-2 text-sm bg-stone-50 rounded-lg p-3 border border-stone-200">
-      {#if phone.iccid}
-        <div class="flex justify-between">
-          <span class="text-stone-500">ICCID:</span>
-          <span class="font-mono text-xs text-stone-800">{phone.iccid}</span>
-        </div>
-      {/if}
-      {#if phone.modem_index != null || phone.sim_index != null}
-        <div class="flex justify-between">
-          <span class="text-stone-500">位置索引:</span>
-          <span class="text-indigo-600 font-medium tech-text">
-            {#if phone.modem_index != null}
-              调制解调器 #{phone.modem_index}
-            {/if}
-            {#if phone.modem_index != null && phone.sim_index != null}
-              ,
-            {/if}
-            {#if phone.sim_index != null}
-              SIM卡 #{phone.sim_index}
-            {/if}
+  <section
+    aria-label="所选卡片信息"
+    class="bg-white border border-stone-200/80 rounded-xl flex flex-col h-full min-h-0 overflow-hidden {mobile ? 'mx-4 mb-4' : ''}"
+    style="box-shadow: 0 1px 3px rgba(28,25,23,0.06);"
+  >
+    <header class="h-[52px] px-4 border-b border-stone-200 flex items-center justify-between gap-4 shrink-0">
+      <div class="min-w-0 flex items-center gap-3">
+        <span class="w-1 h-7 rounded-sm bg-orange-500 shrink-0"></span>
+        <div class="min-w-0 flex items-baseline gap-2">
+          <h2 class="text-sm font-semibold text-stone-900 whitespace-nowrap">卡片信息</h2>
+          <span class="font-mono text-xs font-semibold text-stone-600 whitespace-nowrap">
+            {formatCardNumber(phone.sim_index)}
+          </span>
+          <span class="text-xs text-stone-400 truncate" title={phone.number || '未设置号码'}>
+            {phone.flag || ''} {phone.number || '未设置号码'}
           </span>
         </div>
-      {/if}
-      {#if phone.imei}
-        <div class="flex justify-between">
-          <span class="text-stone-500">IMEI:</span>
-          <span class="font-mono text-xs text-stone-800">{phone.imei}</span>
+      </div>
+
+      <div class="flex items-center gap-3 shrink-0">
+        <div class="hidden sm:flex items-center gap-2 text-xs text-stone-500">
+          <SignalStrength signal={signal} status={phone.status} compact={true} />
+          <span class="font-mono tabular-nums">{signal}%</span>
         </div>
-      {/if}
-      {#if phone.carrier || phone.operator_name}
-        <div class="flex justify-between items-center">
-          <span class="text-stone-500">运营商:</span>
-          <span class="text-stone-800">
-            {phone.carrier || ''}
-            {#if phone.operator_name}
-              {@const dedupedOp = [...new Set(phone.operator_name.split(/\s+/))].join(' ')}
-              {#if dedupedOp !== phone.carrier}
-                {phone.carrier ? ' / ' : ''}{dedupedOp}
-              {/if}
-            {/if}
-            {#if phone.operator_id} ({phone.operator_id}){/if}
-          </span>
+        <span class="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium {statusMeta.badgeClass}">
+          <span class="w-1.5 h-1.5 rounded-full {statusMeta.dotClass}"></span>
+          {statusMeta.label}
+        </span>
+      </div>
+    </header>
+
+    <div class="flex-1 min-h-0 overflow-y-auto">
+      <div class="grid grid-cols-2 xl:grid-cols-4 border-b border-stone-100 bg-stone-50/50">
+        <div class="px-4 py-3 border-r border-b xl:border-b-0 border-stone-100 min-w-0">
+          <p class="text-[11px] text-stone-400 mb-1">手机号</p>
+          <p class="text-sm font-medium text-stone-800 truncate" title={phone.number || '未设置'}>
+            {phone.number || '未设置'}
+          </p>
         </div>
-      {/if}
-      {#if phone.access_tech}
-        <div class="flex justify-between">
-          <span class="text-stone-500">网络类型:</span>
-          <span class="uppercase font-medium text-stone-800">{phone.access_tech}</span>
+        <div class="px-4 py-3 border-b xl:border-b-0 xl:border-r border-stone-100 min-w-0">
+          <p class="text-[11px] text-stone-400 mb-1">运营商</p>
+          <p class="text-sm font-medium text-stone-800 truncate" title={operator}>{operator}</p>
         </div>
-      {/if}
-      {#if phone.country}
-        <div class="flex justify-between">
-          <span class="text-stone-500">国家/地区:</span>
-          <span class="text-stone-800">{phone.country}</span>
+        <div class="px-4 py-3 border-r border-stone-100 min-w-0">
+          <p class="text-[11px] text-stone-400 mb-1">国家 / 地区</p>
+          <p class="text-sm font-medium text-stone-800 truncate" title={phone.country || '—'}>
+            {phone.flag || ''} {phone.country || '—'}
+          </p>
         </div>
-      {/if}
-      {#if phone.lastActive}
-        <div class="flex justify-between">
-          <span class="text-stone-500">最后活跃:</span>
-          <span class="text-stone-800">{new Date(phone.lastActive).toLocaleString('zh-CN')}</span>
+        <div class="px-4 py-3 min-w-0">
+          <p class="text-[11px] text-stone-400 mb-1">最后更新</p>
+          <p class="text-sm font-medium text-stone-800 tabular-nums">
+            {formatUpdatedAt(phone.updated_at || phone.lastActive)}
+          </p>
         </div>
-      {/if}
+      </div>
+
+      <dl class="grid grid-cols-1 xl:grid-cols-2 gap-x-8 gap-y-3 px-4 py-3 text-xs">
+        <div class="grid grid-cols-[88px_minmax(0,1fr)] items-baseline gap-3 min-w-0">
+          <dt class="text-stone-400">ICCID</dt>
+          <dd class="font-mono text-stone-700 truncate" title={phone.iccid || '—'}>{phone.iccid || '—'}</dd>
+        </div>
+        <div class="grid grid-cols-[88px_minmax(0,1fr)] items-baseline gap-3 min-w-0">
+          <dt class="text-stone-400">IMEI</dt>
+          <dd class="font-mono text-stone-700 truncate" title={phone.imei || '—'}>{phone.imei || '—'}</dd>
+        </div>
+        <div class="grid grid-cols-[88px_minmax(0,1fr)] items-baseline gap-3 min-w-0">
+          <dt class="text-stone-400">模块</dt>
+          <dd class="text-stone-700 truncate" title={moduleName}>{moduleName}</dd>
+        </div>
+        <div class="grid grid-cols-[88px_minmax(0,1fr)] items-baseline gap-3 min-w-0">
+          <dt class="text-stone-400">位置</dt>
+          <dd class="text-stone-700 truncate" title={location}>{location}</dd>
+        </div>
+        <div class="grid grid-cols-[88px_minmax(0,1fr)] items-baseline gap-3 min-w-0">
+          <dt class="text-stone-400">网络</dt>
+          <dd class="text-stone-700 truncate" title={phone.access_tech || operator}>
+            {phone.access_tech || operator}
+          </dd>
+        </div>
+        <div class="grid grid-cols-[88px_minmax(0,1fr)] items-baseline gap-3 min-w-0">
+          <dt class="text-stone-400">守护进程</dt>
+          <dd class="text-stone-700">{daemonStatus.connected ? '连接正常' : '未连接'}</dd>
+        </div>
+        {#if phone.notes}
+          <div class="xl:col-span-2 grid grid-cols-[88px_minmax(0,1fr)] items-baseline gap-3 min-w-0 pt-1 border-t border-stone-100">
+            <dt class="text-stone-400">备注</dt>
+            <dd class="text-stone-700 truncate" title={phone.notes}>{phone.notes}</dd>
+          </div>
+        {/if}
+      </dl>
     </div>
-  </div>
-  
+  </section>
 {/if}

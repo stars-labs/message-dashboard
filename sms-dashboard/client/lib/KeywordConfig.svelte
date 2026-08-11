@@ -105,18 +105,18 @@
   }
 </script>
 
-<div>
-  <div class="flex justify-between items-center mb-5">
-    <div>
-      <h2 class="text-xl font-bold text-stone-900">关键词高亮</h2>
+<div class="bg-white lg:bg-transparent">
+  <div class="flex justify-between items-start gap-3 px-4 py-4 border-y border-stone-200 lg:border-0 lg:p-0 lg:mb-5">
+    <div class="min-w-0">
+      <h2 class="text-lg sm:text-xl font-bold text-stone-900">关键词高亮</h2>
       <p class="text-sm text-stone-500 mt-0.5">命中的词在短信正文中自动标色，帮助快速识别验证码类型</p>
     </div>
     <button onclick={openAdd}
-      class="px-4 py-2 bg-stone-800 text-white text-sm font-medium rounded-lg hover:bg-stone-700 transition-colors flex items-center gap-1.5">
+      class="shrink-0 px-3 sm:px-4 py-2 bg-stone-800 text-white text-sm font-medium rounded-lg hover:bg-stone-700 transition-colors flex items-center gap-1.5">
       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
       </svg>
-      添加关键词
+      <span class="hidden min-[360px]:inline">添加关键词</span>
     </button>
   </div>
 
@@ -137,7 +137,7 @@
     </div>
 
   {:else}
-    <div class="overflow-x-auto">
+    <div class="hidden sm:block overflow-x-auto">
       <table class="w-full text-sm">
         <thead>
           <tr class="border-b border-stone-200 text-left">
@@ -208,8 +208,41 @@
       </table>
     </div>
 
+    <div class="sm:hidden border-b border-stone-200 divide-y divide-stone-100">
+      {#each keywords as kw}
+        <div class="px-4 py-3 {kw.is_active ? '' : 'opacity-55'}">
+          <div class="flex items-start gap-3">
+            <div class="min-w-0 flex-1">
+              <p class="font-mono text-sm text-stone-700 leading-relaxed">
+                <!-- eslint-disable-next-line svelte/no-at-html-tags -->
+                {@html `您的<mark style="background:${kw.color}20;border-bottom:2px solid ${kw.color};color:inherit;padding:0 1px;border-radius:2px;font-weight:600">${kw.keyword}</mark>是 839204`}
+              </p>
+              <div class="flex flex-wrap items-center gap-2 mt-2 text-xs text-stone-400">
+                <span class="inline-flex px-2 py-0.5 rounded font-medium"
+                  style="background:{kw.color}20;color:{kw.color};border:1px solid {kw.color}50">{kw.tag}</span>
+                <span>{matchLabel(kw)}</span>
+                <span>优先级 <strong class="font-mono text-stone-600">{kw.priority}</strong></span>
+                <span>命中 <strong class="font-mono text-stone-600">{kw.usage_count || 0}</strong></span>
+              </div>
+            </div>
+            <button onclick={() => toggle(kw)}
+              class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0
+                {kw.is_active ? 'bg-stone-800' : 'bg-stone-200'}"
+              aria-label={kw.is_active ? '停用关键词' : '启用关键词'}>
+              <span class="inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform
+                {kw.is_active ? 'translate-x-6' : 'translate-x-1'}"></span>
+            </button>
+          </div>
+          <div class="mt-2 flex justify-end gap-1">
+            <button onclick={() => openEdit(kw)} class="min-h-9 px-3 text-xs text-stone-600 rounded-lg hover:bg-stone-100">编辑</button>
+            <button onclick={() => remove(kw)} class="min-h-9 px-3 text-xs text-red-600 rounded-lg hover:bg-red-50">删除</button>
+          </div>
+        </div>
+      {/each}
+    </div>
+
     <!-- Priority explainer card -->
-    <div class="mt-4 px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-500">
+    <div class="px-4 py-3 bg-stone-50 border-b border-stone-200 lg:mt-4 lg:border lg:rounded-xl text-xs text-stone-500">
       <strong class="text-stone-700">优先级说明：</strong>
       同一段文字被两个关键词同时命中时，数字大的那个上色。所以「验证码」应该高于「优惠」。
     </div>
@@ -219,9 +252,9 @@
 
 <!-- ─── Add / Edit dialog ────────────────────────────────────────────────── -->
 {#if showDialog}
-  <div class="fixed inset-0 bg-stone-900/40 flex items-center justify-center z-50 p-4"
+  <div class="fixed inset-0 bg-stone-900/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4"
     onclick={(e) => e.target === e.currentTarget && (showDialog = false)}>
-    <div class="bg-white rounded-2xl shadow-modal w-full max-w-md flex flex-col max-h-[90vh] overflow-hidden">
+    <div class="bg-white rounded-t-2xl sm:rounded-2xl shadow-modal w-full max-w-md flex flex-col max-h-[calc(100dvh-74px)] sm:max-h-[90vh] overflow-hidden">
 
       <div class="px-6 py-4 border-b border-stone-100 flex-shrink-0 flex items-center justify-between">
         <h3 class="font-semibold text-stone-900">{editingKeyword ? '编辑关键词' : '添加关键词'}</h3>

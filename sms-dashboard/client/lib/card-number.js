@@ -15,13 +15,3 @@ export function formatCardNumber(simIndex) {
   if (simIndex == null) return '—';
   return String(simIndex).padStart(2, '0');
 }
-
-/**
- * The full label shown in prose contexts, e.g. "05 号卡".
- * @param {number | null | undefined} simIndex
- * @returns {string}
- */
-export function cardLabel(simIndex) {
-  if (simIndex == null) return '未知卡';
-  return `${formatCardNumber(simIndex)} 号卡`;
-}

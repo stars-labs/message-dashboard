@@ -814,6 +814,13 @@ impl AtModemManager {
     /// List all SMS messages, merging concatenated parts using PDU metadata.
     /// Uses PDU mode to get concatenation info for multipart SMS.
     pub async fn list_sms(&self, port: &str) -> Result<Vec<AtSms>> {
+        // The modem persists CPMS across daemon restarts. If another tool leaves the
+        // read store on "SR" (status reports), CMGL succeeds but never sees received
+        // SMS held in the combined "MT" store. Select MT on every scan so polling is
+        // self-healing and deletion operates on the same store that was listed.
+        self.send_at_command(port, "AT+CPMS=\"MT\",\"MT\",\"MT\"", self.timeout)
+            .await?;
+
         // Use PDU mode to get concatenation metadata for multipart SMS
         match self.list_sms_pdu_mode(port).await {
             Ok(messages) if !messages.is_empty() => {

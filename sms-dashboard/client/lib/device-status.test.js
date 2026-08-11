@@ -1,6 +1,6 @@
 // Run with: bun test client/lib/device-status.test.js
 import { describe, expect, test } from 'bun:test';
-import { getStatusMeta, isAnomalous } from './device-status.js';
+import { getStatusMeta, hasOperationalIssue, isAnomalous } from './device-status.js';
 
 describe('getStatusMeta', () => {
   test('known active status returns 在线', () => {
@@ -45,5 +45,19 @@ describe('isAnomalous', () => {
     expect(isAnomalous('iccid_mismatch')).toBe(true);
     expect(isAnomalous('unassigned')).toBe(true);
     expect(isAnomalous('no_modem')).toBe(true);
+  });
+});
+
+describe('hasOperationalIssue', () => {
+  test('includes offline cards and hardware faults', () => {
+    expect(hasOperationalIssue('offline')).toBe(true);
+    expect(hasOperationalIssue('sim_error')).toBe(true);
+    expect(hasOperationalIssue('iccid_mismatch')).toBe(true);
+  });
+
+  test('keeps healthy and mapping states out of the fault bucket', () => {
+    expect(hasOperationalIssue('active')).toBe(false);
+    expect(hasOperationalIssue('unassigned')).toBe(false);
+    expect(hasOperationalIssue('no_modem')).toBe(false);
   });
 });

@@ -14,6 +14,7 @@ import { serveFrontend } from './frontend-handler';
 import { createRoleConfig, hasAnyRole } from '../config/auth0-roles.js';
 import { setupKeywordRoutes } from './api/keywords.js';
 import { setupFilterRoutes } from './api/filters.js';
+import { setupVerificationRoutes } from './api/verification.js';
 import { purgeExpiredMessages } from './utils/message-retention.js';
 import { sweepPending } from './utils/spam-backfill.js';
 import { readCookie } from './utils/session-token.js';
@@ -406,6 +407,9 @@ setupKeywordRoutes(router);
 // Setup spam/marketing filter rule routes
 setupFilterRoutes(router);
 
+// High-confidence verification-code backfill (admin only)
+setupVerificationRoutes(router);
+
 // Login page route - removed duplicate, using auth0Handler.login above
 
 // Serve frontend for all other routes - check authentication
@@ -514,5 +518,4 @@ export default {
     }
   }
 };
-
 

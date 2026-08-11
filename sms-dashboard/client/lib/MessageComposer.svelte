@@ -5,14 +5,16 @@
     selectedPhone = null,
     phoneNumbers = [],
     messages = [],
+    mobilePage = false,
     onmessagesent = null,
   } = $props();
+
+  const DRAFT_KEY = 'sms-dashboard:send-draft';
 
   let recipientNumber = $state("");
   let recipientSIM = $state("");
   let messageContent = $state("");
   let sendingStatus = $state("");
-  let showComposer = $state(false);
   let showRecipientHistory = $state(false);
   let recipientSearch = $state("");
   let simSearch = $state("");
@@ -20,6 +22,7 @@
   let selectedSimDisplay = $state("");
   let selectedCountryCode = $state("+65"); // Default to Singapore
   let showCountryDropdown = $state(false);
+  let draftReady = $state(false);
 
   // Common country codes
   const countryCodes = [
@@ -139,7 +142,6 @@
 
     setTimeout(() => {
       sendingStatus = "";
-      showComposer = false;
     }, 2000);
   }
 
@@ -169,14 +171,42 @@
     { name: "营销模板", content: "限时优惠！全场商品8折，快来选购吧！" },
   ];
 
-  // Load recipient history from localStorage on mount
+  // Restore the route draft after navigation or a refresh. Wait until restore is
+  // complete before persisting so the initial empty state cannot overwrite it.
   onMount(() => {
-    const storedRecipients = JSON.parse(
-      localStorage.getItem("recipientHistory") || "[]",
-    );
-    if (storedRecipients.length > 0) {
-      recipientHistory.push(...storedRecipients);
+    try {
+      const storedRecipients = JSON.parse(localStorage.getItem("recipientHistory") || "[]");
+      if (storedRecipients.length > 0) recipientHistory.push(...storedRecipients);
+    } catch {
+      localStorage.removeItem("recipientHistory");
     }
+
+    if (!mobilePage) return;
+
+    try {
+      const draft = JSON.parse(sessionStorage.getItem(DRAFT_KEY) || "null");
+      if (draft) {
+        recipientNumber = draft.recipientNumber || "";
+        recipientSIM = draft.recipientSIM || "";
+        messageContent = draft.messageContent || "";
+        selectedCountryCode = draft.selectedCountryCode || "+65";
+        selectedSimDisplay = draft.selectedSimDisplay || "";
+      }
+    } catch {
+      sessionStorage.removeItem(DRAFT_KEY);
+    }
+    draftReady = true;
+  });
+
+  $effect(() => {
+    if (!mobilePage || !draftReady) return;
+    sessionStorage.setItem(DRAFT_KEY, JSON.stringify({
+      recipientNumber,
+      recipientSIM,
+      messageContent,
+      selectedCountryCode,
+      selectedSimDisplay,
+    }));
   });
 
   // Close dropdown when clicking outside
@@ -202,7 +232,7 @@
 
 <!-- Desktop Composer -->
 <div
-  class="{showComposer ? 'hidden' : 'hidden lg:flex lg:flex-col'} bg-white border border-stone-200/80 rounded-xl h-full min-h-0"
+  class="hidden lg:flex lg:flex-col bg-white border border-stone-200/80 rounded-xl h-full min-h-0"
   style="box-shadow: 0 1px 3px rgba(28,25,23,0.06);"
 >
   <div class="p-4 border-b border-stone-200 flex-shrink-0 flex items-center justify-between">
@@ -446,36 +476,22 @@
   </div><!-- end scrollable content -->
 </div>
 
-<!-- Mobile Composer Modal -->
-{#if showComposer}
-  <div class="lg:hidden fixed inset-0 bg-[#F7F5F2] z-50 overflow-y-auto">
+<!-- Mobile route content. The App owns the header and persistent bottom tab bar. -->
+{#if mobilePage}
+  <section
+    data-mobile-composer
+    class="lg:hidden min-h-[calc(100dvh-126px)] bg-white"
+    aria-labelledby="mobile-composer-title"
+  >
     <div
-      class="sticky top-0 bg-white border-b border-stone-200 px-4 py-3 flex justify-between items-center"
+      class="sticky top-[52px] z-10 bg-white border-b border-stone-200 px-4 py-3"
     >
       <h2
+        id="mobile-composer-title"
         class="text-lg font-bold data-value header-effect-target"
       >
         发送短信
       </h2>
-      <button
-        class="text-stone-400 hover:text-stone-600 p-2"
-        onclick={() => (showComposer = false)}
-        aria-label="关闭发送短信面板"
-      >
-        <svg
-          class="w-6 h-6"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="2"
-            d="M6 18L18 6M6 6l12 12"
-          />
-        </svg>
-      </button>
     </div>
 
     <div class="p-4">
@@ -719,21 +735,5 @@
         {/if}
       </button>
     </div>
-  </div>
+  </section>
 {/if}
-
-<!-- Mobile Floating Button -->
-<button
-  class="lg:hidden fixed bottom-6 right-6 w-14 h-14 bg-orange-500 text-white rounded-full shadow-lg flex items-center justify-center hover:bg-orange-600 hover:scale-110 transition-all z-30"
-  onclick={() => (showComposer = true)}
-  aria-label="打开发送短信面板"
->
-  <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path
-      stroke-linecap="round"
-      stroke-linejoin="round"
-      stroke-width="2"
-      d="M12 4v16m8-8H4"
-    />
-  </svg>
-</button>

@@ -9,7 +9,9 @@ const DB_NAME = 'sms-dashboard-cache';
 // server now hides, and cached rows have no filter_status at all. Without this
 // bump those messages keep rendering from IndexedDB and the filter looks broken.
 // Raise this again whenever a change makes previously cached rows wrong.
-const DB_VERSION = 2;
+// v3: verification-code detection became high-confidence only. Clear rows whose
+// old bare-digit fallback may still contain years, order numbers or card numbers.
+const DB_VERSION = 3;
 const MESSAGES_STORE = 'messages';
 const META_STORE = 'meta';
 

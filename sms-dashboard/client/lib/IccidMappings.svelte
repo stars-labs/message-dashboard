@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { api } from "./api";
   import { COUNTRIES, getCountryFlag, getCountryName, getCarrierColor } from "./countries.js";
-  import { getStatusMeta, isAnomalous } from "./device-status.js";
+  import { getStatusMeta, hasOperationalIssue, isAnomalous } from "./device-status.js";
   import { formatCardNumber } from "./card-number.js";
 
   let { initialStatusFilter = "all" } = $props();
@@ -15,11 +15,13 @@
   let statusFilter = $state(initialStatusFilter);
   let successMessage = $state(null);
 
-  // Re-sync when parent changes the filter (e.g. "处理 →" in health strip).
+  // Apply a new deep-link filter once. The previous effect also depended on
+  // statusFilter, so every manual chip click was immediately reset to "error".
+  let lastInitialStatusFilter = initialStatusFilter;
   $effect(() => {
-    if (initialStatusFilter !== statusFilter && initialStatusFilter !== "all") {
+    if (initialStatusFilter !== lastInitialStatusFilter) {
+      lastInitialStatusFilter = initialStatusFilter;
       statusFilter = initialStatusFilter;
-      filterMappings();
     }
   });
 
@@ -68,7 +70,7 @@
 
   // ── Stats (for filter chips) ───────────────────────────────────────────────
   let activeCount   = $derived(allMappingsCache.filter(m => m.is_active === 'active').length);
-  let errorCount    = $derived(allMappingsCache.filter(m => isAnomalous(m.is_active)).length);
+  let errorCount    = $derived(allMappingsCache.filter(m => hasOperationalIssue(m.is_active)).length);
   let inactiveCount = $derived(allMappingsCache.filter(m => ['no_modem', 'unassigned'].includes(m.is_active) || !m.is_active).length);
   let totalCount    = $derived(allMappingsCache.length);
 
@@ -93,7 +95,7 @@
   function filterMappings() {
     let filtered = allMappingsCache;
     if (statusFilter === 'active')   filtered = filtered.filter(m => m.is_active === 'active');
-    else if (statusFilter === 'error') filtered = filtered.filter(m => isAnomalous(m.is_active));
+    else if (statusFilter === 'error') filtered = filtered.filter(m => hasOperationalIssue(m.is_active));
     else if (statusFilter === 'inactive') filtered = filtered.filter(m => ['no_modem','unassigned'].includes(m.is_active) || !m.is_active);
 
     if (searchQuery.trim()) {
@@ -166,12 +168,13 @@
 </script>
 
 <!-- ═══ Page ════════════════════════════════════════════════════════════════ -->
-<div class="tech-card p-4 sm:p-6">
+<div class="relative overflow-hidden bg-white p-4 sm:p-6 lg:border lg:border-stone-200/80
+  lg:rounded-xl lg:shadow-[0_1px_3px_rgba(28,25,23,0.06),0_1px_2px_rgba(28,25,23,0.04)]">
 
   <!-- Header -->
   <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
     <div>
-      <h2 class="text-xl font-bold text-stone-900">设备与卡 · ICCID 映射</h2>
+      <h2 class="text-lg sm:text-xl font-bold text-stone-900">设备与卡 · ICCID 映射</h2>
       <p class="text-xs text-stone-400 mt-0.5">{totalCount} 张卡 · 搜索：卡号 / 号码 / 运营商 / ICCID</p>
     </div>
     <button onclick={openAdd}
@@ -258,8 +261,8 @@
                 {#if m.phone_number}{m.phone_number}{:else}<span class="text-stone-300">—</span>{/if}
               </td>
               <!-- ICCID -->
-              <td class="px-3 py-2.5 font-mono text-xs text-stone-500" title={m.iccid}>
-                {m.iccid ? m.iccid.slice(0,8)+'…'+m.iccid.slice(-4) : '—'}
+              <td class="px-3 py-2.5 font-mono text-xs text-stone-500 whitespace-nowrap">
+                {m.iccid || '—'}
               </td>
               <!-- 运营商 -->
               <td class="px-3 py-2.5">
@@ -327,11 +330,11 @@
     </div>
 
     <!-- ── Mobile cards ────────────────────────────────────────────────── -->
-    <div class="sm:hidden space-y-2">
+    <div class="sm:hidden -mx-4 border-t border-stone-100">
       {#each mappings as m}
         {@const meta = getStatusMeta(m.is_active)}
         {@const anomalous = isAnomalous(m.is_active)}
-        <div class="relative bg-white border border-stone-200 rounded-xl p-3 pl-4 shadow-sm overflow-hidden
+        <div class="relative bg-white border-b border-stone-100 p-3 pl-4 overflow-hidden
           {anomalous ? meta.rowClass : ''}">
           <span class="absolute left-0 top-0 bottom-0 w-[3px] {meta.dotClass}" aria-hidden="true"></span>
           <div class="flex items-center gap-2">

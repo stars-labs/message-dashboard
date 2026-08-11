@@ -1,6 +1,11 @@
 // Run with: bun test server/utils/verification.test.js
 import { describe, expect, test } from 'bun:test';
-import { extractVerificationCode, hasLabelledCode } from './verification.js';
+import {
+  detectVerificationCode,
+  extractVerificationCode,
+  hasLabelledCode,
+  hasVerificationCode,
+} from './verification.js';
 
 // hasLabelledCode() is the OTP safety guard used by the spam filter: a message
 // that carries an explicitly LABELLED code is never filtered, whatever rule it
@@ -44,6 +49,20 @@ describe('hasLabelledCode — English labels', () => {
   });
 });
 
+describe('hasVerificationCode — contextual OTPs without an explicit label', () => {
+  test.each([
+    ['Use 4471 to log in. Expires in 10 min.'],
+    ['Enter 839204 to verify your account'],
+    ['输入 38291 完成登录'],
+    ['使用 951753 进行身份验证'],
+    ['4821 is valid for 5 minutes'],
+    ['620914. Do not share it with anyone'],
+    ['445566，请勿泄露给他人'],
+  ])('detects %j', (content) => {
+    expect(hasVerificationCode(content)).toBe(true);
+  });
+});
+
 describe('hasLabelledCode — must NOT fire on marketing text', () => {
   test.each([
     // Mentions the word but carries no code. These are the 4 anti-fraud
@@ -68,15 +87,13 @@ describe('hasLabelledCode — must NOT fire on marketing text', () => {
   });
 });
 
-// extractVerificationCode keeps its loose bare-digit fallback, because it only
-// feeds a display badge. The guard above must NOT share that looseness.
 describe('extractVerificationCode', () => {
   test('prefers the labelled code over any other digits in the body', () => {
     expect(extractVerificationCode('订单2026年，验证码：8842')).toBe('8842');
   });
 
-  test('still falls back to a bare digit run', () => {
-    expect(extractVerificationCode('您的订单号 123456 已受理')).toBe('123456');
+  test('returns null for a bare order number', () => {
+    expect(extractVerificationCode('您的订单号 123456 已受理')).toBeNull();
   });
 
   test('returns null when there are no digits at all', () => {
@@ -87,9 +104,21 @@ describe('extractVerificationCode', () => {
     expect(extractVerificationCode(null)).toBeNull();
   });
 
-  // The reason the guard cannot reuse this function: it happily reports a
-  // "code" for a marketing SMS that merely contains a year.
-  test('DEMONSTRATES the false positive that makes it unusable as a spam signal', () => {
-    expect(extractVerificationCode('将于2026-08-31到期')).toBe('2026');
+  test.each([
+    ['【招商银行】您尾号9016的普卡将于2026年11月30日到期'],
+    ['M1 Prepaid is now on 5G! Upgrade on 9 August 2026.'],
+    ['将于2026-08-31到期'],
+    ['订单 123456 已受理'],
+    ['Call area code 2026 for assistance'],
+    ['Use promo code 2026 for a discount'],
+  ])('does not treat non-OTP numbers as codes: %j', (content) => {
+    expect(extractVerificationCode(content)).toBeNull();
+  });
+
+  test('returns structured evidence for auditing', () => {
+    expect(detectVerificationCode('Your OTP is 4821')).toEqual({
+      code: '4821',
+      reason: 'en_label_before',
+    });
   });
 });

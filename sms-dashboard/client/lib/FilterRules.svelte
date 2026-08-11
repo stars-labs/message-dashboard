@@ -134,12 +134,13 @@
   }
 </script>
 
-<div class="space-y-4">
+<div class="bg-white lg:bg-transparent lg:space-y-4">
 
   <!-- Guarantee banner — hoisted to the very top so users see it before
        deciding whether to enable filtering. The old position (page description
        second line, small text) meant users couldn't find the safety guarantee. -->
-  <div class="flex items-start gap-3 px-4 py-3 bg-emerald-50 border border-emerald-200 rounded-xl text-sm text-emerald-800">
+  <div class="flex items-start gap-3 px-4 py-3 bg-emerald-50 border-y border-emerald-200
+    lg:border lg:rounded-xl text-sm text-emerald-800">
     <svg class="w-5 h-5 shrink-0 mt-0.5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
         d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
@@ -147,8 +148,8 @@
     <span><strong>含验证码的短信永不隐藏</strong>，即使发送方在黑名单里。开启过滤不会漏掉任何验证码。</span>
   </div>
 
-  <div class="bg-white border border-stone-200 rounded-xl shadow-sm p-4">
-    <div class="flex items-start justify-between gap-4">
+  <div class="bg-white border-b border-stone-200 p-4 lg:border lg:rounded-xl lg:shadow-sm">
+    <div class="flex flex-col sm:flex-row sm:items-start justify-between gap-3 sm:gap-4">
       <div>
         <h2 class="text-lg font-semibold text-stone-900">垃圾过滤规则</h2>
         <p class="text-sm text-stone-500 mt-1">命中规则的短信默认不显示，可在消息列表点「已过滤 N 条」查看。</p>
@@ -157,7 +158,7 @@
         <button
           onclick={() => continueSweep(true)}
           disabled={saving}
-          class="px-3 py-1.5 text-sm rounded-lg border border-stone-300 text-stone-600 hover:bg-stone-100 disabled:opacity-50"
+          class="w-full sm:w-auto px-3 py-2 sm:py-1.5 text-sm rounded-lg border border-stone-300 text-stone-600 hover:bg-stone-100 disabled:opacity-50"
           title="按当前规则重新判定所有历史消息"
         >全部重新分类</button>
       </div>
@@ -194,7 +195,7 @@
   </div>
 
   <!-- Add / edit -->
-  <div class="bg-white border border-stone-200 rounded-xl shadow-sm p-4">
+  <div class="bg-white border-b border-stone-200 p-4 lg:border lg:rounded-xl lg:shadow-sm">
     <h3 class="font-medium text-stone-900 mb-3">{editingId ? '编辑规则' : '添加规则'}</h3>
     <div class="grid gap-3 sm:grid-cols-[10rem_1fr_1fr_auto] sm:items-end">
       <div>
@@ -251,10 +252,10 @@
 
   <!-- Existing rules -->
   {#if loading}
-    <div class="bg-white border border-stone-200 rounded-xl p-8 text-center text-stone-400">加载中…</div>
+    <div class="bg-white border-b border-stone-200 p-8 text-center text-stone-400 lg:border lg:rounded-xl">加载中…</div>
   {:else}
     {#each grouped as group}
-      <div class="bg-white border border-stone-200 rounded-xl shadow-sm overflow-hidden">
+      <div class="bg-white border-b border-stone-200 lg:border lg:rounded-xl lg:shadow-sm overflow-hidden">
         <div class="px-4 py-2 bg-stone-50 border-b border-stone-200 text-sm font-medium text-stone-700">
           {group.label}
           <span class="text-stone-400 font-normal">· {group.items.length} 条</span>
@@ -262,7 +263,7 @@
         {#if group.items.length === 0}
           <div class="px-4 py-6 text-center text-sm text-stone-400">暂无规则</div>
         {:else}
-          <table class="w-full text-sm">
+          <table class="hidden sm:table w-full text-sm">
             <thead class="text-xs text-stone-500">
               <tr class="border-b border-stone-100">
                 <th class="text-left px-4 py-2 font-medium">规则内容</th>
@@ -310,6 +311,35 @@
               {/each}
             </tbody>
           </table>
+
+          <div class="sm:hidden divide-y divide-stone-100">
+            {#each group.items as rule (rule.id)}
+              <div class="px-4 py-3 {rule.is_active ? '' : 'opacity-55'}">
+                <div class="flex items-start gap-3">
+                  <div class="min-w-0 flex-1">
+                    <p class="font-mono text-sm font-medium text-stone-800 break-all">{rule.pattern}</p>
+                    <p class="text-xs text-stone-400 mt-1">{rule.note || '无备注'}</p>
+                  </div>
+                  <button
+                    onclick={() => toggleActive(rule)}
+                    disabled={saving}
+                    class="shrink-0 px-2.5 py-1.5 rounded-md text-xs font-medium {rule.is_active
+                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                      : 'bg-stone-100 text-stone-500 border border-stone-200'} disabled:opacity-50"
+                  >{rule.is_active ? '启用中' : '已停用'}</button>
+                </div>
+                <div class="mt-3 flex items-center gap-2">
+                  <span class="text-xs text-stone-400">已隐藏 <strong class="font-mono text-stone-600">{rule.hit_count}</strong> 条</span>
+                  <div class="ml-auto flex items-center gap-1">
+                    <button onclick={() => startEdit(rule)} disabled={saving}
+                      class="min-h-9 px-3 text-xs text-stone-600 rounded-lg hover:bg-stone-100 disabled:opacity-50">编辑</button>
+                    <button onclick={() => remove(rule)} disabled={saving}
+                      class="min-h-9 px-3 text-xs text-red-600 rounded-lg hover:bg-red-50 disabled:opacity-50">删除</button>
+                  </div>
+                </div>
+              </div>
+            {/each}
+          </div>
         {/if}
       </div>
     {/each}

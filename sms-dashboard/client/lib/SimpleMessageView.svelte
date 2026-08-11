@@ -1,9 +1,10 @@
 <script>
   import { onMount } from "svelte";
+  import { fly } from "svelte/transition";
   import MessageHighlight from "./MessageHighlight.svelte";
   import { tagActions, keywords as keywordsStore } from "./tag-store.js";
   import { copyCode } from "./clipboard.js";
-  import { formatCardNumber, cardLabel } from "./card-number.js";
+  import { formatCardNumber } from "./card-number.js";
   import { getCountryFlag } from "./countries.js";
 
   let {
@@ -35,6 +36,7 @@
 
   // Copy feedback: stores the message.id of the last-copied code for 2 s.
   let copiedId = $state(null);
+  let copiedCode = $state(null);
   let copyTimer = null;
 
   async function handleCopy(message) {
@@ -42,7 +44,11 @@
     if (!ok) return;
     if (copyTimer) clearTimeout(copyTimer);
     copiedId = message.id;
-    copyTimer = setTimeout(() => { copiedId = null; }, 2000);
+    copiedCode = message.verification_code;
+    copyTimer = setTimeout(() => {
+      copiedId = null;
+      copiedCode = null;
+    }, 2000);
   }
 
   // Content filter: 'code' = only messages with a parsed verification_code,
@@ -88,7 +94,29 @@
   }
 </script>
 
-<div class="bg-white border border-stone-200 rounded-xl shadow-raised flex flex-col h-full min-h-0">
+<div class="relative bg-white border-0 rounded-none shadow-none lg:border lg:border-stone-200
+  lg:rounded-xl lg:shadow-raised flex flex-col h-full min-h-0">
+
+  <!-- Explicit copy confirmation. Kept outside the scrolling rows so it is
+       always visible and never changes the table layout. -->
+  <div class="absolute top-[58px] left-1/2 -translate-x-1/2 z-30 pointer-events-none" aria-live="polite">
+    {#if copiedCode}
+      <div
+        role="status"
+        transition:fly={{ y: -6, duration: 160 }}
+        class="flex items-center gap-2 min-w-max px-3 py-2 rounded-md border border-stone-700
+          bg-stone-900 text-white shadow-lg"
+      >
+        <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-emerald-500 shrink-0">
+          <svg class="w-3 h-3" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+            <path d="M2.25 6.1 4.8 8.5 9.8 3.6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </span>
+        <span class="text-xs font-medium">已复制</span>
+        <span class="font-mono text-sm font-semibold tracking-wider tabular-nums text-orange-200">{copiedCode}</span>
+      </div>
+    {/if}
+  </div>
 
   <!-- ── Header ───────────────────────────────────────────────────────────── -->
   <div class="px-4 py-3 border-b border-stone-100 flex-shrink-0">
@@ -98,7 +126,7 @@
       <div class="flex items-center gap-2 min-w-0">
         {#if selectedPhone}
           <span class="font-mono font-bold text-sm text-stone-900 tabular-nums shrink-0">
-            {cardLabel(selectedPhone.sim_index)}
+            {formatCardNumber(selectedPhone.sim_index)}
           </span>
           <span class="text-sm text-stone-500 font-mono truncate">
             {selectedPhone.flag || ''} {selectedPhone.number || selectedPhone.iccid}
@@ -173,14 +201,12 @@
 
   <!-- ── Column headers (desktop only) ────────────────────────────────────── -->
   <div class="hidden lg:grid px-3 py-1.5 border-b border-stone-50 flex-shrink-0"
-    style="grid-template-columns: 3px 150px 118px 1fr {selectedPhone ? '84px' : '196px'}; gap: 0 16px;">
+    style="grid-template-columns: 3px 250px 118px minmax(0, 1fr) 92px; gap: 0 16px;">
     <div></div><!-- accent rail -->
-    <div class="text-[11px] font-semibold text-stone-400 tracking-widest uppercase">发送方</div>
+    <div class="text-[11px] font-semibold text-stone-400 tracking-widest uppercase">发送 / 接收</div>
     <div class="text-[11px] font-semibold text-stone-400 tracking-widest uppercase">验证码</div>
     <div class="text-[11px] font-semibold text-stone-400 tracking-widest uppercase">短信内容</div>
-    <div class="text-[11px] font-semibold text-stone-400 tracking-widest uppercase text-right">
-      {selectedPhone ? '时间' : '接收卡'}
-    </div>
+    <div class="text-[11px] font-semibold text-stone-400 tracking-widest uppercase text-right">时间</div>
   </div>
 
   <!-- ── Message list ──────────────────────────────────────────────────────── -->
@@ -191,18 +217,18 @@
       {#each Array(4) as _, i}
         <div class="px-3 py-3 border-b border-stone-50 animate-pulse
           hidden lg:grid items-center"
-          style="grid-template-columns: 3px 150px 118px 1fr 196px; gap: 0 16px;">
+          style="grid-template-columns: 3px 250px 118px minmax(0, 1fr) 92px; gap: 0 16px;">
           <div class="h-8 w-0.5 bg-stone-100 rounded"></div>
-          <div class="h-3 bg-stone-100 rounded w-24"></div>
+          <div class="space-y-1.5">
+            <div class="h-3 bg-stone-100 rounded w-28"></div>
+            <div class="h-2.5 bg-stone-100 rounded w-40"></div>
+          </div>
           <div class="h-7 bg-stone-100 rounded w-20"></div>
           <div class="space-y-1.5">
             <div class="h-3 bg-stone-100 rounded w-full"></div>
             <div class="h-3 bg-stone-100 rounded w-2/3"></div>
           </div>
-          <div class="space-y-1 text-right">
-            <div class="h-3 bg-stone-100 rounded w-24 ml-auto"></div>
-            <div class="h-2.5 bg-stone-100 rounded w-16 ml-auto"></div>
-          </div>
+          <div class="h-3 bg-stone-100 rounded w-16 ml-auto"></div>
         </div>
       {/each}
       <!-- Mobile skeleton -->
@@ -246,6 +272,9 @@
         {@const isFiltered = message.filter_status === 'filtered'}
         {@const isCopied = copiedId === message.id}
         {@const hasCode = !!message.verification_code}
+        {@const receiverIndex = message.phone_sim_index ?? selectedPhone?.sim_index}
+        {@const receiverNumber = message.display_phone_number || selectedPhone?.number || message.phone_iccid?.slice(-8) || '—'}
+        {@const receiverFlag = message.phone_country ? getCountryFlag(message.phone_country) : selectedPhone?.flag || ''}
 
         <!-- ── Desktop row ──────────────────────────────────────────────── -->
         <div
@@ -255,15 +284,24 @@
               : isNew
                 ? 'bg-[#fffbf5] border-stone-100'
                 : idx % 2 === 0 ? 'bg-white border-stone-50' : 'bg-[#fafaf9] border-stone-50'}"
-          style="grid-template-columns: 3px 150px 118px 1fr {selectedPhone ? '84px' : '196px'}; gap: 0 16px;"
+          style="grid-template-columns: 3px 250px 118px minmax(0, 1fr) 92px; gap: 0 16px;"
         >
           <!-- Accent rail: orange for newest, transparent otherwise -->
           <div class="self-stretch rounded-sm {isNew ? 'bg-orange-400' : 'bg-transparent'}"></div>
 
-          <!-- 发送方 -->
-          <div class="font-mono text-sm font-semibold text-stone-800 truncate"
-            title={message.phone_number}>
-            {message.phone_number || '—'}
+          <!-- 发送方 + 接收卡：一次扫视即可确认消息路径 -->
+          <div class="min-w-0 font-mono">
+            <div class="text-sm font-semibold text-stone-800 truncate" title={message.phone_number}>
+              {message.phone_number || '—'}
+            </div>
+            <div class="mt-0.5 flex items-center gap-1.5 text-[11px] text-stone-400 min-w-0">
+              <span class="shrink-0 text-stone-300">接收</span>
+              {#if receiverIndex != null}
+                <span class="font-semibold text-stone-500 tabular-nums shrink-0">{formatCardNumber(receiverIndex)}</span>
+                <span class="text-stone-300 shrink-0">·</span>
+              {/if}
+              <span class="truncate" title={receiverNumber}>{receiverFlag} {receiverNumber}</span>
+            </div>
           </div>
 
           <!-- 验证码: the headline element -->
@@ -294,26 +332,9 @@
             <MessageHighlight content={message.content} keywords={activeKeywords} />
           </div>
 
-          <!-- 接收卡 / 时间 -->
-          <div class="text-right">
-            {#if selectedPhone}
-              <!-- Single-card view: just show the time -->
-              <span class="font-mono text-xs text-stone-400">{formatTime(message.timestamp)}</span>
-            {:else}
-              <!-- All-cards view: flag + number (top), card label + time (bottom) -->
-              <div class="font-mono text-xs text-stone-700">
-                {#if message.phone_country}{getCountryFlag(message.phone_country)}{/if}
-                {message.display_phone_number
-                  ? message.display_phone_number
-                  : message.phone_iccid?.slice(-8) || '—'}
-              </div>
-              <div class="font-mono text-[11px] text-stone-400 mt-0.5">
-                {#if message.phone_sim_index != null}
-                  {cardLabel(message.phone_sim_index)} ·
-                {/if}
-                {formatTime(message.timestamp)}
-              </div>
-            {/if}
+          <!-- 时间 -->
+          <div class="font-mono text-xs text-stone-400 text-right tabular-nums">
+            {formatTime(message.timestamp)}
           </div>
         </div>
 
@@ -350,27 +371,26 @@
             </span>
           </div>
 
+          <!-- Receiving card stays with the sender, before the message body. -->
+          <div class="mt-1 flex items-center gap-1.5 font-mono text-[11px] text-stone-400 min-w-0">
+            <span class="text-stone-300 shrink-0">接收</span>
+            {#if receiverIndex != null}
+              <span class="font-semibold text-stone-500 tabular-nums shrink-0">{formatCardNumber(receiverIndex)}</span>
+              <span class="text-stone-300 shrink-0">·</span>
+            {/if}
+            <span class="truncate">{receiverFlag} {receiverNumber}</span>
+          </div>
+
           <!-- Body -->
           <p class="text-sm text-stone-600 leading-snug line-clamp-2 mt-1.5">
             {message.content}
           </p>
 
-          <!-- Footer: card label + receiving number -->
-          <div class="mt-1.5 font-mono text-[11px] text-stone-400">
-            {#if message.phone_sim_index != null}
-              <span class="font-semibold text-stone-500">{cardLabel(message.phone_sim_index)}</span>
-              ·
-            {/if}
-            {#if message.display_phone_number}
-              {#if message.phone_country}{getCountryFlag(message.phone_country)}{/if}
-              {message.display_phone_number}
-            {/if}
-            {#if isFiltered}
-              <span class="ml-1 px-1 py-0.5 rounded bg-stone-100 text-stone-400 text-[10px]">
-                已过滤
-              </span>
-            {/if}
-          </div>
+          {#if isFiltered}
+            <div class="mt-1.5">
+              <span class="px-1 py-0.5 rounded bg-stone-100 text-stone-400 text-[10px]">已过滤</span>
+            </div>
+          {/if}
         </div>
       {/each}
 

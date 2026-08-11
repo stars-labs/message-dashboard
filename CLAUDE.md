@@ -71,9 +71,18 @@ against it looks like it works. **Use `detected_iccid`.**
 
 ## Commands
 ```bash
-# Frontend
-cd sms-dashboard && bun install && bun run dev      # Dev server :5173
-bun run dev:api                                       # Wrangler local API
+# Local dashboard (run from the repo root; direnv loads the flake dev shell)
+dev-server restart                                    # Supervise the unique frontend :8080 + API :8787 pair
+dev-server status                                     # Show listener ports and PIDs
+dev-server logs                                       # Show frontend/API log paths under /tmp
+dev-server stop                                       # Stop both managed processes
+
+# Single-service debugging only; normal development uses dev-server
+dev-frontend                                          # Strict Vite server on 127.0.0.1:8080
+dev-api                                               # Strict Wrangler API on :8787, secrets via SOPS
+
+# Dashboard build/deploy
+cd sms-dashboard && bun install
 bun run build                                         # Production build
 bun run deploy                                        # Build + deploy to CF
 
@@ -106,7 +115,9 @@ USE_DBUS="0"                         # Set "1" to use ModemManager D-Bus instead
 ```
 
 Cloudflare secrets (set via `bunx wrangler secret put <NAME>`):
-`AUTH0_DOMAIN`, `AUTH0_CLIENT_ID`, `AUTH0_CLIENT_SECRET`, `API_KEY`
+`AUTH0_DOMAIN`, `AUTH0_CLIENT_ID`, `AUTH0_CLIENT_SECRET`, `AUTH0_M2M_CLIENT_ID`,
+`AUTH0_M2M_CLIENT_SECRET`, `API_KEY`. The M2M application is used for Auth0 Management API
+operations on the user-management page; it is separate from the interactive login client.
 
 ## Database Schema (Cloudflare D1)
 - **`sims`** — user SIM inventory (PK: iccid), 95 rows. Source of truth for phone_number, carrier, sim_index. Daemon NEVER writes here.
@@ -122,6 +133,8 @@ Cloudflare secrets (set via `bunx wrangler secret put <NAME>`):
 ### Must-know
 - **Always use `device_view`** for reading device data — never query raw tables directly
 - **Package manager is `bun`**, not npm — all scripts use `bunx`
+- **Local dashboard lifecycle is owned by `dev-server` from `flake.nix`** — after dashboard edits, run `dev-server restart` and leave its foreground supervisor running. Do not launch `bun run dev` or `bun run dev:api` directly: the managed command clears prior listeners, fixes the ports at frontend `8080` and API `8787`, checks both health endpoints, and enforces one listener PID per port.
+- **Local Auth0/API credentials come only from `secrets/dev-vars.yaml`** — `dev-api` uses `sops exec-env` and `CLOUDFLARE_INCLUDE_PROCESS_ENV=true` to pass decrypted values into Bun/Wrangler without plaintext files or command-line secret arguments.
 - **No linters/formatters configured** — follow existing code style in each component
 - **No WebSocket/SSE in production** — manual refresh only (cost optimization). All WS/SSE code has been removed.
 - **Router is custom** — `SimpleRouter` class in `server/index.js`, not itty-router

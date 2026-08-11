@@ -15,6 +15,7 @@
   import { getPhoneFlag, mapStatsResponse } from "./lib/countries.js";
   import { auth } from "./lib/auth.js";
   import { isAnomalous } from "./lib/device-status.js";
+  import { formatCardNumber } from "./lib/card-number.js";
 
   let selectedPhoneIccid = $state(null);
   let selectedPhone = $state(null);
@@ -81,7 +82,7 @@
   let user = $state(null);
   let loading = $state(true);
   let dataLoading = $state(true); // Track data loading separately
-  let currentView = $state("dashboard"); // 'dashboard', 'iccid-mappings', or 'keywords'
+  let currentView = $state("dashboard");
   let iccidMappingsFilter = $state("all");
   let showIccidMappingDialog = $state(false);
   let showMoreMenu = $state(false); // iOS bottom tab: 更多 sheet
@@ -168,6 +169,7 @@
   // guard below, so the two cannot disagree.
   const VIEW_PERMISSION = {
     dashboard: 'messages.read',
+    send: 'messages.send',
     'iccid-mappings': 'phones.write',
     keywords: 'keywords.read',
     filters: 'filters.read',
@@ -709,7 +711,7 @@
     <!-- Header — matches design §一 exactly:
          product mark · title · nav (4 items) · daemon pill · send button · avatar -->
     <header class="bg-white border-b border-stone-200 sticky top-0 z-40 lg:flex-shrink-0">
-      <div class="px-5 flex items-center h-[52px] gap-6">
+      <div class="px-4 lg:px-5 flex items-center h-[52px] gap-3 lg:gap-6">
 
         <!-- Product mark + title -->
         <div class="flex items-center gap-2 shrink-0">
@@ -736,7 +738,7 @@
             </button>
           {/if}
           {#if can('keywords.read') || can('filters.read')}
-            <button onclick={() => navigate(can('keywords.read') ? 'keywords' : 'filters')}
+            <button onclick={() => navigate(can('filters.read') ? 'filters' : 'keywords')}
               class="text-sm px-3 py-1.5 rounded-[7px] transition-all
                 {(currentView === 'keywords' || currentView === 'filters')
                   ? 'bg-stone-100 font-semibold text-stone-900'
@@ -799,16 +801,35 @@
           {/if}
         </div>
 
-        <!-- Mobile: hamburger (keep for phone list toggle) -->
-        <button
-          class="lg:hidden ml-auto p-1.5 -mr-1.5 text-stone-600 hover:bg-stone-100 rounded-lg transition-colors"
-          onclick={() => (showPhoneList = !showPhoneList)}
-          aria-label="切换手机列表"
-        >
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
-          </svg>
-        </button>
+        <!-- Mobile: this is a receiver selector, not global navigation. -->
+        {#if currentView === 'dashboard'}
+          <button
+            class="lg:hidden ml-auto min-w-0 max-w-[190px] h-9 px-2.5 flex items-center gap-1.5
+              border border-stone-200 bg-stone-50 text-stone-700 rounded-lg transition-colors
+              hover:bg-stone-100 active:bg-stone-200"
+            onclick={() => { showMoreMenu = false; showPhoneList = true; }}
+            aria-haspopup="dialog"
+            aria-expanded={showPhoneList}
+            aria-label={selectedPhone ? `切换接收卡，当前为${selectedPhone.number || formatCardNumber(selectedPhone.sim_index)}` : '选择接收卡'}
+          >
+            <svg class="w-4 h-4 text-stone-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <rect x="7" y="2" width="10" height="20" rx="2" stroke-width="2"/>
+              <path stroke-linecap="round" stroke-width="2" d="M10 5h4M11 18h2"/>
+            </svg>
+            <span class="truncate text-xs font-medium">
+              {#if selectedPhone}
+                <span class="font-mono">{formatCardNumber(selectedPhone.sim_index)}</span>
+                <span class="text-stone-300 px-0.5">·</span>
+                {selectedPhone.flag || ''}{selectedPhone.number || '未设置号码'}
+              {:else}
+                全部设备
+              {/if}
+            </span>
+            <svg class="w-3.5 h-3.5 text-stone-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 9l6 6 6-6"/>
+            </svg>
+          </button>
+        {/if}
 
       </div>
     </header>
@@ -968,27 +989,50 @@
       <!-- Main Content.
            Desktop grid: 2xl (≥1600px) = 3 cols (phone · messages · send),
            lg-2xl (<1600px) = 2 cols (phone · messages), send is a drawer. -->
-      <div class="px-2 sm:px-4 lg:px-5 lg:pt-4 lg:pb-4 lg:flex-1 lg:min-h-0 lg:flex lg:flex-col">
+      <div class="px-0 sm:px-4 lg:px-5 lg:pt-4 lg:pb-4 lg:flex-1 lg:min-h-0 lg:flex lg:flex-col">
         <div class="lg:grid lg:gap-4 lg:flex-1 lg:min-h-0 lg:grid-cols-[288px_1fr] {can('messages.send') ? '2xl:grid-cols-[288px_1fr_352px]' : ''}">
-          <!-- Mobile Phone List Overlay -->
+          <!-- Mobile receiver picker: a bottom sheet keeps the message context visible. -->
           {#if showPhoneList}
             <div
-              class="lg:hidden fixed inset-0 z-50 bg-stone-900/40"
-              onclick={() => (showPhoneList = false)}
+              class="lg:hidden fixed inset-0 z-50"
               onkeydown={(e) => e.key === "Escape" && (showPhoneList = false)}
-              role="button"
-              tabindex="0"
-              aria-label="关闭手机列表"
+              role="presentation"
             >
+              <button
+                class="absolute inset-0 bottom-[74px] w-full bg-stone-900/35"
+                onclick={() => (showPhoneList = false)}
+                aria-label="关闭接收卡选择"
+              ></button>
               <div
-                class="absolute left-0 top-0 bottom-0 w-80 max-w-full bg-white shadow-xl border-r border-stone-200"
-                onclick={(e) => e.stopPropagation()}
-                onkeydown={(e) => e.stopPropagation()}
+                class="absolute left-0 right-0 bottom-[74px] h-[min(68dvh,620px)] max-h-[calc(100dvh-126px)]
+                  bg-white rounded-t-2xl shadow-[0_-12px_36px_rgba(28,25,23,.2)] overflow-hidden
+                  flex flex-col"
                 role="dialog"
-                tabindex="-1"
-                aria-label="手机列表"
+                aria-modal="true"
+                aria-labelledby="receiver-picker-title"
               >
-                <div class="h-full overflow-y-auto">
+                <div class="flex-shrink-0 border-b border-stone-200">
+                  <div class="flex justify-center pt-2 pb-1" aria-hidden="true">
+                    <span class="w-9 h-1 rounded-full bg-stone-300"></span>
+                  </div>
+                  <div class="h-11 px-4 flex items-center gap-2">
+                    <div class="min-w-0 flex-1">
+                      <h2 id="receiver-picker-title" class="text-sm font-semibold text-stone-900">选择接收卡</h2>
+                      <p class="text-[11px] text-stone-400 mt-0.5">共 {phoneNumbers.length} 台设备</p>
+                    </div>
+                    <button
+                      class="w-9 h-9 -mr-1 flex items-center justify-center rounded-lg text-stone-500
+                        hover:bg-stone-100 active:bg-stone-200"
+                      onclick={() => (showPhoneList = false)}
+                      aria-label="关闭"
+                    >
+                      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+                <div class="flex-1 min-h-0">
                   <PhoneList
                     {phoneNumbers}
                     {selectedPhone}
@@ -1022,8 +1066,8 @@
           </div>
 
           <!-- Message View Column — fills remaining space -->
-          <div class="flex flex-col h-full min-h-0">
-            <div class="flex-1 min-h-0 flex flex-col">
+          <div class="flex flex-col h-full min-h-0 {selectedPhone ? 'lg:grid lg:grid-rows-[minmax(300px,1fr)_220px] lg:gap-3' : ''}">
+            <div class="min-h-0 flex flex-col">
               <SimpleMessageView
                 {messages}
                 {selectedPhone}
@@ -1036,6 +1080,11 @@
                 onToggleFiltered={toggleFiltered}
               />
             </div>
+            {#if selectedPhone}
+              <div class="hidden lg:block min-h-0">
+                <PhoneDetails phone={selectedPhone} mobile={false} {daemonStatus} />
+              </div>
+            {/if}
           </div>
 
           <!-- Send panel: resident 3rd column at ≥1600px, hidden below -->
@@ -1052,30 +1101,61 @@
         </div>
       </div>
       </ErrorBoundary>
+    {:else if currentView === "send"}
+      <ErrorBoundary componentName="MessageComposer">
+        <div class="lg:flex-1 lg:min-h-0 lg:overflow-auto lg:px-8 lg:py-6">
+          <div class="lg:max-w-[420px] lg:h-full lg:mx-auto">
+            <MessageComposer
+              {selectedPhone}
+              {phoneNumbers}
+              {messages}
+              mobilePage={true}
+              onmessagesent={handleMessageSent}
+            />
+          </div>
+        </div>
+      </ErrorBoundary>
     {:else if currentView === "iccid-mappings"}
       <ErrorBoundary componentName="IccidMappings">
         <!-- ICCID Mappings View -->
-        <div class="px-2 sm:px-4 lg:px-8 py-6 lg:flex-1 lg:min-h-0 lg:overflow-auto">
+        <div class="px-0 py-0 sm:px-4 sm:py-6 lg:px-8 lg:flex-1 lg:min-h-0 lg:overflow-auto">
           <IccidMappings initialStatusFilter={iccidMappingsFilter} />
         </div>
       </ErrorBoundary>
-    {:else if currentView === "keywords"}
-      <ErrorBoundary componentName="Keywords">
-        <!-- Keywords Configuration View -->
-        <div class="px-4 lg:px-8 py-6 lg:flex-1 lg:min-h-0 lg:overflow-auto">
-          <KeywordConfig />
-        </div>
-      </ErrorBoundary>
-    {:else if currentView === "filters"}
-      <ErrorBoundary componentName="FilterRules">
-        <!-- Spam/marketing filter rules -->
-        <div class="px-4 lg:px-8 py-6 lg:flex-1 lg:min-h-0 lg:overflow-auto">
-          <FilterRules />
-        </div>
-      </ErrorBoundary>
+    {:else if currentView === "keywords" || currentView === "filters"}
+      <div class="px-0 py-0 lg:px-8 lg:py-6 lg:flex-1 lg:min-h-0 lg:overflow-auto bg-white lg:bg-transparent">
+        {#if can('keywords.read') && can('filters.read')}
+          <div class="flex items-center p-1 m-3 lg:inline-flex lg:m-0 lg:mb-5 bg-stone-200/70 rounded-lg" aria-label="规则类型">
+            <button
+              onclick={() => navigate('filters')}
+              class="flex-1 lg:flex-none px-3 py-1.5 rounded-md text-sm transition-colors
+                {currentView === 'filters'
+                  ? 'bg-white text-stone-900 font-semibold shadow-sm'
+                  : 'text-stone-500 hover:text-stone-800'}"
+            >垃圾过滤</button>
+            <button
+              onclick={() => navigate('keywords')}
+              class="flex-1 lg:flex-none px-3 py-1.5 rounded-md text-sm transition-colors
+                {currentView === 'keywords'
+                  ? 'bg-white text-stone-900 font-semibold shadow-sm'
+                  : 'text-stone-500 hover:text-stone-800'}"
+            >关键词高亮</button>
+          </div>
+        {/if}
+
+        {#if currentView === "filters"}
+          <ErrorBoundary componentName="FilterRules">
+            <FilterRules />
+          </ErrorBoundary>
+        {:else}
+          <ErrorBoundary componentName="Keywords">
+            <KeywordConfig />
+          </ErrorBoundary>
+        {/if}
+      </div>
     {:else if currentView === "users"}
       <ErrorBoundary componentName="UserManagement">
-        <div class="px-4 lg:px-8 py-6 lg:flex-1 lg:min-h-0 lg:overflow-auto">
+        <div class="px-0 py-0 lg:px-8 lg:py-6 lg:flex-1 lg:min-h-0 lg:overflow-auto">
           <UserManagement currentUserId={user?.id ?? null} />
         </div>
       </ErrorBoundary>
@@ -1143,10 +1223,14 @@
         </button>
       {/if}
 
-      <!-- 发送 tab — opens the mobile composer -->
-      <button onclick={() => { navigate('dashboard'); showMoreMenu = false; showPhoneList = false; }}
+      <!-- 发送 tab — a first-class route, like the other primary tabs. -->
+      <button onclick={() => {
+          navigate('send');
+          showMoreMenu = false;
+          showPhoneList = false;
+        }}
         class="flex-1 flex flex-col items-center justify-center gap-0.5 pt-2 pb-0.5 min-h-[52px]
-          transition-colors text-stone-400 hover:text-stone-600">
+          transition-colors {currentView === 'send' && !showMoreMenu ? 'text-[#c2410c]' : 'text-stone-400 hover:text-stone-600'}">
         <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round"
             d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
@@ -1168,7 +1252,7 @@
 
     <!-- ── 更多 bottom sheet ────────────────────────────────────────────── -->
     {#if showMoreMenu}
-      <div class="lg:hidden fixed inset-0 z-30 bg-stone-900/20"
+      <div class="lg:hidden fixed inset-0 z-[35] bg-stone-900/20"
         onclick={() => showMoreMenu = false}
         role="presentation">
       </div>
@@ -1177,12 +1261,12 @@
         <div class="p-4 space-y-1">
           <p class="text-[11px] font-semibold text-stone-400 uppercase tracking-widest px-3 mb-2">规则</p>
 
-          {#if can('keywords.read')}
-            <button onclick={() => { navigate('keywords'); showMoreMenu = false; }}
+          {#if can('filters.read')}
+            <button onclick={() => { navigate('filters'); showMoreMenu = false; }}
               class="w-full flex items-center justify-between px-3 py-3 rounded-xl hover:bg-stone-50 transition-colors text-left">
               <div>
-                <div class="text-sm font-medium text-stone-800">关键词高亮</div>
-                <div class="text-xs text-stone-400 mt-0.5">标色识别验证码类型</div>
+                <div class="text-sm font-medium text-stone-800">垃圾过滤</div>
+                <div class="text-xs text-stone-400 mt-0.5">隐藏非验证码推广短信</div>
               </div>
               <svg class="w-4 h-4 text-stone-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
@@ -1190,12 +1274,12 @@
             </button>
           {/if}
 
-          {#if can('filters.read')}
-            <button onclick={() => { navigate('filters'); showMoreMenu = false; }}
+          {#if can('keywords.read')}
+            <button onclick={() => { navigate('keywords'); showMoreMenu = false; }}
               class="w-full flex items-center justify-between px-3 py-3 rounded-xl hover:bg-stone-50 transition-colors text-left">
               <div>
-                <div class="text-sm font-medium text-stone-800">垃圾过滤</div>
-                <div class="text-xs text-stone-400 mt-0.5">隐藏非验证码推广短信</div>
+                <div class="text-sm font-medium text-stone-800">关键词高亮</div>
+                <div class="text-xs text-stone-400 mt-0.5">标色识别验证码类型</div>
               </div>
               <svg class="w-4 h-4 text-stone-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
@@ -1250,4 +1334,3 @@
 {#each toasts as toast (toast.id)}
   <Toast message={toast.message} type={toast.type} duration={toast.duration} onClose={() => removeToast(toast.id)} />
 {/each}
-

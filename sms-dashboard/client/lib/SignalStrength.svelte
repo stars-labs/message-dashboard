@@ -98,7 +98,6 @@
           ></div>
         {/each}
       </div>
-      <span class="text-xs text-stone-400">离线</span>
     {:else if status === "unknown"}
       {#if isInitialLoad}
         <!-- Show loading animation during initial load -->

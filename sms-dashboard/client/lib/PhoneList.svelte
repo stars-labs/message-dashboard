@@ -27,8 +27,8 @@
     debounceTimer = setTimeout(() => { searchTerm = searchInput; }, 200);
   }
 
-  // Status filter chips: all / online / anomaly
-  let statusChip = $state('all'); // 'all' | 'online' | 'error'
+  // Status filter chips: all / online / offline / anomaly
+  let statusChip = $state('all'); // 'all' | 'online' | 'offline' | 'error'
 
   let filteredPhones = $derived(
     phoneNumbers
@@ -47,6 +47,7 @@
         const matchesChip =
           statusChip === 'all' ||
           (statusChip === 'online' && phone.status === 'active') ||
+          (statusChip === 'offline' && phone.status === 'offline') ||
           (statusChip === 'error' && isAnomalous(phone.status));
 
         return matchesCountry && matchesSearch && matchesChip;
@@ -63,6 +64,7 @@
   // Status chip counts — always computed from the full list (not filteredPhones)
   // so the badge numbers don't change when a chip is selected.
   let onlineCount  = $derived(phoneNumbers.filter(p => p.status === 'active').length);
+  let offlineCount = $derived(phoneNumbers.filter(p => p.status === 'offline').length);
   let errorCount   = $derived(phoneNumbers.filter(p => isAnomalous(p.status)).length);
 
   // Highlight query matches in a string: wrap hits with <mark>.
@@ -75,7 +77,7 @@
   }
 
   function handlePhoneClick(phone) {
-    if (selectedPhoneIccid === phone.iccid) {
+    if (!mobile && selectedPhoneIccid === phone.iccid) {
       selectedPhoneIccid = null;
       onSelectPhone?.(null);
     } else {
@@ -85,11 +87,12 @@
   }
 </script>
 
-<div class="bg-white border border-stone-200/80 rounded-xl flex flex-col h-full min-h-0"
-  style="box-shadow: 0 1px 3px rgba(28,25,23,0.06);">
+<div class="bg-white flex flex-col h-full min-h-0
+  {mobile ? '' : 'border border-stone-200/80 rounded-xl'}"
+  style={mobile ? '' : 'box-shadow: 0 1px 3px rgba(28,25,23,0.06);'}>
 
   <!-- Header: search + filter chips -->
-  <div class="p-3 border-b border-stone-200 flex-shrink-0 space-y-2">
+  <div class="p-3 border-b border-stone-200 flex-shrink-0 space-y-2 bg-white">
 
     <!-- Search -->
     <div class="relative">
@@ -109,7 +112,7 @@
     </div>
 
     <!-- Status chips -->
-    <div class="flex items-center gap-1.5">
+    <div class="flex flex-wrap items-center gap-1.5">
       <button
         onclick={() => { statusChip = 'all'; }}
         class="px-2.5 py-1 text-xs rounded-md font-medium transition-colors
@@ -124,6 +127,15 @@
             ? 'bg-stone-800 text-white'
             : 'bg-stone-50 border border-stone-200 text-stone-500 hover:bg-stone-100'}"
       >在线 <span class="font-mono tabular-nums">{onlineCount}</span></button>
+      {#if offlineCount > 0}
+        <button
+          onclick={() => { statusChip = 'offline'; }}
+          class="px-2.5 py-1 text-xs rounded-md font-medium transition-colors
+            {statusChip === 'offline'
+              ? 'bg-stone-500 text-white'
+              : 'bg-stone-50 border border-stone-200 text-stone-500 hover:bg-stone-100'}"
+        >离线 <span class="font-mono tabular-nums">{offlineCount}</span></button>
+      {/if}
       {#if errorCount > 0}
         <button
           onclick={() => { statusChip = 'error'; }}
@@ -155,25 +167,51 @@
         </div>
       {/each}
 
-    {:else if filteredPhones.length === 0}
-      <div class="p-6 text-center">
-        {#if phoneNumbers.length === 0}
-          <p class="text-sm text-red-500">无法加载设备数据</p>
-          <p class="text-xs text-stone-400 mt-1">请检查网络连接或重新登录</p>
-        {:else}
-          <p class="text-sm text-stone-400">无匹配设备</p>
-          <button onclick={() => { statusChip = 'all'; searchTerm = ''; searchInput = ''; }}
-            class="text-xs text-action-text mt-1 hover:underline">清除筛选</button>
-        {/if}
-      </div>
-
     {:else}
-      {#each filteredPhones as phone}
+      {#if mobile}
+        <button
+          onclick={() => onSelectPhone?.(null)}
+          class="w-full min-h-[52px] flex items-center gap-3 px-4 border-b border-stone-100
+            text-left transition-colors hover:bg-stone-50 active:bg-stone-100
+            {selectedPhoneIccid === null ? 'bg-[#fff7ed] shadow-[inset_3px_0_0_#f97316]' : 'bg-white'}"
+        >
+          <span class="w-8 h-8 rounded-lg bg-stone-100 flex items-center justify-center shrink-0">
+            <svg class="w-4 h-4 text-stone-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <rect x="7" y="2" width="10" height="20" rx="2" stroke-width="2"/>
+              <path stroke-linecap="round" stroke-width="2" d="M10 5h4M11 18h2"/>
+            </svg>
+          </span>
+          <span class="flex-1 min-w-0">
+            <span class="block text-sm font-medium text-stone-800">全部设备</span>
+            <span class="block text-[11px] text-stone-400 mt-0.5">显示所有接收卡的消息</span>
+          </span>
+          {#if selectedPhoneIccid === null}
+            <span class="w-5 h-5 rounded-full bg-orange-500 text-white flex items-center justify-center shrink-0">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 12l4 4L19 6"/>
+              </svg>
+            </span>
+          {/if}
+        </button>
+      {/if}
+
+      {#if filteredPhones.length === 0}
+        <div class="p-6 text-center">
+          {#if phoneNumbers.length === 0}
+            <p class="text-sm text-red-500">无法加载设备数据</p>
+            <p class="text-xs text-stone-400 mt-1">请检查网络连接或重新登录</p>
+          {:else}
+            <p class="text-sm text-stone-400">无匹配设备</p>
+            <button onclick={() => { statusChip = 'all'; searchTerm = ''; searchInput = ''; }}
+              class="text-xs text-action-text mt-1 hover:underline">清除筛选</button>
+          {/if}
+        </div>
+      {:else}
+        {#each filteredPhones as phone}
         {@const meta = getStatusMeta(phone.status)}
         {@const selected = selectedPhoneIccid === phone.iccid}
         {@const q = searchTerm.trim().toLowerCase()}
         {@const anomalous = isAnomalous(phone.status)}
-        {@const iccidTail = phone.iccid ? phone.iccid.slice(-4) : ''}
 
         <!-- Using div+role rather than <button> here because the row may contain
              a nested <button> (the 映射 action), and a button inside a button is
@@ -183,7 +221,8 @@
           tabindex="0"
           onclick={() => handlePhoneClick(phone)}
           onkeydown={(e) => e.key === 'Enter' && handlePhoneClick(phone)}
-          class="w-full flex items-center gap-2 px-3 py-2.5 border-b text-left cursor-pointer
+          class="w-full flex items-center gap-2 border-b text-left cursor-pointer
+            {mobile ? 'px-4 py-2.5 min-h-[58px]' : 'px-3 py-2.5'}
             transition-all duration-150
             {selected
               ? 'bg-[#fff7ed] border-stone-200'
@@ -221,17 +260,21 @@
                 {/if}
               {/if}
             </div>
-            <!-- Secondary line: carrier · ICCID tail -->
-            <div class="text-[11px] text-stone-400 font-mono leading-snug truncate mt-0.5">
+            <!-- Mobile keeps long ICCIDs out of the scan path unless they matched the search. -->
+            <div class="flex items-baseline gap-1 text-stone-400 font-mono leading-snug mt-0.5 min-w-0">
               {#if phone.carrier}
                 <!-- eslint-disable-next-line svelte/no-at-html-tags -->
-                <span class="text-stone-500">{@html highlight(phone.carrier, q)}</span>
+                <span class="text-[11px] text-stone-500 shrink-0">{@html highlight(phone.carrier, q)}</span>
               {/if}
-              {#if iccidTail}
-                <span class="text-stone-300"> · …{iccidTail}</span>
+              {#if phone.iccid}
+                {#if !mobile || (q && phone.iccid.toLowerCase().includes(q))}
+                  <span class="text-[10px] tracking-tight truncate" title="ICCID: {phone.iccid}">
+                    {phone.carrier ? '· ' : ''}{@html highlight(phone.iccid, q)}
+                  </span>
+                {/if}
               {/if}
               {#if anomalous}
-                <span class="ml-1 text-[10px] font-medium {meta.badgeClass.includes('red') ? 'text-red-600' : 'text-amber-600'}">
+                <span class="text-[10px] font-medium shrink-0 {meta.badgeClass.includes('red') ? 'text-red-600' : 'text-amber-600'}">
                   {meta.label}
                 </span>
               {/if}
@@ -248,8 +291,16 @@
               isInitialLoad={isLoading}
             />
           </div>
+          {#if mobile && selected}
+            <span class="w-5 h-5 rounded-full bg-orange-500 text-white flex items-center justify-center shrink-0">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 12l4 4L19 6"/>
+              </svg>
+            </span>
+          {/if}
         </div>
-      {/each}
+        {/each}
+      {/if}
     {/if}
   </div>
 </div>

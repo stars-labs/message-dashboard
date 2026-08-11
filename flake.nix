@@ -15,7 +15,6 @@
       url = "github:nix-community/lanzaboote";
       inputs = {
         nixpkgs.follows = "nixpkgs";
-        flake-parts.follows = "flake-parts";
       };
     };
   };
@@ -169,15 +168,14 @@
 
           # Runs the Cloudflare Worker locally with Auth0 secrets injected.
           #
-          # Secrets never touch disk. `sops exec-env` decrypts into this process's
-          # environment only, and the values are forwarded to Wrangler as `--var`
-          # flags, which inject them into the Workers `env` bindings object that
-          # server/handlers/auth0.js reads. Wrangler's other mechanism, a `.dev.vars`
-          # file, would mean writing plaintext credentials into the repo — even with
-          # `trap` cleanup a crash would leave them on disk.
+          # Secrets never touch disk or command-line arguments. `sops exec-env`
+          # decrypts into this process's environment only, then Wrangler forwards
+          # that environment into the local Worker bindings. A `.dev.vars` file
+          # would leave plaintext credentials behind after a crash.
           dev-api = pkgs.writeShellApplication {
             name = "dev-api";
             runtimeInputs = with pkgs; [
+              coreutils
               sops
               git
             ];
@@ -188,22 +186,28 @@
               if [ ! -f "$secrets" ]; then
                 echo "dev-api: $secrets is missing." >&2
                 echo "Create it with:  sops \"$secrets\"" >&2
-                echo "Required keys: AUTH0_DOMAIN, AUTH0_CLIENT_ID, AUTH0_CLIENT_SECRET, API_KEY" >&2
+                echo "Required keys: AUTH0_DOMAIN, AUTH0_CLIENT_ID, AUTH0_CLIENT_SECRET," >&2
+                echo "               AUTH0_M2M_CLIENT_ID, AUTH0_M2M_CLIENT_SECRET, API_KEY" >&2
                 exit 1
               fi
 
               cd "$repo_root/sms-dashboard"
 
-              # The single quotes are deliberate: these $VARs must stay unexpanded here
-              # so they expand in the shell `sops exec-env` spawns, which is the only
-              # process that ever holds the decrypted values.
+              # Variables inside this string must expand only after SOPS decrypts
+              # the environment in its child shell.
               # shellcheck disable=SC2016
               exec sops exec-env "$secrets" '
-                exec bunx wrangler dev \
-                  --var AUTH0_DOMAIN:"$AUTH0_DOMAIN" \
-                  --var AUTH0_CLIENT_ID:"$AUTH0_CLIENT_ID" \
-                  --var AUTH0_CLIENT_SECRET:"$AUTH0_CLIENT_SECRET" \
-                  --var API_KEY:"$API_KEY"
+                missing=""
+                for key in AUTH0_DOMAIN AUTH0_CLIENT_ID AUTH0_CLIENT_SECRET AUTH0_M2M_CLIENT_ID AUTH0_M2M_CLIENT_SECRET API_KEY; do
+                  if [ -z "$(printenv "$key")" ]; then
+                    missing="$missing $key"
+                  fi
+                done
+                if [ -n "$missing" ]; then
+                  echo "dev-api: missing secrets:$missing" >&2
+                  exit 1
+                fi
+                CLOUDFLARE_INCLUDE_PROCESS_ENV=true exec bunx wrangler dev --port 8787
               '
             '';
           };
@@ -215,7 +219,185 @@
             runtimeInputs = with pkgs; [ git ];
             text = ''
               cd "$(git rev-parse --show-toplevel)/sms-dashboard"
-              exec bun run dev
+              exec bun run dev -- --host 127.0.0.1 --port 8080 --strictPort
+            '';
+          };
+
+          # Owns the local frontend/API pair. Re-running `dev-server restart`
+          # replaces both processes instead of letting Vite or Wrangler select a
+          # fallback port. State and logs live in /tmp, never in the worktree.
+          dev-server = pkgs.writeShellApplication {
+            name = "dev-server";
+            runtimeInputs = with pkgs; [
+              coreutils
+              curl
+              lsof
+            ];
+            text = ''
+              state_dir="''${XDG_RUNTIME_DIR:-/tmp}/message-dashboard-dev-$(id -u)"
+              frontend_pid_file="$state_dir/frontend.pid"
+              api_pid_file="$state_dir/api.pid"
+              frontend_log="$state_dir/frontend.log"
+              api_log="$state_dir/api.log"
+
+              mkdir -p "$state_dir"
+
+              listener_pids() {
+                lsof -nP -tiTCP:"$1" -sTCP:LISTEN 2>/dev/null | sort -u || true
+              }
+
+              stop_pid_file() {
+                pid_file="$1"
+                if [ -f "$pid_file" ]; then
+                  pid="$(cat "$pid_file")"
+                  if kill -0 "$pid" 2>/dev/null; then
+                    kill "$pid" 2>/dev/null || true
+                  fi
+                  rm -f "$pid_file"
+                fi
+              }
+
+              stop_port() {
+                port="$1"
+                pids="$(listener_pids "$port")"
+                if [ -n "$pids" ]; then
+                  # shellcheck disable=SC2086
+                  kill $pids 2>/dev/null || true
+                fi
+              }
+
+              wait_for_ports_to_stop() {
+                for _ in $(seq 1 30); do
+                  if [ -z "$(listener_pids 8080)" ] && [ -z "$(listener_pids 8787)" ]; then
+                    return 0
+                  fi
+                  sleep 0.1
+                done
+
+                for port in 8080 8787; do
+                  pids="$(listener_pids "$port")"
+                  if [ -n "$pids" ]; then
+                    # These are local dev listeners that did not handle SIGTERM.
+                    # shellcheck disable=SC2086
+                    kill -KILL $pids 2>/dev/null || true
+                  fi
+                done
+              }
+
+              stop_servers() {
+                stop_pid_file "$frontend_pid_file"
+                stop_pid_file "$api_pid_file"
+                stop_port 8080
+                stop_port 8787
+                wait_for_ports_to_stop
+              }
+
+              show_status() {
+                for service in frontend api; do
+                  case "$service" in
+                    frontend) port=8080 ;;
+                    api) port=8787 ;;
+                  esac
+                  pids="$(listener_pids "$port" | tr '\n' ' ' | sed 's/ $//')"
+                  if [ -n "$pids" ]; then
+                    echo "$service: running on :$port (pid $pids)"
+                  else
+                    echo "$service: stopped (:''${port})"
+                  fi
+                done
+              }
+
+              wait_for_url() {
+                name="$1"
+                url="$2"
+                log_file="$3"
+                pid_file="$4"
+                for _ in $(seq 1 60); do
+                  if curl --fail --silent --output /dev/null "$url"; then
+                    return 0
+                  fi
+                  pid="$(cat "$pid_file")"
+                  if ! kill -0 "$pid" 2>/dev/null; then
+                    echo "dev-server: $name exited during startup." >&2
+                    tail -n 30 "$log_file" >&2
+                    return 1
+                  fi
+                  sleep 0.25
+                done
+                echo "dev-server: timed out waiting for $name at $url." >&2
+                tail -n 30 "$log_file" >&2
+                return 1
+              }
+
+              start_servers() {
+                : > "$frontend_log"
+                : > "$api_log"
+
+                ${dev-api}/bin/dev-api >"$api_log" 2>&1 &
+                api_pid="$!"
+                echo "$api_pid" > "$api_pid_file"
+                wait_for_url "API" "http://127.0.0.1:8787/api/health" "$api_log" "$api_pid_file"
+
+                ${dev-frontend}/bin/dev-frontend >"$frontend_log" 2>&1 &
+                frontend_pid="$!"
+                echo "$frontend_pid" > "$frontend_pid_file"
+                wait_for_url "frontend" "http://127.0.0.1:8080/" "$frontend_log" "$frontend_pid_file"
+                wait_for_url "proxied API" "http://127.0.0.1:8080/api/health" "$frontend_log" "$frontend_pid_file"
+
+                for port in 8080 8787; do
+                  count="$(listener_pids "$port" | wc -l | tr -d ' ')"
+                  if [ "$count" -ne 1 ]; then
+                    echo "dev-server: expected one listener PID on :$port, found $count." >&2
+                    stop_servers
+                    return 1
+                  fi
+                done
+
+                echo "SMS Dashboard restarted"
+                show_status
+                echo "URL:  http://localhost:8080"
+                echo "Logs: $state_dir"
+                echo "Press Ctrl-C to stop both servers."
+
+                trap 'stop_servers; exit 130' INT TERM
+                while kill -0 "$frontend_pid" 2>/dev/null && kill -0 "$api_pid" 2>/dev/null; do
+                  sleep 1
+                done
+
+                # A newer `dev-server restart` replaces the PID files before this
+                # supervisor notices its old children exited. In that case, leave
+                # the new process pair alone and simply retire this supervisor.
+                current_frontend_pid="$(cat "$frontend_pid_file" 2>/dev/null || true)"
+                current_api_pid="$(cat "$api_pid_file" 2>/dev/null || true)"
+                if [ "$current_frontend_pid" = "$frontend_pid" ] && [ "$current_api_pid" = "$api_pid" ]; then
+                  echo "dev-server: a managed process exited; stopping its peer." >&2
+                  stop_servers
+                  return 1
+                fi
+              }
+
+              command="''${1:-restart}"
+              case "$command" in
+                restart)
+                  stop_servers
+                  start_servers
+                  ;;
+                stop)
+                  stop_servers
+                  show_status
+                  ;;
+                status)
+                  show_status
+                  ;;
+                logs)
+                  echo "Frontend: $frontend_log"
+                  echo "API:      $api_log"
+                  ;;
+                *)
+                  echo "Usage: dev-server {restart|stop|status|logs}" >&2
+                  exit 2
+                  ;;
+              esac
             '';
           };
         in
@@ -233,10 +415,11 @@
                 # Dev commands (defined above) — on $PATH anywhere in the repo
                 dev-api
                 dev-frontend
+                dev-server
               ]
               ++ (with pkgs; [
                 # Nix tools
-                nixfmt-rfc-style
+                nixfmt
                 nixd
 
                 # Ops tooling
@@ -272,6 +455,7 @@
                 echo "Dev commands (work from anywhere in the repo):"
                 echo "  • dev-frontend  — Vite dev server on :8080"
                 echo "  • dev-api       — Wrangler + Auth0 secrets via SOPS on :8787"
+                echo "  • dev-server    — restart/stop/status the unique :8080 + :8787 pair"
                 echo ""
 
                 # Ensure Ansible finds collections installed by ansible-galaxy (SOPS, general)

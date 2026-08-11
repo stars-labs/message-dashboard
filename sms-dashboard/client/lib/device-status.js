@@ -83,3 +83,13 @@ export function getStatusMeta(status) {
 export function isAnomalous(status) {
   return getStatusMeta(status).sortOrder >= 2;
 }
+
+/**
+ * Whether a mapped card is unavailable because of a runtime/device fault.
+ * Mapping states stay separate so the management screen can offer a distinct
+ * "待映射" filter instead of counting the same card in two buckets.
+ * @param {string | null | undefined} status
+ */
+export function hasOperationalIssue(status) {
+  return ['offline', 'sim_error', 'iccid_mismatch'].includes(status);
+}

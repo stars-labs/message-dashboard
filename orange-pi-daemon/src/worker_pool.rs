@@ -292,10 +292,19 @@ impl WorkerPool {
                 .await
                 .unwrap_or(None);
 
-            let msgs_with_paths = modem_manager
+            let msgs_with_paths = match modem_manager
                 .get_new_messages_with_paths(&modem_id, iccid_val, &message_store)
                 .await
-                .unwrap_or_default();
+            {
+                Ok(messages) => messages,
+                Err(e) => {
+                    warn!(
+                        "Failed to read SMS from modem {} (ICCID {}): {}",
+                        modem_id, iccid_val, e
+                    );
+                    Vec::new()
+                }
+            };
 
             let msgs: Vec<Message> = msgs_with_paths
                 .iter()
