@@ -814,12 +814,11 @@ impl AtModemManager {
     /// List all SMS messages, merging concatenated parts using PDU metadata.
     /// Uses PDU mode to get concatenation info for multipart SMS.
     pub async fn list_sms(&self, port: &str) -> Result<Vec<AtSms>> {
-        // The modem persists CPMS across daemon restarts. If another tool leaves the
-        // read store on "SR" (status reports), CMGL succeeds but never sees received
-        // SMS held in the combined "MT" store. Select MT on every scan so polling is
-        // self-healing and deletion operates on the same store that was listed.
-        self.send_at_command(port, "AT+CPMS=\"MT\",\"MT\",\"MT\"", self.timeout)
-            .await?;
+        // CPMS persists across daemon restarts. Negotiate a received-message store on
+        // every scan so a tool leaving mem1 on "SR" cannot hide SMS indefinitely.
+        // This is deliberately best-effort: a transient CPMS failure must not prevent
+        // CMGL from scanning the modem's existing store.
+        self.select_sms_read_storage(port).await;
 
         // Use PDU mode to get concatenation metadata for multipart SMS
         match self.list_sms_pdu_mode(port).await {
@@ -842,6 +841,129 @@ impl AtModemManager {
                 Ok(messages)
             }
         }
+    }
+
+    /// Select a usable CPMS mem1 (read/delete) store without changing mem2/mem3.
+    ///
+    /// `MT` is preferred because it combines modem and SIM storage. On modems without
+    /// `MT`, prefer the configured receive store (mem3), then `ME`/`SM`. Every failed
+    /// candidate is retried on the next polling cycle; failure here never aborts CMGL.
+    async fn select_sms_read_storage(&self, port: &str) {
+        let capabilities = match self.send_at_command(port, "AT+CPMS=?", self.timeout).await {
+            Ok(response) => response,
+            Err(e) => {
+                warn!(
+                    "Failed to query SMS storage capabilities on {}: {}; continuing with current storage",
+                    port, e
+                );
+                return;
+            }
+        };
+
+        let supported = Self::parse_cpms_read_stores(&capabilities);
+        if supported.is_empty() {
+            warn!(
+                "Modem {} returned no usable CPMS read stores; continuing with current storage",
+                port
+            );
+            return;
+        }
+
+        // MT already covers both ME and SM, so the usual path needs no extra status
+        // query. Current mem3 only matters when this modem does not advertise MT.
+        let current_receive = if supported.iter().any(|store| store == "MT") {
+            None
+        } else {
+            match self.send_at_command(port, "AT+CPMS?", self.timeout).await {
+                Ok(response) => Self::parse_cpms_current_stores(&response)
+                    .and_then(|stores| stores.get(2).cloned()),
+                Err(e) => {
+                    warn!(
+                        "Failed to query current SMS storage on {}: {}; selecting from capabilities",
+                        port, e
+                    );
+                    None
+                }
+            }
+        };
+
+        let candidates = Self::sms_read_store_candidates(&supported, current_receive.as_deref());
+        for store in &candidates {
+            let command = format!("AT+CPMS=\"{}\"", store);
+            match self.send_at_command(port, &command, self.timeout).await {
+                Ok(_) => {
+                    debug!("Selected SMS read storage {} on {}", store, port);
+                    return;
+                }
+                Err(e) => warn!(
+                    "Failed to select SMS read storage {} on {}: {}",
+                    store, port, e
+                ),
+            }
+        }
+
+        warn!(
+            "Could not select any advertised SMS read storage on {}; continuing with current storage",
+            port
+        );
+    }
+
+    /// Parse mem1 capabilities from `+CPMS: ("ME","MT",...),(...),(...)`.
+    fn parse_cpms_read_stores(response: &str) -> Vec<String> {
+        let Some(line) = response.lines().find(|line| line.contains("+CPMS:")) else {
+            return Vec::new();
+        };
+        let Some(start) = line.find('(') else {
+            return Vec::new();
+        };
+        let Some(end_offset) = line[start + 1..].find(')') else {
+            return Vec::new();
+        };
+
+        Self::parse_quoted_values(&line[start + 1..start + 1 + end_offset])
+    }
+
+    /// Parse current mem1/mem2/mem3 names from a `+CPMS:` status response.
+    fn parse_cpms_current_stores(response: &str) -> Option<Vec<String>> {
+        let line = response.lines().find(|line| line.contains("+CPMS:"))?;
+        let values = Self::parse_quoted_values(line);
+        (values.len() >= 3).then_some(values)
+    }
+
+    fn parse_quoted_values(value: &str) -> Vec<String> {
+        value
+            .split('"')
+            .enumerate()
+            .filter(|(index, _)| index % 2 == 1)
+            .map(|(_, value)| value.trim().to_ascii_uppercase())
+            .filter(|value| !value.is_empty())
+            .collect()
+    }
+
+    fn sms_read_store_candidates(
+        supported: &[String],
+        current_receive: Option<&str>,
+    ) -> Vec<String> {
+        if supported.iter().any(|store| store == "MT") {
+            // An advertised MT that temporarily rejects selection is retried next scan.
+            // Do not switch to one half of the combined store and risk hiding messages.
+            return vec!["MT".to_string()];
+        }
+
+        let mut candidates = Vec::new();
+        for candidate in [current_receive, Some("ME"), Some("SM")]
+            .into_iter()
+            .flatten()
+        {
+            let candidate = candidate.to_ascii_uppercase();
+            if matches!(candidate.as_str(), "MT" | "ME" | "SM")
+                && supported.iter().any(|store| store == &candidate)
+                && !candidates.contains(&candidate)
+            {
+                candidates.push(candidate);
+            }
+        }
+        candidates
     }
 
     /// Text-mode listing used as the primary decode path (preserves existing behavior).
@@ -1833,6 +1955,64 @@ mod tests {
             AtModemManager::parse_iccid("AT+QCCID\r\n+QCCID: 8965012306052989681F\r\n\r\nOK\r\n"),
             Some("8965012306052989681".to_string())
         );
+    }
+
+    #[test]
+    fn test_parse_cpms_read_stores_uses_mem1_capabilities_only() {
+        let response = concat!(
+            "AT+CPMS=?\r\n",
+            "+CPMS: (\"ME\",\"MT\",\"SM\",\"SR\"),(\"ME\",\"SM\"),(\"ME\",\"SM\")\r\n",
+            "OK\r\n"
+        );
+
+        assert_eq!(
+            AtModemManager::parse_cpms_read_stores(response),
+            vec!["ME", "MT", "SM", "SR"]
+        );
+    }
+
+    #[test]
+    fn test_parse_cpms_read_stores_rejects_malformed_response() {
+        assert!(AtModemManager::parse_cpms_read_stores("OK").is_empty());
+        assert!(AtModemManager::parse_cpms_read_stores("+CPMS: \"MT\"").is_empty());
+        assert!(AtModemManager::parse_cpms_read_stores("+CPMS: (\"MT\"").is_empty());
+    }
+
+    #[test]
+    fn test_parse_cpms_current_stores() {
+        let response = "+CPMS: \"SR\",0,50,\"ME\",3,255,\"SM\",2,50\r\nOK\r\n";
+
+        assert_eq!(
+            AtModemManager::parse_cpms_current_stores(response),
+            Some(vec!["SR".into(), "ME".into(), "SM".into()])
+        );
+    }
+
+    #[test]
+    fn test_sms_read_store_candidates_prefer_mt() {
+        let supported = vec!["SM".into(), "ME".into(), "MT".into(), "SR".into()];
+
+        assert_eq!(
+            AtModemManager::sms_read_store_candidates(&supported, Some("SM")),
+            vec!["MT"]
+        );
+    }
+
+    #[test]
+    fn test_sms_read_store_candidates_use_receive_store_without_mt() {
+        let supported = vec!["SM".into(), "ME".into(), "SR".into()];
+
+        assert_eq!(
+            AtModemManager::sms_read_store_candidates(&supported, Some("SM")),
+            vec!["SM", "ME"]
+        );
+    }
+
+    #[test]
+    fn test_sms_read_store_candidates_exclude_status_report_storage() {
+        let supported = vec!["SR".into(), "BM".into()];
+
+        assert!(AtModemManager::sms_read_store_candidates(&supported, Some("SR")).is_empty());
     }
 
     // test_port_conversion moved to tests/at_modem_tests.rs (tests public API)
