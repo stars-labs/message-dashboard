@@ -93,3 +93,13 @@ export function isAnomalous(status) {
 export function hasOperationalIssue(status) {
   return ['offline', 'sim_error', 'iccid_mismatch'].includes(status);
 }
+
+/**
+ * Resolve a stored device status against the live daemon connection. A stale
+ * `active` value must not render as online after the daemon disconnects.
+ * @param {string | null | undefined} status
+ * @param {boolean} daemonConnected
+ */
+export function getEffectiveDeviceStatus(status, daemonConnected) {
+  return daemonConnected ? (status || 'offline') : 'offline';
+}

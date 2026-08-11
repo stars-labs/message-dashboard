@@ -4,7 +4,7 @@
 
 const ZH_LABEL = '验证码|校验码|动态码|动态密码|驗證碼|校驗碼|動態碼|動態密碼';
 const EN_CODE_LABEL =
-  'otp|passcode|pin|(?:verification|security|authentication|login|access|confirmation|one[- ]time)\\s+(?:code|password)|code';
+  'otp|passcode|pin|(?:verification|security|authentication|login|access|confirmation|one[- ]time)\\s+(?:code|password)';
 
 /**
  * Ordered from the most explicit forms to contextual forms. Each expression has
@@ -24,6 +24,10 @@ export const VERIFICATION_CODE_PATTERNS = [
     pattern: new RegExp(`\\b(?:${EN_CODE_LABEL})\\b[^\\d\\n]{0,20}?(\\d{4,8})\\b`, 'i'),
   },
   {
+    reason: 'en_generic_code_before',
+    pattern: /\bcode\b[^\d\n]{0,20}?(\d{4,8})\b/i,
+  },
+  {
     reason: 'en_label_after',
     pattern: /\b(\d{4,8})\b\s+is\s+your(?:\s+[a-z][a-z0-9_-]*){0,3}\s+(?:verification\s+|security\s+|authentication\s+|login\s+)?(?:code|otp|pin|password|passcode)\b/i,
   },
@@ -40,8 +44,12 @@ export const VERIFICATION_CODE_PATTERNS = [
     pattern: /(?:输入|輸入|使用|填入|填写|填寫)\s*(\d{4,8})\s*(?:以|来|來|完成|进行|進行)?\s*(?:身份)?(?:登录|登入|登錄|验证|驗證|认证|認證|确认|確認)/,
   },
   {
-    reason: 'en_expiry_or_security',
-    pattern: /\b(\d{4,8})\b[^\n]{0,24}?(?:(?:is\s+)?(?:valid|expires?)\s+(?:for|in)\s+\d+\s*(?:minutes?|mins?)|do\s+not\s+share|never\s+share)\b/i,
+    reason: 'en_expiry',
+    pattern: /\b(\d{4,8})\b[^\n.]{0,16}?(?:is\s+)?valid\s+(?:for|in)\s+\d+\s*(?:minutes?|mins?)\b/i,
+  },
+  {
+    reason: 'en_security',
+    pattern: /\b(\d{4,8})\b[^\n.]{0,8}?[.!,:;]?\s*(?:do\s+not|never)\s+share\s+(?:it|this|the\s+(?:code|otp|pin|passcode)|with\b)/i,
   },
   {
     reason: 'zh_expiry_or_security',
@@ -51,6 +59,8 @@ export const VERIFICATION_CODE_PATTERNS = [
 
 const NON_OTP_CODE_PREFIX =
   /(?:promo(?:tional)?|discount|voucher|coupon|offer|area|postal|zip|product)\s+code\s*[:=-]?\s*$/i;
+const NON_OTP_CODE_ACTION =
+  /^\s*(?:to\s+)?(?:complete|place|track|confirm)\s+(?:your\s+)?(?:purchase|order|delivery|booking)\b/i;
 
 function candidateOffset(match) {
   return match.index + match[0].indexOf(match[1]);
@@ -59,13 +69,17 @@ function candidateOffset(match) {
 function isRejectedCandidate(content, match, reason) {
   const offset = candidateOffset(match);
   const before = content.slice(Math.max(0, offset - 32), offset);
-  const after = content.slice(offset + match[1].length, offset + match[1].length + 16);
+  const after = content.slice(offset + match[1].length, offset + match[1].length + 48);
 
   // A date fragment cannot be an OTP without an explicit OTP label.
   if (!reason.includes('label') && /^\s*(?:年|[-/]\s*\d)/.test(after)) return true;
 
   // English "code" is overloaded. Do not turn promo/area/postal codes into OTPs.
-  if (reason === 'en_label_before' && NON_OTP_CODE_PREFIX.test(before)) return true;
+  if (reason === 'en_generic_code_before') {
+    if (NON_OTP_CODE_PREFIX.test(before)) return true;
+    if (NON_OTP_CODE_ACTION.test(after)) return true;
+  }
+  if (reason === 'en_login_action' && NON_OTP_CODE_ACTION.test(after)) return true;
 
   return false;
 }

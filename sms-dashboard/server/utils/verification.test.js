@@ -111,6 +111,9 @@ describe('extractVerificationCode', () => {
     ['订单 123456 已受理'],
     ['Call area code 2026 for assistance'],
     ['Use promo code 2026 for a discount'],
+    ['Use code 2026 to complete your purchase'],
+    ['Your card ending 9016 expires in 5 minutes'],
+    ['Order 123456: do not share your delivery details'],
   ])('does not treat non-OTP numbers as codes: %j', (content) => {
     expect(extractVerificationCode(content)).toBeNull();
   });

@@ -489,10 +489,13 @@
         messages = [sentMessage, ...messages];
         stats.totalMessages++;
         stats.todayMessages++;
+        return response;
       }
+      throw new Error(response.error || "发送请求未被接受");
     } catch (error) {
       console.error("Failed to send message:", error);
       showToast("发送失败: " + error.message, 'error');
+      throw error;
     }
   }
 

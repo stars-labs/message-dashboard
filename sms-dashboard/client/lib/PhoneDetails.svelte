@@ -1,7 +1,7 @@
 <script>
   import SignalStrength from './SignalStrength.svelte';
   import { formatCardNumber } from './card-number.js';
-  import { getStatusMeta } from './device-status.js';
+  import { getEffectiveDeviceStatus, getStatusMeta } from './device-status.js';
 
   let {
     phone = null,
@@ -9,7 +9,10 @@
     daemonStatus = { connected: false, lastDataUpdate: null },
   } = $props();
 
-  let statusMeta = $derived(getStatusMeta(phone?.status));
+  let effectiveStatus = $derived(
+    getEffectiveDeviceStatus(phone?.status, daemonStatus.connected)
+  );
+  let statusMeta = $derived(getStatusMeta(effectiveStatus));
   let signal = $derived(Number(phone?.signal) || 0);
   let operator = $derived(phone?.operator_name || phone?.operator || phone?.carrier || '—');
   let moduleName = $derived(
@@ -61,7 +64,7 @@
 
       <div class="flex items-center gap-3 shrink-0">
         <div class="hidden sm:flex items-center gap-2 text-xs text-stone-500">
-          <SignalStrength signal={signal} status={phone.status} compact={true} />
+          <SignalStrength signal={signal} status={effectiveStatus} compact={true} />
           <span class="font-mono tabular-nums">{signal}%</span>
         </div>
         <span class="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium {statusMeta.badgeClass}">

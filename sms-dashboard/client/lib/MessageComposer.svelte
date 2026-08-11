@@ -98,9 +98,9 @@
     }
   });
 
-  function handleSend() {
+  async function handleSend() {
     if (!recipientNumber || !recipientSIM || !messageContent) {
-      sendingStatus = "error";
+      sendingStatus = "validation-error";
       setTimeout(() => (sendingStatus = ""), 3000);
       return;
     }
@@ -133,12 +133,16 @@
       status: "sending",
     };
 
-    // Hand the composed message to the parent (App.svelte), which does the HTTP send.
-    onmessagesent?.(sentMessage);
-
-    // Set success status and clear form
-    sendingStatus = "success";
-    messageContent = "";
+    try {
+      // App owns the HTTP request. Keep the draft until the API accepts it.
+      if (!onmessagesent) throw new Error("发送服务不可用");
+      await onmessagesent(sentMessage);
+      sendingStatus = "success";
+      messageContent = "";
+    } catch (error) {
+      console.error("Failed to send message:", error);
+      sendingStatus = "send-error";
+    }
 
     setTimeout(() => {
       sendingStatus = "";
@@ -187,10 +191,10 @@
       const draft = JSON.parse(sessionStorage.getItem(DRAFT_KEY) || "null");
       if (draft) {
         recipientNumber = draft.recipientNumber || "";
-        recipientSIM = draft.recipientSIM || "";
+        recipientSIM = draft.recipientSIM || recipientSIM;
         messageContent = draft.messageContent || "";
         selectedCountryCode = draft.selectedCountryCode || "+65";
-        selectedSimDisplay = draft.selectedSimDisplay || "";
+        selectedSimDisplay = draft.selectedSimDisplay || selectedSimDisplay;
       }
     } catch {
       sessionStorage.removeItem(DRAFT_KEY);
@@ -440,7 +444,7 @@
   <button
     onclick={handleSend}
     disabled={sendingStatus === "sending"}
-    class="w-full py-3 font-medium rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed text-white {sendingStatus === 'success' ? 'bg-emerald-500 hover:bg-emerald-600' : sendingStatus === 'error' ? 'bg-red-500 hover:bg-red-600' : 'bg-orange-500 hover:bg-orange-600'}"
+    class="w-full py-3 font-medium rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed text-white {sendingStatus === 'success' ? 'bg-emerald-500 hover:bg-emerald-600' : sendingStatus === 'validation-error' || sendingStatus === 'send-error' ? 'bg-red-500 hover:bg-red-600' : 'bg-orange-500 hover:bg-orange-600'}"
   >
     {#if sendingStatus === "sending"}
       <span class="flex items-center justify-center">
@@ -467,8 +471,10 @@
       </span>
     {:else if sendingStatus === "success"}
       ✅ 发送成功
-    {:else if sendingStatus === "error"}
+    {:else if sendingStatus === "validation-error"}
       ❌ 请填写完整信息
+    {:else if sendingStatus === "send-error"}
+      ❌ 发送失败，请重试
     {:else}
       发送短信
     {/if}
@@ -699,7 +705,7 @@
           disabled:opacity-50 disabled:cursor-not-allowed
           {sendingStatus === 'success'
             ? 'bg-emerald-500 hover:bg-emerald-600'
-            : sendingStatus === 'error'
+            : sendingStatus === 'validation-error' || sendingStatus === 'send-error'
               ? 'bg-red-500 hover:bg-red-600'
               : 'bg-orange-500 hover:bg-orange-600'}"
       >
@@ -728,8 +734,10 @@
           </span>
         {:else if sendingStatus === "success"}
           ✅ 发送成功
-        {:else if sendingStatus === "error"}
+        {:else if sendingStatus === "validation-error"}
           ❌ 请填写完整信息
+        {:else if sendingStatus === "send-error"}
+          ❌ 发送失败，请重试
         {:else}
           发送短信
         {/if}

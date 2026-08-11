@@ -1,6 +1,11 @@
 // Run with: bun test client/lib/device-status.test.js
 import { describe, expect, test } from 'bun:test';
-import { getStatusMeta, hasOperationalIssue, isAnomalous } from './device-status.js';
+import {
+  getEffectiveDeviceStatus,
+  getStatusMeta,
+  hasOperationalIssue,
+  isAnomalous,
+} from './device-status.js';
 
 describe('getStatusMeta', () => {
   test('known active status returns 在线', () => {
@@ -59,5 +64,16 @@ describe('hasOperationalIssue', () => {
     expect(hasOperationalIssue('active')).toBe(false);
     expect(hasOperationalIssue('unassigned')).toBe(false);
     expect(hasOperationalIssue('no_modem')).toBe(false);
+  });
+});
+
+describe('getEffectiveDeviceStatus', () => {
+  test('does not expose a stored active status while the daemon is disconnected', () => {
+    expect(getEffectiveDeviceStatus('active', false)).toBe('offline');
+  });
+
+  test('preserves the live device status while the daemon is connected', () => {
+    expect(getEffectiveDeviceStatus('sim_error', true)).toBe('sim_error');
+    expect(getEffectiveDeviceStatus('active', true)).toBe('active');
   });
 });
