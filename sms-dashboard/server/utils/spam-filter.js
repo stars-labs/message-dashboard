@@ -48,6 +48,26 @@ export function normalizeSender(raw) {
   return raw.replace(/\D/g, '');
 }
 
+/**
+ * Match numeric short codes after punctuation/country-code normalization, while
+ * also supporting exact case-insensitive alphanumeric sender IDs such as
+ * "M1 Limited".
+ */
+export function senderMatches(rawSender, rawPattern) {
+  if (typeof rawSender !== 'string' || typeof rawPattern !== 'string') return false;
+
+  const sender = rawSender.trim();
+  const pattern = rawPattern.trim();
+  if (!sender || !pattern) return false;
+
+  if (/^\d+$/.test(pattern)) {
+    const digits = normalizeSender(sender);
+    return digits === pattern || digits === `86${pattern}`;
+  }
+
+  return sender.localeCompare(pattern, undefined, { sensitivity: 'accent' }) === 0;
+}
+
 function clean() {
   return { filter_status: FILTER_STATUS.CLEAN, filter_rule_id: null };
 }
@@ -82,8 +102,6 @@ export function classifyMessage(message, rules) {
   // Only high-confidence codes count. The same detector also populates the
   // verification_code column, so filtering and the 验证码 view cannot disagree.
   if (hasVerificationCode(content)) return clean();
-  const sender = normalizeSender(message.phone_number);
-
   for (const rule of rules) {
     if (!rule || !rule.pattern) continue;
 
@@ -97,7 +115,7 @@ export function classifyMessage(message, rules) {
     if (rule.rule_type === RULE_TYPE.SENDER) {
       // Exact match only. endsWith() would wrongly filter a real mobile number
       // such as 13910086 under a '10086' rule.
-      if (sender && (sender === rule.pattern || sender === `86${rule.pattern}`)) {
+      if (senderMatches(message.phone_number, rule.pattern)) {
         return { filter_status: FILTER_STATUS.FILTERED, filter_rule_id: rule.id };
       }
       continue;

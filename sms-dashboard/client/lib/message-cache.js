@@ -11,7 +11,9 @@ const DB_NAME = 'sms-dashboard-cache';
 // Raise this again whenever a change makes previously cached rows wrong.
 // v3: verification-code detection became high-confidence only. Clear rows whose
 // old bare-digit fallback may still contain years, order numbers or card numbers.
-const DB_VERSION = 3;
+// v4: production history was reclassified after the v3 client had already cached
+// stale `2026` values. Clear it once more so corrected server rows replace them.
+const DB_VERSION = 4;
 const MESSAGES_STORE = 'messages';
 const META_STORE = 'meta';
 

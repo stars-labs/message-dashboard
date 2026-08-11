@@ -59,16 +59,21 @@ function validateRule({ rule_type, pattern, note }) {
     return { rule_type, pattern: trimmed, note: note?.trim() || null };
   }
 
-  // Sender patterns are compared as bare digits, so store them that way —
-  // otherwise a rule typed as '+86 10086' could never match anything.
-  const digits = normalizeSender(trimmed);
-  if (digits !== trimmed) {
-    return { error: 'sender pattern must contain digits only (no +, spaces or dashes)' };
+  if (trimmed.length < MIN_SENDER_LENGTH) {
+    return { error: `sender pattern must be at least ${MIN_SENDER_LENGTH} characters` };
   }
-  if (digits.length < MIN_SENDER_LENGTH) {
-    return { error: `sender pattern must be at least ${MIN_SENDER_LENGTH} digits` };
+
+  // Numeric short codes retain the existing canonical storage format. Named
+  // sender IDs are stored verbatim and compared case-insensitively.
+  if (/^[+\d\s-]+$/.test(trimmed)) {
+    const digits = normalizeSender(trimmed);
+    if (digits.length < MIN_SENDER_LENGTH) {
+      return { error: `sender pattern must contain at least ${MIN_SENDER_LENGTH} digits` };
+    }
+    return { rule_type, pattern: digits, note: note?.trim() || null };
   }
-  return { rule_type, pattern: digits, note: note?.trim() || null };
+
+  return { rule_type, pattern: trimmed, note: note?.trim() || null };
 }
 
 function isUniqueViolation(error) {

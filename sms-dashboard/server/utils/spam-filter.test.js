@@ -1,6 +1,6 @@
 // Run with: bun test server/utils/spam-filter.test.js
 import { describe, expect, test } from 'bun:test';
-import { classifyMessage, normalizeSender } from './spam-filter.js';
+import { classifyMessage, normalizeSender, senderMatches } from './spam-filter.js';
 
 // Mirrors the seed rules in migrations/035_add_message_filter.sql.
 // Ordered by id, which is the order classifyMessage evaluates them in.
@@ -12,6 +12,8 @@ const RULES = [
   { id: 5, rule_type: 'sender', pattern: '10010' },
   { id: 6, rule_type: 'sender', pattern: '101906' },
   { id: 7, rule_type: 'sender', pattern: '12306' },
+  { id: 8, rule_type: 'sender', pattern: 'M1 Limited' },
+  { id: 9, rule_type: 'sender', pattern: '10001' },
 ];
 
 // A received message with only the fields the classifier reads.
@@ -30,6 +32,19 @@ describe('normalizeSender', () => {
     expect(normalizeSender(null)).toBe('');
     expect(normalizeSender(undefined)).toBe('');
     expect(normalizeSender('')).toBe('');
+  });
+});
+
+describe('senderMatches', () => {
+  test('matches named sender IDs case-insensitively but exactly', () => {
+    expect(senderMatches('M1 Limited', 'M1 Limited')).toBe(true);
+    expect(senderMatches('m1 limited', 'M1 Limited')).toBe(true);
+    expect(senderMatches('M1 Limited Promo', 'M1 Limited')).toBe(false);
+  });
+
+  test('preserves numeric shortcode and country-prefix matching', () => {
+    expect(senderMatches('+8610001', '10001')).toBe(true);
+    expect(senderMatches('13910001', '10001')).toBe(false);
   });
 });
 
@@ -79,6 +94,28 @@ describe('classifyMessage — body keyword rules', () => {
 });
 
 describe('classifyMessage — sender rules', () => {
+  test('filters a named carrier sender', () => {
+    const msg = received({
+      content: 'M1 Prepaid is now on 5G! Upgrade to a 5G SIM for faster speeds.',
+      phone_number: 'M1 Limited',
+    });
+    expect(classifyMessage(msg, RULES)).toEqual({
+      filter_status: 'filtered',
+      filter_rule_id: 8,
+    });
+  });
+
+  test('filters 10001 carrier broadcasts', () => {
+    const msg = received({
+      content: '尊敬的客户，新加坡漫游使用方式及资费如下',
+      phone_number: '10001',
+    });
+    expect(classifyMessage(msg, RULES)).toEqual({
+      filter_status: 'filtered',
+      filter_rule_id: 9,
+    });
+  });
+
   test('filters an exact shortcode match', () => {
     const msg = received({ content: '【联通助理】国际漫游提醒', phone_number: '101906' });
     expect(classifyMessage(msg, RULES)).toEqual({
