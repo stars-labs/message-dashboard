@@ -95,13 +95,11 @@
   scrollbar-color: theme('colors.stone.300') theme('colors.stone.100');
 }
 
-/* iOS Safari zooms the viewport when a focused form control renders below
-   16px. Keep mobile controls at the accessibility-safe threshold while
-   preserving normal pinch-to-zoom and the existing desktop typography. */
-@media (max-width: 639px) {
-  input,
-  textarea,
-  select {
-    font-size: 16px;
-  }
+/* iOS zooms focused form controls whose rendered text is below 16px. Do not
+   scope this by viewport width: standalone mode, landscape, Display Zoom and
+   split-screen can all report a wider layout viewport than expected. */
+input,
+textarea,
+select {
+  font-size: 16px !important;
 }
