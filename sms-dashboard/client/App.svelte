@@ -16,6 +16,7 @@
   import { auth } from "./lib/auth.js";
   import { isAnomalous } from "./lib/device-status.js";
   import { formatCardNumber } from "./lib/card-number.js";
+  import { formatTimeAgo } from "./lib/time.js";
 
   let selectedPhoneIccid = $state(null);
   let selectedPhone = $state(null);
@@ -497,18 +498,6 @@
       showToast("发送失败: " + error.message, 'error');
       throw error;
     }
-  }
-
-  function formatTimeAgo(timestamp) {
-    if (!timestamp) return "从未";
-
-    const now = Date.now();
-    const diff = now - timestamp;
-
-    if (diff < 60000) return "刚刚";
-    if (diff < 3600000) return `${Math.floor(diff / 60000)}分钟前`;
-    if (diff < 86400000) return `${Math.floor(diff / 3600000)}小时前`;
-    return `${Math.floor(diff / 86400000)}天前`;
   }
 
   // Update daemon health status based on recent data
