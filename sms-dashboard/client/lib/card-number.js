@@ -4,8 +4,8 @@
 
 /**
  * Format a sim_index as a zero-padded card number string.
- * sim_index 5  → "05"
- * sim_index 42 → "42"
+ * sim_index 5  → "S05"
+ * sim_index 42 → "S42"
  * null/undefined → "—"
  *
  * @param {number | null | undefined} simIndex
@@ -13,5 +13,5 @@
  */
 export function formatCardNumber(simIndex) {
   if (simIndex == null) return '—';
-  return String(simIndex).padStart(2, '0');
+  return `S${String(simIndex).padStart(2, '0')}`;
 }

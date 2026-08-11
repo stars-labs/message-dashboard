@@ -38,7 +38,7 @@
 
         const q = searchTerm.trim().toLowerCase();
         const matchesSearch = !q ||
-          String(phone.sim_index ?? '').includes(q) ||
+          formatCardNumber(phone.sim_index).toLowerCase().includes(q) ||
           (phone.number && phone.number.toLowerCase().includes(q)) ||
           (phone.carrier && phone.carrier.toLowerCase().includes(q)) ||
           (phone.iccid && phone.iccid.toLowerCase().includes(q)) ||
@@ -105,7 +105,7 @@
         type="text"
         value={searchInput}
         oninput={handleSearchInput}
-        placeholder="卡号 / 号码 / 运营商 / ICCID"
+        placeholder="S01 / 号码 / 运营商 / ICCID"
         class="w-full pl-8 pr-3 py-1.5 text-sm bg-stone-50 border border-stone-200 rounded-lg
           focus:outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100 transition-colors"
       />
@@ -235,7 +235,7 @@
           <span class="w-1.5 h-1.5 rounded-full shrink-0 {meta.dotClass}"></span>
 
           <!-- Card number: the primary identifier -->
-          <span class="font-mono text-sm font-semibold tabular-nums w-6 text-right shrink-0
+          <span class="font-mono text-sm font-semibold tabular-nums w-8 text-right shrink-0
             {phone.status === 'active' ? 'text-stone-800' : 'text-stone-400'}">
             {formatCardNumber(phone.sim_index)}
           </span>

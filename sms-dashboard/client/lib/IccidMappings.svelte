@@ -101,7 +101,7 @@
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
       filtered = filtered.filter(m =>
-        String(m.sim_index ?? '').includes(q) ||
+        formatCardNumber(m.sim_index).toLowerCase().includes(q) ||
         (m.iccid || '').toLowerCase().includes(q) ||
         (m.phone_number || '').toLowerCase().includes(q) ||
         (m.carrier || '').toLowerCase().includes(q) ||
@@ -200,7 +200,7 @@
     <input
       type="text"
       bind:value={searchQuery}
-      placeholder="搜索 卡号 / 号码 / 运营商 / ICCID…"
+      placeholder="搜索 S01 / 号码 / 运营商 / ICCID…"
       class="flex-1 px-3 py-1.5 text-sm bg-stone-50 border border-stone-200 rounded-lg
         focus:outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100 transition-colors"
     />
@@ -338,7 +338,7 @@
           {anomalous ? meta.rowClass : ''}">
           <span class="absolute left-0 top-0 bottom-0 w-[3px] {meta.dotClass}" aria-hidden="true"></span>
           <div class="flex items-center gap-2">
-            <span class="font-mono font-bold text-sm tabular-nums text-stone-700 shrink-0 w-6 text-right">
+            <span class="font-mono font-bold text-sm tabular-nums text-stone-700 shrink-0 w-8 text-right">
               {formatCardNumber(m.sim_index)}
             </span>
             <span class="font-mono text-sm text-stone-900 truncate">{m.phone_number || '无号码'}</span>
@@ -438,7 +438,7 @@
                   : 'border-stone-300 focus:border-orange-400 focus:ring-orange-100'}" />
             {#if simIndexConflict}
               <p class="mt-1 text-xs text-amber-700">
-                ⚠ 卡号 {panel.formData.sim_index} 已被 {simIndexConflict.phone_number || simIndexConflict.iccid} 占用
+                ⚠ 卡号 {formatCardNumber(panel.formData.sim_index)} 已被 {simIndexConflict.phone_number || simIndexConflict.iccid} 占用
               </p>
             {/if}
           </div>

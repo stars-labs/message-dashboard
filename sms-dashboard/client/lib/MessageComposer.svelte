@@ -1,5 +1,6 @@
 <script>
   import { onMount } from "svelte";
+  import { formatCardNumber } from "./card-number.js";
 
   let {
     selectedPhone = null,
@@ -74,11 +75,18 @@
   // Include phones that are online, registered, or have any other active status
   let availablePhones = $derived(phoneNumbers.filter((p) => p.iccid && (p.status === "online" || p.status === "registered" || (!p.status || (p.status !== "offline" && p.status !== "error" && p.status !== "sim-missing")))));
 
+  function formatSimDisplay(phone) {
+    const number = (phone.number && phone.number !== "null")
+      ? phone.number
+      : (phone.iccid ? `ICCID: ${phone.iccid.slice(-6)}` : "Unknown");
+    const operator = phone.operator_name ? ` - ${phone.operator_name}` : "";
+    return `${formatCardNumber(phone.sim_index)} · ${phone.flag || ""} ${number}${operator}`.trim();
+  }
+
   let filteredSims = $derived(availablePhones.filter(phone => {
     if (!simSearch) return true;
     const searchLower = simSearch.toLowerCase();
-    const phoneNumber = (phone.number && phone.number !== "null") ? phone.number : (phone.iccid ? `ICCID: ${phone.iccid.slice(-6)}` : "Unknown");
-    const phoneDisplay = `${phone.flag || ''} ${phoneNumber} ${phone.operator_name || ""}`.toLowerCase();
+    const phoneDisplay = formatSimDisplay(phone).toLowerCase();
     return phoneDisplay.includes(searchLower) || (phone.iccid && phone.iccid.toLowerCase().includes(searchLower));
   }));
 
@@ -91,9 +99,7 @@
       recipientSIM = selectedPhone.iccid;
       const phone = availablePhones.find(p => p.iccid === selectedPhone.iccid);
       if (phone) {
-        const phoneDisplay = (phone.number && phone.number !== "null") ? phone.number : (phone.iccid ? `ICCID: ${phone.iccid.slice(-6)}` : "Unknown");
-        const operatorDisplay = phone.operator_name ? ` - ${phone.operator_name}` : "";
-        selectedSimDisplay = `${phone.flag || ""} ${phoneDisplay}${operatorDisplay}`;
+        selectedSimDisplay = formatSimDisplay(phone);
       }
     }
   });
@@ -157,9 +163,7 @@
 
   function selectSim(phone) {
     recipientSIM = phone.iccid;
-    const phoneDisplay = (phone.number && phone.number !== "null") ? phone.number : (phone.iccid ? `ICCID: ${phone.iccid.slice(-6)}` : "Unknown");
-    const operatorDisplay = phone.operator_name ? ` - ${phone.operator_name}` : "";
-    selectedSimDisplay = `${phone.flag || ""} ${phoneDisplay}${operatorDisplay}`;
+    selectedSimDisplay = formatSimDisplay(phone);
     showSimDropdown = false;
     simSearch = "";
   }
@@ -194,7 +198,10 @@
         recipientSIM = draft.recipientSIM || recipientSIM;
         messageContent = draft.messageContent || "";
         selectedCountryCode = draft.selectedCountryCode || "+65";
-        selectedSimDisplay = draft.selectedSimDisplay || selectedSimDisplay;
+        const restoredSim = availablePhones.find(phone => phone.iccid === recipientSIM);
+        selectedSimDisplay = restoredSim
+          ? formatSimDisplay(restoredSim)
+          : (draft.selectedSimDisplay || selectedSimDisplay);
       }
     } catch {
       sessionStorage.removeItem(DRAFT_KEY);
@@ -266,7 +273,7 @@
         selectedSimDisplay = e.target.value;
         recipientSIM = "";
       }}
-      placeholder="输入卡号筛选或选择发送卡..."
+      placeholder="输入 S01 / 号码 / ICCID..."
       class="w-full px-4 py-2 cyber-input"
     />
 
@@ -286,6 +293,7 @@
               onclick={() => selectSim(phone)}
               class="w-full text-left px-3 py-2 hover:bg-stone-200 rounded-md transition-colors text-sm flex items-center gap-2"
             >
+              <span class="w-8 shrink-0 font-mono font-semibold text-stone-600">{formatCardNumber(phone.sim_index)}</span>
               <span class="text-lg">{phone.flag}</span>
               <div class="flex-1">
                 <div class="font-mono">
@@ -523,7 +531,7 @@
             selectedSimDisplay = e.target.value;
             recipientSIM = "";
           }}
-          placeholder="输入卡号筛选或选择发送卡..."
+          placeholder="输入 S01 / 号码 / ICCID..."
           class="w-full px-4 py-2 cyber-input"
         />
 
@@ -543,6 +551,7 @@
                   onclick={() => selectSim(phone)}
                   class="w-full text-left px-3 py-2 hover:bg-stone-200 rounded-md transition-colors text-sm flex items-center gap-2"
                 >
+                  <span class="w-8 shrink-0 font-mono font-semibold text-stone-600">{formatCardNumber(phone.sim_index)}</span>
                   <span class="text-lg">{phone.flag}</span>
                   <div class="flex-1">
                     <div class="font-mono">
