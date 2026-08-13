@@ -135,6 +135,7 @@ operations on the user-management page; it is separate from the interactive logi
 - **Package manager is `bun`**, not npm — all scripts use `bunx`
 - **Local dashboard lifecycle is owned by `dev-server` from `flake.nix`** — after dashboard edits, run `dev-server restart` and leave its foreground supervisor running. Do not launch `bun run dev` or `bun run dev:api` directly: the managed command clears prior listeners, fixes the ports at frontend `8080` and API `8787`, checks both health endpoints, and enforces one listener PID per port.
 - **Local Auth0/API credentials come only from `secrets/dev-vars.yaml`** — `dev-api` uses `sops exec-env` and `CLOUDFLARE_INCLUDE_PROCESS_ENV=true` to pass decrypted values into Bun/Wrangler without plaintext files or command-line secret arguments.
+- **Cloudflare access for message-dashboard uses Google login with a `bitgc.io` account** — before running Wrangler deployment or production D1 commands, use `bunx wrangler whoami` and confirm the authenticated email ends in `@bitgc.io` and the intended Cloudflare account is selected.
 - **No linters/formatters configured** — follow existing code style in each component
 - **No WebSocket/SSE in production** — manual refresh only (cost optimization). All WS/SSE code has been removed.
 - **Router is custom** — `SimpleRouter` class in `server/index.js`, not itty-router
