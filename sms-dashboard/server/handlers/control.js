@@ -76,10 +76,10 @@ export const controlHandler = {
               equipment_id, manufacturer, model, firmware_revision,
               hardware_revision, detected_iccid, detected_phone_number,
               detected_operator, signal_percent, rssi,
-              modem_index, usb_port, usb_path, status,
+              modem_index, usb_port, usb_path, last_usb_path, status,
               verification_status, last_verified_session,
               updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(equipment_id) DO UPDATE SET
               manufacturer = excluded.manufacturer,
               model = excluded.model,
@@ -93,6 +93,7 @@ export const controlHandler = {
               modem_index = excluded.modem_index,
               usb_port = excluded.usb_port,
               usb_path = excluded.usb_path,
+              last_usb_path = COALESCE(excluded.last_usb_path, modems.last_usb_path),
               status = excluded.status,
               verification_status = COALESCE(excluded.verification_status, modems.verification_status),
               last_verified_session = COALESCE(excluded.last_verified_session, modems.last_verified_session),
@@ -110,6 +111,7 @@ export const controlHandler = {
             report.rssi ?? null,
             report.modem_index ?? null,
             report.usb_port ?? null,
+            report.usb_path ?? null,
             report.usb_path ?? null,
             report.status || 'active',
             verificationStatus,

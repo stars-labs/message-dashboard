@@ -26,6 +26,7 @@ export const iccidMappingsHandler = {
           modem_status,
           detected_iccid,
           usb_path,
+          last_usb_path,
           created_at,
           updated_at
         FROM device_view
@@ -95,7 +96,7 @@ export const iccidMappingsHandler = {
           iccid as id, iccid, sim_index, number as phone_number,
           country, carrier, equipment_id, notes,
           sim_status as is_active, signal_quality, modem_status, detected_iccid,
-          usb_path, created_at, updated_at
+          usb_path, last_usb_path, created_at, updated_at
         FROM device_view
         WHERE iccid = ?
       `).bind(id).first();
@@ -139,7 +140,7 @@ export const iccidMappingsHandler = {
           iccid as id, iccid, sim_index, number as phone_number,
           country, carrier, equipment_id, notes,
           sim_status as is_active, signal_quality, modem_status, detected_iccid,
-          usb_path, created_at, updated_at
+          usb_path, last_usb_path, created_at, updated_at
         FROM device_view
         WHERE iccid = ?
       `).bind(iccid).first();
@@ -233,7 +234,7 @@ export const iccidMappingsHandler = {
         SELECT
           iccid, sim_index, number as phone_number,
           country as country_code, carrier, equipment_id as imei,
-          notes, sim_status as status,
+          notes, sim_status as status, usb_path, last_usb_path,
           created_at, updated_at
         FROM device_view
         WHERE iccid = ?
@@ -297,7 +298,7 @@ export const iccidMappingsHandler = {
         SELECT
           iccid as id, iccid, sim_index, number as phone_number,
           country, carrier, equipment_id, notes,
-          sim_status as is_active,
+          sim_status as is_active, usb_path, last_usb_path,
           created_at, updated_at
         FROM device_view
         WHERE iccid = ?

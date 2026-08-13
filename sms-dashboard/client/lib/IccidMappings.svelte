@@ -1,5 +1,6 @@
 <script>
   import { onMount } from "svelte";
+  import { getModemPosition } from "./modem-position.js";
   import { api } from "./api";
   import { COUNTRIES, getCountryFlag, getCountryName, getCarrierColor } from "./countries.js";
   import { getStatusMeta, hasOperationalIssue, isAnomalous } from "./device-status.js";
@@ -157,14 +158,6 @@
     }
   }
 
-  // Modem position string — absorbs 设备ID + USB位置 + UP/DOWN into one column.
-  function modemPosition(m) {
-    if (!m.equipment_id) return null;
-    const parts = [];
-    if (m.usb_path)   parts.push(m.usb_path);
-    if (m.modem_index != null) parts.push(`M${m.modem_index}`);
-    return parts.join(' / ') || m.equipment_id.slice(-8);
-  }
 </script>
 
 <!-- ═══ Page ════════════════════════════════════════════════════════════════ -->
@@ -248,7 +241,7 @@
           {#each mappings as m}
             {@const meta = getStatusMeta(m.is_active)}
             {@const anomalous = isAnomalous(m.is_active)}
-            {@const pos = modemPosition(m)}
+            {@const pos = getModemPosition(m)}
             <tr class="hover:bg-stone-50 transition-colors {anomalous ? meta.rowClass : ''}">
               <!-- 卡号 -->
               <td class="px-3 py-2.5">
@@ -277,9 +270,9 @@
               <!-- 模块位置 (absorbs 设备ID + USB位置 + UP/DOWN) -->
               <td class="px-3 py-2.5 font-mono text-xs text-stone-500 whitespace-nowrap">
                 {#if pos}
-                  {pos}
-                  {#if m.modem_status === 'disconnected'}
-                    <span class="text-red-500 ml-1">↓</span>
+                  {pos.path}
+                  {#if pos.isLastKnown}
+                    <span class="ml-1 font-sans text-[10px] text-stone-400" title="模块离线时最后确认的位置">上次</span>
                   {/if}
                 {:else}
                   <span class="text-stone-300">—</span>
@@ -334,6 +327,7 @@
       {#each mappings as m}
         {@const meta = getStatusMeta(m.is_active)}
         {@const anomalous = isAnomalous(m.is_active)}
+        {@const pos = getModemPosition(m)}
         <div class="relative bg-white border-b border-stone-100 p-3 pl-4 overflow-hidden
           {anomalous ? meta.rowClass : ''}">
           <span class="absolute left-0 top-0 bottom-0 w-[3px] {meta.dotClass}" aria-hidden="true"></span>
@@ -356,6 +350,7 @@
             <span class="{meta.badgeClass.includes('red') ? 'text-red-600' : meta.badgeClass.includes('amber') ? 'text-amber-600' : ''}">{meta.label}</span>
             {#if m.carrier}<span>{m.carrier}</span>{/if}
             {#if m.signal_quality != null}<span>· {m.signal_quality}%</span>{/if}
+            {#if pos}<span>· {pos.path}{pos.isLastKnown ? '（上次）' : ''}</span>{/if}
           </div>
         </div>
       {/each}
