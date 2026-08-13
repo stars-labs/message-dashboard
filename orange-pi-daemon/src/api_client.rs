@@ -1,3 +1,4 @@
+use crate::health::HealthSnapshot;
 use crate::sync_manager::SyncMode;
 use crate::types::*;
 use anyhow::{Context, Result};
@@ -20,6 +21,28 @@ impl ApiClient {
                 .expect("Failed to create HTTP client"),
             config,
         }
+    }
+
+    /// Send an independent, versioned process and task health report.
+    pub async fn send_health_snapshot(&self, snapshot: &HealthSnapshot) -> Result<()> {
+        let url = format!("{}/api/control/heartbeat", self.config.api_url);
+        let response = self
+            .client
+            .post(&url)
+            .header("x-api-key", &self.config.api_key)
+            .header("x-daemon-version", env!("CARGO_PKG_VERSION"))
+            .json(snapshot)
+            .send()
+            .await
+            .context("Failed to send health snapshot")?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            anyhow::bail!("Health endpoint returned {}: {}", status, body);
+        }
+
+        Ok(())
     }
 
     /// Upload devices using normalized schema with sync mode

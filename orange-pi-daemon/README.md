@@ -24,7 +24,8 @@ USB Modems (ttyUSB*)
 
 ### Concurrent Tasks
 
-The daemon spawns 6 async tasks:
+The daemon runs independent async loops so one stalled responsibility does not
+block the others:
 
 | Task | Interval | Purpose |
 |------|----------|---------|
@@ -33,7 +34,10 @@ The daemon spawns 6 async tasks:
 | Device Status Sync | 30s | Sync modem/SIM state to API (full every 5min, incremental otherwise) |
 | Statistics Logger | 60s | Log message queue stats, warn if SIM has >200 messages |
 | Auto-Cleanup | 5min | Remove old pending messages (ModemManager deletion bug workaround) |
+| Multipart Cleanup | 5min | Remove incomplete multipart segments after their assembly window |
 | SMS Sender | 10s | Poll API for outbound SMS, route to correct modem via ICCID |
+| Health Heartbeat | 30s | Report process, task, queue, and modem health independently |
+| Modem Re-discovery | 60s | Add newly enumerated or recovered modem ports to the live set |
 
 ### Source Layout
 
@@ -136,6 +140,9 @@ The daemon uses `ttyUSB2` for all AT operations via `nix::termios` (no libudev d
 - **Dynamic batching**: Upload batch size scales 10-100 based on payload size. Shrinks on failures, grows when healthy.
 - **Immediate SIM deletion**: Messages are deleted from SIM right after reading to prevent ModemManager's deletion bug from causing duplicates.
 - **Signal caching**: 30-second TTL cache avoids redundant modem queries during polling cycles.
+- **Independent health reporting**: Business requests do not define process health.
+  The heartbeat includes per-task success ages and failures, local queue depth, real
+  build version, and modem counts so one healthy loop cannot hide another stalled loop.
 
 ## Troubleshooting
 

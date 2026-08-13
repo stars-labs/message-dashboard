@@ -145,6 +145,17 @@ operations on the user-management page; it is separate from the interactive logi
 - Local SQLite queue (`message_store.rs`) buffers messages when network is down, uploads in batches of 10-100
 - Worker pool runs 6 concurrent modem readers; Tokio runtime uses 4 threads (ARM optimized)
 - Signal cache: 30s TTL, 256-entry hash — avoid redundant modem queries
+- **Daemon health schema v1** — the Rust daemon posts an independent health snapshot
+  to `/api/control/heartbeat` every 30s. `daemon_health.metadata` stores per-task
+  success ages/failures, queue depth, modem counts, session ID, and the real build
+  version. Worker receipt time is the liveness clock; never use the Orange Pi wall
+  clock for freshness.
+- **Health states are separate from SIM states** — `healthy`, `degraded`, `offline`,
+  and `unknown` describe the collection service. `device_view.sim_status` and the
+  `93 / 95` count describe individual inventory rows. Do not infer one from the other.
+- **Legacy heartbeat compatibility** — pending-SMS and device-sync routes only refresh
+  liveness until a schema-v1 snapshot exists. After that, they may update their own
+  data but must not make the whole daemon healthy.
 
 ### Server gotchas
 - Middleware chain order: CORS → Auth0 JWT → RBAC (order matters)

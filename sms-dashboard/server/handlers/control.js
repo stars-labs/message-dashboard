@@ -2,6 +2,13 @@ import { nanoid } from 'nanoid';
 import { extractVerificationCode } from '../utils/verification';
 import { findKeywordMatches } from '../api/keywords.js';
 import { classifyMessage, loadActiveRules } from '../utils/spam-filter.js';
+import { HEALTH_SCHEMA_VERSION, normalizeHealthSnapshot } from '../utils/daemon-health.js';
+
+const IS_LEGACY_DAEMON_HEALTH_SQL = `(
+  daemon_health.metadata IS NULL OR
+  json_valid(daemon_health.metadata) = 0 OR
+  COALESCE(json_extract(daemon_health.metadata, '$.schema_version'), 0) < ${HEALTH_SCHEMA_VERSION}
+)`;
 
 export const controlHandler = {
   // New clean endpoint for separate modems and SIMs with state reconciliation
@@ -309,8 +316,16 @@ export const controlHandler = {
           ?, CURRENT_TIMESTAMP
         )
         ON CONFLICT(daemon_id) DO UPDATE SET
-          last_heartbeat = CURRENT_TIMESTAMP,
-          status = 'online',
+          last_heartbeat = CASE
+            WHEN ${IS_LEGACY_DAEMON_HEALTH_SQL}
+              THEN CURRENT_TIMESTAMP
+            ELSE daemon_health.last_heartbeat
+          END,
+          status = CASE
+            WHEN ${IS_LEGACY_DAEMON_HEALTH_SQL}
+              THEN 'online'
+            ELSE daemon_health.status
+          END,
           modem_count = excluded.modem_count,
           last_ip = excluded.last_ip,
           current_session_id = COALESCE(?, daemon_health.current_session_id),
@@ -636,10 +651,22 @@ export const controlHandler = {
         INSERT INTO daemon_health (daemon_id, last_heartbeat, status, last_ip, version, modem_count, error_count, updated_at)
         VALUES ('orange-pi-main', CURRENT_TIMESTAMP, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP)
         ON CONFLICT(daemon_id) DO UPDATE SET
-          last_heartbeat = CURRENT_TIMESTAMP,
-          status = excluded.status,
+          last_heartbeat = CASE
+            WHEN ${IS_LEGACY_DAEMON_HEALTH_SQL}
+              THEN CURRENT_TIMESTAMP
+            ELSE daemon_health.last_heartbeat
+          END,
+          status = CASE
+            WHEN ${IS_LEGACY_DAEMON_HEALTH_SQL}
+              THEN excluded.status
+            ELSE daemon_health.status
+          END,
           last_ip = excluded.last_ip,
-          version = excluded.version,
+          version = CASE
+            WHEN ${IS_LEGACY_DAEMON_HEALTH_SQL}
+              THEN excluded.version
+            ELSE daemon_health.version
+          END,
           modem_count = excluded.modem_count,
           error_count = CASE 
             WHEN excluded.status = 'online' THEN 0 
@@ -929,10 +956,22 @@ export const controlHandler = {
           'orange-pi-main', CURRENT_TIMESTAMP, 'online', ?, ?, CURRENT_TIMESTAMP
         )
         ON CONFLICT(daemon_id) DO UPDATE SET
-          last_heartbeat = CURRENT_TIMESTAMP,
-          status = 'online',
+          last_heartbeat = CASE
+            WHEN ${IS_LEGACY_DAEMON_HEALTH_SQL}
+              THEN CURRENT_TIMESTAMP
+            ELSE daemon_health.last_heartbeat
+          END,
+          status = CASE
+            WHEN ${IS_LEGACY_DAEMON_HEALTH_SQL}
+              THEN 'online'
+            ELSE daemon_health.status
+          END,
           last_ip = excluded.last_ip,
-          version = excluded.version,
+          version = CASE
+            WHEN ${IS_LEGACY_DAEMON_HEALTH_SQL}
+              THEN excluded.version
+            ELSE daemon_health.version
+          END,
           updated_at = CURRENT_TIMESTAMP
       `).bind(clientIp, daemonVersion).run();
       
@@ -1117,28 +1156,60 @@ export const controlHandler = {
     }
     
     try {
-      const { device_id, version, status = 'online' } = await request.json();
-      
-      // Store heartbeat in KV with 5 minute expiration
-      const heartbeatData = {
-        device_id,
-        version,
-        status,
-        timestamp: new Date().toISOString(),
-        last_heartbeat: Date.now()
-      };
-      
-      await env.SESSIONS.put(
-        'daemon:heartbeat',
-        JSON.stringify(heartbeatData),
-        { expirationTtl: 300 } // 5 minutes
-      );
-      
-      console.log(`[control.js] Daemon heartbeat received: device=${device_id}, version=${version}, status=${status}`);
+      const body = await request.json();
+      const clientIp = request.headers.get('CF-Connecting-IP') ||
+        request.headers.get('X-Forwarded-For') || 'unknown';
+
+      if (body.schema_version === HEALTH_SCHEMA_VERSION) {
+        const snapshot = normalizeHealthSnapshot(body);
+        await env.DB.prepare(`
+          INSERT INTO daemon_health (
+            daemon_id, last_heartbeat, status, last_ip, version, modem_count,
+            error_count, metadata, current_session_id, updated_at
+          ) VALUES (
+            'orange-pi-main', CURRENT_TIMESTAMP, 'online', ?, ?, ?, 0, ?, ?, CURRENT_TIMESTAMP
+          )
+          ON CONFLICT(daemon_id) DO UPDATE SET
+            last_heartbeat = CURRENT_TIMESTAMP,
+            status = 'online',
+            last_ip = excluded.last_ip,
+            version = excluded.version,
+            modem_count = excluded.modem_count,
+            error_count = excluded.error_count,
+            metadata = excluded.metadata,
+            current_session_id = excluded.current_session_id,
+            updated_at = CURRENT_TIMESTAMP
+        `).bind(
+          clientIp,
+          snapshot.version,
+          snapshot.modems.discovered,
+          JSON.stringify(snapshot),
+          snapshot.session_id,
+        ).run();
+
+        console.log(`[control.js] Health snapshot received: session=${snapshot.session_id}, version=${snapshot.version}`);
+      } else {
+        // Compatibility for older daemons that used the explicit endpoint without
+        // task telemetry. This path can be removed after the fleet is upgraded.
+        const deviceId = typeof body.device_id === 'string' ? body.device_id : 'orange-pi-main';
+        const version = typeof body.version === 'string' ? body.version.slice(0, 80) : 'unknown';
+        await env.DB.prepare(`
+          INSERT INTO daemon_health (daemon_id, last_heartbeat, status, last_ip, version, updated_at)
+          VALUES ('orange-pi-main', CURRENT_TIMESTAMP, 'online', ?, ?, CURRENT_TIMESTAMP)
+          ON CONFLICT(daemon_id) DO UPDATE SET
+            last_heartbeat = CURRENT_TIMESTAMP,
+            status = 'online',
+            last_ip = excluded.last_ip,
+            version = excluded.version,
+            updated_at = CURRENT_TIMESTAMP
+        `).bind(clientIp, version).run();
+        console.log(`[control.js] Legacy heartbeat received: device=${deviceId}, version=${version}`);
+      }
       
       return new Response(JSON.stringify({
         success: true,
-        message: 'Heartbeat received'
+        message: 'Heartbeat received',
+        received_at: new Date().toISOString()
       }), {
         headers: { 'Content-Type': 'application/json' }
       });
@@ -1146,11 +1217,13 @@ export const controlHandler = {
       console.error('[control.js] Heartbeat error:', error);
       console.error('[control.js] Heartbeat error stack:', error.stack);
       console.error('[control.js] Heartbeat error message:', error.message);
+      const status = error.message?.startsWith('Unsupported health schema') ||
+        error.message?.includes('required') ? 400 : 500;
       return new Response(JSON.stringify({
         success: false,
         error: `Failed to process heartbeat: ${error.message}`
       }), {
-        status: 500,
+        status,
         headers: { 'Content-Type': 'application/json' }
       });
     }

@@ -2,6 +2,7 @@ pub mod api_client;
 pub mod at_modem;
 pub mod benchmark;
 pub mod dbus_client;
+pub mod health;
 pub mod message_store;
 pub mod modem_manager;
 pub mod native_dbus;

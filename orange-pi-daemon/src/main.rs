@@ -8,6 +8,7 @@ use tracing::{debug, error, info, warn};
 // Import from the library crate
 use orange_pi_daemon_rust::api_client::ApiClient;
 use orange_pi_daemon_rust::benchmark::PerformanceBenchmark;
+use orange_pi_daemon_rust::health::{HealthTask, HealthTracker};
 use orange_pi_daemon_rust::message_store::MessageStore;
 use orange_pi_daemon_rust::modem_manager::ModemManager;
 use orange_pi_daemon_rust::sms_sender::SmsSender;
@@ -241,6 +242,11 @@ async fn main() -> Result<()> {
     // Task 3 (device sync) reads from it. This avoids two pools fighting over serial ports.
     let latest_devices: Arc<RwLock<Vec<ModemReport>>> =
         Arc::new(RwLock::new(Vec::new()));
+    let health_tracker = Arc::new(RwLock::new(HealthTracker::new(
+        session_id.clone(),
+        env!("CARGO_PKG_VERSION").to_string(),
+        valid_modems.len(),
+    )));
 
     // TASK 1: MODEM READER (Fast Loop - every 1 second)
     // Reads SMS from modems and saves to database, then deletes from SIM immediately
@@ -249,6 +255,7 @@ async fn main() -> Result<()> {
     let modem_reader_pool = worker_pool.clone();
     let modem_reader_set = modem_set.clone();
     let reader_devices = latest_devices.clone();
+    let reader_health = health_tracker.clone();
 
     tokio::spawn(async move {
         loop {
@@ -256,6 +263,11 @@ async fn main() -> Result<()> {
 
             // Snapshot the current live modem set (Task 7 may have grown it).
             let current_ids = modem_reader_set.read().await.clone();
+            let discovered_count = current_ids.len();
+            reader_health
+                .write()
+                .await
+                .record_attempt(HealthTask::ModemReader);
 
             // Read from all modems in parallel
             match modem_reader_pool.process_modems(current_ids).await {
@@ -317,6 +329,21 @@ async fn main() -> Result<()> {
                               count, start.elapsed(), deleted_count, deletion_failed_count);
                     }
 
+                    let responsive_count = reports.len();
+                    let sim_readable_count = reports
+                        .iter()
+                        .filter(|report| report.detected_iccid.is_some())
+                        .count();
+                    {
+                        let mut health = reader_health.write().await;
+                        health.set_modem_counts(
+                            discovered_count,
+                            responsive_count,
+                            sim_readable_count,
+                        );
+                        health.record_success(HealthTask::ModemReader);
+                    }
+
                     // Update shared buffer for device sync task
                     if !reports.is_empty() {
                         let mut devices = reader_devices.write().await;
@@ -325,6 +352,10 @@ async fn main() -> Result<()> {
                 }
                 Err(e) => {
                     warn!("Modem reader error: {}", e);
+                    reader_health
+                        .write()
+                        .await
+                        .record_failure(HealthTask::ModemReader, &e);
                 }
             }
 
@@ -337,6 +368,7 @@ async fn main() -> Result<()> {
     // Uploads pending messages with smart batching based on payload size
     let upload_store = message_store.clone();
     let upload_client = api_client.clone();
+    let upload_health = health_tracker.clone();
 
     tokio::spawn(async move {
         info!("☁️  Dynamic batch uploader started - SMART SIZING with BACKOFF!");
@@ -362,6 +394,10 @@ async fn main() -> Result<()> {
             // Get pending messages from database with dynamic batch
             match upload_store.get_pending_messages(current_batch_size) {
                 Ok(pending) if !pending.is_empty() => {
+                    upload_health
+                        .write()
+                        .await
+                        .record_attempt(HealthTask::MessageUploader);
                     let ids: Vec<i64> = pending.iter().map(|(id, _)| *id).collect();
                     let messages: Vec<Message> = pending.into_iter().map(|(_, msg)| msg).collect();
 
@@ -392,6 +428,10 @@ async fn main() -> Result<()> {
                     // Mark as uploading
                     if let Err(e) = upload_store.mark_uploading(&ids) {
                         error!("Failed to mark as uploading: {}", e);
+                        upload_health
+                            .write()
+                            .await
+                            .record_failure(HealthTask::MessageUploader, &e);
                         continue;
                     }
 
@@ -403,6 +443,10 @@ async fn main() -> Result<()> {
                             let _ = upload_store.mark_uploaded(&ids);
                             // Reset backoff on success
                             consecutive_failures = 0;
+                            upload_health
+                                .write()
+                                .await
+                                .record_success(HealthTask::MessageUploader);
                             // Small delay to avoid rate limits
                             tokio::time::sleep(Duration::from_millis(100)).await;
                         }
@@ -412,12 +456,24 @@ async fn main() -> Result<()> {
                             let _ = upload_store.mark_failed(&ids, &e.to_string());
                             // Increment failure counter for backoff
                             consecutive_failures = consecutive_failures.saturating_add(1);
+                            upload_health
+                                .write()
+                                .await
+                                .record_failure(HealthTask::MessageUploader, &e);
                         }
                     }
                 }
-                _ => {
+                Ok(_) => {
                     // No pending messages, wait before checking again
                     tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+                Err(e) => {
+                    warn!("☁️  Uploader: Failed to read local queue: {}", e);
+                    upload_health
+                        .write()
+                        .await
+                        .record_failure(HealthTask::MessageUploader, &e);
+                    tokio::time::sleep(Duration::from_secs(1)).await;
                 }
             }
         }
@@ -432,6 +488,8 @@ async fn main() -> Result<()> {
         300,
     )));
     let sync_devices = latest_devices.clone();
+    let sync_health = health_tracker.clone();
+    let sync_session_id = session_id.clone();
 
     tokio::spawn(async move {
         loop {
@@ -443,6 +501,19 @@ async fn main() -> Result<()> {
                 devices.clone()
             };
 
+            sync_health
+                .write()
+                .await
+                .record_attempt(HealthTask::DeviceSync);
+            if all_reports.is_empty() {
+                sync_health
+                    .write()
+                    .await
+                    .record_failure(HealthTask::DeviceSync, "no modem reports available");
+                warn!("Status sync skipped: no modem reports available");
+                continue;
+            }
+
             // Determine sync mode
             let mut sync_manager = sync_manager_arc.lock().await;
             let sync_mode = if sync_manager.needs_full_sync() {
@@ -453,7 +524,7 @@ async fn main() -> Result<()> {
 
             // Upload modem reports directly (no conversion needed)
             match sync_client
-                .upload_modem_reports(&all_reports, sync_mode, &session_id)
+                .upload_modem_reports(&all_reports, sync_mode, &sync_session_id)
                 .await
             {
                 Ok(_) => {
@@ -463,9 +534,18 @@ async fn main() -> Result<()> {
                         sync_mode
                     );
                     sync_manager.record_success(sync_mode);
+                    sync_health
+                        .write()
+                        .await
+                        .record_success(HealthTask::DeviceSync);
                 }
                 Err(e) => {
                     warn!("Status sync failed: {}", e);
+                    sync_manager.record_failure(sync_mode, e.as_ref());
+                    sync_health
+                        .write()
+                        .await
+                        .record_failure(HealthTask::DeviceSync, &e);
                 }
             }
         }
@@ -561,6 +641,7 @@ async fn main() -> Result<()> {
     // Polls Cloudflare for pending outbound SMS and sends them via AT commands
     let sender_api_client = (*api_client).clone();
     let sender_modem_manager = modem_manager.clone();
+    let sender_health = health_tracker.clone();
     let sender_modem_cache: HashMap<String, String> = valid_modems
         .iter()
         .filter_map(|(modem_id, iccid)| {
@@ -575,12 +656,23 @@ async fn main() -> Result<()> {
         sms_sender.update_modem_cache(sender_modem_cache);
 
         loop {
+            sender_health
+                .write()
+                .await
+                .record_attempt(HealthTask::OutboundPoll);
             match sms_sender.process_pending_sms().await {
                 Ok(_) => {
-                    // Success (may have sent 0 or more messages)
+                    sender_health
+                        .write()
+                        .await
+                        .record_success(HealthTask::OutboundPoll);
                 }
                 Err(e) => {
                     warn!("📤 SMS Sender error: {}", e);
+                    sender_health
+                        .write()
+                        .await
+                        .record_failure(HealthTask::OutboundPoll, &e);
                 }
             }
 
@@ -589,7 +681,29 @@ async fn main() -> Result<()> {
         }
     });
 
-    // TASK 7: DYNAMIC MODEM RE-DISCOVERY (every 60 seconds)
+    // TASK 7: INDEPENDENT HEALTH HEARTBEAT (every 30 seconds)
+    // This is deliberately separate from outbound polling and device sync so one
+    // healthy task cannot hide another stalled task.
+    let heartbeat_client = api_client.clone();
+    let heartbeat_health = health_tracker.clone();
+    let heartbeat_store = message_store.clone();
+
+    tokio::spawn(async move {
+        info!("💓 Independent health heartbeat started - reporting every 30 seconds");
+        loop {
+            let pending_uploads = heartbeat_store
+                .get_stats()
+                .map(|stats| stats.pending + stats.failed)
+                .unwrap_or(0);
+            let snapshot = heartbeat_health.read().await.snapshot(pending_uploads);
+            if let Err(e) = heartbeat_client.send_health_snapshot(&snapshot).await {
+                warn!("💓 Health heartbeat failed: {}", e);
+            }
+            tokio::time::sleep(Duration::from_secs(30)).await;
+        }
+    });
+
+    // TASK 8: DYNAMIC MODEM RE-DISCOVERY (every 60 seconds)
     // Picks up modems that enumerate after startup and actively USB-resets wedged ones
     // (present ttyUSB but silent on AT), merging any newly-found modems into the live
     // set with no daemon restart. Cannot recover modems that never enumerate a ttyUSB

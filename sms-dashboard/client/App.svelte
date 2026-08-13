@@ -11,12 +11,14 @@
   import UserManagement from "./lib/UserManagement.svelte";
   import ErrorBoundary from "./lib/ErrorBoundary.svelte";
   import Toast from "./lib/Toast.svelte";
+  import DaemonHealthPanel from "./lib/DaemonHealthPanel.svelte";
   import { api } from "./lib/api.js";
   import { getPhoneFlag, mapStatsResponse } from "./lib/countries.js";
   import { auth } from "./lib/auth.js";
   import { isAnomalous } from "./lib/device-status.js";
   import { formatCardNumber } from "./lib/card-number.js";
   import { formatTimeAgo } from "./lib/time.js";
+  import { getDaemonStatusMeta, isDaemonConnected } from "./lib/daemon-status.js";
 
   let selectedPhoneIccid = $state(null);
   let selectedPhone = $state(null);
@@ -114,6 +116,7 @@
   }
   let lastKnownTimestamp = $state(null); // Only flag messages newer than this as "新"
   let daemonRefreshing = $state(false);
+  let showDaemonDetails = $state(false);
 
   function showToast(message, type = 'info', duration = 4000) {
     const id = Date.now();
@@ -131,11 +134,7 @@
     last_heartbeat: null,
     version: null,
     device_id: null,
-    // Legacy fields for compatibility
-    connected: true,
-    lastDataUpdate: Date.now(),
-    lastPhoneUpdate: Date.now(),
-    healthCheckTime: Date.now(),
+    connected: false,
   });
 
   let stats = $state({
@@ -157,6 +156,7 @@
   let anomalyMismatch    = $derived(phoneNumbers.filter(p => p.status === 'iccid_mismatch').length);
   let anomalyOffline     = $derived(phoneNumbers.filter(p => p.status === 'offline').length);
   let anomalyTotal       = $derived(phoneNumbers.filter(p => isAnomalous(p.status)).length);
+  let daemonMeta         = $derived(getDaemonStatusMeta(daemonStatus.status));
 
   // Permission gate. `user.permissions` comes from /api/auth/me, which derives it from
   // the caller's Auth0 roles. This is UX only — the server enforces the same rules on
@@ -306,12 +306,6 @@
 
       // Mark data as loaded
       dataLoading = false;
-      // Update daemon status to show fresh data
-      daemonStatus.lastDataUpdate = Date.now();
-      daemonStatus.lastPhoneUpdate = Date.now();
-      
-      // Check daemon health based on recent phone data
-      updateDaemonHealthStatus();
     } catch (error) {
       console.warn("Failed to load data:", error);
       // Use default values on error
@@ -350,9 +344,6 @@
     loading = false;
 
     if (user) {
-      daemonStatus.connected = true;
-      daemonStatus.lastDataUpdate = Date.now();
-
       loadData().finally(() => {
         dataLoading = false;
         startPolling();
@@ -500,80 +491,14 @@
     }
   }
 
-  // Update daemon health status based on recent data
-  function updateDaemonHealthStatus() {
-    const now = Date.now();
-    const fiveMinutesAgo = now - (5 * 60 * 1000); // 5 minutes
-    
-    // If we have heartbeat-based status from API, check if it's still fresh
-    if (daemonStatus.lastHeartbeat) {
-      const heartbeatIsRecent = daemonStatus.lastHeartbeat > fiveMinutesAgo;
-      daemonStatus.connected = heartbeatIsRecent;
-    } else {
-      // Fallback to data-based detection if no heartbeat
-      const hasRecentPhoneData = phoneNumbers.some(phone => {
-        return phone.status === 'active';
-      });
-      
-      const dataIsRecent = daemonStatus.lastDataUpdate > fiveMinutesAgo;
-      const hasActivePhones = phoneNumbers.length > 0 && hasRecentPhoneData;
-      
-      daemonStatus.connected = dataIsRecent && (hasActivePhones || phoneNumbers.length === 0);
-    }
-    
-    daemonStatus.healthCheckTime = now;
-  }
-
-  function getDaemonStatusText() {
-    const statusMap = {
-      'online': '在线',
-      'warning': '警告',
-      'offline': '离线',
-      'error': '错误',
-      'unknown': '未知'
-    };
-    return statusMap[daemonStatus.status] || '未知';
-  }
-
-  function getDaemonStatusClass() {
-    const classMap = {
-      'online': 'text-emerald-600',
-      'warning': 'text-amber-600',
-      'offline': 'text-red-500',
-      'error': 'text-red-500',
-      'unknown': 'text-stone-400'
-    };
-    return classMap[daemonStatus.status] || 'text-stone-400';
-  }
-
-  function getDaemonStatusIcon() {
-    const iconMap = {
-      'online': '🟢',
-      'warning': '🟡',
-      'offline': '🔴',
-      'error': '🔴',
-      'unknown': '⚪'
-    };
-    return iconMap[daemonStatus.status] || '⚪';
-  }
-
   async function checkDaemonStatus() {
     try {
       const response = await fetch('/api/daemon/status');
       if (response.ok) {
         const data = await response.json();
-        // Only show modem count when actually online
-        const cleanData = {
-          ...data,
-          modem_count: data.status === 'online' ? (data.modem_count || 0) : undefined
-        };
         daemonStatus = {
-          ...cleanData,
-          // Keep legacy fields for compatibility
-          connected: data.status === 'online',
-          lastDataUpdate: daemonStatus.lastDataUpdate,
-          lastPhoneUpdate: daemonStatus.lastPhoneUpdate,
-          healthCheckTime: daemonStatus.healthCheckTime
+          ...data,
+          connected: isDaemonConnected(data.status),
         };
         
         // Only fetch stats if user is authenticated (stats API requires auth)
@@ -608,6 +533,11 @@
     } finally {
       daemonRefreshing = false;
     }
+  }
+
+  async function openDaemonDetails() {
+    showDaemonDetails = true;
+    await handleRefreshDaemon();
   }
 
   async function fetchStats() {
@@ -687,13 +617,7 @@
         </button>
         <p class="mt-5 text-[11px] font-mono text-stone-400">
           95 modems ·
-          {#if daemonStatus.status === 'online'}
-            守护进程在线
-          {:else if daemonStatus.status === 'offline'}
-            守护进程离线
-          {:else}
-            检测中…
-          {/if}
+          采集服务{daemonMeta.label}
         </p>
       </div>
     </div>
@@ -753,19 +677,19 @@
         <div class="hidden lg:flex items-center gap-3 ml-auto shrink-0">
 
           <!-- Daemon status pill -->
-          <button onclick={handleRefreshDaemon} disabled={daemonRefreshing}
+          <button onclick={openDaemonDetails}
+            aria-haspopup="dialog"
+            aria-expanded={showDaemonDetails}
             class="flex items-center gap-1.5 px-2.5 py-[5px] bg-stone-50 border border-stone-200
               rounded-[7px] text-xs transition-colors hover:bg-stone-100 {daemonRefreshing ? 'opacity-60' : ''}">
-            <span class="w-1.5 h-1.5 rounded-full shrink-0
-              {daemonStatus.status === 'online' ? 'bg-emerald-500' :
-               daemonStatus.status === 'offline' || daemonStatus.status === 'error' ? 'bg-red-500' :
-               'bg-stone-400'}"></span>
-            <span class="text-stone-700 font-medium">守护进程{
-              daemonStatus.status === 'online' ? '在线' :
-              daemonStatus.status === 'offline' ? '离线' :
-              daemonStatus.status === 'error' ? '错误' : '检测中'
-            }</span>
-            {#if daemonStatus.last_heartbeat && daemonStatus.status === 'online'}
+            <span class="w-1.5 h-1.5 rounded-full shrink-0 {daemonMeta.dotClass}"></span>
+            <span class="font-medium {daemonMeta.textClass}">采集服务{daemonMeta.label}</span>
+            {#if daemonStatus.reasons?.[0]}
+              <span class="max-w-[180px] truncate text-stone-500" title={daemonStatus.reasons[0]}>
+                · {daemonStatus.reasons[0]}
+              </span>
+            {/if}
+            {#if daemonStatus.last_heartbeat}
               <span class="text-stone-400">· {formatTimeAgo(daemonStatus.last_heartbeat)}</span>
             {/if}
           </button>
@@ -1251,6 +1175,22 @@
       <div class="lg:hidden fixed bottom-[74px] left-0 right-0 z-40 bg-white border-t border-stone-200 rounded-t-2xl
         shadow-[0_-8px_30px_rgba(28,25,23,.18)]">
         <div class="p-4 space-y-1">
+          <p class="text-[11px] font-semibold text-stone-400 uppercase tracking-widest px-3 mb-2">运行状态</p>
+          <button onclick={() => { showMoreMenu = false; openDaemonDetails(); }}
+            class="w-full flex items-center justify-between px-3 py-3 rounded-lg hover:bg-stone-50 transition-colors text-left">
+            <div class="flex items-center gap-2.5">
+              <span class="w-2 h-2 rounded-full {daemonMeta.dotClass}"></span>
+              <div>
+                <div class="text-sm font-medium text-stone-800">采集服务{daemonMeta.label}</div>
+                <div class="text-xs text-stone-400 mt-0.5">心跳 {formatTimeAgo(daemonStatus.last_heartbeat)}</div>
+              </div>
+            </div>
+            <svg class="w-4 h-4 text-stone-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+            </svg>
+          </button>
+
+          <div class="border-t border-stone-100 my-2"></div>
           <p class="text-[11px] font-semibold text-stone-400 uppercase tracking-widest px-3 mb-2">规则</p>
 
           {#if can('filters.read')}
@@ -1309,6 +1249,15 @@
     {/if}
 
   </div><!-- end outer -->
+{/if}
+
+{#if showDaemonDetails}
+  <DaemonHealthPanel
+    status={daemonStatus}
+    refreshing={daemonRefreshing}
+    onRefresh={handleRefreshDaemon}
+    onClose={() => showDaemonDetails = false}
+  />
 {/if}
 
 <!-- ICCID Mapping Dialog -->
