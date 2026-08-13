@@ -1131,9 +1131,12 @@
         <button onclick={() => { navigate('iccid-mappings'); showMoreMenu = false; }}
           class="flex-1 flex flex-col items-center justify-center gap-0.5 pt-2 pb-0.5 min-h-[52px]
             transition-colors {currentView === 'iccid-mappings' ? 'text-[#c2410c]' : 'text-stone-400'}">
-          <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round"
-              d="M12 18h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"/>
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="3" y="3.5" width="18" height="17" rx="1.5"/>
+            <circle cx="7" cy="8" r="1.5"/>
+            <circle cx="17" cy="8" r="1.5"/>
+            <rect x="8" y="11" width="8" height="5.5" rx="1"/>
+            <path stroke-linecap="round" d="M6 20.5v-2.5m3 2.5v-2.5m3 2.5v-2.5m3 2.5v-2.5m3 2.5v-2.5"/>
           </svg>
           <span class="text-[10px] font-semibold leading-none">设备</span>
         </button>
@@ -1147,9 +1150,10 @@
         }}
         class="flex-1 flex flex-col items-center justify-center gap-0.5 pt-2 pb-0.5 min-h-[52px]
           transition-colors {currentView === 'send' && !showMoreMenu ? 'text-[#c2410c]' : 'text-stone-400 hover:text-stone-600'}">
-        <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
           <path stroke-linecap="round" stroke-linejoin="round"
-            d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
+            d="M5 5h9a3 3 0 013 3v1M5 5a3 3 0 00-3 3v5a3 3 0 003 3h2l3.5 3v-3H13"/>
+          <path stroke-linecap="round" stroke-linejoin="round" d="M14 12h8m-3-3 3 3-3 3"/>
         </svg>
         <span class="text-[10px] font-semibold leading-none">发送</span>
       </button>
