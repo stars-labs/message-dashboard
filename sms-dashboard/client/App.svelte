@@ -1131,12 +1131,10 @@
         <button onclick={() => { navigate('iccid-mappings'); showMoreMenu = false; }}
           class="flex-1 flex flex-col items-center justify-center gap-0.5 pt-2 pb-0.5 min-h-[52px]
             transition-colors {currentView === 'iccid-mappings' ? 'text-[#c2410c]' : 'text-stone-400'}">
-          <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24" aria-hidden="true">
-            <rect x="3" y="3.5" width="18" height="17" rx="1.5"/>
-            <circle cx="7" cy="8" r="1.5"/>
-            <circle cx="17" cy="8" r="1.5"/>
-            <rect x="8" y="11" width="8" height="5.5" rx="1"/>
-            <path stroke-linecap="round" d="M6 20.5v-2.5m3 2.5v-2.5m3 2.5v-2.5m3 2.5v-2.5m3 2.5v-2.5"/>
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="5" y="5" width="14" height="14" rx="2"/>
+            <rect x="9" y="9" width="6" height="6" rx="1"/>
+            <path stroke-linecap="round" d="M9 2v3m6-3v3M9 19v3m6-3v3M2 9h3m-3 6h3m14-6h3m-3 6h3"/>
           </svg>
           <span class="text-[10px] font-semibold leading-none">设备</span>
         </button>
