@@ -63,11 +63,6 @@
     @apply scale-105;
   }
 
-  .phone-selected {
-    @apply relative bg-orange-50;
-    border-left: 3px solid theme('colors.orange.500') !important;
-  }
-
   .high-contrast {
     @apply text-stone-900 font-semibold;
   }
@@ -95,11 +90,11 @@
   scrollbar-color: theme('colors.stone.300') theme('colors.stone.100');
 }
 
-/* iOS zooms focused form controls whose rendered text is below 16px. Do not
-   scope this by viewport width: standalone mode, landscape, Display Zoom and
-   split-screen can all report a wider layout viewport than expected. */
-input,
-textarea,
-select {
-  font-size: 16px !important;
+/* iOS zooms focused form controls whose rendered text is below 16px. The
+   platform class is added before first paint in index.html, so desktop keeps
+   each component's intended font size without a forced cascade override. */
+html.is-ios input,
+html.is-ios textarea,
+html.is-ios select {
+  font-size: 16px;
 }
