@@ -78,8 +78,44 @@ against it looks like it works. **Use `detected_iccid`.**
 - [SIM balance queries](docs/sim-balance-query-plan.md) — carrier validation and
   controlled rollout. Automated balance queries depend on the hardware-storage
   safety gates above.
+- [Balance runtime skill runner](docs/balance-runtime-skill-runner.md) — unresolved
+  carrier menus are leased from the Worker and evaluated by a workstation connected
+  to the company VPN. The company AI token must remain local and must never be added
+  to Cloudflare or the Orange Pi.
+
+## Balance Runtime Skill
+
+This is an application runtime skill, **not** a Codex `SKILL.md`:
+
+| Component | Location / storage | Responsibility |
+|---|---|---|
+| Skill configuration | `sms-dashboard/migrations/042_add_balance_runtime_skills.sql` and production D1 `sim_balance_profiles.skill_config` | Objective, confidence threshold, maximum turns, currencies, and forbidden intents |
+| Prompt and validation | `sms-dashboard/server/utils/balance-skill.js` | Menu extraction, prompt construction, and deterministic safety validation |
+| Worker handler | `sms-dashboard/server/handlers/balance-skill-runner.js` | Job leases, server-side decision validation, SMS queuing, balance persistence, and audit writes |
+| Local Bun runner | `sms-dashboard/scripts/balance-skill-runner.js` | Calls the company AI through the user's VPN and submits structured decisions |
+| Nix process wrappers | `flake.nix` | `balance-skill-runner` plus single-instance `balance-skill-service` management |
+| Architecture document | `docs/balance-runtime-skill-runner.md` | Protocol, trust boundary, deployment, and operating procedure |
+
+Production D1 runtime tables:
+
+- `sim_balance_skill_jobs`: durable pending/leased/completed/stopped jobs.
+- `sim_balance_skill_decisions`: model, confidence, evidence, selected option, and final action audit.
+- `sim_balance_metrics`: validated balances such as `cash_balance` in `CNY`.
+
+The runner's local PID, lock, and service log live under
+`~/.local/state/message-dashboard/`; the log file is
+`~/.local/state/message-dashboard/balance-skill-runner.log`. The runner uses a
+process-level lock, so foreground, one-shot, and background instances cannot overlap.
 
 ## Commands
+
+> **Secret boundary:** Agents may inspect only encrypted key names in
+> `secrets/dev-vars.yaml`. They must never decrypt, print, infer, validate, or edit
+> its values, and must not invoke `sops exec-env`, `balance-skill-runner`, or
+> `balance-skill-service` by default. A user may explicitly authorise one exact
+> secret-consuming command in the current task; that does not permit reading,
+> printing, or editing secret values, and does not grant standing permission.
+
 ```bash
 # Local dashboard (run from the repo root; direnv loads the flake dev shell)
 dev-server restart                                    # Supervise the unique frontend :8080 + API :8787 pair
@@ -90,6 +126,12 @@ dev-server stop                                       # Stop both managed proces
 # Single-service debugging only; normal development uses dev-server
 dev-frontend                                          # Strict Vite server on 127.0.0.1:8080
 dev-api                                               # Strict Wrangler API on :8787, secrets via SOPS
+balance-skill-runner                                  # Process unresolved balance menus over company VPN
+balance-skill-runner --once                           # Claim at most one task for debugging
+balance-skill-runner --check                          # Validate VPN + company AI configuration only
+balance-skill-service start                           # Start the single background VPN runner
+balance-skill-service status                          # Check it without decrypting secrets
+balance-skill-service stop                            # Stop the background runner
 
 # Dashboard build/deploy
 cd sms-dashboard && bun install

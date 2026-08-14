@@ -21,7 +21,7 @@
   );
   let statusMeta = $derived(getStatusMeta(effectiveStatus));
   let signal = $derived(Number(phone?.signal) || 0);
-  let balanceStatusMeta = $derived(getBalanceStatusMeta(balanceCheck?.status));
+  let balanceStatusMeta = $derived(getBalanceStatusMeta(balanceCheck?.display_status || balanceCheck?.status));
   let cashBalance = $derived(getCashBalance(balanceCheck));
   let operator = $derived(phone?.operator_name || phone?.operator || phone?.carrier || '—');
   let moduleName = $derived(

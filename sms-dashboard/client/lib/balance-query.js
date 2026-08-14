@@ -2,6 +2,8 @@ const STATUS_META = {
   queued: { label: '排队中', className: 'bg-stone-100 text-stone-600 border-stone-200' },
   awaiting_response: { label: '等待回复', className: 'bg-amber-50 text-amber-700 border-amber-200' },
   response_received: { label: '已收到回复', className: 'bg-sky-50 text-sky-700 border-sky-200' },
+  skill_pending: { label: '等待 AI', className: 'bg-cyan-50 text-cyan-700 border-cyan-200' },
+  skill_processing: { label: 'AI 判断中', className: 'bg-cyan-50 text-cyan-700 border-cyan-200' },
   parsed: { label: '已解析', className: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
   failed: { label: '失败', className: 'bg-red-50 text-red-700 border-red-200' },
   timed_out: { label: '已超时', className: 'bg-stone-100 text-stone-600 border-stone-200' },

@@ -10,7 +10,7 @@
 
   let { check, selectedPhone = null, striped = false, onOpen = null } = $props();
 
-  let statusMeta = $derived(getBalanceStatusMeta(check?.status));
+  let statusMeta = $derived(getBalanceStatusMeta(check?.display_status || check?.status));
   let receiverIndex = $derived(check?.sim_index ?? selectedPhone?.sim_index);
   let receiverNumber = $derived(check?.sim_number || selectedPhone?.number || check?.sim_iccid || '—');
   let receiverFlag = $derived(

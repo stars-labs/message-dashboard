@@ -11,6 +11,7 @@ import { iccidMappingsHandler } from './handlers/iccid-mappings';
 import { healthHandler } from './handlers/health';
 import { usersHandler } from './handlers/users';
 import { balanceQueriesHandler } from './handlers/balance-queries.js';
+import { balanceSkillRunnerHandler } from './handlers/balance-skill-runner.js';
 import { serveFrontend } from './frontend-handler';
 import { createRoleConfig, hasAnyRole } from '../config/auth0-roles.js';
 import { setupKeywordRoutes } from './api/keywords.js';
@@ -434,6 +435,18 @@ router.post('/api/control/balance-checks/continue', async (request) => {
 
 router.post('/api/control/balance-checks/retry', async (request) => {
   return balanceQueriesHandler.retry(request);
+});
+
+router.get('/api/control/balance-skills/jobs/claim', async (request) => {
+  return balanceSkillRunnerHandler.claim(request);
+});
+
+router.post('/api/control/balance-skills/jobs/:id/decision', async (request) => {
+  return balanceSkillRunnerHandler.decide(request);
+});
+
+router.post('/api/control/balance-skills/jobs/:id/release', async (request) => {
+  return balanceSkillRunnerHandler.release(request);
 });
 
 

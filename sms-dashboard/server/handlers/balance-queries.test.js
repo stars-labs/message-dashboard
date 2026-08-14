@@ -341,6 +341,7 @@ describe('balance reply correlation', () => {
     expect(followUp.params).not.toContain('2');
   });
 
+
   test('parses a final China Mobile balance and stores a typed metric', async () => {
     const db = dbStub();
     const check = {
@@ -385,6 +386,41 @@ describe('balance reply correlation', () => {
     const followUp = db.batches[0][0];
     expect(followUp.params[2]).toBe('101');
     expect(followUp.params).not.toContain('102');
+  });
+
+  test('creates a runtime skill job when fixed rules cannot resolve a menu', async () => {
+    const db = dbStub();
+    const check = {
+      id: 'bal-runtime-skill',
+      sim_iccid: phone.iccid,
+      sim_number: phone.number,
+      step_index: 0,
+      destination: '10086',
+      conversation_steps: profile.conversation_steps,
+      parser_version: profile.parser_version,
+      skill_config: JSON.stringify({
+        id: 'readonly-balance-menu',
+        version: '1',
+        objective: '查询当前可用现金话费余额',
+        max_turns: 4,
+        allowed_currencies: ['CNY'],
+      }),
+    };
+
+    await linkBalanceReply(db, check, {
+      id: 'msg-unfamiliar-menu',
+      phone_number: '10086',
+      content: '11.账务查询\n12.客户服务',
+    });
+
+    expect(db.batches[0][0].params[0]).toBe('response_received');
+    const jobInsert = db.batches[0].find((statement) =>
+      statement.sql.includes('INSERT OR IGNORE INTO sim_balance_skill_jobs')
+    );
+    expect(jobInsert).toBeDefined();
+    expect(jobInsert.params.slice(1)).toEqual([
+      'msg-unfamiliar-menu', 'bal-runtime-skill', 'msg-unfamiliar-menu',
+    ]);
   });
 
   test('does not parse current charges as cash balance', () => {

@@ -30,6 +30,8 @@ describe('balance query presentation', () => {
 
   test('labels audit states and normalizes D1 timestamps', () => {
     expect(getBalanceStatusMeta('response_received').label).toBe('已收到回复');
+    expect(getBalanceStatusMeta('skill_pending').label).toBe('等待 AI');
+    expect(getBalanceStatusMeta('skill_processing').label).toBe('AI 判断中');
     expect(normalizeUtcTimestamp('2026-08-14 04:01:00')).toBe('2026-08-14 04:01:00Z');
     expect(normalizeUtcTimestamp('2026-08-14T04:01:00Z')).toBe('2026-08-14T04:01:00Z');
   });

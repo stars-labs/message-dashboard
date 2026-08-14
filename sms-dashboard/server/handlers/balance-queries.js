@@ -1,5 +1,6 @@
 import { nanoid } from 'nanoid';
 import { senderMatches } from '../utils/spam-filter.js';
+import { parseBalanceSkillConfig } from '../utils/balance-skill.js';
 
 const REPLYABLE_CHECK_STATUS = 'awaiting_response';
 const CHINA_MOBILE_NAMES = ['china mobile', 'cmcc', '中国移动', '移动'];
@@ -227,6 +228,7 @@ export async function findPendingBalanceCheck(db, { phone_iccid, phone_number })
       p.expected_senders,
       p.response_window_minutes,
       p.conversation_steps,
+      p.skill_config,
       p.destination,
       dv.number AS sim_number
     FROM sim_balance_checks c
@@ -298,10 +300,36 @@ export async function linkBalanceReply(db, check, message) {
     ));
   }
 
+  const skill = parseBalanceSkillConfig(check.skill_config);
+  if (!metrics.length && skill && Number(check.step_index || 0) < skill.max_turns) {
+    statements.push(db.prepare(`
+      INSERT OR IGNORE INTO sim_balance_skill_jobs (
+        id, check_id, response_message_id, step_index
+      )
+      SELECT ?, id, ?, step_index
+      FROM sim_balance_checks
+      WHERE id = ?
+        AND status = 'response_received'
+        AND response_message_id = ?
+    `).bind(
+      `skill-${nanoid()}`,
+      message.id,
+      check.id,
+      message.id,
+    ));
+  }
+
   return db.batch(statements);
 }
 
-async function queueBalanceFollowUp(db, check, message, step, fromStatus) {
+export async function queueBalanceFollowUp(
+  db,
+  check,
+  message,
+  step,
+  fromStatus,
+  extraStatements = [],
+) {
   const messageId = `msg-balance-${nanoid()}`;
   const results = await db.batch([
     db.prepare(`
@@ -343,6 +371,7 @@ async function queueBalanceFollowUp(db, check, message, step, fromStatus) {
       fromStatus,
       check.step_index || 0,
     ),
+    ...extraStatements,
   ]);
 
   const queued = Number(results?.[0]?.meta?.changes ?? 1) > 0;
@@ -423,6 +452,13 @@ export const balanceQueriesHandler = {
         rm.content AS response_content,
         rm.phone_number AS response_phone_number,
         rm.timestamp AS response_timestamp,
+        (
+          SELECT sj.status
+          FROM sim_balance_skill_jobs sj
+          WHERE sj.check_id = c.id
+          ORDER BY datetime(sj.created_at) DESC, sj.rowid DESC
+          LIMIT 1
+        ) AS skill_job_status,
         COALESCE((
           SELECT json_group_array(json_object(
             'id', conversation.id,
@@ -480,7 +516,11 @@ export const balanceQueriesHandler = {
         conversation_json: _conversationJson,
         ...record
       } = check;
-      return { ...record, metrics, conversation };
+      const displayStatus = ['response_received', 'unparsed'].includes(record.status)
+        && ['pending', 'leased'].includes(record.skill_job_status)
+        ? (record.skill_job_status === 'leased' ? 'skill_processing' : 'skill_pending')
+        : record.status;
+      return { ...record, display_status: displayStatus, metrics, conversation };
     });
 
     return json({ success: true, data: checks });

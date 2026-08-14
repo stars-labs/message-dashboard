@@ -12,7 +12,7 @@
   } from './balance-query.js';
 
   let { check, onClose = null } = $props();
-  let statusMeta = $derived(getBalanceStatusMeta(check?.status));
+  let statusMeta = $derived(getBalanceStatusMeta(check?.display_status || check?.status));
   let cashBalance = $derived(getCashBalance(check));
   let conversation = $derived(getBalanceConversation(check));
 

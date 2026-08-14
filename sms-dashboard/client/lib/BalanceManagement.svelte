@@ -396,7 +396,7 @@
                   <td class="px-4 py-3 whitespace-nowrap font-mono text-xs text-stone-500">{formatTime(row.balanceTimestamp, true)}</td>
                   <td class="px-4 py-3 whitespace-nowrap">
                     {#if row.latestCheck}
-                      {@const queryMeta = getBalanceStatusMeta(row.latestCheck.status)}
+                      {@const queryMeta = getBalanceStatusMeta(row.latestCheck.display_status || row.latestCheck.status)}
                       <span class="text-xs text-stone-600">{queryMeta.label}</span>
                       <span class="ml-1 text-[10px] uppercase text-stone-400">{row.latestCheck.method || ''}</span>
                     {:else}
@@ -476,7 +476,7 @@
             </tr></thead>
             <tbody class="divide-y divide-stone-50">
               {#each sortedChecks as check}
-                {@const queryMeta = getBalanceStatusMeta(check.status)}
+                {@const queryMeta = getBalanceStatusMeta(check.display_status || check.status)}
                 <tr class="hover:bg-stone-50">
                   <td class="px-4 py-3 font-mono text-xs text-stone-500 whitespace-nowrap">{formatTime(getBalanceTimestamp(check))}</td>
                   <td class="px-4 py-3 font-mono font-semibold text-stone-800 whitespace-nowrap">{formatCardNumber(check.sim_index)} <span class="ml-1 text-xs font-normal text-stone-500">{check.sim_number || check.sim_iccid}</span></td>
@@ -492,7 +492,7 @@
         </div>
         <div class="lg:hidden divide-y divide-stone-100">
           {#each sortedChecks as check}
-            {@const queryMeta = getBalanceStatusMeta(check.status)}
+            {@const queryMeta = getBalanceStatusMeta(check.display_status || check.status)}
             <button type="button" onclick={() => onOpenBalance?.(check)} class="w-full px-4 py-3 text-left active:bg-stone-50">
               <span class="flex items-center gap-2">
                 <span class="font-mono font-bold text-stone-800">{formatCardNumber(check.sim_index)}</span>
