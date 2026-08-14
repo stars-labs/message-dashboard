@@ -1,8 +1,8 @@
 //! SMS assembler - buffers multipart SMS messages and assembles them when complete
 
+use crate::at_modem::AtSms;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
-use crate::at_modem::AtSms;
 use tracing::{debug, warn};
 
 /// Key to identify messages that belong together
@@ -20,14 +20,14 @@ struct MessagePart {
     part_number: u8,
     content: String,
     timestamp: String,
-    index: u32,  // SIM storage index for deletion
+    index: u32, // SIM storage index for deletion
     received_at: Instant,
 }
 
 /// Assembled complete message
 #[derive(Debug, Clone)]
 pub struct AssembledMessage {
-    pub content: String,       // Combined text from all parts
+    pub content: String, // Combined text from all parts
     pub sender: String,
     pub timestamp: String,     // Use first part's timestamp
     pub sms_indices: Vec<u32>, // All SIM indices for deletion
@@ -46,7 +46,7 @@ impl SmsAssembler {
     pub fn new() -> Self {
         SmsAssembler {
             buffer: HashMap::new(),
-            timeout: Duration::from_secs(300),  // 5 minutes
+            timeout: Duration::from_secs(300), // 5 minutes
         }
     }
 
@@ -106,14 +106,17 @@ impl SmsAssembler {
             // All parts received - assemble!
             debug!(
                 "All {} parts received for ref_id={} - assembling",
-                parts.len(), concat_info.ref_id
+                parts.len(),
+                concat_info.ref_id
             );
             return self.assemble_and_remove(&key);
         }
 
         debug!(
             "Waiting for more parts: {}/{} received for ref_id={}",
-            parts.len(), concat_info.total_parts, concat_info.ref_id
+            parts.len(),
+            concat_info.total_parts,
+            concat_info.ref_id
         );
         None
     }
@@ -127,7 +130,8 @@ impl SmsAssembler {
         sorted_parts.sort_by_key(|p| p.part_number);
 
         // Combine content
-        let content = sorted_parts.iter()
+        let content = sorted_parts
+            .iter()
             .map(|p| p.content.as_str())
             .collect::<Vec<_>>()
             .join("");
@@ -139,7 +143,9 @@ impl SmsAssembler {
 
         debug!(
             "Assembled multipart message: {} parts, {} chars, indices: {:?}",
-            sorted_parts.len(), content.len(), sms_indices
+            sorted_parts.len(),
+            content.len(),
+            sms_indices
         );
 
         Some(AssembledMessage {

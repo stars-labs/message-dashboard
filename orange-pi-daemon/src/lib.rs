@@ -16,7 +16,6 @@ pub mod worker_pool;
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::retry_manager::RetryManager;
     use crate::signal_cache::SignalCache;
     use crate::sync_manager::{SyncManager, SyncMode};
@@ -169,7 +168,10 @@ mod tests {
         assert_eq!(report.equipment_id, "IMEI123456789");
         assert_eq!(report.status, "active");
         assert_eq!(report.signal_percent, Some(75));
-        assert_eq!(report.detected_iccid, Some("89860121750097854321".to_string()));
+        assert_eq!(
+            report.detected_iccid,
+            Some("89860121750097854321".to_string())
+        );
 
         // Test serialization — modem_reports format
         let json = serde_json::to_value(&report).unwrap();
@@ -183,7 +185,10 @@ mod tests {
         assert_eq!(parsed.usb_path, Some("1-1.4.2.2.2".to_string()));
 
         // usb_path = None must be omitted from the wire format
-        let report_no_path = ModemReport { usb_path: None, ..report };
+        let report_no_path = ModemReport {
+            usb_path: None,
+            ..report
+        };
         let json_no_path = serde_json::to_value(&report_no_path).unwrap();
         assert!(json_no_path.get("usb_path").is_none());
     }

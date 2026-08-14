@@ -41,9 +41,9 @@ pub struct AtSms {
 /// Concatenation info from PDU User Data Header (UDH)
 #[derive(Debug, Clone)]
 pub struct ConcatInfo {
-    pub ref_id: u8,       // Reference ID (groups parts together)
-    pub total_parts: u8,  // Total number of parts
-    pub part_number: u8,  // This part's number (1-indexed)
+    pub ref_id: u8,      // Reference ID (groups parts together)
+    pub total_parts: u8, // Total number of parts
+    pub part_number: u8, // This part's number (1-indexed)
 }
 
 /// Modem device info from AT commands
@@ -160,7 +160,12 @@ impl AtModemManager {
             .into_iter()
             .map(|(dev, mut nums)| {
                 nums.sort_unstable();
-                (dev, nums.into_iter().map(|n| format!("/dev/ttyUSB{}", n)).collect())
+                (
+                    dev,
+                    nums.into_iter()
+                        .map(|n| format!("/dev/ttyUSB{}", n))
+                        .collect(),
+                )
             })
             .collect())
     }
@@ -332,7 +337,12 @@ impl AtModemManager {
                 Some(parent) if parent.starts_with("/sys") && parent != dir => {
                     dir = parent.to_path_buf();
                 }
-                _ => return Err(anyhow!("No USB device (busnum/devnum) found above {}", port)),
+                _ => {
+                    return Err(anyhow!(
+                        "No USB device (busnum/devnum) found above {}",
+                        port
+                    ))
+                }
             }
         }
     }
@@ -391,7 +401,10 @@ impl AtModemManager {
             tokio::task::spawn_blocking(move || Self::send_at_sync(&port_path, &cmd, timeout));
         match tokio::time::timeout(timeout + Duration::from_secs(2), handle).await {
             Ok(joined) => joined?,
-            Err(_) => Err(anyhow!("AT command timed out (port may be wedged): {}", port)),
+            Err(_) => Err(anyhow!(
+                "AT command timed out (port may be wedged): {}",
+                port
+            )),
         }
     }
 
@@ -680,13 +693,12 @@ impl AtModemManager {
         let creg = self.send_at_command(port, "AT+CREG?", self.timeout).await?;
         let creg = Self::parse_creg(&creg);
 
-        let cgreg = self.send_at_command(port, "AT+CGREG?", self.timeout).await?;
+        let cgreg = self
+            .send_at_command(port, "AT+CGREG?", self.timeout)
+            .await?;
         let gregs = Self::parse_cgreg(&cgreg);
 
-        Ok(NetworkRegStatus {
-            creg,
-            cgreg: gregs,
-        })
+        Ok(NetworkRegStatus { creg, cgreg: gregs })
     }
 
     fn parse_creg(response: &str) -> (u32, u32) {
@@ -723,7 +735,9 @@ impl AtModemManager {
 
     /// Diagnostic: Get IMS status
     pub async fn get_ims_status(&self, port: &str) -> Result<ImsStatus> {
-        let response = self.send_at_command(port, "AT+QCFG=\"ims\"", self.timeout).await?;
+        let response = self
+            .send_at_command(port, "AT+QCFG=\"ims\"", self.timeout)
+            .await?;
 
         let mut ims_enabled = false;
         let mut ims_reg_status = String::new();
@@ -737,7 +751,9 @@ impl AtModemManager {
             }
         }
 
-        let reg_response = self.send_at_command(port, "AT+QIREGAPP?", self.timeout).await?;
+        let reg_response = self
+            .send_at_command(port, "AT+QIREGAPP?", self.timeout)
+            .await?;
         for line in reg_response.lines() {
             if line.contains("+QIREGAPP:") {
                 ims_reg_status = line.to_string();
@@ -786,7 +802,11 @@ impl AtModemManager {
         }
 
         let storage_response = self.send_at_command(port, "AT+CPMS?", self.timeout).await?;
-        let storage = storage_response.lines().find(|l| l.contains("+CPMS:")).map(|s| s.to_string()).unwrap_or_default();
+        let storage = storage_response
+            .lines()
+            .find(|l| l.contains("+CPMS:"))
+            .map(|s| s.to_string())
+            .unwrap_or_default();
 
         Ok(SmsConfig {
             mode: mode.to_string(),
@@ -880,9 +900,16 @@ impl AtModemManager {
                 Ok(messages)
             }
             Err(e) => {
-                warn!("PDU mode failed on {}: {} - falling back to text mode", port, e);
+                warn!(
+                    "PDU mode failed on {}: {} - falling back to text mode",
+                    port, e
+                );
                 let messages = self.list_sms_text_mode(port).await?;
-                debug!("Text mode fallback: got {} messages from {}", messages.len(), port);
+                debug!(
+                    "Text mode fallback: got {} messages from {}",
+                    messages.len(),
+                    port
+                );
                 Ok(messages)
             }
         }
@@ -980,7 +1007,10 @@ impl AtModemManager {
                 debug!("Text mode: UCS2 charset set successfully on {}", port);
             }
             Err(e) => {
-                warn!("Text mode: Failed to set UCS2 charset on {}: {} - using default", port, e);
+                warn!(
+                    "Text mode: Failed to set UCS2 charset on {}: {} - using default",
+                    port, e
+                );
             }
         }
 
@@ -1013,7 +1043,7 @@ impl AtModemManager {
                                 sender: sms.1,
                                 timestamp: sms.2,
                                 text,
-                                concat_info: None,  // Text mode doesn't provide concatenation info
+                                concat_info: None, // Text mode doesn't provide concatenation info
                             });
                         }
                     }
@@ -1049,8 +1079,7 @@ impl AtModemManager {
                     i += 1;
                     if i < lines.len() {
                         let pdu_hex = lines[i].trim();
-                        if !pdu_hex.is_empty() && pdu_hex != "OK" && !pdu_hex.contains("+CMGL:")
-                        {
+                        if !pdu_hex.is_empty() && pdu_hex != "OK" && !pdu_hex.contains("+CMGL:") {
                             // Parse the PDU and extract message
                             if let Ok(sms) = Self::parse_pdu_sms(index, pdu_hex) {
                                 messages.push(sms);
@@ -1343,22 +1372,22 @@ impl AtModemManager {
     /// GSM 03.38 default alphabet (7-bit) → Unicode mapping.
     /// Positions that match ASCII are identical; others map to GSM-specific chars.
     const GSM_DEFAULT_ALPHABET: [char; 128] = [
-        '@',  '£',  '$',  '¥',  'è',  'é',  'ù',  'ì',  // 0x00-0x07
-        'ò',  'Ç',  '\n', 'Ø',  'ø',  '\r', 'Å',  'å',  // 0x08-0x0F
-        'Δ',  '_',  'Φ',  'Γ',  'Λ',  'Ω',  'Π',  'Ψ',  // 0x10-0x17
-        'Σ',  'Θ',  'Ξ',  ' ',  'Æ',  'æ',  'ß',  'É',  // 0x18-0x1F (0x1B=ESC→space fallback)
-        ' ',  '!',  '"',  '#',  '¤',  '%',  '&',  '\'', // 0x20-0x27
-        '(',  ')',  '*',  '+',  ',',  '-',  '.',  '/',   // 0x28-0x2F
-        '0',  '1',  '2',  '3',  '4',  '5',  '6',  '7',  // 0x30-0x37
-        '8',  '9',  ':',  ';',  '<',  '=',  '>',  '?',  // 0x38-0x3F
-        '¡',  'A',  'B',  'C',  'D',  'E',  'F',  'G',  // 0x40-0x47
-        'H',  'I',  'J',  'K',  'L',  'M',  'N',  'O',  // 0x48-0x4F
-        'P',  'Q',  'R',  'S',  'T',  'U',  'V',  'W',  // 0x50-0x57
-        'X',  'Y',  'Z',  'Ä',  'Ö',  'Ñ',  'Ü',  '§',  // 0x58-0x5F
-        '¿',  'a',  'b',  'c',  'd',  'e',  'f',  'g',  // 0x60-0x67
-        'h',  'i',  'j',  'k',  'l',  'm',  'n',  'o',  // 0x68-0x6F
-        'p',  'q',  'r',  's',  't',  'u',  'v',  'w',  // 0x70-0x77
-        'x',  'y',  'z',  'ä',  'ö',  'ñ',  'ü',  'à',  // 0x78-0x7F
+        '@', '£', '$', '¥', 'è', 'é', 'ù', 'ì', // 0x00-0x07
+        'ò', 'Ç', '\n', 'Ø', 'ø', '\r', 'Å', 'å', // 0x08-0x0F
+        'Δ', '_', 'Φ', 'Γ', 'Λ', 'Ω', 'Π', 'Ψ', // 0x10-0x17
+        'Σ', 'Θ', 'Ξ', ' ', 'Æ', 'æ', 'ß', 'É', // 0x18-0x1F (0x1B=ESC→space fallback)
+        ' ', '!', '"', '#', '¤', '%', '&', '\'', // 0x20-0x27
+        '(', ')', '*', '+', ',', '-', '.', '/', // 0x28-0x2F
+        '0', '1', '2', '3', '4', '5', '6', '7', // 0x30-0x37
+        '8', '9', ':', ';', '<', '=', '>', '?', // 0x38-0x3F
+        '¡', 'A', 'B', 'C', 'D', 'E', 'F', 'G', // 0x40-0x47
+        'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', // 0x48-0x4F
+        'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', // 0x50-0x57
+        'X', 'Y', 'Z', 'Ä', 'Ö', 'Ñ', 'Ü', '§', // 0x58-0x5F
+        '¿', 'a', 'b', 'c', 'd', 'e', 'f', 'g', // 0x60-0x67
+        'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', // 0x68-0x6F
+        'p', 'q', 'r', 's', 't', 'u', 'v', 'w', // 0x70-0x77
+        'x', 'y', 'z', 'ä', 'ö', 'ñ', 'ü', 'à', // 0x78-0x7F
     ];
 
     /// GSM 03.38 extension table (reached via ESC 0x1B prefix).
@@ -1567,7 +1596,9 @@ impl AtModemManager {
 
             // Parse local time and convert to UTC using chrono
             let local_str = format!("{}-{}-{}T{}", year, month, day, time_clean);
-            if let Ok(naive) = chrono::NaiveDateTime::parse_from_str(&local_str, "%Y-%m-%dT%H:%M:%S") {
+            if let Ok(naive) =
+                chrono::NaiveDateTime::parse_from_str(&local_str, "%Y-%m-%dT%H:%M:%S")
+            {
                 let utc = naive - chrono::Duration::minutes(offset_minutes as i64);
                 return format!("{}Z", utc.format("%Y-%m-%dT%H:%M:%S%.3f"));
             }
@@ -1576,7 +1607,10 @@ impl AtModemManager {
             let tz_hours = offset_minutes.abs() / 60;
             let tz_mins = offset_minutes.abs() % 60;
             let sign = if offset_minutes >= 0 { '+' } else { '-' };
-            return format!("{}-{}-{}T{}{}{:02}:{:02}", year, month, day, time_clean, sign, tz_hours, tz_mins);
+            return format!(
+                "{}-{}-{}T{}{}{:02}:{:02}",
+                year, month, day, time_clean, sign, tz_hours, tz_mins
+            );
         }
 
         chrono::Utc::now()
@@ -1900,7 +1934,8 @@ mod tests {
         assert!(AtModemManager::validate_recipient("6512345678").is_ok());
         assert!(AtModemManager::validate_recipient("+861380013800").is_ok());
         assert!(AtModemManager::validate_recipient("123456").is_ok()); // 6 digits, minimum
-        assert!(AtModemManager::validate_recipient("+123456789012345").is_ok()); // 15, maximum
+        assert!(AtModemManager::validate_recipient("+123456789012345").is_ok());
+        // 15, maximum
     }
 
     #[test]
@@ -2232,7 +2267,7 @@ mod tests {
             0x90, 0x64, 0x36, 0x1B, 0x0D, // "Hello" with 1 fill bit offset
         ];
         let result = AtModemManager::decode_pdu_7bit(&bytes, 5, 5); // udhl=5
-        // With fill bit, result should still be "Hello" (or close)
+                                                                    // With fill bit, result should still be "Hello" (or close)
         assert!(result.len() >= 4); // At least most of "Hello"
     }
 
@@ -2241,8 +2276,8 @@ mod tests {
         // Longer 7-bit message to test boundary conditions
         // "This is a test message" (22 chars) encoded in 7-bit GSM
         let bytes = vec![
-            0x54, 0x74, 0x7A, 0x0E, 0x4A, 0xCF, 0x41, 0x61, 0x10, 0xBD, 0x3C, 0x07, 0xD9,
-            0xDF, 0x73, 0x90, 0xFB, 0x0D, 0x9A, 0x03,
+            0x54, 0x74, 0x7A, 0x0E, 0x4A, 0xCF, 0x41, 0x61, 0x10, 0xBD, 0x3C, 0x07, 0xD9, 0xDF,
+            0x73, 0x90, 0xFB, 0x0D, 0x9A, 0x03,
         ];
         let result = AtModemManager::decode_pdu_7bit(&bytes, 22, 0);
         assert!(result.len() >= 20); // Should decode most of the message
@@ -2455,7 +2490,10 @@ mod tests {
 
     #[test]
     fn test_usbfs_node_path_zero_pads() {
-        assert_eq!(AtModemManager::usbfs_node_path(3, 7), "/dev/bus/usb/003/007");
+        assert_eq!(
+            AtModemManager::usbfs_node_path(3, 7),
+            "/dev/bus/usb/003/007"
+        );
         assert_eq!(
             AtModemManager::usbfs_node_path(1, 120),
             "/dev/bus/usb/001/120"

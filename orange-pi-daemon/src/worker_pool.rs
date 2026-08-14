@@ -24,7 +24,7 @@ impl Default for WorkerPoolConfig {
     fn default() -> Self {
         Self {
             num_workers: 16, // Higher concurrency for 100+ modems (I/O bound)
-            batch_size: 24, // Larger batches to reduce loop iterations
+            batch_size: 24,  // Larger batches to reduce loop iterations
             modem_timeout: Duration::from_secs(12), // Faster failure detection to avoid backlog
         }
     }
@@ -250,10 +250,7 @@ impl WorkerPool {
         debug!("Processing modem {}", modem_id);
 
         // Get ICCID (may fail — that's ok, IMEI is the gate now)
-        let iccid = modem_manager
-            .get_iccid(&modem_id)
-            .await
-            .unwrap_or(None);
+        let iccid = modem_manager.get_iccid(&modem_id).await.unwrap_or(None);
 
         // Get device details — IMEI is the gate
         let device_details = modem_manager
@@ -306,10 +303,7 @@ impl WorkerPool {
                 }
             };
 
-            let msgs: Vec<Message> = msgs_with_paths
-                .iter()
-                .map(|m| m.message.clone())
-                .collect();
+            let msgs: Vec<Message> = msgs_with_paths.iter().map(|m| m.message.clone()).collect();
 
             (phone_number, msgs, msgs_with_paths)
         } else {

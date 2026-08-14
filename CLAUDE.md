@@ -69,6 +69,16 @@ against it looks like it works. **Use `detected_iccid`.**
 | `sql/` | DB maintenance queries | SQL |
 | `docs/` | Documentation | Markdown |
 
+## Active Multi-Week Plans
+
+- [SMS hardware storage safety](docs/sms-hardware-storage-safety-plan.md) — staged
+  `ME`/`SM` capacity monitoring, delete-retry safety, multipart draining, rollout
+  gates, and weekly status. Stability takes priority; no behavior-changing stage
+  may be enabled without its recorded approval.
+- [SIM balance queries](docs/sim-balance-query-plan.md) — carrier validation and
+  controlled rollout. Automated balance queries depend on the hardware-storage
+  safety gates above.
+
 ## Commands
 ```bash
 # Local dashboard (run from the repo root; direnv loads the flake dev shell)
@@ -93,7 +103,7 @@ bunx wrangler tail sms-dashboard --format pretty       # Live API logs
 
 # Rust daemon
 cd orange-pi-daemon && cargo build --release
-cargo test                                            # Run unit tests (61 tests)
+check-daemon                                          # Required rustfmt check + all Rust tests
 RUST_LOG=debug cargo run
 
 # NixOS deploy

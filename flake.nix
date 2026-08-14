@@ -130,11 +130,21 @@
               lockFile = ./orange-pi-daemon/Cargo.lock;
             };
 
-            nativeBuildInputs = with pkgs; [ pkg-config ];
+            nativeBuildInputs = with pkgs; [
+              pkg-config
+              rustfmt
+            ];
             buildInputs = with pkgs; [
               openssl
               dbus # Required for native D-Bus support
             ];
+
+            # Formatting is a deployment gate, not an optional developer check.
+            # A NixOS daemon build must never proceed to tests or packaging with
+            # an unformatted Rust source tree.
+            preCheck = ''
+              cargo fmt --all --check
+            '';
 
             # Post-install: create symlink from Rust binary name to expected name
             postInstall = ''
@@ -158,6 +168,21 @@
 
           # Alias for backward compatibility
           orange-pi-daemon-rust = sms-daemon;
+
+          # One local entry point for the same Rust validation required by Nix.
+          check-daemon = pkgs.writeShellApplication {
+            name = "check-daemon";
+            runtimeInputs = with pkgs; [
+              cargo
+              git
+              rustfmt
+            ];
+            text = ''
+              cd "$(git rev-parse --show-toplevel)/orange-pi-daemon"
+              cargo fmt --all --check
+              cargo test
+            '';
+          };
 
           # Dev convenience commands. These land on $PATH inside the devShell (via
           # direnv `use flake`), so they work from anywhere in the repo tree.
@@ -409,6 +434,22 @@
             daemon-rust = orange-pi-daemon-rust;
           };
 
+          checks.daemon-format =
+            pkgs.runCommand "daemon-format-check"
+              {
+                nativeBuildInputs = with pkgs; [
+                  cargo
+                  rustfmt
+                ];
+              }
+              ''
+                cp -R ${./orange-pi-daemon} source
+                chmod -R u+w source
+                cd source
+                cargo fmt --all --check
+                touch "$out"
+              '';
+
           devShells = {
             default = pkgs.mkShell {
               packages = [
@@ -416,6 +457,7 @@
                 dev-api
                 dev-frontend
                 dev-server
+                check-daemon
               ]
               ++ (with pkgs; [
                 # Nix tools
@@ -456,6 +498,7 @@
                 echo "  • dev-frontend  — Vite dev server on :8080"
                 echo "  • dev-api       — Wrangler + Auth0 secrets via SOPS on :8787"
                 echo "  • dev-server    — restart/stop/status the unique :8080 + :8787 pair"
+                echo "  • check-daemon  — required Rust format check + full test suite"
                 echo ""
 
                 # Ensure Ansible finds collections installed by ansible-galaxy (SOPS, general)

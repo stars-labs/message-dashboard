@@ -103,8 +103,16 @@ fn main() -> Result<()> {
                 }
 
                 if let Some(net) = &h.network_reg {
-                    println!("  CREG (CS): stat={} -> {}", net.creg.1, parse_reg_status(net.creg.1));
-                    println!("  CGREG (PS): stat={} -> {}", net.cgreg.1, parse_reg_status(net.cgreg.1));
+                    println!(
+                        "  CREG (CS): stat={} -> {}",
+                        net.creg.1,
+                        parse_reg_status(net.creg.1)
+                    );
+                    println!(
+                        "  CGREG (PS): stat={} -> {}",
+                        net.cgreg.1,
+                        parse_reg_status(net.cgreg.1)
+                    );
 
                     if net.creg.1 != 1 && net.creg.1 != 5 {
                         println!("  [WARNING] Not registered to network! SMS will not work.");
@@ -211,7 +219,9 @@ fn main() -> Result<()> {
                 println!("Troubleshooting steps:");
                 println!("  1. Check if port exists: ls -la {}", port);
                 println!("  2. Check permissions: ls -la /dev/ttyUSB*");
-                println!("  3. Check if ModemManager is blocking: sudo systemctl status ModemManager");
+                println!(
+                    "  3. Check if ModemManager is blocking: sudo systemctl status ModemManager"
+                );
                 println!("  4. Try: sudo chmod 666 {}", port);
             }
         }

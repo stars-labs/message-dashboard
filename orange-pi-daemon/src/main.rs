@@ -240,8 +240,7 @@ async fn main() -> Result<()> {
 
     // Shared buffer: Task 1 (modem reader) writes latest ModemReport results here,
     // Task 3 (device sync) reads from it. This avoids two pools fighting over serial ports.
-    let latest_devices: Arc<RwLock<Vec<ModemReport>>> =
-        Arc::new(RwLock::new(Vec::new()));
+    let latest_devices: Arc<RwLock<Vec<ModemReport>>> = Arc::new(RwLock::new(Vec::new()));
     let health_tracker = Arc::new(RwLock::new(HealthTracker::new(
         session_id.clone(),
         env!("CARGO_PKG_VERSION").to_string(),
@@ -644,9 +643,7 @@ async fn main() -> Result<()> {
     let sender_health = health_tracker.clone();
     let sender_modem_cache: HashMap<String, String> = valid_modems
         .iter()
-        .filter_map(|(modem_id, iccid)| {
-            iccid.as_ref().map(|i| (i.clone(), modem_id.clone()))
-        })
+        .filter_map(|(modem_id, iccid)| iccid.as_ref().map(|i| (i.clone(), modem_id.clone())))
         .collect();
 
     tokio::spawn(async move {

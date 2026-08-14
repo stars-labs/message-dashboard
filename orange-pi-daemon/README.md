@@ -71,8 +71,13 @@ cargo build --release
 nix build .#sms-daemon
 
 # Run tests (24 tests)
+cargo fmt --all --check
 cargo test
 ```
+
+From anywhere in the repository, `check-daemon` runs both commands in that
+order. Formatting is also enforced by `nix flake check` and by the daemon's Nix
+build before tests and packaging.
 
 Release profile: `opt-level=3`, LTO, single codegen unit, stripped symbols.
 

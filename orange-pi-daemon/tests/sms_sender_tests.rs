@@ -236,7 +236,7 @@ fn test_pending_sms_with_special_characters() {
         "msg_001",
         "iccid_001",
         "+1234567890",
-        "你好 Hello 🌍 'quotes\" <tags>"
+        "你好 Hello 🌍 'quotes\" <tags>",
     );
 
     assert!(sms.content.contains("你好"));
@@ -262,10 +262,7 @@ async fn test_modem_cache_large_scale() {
     // Create cache with 100+ modems (simulating production)
     let mut cache = HashMap::new();
     for i in 0..100 {
-        cache.insert(
-            format!("iccid_{:03}", i),
-            format!("modem_{}", i)
-        );
+        cache.insert(format!("iccid_{:03}", i), format!("modem_{}", i));
     }
 
     sender.update_modem_cache(cache);
@@ -285,8 +282,17 @@ async fn test_find_modem_multiple_lookups() {
     sender.update_modem_cache(cache);
 
     // Perform multiple lookups
-    assert_eq!(sender.find_modem_for_iccid("iccid_001").await, Some("modem_0".to_string()));
-    assert_eq!(sender.find_modem_for_iccid("iccid_002").await, Some("modem_1".to_string()));
-    assert_eq!(sender.find_modem_for_iccid("iccid_003").await, Some("modem_2".to_string()));
+    assert_eq!(
+        sender.find_modem_for_iccid("iccid_001").await,
+        Some("modem_0".to_string())
+    );
+    assert_eq!(
+        sender.find_modem_for_iccid("iccid_002").await,
+        Some("modem_1".to_string())
+    );
+    assert_eq!(
+        sender.find_modem_for_iccid("iccid_003").await,
+        Some("modem_2".to_string())
+    );
     assert_eq!(sender.find_modem_for_iccid("iccid_999").await, None);
 }

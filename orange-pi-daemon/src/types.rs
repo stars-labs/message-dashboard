@@ -56,7 +56,7 @@ pub struct Modem {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub access_tech: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub sim_read_status: Option<String>,  // "ok" or "failed"
+    pub sim_read_status: Option<String>, // "ok" or "failed"
 }
 
 // Normalized SIM data - matches server schema

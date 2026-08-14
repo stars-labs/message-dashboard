@@ -27,10 +27,8 @@ mod tests {
 
     #[test]
     fn test_format_storage_aware_at_sms_path() {
-        let path = ModemManager::format_at_sms_path(&[
-            ("ME".to_string(), 5),
-            ("SM".to_string(), 7),
-        ]);
+        let path =
+            ModemManager::format_at_sms_path(&[("ME".to_string(), 5), ("SM".to_string(), 7)]);
         assert_eq!(path, "at:ME:5,SM:7");
     }
 
@@ -245,7 +243,10 @@ impl ModemManager {
             cache.insert(id, port);
         }
         if reset_recovered > 0 {
-            info!("Recovered {} wedged modem(s) via USB reset", reset_recovered);
+            info!(
+                "Recovered {} wedged modem(s) via USB reset",
+                reset_recovered
+            );
         }
         Ok(added)
     }
@@ -404,7 +405,10 @@ impl ModemManager {
     }
 
     /// Health check for a modem (diagnostic)
-    pub async fn health_check(&self, modem_id: &str) -> Result<Option<crate::at_modem::ModemHealth>> {
+    pub async fn health_check(
+        &self,
+        modem_id: &str,
+    ) -> Result<Option<crate::at_modem::ModemHealth>> {
         match self.mode {
             BackendMode::AtCommand => {
                 let port = self.get_port(modem_id).await;
@@ -433,14 +437,22 @@ impl ModemManager {
 
                 // Group multipart messages by (sender, ref_id, total_parts)
                 // Messages with concat_info are buffered, messages without are returned immediately
-                let mut multipart_groups: HashMap<(String, u8, u8), Vec<crate::at_modem::AtSms>> = HashMap::new();
+                let mut multipart_groups: HashMap<(String, u8, u8), Vec<crate::at_modem::AtSms>> =
+                    HashMap::new();
                 let mut complete_messages: Vec<MessageWithPath> = Vec::new();
 
                 for sms in sms_list {
                     if let Some(ref concat_info) = sms.concat_info {
                         // This is part of a multipart message - buffer it
-                        let key = (sms.sender.clone(), concat_info.ref_id, concat_info.total_parts);
-                        multipart_groups.entry(key).or_insert_with(Vec::new).push(sms);
+                        let key = (
+                            sms.sender.clone(),
+                            concat_info.ref_id,
+                            concat_info.total_parts,
+                        );
+                        multipart_groups
+                            .entry(key)
+                            .or_insert_with(Vec::new)
+                            .push(sms);
                     } else {
                         // Single-part message - convert immediately
                         complete_messages.push(MessageWithPath {
@@ -478,9 +490,12 @@ impl ModemManager {
                     }
 
                     // Check if all parts are now available (including previously buffered ones)
-                    match message_store
-                        .get_segments_with_storage(iccid, &sender, ref_id, total_parts)
-                    {
+                    match message_store.get_segments_with_storage(
+                        iccid,
+                        &sender,
+                        ref_id,
+                        total_parts,
+                    ) {
                         Ok(segments) if segments.len() == total_parts as usize => {
                             // All parts present - assemble!
                             let mut all_parts: Vec<(u8, String, String, String, u32)> = segments;
@@ -523,7 +538,10 @@ impl ModemManager {
                             // Still incomplete - parts buffered in database
                             debug!(
                                 "Buffering multipart message: {}/{} parts for ref_id={} from {}",
-                                segments.len(), total_parts, ref_id, sender
+                                segments.len(),
+                                total_parts,
+                                ref_id,
+                                sender
                             );
                         }
                         Err(e) => {
@@ -532,7 +550,11 @@ impl ModemManager {
                     }
                 }
 
-                debug!("Got {} messages via AT from {} (after multipart assembly)", complete_messages.len(), modem_id);
+                debug!(
+                    "Got {} messages via AT from {} (after multipart assembly)",
+                    complete_messages.len(),
+                    modem_id
+                );
                 Ok(complete_messages)
             }
             BackendMode::DBus => {
@@ -572,7 +594,9 @@ impl ModemManager {
         iccid: &str,
         message_store: &crate::message_store::MessageStore,
     ) -> Result<Vec<Message>> {
-        let messages_with_paths = self.get_new_messages_with_paths(modem_id, iccid, message_store).await?;
+        let messages_with_paths = self
+            .get_new_messages_with_paths(modem_id, iccid, message_store)
+            .await?;
         Ok(messages_with_paths.into_iter().map(|m| m.message).collect())
     }
 
@@ -588,10 +612,7 @@ impl ModemManager {
                         self.at_modem
                             .delete_sms_from_storage(&port, &storage, index)
                             .await?;
-                        debug!(
-                            "Deleted SMS {}:{} via AT from {}",
-                            storage, index, modem_id
-                        );
+                        debug!("Deleted SMS {}:{} via AT from {}", storage, index, modem_id);
                     } else {
                         // Backward compatibility for rows created before storage-aware paths.
                         self.at_modem.delete_sms(&port, index).await?;

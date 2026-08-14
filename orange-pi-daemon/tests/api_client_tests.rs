@@ -98,7 +98,9 @@ async fn test_upload_devices_empty() {
     let sims: Vec<Sim> = vec![];
 
     // Empty upload should succeed immediately (early return)
-    let result = client.upload_devices(&modems, &sims, SyncMode::Full, "test_session").await;
+    let result = client
+        .upload_devices(&modems, &sims, SyncMode::Full, "test_session")
+        .await;
 
     // Should succeed (but not actually make HTTP request)
     assert!(result.is_ok());
@@ -113,7 +115,9 @@ async fn test_upload_devices_signature() {
     let sims = vec![create_test_sim("89860121750097854321")];
 
     // Will fail without real API server, but tests signature
-    let result = client.upload_devices(&modems, &sims, SyncMode::Full, "test_session").await;
+    let result = client
+        .upload_devices(&modems, &sims, SyncMode::Full, "test_session")
+        .await;
 
     // Expected to error (no real server)
     assert!(result.is_err());
@@ -128,7 +132,9 @@ async fn test_upload_devices_incremental_mode() {
     let sims = vec![create_test_sim("89860121750097854321")];
 
     // Test with incremental mode
-    let result = client.upload_devices(&modems, &sims, SyncMode::Incremental, "session_123").await;
+    let result = client
+        .upload_devices(&modems, &sims, SyncMode::Incremental, "session_123")
+        .await;
 
     // Expected to error (no real server)
     assert!(result.is_err());
@@ -174,7 +180,7 @@ async fn test_upload_messages_batch_size() {
     for i in 0..150 {
         messages.push(create_test_message(
             &format!("iccid_{:03}", i),
-            &format!("Message {}", i)
+            &format!("Message {}", i),
         ));
     }
 
@@ -291,7 +297,9 @@ async fn test_upload_devices_only_modems() {
     let modems = vec![create_test_modem("123456")];
     let sims: Vec<Sim> = vec![]; // No SIMs
 
-    let result = client.upload_devices(&modems, &sims, SyncMode::Full, "test").await;
+    let result = client
+        .upload_devices(&modems, &sims, SyncMode::Full, "test")
+        .await;
 
     // Should attempt upload (even with only modems)
     assert!(result.is_err());
@@ -305,7 +313,9 @@ async fn test_upload_devices_only_sims() {
     let modems: Vec<Modem> = vec![]; // No modems
     let sims = vec![create_test_sim("89860121750097854321")];
 
-    let result = client.upload_devices(&modems, &sims, SyncMode::Full, "test").await;
+    let result = client
+        .upload_devices(&modems, &sims, SyncMode::Full, "test")
+        .await;
 
     // Should attempt upload (even with only SIMs)
     assert!(result.is_err());
@@ -325,7 +335,9 @@ async fn test_upload_devices_large_batch() {
         sims.push(create_test_sim(&format!("iccid_{:03}", i)));
     }
 
-    let result = client.upload_devices(&modems, &sims, SyncMode::Full, "test_large").await;
+    let result = client
+        .upload_devices(&modems, &sims, SyncMode::Full, "test_large")
+        .await;
 
     // Should handle large batch (will error without real API)
     assert!(result.is_err());

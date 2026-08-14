@@ -143,9 +143,9 @@ async fn test_get_device_details_signature() {
 
     // Should return Ok(None) or Err
     match result {
-        Ok(None) => {}, // Expected
-        Ok(Some(_)) => {}, // Unlikely without real hardware
-        Err(_) => {}, // Also expected
+        Ok(None) => {}    // Expected
+        Ok(Some(_)) => {} // Unlikely without real hardware
+        Err(_) => {}      // Also expected
     }
 }
 
@@ -157,9 +157,9 @@ async fn test_get_phone_number_signature() {
     let result = manager.get_phone_number("invalid_modem").await;
 
     match result {
-        Ok(None) => {},
-        Ok(Some(_)) => {},
-        Err(_) => {},
+        Ok(None) => {}
+        Ok(Some(_)) => {}
+        Err(_) => {}
     }
 }
 
@@ -171,9 +171,9 @@ async fn test_get_operator_signature() {
     let result = manager.get_operator("invalid_modem").await;
 
     match result {
-        Ok(None) => {},
-        Ok(Some(_)) => {},
-        Err(_) => {},
+        Ok(None) => {}
+        Ok(Some(_)) => {}
+        Err(_) => {}
     }
 }
 
@@ -191,9 +191,9 @@ async fn test_health_check_signature() {
 
     // Should return Ok(Some(health)) or Err
     match result {
-        Ok(Some(_health)) => {}, // AT mode returns health
-        Ok(None) => {}, // D-Bus mode doesn't support health check
-        Err(_) => {}, // Expected error without hardware
+        Ok(Some(_health)) => {} // AT mode returns health
+        Ok(None) => {}          // D-Bus mode doesn't support health check
+        Err(_) => {}            // Expected error without hardware
     }
 }
 
@@ -211,12 +211,14 @@ async fn test_get_new_messages_signature() {
     let store = MessageStore::new(":memory:").unwrap();
 
     // Test with invalid modem
-    let result = manager.get_new_messages("invalid_modem", "test_iccid", &store).await;
+    let result = manager
+        .get_new_messages("invalid_modem", "test_iccid", &store)
+        .await;
 
     // Should return Ok(empty vec) or Err
     match result {
         Ok(messages) => assert!(messages.is_empty() || !messages.is_empty()),
-        Err(_) => {}, // Expected without hardware
+        Err(_) => {} // Expected without hardware
     }
 }
 
@@ -228,11 +230,13 @@ async fn test_get_new_messages_with_paths_signature() {
     use orange_pi_daemon_rust::message_store::MessageStore;
     let store = MessageStore::new(":memory:").unwrap();
 
-    let result = manager.get_new_messages_with_paths("invalid_modem", "test_iccid", &store).await;
+    let result = manager
+        .get_new_messages_with_paths("invalid_modem", "test_iccid", &store)
+        .await;
 
     match result {
         Ok(messages) => assert!(messages.is_empty() || !messages.is_empty()),
-        Err(_) => {},
+        Err(_) => {}
     }
 }
 
@@ -254,7 +258,9 @@ async fn test_send_sms_signature() {
     let manager = ModemManager::new().await;
 
     // Test with invalid modem
-    let result = manager.send_sms("invalid_modem", "+1234567890", "test message").await;
+    let result = manager
+        .send_sms("invalid_modem", "+1234567890", "test message")
+        .await;
 
     // Should error without real hardware
     assert!(result.is_err() || result.is_ok());
@@ -273,7 +279,10 @@ async fn test_modem_manager_clone() {
     let _cloned = manager.clone();
 
     // Both should have same mode
-    assert_eq!(manager.get_backend_mode().await, _cloned.get_backend_mode().await);
+    assert_eq!(
+        manager.get_backend_mode().await,
+        _cloned.get_backend_mode().await
+    );
 }
 
 // ============================================================================
@@ -287,13 +296,9 @@ async fn test_concurrent_mode_access() {
     let manager_clone = manager.clone();
 
     // Access mode from multiple tasks concurrently
-    let handle1 = tokio::spawn(async move {
-        manager_clone.get_backend_mode().await
-    });
+    let handle1 = tokio::spawn(async move { manager_clone.get_backend_mode().await });
 
-    let handle2 = tokio::spawn(async move {
-        manager.get_backend_mode().await
-    });
+    let handle2 = tokio::spawn(async move { manager.get_backend_mode().await });
 
     let mode1 = handle1.await.unwrap();
     let mode2 = handle2.await.unwrap();

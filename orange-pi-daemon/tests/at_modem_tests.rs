@@ -1,6 +1,6 @@
 // Integration tests for public API of at_modem module
 // These tests verify the contract and behavior of public functions
-use orange_pi_daemon_rust::at_modem::{AtModemManager, AtModemInfo, ModemHealth};
+use orange_pi_daemon_rust::at_modem::{AtModemInfo, AtModemManager, ModemHealth};
 
 // ============================================================================
 // Static Helper Function Tests (No I/O)
@@ -41,7 +41,10 @@ fn test_at_modem_manager_new() {
     let manager = AtModemManager::new();
 
     // Basic smoke test - manager should be created without panic
-    assert_eq!(std::mem::size_of_val(&manager), std::mem::size_of::<AtModemManager>());
+    assert_eq!(
+        std::mem::size_of_val(&manager),
+        std::mem::size_of::<AtModemManager>()
+    );
 }
 
 // ============================================================================

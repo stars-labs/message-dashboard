@@ -106,7 +106,9 @@ fn test_get_pending_messages_with_limit() {
             &format!("Message {}", i),
             &format!("2024-01-01T12:00:{:02}.000Z", i),
         );
-        store.store_message(&msg, "modem_0", &format!("at:{}", i)).unwrap();
+        store
+            .store_message(&msg, "modem_0", &format!("at:{}", i))
+            .unwrap();
     }
 
     // Limit to 3
@@ -148,6 +150,46 @@ fn test_mark_uploaded() {
     // Should not appear in pending
     let pending_after = store.get_pending_messages(10).unwrap();
     assert_eq!(pending_after.len(), 0);
+}
+
+#[test]
+fn test_physical_path_becomes_deletable_only_after_upload() {
+    let store = MessageStore::new(":memory:").unwrap();
+    let msg = create_test_message("iccid_001", "Test", "2024-01-01T12:00:00.000Z");
+
+    store.store_message(&msg, "modem_0", "at:ME:17").unwrap();
+    assert!(store.get_deletable_sms().unwrap().is_empty());
+
+    let pending = store.get_pending_messages(10).unwrap();
+    let ids: Vec<i64> = pending.iter().map(|(id, _)| *id).collect();
+    store.mark_uploading(&ids).unwrap();
+    assert!(store.get_deletable_sms().unwrap().is_empty());
+
+    store.mark_uploaded(&ids).unwrap();
+    assert_eq!(
+        store.get_deletable_sms().unwrap(),
+        vec![("modem_0".to_string(), "at:ME:17".to_string())]
+    );
+}
+
+#[test]
+fn test_duplicate_preserves_first_physical_path() {
+    let store = MessageStore::new(":memory:").unwrap();
+    let msg = create_test_message("iccid_001", "Test", "2024-01-01T12:00:00.000Z");
+
+    assert!(store.store_message(&msg, "modem_0", "at:ME:17").unwrap());
+    assert!(!store.store_message(&msg, "modem_0", "at:SM:23").unwrap());
+
+    let pending = store.get_pending_messages(10).unwrap();
+    let ids: Vec<i64> = pending.iter().map(|(id, _)| *id).collect();
+    store.mark_uploading(&ids).unwrap();
+    store.mark_uploaded(&ids).unwrap();
+
+    // The duplicate is not a second durable deletion task in the current schema.
+    assert_eq!(
+        store.get_deletable_sms().unwrap(),
+        vec![("modem_0".to_string(), "at:ME:17".to_string())]
+    );
 }
 
 #[test]
@@ -207,7 +249,7 @@ fn test_store_single_segment() {
         1,  // part_number
         "Part 1 content",
         "2024-01-01T12:00:00.000Z",
-        1,  // sms_index
+        1, // sms_index
     );
 
     assert!(result.is_ok());
@@ -239,14 +281,77 @@ fn test_store_segment_preserves_sms_storage() {
 }
 
 #[test]
+fn test_incomplete_multipart_keeps_each_physical_location() {
+    let store = MessageStore::new(":memory:").unwrap();
+
+    store
+        .store_segment_in_storage(
+            "iccid_001",
+            "+1234567890",
+            42,
+            3,
+            1,
+            "Part 1",
+            "2024-01-01T12:00:00.000Z",
+            "ME",
+            7,
+        )
+        .unwrap();
+    store
+        .store_segment_in_storage(
+            "iccid_001",
+            "+1234567890",
+            42,
+            3,
+            2,
+            "Part 2",
+            "2024-01-01T12:00:01.000Z",
+            "SM",
+            9,
+        )
+        .unwrap();
+
+    let segments = store
+        .get_segments_with_storage("iccid_001", "+1234567890", 42, 3)
+        .unwrap();
+    assert_eq!(segments.len(), 2);
+    assert_eq!((segments[0].3.as_str(), segments[0].4), ("ME", 7));
+    assert_eq!((segments[1].3.as_str(), segments[1].4), ("SM", 9));
+}
+
+#[test]
 fn test_get_segments_incomplete() {
     let store = MessageStore::new(":memory:").unwrap();
 
     // Store parts 1 and 2 (out of 3)
-    store.store_segment("iccid_001", "+1234567890", 42, 3, 1, "Part 1", "2024-01-01T12:00:00.000Z", 1).unwrap();
-    store.store_segment("iccid_001", "+1234567890", 42, 3, 2, "Part 2", "2024-01-01T12:00:00.000Z", 2).unwrap();
+    store
+        .store_segment(
+            "iccid_001",
+            "+1234567890",
+            42,
+            3,
+            1,
+            "Part 1",
+            "2024-01-01T12:00:00.000Z",
+            1,
+        )
+        .unwrap();
+    store
+        .store_segment(
+            "iccid_001",
+            "+1234567890",
+            42,
+            3,
+            2,
+            "Part 2",
+            "2024-01-01T12:00:00.000Z",
+            2,
+        )
+        .unwrap();
 
-    let segments = store.get_segments("iccid_001", "+1234567890", 42, 3).unwrap();
+    let segments = store
+        .get_segments("iccid_001", "+1234567890", 42, 3)
+        .unwrap();
     assert_eq!(segments.len(), 2); // Still incomplete
 }
 
@@ -255,11 +360,46 @@ fn test_get_segments_complete() {
     let store = MessageStore::new(":memory:").unwrap();
 
     // Store all 3 parts
-    store.store_segment("iccid_001", "+1234567890", 42, 3, 1, "Part 1", "2024-01-01T12:00:00.000Z", 1).unwrap();
-    store.store_segment("iccid_001", "+1234567890", 42, 3, 2, "Part 2", "2024-01-01T12:00:00.000Z", 2).unwrap();
-    store.store_segment("iccid_001", "+1234567890", 42, 3, 3, "Part 3", "2024-01-01T12:00:00.000Z", 3).unwrap();
+    store
+        .store_segment(
+            "iccid_001",
+            "+1234567890",
+            42,
+            3,
+            1,
+            "Part 1",
+            "2024-01-01T12:00:00.000Z",
+            1,
+        )
+        .unwrap();
+    store
+        .store_segment(
+            "iccid_001",
+            "+1234567890",
+            42,
+            3,
+            2,
+            "Part 2",
+            "2024-01-01T12:00:00.000Z",
+            2,
+        )
+        .unwrap();
+    store
+        .store_segment(
+            "iccid_001",
+            "+1234567890",
+            42,
+            3,
+            3,
+            "Part 3",
+            "2024-01-01T12:00:00.000Z",
+            3,
+        )
+        .unwrap();
 
-    let segments = store.get_segments("iccid_001", "+1234567890", 42, 3).unwrap();
+    let segments = store
+        .get_segments("iccid_001", "+1234567890", 42, 3)
+        .unwrap();
     assert_eq!(segments.len(), 3); // Complete
 
     // Verify parts are in correct order
@@ -273,14 +413,52 @@ fn test_segment_content_assembly() {
     let store = MessageStore::new(":memory:").unwrap();
 
     // Store parts out of order
-    store.store_segment("iccid_001", "+1234567890", 42, 3, 3, "World!", "2024-01-01T12:00:00.000Z", 3).unwrap();
-    store.store_segment("iccid_001", "+1234567890", 42, 3, 1, "Hello ", "2024-01-01T12:00:00.000Z", 1).unwrap();
-    store.store_segment("iccid_001", "+1234567890", 42, 3, 2, "Rust ", "2024-01-01T12:00:00.000Z", 2).unwrap();
+    store
+        .store_segment(
+            "iccid_001",
+            "+1234567890",
+            42,
+            3,
+            3,
+            "World!",
+            "2024-01-01T12:00:00.000Z",
+            3,
+        )
+        .unwrap();
+    store
+        .store_segment(
+            "iccid_001",
+            "+1234567890",
+            42,
+            3,
+            1,
+            "Hello ",
+            "2024-01-01T12:00:00.000Z",
+            1,
+        )
+        .unwrap();
+    store
+        .store_segment(
+            "iccid_001",
+            "+1234567890",
+            42,
+            3,
+            2,
+            "Rust ",
+            "2024-01-01T12:00:00.000Z",
+            2,
+        )
+        .unwrap();
 
-    let mut segments = store.get_segments("iccid_001", "+1234567890", 42, 3).unwrap();
+    let mut segments = store
+        .get_segments("iccid_001", "+1234567890", 42, 3)
+        .unwrap();
     segments.sort_by_key(|(part_num, _, _, _)| *part_num);
 
-    let combined: String = segments.iter().map(|(_, content, _, _)| content.as_str()).collect();
+    let combined: String = segments
+        .iter()
+        .map(|(_, content, _, _)| content.as_str())
+        .collect();
     assert_eq!(combined, "Hello Rust World!");
 }
 
@@ -289,15 +467,39 @@ fn test_delete_segments_after_assembly() {
     let store = MessageStore::new(":memory:").unwrap();
 
     // Store segments
-    store.store_segment("iccid_001", "+1234567890", 42, 2, 1, "Part 1", "2024-01-01T12:00:00.000Z", 1).unwrap();
-    store.store_segment("iccid_001", "+1234567890", 42, 2, 2, "Part 2", "2024-01-01T12:00:00.000Z", 2).unwrap();
+    store
+        .store_segment(
+            "iccid_001",
+            "+1234567890",
+            42,
+            2,
+            1,
+            "Part 1",
+            "2024-01-01T12:00:00.000Z",
+            1,
+        )
+        .unwrap();
+    store
+        .store_segment(
+            "iccid_001",
+            "+1234567890",
+            42,
+            2,
+            2,
+            "Part 2",
+            "2024-01-01T12:00:00.000Z",
+            2,
+        )
+        .unwrap();
 
     // Delete segments
     let deleted = store.delete_segments("iccid_001", 42).unwrap();
     assert_eq!(deleted, 2);
 
     // Verify deleted
-    let segments = store.get_segments("iccid_001", "+1234567890", 42, 2).unwrap();
+    let segments = store
+        .get_segments("iccid_001", "+1234567890", 42, 2)
+        .unwrap();
     assert_eq!(segments.len(), 0);
 }
 
@@ -306,16 +508,64 @@ fn test_multiple_multipart_messages_same_sender() {
     let store = MessageStore::new(":memory:").unwrap();
 
     // Message 1 (ref_id=10)
-    store.store_segment("iccid_001", "+1234567890", 10, 2, 1, "Msg1 Part1", "2024-01-01T12:00:00.000Z", 1).unwrap();
-    store.store_segment("iccid_001", "+1234567890", 10, 2, 2, "Msg1 Part2", "2024-01-01T12:00:00.000Z", 2).unwrap();
+    store
+        .store_segment(
+            "iccid_001",
+            "+1234567890",
+            10,
+            2,
+            1,
+            "Msg1 Part1",
+            "2024-01-01T12:00:00.000Z",
+            1,
+        )
+        .unwrap();
+    store
+        .store_segment(
+            "iccid_001",
+            "+1234567890",
+            10,
+            2,
+            2,
+            "Msg1 Part2",
+            "2024-01-01T12:00:00.000Z",
+            2,
+        )
+        .unwrap();
 
     // Message 2 (ref_id=20)
-    store.store_segment("iccid_001", "+1234567890", 20, 2, 1, "Msg2 Part1", "2024-01-01T12:01:00.000Z", 3).unwrap();
-    store.store_segment("iccid_001", "+1234567890", 20, 2, 2, "Msg2 Part2", "2024-01-01T12:01:00.000Z", 4).unwrap();
+    store
+        .store_segment(
+            "iccid_001",
+            "+1234567890",
+            20,
+            2,
+            1,
+            "Msg2 Part1",
+            "2024-01-01T12:01:00.000Z",
+            3,
+        )
+        .unwrap();
+    store
+        .store_segment(
+            "iccid_001",
+            "+1234567890",
+            20,
+            2,
+            2,
+            "Msg2 Part2",
+            "2024-01-01T12:01:00.000Z",
+            4,
+        )
+        .unwrap();
 
     // Retrieve separately
-    let msg1 = store.get_segments("iccid_001", "+1234567890", 10, 2).unwrap();
-    let msg2 = store.get_segments("iccid_001", "+1234567890", 20, 2).unwrap();
+    let msg1 = store
+        .get_segments("iccid_001", "+1234567890", 10, 2)
+        .unwrap();
+    let msg2 = store
+        .get_segments("iccid_001", "+1234567890", 20, 2)
+        .unwrap();
 
     assert_eq!(msg1.len(), 2);
     assert_eq!(msg2.len(), 2);
@@ -332,7 +582,18 @@ fn test_cleanup_old_segments() {
     let store = MessageStore::new(":memory:").unwrap();
 
     // Store some segments
-    store.store_segment("iccid_001", "+1234567890", 42, 2, 1, "Part 1", "2024-01-01T12:00:00.000Z", 1).unwrap();
+    store
+        .store_segment(
+            "iccid_001",
+            "+1234567890",
+            42,
+            2,
+            1,
+            "Part 1",
+            "2024-01-01T12:00:00.000Z",
+            1,
+        )
+        .unwrap();
 
     // Clean up segments older than 0 seconds (all of them)
     let result = store.cleanup_old_segments(0);
@@ -449,7 +710,7 @@ fn test_special_characters_in_content() {
     let msg = create_test_message(
         "iccid_001",
         "你好世界 Hello 🌍 'quotes\" <tags>",
-        "2024-01-01T12:00:00.000Z"
+        "2024-01-01T12:00:00.000Z",
     );
 
     assert!(store.store_message(&msg, "modem_0", "at:1").is_ok());
