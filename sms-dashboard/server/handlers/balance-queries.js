@@ -143,6 +143,7 @@ export const balanceQueriesHandler = {
         SELECT id, status, requested_at
         FROM sim_balance_checks
         WHERE sim_iccid = ?
+          AND status != 'failed'
           AND datetime(requested_at) >= datetime('now', '-24 hours')
         ORDER BY requested_at DESC LIMIT 1
       `).bind(phone_iccid).first(),

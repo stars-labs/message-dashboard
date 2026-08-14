@@ -147,7 +147,7 @@ describe('POST /api/control/balance-checks', () => {
 
   test('enforces the per-SIM 24-hour limit', async () => {
     const db = dbStub({
-      recent: { id: 'bal-previous', status: 'failed', requested_at: '2026-08-14 01:00:00' },
+      recent: { id: 'bal-previous', status: 'awaiting_response', requested_at: '2026-08-14 01:00:00' },
     });
     const response = await balanceQueriesHandler.create(request(db, {
       phone_iccid: phone.iccid,
@@ -156,6 +156,20 @@ describe('POST /api/control/balance-checks', () => {
 
     expect(response.status).toBe(429);
     expect(db.batches).toHaveLength(0);
+  });
+
+  test('does not count failed pre-send attempts against the daily limit', async () => {
+    const db = dbStub();
+    const response = await balanceQueriesHandler.create(request(db, {
+      phone_iccid: phone.iccid,
+      profile_id: profile.id,
+    }));
+
+    expect(response.status).toBe(202);
+    const recentQuery = db.calls.find((call) =>
+      call.operation === 'first' && call.sql.includes('FROM sim_balance_checks')
+    );
+    expect(recentQuery.sql).toContain("status != 'failed'");
   });
 
   test('rejects a SIM from a different carrier', async () => {
