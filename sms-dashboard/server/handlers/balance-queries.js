@@ -33,6 +33,13 @@ function matchingNextStep(check, content) {
   return String(content || '').includes(step.response_contains) ? step : null;
 }
 
+function attemptedStep(check) {
+  const stepIndex = Number(check?.step_index || 0) - 1;
+  if (stepIndex < 0) return null;
+  const step = parseConversationSteps(check?.conversation_steps)[stepIndex];
+  return step && typeof step.command === 'string' ? step : null;
+}
+
 export function parseBalanceMetrics(parserVersion, content) {
   if (parserVersion !== 'cn-mobile-balance-v1' || typeof content !== 'string') return [];
 
@@ -496,6 +503,78 @@ export const balanceQueriesHandler = {
         status: 'queued',
         step_index: (check.step_index || 0) + 1,
         outbound_message_id: result.message_id,
+      },
+    }, 202);
+  },
+
+  async retry(request) {
+    if (!hasApiKey(request)) return json({ error: 'Unauthorized' }, 401);
+
+    let body;
+    try {
+      body = await request.json();
+    } catch {
+      return json({ success: false, error: 'Invalid JSON body' }, 400);
+    }
+
+    if (typeof body?.check_id !== 'string') {
+      return json({ success: false, error: 'check_id is required' }, 400);
+    }
+
+    const check = await request.env.DB.prepare(`
+      SELECT
+        c.id, c.status, c.step_index,
+        p.destination, p.conversation_steps,
+        m.id AS message_id, m.content AS message_content,
+        m.recipient AS message_recipient, m.status AS message_status
+      FROM sim_balance_checks c
+      JOIN sim_balance_profiles p ON p.id = c.profile_id
+      JOIN messages m ON m.id = (
+        SELECT latest.id
+        FROM messages latest
+        WHERE latest.balance_check_id = c.id
+          AND latest.type = 'sent'
+          AND latest.purpose = 'balance_maintenance'
+        ORDER BY datetime(latest.timestamp) DESC, latest.rowid DESC
+        LIMIT 1
+      )
+      WHERE c.id = ?
+    `).bind(body.check_id).first();
+
+    const step = attemptedStep(check);
+    if (!check || check.status !== 'failed' || check.message_status !== 'failed'
+      || !step || check.message_content !== step.command
+      || check.message_recipient !== check.destination) {
+      return json({ success: false, error: 'No allowlisted failed step can be retried' }, 409);
+    }
+
+    const results = await request.env.DB.batch([
+      request.env.DB.prepare(`
+        UPDATE messages
+        SET status = 'sending', error_message = NULL, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND status = 'failed'
+          AND purpose = 'balance_maintenance'
+      `).bind(check.message_id),
+      request.env.DB.prepare(`
+        UPDATE sim_balance_checks
+        SET status = 'queued', completed_at = NULL, error = NULL,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND status = 'failed' AND step_index = ?
+      `).bind(check.id, check.step_index),
+    ]);
+
+    if (Number(results?.[0]?.meta?.changes ?? 1) === 0
+      || Number(results?.[1]?.meta?.changes ?? 1) === 0) {
+      return json({ success: false, error: 'Balance check changed before retry' }, 409);
+    }
+
+    return json({
+      success: true,
+      check: {
+        id: check.id,
+        status: 'queued',
+        step_index: check.step_index,
+        outbound_message_id: check.message_id,
       },
     }, 202);
   },

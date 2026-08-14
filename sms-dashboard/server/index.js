@@ -405,6 +405,10 @@ router.post('/api/control/balance-checks/continue', async (request) => {
   return balanceQueriesHandler.continue(request);
 });
 
+router.post('/api/control/balance-checks/retry', async (request) => {
+  return balanceQueriesHandler.retry(request);
+});
+
 
 router.post('/api/control/heartbeat', async (request) => {
   // Daemon heartbeat endpoint

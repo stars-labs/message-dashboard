@@ -368,3 +368,51 @@ describe('POST /api/control/balance-checks/continue', () => {
     expect(db.batches).toHaveLength(0);
   });
 });
+
+describe('POST /api/control/balance-checks/retry', () => {
+  test('requeues only the last failed allowlisted maintenance step', async () => {
+    const failed = {
+      id: 'bal-failed',
+      status: 'failed',
+      step_index: 1,
+      destination: '10086',
+      conversation_steps: profile.conversation_steps,
+      message_id: 'msg-option-1',
+      message_content: '1',
+      message_recipient: '10086',
+      message_status: 'failed',
+    };
+    const db = dbStub({ recent: failed });
+    const response = await balanceQueriesHandler.retry(request(db, {
+      check_id: failed.id,
+    }));
+    const body = await response.json();
+
+    expect(response.status).toBe(202);
+    expect(body.check.outbound_message_id).toBe('msg-option-1');
+    expect(db.batches[0][0].sql).toContain("SET status = 'sending'");
+    expect(db.batches[0][1].sql).toContain("SET status = 'queued'");
+  });
+
+  test('rejects a failed message whose content differs from the configured step', async () => {
+    const db = dbStub({
+      recent: {
+        id: 'bal-tampered',
+        status: 'failed',
+        step_index: 1,
+        destination: '10086',
+        conversation_steps: profile.conversation_steps,
+        message_id: 'msg-other',
+        message_content: '2',
+        message_recipient: '10086',
+        message_status: 'failed',
+      },
+    });
+    const response = await balanceQueriesHandler.retry(request(db, {
+      check_id: 'bal-tampered',
+    }));
+
+    expect(response.status).toBe(409);
+    expect(db.batches).toHaveLength(0);
+  });
+});
