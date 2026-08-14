@@ -25,7 +25,9 @@ export const messagesHandler = {
     try {
       // Built once and shared by both queries so they can never disagree about
       // which rows they are talking about. Each query keeps its OWN bind array.
-      const conditions = [];
+      // Carrier maintenance traffic is retained for its own audit workflow and
+      // must never appear in either the normal inbox or the spam drawer.
+      const conditions = [`purpose = 'user'`];
       const scopeParams = [];
 
       if (phoneIccid) {

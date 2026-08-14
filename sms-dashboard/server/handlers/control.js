@@ -3,6 +3,11 @@ import { extractVerificationCode } from '../utils/verification';
 import { findKeywordMatches } from '../api/keywords.js';
 import { classifyMessage, loadActiveRules } from '../utils/spam-filter.js';
 import { HEALTH_SCHEMA_VERSION, normalizeHealthSnapshot } from '../utils/daemon-health.js';
+import {
+  findPendingBalanceCheck,
+  linkBalanceReply,
+  updateBalanceCheckForSmsResult,
+} from './balance-queries.js';
 
 const IS_LEGACY_DAEMON_HEALTH_SQL = `(
   daemon_health.metadata IS NULL OR
@@ -414,8 +419,15 @@ export const controlHandler = {
       `);
       
       const insertStmt = env.DB.prepare(`
-        INSERT INTO messages (id, phone_iccid, phone_number, content, timestamp, type, verification_code, status, created_at, updated_at, filter_status, filter_rule_id)
-        VALUES (?, ?, ?, ?, ?, 'received', ?, 'received', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?)
+        INSERT INTO messages (
+          id, phone_iccid, phone_number, content, timestamp, type,
+          verification_code, status, created_at, updated_at,
+          filter_status, filter_rule_id, purpose, balance_check_id
+        )
+        VALUES (
+          ?, ?, ?, ?, ?, 'received', ?, 'received',
+          CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?
+        )
       `);
 
       // Spam rules are loaded ONCE per upload, not per message. Classification is
@@ -460,7 +472,6 @@ export const controlHandler = {
           
           // Generate a unique message ID with timestamp prefix to ensure uniqueness
           const messageId = msg.id || `msg-${Date.now()}-${nanoid(10)}`;
-          const verificationCode = extractVerificationCode(msg.content);
           // Fix timestamp - handle various formatting issues
           let timestamp = msg.timestamp || new Date().toISOString();
           
@@ -485,10 +496,24 @@ export const controlHandler = {
           }
           
           const phoneNumber = msg.phone_number || null;
+          const balanceCheck = await findPendingBalanceCheck(env.DB, {
+            phone_iccid,
+            phone_number: phoneNumber,
+          });
+          const verificationCode = balanceCheck
+            ? null
+            : extractVerificationCode(msg.content);
           
           // Check for duplicate using the prepared statement
           const existing = await checkStmt.bind(phone_iccid, msg.content, timestamp, timestamp).first();
           if (existing) {
+            if (balanceCheck) {
+              await linkBalanceReply(env.DB, balanceCheck, {
+                id: existing.id,
+                phone_number: phoneNumber,
+                content: msg.content,
+              });
+            }
             duplicates++;
             return null;
           }
@@ -500,15 +525,19 @@ export const controlHandler = {
             content: msg.content,
             timestamp,
             type: 'received',
-            verification_code: verificationCode
+            verification_code: verificationCode,
+            purpose: balanceCheck ? 'balance_maintenance' : 'user',
+            balance_check_id: balanceCheck?.id || null,
           };
 
           // Spam/marketing verdict. phone_number carries the SENDER's number for
           // received messages, which is what the sender rules match on.
-          const verdict = classifyMessage(record, filterRules);
+          const verdict = balanceCheck
+            ? { filter_status: 'filtered', filter_rule_id: null }
+            : classifyMessage(record, filterRules);
 
-          // Only add to newMessages if we're actually inserting it
-          newMessages.push(record);
+          // Maintenance replies stay out of keyword and verification processing.
+          if (!balanceCheck) newMessages.push(record);
 
           // Insert the message
           const result = await insertStmt.bind(
@@ -519,8 +548,14 @@ export const controlHandler = {
             timestamp,
             verificationCode,
             verdict.filter_status,
-            verdict.filter_rule_id
+            verdict.filter_rule_id,
+            record.purpose,
+            record.balance_check_id,
           ).run();
+
+          if (balanceCheck) {
+            await linkBalanceReply(env.DB, balanceCheck, record);
+          }
           
           return result;
         });
@@ -1082,6 +1117,13 @@ export const controlHandler = {
           headers: { 'Content-Type': 'application/json' }
         });
       }
+
+      await updateBalanceCheckForSmsResult(
+        env.DB,
+        message_id,
+        Boolean(success),
+        error_message || null,
+      );
       
       // Status updates are now picked up by polling
       

@@ -9,6 +9,11 @@ Product, carrier-procedure, technical-design, and rollout decisions are confirme
 Carrier validation, implementation, and rollout execution remain pending and must
 follow the order and safety gates below.
 
+Automated rollout also depends on the observation and rollback gates in the
+[SMS Hardware Storage Safety Plan](./sms-hardware-storage-safety-plan.md). Carrier
+balance replies use the same physical `ME`/`SM` storage and must not be automated
+until storage occupancy and deletion failures are visible.
+
 ## Goal
 
 Provide a reliable, auditable view of the useful balance state for every managed
@@ -30,7 +35,7 @@ Production currently contains 95 SIM records:
 | Country/region | Carrier | SIMs | Proposed first method |
 | --- | --- | ---: | --- |
 | China | China Unicom | 41 | Carrier SMS |
-| China | China Mobile | 22 | Carrier SMS |
+| China | China Mobile | 22 | USSD discovery, then carrier SMS |
 | Singapore | StarHub | 14 | Official portal or business account |
 | China | China Telecom | 6 | Carrier SMS |
 | Singapore | Singtel | 5 | USSD pilot |
@@ -90,15 +95,48 @@ what constitutes low, stale, unavailable, and failed.
 rollout, every SIM is either assigned a verified query profile or marked
 `unsupported_pending_identification`.
 
+## Automation Discovery Order
+
+Apply the following fallback sequence independently to every carrier. A later
+method is used only when the earlier method is unsupported, unreliable, or has no
+officially verified balance path.
+
+1. **USSD:** verify that the modem and current network mode support `AT+CUSD`, then
+   test only an official or otherwise controlled read-only carrier code on one SIM.
+2. **Carrier SMS:** discover the live service menu, send only the balance command
+   advertised for that SIM, and correlate the reply to the query attempt.
+3. **Official API or business integration:** prefer a documented API, supported
+   multi-SIM portal, or scheduled export. Do not reverse engineer private app APIs.
+4. **Browser automation:** automate the official account page only when no stable
+   USSD, SMS, or API path exists. Treat MFA, session expiry, page changes, and
+   manual takeover as explicit states.
+
+Skills and AI may orchestrate these verified methods and assist with interpreting
+new replies. They must not invent USSD codes, SMS destinations, menu selections,
+or browser actions that can change service. Every network command remains on a
+versioned read-only allowlist. Discovery starts with one manually triggered SIM;
+two successful results on different days are required before unattended use.
+
 ### 3. Confirm China Mobile
 
+China Mobile does not currently publish one nationwide USSD balance code in the
+official material reviewed for this plan. Some provincial and product-specific
+codes may exist, so USSD must still be evaluated first without guessing a code.
 Officially, SMS to and from `10086` is supported and `10086` can return the service
-menu. Provincial documentation also lists commands such as `101`, `YE`, or `CXYE`,
-but those commands must not be assumed to work nationally.
+menu. Provincial documentation also lists SMS commands such as `101`, `YE`, or
+`CXYE`, but those commands must not be assumed to work nationally.
 
 - [x] Pilot procedure approved: select one low-risk China Mobile SIM without
   requiring province/product metadata.
-- [ ] Send `10086` to `10086` on the pilot SIM and capture the complete menu reply.
+- [x] Confirm the pilot modem firmware and current network mode, run the non-network
+  `AT+CUSD=?` capability test, and verify timeout/cancellation behavior.
+- [x] Look for an official USSD balance code applicable to that SIM or product. If
+  one is found, test it once in a serialized maintenance window, capture the full
+  `+CUSD` exchange and DCS, cancel the session, and confirm SMS scanning resumes.
+- [x] If no applicable code exists, or USSD is unsupported or unreliable, record
+  the reason and fall back to carrier SMS.
+- [ ] Send `10086` to `10086` on the pilot SIM and capture the complete menu reply
+  only after the USSD path has been closed out.
 - [ ] Test only the balance command advertised in that SIM's live menu reply. If the
   reply does not identify one unambiguously, keep the SIM unsupported rather than
   applying a province-level command by inference.
@@ -106,8 +144,28 @@ but those commands must not be assumed to work nationally.
   charge.
 - [ ] Repeat once on another day to confirm a stable reply format.
 
-**Exit condition:** a versioned profile exists for each verified reply variant, with
-captured fixtures and parser tests. Unknown variants remain disabled.
+**Exit condition:** the USSD result is documented and either a versioned USSD or SMS
+profile exists for each verified reply variant, with captured fixtures and parser
+tests. Unknown variants remain disabled.
+
+#### China Mobile pilot evidence: S02 on 2026-08-14
+
+- SIM: S02, `+8613520607015`, ICCID `898600520121F0517883`.
+- Modem: EC20F, firmware `EC20CEHDLGR08A03M1G`, `/dev/ttyUSB268`.
+- Registration: roaming (`CREG=5`) on `SGP-M1 CMCC`, FDD LTE band 3. This
+  environment is not a China Mobile home-network test.
+- Capability: `AT+CUSD=?` returned `+CUSD: (0-2)`; `AT+CUSD=1` and
+  `AT+CUSD=2` both returned `OK`.
+- No nationwide China Mobile USSD balance code was found in the official material
+  reviewed. The commonly reported read-only candidate `*100#` was tested once with
+  DCS 15 and once using the modem's default DCS. Both forms returned immediate
+  `ERROR` without a `+CUSD` network response; cancellation returned `OK`.
+- The daemon was stopped for each serialized maintenance window and was confirmed
+  `active` afterwards.
+
+**Pilot conclusion:** USSD balance querying is unavailable for S02 in its current
+Singapore roaming/LTE environment. This is not evidence that USSD is unavailable
+for all China Mobile SIMs. Continue S02 validation with the live `10086` SMS menu.
 
 Sources: [China Mobile SMS service](https://www.10086.cn/support/service/channel/sms/index.html),
 [Jilin Mobile command reference](https://www.jl.10086.cn/support/channelhelp/note).
@@ -230,6 +288,8 @@ has produced at least one supported automated profile.
 
 - [x] Define versioned carrier profiles keyed by country/region, carrier, discovered
   reply variant, and method; plan/province are optional rather than required.
+- [x] Resolve methods per carrier in the approved order: USSD, carrier SMS, official
+  API/business integration, then browser automation.
 - [x] Store immutable query attempts separately from the latest derived balance.
 - [x] Support multiple typed metrics per response instead of one `balance` column.
 - [x] Correlate SMS replies by ICCID, expected service sender, query profile, and a
@@ -266,26 +326,45 @@ and rollback design.
 **Exit condition:** no disruption to SMS collection, no incorrectly classified
 balance replies, and reconciled results for every automated carrier profile.
 
-## Proposed Data Shape
+## Implemented Data Shape
 
-This is a design sketch, not an approved migration.
+Migration `039_add_sim_balance_queries.sql` implements the first SMS discovery
+slice. It must be applied before deploying Worker code that reads `messages.purpose`.
 
 ```text
 sim_balance_profiles
-  id, country_code, carrier, plan, province, method, command,
-  destination, expected_senders, parser_version, enabled
+  id, country_code, carrier, method, command, destination,
+  expected_senders, parser_version, response_window_minutes,
+  discovery_enabled, enabled
 
 sim_balance_checks
-  id, sim_iccid, profile_id, requested_at, completed_at, status,
+  id, sim_iccid, profile_id, requested_at, sent_at, completed_at,
+  status, outbound_message_id, response_message_id, response_sender,
   raw_response, error, parser_version
 
 sim_balance_metrics
-  check_id, metric_type, value, unit, currency, expires_at
+  id, check_id, metric_type, value, unit, currency, expires_at
+
+messages
+  purpose ('user' or 'balance_maintenance'), balance_check_id
 ```
 
 Suggested `metric_type` values include `cash_balance`, `data_remaining`,
 `sms_remaining`, `voice_remaining`, `current_charges`, `arrears`, and
 `account_expiry`.
+
+The API-key protected `POST /api/control/balance-checks` endpoint accepts only
+`phone_iccid` and `profile_id`. Destination and command are always loaded from an
+enabled or discovery-enabled profile. The first profile,
+`cn-mobile-sms-menu-v1`, is discovery-only and fixes both destination and command
+to `10086`; it is not eligible for scheduled fleet queries.
+
+An inbound reply is correlated only after the daemon reports the outbound SMS as
+sent and the check enters `awaiting_response`. Matching requires the same ICCID,
+an allowlisted sender, and the profile's bounded response window. The raw reply is
+stored on the check and both messages are marked `balance_maintenance`, keeping
+them outside the normal inbox, spam drawer, verification extraction, and keyword
+processing.
 
 ## Safety and Rollback Rules
 
@@ -314,8 +393,10 @@ Record confirmation outcomes here before implementation begins.
 | 2026-08-13 | 1. Product requirement | Confirmed | All first-release product decisions complete. |
 | 2026-08-13 | 2a. Prepaid/postpaid metadata | Not required | Do not maintain or infer account type; store only unambiguous metrics returned by verified profiles. |
 | 2026-08-13 | 2. SIM metadata | Confirmed | Use existing ICCID, region, and carrier. Discover commands per SIM; no manual province, plan, owner, or account-type maintenance. |
-| 2026-08-13 | 3. China Mobile procedure | Confirmed | Start with one low-risk SIM, discover the command through the live `10086` menu, capture the reply, and require a second successful test on another day. No production test performed yet. |
-| | 3. China Mobile validation | Pending | Awaiting controlled tests on the Orange Pi. |
+| 2026-08-14 | Automation discovery order | Confirmed | For each carrier, try verified read-only USSD first, then carrier SMS, an official API/business integration, and finally browser automation. AI and skills may orchestrate allowlisted methods but may not invent network commands. |
+| 2026-08-14 | 3. China Mobile procedure | Revised | Start with one low-risk SIM and verify EC20 `AT+CUSD` capability plus an applicable official USSD code. If USSD is unavailable or unreliable, close it out explicitly and fall back to the live `10086` SMS menu. Require a second successful test on another day. No production test performed yet. |
+| 2026-08-14 | 3. China Mobile USSD validation | Closed for S02 | EC20F supports `AT+CUSD`, but `*100#` with and without DCS returned immediate `ERROR` while roaming on SGP-M1 over FDD LTE. No official nationwide USSD balance code was found. Daemon restoration was verified; proceed to the `10086` SMS menu for this SIM. |
+| 2026-08-14 | SMS discovery infrastructure | Implemented locally | Migration 039 adds profiles, immutable checks, typed metrics, and maintenance message linkage. The control API accepts only ICCID/profile IDs, enforces active SIM/carrier matching and a 24-hour limit, and correlates replies only after confirmed send. Tests and production build pass; production migration/deploy and the first S02 SMS remain pending. |
 | 2026-08-13 | 4. China Unicom procedure | Confirmed | Start with one low-risk SIM, query the live `10010` menu, then use its explicit command or test `余额` once; require stable replies on two different days. No production test performed yet. |
 | | 4. China Unicom validation | Pending | Awaiting controlled tests on the Orange Pi. |
 | 2026-08-13 | 5. China Telecom procedure | Confirmed | Start with one low-risk SIM, query the live `10001` menu, and use only a command explicitly returned there; require stable replies on two different days. Do not assume Guangdong `102` nationally. No production test performed yet. |
