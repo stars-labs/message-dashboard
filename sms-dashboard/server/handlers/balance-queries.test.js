@@ -4,6 +4,8 @@ import {
   carrierMatchesProfile,
   expectedSenderMatches,
   findPendingBalanceCheck,
+  linkBalanceReply,
+  parseBalanceMetrics,
   updateBalanceCheckForSmsResult,
 } from './balance-queries.js';
 
@@ -15,7 +17,8 @@ const profile = {
   command: '10086',
   destination: '10086',
   expected_senders: '["10086"]',
-  parser_version: 'cn-mobile-menu-v1',
+  parser_version: 'cn-mobile-balance-v1',
+  conversation_steps: '[{"response_contains":"1.话费与AI豆","command":"1"}]',
   response_window_minutes: 30,
   discovery_enabled: 1,
   enabled: 0,
@@ -202,6 +205,7 @@ describe('GET /api/balance-checks', () => {
                     status: 'parsed',
                     outbound_content: '10086',
                     response_content: '余额82.36元',
+                    conversation_json: '[{"id":"msg-1","type":"received","content":"余额82.36元"}]',
                     metrics_json: '[{"metric_type":"cash_balance","value":82.36,"currency":"CNY"}]',
                   }],
                 };
@@ -224,7 +228,13 @@ describe('GET /api/balance-checks', () => {
       value: 82.36,
       currency: 'CNY',
     }]);
+    expect(body.data[0].conversation).toEqual([{
+      id: 'msg-1',
+      type: 'received',
+      content: '余额82.36元',
+    }]);
     expect(body.data[0].metrics_json).toBeUndefined();
+    expect(body.data[0].conversation_json).toBeUndefined();
   });
 });
 
@@ -255,5 +265,106 @@ describe('balance reply correlation', () => {
 
     const update = db.calls.find((call) => call.operation === 'run');
     expect(update.params).toEqual(['awaiting_response', 1, 1, null, 'msg-1']);
+  });
+
+  test('queues only the allowlisted menu response as the next audited SMS', async () => {
+    const db = dbStub();
+    const check = {
+      id: 'bal-menu',
+      sim_iccid: phone.iccid,
+      sim_number: phone.number,
+      step_index: 0,
+      destination: '10086',
+      conversation_steps: profile.conversation_steps,
+      parser_version: profile.parser_version,
+    };
+
+    const result = await linkBalanceReply(db, check, {
+      id: 'msg-menu',
+      phone_number: '10086',
+      content: '0.业务查询与退订\n1.话费与AI豆\n2.最新活动',
+    });
+
+    expect(result.queued).toBe(true);
+    const followUp = db.batches[0][0];
+    expect(followUp.sql).toContain('INSERT INTO messages');
+    expect(followUp.params[2]).toBe('1');
+    expect(followUp.params[3]).toBe('10086');
+    expect(followUp.params).not.toContain('2');
+  });
+
+  test('parses a final China Mobile balance and stores a typed metric', async () => {
+    const db = dbStub();
+    const check = {
+      id: 'bal-final',
+      step_index: 1,
+      conversation_steps: profile.conversation_steps,
+      parser_version: profile.parser_version,
+    };
+
+    await linkBalanceReply(db, check, {
+      id: 'msg-final',
+      phone_number: '10086',
+      content: '尊敬的客户，您的账户余额为82.36元。',
+    });
+
+    expect(db.batches[0][0].params[0]).toBe('parsed');
+    const metricInsert = db.batches[0][1];
+    expect(metricInsert.params).toEqual([
+      'bal-final', 'cash_balance', 82.36, null, 'CNY', null,
+    ]);
+  });
+
+  test('does not parse current charges as cash balance', () => {
+    expect(parseBalanceMetrics(
+      'cn-mobile-balance-v1',
+      '本月已产生话费25.60元，当前欠费0元。',
+    )).toEqual([]);
+  });
+});
+
+describe('POST /api/control/balance-checks/continue', () => {
+  test('continues an existing menu-stage check without creating a new check', async () => {
+    const existing = {
+      id: 'bal-existing',
+      sim_iccid: phone.iccid,
+      sim_number: phone.number,
+      status: 'response_received',
+      step_index: 0,
+      response_message_id: 'msg-menu',
+      response_sender: '10086',
+      raw_response: '1.话费与AI豆',
+      destination: '10086',
+      conversation_steps: profile.conversation_steps,
+      parser_version: profile.parser_version,
+    };
+    const db = dbStub({ recent: existing });
+    const response = await balanceQueriesHandler.continue(request(db, {
+      check_id: existing.id,
+    }));
+    const body = await response.json();
+
+    expect(response.status).toBe(202);
+    expect(body.check.id).toBe(existing.id);
+    expect(body.check.step_index).toBe(1);
+    expect(db.batches).toHaveLength(1);
+  });
+
+  test('rejects a reply that has no configured next step', async () => {
+    const db = dbStub({
+      recent: {
+        id: 'bal-other',
+        status: 'response_received',
+        step_index: 0,
+        raw_response: '欢迎使用中国移动',
+        conversation_steps: profile.conversation_steps,
+      },
+    });
+    const response = await balanceQueriesHandler.continue(request(db, {
+      check_id: 'bal-other',
+    }));
+
+    expect(response.status).toBe(409);
+    expect(db.batches).toHaveLength(0);
   });
 });

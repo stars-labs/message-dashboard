@@ -4,6 +4,7 @@
   import {
     getBalanceStatusMeta,
     getBalanceTimestamp,
+    getLatestBalanceReply,
     normalizeUtcTimestamp,
   } from './balance-query.js';
 
@@ -16,8 +17,7 @@
     check?.sim_country ? getCountryFlag(check.sim_country) : selectedPhone?.flag || ''
   );
   let summary = $derived(
-    check?.response_content
-      || check?.raw_response
+    getLatestBalanceReply(check)?.content
       || check?.error
       || `发送 ${check?.outbound_content || check?.command || '—'} 至 ${check?.outbound_recipient || check?.destination || '—'}`
   );

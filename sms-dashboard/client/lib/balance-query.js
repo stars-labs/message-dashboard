@@ -26,12 +26,48 @@ export function getBalanceStatusMeta(status) {
 }
 
 export function getBalanceTimestamp(check) {
-  return check?.response_timestamp
+  const conversation = getBalanceConversation(check);
+  return conversation.at(-1)?.timestamp
+    || check?.response_timestamp
     || check?.completed_at
     || check?.sent_at
     || check?.outbound_timestamp
     || check?.requested_at
     || null;
+}
+
+export function getBalanceConversation(check) {
+  if (Array.isArray(check?.conversation) && check.conversation.length) {
+    return check.conversation;
+  }
+
+  const messages = [];
+  if (check?.outbound_content || check?.command) {
+    messages.push({
+      id: check.outbound_message_id || `${check.id}-outbound`,
+      type: 'sent',
+      content: check.outbound_content || check.command,
+      recipient: check.outbound_recipient || check.destination,
+      timestamp: check.outbound_timestamp || check.sent_at,
+      status: check.outbound_status,
+    });
+  }
+  if (check?.response_content || check?.raw_response) {
+    messages.push({
+      id: check.response_message_id || `${check.id}-response`,
+      type: 'received',
+      content: check.response_content || check.raw_response,
+      phone_number: check.response_phone_number || check.response_sender,
+      timestamp: check.response_timestamp || check.completed_at,
+    });
+  }
+  return messages;
+}
+
+export function getLatestBalanceReply(check) {
+  return [...getBalanceConversation(check)]
+    .reverse()
+    .find((message) => message.type === 'received') || null;
 }
 
 export function getCashBalance(check) {

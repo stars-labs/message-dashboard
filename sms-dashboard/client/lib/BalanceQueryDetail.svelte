@@ -4,6 +4,7 @@
   import {
     formatBalanceMetric,
     getBalanceMetricLabel,
+    getBalanceConversation,
     getBalanceStatusMeta,
     getBalanceTimestamp,
     getCashBalance,
@@ -13,6 +14,7 @@
   let { check, onClose = null } = $props();
   let statusMeta = $derived(getBalanceStatusMeta(check?.status));
   let cashBalance = $derived(getCashBalance(check));
+  let conversation = $derived(getBalanceConversation(check));
 
   function formatDate(value) {
     if (!value) return '—';
@@ -96,25 +98,20 @@
         <section class="px-4 lg:px-5 py-5 border-b border-stone-100">
           <h3 class="text-xs font-semibold text-stone-500">短信记录</h3>
           <div class="mt-4 relative pl-5 space-y-5 before:absolute before:left-[5px] before:top-2 before:bottom-2 before:w-px before:bg-stone-200">
-            <div class="relative">
-              <span class="absolute -left-5 top-1.5 w-[11px] h-[11px] rounded-full bg-orange-500 ring-4 ring-white"></span>
-              <div class="flex items-baseline justify-between gap-3">
-                <p class="text-xs font-semibold text-stone-700">发送至 {check.outbound_recipient || check.destination || '—'}</p>
-                <time class="text-[11px] text-stone-400 font-mono shrink-0">{formatDate(check.outbound_timestamp || check.sent_at)}</time>
-              </div>
-              <p class="mt-1.5 text-sm text-stone-700 whitespace-pre-wrap break-words">{check.outbound_content || check.command || '—'}</p>
-            </div>
-
-            {#if check.response_content || check.raw_response}
+            {#each conversation as message (message.id)}
               <div class="relative">
-                <span class="absolute -left-5 top-1.5 w-[11px] h-[11px] rounded-full bg-sky-500 ring-4 ring-white"></span>
+                <span class="absolute -left-5 top-1.5 w-[11px] h-[11px] rounded-full {message.type === 'sent' ? 'bg-orange-500' : 'bg-sky-500'} ring-4 ring-white"></span>
                 <div class="flex items-baseline justify-between gap-3">
-                  <p class="text-xs font-semibold text-stone-700">{check.response_phone_number || check.response_sender || '运营商'} 回复</p>
-                  <time class="text-[11px] text-stone-400 font-mono shrink-0">{formatDate(check.response_timestamp || check.completed_at)}</time>
+                  <p class="text-xs font-semibold text-stone-700">
+                    {message.type === 'sent'
+                      ? `发送至 ${message.recipient || check.destination || '—'}`
+                      : `${message.phone_number || check.response_sender || '运营商'} 回复`}
+                  </p>
+                  <time class="text-[11px] text-stone-400 font-mono shrink-0">{formatDate(message.timestamp)}</time>
                 </div>
-                <p class="mt-1.5 text-sm leading-relaxed text-stone-700 whitespace-pre-wrap break-words">{check.response_content || check.raw_response}</p>
+                <p class="mt-1.5 text-sm leading-relaxed text-stone-700 whitespace-pre-wrap break-words">{message.content || '—'}</p>
               </div>
-            {/if}
+            {/each}
 
             {#if check.error}
               <div class="relative">

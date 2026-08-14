@@ -21,6 +21,36 @@ const check = {
   response_timestamp: '2026-08-14 04:01:00',
   response_phone_number: '10086',
   response_content: '尊敬的客户，账户余额82.36元。',
+  conversation: [
+    {
+      id: 'msg-start',
+      type: 'sent',
+      content: '10086',
+      recipient: '10086',
+      timestamp: '2026-08-14 04:00:01',
+    },
+    {
+      id: 'msg-menu',
+      type: 'received',
+      content: '1.话费与AI豆',
+      phone_number: '10086',
+      timestamp: '2026-08-14 04:00:10',
+    },
+    {
+      id: 'msg-option',
+      type: 'sent',
+      content: '1',
+      recipient: '10086',
+      timestamp: '2026-08-14 04:00:12',
+    },
+    {
+      id: 'msg-balance',
+      type: 'received',
+      content: '尊敬的客户，账户余额82.36元。',
+      phone_number: '10086',
+      timestamp: '2026-08-14 04:01:00',
+    },
+  ],
   parser_version: 'cn-mobile-v1',
   metrics: [{ metric_type: 'cash_balance', value: 82.36, currency: 'CNY' }],
 };
@@ -43,11 +73,12 @@ describe('balance query conversation', () => {
 
   test('shows the request, reply and parsed result in a mobile-safe detail layer', async () => {
     let closed = false;
-    const { container, getByText, getAllByRole } = render(BalanceQueryDetail, {
+    const { container, getByText, getAllByRole, getAllByText } = render(BalanceQueryDetail, {
       props: { check, onClose: () => { closed = true; } },
     });
 
-    expect(getByText('发送至 10086')).toBeTruthy();
+    expect(getAllByText('发送至 10086')).toHaveLength(2);
+    expect(getByText('1.话费与AI豆')).toBeTruthy();
     expect(getByText('尊敬的客户，账户余额82.36元。')).toBeTruthy();
     expect(getByText('账户余额')).toBeTruthy();
     expect(container.querySelector('.bottom-\\[73px\\]')).toBeTruthy();

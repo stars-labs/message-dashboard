@@ -17,6 +17,37 @@ function normalizeCarrier(value) {
   return typeof value === 'string' ? value.trim().toLocaleLowerCase() : '';
 }
 
+function parseConversationSteps(value) {
+  try {
+    const steps = JSON.parse(value || '[]');
+    return Array.isArray(steps) ? steps : [];
+  } catch {
+    return [];
+  }
+}
+
+function matchingNextStep(check, content) {
+  const step = parseConversationSteps(check?.conversation_steps)[check?.step_index || 0];
+  if (!step || typeof step.response_contains !== 'string'
+    || typeof step.command !== 'string') return null;
+  return String(content || '').includes(step.response_contains) ? step : null;
+}
+
+export function parseBalanceMetrics(parserVersion, content) {
+  if (parserVersion !== 'cn-mobile-balance-v1' || typeof content !== 'string') return [];
+
+  const cashMatch = content.match(/(?:账户|话费|可用)?余额(?:为|是)?[：:\s]*([0-9]+(?:\.[0-9]{1,2})?)\s*元/);
+  if (!cashMatch) return [];
+
+  return [{
+    metric_type: 'cash_balance',
+    value: Number(cashMatch[1]),
+    unit: null,
+    currency: 'CNY',
+    expires_at: null,
+  }];
+}
+
 export function carrierMatchesProfile(actualCarrier, profileCarrier) {
   const actual = normalizeCarrier(actualCarrier);
   const expected = normalizeCarrier(profileCarrier);
@@ -48,15 +79,25 @@ export async function findPendingBalanceCheck(db, { phone_iccid, phone_number })
   const result = await db.prepare(`
     SELECT
       c.id,
+      c.sim_iccid,
       c.profile_id,
       c.parser_version,
+      c.step_index,
       p.expected_senders,
-      p.response_window_minutes
+      p.response_window_minutes,
+      p.conversation_steps,
+      p.destination,
+      dv.number AS sim_number
     FROM sim_balance_checks c
     JOIN sim_balance_profiles p ON p.id = c.profile_id
+    LEFT JOIN device_view dv ON dv.iccid = c.sim_iccid
     WHERE c.sim_iccid = ?
       AND c.status = ?
-      AND datetime(c.requested_at) >= datetime(
+      AND datetime(COALESCE((
+        SELECT MAX(m.timestamp)
+        FROM messages m
+        WHERE m.balance_check_id = c.id AND m.type = 'sent'
+      ), c.requested_at)) >= datetime(
         'now', '-' || p.response_window_minutes || ' minutes'
       )
     ORDER BY c.requested_at DESC
@@ -71,9 +112,15 @@ export async function findPendingBalanceCheck(db, { phone_iccid, phone_number })
 export async function linkBalanceReply(db, check, message) {
   if (!check) return;
 
-  await db.prepare(`
+  const nextStep = matchingNextStep(check, message.content);
+  if (nextStep) {
+    return queueBalanceFollowUp(db, check, message, nextStep, 'awaiting_response');
+  }
+
+  const metrics = parseBalanceMetrics(check.parser_version, message.content);
+  const statements = [db.prepare(`
     UPDATE sim_balance_checks
-    SET status = 'response_received',
+    SET status = ?,
         completed_at = CURRENT_TIMESTAMP,
         response_message_id = ?,
         response_sender = ?,
@@ -81,7 +128,84 @@ export async function linkBalanceReply(db, check, message) {
         updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
       AND status = 'awaiting_response'
-  `).bind(message.id, message.phone_number, message.content, check.id).run();
+  `).bind(
+    metrics.length ? 'parsed' : 'response_received',
+    message.id,
+    message.phone_number,
+    message.content,
+    check.id,
+  )];
+
+  for (const metric of metrics) {
+    statements.push(db.prepare(`
+      INSERT INTO sim_balance_metrics (
+        check_id, metric_type, value, unit, currency, expires_at
+      ) VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(check_id, metric_type) DO UPDATE SET
+        value = excluded.value,
+        unit = excluded.unit,
+        currency = excluded.currency,
+        expires_at = excluded.expires_at,
+        created_at = CURRENT_TIMESTAMP
+    `).bind(
+      check.id,
+      metric.metric_type,
+      metric.value,
+      metric.unit,
+      metric.currency,
+      metric.expires_at,
+    ));
+  }
+
+  return db.batch(statements);
+}
+
+async function queueBalanceFollowUp(db, check, message, step, fromStatus) {
+  const messageId = `msg-balance-${nanoid()}`;
+  const results = await db.batch([
+    db.prepare(`
+      INSERT INTO messages (
+        id, phone_iccid, phone_number, content, timestamp, type, recipient,
+        status, filter_status, purpose, balance_check_id
+      )
+      SELECT ?, c.sim_iccid, ?, ?, CURRENT_TIMESTAMP, 'sent', ?,
+        'sending', 'filtered', 'balance_maintenance', c.id
+      FROM sim_balance_checks c
+      WHERE c.id = ? AND c.status = ? AND c.step_index = ?
+    `).bind(
+      messageId,
+      check.sim_number || null,
+      step.command,
+      check.destination,
+      check.id,
+      fromStatus,
+      check.step_index || 0,
+    ),
+    db.prepare(`
+    UPDATE sim_balance_checks
+    SET status = 'queued',
+        step_index = step_index + 1,
+        completed_at = NULL,
+        response_message_id = ?,
+        response_sender = ?,
+        raw_response = ?,
+        error = NULL,
+        updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+      AND status = ?
+      AND step_index = ?
+    `).bind(
+      message.id,
+      message.phone_number,
+      message.content,
+      check.id,
+      fromStatus,
+      check.step_index || 0,
+    ),
+  ]);
+
+  const queued = Number(results?.[0]?.meta?.changes ?? 1) > 0;
+  return { queued, message_id: queued ? messageId : null };
 }
 
 export async function updateBalanceCheckForSmsResult(
@@ -93,7 +217,7 @@ export async function updateBalanceCheckForSmsResult(
   await db.prepare(`
     UPDATE sim_balance_checks
     SET status = ?,
-        sent_at = CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE sent_at END,
+        sent_at = CASE WHEN ? THEN COALESCE(sent_at, CURRENT_TIMESTAMP) ELSE sent_at END,
         completed_at = CASE WHEN ? THEN completed_at ELSE CURRENT_TIMESTAMP END,
         error = ?,
         updated_at = CURRENT_TIMESTAMP
@@ -136,6 +260,7 @@ export const balanceQueriesHandler = {
         c.sent_at,
         c.completed_at,
         c.status,
+        c.step_index,
         c.response_sender,
         c.raw_response,
         c.error,
@@ -145,6 +270,7 @@ export const balanceQueriesHandler = {
         p.method,
         p.command,
         p.destination,
+        p.conversation_steps,
         dv.sim_index,
         dv.number AS sim_number,
         dv.carrier AS sim_carrier,
@@ -156,6 +282,24 @@ export const balanceQueriesHandler = {
         rm.content AS response_content,
         rm.phone_number AS response_phone_number,
         rm.timestamp AS response_timestamp,
+        COALESCE((
+          SELECT json_group_array(json_object(
+            'id', conversation.id,
+            'type', conversation.type,
+            'content', conversation.content,
+            'timestamp', conversation.timestamp,
+            'status', conversation.status,
+            'phone_number', conversation.phone_number,
+            'recipient', conversation.recipient
+          ))
+          FROM (
+            SELECT m.id, m.type, m.content, m.timestamp, m.status,
+                   m.phone_number, m.recipient
+            FROM messages m
+            WHERE m.balance_check_id = c.id
+            ORDER BY datetime(m.timestamp), m.rowid
+          ) conversation
+        ), '[]') AS conversation_json,
         COALESCE((
           SELECT json_group_array(json_object(
             'metric_type', bm.metric_type,
@@ -179,13 +323,23 @@ export const balanceQueriesHandler = {
 
     const checks = (result.results || []).map((check) => {
       let metrics = [];
+      let conversation = [];
       try {
         metrics = JSON.parse(check.metrics_json || '[]');
       } catch {
         metrics = [];
       }
-      const { metrics_json: _metricsJson, ...record } = check;
-      return { ...record, metrics };
+      try {
+        conversation = JSON.parse(check.conversation_json || '[]');
+      } catch {
+        conversation = [];
+      }
+      const {
+        metrics_json: _metricsJson,
+        conversation_json: _conversationJson,
+        ...record
+      } = check;
+      return { ...record, metrics, conversation };
     });
 
     return json({ success: true, data: checks });
@@ -285,6 +439,63 @@ export const balanceQueriesHandler = {
         profile_id,
         status: 'queued',
         outbound_message_id: messageId,
+      },
+    }, 202);
+  },
+
+  async continue(request) {
+    if (!hasApiKey(request)) return json({ error: 'Unauthorized' }, 401);
+
+    let body;
+    try {
+      body = await request.json();
+    } catch {
+      return json({ success: false, error: 'Invalid JSON body' }, 400);
+    }
+
+    if (typeof body?.check_id !== 'string') {
+      return json({ success: false, error: 'check_id is required' }, 400);
+    }
+
+    const check = await request.env.DB.prepare(`
+      SELECT
+        c.id, c.sim_iccid, c.status, c.step_index, c.response_message_id,
+        c.response_sender, c.raw_response, c.parser_version,
+        p.destination, p.conversation_steps,
+        dv.number AS sim_number
+      FROM sim_balance_checks c
+      JOIN sim_balance_profiles p ON p.id = c.profile_id
+      LEFT JOIN device_view dv ON dv.iccid = c.sim_iccid
+      WHERE c.id = ?
+    `).bind(body.check_id).first();
+
+    if (!check) return json({ success: false, error: 'Balance check not found' }, 404);
+    if (!['response_received', 'unparsed'].includes(check.status)) {
+      return json({ success: false, error: 'Balance check cannot be continued' }, 409);
+    }
+
+    const step = matchingNextStep(check, check.raw_response);
+    if (!step) {
+      return json({ success: false, error: 'No allowlisted next step matches the reply' }, 409);
+    }
+
+    const result = await queueBalanceFollowUp(request.env.DB, check, {
+      id: check.response_message_id,
+      phone_number: check.response_sender,
+      content: check.raw_response,
+    }, step, check.status);
+
+    if (!result.queued) {
+      return json({ success: false, error: 'Balance check changed before it was continued' }, 409);
+    }
+
+    return json({
+      success: true,
+      check: {
+        id: check.id,
+        status: 'queued',
+        step_index: (check.step_index || 0) + 1,
+        outbound_message_id: result.message_id,
       },
     }, 202);
   },
