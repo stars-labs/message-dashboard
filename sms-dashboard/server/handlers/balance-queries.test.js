@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   balanceQueriesHandler,
+  buildBalanceQueryPlan,
   carrierMatchesProfile,
   expectedSenderMatches,
   findPendingBalanceCheck,
@@ -95,6 +96,53 @@ describe('balance-query carrier and sender guards', () => {
     expect(expectedSenderMatches('+8610086', '["10086"]')).toBe(true);
     expect(expectedSenderMatches('10086100', '["10086"]')).toBe(false);
     expect(expectedSenderMatches('10086', 'not-json')).toBe(false);
+  });
+});
+
+describe('balance-query planning', () => {
+  const enabledProfile = { ...profile, enabled: 1, discovery_enabled: 0 };
+
+  test('allows every matching active SIM for an enabled profile', () => {
+    const plan = buildBalanceQueryPlan({
+      phones: [phone, { ...phone, iccid: 'second' }],
+      profiles: [enabledProfile],
+    });
+    expect(plan.every((item) => item.eligible)).toBe(true);
+  });
+
+  test('limits discovery profiles in a batch to SIMs with a parsed result', () => {
+    const plan = buildBalanceQueryPlan({
+      phones: [phone, { ...phone, iccid: 'second' }],
+      profiles: [profile],
+      successfulChecks: [{ sim_iccid: phone.iccid, profile_id: profile.id }],
+    });
+    expect(plan[0].eligible).toBe(true);
+    expect(plan[1]).toMatchObject({ eligible: false, reason: 'unverified' });
+  });
+
+  test('allows an explicit single-SIM discovery query but still enforces cooldown', () => {
+    const [available] = buildBalanceQueryPlan({
+      phones: [phone], profiles: [profile], allowDiscovery: true,
+    });
+    const [cooldown] = buildBalanceQueryPlan({
+      phones: [phone],
+      profiles: [profile],
+      allowDiscovery: true,
+      recentChecks: [{ sim_iccid: phone.iccid, id: 'recent' }],
+    });
+    expect(available.eligible).toBe(true);
+    expect(cooldown).toMatchObject({ eligible: false, reason: 'cooldown' });
+  });
+
+  test('skips offline and unsupported cards with explicit reasons', () => {
+    const plan = buildBalanceQueryPlan({
+      phones: [
+        { ...phone, sim_status: 'offline' },
+        { ...phone, iccid: 'sg', country: 'SG', carrier: 'Singtel' },
+      ],
+      profiles: [enabledProfile],
+    });
+    expect(plan.map((item) => item.reason)).toEqual(['offline', 'unsupported']);
   });
 });
 

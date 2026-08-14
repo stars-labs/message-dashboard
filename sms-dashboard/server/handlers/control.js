@@ -1018,9 +1018,19 @@ export const controlHandler = {
       // First, get IDs of pending messages
       const pendingIds = await env.DB.prepare(`
         SELECT id
-        FROM messages
-        WHERE type = 'sent' AND status = 'sending'
-        ORDER BY created_at ASC
+        FROM (
+          SELECT
+            id,
+            purpose,
+            created_at,
+            ROW_NUMBER() OVER (PARTITION BY purpose ORDER BY created_at, id) AS purpose_rank
+          FROM messages
+          WHERE type = 'sent' AND status = 'sending'
+        ) pending
+        WHERE purpose != 'balance_maintenance' OR purpose_rank <= 5
+        ORDER BY CASE WHEN purpose = 'balance_maintenance' THEN 1 ELSE 0 END,
+                 created_at,
+                 id
         LIMIT 50
       `).all();
 

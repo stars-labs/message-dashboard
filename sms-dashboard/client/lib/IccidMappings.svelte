@@ -15,6 +15,8 @@
   let searchQuery = $state("");
   let statusFilter = $state(initialStatusFilter);
   let successMessage = $state(null);
+  let sortKey = $state(null);
+  let sortDirection = $state('asc');
 
   // Apply a new deep-link filter once. The previous effect also depended on
   // statusFilter, so every manual chip click was immediately reset to "error".
@@ -75,6 +77,47 @@
   let inactiveCount = $derived(allMappingsCache.filter(m => ['no_modem', 'unassigned'].includes(m.is_active) || !m.is_active).length);
   let totalCount    = $derived(allMappingsCache.length);
 
+  const tableColumns = [
+    { key: 'sim_index', label: '卡号' },
+    { key: 'phone_number', label: '手机号' },
+    { key: 'iccid', label: 'ICCID' },
+    { key: 'carrier', label: '运营商' },
+    { key: 'position', label: '模块位置' },
+    { key: 'signal_quality', label: '信号' },
+    { key: 'is_active', label: '状态' },
+    { key: 'notes', label: '备注' },
+    { key: null, label: '操作' },
+  ];
+
+  function toggleSort(key) {
+    if (!key) return;
+    if (sortKey === key) sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+    else {
+      sortKey = key;
+      sortDirection = 'asc';
+    }
+    filterMappings();
+  }
+
+  function sortValue(mapping, key) {
+    if (key === 'sim_index' || key === 'signal_quality') return Number(mapping[key]);
+    if (key === 'position') return getModemPosition(mapping)?.path || '';
+    if (key === 'is_active') return getStatusMeta(mapping.is_active).sortOrder;
+    if (key === 'notes') return mapping.notes || mapping.description || '';
+    return mapping[key] || '';
+  }
+
+  function compareValues(left, right) {
+    const leftMissing = left == null || left === '' || Number.isNaN(left);
+    const rightMissing = right == null || right === '' || Number.isNaN(right);
+    if (leftMissing || rightMissing) {
+      if (leftMissing && rightMissing) return 0;
+      return leftMissing ? 1 : -1;
+    }
+    if (typeof left === 'number' && typeof right === 'number') return left - right;
+    return String(left).localeCompare(String(right), 'zh-CN', { numeric: true, sensitivity: 'base' });
+  }
+
   // ── Data loading ──────────────────────────────────────────────────────────
   async function loadMappings() {
     loading = true; error = null;
@@ -111,11 +154,17 @@
       );
     }
 
-    // Rows needing action sort first.
-    mappings = filtered.sort((a, b) => {
-      const ao = getStatusMeta(a.is_active).sortOrder;
-      const bo = getStatusMeta(b.is_active).sortOrder;
-      return ao !== bo ? ao - bo : (a.sim_index ?? 999) - (b.sim_index ?? 999);
+    mappings = filtered.slice().sort((a, b) => {
+      if (sortKey) {
+        const comparison = compareValues(sortValue(a, sortKey), sortValue(b, sortKey));
+        if (comparison !== 0) return sortDirection === 'asc' ? comparison : -comparison;
+      } else {
+        // Default remains action-oriented until a header is selected.
+        const ao = getStatusMeta(a.is_active).sortOrder;
+        const bo = getStatusMeta(b.is_active).sortOrder;
+        if (ao !== bo) return ao - bo;
+      }
+      return (a.sim_index ?? 999) - (b.sim_index ?? 999);
     });
   }
 
@@ -223,16 +272,26 @@
     </div>
 
   {:else}
-    <!-- ── Desktop table (9 columns, per spec) ─────────────────────────── -->
+    <!-- ── Desktop table ──────────────────────────────────────────────── -->
     <div class="hidden sm:block overflow-x-auto">
       <table class="w-full text-sm">
         <thead>
           <tr class="bg-stone-50 border-b border-stone-200">
-            <!-- 卡号 44 / 号码 150 / ICCID 180 / 运营商 130 / 模块位置 110 / 信号 80 / 状态 110 / 备注 flex / 操作 80 -->
-            {#each ['卡号','手机号','ICCID','运营商','模块位置','信号','状态','备注','操作'] as col, i}
+            {#each tableColumns as column, i}
               <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-stone-400 tracking-widest uppercase
-                {i === 8 ? 'text-right' : ''}">
-                {col}
+                {i === tableColumns.length - 1 ? 'text-right' : ''}">
+                {#if column.key}
+                  <button type="button" onclick={() => toggleSort(column.key)}
+                    class="inline-flex items-center gap-1 hover:text-stone-700 transition-colors"
+                    aria-label={`按${column.label}${sortKey === column.key && sortDirection === 'asc' ? '降序' : '升序'}排列`}>
+                    {column.label}
+                    <span class="text-[9px] {sortKey === column.key ? 'text-orange-500' : 'text-stone-300'}" aria-hidden="true">
+                      {sortKey === column.key ? (sortDirection === 'asc' ? '▲' : '▼') : '↕'}
+                    </span>
+                  </button>
+                {:else}
+                  {column.label}
+                {/if}
               </th>
             {/each}
           </tr>

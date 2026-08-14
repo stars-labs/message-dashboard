@@ -13,6 +13,7 @@
   import Toast from "./lib/Toast.svelte";
   import DaemonHealthPanel from "./lib/DaemonHealthPanel.svelte";
   import BalanceQueryDetail from './lib/BalanceQueryDetail.svelte';
+  import BalanceManagement from './lib/BalanceManagement.svelte';
   import { api } from "./lib/api.js";
   import { getPhoneFlag, mapStatsResponse } from "./lib/countries.js";
   import { auth } from "./lib/auth.js";
@@ -180,6 +181,7 @@
     dashboard: 'messages.read',
     send: 'messages.send',
     'iccid-mappings': 'phones.write',
+    balances: 'messages.read',
     keywords: 'keywords.read',
     filters: 'filters.read',
     users: 'users.read',
@@ -250,7 +252,7 @@
               console.error('[App] Failed to fetch stats:', err);
               return { success: false };
             }),
-          auth.authenticatedFetch("/api/balance-checks?limit=100")
+          auth.authenticatedFetch("/api/balance-checks?limit=500")
             .then((r) => r.ok ? r.json() : { success: false, data: [] })
             .catch((err) => {
               console.error('[App] Failed to fetch balance checks:', err);
@@ -398,9 +400,7 @@
           ...(phoneIccid ? { phone_iccid: phoneIccid, limit: 500 } : { limit: 2000 }),
           ...(showFiltered ? { include_filtered: 1 } : {})
         }),
-        api.getBalanceChecks({
-          ...(phoneIccid ? { phone_iccid: phoneIccid, limit: 100 } : { limit: 100 }),
-        }),
+        api.getBalanceChecks({ limit: 500 }),
       ]);
 
       // Discard if user switched phones while we were loading
@@ -590,7 +590,7 @@
   function startPolling() {
     if (pollInterval) return;
     pollInterval = setInterval(async () => {
-      if (!user || currentView !== 'dashboard') return;
+      if (!user || !['dashboard', 'balances'].includes(currentView)) return;
       try {
         // Poll messages for current view
         await loadMessagesForPhone(selectedPhoneIccid);
@@ -679,6 +679,13 @@
               设备与卡
             </button>
           {/if}
+          <button onclick={() => navigate('balances')}
+            class="text-sm px-3 py-1.5 rounded-[7px] transition-all
+              {currentView === 'balances'
+                ? 'bg-stone-100 font-semibold text-stone-900'
+                : 'text-stone-500 hover:text-stone-900 hover:bg-stone-50'}">
+            余额
+          </button>
           {#if can('keywords.read') || can('filters.read')}
             <button onclick={() => navigate(can('filters.read') ? 'filters' : 'keywords')}
               class="text-sm px-3 py-1.5 rounded-[7px] transition-all
@@ -1072,6 +1079,18 @@
           <IccidMappings initialStatusFilter={iccidMappingsFilter} />
         </div>
       </ErrorBoundary>
+    {:else if currentView === "balances"}
+      <ErrorBoundary componentName="BalanceManagement">
+        <div class="lg:flex-1 lg:min-h-0 lg:overflow-hidden">
+          <BalanceManagement
+            {phoneNumbers}
+            {balanceChecks}
+            canQueryBalances={can('balances.query')}
+            onQueriesChanged={() => loadMessagesForPhone(selectedPhoneIccid)}
+            onOpenBalance={(check) => balanceDetailCheck = check}
+          />
+        </div>
+      </ErrorBoundary>
     {:else if currentView === "keywords" || currentView === "filters"}
       <div class="px-0 py-0 lg:px-8 lg:py-6 lg:flex-1 lg:min-h-0 lg:overflow-auto bg-white lg:bg-transparent">
         {#if can('keywords.read') && can('filters.read')}
@@ -1180,6 +1199,17 @@
           <span class="text-[10px] font-semibold leading-none">设备</span>
         </button>
       {/if}
+
+      <!-- 余额 tab -->
+      <button onclick={() => { navigate('balances'); showMoreMenu = false; }}
+        class="flex-1 flex flex-col items-center justify-center gap-0.5 pt-2 pb-0.5 min-h-[52px]
+          transition-colors {currentView === 'balances' ? 'text-[#c2410c]' : 'text-stone-400'}">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M4 7.5A2.5 2.5 0 016.5 5H19a1 1 0 011 1v12a1 1 0 01-1 1H6.5A2.5 2.5 0 014 16.5v-9z"/>
+          <path stroke-linecap="round" stroke-linejoin="round" d="M4 8h13m0 3h4v4h-4a2 2 0 010-4z"/>
+        </svg>
+        <span class="text-[10px] font-semibold leading-none">余额</span>
+      </button>
 
       <!-- 发送 tab — a first-class route, like the other primary tabs. -->
       <button onclick={() => {

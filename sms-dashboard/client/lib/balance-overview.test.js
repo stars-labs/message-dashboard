@@ -1,0 +1,51 @@
+import { describe, expect, test } from 'bun:test';
+import { buildBalanceRows, countBalanceHealth, getBalanceThreshold } from './balance-overview.js';
+
+const now = new Date('2026-08-14T08:00:00Z');
+
+function phone(iccid, country) {
+  return { iccid, country, sim_index: Number(iccid.slice(-1)) || 1 };
+}
+
+function check(iccid, status, value, currency, requestedAt = '2026-08-14 07:00:00') {
+  return {
+    id: `${iccid}-${status}-${requestedAt}`,
+    sim_iccid: iccid,
+    status,
+    requested_at: requestedAt,
+    metrics: value == null ? [] : [{ metric_type: 'cash_balance', value, currency }],
+  };
+}
+
+describe('balance overview', () => {
+  test('uses the confirmed thresholds for China, Singapore and Hong Kong', () => {
+    expect(getBalanceThreshold(phone('cn1', 'CN'))).toEqual({ value: 100, currency: 'CNY' });
+    expect(getBalanceThreshold(phone('sg2', 'SG'))).toEqual({ value: 10, currency: 'SGD' });
+    expect(getBalanceThreshold(phone('hk3', 'HK'))).toEqual({ value: 100, currency: 'HKD' });
+  });
+
+  test('classifies normal, low, stale and unknown balances', () => {
+    const phones = [phone('cn1', 'CN'), phone('sg2', 'SG'), phone('hk3', 'HK'), phone('xx4', 'XX')];
+    const checks = [
+      check('cn1', 'parsed', 264.33, 'CNY'),
+      check('sg2', 'parsed', 4.5, 'SGD'),
+      check('hk3', 'parsed', 180, 'HKD', '2026-06-01 00:00:00'),
+    ];
+    const rows = buildBalanceRows(phones, checks, now);
+
+    expect(rows.map((row) => row.health)).toEqual(['normal', 'low', 'stale', 'unknown']);
+    expect(countBalanceHealth(rows)).toEqual({ normal: 1, low: 1, stale: 1, failed: 0, unknown: 1 });
+  });
+
+  test('keeps the last known balance but gives a newer failed query priority', () => {
+    const checks = [
+      check('cn1', 'failed', null, null, '2026-08-14 07:30:00'),
+      check('cn1', 'parsed', 264.33, 'CNY', '2026-08-14 07:00:00'),
+    ];
+    const [row] = buildBalanceRows([phone('cn1', 'CN')], checks, now);
+
+    expect(row.health).toBe('failed');
+    expect(row.balanceMetric.value).toBe(264.33);
+    expect(row.latestCheck.status).toBe('failed');
+  });
+});

@@ -16,12 +16,16 @@ use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use tracing::{debug, info, warn};
 
 // USBDEVFS_RESET = _IO('U', 20): re-enumerates a USB device via its usbfs node.
 // Equivalent to what `usbreset` does — recovers a wedged modem at the USB level.
 nix::ioctl_none!(usbdevfs_reset, b'U', 20);
+
+const SMS_PROMPT_TIMEOUT: Duration = Duration::from_secs(10);
+const SMS_PROMPT_TIMEOUT_ERROR: &str = "Timeout waiting for > prompt";
+const SMS_PROMPT_RETRY_DELAY: Duration = Duration::from_secs(1);
 
 /// SMS message from AT command interface
 #[derive(Debug, Clone)]
@@ -99,6 +103,9 @@ pub struct ModemHealth {
 pub struct AtModemManager {
     /// Map of port path -> modem info cache
     modems: Arc<RwLock<HashMap<String, AtModemInfo>>>,
+    /// One lock per AT port. A complete SMS submission holds this lock so the reader
+    /// cannot flush or consume the modem prompt between configuration and CMGS.
+    port_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     /// Timeout for AT commands
     timeout: Duration,
 }
@@ -107,8 +114,17 @@ impl AtModemManager {
     pub fn new() -> Self {
         Self {
             modems: Arc::new(RwLock::new(HashMap::new())),
+            port_locks: Mutex::new(HashMap::new()),
             timeout: Duration::from_secs(5),
         }
+    }
+
+    async fn port_lock(&self, port: &str) -> Arc<Mutex<()>> {
+        let mut locks = self.port_locks.lock().await;
+        locks
+            .entry(port.to_string())
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone()
     }
 
     /// Discover all Quectel EC20 AT command ports
@@ -389,6 +405,16 @@ impl AtModemManager {
         command: &str,
         timeout: Duration,
     ) -> Result<String> {
+        let port_lock = self.port_lock(port).await;
+        let _guard = port_lock.lock().await;
+        Self::send_at_command_unlocked(port, command, timeout).await
+    }
+
+    async fn send_at_command_unlocked(
+        port: &str,
+        command: &str,
+        timeout: Duration,
+    ) -> Result<String> {
         let port_path = port.to_string();
         let cmd = command.to_string();
 
@@ -406,6 +432,31 @@ impl AtModemManager {
                 port
             )),
         }
+    }
+
+    fn recover_sms_input_sync(port: &str, timeout: Duration) -> Result<()> {
+        let mut file = Self::open_serial(port)?;
+        file.write_all(&[0x1b])?;
+        file.flush()?;
+        std::thread::sleep(Duration::from_millis(100));
+        drop(file);
+
+        let response = Self::send_at_sync(port, "AT", timeout)?;
+        if response.contains("OK") {
+            Ok(())
+        } else {
+            Err(anyhow!(
+                "Modem did not respond to AT after SMS input recovery: {}",
+                response.trim()
+            ))
+        }
+    }
+
+    async fn recover_sms_input_unlocked(&self, port: &str) -> Result<()> {
+        let port_path = port.to_string();
+        let timeout = self.timeout;
+        tokio::task::spawn_blocking(move || Self::recover_sms_input_sync(&port_path, timeout))
+            .await?
     }
 
     /// Open serial port with proper settings
@@ -1752,51 +1803,72 @@ impl AtModemManager {
         Self::validate_recipient_with_short_code(recipient, allow_short_code)?;
         Self::validate_message_body(message)?;
 
-        // Set text mode
-        self.send_at_command(port, "AT+CMGF=1", self.timeout)
+        let use_ucs2 = Self::needs_ucs2(message);
+        let port_lock = self.port_lock(port).await;
+        let _guard = port_lock.lock().await;
+
+        for attempt in 1..=2 {
+            self.recover_sms_input_unlocked(port).await?;
+            self.configure_sms_unlocked(port, use_ucs2).await?;
+
+            let port_path = port.to_string();
+            let recipient = recipient.to_string();
+            let msg = message.to_string();
+            let timeout = self.timeout;
+            let result = tokio::task::spawn_blocking(move || {
+                Self::send_sms_sync(
+                    &port_path,
+                    &recipient,
+                    &msg,
+                    timeout,
+                    use_ucs2,
+                    allow_short_code,
+                )
+            })
             .await?;
 
-        // Check if we need UCS2 encoding for Unicode content
-        let use_ucs2 = Self::needs_ucs2(message);
+            match result {
+                Ok(()) => return Ok(()),
+                Err(error) if attempt == 1 && Self::is_prompt_timeout(&error) => {
+                    warn!(
+                        "SMS prompt timed out on {}; recovering and retrying once",
+                        port
+                    );
+                    tokio::time::sleep(SMS_PROMPT_RETRY_DELAY).await;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+
+        unreachable!("SMS send loop always returns on its second attempt")
+    }
+
+    async fn configure_sms_unlocked(&self, port: &str, use_ucs2: bool) -> Result<()> {
+        Self::send_at_command_unlocked(port, "AT+CMGF=1", self.timeout).await?;
 
         if use_ucs2 {
             // Set UCS2 character set and message format for Unicode messages
-            self.send_at_command(port, "AT+CSCS=\"UCS2\"", self.timeout)
-                .await?;
+            Self::send_at_command_unlocked(port, "AT+CSCS=\"UCS2\"", self.timeout).await?;
             // Set message parameters: No retry, request delivery report, DCS=8 for UCS2
             // CSMP format: <fo>,<vp>,<pid>,<dcs>
             // fo=49 (0x31): TP-SRR=1 (status report), TP-VPF=00 (no validity period)
             // vp=0: Not used when TP-VPF=00
             // This prevents modem from retrying SMS sends automatically
-            self.send_at_command(port, "AT+CSMP=49,0,0,8", self.timeout)
-                .await?;
+            Self::send_at_command_unlocked(port, "AT+CSMP=49,0,0,8", self.timeout).await?;
         } else {
             // Set GSM character set for ASCII messages
-            self.send_at_command(port, "AT+CSCS=\"GSM\"", self.timeout)
-                .await?;
+            Self::send_at_command_unlocked(port, "AT+CSCS=\"GSM\"", self.timeout).await?;
             // Set message parameters: No retry, request delivery report, GSM 7-bit
             // fo=49 (0x31): TP-SRR=1 (status report), TP-VPF=00 (no validity period)
             // This prevents modem from retrying SMS sends automatically
-            self.send_at_command(port, "AT+CSMP=49,0,0,0", self.timeout)
-                .await?;
+            Self::send_at_command_unlocked(port, "AT+CSMP=49,0,0,0", self.timeout).await?;
         }
 
-        let port_path = port.to_string();
-        let recipient = recipient.to_string();
-        let msg = message.to_string();
-        let timeout = self.timeout;
+        Ok(())
+    }
 
-        tokio::task::spawn_blocking(move || {
-            Self::send_sms_sync(
-                &port_path,
-                &recipient,
-                &msg,
-                timeout,
-                use_ucs2,
-                allow_short_code,
-            )
-        })
-        .await?
+    fn is_prompt_timeout(error: &anyhow::Error) -> bool {
+        error.to_string() == SMS_PROMPT_TIMEOUT_ERROR
     }
 
     fn send_sms_sync(
@@ -1835,7 +1907,7 @@ impl AtModemManager {
         let start = Instant::now();
         let mut got_prompt = false;
 
-        while start.elapsed() < Duration::from_secs(5) {
+        while start.elapsed() < SMS_PROMPT_TIMEOUT {
             match file.read(&mut buf) {
                 Ok(0) => {
                     std::thread::sleep(Duration::from_millis(50));
@@ -1861,7 +1933,7 @@ impl AtModemManager {
         }
 
         if !got_prompt {
-            return Err(anyhow!("Timeout waiting for > prompt"));
+            return Err(anyhow!(SMS_PROMPT_TIMEOUT_ERROR));
         }
 
         // Small delay after prompt
@@ -1957,6 +2029,28 @@ impl AtModemManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn reuses_one_serial_lock_per_port() {
+        let manager = AtModemManager::new();
+        let first = manager.port_lock("/dev/ttyUSB2").await;
+        let same_port = manager.port_lock("/dev/ttyUSB2").await;
+        let other_port = manager.port_lock("/dev/ttyUSB6").await;
+
+        assert!(Arc::ptr_eq(&first, &same_port));
+        assert!(!Arc::ptr_eq(&first, &other_port));
+    }
+
+    #[test]
+    fn retries_only_before_the_sms_body_is_written() {
+        assert!(AtModemManager::is_prompt_timeout(&anyhow!(
+            SMS_PROMPT_TIMEOUT_ERROR
+        )));
+        assert!(!AtModemManager::is_prompt_timeout(&anyhow!(
+            "Send SMS failed after Ctrl-Z"
+        )));
+        assert_eq!(SMS_PROMPT_TIMEOUT, Duration::from_secs(10));
+    }
 
     // An AT command is terminated by CR, so a CR inside the recipient ends the CMGS
     // command and everything after it is parsed by the modem as a fresh command. The

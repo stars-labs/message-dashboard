@@ -100,6 +100,7 @@ describe('permission coverage', () => {
     'phones.write',
     'messages.read',
     'messages.send',
+    'balances.query',
     'keywords.read',
     'keywords.write',
     'keywords.delete',
@@ -121,9 +122,14 @@ describe('permission coverage', () => {
     expect(permissionsForRoles(['viewer'], config)).not.toContain('phones.write');
   });
 
+  test('balances.query is granted to admin and denied to viewer', () => {
+    expect(permissionsForRoles(['admin'], config)).toContain('balances.query');
+    expect(permissionsForRoles(['viewer'], config)).not.toContain('balances.query');
+  });
+
   test('viewer cannot reach any write permission', () => {
     const viewerPerms = permissionsForRoles(['viewer'], config);
-    for (const p of ['phones.write', 'keywords.write', 'keywords.delete', 'filters.write', 'filters.delete', 'users.read', 'users.write']) {
+    for (const p of ['balances.query', 'phones.write', 'keywords.write', 'keywords.delete', 'filters.write', 'filters.delete', 'users.read', 'users.write']) {
       expect(viewerPerms).not.toContain(p);
     }
   });

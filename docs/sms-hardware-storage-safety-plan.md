@@ -335,6 +335,7 @@ Do not overwrite prior evidence.
 | 2026-08-14 | Stage 0 | Rust validation gate | Uniformly formatted the daemon crate. Added `check-daemon`, a `nix flake check` format derivation, and a pre-test format gate to the daemon Nix build. | All future daemon validation and deployment builds must pass `cargo fmt --all --check`. |
 | 2026-08-14 | Stage 0 | Production access retry | Initial SSH attempts were blocked by the local execution sandbox and produced no remote output. An approved read-only retry later succeeded. | No production routing or daemon change was needed. |
 | 2026-08-14 | Stage 0 | Production read-only snapshot, daemon `8.0.0` | Service is active. Retained 75-hour window: 21,530 scans at 11.53 s average, 4 per-modem read failures, 0 explicit delete failures, and 956,797 multipart-completion logs. Journal is about 1 GB. SQLite snapshot contains 520 recent multipart segments in 354 groups. | Treat repeated multipart assembly as a high-priority baseline finding. Do not change deletion behavior or query `CPMS` until serialization and retry safety are reviewed. |
+| 2026-08-14 | Stage 0 | Balance-query debugging overlap | Another authorized session restarted the daemon at 11:58:22 +08 while debugging balance queries. | Do not classify this as a daemon failure. Start the formal seven-day storage baseline only after balance debugging and planned restarts finish. |
 
 ## Decision Log
 
@@ -353,6 +354,15 @@ Do not overwrite prior evidence.
 Store sanitized artifacts under `docs/evidence/sms-storage/`. Never commit SMS
 bodies, phone numbers, secrets, or raw production PDU content. Record hashes,
 redacted fixtures, aggregate counts, build versions, and time ranges instead.
+
+Run the read-only daily collector from the repository root with:
+
+```sh
+orange-pi-daemon/scripts/collect-storage-baseline.sh
+```
+
+Review its aggregate output before appending it to an evidence record. Never
+redirect unsanitized diagnostic commands into this directory.
 
 Suggested files:
 

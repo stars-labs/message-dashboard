@@ -55,8 +55,7 @@
     }, 2000);
   }
 
-  // Content filter: 'code' = only messages with a parsed verification_code,
-  // 'all' = everything that isn't rule-hidden.
+  // Content filter: verification codes, grouped balance conversations, or both.
   let contentFilter = $state('code');
 
   // Messages shown in the list, after both dimensions of filtering.
@@ -66,6 +65,7 @@
     if (selectedPhone) {
       base = base.filter(m => m.phone_iccid === selectedPhone.iccid);
     }
+    if (contentFilter === 'balance') return [];
     // Content filter
     if (contentFilter === 'code') {
       base = base.filter(m => m.verification_code);
@@ -85,7 +85,7 @@
       timestamp: message.timestamp,
     }));
 
-    if (contentFilter === 'all') {
+    if (contentFilter === 'all' || contentFilter === 'balance') {
       const checks = selectedPhone
         ? (balanceChecks || []).filter((check) => check.sim_iccid === selectedPhone.iccid)
         : (balanceChecks || []);
@@ -186,13 +186,19 @@
         <div class="flex items-center bg-stone-100 rounded-lg p-0.5 text-xs">
           <button
             onclick={() => { contentFilter = 'code'; }}
-            class="px-2.5 py-1 rounded-md transition-all {contentFilter === 'code'
+            class="px-2 lg:px-2.5 py-1 rounded-md transition-all {contentFilter === 'code'
               ? 'bg-white shadow-sm font-semibold text-stone-800'
               : 'text-stone-500 hover:text-stone-700'}"
           >验证码</button>
           <button
+            onclick={() => { contentFilter = 'balance'; }}
+            class="px-2 lg:px-2.5 py-1 rounded-md transition-all {contentFilter === 'balance'
+              ? 'bg-white shadow-sm font-semibold text-stone-800'
+              : 'text-stone-500 hover:text-stone-700'}"
+          >余额查询</button>
+          <button
             onclick={() => { contentFilter = 'all'; }}
-            class="px-2.5 py-1 rounded-md transition-all {contentFilter === 'all'
+            class="px-2 lg:px-2.5 py-1 rounded-md transition-all {contentFilter === 'all'
               ? 'bg-white shadow-sm font-semibold text-stone-800'
               : 'text-stone-500 hover:text-stone-700'}"
           >全部短信</button>
@@ -234,7 +240,7 @@
     style="grid-template-columns: 3px 250px 118px minmax(0, 1fr) 92px; gap: 0 16px;">
     <div></div><!-- accent rail -->
     <div class="text-[11px] font-semibold text-stone-400 tracking-widest uppercase">发送 / 接收</div>
-    <div class="text-[11px] font-semibold text-stone-400 tracking-widest uppercase">验证码</div>
+    <div class="text-[11px] font-semibold text-stone-400 tracking-widest uppercase">{contentFilter === 'balance' ? '查询状态' : '验证码'}</div>
     <div class="text-[11px] font-semibold text-stone-400 tracking-widest uppercase">短信内容</div>
     <div class="text-[11px] font-semibold text-stone-400 tracking-widest uppercase text-right">时间</div>
   </div>
@@ -281,6 +287,9 @@
             class="mt-2 text-xs text-action-text hover:underline">
             切换到「全部短信」查看
           </button>
+        {:else if contentFilter === 'balance'}
+          <p class="text-sm font-medium text-stone-500">暂无余额查询记录</p>
+          <p class="text-xs text-stone-400 mt-1">完成查询后，会话会按查询编号显示在这里</p>
         {:else if !selectedPhone}
           <!-- Three breathing dots — "waiting for codes" empty state per §9 -->
           <div class="flex gap-2 mb-4">

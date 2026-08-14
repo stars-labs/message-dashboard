@@ -17,6 +17,140 @@ function normalizeCarrier(value) {
   return typeof value === 'string' ? value.trim().toLocaleLowerCase() : '';
 }
 
+function checkKey(simIccid, profileId) {
+  return `${simIccid}\u0000${profileId}`;
+}
+
+export function buildBalanceQueryPlan({
+  phones = [],
+  profiles = [],
+  recentChecks = [],
+  successfulChecks = [],
+  allowDiscovery = false,
+} = {}) {
+  const recentBySim = new Map(recentChecks.map((check) => [check.sim_iccid, check]));
+  const successful = new Set(
+    successfulChecks.map((check) => checkKey(check.sim_iccid, check.profile_id))
+  );
+
+  return phones.map((phone) => {
+    const matchingProfiles = profiles
+      .filter((profile) => profile.method === 'sms'
+        && phone.country === profile.country_code
+        && carrierMatchesProfile(phone.carrier, profile.carrier))
+      .sort((a, b) => Number(b.enabled || 0) - Number(a.enabled || 0));
+    const profile = matchingProfiles.find((candidate) =>
+      Number(candidate.enabled) === 1
+      || (Number(candidate.discovery_enabled) === 1
+        && (allowDiscovery || successful.has(checkKey(phone.iccid, candidate.id))))
+    ) || null;
+
+    let reason = null;
+    if (phone.sim_status !== 'active') reason = 'offline';
+    else if (!profile) reason = matchingProfiles.length ? 'unverified' : 'unsupported';
+    else if (recentBySim.has(phone.iccid)) reason = 'cooldown';
+
+    return {
+      phone,
+      profile,
+      eligible: !reason,
+      reason,
+      recentCheck: recentBySim.get(phone.iccid) || null,
+    };
+  });
+}
+
+function summarizePlan(plan) {
+  const summary = {
+    total: plan.length,
+    eligible: 0,
+    offline: 0,
+    unsupported: 0,
+    unverified: 0,
+    cooldown: 0,
+  };
+  for (const item of plan) {
+    if (item.eligible) summary.eligible += 1;
+    else if (item.reason in summary) summary[item.reason] += 1;
+  }
+  return summary;
+}
+
+async function loadBalanceQueryPlan(db, { phoneIccid = null, allowDiscovery = false } = {}) {
+  const phoneWhere = phoneIccid ? 'WHERE iccid = ?' : '';
+  const phoneStatement = db.prepare(`
+    SELECT iccid, number, carrier, country, sim_status, sim_index
+    FROM device_view ${phoneWhere}
+    ORDER BY sim_index
+  `);
+  const [phoneResult, profileResult, recentResult, successfulResult] = await Promise.all([
+    phoneIccid ? phoneStatement.bind(phoneIccid).all() : phoneStatement.all(),
+    db.prepare(`
+      SELECT * FROM sim_balance_profiles
+      WHERE method = 'sms' AND (discovery_enabled = 1 OR enabled = 1)
+      ORDER BY enabled DESC, id
+    `).all(),
+    db.prepare(`
+      SELECT sim_iccid, profile_id, id, status, requested_at
+      FROM sim_balance_checks
+      WHERE status IN ('queued', 'awaiting_response')
+         OR (status != 'failed'
+           AND datetime(requested_at) >= datetime('now', '-24 hours'))
+      ORDER BY datetime(requested_at) DESC
+    `).all(),
+    db.prepare(`
+      SELECT DISTINCT sim_iccid, profile_id
+      FROM sim_balance_checks
+      WHERE status = 'parsed'
+    `).all(),
+  ]);
+
+  return buildBalanceQueryPlan({
+    phones: phoneResult.results || [],
+    profiles: profileResult.results || [],
+    recentChecks: recentResult.results || [],
+    successfulChecks: successfulResult.results || [],
+    allowDiscovery,
+  });
+}
+
+async function queueBalanceCheck(db, { phone, profile }) {
+  const checkId = `bal-${nanoid()}`;
+  const messageId = `msg-balance-${nanoid()}`;
+
+  await db.batch([
+    db.prepare(`
+      INSERT INTO sim_balance_checks (
+        id, sim_iccid, profile_id, status, outbound_message_id, parser_version
+      ) VALUES (?, ?, ?, 'queued', ?, ?)
+    `).bind(checkId, phone.iccid, profile.id, messageId, profile.parser_version),
+    db.prepare(`
+      INSERT INTO messages (
+        id, phone_iccid, phone_number, content, timestamp, type, recipient,
+        status, filter_status, purpose, balance_check_id
+      ) VALUES (
+        ?, ?, ?, ?, CURRENT_TIMESTAMP, 'sent', ?,
+        'sending', 'filtered', 'balance_maintenance', ?
+      )
+    `).bind(
+      messageId,
+      phone.iccid,
+      phone.number,
+      profile.command,
+      profile.destination,
+      checkId,
+    ),
+  ]);
+
+  return {
+    id: checkId,
+    sim_iccid: phone.iccid,
+    profile_id: profile.id,
+    status: 'queued',
+    outbound_message_id: messageId,
+  };
+}
+
 function parseConversationSteps(value) {
   try {
     const steps = JSON.parse(value || '[]');
@@ -352,6 +486,93 @@ export const balanceQueriesHandler = {
     return json({ success: true, data: checks });
   },
 
+  async preview(request) {
+    const plan = await loadBalanceQueryPlan(request.env.DB);
+    return json({
+      success: true,
+      summary: summarizePlan(plan),
+      eligible: plan
+        .filter((item) => item.eligible)
+        .map((item) => ({
+          phone_iccid: item.phone.iccid,
+          sim_index: item.phone.sim_index,
+          phone_number: item.phone.number,
+          carrier: item.phone.carrier,
+          profile_id: item.profile.id,
+        })),
+    });
+  },
+
+  async query(request) {
+    let body;
+    try {
+      body = await request.json();
+    } catch {
+      return json({ success: false, error: 'Invalid JSON body' }, 400);
+    }
+
+    if (typeof body?.phone_iccid !== 'string') {
+      return json({ success: false, error: 'phone_iccid is required' }, 400);
+    }
+
+    const [item] = await loadBalanceQueryPlan(request.env.DB, {
+      phoneIccid: body.phone_iccid,
+      allowDiscovery: true,
+    });
+    if (!item) return json({ success: false, error: 'SIM not found' }, 404);
+    if (!item.eligible) {
+      const errors = {
+        offline: 'SIM is not active',
+        unsupported: 'No balance query profile matches this SIM',
+        unverified: 'Balance query profile is not verified for this SIM',
+        cooldown: 'This SIM has already been queried in the last 24 hours',
+      };
+      return json({
+        success: false,
+        error: errors[item.reason] || 'SIM is not eligible for a balance query',
+        reason: item.reason,
+        previous_check: item.recentCheck,
+      }, item.reason === 'cooldown' ? 429 : 409);
+    }
+
+    const check = await queueBalanceCheck(request.env.DB, item);
+    return json({ success: true, check }, 202);
+  },
+
+  async queryBatch(request) {
+    const plan = await loadBalanceQueryPlan(request.env.DB);
+    const eligible = plan.filter((item) => item.eligible);
+    const checks = [];
+    const failures = [];
+
+    // Queue on the server, one audited transaction per SIM. The daemon fetch endpoint
+    // applies a separate maintenance-message cap, so a fleet action cannot monopolise
+    // normal user SMS delivery.
+    for (const item of eligible) {
+      try {
+        checks.push(await queueBalanceCheck(request.env.DB, item));
+      } catch (error) {
+        failures.push({
+          phone_iccid: item.phone.iccid,
+          sim_index: item.phone.sim_index,
+          error: error?.message || 'Failed to queue balance query',
+        });
+      }
+    }
+
+    return json({
+      success: true,
+      batch_id: `balance-batch-${nanoid()}`,
+      summary: {
+        ...summarizePlan(plan),
+        queued: checks.length,
+        failed_to_queue: failures.length,
+      },
+      checks,
+      failures,
+    }, 202);
+  },
+
   async create(request) {
     if (!hasApiKey(request)) return json({ error: 'Unauthorized' }, 401);
 
@@ -411,42 +632,11 @@ export const balanceQueriesHandler = {
       }, 429);
     }
 
-    const checkId = `bal-${nanoid()}`;
-    const messageId = `msg-balance-${nanoid()}`;
-
-    await db.batch([
-      db.prepare(`
-        INSERT INTO sim_balance_checks (
-          id, sim_iccid, profile_id, status, outbound_message_id, parser_version
-        ) VALUES (?, ?, ?, 'queued', ?, ?)
-      `).bind(checkId, phone_iccid, profile_id, messageId, profile.parser_version),
-      db.prepare(`
-        INSERT INTO messages (
-          id, phone_iccid, phone_number, content, timestamp, type, recipient,
-          status, filter_status, purpose, balance_check_id
-        ) VALUES (
-          ?, ?, ?, ?, CURRENT_TIMESTAMP, 'sent', ?,
-          'sending', 'filtered', 'balance_maintenance', ?
-        )
-      `).bind(
-        messageId,
-        phone_iccid,
-        phone.number,
-        profile.command,
-        profile.destination,
-        checkId,
-      ),
-    ]);
+    const check = await queueBalanceCheck(db, { phone, profile });
 
     return json({
       success: true,
-      check: {
-        id: checkId,
-        sim_iccid: phone_iccid,
-        profile_id,
-        status: 'queued',
-        outbound_message_id: messageId,
-      },
+      check,
     }, 202);
   },
 

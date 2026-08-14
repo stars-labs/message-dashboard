@@ -202,6 +202,33 @@ router.get('/api/balance-checks', async (request, env, ctx) => {
   return balanceQueriesHandler.list(request);
 });
 
+router.get('/api/balance-checks/query-preview', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  await enrichUserPermissions(request, env, ctx);
+  const permResponse = await requirePermission('balances.query')(request, env, ctx);
+  if (permResponse) return permResponse;
+  return balanceQueriesHandler.preview(request);
+});
+
+router.post('/api/balance-checks/query', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  await enrichUserPermissions(request, env, ctx);
+  const permResponse = await requirePermission('balances.query')(request, env, ctx);
+  if (permResponse) return permResponse;
+  return balanceQueriesHandler.query(request);
+});
+
+router.post('/api/balance-checks/query-batch', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  await enrichUserPermissions(request, env, ctx);
+  const permResponse = await requirePermission('balances.query')(request, env, ctx);
+  if (permResponse) return permResponse;
+  return balanceQueriesHandler.queryBatch(request);
+});
+
 router.post('/api/messages/send', async (request, env, ctx) => {
   const authResponse = await handleAuth0(request, env, ctx);
   if (authResponse) return authResponse;

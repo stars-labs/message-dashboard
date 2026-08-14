@@ -35,6 +35,7 @@ export const ROLE_PERMISSIONS = {
   [ADMIN]: [
     'messages.read',
     'messages.send',
+    'balances.query',
     'phones.read',
     'phones.write',
     'keywords.read',
