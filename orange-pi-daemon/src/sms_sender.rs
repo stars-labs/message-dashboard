@@ -10,7 +10,13 @@ pub struct PendingSms {
     pub recipient: String,
     pub phone_iccid: String,
     pub content: String,
+    #[serde(default = "default_sms_purpose")]
+    pub purpose: String,
     pub created_at: String,
+}
+
+fn default_sms_purpose() -> String {
+    "user".to_string()
 }
 
 #[derive(Debug, Serialize)]
@@ -164,7 +170,12 @@ impl SmsSender {
         // Send SMS using ModemManager (supports both AT commands and D-Bus)
         match self
             .modem_manager
-            .send_sms(&modem_id, &sms.recipient, &sms.content)
+            .send_sms_with_short_code(
+                &modem_id,
+                &sms.recipient,
+                &sms.content,
+                sms.purpose == "balance_maintenance",
+            )
             .await
         {
             Ok(_) => {

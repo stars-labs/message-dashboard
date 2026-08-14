@@ -1046,7 +1046,7 @@ export const controlHandler = {
 
       // Fetch the updated messages
       const messages = await env.DB.prepare(`
-        SELECT id, phone_iccid, phone_number, content, recipient, created_at
+        SELECT id, phone_iccid, phone_number, content, recipient, purpose, created_at
         FROM messages
         WHERE id IN (${placeholders})
         ORDER BY created_at ASC
