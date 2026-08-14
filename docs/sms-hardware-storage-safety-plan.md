@@ -19,7 +19,7 @@ queries.
 | Item | State |
 | --- | --- |
 | Current behavior documented | Complete (code-level baseline) |
-| Baseline production evidence collected | Blocked: production SSH unavailable on 2026-08-14 |
+| Baseline production evidence collected | In progress: 75-hour snapshot collected; seven-day window unavailable |
 | Storage telemetry implementation | Not started |
 | Storage telemetry enabled in production | Not approved |
 | Delete-retry shadow mode | Not approved |
@@ -130,8 +130,10 @@ Every implementation and review must preserve these invariants.
 
 **Behavior change:** none.
 
-- [ ] Record the deployed daemon commit and build version.
-- [ ] Record at least seven days of current modem-reader success/failure data.
+- [ ] Record the deployed daemon commit and build version. Version `8.0.0` is
+  confirmed; the artifact does not expose its project commit.
+- [ ] Record at least seven days of current modem-reader success/failure data. The
+  retained journal currently covers only about 75 hours.
 - [ ] Measure scan-cycle latency, messages received, duplicate count, deletion
   successes, deletion failures, multipart completions, and incomplete segments.
 - [ ] Capture sanitized examples of `AT+CPMS=?`, storage-selection responses, and
@@ -331,7 +333,8 @@ Do not overwrite prior evidence.
 | 2026-08-14 | Stage 0 | Repository `f073b72` | Code-level receive path and operation serialization documented. Read-only SSH to both known Orange Pi addresses timed out, so deployed version and production metrics are not yet verified. | Add regression coverage locally; resume production evidence collection when read-only access returns. |
 | 2026-08-14 | Stage 0 | Local Rust tests | Added storage-path, duplicate-path, and incomplete-multipart regression cases. Specialized suite: 29 passed. Full suite: 197 passed, 0 failed, 1 ignored doctest. | Keep runtime behavior unchanged; begin the seven-day production baseline after read-only access is restored. |
 | 2026-08-14 | Stage 0 | Rust validation gate | Uniformly formatted the daemon crate. Added `check-daemon`, a `nix flake check` format derivation, and a pre-test format gate to the daemon Nix build. | All future daemon validation and deployment builds must pass `cargo fmt --all --check`. |
-| 2026-08-14 | Stage 0 | Production access retry | A second read-only attempt against both known Orange Pi addresses failed at connection setup with exit `255` and no remote output. No remote command ran. | Keep production evidence pending; do not change routing or daemon state as a workaround. |
+| 2026-08-14 | Stage 0 | Production access retry | Initial SSH attempts were blocked by the local execution sandbox and produced no remote output. An approved read-only retry later succeeded. | No production routing or daemon change was needed. |
+| 2026-08-14 | Stage 0 | Production read-only snapshot, daemon `8.0.0` | Service is active. Retained 75-hour window: 21,530 scans at 11.53 s average, 4 per-modem read failures, 0 explicit delete failures, and 956,797 multipart-completion logs. Journal is about 1 GB. SQLite snapshot contains 520 recent multipart segments in 354 groups. | Treat repeated multipart assembly as a high-priority baseline finding. Do not change deletion behavior or query `CPMS` until serialization and retry safety are reviewed. |
 
 ## Decision Log
 
@@ -343,6 +346,7 @@ Do not overwrite prior evidence.
 | 2026-08-14 | Bulk deletion | Prohibited | Do not introduce an automated `AT+CMGD=1,4` path. |
 | 2026-08-14 | Behavior changes | Pending approval | Telemetry planning is allowed; delete retry and multipart early deletion require later explicit gates. |
 | 2026-08-14 | Per-modem serialization | Gap confirmed | The worker-pool guard serializes reader cycles only. No common per-modem lock covers reading, sending, diagnostics, store selection, and deletion; Stage 1 must not add independent `CPMS` switching. |
+| 2026-08-14 | Repeated multipart assembly | Investigation required | Identical redacted multipart signatures recur every reader cycle. Code and logs indicate physical segments may survive local deduplication without a delete retry. This is not authorization to change runtime behavior. |
 
 ## Evidence Index
 
