@@ -184,6 +184,50 @@ describe('POST /api/control/balance-checks', () => {
   });
 });
 
+describe('GET /api/balance-checks', () => {
+  test('returns grouped audit records with parsed metrics', async () => {
+    const db = {
+      prepare(sql) {
+        return {
+          bind(...params) {
+            return {
+              async all() {
+                expect(sql).toContain('LEFT JOIN messages om');
+                expect(sql).toContain('LEFT JOIN messages rm');
+                expect(params).toEqual([phone.iccid, 25]);
+                return {
+                  results: [{
+                    id: 'bal-1',
+                    sim_iccid: phone.iccid,
+                    status: 'parsed',
+                    outbound_content: '10086',
+                    response_content: '余额82.36元',
+                    metrics_json: '[{"metric_type":"cash_balance","value":82.36,"currency":"CNY"}]',
+                  }],
+                };
+              },
+            };
+          },
+        };
+      },
+    };
+    const response = await balanceQueriesHandler.list({
+      env: { DB: db },
+      url: `https://example.com/api/balance-checks?phone_iccid=${phone.iccid}&limit=25`,
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data).toHaveLength(1);
+    expect(body.data[0].metrics).toEqual([{
+      metric_type: 'cash_balance',
+      value: 82.36,
+      currency: 'CNY',
+    }]);
+    expect(body.data[0].metrics_json).toBeUndefined();
+  });
+});
+
 describe('balance reply correlation', () => {
   test('selects the newest pending check whose sender allowlist matches', async () => {
     const db = dbStub();

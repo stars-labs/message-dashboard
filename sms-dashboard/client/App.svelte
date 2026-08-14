@@ -12,6 +12,7 @@
   import ErrorBoundary from "./lib/ErrorBoundary.svelte";
   import Toast from "./lib/Toast.svelte";
   import DaemonHealthPanel from "./lib/DaemonHealthPanel.svelte";
+  import BalanceQueryDetail from './lib/BalanceQueryDetail.svelte';
   import { api } from "./lib/api.js";
   import { getPhoneFlag, mapStatsResponse } from "./lib/countries.js";
   import { auth } from "./lib/auth.js";
@@ -81,6 +82,13 @@
   let searchTerm = $state("");
   let showPhoneList = $state(false);
   let messages = $state([]);
+  let balanceChecks = $state([]);
+  let balanceDetailCheck = $state(null);
+  let latestSelectedBalanceCheck = $derived(
+    selectedPhoneIccid
+      ? balanceChecks.find((check) => check.sim_iccid === selectedPhoneIccid) || null
+      : null
+  );
   let phoneNumbers = $state([]);
   let user = $state(null);
   let loading = $state(true);
@@ -216,7 +224,7 @@
     
     try {
       // Load data via HTTP API (authenticatedFetch handles 401→logout)
-      const [phonesResponse, messagesResponse, statsResponse] =
+      const [phonesResponse, messagesResponse, statsResponse, balanceResponse] =
         await Promise.all([
           auth.authenticatedFetch("/api/phones")
             .then((r) => r.json())
@@ -241,6 +249,12 @@
             .catch((err) => {
               console.error('[App] Failed to fetch stats:', err);
               return { success: false };
+            }),
+          auth.authenticatedFetch("/api/balance-checks?limit=100")
+            .then((r) => r.ok ? r.json() : { success: false, data: [] })
+            .catch((err) => {
+              console.error('[App] Failed to fetch balance checks:', err);
+              return { success: false, data: [] };
             }),
         ]);
 
@@ -290,6 +304,10 @@
         
         messages = [];
       }
+
+      balanceChecks = balanceResponse?.success && Array.isArray(balanceResponse.data)
+        ? balanceResponse.data
+        : [];
       
       // Map API stats to component format
       if (statsResponse) {
@@ -312,6 +330,7 @@
       phoneNumbers = [];
       updateStatsFromPhones();
       messages = [];
+      balanceChecks = [];
       stats = {
         totalMessages: 0,
         todayMessages: 0,
@@ -361,6 +380,7 @@
   });
 
   function selectPhone(phone) {
+    balanceDetailCheck = null;
     selectedPhoneIccid = phone?.iccid || null;
     handlePhoneSelection();
     showPhoneList = false;
@@ -373,13 +393,19 @@
     const requestId = ++messageRequestId;
 
     try {
-      const response = await api.getMessages({
-        ...(phoneIccid ? { phone_iccid: phoneIccid, limit: 500 } : { limit: 2000 }),
-        ...(showFiltered ? { include_filtered: 1 } : {})
-      });
+      const [response, nextBalanceChecks] = await Promise.all([
+        api.getMessages({
+          ...(phoneIccid ? { phone_iccid: phoneIccid, limit: 500 } : { limit: 2000 }),
+          ...(showFiltered ? { include_filtered: 1 } : {})
+        }),
+        api.getBalanceChecks({
+          ...(phoneIccid ? { phone_iccid: phoneIccid, limit: 100 } : { limit: 100 }),
+        }),
+      ]);
 
       // Discard if user switched phones while we were loading
       if (requestId !== messageRequestId) return;
+      balanceChecks = nextBalanceChecks;
 
       // Keep the badge count fresh even when the offline cache served the list.
       if (response?.pagination?.filtered_count !== undefined) {
@@ -994,11 +1020,19 @@
                 {filteredCount}
                 {filterRules}
                 onToggleFiltered={toggleFiltered}
+                {balanceChecks}
+                onOpenBalance={(check) => balanceDetailCheck = check}
               />
             </div>
             {#if selectedPhone}
               <div class="hidden lg:block min-h-0">
-                <PhoneDetails phone={selectedPhone} mobile={false} {daemonStatus} />
+                <PhoneDetails
+                  phone={selectedPhone}
+                  mobile={false}
+                  {daemonStatus}
+                  balanceCheck={latestSelectedBalanceCheck}
+                  onOpenBalance={(check) => balanceDetailCheck = check}
+                />
               </div>
             {/if}
           </div>
@@ -1105,6 +1139,13 @@
           />
         </div>
       </div>
+    {/if}
+
+    {#if balanceDetailCheck}
+      <BalanceQueryDetail
+        check={balanceDetailCheck}
+        onClose={() => balanceDetailCheck = null}
+      />
     {/if}
 
     <!-- ── iOS bottom tab bar ────────────────────────────────────────────── -->

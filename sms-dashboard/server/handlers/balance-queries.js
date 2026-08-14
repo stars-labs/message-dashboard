@@ -111,6 +111,86 @@ export async function updateBalanceCheckForSmsResult(
 }
 
 export const balanceQueriesHandler = {
+  async list(request) {
+    const url = new URL(request.url);
+    const phoneIccid = url.searchParams.get('phone_iccid');
+    const requestedLimit = Number.parseInt(url.searchParams.get('limit') || '100', 10);
+    const limit = Number.isFinite(requestedLimit)
+      ? Math.min(Math.max(requestedLimit, 1), 500)
+      : 100;
+    const conditions = [];
+    const params = [];
+
+    if (phoneIccid) {
+      conditions.push('c.sim_iccid = ?');
+      params.push(phoneIccid);
+    }
+
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const result = await request.env.DB.prepare(`
+      SELECT
+        c.id,
+        c.sim_iccid,
+        c.profile_id,
+        c.requested_at,
+        c.sent_at,
+        c.completed_at,
+        c.status,
+        c.response_sender,
+        c.raw_response,
+        c.error,
+        c.parser_version,
+        p.country_code,
+        p.carrier AS profile_carrier,
+        p.method,
+        p.command,
+        p.destination,
+        dv.sim_index,
+        dv.number AS sim_number,
+        dv.carrier AS sim_carrier,
+        dv.country AS sim_country,
+        om.content AS outbound_content,
+        om.recipient AS outbound_recipient,
+        om.timestamp AS outbound_timestamp,
+        om.status AS outbound_status,
+        rm.content AS response_content,
+        rm.phone_number AS response_phone_number,
+        rm.timestamp AS response_timestamp,
+        COALESCE((
+          SELECT json_group_array(json_object(
+            'metric_type', bm.metric_type,
+            'value', bm.value,
+            'unit', bm.unit,
+            'currency', bm.currency,
+            'expires_at', bm.expires_at
+          ))
+          FROM sim_balance_metrics bm
+          WHERE bm.check_id = c.id
+        ), '[]') AS metrics_json
+      FROM sim_balance_checks c
+      JOIN sim_balance_profiles p ON p.id = c.profile_id
+      LEFT JOIN device_view dv ON dv.iccid = c.sim_iccid
+      LEFT JOIN messages om ON om.id = c.outbound_message_id
+      LEFT JOIN messages rm ON rm.id = c.response_message_id
+      ${where}
+      ORDER BY datetime(c.requested_at) DESC
+      LIMIT ?
+    `).bind(...params, limit).all();
+
+    const checks = (result.results || []).map((check) => {
+      let metrics = [];
+      try {
+        metrics = JSON.parse(check.metrics_json || '[]');
+      } catch {
+        metrics = [];
+      }
+      const { metrics_json: _metricsJson, ...record } = check;
+      return { ...record, metrics };
+    });
+
+    return json({ success: true, data: checks });
+  },
+
   async create(request) {
     if (!hasApiKey(request)) return json({ error: 'Unauthorized' }, 401);
 

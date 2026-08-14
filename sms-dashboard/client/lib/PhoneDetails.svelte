@@ -2,11 +2,18 @@
   import SignalStrength from './SignalStrength.svelte';
   import { formatCardNumber } from './card-number.js';
   import { getEffectiveDeviceStatus, getStatusMeta } from './device-status.js';
+  import {
+    formatBalanceMetric,
+    getBalanceStatusMeta,
+    getCashBalance,
+  } from './balance-query.js';
 
   let {
     phone = null,
     mobile = false,
     daemonStatus = { connected: false, lastDataUpdate: null },
+    balanceCheck = null,
+    onOpenBalance = null,
   } = $props();
 
   let effectiveStatus = $derived(
@@ -14,6 +21,8 @@
   );
   let statusMeta = $derived(getStatusMeta(effectiveStatus));
   let signal = $derived(Number(phone?.signal) || 0);
+  let balanceStatusMeta = $derived(getBalanceStatusMeta(balanceCheck?.status));
+  let cashBalance = $derived(getCashBalance(balanceCheck));
   let operator = $derived(phone?.operator_name || phone?.operator || phone?.carrier || '—');
   let moduleName = $derived(
     [phone?.manufacturer, phone?.model].filter(Boolean).join(' ') || '—'
@@ -63,6 +72,26 @@
       </div>
 
       <div class="flex items-center gap-3 shrink-0">
+        {#if balanceCheck}
+          <button
+            type="button"
+            onclick={() => onOpenBalance?.(balanceCheck)}
+            class="hidden xl:flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-stone-200
+              hover:border-orange-200 hover:bg-orange-50/50 transition-colors text-left"
+            aria-label="查看余额查询详情"
+          >
+            <span>
+              <span class="block text-[10px] leading-none text-stone-400">余额</span>
+              <span class="block mt-1 text-xs leading-none font-semibold text-stone-800 tabular-nums">
+                {formatBalanceMetric(cashBalance)}
+              </span>
+            </span>
+            <span class="w-px h-6 bg-stone-200"></span>
+            <span class="text-[11px] font-medium {balanceStatusMeta.className.includes('red') ? 'text-red-700' : 'text-stone-500'}">
+              {balanceStatusMeta.label}
+            </span>
+          </button>
+        {/if}
         <div class="hidden sm:flex items-center gap-2 text-xs text-stone-500">
           <SignalStrength signal={signal} status={effectiveStatus} compact={true} />
           <span class="font-mono tabular-nums">{signal}%</span>

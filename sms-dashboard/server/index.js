@@ -193,6 +193,15 @@ router.get('/api/messages', async (request, env, ctx) => {
   return messagesHandler.list(request);
 });
 
+router.get('/api/balance-checks', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  await enrichUserPermissions(request, env, ctx);
+  const permResponse = await requirePermission('messages.read')(request, env, ctx);
+  if (permResponse) return permResponse;
+  return balanceQueriesHandler.list(request);
+});
+
 router.post('/api/messages/send', async (request, env, ctx) => {
   const authResponse = await handleAuth0(request, env, ctx);
   if (authResponse) return authResponse;

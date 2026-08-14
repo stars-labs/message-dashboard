@@ -47,6 +47,7 @@ async function apiRequest(method, data = {}) {
   const httpEndpoints = {
     'getPhones': { url: '/api/phones', method: 'GET' },
     'getMessages': { url: '/api/messages', method: 'GET' },
+    'getBalanceChecks': { url: '/api/balance-checks', method: 'GET' },
     'sendMessage': { url: '/api/messages/send', method: 'POST' },
     'getStats': { url: '/api/stats', method: 'GET' },
     'getUser': { url: '/api/auth/me', method: 'GET' },
@@ -260,6 +261,16 @@ export const api = {
       }
 
       return { data: [], pagination: {} };
+    }
+  },
+
+  async getBalanceChecks(params = {}) {
+    try {
+      const response = await apiRequest('getBalanceChecks', params);
+      return response?.success ? response.data || [] : [];
+    } catch (error) {
+      console.warn('Failed to get balance checks:', error);
+      return [];
     }
   },
   

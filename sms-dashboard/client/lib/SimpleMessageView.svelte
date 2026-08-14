@@ -6,6 +6,8 @@
   import { copyCode } from "./clipboard.js";
   import { formatCardNumber } from "./card-number.js";
   import { getCountryFlag } from "./countries.js";
+  import BalanceConversationRow from './BalanceConversationRow.svelte';
+  import { getBalanceTimestamp, normalizeUtcTimestamp } from './balance-query.js';
 
   let {
     messages = [],
@@ -21,6 +23,8 @@
     onToggleFiltered = null,
     /** Filter rules, used to name the rule that hid a message. */
     filterRules = [],
+    balanceChecks = [],
+    onOpenBalance = null,
   } = $props();
 
   let activeKeywords = $state([]);
@@ -71,6 +75,33 @@
       base = base.filter(m => m.filter_status !== 'filtered');
     }
     return base;
+  });
+
+  let displayItems = $derived.by(() => {
+    const items = displayMessages.map((message) => ({
+      id: message.id,
+      kind: 'message',
+      message,
+      timestamp: message.timestamp,
+    }));
+
+    if (contentFilter === 'all') {
+      const checks = selectedPhone
+        ? (balanceChecks || []).filter((check) => check.sim_iccid === selectedPhone.iccid)
+        : (balanceChecks || []);
+      items.push(...checks.map((check) => ({
+        id: `balance-${check.id}`,
+        kind: 'balance',
+        check,
+        timestamp: getBalanceTimestamp(check),
+      })));
+    }
+
+    return items.sort((a, b) => {
+      const aTime = new Date(normalizeUtcTimestamp(a.timestamp)).getTime() || 0;
+      const bTime = new Date(normalizeUtcTimestamp(b.timestamp)).getTime() || 0;
+      return bTime - aTime;
+    });
   });
 
   // Count of messages that would appear if spam filter were lifted
@@ -241,7 +272,7 @@
         </div>
       {/each}
 
-    {:else if displayMessages.length === 0}
+    {:else if displayItems.length === 0}
       <div class="flex flex-col items-center justify-center h-full py-16 text-center">
         {#if contentFilter === 'code' && messages.length > 0}
           <div class="text-4xl mb-3">🔍</div>
@@ -266,7 +297,16 @@
       </div>
 
     {:else}
-      {#each displayMessages as message, idx}
+      {#each displayItems as item, idx (item.id)}
+        {#if item.kind === 'balance'}
+          <BalanceConversationRow
+            check={item.check}
+            {selectedPhone}
+            striped={idx % 2 !== 0}
+            onOpen={onOpenBalance}
+          />
+        {:else}
+        {@const message = item.message}
         {@const isNew = newMessageIds.has(message.id)}
         {@const isFiltered = message.filter_status === 'filtered'}
         {@const isCopied = copiedId === message.id}
@@ -391,6 +431,7 @@
             </div>
           {/if}
         </div>
+        {/if}
       {/each}
 
       <!-- Pinned spam-reveal banner above the scroll area's bottom — shows
