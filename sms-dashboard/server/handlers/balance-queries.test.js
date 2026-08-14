@@ -18,7 +18,7 @@ const profile = {
   destination: '10086',
   expected_senders: '["10086"]',
   parser_version: 'cn-mobile-balance-v1',
-  conversation_steps: '[{"response_contains":"1.话费与AI豆","command":"1"}]',
+  conversation_steps: '[{"response_contains":"1.话费与AI豆","command":"1"},{"response_contains":"101.查询余额","command":"101"}]',
   response_window_minutes: 30,
   discovery_enabled: 1,
   enabled: 0,
@@ -313,6 +313,30 @@ describe('balance reply correlation', () => {
     expect(metricInsert.params).toEqual([
       'bal-final', 'cash_balance', 82.36, null, 'CNY', null,
     ]);
+  });
+
+  test('queues the discovered 101 command from the second-level menu', async () => {
+    const db = dbStub();
+    const check = {
+      id: 'bal-submenu',
+      sim_iccid: phone.iccid,
+      sim_number: phone.number,
+      step_index: 1,
+      destination: '10086',
+      conversation_steps: profile.conversation_steps,
+      parser_version: profile.parser_version,
+    };
+
+    const result = await linkBalanceReply(db, check, {
+      id: 'msg-submenu',
+      phone_number: '10086',
+      content: '101.查询余额\n102.查询实时话费\n106.话费账单',
+    });
+
+    expect(result.queued).toBe(true);
+    const followUp = db.batches[0][0];
+    expect(followUp.params[2]).toBe('101');
+    expect(followUp.params).not.toContain('102');
   });
 
   test('does not parse current charges as cash balance', () => {
