@@ -1,5 +1,11 @@
 # SMS Dashboard
 
+> **Historical overview:** this document describes the pre-`033` v2 migration era
+> and is retained for context. It is not a production runbook. Current commands,
+> schema boundaries, and deployment rules are in [`../AGENTS.md`](../AGENTS.md) and
+> [`../CLAUDE.md`](../CLAUDE.md). In particular, `modem_state` no longer exists and
+> old numbered migrations must not be replayed against production.
+
 A real-time SMS management dashboard with multi-SIM support, built with Svelte and Cloudflare Workers.
 
 ## What's New in v2.0

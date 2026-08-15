@@ -105,71 +105,28 @@ export const swaggerSpec = {
         }
       }
     },
-    "/api/control/phones": {
+    "/api/control/devices": {
       post: {
-        summary: "Update Phone Status",
-        description: "Update status and signal information for one or more phones",
-        tags: ["Phones"],
+        summary: "Synchronize modem reports",
+        description: "Synchronize the daemon's normalized modem state with the dashboard",
+        tags: ["Devices"],
         security: [{ ApiKeyAuth: [] }],
         requestBody: {
           required: true,
           content: {
             "application/json": {
               schema: {
-                "$ref": "#/components/schemas/PhoneUpdateRequest"
-              },
-              examples: {
-                single: {
-                  summary: "Single phone update",
-                  value: {
-                    phones: [{
-                      id: "SIM_001",
-                      status: "online",
-                      signal: 85,
-                      rssi: -44.0,
-                      rsrq: -6.0,
-                      rsrp: -70.0,
-                      snr: 28.0
-                    }]
-                  }
-                },
-                multiple: {
-                  summary: "Multiple phones",
-                  value: {
-                    phones: [
-                      {
-                        id: "SIM_001",
-                        number: "+8613800138000",
-                        country: "CN",
-                        flag: "🇨🇳",
-                        carrier: "中国移动",
-                        status: "online",
-                        signal: 85
-                      },
-                      {
-                        id: "SIM_002",
-                        status: "offline"
-                      }
-                    ]
-                  }
-                }
+                "$ref": "#/components/schemas/DeviceSyncRequest"
               }
             }
           }
         },
         responses: {
           "200": {
-            description: "Phone status updated successfully",
-            content: {
-              "application/json": {
-                schema: {
-                  "$ref": "#/components/schemas/PhoneUpdateResponse"
-                }
-              }
-            }
+            description: "Device state synchronized successfully"
           },
           "400": {
-            description: "Bad request",
+            description: "Invalid synchronization payload",
             content: {
               "application/json": {
                 schema: {
@@ -239,72 +196,44 @@ export const swaggerSpec = {
           }
         }
       },
-      Phone: {
+      ModemReport: {
         type: "object",
-        required: ["id", "status"],
+        required: ["equipment_id"],
         properties: {
-          id: {
+          equipment_id: {
             type: "string",
-            description: "Phone/SIM identifier",
-            example: "SIM_001"
+            description: "Modem IMEI",
+            example: "865827078383361"
           },
-          number: {
+          detected_iccid: {
             type: "string",
-            description: "Phone number in E.164 format",
-            example: "+8613800138000"
+            nullable: true,
+            description: "ICCID read from the installed SIM"
           },
-          country: {
+          detected_phone_number: {
             type: "string",
-            description: "Country code (ISO 3166-1 alpha-2)",
-            example: "CN"
+            nullable: true
           },
-          flag: {
+          detected_operator: {
             type: "string",
-            description: "Country flag emoji",
-            example: "🇨🇳"
+            nullable: true
           },
-          carrier: {
-            type: "string",
-            description: "Mobile carrier name",
-            example: "中国移动"
+          modem_index: {
+            type: "integer",
+            example: 1
           },
           status: {
             type: "string",
-            enum: ["online", "offline", "error"],
-            description: "Phone status",
-            example: "online"
+            example: "active"
           },
-          signal: {
+          signal_percent: {
             type: "integer",
             minimum: 0,
-            maximum: 100,
-            description: "Signal strength percentage",
-            example: 85
-          },
-          iccid: {
-            type: "string",
-            description: "SIM card ICCID",
-            example: "89860000000000000000"
+            maximum: 100
           },
           rssi: {
             type: "number",
-            description: "Received Signal Strength Indicator in dBm",
-            example: -44.0
-          },
-          rsrq: {
-            type: "number",
-            description: "Reference Signal Received Quality in dB",
-            example: -6.0
-          },
-          rsrp: {
-            type: "number",
-            description: "Reference Signal Received Power in dBm",
-            example: -70.0
-          },
-          snr: {
-            type: "number",
-            description: "Signal-to-Noise Ratio in dB",
-            example: 28.0
+            nullable: true
           }
         }
       },
@@ -323,17 +252,28 @@ export const swaggerSpec = {
           }
         }
       },
-      PhoneUpdateRequest: {
+      DeviceSyncRequest: {
         type: "object",
-        required: ["phones"],
+        required: ["modem_reports"],
         properties: {
-          phones: {
+          modem_reports: {
             type: "array",
             items: {
-              "$ref": "#/components/schemas/Phone"
-            },
-            minItems: 1,
-            description: "Array of phones to update"
+              "$ref": "#/components/schemas/ModemReport"
+            }
+          },
+          sync_mode: {
+            type: "string",
+            enum: ["full", "incremental"],
+            default: "incremental"
+          },
+          session_id: {
+            type: "string",
+            nullable: true
+          },
+          timestamp: {
+            type: "string",
+            format: "date-time"
           }
         }
       },
@@ -352,24 +292,6 @@ export const swaggerSpec = {
           message: {
             type: "string",
             example: "Successfully uploaded 1 messages"
-          }
-        }
-      },
-      PhoneUpdateResponse: {
-        type: "object",
-        properties: {
-          success: {
-            type: "boolean",
-            example: true
-          },
-          updated: {
-            type: "integer",
-            description: "Number of phones updated",
-            example: 1
-          },
-          message: {
-            type: "string",
-            example: "Successfully updated 1 phones"
           }
         }
       },

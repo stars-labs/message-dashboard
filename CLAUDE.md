@@ -11,11 +11,10 @@ When compressing, preserve in priority order:
 5. Tool outputs (can delete, keep pass/fail only)
 
 ## Overview
-Distributed SMS management system for **100+ USB modems** on Orange Pi hardware.
+Distributed SMS management system designed for **100+ USB modems** on Orange Pi hardware.
 - **Production URL**: https://sexy.qzz.io
-- **Daemon version**: v8.0.0 (Rust, direct AT commands, ~7000 LOC)
+- **Daemon version**: v8.0.0 (Rust, direct AT commands, ~8800 LOC)
 - **Orange Pi SSH**: `root@10.171.150.102` (internal LAN, NixOS aarch64)
-- **Orange Pi public**: `203.116.95.146` (deploy target)
 
 ## Architecture
 ```
@@ -24,10 +23,10 @@ Orange Pi (Rust Daemon) → Cloudflare Workers API → Svelte 5 Frontend
 USB Modems (AT/D-Bus)    D1 Database (SQLite)     Auth0 + RBAC
 ```
 
-### Data Model (SIM-Centric) — verified against live D1, 2026-08-06
+### Data Model (SIM-Centric) — schema verified against live D1, 2026-08-06
 ```
-sims (user inventory, 95 rows)     ← Source of truth, daemon NEVER writes
-  └─ device_view (95 rows)         ← PRIMARY read view, all queries use this
+sims (user inventory)              ← Source of truth, daemon NEVER writes
+  └─ device_view                   ← PRIMARY read view, all queries use this
        └─ LEFT JOIN modems  ON sims.imei = modems.equipment_id
                                    ← Daemon-detected hardware + signal data
 ```
@@ -38,32 +37,33 @@ primary ID for a *modem*, and the view is stitched together by the latter.
 
 `device_view.sim_status` is a 6-state CASE (migration `033`/`034`), evaluated in this order:
 
-| State | Condition | Live count |
-|---|---|---|
-| `unassigned` | `sims.imei IS NULL` — inventory row with no modem assigned | 0 |
-| `no_modem` | no matching `modems` row for that IMEI | 0 |
-| `offline` | `modems.status = 'disconnected'` | **18** |
-| `sim_error` | `detected_iccid IS NULL` — modem present, SIM unreadable | 0 |
-| `active` | `detected_iccid = sims.iccid` | **77** |
-| `iccid_mismatch` | detected ICCID ≠ inventory ICCID | 0 |
+| State | Condition |
+|---|---|
+| `unassigned` | `sims.imei IS NULL` — inventory row with no modem assigned |
+| `no_modem` | no matching `modems` row for that IMEI |
+| `offline` | `modems.status = 'disconnected'` |
+| `sim_error` | `detected_iccid IS NULL` — modem present, SIM unreadable |
+| `active` | `detected_iccid = sims.iccid` |
+| `iccid_mismatch` | detected ICCID ≠ inventory ICCID |
 
-77 active exactly matches the 77 modems enumerated on USB; `usb_path` is non-NULL for those same 77.
+Do not copy historical inventory or active-modem counts into new behavior. Query
+`device_view` when a current count is required.
 
 ⚠️ **`modem_state` no longer exists** — dropped in `033_clean_schema_refactor.sql`; its
 `signal_percent`/`rssi` were merged into `modems`. Absent from the live schema.
 
 ⚠️ **`modems.current_iccid` is a DEAD legacy column — never query it.** Migration `033` copied it
-into `detected_iccid` and nothing writes it since. Proof: it is populated on **68** rows while
-`detected_iccid` is populated on **77**. It returns stale data rather than an error, so a query
-against it looks like it works. **Use `detected_iccid`.**
+into `detected_iccid`, and the active v8 `/api/control/devices` sync writes only
+`detected_iccid`. The incompatible pre-`033` `/api/control/phones` route has been
+removed. **Use `detected_iccid`.**
 
 ## Key Directories
 | Path | Purpose | Tech |
 |------|---------|------|
-| `orange-pi-daemon/` | Hardware daemon (~7000 LOC) | Rust + Tokio async |
+| `orange-pi-daemon/` | Hardware daemon (~8800 LOC) | Rust + Tokio async |
 | `sms-dashboard/client/` | Frontend SPA | Svelte 5 + TailwindCSS + Vite 7 |
 | `sms-dashboard/server/` | Backend API (JS) | Cloudflare Workers |
-| `sms-dashboard/migrations/` | DB migrations (~25 files) | SQL (D1) |
+| `sms-dashboard/migrations/` | Sequential DB migrations (currently through `057`) | SQL (D1) |
 | `nixos-config/` | System config | NixOS flake + SOPS |
 | `ansible/` | Deploy automation | Ansible |
 | `sql/` | DB maintenance queries | SQL |
@@ -88,7 +88,8 @@ against it looks like it works. **Use `detected_iccid`.**
   carrier cookies never leave the local browser.
 - [Balance Agent productization plan](docs/balance-agent-product-plan.md) — turns
   the local AI and browser runners into one installable desktop product with device
-  authentication, capability heartbeats, operator handoff, and safe batch semantics.
+  authentication, capability heartbeats, operator handoff, safe batch semantics,
+  and an internal private-release process.
 
 ## Balance Runtime Skill
 
@@ -120,6 +121,15 @@ Balance Agent routing is account-scoped by migration `057`:
 Auth0 device runners may claim and mutate only checks with the same `sub`; runner
 status/preflight are filtered to that user. `NULL` is reserved for legacy API-key
 control jobs, which only legacy API-key runners may claim.
+
+Balance Agent is distributed only as an internal team utility. Its release pipeline
+must be owned by `flake.nix`, produce ad-hoc-signed macOS `.dmg`/`.zip` artifacts
+and SHA-256 checksums, and publish them to private GitHub Releases. Developer ID
+signing and notarization are deferred while the audience remains the trusted team.
+Do not add silent automatic updates to an ad-hoc-signed build; update discovery may
+open the authenticated private Release page for an explicit manual install. The
+planned `nix build .#balance-agent` and `nix run .#release-balance-agent -- <version>`
+interfaces are not yet implemented and must not be documented as available commands.
 
 The runner's local PID, lock, and service log live under
 `~/.local/state/message-dashboard/`; the log file is
@@ -160,7 +170,7 @@ unicom-balance-service stop                          # Stop it
 cd sms-dashboard/balance-agent && bun install
 bun run test                                         # Device auth and secure-store tests
 bun run start                                        # Build and launch the local Electron application
-bun run pack:mac                                     # Unsigned local .app directory for packaging checks
+bun run pack:mac                                     # Current unsigned local .app packaging check
 
 # Dashboard build/deploy
 cd sms-dashboard && bun install
@@ -197,12 +207,14 @@ USE_DBUS="0"                         # Set "1" to use ModemManager D-Bus instead
 
 Cloudflare secrets (set via `bunx wrangler secret put <NAME>`):
 `AUTH0_DOMAIN`, `AUTH0_CLIENT_ID`, `AUTH0_CLIENT_SECRET`, `AUTH0_M2M_CLIENT_ID`,
-`AUTH0_M2M_CLIENT_SECRET`, `API_KEY`. The M2M application is used for Auth0 Management API
-operations on the user-management page; it is separate from the interactive login client.
+`AUTH0_M2M_CLIENT_SECRET`, `AUTH0_AUDIENCE`, `API_KEY`. `AUTH0_AUDIENCE` is required
+for the Dashboard and Balance Agent to receive API access tokens. The M2M application
+is used for Auth0 Management API operations on the user-management page; it is
+separate from the interactive login client.
 
 ## Database Schema (Cloudflare D1)
-- **`sims`** — user SIM inventory (PK: iccid), 95 rows. Source of truth for phone_number, carrier, sim_index. Daemon NEVER writes here.
-- `modems` — daemon-detected hardware (PK: equipment_id = IMEI), 97 rows (more than the 77 live modems — stale rows persist for hardware no longer plugged in). **`detected_iccid`** says which SIM is inserted; it also carries `signal_percent`/`rssi` and `usb_path`.
+- **`sims`** — user SIM inventory (PK: iccid). Source of truth for phone_number, carrier, sim_index. Daemon NEVER writes here.
+- `modems` — daemon-detected hardware (PK: equipment_id = IMEI). Stale rows can persist for hardware no longer plugged in. **`detected_iccid`** says which SIM is inserted; it also carries `signal_percent`/`rssi` and `usb_path`.
   - ⚠️ `current_iccid` is a dead legacy column, frozen since migration `033` — **never query it**, use `detected_iccid`.
 - `messages` — SMS content, FK to sims
 - `daemon_health` — heartbeat monitoring
@@ -217,15 +229,19 @@ operations on the user-management page; it is separate from the interactive logi
 - **Local dashboard lifecycle is owned by `dev-server` from `flake.nix`** — after dashboard edits, run `dev-server restart` and leave its foreground supervisor running. Do not launch `bun run dev` or `bun run dev:api` directly: the managed command clears prior listeners, fixes the ports at frontend `8080` and API `8787`, checks both health endpoints, and enforces one listener PID per port.
 - **Local Auth0/API credentials come only from `secrets/dev-vars.yaml`** — `dev-api` uses `sops exec-env` and `CLOUDFLARE_INCLUDE_PROCESS_ENV=true` to pass decrypted values into Bun/Wrangler without plaintext files or command-line secret arguments.
 - **Cloudflare access for message-dashboard uses Google login with a `bitgc.io` account** — before running Wrangler deployment or production D1 commands, use `bunx wrangler whoami` and confirm the authenticated email ends in `@bitgc.io` and the intended Cloudflare account is selected.
-- **No linters/formatters configured** — follow existing code style in each component
+- **No repository-wide JavaScript lint command is configured** — follow the existing
+  style; Rust changes must pass the `check-daemon` rustfmt gate.
 - **No WebSocket/SSE in production** — manual refresh only (cost optimization). All WS/SSE code has been removed.
 - **Router is custom** — `SimpleRouter` class in `server/index.js`, not itty-router
 
 ### Daemon gotchas
 - AT commands are primary interface (1-5ms). D-Bus/ModemManager is fallback only (50ms)
-- ModemManager has a deletion bug — daemon auto-cleans old pending messages every 5min as workaround
+- The primary direct-AT receive path persists a message before attempting an exact
+  physical-store/index delete. Five-minute local queue/segment cleanup is legacy
+  housekeeping, not a safe physical-delete retry; follow the storage safety plan.
 - Local SQLite queue (`message_store.rs`) buffers messages when network is down, uploads in batches of 10-100
-- Worker pool runs 6 concurrent modem readers; Tokio runtime uses 4 threads (ARM optimized)
+- Worker pool defaults to 16 concurrent modem readers in batches of 24 with a
+  12-second per-modem timeout; Tokio runtime uses 4 threads.
 - Signal cache: 30s TTL, 256-entry hash — avoid redundant modem queries
 - **Daemon health schema v1** — the Rust daemon posts an independent health snapshot
   to `/api/control/heartbeat` every 30s. `daemon_health.metadata` stores per-task
@@ -242,10 +258,15 @@ operations on the user-management page; it is separate from the interactive logi
 ### Server gotchas
 - Middleware chain order: CORS → Auth0 JWT → RBAC (order matters)
 - Daemon authenticates with API key header, users with Auth0 JWT
-- 8 handler modules in `server/handlers/` — new endpoints go there
+- Handler modules live in `server/handlers/`; new endpoints belong there and must
+  include focused handler tests.
+- `/api/control/phones` was removed because it depended on the pre-`033` schema.
+  The v8 daemon uses `/api/control/devices`; do not reintroduce the legacy route.
 
 ### Network
-- Orange Pi IPs: `10.171.150.102` (SSH/internal LAN), `203.116.95.146` (public/deploy target)
+- The verified NixOS SSH/deploy target is `root@10.171.150.102` on the internal
+  network. Do not substitute the historical public address: it is not a verified
+  authenticated deployment endpoint.
 - **SSH over FortiClient VPN**: the tunnel's broad `10.171/16` route via `ppp0` is wrong for the Orange Pi. Before `ssh root@10.171.150.102`, add a host route through the correct gateway:
   ```sh
   sudo route add -host 10.171.150.102 10.171.121.1
@@ -257,7 +278,10 @@ operations on the user-management page; it is separate from the interactive logi
 ### SIM detection gotchas
 - **Modem ID = USB port position**, not physical modem. `modem 14` means ttyUSB58, not a specific device.
 - **`AT+CNUM` usually returns empty** — most carriers don't program MSISDN. Phone numbers come from `sims` table inventory.
-- **Daemon modem cache is static** — built once at startup. Restart daemon after plugging/unplugging modems: `systemctl restart sms-daemon`
+- **Modem discovery is dynamic** — the initial cache is built at startup and the
+  daemon scans every 60 seconds for newly enumerated or recoverable AT modems.
+  Devices that never enumerate a ttyUSB path still require a hardware fix; restart
+  only when re-discovery cannot recover the expected device state.
 - **"Offline" SIM usually means ICCID mismatch** — physical SIM doesn't match inventory, not a hardware failure.
 
 ### USB address budget — THE binding constraint (verified 2026-08-05)
@@ -305,7 +329,10 @@ Each bus has its own independent 127-address pool. Prefer EHCI: EC20 is USB 2.0 
 
 **Why EHCI needs two buses per socket but xHCI also shows two.** Different reasons — don't conflate. EHCI only speaks High-Speed, so Full/Low-Speed devices on the same pins must be handled by a separate *companion* OHCI controller → two controllers, two buses. xHCI speaks all speeds from one controller, but registers **two buses anyway** (one for the USB-2 pairs, one for the SuperSpeed pairs) because those are physically separate wire pairs. So `usb5`/`usb6` sharing `xhci-hcd.5.auto` is one chip, two buses; `usb1`/`usb2` are genuinely two chips.
 
-### Current deployment state (measured 2026-08-06)
+### Historical hardware snapshot (measured 2026-08-06)
+
+The figures below are diagnostic history, not current fleet state. Query the live
+daemon and D1 before making an operational decision.
 
 **77 modems live** (66 on bus1 + 11 on bus3) against a 95-SIM inventory → **18 short**. Both EHCI sockets are now in use; bus3 is no longer a plan.
 

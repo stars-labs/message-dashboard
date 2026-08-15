@@ -99,12 +99,16 @@ The company AI token is injected by `sops exec-env`, remains on the local comput
 
 ## Deployment Note
 
-The production database predates Wrangler migration tracking, so `wrangler d1 migrations apply --remote` currently reports every historical migration as pending and must not be used. Apply only migration 042 directly before deploying the Worker:
+The production database predates Wrangler migration tracking, so
+`wrangler d1 migrations apply --remote` reports historical migrations as pending
+and must not be used. Migration `042` has already been applied. For future changes,
+inspect the remote schema and apply only the exact new migration file before
+deploying the Worker:
 
 ```sh
 cd sms-dashboard
 CLOUDFLARE_ACCOUNT_ID=793e3286eaca411bf1eebaf4b8c7051e \
   bunx wrangler d1 execute sms-dashboard --remote \
-  --file=migrations/042_add_balance_runtime_skills.sql
-bun run deploy
+  --file=migrations/NNN_name.sql
+CLOUDFLARE_ACCOUNT_ID=793e3286eaca411bf1eebaf4b8c7051e bun run deploy
 ```

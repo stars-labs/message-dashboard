@@ -213,7 +213,7 @@ X-API-Key: your-api-key-here
                 <span class="method">POST</span> /api/control/messages
             </div>
             <div class="endpoint">
-                <span class="method">POST</span> /api/control/phones
+                <span class="method">POST</span> /api/control/devices
             </div>
         </div>
         

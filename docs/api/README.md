@@ -32,7 +32,7 @@ Authorization: Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...
 For Orange Pi daemon uploads:
 
 ```http
-POST /api/control/phones
+POST /api/control/devices
 X-API-Key: your-api-key-from-wrangler-secrets
 Content-Type: application/json
 ```
@@ -157,62 +157,20 @@ Get detailed information for a specific phone.
 }
 ```
 
-#### POST /api/control/phones
+#### POST /api/control/devices
 
-**Daemon endpoint** for bulk phone status updates.
+**Daemon endpoint** for normalized modem synchronization.
 
-**Authentication**: API Key (X-API-Key header)
+**Authentication**: API key in the `X-API-Key` header.
 
-**Request Body**:
-```json
-{
-  "phones": [
-    {
-      "iccid": "89860121652000047334",
-      "phone_number": "+8613800138001",
-      "equipment_id": "865827078383361",
-      "manufacturer": "Quectel",
-      "model": "EC20",
-      "firmware": "EC20CEFAR06A01M1G",
-      "hardware_revision": "EC20 R2.0",
-      "imei": "865827078383361",
-      "signal_percent": 85,
-      "rssi": -65.0,
-      "rsrq": -12.5,
-      "rsrp": -95.0,
-      "snr": 18.2,
-      "operator": "China Mobile",
-      "connection_status": "registered",
-      "bearer_technology": "LTE",
-      "band_info": "Band 3 (1800 MHz)",
-      "carrier": "China Mobile",
-      "country_code": "CN",
-      "sim_index": 1,
-      "status": "active"
-    }
-  ],
-  "daemon_info": {
-    "daemon_id": "orange-pi-main",
-    "version": "v3.6.0",
-    "timestamp": "2025-01-15T10:30:00Z"
-  }
-}
-```
+The v8 daemon sends `modem_reports` plus `sync_mode`, `session_id`, and
+`timestamp`. Each report is keyed by modem `equipment_id` (IMEI); detected SIM
+identity belongs in `detected_iccid`. For the exact payload contract, use
+`orange-pi-daemon/src/api_client.rs` and `server/handlers/control.js` as the
+sources of truth.
 
-**Response**:
-```json
-{
-  "success": true,
-  "data": {
-    "processed": 54,
-    "updated_modems": 52,
-    "updated_sims": 54,
-    "new_modems": 0,
-    "new_sims": 0,
-    "errors": []
-  }
-}
-```
+The old `/api/control/phones` endpoint was removed because it depended on the
+pre-migration-033 schema.
 
 ### Message Management
 
@@ -552,12 +510,12 @@ curl https://sexy.qzz.io/api/health
 curl -H "Authorization: Bearer $JWT_TOKEN" \
      https://sexy.qzz.io/api/phones
 
-# Daemon phone upload
+# Daemon device synchronization
 curl -X POST \
      -H "X-API-Key: $API_KEY" \
      -H "Content-Type: application/json" \
-     -d '{"phones": [...]}' \
-     https://sexy.qzz.io/api/control/phones
+     -d '{"modem_reports": [...], "sync_mode": "incremental"}' \
+     https://sexy.qzz.io/api/control/devices
 ```
 
 ### API Client Libraries
@@ -592,31 +550,11 @@ def get_phones(token):
     return response.json()
 ```
 
-#### Zig (Daemon Client)
-```zig
-const std = @import("std");
+#### Rust Daemon Client
 
-pub fn uploadPhones(api_key: []const u8, phones: []Phone) !void {
-    var client = std.http.Client{ .allocator = allocator };
-    defer client.deinit();
-    
-    const uri = try std.Uri.parse("https://sexy.qzz.io/api/control/phones");
-    var request = try client.request(.POST, uri);
-    defer request.deinit();
-    
-    try request.headers.append("X-API-Key", api_key);
-    try request.headers.append("Content-Type", "application/json");
-    
-    const payload = try std.json.stringifyAlloc(allocator, .{ .phones = phones });
-    defer allocator.free(payload);
-    
-    request.transfer_encoding = .{ .content_length = payload.len };
-    try request.start();
-    try request.writer().writeAll(payload);
-    try request.finish();
-    try request.wait();
-}
-```
+The maintained client is `orange-pi-daemon/src/api_client.rs`. It sends
+normalized modem reports to `/api/control/devices`; do not create clients for
+the removed `/api/control/phones` endpoint.
 
 ## Migration from v1 API
 

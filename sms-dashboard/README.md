@@ -1,314 +1,129 @@
-# SMS Dashboard 📱
+# SMS Dashboard
 
-A high-performance, real-time SMS management system built with **Hono.js** and **Drizzle ORM** on Cloudflare Workers. Manages 50+ USB modems simultaneously with enterprise-grade security and global edge deployment.
+Cloudflare-hosted SMS operations dashboard for the Orange Pi modem fleet.
+Production is available at <https://sexy.qzz.io>.
 
-![TypeScript](https://img.shields.io/badge/TypeScript-5.9-blue)
-![Hono](https://img.shields.io/badge/Hono.js-4.9-orange)
-![Drizzle](https://img.shields.io/badge/Drizzle-0.44-green)
-![Cloudflare](https://img.shields.io/badge/Cloudflare-Workers-yellow)
-![License](https://img.shields.io/badge/License-MIT-purple)
+Repository-wide development, secret, migration, and deployment rules live in
+[`../AGENTS.md`](../AGENTS.md). Read them before running production commands.
 
-## 🚀 Features
+## Stack
 
-- **Real-time SMS Management** - Send/receive messages from 50+ modems
-- **Type-Safe Database** - Drizzle ORM with full TypeScript support
-- **Edge Computing** - <50ms global latency via Cloudflare Workers
-- **AI-Powered** - Message classification, code extraction, semantic search
-- **Enterprise Security** - Auth0 integration with RBAC
-- **WebSocket Updates** - Real-time message streaming
-- **99.99% Uptime** - Distributed edge architecture
+- Svelte 5, Tailwind CSS, and Vite for the frontend.
+- A JavaScript Cloudflare Worker with the local `SimpleRouter` implementation in
+  `server/index.js`.
+- Cloudflare D1 for SIM inventory, modem state, messages, balance workflows, and
+  audit records.
+- Auth0 JWT authentication and fail-closed RBAC for users.
+- API-key authentication for the Orange Pi daemon and legacy control clients.
+- An Electron Balance Agent for local AI/VPN and interactive carrier-browser work.
 
-## 🏗️ Architecture
+There is no production WebSocket or SSE transport. The UI uses request/refresh
+flows to avoid persistent Cloudflare connections.
 
-### Modern Tech Stack
-- **[Hono.js](https://hono.dev/)** - Ultra-fast web framework (2x faster than Express)
-- **[Drizzle ORM](https://orm.drizzle.team/)** - TypeScript-first database ORM
-- **[Cloudflare D1](https://developers.cloudflare.com/d1/)** - Distributed SQLite
-- **[Svelte 5](https://svelte.dev/)** - Reactive UI framework
-- **[TailwindCSS](https://tailwindcss.com/)** - Utility-first CSS
+## Layout
 
-### System Components
-```
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│  Orange Pi 5+   │────▶│ Cloudflare Edge  │────▶│   Web Client    │
-│  54 USB Modems  │     │  Hono + Drizzle  │     │    Svelte UI    │
-└─────────────────┘     └──────────────────┘     └─────────────────┘
+```text
+client/             Svelte application and component tests
+server/             Worker handlers, middleware, utilities, and tests
+migrations/         Sequential D1 SQL migrations
+config/             Auth0 role and permission configuration
+runner-core/        Shared authenticated Balance Agent capabilities
+balance-agent/      Electron menu-bar application
+scripts/            Build, maintenance, and developer runner adapters
+wrangler.toml       Production Worker and binding configuration
 ```
 
-## 📦 Installation
+## Local Development
 
-### Prerequisites
-- [Bun](https://bun.sh/) v1.2+ (recommended) or Node.js 18+
-- Cloudflare account with Workers enabled
-- Auth0 account for authentication
+Use the Nix-owned supervisor from the repository root. It starts one frontend on
+`:8080` and one local Worker API on `:8787`, injecting development credentials
+through the existing SOPS wrapper without writing plaintext files.
 
-### Quick Start
-
-1. **Clone the repository**
 ```bash
-git clone https://github.com/yourusername/sms-dashboard.git
-cd sms-dashboard/sms-dashboard
+nix develop --command dev-server restart
+nix develop --command dev-server status
+nix develop --command dev-server logs
 ```
 
-2. **Install dependencies**
+Open <http://localhost:8080>. Do not run additional Vite or Wrangler development
+servers alongside `dev-server`.
+
+For isolated component work:
+
 ```bash
+cd sms-dashboard
 bun install
+bun run test
+bun run build
 ```
 
-3. **Configure environment**
-```bash
-cp wrangler.toml.example wrangler.toml
-# Edit wrangler.toml with your Cloudflare account details
-```
+## Data Model
 
-4. **Set up secrets**
-```bash
-bunx wrangler secret put AUTH0_DOMAIN
-bunx wrangler secret put AUTH0_CLIENT_ID
-bunx wrangler secret put AUTH0_CLIENT_SECRET
-bunx wrangler secret put API_KEY
-```
+- `sims`: user-managed inventory and source of truth for ICCID, phone number,
+  carrier, SIM index, and assigned IMEI.
+- `modems`: daemon-owned hardware state keyed by `equipment_id`/IMEI. Current SIM
+  detection is stored in `detected_iccid`; signal and USB state also live here.
+- `device_view`: primary SIM-centric read view joining inventory to hardware by
+  `sims.imei = modems.equipment_id`.
+- `messages`: inbound and outbound SMS records and classification state.
+- `daemon_health`: schema-v1 daemon health snapshot.
+- `sim_balance_*`: balance profiles, checks, conversations, metrics, runner jobs,
+  and audits.
 
-5. **Initialize database**
-```bash
-bun run db:init
-bun run db:migrate
-```
+`modem_state` was removed by migration `033`. `modems.current_iccid` is legacy,
+and the incompatible `/api/control/phones` route has been removed. The v8 daemon
+syncs through `/api/control/devices` and consumers use `detected_iccid`.
 
-## 🔧 Development
+## Authentication
 
-### Local Development
-```bash
-# Start dev server with hot reload
-bun run dev:api
+- Interactive users receive Auth0 JWTs and the `sms-viewer` or `sms-admin` role.
+- The Worker requires `AUTH0_AUDIENCE` when requesting API access tokens.
+- Balance Agent requests only `balance:runners:heartbeat`, `balance:skills:run`,
+  and `balance:browser:run`.
+- Dashboard-created balance jobs are scoped to the requesting Auth0 `sub`; another
+  user's Agent cannot satisfy readiness or claim them.
+- The daemon authenticates control requests with `X-API-Key`.
 
-# In another terminal, start Vite for frontend
-bun run dev
+## Migrations
 
-# Access at http://localhost:8787
-```
-
-### Available Scripts
-```bash
-bun run dev          # Start frontend dev server
-bun run dev:api      # Start Workers dev server (local D1)
-bun run dev:remote   # Start Workers dev server (remote D1)
-bun run build        # Build frontend assets
-bun run deploy       # Deploy to Cloudflare Workers
-bun run typecheck    # TypeScript type checking
-bun run db:studio    # Open Drizzle Studio (database GUI)
-bun run db:push      # Push schema changes to D1
-bun run db:generate  # Generate migrations from schema
-```
-
-## 📚 API Documentation
-
-### Authentication
-
-The API uses dual authentication:
-- **Bearer Token** - For user requests (Auth0 JWT)
-- **API Key** - For daemon/service requests
-
-### Core Endpoints
-
-#### Health Check
-```http
-GET /api/health
-```
-
-#### Phones Management
-```http
-GET /api/phones
-Authorization: Bearer <token>
-
-GET /api/phones/:id
-PUT /api/phones/:id
-DELETE /api/phones/:id
-```
-
-#### Messages
-```http
-GET /api/messages?phone_id=<id>&limit=100
-POST /api/messages/send
-DELETE /api/messages/:id
-GET /api/messages/stats
-```
-
-#### Control API (Daemon)
-```http
-POST /api/control/phones
-X-API-Key: <api-key>
-
-POST /api/control/messages
-POST /api/control/heartbeat
-GET /api/control/pending-sms
-```
-
-### WebSocket Events
-```javascript
-// Real-time updates
-ws.on('phone:update', (data) => { /* ... */ })
-ws.on('message:new', (data) => { /* ... */ })
-ws.on('daemon:heartbeat', (data) => { /* ... */ })
-```
-
-## 🗄️ Database Schema
-
-### Core Tables
-- `modems` - Hardware devices (IMEI key)
-- `sims` - SIM cards (ICCID key)
-- `messages` - SMS messages
-- `modem_state` - Real-time status
-- `daemon_health` - System monitoring
-
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for complete schema.
-
-## 🚢 Deployment
-
-### Production Deployment
-```bash
-# Build and deploy to Cloudflare
-bun run deploy
-
-# Monitor logs
-bunx wrangler tail sms-dashboard
-```
-
-### Environment Variables
-```toml
-# wrangler.toml
-[vars]
-ENVIRONMENT = "production"
-WORKER_URL = "https://your-domain.com"
-AUTH0_ADMIN_ROLE = "sms-admin"
-AUTH0_VIEWER_ROLE = "sms-viewer"
-AUTH0_ROLE_NAMESPACE = "https://your-domain.com/roles"  # FULL claim URI
-ALLOWED_EMAIL_DOMAINS = "poloniex.com,bitgc.io,tron.network,htx-inc.com"
-```
-
-Role checking is always on and cannot be disabled by configuration. Users need the `sms`
-role plus a verified address on an allowed domain — see
-[docs/SECURITY-REVIEW.md](../docs/SECURITY-REVIEW.md).
-
-## 📊 Performance
-
-- **Response Time**: <100ms average
-- **Global Latency**: <50ms P50
-- **Throughput**: 10,000+ req/min
-- **Bundle Size**: ~170KB gzipped
-- **Database**: <10ms query time
-
-## 🔒 Security
-
-- **Auth0 Integration** - Enterprise SSO
-- **RBAC** - Role-based permissions
-- **API Key Auth** - Service authentication
-- **SQL Injection Protection** - Parameterized queries
-- **Rate Limiting** - DDoS protection
-- **TLS Encryption** - In-transit security
-
-## 🧪 Testing
+Production predates Wrangler migration bookkeeping. Never run
+`wrangler d1 migrations apply --remote`. Inspect the remote schema and execute only
+the exact new migration file:
 
 ```bash
-# Type checking
-bun run typecheck
-
-# Unit tests
-bun test
-
-# Integration tests
-bun run test:integration
-
-# E2E tests
-bun run test:e2e
+CLOUDFLARE_ACCOUNT_ID=793e3286eaca411bf1eebaf4b8c7051e \
+  bunx wrangler d1 execute sms-dashboard --remote \
+  --file=migrations/NNN_name.sql
 ```
 
-## 🤝 Contributing
+Applied migrations are immutable. Prefer additive, backward-compatible changes.
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing`)
-3. Commit changes (`git commit -m 'Add amazing feature'`)
-4. Push to branch (`git push origin feature/amazing`)
-5. Open a Pull Request
+## Deployment
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
+Confirm `bunx wrangler whoami` shows the intended Google-authenticated `@bitgc.io`
+identity and Cloudflare account, then deploy:
 
-## 📖 Documentation
-
-- [Architecture Overview](docs/ARCHITECTURE.md)
-- [Migration Guide](docs/MIGRATION_GUIDE.md)
-- [API Documentation](docs/API.md)
-- [Database Schema](docs/DATABASE.md)
-
-## 🎯 Roadmap
-
-### Q1 2025
-- [x] Migrate to Hono.js
-- [x] Implement Drizzle ORM
-- [ ] Complete TypeScript migration
-- [ ] Add comprehensive tests
-
-### Q2 2025
-- [ ] GraphQL API option
-- [ ] Real-time subscriptions
-- [ ] Advanced analytics
-- [ ] Mobile app
-
-### Future
-- [ ] Multi-region deployment
-- [ ] VPS deployment option
-- [ ] ML-powered insights
-- [ ] Voice integration
-
-## 📈 Stats
-
-- **Active Deployments**: 10+
-- **Messages Processed**: 500K+
-- **Modems Supported**: 54+
-- **Uptime**: 99.99%
-- **Global Regions**: 300+
-
-## 🛠️ Troubleshooting
-
-### Common Issues
-
-**Database connection issues**
 ```bash
-# Reset local database
-bun run db:init --force
+cd sms-dashboard
+CLOUDFLARE_ACCOUNT_ID=793e3286eaca411bf1eebaf4b8c7051e bun run deploy
+curl -fsS https://sexy.qzz.io/api/health
 ```
 
-**Type errors**
+Record the Worker version printed by Wrangler and verify the affected authenticated
+workflow after deployment.
+
+## Balance Agent
+
+Development commands:
+
 ```bash
-# Regenerate types
-bun run types
+cd sms-dashboard/balance-agent
+bun install
+bun run test
+bun run build
+bun run start
 ```
 
-**Deployment failures**
-```bash
-# Check wrangler configuration
-bunx wrangler whoami
-```
-
-## 📄 License
-
-MIT License - see [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- [Cloudflare Workers](https://workers.cloudflare.com/) for edge computing
-- [Hono.js](https://hono.dev/) for the amazing framework
-- [Drizzle Team](https://orm.drizzle.team/) for the TypeScript ORM
-- [Auth0](https://auth0.com/) for authentication
-- [Svelte](https://svelte.dev/) for the reactive UI
-
-## 💬 Support
-
-- 📧 Email: support@example.com
-- 💬 Discord: [Join our server](https://discord.gg/example)
-- 🐛 Issues: [GitHub Issues](https://github.com/yourusername/sms-dashboard/issues)
-- 📚 Docs: [Documentation](https://docs.example.com)
-
----
-
-Built with ❤️ using modern web technologies. Powered by Cloudflare's global edge network.
+The planned internal release is Nix-built, ad-hoc signed, checksummed, and published
+to this repository's private GitHub Releases. The release flake outputs are still
+pending; see [`../docs/balance-agent-product-plan.md`](../docs/balance-agent-product-plan.md).

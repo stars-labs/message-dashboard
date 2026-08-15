@@ -59,7 +59,7 @@ AUTH0_ROLE_NAMESPACE = "https://sexy.qzz.io/roles"  # FULL claim URI holding the
 # wrangler.toml (wrangler v3.88.0^)
 [observability.logs]
 enabled = true
-# Durable Objects removed - using simple SSE instead
+# No Durable Objects or streaming transport; the client uses request/refresh flows.
 
 # Secrets (set these with wrangler secret put)
 # AUTH0_DOMAIN - Your Auth0 domain (e.g., your-tenant.auth0.com)
@@ -67,5 +67,5 @@ enabled = true
 # AUTH0_CLIENT_SECRET - Your Auth0 application client secret
 # AUTH0_M2M_CLIENT_ID - Auth0 Management API machine-to-machine client ID
 # AUTH0_M2M_CLIENT_SECRET - Auth0 Management API machine-to-machine client secret
-# AUTH0_AUDIENCE - Your Auth0 API audience (optional)
+# AUTH0_AUDIENCE - Required Auth0 API identifier used by web and Balance Agent tokens
 # API_KEY - API key for Orange Pi integration

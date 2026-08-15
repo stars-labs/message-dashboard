@@ -107,7 +107,7 @@ X-API-Key: <api_key>
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| POST | `/api/control/phones` | API Key | Sync modem/SIM/signal data |
+| POST | `/api/control/devices` | API Key | Sync modem/SIM/signal data |
 | POST | `/api/control/messages` | API Key | Upload received SMS |
 | POST | `/api/control/heartbeat` | API Key | Daemon health heartbeat |
 | GET | `/api/control/pending-sms` | API Key | Get outgoing SMS queue |

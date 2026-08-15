@@ -11,13 +11,15 @@ encrypted local credentials, settings, tray lifecycle, custom protocol registrat
 separate capability loops, notifications, a hermetic Playwright Chromium, and
 independent in-app checks for Dashboard authentication, company AI/VPN, and the
 browser runtime.
-Auth0 tenant setup, signing, notarization, production migration, deployment, and
-clean-machine pilot remain pending. The Dashboard now blocks unattended single
-queries behind capability preflight, can launch the Agent protocol, warns before
-interactive browser work, and requires explicit batch method selection with
-browser jobs off by default. Batch IDs, progress, and cancellation are not yet
-implemented. This document does not authorize enabling browser queries for the
-full fleet.
+Auth0 tenant setup, account-scoping migration, Worker deployment, and a live
+single-SIM browser pilot are complete. A Nix-owned private release pipeline and
+clean-machine pilot remain pending. Apple Developer ID signing and notarization
+are deliberately deferred while this remains a small internal team tool. The
+Dashboard now blocks unattended single queries behind capability preflight, can
+launch the Agent protocol, warns before interactive browser work, and requires
+explicit batch method selection with browser jobs off by default. Batch IDs,
+progress, and cancellation are not yet implemented. This document does not
+authorize enabling browser queries for the full fleet.
 
 ## Goal
 
@@ -33,7 +35,8 @@ desktop application so the product does not create a second implementation.
 
 ## Current Behavior
 
-There are currently two local Bun processes:
+The developer/diagnostic interface still exposes two local Bun runner adapters;
+the desktop application hosts the same capabilities through shared modules:
 
 | Runner | Responsibility | Local requirements |
 | --- | --- | --- |
@@ -70,10 +73,18 @@ application hosts capability modules:
 - Future carrier browser or API capabilities can be added without changing the
   installation and pairing flow.
 
-The first supported release is a signed and notarized macOS application because
-the current operator environment and browser pilot are macOS. Keep the protocol
-and core modules platform-neutral so Windows can follow without changing Worker
-APIs or task state.
+The first supported release is an internal macOS application because the current
+operator environment and browser pilot are macOS. Package it through Nix, apply an
+ad-hoc signature, and publish checksummed artifacts only to this repository's
+private GitHub Releases. Operators accept the one-time Gatekeeper override with
+Finder's **Open** action. Keep the protocol and core modules platform-neutral so
+Windows can follow without changing Worker APIs or task state.
+
+Do not implement silent automatic updates for an ad-hoc-signed build. The Agent may
+detect a newer version and open the authenticated private Release page, but the user
+must explicitly install it. If distribution grows beyond the trusted internal team,
+replace this decision with Developer ID signing and Apple notarization before wider
+release.
 
 Use Electron for the first desktop release. It supplies a packaged Node runtime,
 tray UI, settings windows, notifications, custom-protocol handling and mature
@@ -347,7 +358,7 @@ with no behavior regression and no secret appearing in logs.
 
 ### Stage 3: Desktop MVP
 
-- Build the signed macOS Electron application.
+- Build the Nix-packaged, ad-hoc-signed internal macOS Electron application.
 - Implement Auth0 device login, OS credential storage and configuration checks.
 - Add tray status, start-at-login control, task view, notifications and the bundled
   browser runtime.
@@ -380,13 +391,17 @@ block AI work, and can resume safely after restarting Balance Agent.
 
 ### Stage 6: Release and operations
 
-- Add signed update manifests, staged rollout and rollback.
+- Add Nix-owned `.dmg`/`.zip` packaging, SHA-256 checksums, and private GitHub
+  prereleases.
+- Add update detection that opens the private Release page; do not silently update
+  an unsigned or ad-hoc-signed application.
 - Define supported macOS and browser-runtime versions.
 - Add privacy-reviewed diagnostics and retention limits.
 - Pilot on one operator machine before enabling monthly fleet scheduling.
 
-**Exit criteria:** the application has an owned release process, revocable device
-access, documented support diagnostics and a tested rollback path.
+**Exit criteria:** the application has an owned private-release process, revocable
+device access, documented first-launch instructions and support diagnostics, plus
+a tested manual rollback path.
 
 ## Verification Matrix
 
@@ -415,9 +430,17 @@ The first release does not:
 - Remove the existing developer scripts until the desktop agent has completed its
   pilot and rollback period.
 
-## First Implementation Slice
+## Next Implementation Slice
 
-Start with Stage 1 only. It has the smallest operational risk and gives the web UI
-the information needed to stop creating opaque, unattended local tasks. Do not
-start Electron packaging until runner identity, heartbeat, capability health and
-preflight response shapes are tested and agreed.
+Build the internal release path without changing runtime behavior:
+
+1. Add `balance-agent` and `release-balance-agent` flake outputs.
+2. Make the Nix build run the Agent tests, bundle the pinned Chromium runtime,
+   produce Apple Silicon `.dmg` and `.zip` artifacts, and apply an ad-hoc signature.
+3. Generate SHA-256 checksum files and verify the packaged application launches.
+4. Make the release app create a private GitHub prerelease from an explicit version
+   and attach only the verified artifacts.
+5. Validate installation and the Finder **Open** Gatekeeper override on a clean Mac,
+   then complete one AI-assisted and one human-assisted browser query.
+
+Do not add automatic installation or widen fleet browser execution in this slice.

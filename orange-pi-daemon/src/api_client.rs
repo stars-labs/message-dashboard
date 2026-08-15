@@ -163,42 +163,6 @@ impl ApiClient {
         Ok(())
     }
 
-    /// Upload phone status data (LEGACY - use upload_modem_reports instead)
-    /// Kept for backward compatibility only
-    #[deprecated(note = "Use upload_modem_reports instead")]
-    pub async fn upload_phones(&self, phones: &[Phone]) -> Result<()> {
-        if phones.is_empty() {
-            return Ok(());
-        }
-
-        warn!("⚠️  Using deprecated upload_phones - should migrate to upload_devices");
-
-        // Use the legacy /api/control/phones endpoint which expects { phones: [...] }
-        let url = format!("{}/api/control/phones", self.config.api_url);
-
-        let response = self
-            .client
-            .post(&url)
-            .header("x-api-key", &self.config.api_key)
-            .header("x-daemon-version", "rust-1.0.0")
-            .json(&json!({ "phones": phones }))
-            .send()
-            .await
-            .context("Failed to send phone data")?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response
-                .text()
-                .await
-                .unwrap_or_else(|_| String::from("(no body)"));
-            anyhow::bail!("API returned error: {} - {}", status, body);
-        }
-
-        info!("✅ Uploaded {} phones", phones.len());
-        Ok(())
-    }
-
     /// Upload messages with proper batching to avoid overwhelming the API
     pub async fn upload_messages(&self, messages: &[Message]) -> Result<()> {
         if messages.is_empty() {

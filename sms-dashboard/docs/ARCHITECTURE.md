@@ -108,7 +108,7 @@ Daemon requests use `X-API-Key` header instead of JWT.
 ## Sync Flow (Daemon → Server)
 
 1. Daemon reads modems via AT commands every 30s
-2. `POST /api/control/phones` — upserts modem + SIM + state data
+2. `POST /api/control/devices` — upserts modem + SIM + state data
 3. `POST /api/control/messages` — uploads new SMS (batches of 10-100)
 4. `POST /api/control/heartbeat` — daemon health pulse
 5. `GET /api/control/pending-sms` — picks up outgoing SMS to send

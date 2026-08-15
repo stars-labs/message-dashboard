@@ -1,5 +1,10 @@
 # ICCID Mappings Debugging Guide
 
+> **Historical guide:** `iccid_mappings` was removed by migration `015`; current
+> mapping data is stored in `sims`. Do not run the migration commands below against
+> production. Follow [`../../AGENTS.md`](../../AGENTS.md) and inspect the current
+> schema before applying one exact new migration.
+
 ## Issue Summary
 The ICCID mappings page shows "Failed to load ICCID mappings" error. This document provides steps to debug and fix the issue.
 

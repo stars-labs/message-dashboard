@@ -376,20 +376,7 @@ router.post('/api/control/messages', async (request) => {
   }
 });
 
-router.post('/api/control/phones', async (request) => {
-  // Control phones endpoint hit
-  try {
-    return await controlHandler.updatePhones(request);
-  } catch (error) {
-    // Control phones error
-    return new Response(JSON.stringify({ error: error.message }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' }
-    });
-  }
-});
-
-// New clean endpoint for devices (modems and SIMs separated) 
+// Device synchronization endpoint (modems and SIMs separated)
 router.post('/api/control/devices', async (request) => {
   // Control devices endpoint hit
   try {
@@ -605,6 +592,14 @@ export default {
       const response = await router.handle(request, env, ctx);
 
       if (!response) {
+        const pathname = new URL(request.url).pathname;
+        if (pathname === '/api' || pathname.startsWith('/api/')) {
+          return handleCORS(new Response(JSON.stringify({ error: 'Not Found' }), {
+            status: 404,
+            headers: { 'Content-Type': 'application/json' }
+          }));
+        }
+
         console.log(`[Worker] No route matched, serving frontend`);
         // No route matched, serve frontend (includes assets)
         return serveFrontend(request);

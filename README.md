@@ -11,7 +11,7 @@ Orange Pi 5+ (ARM64, NixOS)          Cloudflare                    Browser
 │                      │     │                     │     │  + TailwindCSS   │
 │  AT Commands / D-Bus │────▶│  D1 Database        │◀────│                  │
 │  100+ USB Modems     │ API │  Auth0 + RBAC       │ JWT │  Manual Refresh  │
-│  Worker Pool (6)     │ Key │  Keyword Tagging    │     │  Code Extraction │
+│  Worker Pool (16)    │ Key │  Keyword Tagging    │     │  Code Extraction │
 └──────────────────────┘     └─────────────────────┘     └──────────────────┘
 ```
 
@@ -24,7 +24,7 @@ Orange Pi 5+ (ARM64, NixOS)          Cloudflare                    Browser
 ## Project Structure
 
 ```
-├── orange-pi-daemon/       # Rust daemon (Tokio async, ~5700 LOC)
+├── orange-pi-daemon/       # Rust daemon (Tokio async, ~8800 LOC)
 │   └── src/
 │       ├── main.rs         # Multi-task event loop
 │       ├── at_modem.rs     # Direct AT command interface
@@ -68,10 +68,8 @@ Orange Pi 5+ (ARM64, NixOS)          Cloudflare                    Browser
 ### Frontend + API (local dev)
 
 ```bash
-cd sms-dashboard
-bun install
-bun run dev          # Vite dev server on :5173
-bun run dev:api      # Wrangler local API
+nix develop --command dev-server restart
+# Frontend: http://localhost:8080; Worker API: http://localhost:8787
 ```
 
 ### Rust Daemon
@@ -101,12 +99,11 @@ Cloudflare D1 with normalized 3NF schema:
 
 | Table | Purpose |
 |-------|---------|
-| `modems` | Hardware devices (PK: equipment_id/IMEI) |
+| `modems` | Hardware plus current signal, connection, detected ICCID, and USB state (PK: equipment_id/IMEI) |
 | `sims` | SIM cards (PK: iccid), FK to modems |
-| `modem_state` | Signal strength, connection status |
 | `messages` | SMS content with extracted verification codes |
 | `daemon_health` | Heartbeat monitoring |
-| `device_view` | Backward-compat view joining all tables |
+| `device_view` | Primary SIM-centric read view joined by assigned IMEI |
 
 ```bash
 # Query remote DB
@@ -115,7 +112,7 @@ bunx wrangler d1 execute sms-dashboard --remote --command="SELECT * FROM device_
 
 ## Auth
 
-- **Users → Frontend**: Auth0 JWT with RBAC (`sms` role required)
+- **Users → Frontend**: Auth0 JWT with fail-closed RBAC (`sms-viewer`/`sms-admin`)
 - **Daemon → API**: API key (stored in SOPS secrets, set via `wrangler secret put API_KEY`)
 
 ## Hardware / USB Topology
@@ -291,7 +288,7 @@ Steps 1–4 were **completed on 2026-08-06** (3 cables moved off bus1, one now d
 | 2′ | Insert small hub on socket B, move the existing `3-1` cable under it, add 2 more cables | — |
 | 3 | Verify all cables appear on Bus 003 | `lsusb -t \| sed -n '/Bus 003/,/Bus 004/p'` |
 | 4 | Confirm per-bus address usage | `lsusb \| awk '{print $2}' \| sort \| uniq -c` |
-| 5 | Start daemon (rebuilds its static modem cache) | `systemctl start sms-daemon` |
+| 5 | Start daemon (rebuilds the initial cache; 60-second re-discovery then resumes) | `systemctl start sms-daemon` |
 | 6 | Verify online count | `journalctl -u sms-daemon -f` |
 | 7 | Re-scan IMEI↔USB to regenerate `sim-ec20-usb-location.md` | stop daemon → AT+CGSN scan → start daemon |
 
@@ -302,14 +299,14 @@ Steps 1–4 were **completed on 2026-08-06** (3 cables moved off bus1, one now d
 | `usb3` root hub has only 1 port | A small hub (4 addresses) is mandatory for a 2nd cable; one cable direct costs only 7 addresses total |
 | Re-seating the existing `3-1` cable re-enumerates its 11 working modems | Do it in the same maintenance window as the new cables; restart the daemon once at the end |
 | ttyUSB numbers reshuffle after any replug | Expected — USB path is the stable ID, ttyUSB is volatile per boot |
-| Daemon keeps a **static** modem cache | Always restart the daemon after any physical change |
+| A modem never enumerates a ttyUSB path | The 60-second re-discovery cannot see it; fix the hardware path and restart only if state does not recover |
 | Queued messages lost during move | Stop daemon first; the local SQLite queue persists across restarts |
 | hub-2 is non-MTT | Verify with `lsusb -v \| grep -i translator` — non-MTT serialises all traffic |
 
 ## Key Design Decisions
 
 - **AT commands over ModemManager**: 1-5ms vs 50-500ms per operation, essential for 100+ modems
-- **Manual refresh over WebSocket**: Eliminates persistent connection costs on Cloudflare
+- **Request/refresh over persistent streaming**: Eliminates WebSocket/SSE connection costs on Cloudflare
 - **D1 over external DB**: SQLite at edge, zero cold start, global replication
 - **NixOS over traditional Linux**: Declarative, reproducible Orange Pi configuration
 - **Local SQLite queue**: Daemon queues messages locally, uploads in batches (10-100) to handle network interruptions
