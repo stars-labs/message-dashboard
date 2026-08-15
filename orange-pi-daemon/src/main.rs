@@ -649,7 +649,8 @@ async fn main() -> Result<()> {
     tokio::spawn(async move {
         info!("📤 SMS Sender task started - polling every 10 seconds");
 
-        let mut sms_sender = SmsSender::new(sender_api_client, sender_modem_manager);
+        let mut sms_sender =
+            SmsSender::new(sender_api_client, sender_modem_manager, session_id.clone());
         sms_sender.update_modem_cache(sender_modem_cache);
 
         loop {

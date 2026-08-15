@@ -15,6 +15,12 @@ const IS_LEGACY_DAEMON_HEALTH_SQL = `(
   COALESCE(json_extract(daemon_health.metadata, '$.schema_version'), 0) < ${HEALTH_SCHEMA_VERSION}
 )`;
 
+const DAEMON_SESSION_ID = /^[A-Za-z0-9._:-]{1,120}$/;
+
+export function normalizeDaemonSessionId(value) {
+  return typeof value === 'string' && DAEMON_SESSION_ID.test(value) ? value : null;
+}
+
 export const controlHandler = {
   // New clean endpoint for separate modems and SIMs with state reconciliation
   async updateDevices(request) {
@@ -967,6 +973,18 @@ export const controlHandler = {
                       request.headers.get('X-Forwarded-For') || 
                       'unknown';
       const daemonVersion = request.headers.get('X-Daemon-Version') || 'v3.9.0';
+      const rawDaemonSessionId = request.headers.get('X-Daemon-Session-Id');
+      const daemonSessionId = normalizeDaemonSessionId(rawDaemonSessionId);
+
+      if (rawDaemonSessionId && !daemonSessionId) {
+        return new Response(JSON.stringify({
+          success: false,
+          error: 'Invalid daemon session ID',
+        }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
       
       // Create daemon_health table if it doesn't exist
       await env.DB.prepare(`
@@ -1011,6 +1029,31 @@ export const controlHandler = {
           END,
           updated_at = CURRENT_TIMESTAMP
       `).bind(clientIp, daemonVersion).run();
+
+      // A message claimed by a previous daemon process has an indeterminate
+      // delivery result. Never put it back in the send queue automatically: the
+      // old process may have handed it to the modem before restarting. Mark it
+      // explicitly unknown so a human can decide whether to send a new message.
+      // The NULL branch safely adopts records created by pre-session daemons,
+      // after allowing their normal send/report window to expire.
+      if (daemonSessionId) {
+        await env.DB.prepare(`
+          UPDATE messages
+          SET status = 'unknown',
+              error_message = 'Daemon restarted before confirming SMS delivery; delivery status is unknown',
+              processing_session_id = NULL,
+              updated_at = CURRENT_TIMESTAMP
+          WHERE type = 'sent'
+            AND status = 'processing'
+            AND (
+              (processing_session_id IS NOT NULL AND processing_session_id <> ?)
+              OR (
+                processing_session_id IS NULL
+                AND datetime(updated_at) <= datetime('now', '-5 minutes')
+              )
+            )
+        `).bind(daemonSessionId).run();
+      }
       
       // Get pending SMS messages and atomically mark as 'processing' to prevent duplicate sends
       // This prevents the race condition where daemon polls again before status update completes
@@ -1050,9 +1093,11 @@ export const controlHandler = {
       // Update to 'processing' status
       await env.DB.prepare(`
         UPDATE messages
-        SET status = 'processing', updated_at = CURRENT_TIMESTAMP
+        SET status = 'processing',
+            processing_session_id = ?,
+            updated_at = CURRENT_TIMESTAMP
         WHERE id IN (${placeholders})
-      `).bind(...ids).run();
+      `).bind(daemonSessionId, ...ids).run();
 
       // Fetch the updated messages
       const messages = await env.DB.prepare(`
@@ -1112,7 +1157,8 @@ export const controlHandler = {
       const status = success ? 'sent' : 'failed';
       const stmt = env.DB.prepare(`
         UPDATE messages 
-        SET status = ?, error_message = ?, sms_id = ?, updated_at = CURRENT_TIMESTAMP
+        SET status = ?, error_message = ?, sms_id = ?,
+            processing_session_id = NULL, updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
       `);
       

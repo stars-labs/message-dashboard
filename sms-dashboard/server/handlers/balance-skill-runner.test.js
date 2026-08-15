@@ -73,6 +73,7 @@ describe('balance skill runner D1 flow', () => {
         completed_at TIMESTAMP, status TEXT, outbound_message_id TEXT,
         response_message_id TEXT, response_sender TEXT, raw_response TEXT,
         error TEXT, parser_version TEXT, step_index INTEGER DEFAULT 0,
+        requested_by_subject TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
@@ -144,6 +145,16 @@ describe('balance skill runner D1 flow', () => {
       .toBe('completed');
   });
 
+  test('does not let a legacy runner claim a Dashboard-owned job', async () => {
+    seedJob('11.账务查询\n12.客户服务');
+    sqlite.exec("UPDATE sim_balance_checks SET requested_by_subject = 'auth0|alice'");
+
+    const response = await balanceSkillRunnerHandler.claim(workerRequest(db));
+    expect(response.status).toBe(204);
+    expect(sqlite.query("SELECT status FROM sim_balance_skill_jobs WHERE id='job-1'").get().status)
+      .toBe('pending');
+  });
+
   test('stores a balance only when the AI value matches exact SMS evidence', async () => {
     seedJob('当前可用话费余额为82.36元。');
     const job = await claim();
@@ -162,5 +173,23 @@ describe('balance skill runner D1 flow', () => {
       .toBe('parsed');
     expect(sqlite.query("SELECT value, currency FROM sim_balance_metrics WHERE check_id='check-1'").get())
       .toEqual({ value: 82.36, currency: 'CNY' });
+  });
+
+  test('terminalizes a safely stopped unresolved reply as unparsed', async () => {
+    seedJob('请前往运营商APP查询余额。');
+    const job = await claim();
+    const response = await balanceSkillRunnerHandler.decide(workerRequest(db, {
+      id: job.id,
+      body: {
+        runner_id: 'runner-1', model: 'company-model',
+        decision: { action: 'stop', confidence: 0.99, reason: '没有余额信息' },
+      },
+    }));
+
+    expect(response.status).toBe(200);
+    expect(sqlite.query("SELECT status FROM sim_balance_checks WHERE id='check-1'").get().status)
+      .toBe('unparsed');
+    expect(sqlite.query("SELECT status FROM sim_balance_skill_jobs WHERE id='job-1'").get().status)
+      .toBe('stopped');
   });
 });

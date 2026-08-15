@@ -173,22 +173,43 @@ Sources: [China Mobile SMS service](https://www.10086.cn/support/service/channel
 ### 4. Confirm China Unicom
 
 The official service supports sending `10010` to `10010` for a menu and accepts
-commands or natural-language requests. A single nationwide direct balance command
-has not yet been verified.
+commands or natural-language requests. Its official command table identifies
+`102` as "available balance" and also lists `KYYE`, `CXYE`, `YE`, and `OTACXYE`.
+Use numeric command `102` first because it has one explicit read-only meaning;
+do not confuse it with `101`, which is current-month charges.
 
 - [x] Pilot procedure approved: select one low-risk China Unicom SIM without
   requiring province/product metadata.
-- [ ] Send `10010` to `10010` on the pilot SIM and capture the live menu.
-- [ ] Prefer a command explicitly advertised by that menu. If the menu does not
+- [x] Close USSD discovery for the first pilot without a network command: no
+  official nationwide China Unicom cash-balance USSD code has been verified, so
+  guessing a code is outside the read-only allowlist.
+- [x] Send `10010` to `10010` on the pilot SIM and capture the live menu.
+- [x] Prefer a command explicitly advertised by that menu. If the menu does not
   identify one unambiguously, test the exact text `余额` once on the pilot SIM only.
-- [ ] Capture reply variants for prepaid and postpaid accounts separately.
+- [x] Capture the first reply variant; S01 returned only an official app deep link
+  for both the service-menu request and the exact `余额` request.
+- [ ] Capture the response to official command `102` sent to `10010` on S01.
+  The SMS was delivered on 2026-08-14, but no reply had arrived during the
+  initial observation window; leave the check awaiting its configured timeout.
+- [x] Test official alias `KYYE` on active S03 while S01 remains pending. Use a
+  separate discovery profile and check so replies cannot be correlated to the
+  wrong SIM or command.
+  Check `bal-CiiuYyDoaOGrVyacnIm1q` received the same APP-only response and no
+  balance metric; the runtime skill stopped without a follow-up.
+- [x] Test official alias `CXYE` on active S04 with its own discovery profile and
+  audited check. Check `bal-W-n1122L68mKNggoxOUtW` received the same APP-only
+  response and no balance metric; the runtime skill stopped.
+- [x] Test the remaining short official alias `YE` on active S05 with a separate
+  discovery profile and audited check. Check `bal-1eokUl_1StOk7WKeTVRrk`
+  received the same APP-only response; the skill stopped with confidence 1.0.
 - [ ] Confirm whether the reply represents stored value, current charges, available
   credit, or arrears.
 
 **Exit condition:** each enabled profile has an unambiguous metric definition and a
 tested parser. Do not label current charges as cash balance.
 
-Source: [China Unicom SMS service](https://iservice.10010.com/service/service_message.html).
+Sources: [China Unicom SMS service](https://iservice.10010.com/service/service_message.html),
+[China Unicom official command table](https://iservice.10010.com/elecService/message.html).
 
 ### 5. Confirm China Telecom
 
@@ -198,10 +219,10 @@ the six actual SIMs.
 
 - [x] Pilot procedure approved: select one low-risk China Telecom SIM without
   requiring province/product metadata.
-- [ ] Send `10001` to `10001` on the pilot SIM and capture the live menu.
-- [ ] Test only a balance command explicitly advertised by that live menu. Do not
+- [x] Send `10001` to `10001` on the pilot SIM and capture the live menu.
+- [x] Test only a balance command explicitly advertised by that live menu. Do not
   assume Guangdong's `102` command applies nationally.
-- [ ] Distinguish prepaid balance, current charges, arrears, and data allowance.
+- [x] Distinguish prepaid balance, current charges, arrears, and data allowance.
 - [ ] Repeat once and add raw replies as parser fixtures.
 
 **Exit condition:** every enabled Telecom profile is backed by the SIM's captured
@@ -216,10 +237,10 @@ The EC20 modem, firmware, network mode, response encoding, and modem backend mus
 be tested before USSD can be considered supported.
 
 - [x] Pilot procedure approved without requiring prepaid/product metadata.
-- [ ] On one modem during a maintenance window, test whether `AT+CUSD` works in its
+- [x] On one modem during a maintenance window, test whether `AT+CUSD` works in its
   current network mode.
-- [ ] Capture asynchronous `+CUSD` responses, DCS value, menu behavior, and timeout.
-- [ ] Verify cancellation and that normal SMS scanning resumes afterwards.
+- [x] Capture asynchronous `+CUSD` responses, DCS value, menu behavior, and timeout.
+- [x] Verify cancellation and that normal SMS scanning resumes afterwards.
 - [ ] Compare the result with the official hi!App or account portal.
 
 **Exit condition:** one complete USSD session succeeds twice without blocking SMS
@@ -229,22 +250,44 @@ integration is available.
 Sources: [Singtel prepaid FAQ](https://www.singtel.com/content/dam/singtel/personal/products-services/mobile/prepaid-plans/prepaid-plans-webpage/03_FAQ.pdf),
 [Singtel hi!App](https://www.singtel.com/personal/products-services/mobile/prepaid-plans/hiapp).
 
+#### Singtel pilot evidence: S73 on 2026-08-14
+
+- SIM: S73, `+6590950236`, ICCID `8965030124051507851`.
+- Modem: EC20F, `/dev/ttyUSB196`, stable USB path `1-1.2.4.5.3`.
+- Registration: `SGP-M1`; the Singtel SIM was not attached to its home network.
+- `AT+CUSD=1,"*100#"` returned immediate `ERROR` without a `+CUSD` network
+  response. `AT+CUSD=2` returned `OK` and `sms-daemon` was restored to `active`.
+
+**Pilot conclusion:** Singtel USSD is unavailable for S73 in its current network
+environment. This does not establish fleet-wide Singtel behavior.
+
 ### 7. Confirm M1
 
 M1 documents `#100#`, the M1 Prepaid App, and the Prepaid Portal. `#100#` may require
 an interactive USSD session rather than return the desired value directly.
 
 - [x] Pilot procedure approved without requiring prepaid/product metadata.
-- [ ] Test `#100#` on one modem during a maintenance window.
-- [ ] Record every menu step; do not hard-code a menu selection before confirming it
+- [x] Test `#100#` on one modem during a maintenance window.
+- [x] Record every menu step; do not hard-code a menu selection before confirming it
   twice.
-- [ ] Verify timeout, cancellation, encoding, and restoration of SMS scanning.
+- [x] Verify timeout, cancellation, encoding, and restoration of SMS scanning.
 - [ ] Compare the returned values with the Prepaid Portal.
 
 **Exit condition:** the full interaction is deterministic and tested, or M1 remains
 portal/manual.
 
 Source: [M1 prepaid FAQ](https://www.m1.com.sg/support/faq/all-topics/mobile-phones-plans/prepaid).
+
+#### M1 pilot evidence: S78 on 2026-08-14
+
+- SIM: S78, `+6592953543`, ICCID `8965012211290057038`.
+- Modem: EC20F, `/dev/ttyUSB42`, stable USB path `3-1.6.3`.
+- Registration: `Singtel Singtel`; the M1 SIM was not attached to its home network.
+- `AT+CUSD=1,"#100#"` returned immediate `ERROR` without a `+CUSD` network
+  response. `AT+CUSD=2` returned `OK` and `sms-daemon` was restored to `active`.
+
+**Pilot conclusion:** M1 USSD is unavailable for S78 in its current network
+environment. This does not establish fleet-wide M1 behavior.
 
 ### 8. Confirm StarHub
 
@@ -270,16 +313,40 @@ Source: [StarHub current prepaid top-up guidance](https://www.starhub.com/person
 Available documentation shows `*#130#` for data balance on some products, but it
 does not establish a universal stored-value balance command.
 
+Official CMHK product documentation also identifies sending `0` to `12580` as
+the free SMS service-hall entry point. This is suitable for a discovery-only
+menu flow: send only `0` initially, then allow the read-only balance skill to
+follow an explicit account/balance option returned by `12580`.
+
 - [x] Procedure approved: discover a product-specific method only from an official
   response or account interface; do not require manually maintained product data.
 - [ ] Obtain the current product-specific service-code reference.
 - [ ] Confirm whether My Account can manage all three SIMs.
-- [ ] Test only a command explicitly documented for that product.
+- [ ] Test the official `0` to `12580` SMS menu on one online CMHK SIM and retain
+  the complete reply chain.
+- [ ] Test any product-specific dial command only when explicitly documented for
+  that product.
 - [ ] Label data allowance as data, not cash balance.
 
 **Exit condition:** each SIM has a product-backed method, or remains manual/pending.
 
-Source: [CMHK prepaid service tutorial](https://www.hk.chinamobile.com/upload/onlineshop/2025-12-10/Prepaid-Purchasing-Value-Added-Services-Tutorial-EN.pdf).
+Sources: [CMHK prepaid service tutorial](https://www.hk.chinamobile.com/upload/onlineshop/2025-12-10/Prepaid-Purchasing-Value-Added-Services-Tutorial-EN.pdf),
+[CMHK Mobile Duck 2 package documentation](https://www.hk.chinamobile.com/upload/onlineshop/2026-06-05/mobile-duck-2-package-tc.pdf).
+
+#### CMHK SMS pilot evidence: S66 and S67 on 2026-08-14
+
+- Added discovery-only profile `hk-cmhk-sms-menu-v1` from the official instruction
+  to send `0` to `12580` to enter the free SMS service hall.
+- S66 (`+85246820057`) and S67 (`+85246708256`) were both active but registered
+  on `StarHub CMHK`, not the CMHK home network.
+- Both outbound attempts failed before submission with
+  `Failed to send SMS: Send SMS failed: 0`; neither created a cooldown or received
+  a carrier response. S66's modem 108 was also timing out during normal scans.
+
+**Pilot conclusion:** the official SMS menu remains unvalidated because the CMHK
+short code could not be submitted while these cards were roaming on StarHub. Retry
+only after a CMHK SIM is registered on its home network; do not substitute a guessed
+keyword or internationalised form of the short code.
 
 ### 10. Confirm the technical design
 
@@ -399,12 +466,20 @@ Record confirmation outcomes here before implementation begins.
 | 2026-08-14 | SMS discovery infrastructure | Deployed | Migration 039, Worker version `c5de74fe-9e30-4fe5-828f-2a4a2b3b2f12`, and daemon commit `ade87a3` are in production. Queue items carry their purpose, and the daemon permits digits-only 3-5 digit service codes only for `balance_maintenance`; ordinary sends remain E.164-only. Failed pre-send attempts remain audited but do not consume the 24-hour query allowance. |
 | 2026-08-14 | 3. China Mobile SMS validation | First balance confirmed on S02 | Check `bal-ZGNvD9mz1zgFzo3MXG6nc` completed the live allowlisted sequence `10086` → `1` (`话费与AI豆`) → `101` (`查询余额`). The final `10086` reply reported a CNY 264.33 account/general balance, stored as a typed `cash_balance` metric with all six conversation messages retained. The first option-1 attempt timed out waiting for the CMGS prompt and the first retry cleared the residual entry state with `+CMS ERROR: invalid text mode parameter`; the audited retry then succeeded. Migration 040/041 and Worker versions `54c8cb58-c6e3-46bd-be6c-dbe419344aba`/`58596985-b645-45de-b028-4d953dbf5f1a` implement the multi-step flow and restricted failed-step retry. Keep the profile discovery-only until a second successful test on another day. |
 | 2026-08-13 | 4. China Unicom procedure | Confirmed | Start with one low-risk SIM, query the live `10010` menu, then use its explicit command or test `余额` once; require stable replies on two different days. No production test performed yet. |
-| | 4. China Unicom validation | Pending | Awaiting controlled tests on the Orange Pi. |
+| 2026-08-14 | 4. China Unicom validation | In progress | Selected active S01 (`+8617600419127`) for check `bal-C_033GrXsmEwOR6Hpwuo3`. No verified nationwide cash-balance USSD code was available, so USSD was closed without sending a guessed network command. `10010` to `10010` returned no menu, and the one pre-approved `余额` fallback returned only a China Unicom APP deep link. Further official research found `102` documented specifically as "available balance" (`101` is current-month charges), so continue the same audited check once with `102`. |
+| 2026-08-14 | 4. China Unicom `KYYE` validation | APP-only response on S03 | Check `bal-CiiuYyDoaOGrVyacnIm1q` sent the official `KYYE` available-balance alias from active S03 (`+8617600645518`) to `10010`. The carrier returned only the same China Unicom APP deep link and no balance value. The skill stopped safely. |
+| 2026-08-14 | 4. China Unicom `CXYE` validation | APP-only response on S04 | Check `bal-W-n1122L68mKNggoxOUtW` sent the official `CXYE` available-balance alias from active S04 (`+8617600642068`) to `10010`. The carrier again returned only the China Unicom APP deep link and no balance value. The skill stopped safely. |
+| 2026-08-14 | 4. China Unicom `YE` validation | APP-only response on S05 | Check `bal-1eokUl_1StOk7WKeTVRrk` sent the official `YE` available-balance alias from active S05 (`+8617600604190`) to `10010`. The carrier returned the same APP-only response. Across S01/S03/S04/S05, `102`, `KYYE`, `CXYE`, and `YE` did not expose a balance by SMS. Treat the SMS path as unavailable for this card cohort and move to an official API/business integration or authenticated browser path; do not spend more cards testing equivalent aliases without new evidence. |
+| 2026-08-14 | 4. China Unicom authenticated web path | Implementation ready for controlled pilot | Profile `cn-unicom-browser-random-password-v1` creates durable browser jobs. A visible local Chrome Runner requests one random password, obtains only the matching `10010` OTP for the same ICCID and request window, pauses for official human verification when required, calls `userinfoquery` in the authenticated page context, verifies the account number, and stores only the normalized CNY balance. Carrier cookies remain local and ephemeral. Run a one-card selector/response-schema pilot before leaving the service enabled unattended. |
 | 2026-08-13 | 5. China Telecom procedure | Confirmed | Start with one low-risk SIM, query the live `10001` menu, and use only a command explicitly returned there; require stable replies on two different days. Do not assume Guangdong `102` nationally. No production test performed yet. |
-| | 5. China Telecom validation | Pending | Awaiting controlled tests on the Orange Pi. |
+| 2026-08-14 | 5. China Telecom validation | First balance confirmed on S55 | Check `bal-fXSYXBd2kfKbWhTrHnD10` completed the live sequence `10001` -> `1` (`话费积分`) -> `102` (`余额欠费查询`). The final `10001` reply stated `当前号码通用余额为140.76元`, `应缴费用是0元`, `本月已产生费用为149元`, and `待缴费用为0元`. Only the unambiguous CNY 140.76 general balance was stored as `cash_balance`. The runtime skill made three validated decisions with no errors. Keep the profile discovery-only until a second successful test on another day. |
+| 2026-08-14 | 5. Guangdong Telecom direct-command validation | Confirmed on S69/S70/S71 | The Huizhou cohort returned a Guangdong Telecom menu where option `1` led only to an App/WeChat points-query notice. Profile `cn-telecom-sms-102-v1` sent the provincially documented read-only command `102` directly to `10001`; all three cards returned current available balance CNY 86.36, total/prepaid balance CNY 263.36, and gift balance CNY 0.00. The identical customer mask and amounts strongly indicate a shared carrier account. Use current available balance for recharge health and preserve total/prepaid balance as supporting detail. This profile is now the default for the current Telecom fleet; the service-menu profile remains a discovery fallback. |
 | 2026-08-13 | 6. Singtel procedure | Confirmed | Pilot `*100#` through a serialized, cancellable `AT+CUSD` maintenance-window test. Validation pending. |
+| 2026-08-14 | 6. Singtel validation | Closed for S73 | S73 on `/dev/ttyUSB196`, registered to `SGP-M1`, returned immediate `ERROR` for `*100#` with no `+CUSD` network response. Cancellation returned `OK`; `sms-daemon` was restored and verified active. Do not generalize beyond this SIM/network state. |
 | 2026-08-13 | 7. M1 procedure | Confirmed | Pilot the `#100#` interactive USSD flow with timeout/cancellation and portal comparison. Validation pending. |
+| 2026-08-14 | 7. M1 validation | Closed for S78 | S78 on `/dev/ttyUSB42`, registered to `Singtel Singtel`, returned immediate `ERROR` for `#100#` with no `+CUSD` network response. Cancellation returned `OK`; `sms-daemon` was restored and verified active. Do not generalize beyond this SIM/network state. |
 | 2026-08-13 | 8. StarHub procedure | Confirmed | Never use obsolete `*123#`; investigate only an official portal, business export, or supported API. Validation pending. |
 | 2026-08-13 | 9. CMHK procedure | Confirmed | Use only an officially discovered product-specific method; never treat `*#130#` as universal cash balance. Validation pending. |
+| 2026-08-14 | 9. CMHK SMS validation | Blocked by roaming short-code submission | Added discovery-only `0` -> `12580` from current official CMHK product documentation. S66 and S67 were both registered on `StarHub CMHK`; both sends failed before submission with daemon error `Send SMS failed: 0`, so no carrier menu was received and no cooldown was consumed. Retry only on the CMHK home network. |
 | 2026-08-13 | 10. Technical design | Confirmed | Versioned profiles, immutable audit records, typed metrics, strict correlation, modem serialization, command allowlist, and monthly scheduling approved. Implementation pending carrier validation. |
 | 2026-08-13 | 11. Staged rollout | Confirmed | One SIM, then up to five for seven days, then gradual verified-profile rollout with reconciliation and separate alerts. Execution pending. |

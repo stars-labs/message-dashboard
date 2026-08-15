@@ -27,6 +27,17 @@ describe('normalizeRecipient — valid E.164', () => {
   });
 });
 
+describe('normalizeRecipient — carrier short codes', () => {
+  test('accepts 3-5 ASCII digits without adding a country code', () => {
+    expect(normalizeRecipient('100')).toEqual({ ok: true, value: '100' });
+    expect(normalizeRecipient('10010')).toEqual({ ok: true, value: '10010' });
+  });
+
+  test('does not accept a plus-prefixed short code', () => {
+    expect(normalizeRecipient('+10010').ok).toBe(false);
+  });
+});
+
 describe('normalizeRecipient — AT command injection', () => {
   // The literal payload from the security review.
   test('rejects CRLF followed by an AT command', () => {
@@ -69,7 +80,7 @@ describe('normalizeRecipient — malformed input', () => {
   });
 
   test('rejects out-of-range lengths', () => {
-    expect(normalizeRecipient('12345').ok).toBe(false); // 5 digits
+    expect(normalizeRecipient('12').ok).toBe(false); // too short for a short code
     expect(normalizeRecipient('+1234567890123456').ok).toBe(false); // 16 digits
   });
 

@@ -392,6 +392,140 @@
             '';
           };
 
+          # Runs the read-only China Unicom balance workflow in a visible local
+          # Chrome window. Only API_KEY is injected; carrier cookies remain inside
+          # the temporary browser profile and are removed after each SIM.
+          unicom-balance-runner = pkgs.writeShellApplication {
+            name = "unicom-balance-runner";
+            runtimeInputs = with pkgs; [
+              coreutils
+              sops
+              git
+            ];
+            text = ''
+              repo_root="$(git rev-parse --show-toplevel)"
+              secrets="$repo_root/secrets/dev-vars.yaml"
+              if [ ! -f "$secrets" ]; then
+                echo "unicom-balance-runner: $secrets is missing." >&2
+                exit 1
+              fi
+
+              cd "$repo_root/sms-dashboard"
+              export UNICOM_RUNNER_ARGS="$*"
+              state_dir="''${XDG_STATE_HOME:-$HOME/.local/state}/message-dashboard"
+              pid_file="$state_dir/unicom-balance-runner.pid"
+              lock_dir="$state_dir/unicom-balance-runner.lock"
+              mkdir -p "$state_dir"
+
+              acquire_lock() {
+                if mkdir "$lock_dir" 2>/dev/null; then
+                  echo "$$" > "$pid_file"
+                  return 0
+                fi
+                existing_pid="$(cat "$pid_file" 2>/dev/null || true)"
+                if [ -n "$existing_pid" ] && kill -0 "$existing_pid" 2>/dev/null; then
+                  echo "unicom-balance-runner: already running (pid $existing_pid)" >&2
+                  return 1
+                fi
+                rm -f "$pid_file"
+                rmdir "$lock_dir" 2>/dev/null || true
+                mkdir "$lock_dir"
+                echo "$$" > "$pid_file"
+              }
+
+              release_lock() {
+                rm -f "$pid_file"
+                rmdir "$lock_dir" 2>/dev/null || true
+              }
+
+              acquire_lock
+              trap 'release_lock' EXIT
+              # shellcheck disable=SC2016
+              sops exec-env "$secrets" '
+                if [ -z "$(printenv API_KEY)" ]; then
+                  echo "unicom-balance-runner: missing secret: API_KEY" >&2
+                  exit 1
+                fi
+                exec bun scripts/unicom-balance-runner.js $UNICOM_RUNNER_ARGS
+              ' &
+              child_pid="$!"
+              trap 'kill "$child_pid" 2>/dev/null || true; wait "$child_pid" 2>/dev/null || true; release_lock; exit 130' INT TERM
+              wait "$child_pid"
+            '';
+          };
+
+          unicom-balance-service = pkgs.writeShellApplication {
+            name = "unicom-balance-service";
+            runtimeInputs = with pkgs; [ coreutils ];
+            text = ''
+              state_dir="''${XDG_STATE_HOME:-$HOME/.local/state}/message-dashboard"
+              pid_file="$state_dir/unicom-balance-runner.pid"
+              log_file="$state_dir/unicom-balance-runner.log"
+              mkdir -p "$state_dir"
+
+              running_pid() {
+                if [ -f "$pid_file" ]; then
+                  pid="$(cat "$pid_file")"
+                  if kill -0 "$pid" 2>/dev/null; then
+                    printf '%s' "$pid"
+                    return 0
+                  fi
+                  rm -f "$pid_file"
+                fi
+                return 1
+              }
+
+              start() {
+                if pid="$(running_pid)"; then
+                  echo "unicom-balance-runner is already running (pid $pid)"
+                  return 0
+                fi
+                nohup ${unicom-balance-runner}/bin/unicom-balance-runner >>"$log_file" 2>&1 &
+                pid="$!"
+                sleep 1
+                if ! kill -0 "$pid" 2>/dev/null; then
+                  echo "unicom-balance-runner failed to start; see $log_file" >&2
+                  rm -f "$pid_file"
+                  return 1
+                fi
+                echo "unicom-balance-runner started (pid $pid)"
+                echo "A visible Chrome window opens only while processing a SIM."
+                echo "Logs: $log_file"
+              }
+
+              stop() {
+                if pid="$(running_pid)"; then
+                  kill "$pid"
+                  rm -f "$pid_file"
+                  echo "unicom-balance-runner stopped"
+                else
+                  echo "unicom-balance-runner is not running"
+                fi
+              }
+
+              status() {
+                if pid="$(running_pid)"; then
+                  echo "unicom-balance-runner is running (pid $pid)"
+                else
+                  echo "unicom-balance-runner is stopped"
+                  return 1
+                fi
+              }
+
+              case "''${1:-status}" in
+                start) start ;;
+                restart) stop; start ;;
+                stop) stop ;;
+                status) status ;;
+                logs) echo "$log_file" ;;
+                *)
+                  echo "Usage: unicom-balance-service {start|restart|stop|status|logs}" >&2
+                  exit 2
+                  ;;
+              esac
+            '';
+          };
+
           # Owns the local frontend/API pair. Re-running `dev-server restart`
           # replaces both processes instead of letting Vite or Wrangler select a
           # fallback port. State and logs live in /tmp, never in the worktree.
@@ -603,6 +737,8 @@
                 dev-server
                 balance-skill-runner
                 balance-skill-service
+                unicom-balance-runner
+                unicom-balance-service
                 check-daemon
               ]
               ++ (with pkgs; [
@@ -646,6 +782,8 @@
                 echo "  • dev-server    — restart/stop/status the unique :8080 + :8787 pair"
                 echo "  • balance-skill-runner — process balance menus through company AI over VPN"
                 echo "  • balance-skill-service — start/stop/status one background balance runner"
+                echo "  • unicom-balance-runner — query one independent Unicom account in visible Chrome"
+                echo "  • unicom-balance-service — start/stop/status the browser balance runner"
                 echo "  • check-daemon  — required Rust format check + full test suite"
                 echo ""
 

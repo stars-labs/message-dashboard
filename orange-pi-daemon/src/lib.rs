@@ -302,7 +302,7 @@ mod tests {
         };
         let api_client = ApiClient::new(config);
         let modem_manager = Arc::new(ModemManager::new().await);
-        let mut sender = SmsSender::new(api_client, modem_manager);
+        let mut sender = SmsSender::new(api_client, modem_manager, "test-session".to_string());
 
         // Test cache update
         let mut cache = std::collections::HashMap::new();

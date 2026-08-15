@@ -26,6 +26,7 @@
     "@testing-library/svelte": "^5.4.2",
     "autoprefixer": "^10.4.21",
     "happy-dom": "^20.11.2",
+    "playwright-core": "^1.62.1",
     "postcss": "^8.5.6",
     "svelte": "^5.35.5",
     "tailwindcss": "^3.4.0",

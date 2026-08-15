@@ -82,6 +82,13 @@ against it looks like it works. **Use `detected_iccid`.**
   carrier menus are leased from the Worker and evaluated by a workstation connected
   to the company VPN. The company AI token must remain local and must never be added
   to Cloudflare or the Orange Pi.
+- [China Unicom web balance runner](docs/unicom-web-balance-runner.md) — independent
+  Unicom accounts are queried through a visible, temporary local Chrome profile.
+  The Worker correlates the random-password SMS by ICCID, sender, and request time;
+  carrier cookies never leave the local browser.
+- [Balance Agent productization plan](docs/balance-agent-product-plan.md) — turns
+  the local AI and browser runners into one installable desktop product with device
+  authentication, capability heartbeats, operator handoff, and safe batch semantics.
 
 ## Balance Runtime Skill
 
@@ -95,12 +102,24 @@ This is an application runtime skill, **not** a Codex `SKILL.md`:
 | Local Bun runner | `sms-dashboard/scripts/balance-skill-runner.js` | Calls the company AI through the user's VPN and submits structured decisions |
 | Nix process wrappers | `flake.nix` | `balance-skill-runner` plus single-instance `balance-skill-service` management |
 | Architecture document | `docs/balance-runtime-skill-runner.md` | Protocol, trust boundary, deployment, and operating procedure |
+| Unicom browser runner | `sms-dashboard/scripts/unicom-balance-runner.js` | Visible official-site login, OTP entry, human-verification handoff, and read-only balance request |
+| Unicom Worker handler | `sms-dashboard/server/handlers/unicom-web-balance.js` | Browser-job leases, strict OTP correlation, account validation, normalized result persistence, and audit events |
+| Unicom architecture | `docs/unicom-web-balance-runner.md` | Browser trust boundary, state machine, operations, and rollback |
+| Runner control plane | `sms-dashboard/server/handlers/balance-runners.js` and migration `055` | Installation identity, capability heartbeat, online expiry, and dashboard status |
+| Shared runner core | `sms-dashboard/runner-core/` | Authenticated control client, 30-second presence heartbeat, serial cancellation, and capability lifecycle |
+| Balance Agent desktop | `sms-dashboard/balance-agent/` | Electron shell, Auth0 Device Flow, OS-encrypted credentials, separate AI/browser loops, notifications, and packaged Playwright Chromium |
 
 Production D1 runtime tables:
 
 - `sim_balance_skill_jobs`: durable pending/leased/completed/stopped jobs.
 - `sim_balance_skill_decisions`: model, confidence, evidence, selected option, and final action audit.
 - `sim_balance_metrics`: validated balances such as `cash_balance` in `CNY`.
+
+Balance Agent routing is account-scoped by migration `057`:
+`sim_balance_checks.requested_by_subject` stores the Dashboard user's Auth0 `sub`.
+Auth0 device runners may claim and mutate only checks with the same `sub`; runner
+status/preflight are filtered to that user. `NULL` is reserved for legacy API-key
+control jobs, which only legacy API-key runners may claim.
 
 The runner's local PID, lock, and service log live under
 `~/.local/state/message-dashboard/`; the log file is
@@ -132,6 +151,16 @@ balance-skill-runner --check                          # Validate VPN + company A
 balance-skill-service start                           # Start the single background VPN runner
 balance-skill-service status                          # Check it without decrypting secrets
 balance-skill-service stop                            # Stop the background runner
+unicom-balance-runner --once                         # Process at most one Unicom web task in visible Chrome
+unicom-balance-service start                         # Start the single background Unicom browser runner
+unicom-balance-service status                        # Check it without decrypting secrets
+unicom-balance-service stop                          # Stop it
+
+# Balance Agent desktop development (does not read dev-vars.yaml)
+cd sms-dashboard/balance-agent && bun install
+bun run test                                         # Device auth and secure-store tests
+bun run start                                        # Build and launch the local Electron application
+bun run pack:mac                                     # Unsigned local .app directory for packaging checks
 
 # Dashboard build/deploy
 cd sms-dashboard && bun install

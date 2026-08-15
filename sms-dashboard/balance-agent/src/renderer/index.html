@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'">
+    <title>Balance Agent</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <header>
+      <div>
+        <h1>Balance Agent</h1>
+        <p id="installation-name">本机服务</p>
+      </div>
+      <span class="status-badge" id="overall-status">未登录</span>
+    </header>
+
+    <nav aria-label="Agent sections">
+      <button class="tab active" data-tab="status">状态</button>
+      <button class="tab" data-tab="settings">设置</button>
+    </nav>
+
+    <main>
+      <section id="status-panel">
+        <div class="section-heading">
+          <h2>运行状态</h2>
+          <button id="auth-action" class="primary">登录</button>
+        </div>
+        <div class="status-list">
+          <div class="status-row">
+            <span class="indicator" id="auth-dot"></span>
+            <div><strong>Dashboard</strong><small id="auth-detail">未登录</small></div>
+            <span id="auth-state">未登录</span>
+          </div>
+          <div class="status-row">
+            <span class="indicator" id="sms-dot"></span>
+            <div><strong>SMS AI</strong><small>运营商短信流程</small></div>
+            <span id="sms-state">已停止</span>
+          </div>
+          <div class="status-row">
+            <span class="indicator" id="browser-dot"></span>
+            <div><strong>浏览器查询</strong><small>联通网页登录</small></div>
+            <span id="browser-state">待配置</span>
+          </div>
+        </div>
+        <div id="login-code" class="login-code" hidden>
+          <span>设备代码</span>
+          <strong id="user-code"></strong>
+        </div>
+        <p id="error-message" class="error" hidden></p>
+      </section>
+
+      <section id="settings-panel" hidden>
+        <div class="section-heading">
+          <h2>连接设置</h2>
+          <button id="test-configuration" type="button" class="secondary">测试全部配置</button>
+        </div>
+        <form id="settings-form">
+          <div id="configuration-results" class="configuration-results" hidden>
+            <div><span class="indicator" id="dashboard-test-dot"></span><strong>Dashboard</strong><small id="dashboard-test-result"></small></div>
+            <div><span class="indicator" id="ai-full-test-dot"></span><strong>公司 AI / VPN</strong><small id="ai-full-test-result"></small></div>
+            <div><span class="indicator" id="browser-test-dot"></span><strong>浏览器</strong><small id="browser-test-result"></small></div>
+          </div>
+          <div class="form-grid">
+            <label>设备名称<input name="installationName" autocomplete="off"></label>
+            <label>Dashboard URL<input name="dashboardUrl" type="url" placeholder="https://dashboard.example.com"></label>
+            <label>Auth0 issuer<input name="auth0Issuer" type="url" placeholder="https://tenant.auth0.com"></label>
+            <label>Auth0 client ID<input name="auth0ClientId" autocomplete="off"></label>
+            <label class="wide">Auth0 audience<input name="auth0Audience" autocomplete="off"></label>
+          </div>
+
+          <div class="section-heading subsection"><h2>AI 设置</h2></div>
+          <div class="form-grid">
+            <label>AI URL<input name="aiBaseUrl" type="url"></label>
+            <label>模型<input name="aiModel" autocomplete="off"></label>
+            <label>协议<select name="aiProtocol"><option value="anthropic">Anthropic</option><option value="openai">OpenAI</option></select></label>
+            <label>AI token<input name="aiToken" type="password" placeholder="保持空白则不修改" autocomplete="new-password"></label>
+          </div>
+          <div class="connection-test">
+            <div>
+              <strong>AI 连接</strong>
+              <small>需要公司 VPN 时，请先连接 VPN</small>
+            </div>
+            <span id="ai-test-result" role="status"></span>
+            <button id="test-ai" type="button" class="secondary">测试连接</button>
+          </div>
+
+          <label class="login-setting"><input id="open-at-login" type="checkbox"> 登录系统后自动启动</label>
+          <div class="form-actions">
+            <span id="save-result"></span>
+            <button type="submit" class="primary">保存设置</button>
+          </div>
+        </form>
+      </section>
+    </main>
+    <script type="module" src="./renderer.js"></script>
+  </body>
+</html>

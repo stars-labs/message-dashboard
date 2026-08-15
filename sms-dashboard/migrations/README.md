@@ -4,6 +4,21 @@ This directory contains SQL migration scripts for the SMS Dashboard D1 database.
 
 ## Migration History
 
+### 056_enable_unicom_browser_balance.sql
+- Promotes the validated China Unicom browser workflow from discovery to enabled.
+- Makes eligible online Unicom SIMs available to fleet balance queries.
+- Leaves browser execution serialized by the Balance Agent runner concurrency.
+
+### 055_add_balance_runner_control_plane.sql
+- Registers local balance-runner installations without storing runner secrets.
+- Tracks per-capability heartbeat, health, current job, session, and concurrency.
+- Supports legacy API-key scripts while the desktop agent adopts scoped Auth0 tokens.
+
+### 054_add_unicom_web_balance_skill.sql
+- Adds durable, leased China Unicom browser balance jobs and audit events.
+- Enables the official random-password web profile for independent Unicom accounts.
+- Stores no carrier cookies or passwords in D1.
+
 ### 001_initial_schema.sql
 - Creates initial database tables
 - Sets up basic structure for phones and messages
@@ -134,6 +149,16 @@ device_view (
 - **Fixes device_view and device_stats status matching**
 - Daemon writes `'active'` but views expected `'registered'` for `connection_status`
 - Result: no device ever got status `'online'`, online count was always 0
+
+### 051_add_sms_processing_session.sql
+- Adds `messages.processing_session_id` for outbound SMS claims
+- Lets a newly started daemon mark unfinished claims from an older daemon session as `unknown`
+- Preserves at-most-once sending: uncertain messages are never automatically retried
+
+### 057_scope_balance_jobs_to_auth0_subject.sql
+- Adds `sim_balance_checks.requested_by_subject` for Dashboard-created balance work
+- Routes Auth0 device runners only to jobs created by the same Auth0 subject
+- Reserves a `NULL` owner for legacy API-key control jobs
 
 ## Device Status Mapping
 

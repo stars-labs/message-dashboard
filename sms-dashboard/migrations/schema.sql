@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS messages (
     verification_code TEXT,
     error_message TEXT,
     sms_id TEXT,
+    processing_session_id TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (phone_iccid) REFERENCES phones(iccid) ON DELETE CASCADE

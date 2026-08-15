@@ -3,7 +3,9 @@ import {
   balanceQueriesHandler,
   buildBalanceQueryPlan,
   carrierMatchesProfile,
+  describeBalanceMethod,
   expectedSenderMatches,
+  filterBalancePlanByMethods,
   findPendingBalanceCheck,
   linkBalanceReply,
   parseBalanceMetrics,
@@ -78,6 +80,7 @@ function dbStub({ profileResult = profile, phoneResult = phone, recent = null } 
 function request(db, body = {}, apiKey = 'secret') {
   return {
     env: { API_KEY: 'secret', DB: db },
+    user: { id: 'auth0|dashboard-user' },
     headers: new Headers({ 'X-API-Key': apiKey }),
     json: async () => body,
   };
@@ -91,11 +94,49 @@ describe('balance-query carrier and sender guards', () => {
     expect(carrierMatchesProfile('中国联通', 'China Mobile')).toBe(false);
   });
 
+  test('recognizes China Unicom aliases without matching other carriers', () => {
+    expect(carrierMatchesProfile('联通', 'China Unicom')).toBe(true);
+    expect(carrierMatchesProfile('中国联通', 'China Unicom')).toBe(true);
+    expect(carrierMatchesProfile('UNICOM', 'China Unicom')).toBe(true);
+    expect(carrierMatchesProfile('中国移动', 'China Unicom')).toBe(false);
+  });
+
+  test('recognizes China Telecom aliases without matching other carriers', () => {
+    expect(carrierMatchesProfile('电信', 'China Telecom')).toBe(true);
+    expect(carrierMatchesProfile('中国电信', 'China Telecom')).toBe(true);
+    expect(carrierMatchesProfile('CTCC', 'China Telecom')).toBe(true);
+    expect(carrierMatchesProfile('中国联通', 'China Telecom')).toBe(false);
+  });
+
+  test('recognizes CMHK aliases without matching mainland China Mobile', () => {
+    expect(carrierMatchesProfile('移动', 'CMHK')).toBe(true);
+    expect(carrierMatchesProfile('中国移动香港', 'CMHK')).toBe(true);
+    expect(carrierMatchesProfile('China Mobile Hong Kong', 'CMHK')).toBe(true);
+    expect(carrierMatchesProfile('SGP-M1 CMCC', 'CMHK')).toBe(false);
+  });
+
   test('matches only a configured service sender', () => {
     expect(expectedSenderMatches('10086', '["10086"]')).toBe(true);
     expect(expectedSenderMatches('+8610086', '["10086"]')).toBe(true);
     expect(expectedSenderMatches('10086100', '["10086"]')).toBe(false);
     expect(expectedSenderMatches('10086', 'not-json')).toBe(false);
+  });
+});
+
+describe('balance query execution requirements', () => {
+  test('classifies direct, AI-assisted and browser profiles', () => {
+    expect(describeBalanceMethod({ method: 'sms', skill_config: null }))
+      .toEqual({ category: 'direct_sms', capability: null, interactive: false });
+    expect(describeBalanceMethod({
+      method: 'sms',
+      skill_config: JSON.stringify({
+        id: 'balance-menu', version: '1', objective: 'Read balance',
+        max_turns: 2, minimum_confidence: 0.9, currencies: ['CNY'],
+        forbidden_intents: ['recharge'],
+      }),
+    })).toEqual({ category: 'sms_ai', capability: 'sms_ai', interactive: false });
+    expect(describeBalanceMethod({ method: 'browser' }))
+      .toEqual({ category: 'browser', capability: 'unicom_browser', interactive: true });
   });
 });
 
@@ -108,6 +149,20 @@ describe('balance-query planning', () => {
       profiles: [enabledProfile],
     });
     expect(plan.every((item) => item.eligible)).toBe(true);
+  });
+
+  test('selects an enabled browser profile for China Unicom', () => {
+    const browserProfile = {
+      ...enabledProfile,
+      id: 'cn-unicom-browser-random-password-v1',
+      carrier: 'China Unicom',
+      method: 'browser',
+    };
+    const [item] = buildBalanceQueryPlan({
+      phones: [{ ...phone, carrier: '联通' }],
+      profiles: [browserProfile],
+    });
+    expect(item).toMatchObject({ eligible: true, profile: browserProfile });
   });
 
   test('limits discovery profiles in a batch to SIMs with a parsed result', () => {
@@ -143,6 +198,202 @@ describe('balance-query planning', () => {
       profiles: [enabledProfile],
     });
     expect(plan.map((item) => item.reason)).toEqual(['offline', 'unsupported']);
+  });
+
+  test('queues only the explicitly confirmed batch method categories', () => {
+    const plan = [
+      { eligible: true, profile: { method: 'sms', skill_config: null }, phone: { iccid: 'direct' } },
+      { eligible: true, profile: { method: 'sms', skill_config: JSON.stringify({ id: 'skill', version: '1', objective: 'balance' }) }, phone: { iccid: 'ai' } },
+      { eligible: true, profile: { method: 'browser' }, phone: { iccid: 'browser' } },
+      { eligible: false, profile: { method: 'sms' }, phone: { iccid: 'offline' } },
+    ];
+    expect(filterBalancePlanByMethods(plan, ['direct_sms', 'sms_ai'])
+      .map((item) => item.phone.iccid)).toEqual(['direct', 'ai']);
+    expect(filterBalancePlanByMethods(plan, ['browser'])
+      .map((item) => item.phone.iccid)).toEqual(['browser']);
+  });
+});
+
+describe('POST /api/balance-checks/query-batch', () => {
+  test('rejects absent, duplicate, or unknown method selections before loading the plan', async () => {
+    for (const methods of [undefined, [], ['browser', 'browser'], ['ussd']]) {
+      const response = await balanceQueriesHandler.queryBatch({
+        user: { id: 'auth0|dashboard-user' },
+        json: async () => ({ methods }),
+        env: {
+          DB: { prepare: () => { throw new Error('database must not be read'); } },
+        },
+      });
+      expect(response.status).toBe(400);
+    }
+  });
+
+  test('requires a bounded unique SIM scope', async () => {
+    for (const phoneIccids of [undefined, [], [phone.iccid, phone.iccid], [null]]) {
+      const response = await balanceQueriesHandler.queryBatch({
+        user: { id: 'auth0|dashboard-user' },
+        json: async () => ({ methods: ['browser'], phone_iccids: phoneIccids }),
+        env: {
+          DB: { prepare: () => { throw new Error('database must not be read'); } },
+        },
+      });
+      expect(response.status).toBe(400);
+    }
+  });
+});
+
+describe('POST /api/balance-checks/query-preview', () => {
+  test('limits planning to the explicit SIM scope', async () => {
+    const secondPhone = { ...phone, iccid: '89860117811049221140', sim_index: 3 };
+    let deviceParams = null;
+    const db = {
+      prepare(sql) {
+        const execute = async (params = []) => {
+          if (sql.includes('FROM device_view')) {
+            deviceParams = params;
+            return { results: [phone, secondPhone] };
+          }
+          if (sql.includes('FROM sim_balance_profiles')) {
+            return { results: [{ ...profile, enabled: 1, discovery_enabled: 0 }] };
+          }
+          return { results: [] };
+        };
+        return {
+          all: () => execute(),
+          bind(...params) { return { all: () => execute(params) }; },
+        };
+      },
+    };
+    const response = await balanceQueriesHandler.preview({
+      method: 'POST',
+      env: { DB: db },
+      user: { id: 'auth0|dashboard-user' },
+      json: async () => ({ phone_iccids: [phone.iccid, secondPhone.iccid] }),
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(deviceParams).toEqual([phone.iccid, secondPhone.iccid]);
+    expect(body.summary.total).toBe(2);
+    expect(body.summary.eligible).toBe(2);
+  });
+});
+
+describe('POST /api/balance-checks/query', () => {
+  test('routes an explicit China Unicom query to the browser profile', async () => {
+    const browserProfile = {
+      ...profile,
+      id: 'cn-unicom-browser-random-password-v1',
+      carrier: 'China Unicom',
+      method: 'browser',
+      parser_version: 'cn-unicom-web-balance-v1',
+    };
+    const smsProfile = {
+      ...profile,
+      id: 'cn-unicom-sms-cxye-v1',
+      carrier: 'China Unicom',
+      command: 'CXYE',
+      destination: '10010',
+    };
+    const unicomPhone = { ...phone, carrier: '联通' };
+    const batches = [];
+    const db = {
+      prepare(sql) {
+        const execute = (params = []) => ({
+          async all() {
+            if (sql.includes('FROM device_view')) return { results: [unicomPhone] };
+            if (sql.includes('FROM sim_balance_profiles')) {
+              expect(sql).toContain("method IN ('sms', 'browser')");
+              return { results: [browserProfile, smsProfile] };
+            }
+            return { results: [] };
+          },
+        });
+        return {
+          ...execute(),
+          bind(...params) {
+            const statement = { sql, params, ...execute(params) };
+            return statement;
+          },
+        };
+      },
+      async batch(statements) {
+        batches.push(statements);
+        return statements.map(() => ({ success: true }));
+      },
+    };
+
+    const response = await balanceQueriesHandler.query(request(db, {
+      phone_iccid: unicomPhone.iccid,
+    }));
+    const body = await response.json();
+
+    expect(response.status).toBe(202);
+    expect(body.check.profile_id).toBe(browserProfile.id);
+    const checkInsert = batches[0].find((statement) =>
+      statement.sql.includes('INSERT INTO sim_balance_checks')
+    );
+    expect(checkInsert.params.at(-1)).toBe('auth0|dashboard-user');
+    expect(batches[0].some((statement) => statement.sql.includes('sim_balance_web_jobs'))).toBe(true);
+    expect(batches[0].some((statement) => statement.sql.includes('INSERT INTO messages'))).toBe(false);
+  });
+});
+
+describe('GET /api/balance-checks/query-preflight', () => {
+  test('describes an interactive browser query and current runner availability', async () => {
+    const browserProfile = {
+      ...profile,
+      id: 'cn-unicom-browser-random-password-v1',
+      carrier: 'China Unicom',
+      method: 'browser',
+      enabled: 1,
+      discovery_enabled: 0,
+    };
+    const unicomPhone = {
+      ...phone,
+      carrier: '联通',
+      sim_index: 20,
+    };
+    const db = {
+      prepare(sql) {
+        const execute = async () => {
+          if (sql.includes('FROM device_view')) return { results: [unicomPhone] };
+          if (sql.includes('FROM sim_balance_profiles')) return { results: [browserProfile] };
+          if (sql.includes('FROM balance_runner_installations')) {
+            return { results: [{
+              id: 'runner-1', display_name: 'Runner', auth_mode: 'auth0_device',
+              auth_subject: 'auth0|dashboard-user',
+              platform: 'darwin', version: '1', last_heartbeat: '2026-08-15 03:00:00',
+              seconds_since_heartbeat: 10,
+            }] };
+          }
+          if (sql.includes('FROM balance_runner_capabilities')) {
+            return { results: [{
+              runner_id: 'runner-1', capability: 'unicom_browser', state: 'ready',
+              current_job_id: null, concurrency: 1, detail_code: null,
+              last_heartbeat: '2026-08-15 03:00:00', seconds_since_heartbeat: 10,
+            }] };
+          }
+          return { results: [] };
+        };
+        return {
+          all: execute,
+          bind() { return { all: execute }; },
+        };
+      },
+    };
+
+    const response = await balanceQueriesHandler.preflight({
+      env: { DB: db },
+      user: { id: 'auth0|dashboard-user' },
+      url: `https://example.com/api/balance-checks/query-preflight?phone_iccid=${unicomPhone.iccid}`,
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      eligible: true,
+      method: { category: 'browser', capability: 'unicom_browser', interactive: true },
+      runner: { required: true, available: true, state: 'ready' },
+    });
   });
 });
 
@@ -185,6 +436,28 @@ describe('POST /api/control/balance-checks', () => {
     expect(messageInsert.params).not.toContain('+6599999999');
   });
 
+  test('creates a browser job without queueing an outbound SMS', async () => {
+    const browserProfile = {
+      ...profile,
+      id: 'cn-unicom-browser-random-password-v1',
+      carrier: 'China Unicom',
+      method: 'browser',
+      parser_version: 'cn-unicom-web-balance-v1',
+    };
+    const db = dbStub({
+      profileResult: browserProfile,
+      phoneResult: { ...phone, carrier: '联通' },
+    });
+    const response = await balanceQueriesHandler.create(request(db, {
+      phone_iccid: phone.iccid,
+      profile_id: browserProfile.id,
+    }));
+
+    expect(response.status).toBe(202);
+    expect(db.batches[0].some((statement) => statement.sql.includes('sim_balance_web_jobs'))).toBe(true);
+    expect(db.batches[0].some((statement) => statement.sql.includes('INSERT INTO messages'))).toBe(false);
+  });
+
   test('rejects an offline SIM', async () => {
     const db = dbStub({ phoneResult: { ...phone, sim_status: 'offline' } });
     const response = await balanceQueriesHandler.create(request(db, {
@@ -209,7 +482,7 @@ describe('POST /api/control/balance-checks', () => {
     expect(db.batches).toHaveLength(0);
   });
 
-  test('does not count failed pre-send attempts against the daily limit', async () => {
+  test('does not count failed or timed-out attempts against the daily limit', async () => {
     const db = dbStub();
     const response = await balanceQueriesHandler.create(request(db, {
       phone_iccid: phone.iccid,
@@ -220,7 +493,9 @@ describe('POST /api/control/balance-checks', () => {
     const recentQuery = db.calls.find((call) =>
       call.operation === 'first' && call.sql.includes('FROM sim_balance_checks')
     );
-    expect(recentQuery.sql).toContain("status != 'failed'");
+    expect(recentQuery.sql).toContain("status IN ('response_received', 'parsed', 'unparsed')");
+    expect(recentQuery.sql).not.toContain("status != 'failed'");
+    expect(recentQuery.sql).not.toContain("'timed_out'");
   });
 
   test('rejects a SIM from a different carrier', async () => {
@@ -362,6 +637,33 @@ describe('balance reply correlation', () => {
     expect(metricInsert.params).toEqual([
       'bal-final', 'cash_balance', 82.36, null, 'CNY', null,
     ]);
+  });
+
+  test('parses China Telecom available balance instead of total or prepaid balance', () => {
+    expect(parseBalanceMetrics(
+      'cn-telecom-balance-v1',
+      '【中国电信】您的手机账户当前可用余额为86.36元，当前号码总余额为263.36元，预存费用余额为263.36元。',
+    )).toEqual([{
+      metric_type: 'cash_balance',
+      value: 86.36,
+      unit: null,
+      currency: 'CNY',
+      expires_at: null,
+    }]);
+  });
+
+  test('parses China Telecom general balance without treating charges as balance', () => {
+    expect(parseBalanceMetrics(
+      'cn-telecom-balance-v1',
+      '当前号码通用余额为140.76元，本月已产生费用149.00元。',
+    )[0]?.value).toBe(140.76);
+  });
+
+  test('leaves ambiguous China Telecom totals for the skill runner', () => {
+    expect(parseBalanceMetrics(
+      'cn-telecom-balance-v1',
+      '当前号码总余额为263.36元，预存费用余额为263.36元。',
+    )).toEqual([]);
   });
 
   test('queues the discovered 101 command from the second-level menu', async () => {
@@ -522,5 +824,32 @@ describe('POST /api/control/balance-checks/retry', () => {
 
     expect(response.status).toBe(409);
     expect(db.batches).toHaveLength(0);
+  });
+});
+
+describe('POST /api/control/balance-checks/stop', () => {
+  test('terminalizes an awaiting reply as timed out', async () => {
+    const db = dbStub({ recent: { id: 'bal-waiting', status: 'awaiting_response' } });
+    const response = await balanceQueriesHandler.stop(request(db, {
+      check_id: 'bal-waiting',
+    }));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.check).toEqual({ id: 'bal-waiting', status: 'timed_out' });
+    expect(db.batches[0][0].params).toEqual([
+      'timed_out', 'timed_out', 'bal-waiting', 'awaiting_response',
+    ]);
+  });
+
+  test('terminalizes an unresolved received reply as unparsed', async () => {
+    const db = dbStub({ recent: { id: 'bal-unresolved', status: 'response_received' } });
+    const response = await balanceQueriesHandler.stop(request(db, {
+      check_id: 'bal-unresolved',
+    }));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.check).toEqual({ id: 'bal-unresolved', status: 'unparsed' });
   });
 });

@@ -5,6 +5,7 @@
   import { COUNTRIES, getCountryFlag, getCountryName, getCarrierColor } from "./countries.js";
   import { getStatusMeta, hasOperationalIssue, isAnomalous } from "./device-status.js";
   import { formatCardNumber } from "./card-number.js";
+  import { buildCarrierOptions, carrierKey } from "./carrier.js";
 
   let { initialStatusFilter = "all" } = $props();
 
@@ -14,6 +15,7 @@
   let error = $state(null);
   let searchQuery = $state("");
   let statusFilter = $state(initialStatusFilter);
+  let carrierFilter = $state('all');
   let successMessage = $state(null);
   let sortKey = $state(null);
   let sortDirection = $state('asc');
@@ -76,6 +78,9 @@
   let errorCount    = $derived(allMappingsCache.filter(m => hasOperationalIssue(m.is_active)).length);
   let inactiveCount = $derived(allMappingsCache.filter(m => ['no_modem', 'unassigned'].includes(m.is_active) || !m.is_active).length);
   let totalCount    = $derived(allMappingsCache.length);
+  let carrierOptions = $derived.by(() => buildCarrierOptions(
+    allMappingsCache.map((mapping) => mapping.carrier)
+  ));
 
   const tableColumns = [
     { key: 'sim_index', label: '卡号' },
@@ -142,6 +147,10 @@
     else if (statusFilter === 'error') filtered = filtered.filter(m => hasOperationalIssue(m.is_active));
     else if (statusFilter === 'inactive') filtered = filtered.filter(m => ['no_modem','unassigned'].includes(m.is_active) || !m.is_active);
 
+    if (carrierFilter !== 'all') {
+      filtered = filtered.filter((mapping) => carrierKey(mapping.carrier) === carrierFilter);
+    }
+
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
       filtered = filtered.filter(m =>
@@ -168,7 +177,12 @@
     });
   }
 
-  $effect(() => { if (searchQuery !== undefined || statusFilter !== undefined) filterMappings(); });
+  $effect(() => {
+    searchQuery;
+    statusFilter;
+    carrierFilter;
+    filterMappings();
+  });
 
   onMount(loadMappings);
 
@@ -239,13 +253,29 @@
         </button>
       {/each}
     </div>
-    <input
-      type="text"
-      bind:value={searchQuery}
-      placeholder="搜索 S01 / 号码 / 运营商 / ICCID…"
-      class="flex-1 px-3 py-1.5 text-sm bg-stone-50 border border-stone-200 rounded-lg
-        focus:outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100 transition-colors"
-    />
+    <div class="flex flex-1 gap-2 min-w-0">
+      <label class="sr-only" for="mapping-carrier-filter">运营商筛选</label>
+      <select
+        id="mapping-carrier-filter"
+        value={carrierFilter}
+        onchange={(event) => { carrierFilter = event.currentTarget.value; }}
+        aria-label="运营商筛选"
+        class="w-[120px] sm:w-[140px] shrink-0 px-2.5 py-1.5 text-sm bg-stone-50 border border-stone-200 rounded-lg
+          focus:outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
+      >
+        <option value="all">全部运营商</option>
+        {#each carrierOptions as carrier}
+          <option value={carrier.key}>{carrier.label}</option>
+        {/each}
+      </select>
+      <input
+        type="text"
+        bind:value={searchQuery}
+        placeholder="搜索 S01 / 号码 / ICCID…"
+        class="min-w-0 flex-1 px-3 py-1.5 text-sm bg-stone-50 border border-stone-200 rounded-lg
+          focus:outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100 transition-colors"
+      />
+    </div>
   </div>
 
   {#if successMessage}
@@ -320,7 +350,7 @@
               <td class="px-3 py-2.5">
                 {#if m.carrier}
                   <span class="inline-flex px-2 py-0.5 text-xs rounded-full font-medium {getCarrierColor(m.carrier)}">
-                    {m.carrier}
+                    <span class="mr-1" aria-hidden="true">{getCountryFlag(m.country)}</span>{m.carrier}
                   </span>
                 {:else}
                   <span class="text-stone-300">—</span>
@@ -407,7 +437,7 @@
           </div>
           <div class="mt-1 flex items-center gap-2 text-[11px] text-stone-400 font-mono">
             <span class="{meta.badgeClass.includes('red') ? 'text-red-600' : meta.badgeClass.includes('amber') ? 'text-amber-600' : ''}">{meta.label}</span>
-            {#if m.carrier}<span>{m.carrier}</span>{/if}
+            {#if m.carrier}<span>{getCountryFlag(m.country)} {m.carrier}</span>{/if}
             {#if m.signal_quality != null}<span>· {m.signal_quality}%</span>{/if}
             {#if pos}<span>· {pos.path}{pos.isLastKnown ? '（上次）' : ''}</span>{/if}
           </div>

@@ -30,17 +30,20 @@ pub struct SmsSender {
     api_client: crate::api_client::ApiClient,
     modem_manager: Arc<crate::modem_manager::ModemManager>,
     modem_cache: HashMap<String, String>, // ICCID -> modem_id mapping
+    session_id: String,
 }
 
 impl SmsSender {
     pub fn new(
         api_client: crate::api_client::ApiClient,
         modem_manager: Arc<crate::modem_manager::ModemManager>,
+        session_id: String,
     ) -> Self {
         Self {
             api_client,
             modem_manager,
             modem_cache: HashMap::new(),
+            session_id,
         }
     }
 
@@ -59,6 +62,7 @@ impl SmsSender {
         let response = client
             .get(&url)
             .header("X-API-Key", &self.api_client.config.api_key)
+            .header("X-Daemon-Session-Id", &self.session_id)
             .header("Accept", "application/json")
             .timeout(std::time::Duration::from_secs(10))
             .send()
@@ -174,7 +178,7 @@ impl SmsSender {
                 &modem_id,
                 &sms.recipient,
                 &sms.content,
-                sms.purpose == "balance_maintenance",
+                is_short_code(&sms.recipient),
             )
             .await
         {
@@ -273,5 +277,24 @@ impl SmsSender {
         }
 
         Ok(())
+    }
+}
+
+fn is_short_code(recipient: &str) -> bool {
+    (3..=5).contains(&recipient.len()) && recipient.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_short_code;
+
+    #[test]
+    fn recognizes_only_plain_ascii_short_codes() {
+        assert!(is_short_code("100"));
+        assert!(is_short_code("10010"));
+        assert!(!is_short_code("12"));
+        assert!(!is_short_code("+10010"));
+        assert!(!is_short_code("1001A"));
+        assert!(!is_short_code("6512345678"));
     }
 }

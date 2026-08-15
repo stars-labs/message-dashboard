@@ -5,6 +5,23 @@ import { extractSessionToken } from '../utils/session-token.js';
 import { setUserRole } from '../utils/auth0-management.js';
 import { indexSession, unindexSession } from '../utils/user-sessions.js';
 
+export async function resolveLoginRoles({ userInfo, tokens, env, verifyToken }) {
+  const roleConfig = createRoleConfig(env);
+  let roles = rolesFromToken(userInfo, roleConfig);
+
+  if (roles.length === 0 && env.AUTH0_LOGIN_AUDIENCE && tokens.access_token) {
+    const accessPayload = await verifyToken(tokens.access_token, env.AUTH0_LOGIN_AUDIENCE);
+    roles = rolesFromToken(accessPayload, roleConfig);
+  }
+
+  if (roles.length === 0 && tokens.id_token) {
+    const idPayload = await verifyToken(tokens.id_token, env.AUTH0_CLIENT_ID);
+    roles = rolesFromToken(idPayload, roleConfig);
+  }
+
+  return roles;
+}
+
 export const auth0Handler = {
   // Login - redirect to Auth0
   async login(request) {
@@ -28,9 +45,12 @@ export const auth0Handler = {
     authUrl.searchParams.set('scope', 'openid profile email');
     authUrl.searchParams.set('state', nanoid());
     
-    // Add audience if configured to ensure we get a proper access token
-    if (env.AUTH0_AUDIENCE) {
-      authUrl.searchParams.set('audience', env.AUTH0_AUDIENCE);
+    // Browser login creates a Dashboard session from the verified ID token. The
+    // runner API audience belongs to the Native Balance Agent and must not be
+    // requested by this Regular Web Application unless a separate login audience
+    // is explicitly configured.
+    if (env.AUTH0_LOGIN_AUDIENCE) {
+      authUrl.searchParams.set('audience', env.AUTH0_LOGIN_AUDIENCE);
     }
     
     return Response.redirect(authUrl.toString(), 302);
@@ -39,6 +59,7 @@ export const auth0Handler = {
   // Callback - handle Auth0 response
   async callback(request) {
     const { env } = request;
+    const roleConfig = createRoleConfig(env);
     const url = new URL(request.url);
     const code = url.searchParams.get('code');
     const state = url.searchParams.get('state');
@@ -106,21 +127,12 @@ export const auth0Handler = {
       // WITHOUT verifying its signature and trusted the roles it found there. Those
       // roles are persisted into the KV session below, so they are a real
       // authorization input. See docs/SECURITY-REVIEW.md finding 5.
-      const roleConfig = createRoleConfig(env);
-
-      let userRoles = rolesFromToken(userInfo, roleConfig);
-
-      if (userRoles.length === 0 && tokens.id_token) {
-        // The ID TOKEN, not the access token. No AUTH0_AUDIENCE is configured, so
-        // login() never requests an audience and Auth0 returns an *opaque* access
-        // token — not a JWT — which could never verify. The documented Action sets the
-        // roles claim on the ID token (api.idToken.setCustomClaim), and an ID token's
-        // audience is the client_id, which is what verifyToken falls back to.
-        //
-        // Verified, not decoded: on failure this yields [] and the gate below denies.
-        const verified = await this.verifyToken(tokens.id_token, env);
-        userRoles = rolesFromToken(verified, roleConfig);
-      }
+      let userRoles = await resolveLoginRoles({
+        userInfo,
+        tokens,
+        env,
+        verifyToken: (token, audience) => this.verifyToken(token, env, audience),
+      });
 
       const user = {
         id: userId,
@@ -303,13 +315,13 @@ export const auth0Handler = {
   },
 
   // Verify JWT token (for API calls)
-  async verifyToken(token, env) {
+  async verifyToken(token, env, audience = env.AUTH0_AUDIENCE || env.AUTH0_CLIENT_ID) {
     try {
       const JWKS = createRemoteJWKSet(new URL(`https://${env.AUTH0_DOMAIN}/.well-known/jwks.json`));
       
       const { payload } = await jwtVerify(token, JWKS, {
         issuer: `https://${env.AUTH0_DOMAIN}/`,
-        audience: env.AUTH0_AUDIENCE || env.AUTH0_CLIENT_ID
+        audience
       });
       
       return payload;

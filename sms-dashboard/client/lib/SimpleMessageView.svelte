@@ -6,6 +6,7 @@
   import { copyCode } from "./clipboard.js";
   import { formatCardNumber } from "./card-number.js";
   import { getCountryFlag } from "./countries.js";
+  import { getOutboundStatusMeta } from './message-status.js';
   import BalanceConversationRow from './BalanceConversationRow.svelte';
   import { getBalanceTimestamp, normalizeUtcTimestamp } from './balance-query.js';
 
@@ -320,9 +321,17 @@
         {@const isFiltered = message.filter_status === 'filtered'}
         {@const isCopied = copiedId === message.id}
         {@const hasCode = !!message.verification_code}
-        {@const receiverIndex = message.phone_sim_index ?? selectedPhone?.sim_index}
-        {@const receiverNumber = message.display_phone_number || selectedPhone?.number || message.phone_iccid?.slice(-8) || '—'}
-        {@const receiverFlag = message.phone_country ? getCountryFlag(message.phone_country) : selectedPhone?.flag || ''}
+        {@const isSent = message.type === 'sent'}
+        {@const counterpartyNumber = isSent
+          ? message.recipient || message.phone_number || '—'
+          : message.phone_number || '—'}
+        {@const directionLabel = isSent ? '发送' : '接收'}
+        {@const sendStatus = isSent
+          ? getOutboundStatusMeta(message.status, message.error_message)
+          : null}
+        {@const cardIndex = message.phone_sim_index ?? selectedPhone?.sim_index}
+        {@const cardNumber = message.display_phone_number || selectedPhone?.number || message.phone_iccid?.slice(-8) || '—'}
+        {@const cardFlag = message.phone_country ? getCountryFlag(message.phone_country) : selectedPhone?.flag || ''}
 
         <!-- ── Desktop row ──────────────────────────────────────────────── -->
         <div
@@ -337,23 +346,29 @@
           <!-- Accent rail: orange for newest, transparent otherwise -->
           <div class="self-stretch rounded-sm {isNew ? 'bg-orange-400' : 'bg-transparent'}"></div>
 
-          <!-- 发送方 + 接收卡：一次扫视即可确认消息路径 -->
+          <!-- 对方号码 + 本机卡：一次扫视即可确认消息方向 -->
           <div class="min-w-0 font-mono">
-            <div class="text-sm font-semibold text-stone-800 truncate" title={message.phone_number}>
-              {message.phone_number || '—'}
+            <div class="text-sm font-semibold text-stone-800 truncate" title={counterpartyNumber}>
+              {counterpartyNumber}
             </div>
             <div class="mt-0.5 flex items-center gap-1.5 text-[11px] text-stone-400 min-w-0">
-              <span class="shrink-0 text-stone-300">接收</span>
-              {#if receiverIndex != null}
-                <span class="font-semibold text-stone-500 tabular-nums shrink-0">{formatCardNumber(receiverIndex)}</span>
+              <span class="shrink-0 text-stone-300">{directionLabel}</span>
+              {#if cardIndex != null}
+                <span class="font-semibold text-stone-500 tabular-nums shrink-0">{formatCardNumber(cardIndex)}</span>
                 <span class="text-stone-300 shrink-0">·</span>
               {/if}
-              <span class="truncate" title={receiverNumber}>{receiverFlag} {receiverNumber}</span>
+              <span class="truncate" title={cardNumber}>{cardFlag} {cardNumber}</span>
             </div>
           </div>
 
           <!-- 验证码: the headline element -->
-          {#if hasCode}
+          {#if isSent}
+            <span
+              class="inline-flex w-fit items-center px-2 py-1 rounded-md border text-xs font-medium {sendStatus.className}"
+              title={sendStatus.title}
+              aria-label={`${sendStatus.label}：${sendStatus.title}`}
+            >{sendStatus.label}</span>
+          {:else if hasCode}
             <button
               onclick={() => handleCopy(message)}
               class="inline-flex items-center justify-center px-2.5 py-1 rounded-lg border
@@ -397,7 +412,13 @@
         >
           <!-- Top row: code + sender + time -->
           <div class="flex items-center gap-2">
-            {#if hasCode}
+            {#if isSent}
+              <span
+                class="inline-flex items-center px-2 py-0.5 rounded-md border text-xs font-medium shrink-0 {sendStatus.className}"
+                title={sendStatus.title}
+                aria-label={`${sendStatus.label}：${sendStatus.title}`}
+              >{sendStatus.label}</span>
+            {:else if hasCode}
               <button
                 onclick={() => handleCopy(message)}
                 class="font-mono text-base font-semibold tabular-nums px-2 py-0.5 rounded-md border
@@ -412,21 +433,21 @@
               </button>
             {/if}
             <span class="text-sm font-mono font-semibold text-stone-600 truncate">
-              {message.phone_number || '—'}
+              {counterpartyNumber}
             </span>
             <span class="ml-auto font-mono text-xs text-stone-400 shrink-0">
               {formatTime(message.timestamp)}
             </span>
           </div>
 
-          <!-- Receiving card stays with the sender, before the message body. -->
+          <!-- The local card stays with the counterparty, before the message body. -->
           <div class="mt-1 flex items-center gap-1.5 font-mono text-[11px] text-stone-400 min-w-0">
-            <span class="text-stone-300 shrink-0">接收</span>
-            {#if receiverIndex != null}
-              <span class="font-semibold text-stone-500 tabular-nums shrink-0">{formatCardNumber(receiverIndex)}</span>
+            <span class="text-stone-300 shrink-0">{directionLabel}</span>
+            {#if cardIndex != null}
+              <span class="font-semibold text-stone-500 tabular-nums shrink-0">{formatCardNumber(cardIndex)}</span>
               <span class="text-stone-300 shrink-0">·</span>
             {/if}
-            <span class="truncate">{receiverFlag} {receiverNumber}</span>
+            <span class="truncate">{cardFlag} {cardNumber}</span>
           </div>
 
           <!-- Body -->

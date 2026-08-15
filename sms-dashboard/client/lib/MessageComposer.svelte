@@ -27,6 +27,7 @@
 
   // Common country codes
   const countryCodes = [
+    { code: "", country: "不加区号", short: "NONE" },
     { code: "+65", country: "🇸🇬 Singapore", short: "SG" },
     { code: "+86", country: "🇨🇳 China", short: "CN" },
     { code: "+1", country: "🇺🇸 USA/Canada", short: "US" },
@@ -51,7 +52,9 @@
     if (num.startsWith('+')) {
       return num;
     }
-    // Otherwise prepend selected country code
+    // The country code is optional so carrier short codes (for example 10010)
+    // can be submitted unchanged.
+    if (!selectedCountryCode) return num;
     return `${selectedCountryCode}${num}`;
   }
 
@@ -197,7 +200,7 @@
         recipientNumber = draft.recipientNumber || "";
         recipientSIM = draft.recipientSIM || recipientSIM;
         messageContent = draft.messageContent || "";
-        selectedCountryCode = draft.selectedCountryCode || "+65";
+        selectedCountryCode = draft.selectedCountryCode ?? "+65";
         const restoredSim = availablePhones.find(phone => phone.iccid === recipientSIM);
         selectedSimDisplay = restoredSim
           ? formatSimDisplay(restoredSim)
@@ -331,7 +334,7 @@
           onclick={() => showCountryDropdown = !showCountryDropdown}
           class="px-3 py-2 cyber-input flex items-center gap-1 min-w-[90px] justify-between"
         >
-          <span class="font-mono">{selectedCountryCode}</span>
+          <span class="font-mono">{selectedCountryCode || '无区号'}</span>
           <svg class="w-4 h-4 text-stone-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
           </svg>
@@ -344,7 +347,7 @@
                   onclick={() => selectCountryCode(cc.code)}
                   class="w-full text-left px-3 py-2 hover:bg-stone-200 rounded-md transition-colors text-sm flex items-center gap-2 {selectedCountryCode === cc.code ? 'bg-stone-200' : ''}"
                 >
-                  <span class="font-mono w-12">{cc.code}</span>
+                  <span class="font-mono w-12">{cc.code || '—'}</span>
                   <span class="text-stone-500">{cc.country}</span>
                 </button>
               {/each}
@@ -362,7 +365,7 @@
           showRecipientHistory = true;
           recipientSearch = e.target.value;
         }}
-        placeholder="输入手机号..."
+        placeholder="输入手机号或短号..."
         class="flex-1 px-4 py-2 cyber-input"
       />
     </div>
@@ -589,7 +592,7 @@
               onclick={() => showCountryDropdown = !showCountryDropdown}
               class="px-3 py-2 cyber-input flex items-center gap-1 min-w-[90px] justify-between"
             >
-              <span class="font-mono">{selectedCountryCode}</span>
+              <span class="font-mono">{selectedCountryCode || '无区号'}</span>
               <svg class="w-4 h-4 text-stone-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
               </svg>
@@ -602,7 +605,7 @@
                       onclick={() => selectCountryCode(cc.code)}
                       class="w-full text-left px-3 py-2 hover:bg-stone-200 rounded-md transition-colors text-sm flex items-center gap-2 {selectedCountryCode === cc.code ? 'bg-stone-200' : ''}"
                     >
-                      <span class="font-mono w-12">{cc.code}</span>
+                      <span class="font-mono w-12">{cc.code || '—'}</span>
                       <span class="text-stone-500">{cc.country}</span>
                     </button>
                   {/each}
@@ -620,7 +623,7 @@
               showRecipientHistory = true;
               recipientSearch = e.target.value;
             }}
-            placeholder="输入手机号..."
+            placeholder="输入手机号或短号..."
             class="flex-1 px-4 py-2 cyber-input"
           />
         </div>

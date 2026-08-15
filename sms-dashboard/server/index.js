@@ -12,6 +12,8 @@ import { healthHandler } from './handlers/health';
 import { usersHandler } from './handlers/users';
 import { balanceQueriesHandler } from './handlers/balance-queries.js';
 import { balanceSkillRunnerHandler } from './handlers/balance-skill-runner.js';
+import { unicomWebBalanceHandler } from './handlers/unicom-web-balance.js';
+import { balanceRunnersHandler } from './handlers/balance-runners.js';
 import { serveFrontend } from './frontend-handler';
 import { createRoleConfig, hasAnyRole } from '../config/auth0-roles.js';
 import { setupKeywordRoutes } from './api/keywords.js';
@@ -210,6 +212,33 @@ router.get('/api/balance-checks/query-preview', async (request, env, ctx) => {
   const permResponse = await requirePermission('balances.query')(request, env, ctx);
   if (permResponse) return permResponse;
   return balanceQueriesHandler.preview(request);
+});
+
+router.post('/api/balance-checks/query-preview', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  await enrichUserPermissions(request, env, ctx);
+  const permResponse = await requirePermission('balances.query')(request, env, ctx);
+  if (permResponse) return permResponse;
+  return balanceQueriesHandler.preview(request);
+});
+
+router.get('/api/balance-checks/query-preflight', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  await enrichUserPermissions(request, env, ctx);
+  const permResponse = await requirePermission('balances.query')(request, env, ctx);
+  if (permResponse) return permResponse;
+  return balanceQueriesHandler.preflight(request);
+});
+
+router.get('/api/balance-runners', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  await enrichUserPermissions(request, env, ctx);
+  const permResponse = await requirePermission('messages.read')(request, env, ctx);
+  if (permResponse) return permResponse;
+  return balanceRunnersHandler.status(request);
 });
 
 router.post('/api/balance-checks/query', async (request, env, ctx) => {
@@ -437,6 +466,18 @@ router.post('/api/control/balance-checks/retry', async (request) => {
   return balanceQueriesHandler.retry(request);
 });
 
+router.post('/api/control/balance-checks/stop', async (request) => {
+  return balanceQueriesHandler.stop(request);
+});
+
+router.post('/api/control/balance-runners/heartbeat', async (request) => {
+  return balanceRunnersHandler.heartbeat(request);
+});
+
+router.get('/api/control/balance-runners/check', async (request) => {
+  return balanceRunnersHandler.check(request);
+});
+
 router.get('/api/control/balance-skills/jobs/claim', async (request) => {
   return balanceSkillRunnerHandler.claim(request);
 });
@@ -447,6 +488,34 @@ router.post('/api/control/balance-skills/jobs/:id/decision', async (request) => 
 
 router.post('/api/control/balance-skills/jobs/:id/release', async (request) => {
   return balanceSkillRunnerHandler.release(request);
+});
+
+router.get('/api/control/unicom-web-balance/jobs/claim', async (request) => {
+  return unicomWebBalanceHandler.claim(request);
+});
+
+router.post('/api/control/unicom-web-balance/jobs/:id/otp-requested', async (request) => {
+  return unicomWebBalanceHandler.otpRequested(request);
+});
+
+router.get('/api/control/unicom-web-balance/jobs/:id/otp', async (request) => {
+  return unicomWebBalanceHandler.otp(request);
+});
+
+router.post('/api/control/unicom-web-balance/jobs/:id/heartbeat', async (request) => {
+  return unicomWebBalanceHandler.heartbeat(request);
+});
+
+router.post('/api/control/unicom-web-balance/jobs/:id/complete', async (request) => {
+  return unicomWebBalanceHandler.complete(request);
+});
+
+router.post('/api/control/unicom-web-balance/jobs/:id/fail', async (request) => {
+  return unicomWebBalanceHandler.fail(request);
+});
+
+router.post('/api/control/unicom-web-balance/jobs/:id/release', async (request) => {
+  return unicomWebBalanceHandler.release(request);
 });
 
 

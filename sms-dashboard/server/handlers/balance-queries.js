@@ -1,9 +1,24 @@
 import { nanoid } from 'nanoid';
 import { senderMatches } from '../utils/spam-filter.js';
 import { parseBalanceSkillConfig } from '../utils/balance-skill.js';
+import {
+  createUnicomWebBalanceStatements,
+  newUnicomWebBalanceIds,
+} from './unicom-web-balance.js';
+import { loadBalanceRunnerStatus } from './balance-runners.js';
 
 const REPLYABLE_CHECK_STATUS = 'awaiting_response';
 const CHINA_MOBILE_NAMES = ['china mobile', 'cmcc', '中国移动', '移动'];
+const CHINA_UNICOM_NAMES = ['china unicom', 'unicom', '中国联通', '联通'];
+const CHINA_TELECOM_NAMES = ['china telecom', 'telecom', 'ctcc', '中国电信', '电信'];
+const CMHK_NAMES = ['cmhk', 'china mobile hong kong', '中国移动香港', '中移香港', '香港移动'];
+const BATCH_METHODS = new Set(['direct_sms', 'sms_ai', 'browser']);
+const MAX_BATCH_SCOPE = 500;
+const BALANCE_COOLDOWN_PREDICATE = `
+  status IN ('queued', 'awaiting_response')
+  OR (status IN ('response_received', 'parsed', 'unparsed')
+    AND datetime(requested_at) >= datetime('now', '-24 hours'))
+`;
 
 function json(data, status = 200) {
   return Response.json(data, { status });
@@ -22,6 +37,14 @@ function checkKey(simIccid, profileId) {
   return `${simIccid}\u0000${profileId}`;
 }
 
+function parseBatchScope(value) {
+  if (!Array.isArray(value) || value.length < 1 || value.length > MAX_BATCH_SCOPE) return null;
+  const normalized = value.map((item) => typeof item === 'string' ? item.trim() : '');
+  if (normalized.some((item) => !item || item.length > 64)) return null;
+  if (new Set(normalized).size !== normalized.length) return null;
+  return normalized;
+}
+
 export function buildBalanceQueryPlan({
   phones = [],
   profiles = [],
@@ -36,7 +59,7 @@ export function buildBalanceQueryPlan({
 
   return phones.map((phone) => {
     const matchingProfiles = profiles
-      .filter((profile) => profile.method === 'sms'
+      .filter((profile) => ['sms', 'browser'].includes(profile.method)
         && phone.country === profile.country_code
         && carrierMatchesProfile(phone.carrier, profile.carrier))
       .sort((a, b) => Number(b.enabled || 0) - Number(a.enabled || 0));
@@ -77,26 +100,58 @@ function summarizePlan(plan) {
   return summary;
 }
 
-async function loadBalanceQueryPlan(db, { phoneIccid = null, allowDiscovery = false } = {}) {
-  const phoneWhere = phoneIccid ? 'WHERE iccid = ?' : '';
+export function describeBalanceMethod(profile) {
+  if (!profile) return { category: 'unsupported', capability: null, interactive: false };
+  if (profile.method === 'browser') {
+    return { category: 'browser', capability: 'unicom_browser', interactive: true };
+  }
+  if (profile.method === 'sms' && parseBalanceSkillConfig(profile.skill_config)) {
+    return { category: 'sms_ai', capability: 'sms_ai', interactive: false };
+  }
+  return { category: 'direct_sms', capability: null, interactive: false };
+}
+
+function summarizeMethods(plan) {
+  const summary = { direct_sms: 0, sms_ai: 0, browser: 0 };
+  for (const item of plan.filter((candidate) => candidate.eligible)) {
+    const category = describeBalanceMethod(item.profile).category;
+    if (category in summary) summary[category] += 1;
+  }
+  return summary;
+}
+
+export function filterBalancePlanByMethods(plan, methods) {
+  const selected = new Set(methods);
+  return plan.filter((item) => item.eligible
+    && selected.has(describeBalanceMethod(item.profile).category));
+}
+
+async function loadBalanceQueryPlan(db, {
+  phoneIccid = null,
+  phoneIccids = null,
+  allowDiscovery = false,
+} = {}) {
+  const scopedIccids = phoneIccid ? [phoneIccid] : phoneIccids;
+  const phoneWhere = scopedIccids
+    ? `WHERE iccid IN (${scopedIccids.map(() => '?').join(', ')})`
+    : '';
   const phoneStatement = db.prepare(`
     SELECT iccid, number, carrier, country, sim_status, sim_index
     FROM device_view ${phoneWhere}
     ORDER BY sim_index
   `);
   const [phoneResult, profileResult, recentResult, successfulResult] = await Promise.all([
-    phoneIccid ? phoneStatement.bind(phoneIccid).all() : phoneStatement.all(),
+    scopedIccids ? phoneStatement.bind(...scopedIccids).all() : phoneStatement.all(),
     db.prepare(`
       SELECT * FROM sim_balance_profiles
-      WHERE method = 'sms' AND (discovery_enabled = 1 OR enabled = 1)
+      WHERE method IN ('sms', 'browser')
+        AND (discovery_enabled = 1 OR enabled = 1)
       ORDER BY enabled DESC, id
     `).all(),
     db.prepare(`
       SELECT sim_iccid, profile_id, id, status, requested_at
       FROM sim_balance_checks
-      WHERE status IN ('queued', 'awaiting_response')
-         OR (status != 'failed'
-           AND datetime(requested_at) >= datetime('now', '-24 hours'))
+      WHERE ${BALANCE_COOLDOWN_PREDICATE}
       ORDER BY datetime(requested_at) DESC
     `).all(),
     db.prepare(`
@@ -115,16 +170,42 @@ async function loadBalanceQueryPlan(db, { phoneIccid = null, allowDiscovery = fa
   });
 }
 
-async function queueBalanceCheck(db, { phone, profile }) {
+async function queueBalanceCheck(db, { phone, profile }, requestedBySubject = null) {
+  if (profile.method === 'browser') {
+    const { checkId, jobId } = newUnicomWebBalanceIds();
+    await db.batch(createUnicomWebBalanceStatements(db, {
+      checkId,
+      jobId,
+      phone,
+      profile,
+      requestedBySubject,
+    }));
+    return {
+      id: checkId,
+      sim_iccid: phone.iccid,
+      profile_id: profile.id,
+      status: 'queued',
+      web_job_id: jobId,
+    };
+  }
+
   const checkId = `bal-${nanoid()}`;
   const messageId = `msg-balance-${nanoid()}`;
 
   await db.batch([
     db.prepare(`
       INSERT INTO sim_balance_checks (
-        id, sim_iccid, profile_id, status, outbound_message_id, parser_version
-      ) VALUES (?, ?, ?, 'queued', ?, ?)
-    `).bind(checkId, phone.iccid, profile.id, messageId, profile.parser_version),
+        id, sim_iccid, profile_id, status, outbound_message_id, parser_version,
+        requested_by_subject
+      ) VALUES (?, ?, ?, 'queued', ?, ?, ?)
+    `).bind(
+      checkId,
+      phone.iccid,
+      profile.id,
+      messageId,
+      profile.parser_version,
+      requestedBySubject,
+    ),
     db.prepare(`
       INSERT INTO messages (
         id, phone_iccid, phone_number, content, timestamp, type, recipient,
@@ -176,7 +257,24 @@ function attemptedStep(check) {
 }
 
 export function parseBalanceMetrics(parserVersion, content) {
-  if (parserVersion !== 'cn-mobile-balance-v1' || typeof content !== 'string') return [];
+  if (typeof content !== 'string') return [];
+
+  if (parserVersion === 'cn-telecom-balance-v1') {
+    const cashMatch = content.match(
+      /(?:当前可用余额|当前号码通用余额)(?:为|是)?[：:\s]*([0-9]+(?:\.[0-9]{1,2})?)\s*元/
+    );
+    if (!cashMatch) return [];
+
+    return [{
+      metric_type: 'cash_balance',
+      value: Number(cashMatch[1]),
+      unit: null,
+      currency: 'CNY',
+      expires_at: null,
+    }];
+  }
+
+  if (parserVersion !== 'cn-mobile-balance-v1') return [];
 
   const cashMatch = content.match(/(?:账户|话费|可用)?余额(?:为|是)?[：:\s]*([0-9]+(?:\.[0-9]{1,2})?)\s*元/);
   if (!cashMatch) return [];
@@ -198,6 +296,18 @@ export function carrierMatchesProfile(actualCarrier, profileCarrier) {
 
   if (CHINA_MOBILE_NAMES.includes(expected)) {
     return CHINA_MOBILE_NAMES.some((name) => actual.includes(name));
+  }
+
+  if (CHINA_UNICOM_NAMES.includes(expected)) {
+    return CHINA_UNICOM_NAMES.some((name) => actual.includes(name));
+  }
+
+  if (CHINA_TELECOM_NAMES.includes(expected)) {
+    return CHINA_TELECOM_NAMES.some((name) => actual.includes(name));
+  }
+
+  if (CMHK_NAMES.includes(expected)) {
+    return CMHK_NAMES.some((name) => actual.includes(name)) || actual === '移动';
   }
 
   return actual.includes(expected) || expected.includes(actual);
@@ -459,6 +569,18 @@ export const balanceQueriesHandler = {
           ORDER BY datetime(sj.created_at) DESC, sj.rowid DESC
           LIMIT 1
         ) AS skill_job_status,
+        (
+          SELECT wj.status
+          FROM sim_balance_web_jobs wj
+          WHERE wj.check_id = c.id
+          LIMIT 1
+        ) AS web_job_status,
+        (
+          SELECT wj.human_reason
+          FROM sim_balance_web_jobs wj
+          WHERE wj.check_id = c.id
+          LIMIT 1
+        ) AS web_human_reason,
         COALESCE((
           SELECT json_group_array(json_object(
             'id', conversation.id,
@@ -516,10 +638,21 @@ export const balanceQueriesHandler = {
         conversation_json: _conversationJson,
         ...record
       } = check;
-      const displayStatus = ['response_received', 'unparsed'].includes(record.status)
-        && ['pending', 'leased'].includes(record.skill_job_status)
-        ? (record.skill_job_status === 'leased' ? 'skill_processing' : 'skill_pending')
-        : record.status;
+      let displayStatus = record.status;
+      if (['response_received', 'unparsed'].includes(record.status)
+        && ['pending', 'leased'].includes(record.skill_job_status)) {
+        displayStatus = record.skill_job_status === 'leased' ? 'skill_processing' : 'skill_pending';
+      } else if (record.status === 'queued' && record.web_job_status) {
+        const webStatuses = {
+          pending: 'web_pending',
+          leased: 'web_processing',
+          awaiting_otp: 'web_otp',
+          authenticating: 'web_authenticating',
+          querying: 'web_querying',
+          human_verification_required: 'web_human_required',
+        };
+        displayStatus = webStatuses[record.web_job_status] || record.status;
+      }
       return { ...record, display_status: displayStatus, metrics, conversation };
     });
 
@@ -527,10 +660,30 @@ export const balanceQueriesHandler = {
   },
 
   async preview(request) {
-    const plan = await loadBalanceQueryPlan(request.env.DB);
+    const requestedBySubject = request.user?.id;
+    if (!requestedBySubject) return json({ error: 'Unauthorized' }, 401);
+    let phoneIccids = null;
+    if (request.method === 'POST') {
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ success: false, error: 'Invalid JSON body' }, 400);
+      }
+      phoneIccids = parseBatchScope(body?.phone_iccids);
+      if (!phoneIccids) {
+        return json({ success: false, error: 'A unique non-empty SIM scope is required' }, 400);
+      }
+    }
+    const [plan, runners] = await Promise.all([
+      loadBalanceQueryPlan(request.env.DB, { phoneIccids }),
+      loadBalanceRunnerStatus(request.env.DB, { authSubject: requestedBySubject }),
+    ]);
     return json({
       success: true,
       summary: summarizePlan(plan),
+      method_summary: summarizeMethods(plan),
+      runner_capabilities: runners.capabilities,
       eligible: plan
         .filter((item) => item.eligible)
         .map((item) => ({
@@ -539,11 +692,51 @@ export const balanceQueriesHandler = {
           phone_number: item.phone.number,
           carrier: item.phone.carrier,
           profile_id: item.profile.id,
+          ...describeBalanceMethod(item.profile),
         })),
     });
   },
 
+  async preflight(request) {
+    const requestedBySubject = request.user?.id;
+    if (!requestedBySubject) return json({ error: 'Unauthorized' }, 401);
+    const phoneIccid = new URL(request.url).searchParams.get('phone_iccid')?.trim();
+    if (!phoneIccid) return json({ success: false, error: 'phone_iccid is required' }, 400);
+
+    const [[item], runners] = await Promise.all([
+      loadBalanceQueryPlan(request.env.DB, { phoneIccid, allowDiscovery: true }),
+      loadBalanceRunnerStatus(request.env.DB, { authSubject: requestedBySubject }),
+    ]);
+    if (!item) return json({ success: false, error: 'SIM not found' }, 404);
+
+    const method = describeBalanceMethod(item.profile);
+    const runner = method.capability ? runners.capabilities[method.capability] : null;
+    return json({
+      success: true,
+      eligible: item.eligible,
+      reason: item.reason,
+      phone: {
+        iccid: item.phone.iccid,
+        sim_index: item.phone.sim_index,
+        number: item.phone.number,
+        carrier: item.phone.carrier,
+      },
+      profile: item.profile ? {
+        id: item.profile.id,
+        method: item.profile.method,
+        carrier: item.profile.carrier,
+      } : null,
+      method,
+      runner: runner ? {
+        required: true,
+        ...runner,
+      } : { required: false, available: true, state: 'not_required' },
+    });
+  },
+
   async query(request) {
+    const requestedBySubject = request.user?.id;
+    if (!requestedBySubject) return json({ error: 'Unauthorized' }, 401);
     let body;
     try {
       body = await request.json();
@@ -575,13 +768,34 @@ export const balanceQueriesHandler = {
       }, item.reason === 'cooldown' ? 429 : 409);
     }
 
-    const check = await queueBalanceCheck(request.env.DB, item);
+    const check = await queueBalanceCheck(request.env.DB, item, requestedBySubject);
     return json({ success: true, check }, 202);
   },
 
   async queryBatch(request) {
-    const plan = await loadBalanceQueryPlan(request.env.DB);
-    const eligible = plan.filter((item) => item.eligible);
+    const requestedBySubject = request.user?.id;
+    if (!requestedBySubject) return json({ error: 'Unauthorized' }, 401);
+    let body;
+    try {
+      body = await request.json();
+    } catch {
+      return json({ success: false, error: 'Invalid JSON body' }, 400);
+    }
+    const methods = body?.methods;
+    if (!Array.isArray(methods) || methods.length < 1
+      || methods.length > BATCH_METHODS.size
+      || new Set(methods).size !== methods.length
+      || methods.some((method) => !BATCH_METHODS.has(method))) {
+      return json({ success: false, error: 'A unique list of supported methods is required' }, 400);
+    }
+
+    const phoneIccids = parseBatchScope(body?.phone_iccids);
+    if (!phoneIccids) {
+      return json({ success: false, error: 'A unique non-empty SIM scope is required' }, 400);
+    }
+
+    const plan = await loadBalanceQueryPlan(request.env.DB, { phoneIccids });
+    const eligible = filterBalancePlanByMethods(plan, methods);
     const checks = [];
     const failures = [];
 
@@ -590,7 +804,7 @@ export const balanceQueriesHandler = {
     // normal user SMS delivery.
     for (const item of eligible) {
       try {
-        checks.push(await queueBalanceCheck(request.env.DB, item));
+        checks.push(await queueBalanceCheck(request.env.DB, item, requestedBySubject));
       } catch (error) {
         failures.push({
           phone_iccid: item.phone.iccid,
@@ -605,6 +819,8 @@ export const balanceQueriesHandler = {
       batch_id: `balance-batch-${nanoid()}`,
       summary: {
         ...summarizePlan(plan),
+        selected: eligible.length,
+        methods,
         queued: checks.length,
         failed_to_queue: failures.length,
       },
@@ -645,8 +861,7 @@ export const balanceQueriesHandler = {
         SELECT id, status, requested_at
         FROM sim_balance_checks
         WHERE sim_iccid = ?
-          AND status != 'failed'
-          AND datetime(requested_at) >= datetime('now', '-24 hours')
+          AND (${BALANCE_COOLDOWN_PREDICATE})
         ORDER BY requested_at DESC LIMIT 1
       `).bind(phone_iccid).first(),
     ]);
@@ -654,7 +869,7 @@ export const balanceQueriesHandler = {
     if (!profile) {
       return json({ success: false, error: 'Balance profile is not enabled' }, 404);
     }
-    if (profile.method !== 'sms') {
+    if (!['sms', 'browser'].includes(profile.method)) {
       return json({ success: false, error: 'Profile method is not implemented' }, 400);
     }
     if (!phone || phone.sim_status !== 'active') {
@@ -781,7 +996,8 @@ export const balanceQueriesHandler = {
     const results = await request.env.DB.batch([
       request.env.DB.prepare(`
         UPDATE messages
-        SET status = 'sending', error_message = NULL, updated_at = CURRENT_TIMESTAMP
+        SET status = 'sending', error_message = NULL,
+            processing_session_id = NULL, updated_at = CURRENT_TIMESTAMP
         WHERE id = ? AND status = 'failed'
           AND purpose = 'balance_maintenance'
       `).bind(check.message_id),
@@ -807,5 +1023,52 @@ export const balanceQueriesHandler = {
         outbound_message_id: check.message_id,
       },
     }, 202);
+  },
+
+  async stop(request) {
+    if (!hasApiKey(request)) return json({ error: 'Unauthorized' }, 401);
+
+    let body;
+    try {
+      body = await request.json();
+    } catch {
+      return json({ success: false, error: 'Invalid JSON body' }, 400);
+    }
+
+    if (typeof body?.check_id !== 'string') {
+      return json({ success: false, error: 'check_id is required' }, 400);
+    }
+
+    const check = await request.env.DB.prepare(`
+      SELECT id, status FROM sim_balance_checks WHERE id = ?
+    `).bind(body.check_id).first();
+    if (!check) return json({ success: false, error: 'Balance check not found' }, 404);
+    if (!['awaiting_response', 'response_received'].includes(check.status)) {
+      return json({ success: false, error: 'Balance check is not stoppable' }, 409);
+    }
+
+    const finalStatus = check.status === 'awaiting_response' ? 'timed_out' : 'unparsed';
+    const results = await request.env.DB.batch([
+      request.env.DB.prepare(`
+        UPDATE sim_balance_checks
+        SET status = ?, completed_at = CURRENT_TIMESTAMP,
+            error = CASE WHEN ? = 'timed_out' THEN 'Stopped by operator' ELSE error END,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND status = ?
+      `).bind(finalStatus, finalStatus, check.id, check.status),
+      request.env.DB.prepare(`
+        UPDATE sim_balance_skill_jobs
+        SET status = 'stopped', lease_owner = NULL, lease_expires_at = NULL,
+            last_error = COALESCE(last_error, 'Stopped by operator'),
+            updated_at = CURRENT_TIMESTAMP
+        WHERE check_id = ? AND status IN ('pending', 'leased')
+      `).bind(check.id),
+    ]);
+
+    if (Number(results?.[0]?.meta?.changes ?? 1) === 0) {
+      return json({ success: false, error: 'Balance check changed before stop' }, 409);
+    }
+
+    return json({ success: true, check: { id: check.id, status: finalStatus } });
   },
 };

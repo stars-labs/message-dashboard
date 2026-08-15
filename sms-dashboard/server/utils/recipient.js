@@ -10,12 +10,8 @@
 // The daemon validates independently; this is the trust boundary, so a bad value never
 // reaches the database or the pending-send queue in the first place.
 
-// Optional leading '+', then 6-15 ASCII digits. Anchored, and \d is deliberately
-// avoided in favour of [0-9] so non-ASCII digit forms cannot slip through.
-const E164 = /^\+?[0-9]{6,15}$/;
-
 /**
- * Validate a recipient as E.164.
+ * Validate a recipient as E.164 or a carrier short code.
  *
  * @param {unknown} recipient
  * @returns {{ok: true, value: string} | {ok: false, reason: string}}
@@ -24,6 +20,9 @@ const E164 = /^\+?[0-9]{6,15}$/;
  * sending the message to a different number than the caller asked for, and silently
  * "fixing" a payload hides the attempt; a 400 is both safer and diagnosable.
  */
+const E164 = /^\+?[0-9]{6,15}$/;
+const SHORT_CODE = /^[0-9]{3,5}$/;
+
 export function normalizeRecipient(recipient) {
   if (typeof recipient !== 'string') {
     return { ok: false, reason: 'recipient must be a string' };
@@ -39,10 +38,10 @@ export function normalizeRecipient(recipient) {
     return { ok: false, reason: 'recipient must not be empty' };
   }
 
-  if (!E164.test(value)) {
+  if (!E164.test(value) && !SHORT_CODE.test(value)) {
     return {
       ok: false,
-      reason: 'recipient must be E.164: an optional leading "+" followed by 6-15 digits',
+      reason: 'recipient must be a 3-5 digit short code or E.164: an optional leading "+" followed by 6-15 digits',
     };
   }
 

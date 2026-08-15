@@ -59,4 +59,41 @@ describe('MessageComposer mobile route', () => {
     expect(content.value).toBe('retry this message');
     cleanup();
   });
+
+  test('sends a carrier short code unchanged when no country code is selected', async () => {
+    sessionStorage.clear();
+    let submitted;
+    const phone = {
+      iccid: '89860117811049221139',
+      number: '+8617600419127',
+      status: 'active',
+    };
+    const view = render(MessageComposer, {
+      props: {
+        mobilePage: true,
+        selectedPhone: phone,
+        phoneNumbers: [phone],
+        onmessagesent: async (message) => { submitted = message; },
+      },
+    });
+
+    await tick();
+    const page = view.container.querySelector('[data-mobile-composer]');
+    const countrySelector = page.querySelector('.country-code-container > button');
+    await fireEvent.click(countrySelector);
+    const noCountryCode = [...page.querySelectorAll('.country-code-container button')]
+      .find((button) => button.textContent.includes('不加区号'));
+    await fireEvent.click(noCountryCode);
+    await fireEvent.input(page.querySelector('#mobile-recipient-number'), {
+      target: { value: '10010' },
+    });
+    await fireEvent.input(page.querySelector('#mobile-message-content'), {
+      target: { value: 'YE' },
+    });
+    await fireEvent.click([...page.querySelectorAll('button')]
+      .find((button) => button.textContent.trim() === '发送短信'));
+
+    await waitFor(() => expect(submitted?.recipient).toBe('10010'));
+    cleanup();
+  });
 });

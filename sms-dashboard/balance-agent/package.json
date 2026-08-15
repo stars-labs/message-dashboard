@@ -1,0 +1,53 @@
+{
+  "name": "message-dashboard-balance-agent",
+  "version": "0.1.0",
+  "description": "Local runner for automated SIM balance queries",
+  "author": "Stars Labs",
+  "private": true,
+  "type": "module",
+  "main": "dist/main.js",
+  "dependencies": {
+    "playwright-core": "^1.62.1"
+  },
+  "scripts": {
+    "build": "bun scripts/build.mjs",
+    "browser:install": "PLAYWRIGHT_BROWSERS_PATH=0 playwright-core install chromium --no-shell",
+    "start": "bun run build && electron .",
+    "test": "bun test src",
+    "pack:mac": "bun run browser:install && bun run build && electron-builder --mac dir"
+  },
+  "devDependencies": {
+    "electron": "^43.0.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "io.qzz.message-dashboard.balance-agent",
+    "productName": "Balance Agent",
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/playwright-core/.local-browsers/**/*"
+    ],
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "protocols": [
+      {
+        "name": "Balance Agent",
+        "schemes": ["message-dashboard-runner"]
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.utilities",
+      "hardenedRuntime": true,
+      "icon": "src/assets/AppIcon.png",
+      "extendInfo": {
+        "LSUIElement": true
+      },
+      "target": ["dir"]
+    },
+    "directories": {
+      "output": "release"
+    }
+  }
+}

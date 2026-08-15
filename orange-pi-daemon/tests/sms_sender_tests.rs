@@ -17,7 +17,7 @@ async fn create_test_sender() -> SmsSender {
     let api_client = ApiClient::new(config);
     let modem_manager = Arc::new(ModemManager::new().await);
 
-    SmsSender::new(api_client, modem_manager)
+    SmsSender::new(api_client, modem_manager, "test-session".to_string())
 }
 
 // Helper function to create test pending SMS

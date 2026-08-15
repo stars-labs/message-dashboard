@@ -96,7 +96,12 @@
         </div>
 
         <section class="px-4 lg:px-5 py-5 border-b border-stone-100">
-          <h3 class="text-xs font-semibold text-stone-500">短信记录</h3>
+          <h3 class="text-xs font-semibold text-stone-500">{check.method === 'browser' ? '查询记录' : '短信记录'}</h3>
+          {#if check.method === 'browser' && conversation.length === 0}
+            <p class="mt-3 text-sm text-stone-500">
+              {check.web_human_reason || statusMeta.label}
+            </p>
+          {/if}
           <div class="mt-4 relative pl-5 space-y-5 before:absolute before:left-[5px] before:top-2 before:bottom-2 before:w-px before:bg-stone-200">
             {#each conversation as message (message.id)}
               <div class="relative">

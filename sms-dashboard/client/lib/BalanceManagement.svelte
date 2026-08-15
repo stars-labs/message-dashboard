@@ -1,5 +1,7 @@
 <script>
+  import { onMount } from 'svelte';
   import { formatCardNumber } from './card-number.js';
+  import { buildCarrierOptions, carrierKey } from './carrier.js';
   import { getCountryFlag } from './countries.js';
   import { api } from './api.js';
   import {
@@ -24,6 +26,7 @@
 
   let activeTab = $state('overview');
   let statusFilter = $state('all');
+  let carrierFilter = $state('all');
   let searchQuery = $state('');
   let overviewSortKey = $state(null);
   let overviewSortDirection = $state('asc');
@@ -33,13 +36,25 @@
   let loadingPreview = $state(false);
   let batchSubmitting = $state(false);
   let batchPreview = $state(null);
+  let batchMethods = $state({ direct_sms: true, sms_ai: false, browser: false });
+  let batchScope = $state(null);
+  let selectedIccids = $state([]);
+  let singlePreview = $state(null);
   let notice = $state(null);
+  let runnerStatus = $state(null);
+  let runnerStatusLoading = $state(true);
 
   let rows = $derived(buildBalanceRows(phoneNumbers, balanceChecks));
-  let counts = $derived(countBalanceHealth(rows));
+  let carrierOptions = $derived.by(() => buildCarrierOptions([
+    ...rows.map((row) => String(row.phone.carrier || '').trim()),
+    ...(balanceChecks || []).map((check) => String(check.profile_carrier || check.sim_carrier || '').trim()),
+  ]));
+  let carrierRows = $derived(rows.filter((row) => carrierFilter === 'all'
+    || carrierKey(row.phone.carrier) === carrierFilter));
+  let counts = $derived(countBalanceHealth(carrierRows));
   let filteredRows = $derived.by(() => {
     const query = searchQuery.trim().toLowerCase();
-    return rows
+    return carrierRows
       .filter((row) => statusFilter === 'all' || row.health === statusFilter)
       .filter((row) => {
         if (!query) return true;
@@ -54,7 +69,16 @@
       })
       .sort(compareOverviewRows);
   });
-  let sortedChecks = $derived((balanceChecks || []).slice().sort(compareHistoryChecks));
+  let selectedIccidSet = $derived(new Set(selectedIccids));
+  let filteredIccids = $derived(filteredRows.map((row) => row.phone.iccid));
+  let allFilteredSelected = $derived(filteredIccids.length > 0
+    && filteredIccids.every((iccid) => selectedIccidSet.has(iccid)));
+  let someFilteredSelected = $derived(filteredIccids.some((iccid) => selectedIccidSet.has(iccid)));
+  let sortedChecks = $derived((balanceChecks || [])
+    .filter((check) => carrierFilter === 'all'
+      || carrierKey(check.profile_carrier || check.sim_carrier) === carrierFilter)
+    .slice()
+    .sort(compareHistoryChecks));
   let latestUpdate = $derived(
     rows
       .map((row) => row.balanceTimestamp)
@@ -90,6 +114,49 @@
     { key: 'balance', label: '当前余额' },
     { key: null, label: '操作' },
   ];
+
+  const capabilityLabels = {
+    sms_ai: 'AI 短信',
+    unicom_browser: '浏览器查询',
+  };
+
+  function capabilityPresentation(capability) {
+    if (runnerStatusLoading) return { label: '检测中', dot: 'bg-stone-300', text: 'text-stone-400' };
+    if (!capability || capability.state === 'offline') {
+      return { label: '未运行', dot: 'bg-stone-300', text: 'text-stone-500' };
+    }
+    if (capability.state === 'degraded') {
+      return { label: '连接异常', dot: 'bg-amber-500', text: 'text-amber-700' };
+    }
+    if (capability.state === 'configuration_required') {
+      return { label: '需要配置', dot: 'bg-amber-500', text: 'text-amber-700' };
+    }
+    if (capability.state === 'busy') {
+      return {
+        label: capability.detail_code === 'human_verification_required' ? '需要人工验证' : '查询中',
+        dot: capability.detail_code === 'human_verification_required' ? 'bg-orange-500' : 'bg-emerald-500',
+        text: capability.detail_code === 'human_verification_required' ? 'text-orange-700' : 'text-emerald-700',
+      };
+    }
+    if (capability.available) return { label: '已就绪', dot: 'bg-emerald-500', text: 'text-emerald-700' };
+    return { label: '未运行', dot: 'bg-stone-300', text: 'text-stone-500' };
+  }
+
+  async function loadRunnerStatus() {
+    try {
+      runnerStatus = await api.get('/api/balance-runners');
+    } catch {
+      runnerStatus = null;
+    } finally {
+      runnerStatusLoading = false;
+    }
+  }
+
+  onMount(() => {
+    loadRunnerStatus();
+    const interval = setInterval(loadRunnerStatus, 30_000);
+    return () => clearInterval(interval);
+  });
 
   function compareValues(left, right) {
     const leftMissing = left == null || left === '' || Number.isNaN(left);
@@ -204,9 +271,16 @@
     queryingIccid = row.phone.iccid;
     notice = null;
     try {
-      await api.post('/api/balance-checks/query', { phone_iccid: row.phone.iccid });
-      notice = { type: 'success', message: `${formatCardNumber(row.phone.sim_index)} 已加入余额查询队列` };
-      await onQueriesChanged?.();
+      const preflight = await api.get(
+        `/api/balance-checks/query-preflight?phone_iccid=${encodeURIComponent(row.phone.iccid)}`,
+      );
+      if (!preflight.eligible) throw new Error(preflight.reason || '当前 SIM 暂时不能查询');
+      if ((preflight.runner?.required && !preflight.runner.available)
+        || preflight.method?.interactive) {
+        singlePreview = { row, preflight };
+      } else {
+        await submitSingle(row, false);
+      }
     } catch (error) {
       notice = { type: 'error', message: error.message || '余额查询创建失败' };
     } finally {
@@ -214,13 +288,50 @@
     }
   }
 
+  async function submitSingle(row = singlePreview?.row, manageLoading = true) {
+    if (!row || (manageLoading && queryingIccid)) return;
+    if (manageLoading) queryingIccid = row.phone.iccid;
+    notice = null;
+    try {
+      await api.post('/api/balance-checks/query', { phone_iccid: row.phone.iccid });
+      singlePreview = null;
+      notice = { type: 'success', message: `${formatCardNumber(row.phone.sim_index)} 已加入余额查询队列` };
+      await onQueriesChanged?.();
+    } catch (error) {
+      notice = { type: 'error', message: error.message || '余额查询创建失败' };
+    } finally {
+      if (manageLoading) queryingIccid = null;
+    }
+  }
+
   async function openBatchPreview() {
     if (!canQueryBalances || loadingPreview) return;
+    const selectedRows = rows.filter((row) => selectedIccidSet.has(row.phone.iccid));
+    const scopeRows = selectedRows.length ? selectedRows : filteredRows;
+    const phoneIccids = scopeRows.map((row) => row.phone.iccid);
+    if (!phoneIccids.length) {
+      notice = { type: 'error', message: '当前范围内没有可查询的 SIM' };
+      return;
+    }
     loadingPreview = true;
     notice = null;
     try {
-      batchPreview = await api.get('/api/balance-checks/query-preview');
+      batchScope = {
+        phoneIccids,
+        label: selectedRows.length
+          ? `手动选择 ${selectedRows.length} 张卡`
+          : currentFilterLabel(scopeRows.length),
+      };
+      batchPreview = await api.post('/api/balance-checks/query-preview', {
+        phone_iccids: phoneIccids,
+      });
+      batchMethods = {
+        direct_sms: true,
+        sms_ai: Boolean(batchPreview.runner_capabilities?.sms_ai?.available),
+        browser: false,
+      };
     } catch (error) {
+      batchScope = null;
       notice = { type: 'error', message: error.message || '无法生成批量查询预览' };
     } finally {
       loadingPreview = false;
@@ -228,11 +339,18 @@
   }
 
   async function submitBatch() {
-    if (!canQueryBalances || batchSubmitting || !batchPreview?.summary?.eligible) return;
+    const methods = Object.entries(batchMethods).filter(([, selected]) => selected).map(([method]) => method);
+    if (!canQueryBalances || batchSubmitting || !batchPreview
+      || !batchScope?.phoneIccids?.length || methods.length === 0) return;
     batchSubmitting = true;
     try {
-      const result = await api.post('/api/balance-checks/query-batch');
+      const result = await api.post('/api/balance-checks/query-batch', {
+        methods,
+        phone_iccids: batchScope.phoneIccids,
+      });
       batchPreview = null;
+      batchScope = null;
+      selectedIccids = [];
       notice = {
         type: result.summary?.failed_to_queue ? 'error' : 'success',
         message: `已加入 ${result.summary?.queued || 0} 张卡${result.summary?.failed_to_queue ? `，${result.summary.failed_to_queue} 张失败` : ''}`,
@@ -244,38 +362,75 @@
       batchSubmitting = false;
     }
   }
+
+  function selectedBatchCount() {
+    if (!batchPreview?.method_summary) return 0;
+    return Object.entries(batchMethods)
+      .filter(([, selected]) => selected)
+      .reduce((total, [method]) => total + Number(batchPreview.method_summary[method] || 0), 0);
+  }
+
+  function currentFilterLabel(count) {
+    const parts = [];
+    if (carrierFilter !== 'all') {
+      parts.push(carrierOptions.find((carrier) => carrier.key === carrierFilter)?.label || '当前运营商');
+    }
+    if (statusFilter !== 'all') {
+      parts.push(summaryItems.find(([value]) => value === statusFilter)?.[1] || '当前状态');
+    }
+    if (searchQuery.trim()) parts.push(`搜索“${searchQuery.trim()}”`);
+    return `${parts.length ? `当前筛选：${parts.join(' · ')}` : '当前全部卡片'}（${count} 张）`;
+  }
+
+  function toggleCardSelection(iccid, checked) {
+    if (checked) selectedIccids = [...new Set([...selectedIccids, iccid])];
+    else selectedIccids = selectedIccids.filter((value) => value !== iccid);
+  }
+
+  function toggleFilteredSelection(checked) {
+    if (checked) selectedIccids = [...new Set([...selectedIccids, ...filteredIccids])];
+    else {
+      const visible = new Set(filteredIccids);
+      selectedIccids = selectedIccids.filter((iccid) => !visible.has(iccid));
+    }
+  }
+
+  function closeBatchPreview() {
+    batchPreview = null;
+    batchScope = null;
+  }
 </script>
 
 <div class="h-full min-h-0 bg-white lg:bg-transparent lg:px-8 lg:py-6 lg:overflow-auto">
   <div class="w-full bg-white lg:border lg:border-stone-200 lg:rounded-xl lg:shadow-raised overflow-hidden">
-    <header class="px-4 py-4 lg:px-6 lg:py-5 border-b border-stone-100">
-      <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-4">
-        <div>
-          <h2 class="text-lg lg:text-xl font-bold text-stone-900">余额管理</h2>
-          <p class="mt-1 text-xs text-stone-400">
+    <header class="px-4 py-3 lg:px-6 lg:py-5 border-b border-stone-100">
+      <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2.5 sm:gap-4">
+        <div class="flex items-baseline justify-between gap-3 sm:block">
+          <h2 class="text-lg lg:text-xl font-bold text-stone-900 shrink-0">余额管理</h2>
+          <p class="text-[11px] sm:mt-1 sm:text-xs text-stone-400 truncate">
             {phoneNumbers.length} 张卡
             <span class="mx-1">·</span>
             最近更新 {formatTime(latestUpdate, true)}
           </p>
         </div>
         <div class="flex items-center gap-2 shrink-0">
-          <div class="inline-flex items-center bg-stone-100 rounded-lg p-0.5 text-xs">
+          <div class="inline-flex flex-1 sm:flex-none items-center bg-stone-100 rounded-lg p-0.5 text-xs">
             <button
               type="button"
               onclick={() => { activeTab = 'overview'; }}
-              class="px-3 py-1.5 rounded-md transition-all {activeTab === 'overview'
+              class="flex-1 sm:flex-none px-3 py-1.5 rounded-md transition-all {activeTab === 'overview'
                 ? 'bg-white shadow-sm font-semibold text-stone-800'
                 : 'text-stone-500'}"
             >余额概览</button>
             <button
               type="button"
               onclick={() => { activeTab = 'history'; }}
-              class="px-3 py-1.5 rounded-md transition-all {activeTab === 'history'
+              class="flex-1 sm:flex-none px-3 py-1.5 rounded-md transition-all {activeTab === 'history'
                 ? 'bg-white shadow-sm font-semibold text-stone-800'
                 : 'text-stone-500'}"
             >查询记录</button>
           </div>
-          {#if canQueryBalances}
+          {#if canQueryBalances && activeTab === 'overview'}
             <button type="button" onclick={openBatchPreview} disabled={loadingPreview}
               class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-orange-500 hover:bg-orange-600
                 disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors">
@@ -289,6 +444,20 @@
       </div>
     </header>
 
+    <section class="px-4 py-2.5 lg:px-6 border-b border-stone-100 bg-stone-50/60 flex flex-wrap items-center gap-x-4 gap-y-2" aria-label="余额查询助手状态">
+      <span class="text-xs font-semibold text-stone-700">查询助手</span>
+      {#each Object.entries(capabilityLabels) as [name, label]}
+        {@const capability = runnerStatus?.capabilities?.[name]}
+        {@const presentation = capabilityPresentation(capability)}
+        <span class="inline-flex items-center gap-1.5 text-xs {presentation.text}" title={capability?.detail_code || ''}>
+          <span class="w-1.5 h-1.5 rounded-full {presentation.dot}" aria-hidden="true"></span>
+          <span class="text-stone-500">{label}</span>
+          <strong class="font-medium">{presentation.label}</strong>
+        </span>
+      {/each}
+      <span class="text-[11px] text-stone-400 sm:ml-auto">浏览器任务逐张处理</span>
+    </section>
+
     {#if notice}
       <div class="px-4 lg:px-5 py-2.5 border-b text-sm flex items-center justify-between gap-3
         {notice.type === 'success' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 'bg-red-50 text-red-700 border-red-100'}">
@@ -298,7 +467,28 @@
     {/if}
 
     {#if activeTab === 'overview'}
-      <section class="grid grid-cols-5 border-b border-stone-100" aria-label="余额状态汇总">
+      <section class="lg:hidden px-4 py-2.5 border-b border-stone-100 overflow-x-auto" aria-label="余额状态汇总">
+        <div class="flex items-center gap-2 min-w-max">
+          {#each summaryItems as [value, label]}
+            {@const meta = BALANCE_HEALTH_META[value]}
+            <button
+              type="button"
+              onclick={() => { statusFilter = statusFilter === value ? 'all' : value; }}
+              aria-pressed={statusFilter === value}
+              class="h-8 inline-flex items-center gap-1.5 px-2.5 rounded-full border text-xs transition-colors
+                {statusFilter === value
+                  ? 'bg-stone-800 border-stone-800 text-white'
+                  : 'bg-white border-stone-200 text-stone-600'}"
+            >
+              <span class="w-1.5 h-1.5 rounded-full shrink-0 {statusFilter === value ? 'bg-white/80' : meta.dotClass}"></span>
+              <span>{label}</span>
+              <strong class="font-mono tabular-nums {statusFilter === value ? 'text-white' : 'text-stone-900'}">{counts[value]}</strong>
+            </button>
+          {/each}
+        </div>
+      </section>
+
+      <section class="hidden lg:grid grid-cols-5 border-b border-stone-100" aria-label="余额状态汇总（桌面）">
         {#each summaryItems as [value, label], index}
           {@const meta = BALANCE_HEALTH_META[value]}
           <button
@@ -318,8 +508,8 @@
         {/each}
       </section>
 
-      <div class="px-4 py-3 lg:px-5 border-b border-stone-100 flex flex-col sm:flex-row gap-2 sm:items-center">
-        <div class="flex items-center gap-1.5 overflow-x-auto">
+      <div class="px-4 py-2.5 lg:px-5 lg:py-3 border-b border-stone-100 flex flex-col sm:flex-row gap-2 sm:items-center">
+        <div class="hidden lg:flex items-center gap-1.5 overflow-x-auto">
           {#each [['all', '全部'], ['low', '需充值'], ['stale', '已过期'], ['failed', '失败'], ['unknown', '未取得']] as [value, label]}
             <button
               type="button"
@@ -333,30 +523,64 @@
             >{label}</button>
           {/each}
         </div>
-        <div class="relative sm:ml-auto sm:w-[360px]">
-          <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-            <circle cx="11" cy="11" r="7" stroke-width="2"/><path d="m20 20-3.5-3.5" stroke-width="2" stroke-linecap="round"/>
-          </svg>
-          <input
-            bind:value={searchQuery}
-            type="search"
-            placeholder="搜索 S02 / 号码 / 运营商 / ICCID…"
-            class="w-full pl-9 pr-3 py-2 text-sm bg-stone-50 border border-stone-200 rounded-lg
+        <div class="grid grid-cols-[minmax(0,1fr)_112px] sm:flex gap-2 sm:ml-auto min-w-0 sm:w-[520px]">
+          <div class="relative min-w-0 sm:order-2 sm:flex-1">
+            <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="11" cy="11" r="7" stroke-width="2"/><path d="m20 20-3.5-3.5" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            <input
+              bind:value={searchQuery}
+              type="search"
+              aria-label="搜索 SIM"
+              placeholder="卡号 / 手机号 / ICCID"
+              class="w-full pl-9 pr-3 py-2 text-sm bg-stone-50 border border-stone-200 rounded-lg
+                focus:outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
+            />
+          </div>
+          <label class="sr-only" for="balance-carrier-filter">运营商筛选</label>
+          <select
+            id="balance-carrier-filter"
+            value={carrierFilter}
+            onchange={(event) => { carrierFilter = event.currentTarget.value; }}
+            aria-label="运营商筛选"
+            class="w-full sm:w-[145px] sm:order-1 shrink-0 px-2.5 py-2 text-sm bg-stone-50 border border-stone-200 rounded-lg
               focus:outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
-          />
+          >
+            <option value="all">全部运营商</option>
+            {#each carrierOptions as carrier}
+              <option value={carrier.key}>{carrier.label}</option>
+            {/each}
+          </select>
         </div>
       </div>
+
+      {#if canQueryBalances && selectedIccids.length}
+        <div class="px-4 py-2 lg:px-5 border-b border-orange-100 bg-orange-50 flex items-center gap-3 text-xs">
+          <strong class="text-orange-800">已选 {selectedIccids.length} 张</strong>
+          <span class="text-orange-600">批量查询将仅处理已选卡</span>
+          <button type="button" onclick={() => { selectedIccids = []; }} class="ml-auto font-medium text-orange-700 hover:underline">清空选择</button>
+        </div>
+      {/if}
 
       {#if filteredRows.length === 0}
         <div class="py-16 text-center">
           <p class="text-sm text-stone-400">没有匹配的 SIM</p>
-          <button type="button" onclick={() => { statusFilter = 'all'; searchQuery = ''; }} class="mt-2 text-xs text-action-text hover:underline">清除筛选</button>
+          <button type="button" onclick={() => { statusFilter = 'all'; carrierFilter = 'all'; searchQuery = ''; }} class="mt-2 text-xs text-action-text hover:underline">清除筛选</button>
         </div>
       {:else}
         <div class="hidden lg:block overflow-x-auto">
           <table class="w-full text-sm">
             <thead>
               <tr class="bg-stone-50 border-b border-stone-200">
+                {#if canQueryBalances}
+                  <th class="w-12 px-4 py-2.5 text-left">
+                    <input type="checkbox" checked={allFilteredSelected}
+                      aria-checked={someFilteredSelected && !allFilteredSelected ? 'mixed' : allFilteredSelected}
+                      aria-label="选择当前筛选结果"
+                      onchange={(event) => toggleFilteredSelection(event.currentTarget.checked)}
+                      class="rounded border-stone-300 text-orange-500 focus:ring-orange-400">
+                  </th>
+                {/if}
                 {#each overviewColumns as column, index}
                   <th class="px-4 py-2.5 text-left text-[11px] font-semibold text-stone-400 tracking-widest uppercase {index === overviewColumns.length - 1 ? 'text-right' : ''}">
                     {#if column.key}
@@ -376,6 +600,14 @@
             <tbody class="divide-y divide-stone-50">
               {#each filteredRows as row}
                 <tr class="hover:bg-stone-50 transition-colors">
+                  {#if canQueryBalances}
+                    <td class="w-12 px-4 py-3">
+                      <input type="checkbox" checked={selectedIccidSet.has(row.phone.iccid)}
+                        aria-label={`选择 ${formatCardNumber(row.phone.sim_index)}`}
+                        onchange={(event) => toggleCardSelection(row.phone.iccid, event.currentTarget.checked)}
+                        class="rounded border-stone-300 text-orange-500 focus:ring-orange-400">
+                    </td>
+                  {/if}
                   <td class="px-4 py-3 min-w-[210px]">
                     <div class="flex items-baseline gap-2">
                       <span class="font-mono font-bold text-stone-900">{formatCardNumber(row.phone.sim_index)}</span>
@@ -424,37 +656,62 @@
           </table>
         </div>
 
-        <div class="lg:hidden divide-y divide-stone-100">
+        <div class="lg:hidden divide-y divide-stone-100" data-mobile-balance-list>
           {#each filteredRows as row}
-            <div class="w-full px-4 py-3 text-left bg-white">
-              <span class="flex items-center gap-2 min-w-0">
+            <div class="w-full px-4 py-2.5 text-left bg-white" data-mobile-balance-row>
+              <div class="flex items-center gap-2 min-w-0">
+                {#if canQueryBalances}
+                  <input type="checkbox" checked={selectedIccidSet.has(row.phone.iccid)}
+                    aria-label={`选择 ${formatCardNumber(row.phone.sim_index)}（移动端）`}
+                    onchange={(event) => toggleCardSelection(row.phone.iccid, event.currentTarget.checked)}
+                    class="rounded border-stone-300 text-orange-500 focus:ring-orange-400 shrink-0">
+                {/if}
                 <button type="button" onclick={() => openRow(row)} disabled={!row.latestCheck && !row.balanceCheck}
                   class="flex items-center gap-2 min-w-0 text-left disabled:cursor-default">
                   <span class="font-mono font-bold text-sm text-stone-900 shrink-0">{formatCardNumber(row.phone.sim_index)}</span>
-                  <span class="font-mono text-sm text-stone-700 truncate">{row.phone.number || row.phone.phone_number || '未设置号码'}</span>
+                  <span class="font-mono text-xs text-stone-600 truncate">{row.phone.number || row.phone.phone_number || '未设置号码'}</span>
                 </button>
                 <span class="ml-auto inline-flex px-2 py-0.5 rounded-md border text-[10px] font-medium shrink-0 {row.healthMeta.className}">{row.healthMeta.label}</span>
-              </span>
-              <span class="mt-1.5 flex items-baseline gap-2 min-w-0">
-                <strong class="text-base font-semibold tabular-nums {row.health === 'low' ? 'text-red-700' : 'text-stone-900'}">{formatBalanceMetric(row.balanceMetric)}</strong>
-                <span class="text-[11px] text-stone-400 truncate">{row.phone.flag || getCountryFlag(row.phone.country)} {row.phone.carrier || '—'}</span>
-                <span class="ml-auto font-mono text-[10px] text-stone-400 shrink-0">{formatTime(row.balanceTimestamp, true)}</span>
-              </span>
-              {#if canQueryBalances}
-                <div class="mt-2 flex justify-end">
-                  <button type="button" onclick={(event) => queryPhone(row, event)} disabled={!!queryingIccid}
-                    class="px-3 py-1.5 text-xs font-semibold text-action-text bg-orange-50 rounded-lg disabled:text-stone-300 disabled:bg-stone-50">
-                    {queryingIccid === row.phone.iccid ? '正在排队…' : '查询余额'}
-                  </button>
+              </div>
+              <div class="mt-1.5 flex items-center gap-2 min-w-0">
+                <div class="min-w-0 flex-1 flex items-baseline gap-2">
+                  <strong class="text-base leading-tight font-semibold tabular-nums truncate {row.health === 'low' ? 'text-red-700' : 'text-stone-900'}">{formatBalanceMetric(row.balanceMetric)}</strong>
+                  <span class="text-[11px] text-stone-400 truncate shrink">{row.phone.flag || getCountryFlag(row.phone.country)} {row.phone.carrier || '—'}</span>
+                  {#if row.balanceTimestamp}
+                    <span class="hidden min-[390px]:inline ml-auto font-mono text-[10px] text-stone-400 shrink-0">{formatTime(row.balanceTimestamp, true)}</span>
+                  {/if}
                 </div>
-              {/if}
+                {#if canQueryBalances}
+                  <button type="button" onclick={(event) => queryPhone(row, event)} disabled={!!queryingIccid}
+                    aria-label={`查询 ${formatCardNumber(row.phone.sim_index)} 余额`}
+                    class="h-8 px-2.5 shrink-0 text-xs font-semibold text-action-text bg-orange-50 rounded-lg active:bg-orange-100 disabled:text-stone-300 disabled:bg-stone-50">
+                    {queryingIccid === row.phone.iccid ? '排队中…' : '查询'}
+                  </button>
+                {/if}
+              </div>
             </div>
           {/each}
         </div>
       {/if}
     {:else}
+      <div class="px-4 py-3 lg:px-5 border-b border-stone-100 flex justify-end">
+        <label class="sr-only" for="balance-history-carrier-filter">运营商筛选</label>
+        <select
+          id="balance-history-carrier-filter"
+          value={carrierFilter}
+          onchange={(event) => { carrierFilter = event.currentTarget.value; }}
+          aria-label="运营商筛选"
+          class="w-full sm:w-[145px] px-2.5 py-2 text-sm bg-stone-50 border border-stone-200 rounded-lg
+            focus:outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
+        >
+          <option value="all">全部运营商</option>
+          {#each carrierOptions as carrier}
+            <option value={carrier.key}>{carrier.label}</option>
+          {/each}
+        </select>
+      </div>
       {#if sortedChecks.length === 0}
-        <div class="py-16 text-center text-sm text-stone-400">暂无余额查询记录</div>
+        <div class="py-16 text-center text-sm text-stone-400">没有匹配的余额查询记录</div>
       {:else}
         <div class="hidden lg:block overflow-x-auto">
           <table class="w-full text-sm">
@@ -490,10 +747,10 @@
             </tbody>
           </table>
         </div>
-        <div class="lg:hidden divide-y divide-stone-100">
+        <div class="lg:hidden divide-y divide-stone-100" data-mobile-balance-history>
           {#each sortedChecks as check}
             {@const queryMeta = getBalanceStatusMeta(check.display_status || check.status)}
-            <button type="button" onclick={() => onOpenBalance?.(check)} class="w-full px-4 py-3 text-left active:bg-stone-50">
+            <button type="button" onclick={() => onOpenBalance?.(check)} class="w-full px-4 py-2.5 text-left active:bg-stone-50">
               <span class="flex items-center gap-2">
                 <span class="font-mono font-bold text-stone-800">{formatCardNumber(check.sim_index)}</span>
                 <span class="font-mono text-xs text-stone-500 truncate">{check.sim_number || check.sim_iccid}</span>
@@ -512,6 +769,54 @@
   </div>
 </div>
 
+{#if singlePreview}
+  {@const preflight = singlePreview.preflight}
+  {@const runnerUnavailable = preflight.runner?.required && !preflight.runner.available}
+  <div class="fixed inset-0 z-50 bg-stone-900/35 flex items-end sm:items-center justify-center sm:p-4">
+    <section class="w-full sm:max-w-[460px] bg-white border border-stone-200 rounded-t-xl sm:rounded-xl shadow-modal overflow-hidden" aria-label="单卡余额查询确认">
+      <header class="px-5 py-4 border-b border-stone-100 flex items-start justify-between gap-4">
+        <div>
+          <h3 class="font-semibold text-stone-900">
+            {runnerUnavailable ? '查询助手未就绪' : '浏览器查询确认'}
+          </h3>
+          <p class="mt-1 text-xs text-stone-400">
+            {formatCardNumber(singlePreview.row.phone.sim_index)}
+            <span class="mx-1">·</span>{singlePreview.row.phone.number || singlePreview.row.phone.phone_number}
+          </p>
+        </div>
+        <button type="button" onclick={() => { singlePreview = null; }} aria-label="关闭" class="w-8 h-8 text-stone-400 hover:bg-stone-100 rounded-lg">&times;</button>
+      </header>
+      <div class="px-5 py-5 text-sm text-stone-600 leading-6">
+        {#if runnerUnavailable}
+          <p>此查询需要 {capabilityLabels[preflight.method.capability] || '本地查询助手'}，当前没有可用实例。</p>
+          <p class="mt-2 text-xs text-stone-400">启动并登录 Balance Agent 后再查询，可立即处理任务。</p>
+        {:else}
+          <p>联通官方网站将在运行 Balance Agent 的电脑上打开，并逐张处理。</p>
+          <p class="mt-2 text-xs text-stone-400">登录过程中可能需要完成滑块或图片验证。</p>
+        {/if}
+      </div>
+      <footer class="px-5 py-4 border-t border-stone-100 flex items-center justify-end gap-2">
+        <button type="button" onclick={() => { singlePreview = null; }} class="px-4 py-2 text-sm text-stone-600 hover:bg-stone-100 rounded-lg">取消</button>
+        {#if runnerUnavailable}
+          <button type="button" onclick={() => submitSingle()} disabled={!!queryingIccid}
+            class="px-4 py-2 text-sm text-stone-500 hover:bg-stone-100 rounded-lg disabled:opacity-50">
+            {queryingIccid ? '排队中…' : '仍然排队'}
+          </button>
+          <a href="message-dashboard-runner://open"
+            class="px-4 py-2 text-sm font-medium text-white bg-orange-500 hover:bg-orange-600 rounded-lg">
+            打开查询助手
+          </a>
+        {:else}
+          <button type="button" onclick={() => submitSingle()} disabled={!!queryingIccid}
+            class="px-4 py-2 text-sm font-medium text-white bg-orange-500 hover:bg-orange-600 rounded-lg disabled:opacity-50">
+            {queryingIccid ? '排队中…' : '开始查询'}
+          </button>
+        {/if}
+      </footer>
+    </section>
+  </div>
+{/if}
+
 {#if batchPreview}
   <div class="fixed inset-0 z-50 bg-stone-900/35 flex items-end sm:items-center justify-center sm:p-4">
     <section class="w-full sm:max-w-[520px] bg-white border border-stone-200 rounded-t-xl sm:rounded-xl shadow-modal overflow-hidden" aria-label="批量余额查询预览">
@@ -520,23 +825,65 @@
           <h3 class="font-semibold text-stone-900">批量查询确认</h3>
           <p class="mt-0.5 text-xs text-stone-400">只查询已验证且满足 24 小时间隔的在线卡</p>
         </div>
-        <button type="button" onclick={() => { batchPreview = null; }} aria-label="关闭" class="w-8 h-8 text-stone-400 hover:bg-stone-100 rounded-lg">&times;</button>
+        <button type="button" onclick={closeBatchPreview} aria-label="关闭" class="w-8 h-8 text-stone-400 hover:bg-stone-100 rounded-lg">&times;</button>
       </header>
+      <div class="px-4 py-2.5 border-b border-stone-100 bg-stone-50 text-xs text-stone-600">
+        查询范围：<strong class="font-medium text-stone-800">{batchScope?.label}</strong>
+      </div>
       <div class="grid grid-cols-3 border-b border-stone-100">
         <div class="px-4 py-4 border-r border-stone-100"><p class="text-xs text-stone-400">将查询</p><strong class="block mt-1 text-2xl tabular-nums">{batchPreview.summary.eligible}</strong></div>
         <div class="px-4 py-4 border-r border-stone-100"><p class="text-xs text-stone-400">24h 内已查</p><strong class="block mt-1 text-2xl tabular-nums">{batchPreview.summary.cooldown}</strong></div>
         <div class="px-4 py-4"><p class="text-xs text-stone-400">离线</p><strong class="block mt-1 text-2xl tabular-nums">{batchPreview.summary.offline}</strong></div>
       </div>
+      {#if batchPreview.method_summary}
+        <div class="divide-y divide-stone-100 border-b border-stone-100">
+          <label class="px-4 py-3 flex items-center gap-3 text-sm">
+            <input type="checkbox" bind:checked={batchMethods.direct_sms} disabled={!batchPreview.method_summary.direct_sms}
+              class="rounded border-stone-300 text-orange-500 focus:ring-orange-400">
+            <span class="flex-1 text-stone-600">直接短信</span>
+            <strong class="font-mono tabular-nums text-stone-800">{batchPreview.method_summary.direct_sms || 0}</strong>
+          </label>
+          <label class="px-4 py-3 flex items-center gap-3 text-sm">
+            <input type="checkbox" bind:checked={batchMethods.sms_ai}
+              disabled={!batchPreview.method_summary.sms_ai || !batchPreview.runner_capabilities?.sms_ai?.available}
+              class="rounded border-stone-300 text-orange-500 focus:ring-orange-400">
+            <span class="flex-1 text-stone-600">
+              AI 辅助短信
+              {#if batchPreview.method_summary.sms_ai && !batchPreview.runner_capabilities?.sms_ai?.available}
+                <small class="ml-1 text-amber-600">助手未就绪</small>
+              {/if}
+            </span>
+            <strong class="font-mono tabular-nums text-stone-800">{batchPreview.method_summary.sms_ai || 0}</strong>
+          </label>
+          <label class="px-4 py-3 flex items-center gap-3 text-sm">
+            <input type="checkbox" bind:checked={batchMethods.browser}
+              disabled={!batchPreview.method_summary.browser || !batchPreview.runner_capabilities?.unicom_browser?.available}
+              class="rounded border-stone-300 text-orange-500 focus:ring-orange-400">
+            <span class="flex-1 text-stone-600">
+              浏览器登录（逐张处理）
+              {#if batchPreview.method_summary.browser && !batchPreview.runner_capabilities?.unicom_browser?.available}
+                <small class="ml-1 text-amber-600">助手未就绪</small>
+              {/if}
+            </span>
+            <strong class="font-mono tabular-nums text-stone-800">{batchPreview.method_summary.browser || 0}</strong>
+          </label>
+          {#if batchMethods.browser}
+            <p class="px-4 py-2.5 text-xs text-orange-700 bg-orange-50">
+              浏览器任务串行执行，每张卡都可能需要人工验证。
+            </p>
+          {/if}
+        </div>
+      {/if}
       <dl class="px-4 py-4 grid grid-cols-[1fr_auto] gap-y-2 text-sm">
         <dt class="text-stone-500">未支持运营商</dt><dd class="font-mono tabular-nums text-stone-700">{batchPreview.summary.unsupported}</dd>
         <dt class="text-stone-500">尚未完成单卡验证</dt><dd class="font-mono tabular-nums text-stone-700">{batchPreview.summary.unverified}</dd>
-        <dt class="text-stone-500">总卡数</dt><dd class="font-mono tabular-nums text-stone-700">{batchPreview.summary.total}</dd>
+        <dt class="text-stone-500">范围内卡数</dt><dd class="font-mono tabular-nums text-stone-700">{batchPreview.summary.total}</dd>
       </dl>
       <footer class="px-4 py-4 border-t border-stone-100 flex gap-2 justify-end">
-        <button type="button" onclick={() => { batchPreview = null; }} class="px-4 py-2 text-sm text-stone-600 hover:bg-stone-100 rounded-lg">取消</button>
-        <button type="button" onclick={submitBatch} disabled={!batchPreview.summary.eligible || batchSubmitting}
+        <button type="button" onclick={closeBatchPreview} class="px-4 py-2 text-sm text-stone-600 hover:bg-stone-100 rounded-lg">取消</button>
+        <button type="button" onclick={submitBatch} disabled={!selectedBatchCount() || batchSubmitting}
           class="px-4 py-2 text-sm font-medium text-white bg-orange-500 hover:bg-orange-600 rounded-lg disabled:bg-stone-300">
-          {batchSubmitting ? '正在加入队列…' : `确认查询 ${batchPreview.summary.eligible} 张卡`}
+          {batchSubmitting ? '正在加入队列…' : `确认查询 ${selectedBatchCount()} 张卡`}
         </button>
       </footer>
     </section>
