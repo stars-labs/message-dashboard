@@ -42,10 +42,11 @@ Production currently contains 95 SIM records:
 | Singapore | M1 | 4 | USSD pilot or prepaid portal |
 | Hong Kong | CMHK | 3 | Product-specific command or official account |
 
-Prepaid/postpaid classification is not a required inventory field. The system uses
-only verified carrier query profiles and records the metric actually returned. An
-ambiguous response is stored for audit and marked unparsed rather than guessed to
-be a balance, charge, or arrears value.
+Prepaid/postpaid classification is an optional, user-verified inventory field named
+`service_type`. It defaults to `unknown` and never blocks a query. The system still
+uses only verified carrier query profiles and records the metric actually returned.
+An ambiguous response is stored for audit and marked unparsed rather than guessed
+to be a balance, charge, arrears value, or service type.
 
 ## Confirmation Sequence
 
@@ -79,8 +80,13 @@ what constitutes low, stale, unavailable, and failed.
 
 ### 2. Confirm SIM account metadata
 
-- [x] Prepaid versus postpaid classification is not required. Do not block querying
-  on this metadata and do not infer it from the carrier or phone number.
+- [x] Add user-maintained `service_type` with `unknown`, `prepaid`, and `postpaid`.
+  It defaults to `unknown`, never blocks querying, and must not be inferred from the
+  carrier, phone number, ICCID, or the presence of balance/arrears text.
+- [x] Record a controlled verification source and time for every non-unknown value.
+  Treat China Telecom real-time/quasi-real-time prepaid products as `prepaid` for
+  operational health; do not add a generic `hybrid` type for prepayments, gifts, or
+  credit held by an otherwise postpaid account.
 - [x] Product/plan, account owner, and Chinese home province are not required
   inventory fields and do not need manual maintenance.
 - [x] Select a carrier query profile using the existing ICCID, country/region, and
@@ -91,9 +97,8 @@ what constitutes low, stale, unavailable, and failed.
 - [x] Evaluate consolidated business portals only in the corresponding carrier
   confirmation step, not as an inventory prerequisite.
 
-**Exit condition:** no additional manually maintained metadata is required. During
-rollout, every SIM is either assigned a verified query profile or marked
-`unsupported_pending_identification`.
+**Exit condition:** service type may remain `unknown`; every SIM is independently
+assigned a verified query profile or marked `unsupported_pending_identification`.
 
 ## Automation Discovery Order
 
@@ -296,17 +301,61 @@ shutdown. Do not implement the legacy command.
 
 - [x] Procedure approved: do not use the obsolete `*123#` command and do not require
   product/account metadata as a prerequisite.
-- [ ] Check whether the StarHub App/account can manage multiple SIMs.
+- [x] Confirm the supported self-service scopes: mobile-number login in the StarHub
+  App manages only that mobile service; Hub iD login can show the account's linked
+  services. The public top-up site is not a balance-query portal.
+- [ ] Verify whether the team's Hub iD actually links all 14 inventory SIMs and
+  whether My Account exposes their prepaid cash balances, not only usage and bills.
 - [ ] Ask StarHub for a business portal, scheduled export, or supported API for this
   fleet size.
-- [ ] Document the permitted authentication and automation model.
-- [ ] Keep the method manual if no supported machine interface exists; do not reverse
+- [x] Authentication remains an operator handoff: mobile-number login requires an
+  SMS verification code; Hub iD login requires a password and mandatory OTP. Do not
+  store or automate these credentials through D1 or the Orange Pi.
+- [x] Keep the method manual while no supported machine interface exists; do not reverse
   engineer private mobile-app APIs.
 
 **Exit condition:** an official supported integration is identified, or StarHub is
 explicitly recorded as manual-only.
 
-Source: [StarHub current prepaid top-up guidance](https://www.starhub.com/personal/how-to/how-to-top-up-prepaid-plan.html).
+#### StarHub path review and pilot selection: S82 on 2026-08-16
+
+- A read-only production snapshot found all 14 inventory records: 13 were `active`
+  and S89 was `offline`. S82-S88 and S90-S94 reported 100% signal; S95 reported
+  96%.
+- Every active inventory record labelled `Starhub` reported detected operator
+  `Singtel Singtel`. The carrier label came from the manual phone-number import,
+  not modem detection. Because these cards are physically in Singapore, do not
+  describe this discrepancy as StarHub roaming. Reconcile the inventory label with
+  the actual subscription before carrier-specific contact.
+- S82 (`+6598630587`) is the provisional one-card pilot: active, 100% signal, 12
+  stored messages with the latest on 2026-07-15, and no previous balance check.
+- **Code/USSD:** no live command was sent. StarHub's service-specific terms say
+  Happy `*123#` ceased on 2024-06-30, and its current prepaid guidance says the code
+  no longer works after the 3G shutdown.
+- **SMS:** no current official SMS command for prepaid cash/main-wallet balance was
+  identified, so no guessed message was sent. The current prepaid terms document
+  only carrier-pushed SMS alerts for low balance and full utilisation; those alerts
+  are useful status signals but cannot supply an on-demand monthly balance. `CHECK`
+  to `78989` is documented only for DataTravel roaming-bundle balance and is not a
+  cash-balance substitute. Unsupported web claims such as `BAL` to `7007` must not
+  enter the allowlist. Historical `*113#` and `*123*1*1#` instructions are USSD,
+  not SMS keywords, and are not present in current StarHub guidance.
+- A sender-only production summary found 33 messages from `Singtel` across all 14
+  StarHub-labelled inventory records and another 15 from `Singtel Biz` across three
+  records; it found no `StarHub` sender. Together with every active modem reporting
+  `Singtel Singtel`, this makes the manually imported carrier classification unsafe
+  to use for a live StarHub test until the subscription ownership is corrected.
+- **Account:** current prepaid guidance directs balance queries to the StarHub App.
+  Mobile-number login is scoped to one service and uses SMS verification. The web
+  My Account portal uses Hub iD plus mandatory OTP and can show linked services, but
+  prepaid cash-balance visibility remains unverified. No login attempt was made
+  because no interactive browser instance was available in this session.
+
+Sources: [StarHub prepaid terms](https://www.starhub.com/content/dam/starhub/legal-notices-and-terms/consumer/mobile-prepaid.pdf),
+[current prepaid top-up and balance guidance](https://www.starhub.com/personal/how-to/how-to-top-up-prepaid-plan.html),
+[StarHub App login scopes](https://www.starhub.com/personal/support/article.html?id=PQgmJDBiYfAGdJoih1v2e8),
+[My Account authentication](https://www.starhub.com/personal/support/article.html?id=UXSTHae8Tk6M2f2xiaDjS6), and
+[DataTravel balance methods](https://www.starhub.com/personal/support/article.html?id=s7vcBy1xPF917NlIkWNdr8).
 
 ### 9. Confirm CMHK
 
@@ -458,8 +507,9 @@ Record confirmation outcomes here before implementation begins.
 | 2026-08-13 | 1e. Expiry warning and manual refresh | Confirmed | Warn within 30 days of expiry. Administrators may refresh, limited to once per SIM per 24 hours. |
 | 2026-08-13 | 1f. Reply visibility and stale-data definition | Confirmed | Keep raw replies in balance-query audit records only; mark results stale after 35 days without a successful query. |
 | 2026-08-13 | 1. Product requirement | Confirmed | All first-release product decisions complete. |
-| 2026-08-13 | 2a. Prepaid/postpaid metadata | Not required | Do not maintain or infer account type; store only unambiguous metrics returned by verified profiles. |
-| 2026-08-13 | 2. SIM metadata | Confirmed | Use existing ICCID, region, and carrier. Discover commands per SIM; no manual province, plan, owner, or account-type maintenance. |
+| 2026-08-13 | 2a. Prepaid/postpaid metadata | Superseded 2026-08-16 | Original decision was not to maintain or infer account type. The later operational requirement adds user-verified metadata without allowing automatic inference. |
+| 2026-08-13 | 2. SIM metadata | Superseded in part | ICCID, region, and carrier still select query profiles; province, plan, and owner remain out of scope. `service_type` is the only added account metadata. |
+| 2026-08-16 | 2b. Service type model | Confirmed | Add `unknown`/`prepaid`/`postpaid` plus verification source/time. Existing SIMs remain `unknown`. Query results never auto-write the type. China Telecom can expose available, prepaid, and gift balances even for an account with monthly billing, so typed metrics—not `service_type`—drive recharge and arrears health. Normalize real-time/quasi-real-time prepaid to `prepaid`; do not add an unproven `hybrid` bucket. |
 | 2026-08-14 | Automation discovery order | Confirmed | For each carrier, try verified read-only USSD first, then carrier SMS, an official API/business integration, and finally browser automation. AI and skills may orchestrate allowlisted methods but may not invent network commands. |
 | 2026-08-14 | 3. China Mobile procedure | First pilot complete | Start with one low-risk SIM and verify EC20 `AT+CUSD` capability plus an applicable official USSD code. If USSD is unavailable or unreliable, close it out explicitly and fall back to the live `10086` SMS menu. S02 completed the first production SMS test; require a second successful test on another day before enabling the profile. |
 | 2026-08-14 | 3. China Mobile USSD validation | Closed for S02 | EC20F supports `AT+CUSD`, but `*100#` with and without DCS returned immediate `ERROR` while roaming on SGP-M1 over FDD LTE. No official nationwide USSD balance code was found. Daemon restoration was verified; proceed to the `10086` SMS menu for this SIM. |
@@ -479,6 +529,7 @@ Record confirmation outcomes here before implementation begins.
 | 2026-08-13 | 7. M1 procedure | Confirmed | Pilot the `#100#` interactive USSD flow with timeout/cancellation and portal comparison. Validation pending. |
 | 2026-08-14 | 7. M1 validation | Closed for S78 | S78 on `/dev/ttyUSB42`, registered to `Singtel Singtel`, returned immediate `ERROR` for `#100#` with no `+CUSD` network response. Cancellation returned `OK`; `sms-daemon` was restored and verified active. Do not generalize beyond this SIM/network state. |
 | 2026-08-13 | 8. StarHub procedure | Confirmed | Never use obsolete `*123#`; investigate only an official portal, business export, or supported API. Validation pending. |
+| 2026-08-16 | 8. StarHub path review and pilot selection | Code and on-demand SMS closed; account validation pending | Production had 14 StarHub-labelled inventory records, 13 active and S89 offline. S82 was selected provisionally with 100% signal, recent stored messages, and no balance history. No USSD was sent because official terms retired `*123#` on 2024-06-30. No SMS was sent because no official prepaid cash-balance keyword exists; current terms promise only carrier-pushed low-balance/full-utilisation alerts, and `CHECK` to `78989` is DataTravel-only. Current prepaid balance lookup is through the StarHub App. Web My Account requires Hub iD plus OTP; actual multi-SIM linkage and prepaid cash-balance visibility still require an operator login. All active records reported `Singtel Singtel`, and sender-only history found `Singtel` messages on all 14 with no `StarHub` sender, so reconcile the manually imported carrier label before live carrier contact rather than calling the discrepancy roaming. |
 | 2026-08-13 | 9. CMHK procedure | Confirmed | Use only an officially discovered product-specific method; never treat `*#130#` as universal cash balance. Validation pending. |
 | 2026-08-14 | 9. CMHK SMS validation | Blocked by roaming short-code submission | Added discovery-only `0` -> `12580` from current official CMHK product documentation. S66 and S67 were both registered on `StarHub CMHK`; both sends failed before submission with daemon error `Send SMS failed: 0`, so no carrier menu was received and no cooldown was consumed. Retry only on the CMHK home network. |
 | 2026-08-13 | 10. Technical design | Confirmed | Versioned profiles, immutable audit records, typed metrics, strict correlation, modem serialization, command allowlist, and monthly scheduling approved. Implementation pending carrier validation. |

@@ -78,14 +78,9 @@ removed. **Use `detected_iccid`.**
 - [SIM balance queries](docs/sim-balance-query-plan.md) — carrier validation and
   controlled rollout. Automated balance queries depend on the hardware-storage
   safety gates above.
-- [Balance runtime skill runner](docs/balance-runtime-skill-runner.md) — unresolved
-  carrier menus are leased from the Worker and evaluated by a workstation connected
-  to the company VPN. The company AI token must remain local and must never be added
-  to Cloudflare or the Orange Pi.
-- [China Unicom web balance runner](docs/unicom-web-balance-runner.md) — independent
-  Unicom accounts are queried through a visible, temporary local Chrome profile.
-  The Worker correlates the random-password SMS by ICCID, sender, and request time;
-  carrier cookies never leave the local browser.
+- [Balance Agent CLI](docs/balance-agent-cli.md) — one Auth0-authenticated terminal
+  interface for company-AI menu work and visible China Unicom browser queries.
+  Refresh and AI tokens stay in macOS Keychain; carrier cookies remain local.
 - [Balance Agent productization plan](docs/balance-agent-product-plan.md) — turns
   the local AI and browser runners into one installable desktop product with device
   authentication, capability heartbeats, operator handoff, safe batch semantics,
@@ -100,15 +95,12 @@ This is an application runtime skill, **not** a Codex `SKILL.md`:
 | Skill configuration | `sms-dashboard/migrations/042_add_balance_runtime_skills.sql` and production D1 `sim_balance_profiles.skill_config` | Objective, confidence threshold, maximum turns, currencies, and forbidden intents |
 | Prompt and validation | `sms-dashboard/server/utils/balance-skill.js` | Menu extraction, prompt construction, and deterministic safety validation |
 | Worker handler | `sms-dashboard/server/handlers/balance-skill-runner.js` | Job leases, server-side decision validation, SMS queuing, balance persistence, and audit writes |
-| Local Bun runner | `sms-dashboard/scripts/balance-skill-runner.js` | Calls the company AI through the user's VPN and submits structured decisions |
-| Nix process wrappers | `flake.nix` | `balance-skill-runner` plus single-instance `balance-skill-service` management |
-| Architecture document | `docs/balance-runtime-skill-runner.md` | Protocol, trust boundary, deployment, and operating procedure |
-| Unicom browser runner | `sms-dashboard/scripts/unicom-balance-runner.js` | Visible official-site login, OTP entry, human-verification handoff, and read-only balance request |
 | Unicom Worker handler | `sms-dashboard/server/handlers/unicom-web-balance.js` | Browser-job leases, strict OTP correlation, account validation, normalized result persistence, and audit events |
-| Unicom architecture | `docs/unicom-web-balance-runner.md` | Browser trust boundary, state machine, operations, and rollback |
 | Runner control plane | `sms-dashboard/server/handlers/balance-runners.js` and migration `055` | Installation identity, capability heartbeat, online expiry, and dashboard status |
-| Shared runner core | `sms-dashboard/runner-core/` | Authenticated control client, 30-second presence heartbeat, serial cancellation, and capability lifecycle |
-| Balance Agent desktop | `sms-dashboard/balance-agent/` | Electron shell, Auth0 Device Flow, OS-encrypted credentials, separate AI/browser loops, notifications, and packaged Playwright Chromium |
+| Shared runner core | `sms-dashboard/runner-core/` | Auth0 session, authenticated control client, 30-second presence heartbeat, serial cancellation, and capability lifecycle |
+| Balance Agent interfaces | `sms-dashboard/balance-agent/` | Electron shell plus CLI, OS-encrypted credentials, separate AI/browser loops, notifications, and Playwright Chromium |
+| Nix developer interface | `flake.nix` | `balance-agent` command and `nix run .#balance-agent-cli` app |
+| Operations document | `docs/balance-agent-cli.md` | CLI setup, trust boundaries, commands, and rollback |
 
 Production D1 runtime tables:
 
@@ -131,17 +123,13 @@ open the authenticated private Release page for an explicit manual install. The
 planned `nix build .#balance-agent` and `nix run .#release-balance-agent -- <version>`
 interfaces are not yet implemented and must not be documented as available commands.
 
-The runner's local PID, lock, and service log live under
-`~/.local/state/message-dashboard/`; the log file is
-`~/.local/state/message-dashboard/balance-skill-runner.log`. The runner uses a
-process-level lock, so foreground, one-shot, and background instances cannot overlap.
-
 ## Commands
 
 > **Secret boundary:** Agents may inspect only encrypted key names in
 > `secrets/dev-vars.yaml`. They must never decrypt, print, infer, validate, or edit
-> its values, and must not invoke `sops exec-env`, `balance-skill-runner`, or
-> `balance-skill-service` by default. A user may explicitly authorise one exact
+> its values, and must not invoke `sops exec-env` or Balance Agent commands that
+> access Keychain or live services (`credentials`, `login`, `logout`, `status`,
+> `doctor`, or `run`) by default. A user may explicitly authorise one exact
 > secret-consuming command in the current task; that does not permit reading,
 > printing, or editing secret values, and does not grant standing permission.
 
@@ -155,21 +143,24 @@ dev-server stop                                       # Stop both managed proces
 # Single-service debugging only; normal development uses dev-server
 dev-frontend                                          # Strict Vite server on 127.0.0.1:8080
 dev-api                                               # Strict Wrangler API on :8787, secrets via SOPS
-balance-skill-runner                                  # Process unresolved balance menus over company VPN
-balance-skill-runner --once                           # Claim at most one task for debugging
-balance-skill-runner --check                          # Validate VPN + company AI configuration only
-balance-skill-service start                           # Start the single background VPN runner
-balance-skill-service status                          # Check it without decrypting secrets
-balance-skill-service stop                            # Stop the background runner
-unicom-balance-runner --once                         # Process at most one Unicom web task in visible Chrome
-unicom-balance-service start                         # Start the single background Unicom browser runner
-unicom-balance-service status                        # Check it without decrypting secrets
-unicom-balance-service stop                          # Stop it
+
+# Balance Agent CLI (configuration/status are local; run claims live work)
+balance-agent --help
+balance-agent configure --dashboard-url URL --auth0-issuer URL --auth0-client-id ID --auth0-audience AUDIENCE
+balance-agent credentials set-ai-token               # Secure macOS Keychain prompt
+balance-agent login                                  # Auth0 Device Authorization Flow
+balance-agent doctor
+balance-agent run                                    # Independent SMS AI + browser loops
+balance-agent run --capability sms-ai --once
+balance-agent run --capability unicom-browser --once
+balance-agent status
+balance-agent logout
 
 # Balance Agent desktop development (does not read dev-vars.yaml)
 cd sms-dashboard/balance-agent && bun install
 bun run test                                         # Device auth and secure-store tests
 bun run start                                        # Build and launch the local Electron application
+bun run cli -- --help                                # Run the source CLI directly
 bun run pack:mac                                     # Current unsigned local .app packaging check
 
 # Dashboard build/deploy
@@ -213,7 +204,10 @@ is used for Auth0 Management API operations on the user-management page; it is
 separate from the interactive login client.
 
 ## Database Schema (Cloudflare D1)
-- **`sims`** — user SIM inventory (PK: iccid). Source of truth for phone_number, carrier, sim_index. Daemon NEVER writes here.
+- **`sims`** — user SIM inventory (PK: iccid). Source of truth for phone_number,
+  carrier, sim_index, and manually verified `service_type`
+  (`unknown`/`prepaid`/`postpaid`). The daemon and balance parsers NEVER write or
+  infer the service type.
 - `modems` — daemon-detected hardware (PK: equipment_id = IMEI). Stale rows can persist for hardware no longer plugged in. **`detected_iccid`** says which SIM is inserted; it also carries `signal_percent`/`rssi` and `usb_path`.
   - ⚠️ `current_iccid` is a dead legacy column, frozen since migration `033` — **never query it**, use `detected_iccid`.
 - `messages` — SMS content, FK to sims

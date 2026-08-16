@@ -4,6 +4,12 @@ This directory contains SQL migration scripts for the SMS Dashboard D1 database.
 
 ## Migration History
 
+### 058_add_sim_service_type.sql
+- Adds user-verified `unknown`/`prepaid`/`postpaid` metadata to `sims`.
+- Records a controlled confirmation source and verification time for known types.
+- Exposes the fields through the SIM-centric `device_view`; no carrier or daemon
+  detection writes them.
+
 ### 056_enable_unicom_browser_balance.sql
 - Promotes the validated China Unicom browser workflow from discovery to enabled.
 - Makes eligible online Unicom SIMs available to fleet balance queries.

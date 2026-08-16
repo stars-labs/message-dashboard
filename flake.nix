@@ -248,281 +248,15 @@
             '';
           };
 
-          # Executes runtime balance skills from a VPN-connected workstation. The
-          # company AI credential is decrypted only into this local process.
-          balance-skill-runner = pkgs.writeShellApplication {
-            name = "balance-skill-runner";
-            runtimeInputs = with pkgs; [
-              coreutils
-              sops
-              git
-            ];
+          # Authenticated developer interface for both local Balance Agent
+          # capabilities. Credentials live in macOS Keychain; this wrapper never
+          # reads the SOPS development secret file.
+          balance-agent-cli = pkgs.writeShellApplication {
+            name = "balance-agent";
+            runtimeInputs = with pkgs; [ git ];
             text = ''
               repo_root="$(git rev-parse --show-toplevel)"
-              secrets="$repo_root/secrets/dev-vars.yaml"
-
-              if [ ! -f "$secrets" ]; then
-                echo "balance-skill-runner: $secrets is missing." >&2
-                exit 1
-              fi
-
-              cd "$repo_root/sms-dashboard"
-              export BALANCE_RUNNER_ARGS="$*"
-              state_dir="''${XDG_STATE_HOME:-$HOME/.local/state}/message-dashboard"
-              pid_file="$state_dir/balance-skill-runner.pid"
-              lock_dir="$state_dir/balance-skill-runner.lock"
-              mkdir -p "$state_dir"
-
-              acquire_lock() {
-                if mkdir "$lock_dir" 2>/dev/null; then
-                  echo "$$" > "$pid_file"
-                  return 0
-                fi
-                existing_pid="$(cat "$pid_file" 2>/dev/null || true)"
-                if [ -n "$existing_pid" ] && kill -0 "$existing_pid" 2>/dev/null; then
-                  echo "balance-skill-runner: already running (pid $existing_pid)" >&2
-                  return 1
-                fi
-                rm -f "$pid_file" "$lock_dir/pid"
-                rmdir "$lock_dir" 2>/dev/null || true
-                mkdir "$lock_dir"
-                echo "$$" > "$pid_file"
-              }
-
-              release_lock() {
-                rm -f "$pid_file" "$lock_dir/pid"
-                rmdir "$lock_dir" 2>/dev/null || true
-              }
-
-              acquire_lock
-              trap 'release_lock' EXIT
-              # shellcheck disable=SC2016
-              sops exec-env "$secrets" '
-                missing=""
-                for key in API_KEY BALANCE_AI_TOKEN BALANCE_AI_MODEL; do
-                  if [ -z "$(printenv "$key")" ]; then
-                    missing="$missing $key"
-                  fi
-                done
-                if [ -n "$missing" ]; then
-                  echo "balance-skill-runner: missing secrets:$missing" >&2
-                  exit 1
-                fi
-                exec bun scripts/balance-skill-runner.js $BALANCE_RUNNER_ARGS
-              ' &
-              child_pid="$!"
-              trap 'kill "$child_pid" 2>/dev/null || true; wait "$child_pid" 2>/dev/null || true; release_lock; exit 130' INT TERM
-              wait "$child_pid"
-            '';
-          };
-
-          # Keeps one VPN-local balance runner alive without tying it to a shell.
-          # The user starts this explicitly. An agent may invoke it only after the
-          # user explicitly authorises this exact command in the current task.
-          balance-skill-service = pkgs.writeShellApplication {
-            name = "balance-skill-service";
-            runtimeInputs = with pkgs; [
-              coreutils
-            ];
-            text = ''
-              state_dir="''${XDG_STATE_HOME:-$HOME/.local/state}/message-dashboard"
-              pid_file="$state_dir/balance-skill-runner.pid"
-              log_file="$state_dir/balance-skill-runner.log"
-              mkdir -p "$state_dir"
-
-              running_pid() {
-                if [ -f "$pid_file" ]; then
-                  pid="$(cat "$pid_file")"
-                  if kill -0 "$pid" 2>/dev/null; then
-                    printf '%s' "$pid"
-                    return 0
-                  fi
-                  rm -f "$pid_file"
-                fi
-                return 1
-              }
-
-              start() {
-                if pid="$(running_pid)"; then
-                  echo "balance-skill-runner is already running (pid $pid)"
-                  return 0
-                fi
-                nohup ${balance-skill-runner}/bin/balance-skill-runner >>"$log_file" 2>&1 &
-                pid="$!"
-                sleep 1
-                if ! kill -0 "$pid" 2>/dev/null; then
-                  echo "balance-skill-runner failed to start; see $log_file" >&2
-                  rm -f "$pid_file"
-                  return 1
-                fi
-                echo "balance-skill-runner started (pid $pid)"
-                echo "Logs: $log_file"
-              }
-
-              stop() {
-                if pid="$(running_pid)"; then
-                  kill "$pid"
-                  rm -f "$pid_file"
-                  echo "balance-skill-runner stopped"
-                else
-                  echo "balance-skill-runner is not running"
-                fi
-              }
-
-              status() {
-                if pid="$(running_pid)"; then
-                  echo "balance-skill-runner is running (pid $pid)"
-                else
-                  echo "balance-skill-runner is stopped"
-                  return 1
-                fi
-              }
-
-              case "''${1:-status}" in
-                start) start ;;
-                restart) stop; start ;;
-                stop) stop ;;
-                status) status ;;
-                logs) echo "$log_file" ;;
-                *)
-                  echo "Usage: balance-skill-service {start|restart|stop|status|logs}" >&2
-                  exit 2
-                  ;;
-              esac
-            '';
-          };
-
-          # Runs the read-only China Unicom balance workflow in a visible local
-          # Chrome window. Only API_KEY is injected; carrier cookies remain inside
-          # the temporary browser profile and are removed after each SIM.
-          unicom-balance-runner = pkgs.writeShellApplication {
-            name = "unicom-balance-runner";
-            runtimeInputs = with pkgs; [
-              coreutils
-              sops
-              git
-            ];
-            text = ''
-              repo_root="$(git rev-parse --show-toplevel)"
-              secrets="$repo_root/secrets/dev-vars.yaml"
-              if [ ! -f "$secrets" ]; then
-                echo "unicom-balance-runner: $secrets is missing." >&2
-                exit 1
-              fi
-
-              cd "$repo_root/sms-dashboard"
-              export UNICOM_RUNNER_ARGS="$*"
-              state_dir="''${XDG_STATE_HOME:-$HOME/.local/state}/message-dashboard"
-              pid_file="$state_dir/unicom-balance-runner.pid"
-              lock_dir="$state_dir/unicom-balance-runner.lock"
-              mkdir -p "$state_dir"
-
-              acquire_lock() {
-                if mkdir "$lock_dir" 2>/dev/null; then
-                  echo "$$" > "$pid_file"
-                  return 0
-                fi
-                existing_pid="$(cat "$pid_file" 2>/dev/null || true)"
-                if [ -n "$existing_pid" ] && kill -0 "$existing_pid" 2>/dev/null; then
-                  echo "unicom-balance-runner: already running (pid $existing_pid)" >&2
-                  return 1
-                fi
-                rm -f "$pid_file"
-                rmdir "$lock_dir" 2>/dev/null || true
-                mkdir "$lock_dir"
-                echo "$$" > "$pid_file"
-              }
-
-              release_lock() {
-                rm -f "$pid_file"
-                rmdir "$lock_dir" 2>/dev/null || true
-              }
-
-              acquire_lock
-              trap 'release_lock' EXIT
-              # shellcheck disable=SC2016
-              sops exec-env "$secrets" '
-                if [ -z "$(printenv API_KEY)" ]; then
-                  echo "unicom-balance-runner: missing secret: API_KEY" >&2
-                  exit 1
-                fi
-                exec bun scripts/unicom-balance-runner.js $UNICOM_RUNNER_ARGS
-              ' &
-              child_pid="$!"
-              trap 'kill "$child_pid" 2>/dev/null || true; wait "$child_pid" 2>/dev/null || true; release_lock; exit 130' INT TERM
-              wait "$child_pid"
-            '';
-          };
-
-          unicom-balance-service = pkgs.writeShellApplication {
-            name = "unicom-balance-service";
-            runtimeInputs = with pkgs; [ coreutils ];
-            text = ''
-              state_dir="''${XDG_STATE_HOME:-$HOME/.local/state}/message-dashboard"
-              pid_file="$state_dir/unicom-balance-runner.pid"
-              log_file="$state_dir/unicom-balance-runner.log"
-              mkdir -p "$state_dir"
-
-              running_pid() {
-                if [ -f "$pid_file" ]; then
-                  pid="$(cat "$pid_file")"
-                  if kill -0 "$pid" 2>/dev/null; then
-                    printf '%s' "$pid"
-                    return 0
-                  fi
-                  rm -f "$pid_file"
-                fi
-                return 1
-              }
-
-              start() {
-                if pid="$(running_pid)"; then
-                  echo "unicom-balance-runner is already running (pid $pid)"
-                  return 0
-                fi
-                nohup ${unicom-balance-runner}/bin/unicom-balance-runner >>"$log_file" 2>&1 &
-                pid="$!"
-                sleep 1
-                if ! kill -0 "$pid" 2>/dev/null; then
-                  echo "unicom-balance-runner failed to start; see $log_file" >&2
-                  rm -f "$pid_file"
-                  return 1
-                fi
-                echo "unicom-balance-runner started (pid $pid)"
-                echo "A visible Chrome window opens only while processing a SIM."
-                echo "Logs: $log_file"
-              }
-
-              stop() {
-                if pid="$(running_pid)"; then
-                  kill "$pid"
-                  rm -f "$pid_file"
-                  echo "unicom-balance-runner stopped"
-                else
-                  echo "unicom-balance-runner is not running"
-                fi
-              }
-
-              status() {
-                if pid="$(running_pid)"; then
-                  echo "unicom-balance-runner is running (pid $pid)"
-                else
-                  echo "unicom-balance-runner is stopped"
-                  return 1
-                fi
-              }
-
-              case "''${1:-status}" in
-                start) start ;;
-                restart) stop; start ;;
-                stop) stop ;;
-                status) status ;;
-                logs) echo "$log_file" ;;
-                *)
-                  echo "Usage: unicom-balance-service {start|restart|stop|status|logs}" >&2
-                  exit 2
-                  ;;
-              esac
+              exec bun "$repo_root/sms-dashboard/balance-agent/src/cli.js" "$@"
             '';
           };
 
@@ -706,7 +440,7 @@
         in
         {
           packages = {
-            inherit sms-daemon orange-pi-daemon-rust;
+            inherit sms-daemon orange-pi-daemon-rust balance-agent-cli;
             default = sms-daemon;
             # Alias for easier access
             daemon-rust = orange-pi-daemon-rust;
@@ -735,10 +469,7 @@
                 dev-api
                 dev-frontend
                 dev-server
-                balance-skill-runner
-                balance-skill-service
-                unicom-balance-runner
-                unicom-balance-service
+                balance-agent-cli
                 check-daemon
               ]
               ++ (with pkgs; [
@@ -780,10 +511,7 @@
                 echo "  • dev-frontend  — Vite dev server on :8080"
                 echo "  • dev-api       — Wrangler + Auth0 secrets via SOPS on :8787"
                 echo "  • dev-server    — restart/stop/status the unique :8080 + :8787 pair"
-                echo "  • balance-skill-runner — process balance menus through company AI over VPN"
-                echo "  • balance-skill-service — start/stop/status one background balance runner"
-                echo "  • unicom-balance-runner — query one independent Unicom account in visible Chrome"
-                echo "  • unicom-balance-service — start/stop/status the browser balance runner"
+                echo "  • balance-agent — authenticated CLI for SMS AI and browser balance work"
                 echo "  • check-daemon  — required Rust format check + full test suite"
                 echo ""
 
@@ -833,6 +561,10 @@
           };
 
           apps = {
+            balance-agent-cli = {
+              type = "app";
+              program = "${balance-agent-cli}/bin/balance-agent";
+            };
             daemon = {
               type = "app";
               program = "${sms-daemon}/bin/sms-daemon";

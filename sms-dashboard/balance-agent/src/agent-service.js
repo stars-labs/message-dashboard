@@ -2,15 +2,14 @@ import { hostname } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { access } from 'node:fs/promises';
 import { createControlClient } from '../../runner-core/control-client.js';
+import { createAuthSession } from '../../runner-core/auth-session.js';
 import { createRunnerPresence } from '../../runner-core/presence.js';
 import { runSerialCapability } from '../../runner-core/serial-runner.js';
 import { createSmsAiCapability } from '../../runner-core/capabilities/sms-ai.js';
 import { createUnicomBrowserCapability } from '../../runner-core/capabilities/unicom-browser.js';
 import { createUnicomBrowserJobProcessor } from '../../runner-core/capabilities/unicom-browser-workflow.js';
 import { callCompanyAI, companyAIReachable } from '../../server/utils/company-ai.js';
-import { createAuth0DeviceClient } from './auth0-device.js';
 import { testAIConnection } from './ai-connection.js';
-import { assertRunnerAccessToken } from './access-token.js';
 
 function requiredSettings(settings) {
   return ['dashboardUrl', 'auth0Issuer', 'auth0ClientId', 'auth0Audience']
@@ -25,12 +24,12 @@ export function createAgentService({
   browserExecutablePath = null,
   appVersion = 'development',
   platform = process.platform,
+  enabledCapabilities = ['sms_ai', 'unicom_browser'],
+  once = false,
   logger = console,
   onState = () => {},
 }) {
   let settings = {};
-  let accessToken = null;
-  let accessTokenExpiresAt = 0;
   let loginController = null;
   let smsController = null;
   let smsPresence = null;
@@ -40,6 +39,11 @@ export function createAgentService({
   let browserLoop = null;
   let browserProcessor = null;
   const sessionId = randomUUID();
+  const enabled = new Set(enabledCapabilities);
+  const authSession = createAuthSession({
+    getConfiguration: () => settings,
+    secureStore,
+  });
   const state = {
     auth: 'signed_out',
     smsAi: 'stopped',
@@ -49,6 +53,11 @@ export function createAgentService({
     login: null,
     error: null,
   };
+
+  function configuredBrowserState() {
+    if (!enabled.has('unicom_browser')) return 'stopped';
+    return browser && browserExecutablePath ? 'ready' : 'configuration_required';
+  }
 
   function publish(patch = {}) {
     Object.assign(state, patch);
@@ -79,30 +88,6 @@ export function createAgentService({
     });
   }
 
-  function authClient() {
-    return createAuth0DeviceClient({
-      issuer: settings.auth0Issuer,
-      clientId: settings.auth0ClientId,
-      audience: settings.auth0Audience,
-    });
-  }
-
-  async function rememberTokens(payload) {
-    assertRunnerAccessToken(payload.access_token, settings.auth0Audience);
-    accessToken = payload.access_token;
-    accessTokenExpiresAt = Date.now() + Math.max(0, Number(payload.expires_in || 0) - 60) * 1000;
-    if (payload.refresh_token) await secureStore.set('auth0RefreshToken', payload.refresh_token);
-  }
-
-  async function getAccessToken() {
-    if (accessToken && Date.now() < accessTokenExpiresAt) return accessToken;
-    const refreshToken = await secureStore.get('auth0RefreshToken');
-    if (!refreshToken) throw new Error('Balance Agent is not signed in');
-    const payload = await authClient().refresh(refreshToken);
-    await rememberTokens(payload);
-    return accessToken;
-  }
-
   async function runAiTest(input = {}) {
     const candidate = { ...settings, ...input };
     candidate.aiProtocol = String(candidate.aiProtocol || 'anthropic').trim();
@@ -116,7 +101,10 @@ export function createAgentService({
     const dashboardUrl = String(input.dashboardUrl || settings.dashboardUrl || '').trim();
     if (!dashboardUrl) return { ok: false, message: '请先填写 Dashboard URL' };
     try {
-      const client = createControlClient({ baseUrl: dashboardUrl, getAccessToken });
+      const client = createControlClient({
+        baseUrl: dashboardUrl,
+        getAccessToken: () => authSession.getAccessToken(),
+      });
       const response = await client.request('/api/control/balance-runners/check');
       if (response.status === 401 || response.status === 403) {
         return { ok: false, message: '登录无效或缺少 Runner 权限' };
@@ -170,45 +158,54 @@ export function createAgentService({
       publish({ error: `Missing configuration: ${missing.join(', ')}` });
       return;
     }
-    const aiToken = await secureStore.get('aiToken');
+    const aiToken = enabled.has('sms_ai') ? await secureStore.get('aiToken') : null;
     const controlClient = createControlClient({
       baseUrl: settings.dashboardUrl,
-      getAccessToken,
+      getAccessToken: () => authSession.getAccessToken(),
     });
-    browserPresence = publishingPresence(controlClient, 'unicom_browser', 'browser');
-    await browserPresence.start();
-    if (browser && browserExecutablePath) {
-      browserProcessor = createUnicomBrowserJobProcessor({
-        controlClient,
-        presence: browserPresence,
-        runnerId: sessionId,
-        browser,
-        executablePath: browserExecutablePath,
-        logger,
-      });
-      const browserCapability = createUnicomBrowserCapability({
-        controlClient,
-        presence: browserPresence,
-        runnerId: sessionId,
-        processJob: browserProcessor.processJob,
-      });
-      browserController = new AbortController();
-      browserLoop = runSerialCapability({
-        runOne: browserCapability.runOne,
-        signal: browserController.signal,
-        onError: (error) => {
-          logger.error(error.message);
-          publish({ browser: 'degraded', error: error.message });
-        },
-      });
+    if (enabled.has('unicom_browser')) {
+      browserPresence = publishingPresence(controlClient, 'unicom_browser', 'browser');
+      await browserPresence.start();
+      if (browser && browserExecutablePath) {
+        browserProcessor = createUnicomBrowserJobProcessor({
+          controlClient,
+          presence: browserPresence,
+          runnerId: sessionId,
+          browser,
+          executablePath: browserExecutablePath,
+          logger,
+        });
+        const browserCapability = createUnicomBrowserCapability({
+          controlClient,
+          presence: browserPresence,
+          runnerId: sessionId,
+          processJob: browserProcessor.processJob,
+        });
+        browserController = new AbortController();
+        browserLoop = runSerialCapability({
+          runOne: browserCapability.runOne,
+          once,
+          signal: browserController.signal,
+          onError: (error) => {
+            logger.error(error.message);
+            publish({ browser: 'degraded', error: error.message });
+          },
+        });
+      } else {
+        await browserPresence.set('configuration_required', null, 'browser_runtime_unavailable');
+      }
     } else {
-      await browserPresence.set('configuration_required', null, 'browser_runtime_unavailable');
+      publish({ browser: 'stopped', browserDetail: null });
     }
 
+    if (!enabled.has('sms_ai')) {
+      publish({ smsAi: 'stopped', smsAiDetail: null, error: null });
+      return;
+    }
     if (!aiToken || !settings.aiBaseUrl || !settings.aiModel) {
       publish({
         smsAi: 'configuration_required',
-        browser: browser && browserExecutablePath ? 'ready' : 'configuration_required',
+        browser: configuredBrowserState(),
         error: null,
       });
       return;
@@ -231,7 +228,7 @@ export function createAgentService({
     await smsPresence.start();
     publish({
       smsAi: 'starting',
-      browser: browser && browserExecutablePath ? 'ready' : 'configuration_required',
+      browser: configuredBrowserState(),
       error: null,
     });
     smsLoop = runSerialCapability({
@@ -240,6 +237,7 @@ export function createAgentService({
         publish({ smsAi: 'ready', error: null });
         return result;
       },
+      once,
       signal: smsController.signal,
       onError: (error) => {
         logger.error(error.message);
@@ -249,10 +247,11 @@ export function createAgentService({
   }
 
   async function snapshot() {
+    const hasAiToken = enabled.has('sms_ai') && Boolean(await secureStore.get('aiToken'));
     return {
       ...state,
       settings: { ...settings },
-      hasAiToken: Boolean(await secureStore.get('aiToken')),
+      hasAiToken,
     };
   }
 
@@ -264,11 +263,11 @@ export function createAgentService({
         settings.installationName ||= hostname();
         settings = await settingsStore.save(settings);
       }
-      const hasRefreshToken = Boolean(await secureStore.get('auth0RefreshToken'));
+      const hasRefreshToken = await authSession.hasRefreshToken();
       publish({ auth: hasRefreshToken ? 'signed_in' : 'signed_out' });
       if (hasRefreshToken) {
         try {
-          await getAccessToken();
+          await authSession.getAccessToken();
           await startCapabilities();
         } catch (error) {
           publish({ auth: 'signed_out', error: error.message });
@@ -305,17 +304,13 @@ export function createAgentService({
       loginController = new AbortController();
       publish({ auth: 'authorizing', error: null });
       try {
-        const client = authClient();
-        const device = await client.begin({ signal: loginController.signal });
-        publish({
-          login: {
-            userCode: device.user_code,
-            verificationUri: device.verification_uri,
+        await authSession.signIn({
+          signal: loginController.signal,
+          onDeviceCode: async ({ userCode, verificationUri, verificationUriComplete }) => {
+            publish({ login: { userCode, verificationUri } });
+            await openExternal(verificationUriComplete || verificationUri);
           },
         });
-        await openExternal(device.verification_uri_complete || device.verification_uri);
-        const tokens = await client.poll(device, { signal: loginController.signal });
-        await rememberTokens(tokens);
         publish({ auth: 'signed_in', login: null });
         await startCapabilities();
       } catch (error) {
@@ -329,14 +324,16 @@ export function createAgentService({
     async signOut() {
       loginController?.abort();
       await stopCapabilities();
-      await secureStore.set('auth0RefreshToken', null);
-      accessToken = null;
-      accessTokenExpiresAt = 0;
+      await authSession.signOut();
       publish({ auth: 'signed_out', login: null, error: null });
     },
 
     async showVerification() {
       return browserProcessor?.showActiveBrowser() || false;
+    },
+
+    async wait() {
+      await Promise.all([smsLoop, browserLoop].filter(Boolean));
     },
 
     async shutdown() {

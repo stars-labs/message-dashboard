@@ -1,5 +1,49 @@
 // ICCID Mappings handler - manages user-authoritative sims table
 // New schema: sims table is purely user-managed, status computed dynamically
+export const SIM_SERVICE_TYPES = ['unknown', 'prepaid', 'postpaid'];
+export const SIM_SERVICE_TYPE_SOURCES = [
+  'carrier_account',
+  'carrier_support',
+  'contract_or_bill',
+  'carrier_message',
+];
+
+const hasOwn = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
+
+export function resolveServiceType(data, existing = null) {
+  const serviceTypeProvided = hasOwn(data, 'service_type') || hasOwn(data, 'service_type_source');
+  const serviceType = hasOwn(data, 'service_type')
+    ? String(data.service_type || 'unknown')
+    : existing?.service_type || 'unknown';
+
+  if (!SIM_SERVICE_TYPES.includes(serviceType)) {
+    return { error: 'service_type must be unknown, prepaid, or postpaid' };
+  }
+
+  if (serviceType === 'unknown') {
+    return { serviceType, serviceTypeSource: null, serviceTypeProvided };
+  }
+
+  const serviceTypeSource = hasOwn(data, 'service_type_source')
+    ? data.service_type_source || null
+    : existing?.service_type_source || null;
+
+  if (!SIM_SERVICE_TYPE_SOURCES.includes(serviceTypeSource)) {
+    return {
+      error: 'A valid service_type_source is required for prepaid or postpaid SIMs',
+    };
+  }
+
+  return { serviceType, serviceTypeSource, serviceTypeProvided };
+}
+
+function badRequest(error) {
+  return new Response(JSON.stringify({ success: false, error }), {
+    status: 400,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
 export const iccidMappingsHandler = {
   // List all ICCID mappings with pagination
   async list(request) {
@@ -19,6 +63,9 @@ export const iccidMappingsHandler = {
           number as phone_number,
           country,
           carrier,
+          service_type,
+          service_type_source,
+          service_type_verified_at,
           equipment_id,
           notes,
           sim_status as is_active,
@@ -94,7 +141,8 @@ export const iccidMappingsHandler = {
       const mapping = await env.DB.prepare(`
         SELECT
           iccid as id, iccid, sim_index, number as phone_number,
-          country, carrier, equipment_id, notes,
+          country, carrier, service_type, service_type_source,
+          service_type_verified_at, equipment_id, notes,
           sim_status as is_active, signal_quality, modem_status, detected_iccid,
           usb_path, last_usb_path, created_at, updated_at
         FROM device_view
@@ -138,7 +186,8 @@ export const iccidMappingsHandler = {
       const mapping = await env.DB.prepare(`
         SELECT
           iccid as id, iccid, sim_index, number as phone_number,
-          country, carrier, equipment_id, notes,
+          country, carrier, service_type, service_type_source,
+          service_type_verified_at, equipment_id, notes,
           sim_status as is_active, signal_quality, modem_status, detected_iccid,
           usb_path, last_usb_path, created_at, updated_at
         FROM device_view
@@ -179,7 +228,15 @@ export const iccidMappingsHandler = {
     const data = await request.json();
 
     try {
-      const { iccid, phone_number, sim_index, country_code, carrier, imei, notes } = data;
+      const {
+        iccid,
+        phone_number,
+        sim_index,
+        country_code,
+        carrier,
+        imei,
+        notes,
+      } = data;
 
       if (!iccid || !phone_number || !sim_index) {
         return new Response(JSON.stringify({
@@ -193,14 +250,22 @@ export const iccidMappingsHandler = {
 
       // Check if SIM exists
       const simExists = await env.DB.prepare(`
-        SELECT iccid FROM sims WHERE iccid = ?
+        SELECT iccid, service_type, service_type_source FROM sims WHERE iccid = ?
       `).bind(iccid).first();
+      const service = resolveServiceType(data, simExists);
+      if (service.error) return badRequest(service.error);
 
       if (!simExists) {
         // INSERT new SIM (NO status field - computed dynamically)
         await env.DB.prepare(`
-          INSERT INTO sims (iccid, sim_index, phone_number, country_code, carrier, imei, notes, updated_at, updated_by)
-          VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
+          INSERT INTO sims (
+            iccid, sim_index, phone_number, country_code, carrier, imei, notes,
+            service_type, service_type_source, service_type_verified_at,
+            updated_at, updated_by
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,
+            CASE WHEN ? = 'unknown' THEN NULL ELSE CURRENT_TIMESTAMP END,
+            CURRENT_TIMESTAMP, ?)
         `).bind(
           iccid,
           sim_index,
@@ -209,13 +274,23 @@ export const iccidMappingsHandler = {
           carrier || null,
           imei || null,
           notes || null,
+          service.serviceType,
+          service.serviceTypeSource,
+          service.serviceType,
           user?.email || 'system'
         ).run();
       } else {
         // UPDATE existing SIM (NO status field - computed dynamically)
         await env.DB.prepare(`
           UPDATE sims
-          SET sim_index = ?, phone_number = ?, country_code = ?, carrier = ?, imei = ?, notes = ?, updated_at = CURRENT_TIMESTAMP, updated_by = ?
+          SET sim_index = ?, phone_number = ?, country_code = ?, carrier = ?, imei = ?, notes = ?,
+              service_type = ?, service_type_source = ?,
+              service_type_verified_at = CASE
+                WHEN ? = 0 THEN service_type_verified_at
+                WHEN ? = 'unknown' THEN NULL
+                ELSE CURRENT_TIMESTAMP
+              END,
+              updated_at = CURRENT_TIMESTAMP, updated_by = ?
           WHERE iccid = ?
         `).bind(
           sim_index,
@@ -224,6 +299,10 @@ export const iccidMappingsHandler = {
           carrier || null,
           imei || null,
           notes || null,
+          service.serviceType,
+          service.serviceTypeSource,
+          service.serviceTypeProvided ? 1 : 0,
+          service.serviceType,
           user?.email || 'system',
           iccid
         ).run();
@@ -234,7 +313,8 @@ export const iccidMappingsHandler = {
         SELECT
           iccid, sim_index, number as phone_number,
           country as country_code, carrier, equipment_id as imei,
-          notes, sim_status as status, usb_path, last_usb_path,
+          notes, service_type, service_type_source, service_type_verified_at,
+          sim_status as status, usb_path, last_usb_path,
           created_at, updated_at
         FROM device_view
         WHERE iccid = ?
@@ -267,7 +347,29 @@ export const iccidMappingsHandler = {
     const data = await request.json();
 
     try {
-      const { phone_number, sim_index, country_code, carrier, imei, notes } = data;
+      const {
+        phone_number,
+        sim_index,
+        country_code,
+        carrier,
+        imei,
+        notes,
+      } = data;
+
+      const existing = await env.DB.prepare(`
+        SELECT iccid, service_type, service_type_source FROM sims WHERE iccid = ?
+      `).bind(id).first();
+      if (!existing) {
+        return new Response(JSON.stringify({
+          success: false,
+          error: 'ICCID mapping not found'
+        }), {
+          status: 404,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+      const service = resolveServiceType(data, existing);
+      if (service.error) return badRequest(service.error);
 
       // Update sims table (NO status field)
       await env.DB.prepare(`
@@ -279,6 +381,13 @@ export const iccidMappingsHandler = {
           carrier = ?,
           imei = ?,
           notes = ?,
+          service_type = ?,
+          service_type_source = ?,
+          service_type_verified_at = CASE
+            WHEN ? = 0 THEN service_type_verified_at
+            WHEN ? = 'unknown' THEN NULL
+            ELSE CURRENT_TIMESTAMP
+          END,
           updated_at = CURRENT_TIMESTAMP,
           updated_by = ?
         WHERE iccid = ?
@@ -289,6 +398,10 @@ export const iccidMappingsHandler = {
         carrier || null,
         imei || null,
         notes || null,
+        service.serviceType,
+        service.serviceTypeSource,
+        service.serviceTypeProvided ? 1 : 0,
+        service.serviceType,
         user?.email || 'system',
         id
       ).run();
@@ -297,7 +410,8 @@ export const iccidMappingsHandler = {
       const mapping = await env.DB.prepare(`
         SELECT
           iccid as id, iccid, sim_index, number as phone_number,
-          country, carrier, equipment_id, notes,
+          country, carrier, service_type, service_type_source,
+          service_type_verified_at, equipment_id, notes,
           sim_status as is_active, usb_path, last_usb_path,
           created_at, updated_at
         FROM device_view
@@ -394,8 +508,14 @@ export const iccidMappingsHandler = {
 
           // Check if SIM exists
           const existing = await env.DB.prepare(`
-            SELECT iccid FROM sims WHERE iccid = ?
+            SELECT iccid, service_type, service_type_source FROM sims WHERE iccid = ?
           `).bind(iccid).first();
+          const service = resolveServiceType(mapping, existing);
+          if (service.error) {
+            failed++;
+            errors.push(`Invalid service type for ICCID ${iccid}: ${service.error}`);
+            continue;
+          }
 
           if (existing) {
             // Update existing
@@ -408,6 +528,13 @@ export const iccidMappingsHandler = {
                 carrier = ?,
                 imei = ?,
                 notes = ?,
+                service_type = ?,
+                service_type_source = ?,
+                service_type_verified_at = CASE
+                  WHEN ? = 0 THEN service_type_verified_at
+                  WHEN ? = 'unknown' THEN NULL
+                  ELSE CURRENT_TIMESTAMP
+                END,
                 updated_at = CURRENT_TIMESTAMP,
                 updated_by = ?
               WHERE iccid = ?
@@ -418,6 +545,10 @@ export const iccidMappingsHandler = {
               carrier || null,
               imei || null,
               notes || null,
+              service.serviceType,
+              service.serviceTypeSource,
+              service.serviceTypeProvided ? 1 : 0,
+              service.serviceType,
               user?.email || 'system',
               iccid
             ).run();
@@ -425,8 +556,14 @@ export const iccidMappingsHandler = {
           } else {
             // Create new
             await env.DB.prepare(`
-              INSERT INTO sims (iccid, sim_index, phone_number, country_code, carrier, imei, notes, updated_at, updated_by)
-              VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
+              INSERT INTO sims (
+                iccid, sim_index, phone_number, country_code, carrier, imei, notes,
+                service_type, service_type_source, service_type_verified_at,
+                updated_at, updated_by
+              )
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,
+                CASE WHEN ? = 'unknown' THEN NULL ELSE CURRENT_TIMESTAMP END,
+                CURRENT_TIMESTAMP, ?)
             `).bind(
               iccid,
               sim_index,
@@ -435,6 +572,9 @@ export const iccidMappingsHandler = {
               carrier || null,
               imei || null,
               notes || null,
+              service.serviceType,
+              service.serviceTypeSource,
+              service.serviceType,
               user?.email || 'system'
             ).run();
             created++;

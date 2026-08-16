@@ -4,6 +4,7 @@
   import { buildCarrierOptions, carrierKey } from './carrier.js';
   import { getCountryFlag } from './countries.js';
   import { api } from './api.js';
+  import { getSimServiceTypeLabel } from './sim-service-type.js';
   import {
     formatBalanceMetric,
     getBalanceStatusMeta,
@@ -65,6 +66,7 @@
           phone.phone_number,
           phone.iccid,
           phone.carrier,
+          getSimServiceTypeLabel(phone.service_type),
         ].some((value) => String(value || '').toLowerCase().includes(query));
       })
       .sort(compareOverviewRows);
@@ -97,6 +99,7 @@
   const overviewColumns = [
     { key: 'sim', label: 'SIM' },
     { key: 'carrier', label: '运营商' },
+    { key: 'service_type', label: '计费类型' },
     { key: 'balance', label: '当前余额' },
     { key: 'health', label: '状态' },
     { key: 'threshold', label: '阈值' },
@@ -177,6 +180,7 @@
   function overviewValue(row, key) {
     if (key === 'sim') return Number(row.phone.sim_index);
     if (key === 'carrier') return row.phone.carrier || '';
+    if (key === 'service_type') return getSimServiceTypeLabel(row.phone.service_type);
     if (key === 'health') return ({ failed: 0, low: 1, stale: 2, unknown: 3, normal: 4 })[row.health];
     if (key === 'updated') return row.balanceTimestamp ? new Date(normalizeUtcTimestamp(row.balanceTimestamp)).getTime() : null;
     if (key === 'query') return row.latestCheck?.status || '';
@@ -618,6 +622,14 @@
                   <td class="px-4 py-3 whitespace-nowrap text-stone-600">
                     <span class="mr-1">{row.phone.flag || getCountryFlag(row.phone.country)}</span>{row.phone.carrier || '—'}
                   </td>
+                  <td class="px-4 py-3 whitespace-nowrap">
+                    <span class="inline-flex px-2 py-0.5 rounded-md border text-[11px]
+                      {row.phone.service_type && row.phone.service_type !== 'unknown'
+                        ? 'bg-stone-50 text-stone-700 border-stone-200'
+                        : 'bg-amber-50 text-amber-700 border-amber-200'}">
+                      {getSimServiceTypeLabel(row.phone.service_type)}
+                    </span>
+                  </td>
                   <td class="px-4 py-3 whitespace-nowrap font-semibold tabular-nums {row.health === 'low' ? 'text-red-700' : 'text-stone-900'}">
                     {formatBalanceMetric(row.balanceMetric)}
                   </td>
@@ -677,6 +689,7 @@
                 <div class="min-w-0 flex-1 flex items-baseline gap-2">
                   <strong class="text-base leading-tight font-semibold tabular-nums truncate {row.health === 'low' ? 'text-red-700' : 'text-stone-900'}">{formatBalanceMetric(row.balanceMetric)}</strong>
                   <span class="text-[11px] text-stone-400 truncate shrink">{row.phone.flag || getCountryFlag(row.phone.country)} {row.phone.carrier || '—'}</span>
+                  <span class="text-[10px] text-stone-400 shrink-0">· {getSimServiceTypeLabel(row.phone.service_type)}</span>
                   {#if row.balanceTimestamp}
                     <span class="hidden min-[390px]:inline ml-auto font-mono text-[10px] text-stone-400 shrink-0">{formatTime(row.balanceTimestamp, true)}</span>
                   {/if}

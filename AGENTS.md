@@ -20,10 +20,10 @@ Major components:
 - `orange-pi-daemon/`: Rust/Tokio hardware daemon using direct AT commands.
 - `sms-dashboard/client/`: Svelte 5 and Tailwind frontend.
 - `sms-dashboard/server/`: Cloudflare Worker API and Auth0 authorization.
-- `sms-dashboard/migrations/`: append-only D1 migrations, currently through `057`.
+- `sms-dashboard/migrations/`: append-only D1 migrations, currently through `058`.
 - `sms-dashboard/runner-core/`: shared authenticated local-runner logic.
-- `sms-dashboard/balance-agent/`: Electron menu-bar application for AI-assisted
-  SMS and interactive carrier-browser queries.
+- `sms-dashboard/balance-agent/`: Electron menu-bar and authenticated CLI
+  interfaces for AI-assisted SMS and interactive carrier-browser queries.
 - `nixos-config/`: Orange Pi NixOS configuration and encrypted SOPS material.
 - `flake.nix`: canonical development, validation, daemon build, and process tools.
 - `docs/`: architecture, operating procedures, staged plans, and evidence.
@@ -41,8 +41,9 @@ account `793e3286eaca411bf1eebaf4b8c7051e`.
 - Never inspect plaintext process environments, generated Wrangler secret files,
   keychains, tokens, cookies, `.p12` files, Apple keys, Auth0 secrets, or carrier
   sessions.
-- Local Auth0/API values enter processes only through the existing
-  `sops exec-env` wrappers in `flake.nix`; do not create plaintext `.env` files or
+- Local Dashboard development values enter processes only through the existing
+  `sops exec-env` wrapper in `flake.nix`. Balance Agent refresh and AI tokens use
+  the operating-system credential store. Do not create plaintext `.env` files or
   put secret values on command lines.
 - Do not invoke a secret-consuming runner merely to test it. The user must
   explicitly authorize the exact live operation.
@@ -74,6 +75,8 @@ account `793e3286eaca411bf1eebaf4b8c7051e`.
 
 - `sims` is the user-owned inventory and the source of truth for ICCID, phone
   number, carrier, SIM index, and assigned IMEI. The daemon never writes it.
+- `sims.service_type` is manually verified `unknown`/`prepaid`/`postpaid` metadata.
+  Never infer or write it from ICCID, detected operator, or balance replies.
 - Read device/SIM state through `device_view`, not ad hoc joins or legacy tables.
 - `device_view` joins `sims.imei` to `modems.equipment_id`. The join key is IMEI,
   not ICCID.
@@ -136,6 +139,7 @@ bun install
 bun run test
 bun run build
 bun run start
+bun run cli -- --help
 
 cd orange-pi-daemon
 cargo build --release
@@ -154,7 +158,8 @@ Scale verification to the changed surface:
 - Frontend behavior: dashboard tests and `bun run build`; inspect desktop and
   440px mobile layouts with Playwright when layout or navigation changes.
 - Balance Agent: `bun run test && bun run build`; exercise menu-bar lifecycle and
-  destroyed-window recovery for lifecycle changes.
+  destroyed-window recovery for lifecycle changes, and use mock credentials/jobs
+  for CLI tests.
 - Rust daemon: `nix develop --command check-daemon`. Do not replace this with only
   `cargo check`.
 - Cross-component contracts: run every affected component's gate.

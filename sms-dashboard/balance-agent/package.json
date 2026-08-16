@@ -13,6 +13,7 @@
     "build": "bun scripts/build.mjs",
     "browser:install": "PLAYWRIGHT_BROWSERS_PATH=0 playwright-core install chromium --no-shell",
     "start": "bun run build && electron .",
+    "cli": "bun src/cli.js",
     "test": "bun test src",
     "pack:mac": "bun run browser:install && bun run build && electron-builder --mac dir"
   },

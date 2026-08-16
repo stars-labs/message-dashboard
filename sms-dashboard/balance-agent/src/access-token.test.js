@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { assertRunnerAccessToken, REQUIRED_RUNNER_SCOPES } from './access-token.js';
+import { assertRunnerAccessToken, REQUIRED_RUNNER_SCOPES } from '../../runner-core/access-token.js';
 
 function token(payload) {
   return `header.${Buffer.from(JSON.stringify(payload)).toString('base64url')}.signature`;

@@ -11,6 +11,10 @@ encrypted local credentials, settings, tray lifecycle, custom protocol registrat
 separate capability loops, notifications, a hermetic Playwright Chromium, and
 independent in-app checks for Dashboard authentication, company AI/VPN, and the
 browser runtime.
+The former API-key development scripts and their four Nix runner/service wrappers
+have now been replaced by one Auth0-authenticated `balance-agent` CLI. The CLI uses
+macOS Keychain, supports both capability loops independently, and shares the same
+agent service and runner core as the Electron application.
 Auth0 tenant setup, account-scoping migration, Worker deployment, and a live
 single-SIM browser pilot are complete. A Nix-owned private release pipeline and
 clean-machine pilot remain pending. Apple Developer ID signing and notarization
@@ -29,22 +33,24 @@ The dashboard must know whether the application is ready before it creates work,
 show when human verification is required, and explain the impact of a batch before
 the operator confirms it.
 
-The existing scripts remain supported developer and diagnostic entry points. Their
-business logic will move into shared modules used by both the scripts and the
-desktop application so the product does not create a second implementation.
+The CLI is the supported developer and diagnostic entry point. It and the desktop
+application use the same shared modules so there is only one implementation of
+authentication, presence, scheduling, and capability behavior.
 
 ## Current Behavior
 
-The developer/diagnostic interface still exposes two local Bun runner adapters;
-the desktop application hosts the same capabilities through shared modules:
+The developer/diagnostic interface exposes one authenticated CLI; the desktop
+application hosts the same capabilities through shared modules:
 
-| Runner | Responsibility | Local requirements |
+| Capability | Responsibility | Local requirements |
 | --- | --- | --- |
-| `balance-skill-runner.js` | Interpret unresolved carrier SMS menus and choose a validated read-only follow-up | Company VPN, AI URL, token, model and API key |
-| `unicom-balance-runner.js` | Open the official China Unicom website, use an SMS one-time password, pause for human verification, and read the balance | Visible Chrome and API key |
+| `sms-ai` | Interpret unresolved carrier SMS menus and choose a validated read-only follow-up | Company VPN, AI URL, model, and Keychain token |
+| `unicom-browser` | Open the official China Unicom website, use an SMS one-time password, pause for human verification, and read the balance | Visible Chrome and Auth0 device login |
 
-`flake.nix` adds secret injection, process locks, PID files, logs and service
-commands. This is appropriate for development but is not the end-user interface.
+`flake.nix` exposes `balance-agent` in the development shell and
+`nix run .#balance-agent-cli`. It does not decrypt development secrets or provide
+background service wrappers. The Electron application remains the end-user
+interface for persistent operation.
 
 Both runners currently claim exactly one task, finish or release it, and then claim
 the next task. A single-instance lock prevents a second copy on the same machine.
@@ -293,8 +299,8 @@ runner cannot complete a job after its lease has moved to another installation.
 
 ## Local Architecture
 
-Extract the current scripts into modules with no dependency on command-line
-arguments or process-global configuration:
+Keep the shared runtime modules independent of command-line arguments and
+process-global configuration:
 
 ```text
 desktop/
@@ -308,11 +314,8 @@ runner-core/
     sms-ai.js
     unicom-browser.js
     unicom-browser-workflow.js
-scripts/
-  balance-skill-runner.js       Development adapter around runner-core
-  unicom-balance-runner.js      Development adapter around runner-core
 balance-agent/
-  src/                  Electron main, isolated preload, Auth0 and renderer
+  src/                  Electron main, CLI, isolated preload, Auth0 and renderer
   scripts/build.mjs     Bundles shared core into the desktop application
 ```
 
@@ -332,14 +335,14 @@ schemas.
 
 - Add runner identity, Auth0 scopes, heartbeat and capability models.
 - Add status and preflight APIs without changing current query buttons.
-- Report existing script runners through the new protocol.
+- Report the initial API-key script runners through the new protocol.
 - Add expiry, revocation, lease-race and redaction tests.
 
 **Exit criteria:** the dashboard API can accurately say which capabilities are
-ready, degraded or offline, and existing scripts still process current tasks.
+ready, degraded or offline while the initial adapters still process current tasks.
 
-Implementation uses the following future Auth0 native-client scopes while keeping
-the shared API key only as a compatibility path for the current scripts:
+Implementation uses the following Auth0 native-client scopes while keeping the
+shared API key only for legacy `NULL`-owned control clients:
 
 - `balance:runners:heartbeat`
 - `balance:skills:run`
@@ -348,12 +351,12 @@ the shared API key only as a compatibility path for the current scripts:
 ### Stage 2: Shared runner core
 
 - Extract control-client, AI and browser logic from the executable scripts.
-- Keep current script commands as thin adapters.
+- Provide one Auth0-authenticated CLI adapter for development and diagnostics.
 - Separate AI and browser worker loops so human verification cannot block AI work.
 - Add deterministic tests for cancellation, restart, lease loss and partial batch
   queues.
 
-**Exit criteria:** scripts pass existing live pilot workflows using shared modules,
+**Exit criteria:** CLI and desktop pass pilot workflows using shared modules,
 with no behavior regression and no secret appearing in logs.
 
 ### Stage 3: Desktop MVP

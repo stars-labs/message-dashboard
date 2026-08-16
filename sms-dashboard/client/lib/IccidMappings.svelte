@@ -6,6 +6,11 @@
   import { getStatusMeta, hasOperationalIssue, isAnomalous } from "./device-status.js";
   import { formatCardNumber } from "./card-number.js";
   import { buildCarrierOptions, carrierKey } from "./carrier.js";
+  import {
+    getSimServiceTypeLabel,
+    SIM_SERVICE_TYPES,
+    SIM_SERVICE_TYPE_SOURCES,
+  } from "./sim-service-type.js";
 
   let { initialStatusFilter = "all" } = $props();
 
@@ -38,7 +43,17 @@
   // { mode: 'add', formData } | { mode: 'edit', mapping, formData }
 
   function emptyForm() {
-    return { iccid: '', phone_number: '', carrier: '', country: '', description: '', sim_index: '', imei: '' };
+    return {
+      iccid: '',
+      phone_number: '',
+      carrier: '',
+      country: '',
+      description: '',
+      sim_index: '',
+      imei: '',
+      service_type: 'unknown',
+      service_type_source: '',
+    };
   }
 
   function openAdd() {
@@ -57,6 +72,8 @@
         description: mapping.notes || mapping.description || '',
         sim_index: mapping.sim_index || '',
         imei: mapping.equipment_id || '',
+        service_type: mapping.service_type || 'unknown',
+        service_type_source: mapping.service_type_source || '',
       },
     };
   }
@@ -87,6 +104,7 @@
     { key: 'phone_number', label: '手机号' },
     { key: 'iccid', label: 'ICCID' },
     { key: 'carrier', label: '运营商' },
+    { key: 'service_type', label: '计费类型' },
     { key: 'position', label: '模块位置' },
     { key: 'signal_quality', label: '信号' },
     { key: 'is_active', label: '状态' },
@@ -109,6 +127,7 @@
     if (key === 'position') return getModemPosition(mapping)?.path || '';
     if (key === 'is_active') return getStatusMeta(mapping.is_active).sortOrder;
     if (key === 'notes') return mapping.notes || mapping.description || '';
+    if (key === 'service_type') return getSimServiceTypeLabel(mapping.service_type);
     return mapping[key] || '';
   }
 
@@ -158,6 +177,7 @@
         (m.iccid || '').toLowerCase().includes(q) ||
         (m.phone_number || '').toLowerCase().includes(q) ||
         (m.carrier || '').toLowerCase().includes(q) ||
+        getSimServiceTypeLabel(m.service_type).includes(q) ||
         (m.equipment_id || '').toLowerCase().includes(q) ||
         (m.notes || m.description || '').toLowerCase().includes(q)
       );
@@ -192,16 +212,23 @@
     error = null;
     try {
       const fd = panel.formData;
+      const payload = {
+        iccid: fd.iccid,
+        phone_number: fd.phone_number,
+        carrier: fd.carrier,
+        country_code: fd.country,
+        notes: fd.description,
+        sim_index: fd.sim_index,
+        imei: fd.imei,
+        service_type: fd.service_type,
+        service_type_source: fd.service_type === 'unknown' ? null : fd.service_type_source,
+      };
       if (panel.mode === 'add') {
-        const r = await api.iccidMappings.create(fd);
+        const r = await api.iccidMappings.create(payload);
         if (r.success) { closePanel(); await loadMappings(); }
         else error = r.error || "添加失败";
       } else {
-        const r = await api.iccidMappings.update(panel.mapping.id, {
-          phone_number: fd.phone_number, carrier: fd.carrier,
-          country: fd.country, description: fd.description,
-          sim_index: fd.sim_index, imei: fd.imei,
-        });
+        const r = await api.iccidMappings.update(panel.mapping.id, payload);
         if (r.success) { closePanel(); await loadMappings(); }
         else error = r.error || "保存失败";
       }
@@ -356,6 +383,15 @@
                   <span class="text-stone-300">—</span>
                 {/if}
               </td>
+              <!-- 计费类型 -->
+              <td class="px-3 py-2.5 whitespace-nowrap">
+                <span class="inline-flex px-2 py-0.5 text-[11px] rounded-md border
+                  {m.service_type && m.service_type !== 'unknown'
+                    ? 'bg-stone-50 text-stone-700 border-stone-200'
+                    : 'bg-amber-50 text-amber-700 border-amber-200'}">
+                  {getSimServiceTypeLabel(m.service_type)}
+                </span>
+              </td>
               <!-- 模块位置 (absorbs 设备ID + USB位置 + UP/DOWN) -->
               <td class="px-3 py-2.5 font-mono text-xs text-stone-500 whitespace-nowrap">
                 {#if pos}
@@ -438,6 +474,7 @@
           <div class="mt-1 flex items-center gap-2 text-[11px] text-stone-400 font-mono">
             <span class="{meta.badgeClass.includes('red') ? 'text-red-600' : meta.badgeClass.includes('amber') ? 'text-amber-600' : ''}">{meta.label}</span>
             {#if m.carrier}<span>{getCountryFlag(m.country)} {m.carrier}</span>{/if}
+            <span>· {getSimServiceTypeLabel(m.service_type)}</span>
             {#if m.signal_quality != null}<span>· {m.signal_quality}%</span>{/if}
             {#if pos}<span>· {pos.path}{pos.isLastKnown ? '（上次）' : ''}</span>{/if}
           </div>
@@ -558,6 +595,39 @@
                 focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100" />
           </div>
 
+          <!-- 计费类型：只能由人工根据可靠来源确认 -->
+          <div>
+            <label for="mapping-service-type" class="block text-xs font-semibold text-stone-500 mb-1 tracking-wide uppercase">计费类型</label>
+            <select id="mapping-service-type" bind:value={panel.formData.service_type}
+              onchange={() => {
+                if (panel.formData.service_type === 'unknown') panel.formData.service_type_source = '';
+              }}
+              class="w-full px-3 py-2 text-sm border border-stone-300 rounded-lg bg-white
+                focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100">
+              {#each SIM_SERVICE_TYPES as option}
+                <option value={option.value}>{option.label}</option>
+              {/each}
+            </select>
+          </div>
+
+          <div>
+            <label for="mapping-service-type-source" class="block text-xs font-semibold text-stone-500 mb-1 tracking-wide uppercase">确认来源</label>
+            <select id="mapping-service-type-source" bind:value={panel.formData.service_type_source}
+              disabled={panel.formData.service_type === 'unknown'}
+              class="w-full px-3 py-2 text-sm border border-stone-300 rounded-lg bg-white
+                disabled:bg-stone-50 disabled:text-stone-300
+                focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100">
+              <option value="">选择…</option>
+              {#each SIM_SERVICE_TYPE_SOURCES as option}
+                <option value={option.value}>{option.label}</option>
+              {/each}
+            </select>
+          </div>
+
+          <p class="col-span-2 -mt-1 text-[11px] text-stone-400">
+            系统无法通过 ICCID、网络运营商或余额短信可靠识别；请从运营商账户、客服、合同/账单或明确服务短信确认。
+          </p>
+
           <!-- IMEI — read-only in edit, editable in add -->
           <div class="col-span-2">
             <label class="block text-xs font-semibold text-stone-500 mb-1 tracking-wide uppercase">
@@ -619,6 +689,7 @@
           </button>
           <button onclick={handleSave}
             disabled={!panel.formData.phone_number || !panel.formData.sim_index ||
+              (panel.formData.service_type !== 'unknown' && !panel.formData.service_type_source) ||
               (panel.mode === 'add' && !panel.formData.iccid)}
             class="px-4 py-2 text-sm font-medium bg-stone-800 text-white rounded-lg
               hover:bg-stone-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">

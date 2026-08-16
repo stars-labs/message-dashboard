@@ -1,6 +1,7 @@
 <script>
   import { api } from "./api";
   import { COUNTRIES, inferCountryFromNumber } from "./countries.js";
+  import { SIM_SERVICE_TYPES, SIM_SERVICE_TYPE_SOURCES } from "./sim-service-type.js";
 
   let {
     phone = null,
@@ -16,6 +17,8 @@
   let imei = $state("");
   let simIndex = $state("");
   let status = $state("");
+  let serviceType = $state("unknown");
+  let serviceTypeSource = $state("");
   let saving = $state(false);
   let error = $state(null);
 
@@ -30,6 +33,8 @@
     notes = phone.notes || "";
     imei = phone.equipment_id || phone.imei || "";
     status = phone.is_active || phone.status || "inactive";
+    serviceType = phone.service_type || "unknown";
+    serviceTypeSource = phone.service_type_source || "";
     if (!country && phoneNumber) {
       country = inferCountryFromNumber(phoneNumber) || "";
     }
@@ -49,6 +54,11 @@
       return;
     }
 
+    if (serviceType !== "unknown" && !serviceTypeSource) {
+      error = "请选择计费类型的确认来源";
+      return;
+    }
+
     saving = true;
     error = null;
 
@@ -61,6 +71,8 @@
         carrier: carrier || null,
         imei: imei || null,
         notes: notes || null,
+        service_type: serviceType,
+        service_type_source: serviceType === "unknown" ? null : serviceTypeSource,
         // NO status field - computed dynamically by API
       });
 
@@ -89,6 +101,8 @@
     imei = "";
     simIndex = "";
     status = "";
+    serviceType = "unknown";
+    serviceTypeSource = "";
     error = null;
     onclose?.();
   }
@@ -184,6 +198,36 @@
             required
             class="w-full px-3 py-2 cyber-input"
           />
+        </div>
+
+        <div>
+          <label for="dialog-service-type" class="block text-sm font-medium text-stone-500 mb-1">计费类型</label>
+          <select
+            id="dialog-service-type"
+            bind:value={serviceType}
+            onchange={() => { if (serviceType === "unknown") serviceTypeSource = ""; }}
+            class="w-full px-3 py-2 cyber-input"
+          >
+            {#each SIM_SERVICE_TYPES as option}
+              <option value={option.value}>{option.label}</option>
+            {/each}
+          </select>
+        </div>
+
+        <div>
+          <label for="dialog-service-type-source" class="block text-sm font-medium text-stone-500 mb-1">确认来源</label>
+          <select
+            id="dialog-service-type-source"
+            bind:value={serviceTypeSource}
+            disabled={serviceType === "unknown"}
+            class="w-full px-3 py-2 cyber-input disabled:bg-stone-50 disabled:text-stone-300"
+          >
+            <option value="">选择确认来源...</option>
+            {#each SIM_SERVICE_TYPE_SOURCES as option}
+              <option value={option.value}>{option.label}</option>
+            {/each}
+          </select>
+          <p class="mt-1 text-xs text-stone-400">只能人工根据运营商账户、客服、合同/账单或明确服务短信确认。</p>
         </div>
 
         <div>

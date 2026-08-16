@@ -1,4 +1,5 @@
-import { readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
 
 const ALLOWED_KEYS = [
   'dashboardUrl', 'auth0Issuer', 'auth0ClientId', 'auth0Audience',
@@ -19,6 +20,7 @@ export function createSettingsStore(filePath) {
     async save(input) {
       const settings = Object.fromEntries(ALLOWED_KEYS.map((key) => [key, String(input[key] || '').trim()]));
       const temporaryPath = `${filePath}.tmp`;
+      await mkdir(dirname(filePath), { recursive: true });
       await writeFile(temporaryPath, `${JSON.stringify(settings, null, 2)}\n`, { mode: 0o600 });
       await rename(temporaryPath, filePath);
       return settings;

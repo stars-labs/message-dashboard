@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { createAuth0DeviceClient, RUNNER_SCOPES } from './auth0-device.js';
+import { createAuth0DeviceClient, RUNNER_SCOPES } from '../../runner-core/auth0-device.js';
 
 describe('Auth0 device client', () => {
   test('requests only the runner and identity scopes', async () => {

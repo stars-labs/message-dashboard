@@ -8,7 +8,7 @@ const RUNNER_SCOPES = [
 
 function issuerUrl(issuer, path) {
   const base = String(issuer || '').trim().replace(/\/+$/, '');
-  if (!/^https:\/\//.test(base)) throw new Error('Auth0 issuer must use HTTPS');
+  if (!base.startsWith('https://')) throw new Error('Auth0 issuer must use HTTPS');
   return `${base}${path}`;
 }
 

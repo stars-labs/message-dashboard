@@ -8,6 +8,8 @@ const phone = {
   number: '+8613520607015',
   country: 'CN',
   carrier: 'China Mobile',
+  service_type: 'prepaid',
+  service_type_source: 'carrier_account',
   flag: '🇨🇳',
 };
 
@@ -67,6 +69,7 @@ describe('balance management', () => {
 
     expect(view.getAllByText('S02').length).toBeGreaterThan(0);
     expect(view.getAllByText(/264\.33/).length).toBeGreaterThan(0);
+    expect(view.getAllByText('预付费').length).toBeGreaterThan(0);
     expect(view.getAllByText('正常').length).toBeGreaterThan(0);
 
     await fireEvent.click(view.getByRole('button', { name: '查看' }));
