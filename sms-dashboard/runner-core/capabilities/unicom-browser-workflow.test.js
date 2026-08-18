@@ -3,6 +3,7 @@ import {
   TEMPORARY_CHROME_ARGS,
   createTemporaryChromePreferences,
   createUnicomBrowserJobProcessor,
+  isUnicomErrorPage,
   validateUnicomBrowserJob,
 } from './unicom-browser-workflow.js';
 
@@ -59,6 +60,15 @@ describe('China Unicom browser workflow', () => {
     await expect(processor.processJob(validJob(), { signal: controller.signal }))
       .rejects.toThrow('cancelled');
     expect(launched).toBe(false);
+  });
+
+  test('detects Unicom error page URLs', () => {
+    expect(isUnicomErrorPage('https://imgxx.client.10010.com/shengyuhuafeiwt2024/index.html#/errorpage')).toBe(true);
+    expect(isUnicomErrorPage('https://imgxx.client.10010.com/shengyuhuafeiwt2024/index.html#/Errorpage')).toBe(true);
+    expect(isUnicomErrorPage('https://imgxx.client.10010.com/shengyuhuafeiwt2024/index.html#/')).toBe(false);
+    expect(isUnicomErrorPage('https://imgxx.client.10010.com/shengyuhuafeiwt2024/index.html#/home')).toBe(false);
+    expect(isUnicomErrorPage(null)).toBe(false);
+    expect(isUnicomErrorPage('')).toBe(false);
   });
 
   test('reports that there is no verification window before a job starts', async () => {

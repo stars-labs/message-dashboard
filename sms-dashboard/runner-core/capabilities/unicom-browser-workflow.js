@@ -51,6 +51,10 @@ export function validateUnicomBrowserJob(job) {
   assertOfficialUrl(job.skill.query_endpoint, QUERY_ORIGIN, 'Balance endpoint');
 }
 
+export function isUnicomErrorPage(url) {
+  return /[#/]errorpage/i.test(String(url || ''));
+}
+
 export function createUnicomBrowserJobProcessor({
   controlClient,
   presence,
@@ -313,6 +317,16 @@ async function login(job, page) {
 async function queryBalance(job, context, nativeResponsePromise) {
   await heartbeat(job, 'querying');
   const nativeResponse = await nativeResponsePromise;
+
+  // After login, Unicom sometimes redirects to #/errorpage instead of
+  // serving balance data — their backend is temporarily unavailable.
+  // Check the active page URL before attempting the API post so we can
+  // release (retry later) rather than fail the job permanently.
+  const activePage = context.pages()[0];
+  if (activePage && isUnicomErrorPage(activePage.url())) {
+    throw new Error('China Unicom balance service unavailable (redirected to error page); will retry');
+  }
+
   const response = nativeResponse || await context.request.post(
     `${job.skill.query_endpoint}?_=${Date.now()}`,
     {
