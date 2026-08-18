@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { iccidMappingsHandler, resolveServiceType } from './iccid-mappings.js';
+import { iccidMappingsHandler, resolveServiceType, resolveSimRole } from './iccid-mappings.js';
 
 function createD1Adapter(database) {
   return {
@@ -28,6 +28,7 @@ function createD1Adapter(database) {
 
 async function createMigratedDatabase() {
   const database = new Database(':memory:');
+  database.exec(`PRAGMA foreign_keys = ON;`);
   database.exec(`
     CREATE TABLE sims (
       iccid TEXT PRIMARY KEY,
@@ -58,6 +59,8 @@ async function createMigratedDatabase() {
   `);
   const migration = await Bun.file(new URL('../../migrations/058_add_sim_service_type.sql', import.meta.url)).text();
   database.exec(migration);
+  const migration2 = await Bun.file(new URL('../../migrations/059_add_sim_primary_secondary.sql', import.meta.url)).text();
+  database.exec(migration2);
   return database;
 }
 
@@ -172,6 +175,173 @@ describe('SIM service type validation', () => {
           service_type_verified_at = NULL
       WHERE iccid = 'test-iccid'
     `).run()).toThrow('invalid SIM service type verification metadata');
+    database.close();
+  });
+});
+
+describe('SIM primary/secondary role validation', () => {
+  test('defaults to standalone with no primary_iccid', () => {
+    const database = new Database(':memory:');
+    database.exec(`CREATE TABLE sims (iccid TEXT PRIMARY KEY, sim_role TEXT, primary_iccid TEXT)`);
+    const env = { DB: createD1Adapter(database) };
+    expect(resolveSimRole({}, null, env)).resolves.toEqual({
+      role: 'standalone',
+      primaryIccid: null,
+      roleProvided: false,
+    });
+    database.close();
+  });
+
+  test('rejects an invalid role', async () => {
+    const database = new Database(':memory:');
+    database.exec(`CREATE TABLE sims (iccid TEXT PRIMARY KEY, sim_role TEXT, primary_iccid TEXT)`);
+    const env = { DB: createD1Adapter(database) };
+    const result = await resolveSimRole({ sim_role: 'backup' }, null, env);
+    expect(result).toEqual({ error: 'sim_role must be standalone, primary, or secondary' });
+    database.close();
+  });
+
+  test('secondary without primary_iccid is rejected', async () => {
+    const database = new Database(':memory:');
+    database.exec(`CREATE TABLE sims (iccid TEXT PRIMARY KEY, sim_role TEXT, primary_iccid TEXT)`);
+    const env = { DB: createD1Adapter(database) };
+    const result = await resolveSimRole({ sim_role: 'secondary' }, null, env);
+    expect(result).toEqual({ error: 'primary_iccid is required for a secondary SIM' });
+    database.close();
+  });
+
+  test('secondary pointing at a non-existent SIM is rejected', async () => {
+    const database = new Database(':memory:');
+    database.exec(`CREATE TABLE sims (iccid TEXT PRIMARY KEY, sim_role TEXT, primary_iccid TEXT)`);
+    const env = { DB: createD1Adapter(database) };
+    const result = await resolveSimRole({
+      sim_role: 'secondary',
+      primary_iccid: 'missing-iccid',
+    }, null, env);
+    expect(result).toEqual({ error: 'primary_iccid does not match any SIM' });
+    database.close();
+  });
+
+  test('secondary pointing at a standalone SIM is rejected', async () => {
+    const database = new Database(':memory:');
+    database.exec(`CREATE TABLE sims (iccid TEXT PRIMARY KEY, sim_role TEXT, primary_iccid TEXT)`);
+    database.exec(`INSERT INTO sims (iccid, sim_role, primary_iccid) VALUES ('solo', 'standalone', NULL)`);
+    const env = { DB: createD1Adapter(database) };
+    const result = await resolveSimRole({
+      sim_role: 'secondary',
+      primary_iccid: 'solo',
+    }, null, env);
+    expect(result.error).toBe('primary_iccid points to a standalone SIM, not a primary');
+    database.close();
+  });
+
+  test('secondary pointing at a real primary succeeds', async () => {
+    const database = new Database(':memory:');
+    database.exec(`CREATE TABLE sims (iccid TEXT PRIMARY KEY, sim_role TEXT, primary_iccid TEXT)`);
+    database.exec(`INSERT INTO sims (iccid, sim_role, primary_iccid) VALUES ('main', 'primary', NULL)`);
+    const env = { DB: createD1Adapter(database) };
+    const result = await resolveSimRole({
+      sim_role: 'secondary',
+      primary_iccid: 'main',
+    }, null, env);
+    expect(result).toEqual({
+      role: 'secondary',
+      primaryIccid: 'main',
+      roleProvided: true,
+    });
+    database.close();
+  });
+
+  test('SQL trigger refuses secondary with NULL primary_iccid on insert', async () => {
+    const database = await createMigratedDatabase();
+    expect(() => database.exec(
+      `INSERT INTO sims (iccid, sim_index, phone_number, sim_role) VALUES ('x', 1, 'n', 'secondary')`
+    )).toThrow('secondary SIM requires primary_iccid');
+    database.close();
+  });
+
+  test('SQL trigger refuses primary with a primary_iccid set', async () => {
+    const database = await createMigratedDatabase();
+    expect(() => database.exec(
+      `INSERT INTO sims (iccid, sim_index, phone_number, sim_role, primary_iccid) VALUES ('p', 1, 'n', 'primary', 'whatever')`
+    )).toThrow('secondary SIM requires primary_iccid');
+    database.close();
+  });
+
+  test('ON DELETE RESTRICT blocks deleting a primary with secondaries attached', async () => {
+    const database = await createMigratedDatabase();
+    database.exec(`INSERT INTO sims (iccid, sim_index, phone_number, sim_role, primary_iccid) VALUES ('main', 1, 'n', 'primary', NULL)`);
+    database.exec(`INSERT INTO sims (iccid, sim_index, phone_number, sim_role, primary_iccid) VALUES ('sec', 2, 'n2', 'secondary', 'main')`);
+    expect(() => database.exec(`DELETE FROM sims WHERE iccid = 'main'`))
+      .toThrow('FOREIGN KEY constraint failed');
+    database.close();
+  });
+
+  test('full create+update lifecycle through the handler', async () => {
+    const database = await createMigratedDatabase();
+    const env = { DB: createD1Adapter(database) };
+    const user = { email: 'op@example.com' };
+
+    // Create a primary
+    const primaryResp = await iccidMappingsHandler.create({
+      env, user,
+      json: async () => ({
+        iccid: 'primary-1', sim_index: 1, phone_number: '+861',
+        sim_role: 'primary',
+      }),
+    });
+    expect(primaryResp.status).toBe(201);
+
+    // Create a secondary pointing at it
+    const secResp = await iccidMappingsHandler.create({
+      env, user,
+      json: async () => ({
+        iccid: 'secondary-1', sim_index: 2, phone_number: '+862',
+        sim_role: 'secondary', primary_iccid: 'primary-1',
+      }),
+    });
+    expect(secResp.status).toBe(201);
+
+    const sec = database.query(`SELECT sim_role, primary_iccid FROM sims WHERE iccid = 'secondary-1'`).get();
+    expect(sec).toEqual({ sim_role: 'secondary', primary_iccid: 'primary-1' });
+
+    // Flip it back to standalone via update — primary_iccid must clear
+    const updateResp = await iccidMappingsHandler.update({
+      env, user, params: { id: 'secondary-1' },
+      json: async () => ({
+        phone_number: '+862', sim_index: 2, sim_role: 'standalone',
+      }),
+    });
+    expect(updateResp.status).toBe(200);
+    const cleared = database.query(`SELECT sim_role, primary_iccid FROM sims WHERE iccid = 'secondary-1'`).get();
+    expect(cleared).toEqual({ sim_role: 'standalone', primary_iccid: null });
+
+    // Now deleting the primary should succeed (no secondaries attached)
+    const delResp = await iccidMappingsHandler.delete({
+      env, params: { id: 'primary-1' },
+    });
+    expect(delResp.status).toBe(200);
+    database.close();
+  });
+
+  test('delete returns 409 when secondaries are still attached', async () => {
+    const database = await createMigratedDatabase();
+    const env = { DB: createD1Adapter(database) };
+    const user = { email: 'op@example.com' };
+
+    await iccidMappingsHandler.create({
+      env, user,
+      json: async () => ({ iccid: 'p', sim_index: 1, phone_number: 'n', sim_role: 'primary' }),
+    });
+    await iccidMappingsHandler.create({
+      env, user,
+      json: async () => ({ iccid: 's', sim_index: 2, phone_number: 'n2', sim_role: 'secondary', primary_iccid: 'p' }),
+    });
+
+    const delResp = await iccidMappingsHandler.delete({ env, params: { id: 'p' } });
+    expect(delResp.status).toBe(409);
+    const body = await delResp.json();
+    expect(body.error).toMatch(/primary SIM with secondary/);
     database.close();
   });
 });

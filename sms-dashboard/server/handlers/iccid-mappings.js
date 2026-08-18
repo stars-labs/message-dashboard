@@ -8,6 +8,8 @@ export const SIM_SERVICE_TYPE_SOURCES = [
   'carrier_message',
 ];
 
+export const SIM_ROLES = ['standalone', 'primary', 'secondary'];
+
 const hasOwn = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
 
 export function resolveServiceType(data, existing = null) {
@@ -35,6 +37,43 @@ export function resolveServiceType(data, existing = null) {
   }
 
   return { serviceType, serviceTypeSource, serviceTypeProvided };
+}
+
+/**
+ * Resolve the primary/secondary role for a SIM. Unlike resolveServiceType,
+ * this is async: a secondary must point at a real primary SIM, which requires
+ * a cross-row DB lookup the SQL triggers cannot do safely.
+ *
+ * Returns { role, primaryIccid, roleProvided } or { error }.
+ */
+export async function resolveSimRole(data, existing, env) {
+  const roleProvided = hasOwn(data, 'sim_role') || hasOwn(data, 'primary_iccid');
+  const role = hasOwn(data, 'sim_role')
+    ? String(data.sim_role || 'standalone')
+    : existing?.sim_role || 'standalone';
+
+  if (!SIM_ROLES.includes(role)) {
+    return { error: 'sim_role must be standalone, primary, or secondary' };
+  }
+
+  let primaryIccid = null;
+  if (role === 'secondary') {
+    primaryIccid = hasOwn(data, 'primary_iccid')
+      ? (data.primary_iccid || null)
+      : (existing?.primary_iccid || null);
+    if (!primaryIccid) {
+      return { error: 'primary_iccid is required for a secondary SIM' };
+    }
+    const target = await env.DB.prepare(
+      'SELECT sim_role FROM sims WHERE iccid = ?'
+    ).bind(primaryIccid).first();
+    if (!target) return { error: 'primary_iccid does not match any SIM' };
+    if (target.sim_role !== 'primary') {
+      return { error: `primary_iccid points to a ${target.sim_role} SIM, not a primary` };
+    }
+  }
+
+  return { role, primaryIccid, roleProvided };
 }
 
 function badRequest(error) {
@@ -66,6 +105,8 @@ export const iccidMappingsHandler = {
           service_type,
           service_type_source,
           service_type_verified_at,
+          sim_role,
+          primary_iccid,
           equipment_id,
           notes,
           sim_status as is_active,
@@ -250,10 +291,13 @@ export const iccidMappingsHandler = {
 
       // Check if SIM exists
       const simExists = await env.DB.prepare(`
-        SELECT iccid, service_type, service_type_source FROM sims WHERE iccid = ?
+        SELECT iccid, service_type, service_type_source, sim_role, primary_iccid
+        FROM sims WHERE iccid = ?
       `).bind(iccid).first();
       const service = resolveServiceType(data, simExists);
       if (service.error) return badRequest(service.error);
+      const role = await resolveSimRole(data, simExists, env);
+      if (role.error) return badRequest(role.error);
 
       if (!simExists) {
         // INSERT new SIM (NO status field - computed dynamically)
@@ -261,10 +305,12 @@ export const iccidMappingsHandler = {
           INSERT INTO sims (
             iccid, sim_index, phone_number, country_code, carrier, imei, notes,
             service_type, service_type_source, service_type_verified_at,
+            sim_role, primary_iccid,
             updated_at, updated_by
           )
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,
             CASE WHEN ? = 'unknown' THEN NULL ELSE CURRENT_TIMESTAMP END,
+            ?, ?,
             CURRENT_TIMESTAMP, ?)
         `).bind(
           iccid,
@@ -277,6 +323,8 @@ export const iccidMappingsHandler = {
           service.serviceType,
           service.serviceTypeSource,
           service.serviceType,
+          role.role,
+          role.primaryIccid,
           user?.email || 'system'
         ).run();
       } else {
@@ -290,6 +338,8 @@ export const iccidMappingsHandler = {
                 WHEN ? = 'unknown' THEN NULL
                 ELSE CURRENT_TIMESTAMP
               END,
+              sim_role = ?,
+              primary_iccid = ?,
               updated_at = CURRENT_TIMESTAMP, updated_by = ?
           WHERE iccid = ?
         `).bind(
@@ -303,6 +353,8 @@ export const iccidMappingsHandler = {
           service.serviceTypeSource,
           service.serviceTypeProvided ? 1 : 0,
           service.serviceType,
+          role.role,
+          role.primaryIccid,
           user?.email || 'system',
           iccid
         ).run();
@@ -314,6 +366,7 @@ export const iccidMappingsHandler = {
           iccid, sim_index, number as phone_number,
           country as country_code, carrier, equipment_id as imei,
           notes, service_type, service_type_source, service_type_verified_at,
+          sim_role, primary_iccid,
           sim_status as status, usb_path, last_usb_path,
           created_at, updated_at
         FROM device_view
@@ -357,7 +410,8 @@ export const iccidMappingsHandler = {
       } = data;
 
       const existing = await env.DB.prepare(`
-        SELECT iccid, service_type, service_type_source FROM sims WHERE iccid = ?
+        SELECT iccid, service_type, service_type_source, sim_role, primary_iccid
+        FROM sims WHERE iccid = ?
       `).bind(id).first();
       if (!existing) {
         return new Response(JSON.stringify({
@@ -370,6 +424,8 @@ export const iccidMappingsHandler = {
       }
       const service = resolveServiceType(data, existing);
       if (service.error) return badRequest(service.error);
+      const role = await resolveSimRole(data, existing, env);
+      if (role.error) return badRequest(role.error);
 
       // Update sims table (NO status field)
       await env.DB.prepare(`
@@ -388,6 +444,8 @@ export const iccidMappingsHandler = {
             WHEN ? = 'unknown' THEN NULL
             ELSE CURRENT_TIMESTAMP
           END,
+          sim_role = ?,
+          primary_iccid = ?,
           updated_at = CURRENT_TIMESTAMP,
           updated_by = ?
         WHERE iccid = ?
@@ -402,6 +460,8 @@ export const iccidMappingsHandler = {
         service.serviceTypeSource,
         service.serviceTypeProvided ? 1 : 0,
         service.serviceType,
+        role.role,
+        role.primaryIccid,
         user?.email || 'system',
         id
       ).run();
@@ -411,7 +471,8 @@ export const iccidMappingsHandler = {
         SELECT
           iccid as id, iccid, sim_index, number as phone_number,
           country, carrier, service_type, service_type_source,
-          service_type_verified_at, equipment_id, notes,
+          service_type_verified_at, sim_role, primary_iccid,
+          equipment_id, notes,
           sim_status as is_active, usb_path, last_usb_path,
           created_at, updated_at
         FROM device_view
@@ -452,7 +513,8 @@ export const iccidMappingsHandler = {
     const { id } = params;
 
     try {
-      // Actually delete the SIM from sims table
+      // Actually delete the SIM from sims table. If this SIM is a primary with
+      // secondaries still attached, the ON DELETE RESTRICT FK aborts.
       await env.DB.prepare(`
         DELETE FROM sims WHERE iccid = ?
       `).bind(id).run();
@@ -464,6 +526,15 @@ export const iccidMappingsHandler = {
         headers: { 'Content-Type': 'application/json' }
       });
     } catch (error) {
+      if (/FOREIGN KEY constraint failed/i.test(error?.message || '')) {
+        return new Response(JSON.stringify({
+          success: false,
+          error: 'This is a primary SIM with secondary SIMs still attached. Set them back to standalone first.'
+        }), {
+          status: 409,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
       console.error('[iccid-mappings.js] Error deleting ICCID mapping:', error);
       return new Response(JSON.stringify({
         success: false,
@@ -508,12 +579,19 @@ export const iccidMappingsHandler = {
 
           // Check if SIM exists
           const existing = await env.DB.prepare(`
-            SELECT iccid, service_type, service_type_source FROM sims WHERE iccid = ?
+            SELECT iccid, service_type, service_type_source, sim_role, primary_iccid
+            FROM sims WHERE iccid = ?
           `).bind(iccid).first();
           const service = resolveServiceType(mapping, existing);
           if (service.error) {
             failed++;
             errors.push(`Invalid service type for ICCID ${iccid}: ${service.error}`);
+            continue;
+          }
+          const role = await resolveSimRole(mapping, existing, env);
+          if (role.error) {
+            failed++;
+            errors.push(`Invalid SIM role for ICCID ${iccid}: ${role.error}`);
             continue;
           }
 
@@ -535,6 +613,8 @@ export const iccidMappingsHandler = {
                   WHEN ? = 'unknown' THEN NULL
                   ELSE CURRENT_TIMESTAMP
                 END,
+                sim_role = ?,
+                primary_iccid = ?,
                 updated_at = CURRENT_TIMESTAMP,
                 updated_by = ?
               WHERE iccid = ?
@@ -549,6 +629,8 @@ export const iccidMappingsHandler = {
               service.serviceTypeSource,
               service.serviceTypeProvided ? 1 : 0,
               service.serviceType,
+              role.role,
+              role.primaryIccid,
               user?.email || 'system',
               iccid
             ).run();
@@ -559,10 +641,12 @@ export const iccidMappingsHandler = {
               INSERT INTO sims (
                 iccid, sim_index, phone_number, country_code, carrier, imei, notes,
                 service_type, service_type_source, service_type_verified_at,
+                sim_role, primary_iccid,
                 updated_at, updated_by
               )
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,
                 CASE WHEN ? = 'unknown' THEN NULL ELSE CURRENT_TIMESTAMP END,
+                ?, ?,
                 CURRENT_TIMESTAMP, ?)
             `).bind(
               iccid,
@@ -575,6 +659,8 @@ export const iccidMappingsHandler = {
               service.serviceType,
               service.serviceTypeSource,
               service.serviceType,
+              role.role,
+              role.primaryIccid,
               user?.email || 'system'
             ).run();
             created++;

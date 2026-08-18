@@ -70,7 +70,8 @@ export function buildBalanceQueryPlan({
     ) || null;
 
     let reason = null;
-    if (phone.sim_status !== 'active') reason = 'offline';
+    if (phone.sim_role === 'secondary') reason = 'secondary';
+    else if (phone.sim_status !== 'active') reason = 'offline';
     else if (!profile) reason = matchingProfiles.length ? 'unverified' : 'unsupported';
     else if (recentBySim.has(phone.iccid)) reason = 'cooldown';
 
@@ -92,6 +93,7 @@ function summarizePlan(plan) {
     unsupported: 0,
     unverified: 0,
     cooldown: 0,
+    secondary: 0,
   };
   for (const item of plan) {
     if (item.eligible) summary.eligible += 1;
@@ -136,7 +138,7 @@ async function loadBalanceQueryPlan(db, {
     ? `WHERE iccid IN (${scopedIccids.map(() => '?').join(', ')})`
     : '';
   const phoneStatement = db.prepare(`
-    SELECT iccid, number, carrier, country, sim_status, sim_index
+    SELECT iccid, number, carrier, country, sim_status, sim_index, sim_role
     FROM device_view ${phoneWhere}
     ORDER BY sim_index
   `);

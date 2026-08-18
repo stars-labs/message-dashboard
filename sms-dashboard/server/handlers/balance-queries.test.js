@@ -200,6 +200,22 @@ describe('balance-query planning', () => {
     expect(plan.map((item) => item.reason)).toEqual(['offline', 'unsupported']);
   });
 
+  test('marks secondary SIMs ineligible with the secondary reason', () => {
+    const plan = buildBalanceQueryPlan({
+      phones: [
+        { ...phone, iccid: 'primary-card', sim_role: 'primary' },
+        { ...phone, iccid: 'secondary-card', sim_role: 'secondary' },
+        { ...phone, iccid: 'standalone-card', sim_role: 'standalone' },
+        { ...phone, sim_role: undefined },
+      ],
+      profiles: [enabledProfile],
+    });
+    expect(plan[0]).toMatchObject({ eligible: true, reason: null });
+    expect(plan[1]).toMatchObject({ eligible: false, reason: 'secondary' });
+    expect(plan[2]).toMatchObject({ eligible: true, reason: null });
+    expect(plan[3]).toMatchObject({ eligible: true, reason: null });
+  });
+
   test('queues only the explicitly confirmed batch method categories', () => {
     const plan = [
       { eligible: true, profile: { method: 'sms', skill_config: null }, phone: { iccid: 'direct' } },
