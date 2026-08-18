@@ -515,22 +515,21 @@
         </div>
       </section>
 
-      <section class="hidden lg:grid grid-cols-5 border-b border-stone-100" aria-label="余额状态汇总（桌面）">
-        {#each summaryItems as [value, label], index}
+      <section class="hidden lg:flex items-center gap-2 px-5 py-2.5 border-b border-stone-100" aria-label="余额状态汇总（桌面）">
+        {#each summaryItems as [value, label]}
           {@const meta = BALANCE_HEALTH_META[value]}
           <button
             type="button"
             onclick={() => { statusFilter = statusFilter === value ? 'all' : value; }}
             aria-pressed={statusFilter === value}
-            class="min-w-0 px-2 py-3 lg:px-5 lg:py-4 text-left transition-colors
-              {index < summaryItems.length - 1 ? 'border-r border-stone-100' : ''}
-              {statusFilter === value ? 'bg-stone-50' : 'hover:bg-stone-50/70'}"
+            class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs transition-colors
+              {statusFilter === value
+                ? 'bg-stone-800 border-stone-800 text-white'
+                : 'bg-white border-stone-200 text-stone-600 hover:border-stone-300 hover:bg-stone-50'}"
           >
-            <span class="flex items-center gap-1.5 text-[10px] lg:text-xs text-stone-500 truncate">
-              <span class="w-1.5 h-1.5 rounded-full shrink-0 {meta.dotClass}"></span>
-              <span class="truncate">{label}</span>
-            </span>
-            <strong class="block mt-1 text-lg lg:text-2xl font-semibold text-stone-900 tabular-nums">{counts[value]}</strong>
+            <span class="w-1.5 h-1.5 rounded-full shrink-0 {statusFilter === value ? 'bg-white/80' : meta.dotClass}"></span>
+            <span>{label}</span>
+            <strong class="font-mono tabular-nums {statusFilter === value ? 'text-white' : 'text-stone-900'}">{counts[value]}</strong>
           </button>
         {/each}
       </section>
