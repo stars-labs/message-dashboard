@@ -78,6 +78,22 @@
   // status filter that excludes the primary renders an orphan secondary at
   // depth 0 rather than hiding it.
   let groupedRows = $derived(groupByPrimary(filteredRows, (row) => row.phone));
+  // Map of primary_iccid -> its row, for the "余额随主卡 → NN" pointer on
+  // secondary rows. Built from filteredRows (pre-grouping) so the primary is
+  // found even though grouping re-orders rows. Absent when the primary has
+  // been filtered out (orphan secondary).
+  let primaryRowByIccid = $derived.by(() => {
+    const map = new Map();
+    for (const row of filteredRows) {
+      if (row.phone.sim_role === 'primary') map.set(row.phone.iccid, row);
+    }
+    return map;
+  });
+  // Resolve the primary row for a secondary; null if orphaned.
+  function primaryOf(row) {
+    const iccid = row.phone.primary_iccid;
+    return iccid ? primaryRowByIccid.get(iccid) ?? null : null;
+  }
   let selectedIccidSet = $derived(new Set(selectedIccids));
   let filteredIccids = $derived(filteredRows.map((row) => row.phone.iccid));
   let allFilteredSelected = $derived(filteredIccids.length > 0
@@ -648,15 +664,34 @@
                     </span>
                   </td>
                   <td class="px-4 py-3 whitespace-nowrap font-semibold tabular-nums {row.health === 'low' ? 'text-red-700' : 'text-stone-900'}">
-                    {formatBalanceMetric(row.balanceMetric)}
+                    {#if row.__isSecondary}
+                      {@const primary = primaryOf(row)}
+                      <span class="text-xs font-normal text-stone-400">
+                        {primary
+                          ? `余额随主卡 → ${formatCardNumber(primary.phone.sim_index)}`
+                          : '余额随主卡'}
+                      </span>
+                    {:else}
+                      {formatBalanceMetric(row.balanceMetric)}
+                    {/if}
                   </td>
                   <td class="px-4 py-3 whitespace-nowrap">
-                    <span class="inline-flex px-2 py-0.5 rounded-md border text-[11px] font-medium {row.healthMeta.className}">{row.healthMeta.label}</span>
+                    {#if row.__isSecondary}
+                      <span class="text-stone-300">—</span>
+                    {:else}
+                      <span class="inline-flex px-2 py-0.5 rounded-md border text-[11px] font-medium {row.healthMeta.className}">{row.healthMeta.label}</span>
+                    {/if}
                   </td>
-                  <td class="px-4 py-3 whitespace-nowrap font-mono text-xs text-stone-500">{formatThreshold(row.threshold)}</td>
-                  <td class="px-4 py-3 whitespace-nowrap font-mono text-xs text-stone-500">{formatTime(row.balanceTimestamp, true)}</td>
+                  <td class="px-4 py-3 whitespace-nowrap font-mono text-xs text-stone-500">
+                    {row.__isSecondary ? '—' : formatThreshold(row.threshold)}
+                  </td>
+                  <td class="px-4 py-3 whitespace-nowrap font-mono text-xs text-stone-500">
+                    {row.__isSecondary ? '—' : formatTime(row.balanceTimestamp, true)}
+                  </td>
                   <td class="px-4 py-3 whitespace-nowrap">
-                    {#if row.latestCheck}
+                    {#if row.__isSecondary}
+                      <span class="text-stone-300">—</span>
+                    {:else if row.latestCheck}
                       {@const queryMeta = getBalanceStatusMeta(row.latestCheck.display_status || row.latestCheck.status)}
                       <span class="text-xs text-stone-600">{queryMeta.label}</span>
                       <span class="ml-1 text-[10px] uppercase text-stone-400">{row.latestCheck.method || ''}</span>
@@ -705,15 +740,28 @@
                   <span class="font-mono font-bold text-sm text-stone-900 shrink-0">{formatCardNumber(row.phone.sim_index)}</span>
                   <span class="font-mono text-xs text-stone-600 truncate">{row.phone.number || row.phone.phone_number || '未设置号码'}</span>
                 </button>
-                <span class="ml-auto inline-flex px-2 py-0.5 rounded-md border text-[10px] font-medium shrink-0 {row.healthMeta.className}">{row.healthMeta.label}</span>
+                {#if row.__isSecondary}
+                  <span class="ml-auto inline-flex px-1.5 py-0.5 rounded border text-[10px] font-medium shrink-0 bg-violet-50 text-violet-700 border-violet-200">副卡</span>
+                {:else}
+                  <span class="ml-auto inline-flex px-2 py-0.5 rounded-md border text-[10px] font-medium shrink-0 {row.healthMeta.className}">{row.healthMeta.label}</span>
+                {/if}
               </div>
               <div class="mt-1.5 flex items-center gap-2 min-w-0">
                 <div class="min-w-0 flex-1 flex items-baseline gap-2">
-                  <strong class="text-base leading-tight font-semibold tabular-nums truncate {row.health === 'low' ? 'text-red-700' : 'text-stone-900'}">{formatBalanceMetric(row.balanceMetric)}</strong>
-                  <span class="text-[11px] text-stone-400 truncate shrink">{row.phone.flag || getCountryFlag(row.phone.country)} {row.phone.carrier || '—'}</span>
-                  <span class="text-[10px] text-stone-400 shrink-0">· {getSimServiceTypeLabel(row.phone.service_type)}</span>
-                  {#if row.balanceTimestamp}
-                    <span class="hidden min-[390px]:inline ml-auto font-mono text-[10px] text-stone-400 shrink-0">{formatTime(row.balanceTimestamp, true)}</span>
+                  {#if row.__isSecondary}
+                    {@const primary = primaryOf(row)}
+                    <span class="text-sm text-stone-400">
+                      {primary
+                        ? `余额随主卡 → ${formatCardNumber(primary.phone.sim_index)}`
+                        : '余额随主卡'}
+                    </span>
+                  {:else}
+                    <strong class="text-base leading-tight font-semibold tabular-nums truncate {row.health === 'low' ? 'text-red-700' : 'text-stone-900'}">{formatBalanceMetric(row.balanceMetric)}</strong>
+                    <span class="text-[11px] text-stone-400 truncate shrink">{row.phone.flag || getCountryFlag(row.phone.country)} {row.phone.carrier || '—'}</span>
+                    <span class="text-[10px] text-stone-400 shrink-0">· {getSimServiceTypeLabel(row.phone.service_type)}</span>
+                    {#if row.balanceTimestamp}
+                      <span class="hidden min-[390px]:inline ml-auto font-mono text-[10px] text-stone-400 shrink-0">{formatTime(row.balanceTimestamp, true)}</span>
+                    {/if}
                   {/if}
                 </div>
                 {#if canQueryBalances}

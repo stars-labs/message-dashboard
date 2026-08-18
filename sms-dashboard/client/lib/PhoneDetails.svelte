@@ -113,31 +113,6 @@
     </header>
 
     <div class="flex-1 min-h-0 overflow-y-auto">
-      <div class="grid grid-cols-2 xl:grid-cols-4 border-b border-stone-100 bg-stone-50/50">
-        <div class="px-4 py-3 border-r border-b xl:border-b-0 border-stone-100 min-w-0">
-          <p class="text-[11px] text-stone-400 mb-1">手机号</p>
-          <p class="text-sm font-medium text-stone-800 truncate" title={phone.number || '未设置'}>
-            {phone.number || '未设置'}
-          </p>
-        </div>
-        <div class="px-4 py-3 border-b xl:border-b-0 xl:border-r border-stone-100 min-w-0">
-          <p class="text-[11px] text-stone-400 mb-1">运营商</p>
-          <p class="text-sm font-medium text-stone-800 truncate" title={carrier}>{carrier}</p>
-        </div>
-        <div class="px-4 py-3 border-r border-stone-100 min-w-0">
-          <p class="text-[11px] text-stone-400 mb-1">国家 / 地区</p>
-          <p class="text-sm font-medium text-stone-800 truncate" title={phone.country || '—'}>
-            {phone.flag || ''} {phone.country || '—'}
-          </p>
-        </div>
-        <div class="px-4 py-3 min-w-0">
-          <p class="text-[11px] text-stone-400 mb-1">最后更新</p>
-          <p class="text-sm font-medium text-stone-800 tabular-nums">
-            {formatUpdatedAt(phone.updated_at || phone.lastActive)}
-          </p>
-        </div>
-      </div>
-
       <dl class="grid grid-cols-1 xl:grid-cols-2 gap-x-8 gap-y-3 px-4 py-3 text-xs">
         <div class="grid grid-cols-[88px_minmax(0,1fr)] items-baseline gap-3 min-w-0">
           <dt class="text-stone-400">ICCID</dt>
@@ -146,6 +121,14 @@
         <div class="grid grid-cols-[88px_minmax(0,1fr)] items-baseline gap-3 min-w-0">
           <dt class="text-stone-400">IMEI</dt>
           <dd class="font-mono text-stone-700 truncate" title={phone.imei || '—'}>{phone.imei || '—'}</dd>
+        </div>
+        <div class="grid grid-cols-[88px_minmax(0,1fr)] items-baseline gap-3 min-w-0">
+          <dt class="text-stone-400">运营商</dt>
+          <dd class="text-stone-700 truncate" title={carrier}>{carrier}</dd>
+        </div>
+        <div class="grid grid-cols-[88px_minmax(0,1fr)] items-baseline gap-3 min-w-0">
+          <dt class="text-stone-400">最后更新</dt>
+          <dd class="text-stone-700 tabular-nums">{formatUpdatedAt(phone.updated_at || phone.lastActive)}</dd>
         </div>
         <div class="grid grid-cols-[88px_minmax(0,1fr)] items-baseline gap-3 min-w-0">
           <dt class="text-stone-400">模块</dt>
