@@ -189,7 +189,7 @@
       );
     }
 
-    mappings = filtered.slice().sort((a, b) => {
+    const sorted = filtered.slice().sort((a, b) => {
       if (sortKey) {
         const comparison = compareValues(sortValue(a, sortKey), sortValue(b, sortKey));
         if (comparison !== 0) return sortDirection === 'asc' ? comparison : -comparison;
@@ -201,6 +201,24 @@
       }
       return (a.sim_index ?? 999) - (b.sim_index ?? 999);
     });
+
+    // Group secondaries immediately after their primary
+    const grouped = [];
+    const secondariesByPrimary = new Map();
+    for (const m of sorted) {
+      if (m.sim_role === 'secondary' && m.primary_iccid) {
+        const list = secondariesByPrimary.get(m.primary_iccid) ?? [];
+        list.push(m);
+        secondariesByPrimary.set(m.primary_iccid, list);
+      }
+    }
+    for (const m of sorted) {
+      if (m.sim_role === 'secondary') continue; // will be inserted after primary
+      grouped.push(m);
+      const children = secondariesByPrimary.get(m.iccid);
+      if (children) grouped.push(...children);
+    }
+    mappings = grouped;
   }
 
   $effect(() => {
@@ -366,12 +384,23 @@
             {@const meta = getStatusMeta(m.is_active)}
             {@const anomalous = isAnomalous(m.is_active)}
             {@const pos = getModemPosition(m)}
-            <tr class="hover:bg-stone-50 transition-colors {anomalous ? meta.rowClass : ''}">
+            {@const isSecondary = m.sim_role === 'secondary'}
+            {@const primarySim = isSecondary ? allMappingsCache.find(p => p.iccid === m.primary_iccid) : null}
+            <tr class="hover:bg-stone-50 transition-colors {anomalous ? meta.rowClass : ''} {isSecondary ? 'bg-stone-50/60' : ''}">
               <!-- 卡号 -->
-              <td class="px-3 py-2.5">
-                <span class="font-mono font-semibold tabular-nums text-sm text-stone-900">
-                  {formatCardNumber(m.sim_index)}
-                </span>
+              <td class="py-2.5 {isSecondary ? 'pl-7 pr-3' : 'px-3'}">
+                {#if isSecondary}
+                  <div class="flex items-center gap-1.5">
+                    <span class="text-stone-300 text-xs shrink-0">└</span>
+                    <span class="font-mono font-semibold tabular-nums text-sm text-stone-700">
+                      {formatCardNumber(m.sim_index)}
+                    </span>
+                  </div>
+                {:else}
+                  <span class="font-mono font-semibold tabular-nums text-sm text-stone-900">
+                    {formatCardNumber(m.sim_index)}
+                  </span>
+                {/if}
               </td>
               <!-- 号码 -->
               <td class="px-3 py-2.5 font-mono text-sm text-stone-800 whitespace-nowrap">
