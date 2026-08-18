@@ -52,6 +52,17 @@ function timestampValue(check) {
   return Number.isFinite(time) ? time : 0;
 }
 
+// Cancellations and superseded jobs are operational noise — not real query failures.
+// They should not make a SIM appear as "查询失败" when no balance was ever obtained.
+function isCancelledCheck(check) {
+  const err = check?.error || '';
+  return (
+    err.startsWith('Cancelled') ||
+    err.startsWith('Manually cancelled') ||
+    err.startsWith('Superseded')
+  );
+}
+
 export function getBalanceThreshold(phone, metric = null) {
   const currency = metric?.currency || COUNTRY_CURRENCIES[phone?.country] || null;
   // Per-SIM override wins; empty falls back to the currency default.
@@ -78,7 +89,12 @@ export function buildBalanceRows(phones = [], checks = [], now = new Date()) {
     const phoneChecks = (checksByIccid.get(phone.iccid) || [])
       .slice()
       .sort((a, b) => timestampValue(b) - timestampValue(a));
+    // Use the newest non-cancelled check for health classification so that
+    // operational cancellations (rate-limit holds, triggered-in-error batches)
+    // don't permanently mark a SIM as 查询失败 when no balance was ever obtained.
     const latestCheck = phoneChecks[0] || null;
+    const latestSignificantCheck =
+      phoneChecks.find((check) => !isCancelledCheck(check)) || null;
     const balanceCheck = phoneChecks.find((check) => getCashBalance(check)) || null;
     const balanceMetric = getCashBalance(balanceCheck);
     const threshold = getBalanceThreshold(phone, balanceMetric);
@@ -91,7 +107,7 @@ export function buildBalanceRows(phones = [], checks = [], now = new Date()) {
     let health = 'normal';
     if (phone.sim_role === 'secondary') {
       health = 'unknown';
-    } else if (latestCheck && ['failed', 'timed_out'].includes(latestCheck.status)) {
+    } else if (latestSignificantCheck && ['failed', 'timed_out'].includes(latestSignificantCheck.status)) {
       health = 'failed';
     } else if (!balanceMetric) {
       health = 'unknown';
@@ -104,7 +120,7 @@ export function buildBalanceRows(phones = [], checks = [], now = new Date()) {
     return {
       phone,
       checks: phoneChecks,
-      latestCheck,
+      latestCheck: latestSignificantCheck,
       balanceCheck,
       balanceMetric,
       balanceTimestamp,

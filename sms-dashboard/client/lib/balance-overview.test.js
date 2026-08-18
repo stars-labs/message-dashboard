@@ -77,4 +77,28 @@ describe('balance overview', () => {
     expect(row.balanceMetric.value).toBe(264.33);
     expect(row.latestCheck.status).toBe('failed');
   });
+
+  test('cancelled checks are ignored for health — SIM falls back to unknown instead of failed', () => {
+    const checks = [
+      { ...check('cn1', 'failed', null, null, '2026-08-14 07:30:00'), error: 'Manually cancelled: Unicom rate limit in effect' },
+      { ...check('cn1', 'failed', null, null, '2026-08-14 07:00:00'), error: 'Cancelled: China Unicom batch was triggered in error' },
+    ];
+    const [row] = buildBalanceRows([phone('cn1', 'CN')], checks, now);
+
+    expect(row.health).toBe('unknown');
+    // latestCheck should be null — all checks were cancelled
+    expect(row.latestCheck).toBeNull();
+  });
+
+  test('cancelled check does not shadow a real earlier failure', () => {
+    const checks = [
+      { ...check('cn1', 'failed', null, null, '2026-08-14 08:00:00'), error: 'Cancelled: triggered in error' },
+      check('cn1', 'failed', null, null, '2026-08-14 07:00:00'),
+    ];
+    const [row] = buildBalanceRows([phone('cn1', 'CN')], checks, now);
+
+    // The non-cancelled failed check should still drive health = 'failed'
+    expect(row.health).toBe('failed');
+    expect(row.latestCheck.status).toBe('failed');
+  });
 });
