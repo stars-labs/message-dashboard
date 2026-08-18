@@ -14,7 +14,7 @@ log.initialize();
 log.transports.file.level = 'debug';
 log.transports.console.level = 'warn';
 // Catch any uncaught exceptions / unhandled rejections before app is ready.
-log.catchErrors({ showDialog: false });
+log.errorHandler.startCatching({ showDialog: false });
 
 const gotLock = app.requestSingleInstanceLock();
 
