@@ -655,31 +655,40 @@ describe('balance reply correlation', () => {
     ]);
   });
 
-  test('parses China Telecom available balance instead of total or prepaid balance', () => {
+  test('parses China Telecom total balance (当前号码总余额) when present', () => {
+    // The full SMS format reports both 可用余额 and 总余额; we take 总余额 (263.36)
+    // as it is the canonical account total shown in the Telecom app.
     expect(parseBalanceMetrics(
       'cn-telecom-balance-v1',
-      '【中国电信】您的手机账户当前可用余额为86.36元，当前号码总余额为263.36元，预存费用余额为263.36元。',
+      '【中国电信】尊敬的孙*客户：截止至8月18日，您的手机账户当前可用余额为86.36元，当前号码总余额为263.36元，预存费用余额为263.36元，赠送费用余额为0.00元。感谢您的使用！',
     )).toEqual([{
       metric_type: 'cash_balance',
-      value: 86.36,
+      value: 263.36,
       unit: null,
       currency: 'CNY',
       expires_at: null,
     }]);
   });
 
-  test('parses China Telecom general balance without treating charges as balance', () => {
+  test('falls back to 当前可用余额 when 总余额 is absent', () => {
+    expect(parseBalanceMetrics(
+      'cn-telecom-balance-v1',
+      '【中国电信】您的手机账户当前可用余额为86.36元。',
+    )[0]?.value).toBe(86.36);
+  });
+
+  test('parses China Telecom general balance (当前号码通用余额) without treating charges as balance', () => {
     expect(parseBalanceMetrics(
       'cn-telecom-balance-v1',
       '当前号码通用余额为140.76元，本月已产生费用149.00元。',
     )[0]?.value).toBe(140.76);
   });
 
-  test('leaves ambiguous China Telecom totals for the skill runner', () => {
+  test('parses China Telecom SMS with only 总余额 and no 可用余额', () => {
     expect(parseBalanceMetrics(
       'cn-telecom-balance-v1',
       '当前号码总余额为263.36元，预存费用余额为263.36元。',
-    )).toEqual([]);
+    )[0]?.value).toBe(263.36);
   });
 
   test('queues the discovered 101 command from the second-level menu', async () => {

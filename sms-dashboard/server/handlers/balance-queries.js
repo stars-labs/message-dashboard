@@ -262,7 +262,13 @@ export function parseBalanceMetrics(parserVersion, content) {
   if (typeof content !== 'string') return [];
 
   if (parserVersion === 'cn-telecom-balance-v1') {
+    // Prefer 当前号码总余额 (total account balance) over 当前可用余额 (available
+    // balance). The SMS reports both; 总余额 includes prepaid amounts and is
+    // the canonical figure displayed in the Telecom app.
+    // Fall back to 当前号码通用余额 for older SMS formats that omit 总余额.
     const cashMatch = content.match(
+      /当前号码总余额(?:为|是)?[：:\s]*([0-9]+(?:\.[0-9]{1,2})?)\s*元/
+    ) || content.match(
       /(?:当前可用余额|当前号码通用余额)(?:为|是)?[：:\s]*([0-9]+(?:\.[0-9]{1,2})?)\s*元/
     );
     if (!cashMatch) return [];
