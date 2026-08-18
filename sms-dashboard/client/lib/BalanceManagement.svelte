@@ -497,7 +497,7 @@
             <button
               type="button"
               onclick={() => { statusFilter = value; }}
-              class="shrink-0 px-2.5 py-1.5 text-xs rounded-lg font-medium transition-colors
+              class="shrink-0 px-2.5 py-1.5 text-sm rounded-lg font-medium transition-colors
                 {statusFilter === value
                   ? value === 'low' || value === 'failed'
                     ? 'bg-red-600 text-white'
@@ -513,7 +513,7 @@
             value={carrierFilter}
             onchange={(event) => { carrierFilter = event.currentTarget.value; }}
             aria-label="运营商筛选"
-            class="shrink-0 w-[130px] px-2.5 py-2 text-sm bg-stone-50 border border-stone-200 rounded-lg
+            class="shrink-0 w-[130px] px-2.5 py-1.5 text-sm bg-stone-50 border border-stone-200 rounded-lg
               focus:outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
           >
             <option value="all">全部运营商</option>
@@ -531,7 +531,7 @@
               type="search"
               aria-label="搜索 SIM"
               placeholder="卡号 / 手机号 / ICCID"
-              class="w-full pl-9 pr-3 py-2 text-sm bg-stone-50 border border-stone-200 rounded-lg
+              class="w-full pl-9 pr-3 py-1.5 text-sm bg-stone-50 border border-stone-200 rounded-lg
                 focus:outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
             />
           </div>
@@ -540,7 +540,7 @@
         <div class="ml-auto flex items-center gap-2 shrink-0 pl-4">
           {#each summaryItems as [value, label]}
             {@const meta = BALANCE_HEALTH_META[value]}
-            <span class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border text-xs bg-white border-stone-200 text-stone-600">
+            <span class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border text-sm bg-white border-stone-200 text-stone-600">
               <span class="w-1.5 h-1.5 rounded-full shrink-0 {meta.dotClass}"></span>
               <span>{label}</span>
               <strong class="font-mono tabular-nums text-stone-900">{counts[value]}</strong>
