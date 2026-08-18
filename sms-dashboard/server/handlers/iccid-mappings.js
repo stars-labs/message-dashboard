@@ -325,7 +325,7 @@ export const iccidMappingsHandler = {
             updated_at, updated_by
           )
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,
-            CASE WHEN ? = 'unknown' THEN NULL ELSE CURRENT_TIMESTAMP END,
+            CASE WHEN ? = 'unknown' OR ? = 'n/a' THEN NULL ELSE CURRENT_TIMESTAMP END,
             ?, ?, ?,
             CURRENT_TIMESTAMP, ?)
         `).bind(
@@ -338,6 +338,7 @@ export const iccidMappingsHandler = {
           notes || null,
           service.serviceType,
           service.serviceTypeSource,
+          service.serviceType,
           service.serviceType,
           role.role,
           role.primaryIccid,
@@ -352,7 +353,7 @@ export const iccidMappingsHandler = {
               service_type = ?, service_type_source = ?,
               service_type_verified_at = CASE
                 WHEN ? = 0 THEN service_type_verified_at
-                WHEN ? = 'unknown' THEN NULL
+                WHEN ? = 'unknown' OR ? = 'n/a' THEN NULL
                 ELSE CURRENT_TIMESTAMP
               END,
               sim_role = ?,
@@ -370,6 +371,7 @@ export const iccidMappingsHandler = {
           service.serviceType,
           service.serviceTypeSource,
           service.serviceTypeProvided ? 1 : 0,
+          service.serviceType,
           service.serviceType,
           role.role,
           role.primaryIccid,
@@ -461,7 +463,7 @@ export const iccidMappingsHandler = {
           service_type_source = ?,
           service_type_verified_at = CASE
             WHEN ? = 0 THEN service_type_verified_at
-            WHEN ? = 'unknown' THEN NULL
+            WHEN ? = 'unknown' OR ? = 'n/a' THEN NULL
             ELSE CURRENT_TIMESTAMP
           END,
           sim_role = ?,
@@ -480,6 +482,7 @@ export const iccidMappingsHandler = {
         service.serviceType,
         service.serviceTypeSource,
         service.serviceTypeProvided ? 1 : 0,
+        service.serviceType,
         service.serviceType,
         role.role,
         role.primaryIccid,
@@ -632,7 +635,7 @@ export const iccidMappingsHandler = {
                 service_type_source = ?,
                 service_type_verified_at = CASE
                   WHEN ? = 0 THEN service_type_verified_at
-                  WHEN ? = 'unknown' THEN NULL
+                  WHEN ? = 'unknown' OR ? = 'n/a' THEN NULL
                   ELSE CURRENT_TIMESTAMP
                 END,
                 sim_role = ?,
@@ -651,6 +654,7 @@ export const iccidMappingsHandler = {
               service.serviceTypeSource,
               service.serviceTypeProvided ? 1 : 0,
               service.serviceType,
+              service.serviceType,
               role.role,
               role.primaryIccid,
               user?.email || 'system',
@@ -667,7 +671,7 @@ export const iccidMappingsHandler = {
                 updated_at, updated_by
               )
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,
-                CASE WHEN ? = 'unknown' THEN NULL ELSE CURRENT_TIMESTAMP END,
+                CASE WHEN ? = 'unknown' OR ? = 'n/a' THEN NULL ELSE CURRENT_TIMESTAMP END,
                 ?, ?,
                 CURRENT_TIMESTAMP, ?)
             `).bind(
@@ -680,6 +684,7 @@ export const iccidMappingsHandler = {
               notes || null,
               service.serviceType,
               service.serviceTypeSource,
+              service.serviceType,
               service.serviceType,
               role.role,
               role.primaryIccid,
