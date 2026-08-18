@@ -1,6 +1,6 @@
 # Repository Agent Guide
 
-> Distributed SMS management system for 100+ USB modems — Orange Pi Rust daemon → Cloudflare Workers API → Svelte 5 dashboard, with automated carrier balance queries via SMS AI and browser automation.
+> Multi-node SMS management platform for 100+ USB modems — Orange Pi Rust daemon → Cloudflare Workers API → Svelte 5 dashboard, with automated carrier balance queries via SMS AI and browser automation.
 
 This file applies to the entire repository. It is the normative operating guide
 for coding agents. `CLAUDE.md` contains deeper hardware history and diagnostics;
