@@ -123,6 +123,7 @@
   const overviewColumns = [
     { key: 'sim', label: 'SIM' },
     { key: 'carrier', label: '运营商' },
+    { key: 'sim_role', label: '主副卡' },
     { key: 'service_type', label: '计费类型' },
     { key: 'balance', label: '当前余额' },
     { key: 'health', label: '状态' },
@@ -594,22 +595,29 @@
                         class="rounded border-stone-300 text-orange-500 focus:ring-orange-400 disabled:opacity-40">
                     </td>
                   {/if}
-                  <td class="px-4 py-3 min-w-[210px]">
+                  <td class="px-4 py-3 min-w-[180px]">
                     <div class="flex items-baseline gap-2">
                       <span class="font-mono font-bold text-stone-900">{formatCardNumber(row.phone.sim_index)}</span>
                       <span class="font-mono text-xs text-stone-600">{row.phone.number || row.phone.phone_number || '未设置号码'}</span>
-                      {#if row.phone.sim_role === 'secondary'}
-                        <span class="inline-flex px-1.5 py-0.5 rounded border text-[10px] bg-violet-50 text-violet-700 border-violet-200"
-                          title="副卡,余额随主卡查询">副卡</span>
-                      {:else if row.phone.sim_role === 'primary'}
-                        <span class="inline-flex px-1.5 py-0.5 rounded border text-[10px] bg-blue-50 text-blue-700 border-blue-200"
-                          title="主卡">主卡</span>
-                      {/if}
                     </div>
                     <div class="mt-0.5 font-mono text-[10px] text-stone-400">{row.phone.iccid}</div>
                   </td>
                   <td class="px-4 py-3 whitespace-nowrap text-stone-600">
                     <span class="mr-1">{row.phone.flag || getCountryFlag(row.phone.country)}</span>{row.phone.carrier || '—'}
+                  </td>
+                  <!-- 主副卡 -->
+                  <td class="px-4 py-3 whitespace-nowrap">
+                    {#if row.phone.sim_role === 'secondary'}
+                      {@const primary = primaryOf(row)}
+                      <span class="inline-flex px-1.5 py-0.5 rounded border text-[10px] bg-violet-50 text-violet-700 border-violet-200"
+                        title={primary ? `余额随主卡 → ${formatCardNumber(primary.phone.sim_index)}` : '副卡'}>
+                        副卡{primary ? ` → ${formatCardNumber(primary.phone.sim_index)}` : ''}
+                      </span>
+                    {:else if row.phone.sim_role === 'primary'}
+                      <span class="inline-flex px-1.5 py-0.5 rounded border text-[10px] bg-blue-50 text-blue-700 border-blue-200">主卡</span>
+                    {:else}
+                      <span class="text-stone-300">—</span>
+                    {/if}
                   </td>
                   <td class="px-4 py-3 whitespace-nowrap">
                     <span class="inline-flex px-2 py-0.5 rounded-md border text-[11px]
@@ -623,12 +631,7 @@
                   </td>
                   <td class="px-4 py-3 whitespace-nowrap font-semibold tabular-nums {row.health === 'low' ? 'text-red-700' : 'text-stone-900'}">
                     {#if row.__isSecondary}
-                      {@const primary = primaryOf(row)}
-                      <span class="text-xs font-normal text-stone-400">
-                        {primary
-                          ? `余额随主卡 → ${formatCardNumber(primary.phone.sim_index)}`
-                          : '余额随主卡'}
-                      </span>
+                      <span class="text-xs font-normal text-stone-400">余额随主卡</span>
                     {:else}
                       {formatBalanceMetric(row.balanceMetric)}
                     {/if}
