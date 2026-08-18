@@ -721,7 +721,7 @@
           </div>
 
           {#if panel.formData.sim_role === 'secondary'}
-            <div>
+            <div class="col-span-2">
               <label for="mapping-primary-iccid" class="block text-xs font-semibold text-stone-500 mb-1 tracking-wide uppercase">主卡 ICCID</label>
               <select id="mapping-primary-iccid" bind:value={panel.formData.primary_iccid} required
                 class="w-full px-3 py-2 text-sm border border-stone-300 rounded-lg bg-white
