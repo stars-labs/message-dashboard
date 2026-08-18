@@ -278,8 +278,8 @@ Release policy:
 
 ## Documentation Discipline
 
-- Keep `AGENTS.md`, `CLAUDE.md`, and the relevant architecture/operation document
-  aligned when contracts change.
+- Keep `AGENTS.md` and the relevant architecture/operation document aligned when
+  contracts change.
 - Treat dated fleet counts and USB measurements as historical snapshots, not live
   truth. Query production when current state matters and label the observation date.
 - Document commands that actually exist. Mark planned flake outputs and release
