@@ -6,6 +6,7 @@
   import { api } from './api.js';
   import { getSimServiceTypeLabel } from './sim-service-type.js';
   import { getSimRoleLabel } from './sim-role.js';
+  import { groupByPrimary } from './group-by-primary.js';
   import {
     formatBalanceMetric,
     getBalanceStatusMeta,
@@ -72,6 +73,11 @@
       })
       .sort(compareOverviewRows);
   });
+  // Re-order the filtered rows so each secondary sits under its primary, with
+  // a depth marker for indentation. Applied after filtering so a carrier or
+  // status filter that excludes the primary renders an orphan secondary at
+  // depth 0 rather than hiding it.
+  let groupedRows = $derived(groupByPrimary(filteredRows, (row) => row.phone));
   let selectedIccidSet = $derived(new Set(selectedIccids));
   let filteredIccids = $derived(filteredRows.map((row) => row.phone.iccid));
   let allFilteredSelected = $derived(filteredIccids.length > 0
@@ -603,10 +609,10 @@
               </tr>
             </thead>
             <tbody class="divide-y divide-stone-50">
-              {#each filteredRows as row}
-                <tr class="hover:bg-stone-50 transition-colors">
+              {#each groupedRows as row}
+                <tr class="hover:bg-stone-50 transition-colors {row.__isSecondary ? 'bg-stone-50/60' : ''}">
                   {#if canQueryBalances}
-                    <td class="w-12 px-4 py-3">
+                    <td class="w-12 px-4 py-3" style="padding-left: {row.__depth * 1.25 + 1}rem">
                       <input type="checkbox" checked={selectedIccidSet.has(row.phone.iccid)}
                         disabled={row.phone.sim_role === 'secondary'}
                         aria-label={`选择 ${formatCardNumber(row.phone.sim_index)}`}
@@ -633,9 +639,11 @@
                   </td>
                   <td class="px-4 py-3 whitespace-nowrap">
                     <span class="inline-flex px-2 py-0.5 rounded-md border text-[11px]
-                      {row.phone.service_type && row.phone.service_type !== 'unknown'
+                      {row.phone.service_type === 'prepaid' || row.phone.service_type === 'postpaid'
                         ? 'bg-stone-50 text-stone-700 border-stone-200'
-                        : 'bg-amber-50 text-amber-700 border-amber-200'}">
+                        : row.phone.service_type === 'n/a'
+                          ? 'bg-stone-50 text-stone-400 border-stone-200'
+                          : 'bg-amber-50 text-amber-700 border-amber-200'}">
                       {getSimServiceTypeLabel(row.phone.service_type)}
                     </span>
                   </td>
@@ -680,8 +688,10 @@
         </div>
 
         <div class="lg:hidden divide-y divide-stone-100" data-mobile-balance-list>
-          {#each filteredRows as row}
-            <div class="w-full px-4 py-2.5 text-left bg-white" data-mobile-balance-row>
+          {#each groupedRows as row}
+            <div class="w-full px-4 py-2.5 text-left bg-white {row.__isSecondary ? 'bg-stone-50/60' : ''}"
+                 style="padding-left: {row.__depth * 1 + 1}rem"
+                 data-mobile-balance-row>
               <div class="flex items-center gap-2 min-w-0">
                 {#if canQueryBalances}
                   <input type="checkbox" checked={selectedIccidSet.has(row.phone.iccid)}

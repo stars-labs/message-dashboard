@@ -12,6 +12,7 @@
     SIM_SERVICE_TYPE_SOURCES,
   } from "./sim-service-type.js";
   import { SIM_ROLES, getSimRoleLabel } from "./sim-role.js";
+  import { groupByPrimary } from "./group-by-primary.js";
 
   let { initialStatusFilter = "all" } = $props();
 
@@ -202,23 +203,10 @@
       return (a.sim_index ?? 999) - (b.sim_index ?? 999);
     });
 
-    // Group secondaries immediately after their primary
-    const grouped = [];
-    const secondariesByPrimary = new Map();
-    for (const m of sorted) {
-      if (m.sim_role === 'secondary' && m.primary_iccid) {
-        const list = secondariesByPrimary.get(m.primary_iccid) ?? [];
-        list.push(m);
-        secondariesByPrimary.set(m.primary_iccid, list);
-      }
-    }
-    for (const m of sorted) {
-      if (m.sim_role === 'secondary') continue; // will be inserted after primary
-      grouped.push(m);
-      const children = secondariesByPrimary.get(m.iccid);
-      if (children) grouped.push(...children);
-    }
-    mappings = grouped;
+    // Group secondaries immediately after their primary (shared helper).
+    // An orphan secondary (its primary filtered out) renders at depth 0
+    // rather than being dropped — a fix over the prior inline logic.
+    mappings = groupByPrimary(sorted);
   }
 
   $effect(() => {
@@ -428,9 +416,11 @@
               <!-- 计费类型 -->
               <td class="px-3 py-2.5 whitespace-nowrap">
                 <span class="inline-flex px-2 py-0.5 text-[11px] rounded-md border
-                  {m.service_type && m.service_type !== 'unknown'
+                  {m.service_type === 'prepaid' || m.service_type === 'postpaid'
                     ? 'bg-stone-50 text-stone-700 border-stone-200'
-                    : 'bg-amber-50 text-amber-700 border-amber-200'}">
+                    : m.service_type === 'n/a'
+                      ? 'bg-stone-50 text-stone-400 border-stone-200'
+                      : 'bg-amber-50 text-amber-700 border-amber-200'}">
                   {getSimServiceTypeLabel(m.service_type)}
                 </span>
               </td>
@@ -782,7 +772,7 @@
           </button>
           <button onclick={handleSave}
             disabled={!panel.formData.phone_number || !panel.formData.sim_index ||
-              (panel.formData.service_type !== 'unknown' && !panel.formData.service_type_source) ||
+              (panel.formData.service_type !== 'unknown' && panel.formData.service_type !== 'n/a' && !panel.formData.service_type_source) ||
               (panel.mode === 'add' && !panel.formData.iccid)}
             class="px-4 py-2 text-sm font-medium bg-stone-800 text-white rounded-lg
               hover:bg-stone-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
