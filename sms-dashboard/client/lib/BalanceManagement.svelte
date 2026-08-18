@@ -5,6 +5,7 @@
   import { getCountryFlag } from './countries.js';
   import { api } from './api.js';
   import { getSimServiceTypeLabel } from './sim-service-type.js';
+  import { getSimRoleLabel } from './sim-role.js';
   import {
     formatBalanceMetric,
     getBalanceStatusMeta,
@@ -607,15 +608,23 @@
                   {#if canQueryBalances}
                     <td class="w-12 px-4 py-3">
                       <input type="checkbox" checked={selectedIccidSet.has(row.phone.iccid)}
+                        disabled={row.phone.sim_role === 'secondary'}
                         aria-label={`选择 ${formatCardNumber(row.phone.sim_index)}`}
                         onchange={(event) => toggleCardSelection(row.phone.iccid, event.currentTarget.checked)}
-                        class="rounded border-stone-300 text-orange-500 focus:ring-orange-400">
+                        class="rounded border-stone-300 text-orange-500 focus:ring-orange-400 disabled:opacity-40">
                     </td>
                   {/if}
                   <td class="px-4 py-3 min-w-[210px]">
                     <div class="flex items-baseline gap-2">
                       <span class="font-mono font-bold text-stone-900">{formatCardNumber(row.phone.sim_index)}</span>
                       <span class="font-mono text-xs text-stone-600">{row.phone.number || row.phone.phone_number || '未设置号码'}</span>
+                      {#if row.phone.sim_role === 'secondary'}
+                        <span class="inline-flex px-1.5 py-0.5 rounded border text-[10px] bg-violet-50 text-violet-700 border-violet-200"
+                          title="副卡,余额随主卡查询">副卡</span>
+                      {:else if row.phone.sim_role === 'primary'}
+                        <span class="inline-flex px-1.5 py-0.5 rounded border text-[10px] bg-blue-50 text-blue-700 border-blue-200"
+                          title="主卡">主卡</span>
+                      {/if}
                     </div>
                     <div class="mt-0.5 font-mono text-[10px] text-stone-400">{row.phone.iccid}</div>
                   </td>
@@ -653,7 +662,9 @@
                         <button type="button" onclick={() => openRow(row)} class="text-xs font-medium text-stone-500 hover:text-stone-800">查看</button>
                       {/if}
                       {#if canQueryBalances}
-                        <button type="button" onclick={(event) => queryPhone(row, event)} disabled={!!queryingIccid}
+                        <button type="button" onclick={(event) => queryPhone(row, event)}
+                          disabled={!!queryingIccid || row.phone.sim_role === 'secondary'}
+                          title={row.phone.sim_role === 'secondary' ? '副卡,余额随主卡查询' : ''}
                           class="text-xs font-semibold text-action-text hover:underline disabled:text-stone-300 disabled:no-underline">
                           {queryingIccid === row.phone.iccid ? '排队中…' : '查询'}
                         </button>
@@ -674,9 +685,10 @@
               <div class="flex items-center gap-2 min-w-0">
                 {#if canQueryBalances}
                   <input type="checkbox" checked={selectedIccidSet.has(row.phone.iccid)}
+                    disabled={row.phone.sim_role === 'secondary'}
                     aria-label={`选择 ${formatCardNumber(row.phone.sim_index)}（移动端）`}
                     onchange={(event) => toggleCardSelection(row.phone.iccid, event.currentTarget.checked)}
-                    class="rounded border-stone-300 text-orange-500 focus:ring-orange-400 shrink-0">
+                    class="rounded border-stone-300 text-orange-500 focus:ring-orange-400 shrink-0 disabled:opacity-40">
                 {/if}
                 <button type="button" onclick={() => openRow(row)} disabled={!row.latestCheck && !row.balanceCheck}
                   class="flex items-center gap-2 min-w-0 text-left disabled:cursor-default">
@@ -695,7 +707,8 @@
                   {/if}
                 </div>
                 {#if canQueryBalances}
-                  <button type="button" onclick={(event) => queryPhone(row, event)} disabled={!!queryingIccid}
+                  <button type="button" onclick={(event) => queryPhone(row, event)}
+                    disabled={!!queryingIccid || row.phone.sim_role === 'secondary'}
                     aria-label={`查询 ${formatCardNumber(row.phone.sim_index)} 余额`}
                     class="h-8 px-2.5 shrink-0 text-xs font-semibold text-action-text bg-orange-50 rounded-lg active:bg-orange-100 disabled:text-stone-300 disabled:bg-stone-50">
                     {queryingIccid === row.phone.iccid ? '排队中…' : '查询'}
@@ -890,6 +903,9 @@
       <dl class="px-4 py-4 grid grid-cols-[1fr_auto] gap-y-2 text-sm">
         <dt class="text-stone-500">未支持运营商</dt><dd class="font-mono tabular-nums text-stone-700">{batchPreview.summary.unsupported}</dd>
         <dt class="text-stone-500">尚未完成单卡验证</dt><dd class="font-mono tabular-nums text-stone-700">{batchPreview.summary.unverified}</dd>
+        {#if batchPreview.summary.secondary}
+          <dt class="text-stone-500">副卡(余额随主卡)</dt><dd class="font-mono tabular-nums text-stone-700">{batchPreview.summary.secondary}</dd>
+        {/if}
         <dt class="text-stone-500">范围内卡数</dt><dd class="font-mono tabular-nums text-stone-700">{batchPreview.summary.total}</dd>
       </dl>
       <footer class="px-4 py-4 border-t border-stone-100 flex gap-2 justify-end">

@@ -11,6 +11,7 @@
     SIM_SERVICE_TYPES,
     SIM_SERVICE_TYPE_SOURCES,
   } from "./sim-service-type.js";
+  import { SIM_ROLES } from "./sim-role.js";
 
   let { initialStatusFilter = "all" } = $props();
 
@@ -53,6 +54,8 @@
       imei: '',
       service_type: 'unknown',
       service_type_source: '',
+      sim_role: 'standalone',
+      primary_iccid: '',
     };
   }
 
@@ -74,6 +77,8 @@
         imei: mapping.equipment_id || '',
         service_type: mapping.service_type || 'unknown',
         service_type_source: mapping.service_type_source || '',
+        sim_role: mapping.sim_role || 'standalone',
+        primary_iccid: mapping.primary_iccid || '',
       },
     };
   }
@@ -222,6 +227,8 @@
         imei: fd.imei,
         service_type: fd.service_type,
         service_type_source: fd.service_type === 'unknown' ? null : fd.service_type_source,
+        sim_role: fd.sim_role,
+        primary_iccid: fd.sim_role === 'secondary' ? fd.primary_iccid : null,
       };
       if (panel.mode === 'add') {
         const r = await api.iccidMappings.create(payload);
@@ -391,6 +398,15 @@
                     : 'bg-amber-50 text-amber-700 border-amber-200'}">
                   {getSimServiceTypeLabel(m.service_type)}
                 </span>
+                {#if m.sim_role && m.sim_role !== 'standalone'}
+                  <span class="ml-1 inline-flex px-1.5 py-0.5 text-[10px] rounded-md border
+                    {m.sim_role === 'primary'
+                      ? 'bg-blue-50 text-blue-700 border-blue-200'
+                      : 'bg-violet-50 text-violet-700 border-violet-200'}"
+                    title={m.sim_role === 'secondary' ? `副卡 → ${m.primary_iccid || '主卡'}` : '主卡'}>
+                    {m.sim_role === 'primary' ? '主卡' : '副卡'}
+                  </span>
+                {/if}
               </td>
               <!-- 模块位置 (absorbs 设备ID + USB位置 + UP/DOWN) -->
               <td class="px-3 py-2.5 font-mono text-xs text-stone-500 whitespace-nowrap">
@@ -475,6 +491,14 @@
             <span class="{meta.badgeClass.includes('red') ? 'text-red-600' : meta.badgeClass.includes('amber') ? 'text-amber-600' : ''}">{meta.label}</span>
             {#if m.carrier}<span>{getCountryFlag(m.country)} {m.carrier}</span>{/if}
             <span>· {getSimServiceTypeLabel(m.service_type)}</span>
+            {#if m.sim_role && m.sim_role !== 'standalone'}
+              <span class="inline-flex px-1 py-0.5 text-[9px] rounded border
+                {m.sim_role === 'primary'
+                  ? 'bg-blue-50 text-blue-700 border-blue-200'
+                  : 'bg-violet-50 text-violet-700 border-violet-200'}">
+                {m.sim_role === 'primary' ? '主卡' : '副卡'}
+              </span>
+            {/if}
             {#if m.signal_quality != null}<span>· {m.signal_quality}%</span>{/if}
             {#if pos}<span>· {pos.path}{pos.isLastKnown ? '（上次）' : ''}</span>{/if}
           </div>
@@ -623,6 +647,28 @@
               {/each}
             </select>
           </div>
+
+          <!-- 主副卡 -->
+          <div>
+            <label for="mapping-sim-role" class="block text-xs font-semibold text-stone-500 mb-1 tracking-wide uppercase">主副卡</label>
+            <select id="mapping-sim-role" bind:value={panel.formData.sim_role}
+              class="w-full px-3 py-2 text-sm border border-stone-300 rounded-lg bg-white
+                focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100">
+              {#each SIM_ROLES as option}
+                <option value={option.value}>{option.label}</option>
+              {/each}
+            </select>
+          </div>
+
+          {#if panel.formData.sim_role === 'secondary'}
+            <div>
+              <label for="mapping-primary-iccid" class="block text-xs font-semibold text-stone-500 mb-1 tracking-wide uppercase">主卡 ICCID</label>
+              <input id="mapping-primary-iccid" type="text" bind:value={panel.formData.primary_iccid}
+                placeholder="粘贴主卡的 ICCID" required
+                class="w-full px-3 py-2 text-sm border border-stone-300 rounded-lg font-mono
+                  focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100" />
+            </div>
+          {/if}
 
           <p class="col-span-2 -mt-1 text-[11px] text-stone-400">
             系统无法通过 ICCID、网络运营商或余额短信可靠识别；请从运营商账户、客服、合同/账单或明确服务短信确认。

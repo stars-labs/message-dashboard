@@ -2,6 +2,7 @@
   import { api } from "./api";
   import { COUNTRIES, inferCountryFromNumber } from "./countries.js";
   import { SIM_SERVICE_TYPES, SIM_SERVICE_TYPE_SOURCES } from "./sim-service-type.js";
+  import { SIM_ROLES } from "./sim-role.js";
 
   let {
     phone = null,
@@ -19,6 +20,8 @@
   let status = $state("");
   let serviceType = $state("unknown");
   let serviceTypeSource = $state("");
+  let simRole = $state("standalone");
+  let primaryIccid = $state("");
   let saving = $state(false);
   let error = $state(null);
 
@@ -35,6 +38,8 @@
     status = phone.is_active || phone.status || "inactive";
     serviceType = phone.service_type || "unknown";
     serviceTypeSource = phone.service_type_source || "";
+    simRole = phone.sim_role || "standalone";
+    primaryIccid = phone.primary_iccid || "";
     if (!country && phoneNumber) {
       country = inferCountryFromNumber(phoneNumber) || "";
     }
@@ -73,6 +78,8 @@
         notes: notes || null,
         service_type: serviceType,
         service_type_source: serviceType === "unknown" ? null : serviceTypeSource,
+        sim_role: simRole,
+        primary_iccid: simRole === "secondary" ? primaryIccid : null,
         // NO status field - computed dynamically by API
       });
 
@@ -229,6 +236,34 @@
           </select>
           <p class="mt-1 text-xs text-stone-400">只能人工根据运营商账户、客服、合同/账单或明确服务短信确认。</p>
         </div>
+
+        <div>
+          <label for="dialog-sim-role" class="block text-sm font-medium text-stone-500 mb-1">主副卡</label>
+          <select
+            id="dialog-sim-role"
+            bind:value={simRole}
+            class="w-full px-3 py-2 cyber-input"
+          >
+            {#each SIM_ROLES as option}
+              <option value={option.value}>{option.label}</option>
+            {/each}
+          </select>
+          <p class="mt-1 text-xs text-stone-400">中国 SIM 的主副卡关系。副卡余额随主卡,余额查询会跳过副卡。</p>
+        </div>
+
+        {#if simRole === "secondary"}
+          <div>
+            <label for="dialog-primary-iccid" class="block text-sm font-medium text-stone-500 mb-1">主卡 ICCID</label>
+            <input
+              id="dialog-primary-iccid"
+              type="text"
+              bind:value={primaryIccid}
+              placeholder="粘贴主卡的 ICCID"
+              required
+              class="w-full px-3 py-2 cyber-input font-mono text-sm"
+            />
+          </div>
+        {/if}
 
         <div>
           <label
