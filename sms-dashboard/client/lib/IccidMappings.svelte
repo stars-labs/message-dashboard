@@ -13,6 +13,7 @@
   } from "./sim-service-type.js";
   import { SIM_ROLES, getSimRoleLabel } from "./sim-role.js";
   import { groupByPrimary } from "./group-by-primary.js";
+  import { getBalanceThreshold } from "./balance-overview.js";
 
   let { initialStatusFilter = "all" } = $props();
 
@@ -117,6 +118,7 @@
     { key: 'position', label: '模块位置' },
     { key: 'signal_quality', label: '信号' },
     { key: 'is_active', label: '状态' },
+    { key: 'balance_threshold', label: '余额阈值' },
     { key: 'notes', label: '备注' },
     { key: null, label: '操作' },
   ];
@@ -132,7 +134,7 @@
   }
 
   function sortValue(mapping, key) {
-    if (key === 'sim_index' || key === 'signal_quality') return Number(mapping[key]);
+    if (key === 'sim_index' || key === 'signal_quality' || key === 'balance_threshold') return Number(mapping[key]);
     if (key === 'position') return getModemPosition(mapping)?.path || '';
     if (key === 'is_active') return getStatusMeta(mapping.is_active).sortOrder;
     if (key === 'notes') return mapping.notes || mapping.description || '';
@@ -464,6 +466,23 @@
                 <span class="inline-flex px-2 py-0.5 text-[11px] rounded-md font-medium border {meta.badgeClass}">
                   {meta.label}
                 </span>
+              </td>
+              <!-- 余额阈值 — per-SIM override, or muted currency default -->
+              <td class="px-3 py-2.5 font-mono text-xs whitespace-nowrap">
+                {#if m.sim_role === 'secondary'}
+                  <span class="text-stone-300">—</span>
+                {:else}
+                  {@const t = getBalanceThreshold(m)}
+                  {#if t}
+                    {#if m.balance_threshold != null}
+                      <span class="text-stone-800">{t.value} {t.currency}</span>
+                    {:else}
+                      <span class="text-stone-400">{t.value} {t.currency}</span>
+                    {/if}
+                  {:else}
+                    <span class="text-stone-300">—</span>
+                  {/if}
+                {/if}
               </td>
               <!-- 备注 — shows what's wrong for anomalous rows -->
               <td class="px-3 py-2.5 text-xs text-stone-500 max-w-[180px]">
