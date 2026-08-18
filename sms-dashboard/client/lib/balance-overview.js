@@ -54,6 +54,11 @@ function timestampValue(check) {
 
 export function getBalanceThreshold(phone, metric = null) {
   const currency = metric?.currency || COUNTRY_CURRENCIES[phone?.country] || null;
+  // Per-SIM override wins; empty falls back to the currency default.
+  const override = phone?.balance_threshold;
+  if (override != null && override !== '' && Number.isFinite(Number(override))) {
+    return { value: Number(override), currency };
+  }
   const value = currency ? THRESHOLDS[currency] : null;
   return value == null ? null : { value, currency };
 }
@@ -82,8 +87,11 @@ export function buildBalanceRows(phones = [], checks = [], now = new Date()) {
       ? new Date(normalizeUtcTimestamp(balanceTimestamp)).getTime()
       : 0;
 
+    // Secondary SIMs follow their primary's balance — health is not independently meaningful.
     let health = 'normal';
-    if (latestCheck && ['failed', 'timed_out'].includes(latestCheck.status)) {
+    if (phone.sim_role === 'secondary') {
+      health = 'unknown';
+    } else if (latestCheck && ['failed', 'timed_out'].includes(latestCheck.status)) {
       health = 'failed';
     } else if (!balanceMetric) {
       health = 'unknown';

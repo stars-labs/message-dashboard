@@ -55,6 +55,15 @@
   let carrierRows = $derived(rows.filter((row) => carrierFilter === 'all'
     || carrierKey(row.phone.carrier) === carrierFilter));
   let counts = $derived(countBalanceHealth(carrierRows));
+  // Counts live on the filter tabs (device-page pattern) instead of a separate summary bar.
+  let filterTabs = $derived([
+    ['all', '全部', carrierRows.length],
+    ['normal', '正常', counts.normal],
+    ['low', '需充值', counts.low],
+    ['stale', '已过期', counts.stale],
+    ['failed', '失败', counts.failed],
+    ['unknown', '未取得', counts.unknown],
+  ]);
   let filteredRows = $derived.by(() => {
     const query = searchQuery.trim().toLowerCase();
     return carrierRows
@@ -110,14 +119,6 @@
       .filter(Boolean)
       .sort((a, b) => new Date(normalizeUtcTimestamp(b)) - new Date(normalizeUtcTimestamp(a)))[0] || null
   );
-
-  const summaryItems = [
-    ['normal', '正常'],
-    ['low', '需要充值'],
-    ['stale', '数据过期'],
-    ['failed', '查询失败'],
-    ['unknown', '尚未取得'],
-  ];
 
   const overviewColumns = [
     { key: 'sim', label: 'SIM' },
@@ -403,7 +404,7 @@
       parts.push(carrierOptions.find((carrier) => carrier.key === carrierFilter)?.label || '当前运营商');
     }
     if (statusFilter !== 'all') {
-      parts.push(summaryItems.find(([value]) => value === statusFilter)?.[1] || '当前状态');
+      parts.push(BALANCE_HEALTH_META[statusFilter]?.label || '当前状态');
     }
     if (searchQuery.trim()) parts.push(`搜索“${searchQuery.trim()}”`);
     return `${parts.length ? `当前筛选：${parts.join(' · ')}` : '当前全部卡片'}（${count} 张）`;
@@ -489,21 +490,21 @@
     {/if}
 
     {#if activeTab === 'overview'}
-      <!-- Toolbar: [filter tabs] | [carrier] [search] ··· [summary chips right] — one line -->
+      <!-- Toolbar: [filter tabs with counts] | [carrier] [search] — one line -->
       <div class="px-4 py-2.5 lg:px-5 border-b border-stone-100 flex items-center gap-2 overflow-x-auto">
         <div class="flex items-center gap-2 min-w-max shrink-0">
-          <!-- filter tabs -->
-          {#each [['all', '全部'], ['low', '需充值'], ['stale', '已过期'], ['failed', '失败'], ['unknown', '未取得']] as [value, label]}
+          <!-- filter tabs; count follows the label, same as the device page -->
+          {#each filterTabs as [value, label, count]}
             <button
               type="button"
               onclick={() => { statusFilter = value; }}
-              class="shrink-0 px-2.5 py-1.5 text-sm rounded-lg font-medium transition-colors
+              class="shrink-0 px-2.5 py-1.5 text-sm rounded-lg font-medium transition-colors tabular-nums
                 {statusFilter === value
                   ? value === 'low' || value === 'failed'
                     ? 'bg-red-600 text-white'
                     : 'bg-stone-800 text-white'
                   : 'bg-stone-100 text-stone-600 hover:bg-stone-200'}"
-            >{label}</button>
+            >{label} {count}</button>
           {/each}
           <span class="w-px h-5 bg-stone-200 mx-1 shrink-0"></span>
           <!-- carrier select -->
@@ -535,17 +536,6 @@
                 focus:outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
             />
           </div>
-        </div>
-        <!-- summary chips — display only, right-aligned -->
-        <div class="ml-auto flex items-center gap-2 shrink-0 pl-4">
-          {#each summaryItems as [value, label]}
-            {@const meta = BALANCE_HEALTH_META[value]}
-            <span class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border text-sm bg-white border-stone-200 text-stone-600">
-              <span class="w-1.5 h-1.5 rounded-full shrink-0 {meta.dotClass}"></span>
-              <span>{label}</span>
-              <strong class="font-mono tabular-nums text-stone-900">{counts[value]}</strong>
-            </span>
-          {/each}
         </div>
       </div>
 

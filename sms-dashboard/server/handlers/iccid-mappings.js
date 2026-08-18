@@ -12,6 +12,17 @@ export const SIM_ROLES = ['standalone', 'primary', 'secondary'];
 
 const hasOwn = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
 
+/**
+ * Coerce the per-SIM balance threshold from the API payload into a nullable
+ * number. Empty string / null / undefined → null (fall back to the currency
+ * default in the client lib). Non-finite values are also rejected to null.
+ */
+function parseBalanceThreshold(value) {
+  if (value == null || value === '') return null;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
 export function resolveServiceType(data, existing = null) {
   const serviceTypeProvided = hasOwn(data, 'service_type') || hasOwn(data, 'service_type_source');
   const serviceType = hasOwn(data, 'service_type')
@@ -107,6 +118,7 @@ export const iccidMappingsHandler = {
           service_type_verified_at,
           sim_role,
           primary_iccid,
+          balance_threshold,
           equipment_id,
           notes,
           sim_status as is_active,
@@ -281,6 +293,7 @@ export const iccidMappingsHandler = {
         imei,
         notes,
       } = data;
+      const balanceThreshold = parseBalanceThreshold(data.balance_threshold);
 
       if (!iccid || !phone_number || !sim_index) {
         return new Response(JSON.stringify({
@@ -308,12 +321,12 @@ export const iccidMappingsHandler = {
           INSERT INTO sims (
             iccid, sim_index, phone_number, country_code, carrier, imei, notes,
             service_type, service_type_source, service_type_verified_at,
-            sim_role, primary_iccid,
+            sim_role, primary_iccid, balance_threshold,
             updated_at, updated_by
           )
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,
             CASE WHEN ? = 'unknown' THEN NULL ELSE CURRENT_TIMESTAMP END,
-            ?, ?,
+            ?, ?, ?,
             CURRENT_TIMESTAMP, ?)
         `).bind(
           iccid,
@@ -328,6 +341,7 @@ export const iccidMappingsHandler = {
           service.serviceType,
           role.role,
           role.primaryIccid,
+          balanceThreshold,
           user?.email || 'system'
         ).run();
       } else {
@@ -343,6 +357,7 @@ export const iccidMappingsHandler = {
               END,
               sim_role = ?,
               primary_iccid = ?,
+              balance_threshold = ?,
               updated_at = CURRENT_TIMESTAMP, updated_by = ?
           WHERE iccid = ?
         `).bind(
@@ -358,6 +373,7 @@ export const iccidMappingsHandler = {
           service.serviceType,
           role.role,
           role.primaryIccid,
+          balanceThreshold,
           user?.email || 'system',
           iccid
         ).run();
@@ -369,7 +385,7 @@ export const iccidMappingsHandler = {
           iccid, sim_index, number as phone_number,
           country as country_code, carrier, equipment_id as imei,
           notes, service_type, service_type_source, service_type_verified_at,
-          sim_role, primary_iccid,
+          sim_role, primary_iccid, balance_threshold,
           sim_status as status, usb_path, last_usb_path,
           created_at, updated_at
         FROM device_view
@@ -411,6 +427,7 @@ export const iccidMappingsHandler = {
         imei,
         notes,
       } = data;
+      const balanceThreshold = parseBalanceThreshold(data.balance_threshold);
 
       const existing = await env.DB.prepare(`
         SELECT iccid, service_type, service_type_source, sim_role, primary_iccid
@@ -449,6 +466,7 @@ export const iccidMappingsHandler = {
           END,
           sim_role = ?,
           primary_iccid = ?,
+          balance_threshold = ?,
           updated_at = CURRENT_TIMESTAMP,
           updated_by = ?
         WHERE iccid = ?
@@ -465,6 +483,7 @@ export const iccidMappingsHandler = {
         service.serviceType,
         role.role,
         role.primaryIccid,
+        balanceThreshold,
         user?.email || 'system',
         id
       ).run();
@@ -474,7 +493,7 @@ export const iccidMappingsHandler = {
         SELECT
           iccid as id, iccid, sim_index, number as phone_number,
           country, carrier, service_type, service_type_source,
-          service_type_verified_at, sim_role, primary_iccid,
+          service_type_verified_at, sim_role, primary_iccid, balance_threshold,
           equipment_id, notes,
           sim_status as is_active, usb_path, last_usb_path,
           created_at, updated_at

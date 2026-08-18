@@ -57,6 +57,7 @@
       service_type_source: '',
       sim_role: 'standalone',
       primary_iccid: '',
+      balance_threshold: '',
     };
   }
 
@@ -80,6 +81,7 @@
         service_type_source: mapping.service_type_source || '',
         sim_role: mapping.sim_role || 'standalone',
         primary_iccid: mapping.primary_iccid || '',
+        balance_threshold: mapping.balance_threshold ?? '',
       },
     };
   }
@@ -236,6 +238,7 @@
         service_type_source: fd.service_type === 'unknown' ? null : fd.service_type_source,
         sim_role: fd.sim_role,
         primary_iccid: fd.sim_role === 'secondary' ? fd.primary_iccid : null,
+        balance_threshold: fd.balance_threshold === '' ? null : Number(fd.balance_threshold),
       };
       if (panel.mode === 'add') {
         const r = await api.iccidMappings.create(payload);
@@ -673,6 +676,17 @@
                 <option value={option.value}>{option.label}</option>
               {/each}
             </select>
+          </div>
+
+          <!-- 余额阈值：留空走币种默认（CNY 100 / SGD 10 / HKD 100） -->
+          <div>
+            <label for="mapping-balance-threshold" class="block text-xs font-semibold text-stone-500 mb-1 tracking-wide uppercase">余额阈值</label>
+            <input id="mapping-balance-threshold" type="number" step="0.01" min="0"
+              bind:value={panel.formData.balance_threshold}
+              placeholder="留空用默认"
+              class="w-full px-3 py-2 text-sm font-mono border border-stone-300 rounded-lg
+                focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100" />
+            <p class="mt-1 text-[11px] text-stone-400">低于此值标记为需充值；留空按币种默认（CNY 100 / SGD 10 / HKD 100）。</p>
           </div>
 
           <!-- 主副卡 -->

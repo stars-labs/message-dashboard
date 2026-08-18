@@ -24,6 +24,35 @@ describe('balance overview', () => {
     expect(getBalanceThreshold(phone('hk3', 'HK'))).toEqual({ value: 100, currency: 'HKD' });
   });
 
+  test('a per-SIM balance_threshold overrides the currency default', () => {
+    expect(getBalanceThreshold({ ...phone('cn1', 'CN'), balance_threshold: 50 }))
+      .toEqual({ value: 50, currency: 'CNY' });
+  });
+
+  test('empty or null balance_threshold falls back to the currency default', () => {
+    expect(getBalanceThreshold({ ...phone('cn1', 'CN'), balance_threshold: null }))
+      .toEqual({ value: 100, currency: 'CNY' });
+    expect(getBalanceThreshold({ ...phone('cn1', 'CN'), balance_threshold: '' }))
+      .toEqual({ value: 100, currency: 'CNY' });
+  });
+
+  test('a custom threshold affects the low-balance classification', () => {
+    const phoneWithOverride = { ...phone('cn1', 'CN'), balance_threshold: 50 };
+    const above = buildBalanceRows(
+      [phoneWithOverride],
+      [check('cn1', 'parsed', 60, 'CNY')],
+      now
+    );
+    expect(above[0].health).toBe('normal');
+
+    const below = buildBalanceRows(
+      [phoneWithOverride],
+      [check('cn1', 'parsed', 40, 'CNY')],
+      now
+    );
+    expect(below[0].health).toBe('low');
+  });
+
   test('classifies normal, low, stale and unknown balances', () => {
     const phones = [phone('cn1', 'CN'), phone('sg2', 'SG'), phone('hk3', 'HK'), phone('xx4', 'XX')];
     const checks = [

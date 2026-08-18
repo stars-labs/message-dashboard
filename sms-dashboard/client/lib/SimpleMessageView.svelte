@@ -57,7 +57,9 @@
   }
 
   // Content filter: verification codes, grouped balance conversations, or both.
-  let contentFilter = $state('code');
+  // Default to 'all' so non-code messages (e.g. service notices, fee warnings)
+  // are visible immediately without manual filter switching.
+  let contentFilter = $state('all');
 
   // Messages shown in the list, after both dimensions of filtering.
   let displayMessages = $derived.by(() => {
