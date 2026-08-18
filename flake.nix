@@ -260,6 +260,43 @@
             '';
           };
 
+          # Versioned release driver for the Balance Agent desktop app. Builds
+          # the .app, zips it, and emits a SHA-256 checksum. Run:
+          #   nix run .#release-balance-agent -- 0.1.0
+          # Artifacts land under sms-dashboard/balance-agent/release/<version>/.
+          # Ad-hoc (unsigned, unnotarized) per the internal-team-utility policy
+          # in CLAUDE.md; Developer ID signing is deferred.
+          release-balance-agent = pkgs.writeShellApplication {
+            name = "release-balance-agent";
+            runtimeInputs = with pkgs; [
+              git
+              bun
+              coreutils
+              zip
+            ];
+            text = ''
+              version="''${1:?usage: release-balance-agent <version>}"
+              repo_root="$(git rev-parse --show-toplevel)"
+              cd "$repo_root/sms-dashboard/balance-agent"
+
+              echo "==> Building Balance Agent v''${version}"
+              PLAYWRIGHT_BROWSERS_PATH=0 bun run browser:install
+              bun run build
+              bunx electron-builder --mac dir --arm64 \
+                --config.directories.output="release/''${version}"
+
+              app="release/''${version}/mac/Balance Agent.app"
+              zip -r "release/''${version}/Balance-Agent-''${version}-macos-arm64.zip" \
+                "$app" >/dev/null
+              (cd "release/''${version}" && sha256sum \
+                "Balance-Agent-''${version}-macos-arm64.zip" > \
+                "Balance-Agent-''${version}-macos-arm64.zip.sha256")
+
+              echo "==> Artifacts:"
+              ls -1 "release/''${version}"
+            '';
+          };
+
           # Owns the local frontend/API pair. Re-running `dev-server restart`
           # replaces both processes instead of letting Vite or Wrangler select a
           # fallback port. State and logs live in /tmp, never in the worktree.
@@ -440,7 +477,12 @@
         in
         {
           packages = {
-            inherit sms-daemon orange-pi-daemon-rust balance-agent-cli;
+            inherit
+              sms-daemon
+              orange-pi-daemon-rust
+              balance-agent-cli
+              release-balance-agent
+              ;
             default = sms-daemon;
             # Alias for easier access
             daemon-rust = orange-pi-daemon-rust;
@@ -564,6 +606,10 @@
             balance-agent-cli = {
               type = "app";
               program = "${balance-agent-cli}/bin/balance-agent";
+            };
+            release-balance-agent = {
+              type = "app";
+              program = "${release-balance-agent}/bin/release-balance-agent";
             };
             daemon = {
               type = "app";

@@ -437,12 +437,17 @@ The first release does not:
 
 Build the internal release path without changing runtime behavior:
 
-1. Add `balance-agent` and `release-balance-agent` flake outputs.
+1. ~~Add a `release-balance-agent` flake output.~~ **Done** —
+   `nix run .#release-balance-agent -- <version>` builds the `.app`, zips it, and
+   writes a SHA-256 checksum. It wraps the repo's own `bun`/`electron-builder`
+   rather than being a hermetic derivation; `balance-agent` as a real Nix build
+   (offline dependencies, pinned Chromium in the store) is still outstanding.
 2. Make the Nix build run the Agent tests, bundle the pinned Chromium runtime,
-   produce Apple Silicon `.dmg` and `.zip` artifacts, and apply an ad-hoc signature.
-3. Generate SHA-256 checksum files and verify the packaged application launches.
+   produce Apple Silicon `.dmg` artifacts as well as `.zip`, and apply an explicit
+   ad-hoc signature.
+3. Verify the packaged application launches before the artifacts are published.
 4. Make the release app create a private GitHub prerelease from an explicit version
-   and attach only the verified artifacts.
+   and attach only the verified artifacts (currently a manual upload).
 5. Validate installation and the Finder **Open** Gatekeeper override on a clean Mac,
    then complete one AI-assisted and one human-assisted browser query.
 

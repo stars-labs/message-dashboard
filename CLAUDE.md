@@ -119,9 +119,16 @@ must be owned by `flake.nix`, produce ad-hoc-signed macOS `.dmg`/`.zip` artifact
 and SHA-256 checksums, and publish them to private GitHub Releases. Developer ID
 signing and notarization are deferred while the audience remains the trusted team.
 Do not add silent automatic updates to an ad-hoc-signed build; update discovery may
-open the authenticated private Release page for an explicit manual install. The
-planned `nix build .#balance-agent` and `nix run .#release-balance-agent -- <version>`
-interfaces are not yet implemented and must not be documented as available commands.
+open the authenticated private Release page for an explicit manual install.
+
+`nix run .#release-balance-agent -- <version>` is the implemented release driver.
+It builds the `.app` with `electron-builder --mac dir --arm64`, zips it, and writes
+a SHA-256 checksum into `sms-dashboard/balance-agent/release/<version>/`. It is a
+`writeShellApplication` wrapper, so it runs the repo's own `bun`/`electron-builder`
+and needs network access for Playwright Chromium — it is not a hermetic derivation.
+Uploading the artifacts to the private GitHub Release remains a manual step.
+`nix build .#balance-agent` (a hermetic, offline-dependency derivation) is still
+unimplemented and must not be documented as an available command.
 
 ## Commands
 
@@ -162,6 +169,9 @@ bun run test                                         # Device auth and secure-st
 bun run start                                        # Build and launch the local Electron application
 bun run cli -- --help                                # Run the source CLI directly
 bun run pack:mac                                     # Current unsigned local .app packaging check
+
+# Balance Agent release (from repo root; needs network for Playwright Chromium)
+nix run .#release-balance-agent -- 0.1.0             # .app + .zip + .sha256 under balance-agent/release/<version>/
 
 # Dashboard build/deploy
 cd sms-dashboard && bun install
