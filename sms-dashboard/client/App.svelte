@@ -1043,6 +1043,7 @@
                   {daemonStatus}
                   balanceCheck={latestSelectedBalanceCheck}
                   onOpenBalance={(check) => balanceDetailCheck = check}
+                  phones={phoneNumbers}
                 />
               </div>
             {/if}

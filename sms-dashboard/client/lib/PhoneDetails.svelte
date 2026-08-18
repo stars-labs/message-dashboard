@@ -16,6 +16,7 @@
     daemonStatus = { connected: false, lastDataUpdate: null },
     balanceCheck = null,
     onOpenBalance = null,
+    phones = [],
   } = $props();
 
   let effectiveStatus = $derived(
@@ -29,6 +30,13 @@
   // operator = daemon-detected serving network (AT+COPS?, live, may differ when roaming)
   let carrier = $derived(phone?.carrier || '—');
   let operator = $derived(phone?.operator);
+  // For a secondary SIM, the primary it belongs to (looked up from the full
+  // phone list so we can show a human label, not just the raw ICCID).
+  let primarySim = $derived(
+    phone?.sim_role === 'secondary' && phone?.primary_iccid
+      ? phones.find((p) => p.iccid === phone.primary_iccid)
+      : null
+  );
   let moduleName = $derived(
     [phone?.manufacturer, phone?.model].filter(Boolean).join(' ') || '—'
   );
@@ -167,7 +175,12 @@
         </div>
         <div class="grid grid-cols-[88px_minmax(0,1fr)] items-baseline gap-3 min-w-0">
           <dt class="text-stone-400">主副卡</dt>
-          <dd class="text-stone-700">{getSimRoleLabel(phone.sim_role)}</dd>
+          <dd class="text-stone-700">
+            {getSimRoleLabel(phone.sim_role)}
+            {#if phone.sim_role === 'secondary' && primarySim}
+              <span class="text-stone-400"> → {formatCardNumber(primarySim.sim_index)}</span>
+            {/if}
+          </dd>
         </div>
         {#if phone.notes}
           <div class="xl:col-span-2 grid grid-cols-[88px_minmax(0,1fr)] items-baseline gap-3 min-w-0 pt-1 border-t border-stone-100">
