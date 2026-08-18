@@ -93,7 +93,7 @@ export function createAgentService({
     candidate.aiProtocol = String(candidate.aiProtocol || 'anthropic').trim();
     candidate.aiToken = String(input?.aiToken || '').trim()
       || await secureStore.get('aiToken');
-    return testAIConnection(candidate);
+    return testAIConnection(candidate, { logger });
   }
 
   async function testDashboard(input = {}) {

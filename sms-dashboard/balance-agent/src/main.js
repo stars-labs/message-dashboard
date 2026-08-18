@@ -2,10 +2,19 @@ import {
   app, BrowserWindow, ipcMain, Menu, nativeImage, Notification, safeStorage, shell, Tray,
 } from 'electron';
 import { join } from 'node:path';
+import log from 'electron-log/main.js';
 import { createAgentService } from './agent-service.js';
 import { createMenuBarModel } from './menu-model.js';
 import { createSecureStore } from './secure-store.js';
 import { createSettingsStore } from './settings-store.js';
+
+// Write to ~/Library/Logs/Balance Agent/main.log (macOS).
+// Errors and above are also echoed to the terminal.
+log.initialize();
+log.transports.file.level = 'debug';
+log.transports.console.level = 'warn';
+// Catch any uncaught exceptions / unhandled rejections before app is ready.
+log.catchErrors({ showDialog: false });
 
 const gotLock = app.requestSingleInstanceLock();
 
@@ -100,7 +109,7 @@ async function openDashboard() {
     if (!['https:', 'http:'].includes(url.protocol)) throw new Error('Unsupported Dashboard URL');
     await shell.openExternal(url.toString());
   } catch (error) {
-    console.error(`Could not open Dashboard: ${error.message}`);
+    log.error(`Could not open Dashboard: ${error.message}`);
     showWindow();
   }
 }
@@ -109,7 +118,7 @@ async function showVerificationWindow() {
   try {
     if (await service?.showVerification()) return;
   } catch (error) {
-    console.error(`Could not focus verification window: ${error.message}`);
+    log.error(`Could not focus verification window: ${error.message}`);
   }
   showWindow();
 }
@@ -222,6 +231,7 @@ async function startApplication() {
         ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
         : process.env.CHROME_BIN || '/usr/bin/google-chrome')),
     appVersion: app.getVersion(),
+    logger: log,
     onState: (state) => {
       acceptState(state);
       if (state.browserDetail === 'human_verification_required'
@@ -253,7 +263,7 @@ async function startApplication() {
     await service.initialize();
     await snapshot();
   } catch (error) {
-    console.error(`Balance Agent initialization failed: ${error.message}`);
+    log.error(`Balance Agent initialization failed: ${error.message}`);
     acceptState({ error: error.message, auth: 'signed_out' });
   }
 }
@@ -261,7 +271,7 @@ async function startApplication() {
 if (!gotLock) app.quit();
 else {
   startApplication().catch((error) => {
-    console.error(`Balance Agent startup failed: ${error.message}`);
+    log.error(`Balance Agent startup failed: ${error.message}`);
     app.quit();
   });
 }
