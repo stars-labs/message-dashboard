@@ -1,33 +1,32 @@
 # Repository Agent Guide
 
-> Multi-node SMS management platform for 100+ USB modems — Orange Pi Rust daemon → Cloudflare Workers API → Svelte 5 dashboard, with automated carrier balance queries via SMS AI and browser automation.
-
-This file applies to the entire repository. It is the normative operating guide
-for coding agents. `CLAUDE.md` contains deeper hardware history and diagnostics;
-when the two disagree, follow this file and correct the stale documentation.
+> Multi-node SMS management platform for 100+ USB modems — Orange Pi Rust daemon → Cloudflare Workers API → Svelte 5 + Bun dashboard, with automated carrier balance queries via SMS AI and browser automation.
 
 ## Mission and Architecture
 
-This repository operates a SIM-centric SMS and balance-query system:
+This repository operates a SIM-centric platform for collecting SMS messages from
+100+ modems and querying carrier account balances:
 
 ```text
-Orange Pi + EC20 modems -> Rust daemon -> Cloudflare Worker/D1 -> Svelte dashboard
-                                                       ^
-                                                       |
-                                  local macOS Balance Agent
+Orange Pi + EC20 modems -> Rust daemon -> Cloudflare Worker -> Svelte dashboard
+                                                    |    ^
+                                                   D1    |
+                                                         |
+                                         local macOS Balance Agent
 ```
 
 Major components:
 
 - `orange-pi-daemon/`: Rust/Tokio hardware daemon using direct AT commands.
-- `sms-dashboard/client/`: Svelte 5 and Tailwind frontend.
+- `sms-dashboard/client/`: Svelte 5, Tailwind, and Bun frontend.
 - `sms-dashboard/server/`: Cloudflare Worker API and Auth0 authorization.
-- `sms-dashboard/migrations/`: append-only D1 migrations, currently through `058`.
+- `sms-dashboard/migrations/`: append-only D1 migrations (see latest file for current number).
 - `sms-dashboard/runner-core/`: shared authenticated local-runner logic.
 - `sms-dashboard/balance-agent/`: Electron menu-bar and authenticated CLI
   interfaces for AI-assisted SMS and interactive carrier-browser queries.
 - `nixos-config/`: Orange Pi NixOS configuration and encrypted SOPS material.
-- `flake.nix`: canonical development, validation, daemon build, and process tools.
+- `flake.nix`: canonical development, validation, daemon build, and dev convenience
+  commands (`dev-server`, `balance-agent`, `release-balance-agent`).
 - `docs/`: architecture, operating procedures, staged plans, and evidence.
 
 Production is `https://sexy.qzz.io`. The Cloudflare Worker is `sms-dashboard` in
