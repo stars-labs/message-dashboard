@@ -11,7 +11,7 @@
     SIM_SERVICE_TYPES,
     SIM_SERVICE_TYPE_SOURCES,
   } from "./sim-service-type.js";
-  import { SIM_ROLES } from "./sim-role.js";
+  import { SIM_ROLES, getSimRoleLabel } from "./sim-role.js";
 
   let { initialStatusFilter = "all" } = $props();
 
@@ -110,6 +110,7 @@
     { key: 'iccid', label: 'ICCID' },
     { key: 'carrier', label: '运营商' },
     { key: 'service_type', label: '计费类型' },
+    { key: 'sim_role', label: '主副卡' },
     { key: 'position', label: '模块位置' },
     { key: 'signal_quality', label: '信号' },
     { key: 'is_active', label: '状态' },
@@ -383,9 +384,14 @@
               <!-- 运营商 -->
               <td class="px-3 py-2.5">
                 {#if m.carrier}
-                  <span class="inline-flex px-2 py-0.5 text-xs rounded-full font-medium {getCarrierColor(m.carrier)}">
-                    <span class="mr-1" aria-hidden="true">{getCountryFlag(m.country)}</span>{m.carrier}
-                  </span>
+                  <div class="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                    <span class="inline-flex px-2 py-0.5 text-xs rounded-full font-medium {getCarrierColor(m.carrier)}">
+                      <span class="mr-1" aria-hidden="true">{getCountryFlag(m.country)}</span>{m.carrier}
+                    </span>
+                    {#if m.operator && m.operator !== m.carrier}
+                      <span class="text-[11px] text-stone-400 whitespace-nowrap">serving: {m.operator}</span>
+                    {/if}
+                  </div>
                 {:else}
                   <span class="text-stone-300">—</span>
                 {/if}
@@ -398,15 +404,18 @@
                     : 'bg-amber-50 text-amber-700 border-amber-200'}">
                   {getSimServiceTypeLabel(m.service_type)}
                 </span>
-                {#if m.sim_role && m.sim_role !== 'standalone'}
-                  <span class="ml-1 inline-flex px-1.5 py-0.5 text-[10px] rounded-md border
-                    {m.sim_role === 'primary'
-                      ? 'bg-blue-50 text-blue-700 border-blue-200'
-                      : 'bg-violet-50 text-violet-700 border-violet-200'}"
-                    title={m.sim_role === 'secondary' ? `副卡 → ${m.primary_iccid || '主卡'}` : '主卡'}>
-                    {m.sim_role === 'primary' ? '主卡' : '副卡'}
-                  </span>
-                {/if}
+              </td>
+              <!-- 主副卡 -->
+              <td class="px-3 py-2.5 whitespace-nowrap">
+                <span class="inline-flex px-2 py-0.5 text-[11px] rounded-md border
+                  {m.sim_role === 'primary'
+                    ? 'bg-blue-50 text-blue-700 border-blue-200'
+                    : m.sim_role === 'secondary'
+                      ? 'bg-violet-50 text-violet-700 border-violet-200'
+                      : 'bg-stone-50 text-stone-400 border-stone-200'}"
+                  title={m.sim_role === 'secondary' ? `副卡 → ${m.primary_iccid || '主卡'}` : ''}>
+                  {getSimRoleLabel(m.sim_role)}
+                </span>
               </td>
               <!-- 模块位置 (absorbs 设备ID + USB位置 + UP/DOWN) -->
               <td class="px-3 py-2.5 font-mono text-xs text-stone-500 whitespace-nowrap">
@@ -663,10 +672,19 @@
           {#if panel.formData.sim_role === 'secondary'}
             <div>
               <label for="mapping-primary-iccid" class="block text-xs font-semibold text-stone-500 mb-1 tracking-wide uppercase">主卡 ICCID</label>
-              <input id="mapping-primary-iccid" type="text" bind:value={panel.formData.primary_iccid}
-                placeholder="粘贴主卡的 ICCID" required
-                class="w-full px-3 py-2 text-sm border border-stone-300 rounded-lg font-mono
-                  focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100" />
+              <select id="mapping-primary-iccid" bind:value={panel.formData.primary_iccid} required
+                class="w-full px-3 py-2 text-sm border border-stone-300 rounded-lg bg-white
+                  focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100">
+                <option value="">选择主卡…</option>
+                {#each allMappingsCache.filter(m => m.sim_role === 'primary') as primary}
+                  <option value={primary.iccid}>
+                    {formatCardNumber(primary.sim_index)} · {primary.phone_number || primary.iccid} {primary.carrier ? `(${primary.carrier})` : ''}
+                  </option>
+                {/each}
+              </select>
+              {#if allMappingsCache.filter(m => m.sim_role === 'primary').length === 0}
+                <p class="mt-1 text-[11px] text-amber-600">暂无主卡，请先将某张卡设置为主卡。</p>
+              {/if}
             </div>
           {/if}
 

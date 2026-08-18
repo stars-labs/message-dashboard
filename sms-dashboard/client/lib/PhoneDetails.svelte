@@ -7,6 +7,8 @@
     getBalanceStatusMeta,
     getCashBalance,
   } from './balance-query.js';
+  import { getSimServiceTypeLabel } from './sim-service-type.js';
+  import { getSimRoleLabel } from './sim-role.js';
 
   let {
     phone = null,
@@ -23,7 +25,10 @@
   let signal = $derived(Number(phone?.signal) || 0);
   let balanceStatusMeta = $derived(getBalanceStatusMeta(balanceCheck?.display_status || balanceCheck?.status));
   let cashBalance = $derived(getCashBalance(balanceCheck));
-  let operator = $derived(phone?.operator_name || phone?.operator || phone?.carrier || '—');
+  // carrier = user-maintained home label (sims table, never daemon-written)
+  // operator = daemon-detected serving network (AT+COPS?, live, may differ when roaming)
+  let carrier = $derived(phone?.carrier || '—');
+  let operator = $derived(phone?.operator);
   let moduleName = $derived(
     [phone?.manufacturer, phone?.model].filter(Boolean).join(' ') || '—'
   );
@@ -113,7 +118,7 @@
         </div>
         <div class="px-4 py-3 border-b xl:border-b-0 xl:border-r border-stone-100 min-w-0">
           <p class="text-[11px] text-stone-400 mb-1">运营商</p>
-          <p class="text-sm font-medium text-stone-800 truncate" title={operator}>{operator}</p>
+          <p class="text-sm font-medium text-stone-800 truncate" title={carrier}>{carrier}</p>
         </div>
         <div class="px-4 py-3 border-r border-stone-100 min-w-0">
           <p class="text-[11px] text-stone-400 mb-1">国家 / 地区</p>
@@ -155,6 +160,14 @@
         <div class="grid grid-cols-[88px_minmax(0,1fr)] items-baseline gap-3 min-w-0">
           <dt class="text-stone-400">守护进程</dt>
           <dd class="text-stone-700">{daemonStatus.connected ? '连接正常' : '未连接'}</dd>
+        </div>
+        <div class="grid grid-cols-[88px_minmax(0,1fr)] items-baseline gap-3 min-w-0">
+          <dt class="text-stone-400">计费类型</dt>
+          <dd class="text-stone-700">{getSimServiceTypeLabel(phone.service_type)}</dd>
+        </div>
+        <div class="grid grid-cols-[88px_minmax(0,1fr)] items-baseline gap-3 min-w-0">
+          <dt class="text-stone-400">主副卡</dt>
+          <dd class="text-stone-700">{getSimRoleLabel(phone.sim_role)}</dd>
         </div>
         {#if phone.notes}
           <div class="xl:col-span-2 grid grid-cols-[88px_minmax(0,1fr)] items-baseline gap-3 min-w-0 pt-1 border-t border-stone-100">

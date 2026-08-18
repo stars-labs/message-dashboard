@@ -1015,7 +1015,7 @@
           </div>
 
           <!-- Message View Column — fills remaining space -->
-          <div class="flex flex-col h-full min-h-0 {selectedPhone ? 'lg:grid lg:grid-rows-[minmax(300px,1fr)_220px] lg:gap-3' : ''}">
+          <div class="flex flex-col h-full min-h-0 {selectedPhone ? 'lg:grid lg:grid-rows-[minmax(300px,1fr)_auto] lg:gap-3' : ''}">
             <div class="min-h-0 flex flex-col">
               <SimpleMessageView
                 {messages}

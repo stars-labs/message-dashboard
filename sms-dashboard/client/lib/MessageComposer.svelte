@@ -82,7 +82,7 @@
     const number = (phone.number && phone.number !== "null")
       ? phone.number
       : (phone.iccid ? `ICCID: ${phone.iccid.slice(-6)}` : "Unknown");
-    const operator = phone.operator_name ? ` - ${phone.operator_name}` : "";
+    const operator = phone.carrier ? ` - ${phone.carrier}` : "";
     return `${formatCardNumber(phone.sim_index)} · ${phone.flag || ""} ${number}${operator}`.trim();
   }
 
@@ -302,8 +302,8 @@
                 <div class="font-mono">
                   {(phone.number && phone.number !== "null") ? phone.number : (phone.iccid ? `ICCID: ${phone.iccid.slice(-6)}` : "Unknown")}
                 </div>
-                {#if phone.operator_name}
-                  <div class="text-xs text-stone-400">{phone.operator_name}</div>
+                {#if phone.carrier}
+                  <div class="text-xs text-stone-400">{phone.carrier}{#if phone.operator && phone.operator !== phone.carrier} · serving: {phone.operator}{/if}</div>
                 {/if}
               </div>
               {#if phone.signal_strength}

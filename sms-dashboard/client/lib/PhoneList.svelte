@@ -42,7 +42,7 @@
           (phone.number && phone.number.toLowerCase().includes(q)) ||
           (phone.carrier && phone.carrier.toLowerCase().includes(q)) ||
           (phone.iccid && phone.iccid.toLowerCase().includes(q)) ||
-          (phone.operator_name && phone.operator_name.toLowerCase().includes(q));
+          (phone.operator && phone.operator.toLowerCase().includes(q));
 
         const matchesChip =
           statusChip === 'all' ||
