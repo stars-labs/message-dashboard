@@ -461,13 +461,17 @@
     showIccidMappingDialog = true;
   }
 
-  async function handleIccidMappingSuccess({ phone_iccid, phone_number }) {
+  async function handleIccidMappingSuccess(updated) {
+    const { phone_iccid, phone_number, ...rest } = updated;
 
-    // Update the phone in our local list
+    // Update the phone in our local list. Spread the full response so
+    // sim_role / primary_iccid / carrier / etc. stay in sync after an edit —
+    // not just phone_number.
     const phoneIndex = phoneNumbers.findIndex((p) => p.iccid === phone_iccid);
     if (phoneIndex !== -1) {
       phoneNumbers[phoneIndex] = {
         ...phoneNumbers[phoneIndex],
+        ...rest,
         number: phone_number,
       };
       updateStatsFromPhones();

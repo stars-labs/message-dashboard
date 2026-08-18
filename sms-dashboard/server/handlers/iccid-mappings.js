@@ -186,7 +186,8 @@ export const iccidMappingsHandler = {
           country, carrier, service_type, service_type_source,
           service_type_verified_at, equipment_id, notes,
           sim_status as is_active, signal_quality, modem_status, detected_iccid,
-          operator, usb_path, last_usb_path, created_at, updated_at
+          operator, usb_path, last_usb_path, sim_role, primary_iccid,
+          created_at, updated_at
         FROM device_view
         WHERE iccid = ?
       `).bind(id).first();
@@ -231,7 +232,8 @@ export const iccidMappingsHandler = {
           country, carrier, service_type, service_type_source,
           service_type_verified_at, equipment_id, notes,
           sim_status as is_active, signal_quality, modem_status, detected_iccid,
-          operator, usb_path, last_usb_path, created_at, updated_at
+          operator, usb_path, last_usb_path, sim_role, primary_iccid,
+          created_at, updated_at
         FROM device_view
         WHERE iccid = ?
       `).bind(iccid).first();

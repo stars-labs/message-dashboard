@@ -84,9 +84,13 @@
       });
 
       if (response.success) {
+        // Spread the full updated phone so the caller's cache stays in sync —
+        // passing only phone_number left sim_role/primary_iccid stale, so the
+        // phone detail showed "standalone" after editing the role.
         onsuccess?.({
           phone_iccid: phone.iccid,
           phone_number: phoneNumber,
+          ...(response.data || {}),
         });
         close();
       } else {
