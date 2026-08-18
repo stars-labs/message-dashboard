@@ -2,6 +2,7 @@ export const SIM_SERVICE_TYPES = [
   { value: 'unknown', label: '待确认' },
   { value: 'prepaid', label: '预付费' },
   { value: 'postpaid', label: '后付费' },
+  { value: 'n/a', label: '不适用' },
 ];
 
 export const SIM_SERVICE_TYPE_SOURCES = [

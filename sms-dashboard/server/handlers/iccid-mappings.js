@@ -1,6 +1,6 @@
 // ICCID Mappings handler - manages user-authoritative sims table
 // New schema: sims table is purely user-managed, status computed dynamically
-export const SIM_SERVICE_TYPES = ['unknown', 'prepaid', 'postpaid'];
+export const SIM_SERVICE_TYPES = ['unknown', 'prepaid', 'postpaid', 'n/a'];
 export const SIM_SERVICE_TYPE_SOURCES = [
   'carrier_account',
   'carrier_support',
@@ -19,10 +19,10 @@ export function resolveServiceType(data, existing = null) {
     : existing?.service_type || 'unknown';
 
   if (!SIM_SERVICE_TYPES.includes(serviceType)) {
-    return { error: 'service_type must be unknown, prepaid, or postpaid' };
+    return { error: 'service_type must be unknown, prepaid, postpaid, or n/a' };
   }
 
-  if (serviceType === 'unknown') {
+  if (serviceType === 'unknown' || serviceType === 'n/a') {
     return { serviceType, serviceTypeSource: null, serviceTypeProvided };
   }
 
