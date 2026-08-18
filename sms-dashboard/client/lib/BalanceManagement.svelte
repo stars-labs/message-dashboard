@@ -494,48 +494,40 @@
     {/if}
 
     {#if activeTab === 'overview'}
-      <section class="lg:hidden px-4 py-2.5 border-b border-stone-100 overflow-x-auto" aria-label="余额状态汇总">
-        <div class="flex items-center gap-2 min-w-max">
-          {#each summaryItems as [value, label]}
-            {@const meta = BALANCE_HEALTH_META[value]}
-            <button
-              type="button"
-              onclick={() => { statusFilter = statusFilter === value ? 'all' : value; }}
-              aria-pressed={statusFilter === value}
-              class="h-8 inline-flex items-center gap-1.5 px-2.5 rounded-full border text-xs transition-colors
-                {statusFilter === value
-                  ? 'bg-stone-800 border-stone-800 text-white'
-                  : 'bg-white border-stone-200 text-stone-600'}"
-            >
-              <span class="w-1.5 h-1.5 rounded-full shrink-0 {statusFilter === value ? 'bg-white/80' : meta.dotClass}"></span>
-              <span>{label}</span>
-              <strong class="font-mono tabular-nums {statusFilter === value ? 'text-white' : 'text-stone-900'}">{counts[value]}</strong>
-            </button>
-          {/each}
-        </div>
-      </section>
-
-      <section class="hidden lg:flex items-center gap-2 px-5 py-2.5 border-b border-stone-100" aria-label="余额状态汇总（桌面）">
-        {#each summaryItems as [value, label]}
-          {@const meta = BALANCE_HEALTH_META[value]}
-          <button
-            type="button"
-            onclick={() => { statusFilter = statusFilter === value ? 'all' : value; }}
-            aria-pressed={statusFilter === value}
-            class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs transition-colors
-              {statusFilter === value
-                ? 'bg-stone-800 border-stone-800 text-white'
-                : 'bg-white border-stone-200 text-stone-600 hover:border-stone-300 hover:bg-stone-50'}"
+      <!-- Toolbar: [carrier] [search] | [filter tabs] ··· [summary chips right] — one line -->
+      <div class="px-4 py-2.5 lg:px-5 border-b border-stone-100 flex items-center gap-2 overflow-x-auto">
+        <div class="flex items-center gap-2 min-w-max shrink-0">
+          <!-- carrier select -->
+          <label class="sr-only" for="balance-carrier-filter">运营商筛选</label>
+          <select
+            id="balance-carrier-filter"
+            value={carrierFilter}
+            onchange={(event) => { carrierFilter = event.currentTarget.value; }}
+            aria-label="运营商筛选"
+            class="shrink-0 w-[130px] px-2.5 py-2 text-sm bg-stone-50 border border-stone-200 rounded-lg
+              focus:outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
           >
-            <span class="w-1.5 h-1.5 rounded-full shrink-0 {statusFilter === value ? 'bg-white/80' : meta.dotClass}"></span>
-            <span>{label}</span>
-            <strong class="font-mono tabular-nums {statusFilter === value ? 'text-white' : 'text-stone-900'}">{counts[value]}</strong>
-          </button>
-        {/each}
-      </section>
-
-      <div class="px-4 py-2.5 lg:px-5 lg:py-3 border-b border-stone-100 flex flex-col sm:flex-row gap-2 sm:items-center">
-        <div class="hidden lg:flex items-center gap-1.5 overflow-x-auto">
+            <option value="all">全部运营商</option>
+            {#each carrierOptions as carrier}
+              <option value={carrier.key}>{carrier.label}</option>
+            {/each}
+          </select>
+          <!-- search -->
+          <div class="relative w-[220px]">
+            <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="11" cy="11" r="7" stroke-width="2"/><path d="m20 20-3.5-3.5" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            <input
+              bind:value={searchQuery}
+              type="search"
+              aria-label="搜索 SIM"
+              placeholder="卡号 / 手机号 / ICCID"
+              class="w-full pl-9 pr-3 py-2 text-sm bg-stone-50 border border-stone-200 rounded-lg
+                focus:outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
+            />
+          </div>
+          <span class="w-px h-5 bg-stone-200 mx-1 shrink-0"></span>
+          <!-- filter tabs -->
           {#each [['all', '全部'], ['low', '需充值'], ['stale', '已过期'], ['failed', '失败'], ['unknown', '未取得']] as [value, label]}
             <button
               type="button"
@@ -549,34 +541,24 @@
             >{label}</button>
           {/each}
         </div>
-        <div class="grid grid-cols-[minmax(0,1fr)_112px] sm:flex gap-2 sm:ml-auto min-w-0 sm:w-[520px]">
-          <div class="relative min-w-0 sm:order-2 sm:flex-1">
-            <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-              <circle cx="11" cy="11" r="7" stroke-width="2"/><path d="m20 20-3.5-3.5" stroke-width="2" stroke-linecap="round"/>
-            </svg>
-            <input
-              bind:value={searchQuery}
-              type="search"
-              aria-label="搜索 SIM"
-              placeholder="卡号 / 手机号 / ICCID"
-              class="w-full pl-9 pr-3 py-2 text-sm bg-stone-50 border border-stone-200 rounded-lg
-                focus:outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
-            />
-          </div>
-          <label class="sr-only" for="balance-carrier-filter">运营商筛选</label>
-          <select
-            id="balance-carrier-filter"
-            value={carrierFilter}
-            onchange={(event) => { carrierFilter = event.currentTarget.value; }}
-            aria-label="运营商筛选"
-            class="w-full sm:w-[145px] sm:order-1 shrink-0 px-2.5 py-2 text-sm bg-stone-50 border border-stone-200 rounded-lg
-              focus:outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
-          >
-            <option value="all">全部运营商</option>
-            {#each carrierOptions as carrier}
-              <option value={carrier.key}>{carrier.label}</option>
-            {/each}
-          </select>
+        <!-- summary chips — right-aligned -->
+        <div class="ml-auto flex items-center gap-2 shrink-0 pl-4">
+          {#each summaryItems as [value, label]}
+            {@const meta = BALANCE_HEALTH_META[value]}
+            <button
+              type="button"
+              onclick={() => { statusFilter = statusFilter === value ? 'all' : value; }}
+              aria-pressed={statusFilter === value}
+              class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border text-xs transition-colors
+                {statusFilter === value
+                  ? 'bg-stone-800 border-stone-800 text-white'
+                  : 'bg-white border-stone-200 text-stone-600 hover:border-stone-300 hover:bg-stone-50'}"
+            >
+              <span class="w-1.5 h-1.5 rounded-full shrink-0 {statusFilter === value ? 'bg-white/80' : meta.dotClass}"></span>
+              <span>{label}</span>
+              <strong class="font-mono tabular-nums {statusFilter === value ? 'text-white' : 'text-stone-900'}">{counts[value]}</strong>
+            </button>
+          {/each}
         </div>
       </div>
 
