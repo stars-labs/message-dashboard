@@ -272,7 +272,6 @@
   <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
     <div>
       <h2 class="text-lg sm:text-xl font-bold text-stone-900">设备与卡 · ICCID 映射</h2>
-      <p class="text-xs text-stone-400 mt-0.5">{totalCount} 张卡 · 搜索：卡号 / 号码 / 运营商 / ICCID</p>
     </div>
     <button onclick={openAdd}
       class="shrink-0 px-4 py-2 bg-stone-800 text-white text-sm font-medium rounded-lg

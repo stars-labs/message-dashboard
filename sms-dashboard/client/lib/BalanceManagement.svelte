@@ -434,11 +434,6 @@
       <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2.5 sm:gap-4">
         <div class="flex items-baseline justify-between gap-3 sm:block">
           <h2 class="text-lg lg:text-xl font-bold text-stone-900 shrink-0">余额管理</h2>
-          <p class="text-[11px] sm:mt-1 sm:text-xs text-stone-400 truncate">
-            {phoneNumbers.length} 张卡
-            <span class="mx-1">·</span>
-            最近更新 {formatTime(latestUpdate, true)}
-          </p>
         </div>
         <div class="flex items-center gap-2 shrink-0">
           <div class="inline-flex flex-1 sm:flex-none items-center bg-stone-100 rounded-lg p-0.5 text-xs">
