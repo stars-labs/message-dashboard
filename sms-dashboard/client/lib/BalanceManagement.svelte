@@ -910,9 +910,14 @@
             <strong class="font-mono tabular-nums text-stone-800">{batchPreview.method_summary.browser || 0}</strong>
           </label>
           {#if batchMethods.browser}
-            <p class="px-4 py-2.5 text-xs text-orange-700 bg-orange-50">
-              浏览器任务串行执行，每张卡都可能需要人工验证。
-            </p>
+            <div class="px-4 py-2.5 text-xs bg-orange-50 text-orange-700 space-y-1">
+              <p>浏览器任务串行执行，每张卡都可能需要人工验证。每张卡间隔 5 分钟。</p>
+              {#if (batchPreview.method_summary.browser || 0) > 5}
+                <p class="font-medium text-red-600">
+                  ⚠️ 当前选中 {batchPreview.method_summary.browser} 张联通浏览器卡，联通登录接口有频率限制，建议每次不超过 5 张，避免触发验证码锁定。
+                </p>
+              {/if}
+            </div>
           {/if}
         </div>
       {/if}

@@ -419,7 +419,9 @@ async function processJob(job, { signal } = {}) {
     else await release(job, error);
     logger.error(`China Unicom web balance job ${job.id} failed: ${error.message}`);
     if (diagnosticBase) logger.error(`Diagnostics saved to ${diagnosticBase}.json and ${diagnosticBase}.png`);
-    return { handled: true, retryDelay: 30_000 };
+    // 10-second cooldown between browser jobs to avoid hammering Unicom's
+    // captcha service ("操作过于频繁"). Keep batch sizes small (≤5 cards).
+    return { handled: true, retryDelay: 10_000 };
   } finally {
     signal?.removeEventListener('abort', closeOnAbort);
     activePage = null;
