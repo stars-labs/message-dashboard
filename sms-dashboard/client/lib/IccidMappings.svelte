@@ -282,18 +282,7 @@
 
   <!-- Filter chips + search -->
   <div class="flex flex-col sm:flex-row gap-2 mb-4">
-    <div class="flex flex-wrap gap-1.5">
-      {#each [['all','全部',totalCount],['active','活动',activeCount],['error','异常',errorCount],['inactive','未激活',inactiveCount]] as [v,label,count]}
-        <button onclick={() => { statusFilter = v; }}
-          class="px-3 py-1.5 text-xs rounded-lg font-medium transition-colors tabular-nums
-            {statusFilter === v
-              ? v === 'error' ? 'bg-red-600 text-white' : v === 'active' ? 'bg-emerald-600 text-white' : 'bg-stone-800 text-white'
-              : v === 'error' ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'}">
-          {label} {count}
-        </button>
-      {/each}
-    </div>
-    <div class="flex flex-1 gap-2 min-w-0">
+    <div class="flex gap-2 min-w-0">
       <label class="sr-only" for="mapping-carrier-filter">运营商筛选</label>
       <select
         id="mapping-carrier-filter"
@@ -312,9 +301,20 @@
         type="text"
         bind:value={searchQuery}
         placeholder="搜索 S01 / 号码 / ICCID…"
-        class="min-w-0 flex-1 px-3 py-1.5 text-sm bg-stone-50 border border-stone-200 rounded-lg
+        class="w-[220px] px-3 py-1.5 text-sm bg-stone-50 border border-stone-200 rounded-lg
           focus:outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100 transition-colors"
       />
+    </div>
+    <div class="flex flex-wrap gap-1.5">
+      {#each [['all','全部',totalCount],['active','活动',activeCount],['error','异常',errorCount],['inactive','未激活',inactiveCount]] as [v,label,count]}
+        <button onclick={() => { statusFilter = v; }}
+          class="px-3 py-1.5 text-xs rounded-lg font-medium transition-colors tabular-nums
+            {statusFilter === v
+              ? v === 'error' ? 'bg-red-600 text-white' : v === 'active' ? 'bg-emerald-600 text-white' : 'bg-stone-800 text-white'
+              : v === 'error' ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'}">
+          {label} {count}
+        </button>
+      {/each}
     </div>
   </div>
 

@@ -489,9 +489,23 @@
     {/if}
 
     {#if activeTab === 'overview'}
-      <!-- Toolbar: [carrier] [search] | [filter tabs] ··· [summary chips right] — one line -->
+      <!-- Toolbar: [filter tabs] | [carrier] [search] ··· [summary chips right] — one line -->
       <div class="px-4 py-2.5 lg:px-5 border-b border-stone-100 flex items-center gap-2 overflow-x-auto">
         <div class="flex items-center gap-2 min-w-max shrink-0">
+          <!-- filter tabs -->
+          {#each [['all', '全部'], ['low', '需充值'], ['stale', '已过期'], ['failed', '失败'], ['unknown', '未取得']] as [value, label]}
+            <button
+              type="button"
+              onclick={() => { statusFilter = value; }}
+              class="shrink-0 px-2.5 py-1.5 text-xs rounded-lg font-medium transition-colors
+                {statusFilter === value
+                  ? value === 'low' || value === 'failed'
+                    ? 'bg-red-600 text-white'
+                    : 'bg-stone-800 text-white'
+                  : 'bg-stone-100 text-stone-600 hover:bg-stone-200'}"
+            >{label}</button>
+          {/each}
+          <span class="w-px h-5 bg-stone-200 mx-1 shrink-0"></span>
           <!-- carrier select -->
           <label class="sr-only" for="balance-carrier-filter">运营商筛选</label>
           <select
@@ -521,20 +535,6 @@
                 focus:outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
             />
           </div>
-          <span class="w-px h-5 bg-stone-200 mx-1 shrink-0"></span>
-          <!-- filter tabs -->
-          {#each [['all', '全部'], ['low', '需充值'], ['stale', '已过期'], ['failed', '失败'], ['unknown', '未取得']] as [value, label]}
-            <button
-              type="button"
-              onclick={() => { statusFilter = value; }}
-              class="shrink-0 px-2.5 py-1.5 text-xs rounded-lg font-medium transition-colors
-                {statusFilter === value
-                  ? value === 'low' || value === 'failed'
-                    ? 'bg-red-600 text-white'
-                    : 'bg-stone-800 text-white'
-                  : 'bg-stone-100 text-stone-600 hover:bg-stone-200'}"
-            >{label}</button>
-          {/each}
         </div>
         <!-- summary chips — display only, right-aligned -->
         <div class="ml-auto flex items-center gap-2 shrink-0 pl-4">
