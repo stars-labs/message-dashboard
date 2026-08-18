@@ -541,23 +541,15 @@
             >{label}</button>
           {/each}
         </div>
-        <!-- summary chips — right-aligned -->
+        <!-- summary chips — display only, right-aligned -->
         <div class="ml-auto flex items-center gap-2 shrink-0 pl-4">
           {#each summaryItems as [value, label]}
             {@const meta = BALANCE_HEALTH_META[value]}
-            <button
-              type="button"
-              onclick={() => { statusFilter = statusFilter === value ? 'all' : value; }}
-              aria-pressed={statusFilter === value}
-              class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border text-xs transition-colors
-                {statusFilter === value
-                  ? 'bg-stone-800 border-stone-800 text-white'
-                  : 'bg-white border-stone-200 text-stone-600 hover:border-stone-300 hover:bg-stone-50'}"
-            >
-              <span class="w-1.5 h-1.5 rounded-full shrink-0 {statusFilter === value ? 'bg-white/80' : meta.dotClass}"></span>
+            <span class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border text-xs bg-white border-stone-200 text-stone-600">
+              <span class="w-1.5 h-1.5 rounded-full shrink-0 {meta.dotClass}"></span>
               <span>{label}</span>
-              <strong class="font-mono tabular-nums {statusFilter === value ? 'text-white' : 'text-stone-900'}">{counts[value]}</strong>
-            </button>
+              <strong class="font-mono tabular-nums text-stone-900">{counts[value]}</strong>
+            </span>
           {/each}
         </div>
       </div>
