@@ -1,6 +1,7 @@
 <script>
   import SignalStrength from './SignalStrength.svelte';
   import { formatCardNumber } from './card-number.js';
+  import { getModemPosition } from './modem-position.js';
   import { getEffectiveDeviceStatus, getStatusMeta } from './device-status.js';
   import {
     formatBalanceMetric,
@@ -40,12 +41,7 @@
   let moduleName = $derived(
     [phone?.manufacturer, phone?.model].filter(Boolean).join(' ') || '—'
   );
-  let location = $derived(
-    [
-      phone?.usb_port ? `USB ${phone.usb_port}` : null,
-      phone?.modem_index != null ? `模块 ${phone.modem_index}` : null,
-    ].filter(Boolean).join(' · ') || '—'
-  );
+  let location = $derived(getModemPosition(phone) || { path: null, isLastKnown: false });
 
   function formatUpdatedAt(value) {
     if (!value) return '—';
@@ -157,7 +153,16 @@
         </div>
         <div class="grid grid-cols-[88px_minmax(0,1fr)] items-baseline gap-3 min-w-0">
           <dt class="text-stone-400">位置</dt>
-          <dd class="text-stone-700 truncate" title={location}>{location}</dd>
+          <dd class="text-stone-700 truncate" title={location.path || ''}>
+            {#if location.path}
+              {location.path}
+              {#if location.isLastKnown}
+                <span class="text-[11px] text-stone-400">（上次）</span>
+              {/if}
+            {:else}
+              <span class="text-stone-300">—</span>
+            {/if}
+          </dd>
         </div>
         <div class="grid grid-cols-[88px_minmax(0,1fr)] items-baseline gap-3 min-w-0">
           <dt class="text-stone-400">网络</dt>
