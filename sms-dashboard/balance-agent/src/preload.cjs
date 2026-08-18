@@ -1,6 +1,4 @@
 const { contextBridge, ipcRenderer } = require('electron');
-// Route renderer console.* calls to the main-process log file via IPC transport.
-require('electron-log/preload.js');
 
 contextBridge.exposeInMainWorld('balanceAgent', {
   getState: () => ipcRenderer.invoke('agent:get-state'),
