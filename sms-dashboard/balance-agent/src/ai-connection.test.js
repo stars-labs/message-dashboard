@@ -42,10 +42,17 @@ describe('AI connection test', () => {
     expect(describeAIConnectionError(new Error('response is not valid JSON'))).toContain('格式');
   });
 
-  test('surfaces API error body in 401/403 message', () => {
+  test('surfaces API error body in 401 message', () => {
     const err = new Error('Company AI request failed (401): {"error":"invalid_api_key","message":"API key does not exist"}');
     const msg = describeAIConnectionError(err);
     expect(msg).toContain('认证失败');
     expect(msg).toContain('invalid_api_key');
+  });
+
+  test('surfaces API error body in 403 message (e.g. model not provisioned)', () => {
+    const err = new Error('Company AI request failed (403): {"detail":"Model not found"}');
+    const msg = describeAIConnectionError(err);
+    expect(msg).toContain('权限不足');
+    expect(msg).toContain('Model not found');
   });
 });

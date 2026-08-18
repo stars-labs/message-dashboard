@@ -14,8 +14,13 @@ function extractApiDetail(message) {
 export function describeAIConnectionError(error) {
   const message = String(error?.message || error || 'Unknown error');
   const detail = extractApiDetail(message);
-  if (/\b(401|403)\b/.test(message)) {
+  if (/\b401\b/.test(message)) {
     return detail ? `认证失败：${detail}` : '认证失败，请检查 AI token';
+  }
+  if (/\b403\b/.test(message)) {
+    // 403 covers both "wrong token" and "token valid but no model access" —
+    // always surface the API's own message so the user knows which it is.
+    return detail ? `权限不足：${detail}` : '请求被拒绝，请检查 AI token 和模型权限';
   }
   if (/\b404\b/.test(message)) return '接口不存在，请检查 AI URL 和协议';
   if (/abort|timeout|fetch failed|network|ENOTFOUND|ECONN/i.test(message)) {
