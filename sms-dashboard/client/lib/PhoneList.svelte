@@ -79,7 +79,7 @@
 </script>
 
 <div class="bg-white flex flex-col h-full min-h-0
-  {mobile ? '' : 'border border-stone-200/80 rounded-xl'}"
+  {mobile ? '' : 'border border-stone-200/80 rounded-xl overflow-hidden'}"
   style={mobile ? '' : 'box-shadow: 0 1px 3px rgba(28,25,23,0.06);'}>
 
   <!-- Header: search + filter chips -->
