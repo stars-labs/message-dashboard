@@ -810,7 +810,7 @@
                       <span class="flex flex-col gap-0.5 text-xs font-normal">
                         <span class="text-stone-400">不按余额管理</span>
                         <span class={billingAccountBySim.has(row.phone.iccid) ? 'text-emerald-700' : 'text-amber-700'}>
-                          {billingAccountBySim.has(row.phone.iccid) ? '由账单账户管理' : '未关联账单账户'}
+                          {billingAccountBySim.has(row.phone.iccid) ? '已收到过账单短信' : '等待账单短信'}
                         </span>
                       </span>
                     {:else}
@@ -915,7 +915,7 @@
                       <span class="flex flex-col">
                         <strong class="text-sm leading-tight font-medium text-stone-400">不按余额管理</strong>
                         <small class={billingAccountBySim.has(row.phone.iccid) ? 'text-emerald-700' : 'text-amber-700'}>
-                          {billingAccountBySim.has(row.phone.iccid) ? '由账单账户管理' : '未关联账单账户'}
+                          {billingAccountBySim.has(row.phone.iccid) ? '已收到过账单短信' : '等待账单短信'}
                         </small>
                       </span>
                     {:else}
@@ -947,8 +947,8 @@
     {:else if activeTab === 'bills'}
       <div class="px-4 py-3 lg:px-5 border-b border-stone-100 flex items-center gap-3 lg:flex-none">
         <div>
-          <p class="text-sm font-semibold text-stone-800">账户级付款队列</p>
-          <p class="text-[11px] text-stone-400">账单按账户归集，不会重复到每张 SIM</p>
+          <p class="text-sm font-semibold text-stone-800">按接收卡归集的付款队列</p>
+          <p class="text-[11px] text-stone-400">当前 SIM 收到运营商账单短信后自动生成，无需配置账户号</p>
         </div>
         <button type="button" onclick={() => loadBills(true)} disabled={billsLoading}
           class="ml-auto px-3 py-1.5 text-xs font-medium text-stone-600 bg-stone-100 hover:bg-stone-200 rounded-lg disabled:opacity-50">
@@ -965,20 +965,18 @@
       {:else if bills.length === 0}
         <div class="py-16 px-6 text-center">
           <p class="text-sm font-medium text-stone-600">目前没有后付费账单</p>
-          <p class="mt-1 text-xs text-stone-400">关联账单账户后，系统会从运营商账单短信生成待办。</p>
+          <p class="mt-1 text-xs text-stone-400">当前 SIM 收到运营商账单短信后，系统会自动生成待办。</p>
         </div>
       {:else}
         <div class="hidden lg:block lg:flex-1 lg:min-h-0 lg:overflow-auto" data-desktop-bill-scroll>
           <table class="w-full text-sm">
             <thead class="sticky top-0 z-10 bg-stone-50">
               <tr class="border-b border-stone-200 text-[11px] font-semibold text-stone-400 tracking-widest uppercase">
-                <th class="px-4 py-2.5 text-left">账单账户</th>
+                <th class="px-4 py-2.5 text-left">接收卡</th>
                 <th class="px-4 py-2.5 text-left">运营商</th>
                 <th class="px-4 py-2.5 text-left">金额</th>
                 <th class="px-4 py-2.5 text-left">到期日</th>
                 <th class="px-4 py-2.5 text-left">处理状态</th>
-                <th class="px-4 py-2.5 text-left">关联 SIM</th>
-                <th class="px-4 py-2.5 text-left">通知 SIM</th>
                 <th class="px-4 py-2.5 text-right">操作</th>
               </tr>
             </thead>
@@ -987,8 +985,8 @@
                 {@const urgency = billUrgencyMeta(bill)}
                 <tr class="hover:bg-stone-50">
                   <td class="px-4 py-3">
-                    <strong class="block text-stone-800">{bill.account_ref_masked}</strong>
-                    <span class="text-[11px] text-stone-400">{bill.account_display_name}</span>
+                    <strong class="block font-mono text-stone-800">{formatCardNumber(bill.notification_sim?.sim_index)}</strong>
+                    <span class="text-[11px] text-stone-400">账单短信接收卡</span>
                   </td>
                   <td class="px-4 py-3 text-stone-600">{bill.carrier}</td>
                   <td class="px-4 py-3 font-semibold tabular-nums text-stone-900">{formatBillAmount(bill)}</td>
@@ -997,8 +995,6 @@
                     <span class="mt-0.5 inline-flex px-2 py-0.5 rounded-md border text-[10px] font-medium {urgency.className}">{urgency.label}</span>
                   </td>
                   <td class="px-4 py-3 text-xs text-stone-600">{billActionLabel(bill.action_status)}</td>
-                  <td class="px-4 py-3 text-xs text-stone-600">{bill.linked_sim_count} 张 SIM</td>
-                  <td class="px-4 py-3 font-mono text-xs text-stone-600">{formatCardNumber(bill.notification_sim?.sim_index)}</td>
                   <td class="px-4 py-3 text-right">
                     <button type="button" aria-label="查看账单" onclick={() => openBill(bill)} disabled={billDetailLoading}
                       class="text-xs font-medium text-action-text hover:underline disabled:text-stone-300">查看</button>
@@ -1015,15 +1011,15 @@
               class="w-full px-4 py-3 text-left active:bg-stone-50">
               <span class="flex items-start gap-3">
                 <span class="min-w-0 flex-1">
-                  <strong class="block text-sm text-stone-900">{bill.account_ref_masked}</strong>
-                  <span class="mt-0.5 block text-xs text-stone-400 truncate">{bill.carrier} · {bill.linked_sim_count} 张 SIM</span>
+                  <strong class="block font-mono text-sm text-stone-900">{formatCardNumber(bill.notification_sim?.sim_index)}</strong>
+                  <span class="mt-0.5 block text-xs text-stone-400 truncate">{bill.carrier} · 账单短信接收卡</span>
                 </span>
                 <strong class="text-sm tabular-nums text-stone-900">{formatBillAmount(bill)}</strong>
               </span>
               <span class="mt-2 flex items-center gap-2">
                 <span class="font-mono text-xs text-stone-500">{bill.due_date}</span>
                 <span class="inline-flex px-2 py-0.5 rounded-md border text-[10px] font-medium {urgency.className}">{urgency.label}</span>
-                <span class="ml-auto text-[10px] text-stone-400">通知 {formatCardNumber(bill.notification_sim?.sim_index)}</span>
+                <span class="ml-auto text-[10px] text-stone-400">自动识别</span>
               </span>
             </button>
           {/each}
@@ -1111,8 +1107,8 @@
     <section class="w-full sm:max-w-[640px] max-h-[92vh] bg-white border border-stone-200 rounded-t-xl sm:rounded-xl shadow-modal overflow-hidden flex flex-col" aria-label="后付费账单详情">
       <header class="px-5 py-4 border-b border-stone-100 flex items-start justify-between gap-4">
         <div>
-          <h3 class="font-semibold text-stone-900">{selectedBill.account_ref_masked}</h3>
-          <p class="mt-0.5 text-xs text-stone-400">{selectedBill.carrier} · {selectedBill.account_display_name}</p>
+          <h3 class="font-mono font-semibold text-stone-900">{formatCardNumber(selectedBill.notification_sim?.sim_index ?? selectedBill.linked_sims?.[0]?.sim_index)}</h3>
+          <p class="mt-0.5 text-xs text-stone-400">{selectedBill.carrier} · 由该卡收到的账单短信自动识别</p>
         </div>
         <button type="button" onclick={() => { selectedBill = null; }} aria-label="关闭账单详情" class="w-8 h-8 text-stone-400 hover:bg-stone-100 rounded-lg">&times;</button>
       </header>
@@ -1123,13 +1119,9 @@
           <div class="px-4 py-3 border-r border-stone-100"><p class="text-[11px] text-stone-400">紧急程度</p><span class="mt-1 inline-flex px-2 py-0.5 rounded-md border text-[10px] font-medium {selectedUrgency.className}">{selectedUrgency.label}</span></div>
           <div class="px-4 py-3"><p class="text-[11px] text-stone-400">处理状态</p><strong class="block mt-1 text-sm text-stone-800">{billActionLabel(selectedBill.action_status)}</strong></div>
         </div>
-        <section class="px-5 py-4 border-b border-stone-100" aria-label="关联 SIM">
-          <h4 class="text-xs font-semibold text-stone-700">关联 SIM</h4>
-          <div class="mt-2 flex flex-wrap gap-2">
-            {#each selectedBill.linked_sims || [] as sim}
-              <span class="inline-flex px-2 py-1 rounded-md bg-stone-100 text-xs font-mono text-stone-600">{formatCardNumber(sim.sim_index)} · {sim.number || sim.iccid}</span>
-            {/each}
-          </div>
+        <section class="px-5 py-4 border-b border-stone-100" aria-label="账单短信接收卡">
+          <h4 class="text-xs font-semibold text-stone-700">账单短信接收卡</h4>
+          <p class="mt-2 text-sm font-mono text-stone-600">{formatCardNumber(selectedBill.notification_sim?.sim_index ?? selectedBill.linked_sims?.[0]?.sim_index)}</p>
         </section>
         <section class="px-5 py-4 border-b border-stone-100" aria-label="账单短信证据">
           <h4 class="text-xs font-semibold text-stone-700">账单短信证据</h4>

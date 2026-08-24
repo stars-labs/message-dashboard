@@ -44,7 +44,7 @@ describe('balance management', () => {
     expect(scrollRegion.classList).toContain('lg:flex-1', 'lg:min-h-0', 'lg:overflow-auto');
   });
 
-  test('shows the account-level postpaid bill queue on desktop and mobile', async () => {
+  test('shows the receiving-SIM postpaid bill queue without account configuration', async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async (url) => {
       const value = String(url);
@@ -68,7 +68,7 @@ describe('balance management', () => {
             urgency: 'due_soon',
             days_remaining: 4,
             action_status: 'unpaid',
-            linked_sim_count: 18,
+            linked_sim_count: 1,
             notification_sim: { iccid: 'notification-sim', sim_index: 79 },
             version: 1,
           }],
@@ -81,11 +81,12 @@ describe('balance management', () => {
         props: { phoneNumbers: [phone], balanceChecks: [check] },
       });
       await fireEvent.click(view.getByRole('button', { name: '后付费账单' }));
-      await waitFor(() => expect(view.getAllByText('•••• 5678').length).toBeGreaterThan(0));
+      await waitFor(() => expect(view.getAllByText('S79').length).toBeGreaterThan(0));
 
       expect(view.getAllByText('SGD 42.80').length).toBeGreaterThan(0);
       expect(view.getAllByText('4 天后到期').length).toBeGreaterThan(0);
-      expect(view.getAllByText('18 张 SIM').length).toBeGreaterThan(0);
+      expect(view.queryByText('•••• 5678')).toBeNull();
+      expect(view.queryByText('账单账户')).toBeNull();
       expect(view.container.querySelector('[data-desktop-bill-scroll]')).toBeTruthy();
       expect(view.container.querySelector('[data-mobile-bill-list]')).toBeTruthy();
     } finally {
@@ -157,7 +158,7 @@ describe('balance management', () => {
     }
   });
 
-  test('distinguishes linked and unlinked postpaid SIMs in the balance overview', async () => {
+  test('distinguishes SIMs with and without received bill SMS in the balance overview', async () => {
     const originalFetch = globalThis.fetch;
     const linked = { ...phone, iccid: 'linked-sim', sim_index: 79, service_type: 'postpaid' };
     const unlinked = { ...phone, iccid: 'unlinked-sim', sim_index: 80, service_type: 'postpaid' };
@@ -180,8 +181,8 @@ describe('balance management', () => {
       const view = render(BalanceManagement, {
         props: { phoneNumbers: [linked, unlinked], balanceChecks: [] },
       });
-      await waitFor(() => expect(view.getAllByText('由账单账户管理').length).toBeGreaterThan(0));
-      expect(view.getAllByText('未关联账单账户').length).toBeGreaterThan(0);
+      await waitFor(() => expect(view.getAllByText('已收到过账单短信').length).toBeGreaterThan(0));
+      expect(view.getAllByText('等待账单短信').length).toBeGreaterThan(0);
     } finally {
       globalThis.fetch = originalFetch;
     }

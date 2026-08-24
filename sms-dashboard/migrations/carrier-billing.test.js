@@ -35,9 +35,32 @@ beforeEach(async () => {
     ) VALUES (?, 'SG', 'Singtel', 'SGD', 'Singtel corporate account',
       'notification-sim', ?, '5678', 'active', 'auth0|admin')
   `).run('account-1', 'a'.repeat(64));
+  const streamMigration = await Bun.file(
+    new URL('./069_unique_active_billing_stream_per_sim.sql', import.meta.url),
+  ).text();
+  database.exec(streamMigration);
 });
 
 describe('carrier billing migration', () => {
+  test('allows only one active bill stream per receiving SIM', () => {
+    const insert = database.query(`
+      INSERT INTO carrier_billing_accounts (
+        id, country_code, carrier, currency, display_name,
+        notification_sim_iccid, account_ref_digest, account_ref_last4,
+        status, created_by
+      ) VALUES (?, 'SG', 'Singtel', 'SGD', ?, 'notification-sim', ?, ?, ?, 'system:sms')
+    `);
+
+    expect(() => insert.run(
+      'account-2',
+      'Duplicate active stream',
+      'b'.repeat(64),
+      '4321',
+      'active',
+    )).toThrow();
+    insert.run('account-3', 'Inactive history', 'c'.repeat(64), '8765', 'inactive');
+  });
+
   test('stores money as integer cents and validates real ISO due dates', () => {
     const insert = database.query(`
       INSERT INTO carrier_bills (
