@@ -1,7 +1,8 @@
 # Singapore Postpaid Bill SMS Workflow Plan
 
-Status: proposed on 2026-08-24. No implementation or production mutation has been
-performed.
+Status: implementation started on 2026-08-24. Canonical sender normalization and
+the pure Singtel parser are implemented locally; schema, ingestion, API, dashboard,
+historical backfill, deployment, and production mutation have not been performed.
 
 ## 1. Outcome
 

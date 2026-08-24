@@ -1551,6 +1551,72 @@ impl AtModemManager {
         raw.to_string()
     }
 
+    /// Decode a sender address after applying sender-only normalization.
+    ///
+    /// Some modems expose alphanumeric senders as concatenated decimal ASCII
+    /// code points (for example, `83 105 110 ...` for `Singtel`). E.164 phone
+    /// numbers are at most 15 digits, so only longer numeric values are eligible
+    /// for this decoding path.
+    fn decode_sms_sender(raw: &str) -> String {
+        if raw.chars().all(|character| character.is_ascii_digit()) {
+            if raw.len() <= 15 {
+                return raw.to_string();
+            }
+
+            if raw.len() <= 36 {
+                let mut candidates = Vec::new();
+                Self::decode_decimal_ascii_candidates(raw, 0, String::new(), &mut candidates);
+                if candidates.len() == 1 {
+                    let candidate = &candidates[0];
+                    if candidate
+                        .chars()
+                        .any(|character| character.is_ascii_alphabetic())
+                        && candidate.chars().all(|character| {
+                            character.is_ascii_alphanumeric()
+                                || matches!(character, ' ' | '&' | '.' | '-' | '+')
+                        })
+                    {
+                        return candidate.clone();
+                    }
+                }
+            }
+        }
+
+        Self::decode_sms_content(raw)
+    }
+
+    fn decode_decimal_ascii_candidates(
+        raw: &str,
+        offset: usize,
+        decoded: String,
+        candidates: &mut Vec<String>,
+    ) {
+        if candidates.len() > 1 {
+            return;
+        }
+        if offset == raw.len() {
+            candidates.push(decoded);
+            return;
+        }
+
+        for width in [2, 3] {
+            let end = offset + width;
+            if end > raw.len() {
+                continue;
+            }
+            let Ok(code_point) = raw[offset..end].parse::<u8>() else {
+                continue;
+            };
+            if !(32..=126).contains(&code_point) {
+                continue;
+            }
+
+            let mut next = decoded.clone();
+            next.push(code_point as char);
+            Self::decode_decimal_ascii_candidates(raw, end, next, candidates);
+        }
+    }
+
     /// Decode UCS2 hex string to UTF-8
     /// Input: "4F60597D" (你好)
     /// Output: "你好"
@@ -1595,7 +1661,7 @@ impl AtModemManager {
 
         // Extract sender (third part, quoted) - may be UCS2 encoded
         let raw_sender = parts.get(2)?.trim().trim_matches('"');
-        let sender = Self::decode_sms_content(raw_sender);
+        let sender = Self::decode_sms_sender(raw_sender);
 
         // Extract timestamp (4th and 5th parts) - may also be UCS2 encoded
         let timestamp = if parts.len() >= 5 {
@@ -2245,6 +2311,27 @@ mod tests {
         assert_eq!(
             AtModemManager::decode_sms_content("1234"),
             AtModemManager::decode_sms_content("1234") // May decode or pass through
+        );
+    }
+
+    #[test]
+    fn test_decode_sms_sender_normalizes_decimal_ascii_names() {
+        assert_eq!(
+            AtModemManager::decode_sms_sender("83105110103116101108"),
+            "Singtel"
+        );
+        assert_eq!(
+            AtModemManager::decode_sms_sender("831051101031161011083266105122"),
+            "Singtel Biz"
+        );
+    }
+
+    #[test]
+    fn test_decode_sms_sender_preserves_numeric_addresses() {
+        assert_eq!(AtModemManager::decode_sms_sender("1234"), "1234");
+        assert_eq!(
+            AtModemManager::decode_sms_sender("6591234567"),
+            "6591234567"
         );
     }
 
