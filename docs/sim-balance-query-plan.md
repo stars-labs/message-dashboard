@@ -14,6 +14,10 @@ Automated rollout also depends on the observation and rollback gates in the
 balance replies use the same physical `ME`/`SM` storage and must not be automated
 until storage occupancy and deletion failures are visible.
 
+The carrier-neutral operator workflow for prepaid health, manual observations, and
+external recharge verification is defined in
+[Prepaid SIM Balance and Recharge Workflow Plan](prepaid-balance-workflow-plan.md).
+
 ## Goal
 
 Provide a reliable, auditable view of the useful balance state for every managed
@@ -622,6 +626,7 @@ Record confirmation outcomes here before implementation begins.
 | 2026-08-24 | Singapore carrier reconciliation and Singtel route | Inventory reconciled; account membership pending | Read-only production metadata shows S78-S95 are 18 carrier-account-verified Singtel postpaid lines: 17 active on `Singtel Singtel`, with S89 offline. S73-S77 are five verified M1 prepaid lines. The old Singtel `*100#` pilot on S73 and M1 `#100#` pilot on S78 used the wrong carrier cohorts and are not carrier-valid evidence. There is no current Singtel prepaid inventory. Verify billing-account membership from a detailed bill or OnePass; MFA/reCAPTCHA remain human handoffs if OnePass is used. |
 | 2026-08-24 | 6. Singtel postpaid bill-SMS history | Passive account-level source confirmed | Nine consecutive monthly notices from December 2025 through August 2026 were found on S79. Each includes one SGD total and due date and references the same billing account; no equivalent notice was found on the other 17 Singtel lines. Select deterministic passive parsing as the first method. Keep bill state account-level, verify account membership manually, fix the historical numeric sender encoding at ingestion, and use OnePass only for membership/payment reconciliation. |
 | 2026-08-24 | Singapore postpaid bill workflow scope | Carrier-neutral workflow confirmed | Account-level bill detection, due-state calculation, payment actions, audit, API, and UI are shared across all supported Singapore postpaid carriers. Each carrier still requires its own exact, versioned, fixture-backed parser profile; Singtel is the first confirmed profile, not a special-case workflow. |
+| 2026-08-24 | Prepaid workflow scope | Proposed | Use one carrier-neutral SIM health and external-recharge workflow driven by immutable typed observations. Preserve concurrent low-balance and expiry reasons, support controlled manual observations when automation is unavailable, and require a later carrier observation to verify any operator-recorded recharge. Start carrier validation with genuine M1 prepaid SIMs S73-S77; the earlier S78 test is invalid M1 evidence. |
 | 2026-08-13 | 7. M1 procedure | Confirmed | Pilot the `#100#` interactive USSD flow with timeout/cancellation and portal comparison. Validation pending. |
 | 2026-08-14 | 7. M1 validation | Closed for S78 | S78 on `/dev/ttyUSB42`, registered to `Singtel Singtel`, returned immediate `ERROR` for `#100#` with no `+CUSD` network response. Cancellation returned `OK`; `sms-daemon` was restored and verified active. Do not generalize beyond this SIM/network state. |
 | 2026-08-13 | 8. StarHub procedure | Confirmed | Never use obsolete `*123#`; investigate only an official portal, business export, or supported API. Validation pending. |
