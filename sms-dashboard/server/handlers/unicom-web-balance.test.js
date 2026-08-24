@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { unicomWebBalanceHandler } from './unicom-web-balance.js';
+import {
+  reconcileTerminalWebBalanceJobs,
+  unicomWebBalanceHandler,
+} from './unicom-web-balance.js';
 
 class D1Adapter {
   constructor(database) {
@@ -208,5 +211,35 @@ describe('China Unicom browser balance job protocol', () => {
       .toBe('failed');
     expect(sqlite.query("SELECT status FROM sim_balance_checks WHERE id='check-1'").get().status)
       .toBe('failed');
+  });
+
+  test('reconciles a terminal web job whose parent check is still queued', async () => {
+    sqlite.exec(`
+      UPDATE sim_balance_web_jobs
+      SET status = 'stopped', last_error = 'Runner stopped before completion',
+          lease_owner = 'stale-runner', lease_expires_at = datetime('now', '-1 minute')
+      WHERE id = 'job-1';
+    `);
+
+    const result = await reconcileTerminalWebBalanceJobs(db);
+
+    expect(result.reconciled).toBe(1);
+    expect(sqlite.query(`
+      SELECT status, completed_at, error FROM sim_balance_checks WHERE id = 'check-1'
+    `).get()).toEqual({
+      status: 'failed',
+      completed_at: expect.any(String),
+      error: 'Runner stopped before completion',
+    });
+    expect(sqlite.query(`
+      SELECT event_type, detail_json FROM sim_balance_web_events
+      WHERE job_id = 'job-1' ORDER BY id DESC LIMIT 1
+    `).get()).toEqual({
+      event_type: 'reconciled',
+      detail_json: '{"web_job_status":"stopped"}',
+    });
+    expect(sqlite.query(`
+      SELECT lease_owner, lease_expires_at FROM sim_balance_web_jobs WHERE id = 'job-1'
+    `).get()).toEqual({ lease_owner: null, lease_expires_at: null });
   });
 });

@@ -12,7 +12,10 @@ import { healthHandler } from './handlers/health';
 import { usersHandler } from './handlers/users';
 import { balanceQueriesHandler } from './handlers/balance-queries.js';
 import { balanceSkillRunnerHandler } from './handlers/balance-skill-runner.js';
-import { unicomWebBalanceHandler } from './handlers/unicom-web-balance.js';
+import {
+  reconcileTerminalWebBalanceJobs,
+  unicomWebBalanceHandler,
+} from './handlers/unicom-web-balance.js';
 import { balanceRunnersHandler } from './handlers/balance-runners.js';
 import { serveFrontend } from './frontend-handler';
 import { createRoleConfig, hasAnyRole } from '../config/auth0-roles.js';
@@ -641,6 +644,13 @@ export default {
       console.log(`[scheduled] classification: swept ${sweep.processed}, ${sweep.remaining} remaining`);
     } catch (error) {
       console.error('[scheduled] classification sweep failed:', error);
+    }
+
+    try {
+      const webJobs = await reconcileTerminalWebBalanceJobs(env.DB);
+      console.log(`[scheduled] web balance jobs: reconciled ${webJobs.reconciled}`);
+    } catch (error) {
+      console.error('[scheduled] web balance reconciliation failed:', error);
     }
   }
 };

@@ -71,6 +71,42 @@ function eventStatement(db, jobId, eventType, detail = {}) {
   `).bind(jobId, eventType, JSON.stringify(detail));
 }
 
+export async function reconcileTerminalWebBalanceJobs(db) {
+  const results = await db.batch([
+    db.prepare(`
+      INSERT INTO sim_balance_web_events (job_id, event_type, detail_json)
+      SELECT j.id, 'reconciled', json_object('web_job_status', j.status)
+      FROM sim_balance_web_jobs j
+      JOIN sim_balance_checks c ON c.id = j.check_id
+      WHERE c.status = 'queued' AND j.status IN ('failed', 'stopped')
+    `).bind(),
+    db.prepare(`
+      UPDATE sim_balance_checks
+      SET status = 'failed', completed_at = CURRENT_TIMESTAMP,
+          error = COALESCE((
+            SELECT NULLIF(j.last_error, '')
+            FROM sim_balance_web_jobs j
+            WHERE j.check_id = sim_balance_checks.id
+              AND j.status IN ('failed', 'stopped')
+          ), 'Browser balance job ended before completion'),
+          updated_at = CURRENT_TIMESTAMP
+      WHERE status = 'queued' AND id IN (
+        SELECT check_id FROM sim_balance_web_jobs
+        WHERE status IN ('failed', 'stopped')
+      )
+    `).bind(),
+    db.prepare(`
+      UPDATE sim_balance_web_jobs
+      SET lease_owner = NULL, lease_expires_at = NULL,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE status IN ('failed', 'stopped')
+        AND (lease_owner IS NOT NULL OR lease_expires_at IS NOT NULL)
+    `).bind(),
+  ]);
+
+  return { reconciled: Number(results?.[1]?.meta?.changes ?? 0) };
+}
+
 async function requireLease(request, body, auth) {
   if (!body || typeof body.runner_id !== 'string') {
     return { response: json({ error: 'runner_id is required' }, 400) };
@@ -97,6 +133,8 @@ export const unicomWebBalanceHandler = {
     }
     const runnerId = new URL(request.url).searchParams.get('runner_id')?.trim();
     if (!runnerId || runnerId.length > 200) return json({ error: 'runner_id is required' }, 400);
+
+    await reconcileTerminalWebBalanceJobs(request.env.DB);
 
     const expiredReason = 'Browser runner lease expired after login flow started';
     await request.env.DB.batch([
