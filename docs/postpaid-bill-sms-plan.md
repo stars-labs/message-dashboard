@@ -2,8 +2,9 @@
 
 Status: the receiving-SIM auto-discovery design and migrations `066`–`069` were
 deployed on 2026-08-24. Production evidence confirmed that only S79 received all
-nine retained Singtel bill notices. Historical reconciliation has not yet run, so
-the production bill stream and bills remain empty.
+nine retained Singtel bill notices. Historical reconciliation completed on
+2026-08-24: production has one S79 bill stream, nine billing cycles, zero
+`needs_review` records, and no bill stream for any other SIM.
 
 ## 1. Outcome
 
@@ -108,7 +109,7 @@ Initial profile registry:
 
 | Profile | Carrier | Evidence | State |
 | --- | --- | --- | --- |
-| `sg-singtel-postpaid-bill-sms-v1` | Singtel | Nine retained monthly bill notices on S79 | Implemented locally |
+| `sg-singtel-postpaid-bill-sms-v1` | Singtel | Nine retained monthly bill notices on S79 | Deployed |
 | — | StarHub | No current StarHub inventory or confirmed postpaid bill template | Unsupported pending evidence |
 | — | M1 | Current M1 cohort is prepaid; no confirmed postpaid bill template | Unsupported pending evidence |
 
@@ -133,6 +134,13 @@ The parser returns `amount_minor`, `currency`, `due_date`, a masked account suff
 and the account-reference digest. It rejects ambiguous amounts, invalid dates,
 unsupported currencies, account mismatches, rebates, advertisements, OTPs, and
 generic messages that merely contain the word “bill”. It does not use AI.
+
+The retained S79 evidence contains six complete messages and three two-part
+messages. Complete messages include the carrier's trailing fill character; the
+reassembled historical messages do not. Fragment matching uses the same receiving
+SIM and canonical sender, requires a non-negative gap of at most five minutes, and
+chooses the closest unused continuation. Equal timestamps are valid because D1's
+secondary ID ordering does not preserve multipart order.
 
 Historical rows contain a numerically encoded form of the sender `Singtel`, while
 recent rows are canonical. First protect the current decoder with a regression
@@ -253,10 +261,15 @@ Each stage is one atomic commit and starts with a failing test.
 8. **Backfill preview:** fixture-based integration test proves the nine retained
    messages yield nine bills for one account without writing during preview.
 
-All eight stages are complete locally. The preview recognizes six complete notices
-and three controlled two-fragment reconstructions, producing nine billing cycles.
-Execution remains guarded by the exact account version, preview digest, admin
-permission, and an idempotency key.
+All eight stages are complete and deployed. The production preview recognized six
+complete notices and three controlled two-fragment reconstructions, producing nine
+billing cycles. Execution remains guarded by the exact account version, preview
+digest, admin permission, and an idempotency key.
+
+The 2026-08-24 production execution created only the S79 receiving-SIM stream. Its
+nine bills cover due dates from 2026-01-07 through 2026-09-07; all parsed without a
+conflict, and none require review. Independent post-execution aggregation confirmed
+zero active bill streams for other SIMs.
 
 Required gates are `nix develop --command bun run test`,
 `nix develop --command bun run build`, migration validation against a fresh local
