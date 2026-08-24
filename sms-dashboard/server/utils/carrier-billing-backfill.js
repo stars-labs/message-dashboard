@@ -76,11 +76,11 @@ export async function previewCarrierBillBackfill(db, accountId) {
     WHERE phone_iccid = ?
       AND phone_number = 'Singtel'
       AND type = 'received'
-      AND (content LIKE ? OR trim(content) = ?)
+      AND (instr(content, ?) = 1 OR trim(content) = ?)
     ORDER BY timestamp, id
   `).bind(
     account.notification_sim_iccid,
-    `${BILL_PREFIX}%`,
+    BILL_PREFIX,
     BILL_FRAGMENT_SUFFIX,
   ).all();
   const messages = query.results ?? [];

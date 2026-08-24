@@ -233,7 +233,7 @@ export async function reconcileCarrierBillMessages(db, {
       AND d.service_type = 'postpaid'
     WHERE m.type = 'received'
       AND m.phone_number = 'Singtel'
-      AND m.content LIKE ?
+      AND instr(m.content, ?) = 1
       AND NOT EXISTS (
         SELECT 1 FROM carrier_bills b WHERE b.source_message_id = m.id
       )
@@ -242,7 +242,7 @@ export async function reconcileCarrierBillMessages(db, {
       )
     ORDER BY m.timestamp DESC, m.id DESC
     LIMIT ?
-  `).bind(`${SINGTEL_BILL_PREFIX}%`, limit + 1).all();
+  `).bind(SINGTEL_BILL_PREFIX, limit + 1).all();
   const candidates = query.results ?? [];
   const page = candidates.slice(0, limit);
   let detected = 0;

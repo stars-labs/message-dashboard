@@ -28,7 +28,10 @@ function d1(database) {
     },
   });
   return {
-    prepare(sql) { return { bind: (...params) => bound(sql, params) }; },
+    prepare(sql) {
+      preparedSql.push(sql);
+      return { bind: (...params) => bound(sql, params) };
+    },
     async batch(statements) {
       return database.transaction(() => statements.map((statement) => {
         const result = database.query(statement.sql).run(...statement.params);
@@ -49,8 +52,10 @@ function request(db, body, key = 'backfill-execute') {
 
 let database;
 let db;
+let preparedSql;
 
 beforeEach(async () => {
+  preparedSql = [];
   database = new Database(':memory:');
   database.exec(`
     PRAGMA foreign_keys = ON;
@@ -147,6 +152,8 @@ describe('historical carrier bill backfill', () => {
     });
     expect(preview.preview_digest).toMatch(/^[a-f0-9]{64}$/);
     expect(database.query(`SELECT COUNT(*) AS count FROM carrier_bills`).get().count).toBe(0);
+    expect(preparedSql.some((sql) => sql.includes('content LIKE'))).toBe(false);
+    expect(preparedSql.some((sql) => sql.includes('instr(content, ?) = 1'))).toBe(true);
     expect(database.query(`SELECT COUNT(*) AS count FROM carrier_bill_events`).get().count).toBe(0);
   });
 

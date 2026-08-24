@@ -15,6 +15,7 @@ function billMessage({ amount = '42.80', dueDate = '14 Sep 2026' } = {}) {
 function d1(database) {
   return {
     prepare(sql) {
+      preparedSql.push(sql);
       return {
         bind(...params) {
           return {
@@ -37,8 +38,10 @@ function d1(database) {
 
 let database;
 let db;
+let preparedSql;
 
 beforeEach(async () => {
+  preparedSql = [];
   database = new Database(':memory:');
   database.exec(`
     PRAGMA foreign_keys = ON;
@@ -222,6 +225,8 @@ describe('carrier bill SMS processing', () => {
     expect(result).toEqual({ scanned: 1, detected: 1, remaining: 0 });
     expect(bills()).toHaveLength(1);
     expect(events()).toHaveLength(1);
+    expect(preparedSql.some((sql) => sql.includes('m.content LIKE'))).toBe(false);
+    expect(preparedSql.some((sql) => sql.includes('instr(m.content, ?) = 1'))).toBe(true);
   });
 
   test('isolates one processing failure from the rest of an upload batch', async () => {
