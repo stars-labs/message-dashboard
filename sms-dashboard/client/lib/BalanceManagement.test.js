@@ -29,6 +29,21 @@ const check = {
 afterEach(cleanup);
 
 describe('balance management', () => {
+  test('keeps each desktop table tab in its own scroll region', async () => {
+    const view = render(BalanceManagement, {
+      props: { phoneNumbers: [phone], balanceChecks: [check] },
+    });
+
+    let scrollRegion = view.container.querySelector('[data-desktop-balance-scroll]');
+    expect(scrollRegion).toBeTruthy();
+    expect(scrollRegion.classList).toContain('lg:flex-1', 'lg:min-h-0', 'lg:overflow-auto');
+
+    await fireEvent.click(view.getByRole('button', { name: '查询记录' }));
+    scrollRegion = view.container.querySelector('[data-desktop-balance-scroll]');
+    expect(scrollRegion).toBeTruthy();
+    expect(scrollRegion.classList).toContain('lg:flex-1', 'lg:min-h-0', 'lg:overflow-auto');
+  });
+
   test('shows runner capability health from the control plane', async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async (url) => {
@@ -74,6 +89,26 @@ describe('balance management', () => {
 
     await fireEvent.click(view.getByRole('button', { name: '查看' }));
     expect(opened).toBe(check);
+  });
+
+  test('classifies a secondary with its primary instead of as unobtained', async () => {
+    const primary = { ...phone, sim_role: 'primary' };
+    const secondary = {
+      ...phone,
+      iccid: '89860117811049221140',
+      sim_index: 3,
+      number: '+8613520607016',
+      sim_role: 'secondary',
+      primary_iccid: primary.iccid,
+    };
+    const view = render(BalanceManagement, {
+      props: { phoneNumbers: [primary, secondary], balanceChecks: [check] },
+    });
+
+    expect(view.getByRole('button', { name: '正常 2' })).toBeTruthy();
+    expect(view.getByRole('button', { name: '未取得 0' })).toBeTruthy();
+    await fireEvent.click(view.getByRole('button', { name: '未取得 0' }));
+    expect(view.getByText('没有匹配的 SIM')).toBeTruthy();
   });
 
   test('switches to the query audit list', async () => {
@@ -372,6 +407,51 @@ describe('balance management', () => {
     carrierFilter.value = 'china-unicom';
     await fireEvent.change(carrierFilter);
     await waitFor(() => expect(view.container.querySelectorAll('tbody tr')).toHaveLength(1));
+    let rows = [...view.container.querySelectorAll('tbody tr')];
+    expect(rows).toHaveLength(1);
+    expect(rows[0].textContent).toContain('S03');
+    expect(rows[0].textContent).not.toContain('S02');
+
+    await fireEvent.click(view.getByRole('button', { name: '查询记录' }));
+    rows = [...view.container.querySelectorAll('tbody tr')];
+    expect(rows).toHaveLength(1);
+    expect(rows[0].textContent).toContain('S03');
+    expect(rows[0].textContent).not.toContain('S02');
+  });
+
+  test('filters Hong Kong Mobile separately from mainland China Mobile', async () => {
+    const cmhkPhone = {
+      ...phone,
+      iccid: '89852000000000000001',
+      sim_index: 3,
+      number: '+85260000000',
+      country: 'HK',
+      carrier: '移动',
+      flag: '🇭🇰',
+    };
+    const cmhkCheck = {
+      ...check,
+      id: 'bal-s03',
+      sim_iccid: cmhkPhone.iccid,
+      sim_index: cmhkPhone.sim_index,
+      sim_number: cmhkPhone.number,
+      profile_carrier: '移动',
+      sim_country: 'HK',
+    };
+    const view = render(BalanceManagement, {
+      props: {
+        phoneNumbers: [{ ...phone, carrier: '移动' }, cmhkPhone],
+        balanceChecks: [{ ...check, profile_carrier: '移动', sim_country: 'CN' }, cmhkCheck],
+      },
+    });
+
+    const carrierFilter = view.getByLabelText('运营商筛选');
+    expect([...carrierFilter.options].map((option) => option.textContent)).toEqual(
+      expect.arrayContaining(['移动', 'CMHK']),
+    );
+
+    carrierFilter.value = 'cmhk';
+    await fireEvent.change(carrierFilter);
     let rows = [...view.container.querySelectorAll('tbody tr')];
     expect(rows).toHaveLength(1);
     expect(rows[0].textContent).toContain('S03');

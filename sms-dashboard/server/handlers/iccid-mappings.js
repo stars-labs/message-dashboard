@@ -1,6 +1,6 @@
 // ICCID Mappings handler - manages user-authoritative sims table
 // New schema: sims table is purely user-managed, status computed dynamically
-export const SIM_SERVICE_TYPES = ['unknown', 'prepaid', 'postpaid', 'n/a'];
+export const SIM_SERVICE_TYPES = ['unknown', 'prepaid', 'postpaid', 'balance_managed'];
 export const SIM_SERVICE_TYPE_SOURCES = [
   'carrier_account',
   'carrier_support',
@@ -30,10 +30,10 @@ export function resolveServiceType(data, existing = null) {
     : existing?.service_type || 'unknown';
 
   if (!SIM_SERVICE_TYPES.includes(serviceType)) {
-    return { error: 'service_type must be unknown, prepaid, postpaid, or n/a' };
+    return { error: 'service_type must be unknown, prepaid, postpaid, or balance_managed' };
   }
 
-  if (serviceType === 'unknown' || serviceType === 'n/a') {
+  if (serviceType === 'unknown' || serviceType === 'balance_managed') {
     return { serviceType, serviceTypeSource: null, serviceTypeProvided };
   }
 
@@ -325,7 +325,7 @@ export const iccidMappingsHandler = {
             updated_at, updated_by
           )
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,
-            CASE WHEN ? = 'unknown' OR ? = 'n/a' THEN NULL ELSE CURRENT_TIMESTAMP END,
+            CASE WHEN ? = 'unknown' OR ? = 'balance_managed' THEN NULL ELSE CURRENT_TIMESTAMP END,
             ?, ?, ?,
             CURRENT_TIMESTAMP, ?)
         `).bind(
@@ -353,7 +353,7 @@ export const iccidMappingsHandler = {
               service_type = ?, service_type_source = ?,
               service_type_verified_at = CASE
                 WHEN ? = 0 THEN service_type_verified_at
-                WHEN ? = 'unknown' OR ? = 'n/a' THEN NULL
+                WHEN ? = 'unknown' OR ? = 'balance_managed' THEN NULL
                 ELSE CURRENT_TIMESTAMP
               END,
               sim_role = ?,
@@ -463,7 +463,7 @@ export const iccidMappingsHandler = {
           service_type_source = ?,
           service_type_verified_at = CASE
             WHEN ? = 0 THEN service_type_verified_at
-            WHEN ? = 'unknown' OR ? = 'n/a' THEN NULL
+            WHEN ? = 'unknown' OR ? = 'balance_managed' THEN NULL
             ELSE CURRENT_TIMESTAMP
           END,
           sim_role = ?,
@@ -635,7 +635,7 @@ export const iccidMappingsHandler = {
                 service_type_source = ?,
                 service_type_verified_at = CASE
                   WHEN ? = 0 THEN service_type_verified_at
-                  WHEN ? = 'unknown' OR ? = 'n/a' THEN NULL
+                  WHEN ? = 'unknown' OR ? = 'balance_managed' THEN NULL
                   ELSE CURRENT_TIMESTAMP
                 END,
                 sim_role = ?,
@@ -671,7 +671,7 @@ export const iccidMappingsHandler = {
                 updated_at, updated_by
               )
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,
-                CASE WHEN ? = 'unknown' OR ? = 'n/a' THEN NULL ELSE CURRENT_TIMESTAMP END,
+                CASE WHEN ? = 'unknown' OR ? = 'balance_managed' THEN NULL ELSE CURRENT_TIMESTAMP END,
                 ?, ?,
                 CURRENT_TIMESTAMP, ?)
             `).bind(

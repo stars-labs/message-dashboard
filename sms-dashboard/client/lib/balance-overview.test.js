@@ -66,6 +66,48 @@ describe('balance overview', () => {
     expect(countBalanceHealth(rows)).toEqual({ normal: 1, low: 1, stale: 1, failed: 0, unknown: 1 });
   });
 
+  test('secondary SIMs inherit their primary balance and health classification', () => {
+    const primary = {
+      ...phone('primary1', 'CN'),
+      sim_role: 'primary',
+    };
+    const secondary = {
+      ...phone('secondary2', 'CN'),
+      sim_role: 'secondary',
+      primary_iccid: primary.iccid,
+    };
+
+    const rows = buildBalanceRows(
+      [primary, secondary],
+      [check(primary.iccid, 'parsed', 340.76, 'CNY')],
+      now
+    );
+
+    expect(rows.map((row) => row.health)).toEqual(['normal', 'normal']);
+    expect(rows[1].balanceMetric).toEqual(rows[0].balanceMetric);
+    expect(rows[1].balanceTimestamp).toBe(rows[0].balanceTimestamp);
+    expect(countBalanceHealth(rows)).toEqual({
+      normal: 2,
+      low: 0,
+      stale: 0,
+      failed: 0,
+      unknown: 0,
+    });
+  });
+
+  test('an orphan secondary remains unknown', () => {
+    const orphan = {
+      ...phone('secondary2', 'CN'),
+      sim_role: 'secondary',
+      primary_iccid: 'missing-primary',
+    };
+
+    const [row] = buildBalanceRows([orphan], [], now);
+
+    expect(row.health).toBe('unknown');
+    expect(row.balanceMetric).toBeNull();
+  });
+
   test('keeps the last known balance but gives a newer failed query priority', () => {
     const checks = [
       check('cn1', 'failed', null, null, '2026-08-14 07:30:00'),

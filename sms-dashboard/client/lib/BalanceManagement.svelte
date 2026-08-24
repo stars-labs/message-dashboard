@@ -49,11 +49,17 @@
 
   let rows = $derived(buildBalanceRows(phoneNumbers, balanceChecks));
   let carrierOptions = $derived.by(() => buildCarrierOptions([
-    ...rows.map((row) => String(row.phone.carrier || '').trim()),
-    ...(balanceChecks || []).map((check) => String(check.profile_carrier || check.sim_carrier || '').trim()),
+    ...rows.map((row) => ({
+      carrier: row.phone.carrier,
+      country: row.phone.country,
+    })),
+    ...(balanceChecks || []).map((check) => ({
+      carrier: check.profile_carrier || check.sim_carrier,
+      country: check.sim_country || check.country_code,
+    })),
   ]));
   let carrierRows = $derived(rows.filter((row) => carrierFilter === 'all'
-    || carrierKey(row.phone.carrier) === carrierFilter));
+    || carrierKey({ carrier: row.phone.carrier, country: row.phone.country }) === carrierFilter));
   let counts = $derived(countBalanceHealth(carrierRows));
   // Counts live on the filter tabs (device-page pattern) instead of a separate summary bar.
   let filterTabs = $derived([
@@ -110,7 +116,10 @@
   let someFilteredSelected = $derived(filteredIccids.some((iccid) => selectedIccidSet.has(iccid)));
   let sortedChecks = $derived((balanceChecks || [])
     .filter((check) => carrierFilter === 'all'
-      || carrierKey(check.profile_carrier || check.sim_carrier) === carrierFilter)
+      || carrierKey({
+        carrier: check.profile_carrier || check.sim_carrier,
+        country: check.sim_country || check.country_code,
+      }) === carrierFilter)
     .slice()
     .sort(compareHistoryChecks));
   let latestUpdate = $derived(
@@ -430,9 +439,9 @@
   }
 </script>
 
-<div class="h-full min-h-0 bg-white lg:bg-transparent lg:px-8 lg:py-6 lg:overflow-auto">
-  <div class="w-full bg-white lg:border lg:border-stone-200 lg:rounded-xl lg:shadow-raised overflow-hidden">
-    <header class="px-4 py-3 lg:px-6 lg:py-5 border-b border-stone-100">
+<div class="h-full min-h-0 bg-white lg:bg-transparent lg:px-8 lg:py-6 lg:overflow-hidden">
+  <div class="w-full bg-white lg:h-full lg:min-h-0 lg:flex lg:flex-col lg:border lg:border-stone-200 lg:rounded-xl lg:shadow-raised overflow-hidden">
+    <header class="px-4 py-3 lg:px-6 lg:py-5 border-b border-stone-100 lg:flex-none">
       <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2.5 sm:gap-4">
         <div class="flex items-baseline justify-between gap-3 sm:block">
           <h2 class="text-lg lg:text-xl font-bold text-stone-900 shrink-0">余额管理</h2>
@@ -468,7 +477,7 @@
       </div>
     </header>
 
-    <section class="px-4 py-2.5 lg:px-6 border-b border-stone-100 bg-stone-50/60 flex flex-wrap items-center gap-x-4 gap-y-2" aria-label="余额查询助手状态">
+    <section class="px-4 py-2.5 lg:px-6 border-b border-stone-100 bg-stone-50/60 flex flex-wrap items-center gap-x-4 gap-y-2 lg:flex-none" aria-label="余额查询助手状态">
       <span class="text-xs font-semibold text-stone-700">查询助手</span>
       {#each Object.entries(capabilityLabels) as [name, label]}
         {@const capability = runnerStatus?.capabilities?.[name]}
@@ -483,7 +492,7 @@
     </section>
 
     {#if notice}
-      <div class="px-4 lg:px-5 py-2.5 border-b text-sm flex items-center justify-between gap-3
+      <div class="px-4 lg:px-5 py-2.5 border-b text-sm flex items-center justify-between gap-3 lg:flex-none
         {notice.type === 'success' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 'bg-red-50 text-red-700 border-red-100'}">
         <span>{notice.message}</span>
         <button type="button" onclick={() => { notice = null; }} aria-label="关闭提示" class="text-current opacity-60 hover:opacity-100">&times;</button>
@@ -492,7 +501,7 @@
 
     {#if activeTab === 'overview'}
       <!-- Toolbar: [filter tabs with counts] | [carrier] [search] — one line -->
-      <div class="px-4 py-2.5 lg:px-5 border-b border-stone-100 flex items-center gap-2 overflow-x-auto">
+      <div class="px-4 py-2.5 lg:px-5 border-b border-stone-100 flex items-center gap-2 overflow-x-auto lg:flex-none">
         <div class="flex items-center gap-2 min-w-max shrink-0">
           <!-- filter tabs; count follows the label, same as the device page -->
           {#each filterTabs as [value, label, count]}
@@ -541,7 +550,7 @@
       </div>
 
       {#if canQueryBalances && selectedIccids.length}
-        <div class="px-4 py-2 lg:px-5 border-b border-orange-100 bg-orange-50 flex items-center gap-3 text-xs">
+        <div class="px-4 py-2 lg:px-5 border-b border-orange-100 bg-orange-50 flex items-center gap-3 text-xs lg:flex-none">
           <strong class="text-orange-800">已选 {selectedIccids.length} 张</strong>
           <span class="text-orange-600">批量查询将仅处理已选卡</span>
           <button type="button" onclick={() => { selectedIccids = []; }} class="ml-auto font-medium text-orange-700 hover:underline">清空选择</button>
@@ -554,9 +563,9 @@
           <button type="button" onclick={() => { statusFilter = 'all'; carrierFilter = 'all'; searchQuery = ''; }} class="mt-2 text-xs text-action-text hover:underline">清除筛选</button>
         </div>
       {:else}
-        <div class="hidden lg:block overflow-x-auto">
+        <div class="hidden lg:block lg:flex-1 lg:min-h-0 lg:overflow-auto" data-desktop-balance-scroll>
           <table class="w-full text-sm">
-            <thead>
+            <thead class="sticky top-0 z-10 bg-stone-50">
               <tr class="bg-stone-50 border-b border-stone-200">
                 {#if canQueryBalances}
                   <th class="w-12 px-4 py-2.5 text-left">
@@ -623,7 +632,7 @@
                     <span class="inline-flex px-2 py-0.5 rounded-md border text-[11px]
                       {row.phone.service_type === 'prepaid' || row.phone.service_type === 'postpaid'
                         ? 'bg-stone-50 text-stone-700 border-stone-200'
-                        : row.phone.service_type === 'n/a'
+                        : row.phone.service_type === 'balance_managed'
                           ? 'bg-stone-50 text-stone-400 border-stone-200'
                           : 'bg-amber-50 text-amber-700 border-amber-200'}">
                       {getSimServiceTypeLabel(row.phone.service_type)}
@@ -739,7 +748,7 @@
         </div>
       {/if}
     {:else}
-      <div class="px-4 py-3 lg:px-5 border-b border-stone-100 flex justify-end">
+      <div class="px-4 py-3 lg:px-5 border-b border-stone-100 flex justify-end lg:flex-none">
         <label class="sr-only" for="balance-history-carrier-filter">运营商筛选</label>
         <select
           id="balance-history-carrier-filter"
@@ -758,9 +767,9 @@
       {#if sortedChecks.length === 0}
         <div class="py-16 text-center text-sm text-stone-400">没有匹配的余额查询记录</div>
       {:else}
-        <div class="hidden lg:block overflow-x-auto">
+        <div class="hidden lg:block lg:flex-1 lg:min-h-0 lg:overflow-auto" data-desktop-balance-scroll>
           <table class="w-full text-sm">
-            <thead><tr class="bg-stone-50 border-b border-stone-200">
+            <thead class="sticky top-0 z-10 bg-stone-50"><tr class="bg-stone-50 border-b border-stone-200">
               {#each historyColumns as column, index}
                 <th class="px-4 py-2.5 text-left text-[11px] font-semibold text-stone-400 tracking-widest uppercase {index === historyColumns.length - 1 ? 'text-right' : ''}">
                   {#if column.key}

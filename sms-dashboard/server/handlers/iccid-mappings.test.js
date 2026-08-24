@@ -61,6 +61,8 @@ async function createMigratedDatabase() {
   database.exec(migration);
   const migration2 = await Bun.file(new URL('../../migrations/059_add_sim_primary_secondary.sql', import.meta.url)).text();
   database.exec(migration2);
+  const migration3 = await Bun.file(new URL('../../migrations/062_add_balance_threshold.sql', import.meta.url)).text();
+  database.exec(migration3);
   return database;
 }
 
@@ -109,9 +111,26 @@ describe('SIM service type validation', () => {
     });
   });
 
+  test('accepts balance-managed SIMs without verification metadata', () => {
+    expect(resolveServiceType({
+      service_type: 'balance_managed',
+      service_type_source: 'carrier_message',
+    })).toEqual({
+      serviceType: 'balance_managed',
+      serviceTypeSource: null,
+      serviceTypeProvided: true,
+    });
+  });
+
+  test('rejects the replaced n/a service type', () => {
+    expect(resolveServiceType({ service_type: 'n/a' })).toEqual({
+      error: 'service_type must be unknown, prepaid, postpaid, or balance_managed',
+    });
+  });
+
   test('rejects unsupported inferred categories', () => {
     expect(resolveServiceType({ service_type: 'hybrid' })).toEqual({
-      error: 'service_type must be unknown, prepaid, or postpaid',
+      error: 'service_type must be unknown, prepaid, postpaid, or balance_managed',
     });
   });
 

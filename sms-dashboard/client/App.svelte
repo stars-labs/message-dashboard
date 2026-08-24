@@ -1080,7 +1080,7 @@
     {:else if currentView === "iccid-mappings"}
       <ErrorBoundary componentName="IccidMappings">
         <!-- ICCID Mappings View -->
-        <div class="px-0 py-0 sm:px-4 sm:py-6 lg:px-8 lg:flex-1 lg:min-h-0 lg:overflow-auto">
+        <div class="px-0 py-0 sm:px-4 sm:py-6 lg:px-8 lg:flex-1 lg:min-h-0 lg:overflow-hidden">
           <IccidMappings initialStatusFilter={iccidMappingsFilter} />
         </div>
       </ErrorBoundary>

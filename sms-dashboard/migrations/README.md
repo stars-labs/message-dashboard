@@ -4,6 +4,11 @@ This directory contains SQL migration scripts for the SMS Dashboard D1 database.
 
 ## Migration History
 
+### 063_replace_na_service_type.sql / 064_recreate_device_view.sql
+- Replaces the ambiguous `n/a` SIM service type with `balance_managed`.
+- Migrates existing records, removes the old enum value from the schema, and
+  recreates `device_view` after the table rebuild.
+
 ### 058_add_sim_service_type.sql
 - Adds user-verified `unknown`/`prepaid`/`postpaid` metadata to `sims`.
 - Records a controlled confirmation source and verification time for known types.

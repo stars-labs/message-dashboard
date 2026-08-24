@@ -10,6 +10,24 @@ afterEach(() => {
 });
 
 describe('Device & Card sorting', () => {
+  test('keeps the desktop table in its own scroll region', async () => {
+    globalThis.fetch = async () => Response.json({
+      success: true,
+      data: {
+        results: [
+          { id: 'two', iccid: 'iccid-02', phone_number: '+8602', carrier: '联通', country: 'CN', sim_index: 2, is_active: 'active' },
+        ],
+      },
+    });
+
+    const view = render(IccidMappings);
+    await waitFor(() => expect(view.getAllByText('S02').length).toBeGreaterThan(0));
+
+    const scrollRegion = view.container.querySelector('[data-desktop-table-scroll]');
+    expect(scrollRegion).toBeTruthy();
+    expect(scrollRegion.classList).toContain('lg:flex-1', 'lg:min-h-0', 'lg:overflow-auto');
+  });
+
   test('sorts rows by a clicked column and toggles direction', async () => {
     globalThis.fetch = async () => Response.json({
       success: true,
@@ -57,6 +75,34 @@ describe('Device & Card sorting', () => {
     expect(rows[0].textContent).toContain('S03');
     expect(rows[0].textContent).toContain('🇨🇳');
     expect(rows[0].textContent).toContain('联通');
+    expect(rows[0].textContent).not.toContain('S02');
+  });
+
+  test('filters Hong Kong Mobile separately from mainland China Mobile', async () => {
+    globalThis.fetch = async () => Response.json({
+      success: true,
+      data: {
+        results: [
+          { id: 'cn-mobile', iccid: 'cn-mobile-iccid', phone_number: '+86135', carrier: '移动', country: 'CN', sim_index: 2, is_active: 'active' },
+          { id: 'hk-mobile', iccid: 'hk-mobile-iccid', phone_number: '+85260000000', carrier: '移动', country: 'HK', sim_index: 3, is_active: 'active' },
+        ],
+      },
+    });
+
+    const view = render(IccidMappings);
+    await waitFor(() => expect(view.getAllByText('S02').length).toBeGreaterThan(0));
+
+    const carrierFilter = view.getByLabelText('运营商筛选');
+    expect([...carrierFilter.options].map((option) => option.textContent)).toEqual(
+      expect.arrayContaining(['移动', 'CMHK']),
+    );
+    carrierFilter.value = 'cmhk';
+    await fireEvent.change(carrierFilter);
+
+    await waitFor(() => expect(view.container.querySelectorAll('tbody tr')).toHaveLength(1));
+    const rows = [...view.container.querySelectorAll('tbody tr')];
+    expect(rows[0].textContent).toContain('S03');
+    expect(rows[0].textContent).toContain('🇭🇰');
     expect(rows[0].textContent).not.toContain('S02');
   });
 });

@@ -216,7 +216,9 @@
           <select
             id="dialog-service-type"
             bind:value={serviceType}
-            onchange={() => { if (serviceType === "unknown") serviceTypeSource = ""; }}
+            onchange={() => {
+              if (serviceType === "unknown" || serviceType === "balance_managed") serviceTypeSource = "";
+            }}
             class="w-full px-3 py-2 cyber-input"
           >
             {#each SIM_SERVICE_TYPES as option}
@@ -230,7 +232,7 @@
           <select
             id="dialog-service-type-source"
             bind:value={serviceTypeSource}
-            disabled={serviceType === "unknown"}
+            disabled={serviceType === "unknown" || serviceType === "balance_managed"}
             class="w-full px-3 py-2 cyber-input disabled:bg-stone-50 disabled:text-stone-300"
           >
             <option value="">选择确认来源...</option>

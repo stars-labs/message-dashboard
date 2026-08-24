@@ -4,7 +4,8 @@
 
 - `sims` is the user-owned inventory and the source of truth for ICCID, phone
   number, carrier, SIM index, and assigned IMEI. The daemon never writes it.
-- `sims.service_type` is manually verified `unknown`/`prepaid`/`postpaid` metadata.
+- `sims.service_type` is `unknown`, manually verified `prepaid`/`postpaid`, or
+  `balance_managed` when operational health is driven directly by balance metrics.
   Never infer or write it from ICCID, detected operator, or balance replies.
 - Read device/SIM state through `device_view`, not ad hoc joins or legacy tables.
 - `device_view` joins `sims.imei` to `modems.equipment_id`. The join key is IMEI,

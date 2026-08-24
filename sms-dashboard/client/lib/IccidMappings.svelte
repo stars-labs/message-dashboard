@@ -105,7 +105,10 @@
   let inactiveCount = $derived(allMappingsCache.filter(m => ['no_modem', 'unassigned'].includes(m.is_active) || !m.is_active).length);
   let totalCount    = $derived(allMappingsCache.length);
   let carrierOptions = $derived.by(() => buildCarrierOptions(
-    allMappingsCache.map((mapping) => mapping.carrier)
+    allMappingsCache.map((mapping) => ({
+      carrier: mapping.carrier,
+      country: mapping.country,
+    }))
   ));
 
   const tableColumns = [
@@ -130,7 +133,6 @@
       sortKey = key;
       sortDirection = 'asc';
     }
-    filterMappings();
   }
 
   function sortValue(mapping, key) {
@@ -178,7 +180,10 @@
     else if (statusFilter === 'inactive') filtered = filtered.filter(m => ['no_modem','unassigned'].includes(m.is_active) || !m.is_active);
 
     if (carrierFilter !== 'all') {
-      filtered = filtered.filter((mapping) => carrierKey(mapping.carrier) === carrierFilter);
+      filtered = filtered.filter((mapping) => carrierKey({
+        carrier: mapping.carrier,
+        country: mapping.country,
+      }) === carrierFilter);
     }
 
     if (searchQuery.trim()) {
@@ -217,6 +222,8 @@
     searchQuery;
     statusFilter;
     carrierFilter;
+    sortKey;
+    sortDirection;
     filterMappings();
   });
 
@@ -270,11 +277,11 @@
 </script>
 
 <!-- ═══ Page ════════════════════════════════════════════════════════════════ -->
-<div class="relative overflow-hidden bg-white p-4 sm:p-6 lg:border lg:border-stone-200/80
+<div class="relative overflow-hidden bg-white p-4 sm:p-6 lg:h-full lg:min-h-0 lg:flex lg:flex-col lg:border lg:border-stone-200/80
   lg:rounded-xl lg:shadow-[0_1px_3px_rgba(28,25,23,0.06),0_1px_2px_rgba(28,25,23,0.04)]">
 
   <!-- Header -->
-  <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
+  <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4 lg:flex-none">
     <div>
       <h2 class="text-lg sm:text-xl font-bold text-stone-900">设备与卡 · ICCID 映射</h2>
     </div>
@@ -286,7 +293,7 @@
   </div>
 
   <!-- Filter chips + search -->
-  <div class="flex flex-col sm:flex-row gap-2 mb-4">
+  <div class="flex flex-col sm:flex-row gap-2 mb-4 lg:flex-none">
     <div class="flex flex-wrap gap-1.5">
       {#each [['all','全部',totalCount],['active','活动',activeCount],['error','异常',errorCount],['inactive','未激活',inactiveCount]] as [v,label,count]}
         <button onclick={() => { statusFilter = v; }}
@@ -324,14 +331,14 @@
   </div>
 
   {#if successMessage}
-    <div class="mb-3 px-3 py-2 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg text-sm flex items-center justify-between">
+    <div class="mb-3 px-3 py-2 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg text-sm flex items-center justify-between lg:flex-none">
       ✓ {successMessage}
       <button onclick={() => { successMessage = null; }} class="text-emerald-400 hover:text-emerald-600 ml-2">&times;</button>
     </div>
   {/if}
 
   {#if error && !panel}
-    <div class="mb-3 px-3 py-2 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">{error}</div>
+    <div class="mb-3 px-3 py-2 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm lg:flex-none">{error}</div>
   {/if}
 
   {#if loading}
@@ -348,9 +355,9 @@
 
   {:else}
     <!-- ── Desktop table ──────────────────────────────────────────────── -->
-    <div class="hidden sm:block overflow-x-auto">
+    <div class="hidden sm:block overflow-x-auto lg:flex-1 lg:min-h-0 lg:overflow-auto" data-desktop-table-scroll>
       <table class="w-full text-sm">
-        <thead>
+        <thead class="lg:sticky lg:top-0 lg:z-10 bg-stone-50">
           <tr class="bg-stone-50 border-b border-stone-200">
             {#each tableColumns as column, i}
               <th class="px-3 py-2.5 text-left text-[11px] font-semibold text-stone-400 tracking-widest uppercase
@@ -422,7 +429,7 @@
                 <span class="inline-flex px-2 py-0.5 text-[11px] rounded-md border
                   {m.service_type === 'prepaid' || m.service_type === 'postpaid'
                     ? 'bg-stone-50 text-stone-700 border-stone-200'
-                    : m.service_type === 'n/a'
+                    : m.service_type === 'balance_managed'
                       ? 'bg-stone-50 text-stone-400 border-stone-200'
                       : 'bg-amber-50 text-amber-700 border-amber-200'}">
                   {getSimServiceTypeLabel(m.service_type)}
@@ -673,7 +680,9 @@
             <label for="mapping-service-type" class="block text-xs font-semibold text-stone-500 mb-1 tracking-wide uppercase">计费类型</label>
             <select id="mapping-service-type" bind:value={panel.formData.service_type}
               onchange={() => {
-                if (panel.formData.service_type === 'unknown') panel.formData.service_type_source = '';
+                if (panel.formData.service_type === 'unknown' || panel.formData.service_type === 'balance_managed') {
+                  panel.formData.service_type_source = '';
+                }
               }}
               class="w-full px-3 py-2 text-sm border border-stone-300 rounded-lg bg-white
                 focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100">
@@ -686,7 +695,7 @@
           <div>
             <label for="mapping-service-type-source" class="block text-xs font-semibold text-stone-500 mb-1 tracking-wide uppercase">确认来源</label>
             <select id="mapping-service-type-source" bind:value={panel.formData.service_type_source}
-              disabled={panel.formData.service_type === 'unknown'}
+              disabled={panel.formData.service_type === 'unknown' || panel.formData.service_type === 'balance_managed'}
               class="w-full px-3 py-2 text-sm border border-stone-300 rounded-lg bg-white
                 disabled:bg-stone-50 disabled:text-stone-300
                 focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100">
@@ -804,7 +813,7 @@
           </button>
           <button onclick={handleSave}
             disabled={!panel.formData.phone_number || !panel.formData.sim_index ||
-              (panel.formData.service_type !== 'unknown' && panel.formData.service_type !== 'n/a' && !panel.formData.service_type_source) ||
+              (panel.formData.service_type !== 'unknown' && panel.formData.service_type !== 'balance_managed' && !panel.formData.service_type_source) ||
               (panel.mode === 'add' && !panel.formData.iccid)}
             class="px-4 py-2 text-sm font-medium bg-stone-800 text-white rounded-lg
               hover:bg-stone-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">

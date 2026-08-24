@@ -85,7 +85,7 @@ export function buildBalanceRows(phones = [], checks = [], now = new Date()) {
 
   const staleBefore = now.getTime() - BALANCE_STALE_DAYS * 24 * 60 * 60 * 1000;
 
-  return (phones || []).map((phone) => {
+  const rows = (phones || []).map((phone) => {
     const phoneChecks = (checksByIccid.get(phone.iccid) || [])
       .slice()
       .sort((a, b) => timestampValue(b) - timestampValue(a));
@@ -127,6 +127,25 @@ export function buildBalanceRows(phones = [], checks = [], now = new Date()) {
       threshold,
       health,
       healthMeta: BALANCE_HEALTH_META[health],
+    };
+  });
+
+  const rowsByIccid = new Map(rows.map((row) => [row.phone.iccid, row]));
+  return rows.map((row) => {
+    if (row.phone.sim_role !== 'secondary' || !row.phone.primary_iccid) return row;
+    const primary = rowsByIccid.get(row.phone.primary_iccid);
+    if (!primary || primary.phone.sim_role !== 'primary') return row;
+
+    return {
+      ...row,
+      checks: primary.checks,
+      latestCheck: primary.latestCheck,
+      balanceCheck: primary.balanceCheck,
+      balanceMetric: primary.balanceMetric,
+      balanceTimestamp: primary.balanceTimestamp,
+      threshold: primary.threshold,
+      health: primary.health,
+      healthMeta: primary.healthMeta,
     };
   });
 }

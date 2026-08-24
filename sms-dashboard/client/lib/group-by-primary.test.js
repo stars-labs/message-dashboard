@@ -35,7 +35,7 @@ test('orphan secondary (primary not in set) renders at depth 0', () => {
     sim({ iccid: 'A', sim_index: 1 }),
   ];
   const out = groupByPrimary(items);
-  expect(out.map((r) => r.iccid)).toEqual(['A', 'S']);
+  expect(out.map((r) => r.iccid)).toEqual(['S', 'A']);
   expect(out.find((r) => r.iccid === 'S').__depth).toBe(0);
   expect(out.find((r) => r.iccid === 'S').__isSecondary).toBe(false);
 });

@@ -28,9 +28,8 @@ export function groupByPrimary(items, resolve = (x) => x) {
     };
   });
 
-  // Preserve the caller's existing sim_index ordering (primary-vs-primary,
-  // standalone-vs-standalone); secondaries are re-inserted under their parent.
-  keyed.sort((a, b) => a.sim_index - b.sim_index);
+  // Preserve the caller's ordering (including descending or non-SIM sorts);
+  // secondaries are only re-inserted under their parent.
 
   const presentIccids = new Set(keyed.map((k) => k.iccid));
 

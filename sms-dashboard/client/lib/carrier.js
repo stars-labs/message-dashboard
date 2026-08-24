@@ -12,22 +12,28 @@ function normalized(value) {
   return String(value || '').trim().toLocaleLowerCase();
 }
 
-export function carrierKey(value) {
-  const candidate = normalized(value);
+function isHongKong(country) {
+  return ['hk', 'hkg', 'hong kong', '香港'].includes(normalized(country));
+}
+
+export function carrierKey({ carrier, country } = {}) {
+  const candidate = normalized(carrier);
   if (!candidate) return '';
-  return CARRIER_GROUPS.find((group) => group.aliases.includes(candidate))?.key || candidate;
+  const group = CARRIER_GROUPS.find((item) => item.aliases.includes(candidate));
+  if (group?.key === 'china-mobile' && isHongKong(country)) return 'cmhk';
+  return group?.key || candidate;
 }
 
-export function carrierLabel(value) {
-  const key = carrierKey(value);
-  return CARRIER_GROUPS.find((group) => group.key === key)?.label || String(value || '').trim();
+export function carrierLabel(record) {
+  const key = carrierKey(record);
+  return CARRIER_GROUPS.find((group) => group.key === key)?.label || String(record?.carrier || '').trim();
 }
 
-export function buildCarrierOptions(values) {
+export function buildCarrierOptions(records) {
   const options = new Map();
-  for (const value of values) {
-    const key = carrierKey(value);
-    if (key && !options.has(key)) options.set(key, carrierLabel(value));
+  for (const record of records) {
+    const key = carrierKey(record);
+    if (key && !options.has(key)) options.set(key, carrierLabel(record));
   }
   return [...options].map(([key, label]) => ({ key, label }))
     .sort((left, right) => left.label.localeCompare(right.label, 'zh-CN', {
