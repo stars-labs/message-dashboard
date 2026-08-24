@@ -325,7 +325,7 @@ export const carrierBillsHandler = {
       request.env.DB.prepare(`
         SELECT
           a.id, a.country_code, a.carrier, a.currency, a.display_name,
-          a.account_ref_last4, a.status, a.notification_sim_iccid,
+          a.account_ref_last4, a.status, a.version, a.notification_sim_iccid,
           d.sim_index AS notification_sim_index,
           d.number AS notification_sim_number
         FROM carrier_billing_accounts a
@@ -356,6 +356,7 @@ export const carrierBillsHandler = {
       display_name: account.display_name,
       account_ref_masked: maskedAccount(account.account_ref_last4),
       status: account.status,
+      version: account.version,
       notification_sim: {
         iccid: account.notification_sim_iccid,
         sim_index: account.notification_sim_index,

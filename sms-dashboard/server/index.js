@@ -18,6 +18,7 @@ import {
 } from './handlers/carrier-web-balance.js';
 import { balanceRunnersHandler } from './handlers/balance-runners.js';
 import { carrierBillsHandler } from './handlers/carrier-bills.js';
+import { carrierBillingAccountsHandler } from './handlers/carrier-billing-accounts.js';
 import { serveFrontend } from './frontend-handler';
 import { createRoleConfig, hasAnyRole } from '../config/auth0-roles.js';
 import { setupKeywordRoutes } from './api/keywords.js';
@@ -217,6 +218,42 @@ router.get('/api/carrier-billing/accounts', async (request, env, ctx) => {
   const permResponse = await requirePermission('bills.read')(request, env, ctx);
   if (permResponse) return permResponse;
   return carrierBillsHandler.listAccounts(request);
+});
+
+router.post('/api/carrier-billing/accounts', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  await enrichUserPermissions(request, env, ctx);
+  const permResponse = await requirePermission('bills.write')(request, env, ctx);
+  if (permResponse) return permResponse;
+  return carrierBillingAccountsHandler.create(request);
+});
+
+router.post('/api/carrier-billing/accounts/:id/members/preview', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  await enrichUserPermissions(request, env, ctx);
+  const permResponse = await requirePermission('bills.write')(request, env, ctx);
+  if (permResponse) return permResponse;
+  return carrierBillingAccountsHandler.previewMembers(request);
+});
+
+router.post('/api/carrier-billing/accounts/:id/members', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  await enrichUserPermissions(request, env, ctx);
+  const permResponse = await requirePermission('bills.write')(request, env, ctx);
+  if (permResponse) return permResponse;
+  return carrierBillingAccountsHandler.applyMembers(request);
+});
+
+router.post('/api/carrier-billing/accounts/:id/update', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  await enrichUserPermissions(request, env, ctx);
+  const permResponse = await requirePermission('bills.write')(request, env, ctx);
+  if (permResponse) return permResponse;
+  return carrierBillingAccountsHandler.update(request);
 });
 
 router.get('/api/carrier-bills', async (request, env, ctx) => {

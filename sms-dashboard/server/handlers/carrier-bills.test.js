@@ -96,10 +96,10 @@ beforeEach(async () => {
       '2026-08-20T00:00:00Z', 'received'
     );
   `);
-  const migration = await Bun.file(
-    new URL('../../migrations/066_add_carrier_billing.sql', import.meta.url),
-  ).text();
-  database.exec(migration);
+  for (const name of ['066_add_carrier_billing.sql', '067_add_carrier_billing_account_events.sql']) {
+    const migration = await Bun.file(new URL(`../../migrations/${name}`, import.meta.url)).text();
+    database.exec(migration);
+  }
   database.exec(`
     INSERT INTO carrier_billing_accounts (
       id, country_code, carrier, currency, display_name,
