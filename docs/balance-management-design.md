@@ -93,6 +93,8 @@
 - `prepaid`：使用前需要保持可用余额充足；运营商称为“预付费”“实时预付费”
   或“准实时预付费”的产品，在本系统统一归入此类。
 - `postpaid`：按账期出账并在到期日前缴费。
+- `balance_managed`：不维护合同付费分类，直接根据已验证的余额指标执行充值
+  健康管理；当前用于中国大陆 SIM。
 
 本期不增加 `hybrid`。预存款、赠送话费、信用额度和按月套餐可以同时存在，
 但它们是账户资金或计费细节，不构成第四种可操作的付费方式。只有未来出现
@@ -106,7 +108,7 @@
 
 ```text
 service_type
-  'unknown' | 'prepaid' | 'postpaid'; NOT NULL; default 'unknown'
+  'unknown' | 'prepaid' | 'postpaid' | 'balance_managed'; NOT NULL; default 'unknown'
 service_type_source
   NULL | 'carrier_account' | 'carrier_support' | 'contract_or_bill' |
   'carrier_message'
@@ -114,11 +116,17 @@ service_type_verified_at
   NULL or verification timestamp
 ```
 
-`unknown` 必须同时清空来源和确认时间；`prepaid`/`postpaid` 必须同时具备来源
-和确认时间。现有 `updated_by` 记录执行确认的用户。解析器和守护进程都不能写
-这些字段；它们继续只写查询记录和类型明确的指标。
+`unknown`/`balance_managed` 必须同时清空来源和确认时间；`prepaid`/`postpaid`
+必须同时具备来源和确认时间。现有 `updated_by` 记录执行确认的用户。解析器和
+守护进程都不能写这些字段；它们继续只写查询记录和类型明确的指标。
 
 ## 4. 状态计算
+
+Account-level postpaid bill notices are governed by
+[Singapore Postpaid Bill SMS Workflow Plan](postpaid-bill-sms-plan.md). A linked carrier bill
+uses the account-level due and payment workflow defined there; it is not an
+`arrears` metric copied to every SIM. For those linked postpaid SIMs, the billing
+account state supersedes the per-SIM “missing arrears” fallback below.
 
 充值阈值：
 

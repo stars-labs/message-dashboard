@@ -36,15 +36,16 @@ Production currently contains 95 SIM records:
 | --- | --- | ---: | --- |
 | China | China Unicom | 41 | Carrier SMS |
 | China | China Mobile | 22 | USSD discovery, then carrier SMS |
-| Singapore | StarHub | 14 | Official portal or business account |
+| Singapore | StarHub | 0 | No current inventory; deferred |
 | China | China Telecom | 6 | Carrier SMS |
-| Singapore | Singtel | 5 | USSD pilot |
-| Singapore | M1 | 4 | USSD pilot or prepaid portal |
+| Singapore | Singtel | 18 | Passive postpaid bill-SMS detection |
+| Singapore | M1 | 5 | Prepaid portal/manual |
 | Hong Kong | CMHK | 3 | Product-specific command or official account |
 
-Prepaid/postpaid classification is an optional, user-verified inventory field named
-`service_type`. It defaults to `unknown` and never blocks a query. The system still
-uses only verified carrier query profiles and records the metric actually returned.
+Billing management is recorded in `service_type`. It supports user-verified
+`prepaid`/`postpaid`, `unknown`, and `balance_managed` for SIMs managed directly by
+verified balance metrics. It never blocks a query. The system still uses only
+verified carrier query profiles and records the metric actually returned.
 An ambiguous response is stored for audit and marked unparsed rather than guessed
 to be a balance, charge, arrears value, or service type.
 
@@ -80,7 +81,8 @@ what constitutes low, stale, unavailable, and failed.
 
 ### 2. Confirm SIM account metadata
 
-- [x] Add user-maintained `service_type` with `unknown`, `prepaid`, and `postpaid`.
+- [x] Add `service_type` with `unknown`, user-verified `prepaid`/`postpaid`, and
+  operational `balance_managed`.
   It defaults to `unknown`, never blocks querying, and must not be inferred from the
   carrier, phone number, ICCID, or the presence of balance/arrears text.
 - [x] Record a controlled verification source and time for every non-unknown value.
@@ -237,23 +239,37 @@ Source: [Guangdong Telecom SMS commands](https://m.gd.189.cn/gd/sms/).
 
 ### 6. Confirm Singtel
 
-Singtel documents `*100#` for prepaid account information and `*139#` for expiry.
-The EC20 modem, firmware, network mode, response encoding, and modem backend must all
-be tested before USSD can be considered supported.
+Singtel's current prepaid guidance directs customers to the native hi!App. Its
+Balance view shows account balance, expiry, and data balance. The app login accepts
+an email address or the hi!-registered mobile number, sends an OTP, and then requires
+the user to create a six-digit PIN; this is not a browser balance portal.
+
+An official FAQ PDF created in 2020 documents `*100#` for prepaid account
+information and `*139#` for SIM expiry. It also points to `singtel.com/hi`, but that
+URL now redirects to the current hi! product page rather than an account-balance
+page. The current hi! pages do not publish those USSD codes, so treat them as
+historical evidence rather than a currently confirmed interface. No current
+official SMS balance keyword was identified.
 
 - [x] Pilot procedure approved without requiring prepaid/product metadata.
 - [x] On one modem during a maintenance window, test whether `AT+CUSD` works in its
   current network mode.
 - [x] Capture asynchronous `+CUSD` responses, DCS value, menu behavior, and timeout.
 - [x] Verify cancellation and that normal SMS scanning resumes afterwards.
-- [ ] Compare the result with the official hi!App or account portal.
+- [x] Compare the available methods with current official hi!App and account
+  guidance.
+- [ ] Re-test `*100#` only on a Singtel prepaid SIM attached to its home network, or
+  obtain current confirmation from Singtel before enabling a USSD profile.
 
-**Exit condition:** one complete USSD session succeeds twice without blocking SMS
-collection. Otherwise classify Singtel as portal/manual until another official
-integration is available.
+**Prepaid disposition (2026-08-21):** manual/app-only for now. Do not enable a
+Singtel prepaid SMS, USSD, or browser profile until a supported interface is
+confirmed and validated. A complete USSD session must still succeed twice without
+blocking SMS collection before any historical code can be enabled.
 
-Sources: [Singtel prepaid FAQ](https://www.singtel.com/content/dam/singtel/personal/products-services/mobile/prepaid-plans/prepaid-plans-webpage/03_FAQ.pdf),
-[Singtel hi!App](https://www.singtel.com/personal/products-services/mobile/prepaid-plans/hiapp).
+Sources: [historical Singtel prepaid FAQ](https://www.singtel.com/content/dam/singtel/personal/products-services/mobile/prepaid-plans/prepaid-plans-webpage/03_FAQ.pdf),
+[Singtel hi!App](https://www.singtel.com/personal/products-services/mobile/prepaid-plans/hiapp),
+[current hi! FAQ](https://www.singtel.com/personal/products-services/mobile/hi/faq), and
+[hi!App authentication guide](https://www.singtel.com/personal/products-services/mobile/hi/singtel-hi-mfa-guide).
 
 #### Singtel pilot evidence: S73 on 2026-08-14
 
@@ -263,8 +279,77 @@ Sources: [Singtel prepaid FAQ](https://www.singtel.com/content/dam/singtel/perso
 - `AT+CUSD=1,"*100#"` returned immediate `ERROR` without a `+CUSD` network
   response. `AT+CUSD=2` returned `OK` and `sms-daemon` was restored to `active`.
 
-**Pilot conclusion:** Singtel USSD is unavailable for S73 in its current network
-environment. This does not establish fleet-wide Singtel behavior.
+**Reclassified conclusion (2026-08-24):** S73 is now carrier-account-verified as
+M1 prepaid. This test is not Singtel evidence and must not be used to approve or
+reject a Singtel USSD profile.
+
+#### Singtel postpaid browser path review: 2026-08-21
+
+- Singtel My Account exposes linked postpaid mobile usage, bills, payment history,
+  and bill details in a browser.
+- Login requires a Singtel OnePass ID or linked mobile number, the OnePass password,
+  and an SMS OTP for additional authentication. It does not support
+  mobile-number-plus-OTP-only login.
+- OnePass can link services held under one NRIC or FIN. Browser automation is
+  therefore plausible only for postpaid lines linked to an account available to
+  the operator; it is not a general per-SIM login method.
+- Any future pilot must keep the password and browser session local and use an
+  operator handoff for OTP or other human verification. Do not store credentials
+  in D1 or on the Orange Pi.
+
+**Postpaid browser disposition:** fallback only. Use OnePass to verify billing-account
+membership and reconcile payment state when necessary; do not implement a recurring
+browser query while the confirmed monthly bill-SMS source remains reliable.
+
+Sources: [Singtel OnePass FAQ](https://www.singtel.com/personal/support/onepass),
+[My Account mobile usage guide](https://www.singtel.com/personal/support/mobile-postpaid/check-local-data-usage/my-account), and
+[My Account bills and payments](https://www.singtel.com/personal/my-account/bills-payments/view-bills).
+
+#### Singtel inventory reconciliation: 2026-08-24
+
+A read-only production `device_view` query resolved the old manual carrier-label
+mismatches:
+
+- S78-S95 are 18 carrier-account-verified Singtel postpaid lines. Seventeen are
+  active on `Singtel Singtel`; S89 is offline.
+- S73-S77 are five carrier-account-verified M1 prepaid lines, all active on
+  `SGP-M1`. They are not Singtel inventory.
+- The earlier `*100#` test on S73 is therefore not a Singtel pilot. Conversely,
+  the earlier M1 `#100#` test on S78 used a line now verified as Singtel and is not
+  valid M1 evidence.
+- There is no Singtel prepaid cohort in the current fleet, so hi!App and historical
+  prepaid USSD are out of scope for the current implementation.
+
+The public My Account login page currently redirects to Singtel OnePass and returns
+to the account summary after authentication. The OnePass application includes MFA,
+Singpass, and reCAPTCHA paths. Any CAPTCHA or additional verification remains a
+human operator handoff; the Balance Agent must not bypass it.
+
+**Next gate:** verify from a detailed bill or OnePass which of S78-S95 belong to the
+billing account whose notices arrive on S79. Do not infer membership from carrier,
+service type, or receipt of a fleet-wide service message.
+
+#### Singtel postpaid bill-SMS evidence: 2026-08-24
+
+- Nine consecutive monthly bill-ready notices were retained from December 2025
+  through August 2026. Every notice contains one SGD total amount and one due date.
+- All nine notices were delivered to S79. No equivalent bill-ready notice was found
+  on S78 or S80-S95.
+- Every notice references the same billing account. This proves an account-level
+  passive SMS source, but does not prove which of the 18 Singtel SIMs belong to that
+  account.
+- The first three rows stored the sender as a concatenated numeric encoding of
+  `Singtel`; later rows use the canonical sender. Fix and backfill sender
+  normalization before enabling the parser rather than keeping two parser paths.
+- The selected first method is deterministic passive SMS parsing. OnePass is now a
+  membership-verification and reconciliation tool, not the primary monthly bill
+  source.
+
+Implementation design is owned by
+[Singapore Postpaid Bill SMS Workflow Plan](postpaid-bill-sms-plan.md). Bills are account-level
+payment obligations and must not be copied into per-SIM balance metrics. The workflow
+is shared by all supported Singapore postpaid carriers; Singtel is only its first
+evidence-backed parser profile.
 
 ### 7. Confirm M1
 
@@ -292,7 +377,8 @@ Source: [M1 prepaid FAQ](https://www.m1.com.sg/support/faq/all-topics/mobile-pho
   response. `AT+CUSD=2` returned `OK` and `sms-daemon` was restored to `active`.
 
 **Pilot conclusion:** M1 USSD is unavailable for S78 in its current network
-environment. This does not establish fleet-wide M1 behavior.
+environment. S78 was later carrier-account-verified as Singtel postpaid, so this is
+not valid M1 pilot evidence and must not be generalized to the current M1 cohort.
 
 ### 8. Confirm StarHub
 
@@ -304,18 +390,23 @@ shutdown. Do not implement the legacy command.
 - [x] Confirm the supported self-service scopes: mobile-number login in the StarHub
   App manages only that mobile service; Hub iD login can show the account's linked
   services. The public top-up site is not a balance-query portal.
-- [ ] Verify whether the team's Hub iD actually links all 14 inventory SIMs and
-  whether My Account exposes their prepaid cash balances, not only usage and bills.
+- [x] Confirm that browser My Account cannot use mobile-number-plus-OTP-only login:
+  it requires a Hub iD, password, and mandatory OTP. The phone-number login exists
+  only in the native StarHub App.
 - [ ] Ask StarHub for a business portal, scheduled export, or supported API for this
   fleet size.
-- [x] Authentication remains an operator handoff: mobile-number login requires an
-  SMS verification code; Hub iD login requires a password and mandatory OTP. Do not
-  store or automate these credentials through D1 or the Orange Pi.
+- [x] Authentication remains an operator handoff: native-app mobile-number login
+  requires an SMS verification code; browser Hub iD login requires a password and
+  mandatory OTP. Do not store or automate these credentials through D1 or the
+  Orange Pi.
 - [x] Keep the method manual while no supported machine interface exists; do not reverse
   engineer private mobile-app APIs.
 
-**Exit condition:** an official supported integration is identified, or StarHub is
-explicitly recorded as manual-only.
+**Disposition (2026-08-21):** manual-only and deferred. The team does not have a
+suitable shared or linked Hub iD for this fleet, so do not implement a StarHub
+Balance Agent browser profile based on phone-number login. Revisit only if StarHub
+provides an official business integration or an operator supplies a suitable Hub
+iD and confirms the required lines and metrics are linked.
 
 #### StarHub path review and pilot selection: S82 on 2026-08-16
 
@@ -346,10 +437,11 @@ explicitly recorded as manual-only.
   `Singtel Singtel`, this makes the manually imported carrier classification unsafe
   to use for a live StarHub test until the subscription ownership is corrected.
 - **Account:** current prepaid guidance directs balance queries to the StarHub App.
-  Mobile-number login is scoped to one service and uses SMS verification. The web
-  My Account portal uses Hub iD plus mandatory OTP and can show linked services, but
-  prepaid cash-balance visibility remains unverified. No login attempt was made
-  because no interactive browser instance was available in this session.
+  Mobile-number login is scoped to one service, uses SMS verification, and is
+  available only in the native app. The web My Account portal uses Hub iD, password,
+  and mandatory OTP and can show linked services. It cannot be used with a phone
+  number and OTP alone. Without a suitable fleet-linked Hub iD, this remains a
+  manual operator path rather than a Balance Agent integration.
 
 Sources: [StarHub prepaid terms](https://www.starhub.com/content/dam/starhub/legal-notices-and-terms/consumer/mobile-prepaid.pdf),
 [current prepaid top-up and balance guidance](https://www.starhub.com/personal/how-to/how-to-top-up-prepaid-plan.html),
@@ -526,10 +618,15 @@ Record confirmation outcomes here before implementation begins.
 | 2026-08-14 | 5. Guangdong Telecom direct-command validation | Confirmed on S69/S70/S71 | The Huizhou cohort returned a Guangdong Telecom menu where option `1` led only to an App/WeChat points-query notice. Profile `cn-telecom-sms-102-v1` sent the provincially documented read-only command `102` directly to `10001`; all three cards returned current available balance CNY 86.36, total/prepaid balance CNY 263.36, and gift balance CNY 0.00. The identical customer mask and amounts strongly indicate a shared carrier account. Use current available balance for recharge health and preserve total/prepaid balance as supporting detail. This profile is now the default for the current Telecom fleet; the service-menu profile remains a discovery fallback. |
 | 2026-08-13 | 6. Singtel procedure | Confirmed | Pilot `*100#` through a serialized, cancellable `AT+CUSD` maintenance-window test. Validation pending. |
 | 2026-08-14 | 6. Singtel validation | Closed for S73 | S73 on `/dev/ttyUSB196`, registered to `SGP-M1`, returned immediate `ERROR` for `*100#` with no `+CUSD` network response. Cancellation returned `OK`; `sms-daemon` was restored and verified active. Do not generalize beyond this SIM/network state. |
+| 2026-08-21 | 6. Singtel supported-path review | Prepaid manual/app-only; postpaid account validation pending | Current prepaid guidance exposes balance, expiry, and data in the native hi!App; no current official SMS keyword or prepaid browser balance portal was found. The official `*100#`/`*139#` evidence is from a 2020 FAQ and requires current carrier confirmation or a successful home-network pilot before use. Postpaid My Account is browser-accessible, but requires a linked OnePass ID or mobile number, password, and SMS OTP—not phone-number-plus-OTP-only login. Validate line linkage and metric visibility before implementing a browser profile. |
+| 2026-08-24 | Singapore carrier reconciliation and Singtel route | Inventory reconciled; account membership pending | Read-only production metadata shows S78-S95 are 18 carrier-account-verified Singtel postpaid lines: 17 active on `Singtel Singtel`, with S89 offline. S73-S77 are five verified M1 prepaid lines. The old Singtel `*100#` pilot on S73 and M1 `#100#` pilot on S78 used the wrong carrier cohorts and are not carrier-valid evidence. There is no current Singtel prepaid inventory. Verify billing-account membership from a detailed bill or OnePass; MFA/reCAPTCHA remain human handoffs if OnePass is used. |
+| 2026-08-24 | 6. Singtel postpaid bill-SMS history | Passive account-level source confirmed | Nine consecutive monthly notices from December 2025 through August 2026 were found on S79. Each includes one SGD total and due date and references the same billing account; no equivalent notice was found on the other 17 Singtel lines. Select deterministic passive parsing as the first method. Keep bill state account-level, verify account membership manually, fix the historical numeric sender encoding at ingestion, and use OnePass only for membership/payment reconciliation. |
+| 2026-08-24 | Singapore postpaid bill workflow scope | Carrier-neutral workflow confirmed | Account-level bill detection, due-state calculation, payment actions, audit, API, and UI are shared across all supported Singapore postpaid carriers. Each carrier still requires its own exact, versioned, fixture-backed parser profile; Singtel is the first confirmed profile, not a special-case workflow. |
 | 2026-08-13 | 7. M1 procedure | Confirmed | Pilot the `#100#` interactive USSD flow with timeout/cancellation and portal comparison. Validation pending. |
 | 2026-08-14 | 7. M1 validation | Closed for S78 | S78 on `/dev/ttyUSB42`, registered to `Singtel Singtel`, returned immediate `ERROR` for `#100#` with no `+CUSD` network response. Cancellation returned `OK`; `sms-daemon` was restored and verified active. Do not generalize beyond this SIM/network state. |
 | 2026-08-13 | 8. StarHub procedure | Confirmed | Never use obsolete `*123#`; investigate only an official portal, business export, or supported API. Validation pending. |
-| 2026-08-16 | 8. StarHub path review and pilot selection | Code and on-demand SMS closed; account validation pending | Production had 14 StarHub-labelled inventory records, 13 active and S89 offline. S82 was selected provisionally with 100% signal, recent stored messages, and no balance history. No USSD was sent because official terms retired `*123#` on 2024-06-30. No SMS was sent because no official prepaid cash-balance keyword exists; current terms promise only carrier-pushed low-balance/full-utilisation alerts, and `CHECK` to `78989` is DataTravel-only. Current prepaid balance lookup is through the StarHub App. Web My Account requires Hub iD plus OTP; actual multi-SIM linkage and prepaid cash-balance visibility still require an operator login. All active records reported `Singtel Singtel`, and sender-only history found `Singtel` messages on all 14 with no `StarHub` sender, so reconcile the manually imported carrier label before live carrier contact rather than calling the discrepancy roaming. |
+| 2026-08-16 | 8. StarHub path review and pilot selection | Code and on-demand SMS closed; account validation pending | Production had 14 StarHub-labelled inventory records, 13 active and S89 offline. S82 was selected provisionally with 100% signal, recent stored messages, and no balance history. No USSD was sent because official terms retired `*123#` on 2024-06-30. No SMS was sent because no official prepaid cash-balance keyword exists; current terms promise only carrier-pushed low-balance/full-utilisation alerts, and `CHECK` to `78989` is DataTravel-only. Current prepaid balance lookup is through the StarHub App. Web My Account requires Hub iD plus password and OTP; actual multi-SIM linkage and prepaid cash-balance visibility still require an operator login. All active records reported `Singtel Singtel`, and sender-only history found `Singtel` messages on all 14 with no `StarHub` sender, so reconcile the manually imported carrier label before live carrier contact rather than calling the discrepancy roaming. |
+| 2026-08-21 | 8. StarHub final disposition | Manual-only; deferred | Browser My Account requires Hub iD, password, and mandatory OTP. Mobile-number-plus-OTP login is available only in the native StarHub App, not the browser. Without a suitable fleet-linked Hub iD, no StarHub Balance Agent browser profile should be implemented. Revisit only for an official business integration or a suitable linked account; skip StarHub for the current phase. |
 | 2026-08-13 | 9. CMHK procedure | Confirmed | Use only an officially discovered product-specific method; never treat `*#130#` as universal cash balance. Validation pending. |
 | 2026-08-14 | 9. CMHK SMS validation | Blocked by roaming short-code submission | Added discovery-only `0` -> `12580` from current official CMHK product documentation. S66 and S67 were both registered on `StarHub CMHK`; both sends failed before submission with daemon error `Send SMS failed: 0`, so no carrier menu was received and no cooldown was consumed. Retry only on the CMHK home network. |
 | 2026-08-13 | 10. Technical design | Confirmed | Versioned profiles, immutable audit records, typed metrics, strict correlation, modem serialization, command allowlist, and monthly scheduling approved. Implementation pending carrier validation. |
