@@ -102,11 +102,17 @@ export async function previewCarrierBillBackfill(db, accountId) {
 
     if (!parsed && content.endsWith('b')) {
       const firstTime = Date.parse(first.timestamp);
-      const second = messages.slice(index + 1).find((message) => {
-        if (used.has(message.id) || message.content.trim() !== BILL_FRAGMENT_SUFFIX) return false;
+      let second = null;
+      let secondGap = Number.POSITIVE_INFINITY;
+      for (const message of messages) {
+        if (used.has(message.id) || message.content.trim() !== BILL_FRAGMENT_SUFFIX) continue;
         const gap = Date.parse(message.timestamp) - firstTime;
-        return Number.isFinite(gap) && gap >= 0 && gap <= MAX_FRAGMENT_GAP_MS;
-      });
+        if (!Number.isFinite(gap) || gap < 0 || gap > MAX_FRAGMENT_GAP_MS) continue;
+        if (gap < secondGap || (gap === secondGap && message.id < second.id)) {
+          second = message;
+          secondGap = gap;
+        }
+      }
       if (second) {
         content = `${content}${second.content.trim()}`;
         parsed = await parseSingtelPostpaidBillSms({

@@ -116,11 +116,14 @@ beforeEach(async () => {
     const timestamp = `${receivedYear}-${String(receivedMonth).padStart(2, '0')}-01T00:00:00Z`;
     if (index < 3) {
       const splitAt = content.indexOf('ill via My Singtel');
-      insert.run(`message-${index + 1}-part-1`, content.slice(0, splitAt), timestamp);
+      const firstId = index === 2 ? 'message-3-part-1' : `message-${index + 1}-part-1`;
+      const secondId = index === 2 ? 'message-3-part-0' : `message-${index + 1}-part-2`;
+      const secondTimestamp = index === 2 ? timestamp : timestamp.replace('00Z', '30Z');
+      insert.run(firstId, content.slice(0, splitAt), timestamp);
       insert.run(
-        `message-${index + 1}-part-2`,
+        secondId,
         content.slice(splitAt, -1),
-        timestamp.replace('00Z', '30Z'),
+        secondTimestamp,
       );
     } else {
       insert.run(`message-${index + 1}`, content, timestamp);
