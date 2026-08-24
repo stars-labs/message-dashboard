@@ -281,6 +281,51 @@ describe('balance management', () => {
     expect(view.getAllByText('2026-08-30').length).toBeGreaterThan(0);
   });
 
+  test('combines prepaid recharge and postpaid bill actions under payment due', async () => {
+    const originalFetch = globalThis.fetch;
+    const prepaid = { ...phone, iccid: 'prepaid-sim', sim_index: 2 };
+    const postpaid = { ...phone, iccid: 'postpaid-sim', sim_index: 79, service_type: 'postpaid' };
+    const clearPostpaid = { ...postpaid, iccid: 'clear-postpaid-sim', sim_index: 80 };
+    const lowBalance = {
+      ...check,
+      sim_iccid: prepaid.iccid,
+      sim_index: prepaid.sim_index,
+      metrics: [{ metric_type: 'cash_balance', value: 4.5, currency: 'CNY' }],
+    };
+    globalThis.fetch = async (url) => {
+      const value = String(url);
+      if (value.includes('/api/balance-runners')) return Response.json({ success: true, capabilities: {} });
+      if (value.includes('/api/carrier-billing/accounts')) {
+        return Response.json({
+          success: true,
+          accounts: [{
+            id: 'account-1',
+            payment_due_count: 1,
+            notification_sim: { iccid: postpaid.iccid, sim_index: 79 },
+            linked_sims: [{ iccid: postpaid.iccid, sim_index: 79 }],
+          }],
+        });
+      }
+      throw new Error(`Unexpected request: ${value}`);
+    };
+    try {
+      const view = render(BalanceManagement, {
+        props: {
+          phoneNumbers: [prepaid, postpaid, clearPostpaid],
+          balanceChecks: [lowBalance],
+        },
+      });
+
+      const paymentFilter = await view.findByRole('button', { name: '需付款 2' });
+      await fireEvent.click(paymentFilter);
+      expect(view.getAllByText('S02').length).toBeGreaterThan(0);
+      expect(view.getAllByText('S79').length).toBeGreaterThan(0);
+      expect(view.queryByText('S80')).toBeNull();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('does not offer a prepaid balance query for postpaid SIMs', () => {
     const view = render(BalanceManagement, {
       props: {

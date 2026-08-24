@@ -169,6 +169,7 @@ describe('carrier bills API', () => {
     expect(body.accounts).toEqual([expect.objectContaining({
       id: 'account-1',
       account_ref_masked: '•••• 5678',
+      payment_due_count: 1,
       notification_sim: expect.objectContaining({ sim_index: 79 }),
       linked_sims: [
         expect.objectContaining({ iccid: 'notification-sim', sim_index: 79 }),

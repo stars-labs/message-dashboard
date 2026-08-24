@@ -69,12 +69,35 @@
   ]));
   let carrierRows = $derived(rows.filter((row) => carrierFilter === 'all'
     || carrierKey({ carrier: row.phone.carrier, country: row.phone.country }) === carrierFilter));
+  let billingAccountBySim = $derived.by(() => {
+    const map = new Map();
+    for (const account of billAccounts) {
+      for (const sim of account.linked_sims || []) map.set(sim.iccid, account);
+    }
+    return map;
+  });
+  let paymentDueAccountBySim = $derived.by(() => {
+    const map = new Map();
+    for (const account of billAccounts) {
+      if (Number(account.payment_due_count || 0) > 0 && account.notification_sim?.iccid) {
+        map.set(account.notification_sim.iccid, account);
+      }
+    }
+    return map;
+  });
+  function requiresPayment(row) {
+    return ['zero_or_negative_balance', 'low_balance'].includes(row.health)
+      || paymentDueAccountBySim.has(row.phone.iccid);
+  }
+  function postpaidPaymentCount(row) {
+    return Number(paymentDueAccountBySim.get(row.phone.iccid)?.payment_due_count || 0);
+  }
   let counts = $derived(countBalanceHealth(carrierRows));
   // Counts live on the filter tabs (device-page pattern) instead of a separate summary bar.
   let filterTabs = $derived([
     ['all', '全部', carrierRows.length],
     ['healthy', '正常', counts.healthy],
-    ['recharge', '需充值', counts.zero_or_negative_balance + counts.low_balance],
+    ['payment', '需付款', carrierRows.filter(requiresPayment).length],
     ['expiry', '到期处理', counts.expired + counts.expiring_soon],
     ['verification_pending', '待验证', counts.verification_pending],
     ['stale', '数据过期', counts.stale],
@@ -85,9 +108,7 @@
 
   function matchesStatusFilter(row) {
     if (statusFilter === 'all') return true;
-    if (statusFilter === 'recharge') {
-      return ['zero_or_negative_balance', 'low_balance'].includes(row.health);
-    }
+    if (statusFilter === 'payment') return requiresPayment(row);
     if (statusFilter === 'expiry') return ['expired', 'expiring_soon'].includes(row.health);
     if (statusFilter === 'missing') return ['never_observed', 'expiry_unknown'].includes(row.health);
     return row.health === statusFilter;
@@ -156,14 +177,6 @@
       .filter(Boolean)
       .sort((a, b) => new Date(normalizeUtcTimestamp(b)) - new Date(normalizeUtcTimestamp(a)))[0] || null
   );
-  let billingAccountBySim = $derived.by(() => {
-    const map = new Map();
-    for (const account of billAccounts) {
-      for (const sim of account.linked_sims || []) map.set(sim.iccid, account);
-    }
-    return map;
-  });
-
   const overviewColumns = [
     { key: 'sim', label: 'SIM' },
     { key: 'carrier', label: '运营商' },
@@ -675,7 +688,7 @@
               onclick={() => { statusFilter = value; }}
               class="shrink-0 px-2.5 py-1.5 text-sm rounded-lg font-medium transition-colors tabular-nums
                 {statusFilter === value
-                  ? value === 'recharge' || value === 'query_failed' || value === 'expiry'
+                  ? value === 'payment' || value === 'query_failed' || value === 'expiry'
                     ? 'bg-red-600 text-white'
                     : 'bg-stone-800 text-white'
                   : 'bg-stone-100 text-stone-600 hover:bg-stone-200'}"
@@ -807,10 +820,11 @@
                     {#if row.__isSecondary}
                       <span class="text-xs font-normal text-stone-400">余额随主卡</span>
                     {:else if row.phone.service_type === 'postpaid'}
+                      {@const paymentCount = postpaidPaymentCount(row)}
                       <span class="flex flex-col gap-0.5 text-xs font-normal">
                         <span class="text-stone-400">不按余额管理</span>
-                        <span class={billingAccountBySim.has(row.phone.iccid) ? 'text-emerald-700' : 'text-amber-700'}>
-                          {billingAccountBySim.has(row.phone.iccid) ? '已收到过账单短信' : '等待账单短信'}
+                        <span class={paymentCount > 0 ? 'text-red-700 font-medium' : billingAccountBySim.has(row.phone.iccid) ? 'text-emerald-700' : 'text-amber-700'}>
+                          {paymentCount > 0 ? `待付款 ${paymentCount} 笔` : billingAccountBySim.has(row.phone.iccid) ? '已收到过账单短信' : '等待账单短信'}
                         </span>
                       </span>
                     {:else}
@@ -912,10 +926,11 @@
                     </span>
                   {:else}
                     {#if row.phone.service_type === 'postpaid'}
+                      {@const paymentCount = postpaidPaymentCount(row)}
                       <span class="flex flex-col">
                         <strong class="text-sm leading-tight font-medium text-stone-400">不按余额管理</strong>
-                        <small class={billingAccountBySim.has(row.phone.iccid) ? 'text-emerald-700' : 'text-amber-700'}>
-                          {billingAccountBySim.has(row.phone.iccid) ? '已收到过账单短信' : '等待账单短信'}
+                        <small class={paymentCount > 0 ? 'text-red-700 font-medium' : billingAccountBySim.has(row.phone.iccid) ? 'text-emerald-700' : 'text-amber-700'}>
+                          {paymentCount > 0 ? `待付款 ${paymentCount} 笔` : billingAccountBySim.has(row.phone.iccid) ? '已收到过账单短信' : '等待账单短信'}
                         </small>
                       </span>
                     {:else}
