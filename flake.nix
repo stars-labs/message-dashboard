@@ -285,7 +285,7 @@
               bunx electron-builder --mac dir --arm64 \
                 --config.directories.output="release/''${version}"
 
-              app="release/''${version}/mac/Balance Agent.app"
+              app="release/''${version}/mac-arm64/Balance Agent.app"
               zip -r "release/''${version}/Balance-Agent-''${version}-macos-arm64.zip" \
                 "$app" >/dev/null
               (cd "release/''${version}" && sha256sum \
