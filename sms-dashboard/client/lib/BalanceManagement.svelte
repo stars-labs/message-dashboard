@@ -865,7 +865,9 @@
                   </td>
                   <td class="px-4 py-3 text-right">
                     <div class="flex items-center justify-end gap-3">
-                      {#if row.latestCheck || row.balanceCheck}
+                      {#if billingAccountBySim.has(row.phone.iccid)}
+                        <button type="button" onclick={openBillsTab} class="text-xs font-semibold text-action-text hover:underline">查看账单</button>
+                      {:else if row.latestCheck || row.balanceCheck}
                         <button type="button" onclick={() => openRow(row)} class="text-xs font-medium text-stone-500 hover:text-stone-800">查看</button>
                       {/if}
                       {#if canQueryBalances && row.phone.service_type !== 'postpaid'}
@@ -875,7 +877,7 @@
                           class="text-xs font-semibold text-action-text hover:underline disabled:text-stone-300 disabled:no-underline">
                           {queryingIccid === row.phone.iccid ? '排队中…' : '查询'}
                         </button>
-                      {:else if !row.latestCheck && !row.balanceCheck}
+                      {:else if !billingAccountBySim.has(row.phone.iccid) && !row.latestCheck && !row.balanceCheck}
                         <span class="text-stone-300">—</span>
                       {/if}
                     </div>
@@ -946,7 +948,12 @@
                     {/if}
                   {/if}
                 </div>
-                {#if canQueryBalances && row.phone.service_type !== 'postpaid'}
+                {#if billingAccountBySim.has(row.phone.iccid)}
+                  <button type="button" onclick={openBillsTab}
+                    class="h-8 px-2.5 shrink-0 text-xs font-semibold text-action-text bg-orange-50 rounded-lg active:bg-orange-100">
+                    查看账单
+                  </button>
+                {:else if canQueryBalances && row.phone.service_type !== 'postpaid'}
                   <button type="button" onclick={(event) => queryPhone(row, event)}
                     disabled={!!queryingIccid || row.phone.sim_role === 'secondary'}
                     aria-label={`查询 ${formatCardNumber(row.phone.sim_index)} 余额`}

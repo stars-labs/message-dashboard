@@ -326,6 +326,54 @@ describe('balance management', () => {
     }
   });
 
+  test('opens the bill queue from a postpaid overview row', async () => {
+    const originalFetch = globalThis.fetch;
+    const postpaid = { ...phone, iccid: 'postpaid-sim', sim_index: 79, service_type: 'postpaid' };
+    globalThis.fetch = async (url) => {
+      const value = String(url);
+      if (value.includes('/api/balance-runners')) return Response.json({ success: true, capabilities: {} });
+      if (value.includes('/api/carrier-billing/accounts')) {
+        return Response.json({
+          success: true,
+          accounts: [{
+            id: 'account-1',
+            payment_due_count: 1,
+            notification_sim: { iccid: postpaid.iccid, sim_index: 79 },
+            linked_sims: [{ iccid: postpaid.iccid, sim_index: 79 }],
+          }],
+        });
+      }
+      if (value.includes('/api/carrier-bills')) {
+        return Response.json({
+          success: true,
+          bills: [{
+            id: 'bill-1',
+            carrier: 'Singtel',
+            amount_minor: 7202,
+            currency: 'SGD',
+            due_date: '2026-09-07',
+            urgency: 'due_soon',
+            days_remaining: 7,
+            action_status: 'unpaid',
+            notification_sim: { iccid: postpaid.iccid, sim_index: 79 },
+          }],
+        });
+      }
+      throw new Error(`Unexpected request: ${value}`);
+    };
+    try {
+      const view = render(BalanceManagement, {
+        props: { phoneNumbers: [postpaid], balanceChecks: [] },
+      });
+
+      await view.findAllByText('待付款 1 笔');
+      await fireEvent.click((await view.findAllByRole('button', { name: '查看账单' }))[0]);
+      await waitFor(() => expect(view.getAllByText('SGD 72.02').length).toBeGreaterThan(0));
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('does not offer a prepaid balance query for postpaid SIMs', () => {
     const view = render(BalanceManagement, {
       props: {
