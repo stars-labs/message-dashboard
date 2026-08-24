@@ -456,8 +456,15 @@ impl AtModemManager {
     async fn recover_sms_input_unlocked(&self, port: &str) -> Result<()> {
         let port_path = port.to_string();
         let timeout = self.timeout;
-        tokio::task::spawn_blocking(move || Self::recover_sms_input_sync(&port_path, timeout))
-            .await?
+        let handle =
+            tokio::task::spawn_blocking(move || Self::recover_sms_input_sync(&port_path, timeout));
+        match tokio::time::timeout(timeout + Duration::from_secs(2), handle).await {
+            Ok(joined) => joined?,
+            Err(_) => Err(anyhow!(
+                "SMS input recovery timed out (port may be wedged): {}",
+                port
+            )),
+        }
     }
 
     /// Open serial port with proper settings
@@ -1900,7 +1907,21 @@ impl AtModemManager {
             .await?;
 
             match result {
-                Ok(outcome) => return Ok(outcome),
+                Ok(outcome) => {
+                    if Self::should_recover_after_submit(outcome) {
+                        warn!(
+                            "SMS submission was not confirmed on {}; recovering AT channel",
+                            port
+                        );
+                        if let Err(error) = self.recover_sms_input_unlocked(port).await {
+                            warn!(
+                                "Failed to recover AT channel after unconfirmed SMS submission on {}: {}",
+                                port, error
+                            );
+                        }
+                    }
+                    return Ok(outcome);
+                }
                 Err(error) if attempt == 1 && Self::is_prompt_timeout(&error) => {
                     warn!(
                         "SMS prompt timed out on {}; recovering and retrying once",
@@ -1941,6 +1962,10 @@ impl AtModemManager {
 
     fn is_prompt_timeout(error: &anyhow::Error) -> bool {
         error.to_string() == SMS_PROMPT_TIMEOUT_ERROR
+    }
+
+    fn should_recover_after_submit(outcome: SmsSubmitOutcome) -> bool {
+        matches!(outcome, SmsSubmitOutcome::SubmittedUnconfirmed)
     }
 
     fn send_sms_sync(
@@ -2158,6 +2183,19 @@ mod tests {
             AtModemManager::classify_sms_submit_response("0", true).unwrap(),
             SmsSubmitOutcome::SubmittedUnconfirmed,
         );
+    }
+
+    #[test]
+    fn recovers_the_at_channel_only_after_an_unconfirmed_submission() {
+        assert!(AtModemManager::should_recover_after_submit(
+            SmsSubmitOutcome::SubmittedUnconfirmed
+        ));
+        assert!(!AtModemManager::should_recover_after_submit(
+            SmsSubmitOutcome::Confirmed
+        ));
+        assert!(!AtModemManager::should_recover_after_submit(
+            SmsSubmitOutcome::Failed
+        ));
     }
 
     #[test]
