@@ -1,8 +1,10 @@
 # Singapore Postpaid Bill SMS Workflow Plan
 
-Status: implementation started on 2026-08-24. Canonical sender normalization and
-the pure Singtel parser are implemented locally; schema, ingestion, API, dashboard,
-historical backfill, deployment, and production mutation have not been performed.
+Status: implemented locally on 2026-08-24 through migration `068`. Detection,
+nightly reconciliation, account administration, bill API, dashboard, and historical
+backfill preview/execute code are complete and tested. Production migrations,
+account creation, deployment, and historical backfill execution have not been
+performed.
 
 ## 1. Outcome
 
@@ -105,7 +107,7 @@ Initial profile registry:
 
 | Profile | Carrier | Evidence | State |
 | --- | --- | --- | --- |
-| `sg-singtel-postpaid-bill-sms-v1` | Singtel | Nine retained monthly bill notices on S79 | Ready for test-first implementation |
+| `sg-singtel-postpaid-bill-sms-v1` | Singtel | Nine retained monthly bill notices on S79 | Implemented locally |
 | — | StarHub | No current StarHub inventory or confirmed postpaid bill template | Unsupported pending evidence |
 | — | M1 | Current M1 cohort is prepaid; no confirmed postpaid bill template | Unsupported pending evidence |
 
@@ -215,7 +217,18 @@ For a postpaid SIM linked to a billing account, the SIM overview displays
 “balance unavailable” or apply the SGD prepaid threshold. An unlinked postpaid SIM
 shows “Billing account not linked”.
 
-## 9. Test-first implementation sequence
+## 9. Implemented migrations
+
+- `066_add_carrier_billing.sql`: carrier-neutral billing accounts, verified SIM
+  memberships, immutable bill evidence, action state, and bill audit events.
+- `067_add_carrier_billing_account_events.sql`: optimistic account versions,
+  mutation ownership, and immutable account-configuration audit events.
+- `068_normalize_singtel_senders.sql`: exact received-message normalization for the
+  two confirmed decimal-ASCII Singtel sender encodings.
+
+These migrations are committed but have not been applied to production.
+
+## 10. Test-first implementation sequence
 
 Each stage is one atomic commit and starts with a failing test.
 
@@ -239,11 +252,20 @@ Each stage is one atomic commit and starts with a failing test.
 8. **Backfill preview:** fixture-based integration test proves the nine retained
    messages yield nine bills for one account without writing during preview.
 
+All eight stages are complete locally. The preview recognizes six complete notices
+and three controlled two-fragment reconstructions, producing nine billing cycles.
+Execution remains guarded by the exact account version, preview digest, admin
+permission, and an idempotency key.
+
 Required gates are `nix develop --command bun run test`,
 `nix develop --command bun run build`, migration validation against a fresh local
 D1 database, `git diff --check`, and desktop plus 440-pixel visual verification.
 
-## 10. Rollout
+Automated verification passes for the full test suite, production build, and fresh
+local migration application. Browser-based desktop and 440-pixel visual verification
+is pending because the in-app browser runtime cannot initialize in this environment.
+
+## 11. Rollout
 
 1. Verify through a carrier bill or OnePass that the relevant Singtel lines belong
    to the account whose notices arrive on S79.
@@ -260,7 +282,7 @@ D1 database, `git diff --check`, and desktop plus 440-pixel visual verification.
    templates and fixtures. Reuse the account, bill, action, API, and UI workflow;
    add only the new carrier parser profile.
 
-## 11. Unresolved questions
+## 12. Unresolved questions
 
 1. Do all S78-S95 lines belong to the single billing account whose notices arrive
    on S79? Recommended: verify from the detailed bill or OnePass before linking any
