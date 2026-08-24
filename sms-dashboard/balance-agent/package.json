@@ -1,6 +1,6 @@
 {
   "name": "message-dashboard-balance-agent",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Local runner for automated SIM balance queries",
   "author": "Stars Labs",
   "private": true,

@@ -80,6 +80,31 @@ describe('carrier browser workflow', () => {
     expect(waits).toEqual([0, 0]);
   });
 
+  test('waits for M1 validity placeholder text to become a real date', async () => {
+    let attempts = 0;
+    const candidate = {
+      isVisible: async () => true,
+      innerText: async () => {
+        attempts += 1;
+        return attempts >= 3 ? 'Valid Till 22 Sep 2026' : 'Valid Till NA';
+      },
+    };
+    const locator = { count: async () => 1, nth: () => candidate };
+
+    const found = await waitForFirstVisible(
+      [locator],
+      { waitForTimeout: async () => {} },
+      {
+        timeoutMs: 1_000,
+        pollMs: 0,
+        textPattern: /Valid\s+Till\s+\d{1,2}\s+[A-Za-z]{3}\s+\d{4}/i,
+      },
+    );
+
+    expect(found).toBe(candidate);
+    expect(attempts).toBe(3);
+  });
+
   test('cancels before opening a browser when the agent is stopping', async () => {
     let launched = false;
     const processor = createCarrierBrowserJobProcessor({

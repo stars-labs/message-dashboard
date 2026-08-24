@@ -66,12 +66,16 @@ export function isUnicomErrorPage(url) {
   return /[#/]errorpage/i.test(String(url || ''));
 }
 
-async function firstVisible(candidates) {
+async function firstVisible(candidates, textPattern = null) {
   for (const locator of candidates) {
     const count = await locator.count().catch(() => 0);
     for (let index = 0; index < count; index += 1) {
       const candidate = locator.nth(index);
-      if (await candidate.isVisible().catch(() => false)) return candidate;
+      if (!await candidate.isVisible().catch(() => false)) continue;
+      if (!textPattern) return candidate;
+      const candidateText = await candidate.innerText().catch(() => '');
+      textPattern.lastIndex = 0;
+      if (textPattern.test(candidateText)) return candidate;
     }
   }
   return null;
@@ -80,11 +84,11 @@ async function firstVisible(candidates) {
 export async function waitForFirstVisible(
   candidates,
   page,
-  { timeoutMs = 30_000, pollMs = 250 } = {},
+  { timeoutMs = 30_000, pollMs = 250, textPattern = null } = {},
 ) {
   const deadline = Date.now() + timeoutMs;
   while (true) {
-    const candidate = await firstVisible(candidates);
+    const candidate = await firstVisible(candidates, textPattern);
     if (candidate) return candidate;
     const remaining = deadline - Date.now();
     if (remaining <= 0) return null;
@@ -328,7 +332,10 @@ async function queryM1Balance(job, page) {
   const validity = await waitForFirstVisible([
     page.locator('.balanceForBox .brand-color'),
     page.getByText(/Valid\s+Till\s+\d{1,2}\s+[A-Za-z]{3}\s+\d{4}/i),
-  ], page, { timeoutMs: 60_000 });
+  ], page, {
+    timeoutMs: 60_000,
+    textPattern: /Valid\s+Till\s+\d{1,2}\s+[A-Za-z]{3}\s+\d{4}/i,
+  });
   if (!account || !balance || !validity) {
     throw new Error('M1 balance page is missing account, balance, or validity fields');
   }
