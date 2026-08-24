@@ -1,10 +1,9 @@
 # Singapore Postpaid Bill SMS Workflow Plan
 
-Status: implemented locally on 2026-08-24 through migration `068`. Detection,
-nightly reconciliation, account administration, bill API, dashboard, and historical
-backfill preview/execute code are complete and tested. Production migrations,
-account creation, deployment, and historical backfill execution have not been
-performed.
+Status: the account-configured baseline through migration `068` was deployed on
+2026-08-24. Production evidence then confirmed that only S79 received all nine
+retained Singtel bill notices. The receiving-SIM auto-discovery design and migration
+`069` are implemented locally; deployment and historical processing remain pending.
 
 ## 1. Outcome
 
@@ -24,11 +23,11 @@ payment.
 
 ## 2. Domain decisions
 
-1. A bill belongs to a carrier billing account, not to the notification SIM.
-2. A billing account can contain many SIMs. Membership is manually verified from a
-   carrier bill, contract, or account portal; the SMS parser never infers it.
-3. The SIM receiving the SMS is only the notification channel. For the current
-   evidence that SIM is S79.
+1. A payment task belongs to the current SIM that actually receives the bill SMS.
+2. The first authentic notice automatically creates one internal bill stream for
+   that receiving SIM. Operators do not configure an account number or member list.
+3. The system links only the receiving SIM to its stream and never infers that other
+   SIMs share the bill. Current production evidence identifies S79 only.
 4. The billed amount is immutable evidence. Payment workflow state is stored
    separately and may be changed only by an authorized user.
 5. A new bill never marks an older bill as paid. Payment is confirmed manually in
@@ -50,8 +49,9 @@ Add four carrier-neutral tables in one append-only D1 migration.
 - `id`: stable generated identifier.
 - `country_code`, `carrier`, `currency`, and operator-facing `display_name`.
 - `notification_sim_iccid`: the SIM expected to receive notices.
-- `account_ref_digest`: deterministic SHA-256 digest used for matching without
-  repeating the full account reference in normalized tables.
+- `account_ref_digest`: deterministic SHA-256 digest discovered from the authentic
+  SMS and used for matching without repeating the full reference in normalized
+  tables. It is never operator input.
 - `account_ref_last4`: masked display only.
 - `status`: `pending_verification`, `active`, or `inactive`.
 - `created_by`, `created_at`, and `updated_at`.
@@ -67,7 +67,8 @@ boundary, and the full reference remains visible only in the retained source SMS
 - `verified_at`, `verified_by`, and optional `removed_at`.
 - A partial unique index permits only one active billing-account mapping per SIM.
 
-Neither message ingestion nor the parser writes this table.
+Automatic bill-stream discovery writes only the receiving SIM to this table with
+`contract_or_bill` evidence. No other membership is inferred.
 
 ### `carrier_bills`
 
@@ -189,7 +190,6 @@ Add carrier-neutral endpoints:
 - `POST /api/carrier-bills/:id/mark-paid`
 - `POST /api/carrier-bills/:id/waive`
 - `POST /api/carrier-bills/:id/reopen`
-- Admin account/membership endpoints with preview before membership changes
 - Admin historical-backfill preview and execute endpoints
 
 Every write requires the expected `version` and an idempotency key. The server takes
@@ -203,19 +203,18 @@ Extend the Balance module to three views:
 2. `Postpaid bills`: account-level payment queue.
 3. `Query history`: existing balance-query audit.
 
-The bill queue shows masked account, carrier, amount, due date, days remaining,
-derived urgency, linked-SIM count, notification SIM, and action state. Default order
+The bill queue shows receiving SIM, carrier, amount, due date, days remaining,
+derived urgency, and action state. Default order
 is `needs_review`, `overdue`, `due_soon`, `open`, then resolved bills; within each
 group, the earliest due date comes first.
 
-The bill detail drawer shows normalized fields, linked SIMs, the source SMS while it
+The bill detail drawer shows normalized fields, the receiving SIM, the source SMS while it
 is retained, and the immutable event history. Admins can record planned, paid,
 waived, or reopened states. Viewers are read-only.
 
-For a postpaid SIM linked to a billing account, the SIM overview displays
-“Managed by billing account” and links to the current bill. It must not show
-“balance unavailable” or apply the SGD prepaid threshold. An unlinked postpaid SIM
-shows “Billing account not linked”.
+For a postpaid SIM that has received a bill SMS, the overview displays “Received bill
+SMS”. It must not show “balance unavailable” or apply the SGD prepaid threshold. A
+postpaid SIM without a matching notice shows “Waiting for bill SMS”.
 
 ## 9. Implemented migrations
 
@@ -225,8 +224,10 @@ shows “Billing account not linked”.
   mutation ownership, and immutable account-configuration audit events.
 - `068_normalize_singtel_senders.sql`: exact received-message normalization for the
   two confirmed decimal-ASCII Singtel sender encodings.
+- `069_unique_active_billing_stream_per_sim.sql`: one active automatically
+  discovered bill stream per receiving SIM.
 
-These migrations are committed but have not been applied to production.
+Migrations `066`–`068` are in production. Migration `069` is pending deployment.
 
 ## 10. Test-first implementation sequence
 
@@ -238,8 +239,8 @@ Each stage is one atomic commit and starts with a failing test.
 2. **Pure parser:** add sanitized fixtures for all nine confirmed notices plus
    negative fixtures for rebates, OTPs, generic bill text, malformed dates,
    ambiguous amounts, and account mismatch.
-3. **Schema:** migration tests prove money uses integer cents, account membership is
-   explicit, source-message deletion is safe, duplicates are idempotent, and amount
+3. **Schema:** migration tests prove money uses integer cents, the receiving-SIM
+   stream is unique, source-message deletion is safe, duplicates are idempotent, and amount
    conflicts cannot overwrite evidence.
 4. **Detection:** handler tests cover new messages, duplicates, conflicts, parser
    failure isolation, and nightly recovery.
@@ -247,8 +248,8 @@ Each stage is one atomic commit and starts with a failing test.
    optimistic concurrency, idempotency, and immutable events.
 6. **Overview logic:** clock-controlled tests cover open, seven-day warning,
    due-today, overdue, payment-planned, paid, waived, and needs-review states.
-7. **UI:** component tests cover sorting, filtering, viewer/admin actions, linked and
-   unlinked postpaid SIMs, mobile layout, and source-message retention expiry.
+7. **UI:** component tests cover sorting, filtering, viewer/admin actions, SIMs with
+   and without received bill SMS, mobile layout, and source-message retention expiry.
 8. **Backfill preview:** fixture-based integration test proves the nine retained
    messages yield nine bills for one account without writing during preview.
 
@@ -267,34 +268,29 @@ is pending because the in-app browser runtime cannot initialize in this environm
 
 ## 11. Rollout
 
-1. Verify through a carrier bill or OnePass that the relevant Singtel lines belong
-   to the account whose notices arrive on S79.
-2. Create the billing account and manually link only verified SIMs.
-3. Deploy parser and reconciliation with detection enabled but writes limited to
-   S79's account.
-4. Preview the historical backfill; compare all nine normalized amounts and dates
+1. Deploy migration `069` and the receiving-SIM discovery code.
+2. Run reconciliation so the nine retained S79 notices automatically create S79's
+   bill stream and complete notices.
+3. Preview historical processing; compare all nine normalized amounts and dates
    with the source SMS.
-5. With explicit production approval, execute the backfill and review the dashboard.
-6. Observe the next live monthly notice. Confirm one bill, one event, correct urgency,
+4. With explicit production approval, process any controlled fragments and review
+   the dashboard.
+5. Observe the next live monthly notice. Confirm one bill, one event, correct urgency,
    and no effect on message ingestion.
-7. Enable the Singtel profile for the account.
-8. Add StarHub, M1, or another Singapore carrier only from separately confirmed
+6. Add StarHub, M1, or another Singapore carrier only from separately confirmed
    templates and fixtures. Reuse the account, bill, action, API, and UI workflow;
    add only the new carrier parser profile.
 
 ## 12. Unresolved questions
 
-1. Do all S78-S95 lines belong to the single billing account whose notices arrive
-   on S79? Recommended: verify from the detailed bill or OnePass before linking any
-   SIM.
-2. Is the account paid manually or by GIRO/automatic payment? Recommended: retain
+1. Is the bill paid manually or by GIRO/automatic payment? Recommended: retain
    manual confirmation in either case; later add a distinct `autopay_expected`
-   account flag if needed.
-3. Who may record a bill as paid? Recommended: administrators only for the first
+   stream flag if needed.
+2. Who may record a bill as paid? Recommended: administrators only for the first
    release.
-4. Is seven days the desired due-soon window? Recommended: start with seven days and
+3. Is seven days the desired due-soon window? Recommended: start with seven days and
    keep it a single server-side constant until operating evidence justifies making
    it configurable.
-5. Which future Singapore postpaid carrier cohort should be validated next?
+4. Which future Singapore postpaid carrier cohort should be validated next?
    Recommended: wait until the inventory contains a verified postpaid cohort and at
    least two genuine bill notices, then add only that carrier's parser profile.

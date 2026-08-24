@@ -37,11 +37,15 @@
 
 ## Carrier billing contracts
 
-- Postpaid bills belong to `carrier_billing_accounts`, never directly to a SIM and
-  never to `sim_balance_checks` or `sim_balance_metrics`.
-- `carrier_billing_account_sims` contains only manually verified membership. The
-  notification SIM, message parser, carrier, and SIM index must not infer account
-  membership.
+- Postpaid bill tasks are keyed by the current SIM that actually receives an
+  authentic carrier bill SMS. They never use `sim_balance_checks` or
+  `sim_balance_metrics`.
+- The first authentic bill SMS automatically creates one active internal billing
+  stream for its receiving SIM. `carrier_billing_account_sims` contains only that
+  receiving SIM; the system never infers other SIM membership.
+- The carrier account reference is parsed from the SMS only to validate a stable
+  stream and is stored as a digest plus masked suffix. Operators never configure or
+  supply it.
 - `carrier_bills.amount_minor` is integer minor currency units. Bill evidence fields
   are immutable; operator actions update only workflow fields using optimistic
   concurrency.
@@ -52,7 +56,8 @@
   and action state. It is not persisted.
 - Migration `066` owns billing accounts, memberships, bills, and bill events;
   migration `067` owns account versions and account audit events; migration `068`
-  performs the one-time exact normalization of confirmed Singtel senders.
+  performs the one-time exact normalization of confirmed Singtel senders; migration
+  `069` enforces one active bill stream per receiving SIM.
 
 Browser users need `bills.read` to list accounts and read bills. Administrators need
 `bills.write` for account configuration, bill actions, and historical backfill.
@@ -60,10 +65,6 @@ Browser users need `bills.read` to list accounts and read bills. Administrators 
 Carrier-neutral routes:
 
 - `GET /api/carrier-billing/accounts`
-- `POST /api/carrier-billing/accounts`
-- `POST /api/carrier-billing/accounts/:id/update`
-- `POST /api/carrier-billing/accounts/:id/members/preview`
-- `POST /api/carrier-billing/accounts/:id/members`
 - `POST /api/carrier-billing/backfill/preview`
 - `POST /api/carrier-billing/backfill/execute`
 - `GET /api/carrier-bills`
@@ -73,7 +74,7 @@ Carrier-neutral routes:
 - `POST /api/carrier-bills/:id/waive`
 - `POST /api/carrier-bills/:id/reopen`
 
-Every billing write takes the actor from the verified Auth0 identity. Bill actions,
-account mutations, and backfill execution require an idempotency key and the exact
-expected version. Backfill execution additionally requires the exact digest returned
-by a read-only preview.
+Every user billing write takes the actor from the verified Auth0 identity. Bill
+actions and backfill execution require an idempotency key and the exact expected
+version. Backfill execution additionally requires the exact digest returned by a
+read-only preview.
