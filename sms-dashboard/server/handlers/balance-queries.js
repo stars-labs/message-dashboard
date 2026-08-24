@@ -7,7 +7,6 @@ import {
 } from './carrier-web-balance.js';
 import { loadBalanceRunnerStatus } from './balance-runners.js';
 
-const REPLYABLE_CHECK_STATUS = 'awaiting_response';
 const CHINA_MOBILE_NAMES = ['china mobile', 'cmcc', '中国移动', '移动'];
 const CHINA_UNICOM_NAMES = ['china unicom', 'unicom', '中国联通', '联通'];
 const CHINA_TELECOM_NAMES = ['china telecom', 'telecom', 'ctcc', '中国电信', '电信'];
@@ -347,7 +346,11 @@ export function expectedSenderMatches(rawSender, expectedSendersJson) {
     && expected.some((sender) => senderMatches(rawSender, sender));
 }
 
-export async function findPendingBalanceCheck(db, { phone_iccid, phone_number }) {
+export async function findPendingBalanceCheck(db, {
+  phone_iccid,
+  phone_number,
+  message_timestamp = new Date().toISOString(),
+}) {
   if (!phone_iccid || !phone_number) return null;
 
   const result = await db.prepare(`
@@ -357,26 +360,36 @@ export async function findPendingBalanceCheck(db, { phone_iccid, phone_number })
       c.profile_id,
       c.parser_version,
       c.step_index,
+      c.status,
       p.expected_senders,
       p.response_window_minutes,
       p.conversation_steps,
       p.skill_config,
       p.destination,
-      dv.number AS sim_number
+      dv.number AS sim_number,
+      datetime('now') <= datetime(COALESCE((
+        SELECT MAX(m.timestamp)
+        FROM messages m
+        WHERE m.balance_check_id = c.id AND m.type = 'sent'
+      ), c.sent_at, c.requested_at), '+' || p.response_window_minutes || ' minutes')
+        AS response_window_open
     FROM sim_balance_checks c
     JOIN sim_balance_profiles p ON p.id = c.profile_id
     LEFT JOIN device_view dv ON dv.iccid = c.sim_iccid
     WHERE c.sim_iccid = ?
-      AND c.status = ?
-      AND datetime(COALESCE((
+      AND c.status IN ('queued', 'awaiting_response', 'failed', 'timed_out')
+      AND datetime(?) >= datetime(COALESCE((
         SELECT MAX(m.timestamp)
         FROM messages m
         WHERE m.balance_check_id = c.id AND m.type = 'sent'
-      ), c.requested_at)) >= datetime(
-        'now', '-' || p.response_window_minutes || ' minutes'
-      )
+      ), c.sent_at, c.requested_at))
+      AND datetime(?) <= datetime(COALESCE((
+        SELECT MAX(m.timestamp)
+        FROM messages m
+        WHERE m.balance_check_id = c.id AND m.type = 'sent'
+      ), c.sent_at, c.requested_at), '+' || p.response_window_minutes || ' minutes')
     ORDER BY c.requested_at DESC
-  `).bind(phone_iccid, REPLYABLE_CHECK_STATUS).all();
+  `).bind(phone_iccid, message_timestamp, message_timestamp).all();
 
   const candidates = result.results || [];
   return candidates.find((candidate) =>
@@ -384,12 +397,24 @@ export async function findPendingBalanceCheck(db, { phone_iccid, phone_number })
   ) || null;
 }
 
-export async function linkBalanceReply(db, check, message) {
+export async function linkBalanceReply(
+  db,
+  check,
+  message,
+  { allowFollowUp = true } = {},
+) {
   if (!check) return;
 
   const nextStep = matchingNextStep(check, message.content);
-  if (nextStep) {
-    return queueBalanceFollowUp(db, check, message, nextStep, 'awaiting_response');
+  const responseWindowOpen = Number(check.response_window_open ?? 1) === 1;
+  if (nextStep && allowFollowUp && responseWindowOpen) {
+    return queueBalanceFollowUp(
+      db,
+      check,
+      message,
+      nextStep,
+      check.status || 'awaiting_response',
+    );
   }
 
   const metrics = parseBalanceMetrics(check.parser_version, message.content);
@@ -400,9 +425,10 @@ export async function linkBalanceReply(db, check, message) {
         response_message_id = ?,
         response_sender = ?,
         raw_response = ?,
+        error = NULL,
         updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
-      AND status = 'awaiting_response'
+      AND status IN ('queued', 'awaiting_response', 'failed', 'timed_out')
   `).bind(
     metrics.length ? 'parsed' : 'response_received',
     message.id,
@@ -433,7 +459,8 @@ export async function linkBalanceReply(db, check, message) {
   }
 
   const skill = parseBalanceSkillConfig(check.skill_config);
-  if (!metrics.length && skill && Number(check.step_index || 0) < skill.max_turns) {
+  if (!metrics.length && skill && allowFollowUp && responseWindowOpen
+    && Number(check.step_index || 0) < skill.max_turns) {
     statements.push(db.prepare(`
       INSERT OR IGNORE INTO sim_balance_skill_jobs (
         id, check_id, response_message_id, step_index
@@ -451,7 +478,172 @@ export async function linkBalanceReply(db, check, message) {
     ));
   }
 
-  return db.batch(statements);
+  statements.push(db.prepare(`
+    UPDATE messages
+    SET purpose = 'balance_maintenance',
+        balance_check_id = ?,
+        updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+      AND (balance_check_id IS NULL OR balance_check_id = ?)
+      AND EXISTS (
+        SELECT 1
+        FROM sim_balance_checks c
+        WHERE c.id = ?
+          AND c.response_message_id = messages.id
+      )
+  `).bind(check.id, message.id, check.id, check.id));
+
+  const results = await db.batch(statements);
+  return {
+    linked: Number(results?.[0]?.meta?.changes ?? 1) > 0,
+    results,
+  };
+}
+
+export async function expireStaleBalanceChecks(db) {
+  const results = await db.batch([
+    db.prepare(`
+      UPDATE sim_balance_checks
+      SET status = 'timed_out',
+          completed_at = CURRENT_TIMESTAMP,
+          error = 'No reply received within the configured response window',
+          updated_at = CURRENT_TIMESTAMP
+      WHERE status = 'awaiting_response'
+        AND EXISTS (
+          SELECT 1
+          FROM sim_balance_profiles p
+          WHERE p.id = sim_balance_checks.profile_id
+            AND datetime(COALESCE((
+              SELECT MAX(m.timestamp)
+              FROM messages m
+              WHERE m.balance_check_id = sim_balance_checks.id
+                AND m.type = 'sent'
+            ), sim_balance_checks.sent_at, sim_balance_checks.requested_at),
+              '+' || p.response_window_minutes || ' minutes') < datetime('now')
+        )
+    `).bind(),
+    db.prepare(`
+      UPDATE sim_balance_skill_jobs
+      SET status = 'stopped',
+          lease_owner = NULL,
+          lease_expires_at = NULL,
+          last_error = COALESCE(last_error, 'Balance response window expired'),
+          updated_at = CURRENT_TIMESTAMP
+      WHERE status IN ('pending', 'leased')
+        AND EXISTS (
+          SELECT 1
+          FROM sim_balance_checks c
+          WHERE c.id = sim_balance_skill_jobs.check_id
+            AND c.status = 'timed_out'
+        )
+    `).bind(),
+  ]);
+
+  return {
+    expired: Number(results?.[0]?.meta?.changes || 0),
+    stopped_jobs: Number(results?.[1]?.meta?.changes || 0),
+  };
+}
+
+export async function reconcileOrphanBalanceReplies(
+  db,
+  { phoneIccid = null, limit = 200 } = {},
+) {
+  const boundedLimit = Math.min(Math.max(Number(limit) || 200, 1), 500);
+  const scope = phoneIccid ? 'AND m.phone_iccid = ?' : '';
+  const params = phoneIccid ? [phoneIccid, boundedLimit] : [boundedLimit];
+  const result = await db.prepare(`
+    SELECT
+      m.id,
+      m.phone_iccid,
+      m.phone_number,
+      m.content,
+      m.timestamp,
+      c.id AS check_id,
+      c.status,
+      c.parser_version,
+      c.step_index,
+      p.expected_senders,
+      p.response_window_minutes,
+      p.conversation_steps,
+      p.skill_config,
+      p.destination,
+      dv.number AS sim_number,
+      datetime('now') <= datetime(COALESCE((
+        SELECT MAX(sent.timestamp)
+        FROM messages sent
+        WHERE sent.balance_check_id = c.id AND sent.type = 'sent'
+      ), c.sent_at, c.requested_at), '+' || p.response_window_minutes || ' minutes')
+        AS response_window_open
+    FROM messages m
+    JOIN sim_balance_checks c ON c.sim_iccid = m.phone_iccid
+    JOIN sim_balance_profiles p ON p.id = c.profile_id
+    LEFT JOIN device_view dv ON dv.iccid = c.sim_iccid
+    WHERE m.type = 'received'
+      AND m.balance_check_id IS NULL
+      AND c.status IN ('queued', 'awaiting_response', 'failed', 'timed_out')
+      AND datetime(m.timestamp) >= datetime(COALESCE((
+        SELECT MAX(sent.timestamp)
+        FROM messages sent
+        WHERE sent.balance_check_id = c.id AND sent.type = 'sent'
+      ), c.sent_at, c.requested_at))
+      AND datetime(m.timestamp) <= datetime(COALESCE((
+        SELECT MAX(sent.timestamp)
+        FROM messages sent
+        WHERE sent.balance_check_id = c.id AND sent.type = 'sent'
+      ), c.sent_at, c.requested_at), '+' || p.response_window_minutes || ' minutes')
+      AND EXISTS (
+        SELECT 1
+        FROM json_each(p.expected_senders) sender
+        WHERE lower(trim(CAST(sender.value AS TEXT))) = lower(trim(m.phone_number))
+          OR m.phone_number = '86' || CAST(sender.value AS TEXT)
+          OR m.phone_number = '852' || CAST(sender.value AS TEXT)
+      )
+      ${scope}
+    ORDER BY datetime(m.timestamp), datetime(c.requested_at) DESC
+    LIMIT ?
+  `).bind(...params).all();
+
+  const candidates = result.results || [];
+  const handledMessages = new Set();
+  const linkedChecks = new Set();
+  let linked = 0;
+  let supplemental = 0;
+
+  for (const candidate of candidates) {
+    if (handledMessages.has(candidate.id)
+      || !expectedSenderMatches(candidate.phone_number, candidate.expected_senders)) continue;
+    handledMessages.add(candidate.id);
+
+    if (linkedChecks.has(candidate.check_id)) {
+      const attached = await db.prepare(`
+        UPDATE messages
+        SET purpose = 'balance_maintenance',
+            balance_check_id = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND balance_check_id IS NULL
+      `).bind(candidate.check_id, candidate.id).run();
+      supplemental += Number(attached?.meta?.changes || 0);
+      continue;
+    }
+
+    const outcome = await linkBalanceReply(db, {
+      ...candidate,
+      id: candidate.check_id,
+    }, candidate, { allowFollowUp: false });
+    if (outcome?.linked) {
+      linked += 1;
+      linkedChecks.add(candidate.check_id);
+    }
+  }
+
+  return { scanned: handledMessages.size, linked, supplemental };
+}
+
+export async function maintainBalanceChecks(db) {
+  const replies = await reconcileOrphanBalanceReplies(db);
+  const timeouts = await expireStaleBalanceChecks(db);
+  return { replies, timeouts };
 }
 
 export async function queueBalanceFollowUp(

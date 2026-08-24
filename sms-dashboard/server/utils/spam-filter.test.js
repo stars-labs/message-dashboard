@@ -44,6 +44,7 @@ describe('senderMatches', () => {
 
   test('preserves numeric shortcode and country-prefix matching', () => {
     expect(senderMatches('+8610001', '10001')).toBe(true);
+    expect(senderMatches('85212580', '12580')).toBe(true);
     expect(senderMatches('13910001', '10001')).toBe(false);
   });
 });

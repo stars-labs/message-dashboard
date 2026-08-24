@@ -506,6 +506,7 @@ export const controlHandler = {
           const balanceCheck = await findPendingBalanceCheck(env.DB, {
             phone_iccid,
             phone_number: phoneNumber,
+            message_timestamp: timestamp,
           });
           const verificationCode = balanceCheck
             ? null

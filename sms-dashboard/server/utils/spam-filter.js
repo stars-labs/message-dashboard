@@ -2,6 +2,8 @@
 //
 import { hasVerificationCode } from './verification.js';
 
+const SHORT_CODE_COUNTRY_PREFIXES = ['86', '852'];
+
 // This module is the ONLY place that decides whether a message is spam.
 // Callers (ingest in handlers/control.js, backfill in api/filters.js) may use SQL
 // to narrow down which rows are worth looking at, but the verdict always comes
@@ -62,7 +64,8 @@ export function senderMatches(rawSender, rawPattern) {
 
   if (/^\d+$/.test(pattern)) {
     const digits = normalizeSender(sender);
-    return digits === pattern || digits === `86${pattern}`;
+    return digits === pattern
+      || SHORT_CODE_COUNTRY_PREFIXES.some((prefix) => digits === `${prefix}${pattern}`);
   }
 
   return sender.localeCompare(pattern, undefined, { sensitivity: 'accent' }) === 0;

@@ -9,12 +9,10 @@ workers_dev = true
 #   { pattern = "sexy.qzz.io", custom_domain = true }
 # ]
 
-# Nightly maintenance: purge messages past the 12-month retention window, then
-# finish any spam classification a request-scoped sweep ran out of time for.
-# 04:17 UTC — deliberately off the hour, since :00 is when every cron on the
-# platform fires at once.
+# Balance reply correlation and timeout reconciliation runs every five minutes.
+# The 04:17 UTC trigger also runs the heavier nightly retention and backfills.
 [triggers]
-crons = ["17 4 * * *"]
+crons = ["*/5 * * * *", "17 4 * * *"]
 
 # D1 Database binding
 [[d1_databases]]

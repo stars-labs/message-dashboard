@@ -10,7 +10,10 @@ import { statsHandler } from './handlers/stats';
 import { iccidMappingsHandler } from './handlers/iccid-mappings';
 import { healthHandler } from './handlers/health';
 import { usersHandler } from './handlers/users';
-import { balanceQueriesHandler } from './handlers/balance-queries.js';
+import {
+  balanceQueriesHandler,
+  maintainBalanceChecks,
+} from './handlers/balance-queries.js';
 import { balanceSkillRunnerHandler } from './handlers/balance-skill-runner.js';
 import {
   reconcileTerminalWebBalanceJobs,
@@ -692,6 +695,20 @@ export default {
   // Nightly maintenance (cron in wrangler.toml).
   async scheduled(event, env, ctx) {
     console.log(`[scheduled] cron ${event.cron} firing`);
+
+    try {
+      const balances = await maintainBalanceChecks(env.DB);
+      console.log(
+        `[scheduled] balance checks: linked ${balances.replies.linked}, `
+        + `supplemental ${balances.replies.supplemental}, expired ${balances.timeouts.expired}`,
+      );
+    } catch (error) {
+      console.error('[scheduled] balance check maintenance failed:', error);
+    }
+
+    // The five-minute trigger exists only for balance response windows. Keep the
+    // heavier retention and full-database reconciliation on the nightly trigger.
+    if (event.cron !== '17 4 * * *') return;
 
     // Retention first: no point classifying messages that are about to be deleted.
     try {
