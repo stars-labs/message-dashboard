@@ -8,10 +8,10 @@
 | Capability | Method | Requires |
 |---|---|---|
 | `sms-ai` | Company AI parses carrier SMS menus | Company VPN + AI URL + Keychain token |
-| `unicom-browser` | Playwright Chrome → Unicom website → OTP → balance | Visible Chrome + Auth0 login |
+| `carrier-browser` | Playwright Chrome → carrier portal → OTP → balance/expiry | Visible Chrome + Auth0 login |
 
-Both loops are serial (one job at a time). Keep Unicom browser batches ≤ 5 cards —
-Unicom rate-limits rapid logins with a CAPTCHA lockout.
+Both loops are serial (one job at a time). Carrier profiles own their login
+cooldown; keep browser batches small because carrier OTP endpoints rate-limit.
 
 ## Trust boundaries
 

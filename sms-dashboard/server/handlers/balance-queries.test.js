@@ -136,7 +136,7 @@ describe('balance query execution requirements', () => {
       }),
     })).toEqual({ category: 'sms_ai', capability: 'sms_ai', interactive: false });
     expect(describeBalanceMethod({ method: 'browser' }))
-      .toEqual({ category: 'browser', capability: 'unicom_browser', interactive: true });
+      .toEqual({ category: 'browser', capability: 'carrier_browser', interactive: true });
   });
 });
 
@@ -163,6 +163,27 @@ describe('balance-query planning', () => {
       profiles: [browserProfile],
     });
     expect(item).toMatchObject({ eligible: true, profile: browserProfile });
+  });
+
+  test('enforces a browser profile required service type without changing China profiles', () => {
+    const m1Profile = {
+      ...enabledProfile,
+      id: 'sg-m1-prepaid-browser-v1',
+      country_code: 'SG',
+      carrier: 'M1',
+      method: 'browser',
+      skill_config: JSON.stringify({ required_service_type: 'prepaid' }),
+    };
+    const plan = buildBalanceQueryPlan({
+      phones: [
+        { ...phone, iccid: 'm1-prepaid', country: 'SG', carrier: 'M1', service_type: 'prepaid' },
+        { ...phone, iccid: 'm1-postpaid', country: 'SG', carrier: 'M1', service_type: 'postpaid' },
+      ],
+      profiles: [m1Profile],
+    });
+
+    expect(plan[0]).toMatchObject({ eligible: true, reason: null });
+    expect(plan[1]).toMatchObject({ eligible: false, reason: 'service_type' });
   });
 
   test('limits discovery profiles in a batch to SIMs with a parsed result', () => {
@@ -303,6 +324,7 @@ describe('POST /api/balance-checks/query', () => {
       carrier: 'China Unicom',
       method: 'browser',
       parser_version: 'cn-unicom-web-balance-v1',
+      skill_config: JSON.stringify({ id: 'unicom-web-balance' }),
     };
     const smsProfile = {
       ...profile,
@@ -364,6 +386,7 @@ describe('GET /api/balance-checks/query-preflight', () => {
       method: 'browser',
       enabled: 1,
       discovery_enabled: 0,
+      skill_config: JSON.stringify({ id: 'unicom-web-balance' }),
     };
     const unicomPhone = {
       ...phone,
@@ -385,7 +408,7 @@ describe('GET /api/balance-checks/query-preflight', () => {
           }
           if (sql.includes('FROM balance_runner_capabilities')) {
             return { results: [{
-              runner_id: 'runner-1', capability: 'unicom_browser', state: 'ready',
+              runner_id: 'runner-1', capability: 'carrier_browser', state: 'ready',
               current_job_id: null, concurrency: 1, detail_code: null,
               last_heartbeat: '2026-08-15 03:00:00', seconds_since_heartbeat: 10,
             }] };
@@ -407,7 +430,7 @@ describe('GET /api/balance-checks/query-preflight', () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({
       eligible: true,
-      method: { category: 'browser', capability: 'unicom_browser', interactive: true },
+      method: { category: 'browser', capability: 'carrier_browser', interactive: true },
       runner: { required: true, available: true, state: 'ready' },
     });
   });
@@ -459,6 +482,7 @@ describe('POST /api/control/balance-checks', () => {
       carrier: 'China Unicom',
       method: 'browser',
       parser_version: 'cn-unicom-web-balance-v1',
+      skill_config: JSON.stringify({ id: 'unicom-web-balance' }),
     };
     const db = dbStub({
       profileResult: browserProfile,
@@ -542,6 +566,7 @@ describe('GET /api/balance-checks', () => {
                     id: 'bal-1',
                     sim_iccid: phone.iccid,
                     status: 'parsed',
+                    skill_config: '{"outputs":["cash_balance","account_expiry"]}',
                     outbound_content: '10086',
                     response_content: '余额82.36元',
                     conversation_json: '[{"id":"msg-1","type":"received","content":"余额82.36元"}]',
@@ -572,6 +597,8 @@ describe('GET /api/balance-checks', () => {
       type: 'received',
       content: '余额82.36元',
     }]);
+    expect(body.data[0].profile_outputs).toEqual(['cash_balance', 'account_expiry']);
+    expect(body.data[0].skill_config).toBeUndefined();
     expect(body.data[0].metrics_json).toBeUndefined();
     expect(body.data[0].conversation_json).toBeUndefined();
   });

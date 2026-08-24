@@ -174,7 +174,7 @@
 
   const capabilityLabels = {
     sms_ai: 'AI 短信',
-    unicom_browser: '浏览器查询',
+    carrier_browser: '浏览器查询',
   };
 
   function capabilityPresentation(capability) {
@@ -970,11 +970,11 @@
           </label>
           <label class="px-4 py-3 flex items-center gap-3 text-sm">
             <input type="checkbox" bind:checked={batchMethods.browser}
-              disabled={!batchPreview.method_summary.browser || !batchPreview.runner_capabilities?.unicom_browser?.available}
+              disabled={!batchPreview.method_summary.browser || !batchPreview.runner_capabilities?.carrier_browser?.available}
               class="rounded border-stone-300 text-orange-500 focus:ring-orange-400">
             <span class="flex-1 text-stone-600">
               浏览器登录（逐张处理）
-              {#if batchPreview.method_summary.browser && !batchPreview.runner_capabilities?.unicom_browser?.available}
+              {#if batchPreview.method_summary.browser && !batchPreview.runner_capabilities?.carrier_browser?.available}
                 <small class="ml-1 text-amber-600">助手未就绪</small>
               {/if}
             </span>
@@ -982,10 +982,10 @@
           </label>
           {#if batchMethods.browser}
             <div class="px-4 py-2.5 text-xs bg-orange-50 text-orange-700 space-y-1">
-              <p>浏览器任务串行执行，每张卡都可能需要人工验证。每张卡间隔 5 分钟。</p>
+              <p>浏览器任务串行执行，每张卡都可能需要人工验证，并按运营商 profile 的限流间隔处理。</p>
               {#if (batchPreview.method_summary.browser || 0) > 5}
                 <p class="font-medium text-red-600">
-                  ⚠️ 当前选中 {batchPreview.method_summary.browser} 张联通浏览器卡，联通登录接口有频率限制，建议每次不超过 5 张，避免触发验证码锁定。
+                  ⚠️ 当前选中 {batchPreview.method_summary.browser} 张浏览器查询卡，运营商登录接口可能限流，建议分批处理。
                 </p>
               {/if}
             </div>

@@ -1,8 +1,8 @@
 function claimPath(runnerId) {
-  return `/api/control/unicom-web-balance/jobs/claim?runner_id=${encodeURIComponent(runnerId)}`;
+  return `/api/control/carrier-web-balance/jobs/claim?runner_id=${encodeURIComponent(runnerId)}`;
 }
 
-export function createUnicomBrowserCapability({
+export function createCarrierBrowserCapability({
   controlClient,
   presence,
   runnerId,

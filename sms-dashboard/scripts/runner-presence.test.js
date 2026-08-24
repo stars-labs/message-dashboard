@@ -14,7 +14,7 @@ describe('runner presence client', () => {
       runnerId: 'workstation-legacy',
       sessionId: 'session-1',
       displayName: 'Workstation',
-      capability: 'unicom_browser',
+      capability: 'carrier_browser',
       version: '1.0.0',
       platform: 'darwin',
     });
@@ -26,7 +26,7 @@ describe('runner presence client', () => {
     expect(bodies.map((body) => body.capabilities[0].state))
       .toEqual(['starting', 'busy', 'stopping']);
     expect(bodies[1].capabilities[0]).toMatchObject({
-      capability: 'unicom_browser',
+      capability: 'carrier_browser',
       current_job_id: 'job-1',
       detail_code: 'human_verification_required',
     });

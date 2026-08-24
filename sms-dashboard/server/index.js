@@ -14,8 +14,8 @@ import { balanceQueriesHandler } from './handlers/balance-queries.js';
 import { balanceSkillRunnerHandler } from './handlers/balance-skill-runner.js';
 import {
   reconcileTerminalWebBalanceJobs,
-  unicomWebBalanceHandler,
-} from './handlers/unicom-web-balance.js';
+  carrierWebBalanceHandler,
+} from './handlers/carrier-web-balance.js';
 import { balanceRunnersHandler } from './handlers/balance-runners.js';
 import { serveFrontend } from './frontend-handler';
 import { createRoleConfig, hasAnyRole } from '../config/auth0-roles.js';
@@ -480,32 +480,32 @@ router.post('/api/control/balance-skills/jobs/:id/release', async (request) => {
   return balanceSkillRunnerHandler.release(request);
 });
 
-router.get('/api/control/unicom-web-balance/jobs/claim', async (request) => {
-  return unicomWebBalanceHandler.claim(request);
+router.get('/api/control/carrier-web-balance/jobs/claim', async (request) => {
+  return carrierWebBalanceHandler.claim(request);
 });
 
-router.post('/api/control/unicom-web-balance/jobs/:id/otp-requested', async (request) => {
-  return unicomWebBalanceHandler.otpRequested(request);
+router.post('/api/control/carrier-web-balance/jobs/:id/otp-requested', async (request) => {
+  return carrierWebBalanceHandler.otpRequested(request);
 });
 
-router.get('/api/control/unicom-web-balance/jobs/:id/otp', async (request) => {
-  return unicomWebBalanceHandler.otp(request);
+router.get('/api/control/carrier-web-balance/jobs/:id/otp', async (request) => {
+  return carrierWebBalanceHandler.otp(request);
 });
 
-router.post('/api/control/unicom-web-balance/jobs/:id/heartbeat', async (request) => {
-  return unicomWebBalanceHandler.heartbeat(request);
+router.post('/api/control/carrier-web-balance/jobs/:id/heartbeat', async (request) => {
+  return carrierWebBalanceHandler.heartbeat(request);
 });
 
-router.post('/api/control/unicom-web-balance/jobs/:id/complete', async (request) => {
-  return unicomWebBalanceHandler.complete(request);
+router.post('/api/control/carrier-web-balance/jobs/:id/complete', async (request) => {
+  return carrierWebBalanceHandler.complete(request);
 });
 
-router.post('/api/control/unicom-web-balance/jobs/:id/fail', async (request) => {
-  return unicomWebBalanceHandler.fail(request);
+router.post('/api/control/carrier-web-balance/jobs/:id/fail', async (request) => {
+  return carrierWebBalanceHandler.fail(request);
 });
 
-router.post('/api/control/unicom-web-balance/jobs/:id/release', async (request) => {
-  return unicomWebBalanceHandler.release(request);
+router.post('/api/control/carrier-web-balance/jobs/:id/release', async (request) => {
+  return carrierWebBalanceHandler.release(request);
 });
 
 

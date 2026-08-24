@@ -52,7 +52,7 @@ describe('balance management', () => {
         success: true,
         capabilities: {
           sms_ai: { available: true, state: 'ready' },
-          unicom_browser: {
+          carrier_browser: {
             available: true,
             state: 'busy',
             detail_code: 'human_verification_required',
@@ -222,7 +222,7 @@ describe('balance management', () => {
         return Response.json({
           success: true,
           eligible: true,
-          method: { category: 'browser', capability: 'unicom_browser', interactive: true },
+          method: { category: 'browser', capability: 'carrier_browser', interactive: true },
           runner: { required: true, available: true, state: 'ready' },
         });
       }
@@ -266,7 +266,7 @@ describe('balance management', () => {
           method_summary: { direct_sms: 1, sms_ai: 2, browser: 3 },
           runner_capabilities: {
             sms_ai: { available: true, state: 'ready' },
-            unicom_browser: { available: true, state: 'ready' },
+            carrier_browser: { available: true, state: 'ready' },
           },
         });
       }
@@ -321,7 +321,7 @@ describe('balance management', () => {
           success: true,
           summary: { eligible: 1, cooldown: 0, offline: 0, unsupported: 0, unverified: 0, total: 1 },
           method_summary: { direct_sms: 0, sms_ai: 0, browser: 1 },
-          runner_capabilities: { unicom_browser: { available: true, state: 'ready' } },
+          runner_capabilities: { carrier_browser: { available: true, state: 'ready' } },
         });
       }
       throw new Error(`Unexpected request: ${value}`);

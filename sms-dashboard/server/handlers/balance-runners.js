@@ -1,6 +1,6 @@
 import { authorizeRunnerControl, RUNNER_SCOPES } from '../utils/runner-auth.js';
 
-const CAPABILITIES = new Set(['sms_ai', 'unicom_browser']);
+const CAPABILITIES = new Set(['sms_ai', 'carrier_browser']);
 const STATES = new Set([
   'starting',
   'ready',

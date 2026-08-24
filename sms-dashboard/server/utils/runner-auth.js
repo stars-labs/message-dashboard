@@ -3,7 +3,7 @@ import { auth0Handler } from '../handlers/auth0.js';
 export const RUNNER_SCOPES = Object.freeze({
   heartbeat: 'balance:runners:heartbeat',
   smsAi: 'balance:skills:run',
-  unicomBrowser: 'balance:browser:run',
+  carrierBrowser: 'balance:browser:run',
 });
 
 function bearerToken(request) {

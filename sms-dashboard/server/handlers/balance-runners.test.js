@@ -52,6 +52,21 @@ describe('balance runner control plane', () => {
     sqlite = new Database(':memory:');
     sqlite.exec('PRAGMA foreign_keys = ON');
     sqlite.exec(await Bun.file('migrations/055_add_balance_runner_control_plane.sql').text());
+    sqlite.exec(`
+      DROP TABLE balance_runner_capabilities;
+      CREATE TABLE balance_runner_capabilities (
+        runner_id TEXT NOT NULL REFERENCES balance_runner_installations(id) ON DELETE CASCADE,
+        capability TEXT NOT NULL CHECK(capability IN ('sms_ai', 'carrier_browser')),
+        state TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        current_job_id TEXT,
+        concurrency INTEGER NOT NULL DEFAULT 1,
+        detail_code TEXT,
+        last_heartbeat TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (runner_id, capability)
+      );
+    `);
     db = new D1Adapter(sqlite);
   });
 
@@ -152,12 +167,12 @@ describe('balance runner control plane', () => {
         runner_id, capability, state, session_id, last_heartbeat
       ) VALUES
         ('online', 'sms_ai', 'ready', 'session-1', CURRENT_TIMESTAMP),
-        ('stale', 'unicom_browser', 'ready', 'session-2', datetime('now', '-120 seconds'));
+        ('stale', 'carrier_browser', 'ready', 'session-2', datetime('now', '-120 seconds'));
     `);
 
     const status = await loadBalanceRunnerStatus(db);
     expect(status.capabilities.sms_ai.available).toBe(true);
-    expect(status.capabilities.unicom_browser).toMatchObject({ available: false, state: 'offline' });
+    expect(status.capabilities.carrier_browser).toMatchObject({ available: false, state: 'offline' });
     expect(status.runners.find((runner) => runner.id === 'stale').online).toBe(false);
   });
 
@@ -173,13 +188,13 @@ describe('balance runner control plane', () => {
         runner_id, capability, state, session_id
       ) VALUES
         ('alice', 'sms_ai', 'ready', 'alice-session'),
-        ('bob', 'unicom_browser', 'ready', 'bob-session'),
-        ('legacy', 'unicom_browser', 'ready', 'legacy-session');
+        ('bob', 'carrier_browser', 'ready', 'bob-session'),
+        ('legacy', 'carrier_browser', 'ready', 'legacy-session');
     `);
 
     const status = await loadBalanceRunnerStatus(db, { authSubject: 'auth0|alice' });
     expect(status.runners.map((runner) => runner.id)).toEqual(['alice']);
     expect(status.capabilities.sms_ai.available).toBe(true);
-    expect(status.capabilities.unicom_browser.available).toBe(false);
+    expect(status.capabilities.carrier_browser.available).toBe(false);
   });
 });

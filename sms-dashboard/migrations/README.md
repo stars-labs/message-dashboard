@@ -4,6 +4,12 @@ This directory contains SQL migration scripts for the SMS Dashboard D1 database.
 
 ## Migration History
 
+### 065_add_m1_prepaid_browser_balance.sql
+- Renames the shared local browser capability to `carrier_browser`.
+- Generalizes persisted browser jobs for multiple carriers without losing history.
+- Adds a discovery-only M1 prepaid portal profile that returns both cash balance
+  and account expiry.
+
 ### 063_replace_na_service_type.sql / 064_recreate_device_view.sql
 - Replaces the ambiguous `n/a` SIM service type with `balance_managed`.
 - Migrates existing records, removes the old enum value from the schema, and

@@ -45,7 +45,7 @@ application hosts the same capabilities through shared modules:
 | Capability | Responsibility | Local requirements |
 | --- | --- | --- |
 | `sms-ai` | Interpret unresolved carrier SMS menus and choose a validated read-only follow-up | Company VPN, AI URL, model, and Keychain token |
-| `unicom-browser` | Open the official China Unicom website, use an SMS one-time password, pause for human verification, and read the balance | Visible Chrome and Auth0 device login |
+| `carrier-browser` | Open an approved official carrier portal, use an SMS one-time password, pause for human verification, and read typed balance metrics | Visible Chrome and Auth0 device login |
 
 `flake.nix` exposes `balance-agent` in the development shell and
 `nix run .#balance-agent-cli`. It does not decrypt development secrets or provide
@@ -75,7 +75,7 @@ Ship one application named **Balance Agent**, not one application per runner. Th
 application hosts capability modules:
 
 - `sms-ai`: company-AI interpretation of carrier SMS conversations.
-- `unicom-browser`: visible official-site login and read-only balance retrieval.
+- `carrier-browser`: visible official-site login and read-only typed balance retrieval.
 - Future carrier browser or API capabilities can be added without changing the
   installation and pairing flow.
 
@@ -220,7 +220,7 @@ selected method and required capability.
 - For ordinary SMS, show the existing confirmation.
 - For AI-assisted SMS, require an online `sms-ai` capability. If it is unavailable,
   offer to open Balance Agent and explain whether VPN or configuration is missing.
-- For browser queries, require an online `unicom-browser` capability and show:
+- For browser queries, require an online `carrier-browser` capability and show:
   "The official carrier website will open on your computer. You may need to
   complete a slider or image verification before the query can continue."
 
@@ -312,8 +312,8 @@ runner-core/
   serial-runner.js      Cancellable concurrency-one execution loop
   capabilities/
     sms-ai.js
-    unicom-browser.js
-    unicom-browser-workflow.js
+    carrier-browser.js
+    carrier-browser-workflow.js
 balance-agent/
   src/                  Electron main, CLI, isolated preload, Auth0 and renderer
   scripts/build.mjs     Bundles shared core into the desktop application

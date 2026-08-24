@@ -16,7 +16,22 @@ const ACTIVE_STATUSES = [
   'human_verification_required',
 ];
 const HEARTBEAT_STATUSES = new Set(ACTIVE_STATUSES);
-const OTP_CONTEXT = /(?:随机密码|隨機密碼|验证码|驗證碼|登录|登錄|登入)/;
+const PROVIDERS = Object.freeze({
+  china_unicom: {
+    skillId: 'unicom-web-balance',
+    currency: 'CNY',
+    otpContext: /(?:随机密码|隨機密碼|验证码|驗證碼|登录|登錄|登入)/,
+    rawResponse: 'Official China Unicom web balance query',
+    expiryRequired: false,
+  },
+  m1_prepaid: {
+    skillId: 'm1-prepaid-web-balance',
+    currency: 'SGD',
+    otpContext: /\botp\s+for\s+login\b/i,
+    rawResponse: 'Official M1 prepaid portal balance query',
+    expiryRequired: true,
+  },
+});
 
 function json(data, status = 200) {
   return Response.json(data, { status });
@@ -30,8 +45,21 @@ async function readJson(request) {
   }
 }
 
-function normalizePhone(value) {
-  return String(value || '').replace(/\D/g, '').replace(/^86(?=1\d{10}$)/, '');
+function normalizePhone(value, provider) {
+  const digits = String(value || '').replace(/\D/g, '');
+  if (provider === 'china_unicom') return digits.replace(/^86(?=1\d{10}$)/, '');
+  if (provider === 'm1_prepaid') return digits.replace(/^65(?=\d{8}$)/, '');
+  return digits;
+}
+
+function validIsoDate(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ''));
+  if (!match) return false;
+  const [year, month, day] = match.slice(1).map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year
+    && date.getUTCMonth() === month - 1
+    && date.getUTCDate() === day;
 }
 
 function expectedSenderMatches(rawSender, expectedSendersJson) {
@@ -55,6 +83,7 @@ async function loadJob(db, id) {
       j.*, c.sim_iccid, c.status AS check_status, c.profile_id,
       c.requested_by_subject,
       p.command AS login_url, p.expected_senders, p.skill_config,
+      p.parser_version AS profile_parser_version,
       dv.number AS sim_number, dv.sim_index
     FROM sim_balance_web_jobs j
     JOIN sim_balance_checks c ON c.id = j.check_id
@@ -125,9 +154,9 @@ async function requireLease(request, body, auth) {
   return { job };
 }
 
-export const unicomWebBalanceHandler = {
+export const carrierWebBalanceHandler = {
   async claim(request) {
-    const auth = await authorizeRunnerControl(request, RUNNER_SCOPES.unicomBrowser);
+    const auth = await authorizeRunnerControl(request, RUNNER_SCOPES.carrierBrowser);
     if (!auth.authorized) {
       return json({ error: 'Unauthorized' }, 401);
     }
@@ -194,7 +223,8 @@ export const unicomWebBalanceHandler = {
     } catch {
       skill = null;
     }
-    if (!skill || skill.id !== 'unicom-web-balance') {
+    const provider = PROVIDERS[job.provider];
+    if (!skill || !provider || skill.id !== provider.skillId) {
       await request.env.DB.batch([
         request.env.DB.prepare(`
           UPDATE sim_balance_web_jobs
@@ -226,7 +256,7 @@ export const unicomWebBalanceHandler = {
   },
 
   async otpRequested(request) {
-    const auth = await authorizeRunnerControl(request, RUNNER_SCOPES.unicomBrowser);
+    const auth = await authorizeRunnerControl(request, RUNNER_SCOPES.carrierBrowser);
     if (!auth.authorized) {
       return json({ error: 'Unauthorized' }, 401);
     }
@@ -249,7 +279,7 @@ export const unicomWebBalanceHandler = {
   },
 
   async otp(request) {
-    const auth = await authorizeRunnerControl(request, RUNNER_SCOPES.unicomBrowser);
+    const auth = await authorizeRunnerControl(request, RUNNER_SCOPES.carrierBrowser);
     if (!auth.authorized) {
       return json({ error: 'Unauthorized' }, 401);
     }
@@ -267,9 +297,10 @@ export const unicomWebBalanceHandler = {
       ORDER BY datetime(created_at), rowid
       LIMIT 20
     `).bind(job.sim_iccid, job.otp_requested_at).all();
-    const message = (result.results || []).find((candidate) =>
+    const provider = PROVIDERS[job.provider];
+    const message = provider && (result.results || []).find((candidate) =>
       expectedSenderMatches(candidate.phone_number, job.expected_senders)
-      && OTP_CONTEXT.test(candidate.content || '')
+      && provider.otpContext.test(candidate.content || '')
     );
     if (!message) return new Response(null, { status: 204 });
 
@@ -286,7 +317,7 @@ export const unicomWebBalanceHandler = {
   },
 
   async heartbeat(request) {
-    const auth = await authorizeRunnerControl(request, RUNNER_SCOPES.unicomBrowser);
+    const auth = await authorizeRunnerControl(request, RUNNER_SCOPES.carrierBrowser);
     if (!auth.authorized) {
       return json({ error: 'Unauthorized' }, 401);
     }
@@ -315,7 +346,7 @@ export const unicomWebBalanceHandler = {
   },
 
   async complete(request) {
-    const auth = await authorizeRunnerControl(request, RUNNER_SCOPES.unicomBrowser);
+    const auth = await authorizeRunnerControl(request, RUNNER_SCOPES.carrierBrowser);
     if (!auth.authorized) {
       return json({ error: 'Unauthorized' }, 401);
     }
@@ -326,28 +357,50 @@ export const unicomWebBalanceHandler = {
     if (!Number.isFinite(balance) || balance < -100000 || balance > 1000000) {
       return json({ error: 'balance is invalid' }, 400);
     }
-    if (body.currency !== 'CNY') return json({ error: 'currency must be CNY' }, 400);
-    if (normalizePhone(body.account_number) !== normalizePhone(job.sim_number)) {
+    const provider = PROVIDERS[job.provider];
+    if (!provider) return json({ error: 'Unsupported browser balance provider' }, 400);
+    if (body.currency !== provider.currency) {
+      return json({ error: `currency must be ${provider.currency}` }, 400);
+    }
+    if (normalizePhone(body.account_number, job.provider)
+      !== normalizePhone(job.sim_number, job.provider)) {
       return json({ error: 'Authenticated account does not match the balance task SIM' }, 409);
     }
 
-    const results = await request.env.DB.batch([
+    const expiresAt = provider.expiryRequired ? String(body.expires_at || '') : null;
+    if (provider.expiryRequired && !validIsoDate(expiresAt)) {
+      return json({ error: 'expires_at must be a real ISO calendar date' }, 400);
+    }
+
+    const statements = [
       request.env.DB.prepare(`
         UPDATE sim_balance_checks
         SET status = 'parsed', completed_at = CURRENT_TIMESTAMP,
-            raw_response = 'Official China Unicom web balance query',
+            raw_response = ?,
             error = NULL, updated_at = CURRENT_TIMESTAMP
         WHERE id = ? AND status = 'queued'
-      `).bind(job.check_id),
+      `).bind(provider.rawResponse, job.check_id),
       request.env.DB.prepare(`
         INSERT INTO sim_balance_metrics (
           check_id, metric_type, value, unit, currency, expires_at
-        ) SELECT id, 'cash_balance', ?, NULL, 'CNY', NULL
+        ) SELECT id, 'cash_balance', ?, NULL, ?, NULL
           FROM sim_balance_checks WHERE id = ? AND status = 'parsed'
         ON CONFLICT(check_id, metric_type) DO UPDATE SET
           value = excluded.value, currency = excluded.currency,
           created_at = CURRENT_TIMESTAMP
-      `).bind(balance, job.check_id),
+      `).bind(balance, provider.currency, job.check_id),
+    ];
+    if (provider.expiryRequired) {
+      statements.push(request.env.DB.prepare(`
+        INSERT INTO sim_balance_metrics (
+          check_id, metric_type, value, unit, currency, expires_at
+        ) SELECT id, 'account_expiry', NULL, NULL, NULL, ?
+          FROM sim_balance_checks WHERE id = ? AND status = 'parsed'
+        ON CONFLICT(check_id, metric_type) DO UPDATE SET
+          expires_at = excluded.expires_at, created_at = CURRENT_TIMESTAMP
+      `).bind(expiresAt, job.check_id));
+    }
+    statements.push(
       request.env.DB.prepare(`
         UPDATE sim_balance_web_jobs
         SET status = 'completed', lease_owner = NULL, lease_expires_at = NULL,
@@ -355,10 +408,12 @@ export const unicomWebBalanceHandler = {
         WHERE id = ? AND lease_owner = ?
       `).bind(job.id, body.runner_id),
       eventStatement(request.env.DB, job.id, 'completed', {
-        currency: 'CNY',
-        parser_version: 'cn-unicom-web-balance-v1',
+        currency: provider.currency,
+        parser_version: job.profile_parser_version,
+        ...(expiresAt ? { expires_at: expiresAt } : {}),
       }),
-    ]);
+    );
+    const results = await request.env.DB.batch(statements);
     if (Number(results?.[0]?.meta?.changes ?? 1) === 0) {
       return json({ error: 'Balance check changed before completion' }, 409);
     }
@@ -366,7 +421,7 @@ export const unicomWebBalanceHandler = {
   },
 
   async fail(request) {
-    const auth = await authorizeRunnerControl(request, RUNNER_SCOPES.unicomBrowser);
+    const auth = await authorizeRunnerControl(request, RUNNER_SCOPES.carrierBrowser);
     if (!auth.authorized) {
       return json({ error: 'Unauthorized' }, 401);
     }
@@ -393,7 +448,7 @@ export const unicomWebBalanceHandler = {
   },
 
   async release(request) {
-    const auth = await authorizeRunnerControl(request, RUNNER_SCOPES.unicomBrowser);
+    const auth = await authorizeRunnerControl(request, RUNNER_SCOPES.carrierBrowser);
     if (!auth.authorized) {
       return json({ error: 'Unauthorized' }, 401);
     }
@@ -424,7 +479,19 @@ export const unicomWebBalanceHandler = {
   },
 };
 
-export function createUnicomWebBalanceStatements(
+function providerForProfile(profile) {
+  let skill;
+  try {
+    skill = JSON.parse(profile?.skill_config || '{}');
+  } catch {
+    skill = null;
+  }
+  const entry = Object.entries(PROVIDERS).find(([, config]) => config.skillId === skill?.id);
+  if (!entry) throw new Error('Unsupported browser balance profile');
+  return entry[0];
+}
+
+export function createCarrierWebBalanceStatements(
   db,
   { checkId, jobId, phone, profile, requestedBySubject = null }
 ) {
@@ -442,13 +509,13 @@ export function createUnicomWebBalanceStatements(
     ),
     db.prepare(`
       INSERT INTO sim_balance_web_jobs (id, check_id, provider)
-      VALUES (?, ?, 'china_unicom')
-    `).bind(jobId, checkId),
+      VALUES (?, ?, ?)
+    `).bind(jobId, checkId, providerForProfile(profile)),
     eventStatement(db, jobId, 'queued'),
   ];
 }
 
-export function newUnicomWebBalanceIds() {
+export function newCarrierWebBalanceIds() {
   return {
     checkId: `bal-${nanoid()}`,
     jobId: `webbal-${nanoid()}`,

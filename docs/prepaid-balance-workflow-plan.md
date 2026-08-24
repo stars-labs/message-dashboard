@@ -1,7 +1,8 @@
 # Prepaid SIM Balance and Recharge Workflow Plan
 
-Status: proposed on 2026-08-24. No implementation, balance query, recharge, or
-production mutation has been performed.
+Status: prepaid health and the discovery-only M1 portal profile are implemented
+locally as of 2026-08-24. No live M1 balance query, recharge, deployment, or
+production mutation has been performed for this feature.
 
 ## 1. Outcome
 
@@ -11,9 +12,9 @@ observations into a clear, auditable operator queue.
 The workflow is carrier-neutral. Carrier profiles determine only how observations
 are obtained and parsed; one shared workflow decides whether attention is needed.
 The first Singapore cohort is S73-S77: five carrier-account-verified M1 prepaid
-SIMs. Their balance-query method is not yet validated, so the workflow must support
-both automated observations and controlled manual observations without pretending
-that manual data is live carrier automation.
+SIMs. The official M1 prepaid portal has now been confirmed to support mobile-number
+plus SMS OTP login and to display both cash balance and account validity. Automation
+remains discovery-only until a controlled end-to-end runner query succeeds.
 
 The first release monitors and coordinates recharge. It never purchases a top-up,
 submits payment, stores payment credentials, or calls an undocumented carrier API.
@@ -221,8 +222,9 @@ Use S73-S77 as the first genuine Singapore prepaid cohort. The old `#100#` attem
 on S78 is invalid M1 evidence because S78 is verified Singtel postpaid.
 
 1. Confirm the five SIMs remain M1 prepaid and select one low-risk, online pilot.
-2. Research the current official M1 prepaid balance and expiry surfaces again at
-   implementation time.
+2. Confirmed on 2026-08-24: `https://mcardaccount.m1.com.sg/login` accepts an
+   eight-digit M1 prepaid number and six-digit SMS OTP. The authenticated balance
+   surface displays SGD cash balance and `Valid Till DD Mon YYYY` account expiry.
 3. Test official `#100#` only in a serialized maintenance window on the genuine M1
    pilot, with complete asynchronous response capture, timeout, cancellation, and
    proof that normal SMS scanning resumes.
@@ -231,8 +233,9 @@ on S78 is invalid M1 evidence because S78 is verified Singtel postpaid.
 5. If USSD is deterministic, capture two successful observations on different days
    before enabling a profile. If it is not, keep M1 manual-observation-only; do not
    guess an SMS command or reverse engineer the app API.
-6. Validate both cash balance and expiry separately. A profile may support one and
-   leave the other explicitly unavailable.
+6. The M1 portal profile promises both `cash_balance` and `account_expiry`; a result
+   missing either field fails closed and does not create a partial successful
+   observation.
 
 No live USSD, SMS, portal login, balance query, or production change is authorized
 by this plan.

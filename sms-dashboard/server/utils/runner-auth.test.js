@@ -18,7 +18,7 @@ describe('runner Auth0 scopes', () => {
   test('supports Auth0 RBAC permissions arrays', () => {
     expect(hasRunnerScope({ sub: 'device-1', permissions: [RUNNER_SCOPES.smsAi] }, RUNNER_SCOPES.smsAi))
       .toBe(true);
-    expect(hasRunnerScope({ sub: 'device-1', permissions: [RUNNER_SCOPES.smsAi] }, RUNNER_SCOPES.unicomBrowser))
+    expect(hasRunnerScope({ sub: 'device-1', permissions: [RUNNER_SCOPES.smsAi] }, RUNNER_SCOPES.carrierBrowser))
       .toBe(false);
   });
 

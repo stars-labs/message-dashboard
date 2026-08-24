@@ -185,6 +185,20 @@ describe('balance overview', () => {
     expect(row.expiryDate).toBe('2026-08-30');
   });
 
+  test('requires expiry when the selected profile promises account expiry', () => {
+    const balance = {
+      ...check('sg2', 'parsed', 12, 'SGD'),
+      profile_outputs: ['cash_balance', 'account_expiry'],
+    };
+
+    const [row] = buildBalanceRows([
+      { ...phone('sg2', 'SG'), service_type: 'prepaid' },
+    ], [balance], now);
+
+    expect(row.health).toBe('expiry_unknown');
+    expect(row.healthReasons).toContain('expiry_unknown');
+  });
+
   test('excludes postpaid SIMs from prepaid balance health', () => {
     const [row] = buildBalanceRows([
       { ...phone('sg2', 'SG'), service_type: 'postpaid' },

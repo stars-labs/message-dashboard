@@ -2,9 +2,9 @@ import { nanoid } from 'nanoid';
 import { senderMatches } from '../utils/spam-filter.js';
 import { parseBalanceSkillConfig } from '../utils/balance-skill.js';
 import {
-  createUnicomWebBalanceStatements,
-  newUnicomWebBalanceIds,
-} from './unicom-web-balance.js';
+  createCarrierWebBalanceStatements,
+  newCarrierWebBalanceIds,
+} from './carrier-web-balance.js';
 import { loadBalanceRunnerStatus } from './balance-runners.js';
 
 const REPLYABLE_CHECK_STATUS = 'awaiting_response';
@@ -35,6 +35,17 @@ function normalizeCarrier(value) {
 
 function checkKey(simIccid, profileId) {
   return `${simIccid}\u0000${profileId}`;
+}
+
+function requiredServiceType(profile) {
+  try {
+    const parsed = JSON.parse(profile?.skill_config || '{}');
+    return typeof parsed.required_service_type === 'string'
+      ? parsed.required_service_type
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 function parseBatchScope(value) {
@@ -69,10 +80,12 @@ export function buildBalanceQueryPlan({
         && (allowDiscovery || successful.has(checkKey(phone.iccid, candidate.id))))
     ) || null;
 
+    const serviceType = requiredServiceType(profile);
     let reason = null;
     if (phone.sim_role === 'secondary') reason = 'secondary';
     else if (phone.sim_status !== 'active') reason = 'offline';
     else if (!profile) reason = matchingProfiles.length ? 'unverified' : 'unsupported';
+    else if (serviceType && phone.service_type !== serviceType) reason = 'service_type';
     else if (recentBySim.has(phone.iccid)) reason = 'cooldown';
 
     return {
@@ -94,6 +107,7 @@ function summarizePlan(plan) {
     unverified: 0,
     cooldown: 0,
     secondary: 0,
+    service_type: 0,
   };
   for (const item of plan) {
     if (item.eligible) summary.eligible += 1;
@@ -105,7 +119,7 @@ function summarizePlan(plan) {
 export function describeBalanceMethod(profile) {
   if (!profile) return { category: 'unsupported', capability: null, interactive: false };
   if (profile.method === 'browser') {
-    return { category: 'browser', capability: 'unicom_browser', interactive: true };
+    return { category: 'browser', capability: 'carrier_browser', interactive: true };
   }
   if (profile.method === 'sms' && parseBalanceSkillConfig(profile.skill_config)) {
     return { category: 'sms_ai', capability: 'sms_ai', interactive: false };
@@ -138,7 +152,7 @@ async function loadBalanceQueryPlan(db, {
     ? `WHERE iccid IN (${scopedIccids.map(() => '?').join(', ')})`
     : '';
   const phoneStatement = db.prepare(`
-    SELECT iccid, number, carrier, country, sim_status, sim_index, sim_role
+    SELECT iccid, number, carrier, country, sim_status, sim_index, sim_role, service_type
     FROM device_view ${phoneWhere}
     ORDER BY sim_index
   `);
@@ -174,8 +188,8 @@ async function loadBalanceQueryPlan(db, {
 
 async function queueBalanceCheck(db, { phone, profile }, requestedBySubject = null) {
   if (profile.method === 'browser') {
-    const { checkId, jobId } = newUnicomWebBalanceIds();
-    await db.batch(createUnicomWebBalanceStatements(db, {
+    const { checkId, jobId } = newCarrierWebBalanceIds();
+    await db.batch(createCarrierWebBalanceStatements(db, {
       checkId,
       jobId,
       phone,
@@ -559,6 +573,7 @@ export const balanceQueriesHandler = {
         p.command,
         p.destination,
         p.conversation_steps,
+        p.skill_config,
         dv.sim_index,
         dv.number AS sim_number,
         dv.carrier AS sim_carrier,
@@ -631,6 +646,7 @@ export const balanceQueriesHandler = {
     const checks = (result.results || []).map((check) => {
       let metrics = [];
       let conversation = [];
+      let profileOutputs = [];
       try {
         metrics = JSON.parse(check.metrics_json || '[]');
       } catch {
@@ -641,9 +657,18 @@ export const balanceQueriesHandler = {
       } catch {
         conversation = [];
       }
+      try {
+        const skill = JSON.parse(check.skill_config || '{}');
+        profileOutputs = Array.isArray(skill.outputs)
+          ? skill.outputs.filter((output) => typeof output === 'string')
+          : [];
+      } catch {
+        profileOutputs = [];
+      }
       const {
         metrics_json: _metricsJson,
         conversation_json: _conversationJson,
+        skill_config: _skillConfig,
         ...record
       } = check;
       let displayStatus = record.status;
@@ -661,7 +686,13 @@ export const balanceQueriesHandler = {
         };
         displayStatus = webStatuses[record.web_job_status] || record.status;
       }
-      return { ...record, display_status: displayStatus, metrics, conversation };
+      return {
+        ...record,
+        display_status: displayStatus,
+        profile_outputs: profileOutputs,
+        metrics,
+        conversation,
+      };
     });
 
     return json({ success: true, data: checks });

@@ -1,24 +1,26 @@
 import { describe, expect, test } from 'bun:test';
 import {
   TEMPORARY_CHROME_ARGS,
+  createCarrierBrowserJobProcessor,
   createTemporaryChromePreferences,
-  createUnicomBrowserJobProcessor,
   isUnicomErrorPage,
+  validateCarrierBrowserJob,
   validateUnicomBrowserJob,
-} from './unicom-browser-workflow.js';
+} from './carrier-browser-workflow.js';
 
 function validJob() {
   return {
     id: 'job-1',
     login_url: 'https://imgxx.client.10010.com/shengyuhuafeiwt2024/index.html#/',
     skill: {
+      id: 'unicom-web-balance',
       query_origin: 'https://imgxx.client.10010.com',
       query_endpoint: 'https://www.10010.com/mall/service/query/userinfoquery',
     },
   };
 }
 
-describe('China Unicom browser workflow', () => {
+describe('carrier browser workflow', () => {
   test('disables notifications and credential prompts in temporary profiles', () => {
     const preferences = createTemporaryChromePreferences();
     expect(preferences.credentials_enable_service).toBe(false);
@@ -36,13 +38,27 @@ describe('China Unicom browser workflow', () => {
     ]) {
       const job = validJob();
       job.login_url = value;
-      expect(() => validateUnicomBrowserJob(job)).toThrow('approved China Unicom origin');
+      expect(() => validateUnicomBrowserJob(job)).toThrow('approved carrier origin');
     }
+  });
+
+  test('accepts only the official M1 prepaid login and balance origins', () => {
+    const job = {
+      id: 'm1-job',
+      login_url: 'https://mcardaccount.m1.com.sg/login',
+      skill: {
+        id: 'm1-prepaid-web-balance',
+        balance_url: 'https://mcardaccount.m1.com.sg/balance',
+      },
+    };
+    expect(() => validateCarrierBrowserJob(job)).not.toThrow();
+    job.skill.balance_url = 'https://mcardaccount.m1.com.sg.evil.example/balance';
+    expect(() => validateCarrierBrowserJob(job)).toThrow('approved carrier origin');
   });
 
   test('cancels before opening a browser when the agent is stopping', async () => {
     let launched = false;
-    const processor = createUnicomBrowserJobProcessor({
+    const processor = createCarrierBrowserJobProcessor({
       controlClient: { request: async () => new Response(null, { status: 204 }) },
       presence: { set: async () => {} },
       runnerId: 'runner-1',
@@ -72,7 +88,7 @@ describe('China Unicom browser workflow', () => {
   });
 
   test('reports that there is no verification window before a job starts', async () => {
-    const processor = createUnicomBrowserJobProcessor({
+    const processor = createCarrierBrowserJobProcessor({
       controlClient: { request: async () => new Response(null, { status: 204 }) },
       presence: { set: async () => {} },
       runnerId: 'runner-1',

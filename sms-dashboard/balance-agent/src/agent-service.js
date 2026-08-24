@@ -6,8 +6,8 @@ import { createAuthSession } from '../../runner-core/auth-session.js';
 import { createRunnerPresence } from '../../runner-core/presence.js';
 import { runSerialCapability } from '../../runner-core/serial-runner.js';
 import { createSmsAiCapability } from '../../runner-core/capabilities/sms-ai.js';
-import { createUnicomBrowserCapability } from '../../runner-core/capabilities/unicom-browser.js';
-import { createUnicomBrowserJobProcessor } from '../../runner-core/capabilities/unicom-browser-workflow.js';
+import { createCarrierBrowserCapability } from '../../runner-core/capabilities/carrier-browser.js';
+import { createCarrierBrowserJobProcessor } from '../../runner-core/capabilities/carrier-browser-workflow.js';
 import { callCompanyAI, companyAIReachable } from '../../server/utils/company-ai.js';
 import { testAIConnection } from './ai-connection.js';
 
@@ -24,7 +24,7 @@ export function createAgentService({
   browserExecutablePath = null,
   appVersion = 'development',
   platform = process.platform,
-  enabledCapabilities = ['sms_ai', 'unicom_browser'],
+  enabledCapabilities = ['sms_ai', 'carrier_browser'],
   once = false,
   logger = console,
   onState = () => {},
@@ -55,7 +55,7 @@ export function createAgentService({
   };
 
   function configuredBrowserState() {
-    if (!enabled.has('unicom_browser')) return 'stopped';
+    if (!enabled.has('carrier_browser')) return 'stopped';
     return browser && browserExecutablePath ? 'ready' : 'configuration_required';
   }
 
@@ -163,11 +163,11 @@ export function createAgentService({
       baseUrl: settings.dashboardUrl,
       getAccessToken: () => authSession.getAccessToken(),
     });
-    if (enabled.has('unicom_browser')) {
-      browserPresence = publishingPresence(controlClient, 'unicom_browser', 'browser');
+    if (enabled.has('carrier_browser')) {
+      browserPresence = publishingPresence(controlClient, 'carrier_browser', 'browser');
       await browserPresence.start();
       if (browser && browserExecutablePath) {
-        browserProcessor = createUnicomBrowserJobProcessor({
+        browserProcessor = createCarrierBrowserJobProcessor({
           controlClient,
           presence: browserPresence,
           runnerId: sessionId,
@@ -175,7 +175,7 @@ export function createAgentService({
           executablePath: browserExecutablePath,
           logger,
         });
-        const browserCapability = createUnicomBrowserCapability({
+        const browserCapability = createCarrierBrowserCapability({
           controlClient,
           presence: browserPresence,
           runnerId: sessionId,

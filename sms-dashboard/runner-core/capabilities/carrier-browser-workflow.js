@@ -2,10 +2,12 @@ import { tmpdir } from 'node:os';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { extractUnicomWebBalance } from '../../server/utils/unicom-web-balance.js';
+import { extractM1WebBalance } from '../../server/utils/m1-web-balance.js';
 import { abortableSleep } from '../serial-runner.js';
 
 const LOGIN_ORIGIN = 'https://imgxx.client.10010.com';
 const QUERY_ORIGIN = 'https://www.10010.com';
+const M1_ORIGIN = 'https://mcardaccount.m1.com.sg';
 
 export function createTemporaryChromePreferences() {
   return {
@@ -37,7 +39,7 @@ function assertOfficialUrl(value, expectedOrigin, label) {
     throw new Error(`${label} is not a valid URL`);
   }
   if (url.origin !== expectedOrigin) {
-    throw new Error(`${label} must use the approved China Unicom origin`);
+    throw new Error(`${label} must use the approved carrier origin`);
   }
   return url.toString();
 }
@@ -51,17 +53,26 @@ export function validateUnicomBrowserJob(job) {
   assertOfficialUrl(job.skill.query_endpoint, QUERY_ORIGIN, 'Balance endpoint');
 }
 
+export function validateCarrierBrowserJob(job) {
+  if (job?.skill?.id === 'unicom-web-balance') return validateUnicomBrowserJob(job);
+  if (job?.skill?.id !== 'm1-prepaid-web-balance') {
+    throw new Error('Carrier browser job uses an unsupported skill');
+  }
+  assertOfficialUrl(job.login_url, M1_ORIGIN, 'Login URL');
+  assertOfficialUrl(job.skill.balance_url, M1_ORIGIN, 'Balance URL');
+}
+
 export function isUnicomErrorPage(url) {
   return /[#/]errorpage/i.test(String(url || ''));
 }
 
-export function createUnicomBrowserJobProcessor({
+export function createCarrierBrowserJobProcessor({
   controlClient,
   presence,
   runnerId,
   browser,
   executablePath,
-  diagnosticsDirectory = join(tmpdir(), 'message-dashboard-unicom-diagnostics'),
+  diagnosticsDirectory = join(tmpdir(), 'message-dashboard-browser-diagnostics'),
   logger = console,
 }) {
   if (!browser?.launchPersistentContext) {
@@ -75,7 +86,7 @@ async function workerRequest(path, options = {}) {
 
 async function postJob(job, action, body = {}) {
   const response = await workerRequest(
-    `/api/control/unicom-web-balance/jobs/${encodeURIComponent(job.id)}/${action}`,
+    `/api/control/carrier-web-balance/jobs/${encodeURIComponent(job.id)}/${action}`,
     {
       method: 'POST',
       body: JSON.stringify({ runner_id: runnerId, ...body }),
@@ -199,6 +210,10 @@ async function heartbeat(job, status, reason = null) {
   return postJob(job, 'heartbeat', { status, ...(reason ? { reason } : {}) });
 }
 
+function carrierLabel(job) {
+  return job?.skill?.id === 'm1-prepaid-web-balance' ? 'M1' : '联通';
+}
+
 async function waitForOtp(job, page) {
   const deadline = Date.now() + Number(job.skill.human_verification_timeout_seconds || 900) * 1000;
   let humanReported = false;
@@ -206,7 +221,7 @@ async function waitForOtp(job, page) {
   while (Date.now() < deadline) {
     if (await hasHumanChallenge(page)) {
       if (!humanReported || Date.now() - lastHeartbeat > 30_000) {
-        await heartbeat(job, 'human_verification_required', '联通网站要求在本机浏览器完成人工验证');
+        await heartbeat(job, 'human_verification_required', `${carrierLabel(job)}网站要求在本机浏览器完成人工验证`);
         await presence?.set('busy', job.id, 'human_verification_required');
         humanReported = true;
         lastHeartbeat = Date.now();
@@ -220,7 +235,7 @@ async function waitForOtp(job, page) {
     }
 
     const response = await workerRequest(
-      `/api/control/unicom-web-balance/jobs/${encodeURIComponent(job.id)}/otp?runner_id=${encodeURIComponent(runnerId)}`,
+      `/api/control/carrier-web-balance/jobs/${encodeURIComponent(job.id)}/otp?runner_id=${encodeURIComponent(runnerId)}`,
     );
     if (response.status === 204) {
       await abortableSleep(2_000);
@@ -230,21 +245,94 @@ async function waitForOtp(job, page) {
       throw new Error(`Could not poll login code (${response.status}): ${(await response.text()).slice(0, 300)}`);
     }
     const payload = await response.json();
-    if (!payload?.code) throw new Error('Worker returned an empty China Unicom login code');
+    if (!payload?.code) throw new Error('Worker returned an empty carrier login code');
     return payload.code;
   }
-  throw new Error('Timed out waiting for China Unicom login code or human verification');
+  throw new Error('Timed out waiting for carrier login code or human verification');
+}
+
+async function loginM1(job, page) {
+  await page.goto(job.login_url, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+  const phoneInput = await firstVisible([
+    page.locator('#msisdnContainer .typeContactNum'),
+    page.locator('input.typeContactNum'),
+  ]);
+  if (!phoneInput) throw new Error('Could not find the M1 prepaid phone input');
+  const localPhone = String(job.sim_number || '').replace(/\D/g, '').replace(/^65(?=\d{8}$)/, '');
+  if (!/^\d{8}$/.test(localPhone)) throw new Error('M1 prepaid account is not a valid Singapore number');
+  await phoneInput.fill(localPhone);
+
+  const requestButton = await firstVisible([
+    page.locator('#msisdnContainer .loginPageLoginButton'),
+    page.locator('button.loginPageLoginButton'),
+  ]);
+  if (!requestButton) throw new Error('Could not find the M1 OTP request button');
+  if (!job.otp_requested_at) {
+    await postJob(job, 'otp-requested');
+    await requestButton.click();
+  } else {
+    logger.log(`Reusing the existing login code request for S${String(job.sim_index).padStart(2, '0')}.`);
+  }
+
+  const code = await waitForOtp(job, page);
+  if (!/^\d{6}$/.test(code)) throw new Error('M1 login code must contain six digits');
+  const inputs = page.locator('input.otp-input, input.otp-input-error');
+  const deadline = Date.now() + 20_000;
+  while (Date.now() < deadline && await inputs.count().catch(() => 0) < 6) {
+    await page.waitForTimeout(250);
+  }
+  if (await inputs.count().catch(() => 0) < 6) throw new Error('Could not find the six M1 OTP inputs');
+  for (let index = 0; index < 6; index += 1) await inputs.nth(index).fill(code[index]);
+
+  await heartbeat(job, 'authenticating');
+  const loginButton = await firstVisible([
+    page.locator('button.loginPageLoginButton'),
+    page.locator('.loginPageLoginButton'),
+  ]);
+  if (!loginButton) throw new Error('Could not find the M1 login confirmation button');
+  await loginButton.click();
+  const accountDeadline = Date.now() + 60_000;
+  let account = null;
+  while (Date.now() < accountDeadline) {
+    account = await firstVisible([page.locator('.numberTxt')]);
+    if (account) break;
+    await page.waitForTimeout(500);
+  }
+  if (!account) throw new Error('M1 login did not expose the authenticated account');
+  await waitForChallengeCompletion(job, page);
+}
+
+async function queryM1Balance(job, page) {
+  await heartbeat(job, 'querying');
+  await page.goto(job.skill.balance_url, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+  const account = await firstVisible([page.locator('.numberTxt')]);
+  const balance = await firstVisible([
+    page.locator('.balanceForBox .balanceAmt.maBalanceDiv'),
+    page.locator('.balanceAmt.maBalanceDiv'),
+  ]);
+  const validity = await firstVisible([
+    page.locator('.balanceForBox .brand-color'),
+    page.getByText(/Valid\s+Till\s+\d{1,2}\s+[A-Za-z]{3}\s+\d{4}/i),
+  ]);
+  if (!account || !balance || !validity) {
+    throw new Error('M1 balance page is missing account, balance, or validity fields');
+  }
+  return extractM1WebBalance({
+    accountText: await account.innerText(),
+    balanceText: await balance.innerText(),
+    validityText: await validity.innerText(),
+  }, job.sim_number);
 }
 
 async function waitForChallengeCompletion(job, page) {
   if (!await hasHumanChallenge(page)) return;
-  await heartbeat(job, 'human_verification_required', '联通登录要求人工验证');
+  await heartbeat(job, 'human_verification_required', `${carrierLabel(job)}登录要求人工验证`);
   await presence?.set('busy', job.id, 'human_verification_required');
   logger.log(`S${String(job.sim_index).padStart(2, '0')} needs human verification in the open browser.`);
   const deadline = Date.now() + Number(job.skill.human_verification_timeout_seconds || 900) * 1000;
   while (Date.now() < deadline) {
     if (!await hasHumanChallenge(page)) return;
-    await heartbeat(job, 'human_verification_required', '等待用户在本机浏览器完成验证');
+    await heartbeat(job, 'human_verification_required', `等待用户在本机浏览器完成${carrierLabel(job)}验证`);
     await abortableSleep(30_000);
   }
   throw new Error('Human verification timed out');
@@ -379,9 +467,9 @@ async function fail(job, error) {
 }
 
 async function processJob(job, { signal } = {}) {
-  validateUnicomBrowserJob(job);
+  validateCarrierBrowserJob(job);
   if (signal?.aborted) throw new Error('Browser query cancelled');
-  const profileDir = await mkdtemp(join(tmpdir(), 'unicom-balance-'));
+  const profileDir = await mkdtemp(join(tmpdir(), 'carrier-balance-'));
   const defaultProfileDir = join(profileDir, 'Default');
   await mkdir(defaultProfileDir, { recursive: true });
   await writeFile(
@@ -402,26 +490,31 @@ async function processJob(job, { signal } = {}) {
     if (signal?.aborted) throw new Error('Browser query cancelled');
     page = context.pages()[0] || await context.newPage();
     activePage = page;
-    const nativeResponsePromise = page.waitForResponse((response) =>
-      response.url().startsWith(job.skill.query_endpoint)
-      && response.request().method() === 'POST',
-    { timeout: 60_000 }).catch(() => null);
-    await login(job, page);
-    const parsed = await queryBalance(job, context, nativeResponsePromise);
+    let parsed;
+    if (job.skill.id === 'unicom-web-balance') {
+      const nativeResponsePromise = page.waitForResponse((response) =>
+        response.url().startsWith(job.skill.query_endpoint)
+        && response.request().method() === 'POST',
+      { timeout: 60_000 }).catch(() => null);
+      await login(job, page);
+      parsed = await queryBalance(job, context, nativeResponsePromise);
+    } else {
+      await loginM1(job, page);
+      parsed = await queryM1Balance(job, page);
+    }
     await postJob(job, 'complete', parsed);
-    logger.log(`Stored China Unicom balance for S${String(job.sim_index).padStart(2, '0')}.`);
+    logger.log(`Stored carrier balance for S${String(job.sim_index).padStart(2, '0')}.`);
     return { handled: true, retryDelay: 0 };
   } catch (error) {
     const diagnosticBase = await captureDiagnostics(job, page).catch(() => null);
-    const terminal = /(?:timed out|does not prove|multiple candidate|recognized available-balance|HTTP|did not return JSON)/i
+    const terminal = /(?:timed out|does not prove|multiple candidate|recognized available-balance|exact SGD balance|validity date|HTTP|did not return JSON)/i
       .test(error.message);
     if (terminal) await fail(job, error);
     else await release(job, error);
-    logger.error(`China Unicom web balance job ${job.id} failed: ${error.message}`);
+    logger.error(`Carrier web balance job ${job.id} failed: ${error.message}`);
     if (diagnosticBase) logger.error(`Diagnostics saved to ${diagnosticBase}.json and ${diagnosticBase}.png`);
-    // 10-second cooldown between browser jobs to avoid hammering Unicom's
-    // captcha service ("操作过于频繁"). Keep batch sizes small (≤5 cards).
-    return { handled: true, retryDelay: 10_000 };
+    const retryDelay = Math.max(10, Number(job.skill.cooldown_seconds || 10)) * 1_000;
+    return { handled: true, retryDelay };
   } finally {
     signal?.removeEventListener('abort', closeOnAbort);
     activePage = null;

@@ -57,6 +57,8 @@ describe('Balance Agent CLI', () => {
 
   test('validates capability names', () => {
     expect(selectedCapabilities('sms-ai')).toEqual(['sms_ai']);
+    expect(selectedCapabilities('carrier-browser')).toEqual(['carrier_browser']);
+    expect(() => selectedCapabilities('unicom-browser')).toThrow('Unknown capability');
     expect(() => selectedCapabilities('unknown')).toThrow('Unknown capability');
   });
 

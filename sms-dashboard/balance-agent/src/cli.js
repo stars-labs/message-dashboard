@@ -15,9 +15,9 @@ import { acquireRunLock } from './run-lock.js';
 import { createSettingsStore } from './settings-store.js';
 
 const CAPABILITIES = Object.freeze({
-  all: ['sms_ai', 'unicom_browser'],
+  all: ['sms_ai', 'carrier_browser'],
   'sms-ai': ['sms_ai'],
-  'unicom-browser': ['unicom_browser'],
+  'carrier-browser': ['carrier_browser'],
 });
 
 const CONFIGURATION_OPTIONS = Object.freeze({
@@ -51,8 +51,8 @@ Usage:
   balance-agent login
   balance-agent logout
   balance-agent status
-  balance-agent doctor [--capability all|sms-ai|unicom-browser]
-  balance-agent run [--capability all|sms-ai|unicom-browser] [--once]
+  balance-agent doctor [--capability all|sms-ai|carrier-browser]
+  balance-agent run [--capability all|sms-ai|carrier-browser] [--once]
 
 Configuration options:
   --dashboard-url URL
@@ -99,7 +99,7 @@ function requiredSettings(settings) {
 function selectedCapabilities(value = 'all') {
   const capabilities = CAPABILITIES[value];
   if (!capabilities) {
-    throw new Error(`Unknown capability ${value}; expected all, sms-ai, or unicom-browser`);
+    throw new Error(`Unknown capability ${value}; expected all, sms-ai, or carrier-browser`);
   }
   return capabilities;
 }
@@ -228,7 +228,7 @@ async function doctor(argv, { settingsStore, secureStore, output }) {
     const result = await testAIConnection({ ...settings, aiToken });
     results.push(['SMS AI', result]);
   }
-  if (capabilities.includes('unicom_browser')) {
+  if (capabilities.includes('carrier_browser')) {
     const executable = defaultBrowserExecutable();
     const result = await access(executable)
       .then(() => ({ ok: true, message: executable }))
@@ -262,7 +262,7 @@ async function run(argv, {
 
   let browser = null;
   let browserExecutablePath = null;
-  if (capabilities.includes('unicom_browser')) {
+  if (capabilities.includes('carrier_browser')) {
     ({ chromium: browser } = await import('playwright-core'));
     browserExecutablePath = defaultBrowserExecutable();
   }

@@ -7,9 +7,10 @@ both local balance capabilities:
 
 - `sms-ai` evaluates unresolved, read-only carrier menus through the company AI
   endpoint while the workstation is connected to the company VPN.
-- `unicom-browser` opens a visible Chrome session, uses an SMS one-time password,
-  pauses for official-site human verification when required, and reads the
-  normalized China Unicom balance.
+- `carrier-browser` opens a visible Chrome session, uses an SMS one-time password,
+  pauses for official-site human verification when required, and reads normalized
+  carrier metrics. China Unicom returns CNY balance; M1 prepaid returns SGD balance
+  and account expiry.
 
 The CLI and Electron application use the same Auth0 session, presence, serial
 scheduler, and capability modules. The retired API-key scripts cannot claim
@@ -81,7 +82,7 @@ their runtime prerequisites without claiming a balance job:
 ```bash
 balance-agent doctor
 balance-agent doctor --capability sms-ai
-balance-agent doctor --capability unicom-browser
+balance-agent doctor --capability carrier-browser
 ```
 
 `run` starts independent concurrency-one loops. A browser job waiting for a slider
@@ -90,7 +91,7 @@ or image challenge does not block SMS AI work:
 ```bash
 balance-agent run
 balance-agent run --capability sms-ai
-balance-agent run --capability unicom-browser
+balance-agent run --capability carrier-browser
 ```
 
 Use `--once` for a deterministic diagnostic claim attempt. With `all`, each
@@ -99,7 +100,7 @@ capability may claim at most one job:
 ```bash
 balance-agent run --once
 balance-agent run --capability sms-ai --once
-balance-agent run --capability unicom-browser --once
+balance-agent run --capability carrier-browser --once
 ```
 
 `SIGINT` and `SIGTERM` stop both loops, release local browser resources, and send a
@@ -130,5 +131,5 @@ balance-agent credentials clear-ai-token
 
 Sign-out removes the local Auth0 refresh token. Removing the AI token disables
 only the `sms-ai` capability. To stop new Unicom browser work at the product level,
-disable profile `cn-unicom-browser-random-password-v1`; existing audit and balance
-records remain readable.
+disable the affected carrier browser profile; existing audit and balance records
+remain readable.

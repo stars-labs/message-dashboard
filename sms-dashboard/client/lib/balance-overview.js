@@ -157,6 +157,7 @@ export function buildBalanceRows(phones = [], checks = [], now = new Date()) {
           observedAt: normalizeUtcTimestamp(expiryTimestamp),
         } : null,
         latestQueryStatus: latestSignificantCheck?.status || null,
+        expiryExpected: latestSignificantCheck?.profile_outputs?.includes('account_expiry') === true,
       });
     }
     const health = healthResult.summaryStatus;
