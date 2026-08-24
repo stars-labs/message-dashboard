@@ -234,6 +234,17 @@ describe('classifyMessage — OTP safety guard', () => {
     expect(classifyMessage(msg, RULES).filter_status).toBe('clean');
   });
 
+  test('protects an M1 selfcare OTP from the M1 Limited sender rule', () => {
+    const msg = received({
+      content: 'OTP for login to selfcare portal is 159571',
+      phone_number: 'M1 Limited',
+    });
+    expect(classifyMessage(msg, RULES)).toEqual({
+      filter_status: 'clean',
+      filter_rule_id: null,
+    });
+  });
+
   test('a bare year is not a labelled code, so it does not rescue marketing', () => {
     const msg = received({ content: '优惠将于2026-08-31到期', phone_number: '10086' });
     expect(classifyMessage(msg, RULES).filter_status).toBe('filtered');

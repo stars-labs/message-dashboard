@@ -94,6 +94,23 @@ describe('reprocessVerificationPage', () => {
     expect(db.rows[0].filter_status).toBe(FILTER_STATUS.PENDING);
   });
 
+  test('restores a filtered M1 selfcare OTP for reclassification', async () => {
+    const db = fakeDb([{
+      id: 'm1-selfcare',
+      content: 'OTP for login to selfcare portal is 159571',
+      verification_code: null,
+      filter_status: FILTER_STATUS.FILTERED,
+      filter_rule_id: 32,
+    }]);
+
+    const result = await reprocessVerificationPage(db);
+
+    expect(result).toMatchObject({ changed: 1, added: 1, done: true });
+    expect(db.rows[0].verification_code).toBe('159571');
+    expect(db.rows[0].filter_status).toBe(FILTER_STATUS.PENDING);
+    expect(db.rows[0].filter_rule_id).toBeNull();
+  });
+
   test('returns a cursor for bounded, resumable pages', async () => {
     const db = fakeDb([
       { id: '1', content: 'nothing', verification_code: null },

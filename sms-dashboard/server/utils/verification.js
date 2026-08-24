@@ -24,6 +24,10 @@ export const VERIFICATION_CODE_PATTERNS = [
     pattern: new RegExp(`\\b(?:${EN_CODE_LABEL})\\b[^\\d\\n]{0,20}?(\\d{4,8})\\b`, 'i'),
   },
   {
+    reason: 'en_otp_login_before',
+    pattern: /\botp\s+for\s+login\b[^\d\n]{0,64}?(\d{4,8})\b/i,
+  },
+  {
     reason: 'en_generic_code_before',
     pattern: /\bcode\b[^\d\n]{0,20}?(\d{3}-\d{3})\b/i,
   },

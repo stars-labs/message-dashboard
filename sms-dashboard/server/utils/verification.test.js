@@ -44,6 +44,7 @@ describe('hasLabelledCode — English labels', () => {
     ['Telegram code: 54321'],
     ['Your security code is 111222'],
     ['Your authentication code is 456789'],
+    ['OTP for login to selfcare portal is 159571'],
     ["<#> Your WhatsApp code: 367-140 Don't share this code with others 4sgLq1p5sV6"],
     ["<#> Your WhatsApp code: 168-396 Don't share this code with others 4sgLq1p5sV6"],
   ])('detects %j', (content) => {
@@ -100,6 +101,10 @@ describe('extractVerificationCode', () => {
     expect(extractVerificationCode(
       "<#> Your WhatsApp code: 367-140 Don't share this code with others 4sgLq1p5sV6"
     )).toBe('367-140');
+  });
+
+  test('extracts the M1 selfcare login OTP', () => {
+    expect(extractVerificationCode('OTP for login to selfcare portal is 159571')).toBe('159571');
   });
 
   test('returns null for a bare order number', () => {
