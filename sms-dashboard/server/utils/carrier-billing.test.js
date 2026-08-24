@@ -12,12 +12,6 @@ function billMessage({ amount = '42.80', dueDate = '14 Sep 2026' } = {}) {
   return `<Singtel>Dear customer, your latest bill for Singtel a/c ${ACCOUNT_REFERENCE} is ready. The total amount is SGD$${amount} due on ${dueDate}. You can view and pay this bill via My Singtel app at www.singtel.com/viewbill .@`;
 }
 
-async function sha256(value) {
-  const bytes = new TextEncoder().encode(value);
-  const digest = await crypto.subtle.digest('SHA-256', bytes);
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
-}
-
 function d1(database) {
   return {
     prepare(sql) {
@@ -52,10 +46,11 @@ beforeEach(async () => {
       iccid TEXT PRIMARY KEY,
       service_type TEXT NOT NULL,
       country_code TEXT,
-      carrier TEXT
+      carrier TEXT,
+      sim_index INTEGER
     );
     CREATE VIEW device_view AS
-      SELECT iccid, service_type, country_code AS country, carrier FROM sims;
+      SELECT iccid, service_type, country_code AS country, carrier, sim_index FROM sims;
     CREATE TABLE messages (
       id TEXT PRIMARY KEY,
       phone_iccid TEXT NOT NULL,
@@ -65,22 +60,18 @@ beforeEach(async () => {
       type TEXT NOT NULL
     );
     INSERT INTO sims VALUES
-      ('notification-sim', 'postpaid', 'SG', 'Singtel'),
-      ('prepaid-sim', 'prepaid', 'SG', 'Singtel'),
-      ('wrong-carrier', 'postpaid', 'SG', 'StarHub');
+      ('notification-sim', 'postpaid', 'SG', 'Singtel', 79),
+      ('prepaid-sim', 'prepaid', 'SG', 'Singtel', 80),
+      ('wrong-carrier', 'postpaid', 'SG', 'StarHub', 81);
   `);
   const migration = await Bun.file(
     new URL('../../migrations/066_add_carrier_billing.sql', import.meta.url),
   ).text();
   database.exec(migration);
-  database.query(`
-    INSERT INTO carrier_billing_accounts (
-      id, country_code, carrier, currency, display_name,
-      notification_sim_iccid, account_ref_digest, account_ref_last4,
-      status, created_by
-    ) VALUES ('account-1', 'SG', 'Singtel', 'SGD', 'Singtel account',
-      'notification-sim', ?, '5678', 'active', 'auth0|admin')
-  `).run(await sha256(ACCOUNT_REFERENCE));
+  const streamMigration = await Bun.file(
+    new URL('../../migrations/069_unique_active_billing_stream_per_sim.sql', import.meta.url),
+  ).text();
+  database.exec(streamMigration);
   db = d1(database);
 });
 
@@ -114,19 +105,45 @@ function events() {
   `).all();
 }
 
+function accounts() {
+  return database.query(`
+    SELECT notification_sim_iccid, account_ref_last4, status, created_by
+    FROM carrier_billing_accounts
+  `).all();
+}
+
+function members() {
+  return database.query(`
+    SELECT sim_iccid, verification_source, verified_by
+    FROM carrier_billing_account_sims
+    WHERE removed_at IS NULL
+  `).all();
+}
+
 describe('carrier bill SMS processing', () => {
   test('creates one normalized bill and a detected event', async () => {
     const result = await processCarrierBillMessage(db, insertMessage());
 
     expect(result).toMatchObject({ outcome: 'detected', bill_id: expect.any(String) });
     expect(bills()).toEqual([{
-      billing_account_id: 'account-1',
+      billing_account_id: expect.any(String),
       source_message_id: 'message-1',
       amount_minor: 4280,
       currency: 'SGD',
       due_date: '2026-09-14',
       action_status: 'unpaid',
       version: 1,
+    }]);
+    expect(accounts()).toEqual([{
+      notification_sim_iccid: 'notification-sim',
+      account_ref_last4: '5678',
+      status: 'active',
+      created_by: 'system:sms',
+    }]);
+    expect(members()).toEqual([{
+      sim_iccid: 'notification-sim',
+      verification_source: 'contract_or_bill',
+      verified_by: 'system:sms',
     }]);
     expect(events()).toEqual([{ event_type: 'detected', source_message_id: 'message-1' }]);
   });

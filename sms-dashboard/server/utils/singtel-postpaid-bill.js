@@ -47,7 +47,8 @@ export async function parseSingtelPostpaidBillSms({
 }) {
   if (sender !== 'Singtel'
     || typeof content !== 'string'
-    || !/^[a-f\d]{64}$/i.test(expectedAccountRefDigest || '')) {
+    || (expectedAccountRefDigest != null
+      && !/^[a-f\d]{64}$/i.test(expectedAccountRefDigest))) {
     return null;
   }
 
@@ -59,7 +60,8 @@ export async function parseSingtelPostpaidBillSms({
   if (!dueDate) return null;
 
   const digest = await accountReferenceDigest(accountReference);
-  if (digest !== expectedAccountRefDigest.toLowerCase()) return null;
+  if (expectedAccountRefDigest != null
+    && digest !== expectedAccountRefDigest.toLowerCase()) return null;
 
   const amountMinor = (Number(majorText) * 100) + Number(minorText);
   if (!Number.isSafeInteger(amountMinor)) return null;

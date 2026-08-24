@@ -3,24 +3,65 @@ import { parseSingtelPostpaidBillSms } from './singtel-postpaid-bill.js';
 const RECONCILIATION_PAGE_SIZE = 100;
 const SINGTEL_BILL_PREFIX = '<Singtel>Dear customer, your latest bill for Singtel a/c ';
 
-async function eligibleAccounts(db, message) {
-  const query = await db.prepare(`
-    SELECT
-      a.id,
-      a.currency,
-      a.account_ref_digest
-    FROM carrier_billing_accounts a
-    INNER JOIN device_view d ON d.iccid = a.notification_sim_iccid
-    WHERE a.notification_sim_iccid = ?
-      AND a.status = 'active'
-      AND a.country_code = 'SG'
-      AND a.carrier = 'Singtel'
-      AND d.country = 'SG'
-      AND d.carrier = 'Singtel'
-      AND d.service_type = 'postpaid'
-    ORDER BY a.id
-  `).bind(message.phone_iccid).all();
-  return query.results ?? [];
+async function eligibleReceivingSim(db, message) {
+  return db.prepare(`
+    SELECT iccid, sim_index
+    FROM device_view
+    WHERE iccid = ?
+      AND country = 'SG'
+      AND carrier = 'Singtel'
+      AND service_type = 'postpaid'
+  `).bind(message.phone_iccid).first();
+}
+
+async function activeStream(db, simIccid) {
+  return db.prepare(`
+    SELECT id, currency, account_ref_digest
+    FROM carrier_billing_accounts
+    WHERE notification_sim_iccid = ?
+      AND status = 'active'
+      AND country_code = 'SG'
+      AND carrier = 'Singtel'
+    LIMIT 1
+  `).bind(simIccid).first();
+}
+
+async function ensureBillingStream(db, sim, parsed) {
+  const existing = await activeStream(db, sim.iccid);
+  if (existing) {
+    if (existing.account_ref_digest !== parsed.account_ref_digest) return null;
+    await db.prepare(`
+      INSERT OR IGNORE INTO carrier_billing_account_sims (
+        billing_account_id, sim_iccid, verification_source, verified_at, verified_by
+      ) VALUES (?, ?, 'contract_or_bill', CURRENT_TIMESTAMP, 'system:sms')
+    `).bind(existing.id, sim.iccid).run();
+    return existing;
+  }
+
+  const accountId = crypto.randomUUID();
+  const displayIndex = String(sim.sim_index ?? '').padStart(2, '0');
+  await db.prepare(`
+    INSERT OR IGNORE INTO carrier_billing_accounts (
+      id, country_code, carrier, currency, display_name,
+      notification_sim_iccid, account_ref_digest, account_ref_last4,
+      status, created_by
+    ) VALUES (?, 'SG', 'Singtel', 'SGD', ?, ?, ?, ?, 'active', 'system:sms')
+  `).bind(
+    accountId,
+    `S${displayIndex} Singtel postpaid`,
+    sim.iccid,
+    parsed.account_ref_digest,
+    parsed.account_ref_last4,
+  ).run();
+
+  const created = await activeStream(db, sim.iccid);
+  if (created?.account_ref_digest !== parsed.account_ref_digest) return null;
+  await db.prepare(`
+    INSERT OR IGNORE INTO carrier_billing_account_sims (
+      billing_account_id, sim_iccid, verification_source, verified_at, verified_by
+    ) VALUES (?, ?, 'contract_or_bill', CURRENT_TIMESTAMP, 'system:sms')
+  `).bind(created.id, sim.iccid).run();
+  return created;
 }
 
 async function alreadyProcessed(db, sourceMessageId) {
@@ -144,18 +185,18 @@ export async function processCarrierBillMessage(db, message) {
     return { outcome: 'ignored' };
   }
 
-  const accounts = await eligibleAccounts(db, message);
-  for (const account of accounts) {
-    const parsed = await parseSingtelPostpaidBillSms({
-      sender: message.phone_number,
-      content: message.content,
-      expectedAccountRefDigest: account.account_ref_digest,
-    });
-    if (!parsed || parsed.currency !== account.currency) continue;
-    return storeParsedBill(db, account, message, parsed);
-  }
+  const parsed = await parseSingtelPostpaidBillSms({
+    sender: message.phone_number,
+    content: message.content,
+  });
+  if (!parsed) return { outcome: 'ignored' };
 
-  return { outcome: 'ignored' };
+  const sim = await eligibleReceivingSim(db, message);
+  if (!sim) return { outcome: 'ignored' };
+
+  const stream = await ensureBillingStream(db, sim, parsed);
+  if (!stream || parsed.currency !== stream.currency) return { outcome: 'ignored' };
+  return storeParsedBill(db, stream, message, parsed);
 }
 
 export async function processCarrierBillMessages(db, messages, {
@@ -185,13 +226,8 @@ export async function reconcileCarrierBillMessages(db, {
       m.timestamp,
       m.type
     FROM messages m
-    INNER JOIN carrier_billing_accounts a
-      ON a.notification_sim_iccid = m.phone_iccid
-      AND a.status = 'active'
-      AND a.country_code = 'SG'
-      AND a.carrier = 'Singtel'
     INNER JOIN device_view d
-      ON d.iccid = a.notification_sim_iccid
+      ON d.iccid = m.phone_iccid
       AND d.country = 'SG'
       AND d.carrier = 'Singtel'
       AND d.service_type = 'postpaid'

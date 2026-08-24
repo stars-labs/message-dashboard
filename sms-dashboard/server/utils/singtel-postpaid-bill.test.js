@@ -59,6 +59,19 @@ describe('Singtel postpaid bill SMS parser', () => {
     });
   });
 
+  test('discovers the account identity from an authentic bill without operator configuration', async () => {
+    const accountDigest = await sha256(ACCOUNT_REFERENCE);
+
+    await expect(parseSingtelPostpaidBillSms({
+      sender: 'Singtel',
+      content: billMessage(),
+    })).resolves.toMatchObject({
+      account_ref_digest: accountDigest,
+      account_ref_last4: '5678',
+      amount_minor: 4280,
+    });
+  });
+
   test.each([
     ['wrong sender', billMessage(), { sender: 'Singtel Biz' }],
     ['ambiguous amount', `${billMessage()} Total: SGD$1.00`, {}],
