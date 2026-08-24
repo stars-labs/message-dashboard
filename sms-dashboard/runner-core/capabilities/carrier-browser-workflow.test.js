@@ -6,6 +6,7 @@ import {
   isUnicomErrorPage,
   validateCarrierBrowserJob,
   validateUnicomBrowserJob,
+  waitForFirstVisible,
 } from './carrier-browser-workflow.js';
 
 function validJob() {
@@ -54,6 +55,29 @@ describe('carrier browser workflow', () => {
     expect(() => validateCarrierBrowserJob(job)).not.toThrow();
     job.skill.balance_url = 'https://mcardaccount.m1.com.sg.evil.example/balance';
     expect(() => validateCarrierBrowserJob(job)).toThrow('approved carrier origin');
+  });
+
+  test('waits for React-rendered M1 controls instead of checking only once', async () => {
+    let attempts = 0;
+    const candidate = { isVisible: async () => true };
+    const locator = {
+      count: async () => {
+        attempts += 1;
+        return attempts >= 3 ? 1 : 0;
+      },
+      nth: () => candidate,
+    };
+    const waits = [];
+
+    const found = await waitForFirstVisible(
+      [locator],
+      { waitForTimeout: async (milliseconds) => waits.push(milliseconds) },
+      { timeoutMs: 1_000, pollMs: 0 },
+    );
+
+    expect(found).toBe(candidate);
+    expect(attempts).toBe(3);
+    expect(waits).toEqual([0, 0]);
   });
 
   test('cancels before opening a browser when the agent is stopping', async () => {

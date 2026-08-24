@@ -66,6 +66,32 @@ export function isUnicomErrorPage(url) {
   return /[#/]errorpage/i.test(String(url || ''));
 }
 
+async function firstVisible(candidates) {
+  for (const locator of candidates) {
+    const count = await locator.count().catch(() => 0);
+    for (let index = 0; index < count; index += 1) {
+      const candidate = locator.nth(index);
+      if (await candidate.isVisible().catch(() => false)) return candidate;
+    }
+  }
+  return null;
+}
+
+export async function waitForFirstVisible(
+  candidates,
+  page,
+  { timeoutMs = 30_000, pollMs = 250 } = {},
+) {
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    const candidate = await firstVisible(candidates);
+    if (candidate) return candidate;
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return null;
+    await page.waitForTimeout(Math.min(pollMs, remaining));
+  }
+}
+
 export function createCarrierBrowserJobProcessor({
   controlClient,
   presence,
@@ -96,17 +122,6 @@ async function postJob(job, action, body = {}) {
     throw new Error(`Worker rejected ${action} (${response.status}): ${(await response.text()).slice(0, 300)}`);
   }
   return response.json();
-}
-
-async function firstVisible(candidates) {
-  for (const locator of candidates) {
-    const count = await locator.count().catch(() => 0);
-    for (let index = 0; index < count; index += 1) {
-      const candidate = locator.nth(index);
-      if (await candidate.isVisible().catch(() => false)) return candidate;
-    }
-  }
-  return null;
 }
 
 async function findRandomPasswordTab(page) {
@@ -253,19 +268,19 @@ async function waitForOtp(job, page) {
 
 async function loginM1(job, page) {
   await page.goto(job.login_url, { waitUntil: 'domcontentloaded', timeout: 60_000 });
-  const phoneInput = await firstVisible([
+  const phoneInput = await waitForFirstVisible([
     page.locator('#msisdnContainer .typeContactNum'),
     page.locator('input.typeContactNum'),
-  ]);
+  ], page);
   if (!phoneInput) throw new Error('Could not find the M1 prepaid phone input');
   const localPhone = String(job.sim_number || '').replace(/\D/g, '').replace(/^65(?=\d{8}$)/, '');
   if (!/^\d{8}$/.test(localPhone)) throw new Error('M1 prepaid account is not a valid Singapore number');
   await phoneInput.fill(localPhone);
 
-  const requestButton = await firstVisible([
+  const requestButton = await waitForFirstVisible([
     page.locator('#msisdnContainer .loginPageLoginButton'),
     page.locator('button.loginPageLoginButton'),
-  ]);
+  ], page);
   if (!requestButton) throw new Error('Could not find the M1 OTP request button');
   if (!job.otp_requested_at) {
     await postJob(job, 'otp-requested');
@@ -305,15 +320,15 @@ async function loginM1(job, page) {
 async function queryM1Balance(job, page) {
   await heartbeat(job, 'querying');
   await page.goto(job.skill.balance_url, { waitUntil: 'domcontentloaded', timeout: 60_000 });
-  const account = await firstVisible([page.locator('.numberTxt')]);
-  const balance = await firstVisible([
+  const account = await waitForFirstVisible([page.locator('.numberTxt')], page, { timeoutMs: 60_000 });
+  const balance = await waitForFirstVisible([
     page.locator('.balanceForBox .balanceAmt.maBalanceDiv'),
     page.locator('.balanceAmt.maBalanceDiv'),
-  ]);
-  const validity = await firstVisible([
+  ], page, { timeoutMs: 60_000 });
+  const validity = await waitForFirstVisible([
     page.locator('.balanceForBox .brand-color'),
     page.getByText(/Valid\s+Till\s+\d{1,2}\s+[A-Za-z]{3}\s+\d{4}/i),
-  ]);
+  ], page, { timeoutMs: 60_000 });
   if (!account || !balance || !validity) {
     throw new Error('M1 balance page is missing account, balance, or validity fields');
   }
