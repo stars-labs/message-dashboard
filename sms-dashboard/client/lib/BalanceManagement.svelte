@@ -278,6 +278,24 @@
     loadBills();
   }
 
+  async function openBillFromOverview(row) {
+    const account = billingAccountBySim.get(row.phone.iccid);
+    if (!account) return;
+    try {
+      const result = await api.get(`/api/carrier-bills?account_id=${encodeURIComponent(account.id)}`);
+      const accountBills = result.bills || [];
+      const bill = accountBills.find((candidate) => (
+        ['unpaid', 'payment_planned', 'needs_review'].includes(candidate.action_status)
+      )) || accountBills.slice().sort((left, right) => (
+        right.due_date.localeCompare(left.due_date)
+      ))[0];
+      if (bill) await openBill(bill);
+      else openBillsTab();
+    } catch (error) {
+      notice = { type: 'error', message: error.message || '账单加载失败' };
+    }
+  }
+
   async function openBill(bill) {
     billDetailLoading = true;
     try {
@@ -866,7 +884,7 @@
                   <td class="px-4 py-3 text-right">
                     <div class="flex items-center justify-end gap-3">
                       {#if billingAccountBySim.has(row.phone.iccid)}
-                        <button type="button" onclick={openBillsTab} class="text-xs font-semibold text-action-text hover:underline">查看账单</button>
+                        <button type="button" onclick={() => openBillFromOverview(row)} class="text-xs font-semibold text-action-text hover:underline">查看账单</button>
                       {:else if row.latestCheck || row.balanceCheck}
                         <button type="button" onclick={() => openRow(row)} class="text-xs font-medium text-stone-500 hover:text-stone-800">查看</button>
                       {/if}
@@ -949,7 +967,7 @@
                   {/if}
                 </div>
                 {#if billingAccountBySim.has(row.phone.iccid)}
-                  <button type="button" onclick={openBillsTab}
+                  <button type="button" onclick={() => openBillFromOverview(row)}
                     class="h-8 px-2.5 shrink-0 text-xs font-semibold text-action-text bg-orange-50 rounded-lg active:bg-orange-100">
                     查看账单
                   </button>

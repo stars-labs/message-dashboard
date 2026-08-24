@@ -326,7 +326,7 @@ describe('balance management', () => {
     }
   });
 
-  test('opens the bill queue from a postpaid overview row', async () => {
+  test('opens the current bill detail from a postpaid overview row', async () => {
     const originalFetch = globalThis.fetch;
     const postpaid = { ...phone, iccid: 'postpaid-sim', sim_index: 79, service_type: 'postpaid' };
     globalThis.fetch = async (url) => {
@@ -341,6 +341,26 @@ describe('balance management', () => {
             notification_sim: { iccid: postpaid.iccid, sim_index: 79 },
             linked_sims: [{ iccid: postpaid.iccid, sim_index: 79 }],
           }],
+        });
+      }
+      if (value.includes('/api/carrier-bills/bill-1')) {
+        return Response.json({
+          success: true,
+          bill: {
+            id: 'bill-1',
+            carrier: 'Singtel',
+            amount_minor: 7202,
+            currency: 'SGD',
+            due_date: '2026-09-07',
+            urgency: 'due_soon',
+            days_remaining: 7,
+            action_status: 'unpaid',
+            version: 1,
+            notification_sim: { iccid: postpaid.iccid, sim_index: 79 },
+            linked_sims: [{ iccid: postpaid.iccid, sim_index: 79 }],
+            source_message: { sender: 'Singtel', content: 'current bill source' },
+            events: [],
+          },
         });
       }
       if (value.includes('/api/carrier-bills')) {
@@ -368,7 +388,9 @@ describe('balance management', () => {
 
       await view.findAllByText('待付款 1 笔');
       await fireEvent.click((await view.findAllByRole('button', { name: '查看账单' }))[0]);
-      await waitFor(() => expect(view.getAllByText('SGD 72.02').length).toBeGreaterThan(0));
+      await waitFor(() => expect(view.getByText('账单短信证据')).toBeTruthy());
+      expect(view.getByText('current bill source')).toBeTruthy();
+      expect(view.getAllByText('SGD 72.02').length).toBeGreaterThan(0);
     } finally {
       globalThis.fetch = originalFetch;
     }
