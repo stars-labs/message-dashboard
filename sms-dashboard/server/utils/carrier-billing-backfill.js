@@ -1,7 +1,7 @@
 import { parseSingtelPostpaidBillSms } from './singtel-postpaid-bill.js';
 
 const BILL_PREFIX = '<Singtel>Dear customer, your latest bill for Singtel a/c ';
-const BILL_FRAGMENT_SUFFIX = 'ill via My Singtel app at www.singtel.com/viewbill .@';
+const BILL_FRAGMENT_SUFFIX = 'ill via My Singtel app at www.singtel.com/viewbill .';
 const MAX_FRAGMENT_GAP_MS = 5 * 60 * 1000;
 
 function bytesToHex(bytes) {

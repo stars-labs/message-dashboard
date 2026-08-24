@@ -15,7 +15,7 @@ const MONTHS = new Map([
   ['Dec', 12],
 ]);
 
-const BILL_PATTERN = /^<Singtel>Dear customer, your latest bill for Singtel a\/c (\d{8}) is ready\. The total amount is SGD\$(\d{2,3})\.(\d{2}) due on (\d{2}) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (20\d{2})\. You can view and pay this bill via My Singtel app at www\.singtel\.com\/viewbill \.@$/;
+const BILL_PATTERN = /^<Singtel>Dear customer, your latest bill for Singtel a\/c (\d{8}) is ready\. The total amount is SGD\$(\d{2,3})\.(\d{2}) due on (\d{2}) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (20\d{2})\. You can view and pay this bill via My Singtel app at www\.singtel\.com\/viewbill \.@?$/;
 
 function bytesToHex(bytes) {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');

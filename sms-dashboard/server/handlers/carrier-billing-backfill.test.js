@@ -119,7 +119,7 @@ beforeEach(async () => {
       insert.run(`message-${index + 1}-part-1`, content.slice(0, splitAt), timestamp);
       insert.run(
         `message-${index + 1}-part-2`,
-        content.slice(splitAt),
+        content.slice(splitAt, -1),
         timestamp.replace('00Z', '30Z'),
       );
     } else {

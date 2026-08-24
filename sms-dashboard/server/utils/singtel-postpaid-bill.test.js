@@ -59,6 +59,13 @@ describe('Singtel postpaid bill SMS parser', () => {
     });
   });
 
+  test('parses a reassembled historical bill without the trailing fill character', async () => {
+    await expect(parse(billMessage().slice(0, -1))).resolves.toMatchObject({
+      amount_minor: 4280,
+      due_date: '2026-01-14',
+    });
+  });
+
   test('discovers the account identity from an authentic bill without operator configuration', async () => {
     const accountDigest = await sha256(ACCOUNT_REFERENCE);
 
