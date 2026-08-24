@@ -24,6 +24,7 @@
     balanceChecks = [],
     onOpenBalance = null,
     canQueryBalances = false,
+    canWriteBills = false,
     onQueriesChanged = null,
   } = $props();
 
@@ -46,6 +47,14 @@
   let notice = $state(null);
   let runnerStatus = $state(null);
   let runnerStatusLoading = $state(true);
+  let billAccounts = $state([]);
+  let bills = $state([]);
+  let billsLoaded = $state(false);
+  let billsLoading = $state(false);
+  let billError = $state(null);
+  let selectedBill = $state(null);
+  let billDetailLoading = $state(false);
+  let billActionBusy = $state(false);
 
   let rows = $derived(buildBalanceRows(phoneNumbers, balanceChecks));
   let carrierOptions = $derived.by(() => buildCarrierOptions([
@@ -147,6 +156,13 @@
       .filter(Boolean)
       .sort((a, b) => new Date(normalizeUtcTimestamp(b)) - new Date(normalizeUtcTimestamp(a)))[0] || null
   );
+  let billingAccountBySim = $derived.by(() => {
+    const map = new Map();
+    for (const account of billAccounts) {
+      for (const sim of account.linked_sims || []) map.set(sim.iccid, account);
+    }
+    return map;
+  });
 
   const overviewColumns = [
     { key: 'sim', label: 'SIM' },
@@ -211,9 +227,112 @@
 
   onMount(() => {
     loadRunnerStatus();
+    if (phoneNumbers.some((phone) => phone.service_type === 'postpaid')) loadBillingAccounts();
     const interval = setInterval(loadRunnerStatus, 30_000);
     return () => clearInterval(interval);
   });
+
+  async function loadBillingAccounts() {
+    try {
+      const result = await api.get('/api/carrier-billing/accounts');
+      billAccounts = result.accounts || [];
+    } catch {
+      billAccounts = [];
+    }
+  }
+
+  async function loadBills(force = false) {
+    if (billsLoading || (billsLoaded && !force)) return;
+    billsLoading = true;
+    billError = null;
+    try {
+      const [billResult, accountResult] = await Promise.all([
+        api.get('/api/carrier-bills'),
+        api.get('/api/carrier-billing/accounts'),
+      ]);
+      bills = billResult.bills || [];
+      billAccounts = accountResult.accounts || [];
+      billsLoaded = true;
+    } catch (error) {
+      billError = error.message || '账单加载失败';
+    } finally {
+      billsLoading = false;
+    }
+  }
+
+  function openBillsTab() {
+    activeTab = 'bills';
+    loadBills();
+  }
+
+  async function openBill(bill) {
+    billDetailLoading = true;
+    try {
+      const result = await api.get(`/api/carrier-bills/${encodeURIComponent(bill.id)}`);
+      selectedBill = result.bill;
+    } catch (error) {
+      notice = { type: 'error', message: error.message || '账单详情加载失败' };
+    } finally {
+      billDetailLoading = false;
+    }
+  }
+
+  async function recordBillAction(action, label) {
+    if (!selectedBill || billActionBusy || !canWriteBills) return;
+    if (!window.confirm(`确认${label}？此操作会写入账单审计记录。`)) return;
+    billActionBusy = true;
+    try {
+      const result = await api.post(
+        `/api/carrier-bills/${encodeURIComponent(selectedBill.id)}/${action}`,
+        { expected_version: selectedBill.version },
+        { headers: { 'Idempotency-Key': crypto.randomUUID() } },
+      );
+      selectedBill = result.bill;
+      bills = bills.map((bill) => bill.id === result.bill.id ? result.bill : bill);
+      notice = { type: 'success', message: `账单已${label}` };
+    } catch (error) {
+      notice = { type: 'error', message: error.message || '账单状态更新失败' };
+    } finally {
+      billActionBusy = false;
+    }
+  }
+
+  function formatBillAmount(bill) {
+    return `${bill.currency} ${(Number(bill.amount_minor || 0) / 100).toFixed(2)}`;
+  }
+
+  function billUrgencyMeta(bill) {
+    return ({
+      needs_review: { label: '需要复核', className: 'bg-red-50 text-red-700 border-red-200' },
+      overdue: { label: `逾期 ${Math.abs(bill.days_remaining)} 天`, className: 'bg-red-50 text-red-700 border-red-200' },
+      due_soon: { label: bill.days_remaining === 0 ? '今天到期' : `${bill.days_remaining} 天后到期`, className: 'bg-amber-50 text-amber-700 border-amber-200' },
+      open: { label: `${bill.days_remaining} 天后到期`, className: 'bg-stone-50 text-stone-600 border-stone-200' },
+      paid: { label: '已付款', className: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+      waived: { label: '已豁免', className: 'bg-stone-50 text-stone-500 border-stone-200' },
+    })[bill.urgency] || { label: bill.action_status || '待处理', className: 'bg-stone-50 text-stone-600 border-stone-200' };
+  }
+
+  function billActionLabel(status) {
+    return ({
+      unpaid: '待付款',
+      payment_planned: '已计划付款',
+      paid: '已付款',
+      waived: '已豁免',
+      needs_review: '需要复核',
+    })[status] || status;
+  }
+
+  function billEventLabel(type) {
+    return ({
+      detected: '检测到账单',
+      duplicate_detected: '检测到重复通知',
+      parse_conflict: '金额冲突',
+      payment_planned: '计划付款',
+      paid: '标记已付款',
+      waived: '标记豁免',
+      reopened: '重新打开',
+    })[type] || type;
+  }
 
   function compareValues(left, right) {
     const leftMissing = left == null || left === '' || Number.isNaN(left);
@@ -494,6 +613,13 @@
             >余额概览</button>
             <button
               type="button"
+              onclick={openBillsTab}
+              class="flex-1 sm:flex-none px-3 py-1.5 rounded-md transition-all {activeTab === 'bills'
+                ? 'bg-white shadow-sm font-semibold text-stone-800'
+                : 'text-stone-500'}"
+            >后付费账单</button>
+            <button
+              type="button"
               onclick={() => { activeTab = 'history'; }}
               class="flex-1 sm:flex-none px-3 py-1.5 rounded-md transition-all {activeTab === 'history'
                 ? 'bg-white shadow-sm font-semibold text-stone-800'
@@ -514,6 +640,7 @@
       </div>
     </header>
 
+    {#if activeTab !== 'bills'}
     <section class="px-4 py-2.5 lg:px-6 border-b border-stone-100 bg-stone-50/60 flex flex-wrap items-center gap-x-4 gap-y-2 lg:flex-none" aria-label="余额查询助手状态">
       <span class="text-xs font-semibold text-stone-700">查询助手</span>
       {#each Object.entries(capabilityLabels) as [name, label]}
@@ -527,6 +654,7 @@
       {/each}
       <span class="text-[11px] text-stone-400 sm:ml-auto">浏览器任务逐张处理</span>
     </section>
+    {/if}
 
     {#if notice}
       <div class="px-4 lg:px-5 py-2.5 border-b text-sm flex items-center justify-between gap-3 lg:flex-none
@@ -679,7 +807,12 @@
                     {#if row.__isSecondary}
                       <span class="text-xs font-normal text-stone-400">余额随主卡</span>
                     {:else if row.phone.service_type === 'postpaid'}
-                      <span class="text-xs font-normal text-stone-400">不按余额管理</span>
+                      <span class="flex flex-col gap-0.5 text-xs font-normal">
+                        <span class="text-stone-400">不按余额管理</span>
+                        <span class={billingAccountBySim.has(row.phone.iccid) ? 'text-emerald-700' : 'text-amber-700'}>
+                          {billingAccountBySim.has(row.phone.iccid) ? '由账单账户管理' : '未关联账单账户'}
+                        </span>
+                      </span>
                     {:else}
                       {formatBalanceMetric(row.balanceMetric)}
                     {/if}
@@ -779,7 +912,12 @@
                     </span>
                   {:else}
                     {#if row.phone.service_type === 'postpaid'}
-                      <strong class="text-sm leading-tight font-medium text-stone-400">不按余额管理</strong>
+                      <span class="flex flex-col">
+                        <strong class="text-sm leading-tight font-medium text-stone-400">不按余额管理</strong>
+                        <small class={billingAccountBySim.has(row.phone.iccid) ? 'text-emerald-700' : 'text-amber-700'}>
+                          {billingAccountBySim.has(row.phone.iccid) ? '由账单账户管理' : '未关联账单账户'}
+                        </small>
+                      </span>
                     {:else}
                       <strong class="text-base leading-tight font-semibold tabular-nums truncate {['low_balance', 'zero_or_negative_balance'].includes(row.health) ? 'text-red-700' : 'text-stone-900'}">{formatBalanceMetric(row.balanceMetric)}</strong>
                     {/if}
@@ -803,6 +941,91 @@
                 {/if}
               </div>
             </div>
+          {/each}
+        </div>
+      {/if}
+    {:else if activeTab === 'bills'}
+      <div class="px-4 py-3 lg:px-5 border-b border-stone-100 flex items-center gap-3 lg:flex-none">
+        <div>
+          <p class="text-sm font-semibold text-stone-800">账户级付款队列</p>
+          <p class="text-[11px] text-stone-400">账单按账户归集，不会重复到每张 SIM</p>
+        </div>
+        <button type="button" onclick={() => loadBills(true)} disabled={billsLoading}
+          class="ml-auto px-3 py-1.5 text-xs font-medium text-stone-600 bg-stone-100 hover:bg-stone-200 rounded-lg disabled:opacity-50">
+          {billsLoading ? '刷新中…' : '刷新'}
+        </button>
+      </div>
+      {#if billsLoading && !billsLoaded}
+        <div class="py-16 text-center text-sm text-stone-400">正在加载后付费账单…</div>
+      {:else if billError}
+        <div class="py-16 text-center">
+          <p class="text-sm text-red-600">{billError}</p>
+          <button type="button" onclick={() => loadBills(true)} class="mt-2 text-xs text-action-text hover:underline">重试</button>
+        </div>
+      {:else if bills.length === 0}
+        <div class="py-16 px-6 text-center">
+          <p class="text-sm font-medium text-stone-600">目前没有后付费账单</p>
+          <p class="mt-1 text-xs text-stone-400">关联账单账户后，系统会从运营商账单短信生成待办。</p>
+        </div>
+      {:else}
+        <div class="hidden lg:block lg:flex-1 lg:min-h-0 lg:overflow-auto" data-desktop-bill-scroll>
+          <table class="w-full text-sm">
+            <thead class="sticky top-0 z-10 bg-stone-50">
+              <tr class="border-b border-stone-200 text-[11px] font-semibold text-stone-400 tracking-widest uppercase">
+                <th class="px-4 py-2.5 text-left">账单账户</th>
+                <th class="px-4 py-2.5 text-left">运营商</th>
+                <th class="px-4 py-2.5 text-left">金额</th>
+                <th class="px-4 py-2.5 text-left">到期日</th>
+                <th class="px-4 py-2.5 text-left">处理状态</th>
+                <th class="px-4 py-2.5 text-left">关联 SIM</th>
+                <th class="px-4 py-2.5 text-left">通知 SIM</th>
+                <th class="px-4 py-2.5 text-right">操作</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-stone-50">
+              {#each bills as bill}
+                {@const urgency = billUrgencyMeta(bill)}
+                <tr class="hover:bg-stone-50">
+                  <td class="px-4 py-3">
+                    <strong class="block text-stone-800">{bill.account_ref_masked}</strong>
+                    <span class="text-[11px] text-stone-400">{bill.account_display_name}</span>
+                  </td>
+                  <td class="px-4 py-3 text-stone-600">{bill.carrier}</td>
+                  <td class="px-4 py-3 font-semibold tabular-nums text-stone-900">{formatBillAmount(bill)}</td>
+                  <td class="px-4 py-3">
+                    <span class="block font-mono text-xs text-stone-600">{bill.due_date}</span>
+                    <span class="mt-0.5 inline-flex px-2 py-0.5 rounded-md border text-[10px] font-medium {urgency.className}">{urgency.label}</span>
+                  </td>
+                  <td class="px-4 py-3 text-xs text-stone-600">{billActionLabel(bill.action_status)}</td>
+                  <td class="px-4 py-3 text-xs text-stone-600">{bill.linked_sim_count} 张 SIM</td>
+                  <td class="px-4 py-3 font-mono text-xs text-stone-600">{formatCardNumber(bill.notification_sim?.sim_index)}</td>
+                  <td class="px-4 py-3 text-right">
+                    <button type="button" aria-label="查看账单" onclick={() => openBill(bill)} disabled={billDetailLoading}
+                      class="text-xs font-medium text-action-text hover:underline disabled:text-stone-300">查看</button>
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+        <div class="lg:hidden divide-y divide-stone-100" data-mobile-bill-list>
+          {#each bills as bill}
+            {@const urgency = billUrgencyMeta(bill)}
+            <button type="button" aria-label="查看账单" onclick={() => openBill(bill)}
+              class="w-full px-4 py-3 text-left active:bg-stone-50">
+              <span class="flex items-start gap-3">
+                <span class="min-w-0 flex-1">
+                  <strong class="block text-sm text-stone-900">{bill.account_ref_masked}</strong>
+                  <span class="mt-0.5 block text-xs text-stone-400 truncate">{bill.carrier} · {bill.linked_sim_count} 张 SIM</span>
+                </span>
+                <strong class="text-sm tabular-nums text-stone-900">{formatBillAmount(bill)}</strong>
+              </span>
+              <span class="mt-2 flex items-center gap-2">
+                <span class="font-mono text-xs text-stone-500">{bill.due_date}</span>
+                <span class="inline-flex px-2 py-0.5 rounded-md border text-[10px] font-medium {urgency.className}">{urgency.label}</span>
+                <span class="ml-auto text-[10px] text-stone-400">通知 {formatCardNumber(bill.notification_sim?.sim_index)}</span>
+              </span>
+            </button>
           {/each}
         </div>
       {/if}
@@ -881,6 +1104,73 @@
     {/if}
   </div>
 </div>
+
+{#if selectedBill}
+  {@const selectedUrgency = billUrgencyMeta(selectedBill)}
+  <div class="fixed inset-0 z-50 bg-stone-900/35 flex items-end sm:items-center justify-center sm:p-4">
+    <section class="w-full sm:max-w-[640px] max-h-[92vh] bg-white border border-stone-200 rounded-t-xl sm:rounded-xl shadow-modal overflow-hidden flex flex-col" aria-label="后付费账单详情">
+      <header class="px-5 py-4 border-b border-stone-100 flex items-start justify-between gap-4">
+        <div>
+          <h3 class="font-semibold text-stone-900">{selectedBill.account_ref_masked}</h3>
+          <p class="mt-0.5 text-xs text-stone-400">{selectedBill.carrier} · {selectedBill.account_display_name}</p>
+        </div>
+        <button type="button" onclick={() => { selectedBill = null; }} aria-label="关闭账单详情" class="w-8 h-8 text-stone-400 hover:bg-stone-100 rounded-lg">&times;</button>
+      </header>
+      <div class="overflow-y-auto">
+        <div class="grid grid-cols-2 sm:grid-cols-4 border-b border-stone-100">
+          <div class="px-4 py-3 border-r border-stone-100"><p class="text-[11px] text-stone-400">金额</p><strong class="block mt-1 text-stone-900 tabular-nums">{formatBillAmount(selectedBill)}</strong></div>
+          <div class="px-4 py-3 border-r border-stone-100"><p class="text-[11px] text-stone-400">到期日</p><strong class="block mt-1 font-mono text-sm text-stone-800">{selectedBill.due_date}</strong></div>
+          <div class="px-4 py-3 border-r border-stone-100"><p class="text-[11px] text-stone-400">紧急程度</p><span class="mt-1 inline-flex px-2 py-0.5 rounded-md border text-[10px] font-medium {selectedUrgency.className}">{selectedUrgency.label}</span></div>
+          <div class="px-4 py-3"><p class="text-[11px] text-stone-400">处理状态</p><strong class="block mt-1 text-sm text-stone-800">{billActionLabel(selectedBill.action_status)}</strong></div>
+        </div>
+        <section class="px-5 py-4 border-b border-stone-100" aria-label="关联 SIM">
+          <h4 class="text-xs font-semibold text-stone-700">关联 SIM</h4>
+          <div class="mt-2 flex flex-wrap gap-2">
+            {#each selectedBill.linked_sims || [] as sim}
+              <span class="inline-flex px-2 py-1 rounded-md bg-stone-100 text-xs font-mono text-stone-600">{formatCardNumber(sim.sim_index)} · {sim.number || sim.iccid}</span>
+            {/each}
+          </div>
+        </section>
+        <section class="px-5 py-4 border-b border-stone-100" aria-label="账单短信证据">
+          <h4 class="text-xs font-semibold text-stone-700">账单短信证据</h4>
+          {#if selectedBill.source_message}
+            <p class="mt-2 text-[11px] text-stone-400">来自 {selectedBill.source_message.sender || '运营商'}</p>
+            <blockquote class="mt-2 p-3 bg-stone-50 border border-stone-100 rounded-lg text-sm leading-6 text-stone-600 whitespace-pre-wrap break-words">{selectedBill.source_message.content}</blockquote>
+          {:else}
+            <p class="mt-2 text-sm text-stone-400">原始短信已按保留策略清理，规范化账单和审计记录仍保留。</p>
+          {/if}
+        </section>
+        <section class="px-5 py-4" aria-label="账单审计记录">
+          <h4 class="text-xs font-semibold text-stone-700">审计记录</h4>
+          <ol class="mt-2 space-y-2">
+            {#each selectedBill.events || [] as event}
+              <li class="flex items-start gap-3 text-xs">
+                <span class="mt-1.5 w-1.5 h-1.5 rounded-full bg-stone-300 shrink-0"></span>
+                <span class="flex-1 text-stone-600">{billEventLabel(event.event_type)}</span>
+                <span class="font-mono text-[10px] text-stone-400">{formatTime(event.created_at, true)}</span>
+              </li>
+            {/each}
+          </ol>
+        </section>
+      </div>
+      {#if canWriteBills}
+        <footer class="px-5 py-4 border-t border-stone-100 flex flex-wrap justify-end gap-2">
+          {#if !['paid', 'waived'].includes(selectedBill.action_status)}
+            <button type="button" onclick={() => recordBillAction('payment-planned', '计划付款')} disabled={billActionBusy}
+              class="px-3 py-2 text-sm text-stone-600 bg-stone-100 hover:bg-stone-200 rounded-lg disabled:opacity-50">计划付款</button>
+            <button type="button" onclick={() => recordBillAction('waive', '豁免')} disabled={billActionBusy}
+              class="px-3 py-2 text-sm text-stone-600 bg-stone-100 hover:bg-stone-200 rounded-lg disabled:opacity-50">标记豁免</button>
+            <button type="button" onclick={() => recordBillAction('mark-paid', '标记为已付款')} disabled={billActionBusy}
+              class="px-3 py-2 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg disabled:opacity-50">标记已付款</button>
+          {:else}
+            <button type="button" onclick={() => recordBillAction('reopen', '重新打开')} disabled={billActionBusy}
+              class="px-3 py-2 text-sm font-medium text-white bg-orange-500 hover:bg-orange-600 rounded-lg disabled:opacity-50">重新打开</button>
+          {/if}
+        </footer>
+      {/if}
+    </section>
+  </div>
+{/if}
 
 {#if singlePreview}
   {@const preflight = singlePreview.preflight}

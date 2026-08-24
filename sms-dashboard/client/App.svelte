@@ -1091,6 +1091,7 @@
             {phoneNumbers}
             {balanceChecks}
             canQueryBalances={can('balances.query')}
+            canWriteBills={can('bills.write')}
             onQueriesChanged={() => loadMessagesForPhone(selectedPhoneIccid)}
             onOpenBalance={(check) => balanceDetailCheck = check}
           />

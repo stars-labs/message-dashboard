@@ -44,6 +44,149 @@ describe('balance management', () => {
     expect(scrollRegion.classList).toContain('lg:flex-1', 'lg:min-h-0', 'lg:overflow-auto');
   });
 
+  test('shows the account-level postpaid bill queue on desktop and mobile', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (url) => {
+      const value = String(url);
+      if (value.includes('/api/balance-runners')) return Response.json({ success: true, capabilities: {} });
+      if (value.includes('/api/carrier-billing/accounts')) {
+        return Response.json({ success: true, accounts: [] });
+      }
+      if (value.includes('/api/carrier-bills')) {
+        return Response.json({
+          success: true,
+          today: '2026-09-10',
+          bills: [{
+            id: 'bill-1',
+            billing_account_id: 'account-1',
+            account_display_name: 'Singtel corporate',
+            account_ref_masked: '•••• 5678',
+            carrier: 'Singtel',
+            amount_minor: 4280,
+            currency: 'SGD',
+            due_date: '2026-09-14',
+            urgency: 'due_soon',
+            days_remaining: 4,
+            action_status: 'unpaid',
+            linked_sim_count: 18,
+            notification_sim: { iccid: 'notification-sim', sim_index: 79 },
+            version: 1,
+          }],
+        });
+      }
+      throw new Error(`Unexpected request: ${value}`);
+    };
+    try {
+      const view = render(BalanceManagement, {
+        props: { phoneNumbers: [phone], balanceChecks: [check] },
+      });
+      await fireEvent.click(view.getByRole('button', { name: '后付费账单' }));
+      await waitFor(() => expect(view.getAllByText('•••• 5678').length).toBeGreaterThan(0));
+
+      expect(view.getAllByText('SGD 42.80').length).toBeGreaterThan(0);
+      expect(view.getAllByText('4 天后到期').length).toBeGreaterThan(0);
+      expect(view.getAllByText('18 张 SIM').length).toBeGreaterThan(0);
+      expect(view.container.querySelector('[data-desktop-bill-scroll]')).toBeTruthy();
+      expect(view.container.querySelector('[data-mobile-bill-list]')).toBeTruthy();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('shows retained bill evidence and admin actions but keeps viewers read-only', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (url) => {
+      const value = String(url);
+      if (value.includes('/api/balance-runners')) return Response.json({ success: true, capabilities: {} });
+      if (value.includes('/api/carrier-billing/accounts')) return Response.json({ success: true, accounts: [] });
+      if (value.endsWith('/api/carrier-bills/bill-1')) {
+        return Response.json({
+          success: true,
+          bill: {
+            id: 'bill-1',
+            account_ref_masked: '•••• 5678',
+            account_display_name: 'Singtel corporate',
+            carrier: 'Singtel',
+            amount_minor: 4280,
+            currency: 'SGD',
+            due_date: '2026-09-14',
+            urgency: 'due_soon',
+            days_remaining: 4,
+            action_status: 'unpaid',
+            version: 1,
+            linked_sims: [{ iccid: 'notification-sim', sim_index: 79 }],
+            source_message: { content: 'retained bill source', sender: 'Singtel' },
+            events: [{ id: 'event-1', event_type: 'detected', actor_type: 'system', created_at: '2026-08-20' }],
+          },
+        });
+      }
+      if (value.includes('/api/carrier-bills')) {
+        return Response.json({
+          success: true,
+          bills: [{
+            id: 'bill-1', account_ref_masked: '•••• 5678', account_display_name: 'Singtel corporate',
+            carrier: 'Singtel', amount_minor: 4280, currency: 'SGD', due_date: '2026-09-14',
+            urgency: 'due_soon', days_remaining: 4, action_status: 'unpaid', linked_sim_count: 1,
+            notification_sim: { sim_index: 79 }, version: 1,
+          }],
+        });
+      }
+      throw new Error(`Unexpected request: ${value}`);
+    };
+    try {
+      const adminView = render(BalanceManagement, {
+        props: { phoneNumbers: [phone], balanceChecks: [check], canWriteBills: true },
+      });
+      await fireEvent.click(adminView.getByRole('button', { name: '后付费账单' }));
+      await waitFor(() => expect(adminView.getAllByRole('button', { name: '查看账单' }).length).toBeGreaterThan(0));
+      await fireEvent.click(adminView.getAllByRole('button', { name: '查看账单' })[0]);
+      await waitFor(() => expect(adminView.getByText('retained bill source')).toBeTruthy());
+      expect(adminView.getByRole('button', { name: '标记已付款' })).toBeTruthy();
+      cleanup();
+
+      const viewerView = render(BalanceManagement, {
+        props: { phoneNumbers: [phone], balanceChecks: [check], canWriteBills: false },
+      });
+      await fireEvent.click(viewerView.getByRole('button', { name: '后付费账单' }));
+      await waitFor(() => expect(viewerView.getAllByRole('button', { name: '查看账单' }).length).toBeGreaterThan(0));
+      await fireEvent.click(viewerView.getAllByRole('button', { name: '查看账单' })[0]);
+      await waitFor(() => expect(viewerView.getByText('retained bill source')).toBeTruthy());
+      expect(viewerView.queryByRole('button', { name: '标记已付款' })).toBeNull();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('distinguishes linked and unlinked postpaid SIMs in the balance overview', async () => {
+    const originalFetch = globalThis.fetch;
+    const linked = { ...phone, iccid: 'linked-sim', sim_index: 79, service_type: 'postpaid' };
+    const unlinked = { ...phone, iccid: 'unlinked-sim', sim_index: 80, service_type: 'postpaid' };
+    globalThis.fetch = async (url) => {
+      const value = String(url);
+      if (value.includes('/api/balance-runners')) return Response.json({ success: true, capabilities: {} });
+      if (value.includes('/api/carrier-billing/accounts')) {
+        return Response.json({
+          success: true,
+          accounts: [{
+            id: 'account-1',
+            account_ref_masked: '•••• 5678',
+            linked_sims: [{ iccid: 'linked-sim', sim_index: 79 }],
+          }],
+        });
+      }
+      throw new Error(`Unexpected request: ${value}`);
+    };
+    try {
+      const view = render(BalanceManagement, {
+        props: { phoneNumbers: [linked, unlinked], balanceChecks: [] },
+      });
+      await waitFor(() => expect(view.getAllByText('由账单账户管理').length).toBeGreaterThan(0));
+      expect(view.getAllByText('未关联账单账户').length).toBeGreaterThan(0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('shows runner capability health from the control plane', async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async (url) => {
