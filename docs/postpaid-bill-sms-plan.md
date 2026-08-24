@@ -1,9 +1,9 @@
 # Singapore Postpaid Bill SMS Workflow Plan
 
-Status: the account-configured baseline through migration `068` was deployed on
-2026-08-24. Production evidence then confirmed that only S79 received all nine
-retained Singtel bill notices. The receiving-SIM auto-discovery design and migration
-`069` are implemented locally; deployment and historical processing remain pending.
+Status: the receiving-SIM auto-discovery design and migrations `066`–`069` were
+deployed on 2026-08-24. Production evidence confirmed that only S79 received all
+nine retained Singtel bill notices. Historical reconciliation has not yet run, so
+the production bill stream and bills remain empty.
 
 ## 1. Outcome
 
@@ -227,7 +227,7 @@ postpaid SIM without a matching notice shows “Waiting for bill SMS”.
 - `069_unique_active_billing_stream_per_sim.sql`: one active automatically
   discovered bill stream per receiving SIM.
 
-Migrations `066`–`068` are in production. Migration `069` is pending deployment.
+Migrations `066`–`069` are in production.
 
 ## 10. Test-first implementation sequence
 
