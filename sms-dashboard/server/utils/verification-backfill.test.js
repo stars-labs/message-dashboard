@@ -79,6 +79,21 @@ describe('reprocessVerificationPage', () => {
     expect(db.rows[0].verification_code).toBe('9016');
   });
 
+  test('adds a code to an existing WhatsApp message', async () => {
+    const db = fakeDb([{
+      id: 'whatsapp',
+      content: "<#> Your WhatsApp code: 367-140 Don't share this code with others 4sgLq1p5sV6",
+      verification_code: null,
+      filter_status: 'clean',
+    }]);
+
+    const result = await reprocessVerificationPage(db);
+
+    expect(result).toMatchObject({ changed: 1, added: 1, done: true });
+    expect(db.rows[0].verification_code).toBe('367-140');
+    expect(db.rows[0].filter_status).toBe(FILTER_STATUS.PENDING);
+  });
+
   test('returns a cursor for bounded, resumable pages', async () => {
     const db = fakeDb([
       { id: '1', content: 'nothing', verification_code: null },

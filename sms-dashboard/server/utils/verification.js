@@ -25,6 +25,10 @@ export const VERIFICATION_CODE_PATTERNS = [
   },
   {
     reason: 'en_generic_code_before',
+    pattern: /\bcode\b[^\d\n]{0,20}?(\d{3}-\d{3})\b/i,
+  },
+  {
+    reason: 'en_generic_code_before',
     pattern: /\bcode\b[^\d\n]{0,20}?(\d{4,8})\b/i,
   },
   {

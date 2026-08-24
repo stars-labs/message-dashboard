@@ -44,6 +44,8 @@ describe('hasLabelledCode — English labels', () => {
     ['Telegram code: 54321'],
     ['Your security code is 111222'],
     ['Your authentication code is 456789'],
+    ["<#> Your WhatsApp code: 367-140 Don't share this code with others 4sgLq1p5sV6"],
+    ["<#> Your WhatsApp code: 168-396 Don't share this code with others 4sgLq1p5sV6"],
   ])('detects %j', (content) => {
     expect(hasLabelledCode(content)).toBe(true);
   });
@@ -94,6 +96,12 @@ describe('extractVerificationCode', () => {
     expect(extractVerificationCode('订单2026年，验证码：8842')).toBe('8842');
   });
 
+  test('preserves the separator in a WhatsApp verification code', () => {
+    expect(extractVerificationCode(
+      "<#> Your WhatsApp code: 367-140 Don't share this code with others 4sgLq1p5sV6"
+    )).toBe('367-140');
+  });
+
   test('returns null for a bare order number', () => {
     expect(extractVerificationCode('您的订单号 123456 已受理')).toBeNull();
   });
@@ -113,6 +121,7 @@ describe('extractVerificationCode', () => {
     ['订单 123456 已受理'],
     ['Call area code 2026 for assistance'],
     ['Use promo code 2026 for a discount'],
+    ['Use promo code 367-140 for a discount'],
     ['Use code 2026 to complete your purchase'],
     ['Your card ending 9016 expires in 5 minutes'],
     ['Order 123456: do not share your delivery details'],
