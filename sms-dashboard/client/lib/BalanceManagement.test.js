@@ -91,6 +91,39 @@ describe('balance management', () => {
     expect(opened).toBe(check);
   });
 
+  test('shows balance and expiry risks at the same time', () => {
+    const atRisk = {
+      ...check,
+      metrics: [
+        { metric_type: 'cash_balance', value: 4.5, currency: 'CNY' },
+        { metric_type: 'account_expiry', value: null, expires_at: '2026-08-30' },
+      ],
+    };
+    const view = render(BalanceManagement, {
+      props: { phoneNumbers: [phone], balanceChecks: [atRisk] },
+    });
+
+    expect(view.getAllByText('需要充值').length).toBeGreaterThan(0);
+    expect(view.getAllByText('即将到期').length).toBeGreaterThan(0);
+    expect(view.getAllByText('2026-08-30').length).toBeGreaterThan(0);
+  });
+
+  test('does not offer a prepaid balance query for postpaid SIMs', () => {
+    const view = render(BalanceManagement, {
+      props: {
+        phoneNumbers: [{ ...phone, service_type: 'postpaid' }],
+        balanceChecks: [check],
+        canQueryBalances: true,
+      },
+    });
+
+    expect(view.getAllByText('后付费账单管理').length).toBeGreaterThan(0);
+    expect(view.getAllByText('不按余额管理').length).toBeGreaterThan(0);
+    expect(view.queryByText(/264\.33/)).toBeNull();
+    expect(view.queryByRole('button', { name: '查询' })).toBeNull();
+    expect(view.queryByRole('button', { name: '批量查询' })).toBeNull();
+  });
+
   test('classifies a secondary with its primary instead of as unobtained', async () => {
     const primary = { ...phone, sim_role: 'primary' };
     const secondary = {

@@ -43,14 +43,14 @@ describe('balance overview', () => {
       [check('cn1', 'parsed', 60, 'CNY')],
       now
     );
-    expect(above[0].health).toBe('normal');
+    expect(above[0].health).toBe('healthy');
 
     const below = buildBalanceRows(
       [phoneWithOverride],
       [check('cn1', 'parsed', 40, 'CNY')],
       now
     );
-    expect(below[0].health).toBe('low');
+    expect(below[0].health).toBe('low_balance');
   });
 
   test('classifies normal, low, stale and unknown balances', () => {
@@ -62,8 +62,25 @@ describe('balance overview', () => {
     ];
     const rows = buildBalanceRows(phones, checks, now);
 
-    expect(rows.map((row) => row.health)).toEqual(['normal', 'low', 'stale', 'unknown']);
-    expect(countBalanceHealth(rows)).toEqual({ normal: 1, low: 1, stale: 1, failed: 0, unknown: 1 });
+    expect(rows.map((row) => row.health)).toEqual([
+      'healthy',
+      'low_balance',
+      'stale',
+      'never_observed',
+    ]);
+    expect(countBalanceHealth(rows)).toEqual({
+      healthy: 1,
+      zero_or_negative_balance: 0,
+      low_balance: 1,
+      stale: 1,
+      query_failed: 0,
+      never_observed: 1,
+      expired: 0,
+      expiring_soon: 0,
+      verification_pending: 0,
+      expiry_unknown: 0,
+      not_applicable: 0,
+    });
   });
 
   test('secondary SIMs inherit their primary balance and health classification', () => {
@@ -83,15 +100,21 @@ describe('balance overview', () => {
       now
     );
 
-    expect(rows.map((row) => row.health)).toEqual(['normal', 'normal']);
+    expect(rows.map((row) => row.health)).toEqual(['healthy', 'healthy']);
     expect(rows[1].balanceMetric).toEqual(rows[0].balanceMetric);
     expect(rows[1].balanceTimestamp).toBe(rows[0].balanceTimestamp);
     expect(countBalanceHealth(rows)).toEqual({
-      normal: 2,
-      low: 0,
+      healthy: 2,
+      zero_or_negative_balance: 0,
+      low_balance: 0,
       stale: 0,
-      failed: 0,
-      unknown: 0,
+      query_failed: 0,
+      never_observed: 0,
+      expired: 0,
+      expiring_soon: 0,
+      verification_pending: 0,
+      expiry_unknown: 0,
+      not_applicable: 0,
     });
   });
 
@@ -104,7 +127,7 @@ describe('balance overview', () => {
 
     const [row] = buildBalanceRows([orphan], [], now);
 
-    expect(row.health).toBe('unknown');
+    expect(row.health).toBe('never_observed');
     expect(row.balanceMetric).toBeNull();
   });
 
@@ -115,7 +138,7 @@ describe('balance overview', () => {
     ];
     const [row] = buildBalanceRows([phone('cn1', 'CN')], checks, now);
 
-    expect(row.health).toBe('failed');
+    expect(row.health).toBe('query_failed');
     expect(row.balanceMetric.value).toBe(264.33);
     expect(row.latestCheck.status).toBe('failed');
   });
@@ -127,7 +150,7 @@ describe('balance overview', () => {
     ];
     const [row] = buildBalanceRows([phone('cn1', 'CN')], checks, now);
 
-    expect(row.health).toBe('unknown');
+    expect(row.health).toBe('never_observed');
     // latestCheck should be null — all checks were cancelled
     expect(row.latestCheck).toBeNull();
   });
@@ -139,8 +162,36 @@ describe('balance overview', () => {
     ];
     const [row] = buildBalanceRows([phone('cn1', 'CN')], checks, now);
 
-    // The non-cancelled failed check should still drive health = 'failed'
-    expect(row.health).toBe('failed');
+    // The non-cancelled failed check should still drive the query-failed summary.
+    expect(row.health).toBe('query_failed');
     expect(row.latestCheck.status).toBe('failed');
+  });
+
+  test('keeps low balance and approaching expiry as separate reasons', () => {
+    const balance = check('sg2', 'parsed', 4.5, 'SGD');
+    balance.metrics.push({
+      metric_type: 'account_expiry',
+      value: null,
+      currency: null,
+      expires_at: '2026-08-30',
+    });
+
+    const [row] = buildBalanceRows([
+      { ...phone('sg2', 'SG'), service_type: 'prepaid' },
+    ], [balance], now);
+
+    expect(row.health).toBe('low_balance');
+    expect(row.healthReasons).toEqual(expect.arrayContaining(['low_balance', 'expiring_soon']));
+    expect(row.expiryDate).toBe('2026-08-30');
+  });
+
+  test('excludes postpaid SIMs from prepaid balance health', () => {
+    const [row] = buildBalanceRows([
+      { ...phone('sg2', 'SG'), service_type: 'postpaid' },
+    ], [check('sg2', 'parsed', 0, 'SGD')], now);
+
+    expect(row.health).toBe('not_applicable');
+    expect(row.threshold).toBeNull();
+    expect(row.healthReasons).toEqual([]);
   });
 });

@@ -3,8 +3,7 @@ import {
   getCashBalance,
   normalizeUtcTimestamp,
 } from './balance-query.js';
-
-export const BALANCE_STALE_DAYS = 35;
+import { evaluatePrepaidHealth } from '../../shared/prepaid-health.js';
 
 const THRESHOLDS = {
   CNY: 100,
@@ -19,12 +18,17 @@ const COUNTRY_CURRENCIES = {
 };
 
 export const BALANCE_HEALTH_META = {
-  normal: {
+  healthy: {
     label: '正常',
     className: 'bg-emerald-50 text-emerald-700 border-emerald-200',
     dotClass: 'bg-emerald-500',
   },
-  low: {
+  zero_or_negative_balance: {
+    label: '余额耗尽',
+    className: 'bg-red-50 text-red-800 border-red-300',
+    dotClass: 'bg-red-600',
+  },
+  low_balance: {
     label: '需要充值',
     className: 'bg-red-50 text-red-700 border-red-200',
     dotClass: 'bg-red-500',
@@ -34,15 +38,40 @@ export const BALANCE_HEALTH_META = {
     className: 'bg-amber-50 text-amber-700 border-amber-200',
     dotClass: 'bg-amber-500',
   },
-  failed: {
+  query_failed: {
     label: '查询失败',
     className: 'bg-red-50 text-red-700 border-red-200',
     dotClass: 'bg-red-500',
   },
-  unknown: {
+  never_observed: {
     label: '尚未取得',
     className: 'bg-stone-100 text-stone-600 border-stone-200',
     dotClass: 'bg-stone-300',
+  },
+  expired: {
+    label: '已到期',
+    className: 'bg-red-50 text-red-800 border-red-300',
+    dotClass: 'bg-red-600',
+  },
+  expiring_soon: {
+    label: '即将到期',
+    className: 'bg-amber-50 text-amber-700 border-amber-200',
+    dotClass: 'bg-amber-500',
+  },
+  verification_pending: {
+    label: '充值待验证',
+    className: 'bg-sky-50 text-sky-700 border-sky-200',
+    dotClass: 'bg-sky-500',
+  },
+  expiry_unknown: {
+    label: '有效期未取得',
+    className: 'bg-stone-100 text-stone-600 border-stone-200',
+    dotClass: 'bg-stone-300',
+  },
+  not_applicable: {
+    label: '后付费账单管理',
+    className: 'bg-violet-50 text-violet-700 border-violet-200',
+    dotClass: 'bg-violet-500',
   },
 };
 
@@ -83,8 +112,6 @@ export function buildBalanceRows(phones = [], checks = [], now = new Date()) {
     checksByIccid.set(check.sim_iccid, group);
   }
 
-  const staleBefore = now.getTime() - BALANCE_STALE_DAYS * 24 * 60 * 60 * 1000;
-
   const rows = (phones || []).map((phone) => {
     const phoneChecks = (checksByIccid.get(phone.iccid) || [])
       .slice()
@@ -97,25 +124,42 @@ export function buildBalanceRows(phones = [], checks = [], now = new Date()) {
       phoneChecks.find((check) => !isCancelledCheck(check)) || null;
     const balanceCheck = phoneChecks.find((check) => getCashBalance(check)) || null;
     const balanceMetric = getCashBalance(balanceCheck);
-    const threshold = getBalanceThreshold(phone, balanceMetric);
+    const threshold = phone.service_type === 'postpaid'
+      ? null
+      : getBalanceThreshold(phone, balanceMetric);
     const balanceTimestamp = balanceCheck ? getBalanceTimestamp(balanceCheck) : null;
-    const balanceTime = balanceTimestamp
-      ? new Date(normalizeUtcTimestamp(balanceTimestamp)).getTime()
-      : 0;
+    const expiryCheck = phoneChecks.find((check) => check.metrics?.some(
+      (metric) => metric.metric_type === 'account_expiry' && metric.expires_at
+    )) || null;
+    const expiryMetric = expiryCheck?.metrics?.find(
+      (metric) => metric.metric_type === 'account_expiry' && metric.expires_at
+    ) || null;
+    const expiryTimestamp = expiryCheck ? getBalanceTimestamp(expiryCheck) : null;
+    const expiryDate = expiryMetric ? String(expiryMetric.expires_at).slice(0, 10) : null;
 
     // Secondary SIMs follow their primary's balance — health is not independently meaningful.
-    let health = 'normal';
+    let healthResult;
     if (phone.sim_role === 'secondary') {
-      health = 'unknown';
-    } else if (latestSignificantCheck && ['failed', 'timed_out'].includes(latestSignificantCheck.status)) {
-      health = 'failed';
-    } else if (!balanceMetric) {
-      health = 'unknown';
-    } else if (!Number.isFinite(balanceTime) || balanceTime < staleBefore) {
-      health = 'stale';
-    } else if (threshold && Number(balanceMetric.value) < threshold.value) {
-      health = 'low';
+      healthResult = { summaryStatus: 'never_observed', reasons: ['never_observed'] };
+    } else {
+      healthResult = evaluatePrepaidHealth({
+        serviceType: phone.service_type || 'unknown',
+        country: phone.country,
+        now,
+        threshold,
+        cashBalance: balanceMetric ? {
+          value: balanceMetric.value,
+          currency: balanceMetric.currency,
+          observedAt: normalizeUtcTimestamp(balanceTimestamp),
+        } : null,
+        accountExpiry: expiryDate ? {
+          date: expiryDate,
+          observedAt: normalizeUtcTimestamp(expiryTimestamp),
+        } : null,
+        latestQueryStatus: latestSignificantCheck?.status || null,
+      });
     }
+    const health = healthResult.summaryStatus;
 
     return {
       phone,
@@ -124,8 +168,13 @@ export function buildBalanceRows(phones = [], checks = [], now = new Date()) {
       balanceCheck,
       balanceMetric,
       balanceTimestamp,
+      expiryCheck,
+      expiryMetric,
+      expiryDate,
+      expiryTimestamp,
       threshold,
       health,
+      healthReasons: healthResult.reasons,
       healthMeta: BALANCE_HEALTH_META[health],
     };
   });
@@ -143,8 +192,13 @@ export function buildBalanceRows(phones = [], checks = [], now = new Date()) {
       balanceCheck: primary.balanceCheck,
       balanceMetric: primary.balanceMetric,
       balanceTimestamp: primary.balanceTimestamp,
+      expiryCheck: primary.expiryCheck,
+      expiryMetric: primary.expiryMetric,
+      expiryDate: primary.expiryDate,
+      expiryTimestamp: primary.expiryTimestamp,
       threshold: primary.threshold,
       health: primary.health,
+      healthReasons: primary.healthReasons,
       healthMeta: primary.healthMeta,
     };
   });
@@ -154,5 +208,5 @@ export function countBalanceHealth(rows = []) {
   return rows.reduce((counts, row) => {
     counts[row.health] = (counts[row.health] || 0) + 1;
     return counts;
-  }, { normal: 0, low: 0, stale: 0, failed: 0, unknown: 0 });
+  }, Object.fromEntries(Object.keys(BALANCE_HEALTH_META).map((status) => [status, 0])));
 }

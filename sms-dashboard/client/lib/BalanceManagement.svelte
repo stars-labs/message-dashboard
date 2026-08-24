@@ -64,16 +64,30 @@
   // Counts live on the filter tabs (device-page pattern) instead of a separate summary bar.
   let filterTabs = $derived([
     ['all', '全部', carrierRows.length],
-    ['normal', '正常', counts.normal],
-    ['low', '需充值', counts.low],
-    ['stale', '已过期', counts.stale],
-    ['failed', '失败', counts.failed],
-    ['unknown', '未取得', counts.unknown],
+    ['healthy', '正常', counts.healthy],
+    ['recharge', '需充值', counts.zero_or_negative_balance + counts.low_balance],
+    ['expiry', '到期处理', counts.expired + counts.expiring_soon],
+    ['verification_pending', '待验证', counts.verification_pending],
+    ['stale', '数据过期', counts.stale],
+    ['query_failed', '查询失败', counts.query_failed],
+    ['missing', '未取得', counts.never_observed + counts.expiry_unknown],
+    ['not_applicable', '后付费', counts.not_applicable],
   ]);
+
+  function matchesStatusFilter(row) {
+    if (statusFilter === 'all') return true;
+    if (statusFilter === 'recharge') {
+      return ['zero_or_negative_balance', 'low_balance'].includes(row.health);
+    }
+    if (statusFilter === 'expiry') return ['expired', 'expiring_soon'].includes(row.health);
+    if (statusFilter === 'missing') return ['never_observed', 'expiry_unknown'].includes(row.health);
+    return row.health === statusFilter;
+  }
+
   let filteredRows = $derived.by(() => {
     const query = searchQuery.trim().toLowerCase();
     return carrierRows
-      .filter((row) => statusFilter === 'all' || row.health === statusFilter)
+      .filter(matchesStatusFilter)
       .filter((row) => {
         if (!query) return true;
         const phone = row.phone;
@@ -109,8 +123,13 @@
     const iccid = row.phone.primary_iccid;
     return iccid ? primaryRowByIccid.get(iccid) ?? null : null;
   }
+  function isBalanceQueryableRow(row) {
+    return row.phone.sim_role !== 'secondary' && row.phone.service_type !== 'postpaid';
+  }
   let selectedIccidSet = $derived(new Set(selectedIccids));
-  let filteredIccids = $derived(filteredRows.map((row) => row.phone.iccid));
+  let filteredIccids = $derived(filteredRows
+    .filter(isBalanceQueryableRow)
+    .map((row) => row.phone.iccid));
   let allFilteredSelected = $derived(filteredIccids.length > 0
     && filteredIccids.every((iccid) => selectedIccidSet.has(iccid)));
   let someFilteredSelected = $derived(filteredIccids.some((iccid) => selectedIccidSet.has(iccid)));
@@ -135,6 +154,7 @@
     { key: 'sim_role', label: '主副卡' },
     { key: 'service_type', label: '计费类型' },
     { key: 'balance', label: '当前余额' },
+    { key: 'expiry', label: '有效期' },
     { key: 'health', label: '状态' },
     { key: 'threshold', label: '阈值' },
     { key: 'updated', label: '最近更新' },
@@ -215,7 +235,8 @@
     if (key === 'sim') return Number(row.phone.sim_index);
     if (key === 'carrier') return row.phone.carrier || '';
     if (key === 'service_type') return getSimServiceTypeLabel(row.phone.service_type);
-    if (key === 'health') return ({ failed: 0, low: 1, stale: 2, unknown: 3, normal: 4 })[row.health];
+    if (key === 'health') return healthOrder(row.health);
+    if (key === 'expiry') return row.expiryDate || null;
     if (key === 'updated') return row.balanceTimestamp ? new Date(normalizeUtcTimestamp(row.balanceTimestamp)).getTime() : null;
     if (key === 'query') return row.latestCheck?.status || '';
     return null;
@@ -223,8 +244,7 @@
 
   function compareOverviewRows(left, right) {
     if (!overviewSortKey) {
-      const order = { failed: 0, low: 1, stale: 2, unknown: 3, normal: 4 };
-      return order[left.health] - order[right.health]
+      return healthOrder(left.health) - healthOrder(right.health)
         || Number(left.phone.sim_index || 999) - Number(right.phone.sim_index || 999);
     }
     let comparison;
@@ -235,6 +255,22 @@
     } else comparison = compareValues(overviewValue(left, overviewSortKey), overviewValue(right, overviewSortKey));
     if (comparison === 0) comparison = Number(left.phone.sim_index || 999) - Number(right.phone.sim_index || 999);
     return overviewSortDirection === 'asc' ? comparison : -comparison;
+  }
+
+  function healthOrder(status) {
+    return ({
+      expired: 0,
+      zero_or_negative_balance: 1,
+      query_failed: 2,
+      verification_pending: 3,
+      stale: 4,
+      low_balance: 5,
+      expiring_soon: 6,
+      never_observed: 7,
+      expiry_unknown: 8,
+      not_applicable: 9,
+      healthy: 10,
+    })[status] ?? 99;
   }
 
   function historyValue(check, key) {
@@ -305,7 +341,7 @@
 
   async function queryPhone(row, event = null) {
     event?.stopPropagation();
-    if (!canQueryBalances || queryingIccid) return;
+    if (!canQueryBalances || queryingIccid || !isBalanceQueryableRow(row)) return;
     queryingIccid = row.phone.iccid;
     notice = null;
     try {
@@ -345,7 +381,8 @@
   async function openBatchPreview() {
     if (!canQueryBalances || loadingPreview) return;
     const selectedRows = rows.filter((row) => selectedIccidSet.has(row.phone.iccid));
-    const scopeRows = selectedRows.length ? selectedRows : filteredRows;
+    const scopeRows = (selectedRows.length ? selectedRows : filteredRows)
+      .filter(isBalanceQueryableRow);
     const phoneIccids = scopeRows.map((row) => row.phone.iccid);
     if (!phoneIccids.length) {
       notice = { type: 'error', message: '当前范围内没有可查询的 SIM' };
@@ -414,7 +451,7 @@
       parts.push(carrierOptions.find((carrier) => carrier.key === carrierFilter)?.label || '当前运营商');
     }
     if (statusFilter !== 'all') {
-      parts.push(BALANCE_HEALTH_META[statusFilter]?.label || '当前状态');
+      parts.push(filterTabs.find(([value]) => value === statusFilter)?.[1] || '当前状态');
     }
     if (searchQuery.trim()) parts.push(`搜索“${searchQuery.trim()}”`);
     return `${parts.length ? `当前筛选：${parts.join(' · ')}` : '当前全部卡片'}（${count} 张）`;
@@ -463,7 +500,7 @@
                 : 'text-stone-500'}"
             >查询记录</button>
           </div>
-          {#if canQueryBalances && activeTab === 'overview'}
+          {#if canQueryBalances && activeTab === 'overview' && filteredIccids.length}
             <button type="button" onclick={openBatchPreview} disabled={loadingPreview}
               class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-orange-500 hover:bg-orange-600
                 disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors">
@@ -510,7 +547,7 @@
               onclick={() => { statusFilter = value; }}
               class="shrink-0 px-2.5 py-1.5 text-sm rounded-lg font-medium transition-colors tabular-nums
                 {statusFilter === value
-                  ? value === 'low' || value === 'failed'
+                  ? value === 'recharge' || value === 'query_failed' || value === 'expiry'
                     ? 'bg-red-600 text-white'
                     : 'bg-stone-800 text-white'
                   : 'bg-stone-100 text-stone-600 hover:bg-stone-200'}"
@@ -598,7 +635,7 @@
                   {#if canQueryBalances}
                     <td class="w-12 px-4 py-3" style="padding-left: {row.__depth * 1.25 + 1}rem">
                       <input type="checkbox" checked={selectedIccidSet.has(row.phone.iccid)}
-                        disabled={row.phone.sim_role === 'secondary'}
+                        disabled={row.phone.sim_role === 'secondary' || row.phone.service_type === 'postpaid'}
                         aria-label={`选择 ${formatCardNumber(row.phone.sim_index)}`}
                         onchange={(event) => toggleCardSelection(row.phone.iccid, event.currentTarget.checked)}
                         class="rounded border-stone-300 text-orange-500 focus:ring-orange-400 disabled:opacity-40">
@@ -638,18 +675,28 @@
                       {getSimServiceTypeLabel(row.phone.service_type)}
                     </span>
                   </td>
-                  <td class="px-4 py-3 whitespace-nowrap font-semibold tabular-nums {row.health === 'low' ? 'text-red-700' : 'text-stone-900'}">
+                  <td class="px-4 py-3 whitespace-nowrap font-semibold tabular-nums {['low_balance', 'zero_or_negative_balance'].includes(row.health) ? 'text-red-700' : 'text-stone-900'}">
                     {#if row.__isSecondary}
                       <span class="text-xs font-normal text-stone-400">余额随主卡</span>
+                    {:else if row.phone.service_type === 'postpaid'}
+                      <span class="text-xs font-normal text-stone-400">不按余额管理</span>
                     {:else}
                       {formatBalanceMetric(row.balanceMetric)}
                     {/if}
+                  </td>
+                  <td class="px-4 py-3 whitespace-nowrap font-mono text-xs text-stone-500">
+                    {row.__isSecondary ? '—' : row.expiryDate || '—'}
                   </td>
                   <td class="px-4 py-3 whitespace-nowrap">
                     {#if row.__isSecondary}
                       <span class="text-stone-300">—</span>
                     {:else}
-                      <span class="inline-flex px-2 py-0.5 rounded-md border text-[11px] font-medium {row.healthMeta.className}">{row.healthMeta.label}</span>
+                      <span class="flex flex-wrap items-center gap-1 max-w-[190px]">
+                        <span class="inline-flex px-2 py-0.5 rounded-md border text-[11px] font-medium {row.healthMeta.className}">{row.healthMeta.label}</span>
+                        {#each row.healthReasons.filter((reason) => reason !== row.health && BALANCE_HEALTH_META[reason]) as reason}
+                          <span class="inline-flex px-1.5 py-0.5 rounded border text-[10px] font-medium {BALANCE_HEALTH_META[reason].className}">{BALANCE_HEALTH_META[reason].label}</span>
+                        {/each}
+                      </span>
                     {/if}
                   </td>
                   <td class="px-4 py-3 whitespace-nowrap font-mono text-xs text-stone-500">
@@ -674,7 +721,7 @@
                       {#if row.latestCheck || row.balanceCheck}
                         <button type="button" onclick={() => openRow(row)} class="text-xs font-medium text-stone-500 hover:text-stone-800">查看</button>
                       {/if}
-                      {#if canQueryBalances}
+                      {#if canQueryBalances && row.phone.service_type !== 'postpaid'}
                         <button type="button" onclick={(event) => queryPhone(row, event)}
                           disabled={!!queryingIccid || row.phone.sim_role === 'secondary'}
                           title={row.phone.sim_role === 'secondary' ? '副卡,余额随主卡查询' : ''}
@@ -700,7 +747,7 @@
               <div class="flex items-center gap-2 min-w-0">
                 {#if canQueryBalances}
                   <input type="checkbox" checked={selectedIccidSet.has(row.phone.iccid)}
-                    disabled={row.phone.sim_role === 'secondary'}
+                    disabled={row.phone.sim_role === 'secondary' || row.phone.service_type === 'postpaid'}
                     aria-label={`选择 ${formatCardNumber(row.phone.sim_index)}（移动端）`}
                     onchange={(event) => toggleCardSelection(row.phone.iccid, event.currentTarget.checked)}
                     class="rounded border-stone-300 text-orange-500 focus:ring-orange-400 shrink-0 disabled:opacity-40">
@@ -713,7 +760,12 @@
                 {#if row.__isSecondary}
                   <span class="ml-auto inline-flex px-1.5 py-0.5 rounded border text-[10px] font-medium shrink-0 bg-violet-50 text-violet-700 border-violet-200">副卡</span>
                 {:else}
-                  <span class="ml-auto inline-flex px-2 py-0.5 rounded-md border text-[10px] font-medium shrink-0 {row.healthMeta.className}">{row.healthMeta.label}</span>
+                  <span class="ml-auto flex items-center gap-1 shrink-0">
+                    <span class="inline-flex px-2 py-0.5 rounded-md border text-[10px] font-medium {row.healthMeta.className}">{row.healthMeta.label}</span>
+                    {#each row.healthReasons.filter((reason) => reason !== row.health && BALANCE_HEALTH_META[reason]) as reason}
+                      <span class="inline-flex px-1.5 py-0.5 rounded border text-[9px] font-medium {BALANCE_HEALTH_META[reason].className}">{BALANCE_HEALTH_META[reason].label}</span>
+                    {/each}
+                  </span>
                 {/if}
               </div>
               <div class="mt-1.5 flex items-center gap-2 min-w-0">
@@ -726,15 +778,22 @@
                         : '余额随主卡'}
                     </span>
                   {:else}
-                    <strong class="text-base leading-tight font-semibold tabular-nums truncate {row.health === 'low' ? 'text-red-700' : 'text-stone-900'}">{formatBalanceMetric(row.balanceMetric)}</strong>
+                    {#if row.phone.service_type === 'postpaid'}
+                      <strong class="text-sm leading-tight font-medium text-stone-400">不按余额管理</strong>
+                    {:else}
+                      <strong class="text-base leading-tight font-semibold tabular-nums truncate {['low_balance', 'zero_or_negative_balance'].includes(row.health) ? 'text-red-700' : 'text-stone-900'}">{formatBalanceMetric(row.balanceMetric)}</strong>
+                    {/if}
                     <span class="text-[11px] text-stone-400 truncate shrink">{row.phone.flag || getCountryFlag(row.phone.country)} {row.phone.carrier || '—'}</span>
                     <span class="text-[10px] text-stone-400 shrink-0">· {getSimServiceTypeLabel(row.phone.service_type)}</span>
+                    {#if row.expiryDate}
+                      <span class="font-mono text-[10px] text-stone-400 shrink-0">· {row.expiryDate}</span>
+                    {/if}
                     {#if row.balanceTimestamp}
                       <span class="hidden min-[390px]:inline ml-auto font-mono text-[10px] text-stone-400 shrink-0">{formatTime(row.balanceTimestamp, true)}</span>
                     {/if}
                   {/if}
                 </div>
-                {#if canQueryBalances}
+                {#if canQueryBalances && row.phone.service_type !== 'postpaid'}
                   <button type="button" onclick={(event) => queryPhone(row, event)}
                     disabled={!!queryingIccid || row.phone.sim_role === 'secondary'}
                     aria-label={`查询 ${formatCardNumber(row.phone.sim_index)} 余额`}
