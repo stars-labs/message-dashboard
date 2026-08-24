@@ -53,6 +53,14 @@ function request(db, sessionId = 'rust-daemon-session-2') {
   };
 }
 
+function resultRequest(db, body) {
+  return {
+    env: { API_KEY: 'secret', DB: db },
+    headers: new Headers({ 'X-API-Key': 'secret' }),
+    json: async () => body,
+  };
+}
+
 describe('outbound SMS daemon session leases', () => {
   test('accepts only bounded, inert session identifiers', () => {
     expect(normalizeDaemonSessionId('rust-daemon-abc_123')).toBe('rust-daemon-abc_123');
@@ -76,6 +84,37 @@ describe('outbound SMS daemon session leases', () => {
   test('rejects a malformed session header before touching the database', async () => {
     const db = dbStub();
     const response = await controlHandler.heartbeatAndGetPendingSMS(request(db, 'bad session'));
+    expect(response.status).toBe(400);
+    expect(db.calls).toHaveLength(0);
+  });
+});
+
+describe('outbound SMS submission outcomes', () => {
+  test('records an unconfirmed modem submission as unknown without failing its balance check', async () => {
+    const db = dbStub();
+    const response = await controlHandler.updateSMSResult(resultRequest(db, {
+      message_id: 'msg-1',
+      outcome: 'submitted_unconfirmed',
+    }));
+
+    expect(response.status).toBe(200);
+    const messageUpdate = db.calls.find((call) =>
+      call.operation === 'run' && call.sql.includes('SET status = ?, error_message = ?')
+    );
+    expect(messageUpdate.params).toEqual(['unknown', null, null, 'msg-1']);
+    const balanceUpdate = db.calls.find((call) =>
+      call.operation === 'run' && call.sql.includes('UPDATE sim_balance_checks')
+    );
+    expect(balanceUpdate.params).toEqual(['awaiting_response', 1, 1, null, 'msg-1']);
+  });
+
+  test('rejects the removed boolean success result', async () => {
+    const db = dbStub();
+    const response = await controlHandler.updateSMSResult(resultRequest(db, {
+      message_id: 'msg-1',
+      success: true,
+    }));
+
     expect(response.status).toBe(400);
     expect(db.calls).toHaveLength(0);
   });

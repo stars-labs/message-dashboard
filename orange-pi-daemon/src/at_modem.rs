@@ -6,6 +6,7 @@
 //! - ttyUSB2: AT commands (this is what we use)
 //! - ttyUSB3: PPP/Modem
 
+use crate::types::SmsSubmitOutcome;
 use anyhow::{anyhow, Result};
 use nix::sys::termios::{self, BaudRate, SetArg};
 use std::collections::{BTreeMap, HashMap};
@@ -1851,7 +1852,12 @@ impl AtModemManager {
     }
 
     /// Send SMS
-    pub async fn send_sms(&self, port: &str, recipient: &str, message: &str) -> Result<()> {
+    pub async fn send_sms(
+        &self,
+        port: &str,
+        recipient: &str,
+        message: &str,
+    ) -> Result<SmsSubmitOutcome> {
         Self::validate_recipient(recipient)?;
         self.send_sms_with_short_code(port, recipient, message, false)
             .await
@@ -1863,7 +1869,7 @@ impl AtModemManager {
         recipient: &str,
         message: &str,
         allow_short_code: bool,
-    ) -> Result<()> {
+    ) -> Result<SmsSubmitOutcome> {
         // Validate before touching the modem: both values are interpolated into AT
         // command strings below, and both originate from an API request body.
         Self::validate_recipient_with_short_code(recipient, allow_short_code)?;
@@ -1894,7 +1900,7 @@ impl AtModemManager {
             .await?;
 
             match result {
-                Ok(()) => return Ok(()),
+                Ok(outcome) => return Ok(outcome),
                 Err(error) if attempt == 1 && Self::is_prompt_timeout(&error) => {
                     warn!(
                         "SMS prompt timed out on {}; recovering and retrying once",
@@ -1944,7 +1950,7 @@ impl AtModemManager {
         timeout: Duration,
         use_ucs2: bool,
         allow_short_code: bool,
-    ) -> Result<()> {
+    ) -> Result<SmsSubmitOutcome> {
         // Re-checked at the sink rather than trusting send_sms: this is the function
         // that actually writes to the serial port, so the invariant belongs here too.
         Self::validate_recipient_with_short_code(recipient, allow_short_code)?;
@@ -2015,9 +2021,9 @@ impl AtModemManager {
         let mut buf = [0u8; 256];
         let start = Instant::now();
 
-        loop {
+        let timed_out = loop {
             if start.elapsed() > timeout {
-                break;
+                break true;
             }
 
             match file.read(&mut buf) {
@@ -2028,8 +2034,8 @@ impl AtModemManager {
                 Ok(n) => {
                     response.extend_from_slice(&buf[..n]);
                     let text = String::from_utf8_lossy(&response);
-                    if text.contains("OK") || text.contains("ERROR") {
-                        break;
+                    if Self::has_sms_submit_final_code(&text) {
+                        break false;
                     }
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
@@ -2038,14 +2044,42 @@ impl AtModemManager {
                 }
                 Err(e) => return Err(anyhow!("Read error: {}", e)),
             }
-        }
+        };
 
         let response_str = String::from_utf8_lossy(&response);
-        if response_str.contains("OK") {
-            Ok(())
-        } else {
-            Err(anyhow!("Send SMS failed: {}", response_str))
+        Self::classify_sms_submit_response(&response_str, timed_out)
+    }
+
+    fn classify_sms_submit_response(response: &str, timed_out: bool) -> Result<SmsSubmitOutcome> {
+        let lines = response
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty());
+        if lines.clone().any(|line| {
+            line == "ERROR" || line.starts_with("+CMS ERROR:") || line.starts_with("+CME ERROR:")
+        }) {
+            return Err(anyhow!("Send SMS failed: {}", response));
         }
+        if lines
+            .clone()
+            .any(|line| line == "OK" || line.starts_with("+CMGS:"))
+        {
+            return Ok(SmsSubmitOutcome::Confirmed);
+        }
+        if timed_out {
+            return Ok(SmsSubmitOutcome::SubmittedUnconfirmed);
+        }
+        Err(anyhow!("Send SMS failed: {}", response))
+    }
+
+    fn has_sms_submit_final_code(response: &str) -> bool {
+        response.lines().map(str::trim).any(|line| {
+            line == "OK"
+                || line == "ERROR"
+                || line.starts_with("+CMGS:")
+                || line.starts_with("+CMS ERROR:")
+                || line.starts_with("+CME ERROR:")
+        })
     }
 
     /// Get full modem info
@@ -2116,6 +2150,34 @@ mod tests {
             "Send SMS failed after Ctrl-Z"
         )));
         assert_eq!(SMS_PROMPT_TIMEOUT, Duration::from_secs(10));
+    }
+
+    #[test]
+    fn treats_post_submit_timeout_without_modem_error_as_unconfirmed_submission() {
+        assert_eq!(
+            AtModemManager::classify_sms_submit_response("0", true).unwrap(),
+            SmsSubmitOutcome::SubmittedUnconfirmed,
+        );
+    }
+
+    #[test]
+    fn requires_an_explicit_modem_error_to_fail_after_submission() {
+        let error =
+            AtModemManager::classify_sms_submit_response("+CMS ERROR: 500\r\n", false).unwrap_err();
+
+        assert!(error.to_string().contains("+CMS ERROR: 500"));
+    }
+
+    #[test]
+    fn does_not_treat_words_in_the_echo_as_final_result_codes() {
+        assert_eq!(
+            AtModemManager::classify_sms_submit_response("BOOK", true).unwrap(),
+            SmsSubmitOutcome::SubmittedUnconfirmed,
+        );
+        assert_eq!(
+            AtModemManager::classify_sms_submit_response("NO ERROR", true).unwrap(),
+            SmsSubmitOutcome::SubmittedUnconfirmed,
+        );
     }
 
     // An AT command is terminated by CR, so a CR inside the recipient ends the CMGS

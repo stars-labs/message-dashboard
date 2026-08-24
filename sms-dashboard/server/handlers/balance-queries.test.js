@@ -627,10 +627,26 @@ describe('balance reply correlation', () => {
 
   test('moves a queued check to awaiting_response after SMS success', async () => {
     const db = dbStub();
-    await updateBalanceCheckForSmsResult(db, 'msg-1', true);
+    await updateBalanceCheckForSmsResult(db, 'msg-1', 'confirmed');
 
     const update = db.calls.find((call) => call.operation === 'run');
     expect(update.params).toEqual(['awaiting_response', 1, 1, null, 'msg-1']);
+  });
+
+  test('keeps waiting after the modem submitted SMS without a final confirmation', async () => {
+    const db = dbStub();
+    await updateBalanceCheckForSmsResult(db, 'msg-1', 'submitted_unconfirmed');
+
+    const update = db.calls.find((call) => call.operation === 'run');
+    expect(update.params).toEqual(['awaiting_response', 1, 1, null, 'msg-1']);
+  });
+
+  test('fails a queued check only after an explicit SMS submission failure', async () => {
+    const db = dbStub();
+    await updateBalanceCheckForSmsResult(db, 'msg-1', 'failed', 'explicit modem error');
+
+    const update = db.calls.find((call) => call.operation === 'run');
+    expect(update.params).toEqual(['failed', 0, 0, 'explicit modem error', 'msg-1']);
   });
 
   test('queues only the allowlisted menu response as the next audited SMS', async () => {

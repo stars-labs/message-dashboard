@@ -5,7 +5,7 @@
 
 use crate::at_modem::AtModemManager;
 use crate::signal_cache::SignalCache;
-use crate::types::{Message, MessageWithPath, SignalData};
+use crate::types::{Message, MessageWithPath, SignalData, SmsSubmitOutcome};
 use anyhow::{anyhow, Result};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -678,7 +678,12 @@ impl ModemManager {
     }
 
     /// Send SMS
-    pub async fn send_sms(&self, modem_id: &str, recipient: &str, content: &str) -> Result<()> {
+    pub async fn send_sms(
+        &self,
+        modem_id: &str,
+        recipient: &str,
+        content: &str,
+    ) -> Result<SmsSubmitOutcome> {
         self.send_sms_with_short_code(modem_id, recipient, content, false)
             .await
     }
@@ -690,7 +695,7 @@ impl ModemManager {
         recipient: &str,
         content: &str,
         allow_short_code: bool,
-    ) -> Result<()> {
+    ) -> Result<SmsSubmitOutcome> {
         // Single choke point for outbound sends, so both backends get the same
         // guarantee. The AT backend interpolates these into serial command strings
         // where a CR is an injection (docs/SECURITY-REVIEW.md finding 3); the D-Bus
@@ -702,11 +707,12 @@ impl ModemManager {
         match self.mode {
             BackendMode::AtCommand => {
                 let port = self.get_port(modem_id).await;
-                self.at_modem
+                let outcome = self
+                    .at_modem
                     .send_sms_with_short_code(&port, recipient, content, allow_short_code)
                     .await?;
                 info!("Sent SMS via AT from modem {} to {}", modem_id, recipient);
-                Ok(())
+                Ok(outcome)
             }
             BackendMode::DBus => {
                 let client = self
@@ -719,7 +725,7 @@ impl ModemManager {
                         "Sent SMS via D-Bus from modem {} to {}",
                         modem_id, recipient
                     );
-                    Ok(())
+                    Ok(SmsSubmitOutcome::Confirmed)
                 } else {
                     Err(anyhow!("Native D-Bus not available for sending SMS"))
                 }

@@ -513,9 +513,10 @@ export async function queueBalanceFollowUp(
 export async function updateBalanceCheckForSmsResult(
   db,
   messageId,
-  success,
+  outcome,
   errorMessage = null,
 ) {
+  const submitted = outcome === 'confirmed' || outcome === 'submitted_unconfirmed';
   await db.prepare(`
     UPDATE sim_balance_checks
     SET status = ?,
@@ -528,10 +529,10 @@ export async function updateBalanceCheckForSmsResult(
     )
       AND status = 'queued'
   `).bind(
-    success ? 'awaiting_response' : 'failed',
-    success ? 1 : 0,
-    success ? 1 : 0,
-    success ? null : (errorMessage || 'SMS send failed'),
+    submitted ? 'awaiting_response' : 'failed',
+    submitted ? 1 : 0,
+    submitted ? 1 : 0,
+    submitted ? null : (errorMessage || 'SMS send failed'),
     messageId,
   ).run();
 }

@@ -1,5 +1,13 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SmsSubmitOutcome {
+    Confirmed,
+    SubmittedUnconfirmed,
+    Failed,
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub api_url: String,

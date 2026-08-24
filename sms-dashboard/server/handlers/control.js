@@ -872,7 +872,7 @@ export const controlHandler = {
     }
     
     try {
-      const { message_id, success, error_message, sms_id } = await request.json();
+      const { message_id, outcome, error_message, sms_id } = await request.json();
       
       if (!message_id) {
         return new Response(JSON.stringify({
@@ -883,9 +883,23 @@ export const controlHandler = {
           headers: { 'Content-Type': 'application/json' }
         });
       }
+
+      if (!['confirmed', 'submitted_unconfirmed', 'failed'].includes(outcome)) {
+        return new Response(JSON.stringify({
+          success: false,
+          error: 'outcome must be confirmed, submitted_unconfirmed, or failed'
+        }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
       
       // Update message status
-      const status = success ? 'sent' : 'failed';
+      const status = {
+        confirmed: 'sent',
+        submitted_unconfirmed: 'unknown',
+        failed: 'failed',
+      }[outcome];
       const stmt = env.DB.prepare(`
         UPDATE messages 
         SET status = ?, error_message = ?, sms_id = ?,
@@ -908,7 +922,7 @@ export const controlHandler = {
       await updateBalanceCheckForSmsResult(
         env.DB,
         message_id,
-        Boolean(success),
+        outcome,
         error_message || null,
       );
       

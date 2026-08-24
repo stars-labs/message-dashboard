@@ -1,3 +1,4 @@
+use crate::types::SmsSubmitOutcome;
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -22,7 +23,7 @@ fn default_sms_purpose() -> String {
 #[derive(Debug, Serialize)]
 struct SmsResult {
     message_id: String,
-    success: bool,
+    outcome: SmsSubmitOutcome,
     error_message: Option<String>,
 }
 
@@ -153,14 +154,18 @@ impl SmsSender {
     }
 
     /// Send an SMS message using ModemManager (AT commands or D-Bus)
-    pub async fn send_sms(&self, sms: &PendingSms) -> Result<()> {
+    pub async fn send_sms(&self, sms: &PendingSms) -> Result<SmsSubmitOutcome> {
         // Find the modem for this ICCID
         let modem_id = match self.find_modem_for_iccid(&sms.phone_iccid).await {
             Some(id) => id,
             None => {
                 error!("No modem found for ICCID: {}", sms.phone_iccid);
                 let _ = self
-                    .report_sms_result(&sms.id, false, Some("No modem found for ICCID"))
+                    .report_sms_result(
+                        &sms.id,
+                        SmsSubmitOutcome::Failed,
+                        Some("No modem found for ICCID"),
+                    )
                     .await;
                 return Err(anyhow!("ModemNotFound"));
             }
@@ -182,19 +187,31 @@ impl SmsSender {
             )
             .await
         {
-            Ok(_) => {
-                // Report success
-                self.report_sms_result(&sms.id, true, None).await?;
-                info!(
-                    "✅ SMS sent successfully to {} (Message ID: {})",
-                    sms.recipient, sms.id
-                );
-                Ok(())
+            Ok(outcome) => {
+                let detail = match outcome {
+                    SmsSubmitOutcome::SubmittedUnconfirmed => {
+                        Some("SMS body submitted; modem did not return a final confirmation")
+                    }
+                    _ => None,
+                };
+                self.report_sms_result(&sms.id, outcome, detail).await?;
+                match outcome {
+                    SmsSubmitOutcome::Confirmed => info!(
+                        "✅ SMS submission confirmed for {} (Message ID: {})",
+                        sms.recipient, sms.id
+                    ),
+                    SmsSubmitOutcome::SubmittedUnconfirmed => warn!(
+                        "⚠️ SMS submitted without final modem confirmation for {} (Message ID: {})",
+                        sms.recipient, sms.id
+                    ),
+                    SmsSubmitOutcome::Failed => unreachable!("failed submissions are errors"),
+                }
+                Ok(outcome)
             }
             Err(e) => {
                 let error_msg = format!("Failed to send SMS: {}", e);
                 error!("{}", error_msg);
-                self.report_sms_result(&sms.id, false, Some(&error_msg))
+                self.report_sms_result(&sms.id, SmsSubmitOutcome::Failed, Some(&error_msg))
                     .await?;
                 Err(anyhow!(error_msg))
             }
@@ -205,20 +222,20 @@ impl SmsSender {
     pub async fn report_sms_result(
         &self,
         message_id: &str,
-        success: bool,
+        outcome: SmsSubmitOutcome,
         error_message: Option<&str>,
     ) -> Result<()> {
         let url = format!("{}/api/control/sms-result", self.api_client.config.api_url);
 
         let result = SmsResult {
             message_id: message_id.to_string(),
-            success,
+            outcome,
             error_message: error_message.map(|s| s.to_string()),
         };
 
         debug!(
-            "📤 Reporting SMS result for {}: success={}",
-            message_id, success
+            "📤 Reporting SMS result for {}: outcome={:?}",
+            message_id, outcome
         );
 
         let client = reqwest::Client::new();
@@ -242,10 +259,15 @@ impl SmsSender {
             ));
         }
 
-        if success {
-            debug!("✅ Marked SMS {} as sent", message_id);
-        } else {
-            debug!("⚠️  Marked SMS {} as failed", message_id);
+        match outcome {
+            SmsSubmitOutcome::Confirmed => debug!("✅ Marked SMS {} as sent", message_id),
+            SmsSubmitOutcome::SubmittedUnconfirmed => {
+                debug!(
+                    "⚠️ Marked SMS {} as submitted without confirmation",
+                    message_id
+                )
+            }
+            SmsSubmitOutcome::Failed => debug!("⚠️ Marked SMS {} as failed", message_id),
         }
 
         Ok(())

@@ -467,7 +467,7 @@ follow an explicit account/balance option returned by `12580`.
   response or account interface; do not require manually maintained product data.
 - [ ] Obtain the current product-specific service-code reference.
 - [ ] Confirm whether My Account can manage all three SIMs.
-- [ ] Test the official `0` to `12580` SMS menu on one online CMHK SIM and retain
+- [x] Test the official `0` to `12580` SMS menu on one online CMHK SIM and retain
   the complete reply chain.
 - [ ] Test any product-specific dial command only when explicitly documented for
   that product.
@@ -478,20 +478,21 @@ follow an explicit account/balance option returned by `12580`.
 Sources: [CMHK prepaid service tutorial](https://www.hk.chinamobile.com/upload/onlineshop/2025-12-10/Prepaid-Purchasing-Value-Added-Services-Tutorial-EN.pdf),
 [CMHK Mobile Duck 2 package documentation](https://www.hk.chinamobile.com/upload/onlineshop/2026-06-05/mobile-duck-2-package-tc.pdf).
 
-#### CMHK SMS pilot evidence: S66 and S67 on 2026-08-14
+#### CMHK SMS pilot evidence: S66 on 2026-08-24
 
 - Added discovery-only profile `hk-cmhk-sms-menu-v1` from the official instruction
   to send `0` to `12580` to enter the free SMS service hall.
-- S66 (`+85246820057`) and S67 (`+85246708256`) were both active but registered
-  on `StarHub CMHK`, not the CMHK home network.
-- Both outbound attempts failed before submission with
-  `Failed to send SMS: Send SMS failed: 0`; neither created a cooldown or received
-  a carrier response. S66's modem 108 was also timing out during normal scans.
+- S66 successfully submitted `0` to `12580` while registered on `StarHub CMHK` and
+  received the official SMS service-hall menu. Roaming does not block this query.
+- The daemon initially reported `Failed to send SMS: Send SMS failed: 0`, but `0`
+  was the echoed message body and the carrier reply proved submission succeeded.
+- S67 remains untested; validate it only after the submission-confirmation fix is
+  deployed and S66 completes the full read-only balance menu.
 
-**Pilot conclusion:** the official SMS menu remains unvalidated because the CMHK
-short code could not be submitted while these cards were roaming on StarHub. Retry
-only after a CMHK SIM is registered on its home network; do not substitute a guessed
-keyword or internationalised form of the short code.
+**Pilot conclusion:** CMHK's official `0` to `12580` entry point works while roaming
+on StarHub. A post-submit modem timeout is an indeterminate confirmation, not a
+definite send failure; the balance workflow must keep waiting for the allowlisted
+carrier reply without putting the same message back in the send queue.
 
 ### 10. Confirm the technical design
 
@@ -633,6 +634,6 @@ Record confirmation outcomes here before implementation begins.
 | 2026-08-16 | 8. StarHub path review and pilot selection | Code and on-demand SMS closed; account validation pending | Production had 14 StarHub-labelled inventory records, 13 active and S89 offline. S82 was selected provisionally with 100% signal, recent stored messages, and no balance history. No USSD was sent because official terms retired `*123#` on 2024-06-30. No SMS was sent because no official prepaid cash-balance keyword exists; current terms promise only carrier-pushed low-balance/full-utilisation alerts, and `CHECK` to `78989` is DataTravel-only. Current prepaid balance lookup is through the StarHub App. Web My Account requires Hub iD plus password and OTP; actual multi-SIM linkage and prepaid cash-balance visibility still require an operator login. All active records reported `Singtel Singtel`, and sender-only history found `Singtel` messages on all 14 with no `StarHub` sender, so reconcile the manually imported carrier label before live carrier contact rather than calling the discrepancy roaming. |
 | 2026-08-21 | 8. StarHub final disposition | Manual-only; deferred | Browser My Account requires Hub iD, password, and mandatory OTP. Mobile-number-plus-OTP login is available only in the native StarHub App, not the browser. Without a suitable fleet-linked Hub iD, no StarHub Balance Agent browser profile should be implemented. Revisit only for an official business integration or a suitable linked account; skip StarHub for the current phase. |
 | 2026-08-13 | 9. CMHK procedure | Confirmed | Use only an officially discovered product-specific method; never treat `*#130#` as universal cash balance. Validation pending. |
-| 2026-08-14 | 9. CMHK SMS validation | Blocked by roaming short-code submission | Added discovery-only `0` -> `12580` from current official CMHK product documentation. S66 and S67 were both registered on `StarHub CMHK`; both sends failed before submission with daemon error `Send SMS failed: 0`, so no carrier menu was received and no cooldown was consumed. Retry only on the CMHK home network. |
+| 2026-08-24 | 9. CMHK SMS validation | Entry point confirmed on S66 | S66 submitted `0` -> `12580` while roaming on `StarHub CMHK` and received the official menu. The daemon's `Send SMS failed: 0` was a false failure caused by treating a post-submit confirmation timeout as rejection. S67 remains untested. |
 | 2026-08-13 | 10. Technical design | Confirmed | Versioned profiles, immutable audit records, typed metrics, strict correlation, modem serialization, command allowlist, and monthly scheduling approved. Implementation pending carrier validation. |
 | 2026-08-13 | 11. Staged rollout | Confirmed | One SIM, then up to five for seven days, then gradual verified-profile rollout with reconciliation and separate alerts. Execution pending. |
