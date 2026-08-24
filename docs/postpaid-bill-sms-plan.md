@@ -227,6 +227,12 @@ For a postpaid SIM that has received a bill SMS, the overview displays “Receiv
 SMS”. It must not show “balance unavailable” or apply the SGD prepaid threshold. A
 postpaid SIM without a matching notice shows “Waiting for bill SMS”.
 
+The overview's payment-action filter is carrier-neutral and labeled “Payment due”.
+It includes prepaid SIMs that need a recharge and postpaid receiving SIMs with an
+`unpaid` or `payment_planned` bill. The row keeps the specific action visible:
+prepaid rows show their recharge warning, while postpaid rows show the number of
+bills awaiting payment. Resolved bills do not keep a postpaid SIM in this filter.
+
 ## 9. Implemented migrations
 
 - `066_add_carrier_billing.sql`: carrier-neutral billing accounts, verified SIM
