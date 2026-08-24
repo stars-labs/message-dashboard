@@ -4,7 +4,10 @@ Status: the receiving-SIM auto-discovery design and migrations `066`–`069` wer
 deployed on 2026-08-24. Production evidence confirmed that only S79 received all
 nine retained Singtel bill notices. Historical reconciliation completed on
 2026-08-24: production has one S79 bill stream, nine billing cycles, zero
-`needs_review` records, and no bill stream for any other SIM.
+`needs_review` records, and no bill stream for any other SIM. After operator
+confirmation that the historical cycles had already been handled, the eight bills
+due before 2026-08-24 were reconciled to `paid` with immutable audit events. The
+2026-09-07 bill remains the only open cycle.
 
 ## 1. Outcome
 
@@ -269,7 +272,9 @@ digest, admin permission, and an idempotency key.
 The 2026-08-24 production execution created only the S79 receiving-SIM stream. Its
 nine bills cover due dates from 2026-01-07 through 2026-09-07; all parsed without a
 conflict, and none require review. Independent post-execution aggregation confirmed
-zero active bill streams for other SIMs.
+zero active bill streams for other SIMs. A subsequent operator-confirmed status
+reconciliation recorded the eight past-due historical cycles as paid, leaving zero
+overdue bills and one future unpaid cycle due on 2026-09-07.
 
 Required gates are `nix develop --command bun run test`,
 `nix develop --command bun run build`, migration validation against a fresh local
