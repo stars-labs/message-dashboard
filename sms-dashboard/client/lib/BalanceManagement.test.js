@@ -188,6 +188,35 @@ describe('balance management', () => {
     }
   });
 
+  test('loads received bill evidence when the SIM inventory arrives after mount', async () => {
+    const originalFetch = globalThis.fetch;
+    const linked = { ...phone, iccid: 'linked-sim', sim_index: 79, service_type: 'postpaid' };
+    globalThis.fetch = async (url) => {
+      const value = String(url);
+      if (value.includes('/api/balance-runners')) return Response.json({ success: true, capabilities: {} });
+      if (value.includes('/api/carrier-billing/accounts')) {
+        return Response.json({
+          success: true,
+          accounts: [{
+            id: 'account-1',
+            linked_sims: [{ iccid: 'linked-sim', sim_index: 79 }],
+          }],
+        });
+      }
+      throw new Error(`Unexpected request: ${value}`);
+    };
+    try {
+      const view = render(BalanceManagement, {
+        props: { phoneNumbers: [], balanceChecks: [] },
+      });
+      await view.rerender({ phoneNumbers: [linked], balanceChecks: [] });
+
+      await waitFor(() => expect(view.getAllByText('已收到过账单短信').length).toBeGreaterThan(0));
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('shows runner capability health from the control plane', async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async (url) => {

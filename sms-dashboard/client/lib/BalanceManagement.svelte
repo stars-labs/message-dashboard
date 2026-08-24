@@ -227,7 +227,7 @@
 
   onMount(() => {
     loadRunnerStatus();
-    if (phoneNumbers.some((phone) => phone.service_type === 'postpaid')) loadBillingAccounts();
+    loadBillingAccounts();
     const interval = setInterval(loadRunnerStatus, 30_000);
     return () => clearInterval(interval);
   });
