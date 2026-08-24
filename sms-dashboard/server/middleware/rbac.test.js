@@ -43,9 +43,10 @@ describe('requirePermission — admin/viewer matrix', () => {
 describe('requirePermission — viewer restrictions', () => {
   const viewer = () => req({ roles: ['viewer'] });
 
-  test('viewer can read messages, read phones and send', async () => {
+  test('viewer can read messages, phones, and bills and send messages', async () => {
     expect(await isAllowed(viewer(), 'messages.read')).toBe(true);
     expect(await isAllowed(viewer(), 'phones.read')).toBe(true);
+    expect(await isAllowed(viewer(), 'bills.read')).toBe(true);
     expect(await isAllowed(viewer(), 'messages.send')).toBe(true);
   });
 
@@ -59,6 +60,7 @@ describe('requirePermission — viewer restrictions', () => {
   test('viewer is denied every admin-only permission', async () => {
     for (const p of [
       'phones.write',
+      'bills.write',
       'keywords.read',
       'keywords.write',
       'keywords.delete',

@@ -56,9 +56,9 @@ describe('rolesFromToken', () => {
 });
 
 describe('permissionsForRoles', () => {
-  test('viewer gets exactly read messages, read phones, send', () => {
+  test('viewer gets read messages, phones, and bills plus message sending', () => {
     expect(permissionsForRoles(['viewer'], config).sort()).toEqual(
-      ['messages.read', 'messages.send', 'phones.read'].sort()
+      ['bills.read', 'messages.read', 'messages.send', 'phones.read'].sort()
     );
   });
 
@@ -101,6 +101,8 @@ describe('permission coverage', () => {
     'messages.read',
     'messages.send',
     'balances.query',
+    'bills.read',
+    'bills.write',
     'keywords.read',
     'keywords.write',
     'keywords.delete',
@@ -127,9 +129,16 @@ describe('permission coverage', () => {
     expect(permissionsForRoles(['viewer'], config)).not.toContain('balances.query');
   });
 
+  test('bills are readable by both roles and writable only by admin', () => {
+    expect(permissionsForRoles(['admin'], config)).toContain('bills.read');
+    expect(permissionsForRoles(['admin'], config)).toContain('bills.write');
+    expect(permissionsForRoles(['viewer'], config)).toContain('bills.read');
+    expect(permissionsForRoles(['viewer'], config)).not.toContain('bills.write');
+  });
+
   test('viewer cannot reach any write permission', () => {
     const viewerPerms = permissionsForRoles(['viewer'], config);
-    for (const p of ['balances.query', 'phones.write', 'keywords.write', 'keywords.delete', 'filters.write', 'filters.delete', 'users.read', 'users.write']) {
+    for (const p of ['balances.query', 'bills.write', 'phones.write', 'keywords.write', 'keywords.delete', 'filters.write', 'filters.delete', 'users.read', 'users.write']) {
       expect(viewerPerms).not.toContain(p);
     }
   });

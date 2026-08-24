@@ -28,11 +28,14 @@ const VIEWER = 'viewer';
  */
 export const ROLE_PERMISSIONS = {
   [VIEWER]: [
+    'bills.read',
     'messages.read',
     'messages.send',
     'phones.read',
   ],
   [ADMIN]: [
+    'bills.read',
+    'bills.write',
     'messages.read',
     'messages.send',
     'balances.query',

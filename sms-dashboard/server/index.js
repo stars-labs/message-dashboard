@@ -17,6 +17,7 @@ import {
   carrierWebBalanceHandler,
 } from './handlers/carrier-web-balance.js';
 import { balanceRunnersHandler } from './handlers/balance-runners.js';
+import { carrierBillsHandler } from './handlers/carrier-bills.js';
 import { serveFrontend } from './frontend-handler';
 import { createRoleConfig, hasAnyRole } from '../config/auth0-roles.js';
 import { setupKeywordRoutes } from './api/keywords.js';
@@ -208,6 +209,49 @@ router.get('/api/balance-checks', async (request, env, ctx) => {
   if (permResponse) return permResponse;
   return balanceQueriesHandler.list(request);
 });
+
+router.get('/api/carrier-billing/accounts', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  await enrichUserPermissions(request, env, ctx);
+  const permResponse = await requirePermission('bills.read')(request, env, ctx);
+  if (permResponse) return permResponse;
+  return carrierBillsHandler.listAccounts(request);
+});
+
+router.get('/api/carrier-bills', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  await enrichUserPermissions(request, env, ctx);
+  const permResponse = await requirePermission('bills.read')(request, env, ctx);
+  if (permResponse) return permResponse;
+  return carrierBillsHandler.list(request);
+});
+
+router.get('/api/carrier-bills/:id', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  await enrichUserPermissions(request, env, ctx);
+  const permResponse = await requirePermission('bills.read')(request, env, ctx);
+  if (permResponse) return permResponse;
+  return carrierBillsHandler.get(request);
+});
+
+for (const [path, action] of [
+  ['/api/carrier-bills/:id/payment-planned', 'paymentPlanned'],
+  ['/api/carrier-bills/:id/mark-paid', 'markPaid'],
+  ['/api/carrier-bills/:id/waive', 'waive'],
+  ['/api/carrier-bills/:id/reopen', 'reopen'],
+]) {
+  router.post(path, async (request, env, ctx) => {
+    const authResponse = await handleAuth0(request, env, ctx);
+    if (authResponse) return authResponse;
+    await enrichUserPermissions(request, env, ctx);
+    const permResponse = await requirePermission('bills.write')(request, env, ctx);
+    if (permResponse) return permResponse;
+    return carrierBillsHandler[action](request);
+  });
+}
 
 router.get('/api/balance-checks/query-preview', async (request, env, ctx) => {
   const authResponse = await handleAuth0(request, env, ctx);
