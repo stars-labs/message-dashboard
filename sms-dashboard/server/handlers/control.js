@@ -8,6 +8,7 @@ import {
   linkBalanceReply,
   updateBalanceCheckForSmsResult,
 } from './balance-queries.js';
+import { processCarrierBillMessages } from '../utils/carrier-billing.js';
 
 const IS_LEGACY_DAEMON_HEALTH_SQL = `(
   daemon_health.metadata IS NULL OR
@@ -575,17 +576,16 @@ export const controlHandler = {
       // Process new messages with AI and keywords (async, don't wait)
       if (newMessages.length > 0) {
         // Process messages in the background
-        request.ctx.waitUntil(
+        request.ctx.waitUntil(Promise.all([
           Promise.all(newMessages.map(async (msg) => {
             try {
-              // Process keywords first
               await processMessageKeywords(env.DB, msg);
-              
             } catch (error) {
               console.error(`Message processing error for message ${msg.id}:`, error);
             }
-          }))
-        );
+          })),
+          processCarrierBillMessages(env.DB, newMessages),
+        ]));
       }
       
       // Messages are now picked up by polling

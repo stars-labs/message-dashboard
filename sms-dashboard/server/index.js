@@ -24,6 +24,7 @@ import { setupFilterRoutes } from './api/filters.js';
 import { setupVerificationRoutes } from './api/verification.js';
 import { purgeExpiredMessages } from './utils/message-retention.js';
 import { sweepPending } from './utils/spam-backfill.js';
+import { reconcileCarrierBillMessages } from './utils/carrier-billing.js';
 import { readCookie } from './utils/session-token.js';
 
 // Simple router implementation without itty-router
@@ -651,6 +652,13 @@ export default {
       console.log(`[scheduled] web balance jobs: reconciled ${webJobs.reconciled}`);
     } catch (error) {
       console.error('[scheduled] web balance reconciliation failed:', error);
+    }
+
+    try {
+      const bills = await reconcileCarrierBillMessages(env.DB);
+      console.log(`[scheduled] carrier bills: scanned ${bills.scanned}, detected ${bills.detected}, remaining=${bills.remaining}`);
+    } catch (error) {
+      console.error('[scheduled] carrier bill reconciliation failed:', error);
     }
   }
 };
