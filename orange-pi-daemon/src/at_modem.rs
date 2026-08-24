@@ -435,14 +435,17 @@ impl AtModemManager {
         }
     }
 
-    fn recover_sms_input_sync(port: &str, timeout: Duration) -> Result<()> {
+    fn recover_sms_input_sync(port: &str, timeout: Duration) -> Result<String> {
         let mut file = Self::open_serial(port)?;
         file.write_all(&[0x1b])?;
         file.flush()?;
         std::thread::sleep(Duration::from_millis(100));
         drop(file);
 
-        let response = Self::send_at_sync(port, "AT", timeout)?;
+        Self::send_at_sync(port, "AT", timeout)
+    }
+
+    fn require_recovered_at_channel(response: &str) -> Result<()> {
         if response.contains("OK") {
             Ok(())
         } else {
@@ -453,7 +456,7 @@ impl AtModemManager {
         }
     }
 
-    async fn recover_sms_input_unlocked(&self, port: &str) -> Result<()> {
+    async fn recover_sms_input_unlocked(&self, port: &str) -> Result<String> {
         let port_path = port.to_string();
         let timeout = self.timeout;
         let handle =
@@ -1887,7 +1890,8 @@ impl AtModemManager {
         let _guard = port_lock.lock().await;
 
         for attempt in 1..=2 {
-            self.recover_sms_input_unlocked(port).await?;
+            let recovery_response = self.recover_sms_input_unlocked(port).await?;
+            Self::require_recovered_at_channel(&recovery_response)?;
             self.configure_sms_unlocked(port, use_ucs2).await?;
 
             let port_path = port.to_string();
@@ -1913,11 +1917,20 @@ impl AtModemManager {
                             "SMS submission was not confirmed on {}; recovering AT channel",
                             port
                         );
-                        if let Err(error) = self.recover_sms_input_unlocked(port).await {
-                            warn!(
+                        match self.recover_sms_input_unlocked(port).await {
+                            Ok(response) => {
+                                Self::classify_post_submit_recovery_response(&response)?;
+                                if let Err(error) = Self::require_recovered_at_channel(&response) {
+                                    warn!(
+                                        "Failed to recover AT channel after unconfirmed SMS submission on {}: {}",
+                                        port, error
+                                    );
+                                }
+                            }
+                            Err(error) => warn!(
                                 "Failed to recover AT channel after unconfirmed SMS submission on {}: {}",
                                 port, error
-                            );
+                            ),
                         }
                     }
                     return Ok(outcome);
@@ -1966,6 +1979,13 @@ impl AtModemManager {
 
     fn should_recover_after_submit(outcome: SmsSubmitOutcome) -> bool {
         matches!(outcome, SmsSubmitOutcome::SubmittedUnconfirmed)
+    }
+
+    fn classify_post_submit_recovery_response(response: &str) -> Result<()> {
+        if let Some(error) = Self::sms_submit_error_line(response) {
+            return Err(anyhow!("Send SMS failed after submission: {}", error));
+        }
+        Ok(())
     }
 
     fn send_sms_sync(
@@ -2080,9 +2100,7 @@ impl AtModemManager {
             .lines()
             .map(str::trim)
             .filter(|line| !line.is_empty());
-        if lines.clone().any(|line| {
-            line == "ERROR" || line.starts_with("+CMS ERROR:") || line.starts_with("+CME ERROR:")
-        }) {
+        if Self::sms_submit_error_line(response).is_some() {
             return Err(anyhow!("Send SMS failed: {}", response));
         }
         if lines
@@ -2098,12 +2116,16 @@ impl AtModemManager {
     }
 
     fn has_sms_submit_final_code(response: &str) -> bool {
-        response.lines().map(str::trim).any(|line| {
-            line == "OK"
-                || line == "ERROR"
-                || line.starts_with("+CMGS:")
-                || line.starts_with("+CMS ERROR:")
-                || line.starts_with("+CME ERROR:")
+        Self::sms_submit_error_line(response).is_some()
+            || response
+                .lines()
+                .map(str::trim)
+                .any(|line| line == "OK" || line.starts_with("+CMGS:"))
+    }
+
+    fn sms_submit_error_line(response: &str) -> Option<&str> {
+        response.lines().map(str::trim).find(|line| {
+            *line == "ERROR" || line.starts_with("+CMS ERROR:") || line.starts_with("+CME ERROR:")
         })
     }
 
@@ -2196,6 +2218,16 @@ mod tests {
         assert!(!AtModemManager::should_recover_after_submit(
             SmsSubmitOutcome::Failed
         ));
+    }
+
+    #[test]
+    fn turns_a_late_explicit_modem_error_into_a_failed_submission() {
+        let error = AtModemManager::classify_post_submit_recovery_response("+CMS ERROR: 350\r\n")
+            .unwrap_err();
+
+        assert!(error.to_string().contains("+CMS ERROR: 350"));
+        assert!(AtModemManager::classify_post_submit_recovery_response("AT\r\nOK\r\n").is_ok());
+        assert!(AtModemManager::classify_post_submit_recovery_response("NO ERROR").is_ok());
     }
 
     #[test]
