@@ -147,6 +147,11 @@ in
       requires = if cfg.useDBus then [ "ModemManager.service" ] else [];
       wantedBy = [ "multi-user.target" ];
 
+      # Limit repeated starts at the unit level. systemd ignores these keys in
+      # [Service], while NixOS renders these top-level options into [Unit].
+      startLimitIntervalSec = 300;
+      startLimitBurst = 5;
+
       environment = {
         SMS_API_URL = cfg.apiUrl;
         CHECK_INTERVAL_SECS = toString cfg.phoneUpdateIntervalSeconds;
@@ -180,8 +185,6 @@ in
           Restart = "always";
           RestartSec = "10s";
           # RestartPreventExitStatus = "1";  # Only prevent restart on config errors
-          StartLimitIntervalSec = "300";
-          StartLimitBurst = "5";
           # preStart waits up to max_wait=180s for USB enumeration to settle;
           # raise the start timeout above that so systemd doesn't abort it.
           TimeoutStartSec = "300s";
