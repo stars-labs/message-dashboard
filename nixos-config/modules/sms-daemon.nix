@@ -16,7 +16,7 @@ in
 
     apiUrl = mkOption {
       type = types.str;
-      default = "https://sexy.qzz.io";
+      default = "https://sexy.itoken.world";
       description = "API URL for the SMS dashboard server";
     };
 

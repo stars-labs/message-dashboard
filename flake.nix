@@ -93,7 +93,6 @@
                     # SWITCH TO RUST: Use the memory-safe Rust daemon
                     package = self.packages.aarch64-linux.orange-pi-daemon-rust;
                     apiKeyFile = config.sops.secrets."sms-dashboard/api-key".path;
-                    apiUrl = "https://sexy.qzz.io";
                     phoneUpdateIntervalSeconds = 1; # Upload every 1 second!
                     messageCheckIntervalMs = 1000; # Check every 1 second
                     signalCheckIntervalSeconds = 10; # Not used by Rust (syncs with phone status)
