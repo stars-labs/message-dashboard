@@ -1,4 +1,5 @@
 import { FRONTEND_ASSETS } from './frontend-assets.js';
+import { cacheControlFor } from './asset-cache-control.js';
 
 export function serveFrontend(request) {
   const url = new URL(request.url);
@@ -58,9 +59,7 @@ export function serveFrontend(request) {
   // Return the asset with appropriate headers
   const headers = {
     'Content-Type': asset.type,
-    'Cache-Control': pathname.includes('.') && !pathname.endsWith('.html') 
-      ? 'public, max-age=31536000, immutable' // Cache static assets for 1 year
-      : 'no-cache', // Don't cache HTML
+    'Cache-Control': cacheControlFor(pathname),
     'Access-Control-Allow-Origin': '*',
   };
   
