@@ -28,7 +28,16 @@
     onOpenBalance = null,
     /** Called with the message when a row is activated; opens the detail drawer. */
     onOpenMessage = null,
+    /** Whether the server has an older page that is not in `messages` yet. */
+    hasMore = false,
+    /** Loads the next server page after locally available rows are exhausted. */
+    onLoadMore = null,
+    loadingMore = false,
   } = $props();
+
+  const RENDER_BATCH_SIZE = 60;
+  let visibleCount = $state(RENDER_BATCH_SIZE);
+  let loadingNextBatch = $state(false);
 
   let activeKeywords = $state([]);
 
@@ -108,6 +117,28 @@
       return bTime - aTime;
     });
   });
+
+  let visibleItems = $derived(displayItems.slice(0, visibleCount));
+  let hasLocalItems = $derived(visibleCount < displayItems.length);
+  let canShowMore = $derived(hasLocalItems || hasMore);
+
+  async function showMoreRecords() {
+    if (loadingNextBatch || loadingMore) return;
+
+    if (hasLocalItems) {
+      visibleCount += RENDER_BATCH_SIZE;
+      return;
+    }
+
+    if (!hasMore || !onLoadMore) return;
+    loadingNextBatch = true;
+    try {
+      await onLoadMore();
+      visibleCount += RENDER_BATCH_SIZE;
+    } finally {
+      loadingNextBatch = false;
+    }
+  }
 
   // Count of messages that would appear if spam filter were lifted
   // (only meaningful in 'all' mode; in 'code' mode verified messages are never filtered).
@@ -311,7 +342,7 @@
       </div>
 
     {:else}
-      {#each displayItems as item, idx (item.id)}
+      {#each visibleItems as item, idx (item.id)}
         {#if item.kind === 'balance'}
           <BalanceConversationRow
             check={item.check}
@@ -337,31 +368,29 @@
         {@const cardNumber = message.display_phone_number || selectedPhone?.number || message.phone_iccid?.slice(-8) || '—'}
         {@const cardFlag = message.phone_country ? getCountryFlag(message.phone_country) : selectedPhone?.flag || ''}
 
-        <!-- ── Desktop row ──────────────────────────────────────────────── -->
-        <!-- div+role rather than <button> because the row contains a nested
-             <button> (the verification-code copy chip), and a button inside a
-             button is invalid HTML. The keydown handler provides equivalent
-             keyboard access. Same reasoning as PhoneList.svelte. -->
+        <!-- One responsive row tree. CSS-only desktop/mobile copies doubled every
+             message's DOM and keyword work even though one copy was hidden. -->
         <div
           role="button"
           tabindex="0"
           onclick={() => onOpenMessage?.(message)}
           onkeydown={(e) => e.key === 'Enter' && onOpenMessage?.(message)}
-          class="hidden lg:grid items-center px-3 py-2.5 border-b transition-colors duration-500
-            text-left cursor-pointer hover:bg-stone-50
+          data-message-row
+          data-message-layout="responsive"
+          class="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-2 p-3 border-b
+            transition-colors duration-500 text-left cursor-pointer
+            lg:grid-cols-[3px_250px_118px_minmax(0,1fr)_92px] lg:items-center lg:gap-x-4
+            lg:px-3 lg:py-2.5 lg:hover:bg-stone-50
             {isFiltered
               ? 'border-stone-100 opacity-60'
               : isNew
-                ? 'bg-[#fffbf5] border-stone-100'
-                : idx % 2 === 0 ? 'bg-white border-stone-50' : 'bg-[#fafaf9] border-stone-50'}"
-          style="grid-template-columns: 3px 250px 118px minmax(0, 1fr) 92px; gap: 0 16px;"
+                ? 'bg-[#fff7ed] border-[#fdba74] lg:bg-[#fffbf5] lg:border-stone-100'
+                : idx % 2 === 0 ? 'bg-white border-stone-100 lg:border-stone-50' : 'bg-white border-stone-100 lg:bg-[#fafaf9] lg:border-stone-50'}"
         >
-          <!-- Accent rail: orange for newest, transparent otherwise -->
-          <div class="self-stretch rounded-sm {isNew ? 'bg-orange-400' : 'bg-transparent'}"></div>
+          <div class="hidden lg:block self-stretch rounded-sm {isNew ? 'bg-orange-400' : 'bg-transparent'}"></div>
 
-          <!-- 对方号码 + 本机卡：一次扫视即可确认消息方向 -->
-          <div class="min-w-0 font-mono">
-            <div class="text-sm font-semibold text-stone-800 truncate" title={counterpartyNumber}>
+          <div class="col-start-2 row-start-1 min-w-0 font-mono lg:col-start-2">
+            <div class="text-sm font-semibold text-stone-600 lg:text-stone-800 truncate" title={counterpartyNumber}>
               {counterpartyNumber}
             </div>
             <div class="mt-0.5 flex items-center gap-1.5 text-[11px] text-stone-400 min-w-0">
@@ -374,34 +403,33 @@
             </div>
           </div>
 
-          <!-- 验证码: the headline element -->
-          {#if isSent}
-            <span
-              class="inline-flex w-fit items-center px-2 py-1 rounded-md border text-xs font-medium {sendStatus.className}"
-              title={sendStatus.title}
-              aria-label={`${sendStatus.label}：${sendStatus.title}`}
-            >{sendStatus.label}</span>
-          {:else if hasCode}
-            <!-- stopPropagation: the row opens the detail drawer, so without this
-                 a click on the code would copy AND open. Copying is the intent here. -->
-            <button
-              onclick={(e) => { e.stopPropagation(); handleCopy(message); }}
-              class="inline-flex items-center justify-center px-2.5 py-1 rounded-lg border
-                font-mono text-lg font-semibold tracking-widest tabular-nums cursor-pointer
-                transition-colors duration-200
-                {isCopied
-                  ? 'bg-emerald-50 border-emerald-300 text-emerald-700'
-                  : 'bg-[#fff7ed] border-[#fed7aa] text-stone-900 hover:border-orange-300 hover:bg-orange-50'}"
-              title={isCopied ? '已复制！' : '点击复制'}
-            >
-              {message.verification_code}
-            </button>
-          {:else}
-            <span class="text-xs text-stone-300 font-mono pl-1">无验证码</span>
-          {/if}
+          <div class="col-start-1 row-start-1 lg:col-start-3">
+            {#if isSent}
+              <span
+                class="inline-flex w-fit items-center px-2 py-1 rounded-md border text-xs font-medium {sendStatus.className}"
+                title={sendStatus.title}
+                aria-label={`${sendStatus.label}：${sendStatus.title}`}
+              >{sendStatus.label}</span>
+            {:else if hasCode}
+              <button
+                onclick={(e) => { e.stopPropagation(); handleCopy(message); }}
+                class="inline-flex items-center justify-center px-2 py-0.5 lg:px-2.5 lg:py-1 rounded-lg border
+                  font-mono text-base lg:text-lg font-semibold tracking-widest tabular-nums cursor-pointer
+                  transition-colors duration-200
+                  {isCopied
+                    ? 'bg-emerald-50 border-emerald-300 text-emerald-700'
+                    : 'bg-[#fff7ed] border-[#fed7aa] text-stone-900 hover:border-orange-300 hover:bg-orange-50'}"
+                title={isCopied ? '已复制！' : '点击复制'}
+              >
+                {message.verification_code}
+              </button>
+            {:else}
+              <span class="hidden lg:inline text-xs text-stone-300 font-mono pl-1">无验证码</span>
+            {/if}
+          </div>
 
-          <!-- 正文 -->
-          <div class="text-sm text-stone-600 leading-snug line-clamp-2 min-w-0">
+          <div class="col-span-3 row-start-2 mt-1.5 min-w-0 text-sm text-stone-600 leading-snug line-clamp-2
+            lg:col-span-1 lg:col-start-4 lg:row-start-1 lg:mt-0">
             {#if isFiltered}
               <span class="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-stone-100 text-stone-500 mr-1.5 font-medium">
                 已过滤{ruleLabels[message.filter_rule_id] ? `: ${ruleLabels[message.filter_rule_id]}` : ''}
@@ -410,81 +438,26 @@
             <MessageHighlight content={message.content} keywords={activeKeywords} />
           </div>
 
-          <!-- 时间 -->
-          <div class="font-mono text-xs text-stone-400 text-right tabular-nums">
+          <div class="col-start-3 row-start-1 font-mono text-xs text-stone-400 text-right tabular-nums lg:col-start-5">
             {formatTime(message.timestamp)}
           </div>
         </div>
-
-        <!-- ── Mobile card ────────────────────────────────────────────────── -->
-        <!-- div+role for the same reason as the desktop row: nested copy button. -->
-        <div
-          role="button"
-          tabindex="0"
-          onclick={() => onOpenMessage?.(message)}
-          onkeydown={(e) => e.key === 'Enter' && onOpenMessage?.(message)}
-          class="lg:hidden p-3 border-b transition-colors duration-500 text-left cursor-pointer
-            {isFiltered
-              ? 'border-stone-100 opacity-60'
-              : isNew
-                ? 'bg-[#fff7ed] border border-[#fdba74] rounded-xl shadow-focus mx-2 my-1.5'
-                : 'border-stone-100 bg-white'}"
-        >
-          <!-- Top row: code + sender + time -->
-          <div class="flex items-center gap-2">
-            {#if isSent}
-              <span
-                class="inline-flex items-center px-2 py-0.5 rounded-md border text-xs font-medium shrink-0 {sendStatus.className}"
-                title={sendStatus.title}
-                aria-label={`${sendStatus.label}：${sendStatus.title}`}
-              >{sendStatus.label}</span>
-            {:else if hasCode}
-              <button
-                onclick={(e) => { e.stopPropagation(); handleCopy(message); }}
-                class="font-mono text-base font-semibold tabular-nums px-2 py-0.5 rounded-md border
-                  transition-colors duration-200 shrink-0
-                  {isCopied
-                    ? 'bg-emerald-50 border-emerald-300 text-emerald-700'
-                    : isNew
-                      ? 'bg-[#fff7ed] border-[#fed7aa] text-stone-900'
-                      : 'bg-stone-50 border-stone-200 text-stone-800'}"
-              >
-                {message.verification_code}
-              </button>
-            {/if}
-            <span class="text-sm font-mono font-semibold text-stone-600 truncate">
-              {counterpartyNumber}
-            </span>
-            <span class="ml-auto font-mono text-xs text-stone-400 shrink-0">
-              {formatTime(message.timestamp)}
-            </span>
-          </div>
-
-          <!-- The local card stays with the counterparty, before the message body. -->
-          <div class="mt-1 flex items-center gap-1.5 font-mono text-[11px] text-stone-400 min-w-0">
-            <span class="text-stone-300 shrink-0">{directionLabel}</span>
-            {#if cardIndex != null}
-              <span class="font-semibold text-stone-500 tabular-nums shrink-0">{formatCardNumber(cardIndex)}</span>
-              <span class="text-stone-300 shrink-0">·</span>
-            {/if}
-            <span class="truncate">{cardFlag} {cardNumber}</span>
-          </div>
-
-          <!-- Body. Uses MessageHighlight like the desktop row does: rendering the
-               raw string here meant keyword highlighting silently did nothing on
-               mobile. Still clamped to two lines — the drawer shows the full text. -->
-          <p class="text-sm text-stone-600 leading-snug line-clamp-2 mt-1.5">
-            <MessageHighlight content={message.content} keywords={activeKeywords} />
-          </p>
-
-          {#if isFiltered}
-            <div class="mt-1.5">
-              <span class="px-1 py-0.5 rounded bg-stone-100 text-stone-400 text-[10px]">已过滤</span>
-            </div>
-          {/if}
-        </div>
         {/if}
       {/each}
+
+      {#if canShowMore}
+        <div class="flex justify-center px-4 py-3 border-t border-stone-100 bg-white">
+          <button
+            type="button"
+            onclick={showMoreRecords}
+            disabled={loadingNextBatch || loadingMore}
+            class="min-h-10 px-5 rounded-lg text-sm font-medium text-stone-600 bg-stone-100
+              hover:bg-stone-200 active:bg-stone-300 disabled:opacity-50"
+          >
+            {loadingNextBatch || loadingMore ? '正在加载…' : '显示更多记录'}
+          </button>
+        </div>
+      {/if}
 
       <!-- Pinned spam-reveal banner above the scroll area's bottom — shows
            only in 'all' mode when there are hidden messages and they aren't shown yet -->

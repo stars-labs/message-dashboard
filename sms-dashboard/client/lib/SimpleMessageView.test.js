@@ -1,12 +1,22 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/svelte';
 import SimpleMessageView from './SimpleMessageView.svelte';
 
 const originalFetch = globalThis.fetch;
+const originalMatchMedia = window.matchMedia;
+
+beforeEach(() => {
+  window.matchMedia = () => ({
+    matches: false,
+    addEventListener() {},
+    removeEventListener() {},
+  });
+});
 
 afterEach(() => {
   cleanup();
   globalThis.fetch = originalFetch;
+  window.matchMedia = originalMatchMedia;
 });
 
 describe('SimpleMessageView message direction', () => {
@@ -50,14 +60,76 @@ describe('SimpleMessageView message direction', () => {
     await fireEvent.click(view.getByRole('button', { name: '全部短信' }));
 
     await waitFor(() => {
-      expect(view.getAllByText('10010')).toHaveLength(2);
-      expect(view.getAllByText('发送')).toHaveLength(2);
-      expect(view.getAllByText('106807059301423')).toHaveLength(2);
-      expect(view.getAllByText('接收')).toHaveLength(2);
-      expect(view.getAllByText('发送失败')).toHaveLength(2);
+      expect(view.getAllByText('10010')).toHaveLength(1);
+      expect(view.getAllByText('发送')).toHaveLength(1);
+      expect(view.getAllByText('106807059301423')).toHaveLength(1);
+      expect(view.getAllByText('接收')).toHaveLength(1);
+      expect(view.getAllByText('发送失败')).toHaveLength(1);
     });
 
-    expect(view.getAllByLabelText('发送失败：+CMS ERROR: 350')).toHaveLength(2);
+    expect(view.getAllByLabelText('发送失败：+CMS ERROR: 350')).toHaveLength(1);
+  });
+});
+
+describe('SimpleMessageView render budget', () => {
+  test('creates only the first 60 message rows, then reveals the next batch', async () => {
+    globalThis.fetch = async () => Response.json({ keywords: [] });
+    const messages = Array.from({ length: 150 }, (_, index) => ({
+      id: `message-${index}`,
+      phone_number: `sender-${index}`,
+      content: `message body ${index}`,
+      timestamp: new Date(Date.UTC(2026, 7, 26, 0, 0, 150 - index)).toISOString(),
+      type: 'received',
+    }));
+
+    const view = render(SimpleMessageView, { props: { messages } });
+
+    expect(view.container.querySelectorAll('[data-message-row]')).toHaveLength(60);
+    await fireEvent.click(view.getByRole('button', { name: '显示更多记录' }));
+    expect(view.container.querySelectorAll('[data-message-row]')).toHaveLength(120);
+  });
+
+  test('renders one responsive row tree instead of separate mobile and desktop copies', () => {
+    globalThis.fetch = async () => Response.json({ keywords: [] });
+    const view = render(SimpleMessageView, {
+      props: {
+        messages: [{
+          id: 'only-one-tree',
+          phone_number: '10086',
+          content: 'hello',
+          timestamp: '2026-08-26T00:00:00.000Z',
+          type: 'received',
+        }],
+      },
+    });
+
+    const row = view.container.querySelector('[data-message-layout="responsive"]');
+    expect(row).toBeTruthy();
+    expect(view.container.querySelectorAll('[data-message-row]')).toHaveLength(1);
+    expect(row.className).toContain('grid-cols-[auto_minmax(0,1fr)_auto]');
+    expect(row.className).toContain('lg:grid-cols-[3px_250px_118px_minmax(0,1fr)_92px]');
+  });
+
+  test('requests the next server page after the local batch is exhausted', async () => {
+    globalThis.fetch = async () => Response.json({ keywords: [] });
+    let loads = 0;
+    const messages = Array.from({ length: 60 }, (_, index) => ({
+      id: `page-one-${index}`,
+      phone_number: `sender-${index}`,
+      content: `message ${index}`,
+      timestamp: new Date(Date.UTC(2026, 7, 26, 0, 0, 60 - index)).toISOString(),
+      type: 'received',
+    }));
+    const view = render(SimpleMessageView, {
+      props: {
+        messages,
+        hasMore: true,
+        onLoadMore: async () => { loads += 1; },
+      },
+    });
+
+    await fireEvent.click(view.getByRole('button', { name: '显示更多记录' }));
+    expect(loads).toBe(1);
   });
 });
 
@@ -79,8 +151,6 @@ describe('SimpleMessageView row activation', () => {
     type: 'received',
   };
 
-  // Both the desktop row and the mobile card render at once, so an activation
-  // helper has to reach a specific one rather than "the first button".
   function renderList(onOpenMessage) {
     globalThis.fetch = async () => Response.json({ keywords: [] });
     return render(SimpleMessageView, {

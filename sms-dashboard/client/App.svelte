@@ -26,6 +26,12 @@
   import { formatCardNumber } from "./lib/card-number.js";
   import { formatTimeAgo } from "./lib/time.js";
   import { getDaemonStatusMeta, isDaemonConnected } from "./lib/daemon-status.js";
+  import {
+    MESSAGE_PAGE_SIZE,
+    hasMoreMessages,
+    mergeMessagePage,
+    nextMessageOffset,
+  } from "./lib/message-page.js";
 
   let selectedPhoneIccid = $state(null);
   let selectedPhone = $state(null);
@@ -88,6 +94,8 @@
   let searchTerm = $state("");
   let showPhoneList = $state(false);
   let messages = $state([]);
+  let messageTotal = $state(0);
+  let loadingOlderMessages = $state(false);
   let balanceChecks = $state([]);
   let balanceDetailCheck = $state(null);
   // The message whose full body is open in the detail drawer, or null.
@@ -200,6 +208,7 @@
   let anomalyOffline     = $derived(phoneNumbers.filter(p => p.status === 'offline').length);
   let anomalyTotal       = $derived(phoneNumbers.filter(p => isAnomalous(p.status)).length);
   let daemonMeta         = $derived(getDaemonStatusMeta(daemonStatus.status));
+  let hasMoreMessagePages = $derived(hasMoreMessages(messageTotal, messages.length));
 
   // Permission gate. `user.permissions` comes from /api/auth/me, which derives it from
   // the caller's Auth0 roles. This is UX only — the server enforces the same rules on
@@ -268,7 +277,7 @@
               console.error('[App] Failed to fetch phones:', err);
               return { success: false, data: [] };
             }),
-          auth.authenticatedFetch("/api/messages?limit=2000")
+          auth.authenticatedFetch(`/api/messages?limit=${MESSAGE_PAGE_SIZE}`)
             .then(async (r) => {
               if (!r.ok) {
                 console.error('[App] Messages API response not ok:', r.status, r.statusText);
@@ -321,7 +330,8 @@
       
 
       if (messagesResponse && messagesResponse.success && Array.isArray(messagesResponse.data)) {
-        messages = messagesResponse.data;
+        messages = mergeMessagePage([], messagesResponse.data, { replace: true });
+        messageTotal = messagesResponse.pagination?.total ?? messages.length;
         // Set high-water mark so polls only flag messages newer than what we loaded
         const newest = messages.reduce((max, m) => {
           const t = m.timestamp ? new Date(m.timestamp).getTime() : 0;
@@ -339,6 +349,7 @@
         }
         
         messages = [];
+        messageTotal = 0;
       }
 
       balanceChecks = balanceResponse?.success && Array.isArray(balanceResponse.data)
@@ -366,6 +377,7 @@
       phoneNumbers = [];
       updateStatsFromPhones();
       messages = [];
+      messageTotal = 0;
       balanceChecks = [];
       stats = {
         totalMessages: 0,
@@ -419,13 +431,15 @@
     balanceDetailCheck = null;
     // Switching cards makes an open message from the previous card irrelevant.
     messageDetail = null;
+    messages = [];
+    messageTotal = 0;
     selectedPhoneIccid = phone?.iccid || null;
     handlePhoneSelection();
     showPhoneList = false;
   }
   
   // Load messages for a specific phone (race-condition safe)
-  async function loadMessagesForPhone(phoneIccid) {
+  async function loadMessagesForPhone(phoneIccid, { replace = true } = {}) {
     if (!user) return;
 
     const requestId = ++messageRequestId;
@@ -433,7 +447,8 @@
     try {
       const [response, nextBalanceChecks] = await Promise.all([
         api.getMessages({
-          ...(phoneIccid ? { phone_iccid: phoneIccid, limit: 500 } : { limit: 2000 }),
+          ...(phoneIccid ? { phone_iccid: phoneIccid } : {}),
+          limit: MESSAGE_PAGE_SIZE,
           ...(showFiltered ? { include_filtered: 1 } : {})
         }),
         api.getBalanceChecks({ limit: 500 }),
@@ -449,6 +464,7 @@
       }
 
       if (response && response.data) {
+        messageTotal = response.pagination?.total ?? response.data.length;
         // Detect genuinely new messages: must have a timestamp newer than anything we've seen
         if (lastKnownTimestamp && messages.length > 0) {
           const cutoff = new Date(lastKnownTimestamp).getTime();
@@ -475,12 +491,12 @@
           return t > max ? t : max;
         }, lastKnownTimestamp ? new Date(lastKnownTimestamp).getTime() : 0);
         if (newest > 0) lastKnownTimestamp = new Date(newest).toISOString();
-        // Only replace the message list when the response contains data.
-        // api.getMessages uses IndexedDB-backed incremental sync, so an empty
-        // response means "nothing new since last sync" — not "there are no messages".
-        // Replacing with [] in that case erases the data loadData() already loaded.
+        // Polls merge into loaded history and preserve it on an empty incremental
+        // response. Scope/filter changes replace the list, including with empty.
         if (response.data.length > 0) {
-          messages = response.data;
+          messages = mergeMessagePage(messages, response.data, { replace });
+        } else if (replace) {
+          messages = [];
         }
       }
     } catch (error) {
@@ -489,6 +505,30 @@
       // Do not clear messages on poll failure — keep whatever is already loaded.
       // Clearing on transient errors (e.g. network blip, wrangler restart) blanks
       // the UI even though the previous data is still valid.
+    }
+  }
+
+  async function loadOlderMessages() {
+    if (!user || loadingOlderMessages || !hasMoreMessagePages) return;
+
+    loadingOlderMessages = true;
+    try {
+      const response = await api.getMessages({
+        ...(selectedPhoneIccid ? { phone_iccid: selectedPhoneIccid } : {}),
+        ...(showFiltered ? { include_filtered: 1 } : {}),
+        limit: MESSAGE_PAGE_SIZE,
+        offset: nextMessageOffset(messages),
+        force_refresh: true,
+      });
+
+      if (response?.data?.length) {
+        messages = mergeMessagePage(messages, response.data);
+      }
+      messageTotal = response?.pagination?.total ?? messageTotal;
+    } catch (error) {
+      console.error('[App] Failed to load older messages:', error);
+    } finally {
+      loadingOlderMessages = false;
     }
   }
 
@@ -633,7 +673,7 @@
       if (!user || !['dashboard', 'balances'].includes(currentView)) return;
       try {
         // Poll messages for current view
-        await loadMessagesForPhone(selectedPhoneIccid);
+        await loadMessagesForPhone(selectedPhoneIccid, { replace: false });
         // Also refresh device status + stats
         await checkDaemonStatus();
       } catch (e) {
@@ -1074,6 +1114,9 @@
                 {balanceChecks}
                 onOpenBalance={(check) => balanceDetailCheck = check}
                 onOpenMessage={(message) => messageDetail = message}
+                hasMore={hasMoreMessagePages}
+                onLoadMore={loadOlderMessages}
+                loadingMore={loadingOlderMessages}
               />
             </div>
             {#if selectedPhone}
