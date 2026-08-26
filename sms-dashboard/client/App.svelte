@@ -15,6 +15,7 @@
   import BalanceQueryDetail from './lib/BalanceQueryDetail.svelte';
   import MessageDetail from './lib/MessageDetail.svelte';
   import BalanceManagement from './lib/BalanceManagement.svelte';
+  import PullToRefresh from './lib/PullToRefresh.svelte';
   import { keywords as keywordsStore } from "./lib/tag-store.js";
   import { api } from "./lib/api.js";
   import { getPhoneFlag, mapStatsResponse } from "./lib/countries.js";
@@ -130,6 +131,21 @@
   let lastKnownTimestamp = $state(null); // Only flag messages newer than this as "新"
   let daemonRefreshing = $state(false);
   let showDaemonDetails = $state(false);
+
+  // Pull-to-refresh reuses loadData() rather than reloading the page: it refetches
+  // phones, messages, stats and balance checks, and only ever sets dataLoading to
+  // false, so re-running it updates in place without flashing the skeleton.
+  let pullRefreshing = $state(false);
+
+  async function handlePullRefresh() {
+    if (pullRefreshing) return;
+    pullRefreshing = true;
+    try {
+      await loadData();
+    } finally {
+      pullRefreshing = false;
+    }
+  }
 
   function showToast(message, type = 'info', duration = 4000) {
     const id = Date.now();
@@ -794,6 +810,10 @@
     </header>
     <!-- Content below header fills remaining height on desktop.
          pb-[74px] on mobile gives space for the fixed bottom tab bar. -->
+    <!-- Pull-to-refresh wraps the whole content area so every mobile view gets it.
+         Standalone (home-screen) launches hide Safari's own pull-to-refresh, so the
+         gesture has to come from the app. Desktop binds no listeners. -->
+    <PullToRefresh onRefresh={handlePullRefresh}>
     <div class="pb-[74px] lg:pb-0 lg:flex-1 lg:min-h-0 lg:flex lg:flex-col lg:overflow-hidden">
 
     <!-- Daemon offline / error banner (§9 error state).
@@ -1143,6 +1163,7 @@
       </ErrorBoundary>
     {/if}
     </div><!-- end content wrapper -->
+    </PullToRefresh>
 
     <!-- ── Send drawer (<1600px, desktop only) ──────────────────────────── -->
     {#if showSendDrawer && can('messages.send')}
