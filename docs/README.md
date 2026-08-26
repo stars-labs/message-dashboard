@@ -210,6 +210,9 @@ bunx wrangler d1 execute sms-dashboard --remote --file=migrations/rollback-to-ph
 
 ## Orange Pi NixOS Deployment
 
+> **⚠️ OLD IP** — `10.171.150.102` below is the pre-relocation office address,
+> pending change (noted 2026-08-26). Source of truth: `docs/deployment.md#orange-pi-daemon`.
+
 Deploy the SMS dashboard daemon to your Orange Pi 5 Plus:
 
 ```bash

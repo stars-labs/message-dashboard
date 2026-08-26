@@ -21,6 +21,13 @@ bun run deploy
 
 ## Orange Pi Daemon
 
+> **⚠️ OLD / TRANSIENT IP** — `10.171.150.102` and the `10.171.150.0/24` subnet
+> are the pre-relocation office address (noted 2026-08-26). They will change
+> within weeks; new subnet TBD. This file is the **single source of truth** for
+> the Orange Pi host — when the new IP lands, update it here and grep-replace
+> the derived command examples in `README.md`, `docs/README.md`, and
+> `docs/INVENTORY-README.md`.
+
 Target: `root@10.171.150.102` (office LAN, NixOS aarch64).
 
 - **Office network**: SSH works directly — test with `ping -c2 10.171.150.102` first.

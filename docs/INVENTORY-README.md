@@ -193,6 +193,9 @@ Identify modems by **IMEI**. Locate them by **usb_path**. Never rely on `modem_i
 
 ## Updating the Inventory
 
+> **⚠️ OLD IP** — `10.171.150.102` below is the pre-relocation office address,
+> pending change (noted 2026-08-26). Source of truth: `docs/deployment.md#orange-pi-daemon`.
+
 ```bash
 # 1. Topology snapshot
 ssh root@10.171.150.102 "lsusb -t" > docs/usb-topology-$(date +%Y-%m-%d).txt

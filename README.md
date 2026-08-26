@@ -269,6 +269,9 @@ At the **observed** yield of ~11 modems per cable (not the theoretical 20), reac
 
 ### Migration Steps
 
+> **⚠️ OLD IP** — `10.171.150.102` below is the pre-relocation office address,
+> pending change (noted 2026-08-26). Source of truth: `docs/deployment.md#orange-pi-daemon`.
+
 **Pre-check**:
 ```bash
 # Bus 001 address usage (limit = 127)
