@@ -2,7 +2,7 @@ import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { nanoid } from 'nanoid';
 import { createRoleConfig, hasAnyRole, isEmailAllowed, rolesFromToken } from '../../config/auth0-roles.js';
 import { extractSessionToken } from '../utils/session-token.js';
-import { setUserRole } from '../utils/auth0-management.js';
+import { getUserRoles, setUserRole } from '../utils/auth0-management.js';
 import { indexSession, unindexSession } from '../utils/user-sessions.js';
 
 export async function resolveLoginRoles({ userInfo, tokens, env, verifyToken }) {
@@ -20,6 +20,40 @@ export async function resolveLoginRoles({ userInfo, tokens, env, verifyToken }) 
   }
 
   return roles;
+}
+
+/**
+ * Reconcile a login token with Auth0 before provisioning the default viewer role.
+ *
+ * A missing custom claim does not prove that the user has no roles. Treating it as
+ * proof previously let an Action/namespace failure demote an existing administrator:
+ * setUserRole(viewer) removes the configured admin role. Auth0's Management API is the
+ * source of truth whenever the signed login token carries no recognised Dashboard role.
+ */
+export async function ensureDashboardLoginRole({
+  tokenRoles,
+  userId,
+  env,
+  getUserRoles: loadUserRoles = getUserRoles,
+  setUserRole: assignUserRole = setUserRole,
+}) {
+  const roleConfig = createRoleConfig(env);
+  const rolesFromLogin = Array.isArray(tokenRoles) ? tokenRoles : [];
+
+  if (hasAnyRole(rolesFromLogin, roleConfig)) {
+    return { roles: rolesFromLogin, autoAssignedRole: null };
+  }
+
+  const assignedRoles = await loadUserRoles(env, userId);
+  if (hasAnyRole(assignedRoles, roleConfig)) {
+    return { roles: assignedRoles, autoAssignedRole: null };
+  }
+
+  await assignUserRole(env, userId, roleConfig.VIEWER_ROLE);
+  return {
+    roles: [...new Set([...assignedRoles, roleConfig.VIEWER_ROLE])],
+    autoAssignedRole: roleConfig.VIEWER_ROLE,
+  };
 }
 
 export const auth0Handler = {
@@ -127,7 +161,7 @@ export const auth0Handler = {
       // WITHOUT verifying its signature and trusted the roles it found there. Those
       // roles are persisted into the KV session below, so they are a real
       // authorization input. See docs/SECURITY-REVIEW.md finding 5.
-      let userRoles = await resolveLoginRoles({
+      const userRoles = await resolveLoginRoles({
         userInfo,
         tokens,
         env,
@@ -173,7 +207,10 @@ export const auth0Handler = {
         return new Response(`Access denied: ${emailCheck.reason}`, { status: 403 });
       }
 
-      // First-time users are provisioned as `viewer`.
+      // First-time users are provisioned as `viewer`, but only after Auth0 confirms
+      // that no known Dashboard role is already assigned. A missing token claim can
+      // mean the Post-Login Action or namespace is broken; it must never demote an
+      // existing administrator.
       //
       // Deliberately AFTER the verified-email and allowed-domain checks above, so this
       // can only ever fire for someone already entitled to access, and deliberately
@@ -181,29 +218,32 @@ export const auth0Handler = {
       // admin. The app still requires an *explicit* role afterwards, so the gate below
       // stays fail-closed; "default viewer" is a real Auth0 role assignment, not the
       // absence of one. See docs/SECURITY-REVIEW.md finding 1.
-      if (!hasAnyRole(user.roles, roleConfig)) {
-        try {
-          await setUserRole(env, user.id, roleConfig.VIEWER_ROLE);
-          user.roles = [roleConfig.VIEWER_ROLE];
-          userRoles = user.roles;
+      try {
+        const roleResolution = await ensureDashboardLoginRole({
+          tokenRoles: user.roles,
+          userId: user.id,
+          env,
+        });
+        user.roles = roleResolution.roles;
 
+        if (roleResolution.autoAssignedRole) {
           await env.DB.prepare(`
             INSERT INTO audit_logs (action, resource_type, resource_id, user_email, details, timestamp)
             VALUES ('role_autoassigned', 'user', ?, ?, ?, datetime('now'))
           `).bind(
             user.id,
             user.email || null,
-            JSON.stringify({ role: roleConfig.VIEWER_ROLE, domain: emailCheck.domain })
+            JSON.stringify({ role: roleResolution.autoAssignedRole, domain: emailCheck.domain })
           ).run();
-        } catch (provisionError) {
-          // Deny rather than continue role-less: failing open here would hand access to
-          // anyone whose provisioning call happened to error.
-          console.error('Viewer auto-provision failed:', provisionError);
-          return Response.redirect(
-            new URL('/login?error=provisioning_failed', url.origin).toString(),
-            302
-          );
         }
+      } catch (provisionError) {
+        // Deny rather than infer anything from a missing claim. This covers both the
+        // authoritative role lookup and a genuine first-user viewer assignment.
+        console.error('Login role reconciliation failed:', provisionError);
+        return Response.redirect(
+          new URL('/login?error=provisioning_failed', url.origin).toString(),
+          302
+        );
       }
 
       // Role gate. Uses the shared helper rather than a third copy of this logic, and

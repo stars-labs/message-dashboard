@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { auth0Handler, resolveLoginRoles } from './auth0.js';
+import { auth0Handler, ensureDashboardLoginRole, resolveLoginRoles } from './auth0.js';
 
 const realFetch = globalThis.fetch;
 
@@ -7,10 +7,10 @@ afterEach(() => {
   globalThis.fetch = realFetch;
 });
 
-const claim = 'https://sexy.qzz.io/roles';
+const claim = 'https://sexy.itoken.world/roles';
 const env = {
-  AUTH0_AUDIENCE: 'https://sexy.qzz.io/api',
-  AUTH0_LOGIN_AUDIENCE: 'https://sexy.qzz.io/login-api',
+  AUTH0_AUDIENCE: 'https://sexy.itoken.world/api',
+  AUTH0_LOGIN_AUDIENCE: 'https://sexy.itoken.world/login-api',
   AUTH0_CLIENT_ID: 'dashboard-client',
   AUTH0_ROLE_NAMESPACE: claim,
 };
@@ -63,11 +63,11 @@ describe('Auth0 login role token selection', () => {
 
   test('does not use the runner API audience for browser login', async () => {
     const response = await auth0Handler.login({
-      url: 'https://sexy.qzz.io/login',
+      url: 'https://sexy.itoken.world/login',
       env: {
         AUTH0_DOMAIN: 'tenant.example',
         AUTH0_CLIENT_ID: 'dashboard-client',
-        AUTH0_AUDIENCE: 'https://sexy.qzz.io/api',
+        AUTH0_AUDIENCE: 'https://sexy.itoken.world/api',
       },
     });
     const location = new URL(response.headers.get('location'));
@@ -108,12 +108,69 @@ describe('Auth0 login role token selection', () => {
     };
 
     const response = await auth0Handler.callback({
-      url: 'https://sexy.qzz.io/callback?code=authorization-code',
+      url: 'https://sexy.itoken.world/callback?code=authorization-code',
       env: callbackEnv,
     });
 
     expect(response.status).toBe(302);
-    expect(response.headers.get('location')).toBe('https://sexy.qzz.io/');
+    expect(response.headers.get('location')).toBe('https://sexy.itoken.world/');
     expect(sessionWrites).toHaveLength(2);
+  });
+});
+
+describe('Auth0 login role reconciliation', () => {
+  const roleEnv = {
+    AUTH0_ADMIN_ROLE: 'sms-admin',
+    AUTH0_VIEWER_ROLE: 'sms-viewer',
+  };
+
+  test('preserves an existing admin when the login token has no role claim', async () => {
+    const assignments = [];
+
+    const result = await ensureDashboardLoginRole({
+      tokenRoles: [],
+      userId: 'auth0|admin',
+      env: roleEnv,
+      getUserRoles: async () => ['balance-runner', 'sms-admin'],
+      setUserRole: async (...args) => assignments.push(args),
+    });
+
+    expect(result).toEqual({
+      roles: ['balance-runner', 'sms-admin'],
+      autoAssignedRole: null,
+    });
+    expect(assignments).toEqual([]);
+  });
+
+  test('auto-assigns viewer only after Auth0 confirms no dashboard role', async () => {
+    const assignments = [];
+
+    const result = await ensureDashboardLoginRole({
+      tokenRoles: [],
+      userId: 'auth0|new-user',
+      env: roleEnv,
+      getUserRoles: async () => ['balance-runner'],
+      setUserRole: async (...args) => assignments.push(args),
+    });
+
+    expect(result).toEqual({
+      roles: ['balance-runner', 'sms-viewer'],
+      autoAssignedRole: 'sms-viewer',
+    });
+    expect(assignments).toEqual([[roleEnv, 'auth0|new-user', 'sms-viewer']]);
+  });
+
+  test('fails closed without changing roles when the Management API lookup fails', async () => {
+    const assignments = [];
+
+    await expect(ensureDashboardLoginRole({
+      tokenRoles: [],
+      userId: 'auth0|admin',
+      env: roleEnv,
+      getUserRoles: async () => { throw new Error('management unavailable'); },
+      setUserRole: async (...args) => assignments.push(args),
+    })).rejects.toThrow('management unavailable');
+
+    expect(assignments).toEqual([]);
   });
 });
