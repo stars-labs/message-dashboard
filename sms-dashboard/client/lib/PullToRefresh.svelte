@@ -8,16 +8,15 @@
    * here. The W3C handing `overscroll-behavior` to authors reflects the same
    * division of responsibility.
    *
-   * Deliberately NOT branched on standalone mode. `navigator.standalone` is a
-   * private iOS API and the `display-mode` media query has been buggy on iOS, so
-   * keying the feature off either would stake it on an unreliable check. Running the
-   * same gesture in both modes costs nothing and removes a failure mode.
+   * Regular Safari already owns pull-to-refresh. Registering a second gesture there
+   * makes WebKit arbitrate touches between the page and browser chrome, so this
+   * implementation is restricted to installed/standalone web apps.
    */
   import { onMount } from 'svelte';
   import {
-    MAX_PULL,
     THRESHOLD,
     createPullState,
+    onCancel,
     onEnd,
     onMove,
     onStart,
@@ -28,15 +27,27 @@
   let container = $state(null);
   let pull = $state(0);
   let refreshing = $state(false);
-  let armed = $state(false);
 
   const gesture = createPullState();
+  const passive = { passive: true };
+  const nonPassive = { passive: false };
+  let moveListening = false;
 
   // Matches the app's `lg:` breakpoint: desktop has real browser chrome and its own
   // refresh affordances, so no listeners are attached there at all.
   const isDesktop = () =>
     typeof window !== 'undefined'
       && window.matchMedia('(min-width: 1024px)').matches;
+
+  function isStandalone() {
+    if (typeof window === 'undefined' || typeof navigator === 'undefined') return false;
+
+    // On iOS this property is the source of truth. Do not OR it with the media
+    // query: WebKit has reported incorrect display-mode matches in Safari tabs.
+    if ('standalone' in navigator) return navigator.standalone === true;
+
+    return window.matchMedia('(display-mode: standalone)').matches;
+  }
 
   /**
    * Find whichever element actually scrolls under the touch.
@@ -63,7 +74,7 @@
     if (disabled || refreshing || event.touches.length !== 1) return;
     const touch = event.touches[0];
     onStart(gesture, touch.clientY, scrollTopAt(event.target), touch.clientX);
-    armed = gesture.active;
+    if (gesture.active) addMoveListener();
   }
 
   function handleTouchMove(event) {
@@ -77,10 +88,10 @@
     if (next > 0 && event.cancelable) event.preventDefault();
 
     pull = next;
-    armed = gesture.active;
   }
 
   async function handleTouchEnd() {
+    removeMoveListener();
     if (!gesture.active) {
       pull = gesture.pull;
       return;
@@ -88,7 +99,6 @@
 
     const result = onEnd(gesture);
     pull = gesture.pull;
-    armed = false;
 
     if (result !== 'refresh') return;
 
@@ -103,22 +113,38 @@
     }
   }
 
-  onMount(() => {
-    if (isDesktop() || !container) return;
+  function handleTouchCancel() {
+    removeMoveListener();
+    onCancel(gesture);
+    pull = gesture.pull;
+  }
 
-    // touchmove must be non-passive: it conditionally calls preventDefault to claim
-    // the gesture. The other two only read coordinates.
-    const opts = { passive: true };
-    container.addEventListener('touchstart', handleTouchStart, opts);
-    container.addEventListener('touchmove', handleTouchMove, { passive: false });
-    container.addEventListener('touchend', handleTouchEnd, opts);
-    container.addEventListener('touchcancel', handleTouchEnd, opts);
+  function addMoveListener() {
+    if (moveListening || !container) return;
+    container.addEventListener('touchmove', handleTouchMove, nonPassive);
+    moveListening = true;
+  }
+
+  function removeMoveListener() {
+    if (!moveListening || !container) return;
+    container.removeEventListener('touchmove', handleTouchMove, nonPassive);
+    moveListening = false;
+  }
+
+  onMount(() => {
+    if (isDesktop() || !isStandalone() || !container) return;
+
+    // Keep the large content region out of WebKit's permanent non-passive touch
+    // region. The move listener exists only for a gesture that started at the top.
+    container.addEventListener('touchstart', handleTouchStart, passive);
+    container.addEventListener('touchend', handleTouchEnd, passive);
+    container.addEventListener('touchcancel', handleTouchCancel, passive);
 
     return () => {
-      container.removeEventListener('touchstart', handleTouchStart, opts);
-      container.removeEventListener('touchmove', handleTouchMove, { passive: false });
-      container.removeEventListener('touchend', handleTouchEnd, opts);
-      container.removeEventListener('touchcancel', handleTouchEnd, opts);
+      removeMoveListener();
+      container.removeEventListener('touchstart', handleTouchStart, passive);
+      container.removeEventListener('touchend', handleTouchEnd, passive);
+      container.removeEventListener('touchcancel', handleTouchCancel, passive);
     };
   });
 
@@ -130,39 +156,33 @@
   const rotation = $derived(Math.min(pull / THRESHOLD, 1) * 180);
 </script>
 
-<!-- lg:hidden on the indicator only: the wrapper must not change desktop layout,
-     and no listeners are bound there anyway.
-
-     `contents` keeps this wrapper out of the layout entirely, so inserting it around
-     the content area cannot disturb the existing flex chain. The consequence is that
-     the indicator becomes a flex item of whatever ancestor flex container is next up
-     (App.svelte's `lg:flex lg:flex-col` root), where the default flex-shrink:1 would
-     collapse its height to 0 against the tall sibling — hence `shrink-0` below. -->
-<div bind:this={container} class="contents">
+<!-- The mobile listener host must generate a box. iOS WebKit uses rendered hit-test
+     regions to decide whether a touch sequence has a non-passive move listener; a
+     boxless `display: contents` host lets WebKit commit the gesture to scrolling
+     before preventDefault() can claim it. Desktop has no listeners, so `lg:contents`
+     preserves the existing flex layout there. -->
+<div bind:this={container} class="relative block lg:contents" data-pull-to-refresh-root>
   <div
-    class="lg:hidden relative shrink-0 overflow-hidden transition-[height] duration-200 ease-out"
-    style="height: {pull}px;"
+    class="lg:hidden pointer-events-none absolute inset-x-0 top-0 h-16 z-20
+      flex items-center justify-center gap-2 pb-2 text-stone-500 will-change-transform"
+    style="transform: translate3d(0, {pull - THRESHOLD}px, 0);
+      opacity: {Math.min(pull / THRESHOLD, 1)};"
     aria-hidden={pull === 0}
+    data-pull-to-refresh-indicator
   >
-    <div
-      class="absolute inset-x-0 bottom-0 flex items-center justify-center gap-2 pb-2
-        text-stone-500"
-      style="opacity: {Math.min(pull / THRESHOLD, 1)};"
-    >
-      {#if refreshing}
-        <svg class="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2.5"
-            stroke-linecap="round" stroke-dasharray="42" stroke-dashoffset="14" />
-        </svg>
-      {:else}
-        <svg class="w-4 h-4 transition-transform duration-100" viewBox="0 0 24 24"
-          fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"
-          style="transform: rotate({rotation}deg);">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M12 5v14M5 12l7 7 7-7" />
-        </svg>
-      {/if}
-      <span class="text-xs font-medium">{label}</span>
-    </div>
+    {#if refreshing}
+      <svg class="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2.5"
+          stroke-linecap="round" stroke-dasharray="42" stroke-dashoffset="14" />
+      </svg>
+    {:else}
+      <svg class="w-4 h-4" viewBox="0 0 24 24"
+        fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"
+        style="transform: rotate({rotation}deg);">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 5v14M5 12l7 7 7-7" />
+      </svg>
+    {/if}
+    <span class="text-xs font-medium">{label}</span>
   </div>
 
   <!-- Live region so the refresh is announced rather than being a purely visual

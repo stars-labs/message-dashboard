@@ -4,6 +4,7 @@ import {
   THRESHOLD,
   createPullState,
   damp,
+  onCancel,
   onEnd,
   onMove,
   onStart,
@@ -38,6 +39,15 @@ describe('activation', () => {
     state.refreshing = true;
     onStart(state, 100, 0);
     expect(state.active).toBe(false);
+  });
+
+  test('ignores small vertical movement so finger jitter remains a tap', () => {
+    const state = createPullState();
+    onStart(state, 100, 0);
+
+    expect(onMove(state, 104, 0)).toBe(0);
+    expect(state.active).toBe(true);
+    expect(onMove(state, 120, 0)).toBeGreaterThan(0);
   });
 });
 
@@ -142,6 +152,19 @@ describe('direction', () => {
 });
 
 describe('reset', () => {
+  test('an OS-cancelled gesture resets without entering refresh state', () => {
+    const state = createPullState();
+    onStart(state, 100, 0);
+    onMove(state, 400, 100);
+
+    onCancel(state);
+
+    expect(state.active).toBe(false);
+    expect(state.cancelled).toBe(false);
+    expect(state.refreshing).toBe(false);
+    expect(state.pull).toBe(0);
+  });
+
   test('a completed refresh can be followed by another gesture', () => {
     const state = createPullState();
     onStart(state, 100, 0);

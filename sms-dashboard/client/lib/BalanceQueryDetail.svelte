@@ -41,7 +41,7 @@
 </script>
 
 {#if check}
-  <div class="fixed inset-x-0 top-0 bottom-[73px] lg:inset-0 z-50 lg:flex lg:justify-end">
+  <div class="fixed inset-x-0 top-0 bottom-[var(--mobile-tab-bar-height)] lg:inset-0 z-50 lg:flex lg:justify-end">
     <button
       type="button"
       onclick={() => onClose?.()}

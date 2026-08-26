@@ -90,7 +90,9 @@ describe('MessageDetail', () => {
   // the drawer's own controls.
   test('leaves room for the mobile tab bar', () => {
     const { container } = render(MessageDetail, { props: { message: received() } });
-    expect(container.querySelector('.bottom-\\[73px\\]')).toBeTruthy();
+    expect(
+      container.querySelector('.bottom-\\[var\\(--mobile-tab-bar-height\\)\\]'),
+    ).toBeTruthy();
   });
 
   test('names the rule that filtered a hidden message', () => {

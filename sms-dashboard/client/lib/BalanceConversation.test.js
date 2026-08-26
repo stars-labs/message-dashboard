@@ -81,7 +81,9 @@ describe('balance query conversation', () => {
     expect(getByText('1.话费与AI豆')).toBeTruthy();
     expect(getByText('尊敬的客户，账户余额82.36元。')).toBeTruthy();
     expect(getByText('账户余额')).toBeTruthy();
-    expect(container.querySelector('.bottom-\\[73px\\]')).toBeTruthy();
+    expect(
+      container.querySelector('.bottom-\\[var\\(--mobile-tab-bar-height\\)\\]'),
+    ).toBeTruthy();
 
     await fireEvent.click(getAllByRole('button', { name: '关闭' })[0]);
     expect(closed).toBe(true);

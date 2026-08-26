@@ -3,6 +3,13 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    /* One source of truth for every surface that sits above the mobile tabs.
+       Keep a 20px floor for Safari layouts where the safe-area env value is 0. */
+    --mobile-tab-safe-area: max(20px, env(safe-area-inset-bottom, 0px));
+    --mobile-tab-bar-height: calc(53px + var(--mobile-tab-safe-area));
+  }
+
   body {
     @apply bg-[#F7F5F2] min-h-screen text-stone-900 antialiased;
     font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;

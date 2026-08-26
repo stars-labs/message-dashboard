@@ -822,13 +822,13 @@
 
       </div>
     </header>
-    <!-- Content below header fills remaining height on desktop.
-         pb-[74px] on mobile gives space for the fixed bottom tab bar. -->
+    <!-- Content below header fills remaining height on desktop. The mobile padding
+         uses the same safe-area-aware height as the fixed bottom tab bar. -->
     <!-- Pull-to-refresh wraps the whole content area so every mobile view gets it.
          Standalone (home-screen) launches hide Safari's own pull-to-refresh, so the
          gesture has to come from the app. Desktop binds no listeners. -->
     <PullToRefresh onRefresh={handlePullRefresh}>
-    <div class="pb-[74px] lg:pb-0 lg:flex-1 lg:min-h-0 lg:flex lg:flex-col lg:overflow-hidden">
+    <div class="pb-[var(--mobile-tab-bar-height)] lg:pb-0 lg:flex-1 lg:min-h-0 lg:flex lg:flex-col lg:overflow-hidden">
 
     <!-- Daemon offline / error banner (§9 error state).
          "下面显示的是那时的数据" — reassures users the existing data is still visible.
@@ -992,12 +992,12 @@
               role="presentation"
             >
               <button
-                class="absolute inset-0 bottom-[74px] w-full bg-stone-900/35"
+                class="absolute inset-0 bottom-[var(--mobile-tab-bar-height)] w-full bg-stone-900/35"
                 onclick={() => (showPhoneList = false)}
                 aria-label="关闭接收卡选择"
               ></button>
               <div
-                class="absolute left-0 right-0 bottom-[74px] h-[min(68dvh,620px)] max-h-[calc(100dvh-126px)]
+                class="absolute left-0 right-0 bottom-[var(--mobile-tab-bar-height)] h-[min(68dvh,620px)] max-h-[calc(100dvh_-_52px_-_var(--mobile-tab-bar-height))]
                   bg-white rounded-t-2xl shadow-[0_-12px_36px_rgba(28,25,23,.2)] overflow-hidden
                   flex flex-col"
                 role="dialog"
@@ -1226,17 +1226,18 @@
     {/if}
 
     <!-- ── iOS bottom tab bar ────────────────────────────────────────────── -->
-    <!-- lg:hidden: desktop uses the top nav. pb-safe = env(safe-area-inset-bottom)
-         approximated as pb-5 for devices with home indicator. -->
+    <!-- lg:hidden: desktop uses the top nav. The safe-area padding keeps controls
+         clear of both Safari chrome and the home indicator. -->
     <nav class="lg:hidden fixed bottom-0 left-0 right-0 z-40
-      bg-white border-t border-stone-200 pb-5
-      flex items-stretch"
-      style="box-shadow: 0 -1px 0 rgba(28,25,23,.06);">
+      bg-white border-t border-stone-200
+      flex items-stretch touch-manipulation"
+      style="box-shadow: 0 -1px 0 rgba(28,25,23,.06); padding-bottom: var(--mobile-tab-safe-area);">
 
       <!-- 验证码 tab -->
       <button onclick={() => { navigate('dashboard'); showMoreMenu = false; }}
         class="flex-1 flex flex-col items-center justify-center gap-0.5 pt-2 pb-0.5 min-h-[52px]
-          transition-colors {currentView === 'dashboard' ? 'text-[#c2410c]' : 'text-stone-400'}">
+          touch-manipulation active:bg-stone-100 transition-colors
+          {currentView === 'dashboard' ? 'text-[#c2410c]' : 'text-stone-400'}">
         <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round"
             d="M7 8h10M7 12h6m-6 4h10M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z"/>
@@ -1248,7 +1249,8 @@
       {#if can('phones.write')}
         <button onclick={() => { navigate('iccid-mappings'); showMoreMenu = false; }}
           class="flex-1 flex flex-col items-center justify-center gap-0.5 pt-2 pb-0.5 min-h-[52px]
-            transition-colors {currentView === 'iccid-mappings' ? 'text-[#c2410c]' : 'text-stone-400'}">
+            touch-manipulation active:bg-stone-100 transition-colors
+            {currentView === 'iccid-mappings' ? 'text-[#c2410c]' : 'text-stone-400'}">
           <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
             <rect x="5" y="5" width="14" height="14" rx="2"/>
             <rect x="9" y="9" width="6" height="6" rx="1"/>
@@ -1261,7 +1263,8 @@
       <!-- 余额 tab -->
       <button onclick={() => { navigate('balances'); showMoreMenu = false; }}
         class="flex-1 flex flex-col items-center justify-center gap-0.5 pt-2 pb-0.5 min-h-[52px]
-          transition-colors {currentView === 'balances' ? 'text-[#c2410c]' : 'text-stone-400'}">
+          touch-manipulation active:bg-stone-100 transition-colors
+          {currentView === 'balances' ? 'text-[#c2410c]' : 'text-stone-400'}">
         <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
           <path stroke-linecap="round" stroke-linejoin="round" d="M4 7.5A2.5 2.5 0 016.5 5H19a1 1 0 011 1v12a1 1 0 01-1 1H6.5A2.5 2.5 0 014 16.5v-9z"/>
           <path stroke-linecap="round" stroke-linejoin="round" d="M4 8h13m0 3h4v4h-4a2 2 0 010-4z"/>
@@ -1276,7 +1279,8 @@
           showPhoneList = false;
         }}
         class="flex-1 flex flex-col items-center justify-center gap-0.5 pt-2 pb-0.5 min-h-[52px]
-          transition-colors {currentView === 'send' && !showMoreMenu ? 'text-[#c2410c]' : 'text-stone-400 hover:text-stone-600'}">
+          touch-manipulation active:bg-stone-100 transition-colors
+          {currentView === 'send' && !showMoreMenu ? 'text-[#c2410c]' : 'text-stone-400 hover:text-stone-600'}">
         <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
           <path stroke-linecap="round" stroke-linejoin="round"
             d="M5 5h9a3 3 0 013 3v1M5 5a3 3 0 00-3 3v5a3 3 0 003 3h2l3.5 3v-3H13"/>
@@ -1288,7 +1292,8 @@
       <!-- 更多 tab — reveals a sheet with 规则 + 用户管理 -->
       <button onclick={() => { showMoreMenu = !showMoreMenu; }}
         class="flex-1 flex flex-col items-center justify-center gap-0.5 pt-2 pb-0.5 min-h-[52px]
-          transition-colors {showMoreMenu ? 'text-[#c2410c]' : 'text-stone-400'}">
+          touch-manipulation active:bg-stone-100 transition-colors
+          {showMoreMenu ? 'text-[#c2410c]' : 'text-stone-400'}">
         <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round"
             d="M4 6h16M4 12h16M4 18h16"/>
@@ -1303,7 +1308,7 @@
         onclick={() => showMoreMenu = false}
         role="presentation">
       </div>
-      <div class="lg:hidden fixed bottom-[74px] left-0 right-0 z-40 bg-white border-t border-stone-200 rounded-t-2xl
+      <div class="lg:hidden fixed bottom-[var(--mobile-tab-bar-height)] left-0 right-0 z-40 bg-white border-t border-stone-200 rounded-t-2xl
         shadow-[0_-8px_30px_rgba(28,25,23,.18)]">
         <div class="p-4 space-y-1">
           <p class="text-[11px] font-semibold text-stone-400 uppercase tracking-widest px-3 mb-2">运行状态</p>

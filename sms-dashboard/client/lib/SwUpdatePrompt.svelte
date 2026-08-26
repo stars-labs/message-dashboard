@@ -31,12 +31,12 @@
 </script>
 
 {#if update.available}
-  <!-- bottom-[74px] matches the existing "sits above the mobile tab bar" offset
-       (App.svelte:1292); desktop has no tab bar so it anchors to the bottom edge.
+  <!-- The shared variable keeps this above the safe-area-aware mobile tab bar;
+       desktop has no tab bar so it anchors to the bottom edge.
        z-[45] is deliberately between the tab bar (z-40) and modals/detail panels
        (z-50) — at z-50 this bar would cover an open message detail sheet. -->
   <div
-    class="fixed inset-x-3 bottom-[74px] lg:inset-x-auto lg:right-4 lg:bottom-4 lg:max-w-sm z-[45]"
+    class="fixed inset-x-3 bottom-[var(--mobile-tab-bar-height)] lg:inset-x-auto lg:right-4 lg:bottom-4 lg:max-w-sm z-[45]"
     role="status"
     aria-live="polite"
   >

@@ -17,6 +17,10 @@ export const MAX_PULL = 96;
 // Above this ratio of horizontal to vertical travel the gesture is a sideways swipe.
 const HORIZONTAL_RATIO = 1;
 
+// A finger rarely lands perfectly still. Do not claim the sequence until movement
+// clearly exceeds ordinary tap jitter, otherwise iOS suppresses the eventual click.
+const ACTIVATION_SLOP = 8;
+
 export function createPullState() {
   return {
     startY: 0,
@@ -69,8 +73,20 @@ export function onMove(state, y, x = 0) {
     return 0;
   }
 
-  state.pull = dy > 0 ? damp(dy) : 0;
+  state.pull = dy > ACTIVATION_SLOP ? damp(dy - ACTIVATION_SLOP) : 0;
   return state.pull;
+}
+
+/**
+ * Abort a gesture cancelled by the operating system.
+ *
+ * `touchcancel` is not a release: iOS may send it when WebKit or the system takes
+ * ownership of the sequence, so it must never cross the refresh threshold.
+ */
+export function onCancel(state) {
+  state.active = false;
+  state.cancelled = false;
+  state.pull = 0;
 }
 
 /**
