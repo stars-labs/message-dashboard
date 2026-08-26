@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="短信验证码管理系统">
+  <title>短信验证码管理系统</title>
+  <!--
+    Maskable variant of favicon.svg. Separate file rather than a reuse because the
+    two have incompatible requirements:
+
+    - No rounded corners. The launcher applies its own mask (circle, squircle,
+      teardrop, …), so favicon.svg's rx="7" would be clipped twice and show a
+      lighter seam inside the platform silhouette.
+    - Orange bleeds to all four edges. Whatever shape the mask cuts, it cuts out of
+      solid brand colour, so there is never a transparent wedge at a corner.
+    - The bubble is scaled to the safe zone. The spec only guarantees the centre
+      circle of 80% diameter survives, so the mark is drawn at 60% scale about the
+      centre — comfortably inside that circle at any mask shape.
+
+    Geometry: the source art is 32×32; 512/32 = 16 fills the canvas, and 16 × 0.6 =
+    9.6 is the safe-zone scale. Centring offset = (512 - 32 × 9.6) / 2 = 102.4.
+  -->
+  <rect width="512" height="512" fill="#F97316"/>
+  <g transform="translate(102.4 102.4) scale(9.6)">
+    <path fill="#FFFFFF" d="M9.5 5.5h13A5 5 0 0 1 27.5 10.5v6.5a5 5 0 0 1-5 5h-5.7l-4.9 4.5a1.05 1.05 0 0 1-1.77-.78V22h-.13a5 5 0 0 1-5-5v-6.5a5 5 0 0 1 5-5Z"/>
+    <path fill="none" stroke="#F97316" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round" d="m10.9 13.6 3.2 3.3 6.4-6.5"/>
+  </g>
+</svg>

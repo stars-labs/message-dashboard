@@ -71,6 +71,9 @@ function getMimeType(filename) {
     '.js': 'application/javascript',
     '.css': 'text/css',
     '.json': 'application/json',
+    // Without this the manifest falls through to application/octet-stream, which
+    // both stores it as base64 and serves a MIME type browsers reject.
+    '.webmanifest': 'application/manifest+json',
     '.png': 'image/png',
     '.jpg': 'image/jpeg',
     '.jpeg': 'image/jpeg',

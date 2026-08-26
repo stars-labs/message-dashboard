@@ -22,6 +22,11 @@
     <link rel="alternate icon" href="/favicon-32.png" type="image/png" sizes="32x32" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta name="theme-color" content="#F97316" />
+    <!-- Installing from the manifest launches in standalone display mode, which hides
+         the browser chrome — and Safari's pull-to-refresh lives in that chrome. The
+         in-app gesture (client/lib/PullToRefresh.svelte) is what replaces it, so it
+         has to ship before or with this link, never after. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
