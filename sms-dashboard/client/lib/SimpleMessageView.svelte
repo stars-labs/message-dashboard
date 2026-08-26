@@ -26,6 +26,8 @@
     filterRules = [],
     balanceChecks = [],
     onOpenBalance = null,
+    /** Called with the message when a row is activated; opens the detail drawer. */
+    onOpenMessage = null,
   } = $props();
 
   let activeKeywords = $state([]);
@@ -336,8 +338,17 @@
         {@const cardFlag = message.phone_country ? getCountryFlag(message.phone_country) : selectedPhone?.flag || ''}
 
         <!-- ── Desktop row ──────────────────────────────────────────────── -->
+        <!-- div+role rather than <button> because the row contains a nested
+             <button> (the verification-code copy chip), and a button inside a
+             button is invalid HTML. The keydown handler provides equivalent
+             keyboard access. Same reasoning as PhoneList.svelte. -->
         <div
+          role="button"
+          tabindex="0"
+          onclick={() => onOpenMessage?.(message)}
+          onkeydown={(e) => e.key === 'Enter' && onOpenMessage?.(message)}
           class="hidden lg:grid items-center px-3 py-2.5 border-b transition-colors duration-500
+            text-left cursor-pointer hover:bg-stone-50
             {isFiltered
               ? 'border-stone-100 opacity-60'
               : isNew
@@ -371,8 +382,10 @@
               aria-label={`${sendStatus.label}：${sendStatus.title}`}
             >{sendStatus.label}</span>
           {:else if hasCode}
+            <!-- stopPropagation: the row opens the detail drawer, so without this
+                 a click on the code would copy AND open. Copying is the intent here. -->
             <button
-              onclick={() => handleCopy(message)}
+              onclick={(e) => { e.stopPropagation(); handleCopy(message); }}
               class="inline-flex items-center justify-center px-2.5 py-1 rounded-lg border
                 font-mono text-lg font-semibold tracking-widest tabular-nums cursor-pointer
                 transition-colors duration-200
@@ -404,8 +417,13 @@
         </div>
 
         <!-- ── Mobile card ────────────────────────────────────────────────── -->
+        <!-- div+role for the same reason as the desktop row: nested copy button. -->
         <div
-          class="lg:hidden p-3 border-b transition-colors duration-500
+          role="button"
+          tabindex="0"
+          onclick={() => onOpenMessage?.(message)}
+          onkeydown={(e) => e.key === 'Enter' && onOpenMessage?.(message)}
+          class="lg:hidden p-3 border-b transition-colors duration-500 text-left cursor-pointer
             {isFiltered
               ? 'border-stone-100 opacity-60'
               : isNew
@@ -422,7 +440,7 @@
               >{sendStatus.label}</span>
             {:else if hasCode}
               <button
-                onclick={() => handleCopy(message)}
+                onclick={(e) => { e.stopPropagation(); handleCopy(message); }}
                 class="font-mono text-base font-semibold tabular-nums px-2 py-0.5 rounded-md border
                   transition-colors duration-200 shrink-0
                   {isCopied
@@ -452,9 +470,11 @@
             <span class="truncate">{cardFlag} {cardNumber}</span>
           </div>
 
-          <!-- Body -->
+          <!-- Body. Uses MessageHighlight like the desktop row does: rendering the
+               raw string here meant keyword highlighting silently did nothing on
+               mobile. Still clamped to two lines — the drawer shows the full text. -->
           <p class="text-sm text-stone-600 leading-snug line-clamp-2 mt-1.5">
-            {message.content}
+            <MessageHighlight content={message.content} keywords={activeKeywords} />
           </p>
 
           {#if isFiltered}

@@ -13,7 +13,9 @@
   import Toast from "./lib/Toast.svelte";
   import DaemonHealthPanel from "./lib/DaemonHealthPanel.svelte";
   import BalanceQueryDetail from './lib/BalanceQueryDetail.svelte';
+  import MessageDetail from './lib/MessageDetail.svelte';
   import BalanceManagement from './lib/BalanceManagement.svelte';
+  import { keywords as keywordsStore } from "./lib/tag-store.js";
   import { api } from "./lib/api.js";
   import { getPhoneFlag, mapStatsResponse } from "./lib/countries.js";
   import { auth } from "./lib/auth.js";
@@ -85,6 +87,8 @@
   let messages = $state([]);
   let balanceChecks = $state([]);
   let balanceDetailCheck = $state(null);
+  // The message whose full body is open in the detail drawer, or null.
+  let messageDetail = $state(null);
   let latestSelectedBalanceCheck = $derived(
     selectedPhoneIccid
       ? balanceChecks.find((check) => check.sim_iccid === selectedPhoneIccid) || null
@@ -383,6 +387,8 @@
 
   function selectPhone(phone) {
     balanceDetailCheck = null;
+    // Switching cards makes an open message from the previous card irrelevant.
+    messageDetail = null;
     selectedPhoneIccid = phone?.iccid || null;
     handlePhoneSelection();
     showPhoneList = false;
@@ -1033,6 +1039,7 @@
                 onToggleFiltered={toggleFiltered}
                 {balanceChecks}
                 onOpenBalance={(check) => balanceDetailCheck = check}
+                onOpenMessage={(message) => messageDetail = message}
               />
             </div>
             {#if selectedPhone}
@@ -1170,6 +1177,16 @@
       <BalanceQueryDetail
         check={balanceDetailCheck}
         onClose={() => balanceDetailCheck = null}
+      />
+    {/if}
+
+    {#if messageDetail}
+      <MessageDetail
+        message={messageDetail}
+        {selectedPhone}
+        {filterRules}
+        keywords={$keywordsStore}
+        onClose={() => messageDetail = null}
       />
     {/if}
 

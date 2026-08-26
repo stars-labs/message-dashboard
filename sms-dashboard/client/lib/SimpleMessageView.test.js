@@ -60,3 +60,71 @@ describe('SimpleMessageView message direction', () => {
     expect(view.getAllByLabelText('发送失败：+CMS ERROR: 350')).toHaveLength(2);
   });
 });
+
+describe('SimpleMessageView row activation', () => {
+  const selectedPhone = {
+    iccid: '8986012345678901234',
+    number: '+8617600419127',
+    sim_index: 1,
+    flag: '🇨🇳',
+  };
+
+  const message = {
+    id: 'received-open',
+    phone_iccid: selectedPhone.iccid,
+    phone_number: '100860011575',
+    content: '【心级服务 让爱连接】尊敬的客户，感谢您长期以来的支持。',
+    verification_code: '345030',
+    timestamp: '2026-08-14T09:00:00.000Z',
+    type: 'received',
+  };
+
+  // Both the desktop row and the mobile card render at once, so an activation
+  // helper has to reach a specific one rather than "the first button".
+  function renderList(onOpenMessage) {
+    globalThis.fetch = async () => Response.json({ keywords: [] });
+    return render(SimpleMessageView, {
+      props: { selectedPhone, messages: [message], onOpenMessage },
+    });
+  }
+
+  test('opens the detail drawer when a row is clicked', async () => {
+    let opened = null;
+    const view = renderList((m) => { opened = m; });
+
+    const rows = view.getAllByRole('button').filter(
+      (el) => el.tagName === 'DIV' && el.textContent.includes('100860011575')
+    );
+    expect(rows.length).toBeGreaterThan(0);
+
+    await fireEvent.click(rows[0]);
+    expect(opened).toBe(message);
+  });
+
+  test('opens the detail drawer on Enter for keyboard users', async () => {
+    let opened = null;
+    const view = renderList((m) => { opened = m; });
+
+    const rows = view.getAllByRole('button').filter(
+      (el) => el.tagName === 'DIV' && el.textContent.includes('100860011575')
+    );
+    await fireEvent.keyDown(rows[0], { key: 'Enter' });
+    expect(opened).toBe(message);
+  });
+
+  // Regression guard: the row opens the drawer, so the copy chip must stop the
+  // click from bubbling. Without stopPropagation, tapping a code both copies AND
+  // opens the drawer, which makes the primary interaction of the app feel broken.
+  test('copying a verification code does NOT open the drawer', async () => {
+    let opened = null;
+    const view = renderList((m) => { opened = m; });
+
+    const codeButtons = view.getAllByRole('button').filter(
+      (el) => el.tagName === 'BUTTON' && el.textContent.trim() === '345030'
+    );
+    expect(codeButtons.length).toBeGreaterThan(0);
+
+    await fireEvent.click(codeButtons[0]);
+    expect(opened).toBeNull();
+  });
+});
