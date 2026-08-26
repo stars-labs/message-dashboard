@@ -11,6 +11,8 @@
   import UserManagement from "./lib/UserManagement.svelte";
   import ErrorBoundary from "./lib/ErrorBoundary.svelte";
   import Toast from "./lib/Toast.svelte";
+  import SwUpdatePrompt from "./lib/SwUpdatePrompt.svelte";
+  import { resetServiceWorker } from "./lib/sw-reset.js";
   import DaemonHealthPanel from "./lib/DaemonHealthPanel.svelte";
   import BalanceQueryDetail from './lib/BalanceQueryDetail.svelte';
   import MessageDetail from './lib/MessageDetail.svelte';
@@ -136,6 +138,18 @@
   // phones, messages, stats and balance checks, and only ever sets dataLoading to
   // false, so re-running it updates in place without flashing the skeleton.
   let pullRefreshing = $state(false);
+
+  // Clears the service worker and its caches, then hard-reloads so the next request
+  // goes to the network. Reloading is the point, so there is no success toast to read.
+  async function handleResetOfflineCache() {
+    showMoreMenu = false;
+    const result = await resetServiceWorker();
+    if (!result.ok) {
+      showToast('部分缓存未能清除，请重试', 'error');
+      return;
+    }
+    window.location.reload();
+  }
 
   async function handlePullRefresh() {
     if (pullRefreshing) return;
@@ -1353,6 +1367,20 @@
 
           <div class="border-t border-stone-100 my-2"></div>
           <p class="text-[11px] font-semibold text-stone-400 uppercase tracking-widest px-3 mb-2">账户</p>
+          <!-- Recovery path for a bad service worker. Reverting the deployment does not
+               uninstall a worker already on the device, and iOS Safari offers no
+               discoverable way to clear one, so this is the only self-service fix. -->
+          <button onclick={handleResetOfflineCache}
+            class="w-full flex items-center justify-between px-3 py-3 rounded-xl hover:bg-stone-50 transition-colors text-left">
+            <div>
+              <div class="text-sm font-medium text-stone-700">重置离线缓存</div>
+              <div class="text-xs text-stone-400 mt-0.5">页面异常或版本卡住时使用</div>
+            </div>
+            <svg class="w-4 h-4 text-stone-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+            </svg>
+          </button>
           <button onclick={() => auth.logout()}
             class="w-full flex items-center justify-between px-3 py-3 rounded-xl hover:bg-stone-50 transition-colors text-left">
             <div class="text-sm font-medium text-stone-700">退出登录</div>
@@ -1392,3 +1420,7 @@
 {#each toasts as toast (toast.id)}
   <Toast message={toast.message} type={toast.type} duration={toast.duration} onClose={() => removeToast(toast.id)} />
 {/each}
+
+<!-- Service worker update prompt. Outside the main layout because it is a fixed
+     overlay and must not participate in the app's flex chain. -->
+<SwUpdatePrompt />
