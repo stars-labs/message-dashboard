@@ -1,6 +1,11 @@
 // Run with: bun test server/utils/spam-filter.test.js
 import { describe, expect, test } from 'bun:test';
-import { classifyMessage, normalizeSender, senderMatches } from './spam-filter.js';
+import {
+  classifyMessage,
+  normalizeSender,
+  senderMatches,
+  senderMatchesSpamRule,
+} from './spam-filter.js';
 
 // Mirrors the seed rules in migrations/035_add_message_filter.sql.
 // Ordered by id, which is the order classifyMessage evaluates them in.
@@ -14,6 +19,9 @@ const RULES = [
   { id: 7, rule_type: 'sender', pattern: '12306' },
   { id: 8, rule_type: 'sender', pattern: 'M1 Limited' },
   { id: 9, rule_type: 'sender', pattern: '10001' },
+  // Added by migration 070.
+  { id: 10, rule_type: 'body_keyword', pattern: '请您评价' },
+  { id: 11, rule_type: 'body_keyword', pattern: '心级服务' },
 ];
 
 // A received message with only the fields the classifier reads.
@@ -47,9 +55,58 @@ describe('senderMatches', () => {
     expect(senderMatches('85212580', '12580')).toBe(true);
     expect(senderMatches('13910001', '10001')).toBe(false);
   });
+
+  // The strict form stays strict: balance correlation depends on it rejecting a
+  // campaign-suffixed sender, which is a different origin from the shortcode.
+  test('does NOT match a campaign-suffixed shortcode', () => {
+    expect(senderMatches('100860011575', '10086')).toBe(false);
+    expect(senderMatches('10086100', '10086')).toBe(false);
+  });
+});
+
+describe('senderMatchesSpamRule', () => {
+  // Carriers append a per-campaign suffix to their shortcode, so one marketing
+  // blast arrives from 100860011575 and the next from 10086123456. Exact match
+  // alone lets every one of them through.
+  test('matches a shortcode carrying a campaign suffix', () => {
+    expect(senderMatchesSpamRule('100860011575', '10086')).toBe(true);
+    expect(senderMatchesSpamRule('+86100860011575', '10086')).toBe(true);
+    expect(senderMatchesSpamRule('1001012345', '10010')).toBe(true);
+  });
+
+  test('still matches the bare shortcode and country-prefixed forms', () => {
+    expect(senderMatchesSpamRule('10086', '10086')).toBe(true);
+    expect(senderMatchesSpamRule('+8610086', '10086')).toBe(true);
+    expect(senderMatchesSpamRule('85212580', '12580')).toBe(true);
+  });
+
+  // The suffix must extend the shortcode, never merely contain it: a real mobile
+  // number can end with or embed a shortcode, but cannot start with one.
+  test('does NOT match numbers that only contain the shortcode', () => {
+    expect(senderMatchesSpamRule('13910086', '10086')).toBe(false);
+    expect(senderMatchesSpamRule('8613100862222', '10086')).toBe(false);
+  });
+
+  // A different sender, not another campaign from the same one.
+  test('keeps alphanumeric sender IDs exact', () => {
+    expect(senderMatchesSpamRule('M1 Limited', 'M1 Limited')).toBe(true);
+    expect(senderMatchesSpamRule('M1 Limited Promo', 'M1 Limited')).toBe(false);
+  });
 });
 
 describe('classifyMessage — body keyword rules', () => {
+  // Backstop for the sender fix: the same campaign from a sender with no rule.
+  test('filters the 满意度调研 broadcast on wording alone', () => {
+    const msg = received({
+      content: '【心级服务 让爱连接】邀请您参与2道问题调研，期待您的10分满意！',
+      phone_number: '9528',
+    });
+    expect(classifyMessage(msg, RULES)).toEqual({
+      filter_status: 'filtered',
+      filter_rule_id: 11,
+    });
+  });
+
   test('filters the 领保中心 broadcast', () => {
     const msg = received({
       content:
@@ -148,6 +205,21 @@ describe('classifyMessage — sender rules', () => {
   test('does NOT filter a longer number that merely contains a shortcode', () => {
     const msg = received({ content: '任意内容', phone_number: '8613100862222' });
     expect(classifyMessage(msg, RULES).filter_status).toBe('clean');
+  });
+
+  // Observed in production: a 移动 satisfaction survey from a suffixed shortcode.
+  // The body carries no verification code, and "无验证码" showed in the UI, yet the
+  // message stayed visible because 100860011575 !== 10086.
+  test('filters the 移动 satisfaction survey from a suffixed shortcode', () => {
+    const msg = received({
+      content:
+        '【心级服务 让爱连接】尊敬的客户，感谢您长期以来的支持，中国移动特开展“请您评价”调研活动，邀请您参与2道问题调研，期待您的10分满意！',
+      phone_number: '100860011575',
+    });
+    expect(classifyMessage(msg, RULES)).toEqual({
+      filter_status: 'filtered',
+      filter_rule_id: 4,
+    });
   });
 });
 

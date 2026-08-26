@@ -51,9 +51,27 @@ export function normalizeSender(raw) {
 }
 
 /**
- * Match numeric short codes after punctuation/country-code normalization, while
- * also supporting exact case-insensitive alphanumeric sender IDs such as
- * "M1 Limited".
+ * Every way of writing the same sender: the bare digits, plus the digits with a
+ * known country code stripped, so '+8610086' and '10086' reduce alike.
+ */
+function senderCandidates(digits) {
+  const candidates = [digits];
+  for (const prefix of SHORT_CODE_COUNTRY_PREFIXES) {
+    if (digits.startsWith(prefix)) candidates.push(digits.slice(prefix.length));
+  }
+  return candidates;
+}
+
+/**
+ * Match a sender EXACTLY, after punctuation/country-code normalization, while also
+ * supporting exact case-insensitive alphanumeric sender IDs such as "M1 Limited".
+ *
+ * This is the strict form, used to decide whether an inbound SMS is a trustworthy
+ * balance reply (handlers/balance-queries.js, handlers/carrier-web-balance.js).
+ * Balance correlation must not accept 10086100 for a '10086' profile: a
+ * campaign-suffixed sender is a different origin, and reading a balance out of it
+ * would attribute one carrier's marketing text to a real account. Spam rules want
+ * the looser senderMatchesSpamRule() below instead.
  */
 export function senderMatches(rawSender, rawPattern) {
   if (typeof rawSender !== 'string' || typeof rawPattern !== 'string') return false;
@@ -63,12 +81,43 @@ export function senderMatches(rawSender, rawPattern) {
   if (!sender || !pattern) return false;
 
   if (/^\d+$/.test(pattern)) {
-    const digits = normalizeSender(sender);
-    return digits === pattern
-      || SHORT_CODE_COUNTRY_PREFIXES.some((prefix) => digits === `${prefix}${pattern}`);
+    return senderCandidates(normalizeSender(sender)).some((c) => c === pattern);
   }
 
   return sender.localeCompare(pattern, undefined, { sensitivity: 'accent' }) === 0;
+}
+
+/**
+ * Match a sender against a spam RULE pattern: the shortcode itself, or any
+ * campaign-suffixed variant of it.
+ *
+ * Carriers send each marketing blast from a different extension of their
+ * shortcode — one survey arrives from 100860011575, the next from 10086123456 —
+ * so an exact rule silently misses all of them and only the bare shortcode is
+ * ever filtered.
+ *
+ * The suffix has to EXTEND the shortcode. A pattern that merely appears somewhere
+ * inside the number does not match, which keeps a real mobile number such as
+ * 13910086 (ends with) or 13100862222 (contains) visible. No Chinese mobile
+ * number starts with a carrier shortcode, so anchoring at the front is the
+ * property that makes prefix matching safe here where endsWith() was not.
+ *
+ * Alphanumeric sender IDs stay exact: 'M1 Limited' must not filter
+ * 'M1 Limited Promo', which is a distinct sender rather than one campaign of the
+ * same one.
+ */
+export function senderMatchesSpamRule(rawSender, rawPattern) {
+  if (typeof rawSender !== 'string' || typeof rawPattern !== 'string') return false;
+
+  const sender = rawSender.trim();
+  const pattern = rawPattern.trim();
+  if (!sender || !pattern) return false;
+
+  if (/^\d+$/.test(pattern)) {
+    return senderCandidates(normalizeSender(sender)).some((c) => c.startsWith(pattern));
+  }
+
+  return senderMatches(sender, pattern);
 }
 
 function clean() {
@@ -116,9 +165,10 @@ export function classifyMessage(message, rules) {
     }
 
     if (rule.rule_type === RULE_TYPE.SENDER) {
-      // Exact match only. endsWith() would wrongly filter a real mobile number
-      // such as 13910086 under a '10086' rule.
-      if (senderMatches(message.phone_number, rule.pattern)) {
+      // Shortcode prefix match, so one rule covers every campaign extension.
+      // Still anchored at the front: endsWith() or a substring test would wrongly
+      // filter a real mobile number such as 13910086 under a '10086' rule.
+      if (senderMatchesSpamRule(message.phone_number, rule.pattern)) {
         return { filter_status: FILTER_STATUS.FILTERED, filter_rule_id: rule.id };
       }
       continue;
