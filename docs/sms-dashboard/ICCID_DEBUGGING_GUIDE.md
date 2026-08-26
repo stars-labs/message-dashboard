@@ -43,7 +43,7 @@ Check if CORS headers are properly set for the API endpoints.
 5. Check the response and logs for errors
 
 ### Step 2: Check Browser Console
-1. Open the website at https://sexy.qzz.io
+1. Open the website at https://sexy.itoken.world
 2. Open Developer Tools (F12)
 3. Go to the ICCID mappings tab
 4. Check the Console tab for errors
@@ -64,7 +64,7 @@ bunx wrangler d1 execute sms-dashboard --command "SELECT * FROM iccid_mappings L
 # Then test the API endpoint
 curl -H "Authorization: Bearer YOUR_TOKEN_HERE" \
      -H "Content-Type: application/json" \
-     https://sexy.qzz.io/api/iccid-mappings
+     https://sexy.itoken.world/api/iccid-mappings
 ```
 
 ## Common Error Messages and Solutions

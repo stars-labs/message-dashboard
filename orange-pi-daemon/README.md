@@ -87,7 +87,7 @@ Release profile: `opt-level=3`, LTO, single codegen unit, stripped symbols.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SMS_API_URL` | `https://sexy.qzz.io` | Backend API endpoint |
+| `SMS_API_URL` | `https://sexy.itoken.world` | Backend API endpoint |
 | `SMS_API_KEY` | (required) | API authentication key |
 | `MESSAGE_DB_PATH` | `/var/lib/sms-daemon/messages.db` | Local SQLite queue path |
 | `USE_DBUS` | `0` | Set `1` to use ModemManager D-Bus instead of AT commands |
@@ -163,7 +163,7 @@ systemctl status ModemManager
 RUST_LOG=debug journalctl -fu sms-daemon
 
 # Test API connectivity
-curl -H "x-api-key: KEY" https://sexy.qzz.io/api/control/pending-sms
+curl -H "x-api-key: KEY" https://sexy.itoken.world/api/control/pending-sms
 
 # Check local message queue
 sqlite3 /var/lib/sms-daemon/messages.db "SELECT status, COUNT(*) FROM messages GROUP BY status"

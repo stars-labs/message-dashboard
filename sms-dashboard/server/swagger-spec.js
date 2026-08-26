@@ -10,7 +10,7 @@ export const swaggerSpec = {
   },
   servers: [
     {
-      url: "https://sexy.qzz.io",
+      url: "https://sexy.itoken.world",
       description: "Production server"
     },
     {

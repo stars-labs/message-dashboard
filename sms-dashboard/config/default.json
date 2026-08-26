@@ -6,7 +6,7 @@
   },
   "server": {
     "api": {
-      "baseUrl": "https://sexy.qzz.io",
+      "baseUrl": "https://sexy.itoken.world",
       "endpoints": {
         "phones": "/api/phones",
         "messages": "/api/messages",

@@ -4,7 +4,7 @@
   },
   "server": {
     "api": {
-      "baseUrl": "https://sexy.qzz.io"
+      "baseUrl": "https://sexy.itoken.world"
     },
     "websocket": {
       "heartbeatInterval": 60000,

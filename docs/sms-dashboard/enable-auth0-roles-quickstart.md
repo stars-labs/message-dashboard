@@ -21,7 +21,7 @@ Follow these steps to enable role-based access control using Auth0.
 
 ```javascript
 exports.onExecutePostLogin = async (event, api) => {
-  const namespace = 'https://sexy.qzz.io/';
+  const namespace = 'https://sexy.itoken.world/';
   
   // Get user roles
   const assignedRoles = event.authorization?.roles || [];
@@ -46,7 +46,7 @@ Edit your `wrangler.toml` file:
 # Auth0 Role Configuration
 AUTH0_ADMIN_ROLE = "sms-admin"
 AUTH0_VIEWER_ROLE = "sms-viewer"
-AUTH0_ROLE_NAMESPACE = "https://sexy.qzz.io/roles"  # FULL claim URI; must match your Action
+AUTH0_ROLE_NAMESPACE = "https://sexy.itoken.world/roles"  # FULL claim URI; must match your Action
 
 # Only these email domains may complete login. Addresses must also be email_verified.
 ALLOWED_EMAIL_DOMAINS = "poloniex.com,bitgc.io,tron.network,htx-inc.com"

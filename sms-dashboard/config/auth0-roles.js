@@ -4,11 +4,11 @@
 // index.js all go through here so they cannot drift apart.
 
 /**
- * AUTH0_ROLE_NAMESPACE is the FULL claim URI, e.g. "https://sexy.qzz.io/roles".
+ * AUTH0_ROLE_NAMESPACE is the FULL claim URI, e.g. "https://sexy.itoken.world/roles".
  * Auth0 requires custom claims to be namespaced; unnamespaced claims are stripped
  * from minted tokens, which is exactly the property that makes them trustworthy.
  */
-const DEFAULT_ROLE_CLAIM = 'https://sexy.qzz.io/roles';
+const DEFAULT_ROLE_CLAIM = 'https://sexy.itoken.world/roles';
 
 const ADMIN = 'admin';
 const VIEWER = 'viewer';

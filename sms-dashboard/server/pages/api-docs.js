@@ -178,7 +178,7 @@ export function getAPIDocsHTML() {
         </div>
         
         <div class="links">
-            <a href="https://sexy.qzz.io" class="btn">Go to Dashboard</a>
+            <a href="https://sexy.itoken.world" class="btn">Go to Dashboard</a>
             <a href="/api/health" class="btn btn-secondary">API Health</a>
         </div>
         

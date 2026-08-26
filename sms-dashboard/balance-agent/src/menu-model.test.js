@@ -9,7 +9,7 @@ function readyState(overrides = {}) {
     browserDetail: null,
     settings: {
       installationName: 'HMBP',
-      dashboardUrl: 'https://sexy.qzz.io',
+      dashboardUrl: 'https://sexy.itoken.world',
     },
     error: null,
     ...overrides,

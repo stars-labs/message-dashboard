@@ -7,7 +7,7 @@ The SMS Dashboard API provides endpoints for device management, message handling
 ## Base URL
 
 ```
-Production: https://sexy.qzz.io
+Production: https://sexy.itoken.world
 Development: http://localhost:8787
 ```
 
@@ -504,25 +504,25 @@ npm run dev:api  # Start Wrangler dev server
 
 ```bash
 # Health check
-curl https://sexy.qzz.io/api/health
+curl https://sexy.itoken.world/api/health
 
 # Get phones with auth token
 curl -H "Authorization: Bearer $JWT_TOKEN" \
-     https://sexy.qzz.io/api/phones
+     https://sexy.itoken.world/api/phones
 
 # Daemon device synchronization
 curl -X POST \
      -H "X-API-Key: $API_KEY" \
      -H "Content-Type: application/json" \
      -d '{"modem_reports": [...], "sync_mode": "incremental"}' \
-     https://sexy.qzz.io/api/control/devices
+     https://sexy.itoken.world/api/control/devices
 ```
 
 ### API Client Libraries
 
 #### JavaScript/Node.js
 ```javascript
-const API_BASE = 'https://sexy.qzz.io';
+const API_BASE = 'https://sexy.itoken.world';
 
 async function getPhones(token) {
   const response = await fetch(`${API_BASE}/api/phones`, {
@@ -539,7 +539,7 @@ async function getPhones(token) {
 ```python
 import requests
 
-API_BASE = 'https://sexy.qzz.io'
+API_BASE = 'https://sexy.itoken.world'
 
 def get_phones(token):
     headers = {

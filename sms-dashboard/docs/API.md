@@ -1,7 +1,7 @@
 # SMS Dashboard API
 
 ## Base URL
-- **Production**: `https://sexy.qzz.io`
+- **Production**: `https://sexy.itoken.world`
 - **Development**: `http://localhost:8787`
 
 ## Authentication

@@ -1,7 +1,7 @@
 # SMS Dashboard
 
 Cloudflare-hosted SMS operations dashboard for the Orange Pi modem fleet.
-Production is available at <https://sexy.qzz.io>.
+Production is available at <https://sexy.itoken.world>.
 
 Repository-wide development, secret, migration, and deployment rules live in
 [`../AGENTS.md`](../AGENTS.md). Read them before running production commands.
@@ -106,7 +106,7 @@ identity and Cloudflare account, then deploy:
 ```bash
 cd sms-dashboard
 CLOUDFLARE_ACCOUNT_ID=793e3286eaca411bf1eebaf4b8c7051e bun run deploy
-curl -fsS https://sexy.qzz.io/api/health
+curl -fsS https://sexy.itoken.world/api/health
 ```
 
 Record the Worker version printed by Wrangler and verify the affected authenticated

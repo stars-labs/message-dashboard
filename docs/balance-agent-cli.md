@@ -50,7 +50,7 @@ same non-secret values configured for the desktop Balance Agent:
 
 ```bash
 balance-agent configure \
-  --dashboard-url https://sexy.qzz.io \
+  --dashboard-url https://sexy.itoken.world \
   --auth0-issuer https://AUTH0_TENANT \
   --auth0-client-id NATIVE_CLIENT_ID \
   --auth0-audience DASHBOARD_API_AUDIENCE \

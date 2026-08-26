@@ -1,7 +1,7 @@
 // Script to seed test keywords directly via control API
 
 const API_KEY = process.env.API_KEY || 'test-api-key';
-const API_URL = process.env.API_URL || 'https://sexy.qzz.io';
+const API_URL = process.env.API_URL || 'https://sexy.itoken.world';
 
 // Test keywords to seed
 const testKeywords = [

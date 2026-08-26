@@ -17,7 +17,7 @@ bun run deploy
 
 - Do **not** run `wrangler d1 migrations apply --remote` — production predates
   Wrangler migration bookkeeping. Always apply only the exact new migration file.
-- After deploy: verify `https://sexy.qzz.io/api/health` and the affected workflow.
+- After deploy: verify `https://sexy.itoken.world/api/health` and the affected workflow.
 
 ## Orange Pi Daemon
 

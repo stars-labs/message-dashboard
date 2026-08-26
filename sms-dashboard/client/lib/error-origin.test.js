@@ -48,8 +48,8 @@ describe('isForeignError — real application errors', () => {
     expect(
       isForeignError({
         message: "Cannot read properties of undefined (reading 'iccid')",
-        filename: 'https://sexy.qzz.io/assets/index-abc123.js',
-        stack: 'TypeError: ...\n    at https://sexy.qzz.io/assets/index-abc123.js:42:7',
+        filename: 'https://sexy.itoken.world/assets/index-abc123.js',
+        stack: 'TypeError: ...\n    at https://sexy.itoken.world/assets/index-abc123.js:42:7',
       })
     ).toBe(false);
   });

@@ -26,7 +26,7 @@ Orange Pi + EC20 modems -> Rust daemon -> Cloudflare Worker -> Svelte dashboard
 | `flake.nix` | Dev shell, build, and release commands | — |
 | `docs/` | Architecture, plans, and reference | [docs/](docs/) |
 
-Production: `https://sexy.qzz.io` · Cloudflare account `793e3286eaca411bf1eebaf4b8c7051e`
+Production: `https://sexy.itoken.world` · Cloudflare account `793e3286eaca411bf1eebaf4b8c7051e`
 
 ## Hard Boundaries
 

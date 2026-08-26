@@ -104,7 +104,7 @@ Suites after all of the above: **293 JS / 181 Rust, 0 failures.**
 > ⚠️ **Historical — this was the pre-deploy gate for finding 1** (now satisfied). Retained
 > because it is the checklist to re-run if the Auth0 tenant is ever rebuilt; every item is
 > a silent-failure mode:
-> 1. The post-login Action setting the `https://sexy.qzz.io/roles` claim is deployed and
+> 1. The post-login Action setting the `https://sexy.itoken.world/roles` claim is deployed and
 >    **active in the Login flow**.
 > 2. Both `sms-admin` and `sms-viewer` roles exist, and **you hold `sms-admin`** — the role UI is
 >    admin-only and nobody can change their own role.
@@ -195,8 +195,8 @@ remove any switch capable of disabling it.
   case-insensitively, and reads the domain after the **final** `@`. The old check ran
   only when the list was set, split on the first `@`, and compared case-sensitively.
 * `ALLOWED_EMAIL_DOMAINS = "poloniex.com,bitgc.io,tron.network,htx-inc.com"`.
-* `AUTH0_ROLE_NAMESPACE` corrected to the full claim URI `https://sexy.qzz.io/roles`;
-  the previous `https://sexy.qzz.io` was inert only because the claim key was hardcoded.
+* `AUTH0_ROLE_NAMESPACE` corrected to the full claim URI `https://sexy.itoken.world/roles`;
+  the previous namespace root without `/roles` was inert only because the claim key was hardcoded.
 * Regression tests: `server/middleware/rbac.test.js` (20) and
   `config/auth0-roles.test.js` (21), including a case asserting the gate denies a
   roleless user for **every** value of the removed flag. Suite: 100 pass / 0 fail.
@@ -421,7 +421,7 @@ navigation. It is also captured by Workers request logging, enabled at
 
 ### Exploit scenario
 
-An operator completes login and lands on `https://sexy.qzz.io/?token=<session>`. They
+An operator completes login and lands on `https://sexy.itoken.world/?token=<session>`. They
 click any external link, or an attacker gets one image from an external host rendered —
 the full URL including the live token travels in `Referer` to that third party, who
 replays it as `Authorization: Bearer <token>` to read all SMS bodies for the remaining
@@ -487,8 +487,8 @@ Role extraction prefers the **unnamespaced** `roles` claim:
 
 ```js
 roles: jwtPayload.roles ||
-       jwtPayload['https://sexy.qzz.io/roles'] ||
-       jwtPayload['https://sexy.qzz.io/app_metadata']?.roles ||
+       jwtPayload['https://sexy.itoken.world/roles'] ||
+       jwtPayload['https://sexy.itoken.world/app_metadata']?.roles ||
        []
 ```
 
@@ -509,7 +509,7 @@ grants all nine SMS permissions to a user the operator never authorised.
 
 ### Recommendation
 
-Read **only** the namespaced claim — `jwtPayload['https://sexy.qzz.io/roles']` — and
+Read **only** the namespaced claim — `jwtPayload['https://sexy.itoken.world/roles']` — and
 delete the `jwtPayload.roles` fallback. Namespacing exists precisely so the claim cannot
 collide with anything a user controls; the fallback discards that guarantee.
 

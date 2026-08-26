@@ -10,7 +10,7 @@ import {
   rolesFromToken,
 } from './auth0-roles.js';
 
-const CLAIM = 'https://sexy.qzz.io/roles';
+const CLAIM = 'https://sexy.itoken.world/roles';
 const config = createRoleConfig({});
 
 describe('createRoleConfig', () => {

@@ -6,7 +6,7 @@ account_id = "793e3286eaca411bf1eebaf4b8c7051e"
 # Routes
 workers_dev = true
 # routes = [
-#   { pattern = "sexy.qzz.io", custom_domain = true }
+#   { pattern = "sexy.itoken.world", custom_domain = true }
 # ]
 
 # Balance reply correlation and timeout reconciliation runs every five minutes.
@@ -30,7 +30,7 @@ id = "4d7e71fcf5c44a469aa63e28f60cb6d7"
 [vars]
 ENVIRONMENT = "production"
 DEFAULT_USER_GROUP = "viewer"
-WORKER_URL = "https://sexy.qzz.io"
+WORKER_URL = "https://sexy.itoken.world"
 
 # Second layer behind the role check: only these email domains may complete login.
 # Enforced in server/handlers/auth0.js, which also requires the address to be
@@ -52,7 +52,7 @@ ALLOWED_EMAIL_DOMAINS = "poloniex.com,bitgc.io,tron.network,htx-inc.com"
 # nothing, so a session minted before this split re-authenticates.
 AUTH0_ADMIN_ROLE = "sms-admin"
 AUTH0_VIEWER_ROLE = "sms-viewer"
-AUTH0_ROLE_NAMESPACE = "https://sexy.qzz.io/roles"  # FULL claim URI holding the roles array
+AUTH0_ROLE_NAMESPACE = "https://sexy.itoken.world/roles"  # FULL claim URI holding the roles array
 
 # wrangler.toml (wrangler v3.88.0^)
 [observability.logs]

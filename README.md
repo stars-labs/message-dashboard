@@ -77,7 +77,7 @@ nix develop --command dev-server restart
 ```bash
 cd orange-pi-daemon
 cargo build --release
-RUST_LOG=debug SMS_API_URL=https://sexy.qzz.io SMS_API_KEY=<key> cargo run
+RUST_LOG=debug SMS_API_URL=https://sexy.itoken.world SMS_API_KEY=<key> cargo run
 ```
 
 ### Deploy

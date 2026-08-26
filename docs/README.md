@@ -242,7 +242,7 @@ sops secrets/secrets.yaml
 # Add the following to secrets.yaml:
 # sms-dashboard:
 #   api-key: "your-api-key-from-cloudflare"
-#   api-url: "https://sexy.qzz.io"
+#   api-url: "https://sexy.itoken.world"
 
 # The secrets will be automatically deployed to the Orange Pi at:
 # /run/secrets/sms-dashboard-api-key

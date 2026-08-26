@@ -16,7 +16,7 @@
    ```toml
    AUTH0_ADMIN_ROLE = "sms-admin"
    AUTH0_VIEWER_ROLE = "sms-viewer"
-   AUTH0_ROLE_NAMESPACE = "https://sexy.qzz.io/roles"
+   AUTH0_ROLE_NAMESPACE = "https://sexy.itoken.world/roles"
    ALLOWED_EMAIL_DOMAINS = "poloniex.com,bitgc.io,tron.network,htx-inc.com"
    ```
 
@@ -77,7 +77,7 @@ Needed for reading users and changing roles from the dashboard.
 ### 3. Add Roles to Tokens (Auth0 Action)
 ```javascript
 exports.onExecutePostLogin = async (event, api) => {
-  const namespace = 'https://sexy.qzz.io/';
+  const namespace = 'https://sexy.itoken.world/';
   const assignedRoles = event.authorization?.roles || [];
   
   if (assignedRoles.length > 0) {
@@ -137,8 +137,8 @@ If users can't access after deployment:
    - User must hold `sms-admin` or `sms-viewer`
 
 3. **Check namespace matches**
-   - Action sets claim: `https://sexy.qzz.io/` + `roles`
-   - Config expects the FULL claim URI: `AUTH0_ROLE_NAMESPACE = "https://sexy.qzz.io/roles"`
+   - Action sets claim: `https://sexy.itoken.world/` + `roles`
+   - Config expects the FULL claim URI: `AUTH0_ROLE_NAMESPACE = "https://sexy.itoken.world/roles"`
 
 4. **Check the email gate**
    - Address must be `email_verified: true`
