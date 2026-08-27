@@ -163,7 +163,7 @@
      preserves the existing flex layout there. -->
 <div bind:this={container} class="relative block lg:contents" data-pull-to-refresh-root>
   <div
-    class="lg:hidden pointer-events-none absolute inset-x-0 top-0 h-16 z-20
+    class="lg:hidden pointer-events-none fixed inset-x-0 top-[env(safe-area-inset-top)] h-16 z-20
       flex items-center justify-center gap-2 pb-2 text-stone-500 will-change-transform"
     style="transform: translate3d(0, {pull - THRESHOLD}px, 0);
       opacity: {Math.min(pull / THRESHOLD, 1)};"

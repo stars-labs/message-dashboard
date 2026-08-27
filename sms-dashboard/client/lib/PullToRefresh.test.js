@@ -123,6 +123,15 @@ describe('PullToRefresh', () => {
     expect(indicator.style.height).toBe('');
   });
 
+  test('positions the indicator in the viewport gap above the pulled content', () => {
+    const { container } = render(PullToRefresh);
+    const indicator = container.querySelector('[data-pull-to-refresh-indicator]');
+
+    expect(indicator.classList.contains('fixed')).toBe(true);
+    expect(indicator.classList.contains('absolute')).toBe(false);
+    expect(indicator.classList.contains('top-[env(safe-area-inset-top)]')).toBe(true);
+  });
+
   test('finger jitter does not cancel a tap', async () => {
     const { container } = render(PullToRefresh);
     const root = container.querySelector('[data-pull-to-refresh-root]');
