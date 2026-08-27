@@ -113,3 +113,45 @@ html.is-ios textarea,
 html.is-ios select {
   font-size: 16px;
 }
+
+/* Liquid Glass Lite: keep regular Safari visually stable and only enhance the
+   installed iOS app, where the page owns the entire bottom navigation layer. */
+.mobile-tab-selection {
+  display: none;
+}
+
+html.is-ios.is-standalone .mobile-tab-bar {
+  background: rgba(250, 250, 249, 0.76);
+  border-top-color: rgba(255, 255, 255, 0.72);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  backdrop-filter: blur(18px) saturate(150%);
+  box-shadow: 0 -1px 0 rgba(120, 113, 108, 0.12), 0 -8px 24px rgba(28, 25, 23, 0.06) !important;
+}
+
+html.is-ios.is-standalone .mobile-tab-selection {
+  display: block;
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: calc(var(--mobile-tab-selection-width) - 8px);
+  height: calc(var(--mobile-tab-content-height) - 8px);
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  border-radius: 17px;
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.82), rgba(255, 247, 237, 0.5));
+  box-shadow: 0 3px 12px rgba(120, 53, 15, 0.11), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  pointer-events: none;
+  transform: translate3d(var(--mobile-tab-selection-x), 0, 0);
+  transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1), width 160ms ease-out;
+  will-change: transform;
+}
+
+html.is-ios.is-standalone .mobile-tab-button:active {
+  background: rgba(255, 255, 255, 0.28);
+  border-radius: 17px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html.is-ios.is-standalone .mobile-tab-selection {
+    transition: none;
+  }
+}

@@ -77,6 +77,10 @@ describe('mobile detail navigation', () => {
     expect(view.getByRole('region', { name: '短信详情' })).toBeTruthy();
 
     const mobileNav = view.container.querySelector('nav.lg\\:hidden');
+    const selection = mobileNav.querySelector('[data-mobile-tab-selection]');
+    expect(selection).toBeTruthy();
+    expect(mobileNav.style.getPropertyValue('--mobile-tab-selection-width')).toBe('20%');
+    expect(mobileNav.style.getPropertyValue('--mobile-tab-selection-x')).toBe('0%');
     for (const button of mobileNav.querySelectorAll('button')) {
       expect(button.classList.contains('min-h-[var(--mobile-tab-content-height)]')).toBe(true);
       expect(button.classList.contains('justify-start')).toBe(true);
@@ -89,6 +93,9 @@ describe('mobile detail navigation', () => {
 
     expect(view.queryByRole('region', { name: '短信详情' })).toBeNull();
     expect(window.location.hash).toBe('#balances');
+    expect(mobileNav.style.getPropertyValue('--mobile-tab-selection-x')).toBe(
+      'calc(200% + 16px)',
+    );
   });
 
   test('the shared mobile tab content height is 56px with a 6px top inset', () => {
@@ -113,5 +120,14 @@ describe('mobile detail navigation', () => {
     );
     expect(html).toContain("'standalone' in navigator");
     expect(html).toContain("classList.add('is-standalone')");
+  });
+
+  test('the liquid selection is scoped to iOS standalone mode and reduced motion', () => {
+    const css = readFileSync(new URL('./app.css', import.meta.url), 'utf8');
+
+    expect(css).toContain('html.is-ios.is-standalone .mobile-tab-bar');
+    expect(css).toContain('html.is-ios.is-standalone .mobile-tab-selection');
+    expect(css).toContain('backdrop-filter: blur(18px) saturate(150%);');
+    expect(css).toContain('@media (prefers-reduced-motion: reduce)');
   });
 });

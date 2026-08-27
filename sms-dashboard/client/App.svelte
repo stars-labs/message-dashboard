@@ -26,6 +26,7 @@
   import { formatCardNumber } from "./lib/card-number.js";
   import { formatTimeAgo } from "./lib/time.js";
   import { getDaemonStatusMeta, isDaemonConnected } from "./lib/daemon-status.js";
+  import { getMobileTabState } from "./lib/mobile-tab-state.js";
   import {
     MESSAGE_PAGE_SIZE,
     hasMoreMessages,
@@ -221,6 +222,19 @@
   function can(permission) {
     return user?.permissions?.includes(permission) ?? false;
   }
+
+  let canManagePhones = $derived(can('phones.write'));
+  let mobileTabState = $derived(getMobileTabState({
+    currentView,
+    showMoreMenu,
+    canManagePhones,
+  }));
+  let mobileTabSelectionWidth = $derived(`${100 / mobileTabState.count}%`);
+  let mobileTabSelectionX = $derived(
+    mobileTabState.index === 0
+      ? '0%'
+      : `calc(${mobileTabState.index * 100}% + ${mobileTabState.index * 8}px)`,
+  );
 
   // Which permission each view requires. Used both for nav visibility and for the hash
   // guard below, so the two cannot disagree.
@@ -1282,14 +1296,16 @@
     <!-- ── iOS bottom tab bar ────────────────────────────────────────────── -->
     <!-- lg:hidden: desktop uses the top nav. The safe-area padding keeps controls
          clear of both Safari chrome and the home indicator. -->
-    <nav class="lg:hidden fixed bottom-0 left-0 right-0 z-40
+    <nav class="mobile-tab-bar lg:hidden fixed bottom-0 left-0 right-0 z-40
       bg-white border-t border-stone-200
-      flex items-stretch touch-manipulation"
-      style="box-shadow: 0 -1px 0 rgba(28,25,23,.06); padding-bottom: var(--mobile-tab-safe-area);">
+      flex items-stretch touch-manipulation isolate"
+      style="box-shadow: 0 -1px 0 rgba(28,25,23,.06); padding-bottom: var(--mobile-tab-safe-area); --mobile-tab-selection-width: {mobileTabSelectionWidth}; --mobile-tab-selection-x: {mobileTabSelectionX};">
+
+      <span class="mobile-tab-selection" data-mobile-tab-selection aria-hidden="true"></span>
 
       <!-- 验证码 tab -->
       <button onclick={() => navigate('dashboard')}
-        class="flex-1 flex flex-col items-center justify-start gap-0.5 pt-[var(--mobile-tab-content-top)] pb-0.5 min-h-[var(--mobile-tab-content-height)]
+        class="mobile-tab-button relative z-[1] flex-1 flex flex-col items-center justify-start gap-0.5 pt-[var(--mobile-tab-content-top)] pb-0.5 min-h-[var(--mobile-tab-content-height)]
           touch-manipulation active:bg-stone-100 transition-colors
           {currentView === 'dashboard' ? 'text-[#c2410c]' : 'text-stone-400'}">
         <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -1300,9 +1316,9 @@
       </button>
 
       <!-- 设备 tab — links to iccid-mappings; gated to phones.write -->
-      {#if can('phones.write')}
+      {#if canManagePhones}
         <button onclick={() => navigate('iccid-mappings')}
-          class="flex-1 flex flex-col items-center justify-start gap-0.5 pt-[var(--mobile-tab-content-top)] pb-0.5 min-h-[var(--mobile-tab-content-height)]
+          class="mobile-tab-button relative z-[1] flex-1 flex flex-col items-center justify-start gap-0.5 pt-[var(--mobile-tab-content-top)] pb-0.5 min-h-[var(--mobile-tab-content-height)]
             touch-manipulation active:bg-stone-100 transition-colors
             {currentView === 'iccid-mappings' ? 'text-[#c2410c]' : 'text-stone-400'}">
           <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
@@ -1316,7 +1332,7 @@
 
       <!-- 余额 tab -->
       <button onclick={() => navigate('balances')}
-        class="flex-1 flex flex-col items-center justify-start gap-0.5 pt-[var(--mobile-tab-content-top)] pb-0.5 min-h-[var(--mobile-tab-content-height)]
+        class="mobile-tab-button relative z-[1] flex-1 flex flex-col items-center justify-start gap-0.5 pt-[var(--mobile-tab-content-top)] pb-0.5 min-h-[var(--mobile-tab-content-height)]
           touch-manipulation active:bg-stone-100 transition-colors
           {currentView === 'balances' ? 'text-[#c2410c]' : 'text-stone-400'}">
         <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
@@ -1328,7 +1344,7 @@
 
       <!-- 发送 tab — a first-class route, like the other primary tabs. -->
       <button onclick={() => navigate('send')}
-        class="flex-1 flex flex-col items-center justify-start gap-0.5 pt-[var(--mobile-tab-content-top)] pb-0.5 min-h-[var(--mobile-tab-content-height)]
+        class="mobile-tab-button relative z-[1] flex-1 flex flex-col items-center justify-start gap-0.5 pt-[var(--mobile-tab-content-top)] pb-0.5 min-h-[var(--mobile-tab-content-height)]
           touch-manipulation active:bg-stone-100 transition-colors
           {currentView === 'send' && !showMoreMenu ? 'text-[#c2410c]' : 'text-stone-400 hover:text-stone-600'}">
         <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
@@ -1341,9 +1357,9 @@
 
       <!-- 更多 tab — reveals a sheet with 规则 + 用户管理 -->
       <button onclick={() => { showMoreMenu = !showMoreMenu; }}
-        class="flex-1 flex flex-col items-center justify-start gap-0.5 pt-[var(--mobile-tab-content-top)] pb-0.5 min-h-[var(--mobile-tab-content-height)]
+        class="mobile-tab-button relative z-[1] flex-1 flex flex-col items-center justify-start gap-0.5 pt-[var(--mobile-tab-content-top)] pb-0.5 min-h-[var(--mobile-tab-content-height)]
           touch-manipulation active:bg-stone-100 transition-colors
-          {showMoreMenu ? 'text-[#c2410c]' : 'text-stone-400'}">
+          {mobileTabState.index === mobileTabState.count - 1 ? 'text-[#c2410c]' : 'text-stone-400'}">
         <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round"
             d="M4 6h16M4 12h16M4 18h16"/>
