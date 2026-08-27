@@ -9,10 +9,16 @@
       // only so other mobile browsers retain their normal zoom semantics.
       const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
         || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      const isStandalone = 'standalone' in navigator
+        ? navigator.standalone === true
+        : window.matchMedia('(display-mode: standalone)').matches;
       if (isIOS) {
         document.documentElement.classList.add('is-ios');
         document.getElementById('app-viewport')
           .setAttribute('content', 'width=device-width, initial-scale=1.0, maximum-scale=1.0');
+      }
+      if (isStandalone) {
+        document.documentElement.classList.add('is-standalone');
       }
     </script>
     <title>短信验证码管理系统</title>

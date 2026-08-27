@@ -99,4 +99,19 @@ describe('mobile detail navigation', () => {
       '--mobile-tab-bar-height: calc(var(--mobile-tab-content-height) + 1px + var(--mobile-tab-safe-area));',
     );
   });
+
+  test('only standalone apps add the 20px bottom safe-area floor', () => {
+    const css = readFileSync(new URL('./app.css', import.meta.url), 'utf8');
+    const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+
+    expect(css).toContain(
+      '--mobile-tab-safe-area: env(safe-area-inset-bottom, 0px);',
+    );
+    expect(css).toContain('html.is-standalone {');
+    expect(css).toContain(
+      '--mobile-tab-safe-area: max(20px, env(safe-area-inset-bottom, 0px));',
+    );
+    expect(html).toContain("'standalone' in navigator");
+    expect(html).toContain("classList.add('is-standalone')");
+  });
 });
