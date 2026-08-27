@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   getMobileTabDragX,
   getMobileTabIndexAtPoint,
+  getMobileTabOptics,
   getMobileTabs,
   getMobileTabState,
 } from './mobile-tab-state.js';
@@ -59,5 +60,22 @@ describe('mobile tab selection state', () => {
     expect(getMobileTabDragX({ clientX: 250, ...geometry })).toBe(200);
     expect(getMobileTabDragX({ clientX: -20, ...geometry })).toBe(0);
     expect(getMobileTabDragX({ clientX: 520, ...geometry })).toBe(400);
+  });
+
+  test('tracks a clamped highlight and subtle icon parallax under a pointer', () => {
+    const geometry = { left: 0, width: 500, count: 5 };
+
+    expect(getMobileTabOptics({ clientX: 280, ...geometry })).toEqual({
+      glowX: 280,
+      iconShiftX: 1.2,
+    });
+    expect(getMobileTabOptics({ clientX: -20, ...geometry })).toEqual({
+      glowX: 0,
+      iconShiftX: -2,
+    });
+    expect(getMobileTabOptics({ clientX: 520, ...geometry })).toEqual({
+      glowX: 500,
+      iconShiftX: 2,
+    });
   });
 });

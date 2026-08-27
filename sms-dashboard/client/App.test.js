@@ -154,21 +154,27 @@ describe('mobile detail navigation', () => {
     await fireEvent.pointerMove(mobileNav, {
       pointerId: 1,
       pointerType: 'touch',
-      clientX: 250,
+      clientX: 280,
     });
 
     expect(window.location.hash).toBe('');
     expect(mobileNav.dataset.mobileTabDragging).toBe('true');
-    expect(mobileNav.style.getPropertyValue('--mobile-tab-selection-x')).toBe('200px');
+    expect(mobileNav.style.getPropertyValue('--mobile-tab-selection-x')).toBe('230px');
+    expect(mobileNav.style.getPropertyValue('--mobile-tab-glow-x')).toBe('280px');
+    expect(mobileNav.style.getPropertyValue('--mobile-tab-icon-shift-x')).toBe('1.2px');
+    expect(mobileNav.querySelector('[data-mobile-tab-active="true"]')?.textContent)
+      .toContain('余额');
 
     await fireEvent.pointerUp(mobileNav, {
       pointerId: 1,
       pointerType: 'touch',
-      clientX: 250,
+      clientX: 280,
     });
 
     expect(window.location.hash).toBe('#balances');
     expect(mobileNav.dataset.mobileTabDragging).toBe('false');
+    expect(mobileNav.style.getPropertyValue('--mobile-tab-glow-x')).toBe('50%');
+    expect(mobileNav.style.getPropertyValue('--mobile-tab-icon-shift-x')).toBe('0px');
   });
 
   test('the full glass tab bar is floating and suppresses native text selection', () => {
@@ -179,6 +185,11 @@ describe('mobile detail navigation', () => {
     expect(css).toContain('right: 10px;');
     expect(css).toContain('border-radius: 30px;');
     expect(css).toContain('border-radius: 26px;');
+    expect(css).toContain('radial-gradient(circle at var(--mobile-tab-glow-x)');
+    expect(css).toContain('rgba(245, 245, 244, 0.54)');
+    expect(css).toContain('scaleX(var(--mobile-tab-selection-scale-x, 1))');
+    expect(css).toContain('scaleY(var(--mobile-tab-selection-scale-y, 1))');
+    expect(css).toContain('.mobile-tab-button[data-mobile-tab-active="true"] > svg');
     expect(css).toContain('-webkit-user-select: none;');
     expect(css).toContain('-webkit-touch-callout: none;');
   });

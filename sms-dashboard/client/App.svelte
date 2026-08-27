@@ -29,6 +29,7 @@
   import {
     getMobileTabDragX,
     getMobileTabIndexAtPoint,
+    getMobileTabOptics,
     getMobileTabs,
     getMobileTabState,
   } from "./lib/mobile-tab-state.js";
@@ -238,6 +239,8 @@
   let mobileTabPointerId = $state(null);
   let mobileTabDragIndex = $state(null);
   let mobileTabDragX = $state(null);
+  let mobileTabGlowX = $state(null);
+  let mobileTabIconShiftX = $state(0);
   let suppressMobileTabClickUntil = 0;
   let mobileTabVisualIndex = $derived(mobileTabDragIndex ?? mobileTabState.index);
   let mobileTabVisualId = $derived(mobileTabs[mobileTabVisualIndex]);
@@ -248,6 +251,9 @@
       : mobileTabState.index === 0
       ? '0%'
       : `calc(${mobileTabState.index * 100}% + ${mobileTabState.index * 8}px)`,
+  );
+  let mobileTabGlowPosition = $derived(
+    mobileTabGlowX === null ? '50%' : `${mobileTabGlowX}px`,
   );
 
   function activateMobileTab(target) {
@@ -273,6 +279,9 @@
     };
     mobileTabDragIndex = getMobileTabIndexAtPoint(geometry);
     mobileTabDragX = getMobileTabDragX(geometry);
+    const optics = getMobileTabOptics(geometry);
+    mobileTabGlowX = optics.glowX;
+    mobileTabIconShiftX = optics.iconShiftX;
   }
 
   function handleMobileTabPointerDown(event) {
@@ -305,6 +314,8 @@
     mobileTabPointerId = null;
     mobileTabDragIndex = null;
     mobileTabDragX = null;
+    mobileTabGlowX = null;
+    mobileTabIconShiftX = 0;
 
     if (shouldActivate && target) {
       suppressMobileTabClickUntil = Date.now() + 500;
@@ -1375,7 +1386,7 @@
     <nav class="mobile-tab-bar lg:hidden fixed bottom-0 left-0 right-0 z-40
       bg-white border-t border-stone-200
       flex items-stretch touch-manipulation isolate"
-      style="box-shadow: 0 -1px 0 rgba(28,25,23,.06); padding-bottom: var(--mobile-tab-safe-area); --mobile-tab-selection-width: {mobileTabSelectionWidth}; --mobile-tab-selection-x: {mobileTabSelectionX};"
+      style="box-shadow: 0 -1px 0 rgba(28,25,23,.06); padding-bottom: var(--mobile-tab-safe-area); --mobile-tab-selection-width: {mobileTabSelectionWidth}; --mobile-tab-selection-x: {mobileTabSelectionX}; --mobile-tab-glow-x: {mobileTabGlowPosition}; --mobile-tab-icon-shift-x: {mobileTabIconShiftX}px;"
       data-mobile-tab-dragging={mobileTabPointerId !== null}
       onpointerdown={handleMobileTabPointerDown}
       onpointermove={handleMobileTabPointerMove}
@@ -1386,6 +1397,7 @@
 
       <!-- 验证码 tab -->
       <button onclick={() => handleMobileTabClick('dashboard')}
+        data-mobile-tab-active={mobileTabVisualId === 'dashboard'}
         class="mobile-tab-button relative z-[1] flex-1 flex flex-col items-center justify-center gap-0.5 min-h-[var(--mobile-tab-content-height)]
           touch-manipulation active:bg-stone-100 transition-colors
           {mobileTabVisualId === 'dashboard' ? 'text-[#c2410c]' : 'text-stone-400'}">
@@ -1399,6 +1411,7 @@
       <!-- 设备 tab — links to iccid-mappings; gated to phones.write -->
       {#if canManagePhones}
         <button onclick={() => handleMobileTabClick('iccid-mappings')}
+          data-mobile-tab-active={mobileTabVisualId === 'iccid-mappings'}
           class="mobile-tab-button relative z-[1] flex-1 flex flex-col items-center justify-center gap-0.5 min-h-[var(--mobile-tab-content-height)]
             touch-manipulation active:bg-stone-100 transition-colors
             {mobileTabVisualId === 'iccid-mappings' ? 'text-[#c2410c]' : 'text-stone-400'}">
@@ -1413,6 +1426,7 @@
 
       <!-- 余额 tab -->
       <button onclick={() => handleMobileTabClick('balances')}
+        data-mobile-tab-active={mobileTabVisualId === 'balances'}
         class="mobile-tab-button relative z-[1] flex-1 flex flex-col items-center justify-center gap-0.5 min-h-[var(--mobile-tab-content-height)]
           touch-manipulation active:bg-stone-100 transition-colors
           {mobileTabVisualId === 'balances' ? 'text-[#c2410c]' : 'text-stone-400'}">
@@ -1425,6 +1439,7 @@
 
       <!-- 发送 tab — a first-class route, like the other primary tabs. -->
       <button onclick={() => handleMobileTabClick('send')}
+        data-mobile-tab-active={mobileTabVisualId === 'send'}
         class="mobile-tab-button relative z-[1] flex-1 flex flex-col items-center justify-center gap-0.5 min-h-[var(--mobile-tab-content-height)]
           touch-manipulation active:bg-stone-100 transition-colors
           {mobileTabVisualId === 'send' ? 'text-[#c2410c]' : 'text-stone-400 hover:text-stone-600'}">
@@ -1438,6 +1453,7 @@
 
       <!-- 更多 tab — reveals a sheet with 规则 + 用户管理 -->
       <button onclick={() => handleMobileTabClick('more')}
+        data-mobile-tab-active={mobileTabVisualId === 'more'}
         class="mobile-tab-button relative z-[1] flex-1 flex flex-col items-center justify-center gap-0.5 min-h-[var(--mobile-tab-content-height)]
           touch-manipulation active:bg-stone-100 transition-colors
           {mobileTabVisualId === 'more' ? 'text-[#c2410c]' : 'text-stone-400'}">

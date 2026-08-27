@@ -31,3 +31,19 @@ export function getMobileTabDragX({ clientX, left, width, count }) {
   const centeredX = clientX - left - (selectionWidth / 2) - 4;
   return Math.max(0, Math.min(width - tabWidth, centeredX));
 }
+
+export function getMobileTabOptics({ clientX, left, width, count }) {
+  const tabWidth = width / count;
+  const localX = Math.max(0, Math.min(width, clientX - left));
+  const index = getMobileTabIndexAtPoint({ clientX, left, width, count });
+  const tabCenterX = (index + 0.5) * tabWidth;
+  const normalizedOffset = Math.max(
+    -1,
+    Math.min(1, (localX - tabCenterX) / (tabWidth / 2)),
+  );
+
+  return {
+    glowX: localX,
+    iconShiftX: Math.round(normalizedOffset * 200) / 100,
+  };
+}
