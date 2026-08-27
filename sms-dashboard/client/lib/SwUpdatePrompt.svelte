@@ -7,26 +7,61 @@
    * sw-update.js; this file is the rendering and the wiring to the browser.
    */
   import { onMount } from 'svelte';
-  import { applyUpdate, createUpdateState, dismiss, needRefresh, registerError } from './sw-update.js';
+  import {
+    applyUpdate,
+    createUpdateChecker,
+    createUpdateState,
+    dismiss,
+    needRefresh,
+    registerError,
+  } from './sw-update.js';
+
+  let { registerServiceWorker = null } = $props();
 
   const update = $state(createUpdateState());
+  const checker = createUpdateChecker(update);
   let updateSW = null;
 
-  onMount(async () => {
-    // Dynamic import: the virtual module only exists when the PWA plugin is active,
-    // so a static import would break `vite dev` runs without it.
-    try {
-      const { registerSW } = await import('virtual:pwa-register');
-      updateSW = registerSW({
-        immediate: true,
-        onNeedRefresh: () => needRefresh(update),
-        onRegisterError: () => registerError(update),
-      });
-    } catch {
-      // No service worker support, or the virtual module is unavailable. The app is
-      // fully functional without it, so this is not worth surfacing.
-      registerError(update);
+  export async function checkForUpdate() {
+    return checker.check();
+  }
+
+  onMount(() => {
+    let disposed = false;
+
+    async function register() {
+      // Dynamic import: the virtual module only exists when the PWA plugin is active,
+      // so a static import would break `vite dev` runs without it. Tests inject the
+      // same registration contract without replacing browser globals.
+      try {
+        const registerSW = registerServiceWorker
+          || (await import('virtual:pwa-register')).registerSW;
+        if (disposed) return;
+        updateSW = registerSW({
+          immediate: true,
+          onNeedRefresh: () => needRefresh(update),
+          onRegisteredSW: (_swUrl, registration) => checker.setRegistration(registration),
+          onRegisterError: () => registerError(update),
+        });
+      } catch {
+        // No service worker support, or the virtual module is unavailable. The app is
+        // fully functional without it, so this is not worth surfacing.
+        registerError(update);
+      }
     }
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === 'visible') void checkForUpdate();
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    void register();
+
+    return () => {
+      disposed = true;
+      checker.setRegistration(null);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   });
 </script>
 
@@ -44,13 +79,13 @@
       class="flex items-center gap-3 px-4 py-3 rounded-lg border shadow-lg
         bg-blue-50 border-blue-200 text-blue-800"
     >
-      <span class="text-sm flex-1">有新版本可用</span>
+      <span class="text-sm flex-1">新版本已准备好</span>
       <button
         onclick={() => applyUpdate(update, updateSW)}
         class="shrink-0 px-3 py-1.5 rounded-md bg-blue-600 text-white text-xs font-semibold
           hover:bg-blue-700 transition-colors"
       >
-        立即刷新
+        重新载入
       </button>
       <button
         onclick={() => dismiss(update)}

@@ -1,5 +1,12 @@
 import { describe, expect, it, mock } from 'bun:test';
-import { createUpdateState, dismiss, needRefresh, applyUpdate, registerError } from './sw-update.js';
+import {
+  applyUpdate,
+  createUpdateChecker,
+  createUpdateState,
+  dismiss,
+  needRefresh,
+  registerError,
+} from './sw-update.js';
 
 describe('createUpdateState', () => {
   it('starts with nothing to show', () => {
@@ -102,5 +109,45 @@ describe('registerError', () => {
     registerError(s);
     expect(s.available).toBe(false);
     expect(s.applying).toBe(false);
+  });
+});
+
+describe('createUpdateChecker', () => {
+  it('checks the registered worker and surfaces a newly waiting version', async () => {
+    const state = createUpdateState();
+    const registration = {
+      waiting: null,
+      update: mock(async () => {
+        registration.waiting = {};
+      }),
+    };
+    const checker = createUpdateChecker(state);
+    checker.setRegistration(registration);
+
+    await checker.check();
+
+    expect(registration.update).toHaveBeenCalledTimes(1);
+    expect(state.available).toBe(true);
+  });
+
+  it('reopens a dismissed prompt when the worker is already waiting', async () => {
+    const state = createUpdateState();
+    const registration = { waiting: {}, update: mock(async () => {}) };
+    const checker = createUpdateChecker(state);
+    checker.setRegistration(registration);
+    dismiss(state);
+
+    await checker.check();
+
+    expect(registration.update).not.toHaveBeenCalled();
+    expect(state.available).toBe(true);
+  });
+
+  it('is a silent no-op before service worker registration completes', async () => {
+    const state = createUpdateState();
+    const checker = createUpdateChecker(state);
+
+    await expect(checker.check()).resolves.toBe(false);
+    expect(state.available).toBe(false);
   });
 });

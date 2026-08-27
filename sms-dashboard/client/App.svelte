@@ -141,6 +141,7 @@
   let lastKnownTimestamp = $state(null); // Only flag messages newer than this as "新"
   let daemonRefreshing = $state(false);
   let showDaemonDetails = $state(false);
+  let swUpdatePrompt = $state(null);
 
   // Pull-to-refresh reuses loadData() rather than reloading the page: it refetches
   // phones, messages, stats and balance checks, and only ever sets dataLoading to
@@ -163,7 +164,10 @@
     if (pullRefreshing) return;
     pullRefreshing = true;
     try {
-      await loadData();
+      await Promise.all([
+        loadData(),
+        swUpdatePrompt?.checkForUpdate?.(),
+      ]);
     } finally {
       pullRefreshing = false;
     }
@@ -1474,4 +1478,4 @@
 
 <!-- Service worker update prompt. Outside the main layout because it is a fixed
      overlay and must not participate in the app's flex chain. -->
-<SwUpdatePrompt />
+<SwUpdatePrompt bind:this={swUpdatePrompt} />

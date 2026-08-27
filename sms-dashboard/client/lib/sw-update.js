@@ -45,3 +45,42 @@ export function registerError(state) {
   state.available = false;
   state.applying = false;
 }
+
+/**
+ * Own the single service-worker registration used for explicit update checks.
+ * The browser/Workbox callbacks still announce newly installed workers; this
+ * checker covers long-lived iOS web apps that resume without navigating.
+ */
+export function createUpdateChecker(state) {
+  let registration = null;
+
+  return {
+    setRegistration(nextRegistration) {
+      registration = nextRegistration || null;
+      if (registration?.waiting) needRefresh(state);
+    },
+
+    async check() {
+      if (!registration || state.applying) return false;
+
+      // A dismissed worker is still waiting. Surface it again without making a
+      // redundant network request.
+      if (registration.waiting) {
+        needRefresh(state);
+        return true;
+      }
+
+      try {
+        await registration.update();
+      } catch {
+        // Update checks are opportunistic; API/data refresh must still succeed when
+        // iOS is briefly offline or WebKit rejects a background update request.
+        return false;
+      }
+
+      if (!registration.waiting) return false;
+      needRefresh(state);
+      return true;
+    },
+  };
+}
