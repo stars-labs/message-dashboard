@@ -79,6 +79,7 @@ describe('mobile detail navigation', () => {
     const mobileNav = view.container.querySelector('nav.lg\\:hidden');
     for (const button of mobileNav.querySelectorAll('button')) {
       expect(button.classList.contains('min-h-[var(--mobile-tab-content-height)]')).toBe(true);
+      expect(button.classList.contains('pt-[6px]')).toBe(true);
     }
     const balances = [...mobileNav.querySelectorAll('button')]
       .find((button) => button.textContent.includes('余额'));
@@ -88,9 +89,9 @@ describe('mobile detail navigation', () => {
     expect(window.location.hash).toBe('#balances');
   });
 
-  test('the shared mobile tab content height is slightly taller than before', () => {
+  test('the shared mobile tab content height is 58px', () => {
     const css = readFileSync(new URL('./app.css', import.meta.url), 'utf8');
-    expect(css).toContain('--mobile-tab-content-height: 56px;');
+    expect(css).toContain('--mobile-tab-content-height: 58px;');
     expect(css).toContain(
       '--mobile-tab-bar-height: calc(var(--mobile-tab-content-height) + 1px + var(--mobile-tab-safe-area));',
     );
