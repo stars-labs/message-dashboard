@@ -91,10 +91,10 @@ describe('mobile detail navigation', () => {
     expect(window.location.hash).toBe('#balances');
   });
 
-  test('the shared mobile tab content height is 58px', () => {
+  test('the shared mobile tab content height is 56px with a 4px top inset', () => {
     const css = readFileSync(new URL('./app.css', import.meta.url), 'utf8');
-    expect(css).toContain('--mobile-tab-content-height: 58px;');
-    expect(css).toContain('--mobile-tab-content-top: 2px;');
+    expect(css).toContain('--mobile-tab-content-height: 56px;');
+    expect(css).toContain('--mobile-tab-content-top: 4px;');
     expect(css).toContain(
       '--mobile-tab-bar-height: calc(var(--mobile-tab-content-height) + 1px + var(--mobile-tab-safe-area));',
     );

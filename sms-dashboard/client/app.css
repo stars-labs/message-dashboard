@@ -7,8 +7,8 @@
     /* One source of truth for every surface that sits above the mobile tabs.
        Keep a 20px floor for Safari layouts where the safe-area env value is 0. */
     --mobile-tab-safe-area: max(20px, env(safe-area-inset-bottom, 0px));
-    --mobile-tab-content-height: 58px;
-    --mobile-tab-content-top: 2px;
+    --mobile-tab-content-height: 56px;
+    --mobile-tab-content-top: 4px;
     --mobile-tab-bar-height: calc(var(--mobile-tab-content-height) + 1px + var(--mobile-tab-safe-area));
   }
 
