@@ -17,6 +17,7 @@
   import { getCountryFlag } from './countries.js';
   import { getOutboundStatusMeta } from './message-status.js';
   import { copyCode } from './clipboard.js';
+  import { swipeDismiss } from './swipe-dismiss.js';
 
   let {
     message,
@@ -107,8 +108,9 @@
 
     <section
       aria-label="短信详情"
+      use:swipeDismiss={{ onDismiss: onClose }}
       class="relative w-full h-full lg:w-[480px] bg-white lg:border-l lg:border-stone-200
-        flex flex-col"
+        flex flex-col will-change-transform"
       style="box-shadow: -16px 0 40px rgba(28,25,23,.16);"
     >
       <!-- Copy confirmation. Outside the scroll area so it is always visible. -->

@@ -231,6 +231,13 @@
   };
 
   function navigate(view) {
+    // Route changes own the whole visible surface. A detail drawer left mounted
+    // above the new route makes a successful tab click look broken.
+    messageDetail = null;
+    balanceDetailCheck = null;
+    showPhoneList = false;
+    showMoreMenu = false;
+    showSendDrawer = false;
     currentView = view;
     window.location.hash = view;
   }
@@ -1277,7 +1284,7 @@
       style="box-shadow: 0 -1px 0 rgba(28,25,23,.06); padding-bottom: var(--mobile-tab-safe-area);">
 
       <!-- 验证码 tab -->
-      <button onclick={() => { navigate('dashboard'); showMoreMenu = false; }}
+      <button onclick={() => navigate('dashboard')}
         class="flex-1 flex flex-col items-center justify-center gap-0.5 pt-2 pb-0.5 min-h-[52px]
           touch-manipulation active:bg-stone-100 transition-colors
           {currentView === 'dashboard' ? 'text-[#c2410c]' : 'text-stone-400'}">
@@ -1290,7 +1297,7 @@
 
       <!-- 设备 tab — links to iccid-mappings; gated to phones.write -->
       {#if can('phones.write')}
-        <button onclick={() => { navigate('iccid-mappings'); showMoreMenu = false; }}
+        <button onclick={() => navigate('iccid-mappings')}
           class="flex-1 flex flex-col items-center justify-center gap-0.5 pt-2 pb-0.5 min-h-[52px]
             touch-manipulation active:bg-stone-100 transition-colors
             {currentView === 'iccid-mappings' ? 'text-[#c2410c]' : 'text-stone-400'}">
@@ -1304,7 +1311,7 @@
       {/if}
 
       <!-- 余额 tab -->
-      <button onclick={() => { navigate('balances'); showMoreMenu = false; }}
+      <button onclick={() => navigate('balances')}
         class="flex-1 flex flex-col items-center justify-center gap-0.5 pt-2 pb-0.5 min-h-[52px]
           touch-manipulation active:bg-stone-100 transition-colors
           {currentView === 'balances' ? 'text-[#c2410c]' : 'text-stone-400'}">
@@ -1316,11 +1323,7 @@
       </button>
 
       <!-- 发送 tab — a first-class route, like the other primary tabs. -->
-      <button onclick={() => {
-          navigate('send');
-          showMoreMenu = false;
-          showPhoneList = false;
-        }}
+      <button onclick={() => navigate('send')}
         class="flex-1 flex flex-col items-center justify-center gap-0.5 pt-2 pb-0.5 min-h-[52px]
           touch-manipulation active:bg-stone-100 transition-colors
           {currentView === 'send' && !showMoreMenu ? 'text-[#c2410c]' : 'text-stone-400 hover:text-stone-600'}">
@@ -1373,7 +1376,7 @@
           <p class="text-[11px] font-semibold text-stone-400 uppercase tracking-widest px-3 mb-2">规则</p>
 
           {#if can('filters.read')}
-            <button onclick={() => { navigate('filters'); showMoreMenu = false; }}
+            <button onclick={() => navigate('filters')}
               class="w-full flex items-center justify-between px-3 py-3 rounded-xl hover:bg-stone-50 transition-colors text-left">
               <div>
                 <div class="text-sm font-medium text-stone-800">垃圾过滤</div>
@@ -1386,7 +1389,7 @@
           {/if}
 
           {#if can('keywords.read')}
-            <button onclick={() => { navigate('keywords'); showMoreMenu = false; }}
+            <button onclick={() => navigate('keywords')}
               class="w-full flex items-center justify-between px-3 py-3 rounded-xl hover:bg-stone-50 transition-colors text-left">
               <div>
                 <div class="text-sm font-medium text-stone-800">关键词高亮</div>
@@ -1401,7 +1404,7 @@
           {#if can('users.read')}
             <div class="border-t border-stone-100 my-2"></div>
             <p class="text-[11px] font-semibold text-stone-400 uppercase tracking-widest px-3 mb-2">管理</p>
-            <button onclick={() => { navigate('users'); showMoreMenu = false; }}
+            <button onclick={() => navigate('users')}
               class="w-full flex items-center justify-between px-3 py-3 rounded-xl hover:bg-stone-50 transition-colors text-left">
               <div>
                 <div class="text-sm font-medium text-stone-800">用户管理</div>

@@ -86,6 +86,47 @@ describe('MessageDetail', () => {
     expect(closed).toBe(true);
   });
 
+  test('closes after a deliberate swipe right from the mobile left edge', async () => {
+    let closed = false;
+    const { getByRole } = render(MessageDetail, {
+      props: { message: received(), onClose: () => { closed = true; } },
+    });
+    const drawer = getByRole('region', { name: '短信详情' });
+
+    await fireEvent.touchStart(drawer, {
+      touches: [{ clientX: 12, clientY: 240 }],
+    });
+    await fireEvent.touchMove(drawer, {
+      touches: [{ clientX: 112, clientY: 246 }],
+    });
+    await fireEvent.touchEnd(drawer, {
+      changedTouches: [{ clientX: 112, clientY: 246 }],
+    });
+    await fireEvent.transitionEnd(drawer);
+
+    expect(closed).toBe(true);
+  });
+
+  test('keeps the drawer open for vertical scrolling near the left edge', async () => {
+    let closed = false;
+    const { getByRole } = render(MessageDetail, {
+      props: { message: received(), onClose: () => { closed = true; } },
+    });
+    const drawer = getByRole('region', { name: '短信详情' });
+
+    await fireEvent.touchStart(drawer, {
+      touches: [{ clientX: 12, clientY: 120 }],
+    });
+    await fireEvent.touchMove(drawer, {
+      touches: [{ clientX: 20, clientY: 240 }],
+    });
+    await fireEvent.touchEnd(drawer, {
+      changedTouches: [{ clientX: 20, clientY: 240 }],
+    });
+
+    expect(closed).toBe(false);
+  });
+
   // Mirrors BalanceQueryDetail's positioning so the mobile tab bar never covers
   // the drawer's own controls.
   test('leaves room for the mobile tab bar', () => {

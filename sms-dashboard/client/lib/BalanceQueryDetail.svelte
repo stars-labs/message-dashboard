@@ -1,6 +1,7 @@
 <script>
   import { onMount } from 'svelte';
   import { formatCardNumber } from './card-number.js';
+  import { swipeDismiss } from './swipe-dismiss.js';
   import {
     formatBalanceMetric,
     getBalanceMetricLabel,
@@ -51,8 +52,9 @@
 
     <section
       aria-label="余额查询详情"
+      use:swipeDismiss={{ onDismiss: onClose }}
       class="relative w-full h-full lg:w-[480px] bg-white lg:border-l lg:border-stone-200
-        flex flex-col"
+        flex flex-col will-change-transform"
       style="box-shadow: -16px 0 40px rgba(28,25,23,.16);"
     >
       <header class="h-[64px] px-4 lg:px-5 border-b border-stone-200 flex items-center gap-3 shrink-0">
