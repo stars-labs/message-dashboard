@@ -26,7 +26,12 @@
   import { formatCardNumber } from "./lib/card-number.js";
   import { formatTimeAgo } from "./lib/time.js";
   import { getDaemonStatusMeta, isDaemonConnected } from "./lib/daemon-status.js";
-  import { getMobileTabState } from "./lib/mobile-tab-state.js";
+  import {
+    getMobileTabDragX,
+    getMobileTabIndexAtPoint,
+    getMobileTabs,
+    getMobileTabState,
+  } from "./lib/mobile-tab-state.js";
   import {
     MESSAGE_PAGE_SIZE,
     hasMoreMessages,
@@ -224,17 +229,88 @@
   }
 
   let canManagePhones = $derived(can('phones.write'));
+  let mobileTabs = $derived(getMobileTabs(canManagePhones));
   let mobileTabState = $derived(getMobileTabState({
     currentView,
     showMoreMenu,
     canManagePhones,
   }));
+  let mobileTabPointerId = $state(null);
+  let mobileTabDragIndex = $state(null);
+  let mobileTabDragX = $state(null);
+  let suppressMobileTabClickUntil = 0;
+  let mobileTabVisualIndex = $derived(mobileTabDragIndex ?? mobileTabState.index);
+  let mobileTabVisualId = $derived(mobileTabs[mobileTabVisualIndex]);
   let mobileTabSelectionWidth = $derived(`${100 / mobileTabState.count}%`);
   let mobileTabSelectionX = $derived(
-    mobileTabState.index === 0
+    mobileTabDragX !== null
+      ? `${mobileTabDragX}px`
+      : mobileTabState.index === 0
       ? '0%'
       : `calc(${mobileTabState.index * 100}% + ${mobileTabState.index * 8}px)`,
   );
+
+  function activateMobileTab(target) {
+    if (target === 'more') {
+      showMoreMenu = !showMoreMenu;
+      return;
+    }
+    navigate(target);
+  }
+
+  function handleMobileTabClick(target) {
+    if (Date.now() < suppressMobileTabClickUntil) return;
+    activateMobileTab(target);
+  }
+
+  function updateMobileTabDrag(event) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const geometry = {
+      clientX: event.clientX,
+      left: rect.left,
+      width: rect.width,
+      count: mobileTabs.length,
+    };
+    mobileTabDragIndex = getMobileTabIndexAtPoint(geometry);
+    mobileTabDragX = getMobileTabDragX(geometry);
+  }
+
+  function handleMobileTabPointerDown(event) {
+    const root = document.documentElement;
+    if (
+      event.pointerType !== 'touch'
+      || event.button !== 0
+      || !root.classList.contains('is-ios')
+      || !root.classList.contains('is-standalone')
+    ) return;
+
+    event.preventDefault();
+    mobileTabPointerId = event.pointerId;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    updateMobileTabDrag(event);
+  }
+
+  function handleMobileTabPointerMove(event) {
+    if (event.pointerId !== mobileTabPointerId) return;
+    event.preventDefault();
+    updateMobileTabDrag(event);
+  }
+
+  function finishMobileTabPointer(event, shouldActivate) {
+    if (event.pointerId !== mobileTabPointerId) return;
+    event.preventDefault();
+    updateMobileTabDrag(event);
+    const target = mobileTabs[mobileTabDragIndex];
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    mobileTabPointerId = null;
+    mobileTabDragIndex = null;
+    mobileTabDragX = null;
+
+    if (shouldActivate && target) {
+      suppressMobileTabClickUntil = Date.now() + 500;
+      activateMobileTab(target);
+    }
+  }
 
   // Which permission each view requires. Used both for nav visibility and for the hash
   // guard below, so the two cannot disagree.
@@ -1299,15 +1375,20 @@
     <nav class="mobile-tab-bar lg:hidden fixed bottom-0 left-0 right-0 z-40
       bg-white border-t border-stone-200
       flex items-stretch touch-manipulation isolate"
-      style="box-shadow: 0 -1px 0 rgba(28,25,23,.06); padding-bottom: var(--mobile-tab-safe-area); --mobile-tab-selection-width: {mobileTabSelectionWidth}; --mobile-tab-selection-x: {mobileTabSelectionX};">
+      style="box-shadow: 0 -1px 0 rgba(28,25,23,.06); padding-bottom: var(--mobile-tab-safe-area); --mobile-tab-selection-width: {mobileTabSelectionWidth}; --mobile-tab-selection-x: {mobileTabSelectionX};"
+      data-mobile-tab-dragging={mobileTabPointerId !== null}
+      onpointerdown={handleMobileTabPointerDown}
+      onpointermove={handleMobileTabPointerMove}
+      onpointerup={(event) => finishMobileTabPointer(event, true)}
+      onpointercancel={(event) => finishMobileTabPointer(event, false)}>
 
       <span class="mobile-tab-selection" data-mobile-tab-selection aria-hidden="true"></span>
 
       <!-- 验证码 tab -->
-      <button onclick={() => navigate('dashboard')}
+      <button onclick={() => handleMobileTabClick('dashboard')}
         class="mobile-tab-button relative z-[1] flex-1 flex flex-col items-center justify-start gap-0.5 pt-[var(--mobile-tab-content-top)] pb-0.5 min-h-[var(--mobile-tab-content-height)]
           touch-manipulation active:bg-stone-100 transition-colors
-          {currentView === 'dashboard' ? 'text-[#c2410c]' : 'text-stone-400'}">
+          {mobileTabVisualId === 'dashboard' ? 'text-[#c2410c]' : 'text-stone-400'}">
         <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round"
             d="M7 8h10M7 12h6m-6 4h10M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z"/>
@@ -1317,10 +1398,10 @@
 
       <!-- 设备 tab — links to iccid-mappings; gated to phones.write -->
       {#if canManagePhones}
-        <button onclick={() => navigate('iccid-mappings')}
+        <button onclick={() => handleMobileTabClick('iccid-mappings')}
           class="mobile-tab-button relative z-[1] flex-1 flex flex-col items-center justify-start gap-0.5 pt-[var(--mobile-tab-content-top)] pb-0.5 min-h-[var(--mobile-tab-content-height)]
             touch-manipulation active:bg-stone-100 transition-colors
-            {currentView === 'iccid-mappings' ? 'text-[#c2410c]' : 'text-stone-400'}">
+            {mobileTabVisualId === 'iccid-mappings' ? 'text-[#c2410c]' : 'text-stone-400'}">
           <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
             <rect x="5" y="5" width="14" height="14" rx="2"/>
             <rect x="9" y="9" width="6" height="6" rx="1"/>
@@ -1331,10 +1412,10 @@
       {/if}
 
       <!-- 余额 tab -->
-      <button onclick={() => navigate('balances')}
+      <button onclick={() => handleMobileTabClick('balances')}
         class="mobile-tab-button relative z-[1] flex-1 flex flex-col items-center justify-start gap-0.5 pt-[var(--mobile-tab-content-top)] pb-0.5 min-h-[var(--mobile-tab-content-height)]
           touch-manipulation active:bg-stone-100 transition-colors
-          {currentView === 'balances' ? 'text-[#c2410c]' : 'text-stone-400'}">
+          {mobileTabVisualId === 'balances' ? 'text-[#c2410c]' : 'text-stone-400'}">
         <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
           <path stroke-linecap="round" stroke-linejoin="round" d="M4 7.5A2.5 2.5 0 016.5 5H19a1 1 0 011 1v12a1 1 0 01-1 1H6.5A2.5 2.5 0 014 16.5v-9z"/>
           <path stroke-linecap="round" stroke-linejoin="round" d="M4 8h13m0 3h4v4h-4a2 2 0 010-4z"/>
@@ -1343,10 +1424,10 @@
       </button>
 
       <!-- 发送 tab — a first-class route, like the other primary tabs. -->
-      <button onclick={() => navigate('send')}
+      <button onclick={() => handleMobileTabClick('send')}
         class="mobile-tab-button relative z-[1] flex-1 flex flex-col items-center justify-start gap-0.5 pt-[var(--mobile-tab-content-top)] pb-0.5 min-h-[var(--mobile-tab-content-height)]
           touch-manipulation active:bg-stone-100 transition-colors
-          {currentView === 'send' && !showMoreMenu ? 'text-[#c2410c]' : 'text-stone-400 hover:text-stone-600'}">
+          {mobileTabVisualId === 'send' ? 'text-[#c2410c]' : 'text-stone-400 hover:text-stone-600'}">
         <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
           <path stroke-linecap="round" stroke-linejoin="round"
             d="M5 5h9a3 3 0 013 3v1M5 5a3 3 0 00-3 3v5a3 3 0 003 3h2l3.5 3v-3H13"/>
@@ -1356,10 +1437,10 @@
       </button>
 
       <!-- 更多 tab — reveals a sheet with 规则 + 用户管理 -->
-      <button onclick={() => { showMoreMenu = !showMoreMenu; }}
+      <button onclick={() => handleMobileTabClick('more')}
         class="mobile-tab-button relative z-[1] flex-1 flex flex-col items-center justify-start gap-0.5 pt-[var(--mobile-tab-content-top)] pb-0.5 min-h-[var(--mobile-tab-content-height)]
           touch-manipulation active:bg-stone-100 transition-colors
-          {mobileTabState.index === mobileTabState.count - 1 ? 'text-[#c2410c]' : 'text-stone-400'}">
+          {mobileTabVisualId === 'more' ? 'text-[#c2410c]' : 'text-stone-400'}">
         <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round"
             d="M4 6h16M4 12h16M4 18h16"/>

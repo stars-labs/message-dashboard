@@ -13,6 +13,7 @@ afterEach(() => {
   auth.user = null;
   auth.baseUrl = originalBaseUrl;
   window.location.hash = '';
+  document.documentElement.classList.remove('is-ios', 'is-standalone');
 });
 
 function responseFor(url) {
@@ -127,7 +128,56 @@ describe('mobile detail navigation', () => {
 
     expect(css).toContain('html.is-ios.is-standalone .mobile-tab-bar');
     expect(css).toContain('html.is-ios.is-standalone .mobile-tab-selection');
-    expect(css).toContain('backdrop-filter: blur(18px) saturate(150%);');
+    expect(css).toContain('backdrop-filter: blur(22px) saturate(165%);');
     expect(css).toContain('@media (prefers-reduced-motion: reduce)');
+  });
+
+  test('the floating tab pill follows a touch pointer and navigates on release', async () => {
+    document.documentElement.classList.add('is-ios', 'is-standalone');
+    auth.baseUrl = '';
+    globalThis.fetch = async (url) => responseFor(url);
+    const view = render(App);
+    await waitFor(() => expect(view.container.querySelector('[data-message-row]')).toBeTruthy());
+
+    const mobileNav = view.container.querySelector('.mobile-tab-bar');
+    mobileNav.getBoundingClientRect = () => ({ left: 0, width: 500 });
+    mobileNav.setPointerCapture = () => {};
+    mobileNav.releasePointerCapture = () => {};
+
+    await fireEvent.pointerDown(mobileNav, {
+      pointerId: 1,
+      pointerType: 'touch',
+      button: 0,
+      clientX: 50,
+    });
+    await fireEvent.pointerMove(mobileNav, {
+      pointerId: 1,
+      pointerType: 'touch',
+      clientX: 250,
+    });
+
+    expect(window.location.hash).toBe('');
+    expect(mobileNav.dataset.mobileTabDragging).toBe('true');
+    expect(mobileNav.style.getPropertyValue('--mobile-tab-selection-x')).toBe('200px');
+
+    await fireEvent.pointerUp(mobileNav, {
+      pointerId: 1,
+      pointerType: 'touch',
+      clientX: 250,
+    });
+
+    expect(window.location.hash).toBe('#balances');
+    expect(mobileNav.dataset.mobileTabDragging).toBe('false');
+  });
+
+  test('the full glass tab bar is floating and suppresses native text selection', () => {
+    const css = readFileSync(new URL('./app.css', import.meta.url), 'utf8');
+
+    expect(css).toContain('bottom: var(--mobile-tab-safe-area);');
+    expect(css).toContain('left: 10px;');
+    expect(css).toContain('right: 10px;');
+    expect(css).toContain('border-radius: 28px;');
+    expect(css).toContain('-webkit-user-select: none;');
+    expect(css).toContain('-webkit-touch-callout: none;');
   });
 });
