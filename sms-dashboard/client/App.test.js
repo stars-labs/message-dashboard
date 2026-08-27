@@ -79,7 +79,7 @@ describe('mobile detail navigation', () => {
     const mobileNav = view.container.querySelector('nav.lg\\:hidden');
     for (const button of mobileNav.querySelectorAll('button')) {
       expect(button.classList.contains('min-h-[var(--mobile-tab-content-height)]')).toBe(true);
-      expect(button.classList.contains('pt-[6px]')).toBe(true);
+      expect(button.classList.contains('pt-[4px]')).toBe(true);
     }
     const balances = [...mobileNav.querySelectorAll('button')]
       .find((button) => button.textContent.includes('余额'));
