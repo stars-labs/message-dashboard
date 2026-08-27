@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/svelte';
 import { afterEach, describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import App from './App.svelte';
 import { auth } from './lib/auth.js';
 
@@ -76,11 +77,22 @@ describe('mobile detail navigation', () => {
     expect(view.getByRole('region', { name: '短信详情' })).toBeTruthy();
 
     const mobileNav = view.container.querySelector('nav.lg\\:hidden');
+    for (const button of mobileNav.querySelectorAll('button')) {
+      expect(button.classList.contains('min-h-[var(--mobile-tab-content-height)]')).toBe(true);
+    }
     const balances = [...mobileNav.querySelectorAll('button')]
       .find((button) => button.textContent.includes('余额'));
     await fireEvent.click(balances);
 
     expect(view.queryByRole('region', { name: '短信详情' })).toBeNull();
     expect(window.location.hash).toBe('#balances');
+  });
+
+  test('the shared mobile tab content height is slightly taller than before', () => {
+    const css = readFileSync(new URL('./app.css', import.meta.url), 'utf8');
+    expect(css).toContain('--mobile-tab-content-height: 56px;');
+    expect(css).toContain(
+      '--mobile-tab-bar-height: calc(var(--mobile-tab-content-height) + 1px + var(--mobile-tab-safe-area));',
+    );
   });
 });
