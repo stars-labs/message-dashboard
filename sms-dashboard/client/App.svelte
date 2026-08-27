@@ -1285,7 +1285,7 @@
 
       <!-- 验证码 tab -->
       <button onclick={() => navigate('dashboard')}
-        class="flex-1 flex flex-col items-center justify-center gap-0.5 pt-[4px] pb-0.5 min-h-[var(--mobile-tab-content-height)]
+        class="flex-1 flex flex-col items-center justify-start gap-0.5 pt-[var(--mobile-tab-content-top)] pb-0.5 min-h-[var(--mobile-tab-content-height)]
           touch-manipulation active:bg-stone-100 transition-colors
           {currentView === 'dashboard' ? 'text-[#c2410c]' : 'text-stone-400'}">
         <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -1298,7 +1298,7 @@
       <!-- 设备 tab — links to iccid-mappings; gated to phones.write -->
       {#if can('phones.write')}
         <button onclick={() => navigate('iccid-mappings')}
-          class="flex-1 flex flex-col items-center justify-center gap-0.5 pt-[4px] pb-0.5 min-h-[var(--mobile-tab-content-height)]
+          class="flex-1 flex flex-col items-center justify-start gap-0.5 pt-[var(--mobile-tab-content-top)] pb-0.5 min-h-[var(--mobile-tab-content-height)]
             touch-manipulation active:bg-stone-100 transition-colors
             {currentView === 'iccid-mappings' ? 'text-[#c2410c]' : 'text-stone-400'}">
           <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
@@ -1312,7 +1312,7 @@
 
       <!-- 余额 tab -->
       <button onclick={() => navigate('balances')}
-        class="flex-1 flex flex-col items-center justify-center gap-0.5 pt-[4px] pb-0.5 min-h-[var(--mobile-tab-content-height)]
+        class="flex-1 flex flex-col items-center justify-start gap-0.5 pt-[var(--mobile-tab-content-top)] pb-0.5 min-h-[var(--mobile-tab-content-height)]
           touch-manipulation active:bg-stone-100 transition-colors
           {currentView === 'balances' ? 'text-[#c2410c]' : 'text-stone-400'}">
         <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
@@ -1324,7 +1324,7 @@
 
       <!-- 发送 tab — a first-class route, like the other primary tabs. -->
       <button onclick={() => navigate('send')}
-        class="flex-1 flex flex-col items-center justify-center gap-0.5 pt-[4px] pb-0.5 min-h-[var(--mobile-tab-content-height)]
+        class="flex-1 flex flex-col items-center justify-start gap-0.5 pt-[var(--mobile-tab-content-top)] pb-0.5 min-h-[var(--mobile-tab-content-height)]
           touch-manipulation active:bg-stone-100 transition-colors
           {currentView === 'send' && !showMoreMenu ? 'text-[#c2410c]' : 'text-stone-400 hover:text-stone-600'}">
         <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
@@ -1337,7 +1337,7 @@
 
       <!-- 更多 tab — reveals a sheet with 规则 + 用户管理 -->
       <button onclick={() => { showMoreMenu = !showMoreMenu; }}
-        class="flex-1 flex flex-col items-center justify-center gap-0.5 pt-[4px] pb-0.5 min-h-[var(--mobile-tab-content-height)]
+        class="flex-1 flex flex-col items-center justify-start gap-0.5 pt-[var(--mobile-tab-content-top)] pb-0.5 min-h-[var(--mobile-tab-content-height)]
           touch-manipulation active:bg-stone-100 transition-colors
           {showMoreMenu ? 'text-[#c2410c]' : 'text-stone-400'}">
         <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
