@@ -7,8 +7,7 @@
     /* One source of truth for every surface that sits above the mobile tabs.
        Browser chrome already protects Safari tabs, so use only its real inset. */
     --mobile-tab-safe-area: env(safe-area-inset-bottom, 0px);
-    --mobile-tab-content-height: 56px;
-    --mobile-tab-content-top: 6px;
+    --mobile-tab-content-height: 60px;
     --mobile-tab-bar-height: calc(var(--mobile-tab-content-height) + 1px + var(--mobile-tab-safe-area));
   }
 
@@ -137,7 +136,7 @@ html.is-ios.is-standalone .mobile-tab-bar {
   overflow: hidden;
   touch-action: none;
   border: 1px solid rgba(255, 255, 255, 0.76);
-  border-radius: 28px;
+  border-radius: 30px;
   background: rgba(245, 245, 244, 0.7);
   -webkit-backdrop-filter: blur(22px) saturate(165%);
   backdrop-filter: blur(22px) saturate(165%);
@@ -152,7 +151,7 @@ html.is-ios.is-standalone .mobile-tab-selection {
   width: calc(var(--mobile-tab-selection-width) - 8px);
   height: calc(var(--mobile-tab-content-height) - 8px);
   border: 1px solid rgba(255, 255, 255, 0.82);
-  border-radius: 22px;
+  border-radius: 26px;
   background: linear-gradient(145deg, rgba(255, 255, 255, 0.9), rgba(255, 237, 213, 0.58));
   box-shadow: 0 3px 14px rgba(120, 53, 15, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.94);
   pointer-events: none;
@@ -171,7 +170,7 @@ html.is-ios.is-standalone .mobile-tab-bar[data-mobile-tab-dragging="true"] .mobi
 
 html.is-ios.is-standalone .mobile-tab-button:active {
   background: rgba(255, 255, 255, 0.28);
-  border-radius: 22px;
+  border-radius: 26px;
 }
 
 @media (prefers-reduced-motion: reduce) {

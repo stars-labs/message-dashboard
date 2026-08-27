@@ -84,9 +84,10 @@ describe('mobile detail navigation', () => {
     expect(mobileNav.style.getPropertyValue('--mobile-tab-selection-x')).toBe('0%');
     for (const button of mobileNav.querySelectorAll('button')) {
       expect(button.classList.contains('min-h-[var(--mobile-tab-content-height)]')).toBe(true);
-      expect(button.classList.contains('justify-start')).toBe(true);
-      expect(button.classList.contains('justify-center')).toBe(false);
-      expect(button.classList.contains('pt-[var(--mobile-tab-content-top)]')).toBe(true);
+      expect(button.classList.contains('justify-center')).toBe(true);
+      expect(button.classList.contains('justify-start')).toBe(false);
+      expect([...button.classList].some((className) => className.startsWith('pt-'))).toBe(false);
+      expect([...button.classList].some((className) => className.startsWith('pb-'))).toBe(false);
     }
     const balances = [...mobileNav.querySelectorAll('button')]
       .find((button) => button.textContent.includes('余额'));
@@ -99,10 +100,10 @@ describe('mobile detail navigation', () => {
     );
   });
 
-  test('the shared mobile tab content height is 56px with a 6px top inset', () => {
+  test('the shared mobile tab content height is 60px without a vertical offset', () => {
     const css = readFileSync(new URL('./app.css', import.meta.url), 'utf8');
-    expect(css).toContain('--mobile-tab-content-height: 56px;');
-    expect(css).toContain('--mobile-tab-content-top: 6px;');
+    expect(css).toContain('--mobile-tab-content-height: 60px;');
+    expect(css).not.toContain('--mobile-tab-content-top');
     expect(css).toContain(
       '--mobile-tab-bar-height: calc(var(--mobile-tab-content-height) + 1px + var(--mobile-tab-safe-area));',
     );
@@ -176,7 +177,8 @@ describe('mobile detail navigation', () => {
     expect(css).toContain('bottom: var(--mobile-tab-safe-area);');
     expect(css).toContain('left: 10px;');
     expect(css).toContain('right: 10px;');
-    expect(css).toContain('border-radius: 28px;');
+    expect(css).toContain('border-radius: 30px;');
+    expect(css).toContain('border-radius: 26px;');
     expect(css).toContain('-webkit-user-select: none;');
     expect(css).toContain('-webkit-touch-callout: none;');
   });

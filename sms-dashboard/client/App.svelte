@@ -1386,7 +1386,7 @@
 
       <!-- 验证码 tab -->
       <button onclick={() => handleMobileTabClick('dashboard')}
-        class="mobile-tab-button relative z-[1] flex-1 flex flex-col items-center justify-start gap-0.5 pt-[var(--mobile-tab-content-top)] pb-0.5 min-h-[var(--mobile-tab-content-height)]
+        class="mobile-tab-button relative z-[1] flex-1 flex flex-col items-center justify-center gap-0.5 min-h-[var(--mobile-tab-content-height)]
           touch-manipulation active:bg-stone-100 transition-colors
           {mobileTabVisualId === 'dashboard' ? 'text-[#c2410c]' : 'text-stone-400'}">
         <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -1399,7 +1399,7 @@
       <!-- 设备 tab — links to iccid-mappings; gated to phones.write -->
       {#if canManagePhones}
         <button onclick={() => handleMobileTabClick('iccid-mappings')}
-          class="mobile-tab-button relative z-[1] flex-1 flex flex-col items-center justify-start gap-0.5 pt-[var(--mobile-tab-content-top)] pb-0.5 min-h-[var(--mobile-tab-content-height)]
+          class="mobile-tab-button relative z-[1] flex-1 flex flex-col items-center justify-center gap-0.5 min-h-[var(--mobile-tab-content-height)]
             touch-manipulation active:bg-stone-100 transition-colors
             {mobileTabVisualId === 'iccid-mappings' ? 'text-[#c2410c]' : 'text-stone-400'}">
           <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
@@ -1413,7 +1413,7 @@
 
       <!-- 余额 tab -->
       <button onclick={() => handleMobileTabClick('balances')}
-        class="mobile-tab-button relative z-[1] flex-1 flex flex-col items-center justify-start gap-0.5 pt-[var(--mobile-tab-content-top)] pb-0.5 min-h-[var(--mobile-tab-content-height)]
+        class="mobile-tab-button relative z-[1] flex-1 flex flex-col items-center justify-center gap-0.5 min-h-[var(--mobile-tab-content-height)]
           touch-manipulation active:bg-stone-100 transition-colors
           {mobileTabVisualId === 'balances' ? 'text-[#c2410c]' : 'text-stone-400'}">
         <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
@@ -1425,7 +1425,7 @@
 
       <!-- 发送 tab — a first-class route, like the other primary tabs. -->
       <button onclick={() => handleMobileTabClick('send')}
-        class="mobile-tab-button relative z-[1] flex-1 flex flex-col items-center justify-start gap-0.5 pt-[var(--mobile-tab-content-top)] pb-0.5 min-h-[var(--mobile-tab-content-height)]
+        class="mobile-tab-button relative z-[1] flex-1 flex flex-col items-center justify-center gap-0.5 min-h-[var(--mobile-tab-content-height)]
           touch-manipulation active:bg-stone-100 transition-colors
           {mobileTabVisualId === 'send' ? 'text-[#c2410c]' : 'text-stone-400 hover:text-stone-600'}">
         <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
@@ -1438,7 +1438,7 @@
 
       <!-- 更多 tab — reveals a sheet with 规则 + 用户管理 -->
       <button onclick={() => handleMobileTabClick('more')}
-        class="mobile-tab-button relative z-[1] flex-1 flex flex-col items-center justify-start gap-0.5 pt-[var(--mobile-tab-content-top)] pb-0.5 min-h-[var(--mobile-tab-content-height)]
+        class="mobile-tab-button relative z-[1] flex-1 flex flex-col items-center justify-center gap-0.5 min-h-[var(--mobile-tab-content-height)]
           touch-manipulation active:bg-stone-100 transition-colors
           {mobileTabVisualId === 'more' ? 'text-[#c2410c]' : 'text-stone-400'}">
         <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
