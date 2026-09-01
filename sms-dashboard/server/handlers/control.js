@@ -2,19 +2,13 @@ import { nanoid } from 'nanoid';
 import { extractVerificationCode } from '../utils/verification';
 import { findKeywordMatches } from '../api/keywords.js';
 import { classifyMessage, loadActiveRules } from '../utils/spam-filter.js';
-import { HEALTH_SCHEMA_VERSION, normalizeHealthSnapshot } from '../utils/daemon-health.js';
+import { normalizeHealthSnapshot } from '../utils/daemon-health.js';
 import {
   findPendingBalanceCheck,
   linkBalanceReply,
   updateBalanceCheckForSmsResult,
 } from './balance-queries.js';
 import { processCarrierBillMessages } from '../utils/carrier-billing.js';
-
-const IS_LEGACY_DAEMON_HEALTH_SQL = `(
-  daemon_health.metadata IS NULL OR
-  json_valid(daemon_health.metadata) = 0 OR
-  COALESCE(json_extract(daemon_health.metadata, '$.schema_version'), 0) < ${HEALTH_SCHEMA_VERSION}
-)`;
 
 const DAEMON_SESSION_ID = /^[A-Za-z0-9._:-]{1,120}$/;
 
@@ -23,7 +17,7 @@ export function normalizeDaemonSessionId(value) {
 }
 
 export const controlHandler = {
-  // New clean endpoint for separate modems and SIMs with state reconciliation
+  // Synchronize the daemon's canonical modem reports without rewriting unchanged rows.
   async updateDevices(request) {
     const { env } = request;
     
@@ -41,329 +35,152 @@ export const controlHandler = {
     
     // Parse request body
     const body = await request.json();
-    const {
-      sync_mode = 'incremental',
-      session_id = null,
-      timestamp = new Date().toISOString(),
-    } = body;
+    const { modem_reports: reports, sync_mode = 'incremental', session_id = null } = body;
+    const timestamp = body.timestamp || new Date().toISOString();
+
+    if (!Array.isArray(reports)) {
+      return new Response(JSON.stringify({ error: 'modem_reports must be an array' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    if (!['incremental', 'full'].includes(sync_mode) || (sync_mode === 'full' && !session_id)) {
+      return new Response(JSON.stringify({ error: 'Invalid sync mode or missing full-sync session ID' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
 
     try {
-      // Format detection: new path (modem_reports) vs legacy path (modems + sims)
-      if (body.modem_reports) {
-        // === NEW PATH: Single-loop modem_reports ===
-        const reports = body.modem_reports;
-        console.log(`[control.js] Received ${reports.length} modem_reports (mode: ${sync_mode}, session: ${session_id})`);
+      console.log(`[control.js] Received ${reports.length} modem_reports (mode: ${sync_mode}, session: ${session_id})`);
 
-        const batch = [];
+      const acceptedReports = reports.filter((report) => {
+        if (!report?.equipment_id) return false;
+        return !(report.equipment_id.startsWith('MODEM_') && !report.manufacturer && !report.model);
+      });
+      const verificationStatus = sync_mode === 'full' ? 'verified' : null;
+      const lastVerifiedSession = sync_mode === 'full' ? session_id : null;
 
-        // Full sync: mark all active modems as pending verification
-        if (sync_mode === 'full' && session_id) {
-          console.log(`[control.js] Starting FULL STATE SYNC for session ${session_id}`);
-          batch.push(env.DB.prepare(`
-            UPDATE modems
-            SET verification_status = 'pending'
-            WHERE status IN ('active', 'connected', 'online')
-          `));
-        }
-
-        // Single upsert per modem report — no SIM association loop, no eviction
-        for (const report of reports) {
-          if (!report.equipment_id) {
-            console.warn('[control.js] Skipping report without equipment_id');
-            continue;
-          }
-
-          if (report.equipment_id.startsWith('MODEM_') &&
-              (!report.manufacturer || report.manufacturer === null) &&
-              (!report.model || report.model === null)) {
-            console.warn(`[control.js] Rejecting fake modem entry: ${report.equipment_id}`);
-            continue;
-          }
-
-          const verificationStatus = sync_mode === 'full' ? 'verified' : null;
-          const lastVerifiedSession = sync_mode === 'full' ? session_id : null;
-
-          batch.push(env.DB.prepare(`
-            INSERT INTO modems (
-              equipment_id, manufacturer, model, firmware_revision,
-              hardware_revision, detected_iccid, detected_phone_number,
-              detected_operator, signal_percent, rssi,
-              modem_index, usb_port, usb_path, last_usb_path, status,
-              verification_status, last_verified_session,
-              updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(equipment_id) DO UPDATE SET
-              manufacturer = excluded.manufacturer,
-              model = excluded.model,
-              firmware_revision = excluded.firmware_revision,
-              hardware_revision = excluded.hardware_revision,
-              detected_iccid = excluded.detected_iccid,
-              detected_phone_number = excluded.detected_phone_number,
-              detected_operator = excluded.detected_operator,
-              signal_percent = excluded.signal_percent,
-              rssi = excluded.rssi,
-              modem_index = excluded.modem_index,
-              usb_port = excluded.usb_port,
-              usb_path = excluded.usb_path,
-              last_usb_path = COALESCE(excluded.last_usb_path, modems.last_usb_path),
-              status = excluded.status,
-              verification_status = COALESCE(excluded.verification_status, modems.verification_status),
-              last_verified_session = COALESCE(excluded.last_verified_session, modems.last_verified_session),
-              updated_at = CURRENT_TIMESTAMP
-          `).bind(
-            report.equipment_id,
-            report.manufacturer || null,
-            report.model || null,
-            report.firmware_revision || null,
-            report.hardware_revision || null,
-            report.detected_iccid || null,
-            report.detected_phone_number || null,
-            report.detected_operator || null,
-            report.signal_percent ?? null,
-            report.rssi ?? null,
-            report.modem_index ?? null,
-            report.usb_port ?? null,
-            report.usb_path ?? null,
-            report.usb_path ?? null,
-            report.status || 'active',
-            verificationStatus,
-            lastVerifiedSession
-          ));
-        }
-
-        // Execute batch
-        if (batch.length > 0) {
-          await env.DB.batch(batch);
-        }
-
-        // Reconciliation for full sync
-        if (sync_mode === 'full') {
-          console.log('[control.js] Reconciling disconnected modems...');
-
-          const disconnectResult = await env.DB.prepare(`
-            UPDATE modems
-            SET status = 'disconnected',
-                verification_status = 'absent'
-            WHERE verification_status = 'pending'
-          `).run();
-
-          console.log(`[control.js] Marked ${disconnectResult.meta.changes} modems as disconnected`);
-
-          // Clear detected data for disconnected modems. usb_path is detected
-          // state too — a modem we can't see is not at that socket any more.
-          await env.DB.prepare(`
-            UPDATE modems
-            SET detected_iccid = NULL,
-                detected_phone_number = NULL,
-                detected_operator = NULL,
-                signal_percent = NULL,
-                rssi = NULL,
-                usb_path = NULL
-            WHERE verification_status = 'absent'
-          `).run();
-
-          // Record sync history
-          await env.DB.prepare(`
-            INSERT INTO sync_history (
-              daemon_id, session_id, sync_mode, sync_timestamp,
-              modems_received, sims_received, modems_disconnected,
-              status, created_at
-            ) VALUES (
-              'orange-pi-main', ?, ?, ?, ?, 0, ?, 'completed', CURRENT_TIMESTAMP
-            )
-          `).bind(
-            session_id, sync_mode, timestamp,
-            reports.length, disconnectResult.meta.changes
-          ).run();
-        }
-
-      } else {
-        // === LEGACY PATH: modems[] + sims[] ===
-        const { modems = [], sims = [] } = body;
-        console.log(`[control.js] [legacy] Received ${modems.length} modems and ${sims.length} SIMs (mode: ${sync_mode}, session: ${session_id})`);
-
-        const batch = [];
-
-        if (sync_mode === 'full' && session_id) {
-          console.log(`[control.js] Starting FULL STATE SYNC for session ${session_id}`);
-          batch.push(env.DB.prepare(`
-            UPDATE modems
-            SET verification_status = 'pending'
-            WHERE status IN ('active', 'connected', 'online')
-          `));
-        }
-
-        // Update modems table
-        for (const modem of modems) {
-          if (!modem.equipment_id) continue;
-          if (modem.equipment_id.startsWith('MODEM_') &&
-              (!modem.manufacturer || modem.manufacturer === null) &&
-              (!modem.model || modem.model === null)) continue;
-
-          const verificationStatus = sync_mode === 'full' ? 'verified' : null;
-          const lastVerifiedSession = sync_mode === 'full' ? session_id : null;
-
-          batch.push(env.DB.prepare(`
-            INSERT INTO modems (
-              equipment_id, manufacturer, model, firmware_revision,
-              hardware_revision, status, sim_read_status,
-              signal_percent, rssi,
-              verification_status, last_verified_session,
-              updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(equipment_id) DO UPDATE SET
-              manufacturer = excluded.manufacturer,
-              model = excluded.model,
-              firmware_revision = excluded.firmware_revision,
-              hardware_revision = excluded.hardware_revision,
-              status = excluded.status,
-              sim_read_status = excluded.sim_read_status,
-              signal_percent = excluded.signal_percent,
-              rssi = excluded.rssi,
-              verification_status = COALESCE(excluded.verification_status, modems.verification_status),
-              last_verified_session = COALESCE(excluded.last_verified_session, modems.last_verified_session),
-              updated_at = CURRENT_TIMESTAMP
-          `).bind(
-            modem.equipment_id,
-            modem.manufacturer || null,
-            modem.model || null,
-            modem.firmware_revision || null,
-            modem.hardware_revision || null,
-            modem.status || 'unknown',
-            modem.sim_read_status || null,
-            modem.signal ?? null,
-            modem.rssi ?? null,
-            verificationStatus,
-            lastVerifiedSession
-          ));
-        }
-
-        // Process SIMs — write detected_iccid/detected_operator to modems table
-        for (const sim of sims) {
-          if (!sim.iccid || !sim.current_modem_id) continue;
-          if (sim.current_modem_id.startsWith('MODEM_')) continue;
-
-          batch.push(env.DB.prepare(`
-            UPDATE modems
-            SET detected_iccid = ?,
-                detected_phone_number = ?,
-                detected_operator = ?,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE equipment_id = ?
-          `).bind(
-            sim.iccid,
-            sim.phone_number || null,
-            sim.operator_name || null,
-            sim.current_modem_id
-          ));
-        }
-
-        // Clear detected_iccid for modems with failed SIM reads
-        for (const modem of modems) {
-          if (modem.sim_read_status === 'failed' && modem.equipment_id) {
-            batch.push(env.DB.prepare(`
-              UPDATE modems SET detected_iccid = NULL, detected_phone_number = NULL
-              WHERE equipment_id = ?
-            `).bind(modem.equipment_id));
-          }
-        }
-
-        if (batch.length > 0) {
-          await env.DB.batch(batch);
-        }
-
-        // Reconciliation for full sync
-        if (sync_mode === 'full') {
-          console.log('[control.js] Reconciling disconnected modems...');
-
-          const disconnectResult = await env.DB.prepare(`
-            UPDATE modems
-            SET status = 'disconnected',
-                verification_status = 'absent'
-            WHERE verification_status = 'pending'
-          `).run();
-
-          console.log(`[control.js] Marked ${disconnectResult.meta.changes} modems as disconnected`);
-
-          // Clear detected data for disconnected modems. usb_path is detected
-          // state too — a modem we can't see is not at that socket any more.
-          await env.DB.prepare(`
-            UPDATE modems
-            SET detected_iccid = NULL,
-                detected_phone_number = NULL,
-                detected_operator = NULL,
-                signal_percent = NULL,
-                rssi = NULL,
-                usb_path = NULL
-            WHERE verification_status = 'absent'
-          `).run();
-
-          await env.DB.prepare(`
-            INSERT INTO sync_history (
-              daemon_id, session_id, sync_mode, sync_timestamp,
-              modems_received, sims_received, modems_disconnected,
-              status, created_at
-            ) VALUES (
-              'orange-pi-main', ?, ?, ?, ?, ?, ?, 'completed', CURRENT_TIMESTAMP
-            )
-          `).bind(
-            session_id, sync_mode, timestamp,
-            modems.length, sims.length, disconnectResult.meta.changes
-          ).run();
-        }
-      } // end legacy path
-
-      // Update daemon heartbeat (shared by both paths)
-      const modemCount = body.modem_reports ? body.modem_reports.length : (body.modems || []).length;
-      const clientIp = request.headers.get('CF-Connecting-IP') ||
-                      request.headers.get('X-Forwarded-For') ||
-                      'unknown';
-
-      await env.DB.prepare(`
-        INSERT INTO daemon_health (
-          daemon_id, last_heartbeat, status, modem_count, last_ip,
-          current_session_id, last_full_sync, sync_mode,
-          updated_at
-        ) VALUES (
-          'orange-pi-main', CURRENT_TIMESTAMP, 'online', ?, ?, ?,
-          ${sync_mode === 'full' ? 'CURRENT_TIMESTAMP' : 'NULL'},
-          ?, CURRENT_TIMESTAMP
-        )
-        ON CONFLICT(daemon_id) DO UPDATE SET
-          last_heartbeat = CASE
-            WHEN ${IS_LEGACY_DAEMON_HEALTH_SQL}
-              THEN CURRENT_TIMESTAMP
-            ELSE daemon_health.last_heartbeat
-          END,
-          status = CASE
-            WHEN ${IS_LEGACY_DAEMON_HEALTH_SQL}
-              THEN 'online'
-            ELSE daemon_health.status
-          END,
-          modem_count = excluded.modem_count,
-          last_ip = excluded.last_ip,
-          current_session_id = COALESCE(?, daemon_health.current_session_id),
-          last_full_sync = CASE
-            WHEN ? = 'full' THEN CURRENT_TIMESTAMP
-            ELSE daemon_health.last_full_sync
-          END,
-          sync_mode = ?,
+      const statements = acceptedReports.map((report) => env.DB.prepare(`
+        INSERT INTO modems (
+          equipment_id, manufacturer, model, firmware_revision,
+          hardware_revision, detected_iccid, detected_phone_number,
+          detected_operator, signal_percent, rssi,
+          modem_index, usb_port, usb_path, last_usb_path, status,
+          verification_status, last_verified_session, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(equipment_id) DO UPDATE SET
+          manufacturer = excluded.manufacturer,
+          model = excluded.model,
+          firmware_revision = excluded.firmware_revision,
+          hardware_revision = excluded.hardware_revision,
+          detected_iccid = excluded.detected_iccid,
+          detected_phone_number = excluded.detected_phone_number,
+          detected_operator = excluded.detected_operator,
+          signal_percent = excluded.signal_percent,
+          rssi = excluded.rssi,
+          modem_index = excluded.modem_index,
+          usb_port = excluded.usb_port,
+          usb_path = excluded.usb_path,
+          last_usb_path = COALESCE(excluded.last_usb_path, modems.last_usb_path),
+          status = excluded.status,
+          verification_status = COALESCE(excluded.verification_status, modems.verification_status),
+          last_verified_session = COALESCE(excluded.last_verified_session, modems.last_verified_session),
           updated_at = CURRENT_TIMESTAMP
+        WHERE modems.manufacturer IS NOT excluded.manufacturer
+          OR modems.model IS NOT excluded.model
+          OR modems.firmware_revision IS NOT excluded.firmware_revision
+          OR modems.hardware_revision IS NOT excluded.hardware_revision
+          OR modems.detected_iccid IS NOT excluded.detected_iccid
+          OR modems.detected_phone_number IS NOT excluded.detected_phone_number
+          OR modems.detected_operator IS NOT excluded.detected_operator
+          OR modems.modem_index IS NOT excluded.modem_index
+          OR modems.usb_port IS NOT excluded.usb_port
+          OR modems.usb_path IS NOT excluded.usb_path
+          OR modems.last_usb_path IS NOT COALESCE(excluded.last_usb_path, modems.last_usb_path)
+          OR modems.status IS NOT excluded.status
+          OR (excluded.verification_status IS NOT NULL
+              AND modems.verification_status IS NOT excluded.verification_status)
+          OR (excluded.last_verified_session IS NOT NULL
+              AND modems.last_verified_session IS NOT excluded.last_verified_session)
+          OR (
+            (modems.signal_percent IS NOT excluded.signal_percent
+             OR modems.rssi IS NOT excluded.rssi)
+            AND datetime(modems.updated_at) <= datetime('now', '-5 minutes')
+          )
       `).bind(
-        modemCount,
-        clientIp,
-        session_id,
-        sync_mode,
-        session_id,
-        sync_mode,
-        sync_mode
-      ).run();
+        report.equipment_id,
+        report.manufacturer || null,
+        report.model || null,
+        report.firmware_revision || null,
+        report.hardware_revision || null,
+        report.detected_iccid || null,
+        report.detected_phone_number || null,
+        report.detected_operator || null,
+        report.signal_percent ?? null,
+        report.rssi ?? null,
+        report.modem_index ?? null,
+        report.usb_port ?? null,
+        report.usb_path ?? null,
+        report.usb_path ?? null,
+        report.status || 'active',
+        verificationStatus,
+        lastVerifiedSession,
+      ));
+
+      if (statements.length > 0) await env.DB.batch(statements);
+
+      if (sync_mode === 'full') {
+        const presentEquipmentIds = JSON.stringify(acceptedReports.map((report) => report.equipment_id));
+        const disconnectResult = await env.DB.prepare(`
+          UPDATE modems
+          SET status = 'disconnected',
+              verification_status = 'absent',
+              detected_iccid = NULL,
+              detected_phone_number = NULL,
+              detected_operator = NULL,
+              signal_percent = NULL,
+              rssi = NULL,
+              usb_path = NULL,
+              updated_at = CURRENT_TIMESTAMP
+          WHERE NOT EXISTS (
+            SELECT 1 FROM json_each(?) AS present
+            WHERE present.value = modems.equipment_id
+          )
+          AND (
+            status IS NOT 'disconnected'
+            OR verification_status IS NOT 'absent'
+            OR detected_iccid IS NOT NULL
+            OR detected_phone_number IS NOT NULL
+            OR detected_operator IS NOT NULL
+            OR signal_percent IS NOT NULL
+            OR rssi IS NOT NULL
+            OR usb_path IS NOT NULL
+          )
+        `).bind(presentEquipmentIds).run();
+
+        await env.DB.prepare(`
+          INSERT INTO sync_history (
+            daemon_id, session_id, sync_mode, sync_timestamp,
+            modems_received, sims_received, modems_disconnected,
+            status, created_at
+          ) VALUES (
+            'orange-pi-main', ?, 'full', ?, ?, 0, ?, 'completed', CURRENT_TIMESTAMP
+          )
+        `).bind(
+          session_id,
+          timestamp,
+          acceptedReports.length,
+          disconnectResult.meta.changes,
+        ).run();
+      }
 
       return new Response(JSON.stringify({
         success: true,
         sync_mode,
         session_id,
-        processed: { modem_reports: modemCount }
+        processed: { modem_reports: acceptedReports.length }
       }), {
         headers: { 'Content-Type': 'application/json' }
       });
@@ -673,10 +490,7 @@ export const controlHandler = {
     }
   },
 
-  // Daemon heartbeat and check for pending SMS to send
-  // This endpoint is polled regularly by the daemon, serving as both:
-  // 1. A heartbeat to track daemon health
-  // 2. A way to get pending SMS messages to send
+  // Poll and claim pending SMS. Process health has one separate authoritative writer.
   //
   // SMS Status Flow:
   //   'sending' (created by user)
@@ -685,7 +499,7 @@ export const controlHandler = {
   //
   // The atomic transition to 'processing' prevents duplicate sends in the race condition
   // where daemon polls again before the SMS send completes and status is updated to 'sent'.
-  async heartbeatAndGetPendingSMS(request) {
+  async getPendingSMS(request) {
     const { env } = request;
     
     // Check API key
@@ -700,11 +514,6 @@ export const controlHandler = {
     }
     
     try {
-      // Update daemon heartbeat since this endpoint is polled regularly
-      const clientIp = request.headers.get('CF-Connecting-IP') || 
-                      request.headers.get('X-Forwarded-For') || 
-                      'unknown';
-      const daemonVersion = request.headers.get('X-Daemon-Version') || 'v3.9.0';
       const rawDaemonSessionId = request.headers.get('X-Daemon-Session-Id');
       const daemonSessionId = normalizeDaemonSessionId(rawDaemonSessionId);
 
@@ -718,50 +527,6 @@ export const controlHandler = {
         });
       }
       
-      // Create daemon_health table if it doesn't exist
-      await env.DB.prepare(`
-        CREATE TABLE IF NOT EXISTS daemon_health (
-          daemon_id TEXT PRIMARY KEY,
-          last_heartbeat TIMESTAMP NOT NULL,
-          status TEXT DEFAULT 'online',
-          last_ip TEXT,
-          version TEXT,
-          modem_count INTEGER DEFAULT 0,
-          error_count INTEGER DEFAULT 0,
-          last_error TEXT,
-          metadata TEXT,
-          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-      `).run();
-      
-      // Update daemon heartbeat
-      await env.DB.prepare(`
-        INSERT INTO daemon_health (
-          daemon_id, last_heartbeat, status, last_ip, version, updated_at
-        ) VALUES (
-          'orange-pi-main', CURRENT_TIMESTAMP, 'online', ?, ?, CURRENT_TIMESTAMP
-        )
-        ON CONFLICT(daemon_id) DO UPDATE SET
-          last_heartbeat = CASE
-            WHEN ${IS_LEGACY_DAEMON_HEALTH_SQL}
-              THEN CURRENT_TIMESTAMP
-            ELSE daemon_health.last_heartbeat
-          END,
-          status = CASE
-            WHEN ${IS_LEGACY_DAEMON_HEALTH_SQL}
-              THEN 'online'
-            ELSE daemon_health.status
-          END,
-          last_ip = excluded.last_ip,
-          version = CASE
-            WHEN ${IS_LEGACY_DAEMON_HEALTH_SQL}
-              THEN excluded.version
-            ELSE daemon_health.version
-          END,
-          updated_at = CURRENT_TIMESTAMP
-      `).bind(clientIp, daemonVersion).run();
-
       // A message claimed by a previous daemon process has an indeterminate
       // delivery result. Never put it back in the send queue automatically: the
       // old process may have handed it to the modem before restarting. Mark it
@@ -1006,9 +771,8 @@ export const controlHandler = {
       const clientIp = request.headers.get('CF-Connecting-IP') ||
         request.headers.get('X-Forwarded-For') || 'unknown';
 
-      if (body.schema_version === HEALTH_SCHEMA_VERSION) {
-        const snapshot = normalizeHealthSnapshot(body);
-        await env.DB.prepare(`
+      const snapshot = normalizeHealthSnapshot(body);
+      await env.DB.prepare(`
           INSERT INTO daemon_health (
             daemon_id, last_heartbeat, status, last_ip, version, modem_count,
             error_count, metadata, current_session_id, updated_at
@@ -1025,32 +789,15 @@ export const controlHandler = {
             metadata = excluded.metadata,
             current_session_id = excluded.current_session_id,
             updated_at = CURRENT_TIMESTAMP
-        `).bind(
-          clientIp,
-          snapshot.version,
-          snapshot.modems.discovered,
-          JSON.stringify(snapshot),
-          snapshot.session_id,
-        ).run();
+      `).bind(
+        clientIp,
+        snapshot.version,
+        snapshot.modems.discovered,
+        JSON.stringify(snapshot),
+        snapshot.session_id,
+      ).run();
 
-        console.log(`[control.js] Health snapshot received: session=${snapshot.session_id}, version=${snapshot.version}`);
-      } else {
-        // Compatibility for older daemons that used the explicit endpoint without
-        // task telemetry. This path can be removed after the fleet is upgraded.
-        const deviceId = typeof body.device_id === 'string' ? body.device_id : 'orange-pi-main';
-        const version = typeof body.version === 'string' ? body.version.slice(0, 80) : 'unknown';
-        await env.DB.prepare(`
-          INSERT INTO daemon_health (daemon_id, last_heartbeat, status, last_ip, version, updated_at)
-          VALUES ('orange-pi-main', CURRENT_TIMESTAMP, 'online', ?, ?, CURRENT_TIMESTAMP)
-          ON CONFLICT(daemon_id) DO UPDATE SET
-            last_heartbeat = CURRENT_TIMESTAMP,
-            status = 'online',
-            last_ip = excluded.last_ip,
-            version = excluded.version,
-            updated_at = CURRENT_TIMESTAMP
-        `).bind(clientIp, version).run();
-        console.log(`[control.js] Legacy heartbeat received: device=${deviceId}, version=${version}`);
-      }
+      console.log(`[control.js] Health snapshot received: session=${snapshot.session_id}, version=${snapshot.version}`);
       
       return new Response(JSON.stringify({
         success: true,
@@ -1076,55 +823,9 @@ export const controlHandler = {
   }
 };
 
-// Ensure keyword tables exist
-async function ensureKeywordTables(db) {
-    // Create keyword_tags table
-    await db.prepare(`
-        CREATE TABLE IF NOT EXISTS keyword_tags (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            keyword TEXT NOT NULL,
-            tag TEXT NOT NULL,
-            color TEXT DEFAULT '#3B82F6',
-            priority INTEGER DEFAULT 0,
-            is_active BOOLEAN DEFAULT TRUE,
-            case_sensitive BOOLEAN DEFAULT FALSE,
-            whole_word BOOLEAN DEFAULT FALSE,
-            created_by TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
-        )
-    `).run();
-    
-    // Create message_tags table
-    await db.prepare(`
-        CREATE TABLE IF NOT EXISTS message_tags (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            message_id TEXT NOT NULL,
-            keyword_tag_id INTEGER NOT NULL,
-            matched_text TEXT NOT NULL,
-            position INTEGER NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
-            FOREIGN KEY (keyword_tag_id) REFERENCES keyword_tags(id) ON DELETE CASCADE,
-            UNIQUE(message_id, keyword_tag_id, position)
-        )
-    `).run();
-    
-    // Create indexes
-    await db.prepare(`CREATE INDEX IF NOT EXISTS idx_keyword_tags_keyword ON keyword_tags(keyword)`).run();
-    await db.prepare(`CREATE INDEX IF NOT EXISTS idx_keyword_tags_active ON keyword_tags(is_active)`).run();
-    await db.prepare(`CREATE INDEX IF NOT EXISTS idx_keyword_tags_priority ON keyword_tags(priority)`).run();
-    await db.prepare(`CREATE INDEX IF NOT EXISTS idx_message_tags_message ON message_tags(message_id)`).run();
-    await db.prepare(`CREATE INDEX IF NOT EXISTS idx_message_tags_keyword ON message_tags(keyword_tag_id)`).run();
-}
-
 // Process keywords for a message
 async function processMessageKeywords(db, message) {
   try {
-    // Ensure keyword tables exist first
-    await ensureKeywordTables(db);
-    
     // Get active keywords
     const { results: keywords } = await db.prepare(`
       SELECT id, keyword, tag, color, priority, case_sensitive, whole_word

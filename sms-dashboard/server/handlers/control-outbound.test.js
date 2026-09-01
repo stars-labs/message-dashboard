@@ -70,7 +70,7 @@ describe('outbound SMS daemon session leases', () => {
 
   test('marks interrupted claims unknown and tags new claims with this session', async () => {
     const db = dbStub({ pending: [{ id: 'msg-1' }] });
-    const response = await controlHandler.heartbeatAndGetPendingSMS(request(db));
+    const response = await controlHandler.getPendingSMS(request(db));
 
     expect(response.status).toBe(200);
     const recovery = db.calls.find((call) => call.sql.includes("SET status = 'unknown'"));
@@ -83,9 +83,18 @@ describe('outbound SMS daemon session leases', () => {
 
   test('rejects a malformed session header before touching the database', async () => {
     const db = dbStub();
-    const response = await controlHandler.heartbeatAndGetPendingSMS(request(db, 'bad session'));
+    const response = await controlHandler.getPendingSMS(request(db, 'bad session'));
     expect(response.status).toBe(400);
     expect(db.calls).toHaveLength(0);
+  });
+
+  test('an empty poll does not write daemon health or execute schema DDL', async () => {
+    const db = dbStub();
+    const response = await controlHandler.getPendingSMS(request(db));
+
+    expect(response.status).toBe(200);
+    expect(db.calls.some((call) => call.sql.includes('daemon_health'))).toBe(false);
+    expect(db.calls.some((call) => /CREATE\s+(?:TABLE|INDEX)/i.test(call.sql))).toBe(false);
   });
 });
 

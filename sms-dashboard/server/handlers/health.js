@@ -15,26 +15,8 @@ export const healthHandler = {
       // Test database connection
       const result = await env.DB.prepare('SELECT 1 as test').first();
       
-      // Check daemon health
       let daemonHealth = null;
       try {
-        // Create table if not exists
-        await env.DB.prepare(`
-          CREATE TABLE IF NOT EXISTS daemon_health (
-            daemon_id TEXT PRIMARY KEY,
-            last_heartbeat TIMESTAMP NOT NULL,
-            status TEXT DEFAULT 'online',
-            last_ip TEXT,
-            version TEXT,
-            modem_count INTEGER DEFAULT 0,
-            error_count INTEGER DEFAULT 0,
-            last_error TEXT,
-            metadata TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-          )
-        `).run();
-        
         daemonHealth = await env.DB.prepare(DAEMON_HEALTH_SELECT).first();
       } catch (err) {
         console.error('Failed to check daemon health:', err);
@@ -71,23 +53,6 @@ export const healthHandler = {
     const { env } = request;
     
     try {
-      // Create table if not exists
-      await env.DB.prepare(`
-        CREATE TABLE IF NOT EXISTS daemon_health (
-          daemon_id TEXT PRIMARY KEY,
-          last_heartbeat TIMESTAMP NOT NULL,
-          status TEXT DEFAULT 'online',
-          last_ip TEXT,
-          version TEXT,
-          modem_count INTEGER DEFAULT 0,
-          error_count INTEGER DEFAULT 0,
-          last_error TEXT,
-          metadata TEXT,
-          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-      `).run();
-      
       const daemonHealth = await env.DB.prepare(DAEMON_HEALTH_SELECT).first();
       
       if (!daemonHealth) {

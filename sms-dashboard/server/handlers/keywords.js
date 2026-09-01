@@ -5,9 +5,6 @@ export const keywordsHandler = {
     const { env } = request;
     
     try {
-      // Ensure the table exists
-      await createKeywordTablesIfNeeded(env);
-      
       const keywords = await env.DB.prepare(`
         SELECT 
           id,
@@ -49,8 +46,6 @@ export const keywordsHandler = {
     const { id } = params;
     
     try {
-      await createKeywordTablesIfNeeded(env);
-      
       const keyword = await env.DB.prepare(`
         SELECT * FROM keyword_tags WHERE id = ?
       `).bind(id).first();
@@ -89,8 +84,6 @@ export const keywordsHandler = {
     const data = await request.json();
     
     try {
-      await createKeywordTablesIfNeeded(env);
-      
       const { keyword, tag, color, priority, case_sensitive, whole_word, is_active = true } = data;
       
       if (!keyword || !tag) {
@@ -170,8 +163,6 @@ export const keywordsHandler = {
     const data = await request.json();
     
     try {
-      await createKeywordTablesIfNeeded(env);
-      
       const { keyword, tag, color, priority, case_sensitive, whole_word, is_active } = data;
       
       // Check if keyword exists
@@ -243,8 +234,6 @@ export const keywordsHandler = {
     const { id } = params;
     
     try {
-      await createKeywordTablesIfNeeded(env);
-      
       // Delete associated message tags first
       await env.DB.prepare(`
         DELETE FROM message_tags WHERE keyword_tag_id = ?
@@ -279,8 +268,6 @@ export const keywordsHandler = {
     const { id } = params;
     
     try {
-      await createKeywordTablesIfNeeded(env);
-      
       const tags = await env.DB.prepare(`
         SELECT 
           kt.id,
@@ -330,8 +317,6 @@ export const keywordsHandler = {
     }
     
     try {
-      await createKeywordTablesIfNeeded(env);
-      
       // Limit to prevent abuse
       const limitedIds = messageIds.slice(0, 100);
       const placeholders = limitedIds.map(() => '?').join(',');
@@ -395,8 +380,6 @@ export const keywordsHandler = {
     const { id } = params;
     
     try {
-      await createKeywordTablesIfNeeded(env);
-      
       // Get the keyword
       const keyword = await env.DB.prepare(`
         SELECT * FROM keyword_tags WHERE id = ?
@@ -468,45 +451,6 @@ export const keywordsHandler = {
     }
   }
 };
-
-// Helper function to create tables if they don't exist
-async function createKeywordTablesIfNeeded(env) {
-  await env.DB.prepare(`
-    CREATE TABLE IF NOT EXISTS keyword_tags (
-      id TEXT PRIMARY KEY,
-      keyword TEXT NOT NULL UNIQUE,
-      tag TEXT NOT NULL,
-      color TEXT DEFAULT '#3B82F6',
-      priority INTEGER DEFAULT 0,
-      is_active INTEGER DEFAULT 1,
-      case_sensitive INTEGER DEFAULT 0,
-      whole_word INTEGER DEFAULT 0,
-      usage_count INTEGER DEFAULT 0,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      created_by TEXT,
-      updated_by TEXT
-    )
-  `).run();
-  
-  await env.DB.prepare(`
-    CREATE TABLE IF NOT EXISTS message_tags (
-      message_id TEXT NOT NULL,
-      keyword_tag_id INTEGER NOT NULL,
-      matched_text TEXT NOT NULL,
-      position INTEGER NOT NULL,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      PRIMARY KEY (message_id, keyword_tag_id, position),
-      FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
-      FOREIGN KEY (keyword_tag_id) REFERENCES keyword_tags(id) ON DELETE CASCADE
-    )
-  `).run();
-  
-  // Create indexes
-  await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_message_tags_message ON message_tags(message_id)`).run();
-  await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_message_tags_keyword ON message_tags(keyword_tag_id)`).run();
-  await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_keyword_tags_active ON keyword_tags(is_active)`).run();
-}
 
 // Helper function to find keyword matches in text
 function findKeywordMatches(text, keyword) {

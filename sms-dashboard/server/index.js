@@ -486,9 +486,9 @@ router.post('/api/control/cleanup-test-data', async (request) => {
 });
 
 router.get('/api/control/pending-sms', async (request) => {
-  // Daemon heartbeat and get pending SMS
+  // Poll and claim pending SMS; liveness is reported through /api/control/heartbeat.
   try {
-    return await controlHandler.heartbeatAndGetPendingSMS(request);
+    return await controlHandler.getPendingSMS(request);
   } catch (error) {
     // Pending SMS error
     return new Response(JSON.stringify({ error: error.message }), {

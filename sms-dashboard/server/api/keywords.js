@@ -3,50 +3,6 @@ import { requirePermission, enrichUserPermissions } from '../middleware/rbac.js'
 import { DEFAULT_KEYWORD_COLOR, normalizeKeywordColor } from '../utils/keyword-color.js';
 
 /**
- * Ensure keyword tables exist in the database
- */
-async function ensureKeywordTables(db) {
-    // Create keyword_tags table
-    await db.prepare(`
-        CREATE TABLE IF NOT EXISTS keyword_tags (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            keyword TEXT NOT NULL,
-            tag TEXT NOT NULL,
-            color TEXT DEFAULT '#3B82F6',
-            priority INTEGER DEFAULT 0,
-            is_active BOOLEAN DEFAULT TRUE,
-            case_sensitive BOOLEAN DEFAULT FALSE,
-            whole_word BOOLEAN DEFAULT FALSE,
-            created_by TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    `).run();
-    
-    // Create message_tags table
-    await db.prepare(`
-        CREATE TABLE IF NOT EXISTS message_tags (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            message_id TEXT NOT NULL,
-            keyword_tag_id INTEGER NOT NULL,
-            matched_text TEXT NOT NULL,
-            position INTEGER NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
-            FOREIGN KEY (keyword_tag_id) REFERENCES keyword_tags(id) ON DELETE CASCADE,
-            UNIQUE(message_id, keyword_tag_id, position)
-        )
-    `).run();
-    
-    // Create indexes
-    await db.prepare(`CREATE INDEX IF NOT EXISTS idx_keyword_tags_keyword ON keyword_tags(keyword)`).run();
-    await db.prepare(`CREATE INDEX IF NOT EXISTS idx_keyword_tags_active ON keyword_tags(is_active)`).run();
-    await db.prepare(`CREATE INDEX IF NOT EXISTS idx_keyword_tags_priority ON keyword_tags(priority)`).run();
-    await db.prepare(`CREATE INDEX IF NOT EXISTS idx_message_tags_message ON message_tags(message_id)`).run();
-    await db.prepare(`CREATE INDEX IF NOT EXISTS idx_message_tags_keyword ON message_tags(keyword_tag_id)`).run();
-}
-
-/**
  * Keyword-tag API endpoints
  */
 export function setupKeywordRoutes(router) {
@@ -59,9 +15,6 @@ export function setupKeywordRoutes(router) {
         if (permResponse) return permResponse;
         
         try {
-            // Ensure tables exist
-            await ensureKeywordTables(env.DB);
-            
             const { results } = await env.DB.prepare(`
                 SELECT 
                     kt.*,
@@ -135,9 +88,6 @@ export function setupKeywordRoutes(router) {
         const user = request.user;
         
         try {
-            // Ensure tables exist
-            await ensureKeywordTables(env.DB);
-            
             const data = await request.json();
             const { keyword, tag, color, priority, case_sensitive, whole_word } = data;
 
@@ -372,8 +322,6 @@ export function setupKeywordRoutes(router) {
         }
         
         try {
-            await ensureKeywordTables(env.DB);
-            
             // Limit to 100 messages to prevent abuse
             const limitedIds = messageIds.slice(0, 100);
             const placeholders = limitedIds.map(() => '?').join(',');
