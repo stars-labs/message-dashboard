@@ -2,9 +2,11 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { auth0Handler, ensureDashboardLoginRole, resolveLoginRoles } from './auth0.js';
 
 const realFetch = globalThis.fetch;
+const realConsoleError = console.error;
 
 afterEach(() => {
   globalThis.fetch = realFetch;
+  console.error = realConsoleError;
 });
 
 const claim = 'https://sexy.itoken.world/roles';
@@ -14,6 +16,63 @@ const env = {
   AUTH0_CLIENT_ID: 'dashboard-client',
   AUTH0_ROLE_NAMESPACE: claim,
 };
+
+function mockSuccessfulAuth(userInfo = {}) {
+  globalThis.fetch = async (url) => {
+    if (String(url).endsWith('/oauth/token')) {
+      return Response.json({ access_token: 'opaque-access-token', id_token: 'id-token' });
+    }
+    if (String(url).endsWith('/userinfo')) {
+      return Response.json({
+        sub: 'auth0|user-1',
+        email: 'user@example.com',
+        email_verified: true,
+        [claim]: ['viewer'],
+        ...userInfo,
+      });
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  };
+}
+
+function callbackRequest({ dbRun, sessionPut } = {}) {
+  const waits = [];
+  const sessionWrites = [];
+  const callbackEnv = {
+    ...env,
+    AUTH0_DOMAIN: 'tenant.example',
+    AUTH0_CLIENT_SECRET: 'test-secret',
+    DB: {
+      prepare: () => ({
+        bind: () => ({
+          run: dbRun || (async () => ({ success: true })),
+        }),
+      }),
+    },
+    SESSIONS: {
+      get: async () => null,
+      put: async (...args) => {
+        sessionWrites.push(args);
+        if (sessionPut) return sessionPut(...args);
+      },
+      delete: async () => {},
+    },
+  };
+
+  return {
+    request: {
+      url: 'https://sexy.itoken.world/callback?code=authorization-code',
+      env: callbackEnv,
+      ctx: {
+        waitUntil(promise) {
+          waits.push(promise);
+        },
+      },
+    },
+    waits,
+    sessionWrites,
+  };
+}
 
 describe('Auth0 login role token selection', () => {
   test('uses verified API access-token roles when an audience is configured', async () => {
@@ -76,45 +135,96 @@ describe('Auth0 login role token selection', () => {
   });
 
   test('completes the callback when userinfo contains a dashboard role', async () => {
-    globalThis.fetch = async (url) => {
-      if (String(url).endsWith('/oauth/token')) {
-        return Response.json({ access_token: 'opaque-access-token', id_token: 'id-token' });
-      }
-      if (String(url).endsWith('/userinfo')) {
-        return Response.json({
-          sub: 'auth0|user-1',
-          email: 'user@example.com',
-          email_verified: true,
-          [claim]: ['viewer'],
-        });
-      }
-      throw new Error(`Unexpected fetch: ${url}`);
-    };
+    mockSuccessfulAuth();
+    const { request, waits, sessionWrites } = callbackRequest();
 
-    const sessionWrites = [];
-    const callbackEnv = {
-      ...env,
-      AUTH0_DOMAIN: 'tenant.example',
-      AUTH0_CLIENT_SECRET: 'test-secret',
-      DB: {
-        prepare: () => ({
-          bind: () => ({ run: async () => ({ success: true }) }),
-        }),
-      },
-      SESSIONS: {
-        get: async () => null,
-        put: async (...args) => sessionWrites.push(args),
-      },
-    };
-
-    const response = await auth0Handler.callback({
-      url: 'https://sexy.itoken.world/callback?code=authorization-code',
-      env: callbackEnv,
-    });
+    const response = await auth0Handler.callback(request);
+    await Promise.all(waits);
 
     expect(response.status).toBe(302);
     expect(response.headers.get('location')).toBe('https://sexy.itoken.world/');
     expect(sessionWrites).toHaveLength(2);
+    expect(waits).toHaveLength(1);
+  });
+
+  test('creates the session when the non-critical D1 login audit hits quota', async () => {
+    mockSuccessfulAuth();
+    const logs = [];
+    console.error = (...args) => logs.push(args);
+    const quotaError = new Error(
+      "D1_ERROR: Your account has exceeded D1's free tier daily row read limit."
+    );
+    const { request, waits, sessionWrites } = callbackRequest({
+      dbRun: async () => { throw quotaError; },
+    });
+
+    const response = await auth0Handler.callback(request);
+    await Promise.all(waits);
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get('location')).toBe('https://sexy.itoken.world/');
+    expect(sessionWrites).toHaveLength(2);
+    expect(logs.flat().join(' ')).toContain('auth_audit_failed');
+    expect(logs.flat().join(' ')).toContain('D1_QUOTA_EXCEEDED');
+  });
+
+  test('denies a disallowed email even when the denial audit hits D1 quota', async () => {
+    mockSuccessfulAuth({ email_verified: false });
+    console.error = () => {};
+    const { request, waits, sessionWrites } = callbackRequest({
+      dbRun: async () => { throw new Error("exceeded D1's free tier daily row read limit"); },
+    });
+
+    const response = await auth0Handler.callback(request);
+    await Promise.all(waits);
+
+    expect(response.status).toBe(403);
+    expect(sessionWrites).toHaveLength(0);
+  });
+
+  test('returns a friendly 503 without a session when KV session creation fails', async () => {
+    mockSuccessfulAuth();
+    const logs = [];
+    console.error = (...args) => logs.push(args);
+    const { request } = callbackRequest({
+      sessionPut: async () => { throw new Error('sensitive KV provider detail'); },
+    });
+
+    const response = await auth0Handler.callback(request);
+    const body = await response.text();
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get('content-type')).toContain('text/html');
+    expect(response.headers.has('set-cookie')).toBe(false);
+    expect(body).toContain('Authentication is temporarily unavailable');
+    expect(body).not.toContain('sensitive KV provider detail');
+    expect(logs.flat().join(' ')).toContain('auth_callback_failed');
+  });
+
+  test('does not expose the Auth0 token response body', async () => {
+    globalThis.fetch = async () => new Response('sensitive Auth0 provider detail', { status: 401 });
+    console.error = () => {};
+    const { request } = callbackRequest();
+
+    const response = await auth0Handler.callback(request);
+    const body = await response.text();
+
+    expect(response.status).toBe(401);
+    expect(body).toBe('Authentication failed');
+    expect(body).not.toContain('sensitive Auth0 provider detail');
+  });
+
+  test('does not reflect an Auth0 callback error description', async () => {
+    console.error = () => {};
+    const { request } = callbackRequest();
+    request.url = 'https://sexy.itoken.world/callback?error=access_denied&error_description=sensitive-provider-detail';
+
+    const response = await auth0Handler.callback(request);
+    const body = await response.text();
+
+    expect(response.status).toBe(401);
+    expect(body).toBe('Authentication failed');
+    expect(body).not.toContain('sensitive-provider-detail');
   });
 });
 

@@ -4,6 +4,42 @@ import { createRoleConfig, hasAnyRole, isEmailAllowed, rolesFromToken } from '..
 import { extractSessionToken } from '../utils/session-token.js';
 import { getUserRoles, setUserRole } from '../utils/auth0-management.js';
 import { indexSession, unindexSession } from '../utils/user-sessions.js';
+import { scheduleAuthAudit } from '../utils/audit-log.js';
+import { boundedErrorText } from '../utils/d1-error.js';
+
+function logAuthFailure(event, error, details = {}) {
+  console.error(JSON.stringify({
+    event,
+    ...details,
+    error: boundedErrorText(error),
+  }));
+}
+
+function authenticationUnavailable() {
+  const body = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Authentication unavailable</title>
+  </head>
+  <body>
+    <main>
+      <h1>Authentication is temporarily unavailable</h1>
+      <p>Please try again shortly.</p>
+      <p><a href="/login">Try again</a></p>
+    </main>
+  </body>
+</html>`;
+
+  return new Response(body, {
+    status: 503,
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store',
+    },
+  });
+}
 
 export async function resolveLoginRoles({ userInfo, tokens, env, verifyToken }) {
   const roleConfig = createRoleConfig(env);
@@ -96,13 +132,18 @@ export const auth0Handler = {
     const roleConfig = createRoleConfig(env);
     const url = new URL(request.url);
     const code = url.searchParams.get('code');
-    const state = url.searchParams.get('state');
     const error = url.searchParams.get('error');
-    const errorDescription = url.searchParams.get('error_description');
     
     
     if (error) {
-      return new Response(`Authentication error: ${errorDescription || error}`, { status: 401 });
+      console.error(JSON.stringify({
+        event: 'auth_provider_callback_failed',
+        provider_error: error.slice(0, 100),
+      }));
+      return new Response('Authentication failed', {
+        status: 401,
+        headers: { 'Cache-Control': 'no-store' },
+      });
     }
     
     if (!code) {
@@ -129,10 +170,14 @@ export const auth0Handler = {
       });
       
       if (!tokenResponse.ok) {
-        const error = await tokenResponse.text();
-        console.error('Token exchange failed:', tokenResponse.status, error);
-        // Token exchange failed
-        return new Response(`Authentication failed: ${error}`, { status: 401 });
+        console.error(JSON.stringify({
+          event: 'auth_token_exchange_failed',
+          status: tokenResponse.status,
+        }));
+        return new Response('Authentication failed', {
+          status: 401,
+          headers: { 'Cache-Control': 'no-store' },
+        });
       }
       
       const tokens = await tokenResponse.json();
@@ -145,9 +190,14 @@ export const auth0Handler = {
       });
       
       if (!userResponse.ok) {
-        const errorText = await userResponse.text();
-        console.error('Failed to get user info:', userResponse.status, errorText);
-        return new Response(`Failed to get user info: ${errorText || userResponse.statusText}`, { status: 401 });
+        console.error(JSON.stringify({
+          event: 'auth_userinfo_failed',
+          status: userResponse.status,
+        }));
+        return new Response('Authentication failed', {
+          status: 401,
+          headers: { 'Cache-Control': 'no-store' },
+        });
       }
       
       const userInfo = await userResponse.json();
@@ -177,17 +227,6 @@ export const auth0Handler = {
         roles: userRoles
       };
       
-      // No need to store user in database - Auth0 handles user management
-      // Just log the authentication event in audit_logs
-      await env.DB.prepare(`
-        INSERT INTO audit_logs (action, resource_type, resource_id, user_email, details, timestamp)
-        VALUES ('login', 'user', ?, ?, ?, datetime('now'))
-      `).bind(
-        user.id,
-        user.email,
-        JSON.stringify({ provider: 'auth0', roles: userRoles })
-      ).run();
-      
       // Email policy: verified address, on an allowed domain. Runs unconditionally —
       // the old version only ran when ALLOWED_EMAIL_DOMAINS was set, so an unset list
       // meant no email check at all, and it read the domain from the first '@' with a
@@ -195,14 +234,12 @@ export const auth0Handler = {
       const emailCheck = isEmailAllowed(userInfo, env);
 
       if (!emailCheck.allowed) {
-        await env.DB.prepare(`
-          INSERT INTO audit_logs (action, resource_type, resource_id, user_email, details, timestamp)
-          VALUES ('login_denied', 'user', ?, ?, ?, datetime('now'))
-        `).bind(
-          user.id,
-          user.email || null,
-          JSON.stringify({ reason: emailCheck.reason, domain: emailCheck.domain })
-        ).run();
+        scheduleAuthAudit(request, {
+          action: 'login_denied',
+          resourceId: user.id,
+          userEmail: user.email || null,
+          details: { reason: emailCheck.reason, domain: emailCheck.domain },
+        });
 
         return new Response(`Access denied: ${emailCheck.reason}`, { status: 403 });
       }
@@ -227,23 +264,18 @@ export const auth0Handler = {
         user.roles = roleResolution.roles;
 
         if (roleResolution.autoAssignedRole) {
-          await env.DB.prepare(`
-            INSERT INTO audit_logs (action, resource_type, resource_id, user_email, details, timestamp)
-            VALUES ('role_autoassigned', 'user', ?, ?, ?, datetime('now'))
-          `).bind(
-            user.id,
-            user.email || null,
-            JSON.stringify({ role: roleResolution.autoAssignedRole, domain: emailCheck.domain })
-          ).run();
+          scheduleAuthAudit(request, {
+            action: 'role_autoassigned',
+            resourceId: user.id,
+            userEmail: user.email || null,
+            details: { role: roleResolution.autoAssignedRole, domain: emailCheck.domain },
+          });
         }
       } catch (provisionError) {
         // Deny rather than infer anything from a missing claim. This covers both the
         // authoritative role lookup and a genuine first-user viewer assignment.
-        console.error('Login role reconciliation failed:', provisionError);
-        return Response.redirect(
-          new URL('/login?error=provisioning_failed', url.origin).toString(),
-          302
-        );
+        logAuthFailure('auth_role_reconciliation_failed', provisionError);
+        return authenticationUnavailable();
       }
 
       // Role gate. Uses the shared helper rather than a third copy of this logic, and
@@ -275,6 +307,13 @@ export const auth0Handler = {
       // snapshotted into sessionData above.
       await indexSession(env, user.id, sessionToken);
 
+      scheduleAuthAudit(request, {
+        action: 'login',
+        resourceId: user.id,
+        userEmail: user.email || null,
+        details: { provider: 'auth0', roles: user.roles },
+      });
+
       // The session token is delivered ONLY as an HttpOnly cookie. It used to also be
       // appended to this redirect as `?token=...`, which leaked a live 24-hour
       // credential into the Referer header on any outbound link, into browser history,
@@ -290,8 +329,8 @@ export const auth0Handler = {
         }
       });
     } catch (error) {
-      // Auth callback error
-      return new Response(`Authentication failed: ${error.message}`, { status: 500 });
+      logAuthFailure('auth_callback_failed', error);
+      return authenticationUnavailable();
     }
   },
 

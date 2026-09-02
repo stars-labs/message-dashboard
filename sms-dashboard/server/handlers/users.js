@@ -14,6 +14,7 @@
 import { createRoleConfig, getKnownRoles } from '../../config/auth0-roles.js';
 import { getUserRoles, listUsersWithRoles, setUserRole } from '../utils/auth0-management.js';
 import { revokeUserSessions } from '../utils/user-sessions.js';
+import { writeAuditLog } from '../utils/audit-log.js';
 
 function json(body, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -126,20 +127,18 @@ export const usersHandler = {
       // Without this the change is invisible until their session expires.
       const revoked = await revokeUserSessions(env, targetId);
 
-      await env.DB.prepare(`
-        INSERT INTO audit_logs (action, resource_type, resource_id, user_email, details, timestamp)
-        VALUES ('role_changed', 'user', ?, ?, ?, datetime('now'))
-      `).bind(
-        targetId,
-        user?.email ?? null,
-        JSON.stringify({
+      await writeAuditLog(env, {
+        action: 'role_changed',
+        resourceId: targetId,
+        userEmail: user?.email ?? null,
+        details: {
           actor_id: user?.id ?? null,
           target_id: targetId,
           from: previousRoles,
           to: role,
           sessions_revoked: revoked,
-        })
-      ).run();
+        },
+      });
 
       return json({
         success: true,

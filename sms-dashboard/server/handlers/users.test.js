@@ -27,7 +27,7 @@ function kvStub(initial = {}) {
   };
 }
 
-// Records the audit_logs bind() parameters so we can assert on them.
+// Records the centralized audit_logs bind() parameters so we can assert on them.
 function dbStub() {
   return {
     prepare() {
@@ -299,7 +299,13 @@ describe('PUT /api/users/:id/role — success path', () => {
 
     // Audit row records actor, target and the transition.
     expect(audit).toHaveLength(1);
-    const details = JSON.parse(audit[0][2]);
+    expect(audit[0].slice(0, 4)).toEqual([
+      'role_changed',
+      'user',
+      'auth0|target',
+      'admin@poloniex.com',
+    ]);
+    const details = JSON.parse(audit[0][4]);
     expect(details).toMatchObject({
       actor_id: 'auth0|admin',
       target_id: 'auth0|target',
@@ -317,7 +323,7 @@ describe('PUT /api/users/:id/role — success path', () => {
 
     expect(res.status).toBe(200);
     expect(body.role).toBe('viewer');
-    expect(JSON.parse(audit[0][2]).to).toBe('viewer');
+    expect(JSON.parse(audit[0][4]).to).toBe('viewer');
   });
 
   test('a Management API failure returns 502 and writes no audit row', async () => {

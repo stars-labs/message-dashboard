@@ -1,11 +1,15 @@
 const ROW_READ_LIMIT = "exceeded D1's free tier daily row read limit";
 const ROW_WRITE_LIMIT = "exceeded D1's free tier daily row write limit";
 
-function errorText(error) {
+export function errorText(error) {
   const messages = [error?.message, error?.cause?.message]
     .filter((value) => typeof value === 'string' && value)
     .join(' ');
   return messages || String(error);
+}
+
+export function boundedErrorText(error, maxLength = 1000) {
+  return errorText(error).slice(0, maxLength);
 }
 
 export function nextD1Reset(now = new Date()) {
@@ -35,6 +39,6 @@ export function logD1Error(operation, error, classification) {
     operation,
     error_code: classification.code,
     quota: classification.quota ?? null,
-    error: errorText(error).slice(0, 1000),
+    error: boundedErrorText(error),
   }));
 }
