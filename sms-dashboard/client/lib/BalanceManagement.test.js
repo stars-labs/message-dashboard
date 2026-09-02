@@ -265,11 +265,14 @@ describe('balance management', () => {
   });
 
   test('shows balance and expiry risks at the same time', () => {
+    const expiringSoon = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
     const atRisk = {
       ...check,
       metrics: [
         { metric_type: 'cash_balance', value: 4.5, currency: 'CNY' },
-        { metric_type: 'account_expiry', value: null, expires_at: '2026-08-30' },
+        { metric_type: 'account_expiry', value: null, expires_at: expiringSoon },
       ],
     };
     const view = render(BalanceManagement, {
@@ -278,7 +281,7 @@ describe('balance management', () => {
 
     expect(view.getAllByText('需要充值').length).toBeGreaterThan(0);
     expect(view.getAllByText('即将到期').length).toBeGreaterThan(0);
-    expect(view.getAllByText('2026-08-30').length).toBeGreaterThan(0);
+    expect(view.getAllByText(expiringSoon).length).toBeGreaterThan(0);
   });
 
   test('combines prepaid recharge and postpaid bill actions under payment due', async () => {
