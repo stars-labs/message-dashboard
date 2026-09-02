@@ -28,12 +28,10 @@
   # NETWORK SECURITY
   # =============================================================================
 
-  # DHCP via NetworkManager. The office relocated (2026-08) and the old static
-  # config — 10.171.150.102 on enP3p49s0, gateway 10.171.150.1 — no longer matches
-  # the new subnet. Until a stable static assignment is confirmed for the new site,
-  # let NetworkManager obtain the lease dynamically. Applying the old static block
-  # during `nixos-rebuild switch` would reconfigure the interface to a subnet that
-  # doesn't exist here and drop the box off the network entirely.
+  # DHCP via NetworkManager. Let NetworkManager obtain the office LAN lease
+  # dynamically; applying a stale static block during `nixos-rebuild switch`
+  # could reconfigure the interface to the wrong subnet and drop the box off the
+  # network entirely.
   #
   # Do not set networking.useDHCP here: the NetworkManager module (enabled below)
   # sets it to false itself and manages per-interface addressing. Setting it true

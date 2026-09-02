@@ -210,9 +210,6 @@ bunx wrangler d1 execute sms-dashboard --remote --file=migrations/rollback-to-ph
 
 ## Orange Pi NixOS Deployment
 
-> **⚠️ OLD IP** — `10.171.150.102` below is the pre-relocation office address,
-> pending change (noted 2026-08-26). Source of truth: `docs/deployment.md#orange-pi-daemon`.
-
 Deploy the SMS dashboard daemon to your Orange Pi 5 Plus:
 
 ```bash
@@ -222,13 +219,13 @@ cd nixos-config
 # Build and deploy to Orange Pi (critical command)
 nixos-rebuild switch --flake .#orange-pi \
   --use-substitutes \
-  --target-host root@10.171.150.102 \
-  --build-host root@10.171.150.102 \
+  --target-host root@10.40.0.51 \
+  --build-host root@10.40.0.51 \
   --impure
 
 # Verify deployment
-ssh root@10.171.150.102 'systemctl status sms-dashboard-daemon'
-ssh root@10.171.150.102 'journalctl -fu sms-dashboard-daemon'
+ssh root@10.40.0.51 'systemctl status sms-daemon'
+ssh root@10.40.0.51 'journalctl -fu sms-daemon'
 ```
 
 ### Pre-deployment Setup
@@ -252,8 +249,8 @@ sops secrets/secrets.yaml
 # /run/secrets/sms-dashboard-api-url
 
 # Verify deployment prerequisites
-ssh root@10.171.150.102 'systemctl status ModemManager'
-ssh root@10.171.150.102 'mmcli -L'
+ssh root@10.40.0.51 'systemctl status ModemManager'
+ssh root@10.40.0.51 'mmcli -L'
 ```
 
 Note: The NixOS configuration automatically handles SOPS decryption and places secrets in the correct locations. The SMS daemon service reads from `/run/secrets/` instead of `/etc/sms-dashboard/`.
@@ -270,11 +267,11 @@ If you encounter modem problems (QMI error 54, corrupted state):
 ./scripts/reset-problematic-modems.sh
 
 # Manual modem reset on Orange Pi
-ssh root@10.171.150.102
+ssh root@10.40.0.51
 mmcli -m [modem_id] --disable
 sleep 3
 mmcli -m [modem_id] --enable
-systemctl restart sms-dashboard-daemon
+systemctl restart sms-daemon
 ```
 
 See documentation for detailed setup and deployment instructions.

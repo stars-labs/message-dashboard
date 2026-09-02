@@ -21,28 +21,21 @@ bun run deploy
 
 ## Orange Pi Daemon
 
-> **⚠️ OLD / TRANSIENT IP** — `10.171.150.102` and the `10.171.150.0/24` subnet
-> are the pre-relocation office address (noted 2026-08-26). They will change
-> within weeks; new subnet TBD. This file is the **single source of truth** for
-> the Orange Pi host — when the new IP lands, update it here and grep-replace
-> the derived command examples in `README.md`, `docs/README.md`, and
-> `docs/INVENTORY-README.md`.
+This file is the **single source of truth** for the Orange Pi host. Keep the
+derived command examples in `README.md`, `docs/README.md`, and
+`docs/INVENTORY-README.md` synchronized with it.
 
-Target: `root@10.171.150.102` (office LAN, NixOS aarch64).
+Target: `root@10.40.0.51` (office LAN, NixOS aarch64).
 
-- **Office network**: SSH works directly — test with `ping -c2 10.171.150.102` first.
-- **FortiClient VPN**: the broad `10.171/16` route is wrong. Add a host route first:
-  ```bash
-  sudo route add -host 10.171.150.102 10.171.121.1
-  ```
+- **Office network**: SSH works directly — test with `ping -c2 10.40.0.51` first.
 
 ```bash
 # From repo root — run check-daemon first:
 check-daemon
 
 nix run nixpkgs#nixos-rebuild -- switch --flake .#orange-pi \
-  --target-host root@10.171.150.102 \
-  --build-host root@10.171.150.102 \
+  --target-host root@10.40.0.51 \
+  --build-host root@10.40.0.51 \
   --use-substitutes --impure
 ```
 
