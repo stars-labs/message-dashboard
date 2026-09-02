@@ -9,8 +9,15 @@ export const messagesHandler = {
     const { env } = request;
     const url = new URL(request.url);
     const phoneIccid = url.searchParams.get('phone_iccid');
-    const limit = parseInt(url.searchParams.get('limit') || '50');
-    const offset = parseInt(url.searchParams.get('offset') || '0');
+    const requestedLimit = Number.parseInt(url.searchParams.get('limit') || '50', 10);
+    const requestedOffset = Number.parseInt(url.searchParams.get('offset') || '0', 10);
+    const limit = Number.isFinite(requestedLimit)
+      ? Math.min(Math.max(requestedLimit, 1), 500)
+      : 50;
+    const offset = Number.isFinite(requestedOffset) ? Math.max(requestedOffset, 0) : 0;
+    const since = url.searchParams.get('since');
+    const isIncremental = since !== null;
+    const serverTime = new Date().toISOString();
     // Spam/marketing messages are hidden unless explicitly asked for.
     const includeFiltered = url.searchParams.get('include_filtered') === '1';
 
@@ -18,6 +25,7 @@ export const messagesHandler = {
       phoneIccid,
       limit,
       offset,
+      since,
       includeFiltered,
       url: url.toString()
     });
@@ -38,6 +46,17 @@ export const messagesHandler = {
       const listConditions = [...conditions];
       const listParams = [...scopeParams];
 
+      if (isIncremental) {
+        if (Number.isNaN(Date.parse(since))) {
+          return Response.json({ success: false, error: 'Invalid since timestamp' }, { status: 400 });
+        }
+        // created_at is the ingestion clock. Message timestamps come from modems and
+        // may be delayed, so they cannot safely serve as an incremental cursor.
+        // A small overlap protects the boundary; the client deduplicates by ID.
+        listConditions.push(`created_at >= datetime(?, '-2 seconds')`);
+        listParams.push(since);
+      }
+
       if (!includeFiltered) {
         const placeholders = VISIBLE_FILTER_STATUSES.map(() => '?').join(', ');
         listConditions.push(`filter_status IN (${placeholders})`);
@@ -47,6 +66,9 @@ export const messagesHandler = {
       const listWhere = listConditions.length ? `WHERE ${listConditions.map(c => `m.${c}`).join(' AND ')}` : '';
       const countWhere = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
+      const orderBy = isIncremental
+        ? 'm.created_at DESC, m.id DESC'
+        : 'm.timestamp DESC, m.id DESC';
       const query = `
         SELECT
           m.*,
@@ -59,7 +81,7 @@ export const messagesHandler = {
         FROM messages m
         LEFT JOIN device_view dv ON m.phone_iccid = dv.iccid
         ${listWhere}
-        ORDER BY m.timestamp DESC
+        ORDER BY ${orderBy}
         LIMIT ? OFFSET ?
       `;
       listParams.push(limit, offset);
@@ -74,19 +96,27 @@ export const messagesHandler = {
         ${countWhere}
       `;
 
-      const [messagesResult, count] = await Promise.all([
-        env.DB.prepare(query).bind(...listParams).all(),
-        env.DB.prepare(countQuery).bind(...scopeParams).first()
-      ]);
+      let messagesResult;
+      let count = null;
+      if (isIncremental) {
+        messagesResult = await env.DB.prepare(query).bind(...listParams).all();
+      } else {
+        [messagesResult, count] = await Promise.all([
+          env.DB.prepare(query).bind(...listParams).all(),
+          env.DB.prepare(countQuery).bind(...scopeParams).first(),
+        ]);
+      }
 
       const messages = messagesResult.results || messagesResult;
-      const total = includeFiltered ? count.visible + count.filtered : count.visible;
+      const total = count
+        ? (includeFiltered ? count.visible + count.filtered : count.visible)
+        : null;
 
       console.log('[Messages Handler] Query results:', {
         phoneIccid,
         count: messages.length,
         totalCount: total,
-        filteredCount: count.filtered,
+        filteredCount: count?.filtered,
       });
       
       // DEBUG: Verify all messages have the correct ICCID when filtered
@@ -106,16 +136,24 @@ export const messagesHandler = {
         }
       }
 
+      const pagination = {
+        include_filtered: includeFiltered,
+        limit,
+        offset,
+      };
+      if (count) {
+        pagination.total = total;
+        pagination.filtered_count = count.filtered;
+      }
+
       return new Response(JSON.stringify({
         success: true,
         data: messages,
-        pagination: {
-          total,
-          filtered_count: count.filtered,
-          include_filtered: includeFiltered,
-          limit,
-          offset
-        }
+        pagination,
+        sync: {
+          server_time: serverTime,
+          is_incremental: isIncremental,
+        },
       }), {
         headers: { 'Content-Type': 'application/json' }
       });

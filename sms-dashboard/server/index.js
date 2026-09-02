@@ -6,13 +6,12 @@ import { controlHandler } from './handlers/control';
 import { auth0Handler } from './handlers/auth0';
 import { phonesHandler } from './handlers/phones';
 import { messagesHandler } from './handlers/messages';
-import { statsHandler } from './handlers/stats';
 import { iccidMappingsHandler } from './handlers/iccid-mappings';
 import { healthHandler } from './handlers/health';
 import { usersHandler } from './handlers/users';
 import {
   balanceQueriesHandler,
-  maintainBalanceChecks,
+  expireStaleBalanceChecks,
 } from './handlers/balance-queries.js';
 import { balanceSkillRunnerHandler } from './handlers/balance-skill-runner.js';
 import {
@@ -359,12 +358,6 @@ router.put('/api/users/:id/role', async (request, env, ctx) => {
   return usersHandler.setRole(request);
 });
 
-router.get('/api/stats', async (request, env, ctx) => {
-  // Basic stats (device counts) are public
-  // Detailed stats require authentication
-  return statsHandler.get(request, env, ctx);
-});
-
 // ICCID Mappings routes
 router.get('/api/iccid-mappings', async (request, env, ctx) => {
   const authResponse = await handleAuth0(request, env, ctx);
@@ -697,10 +690,9 @@ export default {
     console.log(`[scheduled] cron ${event.cron} firing`);
 
     try {
-      const balances = await maintainBalanceChecks(env.DB);
+      const timeouts = await expireStaleBalanceChecks(env.DB);
       console.log(
-        `[scheduled] balance checks: linked ${balances.replies.linked}, `
-        + `supplemental ${balances.replies.supplemental}, expired ${balances.timeouts.expired}`,
+        `[scheduled] balance checks: expired ${timeouts.expired}`,
       );
     } catch (error) {
       console.error('[scheduled] balance check maintenance failed:', error);

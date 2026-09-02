@@ -20,7 +20,7 @@
   import PullToRefresh from './lib/PullToRefresh.svelte';
   import { keywords as keywordsStore } from "./lib/tag-store.js";
   import { api } from "./lib/api.js";
-  import { getPhoneFlag, mapStatsResponse } from "./lib/countries.js";
+  import { getPhoneFlag } from "./lib/countries.js";
   import { auth } from "./lib/auth.js";
   import { isAnomalous } from "./lib/device-status.js";
   import { formatCardNumber } from "./lib/card-number.js";
@@ -54,6 +54,7 @@
   function handlePhoneSelection() {
     updateSelectedPhone();
     loadMessagesForPhone(selectedPhoneIccid);
+    refreshBalanceChecksForView();
   }
   
   // Centralized function to calculate online devices
@@ -85,17 +86,11 @@
     return onlinePhones.length;
   }
   
-  // Track if we've loaded stats from backend (to prevent race conditions)
-  let backendStatsLoaded = $state(false);
-
-  // Manual function to update stats - no reactive statements to avoid circular dependencies
+  // Device counts come from the already-loaded phone list. Keeping a second D1
+  // aggregate for the same facts made the dashboard poll the whole message table.
   function updateStatsFromPhones() {
-    if (phoneNumbers && phoneNumbers.length > 0) {
-      const onlineCount = calculateOnlineDevices(phoneNumbers);
-      if (onlineCount !== stats.onlineDevices) {
-        stats.onlineDevices = onlineCount;
-      }
-    }
+    stats.onlineDevices = calculateOnlineDevices(phoneNumbers);
+    stats.totalDevices = phoneNumbers?.length || 0;
   }
   let selectedCountry = $state("all");
   let searchTerm = $state("");
@@ -124,6 +119,7 @@
   let toasts = $state([]);
   let messageRequestId = 0; // Prevents stale message responses from overwriting newer ones
   let pollInterval = null;
+  let pollInFlight = false;
   const POLL_INTERVAL_MS = 15000; // 15 seconds
   let newMessageIds = $state(new Set()); // Track newly arrived message IDs for "新" badge
 
@@ -151,7 +147,7 @@
   let swUpdatePrompt = $state(null);
 
   // Pull-to-refresh reuses loadData() rather than reloading the page: it refetches
-  // phones, messages, stats and balance checks, and only ever sets dataLoading to
+  // phones, messages, and the balance rows needed by the current view, then sets dataLoading to
   // false, so re-running it updates in place without flashing the skeleton.
   let pullRefreshing = $state(false);
 
@@ -200,15 +196,8 @@
   });
 
   let stats = $state({
-    totalMessages: 0,
-    todayMessages: 0,
-    totalSent: 0,
-    totalReceived: 0,
-    todaySent: 0,
-    todayReceived: 0,
     onlineDevices: 0,
     totalDevices: 0,
-    verificationRate: 0,
   });
 
   // Anomaly counts for the health strip, derived from the live phone list.
@@ -345,6 +334,7 @@
     showSendDrawer = false;
     currentView = view;
     window.location.hash = view;
+    if (view === 'balances') refreshBalanceChecksForView();
   }
 
   // Hash routing handler
@@ -381,7 +371,10 @@
     
     try {
       // Load data via HTTP API (authenticatedFetch handles 401→logout)
-      const [phonesResponse, messagesResponse, statsResponse, balanceResponse] =
+      const balanceRequest = currentView === 'balances'
+        ? api.getBalanceChecks({ limit: 100 })
+        : Promise.resolve([]);
+      const [phonesResponse, messagesResponse, nextBalanceChecks] =
         await Promise.all([
           auth.authenticatedFetch("/api/phones")
             .then((r) => r.json())
@@ -401,18 +394,7 @@
               console.error('[App] Failed to fetch messages:', err);
               return { success: false, data: [] };
             }),
-          auth.authenticatedFetch("/api/stats")
-            .then((r) => r.json())
-            .catch((err) => {
-              console.error('[App] Failed to fetch stats:', err);
-              return { success: false };
-            }),
-          auth.authenticatedFetch("/api/balance-checks?limit=500")
-            .then((r) => r.ok ? r.json() : { success: false, data: [] })
-            .catch((err) => {
-              console.error('[App] Failed to fetch balance checks:', err);
-              return { success: false, data: [] };
-            }),
+          balanceRequest,
         ]);
 
       // Handle different response formats
@@ -459,27 +441,13 @@
           auth.logout();
           return;
         }
-        
+
         messages = [];
         messageTotal = 0;
       }
 
-      balanceChecks = balanceResponse?.success && Array.isArray(balanceResponse.data)
-        ? balanceResponse.data
-        : [];
-      
-      // Map API stats to component format
-      if (statsResponse) {
-        stats = {
-          ...mapStatsResponse(statsResponse),
-        };
-        backendStatsLoaded = true;
-        updateStatsFromPhones();
-
-        // Check daemon status
-        await checkDaemonStatus();
-        
-      }
+      balanceChecks = Array.isArray(nextBalanceChecks) ? nextBalanceChecks : [];
+      await checkDaemonStatus();
 
       // Mark data as loaded
       dataLoading = false;
@@ -492,15 +460,8 @@
       messageTotal = 0;
       balanceChecks = [];
       stats = {
-        totalMessages: 0,
-        todayMessages: 0,
-        totalSent: 0,
-        totalReceived: 0,
-        todaySent: 0,
-        todayReceived: 0,
         onlineDevices: 0,
         totalDevices: 0,
-        verificationRate: 0,
       };
       // Mark data as loaded even on error
       dataLoading = false;
@@ -557,18 +518,14 @@
     const requestId = ++messageRequestId;
 
     try {
-      const [response, nextBalanceChecks] = await Promise.all([
-        api.getMessages({
-          ...(phoneIccid ? { phone_iccid: phoneIccid } : {}),
-          limit: MESSAGE_PAGE_SIZE,
-          ...(showFiltered ? { include_filtered: 1 } : {})
-        }),
-        api.getBalanceChecks({ limit: 500 }),
-      ]);
+      const response = await api.getMessages({
+        ...(phoneIccid ? { phone_iccid: phoneIccid } : {}),
+        limit: MESSAGE_PAGE_SIZE,
+        ...(showFiltered ? { include_filtered: 1 } : {})
+      });
 
       // Discard if user switched phones while we were loading
       if (requestId !== messageRequestId) return;
-      balanceChecks = nextBalanceChecks;
 
       // Keep the badge count fresh even when the offline cache served the list.
       if (response?.pagination?.filtered_count !== undefined) {
@@ -576,7 +533,11 @@
       }
 
       if (response && response.data) {
-        messageTotal = response.pagination?.total ?? response.data.length;
+        if (response.pagination?.total !== undefined) {
+          messageTotal = response.pagination.total;
+        } else if (replace) {
+          messageTotal = response.data.length;
+        }
         // Detect genuinely new messages: must have a timestamp newer than anything we've seen
         if (lastKnownTimestamp && messages.length > 0) {
           const cutoff = new Date(lastKnownTimestamp).getTime();
@@ -617,6 +578,26 @@
       // Do not clear messages on poll failure — keep whatever is already loaded.
       // Clearing on transient errors (e.g. network blip, wrangler restart) blanks
       // the UI even though the previous data is still valid.
+    }
+  }
+
+  async function refreshBalanceChecksForView() {
+    if (!user) return;
+
+    if (currentView === 'balances') {
+      balanceChecks = await api.getBalanceChecks({ limit: 100 });
+      return;
+    }
+
+    if (currentView === 'dashboard' && selectedPhoneIccid) {
+      const latest = await api.getBalanceChecks({
+        phone_iccid: selectedPhoneIccid,
+        limit: 1,
+      });
+      balanceChecks = [
+        ...balanceChecks.filter((check) => check.sim_iccid !== selectedPhoneIccid),
+        ...latest,
+      ];
     }
   }
 
@@ -697,8 +678,6 @@
         };
 
         messages = [sentMessage, ...messages];
-        stats.totalMessages++;
-        stats.todayMessages++;
         return response;
       }
       throw new Error(response.error || "发送请求未被接受");
@@ -714,15 +693,15 @@
       const response = await fetch('/api/daemon/status');
       if (response.ok) {
         const data = await response.json();
+        const connected = isDaemonConnected(data.status);
         daemonStatus = {
           ...data,
-          connected: isDaemonConnected(data.status),
+          connected,
         };
-        
-        // Only fetch stats if user is authenticated (stats API requires auth)
-        if (user) {
-          await fetchStats();
+        if (Number.isFinite(Number(data.modem_count))) {
+          stats.onlineDevices = connected ? Number(data.modem_count) : 0;
         }
+
       } else {
         daemonStatus = {
           ...daemonStatus,
@@ -758,38 +737,22 @@
     await handleRefreshDaemon();
   }
 
-  async function fetchStats() {
-    if (!user) {
-      return;
-    }
-
-    try {
-      const response = await auth.authenticatedFetch('/api/stats');
-      if (response.ok) {
-        const data = await response.json();
-
-        stats = {
-          ...mapStatsResponse(data),
-        };
-        backendStatsLoaded = true;
-      }
-    } catch (error) {
-      console.error('Failed to fetch stats from API:', error);
-    }
-  }
-
   // Background polling for new messages and device status
   function startPolling() {
     if (pollInterval) return;
     pollInterval = setInterval(async () => {
-      if (!user || !['dashboard', 'balances'].includes(currentView)) return;
+      if (!user || pollInFlight || !['dashboard', 'balances'].includes(currentView)) return;
+      pollInFlight = true;
       try {
-        // Poll messages for current view
-        await loadMessagesForPhone(selectedPhoneIccid, { replace: false });
-        // Also refresh device status + stats
+        if (currentView === 'dashboard') {
+          await loadMessagesForPhone(selectedPhoneIccid, { replace: false });
+        }
+        await refreshBalanceChecksForView();
         await checkDaemonStatus();
       } catch (e) {
         // Silently ignore polling errors
+      } finally {
+        pollInFlight = false;
       }
     }, POLL_INTERVAL_MS);
   }
@@ -798,6 +761,7 @@
     if (pollInterval) {
       clearInterval(pollInterval);
       pollInterval = null;
+      pollInFlight = false;
     }
   }
 
@@ -1288,7 +1252,7 @@
             {balanceChecks}
             canQueryBalances={can('balances.query')}
             canWriteBills={can('bills.write')}
-            onQueriesChanged={() => loadMessagesForPhone(selectedPhoneIccid)}
+            onQueriesChanged={refreshBalanceChecksForView}
             onOpenBalance={(check) => balanceDetailCheck = check}
           />
         </div>

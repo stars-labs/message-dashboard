@@ -48,9 +48,6 @@ function responseFor(url) {
       timestamp: '2026-08-26T12:00:00.000Z',
     }], pagination: { total: 1 } });
   }
-  if (path === '/api/stats') {
-    return Response.json({ success: true, data: {} });
-  }
   if (path === '/api/balance-checks') {
     return Response.json({ success: true, data: [] });
   }
@@ -64,6 +61,22 @@ function responseFor(url) {
 }
 
 describe('mobile detail navigation', () => {
+  test('recurring dashboard refreshes avoid full-table stats and balance history reads', () => {
+    const source = readFileSync(new URL('./App.svelte', import.meta.url), 'utf8');
+    const pollingStart = source.indexOf('async function loadMessagesForPhone');
+    const pollingEnd = source.indexOf('async function refreshBalanceChecksForView');
+    const messagePolling = source.slice(pollingStart, pollingEnd);
+    const balancePolling = source.slice(
+      pollingEnd,
+      source.indexOf('async function loadOlderMessages'),
+    );
+
+    expect(source).not.toContain('/api/stats');
+    expect(source).not.toContain('/api/balance-checks?limit=500');
+    expect(messagePolling).not.toContain('getBalanceChecks');
+    expect(balancePolling).not.toContain('limit: 500');
+  });
+
   test('bottom navigation closes an open message detail before changing views', async () => {
     auth.baseUrl = '';
     globalThis.fetch = async (url) => responseFor(url);

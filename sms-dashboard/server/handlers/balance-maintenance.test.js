@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { maintainBalanceChecks } from './balance-queries.js';
+import { expireStaleBalanceChecks } from './balance-queries.js';
 
 class D1Adapter {
   constructor(database) {
@@ -36,7 +36,7 @@ class D1Adapter {
   }
 }
 
-describe('balance reply maintenance D1 flow', () => {
+describe('balance timeout maintenance D1 flow', () => {
   let sqlite;
   let db;
 
@@ -120,25 +120,24 @@ describe('balance reply maintenance D1 flow', () => {
 
   afterEach(() => sqlite.close());
 
-  test('links historical CMHK replies and expires only stale unanswered checks', async () => {
-    const result = await maintainBalanceChecks(db);
+  test('expires stale unanswered checks without scanning historical replies', async () => {
+    const result = await expireStaleBalanceChecks(db);
 
-    expect(result.replies).toEqual({ scanned: 2, linked: 1, supplemental: 1 });
-    expect(result.timeouts.expired).toBe(1);
+    expect(result.expired).toBe(1);
     expect(sqlite.query(`
       SELECT status, response_message_id, error
       FROM sim_balance_checks WHERE id = 'check-failed'
     `).get()).toEqual({
-      status: 'response_received',
-      response_message_id: 'reply-one',
-      error: null,
+      status: 'failed',
+      response_message_id: null,
+      error: 'SMS submission was not confirmed',
     });
     expect(sqlite.query(`
       SELECT id, purpose, balance_check_id
       FROM messages WHERE id IN ('reply-one', 'reply-two') ORDER BY id
     `).all()).toEqual([
-      { id: 'reply-one', purpose: 'balance_maintenance', balance_check_id: 'check-failed' },
-      { id: 'reply-two', purpose: 'balance_maintenance', balance_check_id: 'check-failed' },
+      { id: 'reply-one', purpose: 'user', balance_check_id: null },
+      { id: 'reply-two', purpose: 'user', balance_check_id: null },
     ]);
     expect(sqlite.query(`
       SELECT id, status FROM sim_balance_checks

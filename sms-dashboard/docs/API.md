@@ -74,7 +74,6 @@ X-API-Key: <api_key>
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET | `/api/stats` | Bearer | Dashboard stats (totals, today count, daemon status) |
 
 ### Keywords
 

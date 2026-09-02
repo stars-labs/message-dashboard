@@ -10,7 +10,6 @@ import {
   findPendingBalanceCheck,
   linkBalanceReply,
   parseBalanceMetrics,
-  reconcileOrphanBalanceReplies,
   updateBalanceCheckForSmsResult,
 } from './balance-queries.js';
 
@@ -746,53 +745,6 @@ describe('balance reply correlation', () => {
     expect(db.batches[0][0].sql).toContain('response_window_minutes');
     expect(db.batches[0][0].sql).toContain("status = 'awaiting_response'");
     expect(db.batches[0][1].sql).toContain("status = 'stopped'");
-  });
-
-  test('recovers an orphan reply without continuing an expired conversation', async () => {
-    const db = dbStub();
-    db.prepare = (sql) => ({
-      bind: (...params) => ({
-        sql,
-        params,
-        all: async () => ({
-          results: sql.includes('FROM messages m') ? [{
-            id: 'msg-late',
-            phone_iccid: phone.iccid,
-            phone_number: '85212580',
-            content: '歡迎使用短信營業廳\n1. 查詢賬號信息',
-            timestamp: '2026-08-24T07:49:22.000Z',
-            check_id: 'bal-failed',
-            status: 'failed',
-            parser_version: 'hk-cmhk-balance-v1',
-            expected_senders: '["12580"]',
-            response_window_open: 0,
-            step_index: 0,
-            conversation_steps: '[{"response_contains":"1.","command":"1"}]',
-            skill_config: JSON.stringify({ id: 'readonly-balance-menu', max_turns: 4 }),
-          }] : [],
-        }),
-        run: async () => ({ meta: { changes: 1 } }),
-      }),
-    });
-    db.batch = async (statements) => {
-      db.batches.push(statements);
-      return statements.map(() => ({ meta: { changes: 1 } }));
-    };
-
-    const result = await reconcileOrphanBalanceReplies(db, { phoneIccid: phone.iccid });
-
-    expect(result).toEqual({ scanned: 1, linked: 1, supplemental: 0 });
-    expect(db.batches[0][0].params[0]).toBe('response_received');
-    expect(db.batches[0].some((statement) =>
-      statement.sql.includes('INSERT INTO messages')
-      || statement.sql.includes('sim_balance_skill_jobs')
-    )).toBe(false);
-    const messageUpdate = db.batches[0].find((statement) =>
-      statement.sql.includes('UPDATE messages')
-    );
-    expect(messageUpdate.params).toEqual([
-      'bal-failed', 'msg-late', 'bal-failed', 'bal-failed',
-    ]);
   });
 
   test('parses China Telecom total balance (当前号码总余额) when present', () => {

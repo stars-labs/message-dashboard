@@ -49,7 +49,6 @@ async function apiRequest(method, data = {}) {
     'getMessages': { url: '/api/messages', method: 'GET' },
     'getBalanceChecks': { url: '/api/balance-checks', method: 'GET' },
     'sendMessage': { url: '/api/messages/send', method: 'POST' },
-    'getStats': { url: '/api/stats', method: 'GET' },
     'getUser': { url: '/api/auth/me', method: 'GET' },
     'listIccidMappings': { url: '/api/iccid-mappings', method: 'GET' },
     'getIccidMapping': { url: (params) => `/api/iccid-mappings/${params.id}`, method: 'GET' },
@@ -280,38 +279,6 @@ export const api = {
     } catch (error) {
       console.warn('Failed to send message:', error);
       throw error;
-    }
-  },
-  
-  // Stats
-  async getStats() {
-    try {
-      const response = await apiRequest('getStats');
-      // Stats API returns data at root level, not under .data
-      return response.success ? response : {
-        total_messages: 0,
-        today_messages: 0,
-        total_sent: 0,
-        total_received: 0,
-        today_sent: 0,
-        today_received: 0,
-        online_devices: 0,
-        total_devices: 0,
-        verification_rate: 0
-      };
-    } catch (error) {
-      console.warn('Failed to get stats:', error);
-      return {
-        total_messages: 0,
-        today_messages: 0,
-        total_sent: 0,
-        total_received: 0,
-        today_sent: 0,
-        today_received: 0,
-        online_devices: 0,
-        total_devices: 0,
-        verification_rate: 0
-      };
     }
   },
   

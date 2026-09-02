@@ -95,17 +95,3 @@ export function getCarrierColor(carrier) {
 
   return "bg-stone-100 text-stone-600 border border-stone-200";
 }
-
-export function mapStatsResponse(data) {
-  return {
-    totalMessages: data.total_messages || 0,
-    todayMessages: data.today_messages || 0,
-    totalSent: data.total_sent || 0,
-    totalReceived: data.total_received || 0,
-    todaySent: data.today_sent || 0,
-    todayReceived: data.today_received || 0,
-    onlineDevices: data.online_devices || 0,
-    totalDevices: data.total_devices || 0,
-    verificationRate: Math.round((data.verification_rate || 0) * 100),
-  };
-}
