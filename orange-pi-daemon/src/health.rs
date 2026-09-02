@@ -1,7 +1,9 @@
 use serde::Serialize;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-pub const HEALTH_SCHEMA_VERSION: u8 = 1;
+const IN_FLIGHT_UPLOAD_TIMEOUT: Duration = Duration::from_secs(90);
+
+pub const HEALTH_SCHEMA_VERSION: u8 = 2;
 
 #[derive(Debug, Clone, Copy)]
 pub enum HealthTask {
@@ -37,7 +39,9 @@ pub struct TaskSnapshots {
 
 #[derive(Debug, Clone, Serialize, Default)]
 pub struct QueueHealthSnapshot {
-    pub pending_uploads: usize,
+    pub retryable: usize,
+    pub attempts_exhausted: usize,
+    pub stuck_uploading: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -66,6 +70,7 @@ pub struct HealthTracker {
     device_sync: TaskState,
     outbound_poll: TaskState,
     message_uploader: TaskState,
+    in_flight_uploads: Option<(usize, Instant)>,
     modems: ModemHealthSnapshot,
 }
 
@@ -79,6 +84,7 @@ impl HealthTracker {
             device_sync: TaskState::default(),
             outbound_poll: TaskState::default(),
             message_uploader: TaskState::default(),
+            in_flight_uploads: None,
             modems: ModemHealthSnapshot {
                 discovered: discovered_modems,
                 responsive: 0,
@@ -124,7 +130,29 @@ impl HealthTracker {
         };
     }
 
-    pub fn snapshot(&self, pending_uploads: usize) -> HealthSnapshot {
+    pub fn set_in_flight_uploads(&mut self, count: usize) {
+        self.in_flight_uploads = (count > 0).then(|| (count, Instant::now()));
+    }
+
+    pub fn queue_snapshot(
+        &self,
+        retryable: usize,
+        attempts_exhausted: usize,
+        uploading: usize,
+    ) -> QueueHealthSnapshot {
+        let active_uploads = self
+            .in_flight_uploads
+            .filter(|(_, started_at)| started_at.elapsed() <= IN_FLIGHT_UPLOAD_TIMEOUT)
+            .map(|(count, _)| count)
+            .unwrap_or(0);
+        QueueHealthSnapshot {
+            retryable,
+            attempts_exhausted,
+            stuck_uploading: uploading.saturating_sub(active_uploads),
+        }
+    }
+
+    pub fn snapshot(&self, queue: QueueHealthSnapshot) -> HealthSnapshot {
         HealthSnapshot {
             schema_version: HEALTH_SCHEMA_VERSION,
             session_id: self.session_id.clone(),
@@ -136,7 +164,7 @@ impl HealthTracker {
                 outbound_poll: task_snapshot(&self.outbound_poll),
                 message_uploader: task_snapshot(&self.message_uploader),
             },
-            queue: QueueHealthSnapshot { pending_uploads },
+            queue,
             modems: self.modems.clone(),
         }
     }
@@ -161,7 +189,7 @@ mod tests {
         tracker.record_failure(HealthTask::ModemReader, "timeout");
         tracker.record_success(HealthTask::ModemReader);
 
-        let snapshot = tracker.snapshot(0);
+        let snapshot = tracker.snapshot(tracker.queue_snapshot(0, 0, 0));
         assert_eq!(snapshot.tasks.modem_reader.consecutive_failures, 0);
         assert_eq!(snapshot.tasks.modem_reader.last_error, None);
         assert!(snapshot
@@ -175,10 +203,14 @@ mod tests {
     fn serializes_the_versioned_contract() {
         let mut tracker = HealthTracker::new("session".into(), "8.0.0".into(), 93);
         tracker.set_modem_counts(93, 92, 91);
-        let value = serde_json::to_value(tracker.snapshot(12)).unwrap();
+        tracker.set_in_flight_uploads(2);
+        let queue = tracker.queue_snapshot(12, 76, 3);
+        let value = serde_json::to_value(tracker.snapshot(queue)).unwrap();
 
-        assert_eq!(value["schema_version"], 1);
-        assert_eq!(value["queue"]["pending_uploads"], 12);
+        assert_eq!(value["schema_version"], 2);
+        assert_eq!(value["queue"]["retryable"], 12);
+        assert_eq!(value["queue"]["attempts_exhausted"], 76);
+        assert_eq!(value["queue"]["stuck_uploading"], 1);
         assert_eq!(value["modems"]["responsive"], 92);
         assert!(value["tasks"]["device_sync"].is_object());
     }
@@ -187,7 +219,15 @@ mod tests {
     fn bounds_error_messages() {
         let mut tracker = HealthTracker::new("session".into(), "8.0.0".into(), 0);
         tracker.record_failure(HealthTask::DeviceSync, "x".repeat(600));
-        let snapshot = tracker.snapshot(0);
+        let snapshot = tracker.snapshot(tracker.queue_snapshot(0, 0, 0));
         assert_eq!(snapshot.tasks.device_sync.last_error.unwrap().len(), 500);
+    }
+
+    #[test]
+    fn stops_masking_an_abandoned_in_flight_batch() {
+        let mut tracker = HealthTracker::new("session".into(), "8.0.0".into(), 0);
+        tracker.in_flight_uploads = Some((2, Instant::now() - Duration::from_secs(91)));
+
+        assert_eq!(tracker.queue_snapshot(0, 0, 3).stuck_uploading, 3);
     }
 }

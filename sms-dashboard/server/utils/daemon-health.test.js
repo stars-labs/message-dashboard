@@ -7,7 +7,7 @@ import {
 
 function snapshot(overrides = {}) {
   return normalizeHealthSnapshot({
-    schema_version: 1,
+    schema_version: 2,
     session_id: 'rust-daemon-test',
     version: '8.0.0',
     uptime_seconds: 600,
@@ -17,7 +17,7 @@ function snapshot(overrides = {}) {
       outbound_poll: { last_success_age_seconds: 3 },
       message_uploader: { last_success_age_seconds: 8 },
     },
-    queue: { pending_uploads: 0 },
+    queue: { retryable: 0, attempts_exhausted: 0, stuck_uploading: 0 },
     modems: { discovered: 93, responsive: 92, sim_readable: 91 },
     ...overrides,
   });
@@ -30,13 +30,15 @@ describe('normalizeHealthSnapshot', () => {
   });
 
   test('rejects missing versions and schema mismatches', () => {
-    expect(() => normalizeHealthSnapshot({ schema_version: 2 })).toThrow();
-    expect(() => normalizeHealthSnapshot({ schema_version: 1, session_id: 'x' })).toThrow();
+    expect(() => normalizeHealthSnapshot({ schema_version: 1 })).toThrow();
+    expect(() => normalizeHealthSnapshot({ schema_version: 2, session_id: 'x' })).toThrow();
   });
 
   test('turns invalid numeric fields into safe defaults', () => {
-    const value = snapshot({ queue: { pending_uploads: 'bad' } });
-    expect(value.queue.pending_uploads).toBe(0);
+    const value = snapshot({
+      queue: { retryable: 'bad', attempts_exhausted: -1, stuck_uploading: null },
+    });
+    expect(value.queue).toEqual({ retryable: 0, attempts_exhausted: 0, stuck_uploading: 0 });
   });
 
   test('preserves missing task timestamps as missing', () => {
@@ -57,7 +59,6 @@ describe('deriveDaemonHealth', () => {
     });
     expect(result.status).toBe('healthy');
     expect(result.reasons).toEqual([]);
-    expect(result.legacy).toBe(false);
   });
 
   test('detects a stalled reader while the heartbeat remains current', () => {
@@ -83,7 +84,9 @@ describe('deriveDaemonHealth', () => {
   });
 
   test('degrades a failing uploader when messages are queued', () => {
-    const value = snapshot({ queue: { pending_uploads: 12 } });
+    const value = snapshot({
+      queue: { retryable: 12, attempts_exhausted: 0, stuck_uploading: 0 },
+    });
     value.tasks.message_uploader.consecutive_failures = 3;
     value.tasks.message_uploader.last_error = 'network timeout';
     const result = deriveDaemonHealth({ seconds_since_heartbeat: 2, metadata: JSON.stringify(value) });
@@ -91,17 +94,34 @@ describe('deriveDaemonHealth', () => {
     expect(result.reasons[0]).toContain('network timeout');
   });
 
+  test('reports exhausted and stuck local messages even without a current upload failure', () => {
+    const value = snapshot({
+      queue: { retryable: 0, attempts_exhausted: 76, stuck_uploading: 3 },
+    });
+    const result = deriveDaemonHealth({ seconds_since_heartbeat: 2, metadata: JSON.stringify(value) });
+
+    expect(result.status).toBe('degraded');
+    expect(result.reasons).toEqual([
+      '76 条消息已耗尽重试次数',
+      '3 条消息卡在上传中',
+    ]);
+  });
+
   test('marks a versioned daemon offline after 180 seconds', () => {
     const result = deriveDaemonHealth({ seconds_since_heartbeat: 181, metadata: JSON.stringify(snapshot()) });
     expect(result.status).toBe('offline');
   });
 
-  test('keeps the five-minute threshold for legacy rows during rollout', () => {
-    expect(deriveDaemonHealth({ seconds_since_heartbeat: 181, metadata: null }).status).toBe('degraded');
-    expect(deriveDaemonHealth({ seconds_since_heartbeat: 301, metadata: null }).status).toBe('offline');
+  test('rejects missing and old health snapshots instead of inventing legacy health', () => {
+    expect(deriveDaemonHealth({ seconds_since_heartbeat: 2, metadata: null }).status).toBe('unknown');
+    expect(deriveDaemonHealth({
+      seconds_since_heartbeat: 2,
+      metadata: JSON.stringify({ schema_version: 1 }),
+    }).status).toBe('unknown');
   });
 
-  test('ignores malformed metadata as legacy input', () => {
+  test('rejects malformed metadata', () => {
     expect(parseHealthSnapshot('{bad')).toBeNull();
+    expect(deriveDaemonHealth({ seconds_since_heartbeat: 2, metadata: '{bad' }).status).toBe('unknown');
   });
 });

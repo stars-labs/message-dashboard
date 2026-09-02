@@ -1,4 +1,5 @@
 import { deriveDaemonHealth } from '../utils/daemon-health.js';
+import { classifyD1Error, logD1Error } from '../utils/d1-error.js';
 
 const DAEMON_HEALTH_SELECT = `
   SELECT *,
@@ -7,45 +8,80 @@ const DAEMON_HEALTH_SELECT = `
   WHERE daemon_id = 'orange-pi-main'
 `;
 
+function json(body, status = 200, headers = {}) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-store',
+      ...headers,
+    },
+  });
+}
+
+function unavailableBody(classification, timestamp) {
+  const database = {
+    status: 'unavailable',
+    code: classification.code,
+  };
+  if (classification.quota) database.quota = classification.quota;
+  if (classification.retryAt) database.retry_at = classification.retryAt.toISOString();
+
+  return {
+    status: 'unavailable',
+    database,
+    daemon: {
+      status: 'unknown',
+      label: 'Unavailable',
+      reasons: ['Database dependency is unavailable'],
+      last_heartbeat: null,
+    },
+    timestamp,
+  };
+}
+
+function unavailableHeaders(classification) {
+  return classification.retryAt
+    ? { 'Retry-After': classification.retryAt.toUTCString() }
+    : {};
+}
+
 export const healthHandler = {
+  async live() {
+    return json({
+      status: 'alive',
+      timestamp: new Date().toISOString(),
+    });
+  },
+
   async check(request) {
     const { env } = request;
-    
+    const timestamp = new Date().toISOString();
+
     try {
-      // Test database connection
-      const result = await env.DB.prepare('SELECT 1 as test').first();
-      
-      let daemonHealth = null;
-      try {
-        daemonHealth = await env.DB.prepare(DAEMON_HEALTH_SELECT).first();
-      } catch (err) {
-        console.error('Failed to check daemon health:', err);
-      }
-      
+      // One indexed application-table read proves D1 is usable and supplies the
+      // daemon state. A constant SELECT 1 can succeed after table reads are blocked.
+      const daemonHealth = await env.DB.prepare(DAEMON_HEALTH_SELECT).first();
       const derived = deriveDaemonHealth(daemonHealth);
-      return new Response(JSON.stringify({
-        status: 'healthy',
-        database: result ? 'connected' : 'error',
+      return json({
+        status: derived.status,
+        database: { status: 'connected' },
         daemon: {
           status: derived.status,
           label: derived.label,
           reasons: derived.reasons,
-          legacy: derived.legacy,
           last_heartbeat: daemonHealth?.last_heartbeat ?? null,
         },
-        timestamp: new Date().toISOString()
-      }), {
-        headers: { 'Content-Type': 'application/json' }
-      });
+        timestamp,
+      }, derived.status === 'healthy' ? 200 : 503);
     } catch (error) {
-      return new Response(JSON.stringify({
-        status: 'unhealthy',
-        error: error.message,
-        timestamp: new Date().toISOString()
-      }), {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' }
-      });
+      const classification = classifyD1Error(error);
+      logD1Error('health_readiness', error, classification);
+      return json(
+        unavailableBody(classification, timestamp),
+        503,
+        unavailableHeaders(classification),
+      );
     }
   },
   
@@ -57,7 +93,7 @@ export const healthHandler = {
       
       if (!daemonHealth) {
         const derived = deriveDaemonHealth(null);
-        return new Response(JSON.stringify({
+        return json({
           status: derived.status,
           label: derived.label,
           message: derived.reasons[0],
@@ -66,10 +102,7 @@ export const healthHandler = {
           tasks: null,
           queue: null,
           modems: null,
-          legacy: false,
-          timestamp: new Date().toISOString()
-        }), {
-          headers: { 'Content-Type': 'application/json' }
+          timestamp: new Date().toISOString(),
         });
       }
       
@@ -79,7 +112,7 @@ export const healthHandler = {
         ? 0
         : (snapshot?.modems?.discovered ?? daemonHealth.modem_count ?? 0);
       
-      return new Response(JSON.stringify({
+      return json({
         daemon_id: daemonHealth.daemon_id,
         status: derived.status,
         label: derived.label,
@@ -97,20 +130,18 @@ export const healthHandler = {
         queue: snapshot?.queue ?? null,
         modems: snapshot?.modems ?? null,
         uptime_seconds: snapshot?.uptime_seconds ?? null,
-        legacy: derived.legacy,
-        timestamp: new Date().toISOString()
-      }), {
-        headers: { 'Content-Type': 'application/json' }
+        timestamp: new Date().toISOString(),
       });
     } catch (error) {
-      return new Response(JSON.stringify({
+      const classification = classifyD1Error(error);
+      logD1Error('daemon_status', error, classification);
+      return json({
         status: 'error',
-        error: error.message,
-        timestamp: new Date().toISOString()
-      }), {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' }
-      });
+        code: classification.code,
+        message: 'Service status is temporarily unavailable',
+        retry_at: classification.retryAt?.toISOString() ?? null,
+        timestamp: new Date().toISOString(),
+      }, 503, unavailableHeaders(classification));
     }
   }
 };

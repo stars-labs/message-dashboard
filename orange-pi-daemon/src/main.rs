@@ -9,6 +9,7 @@ use tracing::{debug, error, info, warn};
 use orange_pi_daemon_rust::api_client::ApiClient;
 use orange_pi_daemon_rust::benchmark::PerformanceBenchmark;
 use orange_pi_daemon_rust::health::{HealthTask, HealthTracker};
+use orange_pi_daemon_rust::logging;
 use orange_pi_daemon_rust::message_store::MessageStore;
 use orange_pi_daemon_rust::modem_manager::ModemManager;
 use orange_pi_daemon_rust::sms_sender::SmsSender;
@@ -29,12 +30,7 @@ use orange_pi_daemon_rust::worker_pool::{WorkerPool, WorkerPoolConfig};
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)] // Optimized for 4-core ARM CPU
 async fn main() -> Result<()> {
-    // Initialize logging
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            std::env::var("RUST_LOG").unwrap_or_else(|_| "orange_pi_daemon_rust=info".to_string()),
-        )
-        .init();
+    logging::init()?;
 
     // Parse command line arguments
     let args: Vec<String> = std::env::args().collect();
@@ -433,6 +429,7 @@ async fn main() -> Result<()> {
                             .record_failure(HealthTask::MessageUploader, &e);
                         continue;
                     }
+                    upload_health.write().await.set_in_flight_uploads(ids.len());
 
                     // Upload to Cloudflare
                     match upload_client.upload_messages(&messages).await {
@@ -440,6 +437,7 @@ async fn main() -> Result<()> {
                             info!("☁️  Uploader: Sent {} messages to Cloudflare", ids.len());
                             // Mark as uploaded in database
                             let _ = upload_store.mark_uploaded(&ids);
+                            upload_health.write().await.set_in_flight_uploads(0);
                             // Reset backoff on success
                             consecutive_failures = 0;
                             upload_health
@@ -450,9 +448,17 @@ async fn main() -> Result<()> {
                             tokio::time::sleep(Duration::from_millis(100)).await;
                         }
                         Err(e) => {
-                            warn!("☁️  Uploader: Failed to upload: {}", e);
+                            warn!(
+                                event = "cloud_sync_failed",
+                                operation = "message_upload",
+                                error_code = "cloud_api_request_failed",
+                                consecutive_failures = consecutive_failures.saturating_add(1),
+                                error = %e,
+                                "Uploader failed to send messages"
+                            );
                             // Mark as failed for retry
                             let _ = upload_store.mark_failed(&ids, &e.to_string());
+                            upload_health.write().await.set_in_flight_uploads(0);
                             // Increment failure counter for backoff
                             consecutive_failures = consecutive_failures.saturating_add(1);
                             upload_health
@@ -539,7 +545,13 @@ async fn main() -> Result<()> {
                         .record_success(HealthTask::DeviceSync);
                 }
                 Err(e) => {
-                    warn!("Status sync failed: {}", e);
+                    warn!(
+                        event = "cloud_sync_failed",
+                        operation = "device_sync",
+                        error_code = "cloud_api_request_failed",
+                        error = %e,
+                        "Device status sync failed"
+                    );
                     sync_manager.record_failure(sync_mode, e.as_ref());
                     sync_health
                         .write()
@@ -553,6 +565,7 @@ async fn main() -> Result<()> {
     // TASK 4: STATISTICS LOGGER (every 60 seconds)
     // Logs database statistics for monitoring
     let stats_store = message_store.clone();
+    let stats_health = health_tracker.clone();
 
     tokio::spawn(async move {
         loop {
@@ -572,6 +585,28 @@ async fn main() -> Result<()> {
                             full_sims.len()
                         );
                     }
+                }
+            }
+
+            if let Ok(queue) = stats_store.get_queue_stats() {
+                let queue = stats_health.read().await.queue_snapshot(
+                    queue.retryable,
+                    queue.attempts_exhausted,
+                    queue.uploading,
+                );
+                if queue.attempts_exhausted > 0 {
+                    error!(
+                        event = "message_queue_attempts_exhausted",
+                        count = queue.attempts_exhausted,
+                        "Messages require operator recovery"
+                    );
+                }
+                if queue.stuck_uploading > 0 {
+                    error!(
+                        event = "message_queue_stuck_uploading",
+                        count = queue.stuck_uploading,
+                        "Messages are stuck in uploading state"
+                    );
                 }
             }
         }
@@ -666,7 +701,13 @@ async fn main() -> Result<()> {
                         .record_success(HealthTask::OutboundPoll);
                 }
                 Err(e) => {
-                    warn!("📤 SMS Sender error: {}", e);
+                    warn!(
+                        event = "cloud_sync_failed",
+                        operation = "outbound_poll",
+                        error_code = "cloud_api_request_failed",
+                        error = %e,
+                        "Outbound SMS poll failed"
+                    );
                     sender_health
                         .write()
                         .await
@@ -689,13 +730,24 @@ async fn main() -> Result<()> {
     tokio::spawn(async move {
         info!("💓 Independent health heartbeat started - reporting every 30 seconds");
         loop {
-            let pending_uploads = heartbeat_store
-                .get_stats()
-                .map(|stats| stats.pending + stats.failed)
-                .unwrap_or(0);
-            let snapshot = heartbeat_health.read().await.snapshot(pending_uploads);
+            let queue_stats = heartbeat_store.get_queue_stats().unwrap_or_default();
+            let snapshot = {
+                let health = heartbeat_health.read().await;
+                let queue = health.queue_snapshot(
+                    queue_stats.retryable,
+                    queue_stats.attempts_exhausted,
+                    queue_stats.uploading,
+                );
+                health.snapshot(queue)
+            };
             if let Err(e) = heartbeat_client.send_health_snapshot(&snapshot).await {
-                warn!("💓 Health heartbeat failed: {}", e);
+                warn!(
+                    event = "cloud_sync_failed",
+                    operation = "health_heartbeat",
+                    error_code = "cloud_api_request_failed",
+                    error = %e,
+                    "Health heartbeat failed"
+                );
             }
             tokio::time::sleep(Duration::from_secs(30)).await;
         }

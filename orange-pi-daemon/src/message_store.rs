@@ -390,6 +390,31 @@ impl MessageStore {
         })
     }
 
+    /// Queue states that require different operator actions. Unlike the dashboard
+    /// statistics, this covers the complete durable local queue, not only 24 hours.
+    pub fn get_queue_stats(&self) -> Result<QueueStats> {
+        let conn = self.conn.lock().unwrap();
+        let (retryable, attempts_exhausted, uploading): (i64, i64, i64) = conn.query_row(
+            "SELECT
+                COUNT(CASE
+                    WHEN status IN ('pending', 'failed') AND attempts < 5 THEN 1
+                END),
+                COUNT(CASE
+                    WHEN status IN ('pending', 'failed') AND attempts >= 5 THEN 1
+                END),
+                COUNT(CASE WHEN status = 'uploading' THEN 1 END)
+             FROM messages",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+
+        Ok(QueueStats {
+            retryable: retryable as usize,
+            attempts_exhausted: attempts_exhausted as usize,
+            uploading: uploading as usize,
+        })
+    }
+
     /// Check if database has many messages for any SIM (NOT actual SIM card storage)
     pub fn check_sim_storage(&self) -> Result<Vec<String>> {
         let conn = self.conn.lock().unwrap();
@@ -512,6 +537,50 @@ impl MessageStore {
     }
 }
 
+#[cfg(test)]
+mod queue_monitoring_tests {
+    use super::*;
+
+    #[test]
+    fn separates_retryable_exhausted_and_uploading_messages() {
+        let store = MessageStore::new(":memory:").unwrap();
+        {
+            let conn = store.conn.lock().unwrap();
+            for (index, (status, attempts)) in [
+                ("pending", 0),
+                ("failed", 4),
+                ("failed", 5),
+                ("failed", 8),
+                ("uploading", 1),
+                ("uploaded", 1),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                conn.execute(
+                    "INSERT INTO messages (
+                        phone_iccid, phone_number, content, timestamp, direction,
+                        modem_id, sms_path, status, attempts
+                     ) VALUES ('iccid', '10010', ?3, CURRENT_TIMESTAMP, 'received',
+                               'modem', ?4, ?1, ?2)",
+                    params![
+                        status,
+                        attempts,
+                        format!("content-{index}"),
+                        format!("path-{index}")
+                    ],
+                )
+                .unwrap();
+            }
+        }
+
+        let stats = store.get_queue_stats().unwrap();
+        assert_eq!(stats.retryable, 2);
+        assert_eq!(stats.attempts_exhausted, 2);
+        assert_eq!(stats.uploading, 1);
+    }
+}
+
 #[derive(Debug)]
 pub struct MessageStats {
     pub pending: usize,
@@ -519,6 +588,13 @@ pub struct MessageStats {
     pub uploaded: usize,
     pub failed: usize,
     pub total: usize,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct QueueStats {
+    pub retryable: usize,
+    pub attempts_exhausted: usize,
+    pub uploading: usize,
 }
 
 impl MessageStats {

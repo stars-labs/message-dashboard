@@ -1,4 +1,4 @@
-export const HEALTH_SCHEMA_VERSION = 1;
+export const HEALTH_SCHEMA_VERSION = 2;
 
 export const HEALTH_TASKS = {
   modem_reader: { label: '短信扫描', degradedAfter: 120, criticalAfter: 300 },
@@ -48,7 +48,9 @@ export function normalizeHealthSnapshot(raw) {
     uptime_seconds: finiteNonNegative(raw.uptime_seconds) ?? 0,
     tasks,
     queue: {
-      pending_uploads: finiteNonNegative(raw.queue?.pending_uploads) ?? 0,
+      retryable: finiteNonNegative(raw.queue?.retryable) ?? 0,
+      attempts_exhausted: finiteNonNegative(raw.queue?.attempts_exhausted) ?? 0,
+      stuck_uploading: finiteNonNegative(raw.queue?.stuck_uploading) ?? 0,
     },
     modems: {
       discovered: finiteNonNegative(raw.modems?.discovered) ?? 0,
@@ -87,7 +89,10 @@ function advanceSnapshotAges(snapshot, heartbeatAge) {
 
 function taskReason(name, task, snapshot) {
   const config = HEALTH_TASKS[name];
-  if (name === 'message_uploader' && (snapshot.queue?.pending_uploads ?? 0) === 0) return null;
+  const queued = (snapshot.queue?.retryable ?? 0) +
+    (snapshot.queue?.attempts_exhausted ?? 0) +
+    (snapshot.queue?.stuck_uploading ?? 0);
+  if (name === 'message_uploader' && queued === 0) return null;
 
   const age = finiteNonNegative(task?.last_success_age_seconds);
   const failures = finiteNonNegative(task?.consecutive_failures) ?? 0;
@@ -112,42 +117,49 @@ export function deriveDaemonHealth(row) {
       status: 'unknown',
       label: '检测中',
       reasons: ['等待采集服务首次连接'],
-      legacy: false,
       snapshot: null,
     };
   }
 
   const heartbeatAge = finiteNonNegative(row.seconds_since_heartbeat) ?? Number.POSITIVE_INFINITY;
   const storedSnapshot = parseHealthSnapshot(row.metadata);
-  const snapshot = advanceSnapshotAges(storedSnapshot, heartbeatAge);
-  const legacy = !storedSnapshot;
-  const offlineAfter = legacy ? 300 : 180;
-  const degradedAfter = legacy ? 120 : 90;
+  if (!storedSnapshot) {
+    return {
+      status: 'unknown',
+      label: '检测中',
+      reasons: ['健康报告格式无效或缺失'],
+      snapshot: null,
+    };
+  }
 
-  if (heartbeatAge > offlineAfter) {
+  const snapshot = advanceSnapshotAges(storedSnapshot, heartbeatAge);
+
+  if (heartbeatAge > 180) {
     return {
       status: 'offline',
       label: '离线',
       reasons: [`${Math.floor(heartbeatAge / 60)} 分钟未收到心跳`],
-      legacy,
       snapshot,
     };
   }
 
   const reasons = [];
-  if (heartbeatAge > degradedAfter) reasons.push(`${Math.floor(heartbeatAge)} 秒未收到心跳`);
-  if (snapshot) {
-    for (const name of Object.keys(HEALTH_TASKS)) {
-      const reason = taskReason(name, snapshot.tasks?.[name], snapshot);
-      if (reason) reasons.push(reason);
-    }
+  if (heartbeatAge > 90) reasons.push(`${Math.floor(heartbeatAge)} 秒未收到心跳`);
+  for (const name of Object.keys(HEALTH_TASKS)) {
+    const reason = taskReason(name, snapshot.tasks?.[name], snapshot);
+    if (reason) reasons.push(reason);
+  }
+  if (snapshot.queue?.attempts_exhausted > 0) {
+    reasons.push(`${snapshot.queue.attempts_exhausted} 条消息已耗尽重试次数`);
+  }
+  if (snapshot.queue?.stuck_uploading > 0) {
+    reasons.push(`${snapshot.queue.stuck_uploading} 条消息卡在上传中`);
   }
 
   return {
     status: reasons.length ? 'degraded' : 'healthy',
     label: reasons.length ? '部分异常' : '正常',
     reasons,
-    legacy,
     snapshot,
   };
 }

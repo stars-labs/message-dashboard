@@ -193,9 +193,11 @@ in
           WorkingDirectory = "/var/lib/sms-daemon";
 
           # Logging
-          StandardOutput = "journal";
+          # `tracing-journald` writes structured events and native PRIORITY fields
+          # directly. Reserve stderr for panics and other unstructured failures.
+          StandardOutput = "null";
           StandardError = "journal";
-          SyslogLevel = if cfg.debugBuild then "debug" else "info";
+          SyslogLevel = "err";
           SyslogIdentifier = "sms-daemon";
 
           # ==========================================================

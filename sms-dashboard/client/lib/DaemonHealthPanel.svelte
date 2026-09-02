@@ -66,9 +66,9 @@
     </div>
   {/if}
 
-  {#if status?.legacy}
+  {#if !status?.tasks}
     <div class="px-4 py-3 border-b border-stone-100 bg-stone-50">
-      <p class="text-xs text-stone-600">当前使用兼容心跳；升级采集服务后可查看各任务运行状态。</p>
+      <p class="text-xs text-stone-600">暂无有效的任务健康报告。</p>
     </div>
   {:else}
     <div class="divide-y divide-stone-100">
@@ -91,8 +91,10 @@
 
   <footer class="grid grid-cols-3 border-t border-stone-200 bg-stone-50 rounded-b-lg">
     <div class="px-3 py-2.5 border-r border-stone-200">
-      <p class="text-[10px] text-stone-400">待上传</p>
-      <p class="text-xs font-mono text-stone-700 mt-0.5">{status?.queue?.pending_uploads ?? '—'}</p>
+      <p class="text-[10px] text-stone-400" title="可重试 / 已耗尽 / 卡住">队列</p>
+      <p class="text-xs font-mono text-stone-700 mt-0.5" title="可重试 / 已耗尽 / 卡住">
+        {status?.queue ? `${status.queue.retryable} / ${status.queue.attempts_exhausted} / ${status.queue.stuck_uploading}` : '—'}
+      </p>
     </div>
     <div class="px-3 py-2.5 border-r border-stone-200">
       <p class="text-[10px] text-stone-400">Modem</p>

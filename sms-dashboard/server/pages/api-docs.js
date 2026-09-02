@@ -198,6 +198,9 @@ X-API-Key: your-api-key-here
         <div class="endpoints">
             <h3 style="color: #334155; margin-bottom: 15px;">Available Endpoints</h3>
             <div class="endpoint">
+                <span class="method">GET</span> /api/live
+            </div>
+            <div class="endpoint">
                 <span class="method">GET</span> /api/health
             </div>
             <div class="endpoint">

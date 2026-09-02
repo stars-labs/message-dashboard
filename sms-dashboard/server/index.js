@@ -160,6 +160,7 @@ const router = new SimpleRouter();
 router.options('*', handleCORS);
 
 // Public API routes
+router.get('/api/live', (request) => healthHandler.live(request));
 router.get('/api/health', (request) => healthHandler.check(request));
 router.get('/api/daemon/status', (request) => healthHandler.daemonStatus(request));
 // Legacy /favicon.ico requests (browsers ask for it even when index.html declares
