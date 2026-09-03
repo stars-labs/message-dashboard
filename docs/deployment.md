@@ -25,9 +25,10 @@ This file is the **single source of truth** for the Orange Pi host. Keep the
 derived command examples in `README.md`, `docs/README.md`, and
 `docs/INVENTORY-README.md` synchronized with it.
 
-Target: `root@10.40.0.51` (office LAN, NixOS aarch64).
+Target: `root@10.40.0.51` (current LAN address, NixOS aarch64).
 
-- **Office network**: SSH works directly — test with `ping -c2 10.40.0.51` first.
+- **LAN access**: before ping or SSH, confirm the operator's current network/location
+  and that `10.40.0.51` is reachable from it.
 
 ```bash
 # From repo root — run check-daemon first:

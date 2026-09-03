@@ -11,10 +11,11 @@ synced copy that can lag or fail (D1 free-tier row-read limit, 500s on upload).
 
 ## Target
 
-- Host: `root@10.40.0.51` (Orange Pi, DHCP after 2026-08 office relocation).
-  The old static `10.171.150.102` is **dead** — do not use it.
-  `ping -c2 10.40.0.51` first if unsure; if that IP stops resolving, the Pi may
-  have a new DHCP lease — check `docs/deployment.md` and recent nixos commits.
+- Host: `root@10.40.0.51` (current Orange Pi LAN address).
+  This is the only Orange Pi LAN address to use. Before any ping, SSH, or other
+  connectivity check, confirm the user's current network/location and that the
+  address is reachable from it. Never probe an address merely because it appears
+  in old documentation or command history.
 - DB: `/var/lib/sms-daemon/messages.db` (SQLite, WAL mode).
 - The Pi has **no `sqlite3` binary**. Run it via an ephemeral nix shell:
   `nix run --extra-experimental-features "nix-command flakes" nixpkgs#sqlite -- …`
@@ -133,7 +134,7 @@ UNIQUE constraint: `(phone_iccid, timestamp, content)` — dedup is built in.
 
 ## Never
 
-- Use the old IP `10.171.150.102`.
+- Use any Orange Pi IP other than `10.40.0.51`.
 - Install `sqlite3` on the Pi imperatively — use the nix one-shot.
 - Treat `modem_id` as a stable SIM identity or `phone_number` as the SIM's own number.
 - Retry D1 after a quota error — fall through to the content-echo fallback.
