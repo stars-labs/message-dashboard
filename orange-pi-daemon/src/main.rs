@@ -417,9 +417,8 @@ async fn main() -> Result<()> {
                             let mut dead_letter = Vec::new();
                             let mut retryable = Vec::new();
                             for result in &results {
-                                if let Some(message) = pending
-                                    .iter()
-                                    .find(|m| m.source_message_id == result.id)
+                                if let Some(message) =
+                                    pending.iter().find(|m| m.source_message_id == result.id)
                                 {
                                     match result.status.as_str() {
                                         "stored" | "already_stored" => {
@@ -443,8 +442,7 @@ async fn main() -> Result<()> {
                                         "Worker returned unrecognised message id",
                                     );
                                     upload_health.write().await.set_in_flight_uploads(0);
-                                    consecutive_failures =
-                                        consecutive_failures.saturating_add(1);
+                                    consecutive_failures = consecutive_failures.saturating_add(1);
                                     continue;
                                 }
                             }
@@ -454,9 +452,10 @@ async fn main() -> Result<()> {
                                 error!("Failed to persist upload acknowledgement: {}", e);
                                 continue;
                             }
-                            if let Err(e) = upload_store
-                                .reject_messages(&dead_letter, "Worker permanently rejected message")
-                            {
+                            if let Err(e) = upload_store.reject_messages(
+                                &dead_letter,
+                                "Worker permanently rejected message",
+                            ) {
                                 error!("Failed to persist dead-letter: {}", e);
                                 continue;
                             }
