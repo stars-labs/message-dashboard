@@ -113,7 +113,7 @@ Example payload:
 ## Independent Heartbeat
 
 Add a dedicated daemon task that posts the health snapshot to
-`POST /api/control/heartbeat` every 30 seconds.
+`POST /api/control/heartbeat` every 60 seconds.
 
 The Worker must record `last_heartbeat` using its own `CURRENT_TIMESTAMP`. The
 payload's task ages are useful telemetry, but the daemon-supplied wall clock must

@@ -116,8 +116,9 @@
           ...
         }:
         let
-          # SMS daemon version - single source of truth
-          daemonVersion = "8.0.0"; # v8.0.0: Direct AT commands (bypasses ModemManager for better 100+ modem performance)
+          # Cargo package metadata is the single source of truth for daemon versioning.
+          daemonCargo = builtins.fromTOML (builtins.readFile ./orange-pi-daemon/Cargo.toml);
+          daemonVersion = daemonCargo.package.version;
 
           # Rust SMS daemon - the only daemon implementation
           sms-daemon = pkgs.rustPlatform.buildRustPackage {

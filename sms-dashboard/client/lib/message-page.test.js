@@ -46,8 +46,8 @@ describe('message pagination', () => {
   });
 
   test('reports whether the server has another page', () => {
-    expect(hasMoreMessages(101, 100)).toBe(true);
-    expect(hasMoreMessages(100, 100)).toBe(false);
-    expect(hasMoreMessages(undefined, 100)).toBe(false);
+    expect(hasMoreMessages({ has_more: true })).toBe(true);
+    expect(hasMoreMessages({ has_more: false })).toBe(false);
+    expect(hasMoreMessages()).toBe(false);
   });
 });

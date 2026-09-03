@@ -59,7 +59,16 @@ X-API-Key: <api_key>
 | DELETE | `/api/messages/:id` | Bearer | Delete message |
 | GET | `/api/messages/stats` | Bearer | Message count statistics |
 
-**GET /api/messages query params**: `phone_iccid`, `limit` (default 50), `offset`
+**GET /api/messages query params**: `phone_iccid`, `limit` (default 50), `offset`,
+`since` (ingestion timestamp for incremental sync), `include_filtered=1`. Incremental
+continuation requests use the response's `sync.server_time` as `until` and its
+`pagination.next_cursor` fields as `before_created_at` and `before_id`.
+
+Message pagination is bounded: `pagination.has_more` and `next_offset` come from
+fetching one extra row. Incremental pages use a stable `(created_at, id)` keyset
+within one fixed ingestion window; `next_offset` is only for ordinary history pages.
+The endpoint deliberately does not return exact history totals because counting the
+complete message table would amplify every inbox read.
 
 **POST /api/messages/send body**:
 ```json
@@ -137,4 +146,5 @@ X-API-Key: <api_key>
 - RBAC is enforced and fails closed. Every endpoint requires the `sms` role (or an
   alternative role) — a user without it gets 403, and there is no setting that grants
   access without a role.
-- The daemon syncs device status every 30s and does a full sync every 5min.
+- The daemon checks device state every 30s, sends only changed or removed modems,
+  and performs a full reconciliation only at startup or after repeated failures.

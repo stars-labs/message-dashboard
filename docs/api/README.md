@@ -183,19 +183,20 @@ Retrieve SMS messages with filtering and pagination.
 **Query Parameters**:
 - `limit` (number, default: 50): Number of messages to return
 - `offset` (number, default: 0): Pagination offset
-- `phone_id` (string, optional): Filter by specific phone ICCID
+- `phone_iccid` (string, optional): Filter by specific phone ICCID
 - `since` (ISO datetime, optional): Messages after this timestamp
-- `search` (string, optional): Search message content
+- `include_filtered` (`1`, optional): Include messages hidden by filter rules
+- `until`, `before_created_at`, `before_id`: Opaque incremental continuation values
+  copied from `sync.server_time` and `pagination.next_cursor`
 
 **Response**:
 ```json
 {
   "success": true,
-  "data": {
-    "messages": [
-      {
+  "data": [
+    {
         "id": "01JGRM7XFQZ8Z8Z8Z8Z8Z8Z8Z8",
-        "phone_id": "89860121652000047334",
+        "phone_iccid": "89860121652000047334",
         "phone_number": "+8613800138001",
         "sender": "+1234567890",
         "content": "Your Amazon verification code is 789012. Do not share this code.",
@@ -207,14 +208,21 @@ Retrieve SMS messages with filtering and pagination.
         },
         "created_at": "2025-01-15T10:25:00Z",
         "updated_at": "2025-01-15T10:25:00Z"
-      }
-    ],
-    "total": 1234,
+    }
+  ],
+  "pagination": {
+    "limit": 50,
+    "offset": 0,
     "has_more": true,
     "next_offset": 50
   }
 }
 ```
+
+Exact inbox and filtered totals are intentionally omitted; the endpoint reads one
+extra row to determine `has_more` without scanning complete message history.
+Incremental consumers must follow `next_cursor` until `has_more` is false before
+advancing their stored ingestion timestamp to `sync.server_time`.
 
 #### POST /api/control/messages
 

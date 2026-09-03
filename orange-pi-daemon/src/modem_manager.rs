@@ -7,7 +7,7 @@ use crate::at_modem::AtModemManager;
 use crate::signal_cache::SignalCache;
 use crate::types::{Message, MessageWithPath, SignalData, SmsSubmitOutcome};
 use anyhow::{anyhow, Result};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
@@ -21,9 +21,17 @@ pub enum BackendMode {
     DBus,
 }
 
+fn retain_present_cached_modems(
+    cache: &mut HashMap<String, String>,
+    present_ports: &HashSet<String>,
+) {
+    cache.retain(|_, port| present_ports.contains(port));
+}
+
 #[cfg(test)]
 mod tests {
-    use super::ModemManager;
+    use super::{retain_present_cached_modems, ModemManager};
+    use std::collections::{HashMap, HashSet};
 
     #[test]
     fn test_format_storage_aware_at_sms_path() {
@@ -53,6 +61,27 @@ mod tests {
         assert!(ModemManager::parse_at_sms_path("at:SR:5").is_err());
         assert!(ModemManager::parse_at_sms_path("at:ME:not-a-number").is_err());
         assert!(ModemManager::parse_at_sms_path("at:").is_err());
+    }
+
+    #[test]
+    fn cached_modems_are_retained_only_while_their_usb_port_is_present() {
+        let mut cache = HashMap::from([
+            ("2".to_string(), "/dev/ttyUSB2".to_string()),
+            ("6".to_string(), "/dev/ttyUSB6".to_string()),
+        ]);
+        let present_ports = HashSet::from([
+            "/dev/ttyUSB0".to_string(),
+            "/dev/ttyUSB1".to_string(),
+            "/dev/ttyUSB2".to_string(),
+            "/dev/ttyUSB3".to_string(),
+        ]);
+
+        retain_present_cached_modems(&mut cache, &present_ports);
+
+        assert_eq!(
+            cache,
+            HashMap::from([("2".to_string(), "/dev/ttyUSB2".to_string(),)])
+        );
     }
 }
 
@@ -249,6 +278,29 @@ impl ModemManager {
             );
         }
         Ok(added)
+    }
+
+    /// Reconcile the live modem handles against USB enumeration, then probe only
+    /// newly enumerated devices. Existing devices are never re-probed here, so
+    /// this cannot collide with the reader's normal AT traffic.
+    pub async fn reconcile_modems(&self) -> Result<Vec<String>> {
+        if self.mode == BackendMode::DBus {
+            return self.list_modems().await;
+        }
+
+        let groups = AtModemManager::ttyusb_by_usb_device()?;
+        let present_ports: HashSet<String> = groups.into_values().flatten().collect();
+        {
+            let mut cache = self.port_cache.write().await;
+            retain_present_cached_modems(&mut cache, &present_ports);
+        }
+
+        let known: HashSet<String> = self.port_cache.read().await.keys().cloned().collect();
+        self.rediscover_and_merge(&known).await?;
+
+        let mut current: Vec<String> = self.port_cache.read().await.keys().cloned().collect();
+        current.sort_by_key(|id| id.parse::<u32>().unwrap_or(u32::MAX));
+        Ok(current)
     }
 
     /// Get port for modem ID

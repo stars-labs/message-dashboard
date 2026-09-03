@@ -1,11 +1,12 @@
 import { auth } from './auth';
 import { messageCache } from './message-cache';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 
-  (typeof window !== 'undefined' ? window.location.origin : 'https://sms-dashboard-api.workers.dev');
+// Runtime cursors keep polling cheap even when IndexedDB is unavailable or the
+// current view deliberately avoids persistent caching (for example spam audit).
+const volatileMessageCursors = new Map();
 
 export async function fetchWithAuth(endpoint, options = {}) {
-  const fullUrl = `${API_BASE_URL}${endpoint}`;
+  const fullUrl = `${auth.baseUrl}${endpoint}`;
 
   // Credentials travel as the HttpOnly auth_token cookie, which the browser attaches
   // itself — there is no token for JavaScript to read or forward.
@@ -152,21 +153,22 @@ export const api = {
   // Messages - with client-side caching for reduced D1 reads
   async getMessages(params = {}) {
     const phoneIccid = params.phone_iccid || null;
-    const cacheKey = phoneIccid || 'global';
+    const includeFiltered = params.include_filtered === true
+      || params.include_filtered === 1
+      || params.include_filtered === '1';
+    const cacheKey = includeFiltered
+      ? `filtered:${phoneIccid || 'global'}`
+      : phoneIccid || 'global';
+    const persistentCacheEnabled = !includeFiltered;
     const forceRefresh = params.force_refresh || false;
-
-    // Auditing view ("显示已过滤"). Bypass IndexedDB entirely — neither read nor
-    // write — so spam never lands in the cache that backs the default view.
-    if (params.include_filtered) {
-      return await apiRequest('getMessages', params);
-    }
+    const resetSync = params.reset_sync || false;
 
     try {
       // Step 1: Get cached messages first for immediate display
       let cachedMessages = [];
       let lastSyncTime = null;
 
-      if (!forceRefresh) {
+      if (!forceRefresh && persistentCacheEnabled) {
         try {
           cachedMessages = await messageCache.getCachedMessages(phoneIccid, params.limit || 500);
           lastSyncTime = await messageCache.getLastSyncTime(cacheKey);
@@ -174,16 +176,54 @@ export const api = {
           console.warn('[API] Cache read failed:', cacheErr);
         }
       }
+      if (!forceRefresh && !resetSync) {
+        lastSyncTime = volatileMessageCursors.get(cacheKey) || lastSyncTime;
+      } else if (resetSync) {
+        lastSyncTime = null;
+      }
 
       // Step 2: Fetch new messages from API (incremental if we have cache)
-      const apiParams = { ...params };
+      const { force_refresh: _forceRefresh, reset_sync: _resetSync, ...apiParams } = params;
       if (lastSyncTime && !forceRefresh) {
         apiParams.since = lastSyncTime;
         // Reduce limit for incremental sync since we're only getting new messages
         apiParams.limit = Math.min(params.limit || 100, 100);
       }
 
-      const response = await apiRequest('getMessages', apiParams);
+      let response = await apiRequest('getMessages', apiParams);
+
+      if (response.success && response.sync?.is_incremental) {
+        const syncUntil = response.sync.server_time;
+        const collected = [...(response.data || [])];
+        while (response.pagination?.has_more === true) {
+          const cursor = response.pagination?.next_cursor;
+          if (!syncUntil || !cursor?.created_at || !cursor?.id) {
+            throw new Error('Incremental message page is missing its stable cursor');
+          }
+          response = await apiRequest('getMessages', {
+            ...apiParams,
+            since: lastSyncTime,
+            until: syncUntil,
+            before_created_at: cursor.created_at,
+            before_id: cursor.id,
+            offset: 0,
+          });
+          if (!response.success || response.sync?.server_time !== syncUntil) {
+            throw new Error('Incremental message page changed its synchronization window');
+          }
+          collected.push(...(response.data || []));
+        }
+        response = {
+          ...response,
+          data: collected,
+          sync: {
+            ...response.sync,
+            server_time: syncUntil,
+            is_incremental: true,
+            new_count: collected.length,
+          },
+        };
+      }
 
       if (response.success) {
         const newMessages = response.data || [];
@@ -191,7 +231,7 @@ export const api = {
 
 
         // Step 3: Cache new messages
-        if (newMessages.length > 0) {
+        if (persistentCacheEnabled && newMessages.length > 0) {
           try {
             await messageCache.cacheMessages(newMessages);
             // Prune old messages to keep IndexedDB bounded
@@ -201,11 +241,17 @@ export const api = {
           }
         }
 
-        // Step 4: Update last sync time
-        try {
-          await messageCache.setLastSyncTime(cacheKey, serverTime);
-        } catch (cacheErr) {
-          console.warn('[API] Failed to update sync time:', cacheErr);
+        // Step 4: Advance only after every incremental page completed. Forced
+        // history pagination must not move the live ingestion cursor.
+        if (!forceRefresh) {
+          volatileMessageCursors.set(cacheKey, serverTime);
+          if (persistentCacheEnabled) {
+            try {
+              await messageCache.setLastSyncTime(cacheKey, serverTime);
+            } catch (cacheErr) {
+              console.warn('[API] Failed to update sync time:', cacheErr);
+            }
+          }
         }
 
         // Step 5: Merge new messages with cached (avoiding duplicates)
@@ -216,14 +262,25 @@ export const api = {
           // Sort by timestamp descending and limit
           merged.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
           const limitedMerged = merged.slice(0, params.limit || 500);
+          const requestedLimit = params.limit || 500;
 
 
           return {
             success: true,
             data: limitedMerged,
-            pagination: response.pagination,
+            pagination: {
+              ...response.pagination,
+              // An incremental response only describes newly ingested rows. A
+              // full local page may still have older server pages behind it.
+              has_more: response.pagination?.has_more === true
+                || cachedMessages.length >= requestedLimit,
+            },
             sync: { ...response.sync, from_cache: cachedMessages.length, new_count: uniqueNewMessages.length }
           };
+        }
+
+        if (response.sync?.is_incremental) {
+          response.sync = { ...response.sync, new_count: newMessages.length };
         }
 
         // Full refresh - return API data directly
@@ -235,7 +292,11 @@ export const api = {
         return {
           success: true,
           data: cachedMessages,
-          pagination: { limit: params.limit || 500, offset: 0, total: cachedMessages.length },
+          pagination: {
+            limit: params.limit || 500,
+            offset: 0,
+            has_more: cachedMessages.length >= (params.limit || 500),
+          },
           sync: { from_cache: cachedMessages.length, is_offline: true }
         };
       }
@@ -251,7 +312,11 @@ export const api = {
           return {
             success: true,
             data: cachedMessages,
-            pagination: { limit: params.limit || 500, offset: 0, total: cachedMessages.length },
+            pagination: {
+              limit: params.limit || 500,
+              offset: 0,
+              has_more: cachedMessages.length >= (params.limit || 500),
+            },
             sync: { from_cache: cachedMessages.length, is_offline: true }
           };
         }

@@ -65,14 +65,8 @@ mod tests {
     }
 
     #[test]
-    fn test_sync_manager_initialization() {
-        let sync_manager = SyncManager::new("test-session".to_string(), 300);
-        assert_eq!(sync_manager.session_id(), "test-session");
-    }
-
-    #[test]
     fn test_sync_manager_mode() {
-        let sync_manager = SyncManager::new("test".to_string(), 300);
+        let sync_manager = SyncManager::new();
 
         // First sync should always be full
         assert!(sync_manager.needs_full_sync());

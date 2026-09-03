@@ -21,6 +21,6 @@ export function nextMessageOffset(messages = []) {
   return new Set(messages.map(({ id }) => id).filter(Boolean)).size;
 }
 
-export function hasMoreMessages(total, loaded) {
-  return Number.isFinite(total) && total > loaded;
+export function hasMoreMessages(pagination = {}) {
+  return pagination?.has_more === true;
 }

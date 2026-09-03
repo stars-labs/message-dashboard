@@ -96,7 +96,7 @@
   let searchTerm = $state("");
   let showPhoneList = $state(false);
   let messages = $state([]);
-  let messageTotal = $state(0);
+  let hasMoreMessagePages = $state(false);
   let loadingOlderMessages = $state(false);
   let balanceChecks = $state([]);
   let balanceDetailCheck = $state(null);
@@ -120,13 +120,14 @@
   let messageRequestId = 0; // Prevents stale message responses from overwriting newer ones
   let pollInterval = null;
   let pollInFlight = false;
-  const POLL_INTERVAL_MS = 15000; // 15 seconds
+  const POLL_INTERVAL_MS = 60000;
+  const DAEMON_POLL_INTERVAL_MS = 300000;
+  let lastDaemonPollAt = 0;
   let newMessageIds = $state(new Set()); // Track newly arrived message IDs for "新" badge
 
-  // Spam/marketing filtering. Hidden by default; the count is always shown so the
-  // filter is never silent, and toggling refetches with include_filtered=1.
+  // Spam/marketing filtering. Exact totals require scanning message history, so the
+  // control exposes the filtered view without maintaining an expensive count.
   let showFiltered = $state(false);
-  let filteredCount = $state(0);
   let filterRules = $state([]); // Loaded lazily, only to name the rule that hid a message
 
   async function toggleFiltered() {
@@ -139,7 +140,7 @@
         console.warn('[App] Could not load filter rules for labels:', error);
       }
     }
-    await loadMessagesForPhone(selectedPhoneIccid);
+    await loadMessagesForPhone(selectedPhoneIccid, { resetSync: true });
   }
   let lastKnownTimestamp = $state(null); // Only flag messages newer than this as "新"
   let daemonRefreshing = $state(false);
@@ -208,8 +209,6 @@
   let anomalyOffline     = $derived(phoneNumbers.filter(p => p.status === 'offline').length);
   let anomalyTotal       = $derived(phoneNumbers.filter(p => isAnomalous(p.status)).length);
   let daemonMeta         = $derived(getDaemonStatusMeta(daemonStatus.status));
-  let hasMoreMessagePages = $derived(hasMoreMessages(messageTotal, messages.length));
-
   // Permission gate. `user.permissions` comes from /api/auth/me, which derives it from
   // the caller's Auth0 roles. This is UX only — the server enforces the same rules on
   // every endpoint, so hiding a control is a convenience, never a security boundary.
@@ -361,7 +360,9 @@
     if (user) handleHashChange();
   });
 
-  // Load data using HTTP API directly for better performance
+  // Load the bounded dashboard data. Message reads go through the IndexedDB-backed
+  // API helper so repeat visits use an ingestion-time cursor instead of re-reading
+  // the first page from D1.
   async function loadData() {
     // Only proceed if user is authenticated
     if (!user) {
@@ -370,30 +371,13 @@
     }
     
     try {
-      // Load data via HTTP API (authenticatedFetch handles 401→logout)
       const balanceRequest = currentView === 'balances'
         ? api.getBalanceChecks({ limit: 100 })
         : Promise.resolve([]);
       const [phonesResponse, messagesResponse, nextBalanceChecks] =
         await Promise.all([
-          auth.authenticatedFetch("/api/phones")
-            .then((r) => r.json())
-            .catch((err) => {
-              console.error('[App] Failed to fetch phones:', err);
-              return { success: false, data: [] };
-            }),
-          auth.authenticatedFetch(`/api/messages?limit=${MESSAGE_PAGE_SIZE}`)
-            .then(async (r) => {
-              if (!r.ok) {
-                console.error('[App] Messages API response not ok:', r.status, r.statusText);
-                return { success: false, data: [], error: `HTTP ${r.status}` };
-              }
-              return r.json();
-            })
-            .catch((err) => {
-              console.error('[App] Failed to fetch messages:', err);
-              return { success: false, data: [] };
-            }),
+          api.getPhones(),
+          api.getMessages({ limit: MESSAGE_PAGE_SIZE }),
           balanceRequest,
         ]);
 
@@ -425,7 +409,7 @@
 
       if (messagesResponse && messagesResponse.success && Array.isArray(messagesResponse.data)) {
         messages = mergeMessagePage([], messagesResponse.data, { replace: true });
-        messageTotal = messagesResponse.pagination?.total ?? messages.length;
+        hasMoreMessagePages = hasMoreMessages(messagesResponse.pagination);
         // Set high-water mark so polls only flag messages newer than what we loaded
         const newest = messages.reduce((max, m) => {
           const t = m.timestamp ? new Date(m.timestamp).getTime() : 0;
@@ -443,7 +427,7 @@
         }
 
         messages = [];
-        messageTotal = 0;
+        hasMoreMessagePages = false;
       }
 
       balanceChecks = Array.isArray(nextBalanceChecks) ? nextBalanceChecks : [];
@@ -457,7 +441,7 @@
       phoneNumbers = [];
       updateStatsFromPhones();
       messages = [];
-      messageTotal = 0;
+      hasMoreMessagePages = false;
       balanceChecks = [];
       stats = {
         onlineDevices: 0,
@@ -505,14 +489,14 @@
     // Switching cards makes an open message from the previous card irrelevant.
     messageDetail = null;
     messages = [];
-    messageTotal = 0;
+    hasMoreMessagePages = false;
     selectedPhoneIccid = phone?.iccid || null;
     handlePhoneSelection();
     showPhoneList = false;
   }
   
   // Load messages for a specific phone (race-condition safe)
-  async function loadMessagesForPhone(phoneIccid, { replace = true } = {}) {
+  async function loadMessagesForPhone(phoneIccid, { replace = true, resetSync = false } = {}) {
     if (!user) return;
 
     const requestId = ++messageRequestId;
@@ -521,22 +505,16 @@
       const response = await api.getMessages({
         ...(phoneIccid ? { phone_iccid: phoneIccid } : {}),
         limit: MESSAGE_PAGE_SIZE,
-        ...(showFiltered ? { include_filtered: 1 } : {})
+        ...(showFiltered ? { include_filtered: 1 } : {}),
+        ...(resetSync ? { reset_sync: 1 } : {}),
       });
 
       // Discard if user switched phones while we were loading
       if (requestId !== messageRequestId) return;
 
-      // Keep the badge count fresh even when the offline cache served the list.
-      if (response?.pagination?.filtered_count !== undefined) {
-        filteredCount = response.pagination.filtered_count;
-      }
-
       if (response && response.data) {
-        if (response.pagination?.total !== undefined) {
-          messageTotal = response.pagination.total;
-        } else if (replace) {
-          messageTotal = response.data.length;
+        if (replace || response.pagination?.has_more) {
+          hasMoreMessagePages = hasMoreMessages(response.pagination);
         }
         // Detect genuinely new messages: must have a timestamp newer than anything we've seen
         if (lastKnownTimestamp && messages.length > 0) {
@@ -617,7 +595,7 @@
       if (response?.data?.length) {
         messages = mergeMessagePage(messages, response.data);
       }
-      messageTotal = response?.pagination?.total ?? messageTotal;
+      hasMoreMessagePages = hasMoreMessages(response?.pagination);
     } catch (error) {
       console.error('[App] Failed to load older messages:', error);
     } finally {
@@ -689,6 +667,7 @@
   }
 
   async function checkDaemonStatus() {
+    lastDaemonPollAt = Date.now();
     try {
       const response = await fetch('/api/daemon/status');
       if (response.ok) {
@@ -741,14 +720,21 @@
   function startPolling() {
     if (pollInterval) return;
     pollInterval = setInterval(async () => {
-      if (!user || pollInFlight || !['dashboard', 'balances'].includes(currentView)) return;
+      if (
+        document.visibilityState !== 'visible'
+        || !user
+        || pollInFlight
+        || !['dashboard', 'balances'].includes(currentView)
+      ) return;
       pollInFlight = true;
       try {
         if (currentView === 'dashboard') {
           await loadMessagesForPhone(selectedPhoneIccid, { replace: false });
         }
-        await refreshBalanceChecksForView();
-        await checkDaemonStatus();
+        const now = Date.now();
+        if (now - lastDaemonPollAt >= DAEMON_POLL_INTERVAL_MS) {
+          await checkDaemonStatus();
+        }
       } catch (e) {
         // Silently ignore polling errors
       } finally {
@@ -1184,7 +1170,6 @@
                 {newMessageIds}
                 onClearPhone={() => selectPhone(null)}
                 {showFiltered}
-                {filteredCount}
                 {filterRules}
                 onToggleFiltered={toggleFiltered}
                 {balanceChecks}

@@ -35,11 +35,16 @@ export const controlHandler = {
     
     // Parse request body
     const body = await request.json();
-    const { modem_reports: reports, sync_mode = 'incremental', session_id = null } = body;
-    const timestamp = body.timestamp || new Date().toISOString();
-
-    if (!Array.isArray(reports)) {
-      return new Response(JSON.stringify({ error: 'modem_reports must be an array' }), {
+    const {
+      modem_reports: reports,
+      removed_equipment_ids: removedEquipmentIds,
+      sync_mode = 'incremental',
+      session_id = null,
+    } = body;
+    if (!Array.isArray(reports) || !Array.isArray(removedEquipmentIds)) {
+      return new Response(JSON.stringify({
+        error: 'modem_reports and removed_equipment_ids must be arrays',
+      }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' },
       });
@@ -59,6 +64,14 @@ export const controlHandler = {
         if (!report?.equipment_id) return false;
         return !(report.equipment_id.startsWith('MODEM_') && !report.manufacturer && !report.model);
       });
+      const removedIds = [...new Set(removedEquipmentIds)];
+      if (removedIds.some((id) => typeof id !== 'string' || !id)
+          || acceptedReports.some((report) => removedIds.includes(report.equipment_id))) {
+        return new Response(JSON.stringify({ error: 'Invalid or conflicting removed equipment IDs' }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
       const verificationStatus = sync_mode === 'full' ? 'verified' : null;
       const lastVerifiedSession = sync_mode === 'full' ? session_id : null;
 
@@ -104,11 +117,8 @@ export const controlHandler = {
               AND modems.verification_status IS NOT excluded.verification_status)
           OR (excluded.last_verified_session IS NOT NULL
               AND modems.last_verified_session IS NOT excluded.last_verified_session)
-          OR (
-            (modems.signal_percent IS NOT excluded.signal_percent
-             OR modems.rssi IS NOT excluded.rssi)
-            AND datetime(modems.updated_at) <= datetime('now', '-5 minutes')
-          )
+          OR modems.signal_percent IS NOT excluded.signal_percent
+          OR modems.rssi IS NOT excluded.rssi
       `).bind(
         report.equipment_id,
         report.manufacturer || null,
@@ -131,6 +141,36 @@ export const controlHandler = {
 
       if (statements.length > 0) await env.DB.batch(statements);
 
+      let explicitlyDisconnected = 0;
+      if (removedIds.length > 0) {
+        const placeholders = removedIds.map(() => '?').join(',');
+        const result = await env.DB.prepare(`
+          UPDATE modems
+          SET status = 'disconnected',
+              verification_status = 'absent',
+              detected_iccid = NULL,
+              detected_phone_number = NULL,
+              detected_operator = NULL,
+              signal_percent = NULL,
+              rssi = NULL,
+              usb_path = NULL,
+              updated_at = CURRENT_TIMESTAMP
+          WHERE equipment_id IN (${placeholders})
+            AND (
+              status IS NOT 'disconnected'
+              OR verification_status IS NOT 'absent'
+              OR detected_iccid IS NOT NULL
+              OR detected_phone_number IS NOT NULL
+              OR detected_operator IS NOT NULL
+              OR signal_percent IS NOT NULL
+              OR rssi IS NOT NULL
+              OR usb_path IS NOT NULL
+            )
+        `).bind(...removedIds).run();
+        explicitlyDisconnected = result.meta.changes;
+      }
+
+      let reconciledDisconnected = 0;
       if (sync_mode === 'full') {
         const presentEquipmentIds = JSON.stringify(acceptedReports.map((report) => report.equipment_id));
         const disconnectResult = await env.DB.prepare(`
@@ -159,28 +199,17 @@ export const controlHandler = {
             OR usb_path IS NOT NULL
           )
         `).bind(presentEquipmentIds).run();
-
-        await env.DB.prepare(`
-          INSERT INTO sync_history (
-            daemon_id, session_id, sync_mode, sync_timestamp,
-            modems_received, sims_received, modems_disconnected,
-            status, created_at
-          ) VALUES (
-            'orange-pi-main', ?, 'full', ?, ?, 0, ?, 'completed', CURRENT_TIMESTAMP
-          )
-        `).bind(
-          session_id,
-          timestamp,
-          acceptedReports.length,
-          disconnectResult.meta.changes,
-        ).run();
+        reconciledDisconnected = disconnectResult.meta.changes;
       }
 
       return new Response(JSON.stringify({
         success: true,
         sync_mode,
         session_id,
-        processed: { modem_reports: acceptedReports.length }
+        processed: {
+          modem_reports: acceptedReports.length,
+          modems_disconnected: explicitlyDisconnected + reconciledDisconnected,
+        }
       }), {
         headers: { 'Content-Type': 'application/json' }
       });

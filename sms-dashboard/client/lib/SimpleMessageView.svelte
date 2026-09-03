@@ -18,8 +18,6 @@
     onClearPhone = null,
     /** Whether spam/marketing messages are currently being shown. */
     showFiltered = false,
-    /** How many messages the filter is hiding, from pagination.filtered_count. */
-    filteredCount = 0,
     /** Called when the user flips the toggle; the parent refetches. */
     onToggleFiltered = null,
     /** Filter rules, used to name the rule that hid a message. */
@@ -140,12 +138,6 @@
     }
   }
 
-  // Count of messages that would appear if spam filter were lifted
-  // (only meaningful in 'all' mode; in 'code' mode verified messages are never filtered).
-  let hiddenSpamCount = $derived(
-    contentFilter === 'all' ? filteredCount : 0
-  );
-
   // Format a timestamp for the 接收卡 column: HH:MM:SS today, MM/DD HH:MM otherwise.
   function formatTime(ts) {
     if (!ts) return '';
@@ -240,15 +232,15 @@
           >全部短信</button>
         </div>
 
-        <!-- The spam control has no action in verification-code mode and no
-             value when the count is zero, so do not reserve mobile space for it. -->
-        {#if contentFilter === 'all' && (filteredCount > 0 || showFiltered)}
+        <!-- Exact hidden totals require a history scan. Keep the audit control
+             available without turning every inbox load into an aggregate query. -->
+        {#if contentFilter === 'all'}
           <div class="w-px h-[18px] bg-stone-200 mx-0.5 lg:mx-1"></div>
 
           <button
             onclick={onToggleFiltered}
             aria-pressed={showFiltered}
-            aria-label={!showFiltered ? `显示 ${filteredCount} 条垃圾短信` : '隐藏垃圾短信'}
+            aria-label={!showFiltered ? '显示垃圾短信' : '隐藏垃圾短信'}
             class="flex items-center gap-1.5 text-xs text-stone-600 hover:text-stone-900 transition-colors"
             title={!showFiltered ? '点击查看被规则隐藏的短信' : '点击隐藏垃圾短信'}
           >
@@ -263,8 +255,8 @@
                 </svg>
               {/if}
             </span>
-            <span class="lg:hidden">垃圾 <strong class="font-mono tabular-nums">{filteredCount}</strong></span>
-            <span class="hidden lg:inline">隐藏垃圾 <strong class="font-mono tabular-nums">{filteredCount}</strong></span>
+            <span class="lg:hidden">垃圾</span>
+            <span class="hidden lg:inline">隐藏垃圾</span>
           </button>
         {/if}
       </div>
@@ -459,16 +451,6 @@
         </div>
       {/if}
 
-      <!-- Pinned spam-reveal banner above the scroll area's bottom — shows
-           only in 'all' mode when there are hidden messages and they aren't shown yet -->
-      {#if contentFilter === 'all' && !showFiltered && filteredCount > 0}
-        <div class="sticky bottom-0 flex items-center justify-between
-          px-4 py-2.5 bg-stone-50 border-t border-stone-200 text-sm">
-          <span class="text-stone-500">另有 <strong class="text-stone-700 font-mono">{filteredCount}</strong> 条被规则隐藏</span>
-          <button onclick={onToggleFiltered}
-            class="text-action-text text-xs font-medium hover:underline">查看</button>
-        </div>
-      {/if}
     {/if}
 
   </div>

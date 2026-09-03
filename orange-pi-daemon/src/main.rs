@@ -13,7 +13,9 @@ use orange_pi_daemon_rust::logging;
 use orange_pi_daemon_rust::message_store::MessageStore;
 use orange_pi_daemon_rust::modem_manager::ModemManager;
 use orange_pi_daemon_rust::sms_sender::SmsSender;
-use orange_pi_daemon_rust::sync_manager::{SyncManager, SyncMode};
+use orange_pi_daemon_rust::sync_manager::{
+    device_delta, merge_device_reports, DeviceDelta, SyncManager, SyncMode,
+};
 use orange_pi_daemon_rust::types::*;
 use orange_pi_daemon_rust::worker_pool::{WorkerPool, WorkerPoolConfig};
 
@@ -37,7 +39,10 @@ async fn main() -> Result<()> {
 
     // Check for --help
     if args.iter().any(|a| a == "--help" || a == "-h") {
-        println!("SMS Daemon v8.0.0 - Direct AT Commands for 100+ modems");
+        println!(
+            "SMS Daemon v{} - Direct AT Commands for 100+ modems",
+            env!("CARGO_PKG_VERSION")
+        );
         println!();
         println!("USAGE:");
         println!("    {} [OPTIONS] [COMMAND]", args[0]);
@@ -98,7 +103,10 @@ async fn main() -> Result<()> {
     });
 
     let session_id = format!("rust-daemon-{}", uuid::Uuid::new_v4());
-    info!("🚀 SMS Daemon v8.0.0 starting (Direct AT Commands)");
+    info!(
+        "🚀 SMS Daemon v{} starting (Direct AT Commands)",
+        env!("CARGO_PKG_VERSION")
+    );
     info!("📡 Session ID: {}", session_id);
     info!("🌍 API URL: {}", api_url);
     info!("💾 Database: {}", db_path);
@@ -222,7 +230,7 @@ async fn main() -> Result<()> {
     let modem_ids: Vec<String> = valid_modems.keys().cloned().collect();
 
     // Live modem set, shared and mutable: the reader loop reads it each tick and the
-    // re-discovery task (Task 7) appends modems that appear or recover after startup.
+    // re-discovery task (Task 8) reconciles additions and physical removals.
     let modem_set: Arc<RwLock<Vec<String>>> = Arc::new(RwLock::new(modem_ids.clone()));
 
     // Notify systemd that we're ready
@@ -236,7 +244,8 @@ async fn main() -> Result<()> {
 
     // Shared buffer: Task 1 (modem reader) writes latest ModemReport results here,
     // Task 3 (device sync) reads from it. This avoids two pools fighting over serial ports.
-    let latest_devices: Arc<RwLock<Vec<ModemReport>>> = Arc::new(RwLock::new(Vec::new()));
+    let latest_devices: Arc<RwLock<HashMap<String, ModemReport>>> =
+        Arc::new(RwLock::new(HashMap::new()));
     let health_tracker = Arc::new(RwLock::new(HealthTracker::new(
         session_id.clone(),
         env!("CARGO_PKG_VERSION").to_string(),
@@ -256,7 +265,7 @@ async fn main() -> Result<()> {
         loop {
             let start = Instant::now();
 
-            // Snapshot the current live modem set (Task 7 may have grown it).
+            // Snapshot the current live modem set (Task 8 may have reconciled it).
             let current_ids = modem_reader_set.read().await.clone();
             let discovered_count = current_ids.len();
             reader_health
@@ -265,7 +274,7 @@ async fn main() -> Result<()> {
                 .record_attempt(HealthTask::ModemReader);
 
             // Read from all modems in parallel
-            match modem_reader_pool.process_modems(current_ids).await {
+            match modem_reader_pool.process_modems(current_ids.clone()).await {
                 Ok(results) => {
                     // Collect modem reports for the device sync task
                     let mut reports = Vec::new();
@@ -274,7 +283,7 @@ async fn main() -> Result<()> {
                     let mut deletion_failed_count = 0;
                     for result in results {
                         if let Some(report) = result.report.clone() {
-                            reports.push(report);
+                            reports.push((result.modem_id.clone(), report));
                         }
                         for msg_with_path in result.messages_with_paths {
                             // Save to SQLite immediately
@@ -327,7 +336,7 @@ async fn main() -> Result<()> {
                     let responsive_count = reports.len();
                     let sim_readable_count = reports
                         .iter()
-                        .filter(|report| report.detected_iccid.is_some())
+                        .filter(|(_, report)| report.detected_iccid.is_some())
                         .count();
                     {
                         let mut health = reader_health.write().await;
@@ -339,11 +348,10 @@ async fn main() -> Result<()> {
                         health.record_success(HealthTask::ModemReader);
                     }
 
-                    // Update shared buffer for device sync task
-                    if !reports.is_empty() {
-                        let mut devices = reader_devices.write().await;
-                        *devices = reports;
-                    }
+                    // Preserve the last successful report for transient AT failures.
+                    // Only USB discovery is allowed to remove a modem from this snapshot.
+                    let mut devices = reader_devices.write().await;
+                    *devices = merge_device_reports(&devices, &current_ids, reports);
                 }
                 Err(e) => {
                     warn!("Modem reader error: {}", e);
@@ -488,29 +496,32 @@ async fn main() -> Result<()> {
     // Reads latest device data from shared buffer (populated by Task 1) and syncs to API.
     // This avoids a second process_modems() call that would fight over serial ports.
     let sync_client = api_client.clone();
-    let sync_manager_arc = Arc::new(tokio::sync::Mutex::new(SyncManager::new(
-        session_id.clone(),
-        300,
-    )));
+    let sync_manager_arc = Arc::new(tokio::sync::Mutex::new(SyncManager::new()));
     let sync_devices = latest_devices.clone();
+    let sync_modem_set = modem_set.clone();
     let sync_health = health_tracker.clone();
     let sync_session_id = session_id.clone();
 
     tokio::spawn(async move {
+        let mut last_synced_reports = Vec::new();
+
         loop {
             tokio::time::sleep(Duration::from_secs(30)).await;
 
             // Read latest modem reports from shared buffer (populated by Task 1)
             let all_reports = {
                 let devices = sync_devices.read().await;
-                devices.clone()
+                let mut reports: Vec<ModemReport> = devices.values().cloned().collect();
+                reports.sort_by(|left, right| left.equipment_id.cmp(&right.equipment_id));
+                reports
             };
+            let discovered_count = sync_modem_set.read().await.len();
 
             sync_health
                 .write()
                 .await
                 .record_attempt(HealthTask::DeviceSync);
-            if all_reports.is_empty() {
+            if all_reports.is_empty() && discovered_count > 0 {
                 sync_health
                     .write()
                     .await
@@ -526,18 +537,45 @@ async fn main() -> Result<()> {
             } else {
                 SyncMode::Incremental
             };
+            let delta = if sync_mode == SyncMode::Full {
+                DeviceDelta {
+                    reports: all_reports.clone(),
+                    removed_equipment_ids: Vec::new(),
+                }
+            } else {
+                device_delta(&last_synced_reports, &all_reports)
+            };
 
-            // Upload modem reports directly (no conversion needed)
+            if sync_mode == SyncMode::Incremental
+                && delta.reports.is_empty()
+                && delta.removed_equipment_ids.is_empty()
+            {
+                last_synced_reports = all_reports;
+                sync_manager.record_success(sync_mode);
+                sync_health
+                    .write()
+                    .await
+                    .record_success(HealthTask::DeviceSync);
+                continue;
+            }
+
             match sync_client
-                .upload_modem_reports(&all_reports, sync_mode, &sync_session_id)
+                .upload_modem_reports(
+                    &delta.reports,
+                    &delta.removed_equipment_ids,
+                    sync_mode,
+                    &sync_session_id,
+                )
                 .await
             {
                 Ok(_) => {
                     info!(
-                        "📊 Status sync: Updated {} devices (mode: {:?})",
-                        all_reports.len(),
+                        "📊 Status sync: {} changed, {} removed (mode: {:?})",
+                        delta.reports.len(),
+                        delta.removed_equipment_ids.len(),
                         sync_mode
                     );
+                    last_synced_reports = all_reports;
                     sync_manager.record_success(sync_mode);
                     sync_health
                         .write()
@@ -720,7 +758,7 @@ async fn main() -> Result<()> {
         }
     });
 
-    // TASK 7: INDEPENDENT HEALTH HEARTBEAT (every 30 seconds)
+    // TASK 7: INDEPENDENT HEALTH HEARTBEAT (every 60 seconds)
     // This is deliberately separate from outbound polling and device sync so one
     // healthy task cannot hide another stalled task.
     let heartbeat_client = api_client.clone();
@@ -728,7 +766,7 @@ async fn main() -> Result<()> {
     let heartbeat_store = message_store.clone();
 
     tokio::spawn(async move {
-        info!("💓 Independent health heartbeat started - reporting every 30 seconds");
+        info!("💓 Independent health heartbeat started - reporting every 60 seconds");
         loop {
             let queue_stats = heartbeat_store.get_queue_stats().unwrap_or_default();
             let snapshot = {
@@ -749,15 +787,13 @@ async fn main() -> Result<()> {
                     "Health heartbeat failed"
                 );
             }
-            tokio::time::sleep(Duration::from_secs(30)).await;
+            tokio::time::sleep(Duration::from_secs(60)).await;
         }
     });
 
     // TASK 8: DYNAMIC MODEM RE-DISCOVERY (every 60 seconds)
-    // Picks up modems that enumerate after startup and actively USB-resets wedged ones
-    // (present ttyUSB but silent on AT), merging any newly-found modems into the live
-    // set with no daemon restart. Cannot recover modems that never enumerate a ttyUSB
-    // (steady-state USB power/topology failures) — those need a hardware fix.
+    // Reconciles physical USB removal and picks up modems that enumerate after startup.
+    // Newly enumerated but silent devices receive one USB reset attempt.
     let rediscover_manager = modem_manager.clone();
     let rediscover_set = modem_set.clone();
 
@@ -766,24 +802,20 @@ async fn main() -> Result<()> {
         loop {
             tokio::time::sleep(Duration::from_secs(60)).await;
 
-            let known: std::collections::HashSet<String> =
-                rediscover_set.read().await.iter().cloned().collect();
-
-            match rediscover_manager.rediscover_and_merge(&known).await {
-                Ok(added) if !added.is_empty() => {
+            match rediscover_manager.reconcile_modems().await {
+                Ok(current) => {
                     let mut set = rediscover_set.write().await;
-                    for id in &added {
-                        if !set.contains(id) {
-                            set.push(id.clone());
-                        }
+                    if *set == current {
+                        debug!("🔎 Re-discovery: modem set unchanged");
+                    } else {
+                        info!(
+                            "🔎 Re-discovery: reconciled modem set from {} to {}",
+                            set.len(),
+                            current.len()
+                        );
+                        *set = current;
                     }
-                    info!(
-                        "🔎 Re-discovery: added {} new modem(s), now {} total",
-                        added.len(),
-                        set.len()
-                    );
                 }
-                Ok(_) => debug!("🔎 Re-discovery: no new modems"),
                 Err(e) => warn!("🔎 Re-discovery failed: {}", e),
             }
         }

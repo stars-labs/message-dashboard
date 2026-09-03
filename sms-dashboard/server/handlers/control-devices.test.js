@@ -69,6 +69,7 @@ function report(overrides = {}) {
 function body(syncMode = 'incremental', reports = [report()]) {
   return {
     modem_reports: reports,
+    removed_equipment_ids: [],
     sync_mode: syncMode,
     session_id: 'session-1',
     timestamp: '2026-09-02T00:00:00.000Z',
@@ -98,18 +99,6 @@ beforeEach(() => {
       last_verified_session TEXT,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
-    CREATE TABLE sync_history (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      daemon_id TEXT,
-      session_id TEXT,
-      sync_mode TEXT,
-      sync_timestamp TEXT,
-      modems_received INTEGER,
-      sims_received INTEGER,
-      modems_disconnected INTEGER,
-      status TEXT,
-      created_at TEXT
-    );
     CREATE TABLE modem_update_log (equipment_id TEXT NOT NULL);
     CREATE TRIGGER audit_modem_update AFTER UPDATE ON modems
     BEGIN
@@ -121,7 +110,7 @@ beforeEach(() => {
 afterEach(() => sqlite.close());
 
 describe('device synchronization write suppression', () => {
-  test('suppresses unchanged and rapid signal-only writes but persists meaningful changes', async () => {
+  test('suppresses unchanged reports and persists every delta selected by the daemon', async () => {
     const db = d1(sqlite);
 
     expect((await controlHandler.updateDevices(request(db, body()))).status).toBe(200);
@@ -131,19 +120,12 @@ describe('device synchronization write suppression', () => {
     expect((await controlHandler.updateDevices(request(db, body('incremental', [
       report({ signal_percent: 60 }),
     ])))).status).toBe(200);
-    expect(sqlite.query('SELECT COUNT(*) AS count FROM modem_update_log').get().count).toBe(0);
+    expect(sqlite.query('SELECT COUNT(*) AS count FROM modem_update_log').get().count).toBe(1);
 
     expect((await controlHandler.updateDevices(request(db, body('incremental', [
       report({ signal_percent: 60, status: 'connected' }),
     ])))).status).toBe(200);
-    expect(sqlite.query('SELECT COUNT(*) AS count FROM modem_update_log').get().count).toBe(1);
-
-    sqlite.query(`UPDATE modems SET updated_at = datetime('now', '-6 minutes')`).run();
-    sqlite.query('DELETE FROM modem_update_log').run();
-    expect((await controlHandler.updateDevices(request(db, body('incremental', [
-      report({ signal_percent: 55, status: 'connected' }),
-    ])))).status).toBe(200);
-    expect(sqlite.query('SELECT COUNT(*) AS count FROM modem_update_log').get().count).toBe(1);
+    expect(sqlite.query('SELECT COUNT(*) AS count FROM modem_update_log').get().count).toBe(2);
   });
 
   test('full sync updates present and missing modems once, then becomes write-free', async () => {
@@ -183,6 +165,59 @@ describe('device synchronization write suppression', () => {
       rssi: null,
       usb_path: null,
     });
+  });
+
+  test('an empty full snapshot disconnects every previously present modem', async () => {
+    const db = d1(sqlite);
+    sqlite.query(`
+      INSERT INTO modems (equipment_id, detected_iccid, signal_percent, rssi, usb_path, status)
+      VALUES
+        ('modem-a', 'iccid-a', 80, -70, '1-1', 'active'),
+        ('modem-b', 'iccid-b', 40, -90, '1-2', 'active')
+    `).run();
+
+    const response = await controlHandler.updateDevices(request(db, body('full', [])));
+
+    expect(response.status).toBe(200);
+    expect(sqlite.query(`
+      SELECT equipment_id, status, verification_status
+      FROM modems ORDER BY equipment_id
+    `).all()).toEqual([
+      { equipment_id: 'modem-a', status: 'disconnected', verification_status: 'absent' },
+      { equipment_id: 'modem-b', status: 'disconnected', verification_status: 'absent' },
+    ]);
+  });
+
+  test('marks explicitly removed modems disconnected during incremental sync', async () => {
+    const db = d1(sqlite);
+    sqlite.query(`
+      INSERT INTO modems (equipment_id, detected_iccid, signal_percent, rssi, usb_path, status)
+      VALUES ('modem-b', 'iccid-b', 40, -90, '1-2', 'active')
+    `).run();
+
+    const payload = body('incremental', []);
+    payload.removed_equipment_ids = ['modem-b'];
+    const response = await controlHandler.updateDevices(request(db, payload));
+
+    expect(response.status).toBe(200);
+    expect(sqlite.query(`
+      SELECT status, verification_status, detected_iccid, signal_percent, rssi, usb_path
+      FROM modems WHERE equipment_id = 'modem-b'
+    `).get()).toEqual({
+      status: 'disconnected',
+      verification_status: 'absent',
+      detected_iccid: null,
+      signal_percent: null,
+      rssi: null,
+      usb_path: null,
+    });
+  });
+
+  test('requires the explicit removal set in the device payload contract', async () => {
+    const payload = body();
+    delete payload.removed_equipment_ids;
+
+    expect((await controlHandler.updateDevices(request(d1(sqlite), payload))).status).toBe(400);
   });
 
   test('rejects the removed legacy device payload without touching D1', async () => {

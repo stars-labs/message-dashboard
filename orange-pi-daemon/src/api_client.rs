@@ -4,7 +4,7 @@ use crate::types::*;
 use anyhow::{Context, Result};
 use reqwest::Client;
 use serde_json::json;
-use tracing::{info, warn};
+use tracing::info;
 
 #[derive(Clone)]
 pub struct ApiClient {
@@ -45,76 +45,18 @@ impl ApiClient {
         Ok(())
     }
 
-    /// Upload devices using normalized schema with sync mode
-    /// This is the preferred method for device synchronization
-    pub async fn upload_devices(
-        &self,
-        modems: &[Modem],
-        sims: &[Sim],
-        sync_mode: SyncMode,
-        session_id: &str,
-    ) -> Result<()> {
-        if modems.is_empty() && sims.is_empty() {
-            warn!("⚠️  Attempted to upload empty device list");
-            return Ok(());
-        }
-
-        let url = format!("{}/api/control/devices", self.config.api_url);
-        let timestamp = chrono::Utc::now()
-            .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-            .to_string();
-
-        info!(
-            "📤 Uploading {} modems and {} SIMs (mode: {}, session: {})",
-            modems.len(),
-            sims.len(),
-            sync_mode.as_str(),
-            session_id
-        );
-
-        let payload = json!({
-            "sync_mode": sync_mode.as_str(),
-            "session_id": session_id,
-            "timestamp": timestamp,
-            "modems": modems,
-            "sims": sims,
-        });
-
-        let response = self
-            .client
-            .post(&url)
-            .header("x-api-key", &self.config.api_key)
-            .header("x-daemon-version", "rust-2.0.0-sync")
-            .json(&payload)
-            .send()
-            .await
-            .context("Failed to send device data")?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response
-                .text()
-                .await
-                .unwrap_or_else(|_| String::from("(no body)"));
-            anyhow::bail!("API returned error: {} - {}", status, body);
-        }
-
-        info!(
-            "✅ Successfully uploaded devices (mode: {})",
-            sync_mode.as_str()
-        );
-        Ok(())
-    }
-
-    /// Upload modem reports using the new single-struct format (migration 033+)
+    /// Upload changed modem reports and explicit removals.
     pub async fn upload_modem_reports(
         &self,
         reports: &[ModemReport],
+        removed_equipment_ids: &[String],
         sync_mode: SyncMode,
         session_id: &str,
     ) -> Result<()> {
-        if reports.is_empty() {
-            warn!("⚠️  Attempted to upload empty modem_reports list");
+        if sync_mode == SyncMode::Incremental
+            && reports.is_empty()
+            && removed_equipment_ids.is_empty()
+        {
             return Ok(());
         }
 
@@ -124,8 +66,9 @@ impl ApiClient {
             .to_string();
 
         info!(
-            "📤 Uploading {} modem_reports (mode: {}, session: {})",
+            "📤 Uploading {} changed modem reports and {} removals (mode: {}, session: {})",
             reports.len(),
+            removed_equipment_ids.len(),
             sync_mode.as_str(),
             session_id
         );
@@ -135,6 +78,7 @@ impl ApiClient {
             "session_id": session_id,
             "timestamp": timestamp,
             "modem_reports": reports,
+            "removed_equipment_ids": removed_equipment_ids,
         });
 
         let response = self

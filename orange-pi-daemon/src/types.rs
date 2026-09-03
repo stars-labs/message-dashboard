@@ -116,7 +116,7 @@ pub struct Phone {
 
 /// Flat modem report for the new single-struct API (migration 033+)
 /// One struct per modem, sent as `{ modem_reports: [...] }` to the server
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModemReport {
     pub equipment_id: String,
     pub manufacturer: Option<String>,

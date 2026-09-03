@@ -72,6 +72,17 @@ describe('SimpleMessageView message direction', () => {
 });
 
 describe('SimpleMessageView render budget', () => {
+  test('offers filtered-message auditing without an exact history count', async () => {
+    globalThis.fetch = async () => Response.json({ keywords: [] });
+    let toggles = 0;
+    const view = render(SimpleMessageView, {
+      props: { onToggleFiltered: () => { toggles += 1; } },
+    });
+
+    await fireEvent.click(view.getByRole('button', { name: '显示垃圾短信' }));
+    expect(toggles).toBe(1);
+  });
+
   test('creates only the first 60 message rows, then reveals the next batch', async () => {
     globalThis.fetch = async () => Response.json({ keywords: [] });
     const messages = Array.from({ length: 150 }, (_, index) => ({

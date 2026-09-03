@@ -77,6 +77,26 @@ describe('mobile detail navigation', () => {
     expect(balancePolling).not.toContain('limit: 500');
   });
 
+  test('uses cached incremental loading and only polls a visible dashboard once per minute', () => {
+    const source = readFileSync(new URL('./App.svelte', import.meta.url), 'utf8');
+    const loadData = source.slice(
+      source.indexOf('async function loadData()'),
+      source.indexOf('onMount(async () =>'),
+    );
+    const polling = source.slice(
+      source.indexOf('function startPolling()'),
+      source.indexOf('function stopPolling()'),
+    );
+
+    expect(source).toContain('const POLL_INTERVAL_MS = 60000');
+    expect(source).toContain('const DAEMON_POLL_INTERVAL_MS = 300000');
+    expect(loadData).toContain('api.getMessages({ limit: MESSAGE_PAGE_SIZE })');
+    expect(loadData).not.toContain('authenticatedFetch(`/api/messages');
+    expect(polling).toContain("document.visibilityState !== 'visible'");
+    expect(polling).toContain('now - lastDaemonPollAt >= DAEMON_POLL_INTERVAL_MS');
+    expect(polling).not.toContain('refreshBalanceChecksForView');
+  });
+
   test('bottom navigation closes an open message detail before changing views', async () => {
     auth.baseUrl = '';
     globalThis.fetch = async (url) => responseFor(url);

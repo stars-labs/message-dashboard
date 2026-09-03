@@ -1,5 +1,5 @@
-use crate::types::{Modem, Sim};
-use std::time::{Duration, Instant};
+use crate::types::ModemReport;
+use std::collections::{HashMap, HashSet};
 use tracing::{info, warn};
 
 /// Sync mode for state reconciliation
@@ -9,6 +9,92 @@ pub enum SyncMode {
     Full,
     /// Incremental update - only send changed data
     Incremental,
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct DeviceDelta {
+    pub reports: Vec<ModemReport>,
+    pub removed_equipment_ids: Vec<String>,
+}
+
+/// Merge successful reads into the last known report snapshot while using USB
+/// discovery, not AT-command success, as the authority for physical removal.
+pub fn merge_device_reports<I>(
+    previous: &HashMap<String, ModemReport>,
+    discovered_modem_ids: &[String],
+    successful_reports: I,
+) -> HashMap<String, ModemReport>
+where
+    I: IntoIterator<Item = (String, ModemReport)>,
+{
+    let discovered: HashSet<&str> = discovered_modem_ids.iter().map(String::as_str).collect();
+    let mut merged: HashMap<String, ModemReport> = previous
+        .iter()
+        .filter(|(modem_id, _)| discovered.contains(modem_id.as_str()))
+        .map(|(modem_id, report)| (modem_id.clone(), report.clone()))
+        .collect();
+    merged.extend(successful_reports);
+    merged
+}
+
+fn signal_band(signal_percent: Option<i32>) -> u8 {
+    match signal_percent.unwrap_or(0) {
+        75.. => 4,
+        50..=74 => 3,
+        25..=49 => 2,
+        1..=24 => 1,
+        _ => 0,
+    }
+}
+
+fn device_state_changed(previous: &ModemReport, current: &ModemReport) -> bool {
+    previous.manufacturer != current.manufacturer
+        || previous.model != current.model
+        || previous.firmware_revision != current.firmware_revision
+        || previous.hardware_revision != current.hardware_revision
+        || previous.status != current.status
+        || previous.detected_iccid != current.detected_iccid
+        || previous.detected_phone_number != current.detected_phone_number
+        || previous.detected_operator != current.detected_operator
+        || previous.modem_index != current.modem_index
+        || previous.usb_port != current.usb_port
+        || previous.usb_path != current.usb_path
+        || signal_band(previous.signal_percent) != signal_band(current.signal_percent)
+}
+
+/// Return only reports whose durable dashboard state changed, plus explicit removals.
+/// Raw signal and RSSI noise inside the same UI signal band is intentionally ignored.
+pub fn device_delta(previous: &[ModemReport], current: &[ModemReport]) -> DeviceDelta {
+    let previous_by_id: HashMap<&str, &ModemReport> = previous
+        .iter()
+        .map(|report| (report.equipment_id.as_str(), report))
+        .collect();
+    let current_ids: HashSet<&str> = current
+        .iter()
+        .map(|report| report.equipment_id.as_str())
+        .collect();
+
+    let reports = current
+        .iter()
+        .filter(|report| {
+            previous_by_id
+                .get(report.equipment_id.as_str())
+                .is_none_or(|previous| device_state_changed(previous, report))
+        })
+        .cloned()
+        .collect();
+
+    let mut removed_equipment_ids: Vec<String> = previous
+        .iter()
+        .filter(|report| !current_ids.contains(report.equipment_id.as_str()))
+        .map(|report| report.equipment_id.clone())
+        .collect();
+    removed_equipment_ids.sort();
+
+    DeviceDelta {
+        reports,
+        removed_equipment_ids,
+    }
 }
 
 impl SyncMode {
@@ -23,58 +109,29 @@ impl SyncMode {
 /// Manages synchronization state between daemon and server
 /// Implements full/incremental sync pattern for efficient updates
 pub struct SyncManager {
-    session_id: String,
-    last_full_sync: Option<Instant>,
-    last_sync: Option<Instant>,
+    full_sync_completed: bool,
     consecutive_failures: u32,
-    full_sync_interval: Duration,
-    min_sync_interval: Duration,
 }
 
 impl SyncManager {
-    /// Create a new sync manager with a unique session ID
-    ///
-    /// # Arguments
-    /// * `session_id` - Unique session ID for this daemon instance
-    /// * `full_sync_interval_secs` - How often to do full syncs (default: 300s = 5 minutes)
-    pub fn new(session_id: String, full_sync_interval_secs: u64) -> Self {
-        info!(
-            "🔑 Sync manager initialized with session ID: {}",
-            session_id
-        );
+    pub fn new() -> Self {
+        info!("🔄 Device sync manager initialized");
 
         Self {
-            session_id,
-            last_full_sync: None,
-            last_sync: None,
+            full_sync_completed: false,
             consecutive_failures: 0,
-            full_sync_interval: Duration::from_secs(full_sync_interval_secs),
-            min_sync_interval: Duration::from_secs(10), // Minimum 10s between syncs
         }
-    }
-
-    /// Get the session ID for this daemon instance
-    pub fn session_id(&self) -> &str {
-        &self.session_id
     }
 
     /// Check if a full sync is needed
     ///
     /// Full sync is needed when:
     /// 1. Never done before
-    /// 2. Interval since last full sync exceeded
-    /// 3. Multiple consecutive failures (recovery)
+    /// 2. Multiple consecutive failures require reconciliation after recovery
     pub fn needs_full_sync(&self) -> bool {
         // Never synced before
-        if self.last_full_sync.is_none() {
+        if !self.full_sync_completed {
             return true;
-        }
-
-        // Check interval
-        if let Some(last) = self.last_full_sync {
-            if last.elapsed() >= self.full_sync_interval {
-                return true;
-            }
         }
 
         // Recovery mode after failures
@@ -98,21 +155,12 @@ impl SyncManager {
         }
     }
 
-    /// Check if enough time has passed since last sync
-    pub fn can_sync_now(&self) -> bool {
-        match self.last_sync {
-            None => true,
-            Some(last) => last.elapsed() >= self.min_sync_interval,
-        }
-    }
-
     /// Record a successful sync
     pub fn record_success(&mut self, sync_mode: SyncMode) {
-        self.last_sync = Some(Instant::now());
         self.consecutive_failures = 0;
 
         if sync_mode == SyncMode::Full {
-            self.last_full_sync = Some(Instant::now());
+            self.full_sync_completed = true;
             info!("✅ Full sync completed successfully");
         } else {
             info!("✅ Incremental sync completed successfully");
@@ -137,98 +185,42 @@ impl SyncManager {
             );
         }
     }
-
-    /// Validate sync data before sending
-    ///
-    /// Ensures data integrity to prevent server-side errors
-    pub fn validate_sync_data(&self, modems: &[Modem], sims: &[Sim]) -> Result<(), String> {
-        // Check for duplicate equipment IDs
-        let mut seen_equipment_ids = std::collections::HashSet::new();
-        for modem in modems {
-            if !seen_equipment_ids.insert(&modem.equipment_id) {
-                return Err(format!(
-                    "Duplicate equipment_id found: {}",
-                    modem.equipment_id
-                ));
-            }
-        }
-
-        // Check for duplicate ICCIDs
-        let mut seen_iccids = std::collections::HashSet::new();
-        for sim in sims {
-            if !seen_iccids.insert(&sim.iccid) {
-                return Err(format!("Duplicate ICCID found: {}", sim.iccid));
-            }
-        }
-
-        // Validate equipment IDs are not empty
-        for modem in modems {
-            if modem.equipment_id.is_empty() {
-                return Err("Modem with empty equipment_id found".to_string());
-            }
-        }
-
-        // Validate ICCIDs are not empty
-        for sim in sims {
-            if sim.iccid.is_empty() {
-                return Err("SIM with empty ICCID found".to_string());
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Create a checkpoint string for logging/debugging
-    ///
-    /// Example: "session-abc123|modems=87|sims=87|2025-01-02T12:34:56Z"
-    pub fn create_checkpoint(&self, modems: &[Modem], sims: &[Sim]) -> String {
-        format!(
-            "{}|modems={}|sims={}|{}",
-            self.session_id,
-            modems.len(),
-            sims.len(),
-            chrono::Utc::now()
-                .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-                .to_string()
-        )
-    }
-
-    /// Get statistics about sync state
-    pub fn get_stats(&self) -> SyncStats {
-        SyncStats {
-            session_id: self.session_id.clone(),
-            last_full_sync: self.last_full_sync.map(|t| t.elapsed()),
-            last_sync: self.last_sync.map(|t| t.elapsed()),
-            consecutive_failures: self.consecutive_failures,
-            needs_full_sync: self.needs_full_sync(),
-        }
-    }
-}
-
-/// Statistics about sync manager state
-#[derive(Debug)]
-pub struct SyncStats {
-    pub session_id: String,
-    pub last_full_sync: Option<Duration>,
-    pub last_sync: Option<Duration>,
-    pub consecutive_failures: u32,
-    pub needs_full_sync: bool,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
+
+    fn report(equipment_id: &str, signal_percent: i32) -> ModemReport {
+        ModemReport {
+            equipment_id: equipment_id.to_string(),
+            manufacturer: Some("Quectel".to_string()),
+            model: Some("EC20".to_string()),
+            firmware_revision: Some("1".to_string()),
+            hardware_revision: Some("1".to_string()),
+            status: "active".to_string(),
+            detected_iccid: Some(format!("iccid-{equipment_id}")),
+            detected_phone_number: None,
+            detected_operator: Some("carrier".to_string()),
+            signal_percent: Some(signal_percent),
+            rssi: Some(-70),
+            modem_index: Some(1),
+            usb_port: Some(1),
+            usb_path: Some(format!("1-{equipment_id}")),
+        }
+    }
 
     #[test]
     fn test_initial_state_needs_full_sync() {
-        let sm = SyncManager::new("test-session".to_string(), 300);
+        let sm = SyncManager::new();
         assert!(sm.needs_full_sync());
         assert_eq!(sm.get_sync_mode(), SyncMode::Full);
     }
 
     #[test]
     fn test_incremental_after_success() {
-        let mut sm = SyncManager::new("test-session".to_string(), 300);
+        let mut sm = SyncManager::new();
 
         sm.record_success(SyncMode::Full);
         assert!(!sm.needs_full_sync());
@@ -237,7 +229,7 @@ mod tests {
 
     #[test]
     fn test_failures_trigger_full_sync() {
-        let mut sm = SyncManager::new("test-session".to_string(), 300);
+        let mut sm = SyncManager::new();
 
         sm.record_success(SyncMode::Full);
         assert!(!sm.needs_full_sync());
@@ -251,5 +243,74 @@ mod tests {
         }
 
         assert!(sm.needs_full_sync());
+    }
+
+    #[test]
+    fn device_delta_ignores_signal_noise_within_the_same_display_band() {
+        let previous = vec![report("a", 80)];
+        let current = vec![report("a", 76)];
+
+        assert_eq!(device_delta(&previous, &current), DeviceDelta::default());
+    }
+
+    #[test]
+    fn device_delta_emits_signal_band_and_device_state_changes() {
+        let previous = vec![report("a", 80), report("b", 60)];
+        let mut signal_changed = report("a", 49);
+        signal_changed.rssi = Some(-92);
+        let mut state_changed = report("b", 60);
+        state_changed.status = "error".to_string();
+
+        let delta = device_delta(&previous, &[signal_changed.clone(), state_changed.clone()]);
+
+        assert_eq!(delta.reports, vec![signal_changed, state_changed]);
+        assert!(delta.removed_equipment_ids.is_empty());
+    }
+
+    #[test]
+    fn device_delta_emits_explicit_removals() {
+        let previous = vec![report("a", 80), report("b", 60)];
+
+        let delta = device_delta(&previous, &[report("a", 80)]);
+
+        assert!(delta.reports.is_empty());
+        assert_eq!(delta.removed_equipment_ids, vec!["b"]);
+    }
+
+    #[test]
+    fn report_snapshot_preserves_transient_read_failures() {
+        let previous = HashMap::from([
+            ("port-a".to_string(), report("a", 80)),
+            ("port-b".to_string(), report("b", 60)),
+        ]);
+        let discovered = vec!["port-a".to_string(), "port-b".to_string()];
+
+        let snapshot = merge_device_reports(
+            &previous,
+            &discovered,
+            vec![("port-a".to_string(), report("a", 49))],
+        );
+
+        assert_eq!(snapshot.len(), 2);
+        assert_eq!(snapshot["port-a"].signal_percent, Some(49));
+        assert_eq!(snapshot["port-b"].equipment_id, "b");
+    }
+
+    #[test]
+    fn report_snapshot_removes_only_modems_absent_from_discovery() {
+        let previous = HashMap::from([
+            ("port-a".to_string(), report("a", 80)),
+            ("port-b".to_string(), report("b", 60)),
+        ]);
+
+        let snapshot = merge_device_reports(
+            &previous,
+            &["port-a".to_string()],
+            Vec::<(String, ModemReport)>::new(),
+        );
+
+        assert_eq!(snapshot.len(), 1);
+        assert_eq!(snapshot["port-a"].equipment_id, "a");
+        assert!(!snapshot.contains_key("port-b"));
     }
 }

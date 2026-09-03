@@ -1,7 +1,39 @@
 import { nanoid } from 'nanoid';
 import { extractVerificationCode } from '../utils/verification';
-import { FILTER_STATUS, VISIBLE_FILTER_STATUSES } from '../utils/spam-filter.js';
+import { VISIBLE_FILTER_STATUSES } from '../utils/spam-filter.js';
 import { normalizeRecipient } from '../utils/recipient.js';
+
+const D1_MAX_BOUND_PARAMETERS = 100;
+
+async function enrichMessagePage(db, messages) {
+  const iccids = [...new Set(messages.map((message) => message.phone_iccid).filter(Boolean))];
+  const devicesByIccid = new Map();
+
+  for (let start = 0; start < iccids.length; start += D1_MAX_BOUND_PARAMETERS) {
+    const chunk = iccids.slice(start, start + D1_MAX_BOUND_PARAMETERS);
+    const placeholders = chunk.map(() => '?').join(', ');
+    const result = await db.prepare(`
+      SELECT iccid, number, carrier, sim_status, sim_index, country
+      FROM device_view
+      WHERE iccid IN (${placeholders})
+    `).bind(...chunk).all();
+    const devices = result.results || result;
+    for (const device of devices) devicesByIccid.set(device.iccid, device);
+  }
+
+  return messages.map((message) => {
+    const device = devicesByIccid.get(message.phone_iccid);
+    return {
+      ...message,
+      display_phone_number: device?.number || message.phone_number,
+      phone_carrier: device?.carrier ?? null,
+      phone_status: device?.sim_status ?? null,
+      phone_sim_index: device?.sim_index ?? null,
+      phone_country: device?.country ?? null,
+      mapped_number: null,
+    };
+  });
+}
 
 export const messagesHandler = {
   // List messages with pagination
@@ -18,6 +50,9 @@ export const messagesHandler = {
     const since = url.searchParams.get('since');
     const isIncremental = since !== null;
     const serverTime = new Date().toISOString();
+    const requestedUntil = url.searchParams.get('until');
+    const beforeCreatedAt = url.searchParams.get('before_created_at');
+    const beforeId = url.searchParams.get('before_id');
     // Spam/marketing messages are hidden unless explicitly asked for.
     const includeFiltered = url.searchParams.get('include_filtered') === '1';
 
@@ -31,15 +66,13 @@ export const messagesHandler = {
     });
 
     try {
-      // Built once and shared by both queries so they can never disagree about
-      // which rows they are talking about. Each query keeps its OWN bind array.
       // Carrier maintenance traffic is retained for its own audit workflow and
       // must never appear in either the normal inbox or the spam drawer.
-      const conditions = [`purpose = 'user'`];
+      const conditions = [`m.purpose = 'user'`];
       const scopeParams = [];
 
       if (phoneIccid) {
-        conditions.push(`phone_iccid = ?`);
+        conditions.push(`m.phone_iccid = ?`);
         scopeParams.push(phoneIccid);
       }
 
@@ -50,73 +83,61 @@ export const messagesHandler = {
         if (Number.isNaN(Date.parse(since))) {
           return Response.json({ success: false, error: 'Invalid since timestamp' }, { status: 400 });
         }
+        if (requestedOffset !== 0) {
+          return Response.json({ success: false, error: 'Incremental sync uses a keyset cursor, not offset' }, { status: 400 });
+        }
+        if (requestedUntil && Number.isNaN(Date.parse(requestedUntil))) {
+          return Response.json({ success: false, error: 'Invalid until timestamp' }, { status: 400 });
+        }
+        if ((beforeCreatedAt === null) !== (beforeId === null)
+            || (beforeCreatedAt && Number.isNaN(Date.parse(beforeCreatedAt)))) {
+          return Response.json({ success: false, error: 'Invalid incremental page cursor' }, { status: 400 });
+        }
+        const syncUntil = requestedUntil || serverTime;
         // created_at is the ingestion clock. Message timestamps come from modems and
         // may be delayed, so they cannot safely serve as an incremental cursor.
         // A small overlap protects the boundary; the client deduplicates by ID.
-        listConditions.push(`created_at >= datetime(?, '-2 seconds')`);
-        listParams.push(since);
+        listConditions.push(`m.created_at >= datetime(?, '-2 seconds')`);
+        listConditions.push(`m.created_at <= datetime(?)`);
+        listParams.push(since, syncUntil);
+        if (beforeCreatedAt && beforeId) {
+          listConditions.push(`(m.created_at < ? OR (m.created_at = ? AND m.id < ?))`);
+          listParams.push(beforeCreatedAt, beforeCreatedAt, beforeId);
+        }
       }
 
       if (!includeFiltered) {
         const placeholders = VISIBLE_FILTER_STATUSES.map(() => '?').join(', ');
-        listConditions.push(`filter_status IN (${placeholders})`);
+        listConditions.push(`m.filter_status IN (${placeholders})`);
         listParams.push(...VISIBLE_FILTER_STATUSES);
       }
 
-      const listWhere = listConditions.length ? `WHERE ${listConditions.map(c => `m.${c}`).join(' AND ')}` : '';
-      const countWhere = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-
+      const listWhere = listConditions.length ? `WHERE ${listConditions.join(' AND ')}` : '';
       const orderBy = isIncremental
         ? 'm.created_at DESC, m.id DESC'
         : 'm.timestamp DESC, m.id DESC';
       const query = `
-        SELECT
-          m.*,
-          COALESCE(dv.number, m.phone_number) as display_phone_number,
-          dv.carrier as phone_carrier,
-          dv.sim_status as phone_status,
-          dv.sim_index as phone_sim_index,
-          dv.country as phone_country,
-          NULL as mapped_number
+        SELECT m.*
         FROM messages m
-        LEFT JOIN device_view dv ON m.phone_iccid = dv.iccid
         ${listWhere}
         ORDER BY ${orderBy}
         LIMIT ? OFFSET ?
       `;
-      listParams.push(limit, offset);
+      // Fetch one extra row to answer "is there another page?" without an
+      // unbounded COUNT/SUM over message history.
+      listParams.push(limit + 1, offset);
 
-      // One aggregate gives both counts, so the "已过滤 N 条" badge costs no extra
-      // round trip. FILTER_STATUS.FILTERED is a module constant, not user input.
-      const countQuery = `
-        SELECT
-          COALESCE(SUM(CASE WHEN filter_status =  '${FILTER_STATUS.FILTERED}' THEN 1 ELSE 0 END), 0) AS filtered,
-          COALESCE(SUM(CASE WHEN filter_status <> '${FILTER_STATUS.FILTERED}' THEN 1 ELSE 0 END), 0) AS visible
-        FROM messages
-        ${countWhere}
-      `;
-
-      let messagesResult;
-      let count = null;
-      if (isIncremental) {
-        messagesResult = await env.DB.prepare(query).bind(...listParams).all();
-      } else {
-        [messagesResult, count] = await Promise.all([
-          env.DB.prepare(query).bind(...listParams).all(),
-          env.DB.prepare(countQuery).bind(...scopeParams).first(),
-        ]);
-      }
-
-      const messages = messagesResult.results || messagesResult;
-      const total = count
-        ? (includeFiltered ? count.visible + count.filtered : count.visible)
-        : null;
+      const messagesResult = await env.DB.prepare(query).bind(...listParams).all();
+      const rawMessages = messagesResult.results || messagesResult;
+      const hasMore = rawMessages.length > limit;
+      const pageRows = rawMessages.slice(0, limit);
+      const messages = await enrichMessagePage(env.DB, pageRows);
+      const lastPageRow = pageRows.at(-1);
 
       console.log('[Messages Handler] Query results:', {
         phoneIccid,
         count: messages.length,
-        totalCount: total,
-        filteredCount: count?.filtered,
+        hasMore,
       });
       
       // DEBUG: Verify all messages have the correct ICCID when filtered
@@ -140,18 +161,19 @@ export const messagesHandler = {
         include_filtered: includeFiltered,
         limit,
         offset,
+        has_more: hasMore,
+        next_offset: !isIncremental && hasMore ? offset + limit : null,
+        next_cursor: isIncremental && hasMore && lastPageRow
+          ? { created_at: lastPageRow.created_at, id: lastPageRow.id }
+          : null,
       };
-      if (count) {
-        pagination.total = total;
-        pagination.filtered_count = count.filtered;
-      }
 
       return new Response(JSON.stringify({
         success: true,
         data: messages,
         pagination,
         sync: {
-          server_time: serverTime,
+          server_time: isIncremental ? (requestedUntil || serverTime) : serverTime,
           is_incremental: isIncremental,
         },
       }), {

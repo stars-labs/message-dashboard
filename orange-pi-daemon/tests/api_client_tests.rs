@@ -1,7 +1,7 @@
 // Integration tests for ApiClient - HTTP communication layer
 use orange_pi_daemon_rust::api_client::ApiClient;
 use orange_pi_daemon_rust::sync_manager::SyncMode;
-use orange_pi_daemon_rust::types::{Config, Message, Modem, Sim};
+use orange_pi_daemon_rust::types::{Config, Message, Modem, ModemReport, Sim};
 
 // Helper function to create test config
 fn create_test_config() -> Config {
@@ -85,58 +85,29 @@ fn test_api_client_clone() {
     assert_eq!(client.config.api_key, cloned.config.api_key);
 }
 
-// ============================================================================
-// Upload Devices Tests
-// ============================================================================
-
 #[tokio::test]
-async fn test_upload_devices_empty() {
-    let config = create_test_config();
-    let client = ApiClient::new(config);
+async fn test_empty_incremental_device_delta_is_a_noop() {
+    let client = ApiClient::new(create_test_config());
+    let reports: Vec<ModemReport> = Vec::new();
+    let removed: Vec<String> = Vec::new();
 
-    let modems: Vec<Modem> = vec![];
-    let sims: Vec<Sim> = vec![];
-
-    // Empty upload should succeed immediately (early return)
     let result = client
-        .upload_devices(&modems, &sims, SyncMode::Full, "test_session")
+        .upload_modem_reports(&reports, &removed, SyncMode::Incremental, "session")
         .await;
 
-    // Should succeed (but not actually make HTTP request)
     assert!(result.is_ok());
 }
 
 #[tokio::test]
-async fn test_upload_devices_signature() {
-    let config = create_test_config();
-    let client = ApiClient::new(config);
+async fn test_empty_full_device_snapshot_reaches_the_reconciliation_endpoint() {
+    let client = ApiClient::new(create_test_config());
+    let reports: Vec<ModemReport> = Vec::new();
+    let removed: Vec<String> = Vec::new();
 
-    let modems = vec![create_test_modem("123456789012345")];
-    let sims = vec![create_test_sim("89860121750097854321")];
-
-    // Will fail without real API server, but tests signature
     let result = client
-        .upload_devices(&modems, &sims, SyncMode::Full, "test_session")
+        .upload_modem_reports(&reports, &removed, SyncMode::Full, "session")
         .await;
 
-    // Expected to error (no real server)
-    assert!(result.is_err());
-}
-
-#[tokio::test]
-async fn test_upload_devices_incremental_mode() {
-    let config = create_test_config();
-    let client = ApiClient::new(config);
-
-    let modems = vec![create_test_modem("123456789012345")];
-    let sims = vec![create_test_sim("89860121750097854321")];
-
-    // Test with incremental mode
-    let result = client
-        .upload_devices(&modems, &sims, SyncMode::Incremental, "session_123")
-        .await;
-
-    // Expected to error (no real server)
     assert!(result.is_err());
 }
 
@@ -287,60 +258,6 @@ fn test_message_with_unicode() {
     let msg = create_test_message("iccid_001", "你好世界 Hello 🌍");
     assert!(msg.content.contains("你好"));
     assert!(msg.content.contains("🌍"));
-}
-
-#[tokio::test]
-async fn test_upload_devices_only_modems() {
-    let config = create_test_config();
-    let client = ApiClient::new(config);
-
-    let modems = vec![create_test_modem("123456")];
-    let sims: Vec<Sim> = vec![]; // No SIMs
-
-    let result = client
-        .upload_devices(&modems, &sims, SyncMode::Full, "test")
-        .await;
-
-    // Should attempt upload (even with only modems)
-    assert!(result.is_err());
-}
-
-#[tokio::test]
-async fn test_upload_devices_only_sims() {
-    let config = create_test_config();
-    let client = ApiClient::new(config);
-
-    let modems: Vec<Modem> = vec![]; // No modems
-    let sims = vec![create_test_sim("89860121750097854321")];
-
-    let result = client
-        .upload_devices(&modems, &sims, SyncMode::Full, "test")
-        .await;
-
-    // Should attempt upload (even with only SIMs)
-    assert!(result.is_err());
-}
-
-#[tokio::test]
-async fn test_upload_devices_large_batch() {
-    let config = create_test_config();
-    let client = ApiClient::new(config);
-
-    // Create 100 modems and 100 SIMs
-    let mut modems = Vec::new();
-    let mut sims = Vec::new();
-
-    for i in 0..100 {
-        modems.push(create_test_modem(&format!("modem_{:03}", i)));
-        sims.push(create_test_sim(&format!("iccid_{:03}", i)));
-    }
-
-    let result = client
-        .upload_devices(&modems, &sims, SyncMode::Full, "test_large")
-        .await;
-
-    // Should handle large batch (will error without real API)
-    assert!(result.is_err());
 }
 
 // ============================================================================

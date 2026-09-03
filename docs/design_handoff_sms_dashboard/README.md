@@ -304,7 +304,7 @@ let mappingPanel = $state(null);        // { mode: 'create'|'edit', card } —�
 数据需求：
 - 消息列表需要 `parsed_code`（服务端解析的验证码）、`sender`（原始发送方，不做平台映射）、`receiving_card_index`
 - 卡列表需要 `sim_index`（卡号）、`iccid`、`carrier`、`signal`、`status`（统一后的五种）、`today_sent_count`（发送卡选择器排序用）
-- `filtered_count`（被规则隐藏的条数）随消息列表返回
+- 垃圾短信审计入口始终可用，但不显示精确总数，避免每次加载扫描完整短信历史
 
 ## Design Tokens
 

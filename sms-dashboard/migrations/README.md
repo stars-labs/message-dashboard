@@ -177,6 +177,14 @@ device_view (
 - Routes Auth0 device runners only to jobs created by the same Auth0 subject
 - Reserves a `NULL` owner for legacy API-key control jobs
 
+### 073_drop_sync_history.sql
+- Removes the write-only `sync_history` table and its indexes
+- Device removals are carried explicitly by incremental sync; full reconciliation runs only at daemon startup or recovery
+
+### 074_optimize_message_inbox_reads.sql
+- Adds global and per-card ingestion-cursor indexes for dashboard polling
+- Keeps each incremental read proportional to newly arrived messages instead of total history
+
 ## Device Status Mapping
 
 ### Raw Values (written by Rust daemon)

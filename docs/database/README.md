@@ -16,13 +16,10 @@ USB Modems → AT Commands                 /api/control/* (API key)           /a
 
 | Table | Written by | Mechanism |
 |-------|-----------|-----------|
-| `modems` | Daemon | `POST /api/control/devices` — upserts IMEI, status every 30s |
-| `modem_state` | Daemon | Same endpoint — upserts signal strength, connection status |
-| `sims` (core fields) | Daemon | Same endpoint — upserts iccid, operator_name, carrier |
-| `sims` (phone_number) | Human | Via `/api/iccid-mappings` frontend UI, or AT+CNUM if SIM stores it |
+| `modems` | Daemon | `POST /api/control/devices` — changed hardware state and USB-confirmed removals only |
+| `sims` | Human | Via `/api/iccid-mappings`; the daemon never writes inventory |
 | `messages` | Daemon | `POST /api/control/messages` — batch uploads SMS from modems |
-| `daemon_health` | Daemon | `POST /api/control/heartbeat` — every 30s |
-| `sync_history` | Daemon | Written during full/incremental sync in `/api/control/devices` |
+| `daemon_health` | Daemon | `POST /api/control/heartbeat` — one health snapshot every 60s |
 | `modem_sim_history` | DB trigger | `sim_swap_detection` trigger fires automatically on SIM reassignment |
 | `keyword_tags` | Human | Frontend: configure keyword matching rules |
 | `message_tags` | Server (auto) | Auto-tagged when messages arrive, matched against `keyword_tags` |
@@ -40,13 +37,10 @@ USB Modems → AT Commands                 /api/control/* (API key)           /a
 
 ```
 modems (98)
-  ├── sims (98)               FK: current_modem_id → modems.equipment_id
-  │     └── messages (8.4k)   FK: phone_iccid → sims.iccid (implicit)
-  ├── modem_state (97)        FK: modem_id → modems.equipment_id (1:1)
-  └── modem_sim_history (549) FK: modem_id, sim_iccid (SIM swap log)
+  └── sims (98)               Assigned by sims.imei → modems.equipment_id
+        └── messages (8.4k)   phone_iccid → sims.iccid (implicit)
 
-daemon_health (1)             Heartbeat + sync tracking
-sync_history (11.4k)          Full/incremental sync log
+daemon_health (1)             Latest process and task health snapshot
 
 keyword_tags (10)             Keyword → tag/color config
   └── message_tags            FK: keyword_tag_id, message_id
@@ -156,7 +150,7 @@ CREATE TABLE messages (
 ```
 
 ### daemon_health
-Single row, updated every 30s by daemon heartbeat.
+Single row, updated every 60s by daemon heartbeat.
 
 ```sql
 CREATE TABLE daemon_health (
@@ -200,9 +194,6 @@ Keyword-based message tagging system. `keyword_tags` defines rules (keyword, tag
 
 ### modem_sim_history
 SIM swap log — automatically populated by the `sim_swap_detection` trigger on the `sims` table.
-
-### sync_history
-Logs every daemon sync operation with counts of modems/SIMs received, verified, disconnected, and duration.
 
 ## Other Tables
 

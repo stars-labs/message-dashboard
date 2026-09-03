@@ -1,4 +1,4 @@
-# System Architecture (v8.0.0)
+# System Architecture (v8.0.1)
 
 ## Executive Summary
 
@@ -16,7 +16,7 @@ The SMS Dashboard is a distributed system designed for high-performance SMS mana
 │  │                 │    │                      │    │                 │   │
 │  │ ┌─────────────┐ │    │ ┌──────────────────┐ │    │ ┌─────────────┐ │   │
 │  │ │Rust Daemon │ │───▶│ │ SMS API Handlers │ │◀───│ │ Svelte App  │ │   │
-│  │ │ v8.0.0      │ │API │ │ Auth0 + RBAC     │ │HTTP│ │ Manual      │ │   │
+│  │ │ v8.0.1      │ │API │ │ Auth0 + RBAC     │ │HTTP│ │ Manual      │ │   │
 │  │ │             │ │Key │ └──────────────────┘ │Auth│ │ Refresh     │ │   │
 │  │ └─────┬───────┘ │    │          │           │    │ └─────────────┘ │   │
 │  │       │         │    │ ┌────────▼─────────┐ │    │                 │   │
@@ -43,7 +43,7 @@ The SMS Dashboard is a distributed system designed for high-performance SMS mana
 - **Operating System**: NixOS with declarative configuration
 - **Memory Requirements**: 8GB+ RAM for high modem counts
 
-### 2. Rust SMS Daemon (v8.0.0)
+### 2. Rust SMS Daemon (v8.0.1)
 
 **Architecture**: Async Tokio-based daemon with direct AT command interface
 
@@ -300,7 +300,7 @@ Event Trigger → Health Update → Frontend Poll
 
 ## Performance Characteristics
 
-### Daemon Performance (v8.0.0)
+### Daemon Performance (v8.0.1)
 - **AT Command Latency**: 1-5ms per query (direct serial)
 - **Concurrent Modems**: 100+ simultaneously processed
 - **Worker Pool**: 6 concurrent readers, Tokio 4-thread runtime (ARM optimized)
