@@ -31,6 +31,153 @@ caused it. Writes have a separate quota; the dashboard showed that quota was
 also exceeded (124.58k / 100k), although the error blocking this request was
 specifically the row-read quota.
 
+**Cloudflare Query Insights evidence.** A read-only Query Insights capture on
+2026-09-03 at approximately 10:22 Singapore time grouped the rolling three-hour
+window by normalized SQL and sorted it by total rows read. The returned query
+groups totaled 1,786,969 rows read, matching the dashboard's rounded 1.78M
+observation. The five dominant old-version operations were:
+
+| Operation | Runs | Average rows read | Total rows read | Share |
+|---|---:|---:|---:|---:|
+| Dashboard incremental message poll | 83 | 15,573 | 1,292,589 | 72.3% |
+| Daemon pending-outbound selection | 915 | 179 | 163,835 | 9.2% |
+| Daemon stale `processing` recovery | 813 | 176 | 143,752 | 8.0% |
+| Full-sync disconnected-modem reconciliation | 32 | 4,470 | 143,040 | 8.0% |
+| Modem upsert conflict checks | 25,563 | 1 | 25,563 | 1.4% |
+
+The first four query shapes accounted for 97.5% of the observed reads. The
+largest query was the old dashboard's 15-second incremental message poll:
+
+```sql
+SELECT ...
+FROM messages m
+LEFT JOIN device_view dv ON m.phone_iccid = dv.iccid
+WHERE m.purpose = 'user'
+  AND m.created_at >= datetime(?, '-2 seconds')
+  AND m.filter_status IN (?, ?)
+ORDER BY m.created_at DESC, m.id DESC
+LIMIT ? OFFSET ?
+```
+
+It returned few or no new messages but scanned an average of 15,573 rows per
+execution. At one request every 15 seconds, the observed 83 executions require
+only about 20 minutes 45 seconds to consume 1.29M row reads; additional open
+dashboard tabs multiply that cost. The daemon's three scan-heavy query shapes
+plus its upsert checks contributed another 476,190 rows. `UPDATE` statements
+appear here because D1 counts rows scanned while locating update candidates as
+rows read even when zero rows are changed.
+
+The evidence was captured with:
+
+```bash
+bunx wrangler d1 insights sms-dashboard \
+  --time-period 3h \
+  --sort-type sum \
+  --sort-by reads \
+  --sort-direction DESC \
+  --limit 100
+```
+
+Query Insights uses a rolling window while the billing UI uses a
+calendar-bounded usage view, so the SQL attribution and proportions are the
+durable evidence; the rounded totals should not be treated as an exact
+timestamp-boundary reconciliation.
+
+**Post-deployment verification.** The Orange Pi switched to daemon v8.0.1 at
+2026-09-03 10:31:55 Singapore time. At the 10:59 check the service was still
+active with zero restarts. It discovered all 94 modems, completed the initial
+full sync at 10:32:52, and every subsequent 30-second incremental sync
+completed successfully. The Pi log recorded 94 reports in the one-time full
+sync and only 14 changed-modem reports from then through 10:58; no incremental
+cycle resent all 94 modems.
+
+The one-hour Query Insights window still contained old-version samples, so its
+whole-window averages were not valid post-deployment rates. Two consecutive
+snapshots at approximately 10:58 and 10:59 isolated the new executions:
+
+| Operation | Before deployment | Post-deployment evidence |
+|---|---:|---:|
+| Dashboard incremental message poll | 15,572 rows/read | 17 runs, 25 rows total; Insights reported 1 row/read average |
+| Pending-outbound poll | 179 rows/read | 8 new runs, 24 new rows; 3 rows/read |
+| Stale `processing` recovery | 176 rows/read | 7 new runs, 14 new rows; 2 rows/read |
+| Modem status upload | all 94 every cycle | one 94-row startup sync, then only changed rows |
+
+The fixed dashboard query therefore reduced the dominant per-poll cost by
+more than 99.99%. The old `LEFT JOIN device_view` query group remained at
+exactly three runs and 46,716 rows across both snapshots, showing that it was
+rolling-window residue rather than a query still being issued during the
+measurement interval. The new bounded query shape was stable at 17 runs and
+25 total rows read.
+
+Writes showed the same intended shape. The new modem-upsert query group had
+115 executions, 115 rows read, and 460 D1-counted rows written. Ninety-four of
+those executions were the one-time startup full sync; D1 counted four writes
+per modem upsert because table and index maintenance are included. The daemon
+heartbeat remains one upsert per minute (one row read and one row written),
+and the two observed inbound SMS inserts cost 13 D1-counted writes each because
+the message row updates several indexes. The old `sync_history` insert visible
+once in the rolling window was pre-deployment residue; migration 073 removed
+that table and the deployed path no longer writes it. Migration 074 itself
+cost 64,545 reads and 31,710 writes while building indexes, but that was a
+one-time deployment cost and must not be projected as steady-state traffic.
+
+**Post-deployment query frequencies.** A daily estimate must multiply each
+statement's row cost by its actual trigger frequency. The deployed timers and
+event triggers are:
+
+| D1 operation | Trigger frequency | Maximum normal executions/day | Measured cost | Daily contribution |
+|---|---:|---:|---:|---:|
+| Recover stale outbound `processing` rows | Every 10 seconds, one daemon | 8,640 | 2 reads/run | 17,280 reads |
+| Select pending outbound messages | Same 10-second request | 8,640 | 3 reads/run | 25,920 reads |
+| Daemon health upsert | Immediately at start, then every 60 seconds | About 1,440 | 1 read + 1 write/run | About 1,440 reads + 1,440 writes |
+| Modem delta upsert | Local comparison every 30 seconds; D1 only when a modem changed | At most 2,880 checks, but zero D1 statements for an empty delta | 1 read + 4 writes/changed modem | Traffic-dependent; 14 changed reports in the first 26 minutes |
+| Full modem upsert | Once after daemon start; again only after 3 consecutive sync failures | Normally once/process | 94 modem statements at current hardware count | One-time 94 reads + 376 writes |
+| Dashboard incremental messages | Every 60 seconds per visible Dashboard tab | 1,440/tab | 25 reads / 17 runs = 1.47 reads/run | About 2,118 reads/day/tab |
+| Dashboard daemon status | Every 5 minutes per visible Dashboard or Balance tab | 288/tab | 1 read/run | About 288 reads/day/tab |
+| Balance runner status display | On Balance view mount, then every 30 seconds while mounted | 2,880/tab | Two queries totaling about 9 reads/poll | About 25,920 reads/day/tab if left open continuously |
+| Initial phones + messages + enrichment | Login, reload, pull-to-refresh, or relevant scope change | User-driven; no timer | About 639 reads/full load in this capture | `639 * full loads` |
+| Inbound message duplicate check and insert | Only when the Pi uploads a new or explicitly requeued SMS | Traffic-driven; no timer | New insert: 1 read + 13 writes/message | At 100 SMS/day: about 100 reads + 1,300 writes |
+
+Hidden browser tabs do not execute the Dashboard polling body. The 60-second
+message timer runs only on the Dashboard view; the Balance view has its own
+30-second runner-status timer. No-message modem cycles compare state locally
+and make no device-sync request to D1. The daemon checks its local SQLite
+upload queue every 100 ms, but that is not a D1 query; it calls D1 only when a
+message is pending, in batches of up to 50 messages.
+
+The Balance Agent was not actively contributing writes during this capture,
+so it is excluded from the measured steady-state projection below. When it is
+online, each enabled capability attempts an idle job claim every 5 seconds
+(up to 17,280 claims/day/capability). Its presence object also has a 30-second
+heartbeat, and the current claim loop calls `presence.set('ready')` before each
+claim, which sends another heartbeat even when the state did not change. That
+is up to approximately 20,160 presence requests/day/capability before real job
+state transitions. This is a separate, unmeasured write-amplification risk; the
+current projection must not be used for a continuously running Balance Agent.
+
+Using the measured empty-queue costs and the configured polling intervals, the
+early steady-state projection with the Balance Agent inactive is approximately
+60k-100k rows read per day and 6k-10k rows written per day under current
+traffic. The largest fixed daemon
+read component is now the 10-second outbound poll: `(3 + 2) * 8,640 = 43,200`
+rows/day while the queue is empty. A dashboard tab left open continuously adds
+about 2,118 message-poll rows/day at the observed `25 / 17` rows per poll;
+normal page loads and the observed modem deltas account for the remainder. This
+is roughly 1-2% of the 5M daily read
+allowance and 6-10% of the 100k daily write allowance, rather than the previous
+quota-exhausting rate. This is an early projection from about 27 minutes of
+post-deployment operation, not a completed 24-hour measurement. The first
+clean billing-day validation window begins at 2026-09-04 08:00 Singapore time
+(00:00 UTC); the Cloudflare daily counter before then still includes the old
+queries and one-time index creation.
+
+The public health endpoint was still `degraded` at 10:57, but D1 was connected
+and the daemon heartbeat was fresh. Its reasons were the incident's existing
+recovery backlog (96 attempt-exhausted messages and 3 stale `uploading` rows),
+not a new sync failure. The Pi's live queue reported zero pending and zero
+uploading messages while new uploads continued to succeed. Backlog recovery is
+a separate operator action and was not performed as part of this measurement.
+
 **Contributing factor.** The `fetch-sms` skill's number→ICCID resolution had
 two paths — D1 lookup, then a content-echo fallback (searching SMS bodies for
 the subscriber's own number, which works for Chinese carriers that send
@@ -58,7 +205,10 @@ requeue instead of assuming the uploader will retry everything by itself.
 **Mitigations completed.** Recurring Worker reads were bounded (`244d2d8`),
 the health API now distinguishes D1 quota failures from daemon failures and
 the daemon reports exhausted/stuck queue state (`cbc387c`), and authentication
-audits no longer make D1 part of the login critical path (`6a2d7d7`).
+audits no longer make D1 part of the login critical path (`6a2d7d7`). The
+production follow-up (`b6e31f0`) added the final message-list indexes, removed
+`sync_history`, and changed modem status sync from full-cycle writes to delta
+uploads.
 
 **Fix (planned — see [`TODO.md`](TODO.md)).** Back up the `sims` mapping to a
 local `sim_inventory` table on the Pi's `messages.db`, refreshed from D1 on a
