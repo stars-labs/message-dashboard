@@ -270,55 +270,6 @@ impl MessageStore {
         Ok(true)
     }
 
-    /// Get pending messages for upload (batched)
-    pub fn get_pending_messages(&self, limit: usize) -> Result<Vec<(i64, Message)>> {
-        let conn = self.conn.lock().unwrap();
-
-        // First log what we have in the database
-        let mut count_stmt =
-            conn.prepare("SELECT status, COUNT(*) FROM messages GROUP BY status")?;
-        if let Ok(counts) = count_stmt.query_map(params![], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, i32>(1)?))
-        }) {
-            for count in counts.flatten() {
-                debug!("Message counts by status: {} = {}", count.0, count.1);
-            }
-        }
-
-        let mut stmt = conn.prepare(
-            "SELECT id, phone_iccid, phone_number, content, timestamp, direction
-             FROM messages
-             WHERE status IN ('pending', 'failed')
-               AND attempts < 5
-               AND content IS NOT NULL
-               AND content != ''
-               AND id NOT IN (
-                   SELECT id FROM messages
-                   WHERE status IN ('uploaded', 'uploading')
-                   AND uploaded_at > datetime('now', '-1 hour')
-               )
-             ORDER BY created_at ASC
-             LIMIT ?1",
-        )?;
-
-        let messages = stmt
-            .query_map(params![limit], |row| {
-                Ok((
-                    row.get(0)?,
-                    Message {
-                        phone_iccid: row.get(1)?,
-                        phone_number: row.get(2)?,
-                        content: row.get(3)?,
-                        timestamp: row.get(4)?,
-                        direction: row.get(5)?,
-                    },
-                ))
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-
-        Ok(messages)
-    }
-
     /// Atomically lease due work. A crashed uploader becomes eligible again when
     /// its lease expires; attempts are diagnostic only and never exhaust retries.
     pub fn claim_messages(&self, limit: usize, lease_seconds: u64) -> Result<Vec<StoredMessage>> {
@@ -407,62 +358,6 @@ impl MessageStore {
         Ok(())
     }
 
-    /// Mark messages as being uploaded
-    pub fn mark_uploading(&self, ids: &[i64]) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
-        let tx = conn.unchecked_transaction()?;
-
-        for id in ids {
-            tx.execute(
-                "UPDATE messages
-                 SET status = 'uploading', attempts = attempts + 1
-                 WHERE id = ?1",
-                params![id],
-            )?;
-        }
-
-        tx.commit()?;
-        Ok(())
-    }
-
-    /// Mark messages as successfully uploaded
-    pub fn mark_uploaded(&self, ids: &[i64]) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
-        let tx = conn.unchecked_transaction()?;
-
-        for id in ids {
-            tx.execute(
-                "UPDATE messages
-                 SET status = 'uploaded', uploaded_at = CURRENT_TIMESTAMP
-                 WHERE id = ?1",
-                params![id],
-            )?;
-        }
-
-        tx.commit()?;
-        info!("✅ Marked {} messages as uploaded", ids.len());
-        Ok(())
-    }
-
-    /// Mark messages as failed (will be retried)
-    pub fn mark_failed(&self, ids: &[i64], error: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
-        let tx = conn.unchecked_transaction()?;
-
-        for id in ids {
-            tx.execute(
-                "UPDATE messages
-                 SET status = 'failed', error = ?2
-                 WHERE id = ?1",
-                params![id, error],
-            )?;
-        }
-
-        tx.commit()?;
-        warn!("⚠️ Marked {} messages as failed: {}", ids.len(), error);
-        Ok(())
-    }
-
     /// Get SMS paths to delete from SIM (only uploaded messages)
     pub fn get_deletable_sms(&self) -> Result<Vec<(String, String)>> {
         let conn = self.conn.lock().unwrap();
@@ -508,43 +403,8 @@ impl MessageStore {
         Ok(())
     }
 
-    /// Get statistics
-    pub fn get_stats(&self) -> Result<MessageStats> {
-        let conn = self.conn.lock().unwrap();
-
-        let (pending, uploading, uploaded, failed, total): (i64, i64, i64, i64, i64) = conn
-            .query_row(
-                "SELECT
-                    COUNT(CASE WHEN status = 'pending' THEN 1 END),
-                    COUNT(CASE WHEN status = 'uploading' THEN 1 END),
-                    COUNT(CASE WHEN status = 'uploaded' THEN 1 END),
-                    COUNT(CASE WHEN status = 'failed' THEN 1 END),
-                    COUNT(*)
-                 FROM messages
-                 WHERE created_at > datetime('now', '-24 hours')",
-                [],
-                |row| {
-                    Ok((
-                        row.get(0)?,
-                        row.get(1)?,
-                        row.get(2)?,
-                        row.get(3)?,
-                        row.get(4)?,
-                    ))
-                },
-            )?;
-
-        Ok(MessageStats {
-            pending: pending as usize,
-            uploading: uploading as usize,
-            uploaded: uploaded as usize,
-            failed: failed as usize,
-            total: total as usize,
-        })
-    }
-
-    /// Queue states that require different operator actions. Unlike the dashboard
-    /// statistics, this covers the complete durable local queue, not only 24 hours.
+    /// Queue states that require different operator actions. Covers the complete
+    /// durable local queue, with no age window.
     pub fn get_queue_stats(&self) -> Result<QueueStats> {
         let conn = self.conn.lock().unwrap();
         let (pending, dead_letter, in_flight, oldest_unacknowledged_age_seconds): (
@@ -687,30 +547,12 @@ mod queue_monitoring_tests {
     }
 }
 
-#[derive(Debug)]
-pub struct MessageStats {
-    pub pending: usize,
-    pub uploading: usize,
-    pub uploaded: usize,
-    pub failed: usize,
-    pub total: usize,
-}
-
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct QueueStats {
     pub pending: usize,
     pub dead_letter: usize,
     pub in_flight: usize,
     pub oldest_unacknowledged_age_seconds: Option<u64>,
-}
-
-impl MessageStats {
-    pub fn log(&self) {
-        info!(
-            "📊 Message store (24h): {} pending, {} uploading, {} uploaded, {} failed (total: {})",
-            self.pending, self.uploading, self.uploaded, self.failed, self.total
-        );
-    }
 }
 
 impl MessageStore {

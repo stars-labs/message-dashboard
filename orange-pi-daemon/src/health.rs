@@ -44,7 +44,7 @@ pub struct HealthTracker {
 }
 
 impl HealthTracker {
-    pub fn new(session_id: String, version: String, _discovered_modems: usize) -> Self {
+    pub fn new(session_id: String, version: String) -> Self {
         Self {
             started_at: Instant::now(),
             session_id,
@@ -53,8 +53,6 @@ impl HealthTracker {
             message_uploader: TaskState::default(),
         }
     }
-
-    pub fn record_attempt(&mut self, _task: HealthTask) {}
 
     pub fn record_success(&mut self, task: HealthTask) {
         match task {
@@ -65,16 +63,6 @@ impl HealthTracker {
             HealthTask::DeviceSync | HealthTask::OutboundPoll => {}
         }
     }
-
-    pub fn record_failure(&mut self, _task: HealthTask, _error: impl ToString) {}
-    pub fn set_modem_counts(
-        &mut self,
-        _discovered: usize,
-        _responsive: usize,
-        _sim_readable: usize,
-    ) {
-    }
-    pub fn set_in_flight_uploads(&mut self, _count: usize) {}
 
     pub fn queue_snapshot(
         &self,
@@ -116,7 +104,7 @@ mod tests {
 
     #[test]
     fn serializes_only_the_v3_delivery_observer_contract() {
-        let mut tracker = HealthTracker::new("session".into(), "8.0.0".into(), 93);
+        let mut tracker = HealthTracker::new("session".into(), "8.0.0".into());
         tracker.record_success(HealthTask::ModemReader);
         tracker.record_success(HealthTask::MessageUploader);
         let value =

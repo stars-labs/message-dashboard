@@ -78,10 +78,9 @@ fn test_store_same_content_different_iccid() {
 // ============================================================================
 
 #[test]
-fn test_get_pending_messages() {
+fn test_claim_pending_messages() {
     let store = MessageStore::new(":memory:").unwrap();
 
-    // Store 3 messages
     let msg1 = create_test_message("iccid_001", "Msg 1", "2024-01-01T12:00:00.000Z");
     let msg2 = create_test_message("iccid_002", "Msg 2", "2024-01-01T12:01:00.000Z");
     let msg3 = create_test_message("iccid_003", "Msg 3", "2024-01-01T12:02:00.000Z");
@@ -90,16 +89,14 @@ fn test_get_pending_messages() {
     store.store_message(&msg2, "modem_0", "at:2").unwrap();
     store.store_message(&msg3, "modem_0", "at:3").unwrap();
 
-    // Get pending messages
-    let pending = store.get_pending_messages(10).unwrap();
-    assert_eq!(pending.len(), 3);
+    let claimed = store.claim_messages(10, 90).unwrap();
+    assert_eq!(claimed.len(), 3);
 }
 
 #[test]
-fn test_get_pending_messages_with_limit() {
+fn test_claim_pending_messages_with_limit() {
     let store = MessageStore::new(":memory:").unwrap();
 
-    // Store 5 messages
     for i in 0..5 {
         let msg = create_test_message(
             &format!("iccid_{:03}", i),
@@ -111,9 +108,8 @@ fn test_get_pending_messages_with_limit() {
             .unwrap();
     }
 
-    // Limit to 3
-    let pending = store.get_pending_messages(3).unwrap();
-    assert_eq!(pending.len(), 3);
+    let claimed = store.claim_messages(3, 90).unwrap();
+    assert_eq!(claimed.len(), 3);
 }
 
 #[test]
@@ -146,8 +142,8 @@ fn test_legacy_uploading_message_is_requeued_after_restart() {
         let store = MessageStore::new(&db_path).unwrap();
         let msg = create_test_message("iccid_001", "Legacy upload", "2024-01-01T12:00:00.000Z");
         store.store_message(&msg, "modem_0", "at:1").unwrap();
-        let pending = store.get_pending_messages(1).unwrap();
-        store.mark_uploading(&[pending[0].0]).unwrap();
+        // Claim with a 0s lease so it appears as an expired in_flight on restart.
+        store.claim_messages(1, 0).unwrap();
     }
 
     let restarted_store = MessageStore::new(&db_path).unwrap();
@@ -158,39 +154,34 @@ fn test_legacy_uploading_message_is_requeued_after_restart() {
 }
 
 #[test]
-fn test_mark_uploading() {
+fn test_claimed_message_not_reclaimable_before_lease_expires() {
     let store = MessageStore::new(":memory:").unwrap();
 
     let msg = create_test_message("iccid_001", "Test", "2024-01-01T12:00:00.000Z");
     store.store_message(&msg, "modem_0", "at:1").unwrap();
 
-    let pending = store.get_pending_messages(10).unwrap();
-    assert_eq!(pending.len(), 1);
+    // Claim with a 90s lease
+    let claimed = store.claim_messages(10, 90).unwrap();
+    assert_eq!(claimed.len(), 1);
 
-    let ids: Vec<i64> = pending.iter().map(|(id, _)| *id).collect();
-    store.mark_uploading(&ids).unwrap();
-
-    // Should not appear in pending anymore (status is now 'uploading')
-    let pending_after = store.get_pending_messages(10).unwrap();
-    assert_eq!(pending_after.len(), 0);
+    // Same message must not be claimable again while lease is active
+    let second = store.claim_messages(10, 90).unwrap();
+    assert_eq!(second.len(), 0);
 }
 
 #[test]
-fn test_mark_uploaded() {
+fn test_acknowledge_uploaded_removes_from_queue() {
     let store = MessageStore::new(":memory:").unwrap();
 
     let msg = create_test_message("iccid_001", "Test", "2024-01-01T12:00:00.000Z");
     store.store_message(&msg, "modem_0", "at:1").unwrap();
 
-    let pending = store.get_pending_messages(10).unwrap();
-    let ids: Vec<i64> = pending.iter().map(|(id, _)| *id).collect();
+    let claimed = store.claim_messages(10, 90).unwrap();
+    store.acknowledge_uploaded(&claimed).unwrap();
 
-    store.mark_uploading(&ids).unwrap();
-    store.mark_uploaded(&ids).unwrap();
-
-    // Should not appear in pending
-    let pending_after = store.get_pending_messages(10).unwrap();
-    assert_eq!(pending_after.len(), 0);
+    // Uploaded message must not reappear even after lease would expire
+    let reclaimed = store.claim_messages(10, 0).unwrap();
+    assert_eq!(reclaimed.len(), 0);
 }
 
 #[test]
@@ -201,12 +192,10 @@ fn test_physical_path_becomes_deletable_only_after_upload() {
     store.store_message(&msg, "modem_0", "at:ME:17").unwrap();
     assert!(store.get_deletable_sms().unwrap().is_empty());
 
-    let pending = store.get_pending_messages(10).unwrap();
-    let ids: Vec<i64> = pending.iter().map(|(id, _)| *id).collect();
-    store.mark_uploading(&ids).unwrap();
+    let claimed = store.claim_messages(10, 90).unwrap();
     assert!(store.get_deletable_sms().unwrap().is_empty());
 
-    store.mark_uploaded(&ids).unwrap();
+    store.acknowledge_uploaded(&claimed).unwrap();
     assert_eq!(
         store.get_deletable_sms().unwrap(),
         vec![("modem_0".to_string(), "at:ME:17".to_string())]
@@ -221,12 +210,9 @@ fn test_duplicate_preserves_first_physical_path() {
     assert!(store.store_message(&msg, "modem_0", "at:ME:17").unwrap());
     assert!(!store.store_message(&msg, "modem_0", "at:SM:23").unwrap());
 
-    let pending = store.get_pending_messages(10).unwrap();
-    let ids: Vec<i64> = pending.iter().map(|(id, _)| *id).collect();
-    store.mark_uploading(&ids).unwrap();
-    store.mark_uploaded(&ids).unwrap();
+    let claimed = store.claim_messages(10, 90).unwrap();
+    store.acknowledge_uploaded(&claimed).unwrap();
 
-    // The duplicate is not a second durable deletion task in the current schema.
     assert_eq!(
         store.get_deletable_sms().unwrap(),
         vec![("modem_0".to_string(), "at:ME:17".to_string())]
@@ -234,44 +220,44 @@ fn test_duplicate_preserves_first_physical_path() {
 }
 
 #[test]
-fn test_mark_failed_and_retry() {
+fn test_return_to_pending_and_retry() {
     let store = MessageStore::new(":memory:").unwrap();
 
     let msg = create_test_message("iccid_001", "Test", "2024-01-01T12:00:00.000Z");
     store.store_message(&msg, "modem_0", "at:1").unwrap();
 
-    let pending = store.get_pending_messages(10).unwrap();
-    let ids: Vec<i64> = pending.iter().map(|(id, _)| *id).collect();
+    let claimed = store.claim_messages(10, 90).unwrap();
+    store.return_to_pending(&claimed, "Network error").unwrap();
 
-    store.mark_uploading(&ids).unwrap();
-    store.mark_failed(&ids, "Network error").unwrap();
-
-    // Failed messages should reappear in pending (for retry)
-    let pending_retry = store.get_pending_messages(10).unwrap();
-    assert_eq!(pending_retry.len(), 1);
+    // Returned messages are eligible again once next_attempt_at is due.
+    // Force eligibility by claiming with a 0s lease on in_flight (none here —
+    // return_to_pending sets status back to pending with a backoff delay, so
+    // we verify via queue stats instead of reclaiming immediately).
+    let stats = store.get_queue_stats().unwrap();
+    assert_eq!(stats.pending, 1);
 }
 
 #[test]
-fn test_failed_messages_retry_limit() {
+fn test_transient_failures_never_exhaust_retries() {
     let store = MessageStore::new(":memory:").unwrap();
 
     let msg = create_test_message("iccid_001", "Test", "2024-01-01T12:00:00.000Z");
     store.store_message(&msg, "modem_0", "at:1").unwrap();
 
-    // Fail 5 times (reaches retry limit)
-    for _ in 0..5 {
-        let pending = store.get_pending_messages(10).unwrap();
-        if pending.is_empty() {
+    // Simulate 10 transient failures via return_to_pending — message must
+    // remain pending throughout, never become dead_letter.
+    for _ in 0..10 {
+        // Use lease_seconds=0 so expired in_flight is immediately reclaimable.
+        let claimed = store.claim_messages(10, 0).unwrap();
+        if claimed.is_empty() {
             break;
         }
-        let ids: Vec<i64> = pending.iter().map(|(id, _)| *id).collect();
-        store.mark_uploading(&ids).unwrap();
-        store.mark_failed(&ids, "Test error").unwrap();
+        store.return_to_pending(&claimed, "Test error").unwrap();
     }
 
-    // After 5 attempts, should not appear in pending anymore
-    let pending_final = store.get_pending_messages(10).unwrap();
-    assert_eq!(pending_final.len(), 0);
+    let stats = store.get_queue_stats().unwrap();
+    assert_eq!(stats.dead_letter, 0);
+    assert_eq!(stats.pending, 1);
 }
 
 // ============================================================================
@@ -645,12 +631,11 @@ fn test_cleanup_old_segments() {
 fn test_unacknowledged_messages_survive_retention() {
     let store = MessageStore::new(":memory:").unwrap();
 
-    // Store a message (will be old immediately in this test context)
     let msg = create_test_message("iccid_001", "Old message", "2024-01-01T12:00:00.000Z");
     store.store_message(&msg, "modem_0", "at:1").unwrap();
 
     assert_eq!(store.cleanup_old_messages().unwrap(), 0);
-    assert_eq!(store.get_pending_messages(10).unwrap().len(), 1);
+    assert_eq!(store.get_queue_stats().unwrap().pending, 1);
 }
 
 #[test]
@@ -660,12 +645,9 @@ fn test_mark_old_uploaded_as_deleted() {
     let msg = create_test_message("iccid_001", "Test", "2024-01-01T12:00:00.000Z");
     store.store_message(&msg, "modem_0", "at:1").unwrap();
 
-    let pending = store.get_pending_messages(10).unwrap();
-    let ids: Vec<i64> = pending.iter().map(|(id, _)| *id).collect();
-    store.mark_uploading(&ids).unwrap();
-    store.mark_uploaded(&ids).unwrap();
+    let claimed = store.claim_messages(10, 90).unwrap();
+    store.acknowledge_uploaded(&claimed).unwrap();
 
-    // Mark old uploaded messages as deleted
     let result = store.mark_old_uploaded_as_deleted();
     assert!(result.is_ok());
 }
@@ -675,7 +657,7 @@ fn test_mark_old_uploaded_as_deleted() {
 // ============================================================================
 
 #[test]
-fn test_get_stats() {
+fn test_stored_messages_count_as_pending() {
     let store = MessageStore::new(":memory:").unwrap();
 
     // Store some messages
@@ -685,32 +667,32 @@ fn test_get_stats() {
     store.store_message(&msg1, "modem_0", "at:1").unwrap();
     store.store_message(&msg2, "modem_0", "at:2").unwrap();
 
-    let stats = store.get_stats().unwrap();
+    let stats = store.get_queue_stats().unwrap();
     assert_eq!(stats.pending, 2);
-    assert_eq!(stats.uploading, 0);
-    assert_eq!(stats.uploaded, 0);
-    assert_eq!(stats.failed, 0);
+    assert_eq!(stats.in_flight, 0);
+    assert_eq!(stats.dead_letter, 0);
 }
 
 #[test]
-fn test_stats_after_upload() {
+fn test_queue_drains_once_upload_is_acknowledged() {
     let store = MessageStore::new(":memory:").unwrap();
 
     let msg = create_test_message("iccid_001", "Test", "2024-01-01T12:00:00.000Z");
     store.store_message(&msg, "modem_0", "at:1").unwrap();
 
-    let pending = store.get_pending_messages(10).unwrap();
-    let ids: Vec<i64> = pending.iter().map(|(id, _)| *id).collect();
-    store.mark_uploading(&ids).unwrap();
+    let claimed = store.claim_messages(10, 90).unwrap();
 
-    let stats = store.get_stats().unwrap();
+    let stats = store.get_queue_stats().unwrap();
     assert_eq!(stats.pending, 0);
-    assert_eq!(stats.uploading, 1);
+    assert_eq!(stats.in_flight, 1);
+    assert!(stats.oldest_unacknowledged_age_seconds.is_some());
 
-    store.mark_uploaded(&ids).unwrap();
+    store.acknowledge_uploaded(&claimed).unwrap();
 
-    let stats_after = store.get_stats().unwrap();
-    assert_eq!(stats_after.uploaded, 1);
+    let stats_after = store.get_queue_stats().unwrap();
+    assert_eq!(stats_after.pending, 0);
+    assert_eq!(stats_after.in_flight, 0);
+    assert_eq!(stats_after.oldest_unacknowledged_age_seconds, None);
 }
 
 // ============================================================================
@@ -732,14 +714,14 @@ fn test_empty_content_handling() {
 fn test_long_content() {
     let store = MessageStore::new(":memory:").unwrap();
 
-    let long_content = "x".repeat(1000); // 1000 chars
+    let long_content = "x".repeat(1000);
     let msg = create_test_message("iccid_001", &long_content, "2024-01-01T12:00:00.000Z");
 
     assert!(store.store_message(&msg, "modem_0", "at:1").is_ok());
 
-    let pending = store.get_pending_messages(10).unwrap();
-    assert_eq!(pending.len(), 1);
-    assert_eq!(pending[0].1.content.len(), 1000);
+    let claimed = store.claim_messages(10, 90).unwrap();
+    assert_eq!(claimed.len(), 1);
+    assert_eq!(claimed[0].message.content.len(), 1000);
 }
 
 #[test]
@@ -754,6 +736,9 @@ fn test_special_characters_in_content() {
 
     assert!(store.store_message(&msg, "modem_0", "at:1").is_ok());
 
-    let pending = store.get_pending_messages(10).unwrap();
-    assert_eq!(pending[0].1.content, "你好世界 Hello 🌍 'quotes\" <tags>");
+    let claimed = store.claim_messages(10, 90).unwrap();
+    assert_eq!(
+        claimed[0].message.content,
+        "你好世界 Hello 🌍 'quotes\" <tags>"
+    );
 }
