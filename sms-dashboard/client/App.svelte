@@ -677,10 +677,6 @@
           ...data,
           connected,
         };
-        if (Number.isFinite(Number(data.modem_count))) {
-          stats.onlineDevices = connected ? Number(data.modem_count) : 0;
-        }
-
       } else {
         daemonStatus = {
           ...daemonStatus,

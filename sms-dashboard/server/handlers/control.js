@@ -757,17 +757,17 @@ export const controlHandler = {
       const snapshot = normalizeHealthSnapshot(body);
       await env.DB.prepare(`
           INSERT INTO daemon_health (
-            daemon_id, last_heartbeat, status, last_ip, version, modem_count,
+            daemon_id, last_heartbeat, status, last_ip, version,
             error_count, metadata, current_session_id, updated_at
           ) VALUES (
-            'orange-pi-main', CURRENT_TIMESTAMP, 'online', ?, ?, ?, 0, ?, ?, CURRENT_TIMESTAMP
+            'orange-pi-main', CURRENT_TIMESTAMP, 'online', ?, ?,
+            0, ?, ?, CURRENT_TIMESTAMP
           )
           ON CONFLICT(daemon_id) DO UPDATE SET
             last_heartbeat = CURRENT_TIMESTAMP,
             status = 'online',
             last_ip = excluded.last_ip,
             version = excluded.version,
-            modem_count = excluded.modem_count,
             error_count = excluded.error_count,
             metadata = excluded.metadata,
             current_session_id = excluded.current_session_id,
@@ -775,7 +775,6 @@ export const controlHandler = {
       `).bind(
         clientIp,
         snapshot.version,
-        0,
         JSON.stringify(snapshot),
         snapshot.session_id,
       ).run();
