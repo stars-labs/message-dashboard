@@ -248,6 +248,26 @@
             '';
           };
 
+          # Routes the Orange Pi subnet out the local LAN gateway, bypassing the
+          # VPN (which grabs 10.171/16 and black-holes Pi traffic). Run this when
+          # on the company VPN and Pi access fails. Sudo prompt is expected.
+          # Pi host is defined in docs/deployment.md (single source of truth).
+          pi-route = pkgs.writeShellApplication {
+            name = "pi-route";
+            runtimeInputs = with pkgs; [ coreutils ];
+            text = ''
+              subnet="10.171.150.0/24"
+              gateway="10.171.121.1"
+              host="10.171.150.102"
+
+              sudo route -n delete -net "$subnet" "$gateway" 2>/dev/null || true
+              sudo route -n add -net "$subnet" "$gateway"
+
+              echo "==> Pinging $host ..."
+              ping -c 2 -W 3000 "$host"
+            '';
+          };
+
           # Authenticated developer interface for both local Balance Agent
           # capabilities. Credentials live in macOS Keychain; this wrapper never
           # reads the SOPS development secret file.
@@ -513,6 +533,7 @@
                 dev-server
                 balance-agent-cli
                 check-daemon
+                pi-route
               ]
               ++ (with pkgs; [
                 # Nix tools
@@ -555,6 +576,7 @@
                 echo "  • dev-server    — restart/stop/status the unique :8080 + :8787 pair"
                 echo "  • balance-agent — authenticated CLI for SMS AI and browser balance work"
                 echo "  • check-daemon  — required Rust format check + full test suite"
+                echo "  • pi-route      — route Pi subnet past the VPN (sudo; run when on VPN)"
                 echo ""
 
                 # Ensure Ansible finds collections installed by ansible-galaxy (SOPS, general)
