@@ -273,11 +273,11 @@ At the **observed** yield of ~11 modems per cable (not the theoretical 20), reac
 ```bash
 # Bus 001 address usage (limit = 127)
 # Address usage PER BUS — both EHCI buses carry modems now, never report one number alone
-ssh root@10.171.150.2 "lsusb | awk '{print \$2}' | sort | uniq -c"
+ssh root@10.171.150.102 "lsusb | awk '{print \$2}' | sort | uniq -c"
 # Hub vs modem split on a given bus
-ssh root@10.171.150.2 'echo "bus3 hubs: $(lsusb | grep "Bus 003" | grep -c 1a40)  modems: $(lsusb | grep -c 2c7c)"'
+ssh root@10.171.150.102 'echo "bus3 hubs: $(lsusb | grep "Bus 003" | grep -c 1a40)  modems: $(lsusb | grep -c 2c7c)"'
 # Enumeration failures
-ssh root@10.171.150.2 'dmesg | grep -iE "unable to enumerate|not accepting address" | tail'
+ssh root@10.171.150.102 'dmesg | grep -iE "unable to enumerate|not accepting address" | tail'
 ```
 
 Steps 1–4 were **completed on 2026-08-06** (3 cables moved off bus1, one now direct on socket B, 66 + 11 = 77 online). Remaining work is steps 2′–7 for the last 18 modems:

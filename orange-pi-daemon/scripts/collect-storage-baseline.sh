@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-host="${1:-root@10.171.150.2}"
+host="${1:-root@10.171.150.102}"
 
 if [[ ! "$host" =~ ^[a-zA-Z0-9._@:-]+$ ]]; then
   echo "Invalid SSH host: $host" >&2

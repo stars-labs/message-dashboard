@@ -195,14 +195,14 @@ Identify modems by **IMEI**. Locate them by **usb_path**. Never rely on `modem_i
 
 ```bash
 # 1. Topology snapshot
-ssh root@10.171.150.2 "lsusb -t" > docs/usb-topology-$(date +%Y-%m-%d).txt
+ssh root@10.171.150.102 "lsusb -t" > docs/usb-topology-$(date +%Y-%m-%d).txt
 
 # 2. IMEI ↔ ICCID pairs — logged once per modem at daemon startup and on each rediscovery.
 #    ❗ These lines only appear near daemon start, so pick a window that CONTAINS the start,
 #    then check the count is non-zero before trusting the output.
-ssh root@10.171.150.2 'systemctl show sms-daemon -p ActiveEnterTimestamp --value'
-ssh root@10.171.150.2 'journalctl -u sms-daemon --since "-24h" | grep -c "Cached modem"'   # must be > 0
-ssh root@10.171.150.2 'journalctl -u sms-daemon --since "-24h" | grep "Cached modem"'
+ssh root@10.171.150.102 'systemctl show sms-daemon -p ActiveEnterTimestamp --value'
+ssh root@10.171.150.102 'journalctl -u sms-daemon --since "-24h" | grep -c "Cached modem"'   # must be > 0
+ssh root@10.171.150.102 'journalctl -u sms-daemon --since "-24h" | grep "Cached modem"'
 #    Format: "✅ Cached modem <ttyUSB#> with ICCID <iccid> (IMEI <imei>)"
 #    A "⚠️ Cached modem N without ICCID" line means the SIM read failed on that port.
 

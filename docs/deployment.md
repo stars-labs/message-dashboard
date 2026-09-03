@@ -25,18 +25,18 @@ This file is the **single source of truth** for the Orange Pi host. Keep the
 derived command examples in `README.md`, `docs/README.md`, and
 `docs/INVENTORY-README.md` synchronized with it.
 
-Target: `root@10.171.150.2` (current LAN address, NixOS aarch64).
+Target: `root@10.171.150.102` (fixed LAN address, NixOS aarch64).
 
 - **LAN access**: before ping or SSH, confirm the operator's current network/location
-  and that `10.171.150.2` is reachable from it.
+  and that `10.171.150.102` is reachable from it.
 
 ```bash
 # From repo root — run check-daemon first:
 check-daemon
 
 nix run nixpkgs#nixos-rebuild -- switch --flake .#orange-pi \
-  --target-host root@10.171.150.2 \
-  --build-host root@10.171.150.2 \
+  --target-host root@10.171.150.102 \
+  --build-host root@10.171.150.102 \
   --use-substitutes --impure
 ```
 

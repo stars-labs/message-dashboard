@@ -11,7 +11,7 @@ synced copy that can lag or fail (D1 free-tier row-read limit, 500s on upload).
 
 ## Target
 
-- Host: `root@10.171.150.2` (current Orange Pi LAN address).
+- Host: `root@10.171.150.102` (fixed Orange Pi LAN address).
   This is the only Orange Pi LAN address to use. Before any ping, SSH, or other
   connectivity check, confirm the user's current network/location and that the
   address is reachable from it. Never probe an address merely because it appears
@@ -66,7 +66,7 @@ Always query by `phone_iccid`. Pass SQL via **stdin heredoc** (single-quoted
 `<<'SQL'`) — double-quoted `LIKE "%…%"` breaks under shell quoting on the Pi.
 
 ```bash
-ssh -o ConnectTimeout=10 -o BatchMode=yes root@10.171.150.2 \
+ssh -o ConnectTimeout=10 -o BatchMode=yes root@10.171.150.102 \
   'nix run --extra-experimental-features "nix-command flakes" nixpkgs#sqlite -- \
    /var/lib/sms-daemon/messages.db' <<'SQL' 2>&1 | tail -120
 .mode line
@@ -134,7 +134,7 @@ UNIQUE constraint: `(phone_iccid, timestamp, content)` — dedup is built in.
 
 ## Never
 
-- Use any Orange Pi IP other than `10.171.150.2`.
+- Use any Orange Pi IP other than `10.171.150.102`.
 - Install `sqlite3` on the Pi imperatively — use the nix one-shot.
 - Treat `modem_id` as a stable SIM identity or `phone_number` as the SIM's own number.
 - Retry D1 after a quota error — fall through to the content-echo fallback.
