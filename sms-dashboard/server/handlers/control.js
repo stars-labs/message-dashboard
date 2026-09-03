@@ -1,4 +1,3 @@
-import { nanoid } from 'nanoid';
 import { extractVerificationCode } from '../utils/verification';
 import { findKeywordMatches } from '../api/keywords.js';
 import { classifyMessage, loadActiveRules } from '../utils/spam-filter.js';
@@ -257,19 +256,24 @@ export const controlHandler = {
         });
       }
       
-      // Process messages in batches
-      const batchSize = 50;
+      for (const message of messages) {
+        if (!message?.id || typeof message.id !== 'string') {
+          return new Response(JSON.stringify({ success: false, error: 'Every message requires a daemon-assigned id' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        if (!message.phone_iccid || !message.content) {
+          return new Response(JSON.stringify({ success: false, error: 'Every message requires phone_iccid and content' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+      }
+
       let processed = 0;
-      let duplicates = 0;
+      const results = [];
       const newMessages = [];
-      
-      // Prepare statements outside the loop for better performance
-      const checkStmt = env.DB.prepare(`
-        SELECT id FROM messages 
-        WHERE phone_iccid = ? 
-        AND content = ? 
-        AND datetime(timestamp) BETWEEN datetime(?, '-10 seconds') AND datetime(?, '+10 seconds')
-      `);
       
       const insertStmt = env.DB.prepare(`
         INSERT INTO messages (
@@ -280,7 +284,7 @@ export const controlHandler = {
         VALUES (
           ?, ?, ?, ?, ?, 'received', ?, 'received',
           CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?
-        )
+        ) ON CONFLICT(id) DO NOTHING
       `);
 
       // Spam rules are loaded ONCE per upload, not per message. Classification is
@@ -289,42 +293,9 @@ export const controlHandler = {
       // in the window before a background task caught up.
       const filterRules = await loadActiveRules(env.DB);
       
-      // First, deduplicate within the entire request
-      const uniqueMessages = [];
-      const seen = new Set();
-      
       for (const msg of messages) {
-        // Create a unique key for each message
-        const key = `${msg.phone_iccid}|${msg.content}|${msg.timestamp || 'no-timestamp'}`;
-        if (!seen.has(key)) {
-          seen.add(key);
-          uniqueMessages.push(msg);
-        } else {
-          duplicates++;
-        }
-      }
-      
-      for (let i = 0; i < uniqueMessages.length; i += batchSize) {
-        const batch = uniqueMessages.slice(i, i + batchSize);
-        
-        const promises = batch.map(async (msg, index) => {
           const phone_iccid = msg.phone_iccid;
-          
-          // Validate required fields
-          if (!phone_iccid) {
-            console.error(`[control.js] Message ${index} missing phone_iccid:`, msg);
-            throw new Error(`Message ${index} missing required field: phone_iccid`);
-          }
-          if (!msg.content) {
-            console.error(`[control.js] Message ${index} missing content:`, msg);
-            throw new Error(`Message ${index} missing required field: content`);
-          }
-          
-          // Simple validation: Messages must come from the daemon reading actual SIM cards
-          // This is the ONLY way to create 'received' messages - no fake/simulated paths
-          
-          // Generate a unique message ID with timestamp prefix to ensure uniqueness
-          const messageId = msg.id || `msg-${Date.now()}-${nanoid(10)}`;
+          const messageId = msg.id;
           // Fix timestamp - handle various formatting issues
           let timestamp = msg.timestamp || new Date().toISOString();
           
@@ -358,20 +329,6 @@ export const controlHandler = {
             ? null
             : extractVerificationCode(msg.content);
           
-          // Check for duplicate using the prepared statement
-          const existing = await checkStmt.bind(phone_iccid, msg.content, timestamp, timestamp).first();
-          if (existing) {
-            if (balanceCheck) {
-              await linkBalanceReply(env.DB, balanceCheck, {
-                id: existing.id,
-                phone_number: phoneNumber,
-                content: msg.content,
-              });
-            }
-            duplicates++;
-            return null;
-          }
-          
           const record = {
             id: messageId,
             phone_iccid: phone_iccid,
@@ -390,10 +347,8 @@ export const controlHandler = {
             ? { filter_status: 'filtered', filter_rule_id: null }
             : classifyMessage(record, filterRules);
 
-          // Maintenance replies stay out of keyword and verification processing.
-          if (!balanceCheck) newMessages.push(record);
-
-          // Insert the message
+          // D1's primary key is the sole idempotency boundary. No content/timestamp
+          // comparison is valid here: two equal SMS payloads may be distinct SMS.
           const result = await insertStmt.bind(
             messageId,
             phone_iccid,
@@ -407,17 +362,16 @@ export const controlHandler = {
             record.balance_check_id,
           ).run();
 
-          if (balanceCheck) {
-            await linkBalanceReply(env.DB, balanceCheck, record);
+          if (result.meta.changes === 0) {
+            results.push({ id: messageId, status: 'already_stored' });
+            continue;
           }
-          
-          return result;
-        });
-        
-        const results = await Promise.all(promises);
-        // Count actual inserts (excluding nulls from duplicates)
-        const inserted = results.filter(r => r !== null).length;
-        processed += inserted;
+
+          processed += 1;
+          results.push({ id: messageId, status: 'stored' });
+          // Only a newly inserted message may trigger side effects.
+          if (balanceCheck) await linkBalanceReply(env.DB, balanceCheck, record);
+          else newMessages.push(record);
       }
       
       // Process new messages with AI and keywords (async, don't wait)
@@ -440,8 +394,8 @@ export const controlHandler = {
       return new Response(JSON.stringify({
         success: true,
         processed,
-        duplicates,
-        message: `Successfully uploaded ${processed} messages${duplicates > 0 ? `, skipped ${duplicates} duplicates` : ''}`
+        results,
+        message: `Successfully uploaded ${processed} messages`
       }), {
         headers: { 'Content-Type': 'application/json' }
       });
@@ -821,7 +775,7 @@ export const controlHandler = {
       `).bind(
         clientIp,
         snapshot.version,
-        snapshot.modems.discovered,
+        0,
         JSON.stringify(snapshot),
         snapshot.session_id,
       ).run();

@@ -1,5 +1,6 @@
 // Integration tests for ApiClient - HTTP communication layer
 use orange_pi_daemon_rust::api_client::ApiClient;
+use orange_pi_daemon_rust::message_store::{MessageStatus, StoredMessage};
 use orange_pi_daemon_rust::sync_manager::SyncMode;
 use orange_pi_daemon_rust::types::{Config, Message, Modem, ModemReport, Sim};
 
@@ -20,6 +21,19 @@ fn create_test_message(iccid: &str, content: &str) -> Message {
         content: content.to_string(),
         timestamp: "2024-01-01T12:00:00.000Z".to_string(),
         direction: "received".to_string(),
+    }
+}
+
+fn create_stored_test_message(iccid: &str, content: &str) -> StoredMessage {
+    StoredMessage {
+        id: 1,
+        source_message_id: "018c1a55-73a0-7b9b-8c06-123456789abc".to_string(),
+        message: create_test_message(iccid, content),
+        modem_id: "modem-1".to_string(),
+        sms_path: "ME:1".to_string(),
+        status: MessageStatus::Pending,
+        attempts: 0,
+        lease_token: "lease-1".to_string(),
     }
 }
 
@@ -120,7 +134,7 @@ async fn test_upload_messages_empty() {
     let config = create_test_config();
     let client = ApiClient::new(config);
 
-    let messages: Vec<Message> = vec![];
+    let messages: Vec<StoredMessage> = vec![];
 
     // Empty upload should succeed immediately
     let result = client.upload_messages(&messages).await;
@@ -133,7 +147,7 @@ async fn test_upload_messages_single() {
     let config = create_test_config();
     let client = ApiClient::new(config);
 
-    let messages = vec![create_test_message("iccid_001", "Test message")];
+    let messages = vec![create_stored_test_message("iccid_001", "Test message")];
 
     // Will fail without real API server
     let result = client.upload_messages(&messages).await;
@@ -149,7 +163,7 @@ async fn test_upload_messages_batch_size() {
     // Create 150 messages (should be split into 3 batches of 50)
     let mut messages = Vec::new();
     for i in 0..150 {
-        messages.push(create_test_message(
+        messages.push(create_stored_test_message(
             &format!("iccid_{:03}", i),
             &format!("Message {}", i),
         ));

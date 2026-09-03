@@ -1,165 +1,63 @@
-export const HEALTH_SCHEMA_VERSION = 2;
+export const HEALTH_SCHEMA_VERSION = 3;
 
-export const HEALTH_TASKS = {
-  modem_reader: { label: '短信扫描', degradedAfter: 120, criticalAfter: 300 },
-  device_sync: { label: '设备同步', degradedAfter: 90, criticalAfter: 300 },
-  outbound_poll: { label: '发送轮询', degradedAfter: 45, criticalAfter: 180 },
-  message_uploader: { label: '消息上传', degradedAfter: 120, criticalAfter: 300 },
-};
-
-function finiteNonNegative(value) {
+function age(value) {
   if (value === null || value === undefined || value === '') return null;
   const number = Number(value);
   return Number.isFinite(number) && number >= 0 ? number : null;
 }
 
-function shortString(value, maxLength = 500) {
-  return typeof value === 'string' && value.trim()
-    ? value.trim().slice(0, maxLength)
-    : null;
+function text(value, maxLength) {
+  return typeof value === 'string' && value.trim() ? value.trim().slice(0, maxLength) : null;
 }
 
-function normalizeTask(raw = {}) {
-  return {
-    last_attempt_age_seconds: finiteNonNegative(raw.last_attempt_age_seconds),
-    last_success_age_seconds: finiteNonNegative(raw.last_success_age_seconds),
-    consecutive_failures: finiteNonNegative(raw.consecutive_failures) ?? 0,
-    last_error: shortString(raw.last_error),
-  };
-}
-
-/** Validate and bound a versioned health report before it is persisted. */
 export function normalizeHealthSnapshot(raw) {
-  if (!raw || raw.schema_version !== HEALTH_SCHEMA_VERSION) {
-    throw new Error(`Unsupported health schema version: ${raw?.schema_version ?? 'missing'}`);
-  }
-
-  const sessionId = shortString(raw.session_id, 120);
-  const version = shortString(raw.version, 80);
-  if (!sessionId || !version) throw new Error('session_id and version are required');
-
-  const tasks = {};
-  for (const name of Object.keys(HEALTH_TASKS)) tasks[name] = normalizeTask(raw.tasks?.[name]);
-
+  if (!raw || raw.schema_version !== HEALTH_SCHEMA_VERSION) throw new Error(`Unsupported health schema version: ${raw?.schema_version ?? 'missing'}`);
+  const session_id = text(raw.session_id, 120);
+  const version = text(raw.version, 80);
+  if (!session_id || !version) throw new Error('session_id and version are required');
   return {
-    schema_version: HEALTH_SCHEMA_VERSION,
-    session_id: sessionId,
-    version,
-    uptime_seconds: finiteNonNegative(raw.uptime_seconds) ?? 0,
-    tasks,
+    schema_version: HEALTH_SCHEMA_VERSION, session_id, version, uptime_seconds: age(raw.uptime_seconds) ?? 0,
+    last_message_read_success_age_seconds: age(raw.last_message_read_success_age_seconds),
+    last_upload_success_age_seconds: age(raw.last_upload_success_age_seconds),
     queue: {
-      retryable: finiteNonNegative(raw.queue?.retryable) ?? 0,
-      attempts_exhausted: finiteNonNegative(raw.queue?.attempts_exhausted) ?? 0,
-      stuck_uploading: finiteNonNegative(raw.queue?.stuck_uploading) ?? 0,
-    },
-    modems: {
-      discovered: finiteNonNegative(raw.modems?.discovered) ?? 0,
-      responsive: finiteNonNegative(raw.modems?.responsive) ?? 0,
-      sim_readable: finiteNonNegative(raw.modems?.sim_readable) ?? 0,
+      pending: age(raw.queue?.pending) ?? 0, in_flight: age(raw.queue?.in_flight) ?? 0,
+      dead_letter: age(raw.queue?.dead_letter) ?? 0,
+      oldest_unacknowledged_age_seconds: age(raw.queue?.oldest_unacknowledged_age_seconds),
     },
   };
 }
 
 export function parseHealthSnapshot(metadata) {
-  if (!metadata) return null;
   try {
-    const parsed = typeof metadata === 'string' ? JSON.parse(metadata) : metadata;
-    return parsed?.schema_version === HEALTH_SCHEMA_VERSION ? parsed : null;
-  } catch {
-    return null;
-  }
+    const value = typeof metadata === 'string' ? JSON.parse(metadata) : metadata;
+    return value?.schema_version === HEALTH_SCHEMA_VERSION ? value : null;
+  } catch { return null; }
 }
 
-function advanceSnapshotAges(snapshot, heartbeatAge) {
-  if (!snapshot || !Number.isFinite(heartbeatAge)) return snapshot;
-  const tasks = {};
-  for (const [name, task] of Object.entries(snapshot.tasks || {})) {
-    tasks[name] = { ...task };
-    for (const field of ['last_attempt_age_seconds', 'last_success_age_seconds']) {
-      const age = finiteNonNegative(task?.[field]);
-      tasks[name][field] = age === null ? null : age + heartbeatAge;
-    }
-  }
+function advance(snapshot, heartbeatAge) {
+  if (!Number.isFinite(heartbeatAge)) return snapshot;
+  const plus = (value) => value === null ? null : value + heartbeatAge;
   return {
-    ...snapshot,
-    uptime_seconds: (finiteNonNegative(snapshot.uptime_seconds) ?? 0) + heartbeatAge,
-    tasks,
+    ...snapshot, uptime_seconds: snapshot.uptime_seconds + heartbeatAge,
+    last_message_read_success_age_seconds: plus(snapshot.last_message_read_success_age_seconds),
+    last_upload_success_age_seconds: plus(snapshot.last_upload_success_age_seconds),
+    queue: { ...snapshot.queue, oldest_unacknowledged_age_seconds: plus(snapshot.queue.oldest_unacknowledged_age_seconds) },
   };
 }
 
-function taskReason(name, task, snapshot) {
-  const config = HEALTH_TASKS[name];
-  const queued = (snapshot.queue?.retryable ?? 0) +
-    (snapshot.queue?.attempts_exhausted ?? 0) +
-    (snapshot.queue?.stuck_uploading ?? 0);
-  if (name === 'message_uploader' && queued === 0) return null;
-
-  const age = finiteNonNegative(task?.last_success_age_seconds);
-  const failures = finiteNonNegative(task?.consecutive_failures) ?? 0;
-  if (failures >= 3) {
-    return `${config.label}连续失败 ${failures} 次${task?.last_error ? `：${task.last_error}` : ''}`;
-  }
-  if (age === null) {
-    return snapshot.uptime_seconds > config.degradedAfter ? `${config.label}尚未成功运行` : null;
-  }
-  if (age > config.criticalAfter) return `${config.label}已中断 ${Math.floor(age / 60)} 分钟`;
-  if (age > config.degradedAfter) return `${config.label}已延迟 ${Math.floor(age)} 秒`;
-  return null;
-}
-
-/**
- * Derive the public service status from one daemon_health row.
- * `seconds_since_heartbeat` must be calculated by D1, not by the daemon clock.
- */
 export function deriveDaemonHealth(row) {
-  if (!row) {
-    return {
-      status: 'unknown',
-      label: '检测中',
-      reasons: ['等待采集服务首次连接'],
-      snapshot: null,
-    };
-  }
-
-  const heartbeatAge = finiteNonNegative(row.seconds_since_heartbeat) ?? Number.POSITIVE_INFINITY;
-  const storedSnapshot = parseHealthSnapshot(row.metadata);
-  if (!storedSnapshot) {
-    return {
-      status: 'unknown',
-      label: '检测中',
-      reasons: ['健康报告格式无效或缺失'],
-      snapshot: null,
-    };
-  }
-
-  const snapshot = advanceSnapshotAges(storedSnapshot, heartbeatAge);
-
-  if (heartbeatAge > 180) {
-    return {
-      status: 'offline',
-      label: '离线',
-      reasons: [`${Math.floor(heartbeatAge / 60)} 分钟未收到心跳`],
-      snapshot,
-    };
-  }
-
+  if (!row) return { status: 'unknown', label: '检测中', reasons: ['等待采集服务首次连接'], snapshot: null };
+  const heartbeatAge = age(row.seconds_since_heartbeat) ?? Infinity;
+  const stored = parseHealthSnapshot(row.metadata);
+  if (!stored) return { status: 'unknown', label: '检测中', reasons: ['健康报告格式无效或缺失'], snapshot: null };
+  const snapshot = advance(stored, heartbeatAge);
+  if (heartbeatAge > 180) return { status: 'offline', label: '离线', reasons: [`${Math.floor(heartbeatAge / 60)} 分钟未收到心跳`], snapshot };
   const reasons = [];
   if (heartbeatAge > 90) reasons.push(`${Math.floor(heartbeatAge)} 秒未收到心跳`);
-  for (const name of Object.keys(HEALTH_TASKS)) {
-    const reason = taskReason(name, snapshot.tasks?.[name], snapshot);
-    if (reason) reasons.push(reason);
-  }
-  if (snapshot.queue?.attempts_exhausted > 0) {
-    reasons.push(`${snapshot.queue.attempts_exhausted} 条消息已耗尽重试次数`);
-  }
-  if (snapshot.queue?.stuck_uploading > 0) {
-    reasons.push(`${snapshot.queue.stuck_uploading} 条消息卡在上传中`);
-  }
-
-  return {
-    status: reasons.length ? 'degraded' : 'healthy',
-    label: reasons.length ? '部分异常' : '正常',
-    reasons,
-    snapshot,
-  };
+  if (snapshot.last_message_read_success_age_seconds === null || snapshot.last_message_read_success_age_seconds > 300) reasons.push('短信读取已中断');
+  const queued = snapshot.queue.pending + snapshot.queue.in_flight;
+  if (queued > 0 && (snapshot.last_upload_success_age_seconds === null || snapshot.last_upload_success_age_seconds > 300)) reasons.push('消息上传已中断');
+  if (snapshot.queue.oldest_unacknowledged_age_seconds !== null && snapshot.queue.oldest_unacknowledged_age_seconds > 300) reasons.push('消息积压超过 5 分钟');
+  if (snapshot.queue.dead_letter > 0) reasons.push(`${snapshot.queue.dead_letter} 条消息需要人工处理`);
+  return { status: reasons.length ? 'degraded' : 'healthy', label: reasons.length ? '部分异常' : '正常', reasons, snapshot };
 }

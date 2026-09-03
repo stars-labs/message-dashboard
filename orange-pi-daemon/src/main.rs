@@ -80,20 +80,6 @@ async fn main() -> Result<()> {
         return PerformanceBenchmark::run_benchmark().await;
     }
 
-    // Check for cleanup mode
-    if args.iter().any(|a| a == "cleanup") {
-        info!("🧹 Running database cleanup...");
-        let message_store = Arc::new(MessageStore::new(&db_path)?);
-
-        // Run aggressive cleanup
-        let deleted = message_store.cleanup_all_old_pending()?;
-        info!(
-            "✅ Cleanup complete: {} old pending messages removed",
-            deleted
-        );
-        return Ok(());
-    }
-
     // Load configuration
     let api_url =
         std::env::var("SMS_API_URL").unwrap_or_else(|_| "http://localhost:8787".to_string());
@@ -117,12 +103,6 @@ async fn main() -> Result<()> {
     // Note: Multipart SMS assembly is handled inline in modem_manager.rs
     // No separate assembler instance needed - PDU parser extracts concat info
     // and messages are assembled during the read operation
-
-    // Clean up old pending messages on startup
-    let cleaned = message_store.cleanup_all_old_pending()?;
-    if cleaned > 0 {
-        info!("🧹 Cleaned up {} old pending messages on startup", cleaned);
-    }
 
     // Mark old uploaded messages as deleted (they have stale paths)
     let marked_deleted = message_store.mark_old_uploaded_as_deleted()?;
@@ -395,24 +375,21 @@ async fn main() -> Result<()> {
             }
 
             // Get pending messages from database with dynamic batch
-            match upload_store.get_pending_messages(current_batch_size) {
+            match upload_store.claim_messages(current_batch_size, 90) {
                 Ok(pending) if !pending.is_empty() => {
                     upload_health
                         .write()
                         .await
                         .record_attempt(HealthTask::MessageUploader);
-                    let ids: Vec<i64> = pending.iter().map(|(id, _)| *id).collect();
-                    let messages: Vec<Message> = pending.into_iter().map(|(_, msg)| msg).collect();
-
                     // Calculate approximate payload size
-                    let payload_size: usize = messages
+                    let payload_size: usize = pending
                         .iter()
-                        .map(|m| m.content.len() + m.phone_number.len() + 100) // +100 for JSON overhead
+                        .map(|m| m.message.content.len() + m.message.phone_number.len() + 100) // +100 for JSON overhead
                         .sum();
 
                     // Adjust batch size for next iteration based on current payload
                     if payload_size < 100_000
-                        && ids.len() == current_batch_size
+                        && pending.len() == current_batch_size
                         && consecutive_failures == 0
                     {
                         // Small payload and no failures, can increase batch size
@@ -424,27 +401,57 @@ async fn main() -> Result<()> {
 
                     info!(
                         "☁️  Uploading {} messages (~{} KB)",
-                        ids.len(),
+                        pending.len(),
                         payload_size / 1024
                     );
 
-                    // Mark as uploading
-                    if let Err(e) = upload_store.mark_uploading(&ids) {
-                        error!("Failed to mark as uploading: {}", e);
-                        upload_health
-                            .write()
-                            .await
-                            .record_failure(HealthTask::MessageUploader, &e);
-                        continue;
-                    }
-                    upload_health.write().await.set_in_flight_uploads(ids.len());
+                    upload_health
+                        .write()
+                        .await
+                        .set_in_flight_uploads(pending.len());
 
                     // Upload to Cloudflare
-                    match upload_client.upload_messages(&messages).await {
-                        Ok(_) => {
-                            info!("☁️  Uploader: Sent {} messages to Cloudflare", ids.len());
-                            // Mark as uploaded in database
-                            let _ = upload_store.mark_uploaded(&ids);
+                    match upload_client.upload_messages(&pending).await {
+                        Ok(results) => {
+                            let mut acknowledged = Vec::new();
+                            let mut rejected = Vec::new();
+                            for result in results {
+                                if let Some(message) = pending
+                                    .iter()
+                                    .find(|message| message.source_message_id == result.id)
+                                {
+                                    match result.status.as_str() {
+                                        "stored" | "already_stored" => {
+                                            acknowledged.push(message.clone())
+                                        }
+                                        "rejected" if !result.retryable => {
+                                            rejected.push(message.clone())
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                            let completed = acknowledged.len() + rejected.len();
+                            if completed != pending.len() {
+                                let _ = upload_store.return_to_pending(
+                                    &pending,
+                                    "incomplete or retryable upload acknowledgement",
+                                );
+                                upload_health.write().await.set_in_flight_uploads(0);
+                                consecutive_failures = consecutive_failures.saturating_add(1);
+                                continue;
+                            }
+                            if let Err(e) = upload_store.acknowledge_uploaded(&acknowledged) {
+                                error!("Failed to persist upload acknowledgement: {}", e);
+                                continue;
+                            }
+                            if let Err(e) = upload_store
+                                .reject_messages(&rejected, "Worker rejected message payload")
+                            {
+                                error!("Failed to persist rejected message: {}", e);
+                                continue;
+                            }
+                            info!("☁️  Uploader: acknowledged {} messages", acknowledged.len());
                             upload_health.write().await.set_in_flight_uploads(0);
                             // Reset backoff on success
                             consecutive_failures = 0;
@@ -465,7 +472,7 @@ async fn main() -> Result<()> {
                                 "Uploader failed to send messages"
                             );
                             // Mark as failed for retry
-                            let _ = upload_store.mark_failed(&ids, &e.to_string());
+                            let _ = upload_store.return_to_pending(&pending, &e.to_string());
                             upload_health.write().await.set_in_flight_uploads(0);
                             // Increment failure counter for backoff
                             consecutive_failures = consecutive_failures.saturating_add(1);
@@ -628,50 +635,30 @@ async fn main() -> Result<()> {
 
             if let Ok(queue) = stats_store.get_queue_stats() {
                 let queue = stats_health.read().await.queue_snapshot(
-                    queue.retryable,
-                    queue.attempts_exhausted,
-                    queue.uploading,
+                    queue.pending,
+                    queue.dead_letter,
+                    queue.in_flight,
+                    queue.oldest_unacknowledged_age_seconds,
                 );
-                if queue.attempts_exhausted > 0 {
+                if queue.dead_letter > 0 {
                     error!(
-                        event = "message_queue_attempts_exhausted",
-                        count = queue.attempts_exhausted,
+                        event = "message_queue_dead_letter",
+                        count = queue.dead_letter,
                         "Messages require operator recovery"
-                    );
-                }
-                if queue.stuck_uploading > 0 {
-                    error!(
-                        event = "message_queue_stuck_uploading",
-                        count = queue.stuck_uploading,
-                        "Messages are stuck in uploading state"
                     );
                 }
             }
         }
     });
 
-    // TASK 5: AUTOMATIC CLEANUP (every 5 minutes)
-    // Since ModemManager won't delete SMS from SIM cards, we need periodic cleanup
+    // TASK 5: ACKNOWLEDGED-ROW RETENTION (every 5 minutes)
     let cleanup_store = message_store.clone();
 
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_secs(300)).await; // Every 5 minutes
 
-            // Clean up old pending messages that can't be deleted from SIM
-            match cleanup_store.cleanup_all_old_pending() {
-                Ok(deleted) if deleted > 0 => {
-                    warn!("🧹 AUTO-CLEANUP: Removed {} old pending messages (ModemManager deletion failure workaround)", deleted);
-                }
-                Ok(_) => {
-                    debug!("🧹 Auto-cleanup: No old pending messages to remove");
-                }
-                Err(e) => {
-                    error!("❌ Auto-cleanup failed: {}", e);
-                }
-            }
-
-            // Also mark old uploaded messages as deleted to prevent deletion attempts
+            // Uploaded rows may be retained; unacknowledged rows are never age-deleted.
             if let Ok(marked) = cleanup_store.mark_old_uploaded_as_deleted() {
                 if marked > 0 {
                     info!(
@@ -772,9 +759,10 @@ async fn main() -> Result<()> {
             let snapshot = {
                 let health = heartbeat_health.read().await;
                 let queue = health.queue_snapshot(
-                    queue_stats.retryable,
-                    queue_stats.attempts_exhausted,
-                    queue_stats.uploading,
+                    queue_stats.pending,
+                    queue_stats.dead_letter,
+                    queue_stats.in_flight,
+                    queue_stats.oldest_unacknowledged_age_seconds,
                 );
                 health.snapshot(queue)
             };

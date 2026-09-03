@@ -1,10 +1,24 @@
 use crate::health::HealthSnapshot;
+use crate::message_store::StoredMessage;
 use crate::sync_manager::SyncMode;
 use crate::types::*;
 use anyhow::{Context, Result};
 use reqwest::Client;
 use serde_json::json;
 use tracing::info;
+
+#[derive(Debug, serde::Deserialize)]
+pub struct UploadResult {
+    pub id: String,
+    pub status: String,
+    #[serde(default)]
+    pub retryable: bool,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct UploadResponse {
+    results: Vec<UploadResult>,
+}
 
 #[derive(Clone)]
 pub struct ApiClient {
@@ -108,9 +122,9 @@ impl ApiClient {
     }
 
     /// Upload messages with proper batching to avoid overwhelming the API
-    pub async fn upload_messages(&self, messages: &[Message]) -> Result<()> {
+    pub async fn upload_messages(&self, messages: &[StoredMessage]) -> Result<Vec<UploadResult>> {
         if messages.is_empty() {
-            return Ok(());
+            return Ok(vec![]);
         }
 
         const BATCH_SIZE: usize = 50; // Match the server's internal batch size
@@ -118,7 +132,7 @@ impl ApiClient {
 
         // Process messages in batches to avoid overwhelming the API
         let total = messages.len();
-        let mut uploaded = 0;
+        let mut results = Vec::with_capacity(messages.len());
 
         for (batch_num, chunk) in messages.chunks(BATCH_SIZE).enumerate() {
             info!(
@@ -133,7 +147,14 @@ impl ApiClient {
                 .client
                 .post(&url)
                 .header("x-api-key", &self.config.api_key)
-                .json(&json!({ "messages": chunk }))
+                .json(&json!({ "messages": chunk.iter().map(|stored| json!({
+                    "id": stored.source_message_id,
+                    "phone_iccid": stored.message.phone_iccid,
+                    "phone_number": stored.message.phone_number,
+                    "content": stored.message.content,
+                    "timestamp": stored.message.timestamp,
+                    "direction": stored.message.direction,
+                })).collect::<Vec<_>>() }))
                 .send()
                 .await
                 .context(format!("Failed to upload message batch {}", batch_num + 1))?;
@@ -152,7 +173,11 @@ impl ApiClient {
                 );
             }
 
-            uploaded += chunk.len();
+            let response: UploadResponse = response
+                .json()
+                .await
+                .context("Invalid message upload response")?;
+            results.extend(response.results);
 
             // Small delay between batches to avoid rate limiting
             if batch_num < messages.chunks(BATCH_SIZE).len() - 1 {
@@ -162,10 +187,10 @@ impl ApiClient {
 
         info!(
             "✅ Successfully uploaded {} messages in {} batches",
-            uploaded,
+            results.len(),
             (total + BATCH_SIZE - 1) / BATCH_SIZE
         );
-        Ok(())
+        Ok(results)
     }
 
     /// Get pending SMS to send

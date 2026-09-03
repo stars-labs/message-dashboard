@@ -25,18 +25,13 @@ function request(db) {
 
 function daemonSnapshot() {
   return JSON.stringify({
-    schema_version: 2,
+    schema_version: 3,
     session_id: 'session',
     version: '8.0.0',
     uptime_seconds: 600,
-    tasks: {
-      modem_reader: { last_success_age_seconds: 2 },
-      device_sync: { last_success_age_seconds: 2 },
-      outbound_poll: { last_success_age_seconds: 2 },
-      message_uploader: { last_success_age_seconds: 2 },
-    },
-    queue: { retryable: 0, attempts_exhausted: 0, stuck_uploading: 0 },
-    modems: { discovered: 94, responsive: 94, sim_readable: 94 },
+    last_message_read_success_age_seconds: 2,
+    last_upload_success_age_seconds: 2,
+    queue: { pending: 0, in_flight: 0, dead_letter: 0, oldest_unacknowledged_age_seconds: null },
   });
 }
 

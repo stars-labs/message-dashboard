@@ -43,6 +43,7 @@ function request(db, body) {
     env: { API_KEY: 'secret', DB: db },
     headers: new Headers({ 'X-API-Key': 'secret' }),
     json: async () => body,
+    ctx: { waitUntil() {} },
   };
 }
 
@@ -104,6 +105,24 @@ beforeEach(() => {
     BEGIN
       INSERT INTO modem_update_log (equipment_id) VALUES (NEW.equipment_id);
     END;
+    CREATE TABLE messages (
+      id TEXT PRIMARY KEY,
+      phone_iccid TEXT NOT NULL,
+      phone_number TEXT,
+      content TEXT NOT NULL,
+      timestamp TEXT NOT NULL,
+      type TEXT NOT NULL,
+      verification_code TEXT,
+      status TEXT NOT NULL,
+      created_at TEXT,
+      updated_at TEXT,
+      filter_status TEXT,
+      filter_rule_id INTEGER,
+      purpose TEXT,
+      balance_check_id TEXT
+    );
+    CREATE TABLE filter_rules (id INTEGER PRIMARY KEY, rule_type TEXT, pattern TEXT, is_active INTEGER);
+    CREATE TABLE keyword_tags (id INTEGER PRIMARY KEY, keyword TEXT, tag TEXT, color TEXT, priority INTEGER, case_sensitive INTEGER, whole_word INTEGER, is_active INTEGER);
   `);
 });
 
@@ -232,5 +251,36 @@ describe('device synchronization write suppression', () => {
 
     expect(response.status).toBe(400);
     expect(calls).toHaveLength(0);
+  });
+});
+
+describe('message upload idempotency', () => {
+  test('requires a daemon-assigned ID before touching D1', async () => {
+    const response = await controlHandler.uploadMessages(request(d1(sqlite), {
+      messages: [{ phone_iccid: 'iccid-a', content: 'hello', timestamp: '2026-09-03T00:00:00.000Z' }],
+    }));
+
+    expect(response.status).toBe(400);
+    expect(sqlite.query('SELECT COUNT(*) AS count FROM messages').get().count).toBe(0);
+  });
+
+  test('acknowledges retries by stable ID while preserving equal SMS payloads with distinct IDs', async () => {
+    const db = d1(sqlite);
+    const first = {
+      id: '018c1a55-73a0-7b9b-8c06-123456789abc',
+      phone_iccid: 'iccid-a', content: 'same SMS', timestamp: '2026-09-03T00:00:00.000Z',
+    };
+    const second = { ...first, id: '018c1a55-73a0-7b9b-8c06-123456789abd' };
+
+    const initial = await controlHandler.uploadMessages(request(db, { messages: [first, second] }));
+    expect(initial.status).toBe(200);
+    expect((await initial.json()).results).toEqual([
+      { id: first.id, status: 'stored' },
+      { id: second.id, status: 'stored' },
+    ]);
+
+    const retry = await controlHandler.uploadMessages(request(db, { messages: [first] }));
+    expect((await retry.json()).results).toEqual([{ id: first.id, status: 'already_stored' }]);
+    expect(sqlite.query('SELECT COUNT(*) AS count FROM messages').get().count).toBe(2);
   });
 });

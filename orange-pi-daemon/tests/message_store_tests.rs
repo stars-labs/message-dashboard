@@ -117,6 +117,47 @@ fn test_get_pending_messages_with_limit() {
 }
 
 #[test]
+fn test_claimed_message_keeps_its_stable_cloud_id_across_an_expired_lease() {
+    let store = MessageStore::new(":memory:").unwrap();
+    let msg = create_test_message("iccid_001", "Durable", "2024-01-01T12:00:00.000Z");
+    store.store_message(&msg, "modem_0", "at:1").unwrap();
+
+    let first = store.claim_messages(1, 0).unwrap();
+    assert_eq!(first.len(), 1);
+    assert!(!first[0].source_message_id.is_empty());
+
+    let reclaimed = store.claim_messages(1, 90).unwrap();
+    assert_eq!(reclaimed.len(), 1);
+    assert_eq!(reclaimed[0].source_message_id, first[0].source_message_id);
+
+    store.acknowledge_uploaded(&reclaimed).unwrap();
+    assert!(store.claim_messages(1, 90).unwrap().is_empty());
+}
+
+#[test]
+fn test_legacy_uploading_message_is_requeued_after_restart() {
+    let db_path = std::env::temp_dir().join(format!(
+        "message-store-legacy-uploading-{}.db",
+        uuid::Uuid::new_v4()
+    ));
+    let db_path = db_path.to_string_lossy().into_owned();
+
+    {
+        let store = MessageStore::new(&db_path).unwrap();
+        let msg = create_test_message("iccid_001", "Legacy upload", "2024-01-01T12:00:00.000Z");
+        store.store_message(&msg, "modem_0", "at:1").unwrap();
+        let pending = store.get_pending_messages(1).unwrap();
+        store.mark_uploading(&[pending[0].0]).unwrap();
+    }
+
+    let restarted_store = MessageStore::new(&db_path).unwrap();
+    let claimed = restarted_store.claim_messages(1, 90).unwrap();
+    assert_eq!(claimed.len(), 1);
+
+    std::fs::remove_file(db_path).unwrap();
+}
+
+#[test]
 fn test_mark_uploading() {
     let store = MessageStore::new(":memory:").unwrap();
 
@@ -601,17 +642,15 @@ fn test_cleanup_old_segments() {
 }
 
 #[test]
-fn test_cleanup_all_old_pending() {
+fn test_unacknowledged_messages_survive_retention() {
     let store = MessageStore::new(":memory:").unwrap();
 
     // Store a message (will be old immediately in this test context)
     let msg = create_test_message("iccid_001", "Old message", "2024-01-01T12:00:00.000Z");
     store.store_message(&msg, "modem_0", "at:1").unwrap();
 
-    // Since the message was just created, it won't be cleaned up yet
-    // This tests the function signature and basic behavior
-    let result = store.cleanup_all_old_pending();
-    assert!(result.is_ok());
+    assert_eq!(store.cleanup_old_messages().unwrap(), 0);
+    assert_eq!(store.get_pending_messages(10).unwrap().len(), 1);
 }
 
 #[test]

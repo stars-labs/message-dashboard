@@ -108,9 +108,7 @@ export const healthHandler = {
       
       const derived = deriveDaemonHealth(daemonHealth);
       const snapshot = derived.snapshot;
-      const actualModemCount = derived.status === 'offline'
-        ? 0
-        : (snapshot?.modems?.discovered ?? daemonHealth.modem_count ?? 0);
+      const actualModemCount = derived.status === 'offline' ? 0 : (daemonHealth.modem_count ?? 0);
       
       return json({
         daemon_id: daemonHealth.daemon_id,
@@ -126,9 +124,9 @@ export const healthHandler = {
         last_ip: daemonHealth.last_ip,
         version: snapshot?.version ?? daemonHealth.version,
         session_id: snapshot?.session_id ?? daemonHealth.current_session_id,
-        tasks: snapshot?.tasks ?? null,
+        tasks: null,
         queue: snapshot?.queue ?? null,
-        modems: snapshot?.modems ?? null,
+        modems: null,
         uptime_seconds: snapshot?.uptime_seconds ?? null,
         timestamp: new Date().toISOString(),
       });
