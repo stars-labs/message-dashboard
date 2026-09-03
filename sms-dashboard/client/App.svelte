@@ -57,33 +57,14 @@
     refreshBalanceChecksForView();
   }
   
-  // Centralized function to calculate online devices
+  // Centralized function to calculate online devices.
+  // Daemon liveness is tracked by the heartbeat (offline after 3 min silence),
+  // not by per-device updated_at. Device sync is incremental — updated_at only
+  // changes when modem state changes, so a time-window filter would exclude
+  // stable online devices. sim_status='active' is the sole online signal.
   function calculateOnlineDevices(phones) {
     if (!phones || phones.length === 0) return 0;
-    
-    const fiveMinutesAgo = Date.now() - (5 * 60 * 1000);
-    const onlinePhones = phones.filter(p => {
-      const hasOnlineStatus = p?.status === 'active';
-      if (!hasOnlineStatus) {
-        return false;
-      }
-      if (!p.updated_at) {
-        return false;
-      }
-      
-      try {
-        // D1 returns timestamps without timezone suffix — treat as UTC
-        const raw = p.updated_at.endsWith('Z') ? p.updated_at : p.updated_at + 'Z';
-        const updateTime = new Date(raw).getTime();
-        const isRecent = !isNaN(updateTime) && updateTime > fiveMinutesAgo;
-        return isRecent;
-      } catch (e) {
-        console.warn('Invalid date for phone:', p.iccid, p.updated_at);
-        return false;
-      }
-    });
-    
-    return onlinePhones.length;
+    return phones.filter(p => p?.status === 'active').length;
   }
   
   // Device counts come from the already-loaded phone list. Keeping a second D1
