@@ -117,14 +117,23 @@
     }
   }
 
-  // Resume an interrupted sweep. Safe to press repeatedly.
+  // Sweep all pending rows, looping until the server reports remaining === 0.
+  // Safe to call repeatedly; each call to the server is idempotent.
   async function continueSweep(reset = false) {
     saving = true;
     error = null;
     notice = null;
     try {
-      const result = await api.post(`/api/filters/reclassify${reset ? '?reset=1' : ''}`, {});
+      // First call: optionally reset the whole table to pending, then start sweep.
+      let result = await api.post(`/api/filters/reclassify${reset ? '?reset=1' : ''}`, {});
       reportOutcome(result, reset ? '已全部重新分类' : '继续处理完成');
+
+      // Keep going until the server has nothing left to process.
+      while ((result?.remaining ?? 0) > 0) {
+        result = await api.post('/api/filters/reclassify', {});
+        reportOutcome(result, '继续处理完成');
+      }
+
       await loadRules();
     } catch (err) {
       error = err.message || '重新分类失败';
