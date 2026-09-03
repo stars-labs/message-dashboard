@@ -414,44 +414,64 @@ async fn main() -> Result<()> {
                     match upload_client.upload_messages(&pending).await {
                         Ok(results) => {
                             let mut acknowledged = Vec::new();
-                            let mut rejected = Vec::new();
-                            for result in results {
+                            let mut dead_letter = Vec::new();
+                            let mut retryable = Vec::new();
+                            for result in &results {
                                 if let Some(message) = pending
                                     .iter()
-                                    .find(|message| message.source_message_id == result.id)
+                                    .find(|m| m.source_message_id == result.id)
                                 {
                                     match result.status.as_str() {
                                         "stored" | "already_stored" => {
                                             acknowledged.push(message.clone())
                                         }
                                         "rejected" if !result.retryable => {
-                                            rejected.push(message.clone())
+                                            dead_letter.push(message.clone())
                                         }
-                                        _ => {}
+                                        // retryable rejection or unrecognised status
+                                        _ => retryable.push(message.clone()),
                                     }
+                                } else {
+                                    // Worker returned an ID we didn't send — infrastructure bug,
+                                    // treat the whole batch as transient failure.
+                                    warn!(
+                                        "Worker returned unknown id {} in upload response",
+                                        result.id
+                                    );
+                                    let _ = upload_store.return_to_pending(
+                                        &pending,
+                                        "Worker returned unrecognised message id",
+                                    );
+                                    upload_health.write().await.set_in_flight_uploads(0);
+                                    consecutive_failures =
+                                        consecutive_failures.saturating_add(1);
+                                    continue;
                                 }
                             }
-                            let completed = acknowledged.len() + rejected.len();
-                            if completed != pending.len() {
-                                let _ = upload_store.return_to_pending(
-                                    &pending,
-                                    "incomplete or retryable upload acknowledgement",
-                                );
-                                upload_health.write().await.set_in_flight_uploads(0);
-                                consecutive_failures = consecutive_failures.saturating_add(1);
-                                continue;
-                            }
+                            // Finalize each group independently so one bad message
+                            // cannot block the rest of the batch.
                             if let Err(e) = upload_store.acknowledge_uploaded(&acknowledged) {
                                 error!("Failed to persist upload acknowledgement: {}", e);
                                 continue;
                             }
                             if let Err(e) = upload_store
-                                .reject_messages(&rejected, "Worker rejected message payload")
+                                .reject_messages(&dead_letter, "Worker permanently rejected message")
                             {
-                                error!("Failed to persist rejected message: {}", e);
+                                error!("Failed to persist dead-letter: {}", e);
                                 continue;
                             }
-                            info!("☁️  Uploader: acknowledged {} messages", acknowledged.len());
+                            if !retryable.is_empty() {
+                                let _ = upload_store.return_to_pending(
+                                    &retryable,
+                                    "Worker returned retryable rejection",
+                                );
+                            }
+                            info!(
+                                "☁️  Uploader: acknowledged {}, dead_letter {}, retryable {}",
+                                acknowledged.len(),
+                                dead_letter.len(),
+                                retryable.len()
+                            );
                             upload_health.write().await.set_in_flight_uploads(0);
                             // Reset backoff on success
                             consecutive_failures = 0;

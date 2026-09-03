@@ -294,31 +294,27 @@ export const controlHandler = {
       const filterRules = await loadActiveRules(env.DB);
       
       for (const msg of messages) {
+        const messageId = msg.id;
+        try {
           const phone_iccid = msg.phone_iccid;
-          const messageId = msg.id;
           // Fix timestamp - handle various formatting issues
           let timestamp = msg.timestamp || new Date().toISOString();
-          
+
           // First handle URL-encoded + signs (convert to space temporarily for processing)
           timestamp = timestamp.replace(/\+/g, ' ');
-          
+
           // Try to match timestamp with spaces or T separator
           const timeMatch = timestamp.match(/^(\d{4})-(\d{2})-(\d{2})[T\s]+(\d{1,2}):(\d{1,2}):(\d{1,2})(\.\d{3})?Z?$/);
           if (timeMatch) {
             const [_, year, month, day, hours, minutes, seconds, millis] = timeMatch;
-            // Pad single digits with leading zeros
-            const paddedHours = hours.padStart(2, '0');
-            const paddedMinutes = minutes.padStart(2, '0');
-            const paddedSeconds = seconds.padStart(2, '0');
-            timestamp = `${year}-${month}-${day}T${paddedHours}:${paddedMinutes}:${paddedSeconds}${millis || '.000'}Z`;
+            timestamp = `${year}-${month}-${day}T${hours.padStart(2, '0')}:${minutes.padStart(2, '0')}:${seconds.padStart(2, '0')}${millis || '.000'}Z`;
           } else {
-            // Remove all remaining spaces and ensure proper format
             timestamp = timestamp.replace(/\s+/g, '');
             if (timestamp.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?$/) && !timestamp.endsWith('Z')) {
               timestamp += 'Z';
             }
           }
-          
+
           const phoneNumber = msg.phone_number || null;
           const balanceCheck = await findPendingBalanceCheck(env.DB, {
             phone_iccid,
@@ -328,10 +324,10 @@ export const controlHandler = {
           const verificationCode = balanceCheck
             ? null
             : extractVerificationCode(msg.content);
-          
+
           const record = {
             id: messageId,
-            phone_iccid: phone_iccid,
+            phone_iccid,
             phone_number: phoneNumber,
             content: msg.content,
             timestamp,
@@ -372,6 +368,13 @@ export const controlHandler = {
           // Only a newly inserted message may trigger side effects.
           if (balanceCheck) await linkBalanceReply(env.DB, balanceCheck, record);
           else newMessages.push(record);
+        } catch (err) {
+          // Per-message failure must not abort the batch. The daemon retries
+          // transient errors; permanent input errors become dead_letter locally.
+          const retryable = !(err instanceof TypeError);
+          console.error(`[control.js] Message ${messageId} failed (retryable=${retryable}):`, err);
+          results.push({ id: messageId, status: 'rejected', retryable });
+        }
       }
       
       // Process new messages with AI and keywords (async, don't wait)
