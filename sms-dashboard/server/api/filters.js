@@ -11,7 +11,6 @@ import {
   sweepPending,
   markPendingForRule,
   releaseRowsAttributedTo,
-  markAllPending,
   countPending,
 } from '../utils/spam-backfill.js';
 
@@ -212,21 +211,16 @@ export function setupFilterRoutes(router) {
     }
   });
 
-  // Re-judge everything. Also the endpoint that backfills messages predating the
-  // feature. Safe to call repeatedly: it is idempotent and resumable.
+  // Continue sweeping rows already marked pending. Safe to call repeatedly.
+  // Rule mutations (create/update/delete) mark the affected rows pending before
+  // returning; this endpoint just drains whatever is queued.
   router.post('/api/filters/reclassify', async (request, env, ctx) => {
     const blocked = await gate(request, env, ctx, 'filters.write');
     if (blocked) return blocked;
 
     try {
-      const url = new URL(request.url);
-      // Default resumes an interrupted sweep; ?reset=1 re-judges the whole table.
-      const queued = url.searchParams.get('reset') === '1'
-        ? await markAllPending(env.DB)
-        : 0;
-
       const sweep = await sweepPending(env.DB);
-      return json({ success: true, queued, ...sweep });
+      return json({ success: true, queued: 0, ...sweep });
     } catch (error) {
       console.error('[filters] reclassify failed:', error);
       return json({ error: 'Failed to reclassify messages' }, 500);

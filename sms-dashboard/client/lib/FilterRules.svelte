@@ -117,18 +117,16 @@
     }
   }
 
-  // Sweep all pending rows, looping until the server reports remaining === 0.
-  // Safe to call repeatedly; each call to the server is idempotent.
-  async function continueSweep(reset = false) {
+  // Drain rows already marked pending by rule mutations. Loops until the server
+  // reports remaining === 0. Safe to call repeatedly; idempotent.
+  async function continueSweep() {
     saving = true;
     error = null;
     notice = null;
     try {
-      // First call: optionally reset the whole table to pending, then start sweep.
-      let result = await api.post(`/api/filters/reclassify${reset ? '?reset=1' : ''}`, {});
-      reportOutcome(result, reset ? '已全部重新分类' : '继续处理完成');
+      let result = await api.post('/api/filters/reclassify', {});
+      reportOutcome(result, '继续处理完成');
 
-      // Keep going until the server has nothing left to process.
       while ((result?.remaining ?? 0) > 0) {
         result = await api.post('/api/filters/reclassify', {});
         reportOutcome(result, '继续处理完成');
@@ -163,14 +161,16 @@
         <h2 class="text-lg font-semibold text-stone-900">垃圾过滤规则</h2>
         <p class="text-sm text-stone-500 mt-1">命中规则的短信默认不显示，可在消息列表点「已过滤 N 条」查看。</p>
       </div>
-      <div class="flex items-center gap-2 shrink-0">
-        <button
-          onclick={() => continueSweep(true)}
-          disabled={saving}
-          class="w-full sm:w-auto px-3 py-2 sm:py-1.5 text-sm rounded-lg border border-stone-300 text-stone-600 hover:bg-stone-100 disabled:opacity-50"
-          title="按当前规则重新判定所有历史消息"
-        >全部重新分类</button>
-      </div>
+      {#if pending > 0}
+        <div class="flex items-center gap-2 shrink-0">
+          <button
+            onclick={continueSweep}
+            disabled={saving}
+            class="w-full sm:w-auto px-3 py-2 sm:py-1.5 text-sm rounded-lg border border-stone-300 text-stone-600 hover:bg-stone-100 disabled:opacity-50"
+            title="继续处理待判定的消息"
+          >继续处理</button>
+        </div>
+      {/if}
     </div>
 
     <!-- Reclassification progress — permanent UI, not a toast.
@@ -179,19 +179,15 @@
     {#if pending > 0}
       <div class="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-xl">
         <div class="flex items-center justify-between mb-1.5">
-          <span class="text-sm font-medium text-amber-800">正在重新判定历史短信</span>
-          <span class="text-xs font-mono text-amber-700 tabular-nums">{pending} 条待处理</span>
+          <span class="text-sm font-medium text-amber-800">待判定</span>
+          <span class="text-xs font-mono text-amber-700 tabular-nums">{pending} 条</span>
         </div>
         <div class="h-1.5 bg-amber-200 rounded-full overflow-hidden">
           <div class="h-full bg-amber-500 rounded-full animate-pulse" style="width: 60%"></div>
         </div>
-        <div class="flex items-center justify-between mt-2">
-          <span class="text-xs text-amber-700">{notice || '处理中，完成后会停止'}</span>
-          <button onclick={() => continueSweep(false)} disabled={saving}
-            class="text-xs font-medium text-amber-800 hover:underline disabled:opacity-50">
-            继续处理 →
-          </button>
-        </div>
+        {#if notice}
+          <p class="text-xs text-amber-700 mt-2">{notice}</p>
+        {/if}
       </div>
     {/if}
 
