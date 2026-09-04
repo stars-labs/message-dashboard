@@ -4,7 +4,6 @@ const handlerFiles = [
   './control.js',
   './health.js',
   '../api/keywords.js',
-  './keywords.js',
 ];
 
 describe('database schema ownership', () => {

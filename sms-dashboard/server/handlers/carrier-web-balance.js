@@ -136,6 +136,36 @@ export async function reconcileTerminalWebBalanceJobs(db) {
   return { reconciled: Number(results?.[1]?.meta?.changes ?? 0) };
 }
 
+export async function maintainWebBalanceJobs(db) {
+  const expiredReason = 'Browser runner lease expired after login flow started';
+  const expired = await db.batch([
+    db.prepare(`
+      UPDATE sim_balance_checks
+      SET status = 'failed', completed_at = CURRENT_TIMESTAMP,
+          error = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE status = 'queued' AND id IN (
+        SELECT check_id FROM sim_balance_web_jobs
+        WHERE status IN ('leased', 'awaiting_otp', 'authenticating', 'querying',
+                         'human_verification_required')
+          AND datetime(lease_expires_at) < datetime('now')
+      )
+    `).bind(expiredReason),
+    db.prepare(`
+      UPDATE sim_balance_web_jobs
+      SET status = 'failed', lease_owner = NULL, lease_expires_at = NULL,
+          last_error = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE status IN ('leased', 'awaiting_otp', 'authenticating', 'querying',
+                       'human_verification_required')
+        AND datetime(lease_expires_at) < datetime('now')
+    `).bind(expiredReason),
+  ]);
+  const terminal = await reconcileTerminalWebBalanceJobs(db);
+  return {
+    expired: Number(expired?.[0]?.meta?.changes ?? 0),
+    reconciled: terminal.reconciled,
+  };
+}
+
 async function requireLease(request, body, auth) {
   if (!body || typeof body.runner_id !== 'string') {
     return { response: json({ error: 'runner_id is required' }, 400) };
@@ -163,31 +193,6 @@ export const carrierWebBalanceHandler = {
     const runnerId = new URL(request.url).searchParams.get('runner_id')?.trim();
     if (!runnerId || runnerId.length > 200) return json({ error: 'runner_id is required' }, 400);
 
-    await reconcileTerminalWebBalanceJobs(request.env.DB);
-
-    const expiredReason = 'Browser runner lease expired after login flow started';
-    await request.env.DB.batch([
-      request.env.DB.prepare(`
-        UPDATE sim_balance_checks
-        SET status = 'failed', completed_at = CURRENT_TIMESTAMP,
-            error = ?, updated_at = CURRENT_TIMESTAMP
-        WHERE status = 'queued' AND id IN (
-          SELECT check_id FROM sim_balance_web_jobs
-          WHERE status IN ('leased', 'awaiting_otp', 'authenticating', 'querying',
-                           'human_verification_required')
-            AND datetime(lease_expires_at) < datetime('now')
-        )
-      `).bind(expiredReason),
-      request.env.DB.prepare(`
-        UPDATE sim_balance_web_jobs
-        SET status = 'failed', lease_owner = NULL, lease_expires_at = NULL,
-            last_error = ?, updated_at = CURRENT_TIMESTAMP
-        WHERE status IN ('leased', 'awaiting_otp', 'authenticating', 'querying',
-                         'human_verification_required')
-          AND datetime(lease_expires_at) < datetime('now')
-      `).bind(expiredReason),
-    ]);
-
     const leased = await request.env.DB.prepare(`
       UPDATE sim_balance_web_jobs
       SET status = 'leased', lease_owner = ?,
@@ -196,14 +201,14 @@ export const carrierWebBalanceHandler = {
           human_reason = NULL, updated_at = CURRENT_TIMESTAMP
       WHERE id = (
         SELECT j.id
-        FROM sim_balance_web_jobs j
+        FROM sim_balance_web_jobs j INDEXED BY idx_balance_web_jobs_pending_claim
         JOIN sim_balance_checks c ON c.id = j.check_id
         WHERE j.status = 'pending'
           AND j.attempts < 3
           AND c.status = 'queued'
           AND ((? = 'auth0_device' AND c.requested_by_subject = ?)
             OR (? = 'legacy_api_key' AND c.requested_by_subject IS NULL))
-        ORDER BY datetime(j.created_at), j.id
+        ORDER BY j.created_at, j.id
         LIMIT 1
       )
       RETURNING id
@@ -288,21 +293,54 @@ export const carrierWebBalanceHandler = {
     if (response) return response;
     if (!job.otp_requested_at) return json({ error: 'OTP has not been requested' }, 409);
 
-    const result = await request.env.DB.prepare(`
+    const url = new URL(request.url);
+    const afterCreatedAt = url.searchParams.get('after_created_at')?.trim() || null;
+    const afterSourceMessageId = url.searchParams.get('after_source_message_id')?.trim() || null;
+    const hasCursor = Boolean(
+      afterCreatedAt
+      && afterSourceMessageId
+      && afterCreatedAt.length <= 40
+      && afterSourceMessageId.length <= 200
+    );
+    const cursorPredicate = hasCursor
+      ? 'AND (created_at > ? OR (created_at = ? AND id > ?))'
+      : '';
+    const statement = request.env.DB.prepare(`
       SELECT id, phone_number, content, verification_code, created_at
       FROM messages
       WHERE phone_iccid = ? AND type = 'received'
         AND verification_code IS NOT NULL
-        AND datetime(created_at) >= datetime(?)
-      ORDER BY datetime(created_at), rowid
+        AND created_at >= ?
+        ${cursorPredicate}
+      ORDER BY created_at, id
       LIMIT 20
-    `).bind(job.sim_iccid, job.otp_requested_at).all();
+    `);
+    const result = await (hasCursor
+      ? statement.bind(
+        job.sim_iccid,
+        job.otp_requested_at,
+        afterCreatedAt,
+        afterCreatedAt,
+        afterSourceMessageId,
+      )
+      : statement.bind(job.sim_iccid, job.otp_requested_at)).all();
     const provider = PROVIDERS[job.provider];
-    const message = provider && (result.results || []).find((candidate) =>
+    const candidates = result.results || [];
+    const message = provider && candidates.find((candidate) =>
       expectedSenderMatches(candidate.phone_number, job.expected_senders)
       && provider.otpContext.test(candidate.content || '')
     );
-    if (!message) return new Response(null, { status: 204 });
+    if (!message) {
+      const last = candidates.at(-1);
+      if (!last) return new Response(null, { status: 204 });
+      return json({
+        code: null,
+        cursor: {
+          created_at: last.created_at,
+          source_message_id: last.id,
+        },
+      });
+    }
 
     await request.env.DB.batch([
       request.env.DB.prepare(`
@@ -329,19 +367,20 @@ export const carrierWebBalanceHandler = {
     const human = body.status === 'human_verification_required';
     const leaseSeconds = human ? HUMAN_LEASE_SECONDS : NORMAL_LEASE_SECONDS;
     const reason = human ? String(body.reason || 'Official site requested human verification').slice(0, 500) : null;
-    await request.env.DB.batch([
-      request.env.DB.prepare(`
+    const statements = [request.env.DB.prepare(`
         UPDATE sim_balance_web_jobs
         SET status = ?, human_reason = ?,
             lease_expires_at = datetime('now', '+' || ? || ' seconds'),
             updated_at = CURRENT_TIMESTAMP
         WHERE id = ? AND lease_owner = ?
-      `).bind(body.status, reason, leaseSeconds, job.id, body.runner_id),
-      eventStatement(request.env.DB, job.id, human ? 'human_verification_required' : 'heartbeat', {
+      `).bind(body.status, reason, leaseSeconds, job.id, body.runner_id)];
+    if (job.status !== body.status || job.human_reason !== reason) {
+      statements.push(eventStatement(request.env.DB, job.id, body.status, {
         status: body.status,
         ...(reason ? { reason } : {}),
-      }),
-    ]);
+      }));
+    }
+    await request.env.DB.batch(statements);
     return json({ success: true, status: body.status, lease_seconds: leaseSeconds });
   },
 

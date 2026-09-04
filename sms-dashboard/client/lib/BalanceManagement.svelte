@@ -18,6 +18,7 @@
     buildBalanceRows,
     countBalanceHealth,
   } from './balance-overview.js';
+  import { activeBalanceCheckIds, balancePollDelay } from './balance-polling.js';
 
   let {
     phoneNumbers = [],
@@ -55,6 +56,9 @@
   let selectedBill = $state(null);
   let billDetailLoading = $state(false);
   let billActionBusy = $state(false);
+  let activePollTimer = null;
+  let fastPollingUntil = Date.now() + 15_000;
+
 
   let rows = $derived(buildBalanceRows(phoneNumbers, balanceChecks));
   let carrierOptions = $derived.by(() => buildCarrierOptions([
@@ -242,7 +246,24 @@
     loadRunnerStatus();
     loadBillingAccounts();
     const interval = setInterval(loadRunnerStatus, 30_000);
-    return () => clearInterval(interval);
+    async function pollActiveQueries() {
+      try {
+        const activeIds = activeBalanceCheckIds(balanceChecks);
+        if (activeIds.length && document.visibilityState === 'visible') {
+          await onQueriesChanged?.({ activeIds });
+        }
+      } catch (error) {
+        console.warn('Failed to refresh active balance queries:', error);
+      } finally {
+        const delay = balancePollDelay(Date.now(), fastPollingUntil);
+        activePollTimer = setTimeout(pollActiveQueries, delay);
+      }
+    }
+    activePollTimer = setTimeout(pollActiveQueries, 2_000);
+    return () => {
+      clearInterval(interval);
+      clearTimeout(activePollTimer);
+    };
   });
 
   async function loadBillingAccounts() {
@@ -517,10 +538,12 @@
     if (manageLoading) queryingIccid = row.phone.iccid;
     notice = null;
     try {
-      await api.post('/api/balance-checks/query', { phone_iccid: row.phone.iccid });
+      const result = await api.post('/api/balance-checks/query', { phone_iccid: row.phone.iccid });
       singlePreview = null;
       notice = { type: 'success', message: `${formatCardNumber(row.phone.sim_index)} 已加入余额查询队列` };
-      await onQueriesChanged?.();
+      fastPollingUntil = Date.now() + 15_000;
+      await onQueriesChanged?.({ queuedChecks: result.check ? [result.check] : [] });
+      await loadRunnerStatus();
     } catch (error) {
       notice = { type: 'error', message: error.message || '余额查询创建失败' };
     } finally {
@@ -580,7 +603,9 @@
         type: result.summary?.failed_to_queue ? 'error' : 'success',
         message: `已加入 ${result.summary?.queued || 0} 张卡${result.summary?.failed_to_queue ? `，${result.summary.failed_to_queue} 张失败` : ''}`,
       };
-      await onQueriesChanged?.();
+      fastPollingUntil = Date.now() + 15_000;
+      await onQueriesChanged?.({ queuedChecks: result.checks || [] });
+      await loadRunnerStatus();
     } catch (error) {
       notice = { type: 'error', message: error.message || '批量查询创建失败' };
     } finally {

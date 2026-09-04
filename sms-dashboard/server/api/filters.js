@@ -1,18 +1,13 @@
 // Spam/marketing filter rule management.
 //
-// Every mutation queues the affected messages for re-judgement and then runs one
-// bounded sweep, returning how many rows are still pending so the caller can
-// keep going. Nothing here decides what spam is — see utils/spam-filter.js.
+// Rule mutations affect new ingestion only. Historical changes are a separate,
+// explicitly requested, one-page-at-a-time operation. Nothing here decides what
+// spam is — see utils/spam-filter.js.
 
 import { handleAuth0 } from '../middleware/auth0.js';
 import { requirePermission, enrichUserPermissions } from '../middleware/rbac.js';
 import { RULE_TYPE, normalizeSender } from '../utils/spam-filter.js';
-import {
-  sweepPending,
-  markPendingForRule,
-  releaseRowsAttributedTo,
-  countPending,
-} from '../utils/spam-backfill.js';
+import { processRuleHistoryPage } from '../utils/filter-history.js';
 
 const VALID_RULE_TYPES = Object.values(RULE_TYPE);
 
@@ -79,31 +74,32 @@ function isUniqueViolation(error) {
   return /UNIQUE constraint failed/i.test(error?.message || '');
 }
 
+export async function listFilterRules(db) {
+  const { results } = await db.prepare(
+    `SELECT *
+     FROM filter_rules
+     ORDER BY rule_type, id`
+  ).all();
+
+  return { filters: results || [] };
+}
+
 export function setupFilterRoutes(router) {
-  // List rules, with how many messages each is currently hiding.
+  // List rule metadata only. Historical hit counts require reading every matched
+  // message and are not part of the dashboard's operational rule contract.
   router.get('/api/filters', async (request, env, ctx) => {
     const blocked = await gate(request, env, ctx, 'filters.read');
     if (blocked) return blocked;
 
     try {
-      const [{ results }, pending] = await Promise.all([
-        env.DB.prepare(
-          `SELECT r.*,
-                  (SELECT COUNT(*) FROM messages m WHERE m.filter_rule_id = r.id) AS hit_count
-           FROM filter_rules r
-           ORDER BY r.rule_type, r.id`
-        ).all(),
-        countPending(env.DB),
-      ]);
-
-      return json({ filters: results || [], pending });
+      return json(await listFilterRules(env.DB));
     } catch (error) {
       console.error('[filters] list failed:', error);
       return json({ error: 'Failed to fetch filter rules' }, 500);
     }
   });
 
-  // Create a rule, then judge the messages it could newly apply to.
+  // Create a prospective rule. Existing messages remain historical facts.
   router.post('/api/filters', async (request, env, ctx) => {
     const blocked = await gate(request, env, ctx, 'filters.write');
     if (blocked) return blocked;
@@ -125,10 +121,7 @@ export function setupFilterRoutes(router) {
         )
         .first();
 
-      const queued = await markPendingForRule(env.DB, inserted);
-      const sweep = await sweepPending(env.DB);
-
-      return json({ filter: inserted, queued, ...sweep }, 201);
+      return json({ filter: inserted }, 201);
     } catch (error) {
       if (isUniqueViolation(error)) {
         return json({ error: 'That rule already exists' }, 409);
@@ -138,8 +131,7 @@ export function setupFilterRoutes(router) {
     }
   });
 
-  // Update a rule. Anything it currently hides is released and re-judged, because
-  // the edit may mean it no longer applies — and those rows may match another rule.
+  // Matching identity is immutable. Notes and prospective active state may change.
   router.put('/api/filters/:id', async (request, env, ctx) => {
     const blocked = await gate(request, env, ctx, 'filters.write');
     if (blocked) return blocked;
@@ -152,9 +144,18 @@ export function setupFilterRoutes(router) {
       if (!existing) return json({ error: 'Filter rule not found' }, 404);
 
       const body = await request.json();
+      if (
+        (body.rule_type !== undefined && body.rule_type !== existing.rule_type)
+        || (
+          body.pattern !== undefined
+          && (typeof body.pattern !== 'string' || body.pattern.trim() !== existing.pattern)
+        )
+      ) {
+        return json({ error: 'Rule type and pattern are immutable; create a new rule instead' }, 400);
+      }
       const validated = validateRule({
-        rule_type: body.rule_type ?? existing.rule_type,
-        pattern: body.pattern ?? existing.pattern,
+        rule_type: existing.rule_type,
+        pattern: existing.pattern,
         note: body.note ?? existing.note,
       });
       if (validated.error) return json({ error: validated.error }, 400);
@@ -170,13 +171,7 @@ export function setupFilterRoutes(router) {
         .bind(validated.rule_type, validated.pattern, validated.note, isActive, id)
         .first();
 
-      // Release first: what this rule used to hide may no longer qualify.
-      const released = await releaseRowsAttributedTo(env.DB, id);
-      // Then queue what it now covers, if it is still switched on.
-      const queued = isActive ? await markPendingForRule(env.DB, updated) : 0;
-      const sweep = await sweepPending(env.DB);
-
-      return json({ filter: updated, released, queued, ...sweep });
+      return json({ filter: updated });
     } catch (error) {
       if (isUniqueViolation(error)) {
         return json({ error: 'That rule already exists' }, 409);
@@ -186,44 +181,75 @@ export function setupFilterRoutes(router) {
     }
   });
 
-  // Delete a rule and re-judge whatever it was hiding.
+  // A referenced rule is historical provenance and cannot be physically deleted.
   router.delete('/api/filters/:id', async (request, env, ctx) => {
     const blocked = await gate(request, env, ctx, 'filters.delete');
     if (blocked) return blocked;
 
     const id = Number(request.params.id);
     try {
-      // Release BEFORE the delete. filter_rule_id is ON DELETE SET NULL, so
-      // deleting first would erase the attribution and leave those rows hidden
-      // with no recoverable reason.
-      const released = await releaseRowsAttributedTo(env.DB, id);
+      const referenced = await env.DB.prepare(
+        `SELECT 1 FROM messages WHERE filter_rule_id = ? LIMIT 1`
+      ).bind(id).first();
+      if (referenced) {
+        return json({ error: 'Rule has historical messages; deactivate it instead' }, 409);
+      }
 
       const result = await env.DB.prepare(`DELETE FROM filter_rules WHERE id = ?`)
         .bind(id)
         .run();
       if (!result?.meta?.changes) return json({ error: 'Filter rule not found' }, 404);
 
-      const sweep = await sweepPending(env.DB);
-      return json({ success: true, released, ...sweep });
+      return json({ success: true });
     } catch (error) {
       console.error('[filters] delete failed:', error);
       return json({ error: 'Failed to delete filter rule' }, 500);
     }
   });
 
-  // Continue sweeping rows already marked pending. Safe to call repeatedly.
-  // Rule mutations (create/update/delete) mark the affected rows pending before
-  // returning; this endpoint just drains whatever is queued.
-  router.post('/api/filters/reclassify', async (request, env, ctx) => {
+  // Historical changes are explicit, bounded, and one page per operator action.
+  router.post('/api/filters/:id/history', async (request, env, ctx) => {
     const blocked = await gate(request, env, ctx, 'filters.write');
     if (blocked) return blocked;
 
+    const id = Number(request.params.id);
     try {
-      const sweep = await sweepPending(env.DB);
-      return json({ success: true, queued: 0, ...sweep });
+      const rule = await env.DB.prepare(`SELECT * FROM filter_rules WHERE id = ?`)
+        .bind(id)
+        .first();
+      if (!rule) return json({ error: 'Filter rule not found' }, 404);
+
+      const body = await request.json();
+      const since = new Date(body.since);
+      const until = new Date(body.until);
+      if (
+        Number.isNaN(since.getTime())
+        || Number.isNaN(until.getTime())
+        || since > until
+      ) {
+        return json({ error: 'A valid history time range is required' }, 400);
+      }
+      const cursor = body.cursor || null;
+      if (
+        cursor
+        && (
+          typeof cursor.created_at !== 'string'
+          || typeof cursor.id !== 'string'
+          || Number.isNaN(new Date(`${cursor.created_at}Z`).getTime())
+        )
+      ) {
+        return json({ error: 'Invalid history cursor' }, 400);
+      }
+
+      const result = await processRuleHistoryPage(env.DB, rule, {
+        since: since.toISOString(),
+        until: until.toISOString(),
+        cursor,
+      });
+      return json(result);
     } catch (error) {
-      console.error('[filters] reclassify failed:', error);
-      return json({ error: 'Failed to reclassify messages' }, 500);
+      console.error('[filters] history processing failed:', error);
+      return json({ error: 'Failed to process filter history' }, 500);
     }
   });
 }

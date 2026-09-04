@@ -24,7 +24,7 @@ describe('carrier browser capability', () => {
     expect(await capability.runOne()).toEqual({ handled: true, retryDelay: 0 });
     expect(jobs).toEqual([{ id: 'web-job-1', sim_index: 36 }]);
     expect(paths).toEqual(['/api/control/carrier-web-balance/jobs/claim?runner_id=browser-session']);
-    expect(states).toEqual([['ready'], ['busy', 'web-job-1'], ['ready']]);
+    expect(states).toEqual([['busy', 'web-job-1'], ['ready']]);
   });
 
   test('does not launch a browser when the queue is empty', async () => {
@@ -52,6 +52,6 @@ describe('carrier browser capability', () => {
     });
 
     await expect(capability.runOne()).rejects.toThrow('browser closed');
-    expect(states).toEqual([['ready'], ['busy', 'web-job-2'], ['ready']]);
+    expect(states).toEqual([['busy', 'web-job-2'], ['ready']]);
   });
 });

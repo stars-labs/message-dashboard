@@ -60,6 +60,7 @@ describe('balance timeout maintenance D1 flow', () => {
       CREATE TABLE sim_balance_checks (
         id TEXT PRIMARY KEY, sim_iccid TEXT, profile_id TEXT,
         requested_at TIMESTAMP, sent_at TIMESTAMP, completed_at TIMESTAMP,
+        deadline_at TIMESTAMP,
         status TEXT, outbound_message_id TEXT, response_message_id TEXT,
         response_sender TEXT, raw_response TEXT, error TEXT, parser_version TEXT,
         step_index INTEGER DEFAULT 0, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -83,17 +84,19 @@ describe('balance timeout maintenance D1 flow', () => {
         '[]', '{"id":"readonly-balance-menu","max_turns":4}', '12580'
       );
       INSERT INTO sim_balance_checks (
-        id, sim_iccid, profile_id, requested_at, sent_at, completed_at, status,
+        id, sim_iccid, profile_id, requested_at, sent_at, completed_at, deadline_at, status,
         outbound_message_id, error, parser_version
       ) VALUES
         ('check-failed', 'iccid-s66', 'hk-cmhk-sms-menu-v1',
-         '2026-08-24 07:48:54', NULL, '2026-08-24 07:49:05', 'failed',
+         '2026-08-24 07:48:54', NULL, '2026-08-24 07:49:05', NULL, 'failed',
          'sent-failed', 'SMS submission was not confirmed', 'hk-cmhk-balance-v1'),
         ('check-stale', 'iccid-s66', 'hk-cmhk-sms-menu-v1',
          datetime('now', '-40 minutes'), datetime('now', '-40 minutes'), NULL,
+         datetime('now', '-10 minutes'),
          'awaiting_response', 'sent-stale', NULL, 'hk-cmhk-balance-v1'),
         ('check-fresh', 'iccid-s66', 'hk-cmhk-sms-menu-v1',
          datetime('now', '-5 minutes'), datetime('now', '-5 minutes'), NULL,
+         datetime('now', '+25 minutes'),
          'awaiting_response', 'sent-fresh', NULL, 'hk-cmhk-balance-v1');
       INSERT INTO messages (
         id, phone_iccid, phone_number, content, timestamp, type, recipient,

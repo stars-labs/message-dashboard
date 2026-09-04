@@ -1,5 +1,5 @@
 import { extractVerificationCode } from '../utils/verification';
-import { findKeywordMatches } from '../api/keywords.js';
+import { findKeywordMatches } from '../utils/keyword-match.js';
 import { classifyMessage, loadActiveRules } from '../utils/spam-filter.js';
 import { normalizeHealthSnapshot } from '../utils/daemon-health.js';
 import {

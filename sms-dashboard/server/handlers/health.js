@@ -98,18 +98,14 @@ export const healthHandler = {
           label: derived.label,
           message: derived.reasons[0],
           reasons: derived.reasons,
-          modem_count: 0,
-          tasks: null,
-          queue: null,
-          modems: null,
+          snapshot: null,
           timestamp: new Date().toISOString(),
         });
       }
       
       const derived = deriveDaemonHealth(daemonHealth);
       const snapshot = derived.snapshot;
-      const actualModemCount = derived.status === 'offline' ? 0 : (daemonHealth.modem_count ?? 0);
-      
+
       return json({
         daemon_id: daemonHealth.daemon_id,
         status: derived.status,
@@ -118,16 +114,7 @@ export const healthHandler = {
         seconds_since_heartbeat: daemonHealth.seconds_since_heartbeat,
         message: derived.reasons[0] || '正常运行中',
         reasons: derived.reasons,
-        modem_count: actualModemCount,
-        error_count: daemonHealth.error_count,
-        last_error: daemonHealth.last_error,
-        last_ip: daemonHealth.last_ip,
-        version: snapshot?.version ?? daemonHealth.version,
-        session_id: snapshot?.session_id ?? daemonHealth.current_session_id,
-        tasks: null,
-        queue: snapshot?.queue ?? null,
-        modems: null,
-        uptime_seconds: snapshot?.uptime_seconds ?? null,
+        snapshot,
         timestamp: new Date().toISOString(),
       });
     } catch (error) {

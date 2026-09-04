@@ -5,22 +5,32 @@ export function createRunnerPresence({
   runnerId,
   sessionId,
   displayName,
-  capability,
+  capabilities,
   version = 'development',
   platform,
   heartbeatInterval = HEARTBEAT_INTERVAL_MS,
+  setIntervalFn = setInterval,
+  clearIntervalFn = clearInterval,
   logger = console,
 }) {
-  let state = 'starting';
-  let currentJobId = null;
-  let detailCode = null;
+  const states = new Map(capabilities.map((capability) => [capability, {
+    capability,
+    state: 'starting',
+    current_job_id: null,
+    concurrency: 1,
+    detail_code: null,
+  }]));
   let timer = null;
-  let inFlight = null;
+  let pending = Promise.resolve();
   let lastError = null;
 
-  async function send() {
-    if (inFlight) return inFlight;
-    inFlight = (async () => {
+  function snapshots(selected = states.keys()) {
+    return [...selected].map((capability) => ({ ...states.get(capability) }));
+  }
+
+  function send(selected = []) {
+    const capabilitySnapshots = snapshots(selected);
+    pending = pending.then(async () => {
       const response = await controlClient.request('/api/control/balance-runners/heartbeat', {
         method: 'POST',
         body: JSON.stringify({
@@ -29,47 +39,52 @@ export function createRunnerPresence({
           display_name: displayName,
           platform,
           version,
-          capabilities: [{
-            capability,
-            state,
-            current_job_id: currentJobId,
-            concurrency: 1,
-            detail_code: detailCode,
-          }],
+          capabilities: capabilitySnapshots,
         }),
       });
       if (!response.ok) throw new Error(`heartbeat rejected (${response.status})`);
       lastError = null;
-    })().catch((error) => {
+    }).catch((error) => {
       if (error.message !== lastError) {
         logger.error(`Runner presence unavailable: ${error.message}`);
         lastError = error.message;
       }
-    }).finally(() => {
-      inFlight = null;
     });
-    return inFlight;
+    return pending;
   }
 
   return Object.freeze({
     async start() {
-      await send();
-      timer = setInterval(send, heartbeatInterval);
+      await send(states.keys());
+      timer = setIntervalFn(() => send(), heartbeatInterval);
       timer.unref?.();
     },
-    async set(nextState, jobId = null, nextDetailCode = null) {
-      state = nextState;
-      currentJobId = jobId;
-      detailCode = nextDetailCode;
-      await send();
+    async set(capability, nextState, jobId = null, nextDetailCode = null) {
+      const current = states.get(capability);
+      if (!current) throw new Error(`Unknown runner capability: ${capability}`);
+      if (current.state === nextState
+        && current.current_job_id === jobId
+        && current.detail_code === nextDetailCode) return;
+      states.set(capability, {
+        ...current,
+        state: nextState,
+        current_job_id: jobId,
+        detail_code: nextDetailCode,
+      });
+      await send([capability]);
     },
     async stop() {
-      if (timer) clearInterval(timer);
+      if (timer) clearIntervalFn(timer);
       timer = null;
-      state = 'stopping';
-      currentJobId = null;
-      detailCode = null;
-      await send();
+      for (const [capability, current] of states) {
+        states.set(capability, {
+          ...current,
+          state: 'stopping',
+          current_job_id: null,
+          detail_code: null,
+        });
+      }
+      await send(states.keys());
     },
   });
 }

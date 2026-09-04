@@ -106,6 +106,30 @@ describe('balance runner control plane', () => {
     `).get()).toEqual({ capability: 'sms_ai', state: 'ready', session_id: 'session-1' });
   });
 
+  test('refreshes installation liveness without rewriting unchanged capabilities', async () => {
+    sqlite.exec(`
+      INSERT INTO balance_runner_installations (
+        id, display_name, auth_mode, platform, version, last_heartbeat
+      ) VALUES ('runner-1', 'Runner', 'legacy_api_key', 'darwin', '1', datetime('now', '-120 seconds'));
+      INSERT INTO balance_runner_capabilities (
+        runner_id, capability, state, session_id, last_heartbeat
+      ) VALUES ('runner-1', 'sms_ai', 'ready', 'session-1', datetime('now', '-120 seconds'));
+    `);
+
+    const response = await balanceRunnersHandler.heartbeat(request(db, {
+      runner_id: 'runner-1', session_id: 'session-1', display_name: 'Runner',
+      platform: 'darwin', version: '1', capabilities: [],
+    }));
+
+    expect(response.status).toBe(200);
+    const status = await loadBalanceRunnerStatus(db);
+    expect(status.capabilities.sms_ai).toMatchObject({ available: true, state: 'ready' });
+    expect(sqlite.query(`
+      SELECT CAST((julianday('now') - julianday(last_heartbeat)) * 86400 AS INTEGER) AS age
+      FROM balance_runner_capabilities WHERE runner_id = 'runner-1'
+    `).get().age).toBeGreaterThanOrEqual(119);
+  });
+
   test('rejects unknown capabilities and invalid concurrency', async () => {
     const base = {
       runner_id: 'runner-1', session_id: 'session-1', display_name: 'Runner',

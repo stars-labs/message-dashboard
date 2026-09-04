@@ -15,7 +15,7 @@ import {
 } from './handlers/balance-queries.js';
 import { balanceSkillRunnerHandler } from './handlers/balance-skill-runner.js';
 import {
-  reconcileTerminalWebBalanceJobs,
+  maintainWebBalanceJobs,
   carrierWebBalanceHandler,
 } from './handlers/carrier-web-balance.js';
 import { balanceRunnersHandler } from './handlers/balance-runners.js';
@@ -214,6 +214,15 @@ router.get('/api/balance-checks', async (request, env, ctx) => {
   return balanceQueriesHandler.list(request);
 });
 
+router.get('/api/balance-checks/status', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  await enrichUserPermissions(request, env, ctx);
+  const permResponse = await requirePermission('messages.read')(request, env, ctx);
+  if (permResponse) return permResponse;
+  return balanceQueriesHandler.status(request);
+});
+
 router.get('/api/carrier-billing/accounts', async (request, env, ctx) => {
   const authResponse = await handleAuth0(request, env, ctx);
   if (authResponse) return authResponse;
@@ -327,6 +336,15 @@ router.post('/api/balance-checks/query-batch', async (request, env, ctx) => {
   const permResponse = await requirePermission('balances.query')(request, env, ctx);
   if (permResponse) return permResponse;
   return balanceQueriesHandler.queryBatch(request);
+});
+
+router.get('/api/balance-checks/:id', async (request, env, ctx) => {
+  const authResponse = await handleAuth0(request, env, ctx);
+  if (authResponse) return authResponse;
+  await enrichUserPermissions(request, env, ctx);
+  const permResponse = await requirePermission('messages.read')(request, env, ctx);
+  if (permResponse) return permResponse;
+  return balanceQueriesHandler.detail(request);
 });
 
 router.post('/api/messages/send', async (request, env, ctx) => {
@@ -699,6 +717,15 @@ export default {
       console.error('[scheduled] balance check maintenance failed:', error);
     }
 
+    try {
+      const webJobs = await maintainWebBalanceJobs(env.DB);
+      console.log(
+        `[scheduled] web balance jobs: expired ${webJobs.expired}, reconciled ${webJobs.reconciled}`,
+      );
+    } catch (error) {
+      console.error('[scheduled] web balance maintenance failed:', error);
+    }
+
     // The five-minute trigger exists only for balance response windows. Keep the
     // heavier retention and full-database reconciliation on the nightly trigger.
     if (event.cron !== '17 4 * * *') return;
@@ -718,13 +745,6 @@ export default {
       console.log(`[scheduled] classification: swept ${sweep.processed}, ${sweep.remaining} remaining`);
     } catch (error) {
       console.error('[scheduled] classification sweep failed:', error);
-    }
-
-    try {
-      const webJobs = await reconcileTerminalWebBalanceJobs(env.DB);
-      console.log(`[scheduled] web balance jobs: reconciled ${webJobs.reconciled}`);
-    } catch (error) {
-      console.error('[scheduled] web balance reconciliation failed:', error);
     }
 
     try {

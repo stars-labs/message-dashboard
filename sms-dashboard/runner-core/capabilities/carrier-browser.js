@@ -10,7 +10,6 @@ export function createCarrierBrowserCapability({
 }) {
   return Object.freeze({
     async runOne({ signal } = {}) {
-      await presence.set('ready');
       const response = await controlClient.request(claimPath(runnerId), { signal });
       if (response.status === 204) return { handled: false, retryDelay: 5_000 };
       if (!response.ok) {

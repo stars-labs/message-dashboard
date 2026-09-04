@@ -4,6 +4,14 @@ This directory contains SQL migration scripts for the SMS Dashboard D1 database.
 
 ## Migration History
 
+### 076_optimize_balance_runtime.sql
+- Materializes each active SMS balance response deadline for indexed timeout maintenance.
+- Adds a partial browser-job claim index so five-second polling stays inexpensive.
+
+### 075_optimize_balance_otp_cursor.sql
+- Adds the `(phone_iccid, created_at, id)` OTP cursor index.
+- Uses the daemon-assigned message ID as the stable source-message tie-breaker.
+
 ### 065_add_m1_prepaid_browser_balance.sql
 - Renames the shared local browser capability to `carrier_browser`.
 - Generalizes persisted browser jobs for multiple carriers without losing history.

@@ -8,11 +8,12 @@
   ];
 
   let rules = $state([]);
-  let pending = $state(0);
   let loading = $state(true);
   let saving = $state(false);
   let error = $state(null);
   let notice = $state(null);
+  let historySince = $state(new Date(Date.now() - 7 * 86_400_000).toISOString().slice(0, 10));
+  let historyRuns = $state({});
 
   let editingId = $state(null);
   let form = $state({ rule_type: 'body_keyword', pattern: '', note: '' });
@@ -34,7 +35,6 @@
     try {
       const response = await api.get('/api/filters');
       rules = response?.filters || [];
-      pending = response?.pending || 0;
     } catch (err) {
       error = err.message || '加载过滤规则失败';
     } finally {
@@ -52,16 +52,6 @@
     form = { rule_type: rule.rule_type, pattern: rule.pattern, note: rule.note || '' };
   }
 
-  // Every mutation returns how much reclassification is left, because a rule
-  // change re-judges existing messages. Report it instead of silently finishing.
-  function reportOutcome(result, verb) {
-    pending = result?.remaining ?? 0;
-    const touched = (result?.queued || 0) + (result?.released || 0);
-    notice = `${verb}。已重新判定 ${result?.processed ?? 0} 条消息` +
-      (touched ? `（受影响 ${touched} 条）` : '') +
-      (pending > 0 ? `，还有 ${pending} 条待处理，可点击「继续处理」。` : '。');
-  }
-
   async function save() {
     if (!form.pattern.trim()) {
       error = '规则内容不能为空';
@@ -71,10 +61,10 @@
     error = null;
     notice = null;
     try {
-      const result = editingId
-        ? await api.put(`/api/filters/${editingId}`, form)
-        : await api.post('/api/filters', form);
-      reportOutcome(result, editingId ? '规则已更新' : '规则已添加');
+      await (editingId
+        ? api.put(`/api/filters/${editingId}`, { note: form.note })
+        : api.post('/api/filters', form));
+      notice = editingId ? '备注已更新。' : '规则已添加，将用于之后收到的新短信。';
       resetForm();
       await loadRules();
     } catch (err) {
@@ -89,8 +79,11 @@
     error = null;
     notice = null;
     try {
-      const result = await api.put(`/api/filters/${rule.id}`, { is_active: !rule.is_active });
-      reportOutcome(result, rule.is_active ? '规则已停用' : '规则已启用');
+      await api.put(`/api/filters/${rule.id}`, { is_active: !rule.is_active });
+      historyRuns = { ...historyRuns, [rule.id]: null };
+      notice = rule.is_active
+        ? '规则已停用，历史短信保持原判定。'
+        : '规则已启用，将用于之后收到的新短信。';
       await loadRules();
     } catch (err) {
       error = err.message || '操作失败';
@@ -100,15 +93,15 @@
   }
 
   async function remove(rule) {
-    if (!confirm(`删除规则「${rule.pattern}」？\n\n它当前隐藏了 ${rule.hit_count} 条消息，删除后这些消息会重新判定。`)) {
+    if (!confirm(`删除未使用的规则「${rule.pattern}」？\n\n已有历史短信引用的规则只能停用。`)) {
       return;
     }
     saving = true;
     error = null;
     notice = null;
     try {
-      const result = await api.delete(`/api/filters/${rule.id}`);
-      reportOutcome(result, '规则已删除');
+      await api.delete(`/api/filters/${rule.id}`);
+      notice = '未使用的规则已删除。';
       await loadRules();
     } catch (err) {
       error = err.message || '删除失败';
@@ -117,24 +110,44 @@
     }
   }
 
-  // Drain rows already marked pending by rule mutations. Loops until the server
-  // reports remaining === 0. Safe to call repeatedly; idempotent.
-  async function continueSweep() {
+  async function processHistory(rule) {
+    if (!historySince) {
+      error = '请选择历史短信的起始日期';
+      return;
+    }
+    const previous = historyRuns[rule.id];
+    if (!previous && !confirm(
+      `${rule.is_active ? '应用' : '重新判定'}规则「${rule.pattern}」自 ${historySince} 起的历史短信？\n\n每次只处理最多 200 条候选记录。`
+    )) return;
+
     saving = true;
     error = null;
     notice = null;
     try {
-      let result = await api.post('/api/filters/reclassify', {});
-      reportOutcome(result, '继续处理完成');
-
-      while ((result?.remaining ?? 0) > 0) {
-        result = await api.post('/api/filters/reclassify', {});
-        reportOutcome(result, '继续处理完成');
-      }
-
-      await loadRules();
+      const window = previous || {
+        since: new Date(`${historySince}T00:00:00`).toISOString(),
+        until: new Date().toISOString(),
+        cursor: null,
+        processed: 0,
+        changed: 0,
+      };
+      const result = await api.post(`/api/filters/${rule.id}/history`, {
+        since: window.since,
+        until: window.until,
+        cursor: window.cursor,
+      });
+      const progress = {
+        ...window,
+        cursor: result.next_cursor,
+        has_more: result.has_more,
+        processed: window.processed + result.processed,
+        changed: window.changed + result.changed,
+      };
+      historyRuns = { ...historyRuns, [rule.id]: result.has_more ? progress : null };
+      notice = `累计检查 ${progress.processed} 条候选记录，更新 ${progress.changed} 条。`
+        + (result.has_more ? '如需继续，请再次点击。' : '所选时间范围已处理完成。');
     } catch (err) {
-      error = err.message || '重新分类失败';
+      error = err.message || '历史短信处理失败';
     } finally {
       saving = false;
     }
@@ -159,42 +172,19 @@
     <div class="flex flex-col sm:flex-row sm:items-start justify-between gap-3 sm:gap-4">
       <div>
         <h2 class="text-lg font-semibold text-stone-900">垃圾过滤规则</h2>
-        <p class="text-sm text-stone-500 mt-1">命中规则的短信默认不显示，可在消息列表点「已过滤 N 条」查看。</p>
+        <p class="text-sm text-stone-500 mt-1">规则默认只影响之后收到的新短信；历史短信必须手动逐批处理。</p>
       </div>
-      {#if pending > 0}
-        <div class="flex items-center gap-2 shrink-0">
-          <button
-            onclick={continueSweep}
-            disabled={saving}
-            class="w-full sm:w-auto px-3 py-2 sm:py-1.5 text-sm rounded-lg border border-stone-300 text-stone-600 hover:bg-stone-100 disabled:opacity-50"
-            title="继续处理待判定的消息"
-          >继续处理</button>
-        </div>
-      {/if}
+      <label class="shrink-0 text-xs text-stone-500">
+        历史起始日期
+        <input type="date" bind:value={historySince}
+          class="block mt-1 px-2 py-1.5 border border-stone-300 rounded-lg text-sm text-stone-700" />
+      </label>
     </div>
-
-    <!-- Reclassification progress — permanent UI, not a toast.
-         Shown whenever there are pending messages so progress survives
-         a page refresh and users can track large sweeps. -->
-    {#if pending > 0}
-      <div class="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-xl">
-        <div class="flex items-center justify-between mb-1.5">
-          <span class="text-sm font-medium text-amber-800">待判定</span>
-          <span class="text-xs font-mono text-amber-700 tabular-nums">{pending} 条</span>
-        </div>
-        <div class="h-1.5 bg-amber-200 rounded-full overflow-hidden">
-          <div class="h-full bg-amber-500 rounded-full animate-pulse" style="width: 60%"></div>
-        </div>
-        {#if notice}
-          <p class="text-xs text-amber-700 mt-2">{notice}</p>
-        {/if}
-      </div>
-    {/if}
 
     {#if error}
       <div class="mt-3 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">{error}</div>
     {/if}
-    {#if notice && pending === 0}
+    {#if notice}
       <div class="mt-3 p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg text-sm">{notice}</div>
     {/if}
   </div>
@@ -208,6 +198,7 @@
         <select
           id="fr-type"
           bind:value={form.rule_type}
+          disabled={editingId !== null}
           class="w-full px-3 py-2 border border-stone-300 rounded-lg text-sm"
         >
           {#each RULE_TYPES as t}
@@ -220,6 +211,7 @@
         <input
           id="fr-pattern"
           bind:value={form.pattern}
+          disabled={editingId !== null}
           placeholder={form.rule_type === 'sender' ? '10086' : '中国海关提示'}
           class="w-full px-3 py-2 border border-stone-300 rounded-lg text-sm font-mono"
         />
@@ -273,7 +265,6 @@
               <tr class="border-b border-stone-100">
                 <th class="text-left px-4 py-2 font-medium">规则内容</th>
                 <th class="text-left px-4 py-2 font-medium">备注</th>
-                <th class="text-right px-4 py-2 font-medium">已隐藏</th>
                 <th class="text-center px-4 py-2 font-medium">状态</th>
                 <th class="text-right px-4 py-2 font-medium">操作</th>
               </tr>
@@ -283,7 +274,6 @@
                 <tr class="border-b border-stone-50 last:border-0 {rule.is_active ? '' : 'opacity-50'}">
                   <td class="px-4 py-2 font-mono text-stone-800 break-all">{rule.pattern}</td>
                   <td class="px-4 py-2 text-stone-500">{rule.note || '—'}</td>
-                  <td class="px-4 py-2 text-right text-stone-600 tabular-nums">{rule.hit_count}</td>
                   <td class="px-4 py-2 text-center">
                     <button
                       onclick={() => toggleActive(rule)}
@@ -297,6 +287,11 @@
                     </button>
                   </td>
                   <td class="px-4 py-2 text-right whitespace-nowrap">
+                    <button
+                      onclick={() => processHistory(rule)}
+                      disabled={saving}
+                      class="px-2 py-0.5 text-xs text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded disabled:opacity-50"
+                    >{historyRuns[rule.id]?.has_more ? '继续历史处理' : (rule.is_active ? '应用到历史' : '重新判定历史')}</button>
                     <button
                       onclick={() => startEdit(rule)}
                       disabled={saving}
@@ -334,8 +329,10 @@
                   >{rule.is_active ? '启用中' : '已停用'}</button>
                 </div>
                 <div class="mt-3 flex items-center gap-2">
-                  <span class="text-xs text-stone-400">已隐藏 <strong class="font-mono text-stone-600">{rule.hit_count}</strong> 条</span>
                   <div class="ml-auto flex items-center gap-1">
+                    <button onclick={() => processHistory(rule)} disabled={saving}
+                      class="min-h-9 px-3 text-xs text-blue-600 rounded-lg hover:bg-blue-50 disabled:opacity-50"
+                    >{historyRuns[rule.id]?.has_more ? '继续历史处理' : (rule.is_active ? '应用到历史' : '重新判定历史')}</button>
                     <button onclick={() => startEdit(rule)} disabled={saving}
                       class="min-h-9 px-3 text-xs text-stone-600 rounded-lg hover:bg-stone-100 disabled:opacity-50">编辑</button>
                     <button onclick={() => remove(rule)} disabled={saving}

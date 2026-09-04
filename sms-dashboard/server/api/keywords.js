@@ -1,6 +1,7 @@
 import { handleAuth0 } from '../middleware/auth0.js';
 import { requirePermission, enrichUserPermissions } from '../middleware/rbac.js';
 import { DEFAULT_KEYWORD_COLOR, normalizeKeywordColor } from '../utils/keyword-color.js';
+import { processKeywordHistoryPage } from '../utils/keyword-history.js';
 
 /**
  * Keyword-tag API endpoints
@@ -142,9 +143,6 @@ export function setupKeywordRoutes(router) {
                 'SELECT * FROM keyword_tags WHERE id = ?'
             ).bind(result.meta.last_row_id).first();
 
-            // Process existing messages to find matches
-            await processExistingMessages(env.DB, result.meta.last_row_id, keyword, case_sensitive, whole_word);
-
             return new Response(JSON.stringify({ keyword: newKeyword }), {
                 status: 201,
                 headers: { 'Content-Type': 'application/json' }
@@ -189,6 +187,19 @@ export function setupKeywordRoutes(router) {
                 });
             }
 
+            if (
+                (keyword !== undefined && keyword !== existing.keyword)
+                || (case_sensitive !== undefined && Boolean(case_sensitive) !== Boolean(existing.case_sensitive))
+                || (whole_word !== undefined && Boolean(whole_word) !== Boolean(existing.whole_word))
+            ) {
+                return new Response(JSON.stringify({
+                    error: 'Keyword and matching options are immutable; create a new keyword instead'
+                }), {
+                    status: 400,
+                    headers: { 'Content-Type': 'application/json' }
+                });
+            }
+
             // A supplied colour must be a hex literal (400 otherwise, so the client
             // gets told). An omitted colour keeps the stored one — but a row written
             // before this validation existed may hold a payload, so that value is run
@@ -215,43 +226,19 @@ export function setupKeywordRoutes(router) {
             }
 
             // Update keyword tag
-            await env.DB.prepare(`
+            const updated = await env.DB.prepare(`
                 UPDATE keyword_tags
-                SET keyword = ?, tag = ?, color = ?, priority = ?,
-                    case_sensitive = ?, whole_word = ?, is_active = ?,
+                SET tag = ?, color = ?, priority = ?, is_active = ?,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
+                RETURNING *
             `).bind(
-                keyword || existing.keyword,
                 tag || existing.tag,
                 resolvedColor,
                 priority !== undefined ? priority : existing.priority,
-                case_sensitive !== undefined ? case_sensitive : existing.case_sensitive,
-                whole_word !== undefined ? whole_word : existing.whole_word,
                 is_active !== undefined ? is_active : existing.is_active,
                 id
-            ).run();
-
-            // If keyword changed or matching rules changed, reprocess messages
-            if (keyword !== existing.keyword || 
-                case_sensitive !== existing.case_sensitive || 
-                whole_word !== existing.whole_word) {
-                // Remove old matches
-                await env.DB.prepare(
-                    'DELETE FROM message_tags WHERE keyword_tag_id = ?'
-                ).bind(id).run();
-                
-                // Reprocess messages if active
-                if (is_active !== false) {
-                    await processExistingMessages(env.DB, id, keyword || existing.keyword, 
-                        case_sensitive !== undefined ? case_sensitive : existing.case_sensitive,
-                        whole_word !== undefined ? whole_word : existing.whole_word);
-                }
-            }
-
-            const updated = await env.DB.prepare(
-                'SELECT * FROM keyword_tags WHERE id = ?'
-            ).bind(id).first();
+            ).first();
 
             return new Response(JSON.stringify({ keyword: updated }), {
                 headers: { 'Content-Type': 'application/json' }
@@ -287,7 +274,18 @@ export function setupKeywordRoutes(router) {
                 });
             }
 
-            // Delete keyword (message_tags will be cascade deleted)
+            const referenced = await env.DB.prepare(
+                'SELECT 1 FROM message_tags WHERE keyword_tag_id = ? LIMIT 1'
+            ).bind(id).first();
+            if (referenced) {
+                return new Response(JSON.stringify({
+                    error: 'Keyword has historical messages; deactivate it instead'
+                }), {
+                    status: 409,
+                    headers: { 'Content-Type': 'application/json' }
+                });
+            }
+
             await env.DB.prepare('DELETE FROM keyword_tags WHERE id = ?').bind(id).run();
 
             return new Response(JSON.stringify({ success: true }), {
@@ -340,6 +338,7 @@ export function setupKeywordRoutes(router) {
                 FROM message_tags mt
                 JOIN keyword_tags kt ON mt.keyword_tag_id = kt.id
                 WHERE mt.message_id IN (${placeholders})
+                  AND kt.is_active = TRUE
                 ORDER BY mt.message_id, mt.position ASC
             `).bind(...limitedIds).all();
             
@@ -379,8 +378,8 @@ export function setupKeywordRoutes(router) {
         }
     });
 
-    // Reprocess all messages for a specific keyword
-    router.post('/api/keywords/:id/reprocess', async (request, env, ctx) => {
+    // Historical tagging is explicit, bounded, and one page per operator action.
+    router.post('/api/keywords/:id/history', async (request, env, ctx) => {
         const authResponse = await handleAuth0(request, env, ctx);
         if (authResponse) return authResponse;
         await enrichUserPermissions(request, env, ctx);
@@ -390,7 +389,6 @@ export function setupKeywordRoutes(router) {
         const { id } = request.params;
         
         try {
-            // Get the keyword
             const keyword = await env.DB.prepare(
                 'SELECT * FROM keyword_tags WHERE id = ?'
             ).bind(id).first();
@@ -401,30 +399,46 @@ export function setupKeywordRoutes(router) {
                     headers: { 'Content-Type': 'application/json' }
                 });
             }
-            
-            // Clear existing tags for this keyword
-            await env.DB.prepare(
-                'DELETE FROM message_tags WHERE keyword_tag_id = ?'
-            ).bind(id).run();
-            
-            // Reprocess all messages
-            await processExistingMessages(env.DB, keyword.id, keyword.keyword, keyword.case_sensitive, keyword.whole_word);
-            
-            // Get count of processed tags
-            const { results } = await env.DB.prepare(
-                'SELECT COUNT(*) as count FROM message_tags WHERE keyword_tag_id = ?'
-            ).bind(id).all();
-            
-            return new Response(JSON.stringify({ 
-                success: true,
-                keyword: keyword.keyword,
-                tags_created: results[0].count
-            }), {
+            if (!keyword.is_active) {
+                return new Response(JSON.stringify({ error: 'Activate the keyword before applying it to history' }), {
+                    status: 409,
+                    headers: { 'Content-Type': 'application/json' }
+                });
+            }
+
+            const body = await request.json();
+            const since = new Date(body.since);
+            const until = new Date(body.until);
+            if (Number.isNaN(since.getTime()) || Number.isNaN(until.getTime()) || since > until) {
+                return new Response(JSON.stringify({ error: 'A valid history time range is required' }), {
+                    status: 400,
+                    headers: { 'Content-Type': 'application/json' }
+                });
+            }
+            const cursor = body.cursor || null;
+            if (cursor && (
+                typeof cursor.created_at !== 'string'
+                || typeof cursor.id !== 'string'
+                || Number.isNaN(new Date(`${cursor.created_at}Z`).getTime())
+            )) {
+                return new Response(JSON.stringify({ error: 'Invalid history cursor' }), {
+                    status: 400,
+                    headers: { 'Content-Type': 'application/json' }
+                });
+            }
+
+            const result = await processKeywordHistoryPage(env.DB, keyword, {
+                since: since.toISOString(),
+                until: until.toISOString(),
+                cursor
+            });
+
+            return new Response(JSON.stringify(result), {
                 headers: { 'Content-Type': 'application/json' }
             });
         } catch (error) {
-            console.error('Error reprocessing keyword:', error);
-            return new Response(JSON.stringify({ error: 'Failed to reprocess keyword' }), {
+            console.error('Error processing keyword history:', error);
+            return new Response(JSON.stringify({ error: 'Failed to process keyword history' }), {
                 status: 500,
                 headers: { 'Content-Type': 'application/json' }
             });
@@ -465,107 +479,4 @@ export function setupKeywordRoutes(router) {
             });
         }
     });
-}
-
-/**
- * Process existing messages to find keyword matches
- */
-async function processExistingMessages(db, keywordId, keyword, caseSensitive, wholeWord) {
-    try {
-        console.log(`[processExistingMessages] Processing keyword "${keyword}" (ID: ${keywordId})`);
-        
-        // Get all messages
-        const { results: messages } = await db.prepare(
-            'SELECT id, content FROM messages'
-        ).all();
-        
-        console.log(`[processExistingMessages] Found ${messages.length} messages to process`);
-
-        const batch = [];
-        let messageCount = 0;
-        
-        for (const message of messages) {
-            const matches = findKeywordMatches(message.content, keyword, caseSensitive, wholeWord);
-            if (matches.length > 0) {
-                messageCount++;
-                if (/[一-龥]/.test(keyword)) {
-                    console.log(`[processExistingMessages] Chinese keyword "${keyword}" found ${matches.length} matches in message ${message.id}`);
-                }
-            }
-            for (const match of matches) {
-                batch.push({
-                    message_id: message.id,
-                    keyword_tag_id: keywordId,
-                    matched_text: match.text,
-                    position: match.position
-                });
-            }
-        }
-
-        // Insert matches in batches
-        if (batch.length > 0) {
-            console.log(`[processExistingMessages] Inserting ${batch.length} tags for keyword "${keyword}" in ${messageCount} messages`);
-            const batchSize = 100;
-            for (let i = 0; i < batch.length; i += batchSize) {
-                const currentBatch = batch.slice(i, i + batchSize);
-                const placeholders = currentBatch.map(() => '(?, ?, ?, ?)').join(',');
-                const values = currentBatch.flatMap(b => [b.message_id, b.keyword_tag_id, b.matched_text, b.position]);
-                
-                await db.prepare(`
-                    INSERT OR IGNORE INTO message_tags (message_id, keyword_tag_id, matched_text, position)
-                    VALUES ${placeholders}
-                `).bind(...values).run();
-            }
-            console.log(`[processExistingMessages] Successfully inserted tags for keyword "${keyword}"`);
-        } else {
-            console.log(`[processExistingMessages] No matches found for keyword "${keyword}"`);
-        }
-    } catch (error) {
-        console.error('Error processing existing messages:', error);
-    }
-}
-
-/**
- * Find keyword matches in text
- */
-export function findKeywordMatches(text, keyword, caseSensitive = false, wholeWord = false) {
-    const matches = [];
-    
-    if (!text || !keyword) return matches;
-    
-    let searchText = caseSensitive ? text : text.toLowerCase();
-    let searchKeyword = caseSensitive ? keyword : keyword.toLowerCase();
-    
-    if (wholeWord) {
-        // Create word boundary regex
-        const wordBoundary = `\\b${escapeRegex(searchKeyword)}\\b`;
-        const regex = new RegExp(wordBoundary, caseSensitive ? 'g' : 'gi');
-        
-        let match;
-        while ((match = regex.exec(text)) !== null) {
-            matches.push({
-                text: match[0],
-                position: match.index
-            });
-        }
-    } else {
-        // Simple substring search
-        let position = 0;
-        while ((position = searchText.indexOf(searchKeyword, position)) !== -1) {
-            matches.push({
-                text: text.substr(position, keyword.length),
-                position: position
-            });
-            position += keyword.length;
-        }
-    }
-    
-    return matches;
-}
-
-/**
- * Escape special regex characters
- */
-function escapeRegex(str) {
-    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

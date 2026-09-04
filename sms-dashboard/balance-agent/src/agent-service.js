@@ -32,6 +32,7 @@ export function createAgentService({
   let settings = {};
   let loginController = null;
   let smsController = null;
+  let runnerPresence = null;
   let smsPresence = null;
   let browserPresence = null;
   let smsLoop = null;
@@ -64,26 +65,14 @@ export function createAgentService({
     onState({ ...state });
   }
 
-  function publishingPresence(controlClient, capability, stateKey) {
-    const presence = createRunnerPresence({
-      controlClient,
-      runnerId: settings.installationId,
-      sessionId,
-      displayName: settings.installationName || hostname(),
-      version: appVersion,
-      platform,
-      logger,
-      capability,
-    });
+  function publishingPresence(presence, capability, stateKey) {
     return Object.freeze({
-      start: () => presence.start(),
-      stop: () => presence.stop(),
       async set(nextState, jobId, detailCode) {
         publish({
           [stateKey]: nextState,
           [`${stateKey}Detail`]: detailCode || null,
         });
-        await presence.set(nextState, jobId, detailCode);
+        await presence.set(capability, nextState, jobId, detailCode);
       },
     });
   }
@@ -137,10 +126,8 @@ export function createAgentService({
     await Promise.all([smsLoop, browserLoop].filter(Boolean).map((loop) => loop.catch(() => {})));
     smsLoop = null;
     browserLoop = null;
-    await Promise.all([
-      smsPresence?.stop(),
-      browserPresence?.stop(),
-    ].filter(Boolean));
+    await runnerPresence?.stop();
+    runnerPresence = null;
     smsPresence = null;
     browserPresence = null;
     publish({
@@ -163,10 +150,21 @@ export function createAgentService({
       baseUrl: settings.dashboardUrl,
       getAccessToken: () => authSession.getAccessToken(),
     });
+    runnerPresence = createRunnerPresence({
+      controlClient,
+      runnerId: settings.installationId,
+      sessionId,
+      displayName: settings.installationName || hostname(),
+      version: appVersion,
+      platform,
+      logger,
+      capabilities: [...enabled],
+    });
+    await runnerPresence.start();
     if (enabled.has('carrier_browser')) {
-      browserPresence = publishingPresence(controlClient, 'carrier_browser', 'browser');
-      await browserPresence.start();
+      browserPresence = publishingPresence(runnerPresence, 'carrier_browser', 'browser');
       if (browser && browserExecutablePath) {
+        await browserPresence.set('ready');
         browserProcessor = createCarrierBrowserJobProcessor({
           controlClient,
           presence: browserPresence,
@@ -202,7 +200,9 @@ export function createAgentService({
       publish({ smsAi: 'stopped', smsAiDetail: null, error: null });
       return;
     }
+    smsPresence = publishingPresence(runnerPresence, 'sms_ai', 'smsAi');
     if (!aiToken || !settings.aiBaseUrl || !settings.aiModel) {
+      await smsPresence.set('configuration_required', null, 'ai_configuration_required');
       publish({
         smsAi: 'configuration_required',
         browser: configuredBrowserState(),
@@ -211,7 +211,6 @@ export function createAgentService({
       return;
     }
 
-    smsPresence = publishingPresence(controlClient, 'sms_ai', 'smsAi');
     const capability = createSmsAiCapability({
       controlClient,
       presence: smsPresence,
@@ -225,9 +224,9 @@ export function createAgentService({
       logger,
     });
     smsController = new AbortController();
-    await smsPresence.start();
+    await smsPresence.set('ready');
     publish({
-      smsAi: 'starting',
+      smsAi: 'ready',
       browser: configuredBrowserState(),
       error: null,
     });

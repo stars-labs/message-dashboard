@@ -9,14 +9,12 @@
     onClose = null,
   } = $props();
 
-  const taskRows = [
-    ['modem_reader', '短信扫描'],
-    ['device_sync', '设备同步'],
-    ['outbound_poll', '发送轮询'],
-    ['message_uploader', '消息上传'],
-  ];
-
   let meta = $derived(getDaemonStatusMeta(status?.status));
+  let snapshot = $derived(status?.snapshot ?? null);
+
+  function formatBacklogAge(seconds) {
+    return seconds === null || seconds === undefined ? '无积压' : formatTaskAge(seconds);
+  }
 </script>
 
 <div class="fixed inset-0 z-[59] bg-stone-900/10 lg:bg-transparent" onclick={onClose} role="presentation"></div>
@@ -66,43 +64,49 @@
     </div>
   {/if}
 
-  {#if !status?.tasks}
+  {#if !snapshot}
     <div class="px-4 py-3 border-b border-stone-100 bg-stone-50">
-      <p class="text-xs text-stone-600">暂无有效的任务健康报告。</p>
+      <p class="text-xs text-stone-600">暂无有效的采集服务健康报告。</p>
     </div>
   {:else}
     <div class="divide-y divide-stone-100">
-      {#each taskRows as [key, label]}
-        {@const task = status?.tasks?.[key]}
-        <div class="flex items-center justify-between gap-3 px-4 py-2.5">
-          <div>
-            <p class="text-xs font-medium text-stone-700">{label}</p>
-            {#if task?.last_error}
-              <p class="text-[10px] text-red-500 mt-0.5 truncate max-w-[230px]" title={task.last_error}>{task.last_error}</p>
-            {/if}
-          </div>
-          <span class="text-[11px] font-mono tabular-nums {task?.consecutive_failures > 0 ? 'text-red-600' : 'text-stone-400'}">
-            {formatTaskAge(task?.last_success_age_seconds)}
-          </span>
-        </div>
-      {/each}
+      <div class="flex items-center justify-between gap-3 px-4 py-2.5">
+        <p class="text-xs font-medium text-stone-700">短信读取</p>
+        <span class="text-[11px] font-mono tabular-nums text-stone-500">
+          {formatTaskAge(snapshot.last_message_read_success_age_seconds)}
+        </span>
+      </div>
+      <div class="flex items-center justify-between gap-3 px-4 py-2.5">
+        <p class="text-xs font-medium text-stone-700">消息上传</p>
+        <span class="text-[11px] font-mono tabular-nums text-stone-500">
+          {formatTaskAge(snapshot.last_upload_success_age_seconds)}
+        </span>
+      </div>
+      <div class="flex items-center justify-between gap-3 px-4 py-2.5">
+        <p class="text-xs font-medium text-stone-700">最老积压</p>
+        <span class="text-[11px] font-mono tabular-nums text-stone-500">
+          {formatBacklogAge(snapshot.queue?.oldest_unacknowledged_age_seconds)}
+        </span>
+      </div>
     </div>
   {/if}
 
-  <footer class="grid grid-cols-3 border-t border-stone-200 bg-stone-50 rounded-b-lg">
+  <footer class="grid grid-cols-4 border-t border-stone-200 bg-stone-50 rounded-b-lg">
     <div class="px-3 py-2.5 border-r border-stone-200">
-      <p class="text-[10px] text-stone-400" title="可重试 / 已耗尽 / 卡住">队列</p>
-      <p class="text-xs font-mono text-stone-700 mt-0.5" title="可重试 / 已耗尽 / 卡住">
-        {status?.queue ? `${status.queue.retryable} / ${status.queue.attempts_exhausted} / ${status.queue.stuck_uploading}` : '—'}
-      </p>
+      <p class="text-[10px] text-stone-400">待处理</p>
+      <p class="text-xs font-mono text-stone-700 mt-0.5">{snapshot?.queue?.pending ?? '—'}</p>
     </div>
     <div class="px-3 py-2.5 border-r border-stone-200">
-      <p class="text-[10px] text-stone-400">Modem</p>
-      <p class="text-xs font-mono text-stone-700 mt-0.5">{status?.modems?.responsive ?? status?.modem_count ?? '—'} / {status?.modems?.discovered ?? status?.modem_count ?? '—'}</p>
+      <p class="text-[10px] text-stone-400">上传中</p>
+      <p class="text-xs font-mono text-stone-700 mt-0.5">{snapshot?.queue?.in_flight ?? '—'}</p>
+    </div>
+    <div class="px-3 py-2.5 border-r border-stone-200">
+      <p class="text-[10px] text-stone-400">人工处理</p>
+      <p class="text-xs font-mono text-stone-700 mt-0.5">{snapshot?.queue?.dead_letter ?? '—'}</p>
     </div>
     <div class="px-3 py-2.5 min-w-0">
       <p class="text-[10px] text-stone-400">版本</p>
-      <p class="text-xs font-mono text-stone-700 mt-0.5 truncate" title={status?.version}>{status?.version || '—'}</p>
+      <p class="text-xs font-mono text-stone-700 mt-0.5 truncate" title={snapshot?.version}>{snapshot?.version || '—'}</p>
     </div>
   </footer>
 </div>

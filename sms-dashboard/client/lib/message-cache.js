@@ -255,6 +255,7 @@ async function clearCache() {
     });
   } catch (err) {
     console.warn('[MessageCache] clearCache error:', err);
+    throw err;
   }
 }
 

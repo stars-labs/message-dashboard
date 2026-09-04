@@ -131,4 +131,31 @@ describe('Worker health monitoring', () => {
     expect(response.status).toBe(200);
     expect(body.status).toBe('offline');
   });
+
+  test('daemon status exposes only the v3 snapshot instead of legacy placeholders', async () => {
+    const db = dbStub({
+      row: {
+        daemon_id: 'orange-pi-main',
+        last_heartbeat: '2026-09-02 07:00:00',
+        seconds_since_heartbeat: 3,
+        metadata: daemonSnapshot(),
+      },
+    });
+
+    const response = await healthHandler.daemonStatus(request(db));
+    const body = await response.json();
+
+    expect(body.snapshot.queue).toEqual({
+      pending: 0,
+      in_flight: 0,
+      dead_letter: 0,
+      oldest_unacknowledged_age_seconds: null,
+    });
+    expect(body.snapshot.last_message_read_success_age_seconds).toBe(5);
+    expect(body.snapshot.last_upload_success_age_seconds).toBe(5);
+    expect(body).not.toHaveProperty('tasks');
+    expect(body).not.toHaveProperty('modems');
+    expect(body).not.toHaveProperty('modem_count');
+    expect(body).not.toHaveProperty('queue');
+  });
 });

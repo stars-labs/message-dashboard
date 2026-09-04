@@ -114,7 +114,7 @@ describe('outbound SMS submission outcomes', () => {
     const balanceUpdate = db.calls.find((call) =>
       call.operation === 'run' && call.sql.includes('UPDATE sim_balance_checks')
     );
-    expect(balanceUpdate.params).toEqual(['awaiting_response', 1, 1, null, 'msg-1']);
+    expect(balanceUpdate.params).toEqual(['awaiting_response', 1, 1, 1, null, 'msg-1']);
   });
 
   test('rejects the removed boolean success result', async () => {

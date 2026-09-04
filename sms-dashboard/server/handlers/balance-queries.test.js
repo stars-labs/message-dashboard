@@ -562,6 +562,7 @@ describe('GET /api/balance-checks', () => {
               async all() {
                 expect(sql).toContain('LEFT JOIN messages om');
                 expect(sql).toContain('LEFT JOIN messages rm');
+                expect(sql).not.toContain('conversation_json');
                 expect(params).toEqual([phone.iccid, 25]);
                 return {
                   results: [{
@@ -594,15 +595,76 @@ describe('GET /api/balance-checks', () => {
       value: 82.36,
       currency: 'CNY',
     }]);
-    expect(body.data[0].conversation).toEqual([{
-      id: 'msg-1',
-      type: 'received',
-      content: '余额82.36元',
-    }]);
+    expect(body.data[0].conversation).toBeUndefined();
     expect(body.data[0].profile_outputs).toEqual(['cash_balance', 'account_expiry']);
     expect(body.data[0].skill_config).toBeUndefined();
     expect(body.data[0].metrics_json).toBeUndefined();
     expect(body.data[0].conversation_json).toBeUndefined();
+  });
+  test('returns lightweight status for only requested active checks', async () => {
+    let query;
+    const db = {
+      prepare(sql) {
+        return {
+          bind(...params) {
+            query = { sql, params };
+            return {
+              all: async () => ({ results: [{
+                id: 'bal-1', status: 'queued', web_job_status: 'awaiting_otp',
+                updated_at: '2026-09-04 10:00:00',
+              }] }),
+            };
+          },
+        };
+      },
+    };
+    const response = await balanceQueriesHandler.status({
+      env: { DB: db },
+      url: 'https://example.com/api/balance-checks/status?ids=bal-1',
+    });
+
+    expect(await response.json()).toMatchObject({
+      data: [{ id: 'bal-1', display_status: 'web_otp' }],
+    });
+    expect(query.params).toEqual(['bal-1']);
+    expect(query.sql).not.toContain('messages');
+    expect(query.sql).not.toContain('sim_balance_metrics');
+  });
+
+  test('loads conversation only when one balance check is opened', async () => {
+    const calls = [];
+    const db = {
+      prepare(sql) {
+        return {
+          bind(...params) {
+            calls.push({ sql, params });
+            return {
+              first: async () => ({ id: 'bal-1' }),
+              all: async () => ({
+                results: sql.includes('sim_balance_web_events')
+                  ? [{ id: 1, event_type: 'claimed' }]
+                  : [{ id: 'source-message-1', content: '余额 10 元' }],
+              }),
+            };
+          },
+        };
+      },
+    };
+    const response = await balanceQueriesHandler.detail({
+      env: { DB: db }, params: { id: 'bal-1' },
+    });
+
+    expect(await response.json()).toEqual({
+      success: true,
+      data: {
+        id: 'bal-1',
+        conversation: [{ id: 'source-message-1', content: '余额 10 元' }],
+        web_events: [{ id: 1, event_type: 'claimed' }],
+      },
+    });
+    expect(calls[1].sql).toContain('WHERE balance_check_id = ?');
+    expect(calls[1].params).toEqual(['bal-1']);
+    expect(calls[2].sql).toContain('sim_balance_web_events');
   });
 });
 
@@ -661,7 +723,7 @@ describe('balance reply correlation', () => {
     await updateBalanceCheckForSmsResult(db, 'msg-1', 'confirmed');
 
     const update = db.calls.find((call) => call.operation === 'run');
-    expect(update.params).toEqual(['awaiting_response', 1, 1, null, 'msg-1']);
+    expect(update.params).toEqual(['awaiting_response', 1, 1, 1, null, 'msg-1']);
   });
 
   test('keeps waiting after the modem submitted SMS without a final confirmation', async () => {
@@ -669,7 +731,7 @@ describe('balance reply correlation', () => {
     await updateBalanceCheckForSmsResult(db, 'msg-1', 'submitted_unconfirmed');
 
     const update = db.calls.find((call) => call.operation === 'run');
-    expect(update.params).toEqual(['awaiting_response', 1, 1, null, 'msg-1']);
+    expect(update.params).toEqual(['awaiting_response', 1, 1, 1, null, 'msg-1']);
   });
 
   test('fails a queued check only after an explicit SMS submission failure', async () => {
@@ -677,7 +739,7 @@ describe('balance reply correlation', () => {
     await updateBalanceCheckForSmsResult(db, 'msg-1', 'failed', 'explicit modem error');
 
     const update = db.calls.find((call) => call.operation === 'run');
-    expect(update.params).toEqual(['failed', 0, 0, 'explicit modem error', 'msg-1']);
+    expect(update.params).toEqual(['failed', 0, 0, 0, 'explicit modem error', 'msg-1']);
   });
 
   test('queues only the allowlisted menu response as the next audited SMS', async () => {
@@ -742,7 +804,8 @@ describe('balance reply correlation', () => {
 
     expect(result).toEqual({ expired: 2, stopped_jobs: 1 });
     expect(db.batches[0][0].sql).toContain("status = 'timed_out'");
-    expect(db.batches[0][0].sql).toContain('response_window_minutes');
+    expect(db.batches[0][0].sql).toContain('deadline_at');
+    expect(db.batches[0][0].sql).not.toContain('response_window_minutes');
     expect(db.batches[0][0].sql).toContain("status = 'awaiting_response'");
     expect(db.batches[0][1].sql).toContain("status = 'stopped'");
   });

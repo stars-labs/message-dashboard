@@ -70,6 +70,7 @@ describe('balance skill runner D1 flow', () => {
       CREATE TABLE sim_balance_checks (
         id TEXT PRIMARY KEY, sim_iccid TEXT, profile_id TEXT,
         requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, sent_at TIMESTAMP,
+        deadline_at TIMESTAMP,
         completed_at TIMESTAMP, status TEXT, outbound_message_id TEXT,
         response_message_id TEXT, response_sender TEXT, raw_response TEXT,
         error TEXT, parser_version TEXT, step_index INTEGER DEFAULT 0,

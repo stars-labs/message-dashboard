@@ -64,7 +64,6 @@ export function createSmsAiCapability({
         return { handled: false, retryDelay: 15_000 };
       }
 
-      await presence.set('ready');
       const claimPath = `/api/control/balance-skills/jobs/claim?runner_id=${encodeURIComponent(runnerId)}`;
       const response = await controlClient.request(claimPath, { signal });
       if (response.status === 204) return { handled: false, retryDelay: 5_000 };

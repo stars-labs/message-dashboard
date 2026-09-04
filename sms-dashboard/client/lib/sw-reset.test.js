@@ -1,5 +1,5 @@
 import { describe, expect, it, mock } from 'bun:test';
-import { resetServiceWorker } from './sw-reset.js';
+import { resetDashboardCache, resetServiceWorker } from './sw-reset.js';
 
 /** Minimal stand-ins for the two browser APIs the reset touches. */
 function fakeEnv({ registrations = 1, cacheKeys = ['workbox-precache-v2'], unregister, deleteCache } = {}) {
@@ -62,6 +62,30 @@ describe('resetServiceWorker', () => {
       caches: { keys: async () => ['x'], delete: del },
     });
     expect(del).toHaveBeenCalledWith('x');
+    expect(result.cachesDeleted).toBe(1);
+  });
+});
+
+describe('resetDashboardCache', () => {
+  it('clears the IndexedDB message cache as well as offline caches', async () => {
+    const clearMessageCache = mock(async () => {});
+    const resetOfflineCache = mock(async () => ({ ok: true, unregistered: 1, cachesDeleted: 2 }));
+
+    const result = await resetDashboardCache({ clearMessageCache, resetOfflineCache });
+
+    expect(clearMessageCache).toHaveBeenCalledTimes(1);
+    expect(resetOfflineCache).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ ok: true, unregistered: 1, cachesDeleted: 2 });
+  });
+
+  it('reports failure but still attempts both independent cache clears', async () => {
+    const clearMessageCache = mock(async () => { throw new Error('IndexedDB blocked'); });
+    const resetOfflineCache = mock(async () => ({ ok: true, unregistered: 0, cachesDeleted: 1 }));
+
+    const result = await resetDashboardCache({ clearMessageCache, resetOfflineCache });
+
+    expect(resetOfflineCache).toHaveBeenCalledTimes(1);
+    expect(result.ok).toBe(false);
     expect(result.cachesDeleted).toBe(1);
   });
 });

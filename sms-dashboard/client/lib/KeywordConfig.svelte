@@ -4,9 +4,13 @@
 
   let keywords = $state([]);
   let loading = $state(false);
+  let saving = $state(false);
   let error = $state(null);
+  let notice = $state(null);
   let showDialog = $state(false);
   let editingKeyword = $state(null);
+  let historySince = $state(new Date(Date.now() - 7 * 86_400_000).toISOString().slice(0, 10));
+  let historyRuns = $state({});
 
   // 5 preset colours matching the design. These must be complete literal strings
   // so Tailwind includes them in the bundle.
@@ -65,34 +69,105 @@
 
   async function save() {
     error = null;
+    notice = null;
+    saving = true;
     try {
-      if (editingKeyword) await api.put(`/api/keywords/${editingKeyword.id}`, formData);
-      else await api.post('/api/keywords', formData);
+      if (editingKeyword) {
+        await api.put(`/api/keywords/${editingKeyword.id}`, {
+          tag: formData.tag,
+          color: formData.color,
+          priority: formData.priority,
+        });
+        notice = '关键词显示信息已更新。';
+      } else {
+        await api.post('/api/keywords', formData);
+        notice = '关键词已添加，将用于之后收到的新短信。';
+      }
       showDialog = false;
       await loadKeywords();
     } catch (err) {
       error = err.message === 'Keyword already exists'
         ? '该关键词已存在，请换一个'
         : err.message || '保存失败';
+    } finally {
+      saving = false;
     }
   }
 
   async function remove(kw) {
-    if (!confirm(`确认删除关键词「${kw.keyword}」？`)) return;
+    if (!confirm(`删除未使用的关键词「${kw.keyword}」？\n\n已有历史短信引用的关键词只能停用。`)) return;
+    saving = true;
+    error = null;
+    notice = null;
     try {
       await api.delete(`/api/keywords/${kw.id}`);
+      notice = '未使用的关键词已删除。';
       await loadKeywords();
     } catch (err) {
-      error = '删除失败';
+      error = err.message || '删除失败';
+    } finally {
+      saving = false;
     }
   }
 
   async function toggle(kw) {
+    saving = true;
+    error = null;
+    notice = null;
     try {
-      await api.put(`/api/keywords/${kw.id}`, { ...kw, is_active: !kw.is_active });
+      await api.put(`/api/keywords/${kw.id}`, { is_active: !kw.is_active });
+      historyRuns = { ...historyRuns, [kw.id]: null };
+      notice = kw.is_active
+        ? '关键词已停用，已有历史标签保持不变但不再显示。'
+        : '关键词已启用，将用于之后收到的新短信。';
       await loadKeywords();
     } catch (err) {
-      error = '操作失败';
+      error = err.message || '操作失败';
+    } finally {
+      saving = false;
+    }
+  }
+
+  async function processHistory(kw) {
+    if (!historySince) {
+      error = '请选择历史短信的起始日期';
+      return;
+    }
+    const previous = historyRuns[kw.id];
+    if (!previous && !confirm(
+      `把关键词「${kw.keyword}」应用到 ${historySince} 起的历史短信？\n\n每次只检查最多 200 条记录。`
+    )) return;
+
+    saving = true;
+    error = null;
+    notice = null;
+    try {
+      const window = previous || {
+        since: new Date(`${historySince}T00:00:00`).toISOString(),
+        until: new Date().toISOString(),
+        cursor: null,
+        processed: 0,
+        inserted: 0,
+      };
+      const result = await api.post(`/api/keywords/${kw.id}/history`, {
+        since: window.since,
+        until: window.until,
+        cursor: window.cursor,
+      });
+      const progress = {
+        ...window,
+        cursor: result.next_cursor,
+        has_more: result.has_more,
+        processed: window.processed + result.processed,
+        inserted: window.inserted + result.inserted,
+      };
+      historyRuns = { ...historyRuns, [kw.id]: result.has_more ? progress : null };
+      notice = `累计检查 ${progress.processed} 条记录，新增 ${progress.inserted} 个标签。`
+        + (result.has_more ? '如需继续，请再次点击。' : '所选时间范围已处理完成。');
+    } catch (err) {
+      error = err.message || '历史短信处理失败';
+    } finally {
+      saving = false;
     }
   }
 
@@ -109,7 +184,7 @@
   <div class="flex justify-between items-start gap-3 px-4 py-4 border-y border-stone-200 lg:border-0 lg:p-0 lg:mb-5">
     <div class="min-w-0">
       <h2 class="text-lg sm:text-xl font-bold text-stone-900">关键词高亮</h2>
-      <p class="text-sm text-stone-500 mt-0.5">命中的词在短信正文中自动标色，帮助快速识别验证码类型</p>
+      <p class="text-sm text-stone-500 mt-0.5">关键词默认只影响之后收到的新短信；历史短信必须手动逐批处理。</p>
     </div>
     <button onclick={openAdd}
       class="shrink-0 px-3 sm:px-4 py-2 bg-stone-800 text-white text-sm font-medium rounded-lg hover:bg-stone-700 transition-colors flex items-center gap-1.5">
@@ -123,6 +198,17 @@
   {#if error}
     <div class="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-lg mb-4 text-sm">{error}</div>
   {/if}
+  {#if notice}
+    <div class="bg-emerald-50 border border-emerald-200 text-emerald-700 px-4 py-3 rounded-lg mb-4 text-sm">{notice}</div>
+  {/if}
+
+  <div class="px-4 pb-3 lg:px-0 flex justify-end">
+    <label class="text-xs text-stone-500">
+      历史起始日期
+      <input type="date" bind:value={historySince}
+        class="block mt-1 px-2 py-1.5 border border-stone-300 rounded-lg text-sm text-stone-700" />
+    </label>
+  </div>
 
   {#if loading}
     <div class="py-10 text-center">
@@ -185,15 +271,22 @@
               </td>
               <!-- 操作 -->
               <td class="px-4 py-2.5">
-                <div class="flex gap-1">
-                  <button onclick={() => openEdit(kw)} title="编辑"
+                <div class="flex items-center gap-1">
+                  {#if kw.is_active}
+                    <button onclick={() => processHistory(kw)} disabled={saving}
+                      aria-label={historyRuns[kw.id] ? '继续历史处理' : '应用到历史'}
+                      class="px-2 py-1 text-xs text-action-text hover:bg-stone-100 rounded-lg disabled:opacity-40">
+                      {historyRuns[kw.id] ? '继续历史处理' : '应用到历史'}
+                    </button>
+                  {/if}
+                  <button onclick={() => openEdit(kw)} title="编辑" aria-label="编辑关键词"
                     class="p-1.5 text-stone-400 hover:text-stone-700 hover:bg-stone-100 rounded-lg transition-colors">
                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                         d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
                     </svg>
                   </button>
-                  <button onclick={() => remove(kw)} title="删除"
+                  <button onclick={() => remove(kw)} title="删除" aria-label="删除关键词"
                     class="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors">
                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -234,7 +327,14 @@
             </button>
           </div>
           <div class="mt-2 flex justify-end gap-1">
-            <button onclick={() => openEdit(kw)} class="min-h-9 px-3 text-xs text-stone-600 rounded-lg hover:bg-stone-100">编辑</button>
+            {#if kw.is_active}
+              <button onclick={() => processHistory(kw)} disabled={saving}
+                aria-label={historyRuns[kw.id] ? '继续历史处理' : '应用到历史'}
+                class="min-h-9 px-3 text-xs text-action-text rounded-lg hover:bg-stone-100 disabled:opacity-40">
+                {historyRuns[kw.id] ? '继续历史处理' : '应用到历史'}
+              </button>
+            {/if}
+            <button onclick={() => openEdit(kw)} aria-label="编辑关键词" class="min-h-9 px-3 text-xs text-stone-600 rounded-lg hover:bg-stone-100">编辑</button>
             <button onclick={() => remove(kw)} class="min-h-9 px-3 text-xs text-red-600 rounded-lg hover:bg-red-50">删除</button>
           </div>
         </div>
@@ -252,13 +352,14 @@
 
 <!-- ─── Add / Edit dialog ────────────────────────────────────────────────── -->
 {#if showDialog}
-  <div class="fixed inset-0 bg-stone-900/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4"
+  <dialog open aria-modal="true" aria-labelledby="keyword-dialog-title"
+    class="fixed inset-0 m-0 w-full h-full max-w-none max-h-none border-0 bg-stone-900/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4"
     onclick={(e) => e.target === e.currentTarget && (showDialog = false)}>
     <div class="bg-white rounded-t-2xl sm:rounded-2xl shadow-modal w-full max-w-md flex flex-col max-h-[calc(100dvh-74px)] sm:max-h-[90vh] overflow-hidden">
 
       <div class="px-6 py-4 border-b border-stone-100 flex-shrink-0 flex items-center justify-between">
-        <h3 class="font-semibold text-stone-900">{editingKeyword ? '编辑关键词' : '添加关键词'}</h3>
-        <button onclick={() => showDialog = false} class="text-stone-400 hover:text-stone-700">
+        <h3 id="keyword-dialog-title" class="font-semibold text-stone-900">{editingKeyword ? '编辑关键词' : '添加关键词'}</h3>
+        <button onclick={() => showDialog = false} aria-label="关闭" class="text-stone-400 hover:text-stone-700">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
           </svg>
@@ -280,27 +381,27 @@
         {/if}
 
         <div>
-          <label class="block text-xs font-semibold text-stone-500 mb-1 tracking-wide uppercase">关键词</label>
-          <input type="text" bind:value={formData.keyword} placeholder="例：验证码"
+          <label for="keyword-value" class="block text-xs font-semibold text-stone-500 mb-1 tracking-wide uppercase">关键词</label>
+          <input id="keyword-value" type="text" bind:value={formData.keyword} disabled={Boolean(editingKeyword)} placeholder="例：验证码"
             class="w-full px-3 py-2 text-sm border border-stone-300 rounded-lg
-              focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100" />
+              focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 disabled:bg-stone-100 disabled:text-stone-500" />
         </div>
 
         <div>
-          <label class="block text-xs font-semibold text-stone-500 mb-1 tracking-wide uppercase">标签</label>
-          <input type="text" bind:value={formData.tag} placeholder="例：OTP"
+          <label for="keyword-tag" class="block text-xs font-semibold text-stone-500 mb-1 tracking-wide uppercase">标签</label>
+          <input id="keyword-tag" type="text" bind:value={formData.tag} placeholder="例：OTP"
             class="w-full px-3 py-2 text-sm border border-stone-300 rounded-lg
               focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100" />
         </div>
 
         <!-- 5 preset colour swatches — no colour picker (hard to use precisely on mobile) -->
         <div>
-          <label class="block text-xs font-semibold text-stone-500 mb-2 tracking-wide uppercase">颜色</label>
+          <p class="block text-xs font-semibold text-stone-500 mb-2 tracking-wide uppercase">颜色</p>
           <div class="flex items-center gap-2">
             {#each PRESET_COLORS as p}
               <button
                 onclick={() => { formData.color = p.hex; }}
-                title={p.label}
+                title={p.label} aria-label={`选择${p.label}色`}
                 class="w-7 h-7 rounded-full {p.bg} transition-transform hover:scale-110
                   {formData.color === p.hex ? 'ring-2 ring-offset-2 ring-stone-700 scale-110' : ''}"
               ></button>
@@ -309,8 +410,8 @@
         </div>
 
         <div>
-          <label class="block text-xs font-semibold text-stone-500 mb-1 tracking-wide uppercase">优先级</label>
-          <input type="number" bind:value={formData.priority} min="0" max="100"
+          <label for="keyword-priority" class="block text-xs font-semibold text-stone-500 mb-1 tracking-wide uppercase">优先级</label>
+          <input id="keyword-priority" type="number" bind:value={formData.priority} min="0" max="100"
             class="w-full px-3 py-2 text-sm border border-stone-300 rounded-lg
               focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100" />
         </div>
@@ -320,8 +421,9 @@
           <label class="flex items-center justify-between py-2.5 cursor-pointer">
             <span class="text-sm text-stone-700">整词匹配</span>
             <button onclick={() => { formData.whole_word = !formData.whole_word; }}
+              aria-label="整词匹配" disabled={Boolean(editingKeyword)}
               class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors
-                {formData.whole_word ? 'bg-stone-800' : 'bg-stone-200'}">
+                {formData.whole_word ? 'bg-stone-800' : 'bg-stone-200'} disabled:opacity-40">
               <span class="inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform
                 {formData.whole_word ? 'translate-x-4' : 'translate-x-1'}"></span>
             </button>
@@ -329,8 +431,9 @@
           <label class="flex items-center justify-between py-2.5 cursor-pointer border-t border-stone-100">
             <span class="text-sm text-stone-700">区分大小写</span>
             <button onclick={() => { formData.case_sensitive = !formData.case_sensitive; }}
+              aria-label="区分大小写" disabled={Boolean(editingKeyword)}
               class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors
-                {formData.case_sensitive ? 'bg-stone-800' : 'bg-stone-200'}">
+                {formData.case_sensitive ? 'bg-stone-800' : 'bg-stone-200'} disabled:opacity-40">
               <span class="inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform
                 {formData.case_sensitive ? 'translate-x-4' : 'translate-x-1'}"></span>
             </button>
@@ -343,12 +446,12 @@
           class="px-4 py-2 text-sm text-stone-600 border border-stone-200 rounded-lg hover:bg-stone-50 transition-colors">
           取消
         </button>
-        <button onclick={save} disabled={!formData.keyword || !formData.tag}
+        <button onclick={save} disabled={saving || !formData.keyword || !formData.tag}
           class="px-4 py-2 text-sm font-medium bg-stone-800 text-white rounded-lg
             hover:bg-stone-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
           {editingKeyword ? '更新关键词' : '添加关键词'}
         </button>
       </div>
     </div>
-  </div>
+  </dialog>
 {/if}

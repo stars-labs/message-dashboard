@@ -55,6 +55,24 @@ function parseBatchScope(value) {
   return normalized;
 }
 
+function displayBalanceStatus(record) {
+  if (['response_received', 'unparsed'].includes(record.status)
+    && ['pending', 'leased'].includes(record.skill_job_status)) {
+    return record.skill_job_status === 'leased' ? 'skill_processing' : 'skill_pending';
+  }
+  if (record.status === 'queued' && record.web_job_status) {
+    return ({
+      pending: 'web_pending',
+      leased: 'web_processing',
+      awaiting_otp: 'web_otp',
+      authenticating: 'web_authenticating',
+      querying: 'web_querying',
+      human_verification_required: 'web_human_required',
+    })[record.web_job_status] || record.status;
+  }
+  return record.status;
+}
+
 export function buildBalanceQueryPlan({
   phones = [],
   profiles = [],
@@ -186,6 +204,7 @@ async function loadBalanceQueryPlan(db, {
 }
 
 async function queueBalanceCheck(db, { phone, profile }, requestedBySubject = null) {
+  const requestedAt = new Date().toISOString();
   if (profile.method === 'browser') {
     const { checkId, jobId } = newCarrierWebBalanceIds();
     await db.batch(createCarrierWebBalanceStatements(db, {
@@ -200,6 +219,9 @@ async function queueBalanceCheck(db, { phone, profile }, requestedBySubject = nu
       sim_iccid: phone.iccid,
       profile_id: profile.id,
       status: 'queued',
+      requested_at: requestedAt,
+      method: profile.method,
+      profile_carrier: profile.carrier,
       web_job_id: jobId,
     };
   }
@@ -244,6 +266,9 @@ async function queueBalanceCheck(db, { phone, profile }, requestedBySubject = nu
     sim_iccid: phone.iccid,
     profile_id: profile.id,
     status: 'queued',
+    requested_at: requestedAt,
+    method: profile.method,
+    profile_carrier: profile.carrier,
     outbound_message_id: messageId,
   };
 }
@@ -367,11 +392,7 @@ export async function findPendingBalanceCheck(db, {
       p.skill_config,
       p.destination,
       dv.number AS sim_number,
-      datetime('now') <= datetime(COALESCE((
-        SELECT MAX(m.timestamp)
-        FROM messages m
-        WHERE m.balance_check_id = c.id AND m.type = 'sent'
-      ), c.sent_at, c.requested_at), '+' || p.response_window_minutes || ' minutes')
+      datetime('now') <= datetime(c.deadline_at)
         AS response_window_open
     FROM sim_balance_checks c
     JOIN sim_balance_profiles p ON p.id = c.profile_id
@@ -383,11 +404,7 @@ export async function findPendingBalanceCheck(db, {
         FROM messages m
         WHERE m.balance_check_id = c.id AND m.type = 'sent'
       ), c.sent_at, c.requested_at))
-      AND datetime(?) <= datetime(COALESCE((
-        SELECT MAX(m.timestamp)
-        FROM messages m
-        WHERE m.balance_check_id = c.id AND m.type = 'sent'
-      ), c.sent_at, c.requested_at), '+' || p.response_window_minutes || ' minutes')
+      AND datetime(?) <= datetime(c.deadline_at)
     ORDER BY c.requested_at DESC
   `).bind(phone_iccid, message_timestamp, message_timestamp).all();
 
@@ -509,18 +526,7 @@ export async function expireStaleBalanceChecks(db) {
           error = 'No reply received within the configured response window',
           updated_at = CURRENT_TIMESTAMP
       WHERE status = 'awaiting_response'
-        AND EXISTS (
-          SELECT 1
-          FROM sim_balance_profiles p
-          WHERE p.id = sim_balance_checks.profile_id
-            AND datetime(COALESCE((
-              SELECT MAX(m.timestamp)
-              FROM messages m
-              WHERE m.balance_check_id = sim_balance_checks.id
-                AND m.type = 'sent'
-            ), sim_balance_checks.sent_at, sim_balance_checks.requested_at),
-              '+' || p.response_window_minutes || ' minutes') < datetime('now')
-        )
+        AND deadline_at < CURRENT_TIMESTAMP
     `).bind(),
     db.prepare(`
       UPDATE sim_balance_skill_jobs
@@ -581,6 +587,7 @@ export async function queueBalanceFollowUp(
         response_message_id = ?,
         response_sender = ?,
         raw_response = ?,
+        deadline_at = NULL,
         error = NULL,
         updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
@@ -612,6 +619,12 @@ export async function updateBalanceCheckForSmsResult(
     UPDATE sim_balance_checks
     SET status = ?,
         sent_at = CASE WHEN ? THEN COALESCE(sent_at, CURRENT_TIMESTAMP) ELSE sent_at END,
+        deadline_at = CASE WHEN ? THEN datetime(
+          CURRENT_TIMESTAMP,
+          '+' || (SELECT p.response_window_minutes
+                  FROM sim_balance_profiles p
+                  WHERE p.id = sim_balance_checks.profile_id) || ' minutes'
+        ) ELSE deadline_at END,
         completed_at = CASE WHEN ? THEN completed_at ELSE CURRENT_TIMESTAMP END,
         error = ?,
         updated_at = CURRENT_TIMESTAMP
@@ -621,6 +634,7 @@ export async function updateBalanceCheckForSmsResult(
       AND status = 'queued'
   `).bind(
     submitted ? 'awaiting_response' : 'failed',
+    submitted ? 1 : 0,
     submitted ? 1 : 0,
     submitted ? 1 : 0,
     submitted ? null : (errorMessage || 'SMS send failed'),
@@ -681,7 +695,7 @@ export const balanceQueriesHandler = {
           SELECT sj.status
           FROM sim_balance_skill_jobs sj
           WHERE sj.check_id = c.id
-          ORDER BY datetime(sj.created_at) DESC, sj.rowid DESC
+          ORDER BY sj.created_at DESC, sj.rowid DESC
           LIMIT 1
         ) AS skill_job_status,
         (
@@ -696,24 +710,6 @@ export const balanceQueriesHandler = {
           WHERE wj.check_id = c.id
           LIMIT 1
         ) AS web_human_reason,
-        COALESCE((
-          SELECT json_group_array(json_object(
-            'id', conversation.id,
-            'type', conversation.type,
-            'content', conversation.content,
-            'timestamp', conversation.timestamp,
-            'status', conversation.status,
-            'phone_number', conversation.phone_number,
-            'recipient', conversation.recipient
-          ))
-          FROM (
-            SELECT m.id, m.type, m.content, m.timestamp, m.status,
-                   m.phone_number, m.recipient
-            FROM messages m
-            WHERE m.balance_check_id = c.id
-            ORDER BY datetime(m.timestamp), m.rowid
-          ) conversation
-        ), '[]') AS conversation_json,
         COALESCE((
           SELECT json_group_array(json_object(
             'metric_type', bm.metric_type,
@@ -731,23 +727,17 @@ export const balanceQueriesHandler = {
       LEFT JOIN messages om ON om.id = c.outbound_message_id
       LEFT JOIN messages rm ON rm.id = c.response_message_id
       ${where}
-      ORDER BY datetime(c.requested_at) DESC
+      ORDER BY c.requested_at DESC
       LIMIT ?
     `).bind(...params, limit).all();
 
     const checks = (result.results || []).map((check) => {
       let metrics = [];
-      let conversation = [];
       let profileOutputs = [];
       try {
         metrics = JSON.parse(check.metrics_json || '[]');
       } catch {
         metrics = [];
-      }
-      try {
-        conversation = JSON.parse(check.conversation_json || '[]');
-      } catch {
-        conversation = [];
       }
       try {
         const skill = JSON.parse(check.skill_config || '{}');
@@ -763,31 +753,74 @@ export const balanceQueriesHandler = {
         skill_config: _skillConfig,
         ...record
       } = check;
-      let displayStatus = record.status;
-      if (['response_received', 'unparsed'].includes(record.status)
-        && ['pending', 'leased'].includes(record.skill_job_status)) {
-        displayStatus = record.skill_job_status === 'leased' ? 'skill_processing' : 'skill_pending';
-      } else if (record.status === 'queued' && record.web_job_status) {
-        const webStatuses = {
-          pending: 'web_pending',
-          leased: 'web_processing',
-          awaiting_otp: 'web_otp',
-          authenticating: 'web_authenticating',
-          querying: 'web_querying',
-          human_verification_required: 'web_human_required',
-        };
-        displayStatus = webStatuses[record.web_job_status] || record.status;
-      }
       return {
         ...record,
-        display_status: displayStatus,
+        display_status: displayBalanceStatus(record),
         profile_outputs: profileOutputs,
         metrics,
-        conversation,
       };
     });
 
     return json({ success: true, data: checks });
+  },
+
+  async status(request) {
+    const ids = [...new Set((new URL(request.url).searchParams.get('ids') || '')
+      .split(',').map((id) => id.trim()).filter(Boolean))];
+    if (!ids.length || ids.length > 100 || ids.some((id) => id.length > 200)) {
+      return json({ error: 'ids must contain 1 to 100 balance check IDs' }, 400);
+    }
+    const placeholders = ids.map(() => '?').join(', ');
+    const result = await request.env.DB.prepare(`
+      SELECT c.id, c.status, c.updated_at, c.completed_at,
+        (SELECT sj.status FROM sim_balance_skill_jobs sj
+         WHERE sj.check_id = c.id ORDER BY sj.created_at DESC, sj.rowid DESC LIMIT 1)
+          AS skill_job_status,
+        wj.status AS web_job_status,
+        wj.human_reason AS web_human_reason
+      FROM sim_balance_checks c
+      LEFT JOIN sim_balance_web_jobs wj ON wj.check_id = c.id
+      WHERE c.id IN (${placeholders})
+    `).bind(...ids).all();
+    return json({
+      success: true,
+      data: (result.results || []).map((record) => ({
+        ...record,
+        display_status: displayBalanceStatus(record),
+      })),
+    });
+  },
+
+  async detail(request) {
+    const id = String(request.params?.id || '').trim();
+    if (!id || id.length > 200) return json({ error: 'Invalid balance check ID' }, 400);
+    const check = await request.env.DB.prepare(`
+      SELECT id FROM sim_balance_checks WHERE id = ?
+    `).bind(id).first();
+    if (!check) return json({ error: 'Balance check not found' }, 404);
+    const [messages, events] = await Promise.all([
+      request.env.DB.prepare(`
+        SELECT id, type, content, timestamp, status, phone_number, recipient
+        FROM messages
+        WHERE balance_check_id = ?
+        ORDER BY timestamp, id
+      `).bind(id).all(),
+      request.env.DB.prepare(`
+        SELECT e.id, e.event_type, e.detail_json, e.created_at
+        FROM sim_balance_web_events e
+        JOIN sim_balance_web_jobs j ON j.id = e.job_id
+        WHERE j.check_id = ?
+        ORDER BY e.created_at, e.id
+      `).bind(id).all(),
+    ]);
+    return json({
+      success: true,
+      data: {
+        id,
+        conversation: messages.results || [],
+        web_events: events.results || [],
+      },
+    });
   },
 
   async preview(request) {
@@ -1134,7 +1167,7 @@ export const balanceQueriesHandler = {
       `).bind(check.message_id),
       request.env.DB.prepare(`
         UPDATE sim_balance_checks
-        SET status = 'queued', completed_at = NULL, error = NULL,
+        SET status = 'queued', completed_at = NULL, deadline_at = NULL, error = NULL,
             updated_at = CURRENT_TIMESTAMP
         WHERE id = ? AND status = 'failed' AND step_index = ?
       `).bind(check.id, check.step_index),

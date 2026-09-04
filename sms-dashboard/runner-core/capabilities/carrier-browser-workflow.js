@@ -237,6 +237,7 @@ async function waitForOtp(job, page) {
   const deadline = Date.now() + Number(job.skill.human_verification_timeout_seconds || 900) * 1000;
   let humanReported = false;
   let lastHeartbeat = 0;
+  let cursor = null;
   while (Date.now() < deadline) {
     if (await hasHumanChallenge(page)) {
       if (!humanReported || Date.now() - lastHeartbeat > 30_000) {
@@ -253,8 +254,13 @@ async function waitForOtp(job, page) {
       lastHeartbeat = Date.now();
     }
 
+    const query = new URLSearchParams({ runner_id: runnerId });
+    if (cursor) {
+      query.set('after_created_at', cursor.created_at);
+      query.set('after_source_message_id', cursor.source_message_id);
+    }
     const response = await workerRequest(
-      `/api/control/carrier-web-balance/jobs/${encodeURIComponent(job.id)}/otp?runner_id=${encodeURIComponent(runnerId)}`,
+      `/api/control/carrier-web-balance/jobs/${encodeURIComponent(job.id)}/otp?${query}`,
     );
     if (response.status === 204) {
       await abortableSleep(2_000);
@@ -264,7 +270,14 @@ async function waitForOtp(job, page) {
       throw new Error(`Could not poll login code (${response.status}): ${(await response.text()).slice(0, 300)}`);
     }
     const payload = await response.json();
-    if (!payload?.code) throw new Error('Worker returned an empty carrier login code');
+    if (!payload?.code) {
+      if (payload?.cursor?.created_at && payload?.cursor?.source_message_id) {
+        cursor = payload.cursor;
+        await abortableSleep(2_000);
+        continue;
+      }
+      throw new Error('Worker returned an empty carrier login code');
+    }
     return payload.code;
   }
   throw new Error('Timed out waiting for carrier login code or human verification');

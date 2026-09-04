@@ -45,3 +45,22 @@ export async function resetServiceWorker(env = globalThis) {
 
   return { ok, unregistered, cachesDeleted };
 }
+
+/**
+ * Clear both persistent message data (IndexedDB) and offline application caches.
+ * The operations are independent so one failure never prevents the other cleanup.
+ */
+export async function resetDashboardCache({ clearMessageCache, resetOfflineCache }) {
+  const [messageResult, offlineResult] = await Promise.allSettled([
+    clearMessageCache(),
+    resetOfflineCache(),
+  ]);
+  const offline = offlineResult.status === 'fulfilled'
+    ? offlineResult.value
+    : { ok: false, unregistered: 0, cachesDeleted: 0 };
+
+  return {
+    ...offline,
+    ok: messageResult.status === 'fulfilled' && offline.ok,
+  };
+}

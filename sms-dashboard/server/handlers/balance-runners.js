@@ -29,7 +29,7 @@ function parseHeartbeat(body) {
   const platform = boundedString(body?.platform, 100);
   const version = boundedString(body?.version, 100);
   if (!runnerId || !sessionId || !displayName || !platform || !version) return null;
-  if (!Array.isArray(body.capabilities) || body.capabilities.length < 1
+  if (!Array.isArray(body.capabilities)
     || body.capabilities.length > CAPABILITIES.size) return null;
 
   const seen = new Set();
@@ -92,13 +92,13 @@ export async function loadBalanceRunnerStatus(db, { authSubject = null } = {}) {
     `);
   const capabilityStatement = db.prepare(`
       SELECT c.runner_id, c.capability, c.state, c.current_job_id, c.concurrency,
-        c.detail_code, c.last_heartbeat,
-        CAST((julianday('now') - julianday(c.last_heartbeat)) * 86400 AS INTEGER)
+        c.detail_code, r.last_heartbeat,
+        CAST((julianday('now') - julianday(r.last_heartbeat)) * 86400 AS INTEGER)
           AS seconds_since_heartbeat
       FROM balance_runner_capabilities c
       JOIN balance_runner_installations r ON r.id = c.runner_id
       WHERE r.revoked_at IS NULL${capabilityOwnerFilter}
-      ORDER BY datetime(c.last_heartbeat) DESC, c.runner_id
+      ORDER BY datetime(r.last_heartbeat) DESC, c.runner_id
     `);
   const [installations, capabilityRows] = await Promise.all([
     authSubject ? installationStatement.bind(authSubject).all() : installationStatement.all(),

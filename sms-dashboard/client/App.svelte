@@ -12,7 +12,7 @@
   import ErrorBoundary from "./lib/ErrorBoundary.svelte";
   import Toast from "./lib/Toast.svelte";
   import SwUpdatePrompt from "./lib/SwUpdatePrompt.svelte";
-  import { resetServiceWorker } from "./lib/sw-reset.js";
+  import { resetDashboardCache, resetServiceWorker } from "./lib/sw-reset.js";
   import DaemonHealthPanel from "./lib/DaemonHealthPanel.svelte";
   import BalanceQueryDetail from './lib/BalanceQueryDetail.svelte';
   import MessageDetail from './lib/MessageDetail.svelte';
@@ -25,6 +25,7 @@
   import { isAnomalous } from "./lib/device-status.js";
   import { formatCardNumber } from "./lib/card-number.js";
   import { formatTimeAgo } from "./lib/time.js";
+  import { isActiveBalanceCheck } from './lib/balance-polling.js';
   import { getDaemonStatusMeta, isDaemonConnected } from "./lib/daemon-status.js";
   import {
     getMobileTabDragX,
@@ -133,11 +134,14 @@
   // false, so re-running it updates in place without flashing the skeleton.
   let pullRefreshing = $state(false);
 
-  // Clears the service worker and its caches, then hard-reloads so the next request
-  // goes to the network. Reloading is the point, so there is no success toast to read.
-  async function handleResetOfflineCache() {
+  // Clears persistent SMS rows plus the service worker/HTTP caches, then reloads.
+  // The reload fetches only the current first page; it does not rescan D1 history.
+  async function handleResetLocalCache() {
     showMoreMenu = false;
-    const result = await resetServiceWorker();
+    const result = await resetDashboardCache({
+      clearMessageCache: () => api.cache.clear(),
+      resetOfflineCache: () => resetServiceWorker(),
+    });
     if (!result.ok) {
       showToast('部分缓存未能清除，请重试', 'error');
       return;
@@ -170,10 +174,8 @@
   let daemonStatus = $state({
     status: 'unknown',
     message: 'Checking daemon status...',
-    modem_count: 0,
     last_heartbeat: null,
-    version: null,
-    device_id: null,
+    snapshot: null,
     connected: false,
   });
 
@@ -540,8 +542,50 @@
     }
   }
 
-  async function refreshBalanceChecksForView() {
+  async function openBalanceCheck(check) {
+    if (!check?.id) return;
+    balanceDetailCheck = check;
+    try {
+      const result = await api.get(`/api/balance-checks/${encodeURIComponent(check.id)}`);
+      if (balanceDetailCheck?.id === check.id && result?.data) {
+        balanceDetailCheck = { ...check, ...result.data };
+      }
+    } catch (error) {
+      console.warn('Failed to load balance query detail:', error);
+    }
+  }
+
+  async function refreshBalanceChecksForView(options = {}) {
     if (!user) return;
+
+    if (Array.isArray(options.queuedChecks) && options.queuedChecks.length) {
+      const queuedIds = new Set(options.queuedChecks.map(({ id }) => id));
+      balanceChecks = [
+        ...options.queuedChecks,
+        ...balanceChecks.filter(({ id }) => !queuedIds.has(id)),
+      ];
+      return;
+    }
+
+    if (Array.isArray(options.activeIds) && options.activeIds.length) {
+      const result = await api.get(
+        `/api/balance-checks/status?ids=${encodeURIComponent(options.activeIds.join(','))}`,
+      );
+      const updates = new Map((result.data || []).map((status) => [status.id, status]));
+      const reachedTerminal = options.activeIds.some((id) => {
+        if (!updates.has(id)) return true;
+        const check = balanceChecks.find((candidate) => candidate.id === id);
+        if (!check) return false;
+        const update = updates.get(check.id);
+        return update
+          && isActiveBalanceCheck(check)
+          && !isActiveBalanceCheck(update);
+      });
+      balanceChecks = balanceChecks.map((check) => (
+        updates.has(check.id) ? { ...check, ...updates.get(check.id) } : check
+      ));
+      if (!reachedTerminal) return;
+    }
 
     if (currentView === 'balances') {
       balanceChecks = await api.getBalanceChecks({ limit: 100 });
@@ -664,7 +708,6 @@
           status: 'error',
           message: 'Failed to check daemon status',
           connected: false,
-          modem_count: undefined
         };
       }
     } catch (error) {
@@ -674,7 +717,6 @@
         status: 'error',
         message: 'Cannot connect to server',
         connected: false,
-        modem_count: undefined
       };
     }
   }
@@ -857,6 +899,17 @@
               发送短信
             </button>
           {/if}
+
+          <button onclick={handleResetLocalCache}
+            title="清除本地短信缓存"
+            aria-label="清除本地短信缓存"
+            class="w-[26px] h-[26px] rounded-full text-stone-400 hover:text-stone-700 hover:bg-stone-100
+              flex items-center justify-center transition-colors shrink-0">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M4 4v5h5M20 20v-5h-5M5.1 9A8 8 0 0118.9 6M18.9 15A8 8 0 015.1 18"/>
+            </svg>
+          </button>
 
           <!-- Avatar -->
           {#if user}
@@ -1150,7 +1203,7 @@
                 {filterRules}
                 onToggleFiltered={toggleFiltered}
                 {balanceChecks}
-                onOpenBalance={(check) => balanceDetailCheck = check}
+                onOpenBalance={openBalanceCheck}
                 onOpenMessage={(message) => messageDetail = message}
                 hasMore={hasMoreMessagePages}
                 onLoadMore={loadOlderMessages}
@@ -1164,7 +1217,7 @@
                   mobile={false}
                   {daemonStatus}
                   balanceCheck={latestSelectedBalanceCheck}
-                  onOpenBalance={(check) => balanceDetailCheck = check}
+                  onOpenBalance={openBalanceCheck}
                   phones={phoneNumbers}
                 />
               </div>
@@ -1215,7 +1268,7 @@
             canQueryBalances={can('balances.query')}
             canWriteBills={can('bills.write')}
             onQueriesChanged={refreshBalanceChecksForView}
-            onOpenBalance={(check) => balanceDetailCheck = check}
+            onOpenBalance={openBalanceCheck}
           />
         </div>
       </ErrorBoundary>
@@ -1461,14 +1514,12 @@
 
           <div class="border-t border-stone-100 my-2"></div>
           <p class="text-[11px] font-semibold text-stone-400 uppercase tracking-widest px-3 mb-2">账户</p>
-          <!-- Recovery path for a bad service worker. Reverting the deployment does not
-               uninstall a worker already on the device, and iOS Safari offers no
-               discoverable way to clear one, so this is the only self-service fix. -->
-          <button onclick={handleResetOfflineCache}
+          <!-- Self-service recovery for stale IndexedDB rows or a bad service worker. -->
+          <button onclick={handleResetLocalCache}
             class="w-full flex items-center justify-between px-3 py-3 rounded-xl hover:bg-stone-50 transition-colors text-left">
             <div>
-              <div class="text-sm font-medium text-stone-700">重置离线缓存</div>
-              <div class="text-xs text-stone-400 mt-0.5">页面异常或版本卡住时使用</div>
+              <div class="text-sm font-medium text-stone-700">重置本地缓存</div>
+              <div class="text-xs text-stone-400 mt-0.5">清除短信与离线缓存后重新加载</div>
             </div>
             <svg class="w-4 h-4 text-stone-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"

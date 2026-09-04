@@ -8,9 +8,11 @@ import {
 class D1Adapter {
   constructor(database) {
     this.database = database;
+    this.preparedSql = [];
   }
 
   prepare(sql) {
+    this.preparedSql.push(sql);
     const database = this.database;
     return {
       bind(...params) {
@@ -90,6 +92,7 @@ describe('carrier browser balance job protocol', () => {
     sqlite.exec(await Bun.file('migrations/055_add_balance_runner_control_plane.sql').text());
     sqlite.exec(await Bun.file('migrations/054_add_unicom_web_balance_skill.sql').text());
     sqlite.exec(await Bun.file('migrations/065_add_m1_prepaid_browser_balance.sql').text());
+    sqlite.exec(await Bun.file('migrations/076_optimize_balance_runtime.sql').text());
     sqlite.exec(`
       INSERT INTO sim_balance_checks (
         id, sim_iccid, profile_id, status, parser_version
@@ -132,6 +135,14 @@ describe('carrier browser balance job protocol', () => {
       .toBe('leased');
   });
 
+  test('forces the pending-job index on the claim hot path', async () => {
+    await claim();
+
+    expect(db.preparedSql[0]).toContain(
+      'sim_balance_web_jobs j INDEXED BY idx_balance_web_jobs_pending_claim',
+    );
+  });
+
   test('does not let a legacy runner claim a Dashboard-owned browser job', async () => {
     sqlite.exec("UPDATE sim_balance_checks SET requested_by_subject = 'auth0|alice'");
 
@@ -139,6 +150,16 @@ describe('carrier browser balance job protocol', () => {
     expect(response.status).toBe(204);
     expect(sqlite.query("SELECT status FROM sim_balance_web_jobs WHERE id='job-1'").get().status)
       .toBe('pending');
+  });
+
+  test('keeps the five-second claim path free of maintenance work', async () => {
+    sqlite.exec("UPDATE sim_balance_web_jobs SET status = 'stopped' WHERE id = 'job-1'");
+
+    const response = await carrierWebBalanceHandler.claim(request(db));
+
+    expect(response.status).toBe(204);
+    expect(sqlite.query("SELECT status FROM sim_balance_checks WHERE id='check-1'").get().status)
+      .toBe('queued');
   });
 
   test('returns only an OTP from the same SIM, allowlisted sender and request window', async () => {
@@ -165,6 +186,52 @@ describe('carrier browser balance job protocol', () => {
     expect(await response.json()).toEqual({ code: '654321' });
   });
 
+  test('advances an OTP cursor with the daemon source message id', async () => {
+    const job = await claim();
+    await carrierWebBalanceHandler.otpRequested(request(db, {
+      id: job.id,
+      body: { runner_id: 'runner-1' },
+    }));
+    sqlite.exec(`
+      INSERT INTO messages VALUES (
+        'source-message-1', 'iccid-1', '10010', '优惠码123456', CURRENT_TIMESTAMP,
+        'received', '123456', '2026-09-04 10:00:00'
+      );
+      INSERT INTO messages VALUES (
+        'source-message-2', 'iccid-1', '10010', '优惠码234567', CURRENT_TIMESTAMP,
+        'received', '234567', '2026-09-04 10:00:00'
+      );
+    `);
+    sqlite.exec("UPDATE sim_balance_web_jobs SET otp_requested_at = '2026-09-04 09:59:00'");
+
+    const first = await carrierWebBalanceHandler.otp(request(db, {
+      id: job.id,
+      runnerId: 'runner-1',
+    }));
+    expect(first.status).toBe(200);
+    expect(await first.json()).toEqual({
+      code: null,
+      cursor: {
+        created_at: '2026-09-04 10:00:00',
+        source_message_id: 'source-message-2',
+      },
+    });
+
+    sqlite.exec(`
+      INSERT INTO messages VALUES (
+        'source-message-3', 'iccid-1', '+8610010',
+        '您的随机密码为654321，请勿泄露', CURRENT_TIMESTAMP,
+        'received', '654321', '2026-09-04 10:00:01'
+      );
+    `);
+    const secondRequest = request(db, { id: job.id, runnerId: 'runner-1' });
+    secondRequest.url += '&after_created_at=2026-09-04%2010%3A00%3A00&after_source_message_id=source-message-2';
+    const second = await carrierWebBalanceHandler.otp(secondRequest);
+
+    expect(second.status).toBe(200);
+    expect(await second.json()).toEqual({ code: '654321' });
+  });
+
   test('extends the lease while waiting for human verification', async () => {
     const job = await claim();
     const response = await carrierWebBalanceHandler.heartbeat(request(db, {
@@ -182,6 +249,22 @@ describe('carrier browser balance job protocol', () => {
         status: 'human_verification_required',
         human_reason: '请完成滑块验证',
       });
+  });
+
+  test('renews a lease without appending duplicate heartbeat events', async () => {
+    const job = await claim();
+    const heartbeatRequest = () => request(db, {
+      id: job.id,
+      body: { runner_id: 'runner-1', status: 'awaiting_otp' },
+    });
+
+    await carrierWebBalanceHandler.heartbeat(heartbeatRequest());
+    await carrierWebBalanceHandler.heartbeat(heartbeatRequest());
+
+    expect(sqlite.query(`
+      SELECT COUNT(*) AS count FROM sim_balance_web_events
+      WHERE job_id = 'job-1' AND event_type = 'awaiting_otp'
+    `).get().count).toBe(1);
   });
 
   test('matches only the M1 login OTP for an M1 prepaid job', async () => {

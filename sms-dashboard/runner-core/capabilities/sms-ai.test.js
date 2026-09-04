@@ -54,7 +54,7 @@ describe('SMS AI capability', () => {
     const submitted = JSON.parse(harness.requests[1].options.body);
     expect(submitted.decision.action).toBe('reply');
     expect(submitted.decision.selected_option).toBe('102');
-    expect(harness.states).toEqual([['ready'], ['busy', 'job-1'], ['ready']]);
+    expect(harness.states).toEqual([['busy', 'job-1'], ['ready']]);
   });
 
   test('uses AI for a carrier menu and validates the result before submission', async () => {
