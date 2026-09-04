@@ -1290,7 +1290,7 @@ impl AtModemManager {
             // Bit 2 set (but not bit 3) = 8-bit data encoding
             debug!("PDU encoding detected: 8-bit data (DCS: 0x{:02X})", dcs);
             // UDH already skipped, text_start points to actual text
-            String::from_utf8_lossy(&pdu_bytes[text_start..]).to_string()
+            Self::decode_pdu_8bit(&pdu_bytes[text_start..])
         } else {
             // Default 7-bit GSM alphabet (English/ASCII)
             debug!("PDU encoding detected: 7-bit GSM (DCS: 0x{:02X})", dcs);
@@ -1306,6 +1306,41 @@ impl AtModemManager {
             text,
             concat_info,
         })
+    }
+
+    /// Preserve ordinary 8-bit text, while turning binary WAP Push payloads into
+    /// a safe, readable notification. Unknown binary data deliberately keeps the
+    /// previous lossy conversion behavior so this narrow fix cannot change other
+    /// message handling paths.
+    fn decode_pdu_8bit(bytes: &[u8]) -> String {
+        if let Ok(text) = std::str::from_utf8(bytes) {
+            let is_plain_text = text.chars().all(|character| {
+                !character.is_control() || matches!(character, '\n' | '\r' | '\t')
+            });
+            if is_plain_text {
+                return text.to_string();
+            }
+        }
+
+        if let Some(url) = Self::extract_http_url(bytes) {
+            return format!("运营商 WAP Push\n链接：{url}");
+        }
+
+        String::from_utf8_lossy(bytes).to_string()
+    }
+
+    fn extract_http_url(bytes: &[u8]) -> Option<String> {
+        let start = (0..bytes.len()).find(|&index| {
+            bytes[index..].starts_with(b"https://") || bytes[index..].starts_with(b"http://")
+        })?;
+        let end = bytes[start..]
+            .iter()
+            .position(|byte| !byte.is_ascii_graphic())
+            .map(|length| start + length)
+            .unwrap_or(bytes.len());
+        std::str::from_utf8(&bytes[start..end])
+            .ok()
+            .map(str::to_owned)
     }
 
     /// Extract concatenation info from UDH
@@ -2788,11 +2823,30 @@ mod tests {
         // PDU Type: 04, Sender: 0B 91 2143658709F0
         // PID: 00, DCS: 04 (8-bit), Timestamp: 42301141030023
         // UDL: 05, Text: 48656C6C6F ("Hello" as raw 8-bit bytes)
-        let pdu = "00040B912143658709F000044230114103002305048656C6C6F";
+        let pdu = "00040B912143658709F00004423011410300230548656C6C6F";
         let result = AtModemManager::parse_pdu_sms(7, pdu);
         assert!(result.is_ok());
         let sms = result.unwrap();
-        assert!(sms.text.contains("Hello") || sms.text.len() >= 5);
+        assert_eq!(sms.text, "Hello");
+    }
+
+    #[test]
+    fn test_decode_8bit_wap_push_as_safe_summary() {
+        let payload = b"\x00\x06\x05\xff\xfeW\x80\x81http://z1.v-mas.cn:30089//v?c=243004716252924832&m=2909341\x00";
+
+        let text = AtModemManager::decode_pdu_8bit(payload);
+
+        assert_eq!(
+            text,
+            "运营商 WAP Push\n链接：http://z1.v-mas.cn:30089//v?c=243004716252924832&m=2909341"
+        );
+        assert!(!text.contains('\u{fffd}'));
+        assert!(!text.contains('\0'));
+    }
+
+    #[test]
+    fn test_decode_8bit_non_wap_payload_keeps_existing_lossy_behavior() {
+        assert_eq!(AtModemManager::decode_pdu_8bit(b"\xffA"), "\u{fffd}A");
     }
 
     #[test]
