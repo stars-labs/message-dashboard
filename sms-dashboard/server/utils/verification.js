@@ -5,6 +5,7 @@
 const ZH_LABEL = '验证码|校验码|动态码|动态密码|驗證碼|校驗碼|動態碼|動態密碼';
 const EN_CODE_LABEL =
   'otp|passcode|pin|(?:verification|security|authentication|login|access|confirmation|one[- ]time)\\s+(?:code|password)';
+const JA_LABEL = '認証コード|確認コード|ワンタイムパスワード|ワンタイムコード|セキュリティコード';
 
 /**
  * Ordered from the most explicit forms to contextual forms. Each expression has
@@ -18,6 +19,14 @@ export const VERIFICATION_CODE_PATTERNS = [
   {
     reason: 'zh_label_after',
     pattern: new RegExp(`(\\d{4,8})\\s*(?:是|为|為)\\s*(?:您|你|妳)?的?\\s*(?:${ZH_LABEL})`),
+  },
+  {
+    reason: 'ja_label_before',
+    pattern: new RegExp(`(?:${JA_LABEL})\\s*(?:は|が)?\\s*[:：]?\\s*(\\d{4,8})`),
+  },
+  {
+    reason: 'ja_label_after',
+    pattern: new RegExp(`(\\d{4,8})\\s*(?:は|が)?\\s*(?:あなたの|お客様の)?[^\\n。]{0,24}?(?:${JA_LABEL})`),
   },
   {
     reason: 'en_label_before',
@@ -68,12 +77,30 @@ export const VERIFICATION_CODE_PATTERNS = [
     reason: 'zh_expiry_or_security',
     pattern: /(\d{4,8})[^\n。]{0,24}?(?:\d+\s*分钟内有效|\d+\s*分鐘內有效|有效期(?:为|為)?\s*\d+\s*分钟|有效期(?:为|為)?\s*\d+\s*分鐘|请勿(?:向他人)?泄露|請勿(?:向他人)?洩露|不要告知他人|切勿转发|切勿轉發)/,
   },
+  {
+    reason: 'ja_generic_code_before',
+    pattern: /コード\s*(?:番号)?\s*[:：]?\s*(\d{4,8})/,
+  },
+  {
+    reason: 'ja_login_action',
+    pattern: /(\d{4,8})\s*を\s*(?:入力|使用)(?:し(?:てください)?)?[^\n。]{0,24}?(?:ログイン|サインイン|認証|確認)/,
+  },
+  {
+    reason: 'ja_expiry',
+    pattern: /(\d{4,8})[^\n。]{0,16}?(?:有効期限\s*(?:は|が)?\s*\d+\s*分|\d+\s*分(?:間|以内)?\s*有効)/,
+  },
+  {
+    reason: 'ja_security',
+    pattern: /(\d{4,8})[^\n。]{0,24}?(?:誰とも|誰にも|他人|第三者)[^\n。]{0,8}?(?:共有|教え|伝え)(?:しないで|しない|ず|ないでください)/,
+  },
 ];
 
 const NON_OTP_CODE_PREFIX =
   /(?:promo(?:tional)?|discount|voucher|coupon|offer|area|postal|zip|product)\s+code\s*[:=-]?\s*$/i;
 const NON_OTP_CODE_ACTION =
   /^\s*(?:to\s+)?(?:complete|place|track|confirm)\s+(?:your\s+)?(?:purchase|order|delivery|booking)\b/i;
+const JA_NON_OTP_CODE_PREFIX =
+  /(?:商品|製品|クーポン|プロモーション?|キャンペーン|バウチャー|割引|招待|紹介|注文|予約|会員|ポイント)\s*コード\s*(?:番号)?\s*[:：]?\s*$/;
 
 function candidateOffset(match) {
   return match.index + match[0].indexOf(match[1]);
@@ -93,6 +120,9 @@ function isRejectedCandidate(content, match, reason) {
     if (NON_OTP_CODE_ACTION.test(after)) return true;
   }
   if (reason === 'en_login_action' && NON_OTP_CODE_ACTION.test(after)) return true;
+
+  // Japanese コード is equally overloaded (product/coupon/order codes).
+  if (reason === 'ja_generic_code_before' && JA_NON_OTP_CODE_PREFIX.test(before)) return true;
 
   return false;
 }
