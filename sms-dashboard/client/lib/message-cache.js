@@ -13,7 +13,9 @@ const DB_NAME = 'sms-dashboard-cache';
 // old bare-digit fallback may still contain years, order numbers or card numbers.
 // v4: production history was reclassified after the v3 client had already cached
 // stale `2026` values. Clear it once more so corrected server rows replace them.
-const DB_VERSION = 4;
+// v5: Japanese OTP detection added and history backfilled; cached rows still hold
+// null verification_code from before that backfill.
+const DB_VERSION = 5;
 const MESSAGES_STORE = 'messages';
 const META_STORE = 'meta';
 

@@ -52,6 +52,21 @@ describe('hasLabelledCode — English labels', () => {
   });
 });
 
+describe('hasLabelledCode — Japanese labels', () => {
+  test.each([
+    ['認証コードは 123456 です'],
+    ['確認コード：123456'],
+    ['【LINE】認証コード 778899'],
+    ['ワンタイムパスワード: 667755'],
+    ['ワンタイムコード 998877'],
+    ['セキュリティコード: 901234'],
+    ['123456 が認証コードです'],
+    ['123456 がお客様の認証コードです'],
+  ])('detects %j', (content) => {
+    expect(hasLabelledCode(content)).toBe(true);
+  });
+});
+
 describe('hasVerificationCode — contextual OTPs without an explicit label', () => {
   test.each([
     ['Use 4471 to log in. Expires in 10 min.'],
@@ -63,6 +78,15 @@ describe('hasVerificationCode — contextual OTPs without an explicit label', ()
     ['445566，请勿泄露给他人'],
     ['【微博】672868。仅用于解除账号异常，5分钟内有效。'],
     ['【微博】920629。仅用于解除账号异常，5分钟内有效。'],
+    ['123456 を入力してログインしてください'],
+    ['123456 を入力して認証してください'],
+    ['789012、有効期限は5分です'],
+    ['123456 は5分間有効です'],
+    // Real messages reported by an operator: Amazon (亚马逊卓越) OTP SMS.
+    ['【亚马逊卓越】 Amazon コード：447106。'],
+    ['【亚马逊卓越】 Amazon コード：923564。'],
+    ['【亚马逊卓越】 Amazon コード：385345。'],
+    ['【亚马逊卓越】 075691は、Amazonのワンタイムパスワードです。誰とも共有しないでください。'],
   ])('detects %j', (content) => {
     expect(hasVerificationCode(content)).toBe(true);
   });
@@ -80,6 +104,14 @@ describe('hasLabelledCode — must NOT fire on marketing text', () => {
     ['外交部领保中心祝您健康平安！当地报警电话：999。外交部全球领事保护与服务应急热线+86-10-12308/65612308。'],
     ['中国海关提示，请勿携带下列物品进入中国境内'],
     ['【12306】刘洋购票成功，8月5日G6588次，福田站19:59开。'],
+    // Japanese marketing / non-OTP numbers must not match.
+    ['お知らせ：商品番号は1234です'],
+    ['ご登録ありがとうございます。ポイント123456が付与されました。'],
+    ['お問い合わせ番号: 567890'],
+    ['【ショップ】キャンペーン2026年11月30日まで開催中'],
+    ['商品コード: 123456 をご利用ください'],
+    ['クーポンコード: 789012 をレジでご提示ください'],
+    ['予約コード: 654321 をお持ちください'],
   ])('ignores %j', (content) => {
     expect(hasLabelledCode(content)).toBe(false);
   });
