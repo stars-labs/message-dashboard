@@ -4,6 +4,21 @@ This directory contains SQL migration scripts for the SMS Dashboard D1 database.
 
 ## Migration History
 
+### 079_index_outbound_status_refresh.sql
+- Indexes `(type, updated_at)` so incremental sync can deliver outbound status changes.
+- Without it the dashboard showed a sent SMS as 等待发送 indefinitely.
+
+### 078_one_open_ring_per_sim.sql
+- Adds a partial unique index so one SIM can have only one ringing inbound call.
+- Lets the database, not an eventually consistent KV read, decide a ring's identity.
+
+### 077_add_call_log.sql
+- Adds the `calls` table: one row per voice call attempt, with direction, SIM,
+  remote number, outcome, end reason, and talk-time duration.
+- Not foreign-keyed to `sims`, so history survives a SIM leaving inventory;
+  `/api/calls/history` enriches from `device_view` instead.
+- The live call stays in KV, so dashboard polling still never reads D1.
+
 ### 076_optimize_balance_runtime.sql
 - Materializes each active SMS balance response deadline for indexed timeout maintenance.
 - Adds a partial browser-job claim index so five-second polling stays inexpensive.

@@ -5,9 +5,9 @@ account_id = "793e3286eaca411bf1eebaf4b8c7051e"
 
 # Routes
 workers_dev = true
-# routes = [
-#   { pattern = "sexy.itoken.world", custom_domain = true }
-# ]
+routes = [
+  { pattern = "sexy.itoken.world", custom_domain = true }
+]
 
 # Balance reply correlation and timeout reconciliation runs every five minutes.
 # The 04:17 UTC trigger also runs the heavier nightly retention and backfills.
@@ -31,6 +31,10 @@ id = "4d7e71fcf5c44a469aa63e28f60cb6d7"
 ENVIRONMENT = "production"
 DEFAULT_USER_GROUP = "viewer"
 WORKER_URL = "https://sexy.itoken.world"
+
+# Voice calls: host of the daemon's voice bridge on the Orange Pi. The Realtime SFU
+# adapters connect to wss://<host>/voice/... with a per-call HMAC signature.
+VOICE_BRIDGE_HOST = "voice-bridge.itoken.world"
 
 # Second layer behind the role check: only these email domains may complete login.
 # Enforced in server/handlers/auth0.js, which also requires the address to be

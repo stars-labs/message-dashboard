@@ -26,6 +26,7 @@ import { createRoleConfig, hasAnyRole } from '../config/auth0-roles.js';
 import { setupKeywordRoutes } from './api/keywords.js';
 import { setupFilterRoutes } from './api/filters.js';
 import { setupVerificationRoutes } from './api/verification.js';
+import { setupCallRoutes } from './api/calls.js';
 import { purgeExpiredMessages } from './utils/message-retention.js';
 import { sweepPending } from './utils/spam-backfill.js';
 import { reconcileCarrierBillMessages } from './utils/carrier-billing.js';
@@ -609,6 +610,7 @@ setupFilterRoutes(router);
 
 // High-confidence verification-code backfill (admin only)
 setupVerificationRoutes(router);
+setupCallRoutes(router);
 
 // Login page route - removed duplicate, using auth0Handler.login above
 
