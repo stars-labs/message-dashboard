@@ -1,6 +1,7 @@
 <script>
   import { formatTaskAge, getDaemonStatusMeta } from './daemon-status.js';
   import { formatTimeAgo } from './time.js';
+  import { overlay } from './overlay.js';
 
   let {
     status,
@@ -20,10 +21,12 @@
 <div class="fixed inset-0 z-[59] bg-stone-900/10 lg:bg-transparent" onclick={onClose} role="presentation"></div>
 <div
   role="dialog"
-  aria-modal="true"
+  aria-modal="false"
   aria-label="采集服务状态"
+  use:overlay={{ onClose }}
   class="fixed z-[60] bg-white border border-stone-200 shadow-[0_16px_40px_rgba(28,25,23,.18)]
-    left-3 right-3 bottom-[78px] rounded-lg lg:left-auto lg:right-5 lg:top-[58px] lg:bottom-auto lg:w-[360px]"
+    left-3 right-3 bottom-[calc(var(--mobile-tab-bar-height)+18px)] rounded-lg
+    lg:left-auto lg:right-5 lg:top-[58px] lg:bottom-auto lg:w-[360px]"
 >
   <header class="flex items-center gap-2 px-4 py-3 border-b border-stone-200">
     <span class="w-2 h-2 rounded-full {meta.dotClass}"></span>

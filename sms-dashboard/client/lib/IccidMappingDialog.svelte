@@ -1,4 +1,5 @@
 <script>
+  import { overlay } from './overlay.js';
   import { api } from "./api";
   import { COUNTRIES, inferCountryFromNumber } from "./countries.js";
   import { SIM_SERVICE_TYPES, SIM_SERVICE_TYPE_SOURCES } from "./sim-service-type.js";
@@ -123,7 +124,9 @@
   <div
     class="fixed inset-0 bg-stone-900/50 flex items-center justify-center z-50 p-4"
   >
-    <div class="tech-card max-w-md w-full max-h-full flex flex-col">
+    <div class="tech-card max-w-md w-full max-h-full flex flex-col"
+      role="dialog" aria-modal="true" aria-label="设置 ICCID 映射"
+      use:overlay={{ onClose: close }}>
       <div class="p-4 sm:p-6 flex-shrink-0 border-b border-stone-100">
         <h3 class="text-lg font-bold data-value high-contrast">设置 ICCID 映射</h3>
       </div>
@@ -301,7 +304,7 @@
 
         <!-- Status display (read-only, computed from hardware) -->
         <div>
-          <label class="block text-sm font-medium text-stone-500 mb-1">状态</label>
+          <span class="block text-sm font-medium text-stone-500 mb-1">状态</span>
           <div class="text-sm px-3 py-2 bg-stone-50 rounded-lg border border-stone-200">
             <span class:text-green-600={status === 'active'} class:text-stone-400={status === 'inactive'}>
               {status === 'active' ? '✓ 活动' : '○ 未激活'}

@@ -50,12 +50,15 @@
       : value;
     const date = new Date(normalized);
     if (Number.isNaN(date.getTime())) return '—';
+    // Pinned to Shanghai like every other timestamp in the app: without it a
+    // browser in another timezone showed this field hours off from the list.
     return date.toLocaleString('zh-CN', {
       month: '2-digit',
       day: '2-digit',
       hour: '2-digit',
       minute: '2-digit',
       hour12: false,
+      timeZone: 'Asia/Shanghai',
     });
   }
 </script>
@@ -154,8 +157,8 @@
           </dd>
         </div>
         <div class="grid grid-cols-[88px_minmax(0,1fr)] items-baseline gap-3 min-w-0">
-          <dt class="text-stone-400">守护进程</dt>
-          <dd class="text-stone-700">{daemonStatus.connected ? '连接正常' : '未连接'}</dd>
+          <dt class="text-stone-400">采集服务</dt>
+          <dd class="text-stone-700">{daemonStatus.connected ? '正常' : '离线'}</dd>
         </div>
         <div class="grid grid-cols-[88px_minmax(0,1fr)] items-baseline gap-3 min-w-0">
           <dt class="text-stone-400">计费类型</dt>

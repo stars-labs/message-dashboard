@@ -685,7 +685,8 @@ describe('balance management', () => {
     });
 
     expect(view.container.querySelectorAll('[data-mobile-balance-row]')).toHaveLength(1);
-    expect(view.getByRole('searchbox', { name: '搜索 SIM' }).placeholder).toBe('卡号 / 手机号 / ICCID');
+    // One placeholder across every SIM search in the app.
+    expect(view.getByRole('searchbox', { name: '搜索 SIM' }).placeholder).toBe('卡号 / 号码 / 运营商 / ICCID');
     expect(view.getByRole('button', { name: '查询 S02 余额' })).toBeTruthy();
   });
 

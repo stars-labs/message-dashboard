@@ -276,7 +276,7 @@
         selectedSimDisplay = e.target.value;
         recipientSIM = "";
       }}
-      placeholder="输入 S01 / 号码 / ICCID..."
+      placeholder="卡号 / 号码 / 运营商 / ICCID"
       class="w-full px-4 py-2 cyber-input"
     />
 
@@ -478,14 +478,14 @@
             d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
           ></path>
         </svg>
-        发送中...
+        发送中…
       </span>
     {:else if sendingStatus === "success"}
-      ✅ 发送成功
+      已提交，等待发送
     {:else if sendingStatus === "validation-error"}
-      ❌ 请填写完整信息
+      请填写完整信息
     {:else if sendingStatus === "send-error"}
-      ❌ 发送失败，请重试
+      提交失败，请先查看发送记录
     {:else}
       发送短信
     {/if}
@@ -534,7 +534,7 @@
             selectedSimDisplay = e.target.value;
             recipientSIM = "";
           }}
-          placeholder="输入 S01 / 号码 / ICCID..."
+          placeholder="卡号 / 号码 / 运营商 / ICCID"
           class="w-full px-4 py-2 cyber-input"
         />
 
@@ -742,14 +742,14 @@
                 d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
               ></path>
             </svg>
-            发送中...
+            发送中…
           </span>
         {:else if sendingStatus === "success"}
-          ✅ 发送成功
+          已提交，等待发送
         {:else if sendingStatus === "validation-error"}
-          ❌ 请填写完整信息
+          请填写完整信息
         {:else if sendingStatus === "send-error"}
-          ❌ 发送失败，请重试
+          提交失败，请先查看发送记录
         {:else}
           发送短信
         {/if}

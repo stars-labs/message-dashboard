@@ -1,4 +1,5 @@
 <script>
+  import { confirmAction } from './confirm.svelte.js';
   // Admin-only user/role administration. Reached only when the caller holds
   // `users.read`; the server enforces that independently on both endpoints.
   import { api } from "./api.js";
@@ -49,7 +50,11 @@
   async function changeRole(user, role) {
     if (role === user.role) return;
     const verb = role === adminRole ? "提升为管理员" : "降级为查看者";
-    if (!confirm(`确定要将 ${user.email || user.id} ${verb}吗？\n\n⚠ 该操作会立即注销该用户的所有会话，需要重新登录。`)) return;
+    if (!(await confirmAction({
+      message: `确定要将 ${user.email || user.id} ${verb}吗？\n\n该操作会立即注销该用户的所有会话，需要重新登录。`,
+      confirmLabel: '确认',
+      danger: true,
+    }))) return;
 
     savingId = user.id; error = null; notice = null;
     try {

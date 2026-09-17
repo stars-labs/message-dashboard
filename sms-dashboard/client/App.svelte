@@ -13,7 +13,14 @@
   import Toast from "./lib/Toast.svelte";
   import SwUpdatePrompt from "./lib/SwUpdatePrompt.svelte";
   import { resetDashboardCache, resetServiceWorker } from "./lib/sw-reset.js";
+  import { overlay } from "./lib/overlay.js";
+  import { confirmAction } from "./lib/confirm.svelte.js";
+  import ConfirmHost from "./lib/ConfirmHost.svelte";
   import DaemonHealthPanel from "./lib/DaemonHealthPanel.svelte";
+  import CallPanel from "./lib/CallPanel.svelte";
+  import { callApi, callElapsedSeconds, countMissedSince, describeCallError, fetchCallHistory, fetchCallState, fetchIceServers, formatDuration } from "./lib/call-client.js";
+  import { createCallSession } from "./lib/call-session.js";
+  import { createRingtone } from "./lib/call-ringtone.js";
   import BalanceQueryDetail from './lib/BalanceQueryDetail.svelte';
   import MessageDetail from './lib/MessageDetail.svelte';
   import BalanceManagement from './lib/BalanceManagement.svelte';
@@ -22,7 +29,7 @@
   import { api } from "./lib/api.js";
   import { getPhoneFlag } from "./lib/countries.js";
   import { auth } from "./lib/auth.js";
-  import { isAnomalous } from "./lib/device-status.js";
+  import { getStatusMeta, isAnomalous } from "./lib/device-status.js";
   import { formatCardNumber } from "./lib/card-number.js";
   import { formatTimeAgo } from "./lib/time.js";
   import { isActiveBalanceCheck } from './lib/balance-polling.js';
@@ -127,7 +134,34 @@
   let lastKnownTimestamp = $state(null); // Only flag messages newer than this as "新"
   let daemonRefreshing = $state(false);
   let showDaemonDetails = $state(false);
+
+  // Voice calls. `activeCall` mirrors the Worker's single fleet-wide call lock and
+  // is polled while the tab is visible; `callSession` owns this tab's microphone
+  // and PeerConnection and is plain (non-reactive) because it holds browser objects.
+  const CALL_POLL_INTERVAL_MS = 3000;
+  let showCallPanel = $state(false);
+  let activeCall = $state(null);
+  let callBusy = $state(false);
+  let callError = $state(null);
+  let callAudio = $state(null);
+  let callMuted = $state(false);
+  let callHistory = $state([]);
+  let callHistoryLoading = $state(false);
+  // Last time the call panel was opened, so the badge counts only new misses.
+  let callsSeenAt = $state(readCallsSeenAt());
+  let callClock = $state(Date.now());
+  let callSession = null;
+  let callPollInterval = null;
+  let callPollInFlight = false;
+  let lastRingingCallId = null;
+  let ringtone = null;
+  let titleBeforeRing = null;
+  let activeCallId = null;
   let swUpdatePrompt = $state(null);
+  // The dashboard must never present a failed fetch as a healthy, quiet fleet.
+  let authError = $state(null);
+  let dataError = $state(null);
+  let messagesFromCache = $state(false);
 
   // Pull-to-refresh reuses loadData() rather than reloading the page: it refetches
   // phones, messages, and the balance rows needed by the current view, then sets dataLoading to
@@ -138,6 +172,16 @@
   // The reload fetches only the current first page; it does not rescan D1 history.
   async function handleResetLocalCache() {
     showMoreMenu = false;
+    // This wipes the offline cache and reloads: from a circular-arrow icon it
+    // reads as a refresh, so it has to say what it actually does first.
+    const confirmed = await confirmAction({
+      title: '清除本地缓存',
+      message: '会删除这台设备上缓存的短信副本和离线资源，然后重新加载页面。\n\n'
+        + '服务器上的短信不受影响，重新加载后会重新拉取。',
+      confirmLabel: '清除并重载',
+      danger: true,
+    });
+    if (!confirmed) return;
     const result = await resetDashboardCache({
       clearMessageCache: () => api.cache.clear(),
       resetOfflineCache: () => resetServiceWorker(),
@@ -162,9 +206,12 @@
     }
   }
 
+  // A counter, not Date.now(): two toasts raised in the same millisecond shared
+  // an id, so keyed rendering dropped one of them.
+  let toastSeq = 0;
   function showToast(message, type = 'info', duration = 4000) {
-    const id = Date.now();
-    toasts.push({ id, message, type, duration });
+    toastSeq += 1;
+    toasts.push({ id: toastSeq, message, type, duration });
   }
 
   function removeToast(id) {
@@ -173,7 +220,7 @@
   let phoneToMap = $state(null);
   let daemonStatus = $state({
     status: 'unknown',
-    message: 'Checking daemon status...',
+    message: '正在检查采集服务状态…',
     last_heartbeat: null,
     snapshot: null,
     connected: false,
@@ -390,6 +437,7 @@
       }
       
 
+      dataError = null;
       if (messagesResponse && messagesResponse.success && Array.isArray(messagesResponse.data)) {
         messages = mergeMessagePage([], messagesResponse.data, { replace: true });
         hasMoreMessagePages = hasMoreMessages(messagesResponse.pagination);
@@ -401,7 +449,7 @@
         if (newest > 0) lastKnownTimestamp = new Date(newest).toISOString();
       } else {
         console.error('[App] Messages API failed:', messagesResponse?.error);
-        
+
         // If this is an auth error, try to re-authenticate
         if (messagesResponse?.error && messagesResponse.error.includes('HTTP 401')) {
           console.error('[App] Authentication error detected, forcing logout');
@@ -411,7 +459,10 @@
 
         messages = [];
         hasMoreMessagePages = false;
+        dataError = '短信列表加载失败';
       }
+      // Rows served from the local cache are not live; the inbox says so.
+      messagesFromCache = Boolean(messagesResponse?.sync?.is_offline);
 
       balanceChecks = Array.isArray(nextBalanceChecks) ? nextBalanceChecks : [];
       await checkDaemonStatus();
@@ -420,17 +471,9 @@
       dataLoading = false;
     } catch (error) {
       console.warn("Failed to load data:", error);
-      // Use default values on error
-      phoneNumbers = [];
-      updateStatsFromPhones();
-      messages = [];
-      hasMoreMessagePages = false;
-      balanceChecks = [];
-      stats = {
-        onlineDevices: 0,
-        totalDevices: 0,
-      };
-      // Mark data as loaded even on error
+      // Keep whatever was on screen. Zeroing the counters here read as "the
+      // whole fleet is offline" when all that happened was a failed request.
+      dataError = error?.message || '数据加载失败';
       dataLoading = false;
     }
   }
@@ -444,8 +487,11 @@
     // See docs/SECURITY-REVIEW.md finding 4.
     try {
       user = await auth.getUser();
+      authError = null;
     } catch (error) {
-      // Authentication check failed
+      // The identity service failing is not the same as being signed out: the
+      // login button would just bounce. Say the server is unreachable instead.
+      authError = error?.message || '无法连接服务器';
     }
 
     loading = false;
@@ -454,6 +500,8 @@
       loadData().finally(() => {
         dataLoading = false;
         startPolling();
+        startCallPolling();
+        loadCallHistory();
       }).catch((error) => {
         console.error("Failed to load data:", error);
       });
@@ -706,7 +754,7 @@
         daemonStatus = {
           ...daemonStatus,
           status: 'error',
-          message: 'Failed to check daemon status',
+          message: '采集服务状态检查失败',
           connected: false,
         };
       }
@@ -715,7 +763,7 @@
       daemonStatus = {
         ...daemonStatus,
         status: 'error',
-        message: 'Cannot connect to server',
+        message: '无法连接服务器',
         connected: false,
       };
     }
@@ -768,6 +816,173 @@
       pollInterval = null;
       pollInFlight = false;
     }
+    stopCallPolling();
+  }
+
+  // ── Voice calls ──────────────────────────────────────────────────────────
+  // Polling reads KV only (never D1) and pauses while the tab is hidden, so an
+  // idle dashboard costs at most one KV read every 3 s per visible tab.
+  function startCallPolling() {
+    if (callPollInterval || !can('messages.read')) return;
+    refreshCallState();
+    callPollInterval = setInterval(() => {
+      if (document.visibilityState === 'visible') refreshCallState();
+    }, CALL_POLL_INTERVAL_MS);
+  }
+
+  function stopCallPolling() {
+    if (callPollInterval) {
+      clearInterval(callPollInterval);
+      callPollInterval = null;
+    }
+  }
+
+  async function refreshCallState() {
+    if (callPollInFlight || !user) return;
+    callPollInFlight = true;
+    try {
+      applyCallState(await fetchCallState());
+    } catch (e) {
+      // A failed poll keeps the last known state; the next tick retries.
+    } finally {
+      callPollInFlight = false;
+    }
+  }
+
+  function applyCallState(call) {
+    activeCall = call;
+    // The call ended elsewhere (far end hung up, daemon, another tab): drop media.
+    if (!call && callSession && !callBusy) {
+      callSession.release();
+      callSession = null;
+      callMuted = false;
+    }
+    // A call just disappeared: its row is now final, so refresh the log.
+    if (!call && activeCallId) loadCallHistory();
+    activeCallId = call?.id ?? null;
+    // Surface a new incoming call once, without reopening a panel the user closed.
+    if (call?.direction === 'inbound' && call.state === 'ringing' && call.id !== lastRingingCallId) {
+      lastRingingCallId = call.id;
+      showCallPanel = true;
+    }
+  }
+
+  // Ticks only while a call is up, so the top bar timer costs nothing when idle.
+  $effect(() => {
+    if (!activeCall || activeCall.state === 'ringing') return;
+    const timer = setInterval(() => (callClock = Date.now()), 1000);
+    return () => clearInterval(timer);
+  });
+
+  let callDuration = $derived(
+    activeCall && activeCall.state !== 'ringing'
+      ? formatDuration(callElapsedSeconds(activeCall, callClock))
+      : null,
+  );
+
+  // An inbound call must be noticeable from another tab: it rings and takes over
+  // the tab title until it is answered, rejected, or gone.
+  $effect(() => {
+    const ringing = activeCall?.direction === 'inbound' && activeCall.state === 'ringing';
+    if (!ringing) {
+      ringtone?.stop();
+      if (titleBeforeRing !== null) {
+        document.title = titleBeforeRing;
+        titleBeforeRing = null;
+      }
+      return;
+    }
+    ringtone = ringtone ?? createRingtone(window.AudioContext ?? window.webkitAudioContext);
+    ringtone.start();
+    titleBeforeRing = titleBeforeRing ?? document.title;
+    document.title = `☎ 来电 ${activeCall.number ?? ''}`.trim();
+  });
+
+  // Per-viewer convenience only: which misses this browser has already shown.
+  function readCallsSeenAt() {
+    try {
+      return localStorage.getItem('calls.seen_at');
+    } catch {
+      return null;
+    }
+  }
+
+  let missedCallCount = $derived(countMissedSince(callHistory, callsSeenAt));
+
+  async function loadCallHistory() {
+    if (!can('messages.read')) return;
+    callHistoryLoading = true;
+    try {
+      const { calls } = await fetchCallHistory({ limit: 30 });
+      callHistory = calls;
+    } catch (error) {
+      // The log is a convenience; a failed load must not disturb call control.
+    } finally {
+      callHistoryLoading = false;
+    }
+  }
+
+  function openCallPanel() {
+    showCallPanel = true;
+    const seenAt = new Date().toISOString();
+    callsSeenAt = seenAt;
+    try {
+      localStorage.setItem('calls.seen_at', seenAt);
+    } catch {
+      // Private windows refuse storage; the badge then just returns next reload.
+    }
+    loadCallHistory();
+  }
+
+  function newCallSession() {
+    callSession?.release();
+    callMuted = false;
+    callSession = createCallSession({
+      fetchIce: fetchIceServers,
+      api: callApi,
+      RTCPeerConnection: window.RTCPeerConnection,
+      getUserMedia: (constraints) => navigator.mediaDevices.getUserMedia(constraints),
+      audioElement: callAudio,
+    });
+    return callSession;
+  }
+
+  async function runCallAction(action) {
+    callBusy = true;
+    callError = null;
+    try {
+      await action();
+    } catch (error) {
+      callError = describeCallError(error) || '通话操作失败';
+      callSession = null;
+    } finally {
+      callBusy = false;
+      await refreshCallState();
+    }
+  }
+
+  function handleDial({ iccid, number }) {
+    return runCallAction(() => newCallSession().dial({ iccid, number }));
+  }
+
+  function handleAnswer() {
+    return runCallAction(() => newCallSession().answer());
+  }
+
+  function handleToggleMute() {
+    if (!callSession) return;
+    callMuted = callSession.setMuted(!callMuted);
+  }
+
+  function handleHangup() {
+    return runCallAction(async () => {
+      if (callSession) {
+        await callSession.hangup();
+        callSession = null;
+      } else {
+        await callApi.hangup();
+      }
+    });
   }
 
 </script>
@@ -779,6 +994,28 @@
       <span class="w-3 h-3 rounded-full bg-emerald-400 animate-pulse"></span>
       <span class="w-3 h-3 rounded-full bg-emerald-200 animate-pulse [animation-delay:.2s]"></span>
       <span class="w-3 h-3 rounded-full bg-emerald-100 animate-pulse [animation-delay:.4s]"></span>
+    </div>
+  </div>
+
+{:else if authError}
+  <!-- The identity service is unreachable. Offering a login button here would
+       bounce the operator straight back, so say what is wrong and offer a retry. -->
+  <div class="min-h-screen flex items-center justify-center bg-[#F7F5F2]">
+    <div class="w-full max-w-[460px] mx-4">
+      <div class="bg-white border border-stone-200 rounded-2xl p-10 shadow-raised text-center">
+        <h1 class="text-lg font-semibold text-stone-900 tracking-tight">无法连接服务器</h1>
+        <p class="text-sm text-stone-500 mt-2 mb-6 leading-relaxed">
+          没能确认登录状态，这通常是网络问题或服务端故障，不是你被登出了。<br>
+          <span class="text-stone-400 text-xs font-mono">{authError}</span>
+        </p>
+        <button
+          onclick={() => location.reload()}
+          class="w-full px-6 py-3 bg-orange-500 hover:bg-orange-600 text-white font-medium rounded-xl
+            transition-colors shadow-focus"
+        >
+          重试
+        </button>
+      </div>
     </div>
   </div>
 
@@ -870,6 +1107,32 @@
         <!-- Right side: daemon pill + send button + avatar -->
         <div class="hidden lg:flex items-center gap-3 ml-auto shrink-0">
 
+          {#if can('messages.read')}
+            <button onclick={() => (showCallPanel ? (showCallPanel = false) : openCallPanel())}
+              aria-haspopup="dialog"
+              aria-expanded={showCallPanel}
+              class="flex items-center gap-1.5 px-2.5 py-[5px] border rounded-[7px] text-xs transition-colors
+                {activeCall?.state === 'ringing'
+                  ? 'bg-emerald-600 border-emerald-600 text-white hover:bg-emerald-700 animate-pulse'
+                  : activeCall
+                    ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100'
+                    : 'bg-stone-50 border-stone-200 text-stone-700 hover:bg-stone-100'}">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M3 5a2 2 0 012-2h2.3a1 1 0 01.95.68l1.1 3.3a1 1 0 01-.5 1.2l-1.6.8a11 11 0 005.1 5.1l.8-1.6a1 1 0 011.2-.5l3.3 1.1a1 1 0 01.68.95V19a2 2 0 01-2 2h-1C9.7 21 3 14.3 3 6V5z"/>
+              </svg>
+              <span class="font-medium tabular-nums">
+                {#if activeCall?.state === 'ringing'}来电{:else if callDuration}{callDuration}{:else}通话{/if}
+              </span>
+              {#if !activeCall && missedCallCount > 0}
+                <span
+                  title="{missedCallCount} 通未接来电"
+                  class="min-w-[16px] h-4 px-1 flex items-center justify-center rounded-full
+                    bg-rose-600 text-white text-[10px] font-medium tabular-nums"
+                >{missedCallCount}</span>
+              {/if}
+            </button>
+          {/if}
+
           <!-- Daemon status pill -->
           <button onclick={openDaemonDetails}
             aria-haspopup="dialog"
@@ -900,14 +1163,15 @@
             </button>
           {/if}
 
+          <!-- A broom, not a refresh arrow: this clears local data and reloads. -->
           <button onclick={handleResetLocalCache}
-            title="清除本地短信缓存"
-            aria-label="清除本地短信缓存"
+            title="清除本地缓存并重新加载"
+            aria-label="清除本地缓存并重新加载"
             class="w-[26px] h-[26px] rounded-full text-stone-400 hover:text-stone-700 hover:bg-stone-100
               flex items-center justify-center transition-colors shrink-0">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                d="M4 4v5h5M20 20v-5h-5M5.1 9A8 8 0 0118.9 6M18.9 15A8 8 0 015.1 18"/>
+                d="M19 5l-7 7M14 3l7 7-9 9H5v-3l9-9z"/>
             </svg>
           </button>
 
@@ -973,7 +1237,7 @@
           </span>
           <div class="flex-1 min-w-0">
             <p class="text-sm font-semibold text-red-800">
-              守护进程{daemonStatus.status === 'error' ? '错误' : '离线'}
+              采集服务{daemonMeta.label}
             </p>
             <p class="text-xs text-red-600 mt-0.5 leading-relaxed">
               {#if daemonStatus.last_heartbeat}
@@ -1017,7 +1281,7 @@
                 <strong
                   >{phoneNumbers.filter((p) => p.status === "sim_error")
                     .length}</strong
-                > 张SIM卡读取失败
+                > 张{getStatusMeta('sim_error').label}
               {/if}
               {#if phoneNumbers.filter((p) => p.status === "iccid_mismatch").length > 0}
                 {#if phoneNumbers.filter((p) => p.status === "sim_error").length > 0}
@@ -1026,7 +1290,7 @@
                 <strong
                   >{phoneNumbers.filter((p) => p.status === "iccid_mismatch")
                     .length}</strong
-                > 张SIM卡ICCID不匹配
+                > 张{getStatusMeta('iccid_mismatch').label}
               {/if}
             </span>
           </div>
@@ -1118,11 +1382,7 @@
         <div class="lg:grid lg:gap-4 lg:flex-1 lg:min-h-0 lg:grid-cols-[288px_1fr] {can('messages.send') ? '2xl:grid-cols-[288px_1fr_352px]' : ''}">
           <!-- Mobile receiver picker: a bottom sheet keeps the message context visible. -->
           {#if showPhoneList}
-            <div
-              class="lg:hidden fixed inset-0 z-50"
-              onkeydown={(e) => e.key === "Escape" && (showPhoneList = false)}
-              role="presentation"
-            >
+            <div class="lg:hidden fixed inset-0 z-50" role="presentation">
               <button
                 class="absolute inset-0 bottom-[var(--mobile-tab-bar-height)] w-full bg-stone-900/35"
                 onclick={() => (showPhoneList = false)}
@@ -1135,6 +1395,7 @@
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby="receiver-picker-title"
+                use:overlay={{ onClose: () => (showPhoneList = false) }}
               >
                 <div class="flex-shrink-0 border-b border-stone-200">
                   <div class="flex justify-center pt-2 pb-1" aria-hidden="true">
@@ -1208,6 +1469,9 @@
                 hasMore={hasMoreMessagePages}
                 onLoadMore={loadOlderMessages}
                 loadingMore={loadingOlderMessages}
+                loadError={dataError}
+                fromCache={messagesFromCache}
+                onRetry={() => { dataLoading = true; loadData().finally(() => (dataLoading = false)); }}
               />
             </div>
             {#if selectedPhone}
@@ -1325,6 +1589,7 @@
         <div class="flex items-center justify-between px-5 py-4 border-b border-stone-200 flex-shrink-0">
           <h3 class="text-sm font-semibold text-stone-900">发送短信</h3>
           <button onclick={() => showSendDrawer = false}
+            aria-label="关闭发送短信"
             class="p-1.5 text-stone-400 hover:text-stone-700 hover:bg-stone-100 rounded-lg transition-colors">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
@@ -1451,7 +1716,11 @@
         role="presentation">
       </div>
       <div class="lg:hidden fixed bottom-[var(--mobile-tab-bar-height)] left-0 right-0 z-40 bg-white border-t border-stone-200 rounded-t-2xl
-        shadow-[0_-8px_30px_rgba(28,25,23,.18)]">
+        shadow-[0_-8px_30px_rgba(28,25,23,.18)] max-h-[calc(100dvh_-_var(--mobile-tab-bar-height)_-_16px)] overflow-y-auto"
+        role="dialog"
+        aria-modal="true"
+        aria-label="更多"
+        use:overlay={{ onClose: () => (showMoreMenu = false) }}>
         <div class="p-4 space-y-1">
           <p class="text-[11px] font-semibold text-stone-400 uppercase tracking-widest px-3 mb-2">运行状态</p>
           <button onclick={() => { showMoreMenu = false; openDaemonDetails(); }}
@@ -1467,6 +1736,25 @@
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
             </svg>
           </button>
+
+          {#if can('messages.read')}
+            <button onclick={() => { showMoreMenu = false; openCallPanel(); }}
+              class="w-full flex items-center justify-between px-3 py-3 rounded-lg hover:bg-stone-50 transition-colors text-left">
+              <div class="flex items-center gap-2.5">
+                <span class="w-2 h-2 rounded-full {activeCall ? 'bg-emerald-500' : 'bg-stone-300'}"></span>
+                <div class="text-sm font-medium text-stone-800">
+                  {#if activeCall?.state === 'ringing'}来电振铃{:else if callDuration}通话中 {callDuration}{:else}语音通话{/if}
+                </div>
+                {#if !activeCall && missedCallCount > 0}
+                  <span class="min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full
+                    bg-rose-600 text-white text-[10px] font-medium tabular-nums">{missedCallCount}</span>
+                {/if}
+              </div>
+              <svg class="w-4 h-4 text-stone-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+              </svg>
+            </button>
+          {/if}
 
           <div class="border-t border-stone-100 my-2"></div>
           <p class="text-[11px] font-semibold text-stone-400 uppercase tracking-widest px-3 mb-2">规则</p>
@@ -1550,6 +1838,40 @@
   />
 {/if}
 
+{#if user && can('messages.read')}
+  <!-- Far-end call audio. Always mounted so a session can attach to it at once. -->
+  <audio bind:this={callAudio} autoplay class="hidden"></audio>
+{/if}
+
+{#if showCallPanel && user}
+  <!-- Desktop: a panel under the top bar. Mobile: a sheet above the tab bar. -->
+  <div
+    role="dialog"
+    aria-modal="false"
+    aria-label="语音通话"
+    use:overlay={{ onClose: () => (showCallPanel = false) }}
+    class="fixed z-[60] left-3 right-3 bottom-[calc(var(--mobile-tab-bar-height)+18px)]
+      lg:left-auto lg:right-5 lg:top-[58px] lg:bottom-auto lg:w-[340px]
+      shadow-[0_16px_40px_rgba(28,25,23,.18)] rounded-lg"
+  >
+    <CallPanel
+      call={activeCall}
+      phones={phoneNumbers}
+      busy={callBusy}
+      error={callError}
+      muted={callMuted}
+      daemonOnline={isDaemonConnected(daemonStatus.status)}
+      history={callHistory}
+      historyLoading={callHistoryLoading}
+      onDial={handleDial}
+      onAnswer={handleAnswer}
+      onHangup={handleHangup}
+      onToggleMute={handleToggleMute}
+      onClose={() => (showCallPanel = false)}
+    />
+  </div>
+{/if}
+
 <!-- ICCID Mapping Dialog -->
 <IccidMappingDialog
   phone={phoneToMap}
@@ -1561,10 +1883,17 @@
   }}
 />
 
-<!-- Toast notifications -->
-{#each toasts as toast (toast.id)}
-  <Toast message={toast.message} type={toast.type} duration={toast.duration} onClose={() => removeToast(toast.id)} />
-{/each}
+<!-- Toast notifications, stacked so concurrent toasts stay readable. -->
+{#if toasts.length}
+  <div class="fixed top-4 right-4 z-[100] flex flex-col gap-2 items-end">
+    {#each toasts as toast (toast.id)}
+      <Toast message={toast.message} type={toast.type} duration={toast.duration} onClose={() => removeToast(toast.id)} />
+    {/each}
+  </div>
+{/if}
+
+<!-- One confirmation dialog for every destructive action in the app. -->
+<ConfirmHost />
 
 <!-- Service worker update prompt. Outside the main layout because it is a fixed
      overlay and must not participate in the app's flex chain. -->

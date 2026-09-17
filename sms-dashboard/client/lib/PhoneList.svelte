@@ -96,7 +96,7 @@
         type="text"
         value={searchInput}
         oninput={handleSearchInput}
-        placeholder="S01 / 号码 / 运营商 / ICCID"
+        placeholder="卡号 / 号码 / 运营商 / ICCID"
         class="w-full pl-8 pr-3 py-1.5 text-sm bg-stone-50 border border-stone-200 rounded-lg
           focus:outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100 transition-colors"
       />

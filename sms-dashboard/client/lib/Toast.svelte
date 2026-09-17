@@ -32,8 +32,12 @@
   };
 </script>
 
+<!-- Positioned by the parent's stack, not by itself: two self-positioned toasts
+     landed on the same pixel and hid each other. -->
 <div
-  class="fixed top-4 right-4 z-[100] transition-all duration-200 {visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2'}"
+  role="alert"
+  aria-live="assertive"
+  class="transition-all duration-200 {visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2'}"
 >
   <div class="flex items-center gap-3 px-4 py-3 rounded-lg border shadow-lg {colors[type] || colors.info} max-w-sm">
     <span class="text-lg font-bold shrink-0">{icons[type] || icons.info}</span>

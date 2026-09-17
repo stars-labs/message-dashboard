@@ -1,4 +1,5 @@
 <script>
+  import { confirmAction } from './confirm.svelte.js';
   import { onMount } from 'svelte';
   import { api } from './api.js';
 
@@ -95,7 +96,11 @@
   }
 
   async function remove(kw) {
-    if (!confirm(`删除未使用的关键词「${kw.keyword}」？\n\n已有历史短信引用的关键词只能停用。`)) return;
+    if (!(await confirmAction({
+      message: `删除未使用的关键词「${kw.keyword}」？\n\n已有历史短信引用的关键词只能停用。`,
+      confirmLabel: '删除',
+      danger: true,
+    }))) return;
     saving = true;
     error = null;
     notice = null;
@@ -134,9 +139,10 @@
       return;
     }
     const previous = historyRuns[kw.id];
-    if (!previous && !confirm(
-      `把关键词「${kw.keyword}」应用到 ${historySince} 起的历史短信？\n\n每次只检查最多 200 条记录。`
-    )) return;
+    if (!previous && !(await confirmAction({
+      message: `把关键词「${kw.keyword}」应用到 ${historySince} 起的历史短信？\n\n每次只检查最多 200 条记录。`,
+      confirmLabel: '开始处理',
+    }))) return;
 
     saving = true;
     error = null;
@@ -287,7 +293,7 @@
                     </svg>
                   </button>
                   <button onclick={() => remove(kw)} title="删除" aria-label="删除关键词"
-                    class="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+                    class="p-1.5 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors">
                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                         d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>

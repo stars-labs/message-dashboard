@@ -1,8 +1,15 @@
 import { describe, expect, test } from 'bun:test';
 import { messagesHandler } from './messages.js';
 
-function dbStub({ messages = [], devices = [] } = {}) {
+function dbStub({ messages = [], devices = [], statusChanges = null } = {}) {
   const calls = [];
+
+  function rowsFor(sql) {
+    if (sql.includes('FROM device_view')) return devices;
+    // The outbound status-refresh query, kept separate from the page above it.
+    if (statusChanges && sql.includes("m.type = 'sent'")) return statusChanges;
+    return messages;
+  }
 
   function statement(sql, params = []) {
     return {
@@ -11,7 +18,7 @@ function dbStub({ messages = [], devices = [] } = {}) {
       },
       async all() {
         calls.push({ operation: 'all', sql, params });
-        return { results: sql.includes('FROM device_view') ? devices : messages };
+        return { results: rowsFor(sql) };
       },
       async first() {
         calls.push({ operation: 'first', sql, params });
@@ -50,14 +57,15 @@ describe('message list D1 reads', () => {
     const body = await response.json();
 
     expect(response.status).toBe(200);
-    expect(db.calls).toHaveLength(2);
+    // Page, outbound status refresh, then one device_view enrichment.
+    expect(db.calls).toHaveLength(3);
     expect(db.calls[0].operation).toBe('all');
     expect(db.calls[0].sql).toContain("m.created_at >= datetime(?, '-2 seconds')");
     expect(db.calls[0].sql).toContain('ORDER BY m.created_at DESC, m.id DESC');
     expect(db.calls[0].sql).not.toContain('JOIN device_view');
     expect(db.calls[0].params).toContain(since);
-    expect(db.calls[1].sql).toContain('FROM device_view');
-    expect(db.calls[1].params).toEqual(['iccid-1']);
+    expect(db.calls[2].sql).toContain('FROM device_view');
+    expect(db.calls[2].params).toEqual(['iccid-1']);
     expect(body.sync.is_incremental).toBe(true);
     expect(new Date(body.sync.server_time).toString()).not.toBe('Invalid Date');
     expect(body.pagination).not.toHaveProperty('total');
@@ -178,5 +186,61 @@ describe('message list D1 reads', () => {
     const enrichmentCalls = db.calls.filter(({ sql }) => sql.includes('FROM device_view'));
     expect(enrichmentCalls).toHaveLength(3);
     expect(enrichmentCalls.every(({ params }) => params.length <= 100)).toBe(true);
+  });
+});
+
+
+describe('outbound status changes reach the dashboard', () => {
+  const since = '2026-09-02T00:00:00.000Z';
+
+  test('an incremental sync carries an already-known row whose status moved', async () => {
+    const db = dbStub({
+      messages: [{ id: 'new-inbound', phone_iccid: 'iccid-1', content: 'code 1234' }],
+      statusChanges: [{
+        id: 'sent-earlier',
+        phone_iccid: 'iccid-1',
+        type: 'sent',
+        status: 'sent',
+        content: 'hello',
+      }],
+    });
+
+    const response = await messagesHandler.list(listRequest(
+      db,
+      `?phone_iccid=iccid-1&limit=50&since=${encodeURIComponent(since)}`,
+    ));
+    const body = await response.json();
+
+    const refresh = db.calls.find((call) => call.sql.includes("m.type = 'sent'"));
+    expect(refresh).toBeTruthy();
+    expect(refresh.sql).toContain("m.updated_at >= datetime(?, '-2 seconds')");
+    expect(refresh.sql).toContain('ORDER BY m.updated_at DESC');
+    expect(refresh.params).toContain(since);
+    expect(refresh.params).toContain('iccid-1');
+
+    expect(body.data.map((message) => message.id)).toEqual(['new-inbound', 'sent-earlier']);
+    expect(body.sync.status_refreshed).toBe(1);
+  });
+
+  test('a row already in the page is not sent twice', async () => {
+    const row = { id: 'same-row', phone_iccid: 'iccid-1', type: 'sent', status: 'sent' };
+    const db = dbStub({ messages: [row], statusChanges: [row] });
+
+    const response = await messagesHandler.list(listRequest(
+      db,
+      `?phone_iccid=iccid-1&limit=50&since=${encodeURIComponent(since)}`,
+    ));
+    const body = await response.json();
+
+    expect(body.data.map((message) => message.id)).toEqual(['same-row']);
+    expect(body.sync.status_refreshed).toBe(0);
+  });
+
+  test('a full load does not run the refresh query', async () => {
+    const db = dbStub({ messages: [], statusChanges: [{ id: 'x', type: 'sent' }] });
+
+    await messagesHandler.list(listRequest(db, '?phone_iccid=iccid-1&limit=50'));
+
+    expect(db.calls.some((call) => call.sql.includes("m.type = 'sent'"))).toBe(false);
   });
 });

@@ -19,11 +19,11 @@ afterEach(() => {
   Object.assign(messageCache, originalCache);
 });
 
-function installCache({ lastSyncTime = null, fail = false } = {}) {
+function installCache({ lastSyncTime = null, fail = false, cached = [] } = {}) {
   const persisted = [];
   messageCache.getCachedMessages = async () => {
     if (fail) throw new Error('IndexedDB unavailable');
-    return [];
+    return cached;
   };
   messageCache.getLastSyncTime = async () => {
     if (fail) throw new Error('IndexedDB unavailable');
@@ -138,5 +138,35 @@ describe('message synchronization cursors', () => {
     expect(urls[1].searchParams.has('since')).toBe(false);
     expect(urls[1].searchParams.has('reset_sync')).toBe(false);
     expect(urls[2].searchParams.get('since')).toBe(resetTime);
+  });
+});
+
+
+describe('outbound status updates', () => {
+  test('a refreshed row replaces the cached copy instead of being dropped as a duplicate', async () => {
+    auth.baseUrl = 'https://example.com';
+    const sent = {
+      id: 'outbound-1',
+      type: 'sent',
+      status: 'sending',
+      timestamp: '2026-09-02T03:00:00.000Z',
+      content: 'hello',
+    };
+    installCache({ lastSyncTime: '2026-09-02T03:00:00.000Z', cached: [sent] });
+    installResponses([
+      page({
+        data: [{ ...sent, status: 'sent' }],
+        serverTime: '2026-09-02T03:05:00.000Z',
+        incremental: true,
+      }),
+    ]);
+
+    const result = await api.getMessages({ phone_iccid: 'iccid-1', limit: 100 });
+
+    const row = result.data.find((message) => message.id === 'outbound-1');
+    // 等待发送 → 已发送 must survive the merge; dropping it as a duplicate was
+    // why a sent SMS never changed state.
+    expect(row.status).toBe('sent');
+    expect(result.data).toHaveLength(1);
   });
 });

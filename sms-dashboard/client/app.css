@@ -26,6 +26,28 @@
   .font-mono, code, pre {
     font-family: 'IBM Plex Mono', 'Fira Code', monospace;
   }
+
+  /* One keyboard focus style for the whole app. Two of ~160 controls defined
+     their own ring, so every other button, link and field fell back to the
+     browser default — invisible against this palette on several surfaces.
+     :focus-visible only fires for keyboard focus, so mouse users see nothing. */
+  a:focus-visible,
+  button:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible,
+  summary:focus-visible,
+  [tabindex]:focus-visible {
+    outline: 2px solid theme('colors.orange.400');
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+
+  /* Overlays take focus when they open (lib/overlay.js); that is a programmatic
+     focus, not a keyboard one, so it must not paint a ring around the panel. */
+  [role='dialog']:focus-visible {
+    outline: none;
+  }
 }
 
 @layer components {

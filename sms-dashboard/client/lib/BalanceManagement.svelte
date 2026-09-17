@@ -1,4 +1,7 @@
 <script>
+  import { confirmAction } from './confirm.svelte.js';
+  import { formatClock } from './time.js';
+  import { overlay } from './overlay.js';
   import { onMount } from 'svelte';
   import { formatCardNumber } from './card-number.js';
   import { buildCarrierOptions, carrierKey } from './carrier.js';
@@ -49,6 +52,8 @@
   let runnerStatus = $state(null);
   let runnerStatusLoading = $state(true);
   let billAccounts = $state([]);
+  /** Set when the account list failed to load; then unpaid bills cannot be trusted. */
+  let billAccountsError = $state(null);
   let bills = $state([]);
   let billsLoaded = $state(false);
   let billsLoading = $state(false);
@@ -270,8 +275,12 @@
     try {
       const result = await api.get('/api/carrier-billing/accounts');
       billAccounts = result.accounts || [];
-    } catch {
+      billAccountsError = null;
+    } catch (error) {
+      // Swallowing this made a failed fetch render as "nothing owed": postpaid
+      // rows silently fell back to 等待账单短信 and the 查看账单 button vanished.
       billAccounts = [];
+      billAccountsError = error?.message || '账单账户加载失败';
     }
   }
 
@@ -331,7 +340,10 @@
 
   async function recordBillAction(action, label) {
     if (!selectedBill || billActionBusy || !canWriteBills) return;
-    if (!window.confirm(`确认${label}？此操作会写入账单审计记录。`)) return;
+    if (!(await confirmAction({
+      message: `确认${label}？此操作会写入账单审计记录。`,
+      confirmLabel: '确认',
+    }))) return;
     billActionBusy = true;
     try {
       const result = await api.post(
@@ -487,17 +499,11 @@
     return Number.isFinite(time) ? time : 0;
   }
 
-  function formatTime(value, compact = false) {
+  // One absolute format across both tabs: 查询记录 used to print the year while
+  // its neighbour 余额概览 did not, one tab click apart.
+  function formatTime(value) {
     if (!value) return '—';
-    const date = new Date(normalizeUtcTimestamp(value));
-    if (Number.isNaN(date.getTime())) return '—';
-    return date.toLocaleString('zh-CN', {
-      timeZone: 'Asia/Shanghai',
-      month: '2-digit', day: '2-digit',
-      ...(compact ? {} : { year: 'numeric' }),
-      hour: '2-digit', minute: '2-digit',
-      hour12: false,
-    });
+    return formatClock(normalizeUtcTimestamp(value)) || '—';
   }
 
   function formatThreshold(threshold) {
@@ -712,6 +718,16 @@
     </section>
     {/if}
 
+    {#if billAccountsError}
+      <!-- Without the accounts, a postpaid card with unpaid bills looks settled. -->
+      <div class="px-4 lg:px-5 py-2.5 border-b border-amber-100 bg-amber-50 text-amber-800 text-sm
+        flex items-center justify-between gap-3 lg:flex-none">
+        <span>账单账户没能加载，欠款信息可能不完整。</span>
+        <button type="button" onclick={() => loadBillingAccounts()}
+          class="text-xs font-medium px-2 py-1 rounded border border-amber-300 hover:bg-amber-100">重试</button>
+      </div>
+    {/if}
+
     {#if notice}
       <div class="px-4 lg:px-5 py-2.5 border-b text-sm flex items-center justify-between gap-3 lg:flex-none
         {notice.type === 'success' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 'bg-red-50 text-red-700 border-red-100'}">
@@ -721,9 +737,24 @@
     {/if}
 
     {#if activeTab === 'overview'}
-      <!-- Toolbar: [filter tabs with counts] | [carrier] [search] — one line -->
-      <div class="px-4 py-2.5 lg:px-5 border-b border-stone-100 flex items-center gap-2 overflow-x-auto lg:flex-none">
-        <div class="flex items-center gap-2 min-w-max shrink-0">
+      <!-- Toolbar. One search input: it wraps onto its own row on a phone, where
+           living inside the horizontally scrolling chip strip put it ~600px
+           off-screen, and sits inline on desktop. -->
+      <div class="px-4 py-2.5 lg:px-5 border-b border-stone-100 flex flex-wrap items-center gap-2 lg:flex-nowrap lg:flex-none">
+        <div class="relative w-full order-first lg:order-last lg:w-[220px] shrink-0">
+          <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="11" cy="11" r="7" stroke-width="2"/><path d="m20 20-3.5-3.5" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          <input
+            bind:value={searchQuery}
+            type="search"
+            aria-label="搜索 SIM"
+            placeholder="卡号 / 号码 / 运营商 / ICCID"
+            class="w-full h-10 lg:h-auto pl-9 pr-3 lg:py-1.5 text-sm bg-stone-50 border border-stone-200 rounded-lg
+              focus:outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
+          />
+        </div>
+        <div class="flex items-center gap-2 min-w-0 flex-1 overflow-x-auto">
           <!-- filter tabs; count follows the label, same as the device page -->
           {#each filterTabs as [value, label, count]}
             <button
@@ -753,20 +784,6 @@
               <option value={carrier.key}>{carrier.label}</option>
             {/each}
           </select>
-          <!-- search -->
-          <div class="relative w-[220px]">
-            <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-              <circle cx="11" cy="11" r="7" stroke-width="2"/><path d="m20 20-3.5-3.5" stroke-width="2" stroke-linecap="round"/>
-            </svg>
-            <input
-              bind:value={searchQuery}
-              type="search"
-              aria-label="搜索 SIM"
-              placeholder="卡号 / 手机号 / ICCID"
-              class="w-full pl-9 pr-3 py-1.5 text-sm bg-stone-50 border border-stone-200 rounded-lg
-                focus:outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
-            />
-          </div>
         </div>
       </div>
 
@@ -893,7 +910,7 @@
                     {row.__isSecondary ? '—' : formatThreshold(row.threshold)}
                   </td>
                   <td class="px-4 py-3 whitespace-nowrap font-mono text-xs text-stone-500">
-                    {row.__isSecondary ? '—' : formatTime(row.balanceTimestamp, true)}
+                    {row.__isSecondary ? '—' : formatTime(row.balanceTimestamp)}
                   </td>
                   <td class="px-4 py-3 whitespace-nowrap">
                     {#if row.__isSecondary}
@@ -987,7 +1004,7 @@
                       <span class="font-mono text-[10px] text-stone-400 shrink-0">· {row.expiryDate}</span>
                     {/if}
                     {#if row.balanceTimestamp}
-                      <span class="hidden min-[390px]:inline ml-auto font-mono text-[10px] text-stone-400 shrink-0">{formatTime(row.balanceTimestamp, true)}</span>
+                      <span class="hidden min-[390px]:inline ml-auto font-mono text-[10px] text-stone-400 shrink-0">{formatTime(row.balanceTimestamp)}</span>
                     {/if}
                   {/if}
                 </div>
@@ -1169,7 +1186,9 @@
 {#if selectedBill}
   {@const selectedUrgency = billUrgencyMeta(selectedBill)}
   <div class="fixed inset-0 z-50 bg-stone-900/35 flex items-end sm:items-center justify-center sm:p-4">
-    <section class="w-full sm:max-w-[640px] max-h-[92vh] bg-white border border-stone-200 rounded-t-xl sm:rounded-xl shadow-modal overflow-hidden flex flex-col" aria-label="后付费账单详情">
+    <div class="w-full sm:max-w-[640px] max-h-[92vh] bg-white border border-stone-200 rounded-t-xl sm:rounded-xl shadow-modal overflow-hidden flex flex-col"
+      role="dialog" aria-modal="true" aria-label="后付费账单详情"
+      use:overlay={{ onClose: () => { selectedBill = null; } }}>
       <header class="px-5 py-4 border-b border-stone-100 flex items-start justify-between gap-4">
         <div>
           <h3 class="font-mono font-semibold text-stone-900">{formatCardNumber(selectedBill.notification_sim?.sim_index ?? selectedBill.linked_sims?.[0]?.sim_index)}</h3>
@@ -1204,7 +1223,7 @@
               <li class="flex items-start gap-3 text-xs">
                 <span class="mt-1.5 w-1.5 h-1.5 rounded-full bg-stone-300 shrink-0"></span>
                 <span class="flex-1 text-stone-600">{billEventLabel(event.event_type)}</span>
-                <span class="font-mono text-[10px] text-stone-400">{formatTime(event.created_at, true)}</span>
+                <span class="font-mono text-[10px] text-stone-400">{formatTime(event.created_at)}</span>
               </li>
             {/each}
           </ol>
@@ -1225,7 +1244,7 @@
           {/if}
         </footer>
       {/if}
-    </section>
+    </div>
   </div>
 {/if}
 
@@ -1233,7 +1252,9 @@
   {@const preflight = singlePreview.preflight}
   {@const runnerUnavailable = preflight.runner?.required && !preflight.runner.available}
   <div class="fixed inset-0 z-50 bg-stone-900/35 flex items-end sm:items-center justify-center sm:p-4">
-    <section class="w-full sm:max-w-[460px] bg-white border border-stone-200 rounded-t-xl sm:rounded-xl shadow-modal overflow-hidden" aria-label="单卡余额查询确认">
+    <div class="w-full sm:max-w-[460px] bg-white border border-stone-200 rounded-t-xl sm:rounded-xl shadow-modal overflow-hidden"
+      role="dialog" aria-modal="true" aria-label="单卡余额查询确认"
+      use:overlay={{ onClose: () => { singlePreview = null; } }}>
       <header class="px-5 py-4 border-b border-stone-100 flex items-start justify-between gap-4">
         <div>
           <h3 class="font-semibold text-stone-900">
@@ -1273,13 +1294,15 @@
           </button>
         {/if}
       </footer>
-    </section>
+    </div>
   </div>
 {/if}
 
 {#if batchPreview}
   <div class="fixed inset-0 z-50 bg-stone-900/35 flex items-end sm:items-center justify-center sm:p-4">
-    <section class="w-full sm:max-w-[520px] bg-white border border-stone-200 rounded-t-xl sm:rounded-xl shadow-modal overflow-hidden" aria-label="批量余额查询预览">
+    <div class="w-full sm:max-w-[520px] bg-white border border-stone-200 rounded-t-xl sm:rounded-xl shadow-modal overflow-hidden"
+      role="dialog" aria-modal="true" aria-label="批量余额查询预览"
+      use:overlay={{ onClose: () => { batchPreview = null; } }}>
       <header class="px-4 py-4 border-b border-stone-100 flex items-center justify-between">
         <div>
           <h3 class="font-semibold text-stone-900">批量查询确认</h3>
@@ -1354,6 +1377,6 @@
           {batchSubmitting ? '正在加入队列…' : `确认查询 ${selectedBatchCount()} 张卡`}
         </button>
       </footer>
-    </section>
+    </div>
   </div>
 {/if}

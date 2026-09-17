@@ -1,4 +1,5 @@
 <script>
+  import { confirmAction } from './confirm.svelte.js';
   import { onMount } from 'svelte';
   import { api } from './api.js';
 
@@ -93,7 +94,11 @@
   }
 
   async function remove(rule) {
-    if (!confirm(`删除未使用的规则「${rule.pattern}」？\n\n已有历史短信引用的规则只能停用。`)) {
+    if (!(await confirmAction({
+      message: `删除未使用的规则「${rule.pattern}」？\n\n已有历史短信引用的规则只能停用。`,
+      confirmLabel: '删除',
+      danger: true,
+    }))) {
       return;
     }
     saving = true;
@@ -116,9 +121,10 @@
       return;
     }
     const previous = historyRuns[rule.id];
-    if (!previous && !confirm(
-      `${rule.is_active ? '应用' : '重新判定'}规则「${rule.pattern}」自 ${historySince} 起的历史短信？\n\n每次只处理最多 200 条候选记录。`
-    )) return;
+    if (!previous && !(await confirmAction({
+      message: `${rule.is_active ? '应用' : '重新判定'}规则「${rule.pattern}」自 ${historySince} 起的历史短信？\n\n每次只处理最多 200 条候选记录。`,
+      confirmLabel: '开始处理',
+    }))) return;
 
     saving = true;
     error = null;
@@ -302,7 +308,7 @@
                     <button
                       onclick={() => remove(rule)}
                       disabled={saving}
-                      class="px-2 py-0.5 text-xs text-red-500 hover:text-red-700 hover:bg-red-50 rounded disabled:opacity-50"
+                      class="px-2 py-0.5 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 rounded disabled:opacity-50"
                     >
                       删除
                     </button>

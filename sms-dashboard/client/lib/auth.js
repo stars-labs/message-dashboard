@@ -41,11 +41,14 @@ class Auth0Service {
 
       // 401/403 — no usable session.
       this.user = null;
-      return null;
+      if (response.status === 401 || response.status === 403) return null;
+      // Any other status is the server failing, not the user being signed out.
+      // Returning null here sent an operator to the login screen during an
+      // outage, where logging in bounced straight back.
+      throw new Error(`身份服务返回 ${response.status}`);
     } catch (error) {
-      // Failed to get user
       this.user = null;
-      return null;
+      throw error;
     }
   }
 

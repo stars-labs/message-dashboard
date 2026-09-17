@@ -1,4 +1,5 @@
 <script>
+  import { formatClock } from './time.js';
   import { onMount } from "svelte";
   import { fly } from "svelte/transition";
   import MessageHighlight from "./MessageHighlight.svelte";
@@ -31,6 +32,12 @@
     /** Loads the next server page after locally available rows are exhausted. */
     onLoadMore = null,
     loadingMore = false,
+    /** Set when the last load failed: the list below is stale or empty. */
+    loadError = null,
+    /** Set when the rows came from the local cache rather than the server. */
+    fromCache = false,
+    /** Retry handler for a failed load. */
+    onRetry = null,
   } = $props();
 
   const RENDER_BATCH_SIZE = 60;
@@ -138,27 +145,21 @@
     }
   }
 
-  // Format a timestamp for the 接收卡 column: HH:MM:SS today, MM/DD HH:MM otherwise.
-  function formatTime(ts) {
-    if (!ts) return '';
-    try {
-      const d = new Date(ts);
-      if (isNaN(d.getTime())) return '';
-      const now = new Date();
-      const opts = { timeZone: 'Asia/Shanghai' };
-      const isToday = d.toLocaleDateString('zh-CN', opts) === now.toLocaleDateString('zh-CN', opts);
-      if (isToday) return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit', ...opts });
-      return d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', ...opts });
-    } catch { return ''; }
-  }
 </script>
 
 <div class="relative bg-white border-0 rounded-none shadow-none lg:border lg:border-stone-200
   lg:rounded-xl lg:shadow-raised flex flex-col h-full min-h-0">
 
-  <!-- Explicit copy confirmation. Kept outside the scrolling rows so it is
-       always visible and never changes the table layout. -->
-  <div class="absolute top-[58px] left-1/2 -translate-x-1/2 z-30 pointer-events-none" aria-live="polite">
+  <!-- Explicit copy confirmation. Kept outside the scrolling rows so it never
+       changes the table layout. On mobile the list does not scroll internally,
+       so an absolutely positioned chip sat at the top of the document and was
+       invisible from row 15 onwards; there it is fixed above the tab bar. -->
+  <div
+    class="fixed left-1/2 -translate-x-1/2 z-[70] pointer-events-none
+      bottom-[calc(var(--mobile-tab-bar-height)+12px)]
+      lg:absolute lg:bottom-auto lg:top-[58px] lg:z-30"
+    aria-live="polite"
+  >
     {#if copiedCode}
       <div
         role="status"
@@ -199,10 +200,23 @@
           {/if}
         {:else}
           <span class="text-sm font-medium text-stone-700">全部设备</span>
-          <span class="flex items-center gap-1 text-xs text-stone-400">
-            <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-            实时
-          </span>
+          <!-- Only claim "实时" when these rows actually came from the server. -->
+          {#if loadError}
+            <span class="flex items-center gap-1 text-xs text-red-600">
+              <span class="inline-block w-1.5 h-1.5 rounded-full bg-red-500"></span>
+              连接失败
+            </span>
+          {:else if fromCache}
+            <span class="flex items-center gap-1 text-xs text-amber-600">
+              <span class="inline-block w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+              本地缓存
+            </span>
+          {:else}
+            <span class="flex items-center gap-1 text-xs text-stone-400">
+              <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+              实时
+            </span>
+          {/if}
         {/if}
       </div>
 
@@ -318,6 +332,20 @@
         {:else if contentFilter === 'balance'}
           <p class="text-sm font-medium text-stone-500">暂无余额查询记录</p>
           <p class="text-xs text-stone-400 mt-1">完成查询后，会话会按查询编号显示在这里</p>
+        {:else if loadError}
+          <!-- A failed load must never render as the healthy "listening" state. -->
+          <div class="text-3xl mb-3">⚠️</div>
+          <p class="text-sm font-semibold text-stone-600">短信列表加载失败</p>
+          <p class="text-xs text-stone-400 mt-1 max-w-[280px]">
+            这里显示的不是空收件箱，是没能取到数据。请检查网络后重试。
+          </p>
+          {#if onRetry}
+            <button
+              onclick={() => onRetry?.()}
+              class="mt-3 px-3 py-1.5 text-xs font-medium rounded-md border border-stone-200
+                text-stone-700 hover:bg-stone-50"
+            >重试</button>
+          {/if}
         {:else if !selectedPhone}
           <!-- Three breathing dots — "waiting for codes" empty state per §9 -->
           <div class="flex gap-2 mb-4">
@@ -405,7 +433,8 @@
             {:else if hasCode}
               <button
                 onclick={(e) => { e.stopPropagation(); handleCopy(message); }}
-                class="inline-flex items-center justify-center px-2 py-0.5 lg:px-2.5 lg:py-1 rounded-lg border
+                class="inline-flex items-center justify-center min-h-[40px] lg:min-h-0 px-3 py-1.5
+                  lg:px-2.5 lg:py-1 rounded-lg border
                   font-mono text-base lg:text-lg font-semibold tracking-widest tabular-nums cursor-pointer
                   transition-colors duration-200
                   {isCopied
@@ -431,7 +460,7 @@
           </div>
 
           <div class="col-start-3 row-start-1 font-mono text-xs text-stone-400 text-right tabular-nums lg:col-start-5">
-            {formatTime(message.timestamp)}
+            {formatClock(message.timestamp)}
           </div>
         </div>
         {/if}

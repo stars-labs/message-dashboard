@@ -254,11 +254,20 @@ export const api = {
           }
         }
 
-        // Step 5: Merge new messages with cached (avoiding duplicates)
+        // Step 5: Merge new messages with cached.
+        //
+        // A server row always wins over the cached copy with the same id: an
+        // incremental response now also carries outbound rows whose status
+        // changed (已发送 / 发送失败), and dropping them as "duplicates" was why a
+        // sent SMS stayed at 等待发送 for the life of the cache.
         if (response.sync?.is_incremental && cachedMessages.length > 0) {
           const existingIds = new Set(cachedMessages.map(m => m.id));
           const uniqueNewMessages = newMessages.filter(m => !existingIds.has(m.id));
-          const merged = [...uniqueNewMessages, ...cachedMessages];
+          const freshById = new Map(newMessages.map(m => [m.id, m]));
+          const merged = [
+            ...uniqueNewMessages,
+            ...cachedMessages.map(m => freshById.get(m.id) ?? m),
+          ];
           // Sort by timestamp descending and limit
           merged.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
           const limitedMerged = merged.slice(0, params.limit || 500);
@@ -301,7 +310,9 @@ export const api = {
         };
       }
 
-      return { data: [], pagination: {} };
+      // Nothing from the API and nothing cached: say so. Returning a bare empty
+      // page here made an outage render as a healthy, quiet inbox.
+      return { data: [], pagination: {}, failed: true };
     } catch (error) {
       console.warn('Failed to get messages:', error);
 
@@ -324,7 +335,7 @@ export const api = {
         console.warn('[API] Cache fallback failed:', cacheErr);
       }
 
-      return { data: [], pagination: {} };
+      return { data: [], pagination: {}, failed: true };
     }
   },
 

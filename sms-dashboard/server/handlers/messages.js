@@ -5,6 +5,42 @@ import { normalizeRecipient } from '../utils/recipient.js';
 
 const D1_MAX_BOUND_PARAMETERS = 100;
 
+/**
+ * How many outbound status changes one incremental response carries. Sending is
+ * operator-driven and rare next to inbound traffic, so this is generous.
+ */
+const OUTBOUND_REFRESH_LIMIT = 50;
+
+/**
+ * Outbound rows whose status moved inside the sync window. Scoped to `sent`
+ * rows and ordered by the indexed `updated_at` (migration 079), so it cannot
+ * turn into a scan of message history.
+ */
+async function outboundStatusChanges(db, { since, until, phoneIccid, limit }) {
+  const conditions = [
+    `m.purpose = 'user'`,
+    `m.type = 'sent'`,
+    `m.updated_at IS NOT NULL`,
+    `m.updated_at >= datetime(?, '-2 seconds')`,
+    `m.updated_at <= datetime(?)`,
+  ];
+  const params = [since, until];
+  if (phoneIccid) {
+    conditions.push(`m.phone_iccid = ?`);
+    params.push(phoneIccid);
+  }
+  params.push(limit);
+
+  const result = await db.prepare(`
+    SELECT m.*
+    FROM messages m
+    WHERE ${conditions.join(' AND ')}
+    ORDER BY m.updated_at DESC
+    LIMIT ?
+  `).bind(...params).all();
+  return result.results || result || [];
+}
+
 async function enrichMessagePage(db, messages) {
   const iccids = [...new Set(messages.map((message) => message.phone_iccid).filter(Boolean))];
   const devicesByIccid = new Map();
@@ -131,8 +167,24 @@ export const messagesHandler = {
       const rawMessages = messagesResult.results || messagesResult;
       const hasMore = rawMessages.length > limit;
       const pageRows = rawMessages.slice(0, limit);
-      const messages = await enrichMessagePage(env.DB, pageRows);
       const lastPageRow = pageRows.at(-1);
+
+      // An outbound row is written once and its status moves later, so paging on
+      // created_at alone never delivered 已发送 or 发送失败 — the dashboard sat on
+      // 等待发送 forever. Ask separately for outbound rows whose updated_at moved
+      // inside this window but which are too old for the page above. Outbound
+      // volume is low and the window is the poll interval, so this stays small.
+      const refreshRows = isIncremental
+        ? await outboundStatusChanges(env.DB, {
+            since,
+            until: requestedUntil || serverTime,
+            phoneIccid,
+            limit: OUTBOUND_REFRESH_LIMIT,
+          })
+        : [];
+      const seenIds = new Set(pageRows.map((row) => row.id));
+      const extraRows = refreshRows.filter((row) => !seenIds.has(row.id));
+      const messages = await enrichMessagePage(env.DB, [...pageRows, ...extraRows]);
 
       console.log('[Messages Handler] Query results:', {
         phoneIccid,
@@ -175,6 +227,8 @@ export const messagesHandler = {
         sync: {
           server_time: isIncremental ? (requestedUntil || serverTime) : serverTime,
           is_incremental: isIncremental,
+          // Rows already known to the client whose status changed.
+          status_refreshed: extraRows.length,
         },
       }), {
         headers: { 'Content-Type': 'application/json' }

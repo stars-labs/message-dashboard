@@ -1,4 +1,6 @@
 <script>
+  import { confirmAction } from './confirm.svelte.js';
+  import { overlay } from './overlay.js';
   import { onMount } from "svelte";
   import { getModemPosition } from "./modem-position.js";
   import { api } from "./api";
@@ -264,7 +266,11 @@
   }
 
   async function handleDelete(id) {
-    if (!confirm("确认删除此映射？\n\n卡还在槽里，但收到的短信将不再归属号码。已收到的历史短信保留。")) return;
+    if (!(await confirmAction({
+      message: '确认删除此映射？\n\n卡还在槽里，但收到的短信将不再归属号码。已收到的历史短信保留。',
+      confirmLabel: '删除',
+      danger: true,
+    }))) return;
     try {
       const r = await api.iccidMappings.delete(id);
       if (r.success) { closePanel(); await loadMappings(); }
@@ -295,7 +301,9 @@
   <!-- Filter chips + search -->
   <div class="flex flex-col sm:flex-row gap-2 mb-4 lg:flex-none">
     <div class="flex flex-wrap gap-1.5">
-      {#each [['all','全部',totalCount],['active','活动',activeCount],['error','异常',errorCount],['inactive','未激活',inactiveCount]] as [v,label,count]}
+      <!-- Same words as the device page and the status badge: 活动/未激活 named
+           the same rows as 在线/待映射 and made the two screens look unrelated. -->
+      {#each [['all','全部',totalCount],['active','在线',activeCount],['error','异常',errorCount],['inactive','待映射',inactiveCount]] as [v,label,count]}
         <button onclick={() => { statusFilter = v; }}
           class="px-3 py-1.5 text-xs rounded-lg font-medium transition-colors tabular-nums
             {statusFilter === v
@@ -323,7 +331,7 @@
       <input
         type="text"
         bind:value={searchQuery}
-        placeholder="搜索 S01 / 号码 / ICCID…"
+        placeholder="卡号 / 号码 / 运营商 / ICCID"
         class="w-[220px] px-3 py-1.5 text-sm bg-stone-50 border border-stone-200 rounded-lg
           focus:outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100 transition-colors"
       />
@@ -568,15 +576,18 @@
 <!-- ═══ Unified add/edit panel ══════════════════════════════════════════════ -->
 {#if panel}
   <div class="fixed inset-0 bg-stone-900/40 flex items-center justify-center z-50 p-4"
-    onclick={(e) => e.target === e.currentTarget && closePanel()}>
-    <div class="bg-white rounded-2xl shadow-modal w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden">
+    onclick={(e) => e.target === e.currentTarget && closePanel()}
+    role="presentation">
+    <div class="bg-white rounded-2xl shadow-modal w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden"
+      role="dialog" aria-modal="true" aria-label={panel.mode === 'add' ? '添加映射' : '编辑映射'}
+      use:overlay={{ onClose: closePanel }}>
 
       <!-- Panel header -->
       <div class="px-6 py-4 border-b border-stone-100 flex-shrink-0 flex items-center justify-between">
         <h3 class="font-semibold text-stone-900">
           {panel.mode === 'add' ? '添加映射' : '编辑映射'}
         </h3>
-        <button onclick={closePanel} class="text-stone-400 hover:text-stone-700 transition-colors">
+        <button onclick={closePanel} aria-label="关闭" class="text-stone-400 hover:text-stone-700 transition-colors">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
           </svg>
@@ -619,8 +630,8 @@
           <!-- Add mode: ICCID (free-entry, since we don't have unassigned-card list from daemon) -->
           {#if panel.mode === 'add'}
             <div class="col-span-2">
-              <label class="block text-xs font-semibold text-stone-500 mb-1 tracking-wide uppercase">ICCID *</label>
-              <input type="text" bind:value={panel.formData.iccid}
+              <label for="mapping-iccid" class="block text-xs font-semibold text-stone-500 mb-1 tracking-wide uppercase">ICCID *</label>
+              <input id="mapping-iccid" type="text" bind:value={panel.formData.iccid}
                 placeholder="89650…（19位）"
                 class="w-full px-3 py-2 text-sm font-mono border border-stone-300 rounded-lg
                   focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100" />
@@ -629,8 +640,8 @@
 
           <!-- 卡号 / sim_index — stays editable; collision warning shown -->
           <div class="col-span-2 sm:col-span-1">
-            <label class="block text-xs font-semibold text-stone-500 mb-1 tracking-wide uppercase">卡号 (sim_index)</label>
-            <input type="number" bind:value={panel.formData.sim_index}
+            <label for="mapping-sim-index" class="block text-xs font-semibold text-stone-500 mb-1 tracking-wide uppercase">卡号 (sim_index)</label>
+            <input id="mapping-sim-index" type="number" bind:value={panel.formData.sim_index}
               placeholder="1–95" min="1" max="95"
               class="w-full px-3 py-2 text-sm font-mono border rounded-lg
                 focus:outline-none focus:ring-2 transition-colors
@@ -646,8 +657,8 @@
 
           <!-- 手机号 -->
           <div class="col-span-2 sm:col-span-1">
-            <label class="block text-xs font-semibold text-stone-500 mb-1 tracking-wide uppercase">手机号 *</label>
-            <input type="tel" bind:value={panel.formData.phone_number}
+            <label for="mapping-number" class="block text-xs font-semibold text-stone-500 mb-1 tracking-wide uppercase">手机号 *</label>
+            <input id="mapping-number" type="tel" bind:value={panel.formData.phone_number}
               placeholder="+65 …"
               class="w-full px-3 py-2 text-sm font-mono border border-stone-300 rounded-lg
                 focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100" />
@@ -655,8 +666,8 @@
 
           <!-- 国家 -->
           <div>
-            <label class="block text-xs font-semibold text-stone-500 mb-1 tracking-wide uppercase">国家 *</label>
-            <select bind:value={panel.formData.country}
+            <label for="mapping-country" class="block text-xs font-semibold text-stone-500 mb-1 tracking-wide uppercase">国家 *</label>
+            <select id="mapping-country" bind:value={panel.formData.country}
               class="w-full px-3 py-2 text-sm border border-stone-300 rounded-lg bg-white
                 focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100">
               <option value="">选择…</option>
@@ -668,8 +679,8 @@
 
           <!-- 运营商 -->
           <div>
-            <label class="block text-xs font-semibold text-stone-500 mb-1 tracking-wide uppercase">运营商</label>
-            <input type="text" bind:value={panel.formData.carrier}
+            <label for="mapping-carrier" class="block text-xs font-semibold text-stone-500 mb-1 tracking-wide uppercase">运营商</label>
+            <input id="mapping-carrier" type="text" bind:value={panel.formData.carrier}
               placeholder="Singtel / 中国移动…"
               class="w-full px-3 py-2 text-sm border border-stone-300 rounded-lg
                 focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100" />
@@ -754,14 +765,14 @@
 
           <!-- IMEI — read-only in edit, editable in add -->
           <div class="col-span-2">
-            <label class="block text-xs font-semibold text-stone-500 mb-1 tracking-wide uppercase">
+            <label for="mapping-imei" class="block text-xs font-semibold text-stone-500 mb-1 tracking-wide uppercase">
               IMEI
               {#if panel.mode === 'edit'}
-                <span class="ml-1 text-stone-300 font-normal normal-case">(由守护进程绑定)</span>
+                <span class="ml-1 text-stone-300 font-normal normal-case">(由采集服务绑定)</span>
               {/if}
             </label>
             <div class="relative">
-              <input type="text" bind:value={panel.formData.imei}
+              <input id="mapping-imei" type="text" bind:value={panel.formData.imei}
                 readonly={panel.mode === 'edit'}
                 placeholder={panel.mode === 'add' ? '可选' : ''}
                 class="w-full px-3 py-2 text-sm font-mono border rounded-lg transition-colors
@@ -779,8 +790,8 @@
 
           <!-- 备注 -->
           <div class="col-span-2">
-            <label class="block text-xs font-semibold text-stone-500 mb-1 tracking-wide uppercase">备注（可选）</label>
-            <textarea bind:value={panel.formData.description} rows="2"
+            <label for="mapping-note" class="block text-xs font-semibold text-stone-500 mb-1 tracking-wide uppercase">备注（可选）</label>
+            <textarea id="mapping-note" bind:value={panel.formData.description} rows="2"
               placeholder="用途、标注等"
               class="w-full px-3 py-2 text-sm border border-stone-300 rounded-lg resize-none
                 focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"></textarea>

@@ -1,4 +1,5 @@
 <script>
+  import { formatClock } from './time.js';
   import { formatCardNumber } from './card-number.js';
   import { getCountryFlag } from './countries.js';
   import {
@@ -22,22 +23,6 @@
       || `发送 ${check?.outbound_content || check?.command || '—'} 至 ${check?.outbound_recipient || check?.destination || '—'}`
   );
 
-  function formatTime(value) {
-    if (!value) return '';
-    const date = new Date(normalizeUtcTimestamp(value));
-    if (Number.isNaN(date.getTime())) return '';
-    const now = new Date();
-    const options = { timeZone: 'Asia/Shanghai' };
-    const isToday = date.toLocaleDateString('zh-CN', options)
-      === now.toLocaleDateString('zh-CN', options);
-    return isToday
-      ? date.toLocaleTimeString('zh-CN', {
-          hour: '2-digit', minute: '2-digit', second: '2-digit', ...options,
-        })
-      : date.toLocaleString('zh-CN', {
-          month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', ...options,
-        });
-  }
 </script>
 
 <button
@@ -75,7 +60,7 @@
   </span>
 
   <span class="font-mono text-xs text-stone-400 text-right tabular-nums">
-    {formatTime(getBalanceTimestamp(check))}
+    {formatClock(getBalanceTimestamp(check))}
   </span>
 </button>
 
@@ -92,7 +77,7 @@
     </span>
     <span class="text-sm font-semibold text-stone-700">余额查询</span>
     <span class="ml-auto font-mono text-xs text-stone-400 shrink-0">
-      {formatTime(getBalanceTimestamp(check))}
+      {formatClock(getBalanceTimestamp(check))}
     </span>
   </span>
   <span class="mt-1 flex items-center gap-1.5 font-mono text-[11px] text-stone-400 min-w-0">
