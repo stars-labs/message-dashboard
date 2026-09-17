@@ -217,4 +217,46 @@ impl ApiClient {
         let data: PendingResponse = response.json().await?;
         Ok(data.pending_messages)
     }
+
+    /// Report a ringing SIM. Repeated while it rings; the Worker refreshes a
+    /// short-lived KV entry and answers 409 when another call is active.
+    pub async fn report_incoming_call(&self, iccid: &str, from: Option<&str>) -> Result<()> {
+        self.post_call_event("incoming", json!({ "iccid": iccid, "from": from }))
+            .await
+    }
+
+    /// Report that a call ended on the modem side: hangup, failure, or a ring
+    /// that stopped. `call_id` is absent for an unanswered ring.
+    pub async fn report_call_ended(
+        &self,
+        call_id: Option<&str>,
+        iccid: &str,
+        reason: &str,
+    ) -> Result<()> {
+        self.post_call_event(
+            "ended",
+            json!({ "call_id": call_id, "iccid": iccid, "reason": reason }),
+        )
+        .await
+    }
+
+    async fn post_call_event(&self, event: &str, body: serde_json::Value) -> Result<()> {
+        let url = format!("{}/api/control/calls/{}", self.config.api_url, event);
+        let response = self
+            .client
+            .post(&url)
+            .header("x-api-key", &self.config.api_key)
+            .timeout(std::time::Duration::from_secs(10))
+            .json(&body)
+            .send()
+            .await
+            .with_context(|| format!("Failed to report call {}", event))?;
+        let status = response.status();
+        // 409: another call holds the single-call lock, which is expected.
+        if !status.is_success() && status != reqwest::StatusCode::CONFLICT {
+            let body = response.text().await.unwrap_or_default();
+            anyhow::bail!("calls/{} returned {}: {}", event, status, body);
+        }
+        Ok(())
+    }
 }

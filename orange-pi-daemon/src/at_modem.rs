@@ -100,6 +100,15 @@ pub struct ModemHealth {
     pub sms_config: Option<SmsConfig>,
 }
 
+/// Serial ports a voice call needs besides the AT port.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VoicePorts {
+    /// Interface 1: 8 kHz PCM once `AT+QPCMV=1,0` is set.
+    pub nmea: String,
+    /// Interface 3: URCs once `init_urc_port` has run.
+    pub modem: String,
+}
+
 /// Direct AT command modem manager
 pub struct AtModemManager {
     /// Map of port path -> modem info cache
@@ -245,6 +254,9 @@ impl AtModemManager {
                         if let Err(e) = self.init_ims(&port_path).await {
                             warn!("Failed to initialize IMS on {}: {}", port_path, e);
                         }
+                        if let Err(e) = self.init_urc_port(&port_path).await {
+                            warn!("Failed to route URCs on {}: {}", port_path, e);
+                        }
                         ports.push(port_path);
                         break; // one AT port per physical modem
                     }
@@ -377,6 +389,86 @@ impl AtModemManager {
             .map_err(|e| anyhow!("parse {} ('{}') failed: {}", path.display(), raw.trim(), e))
     }
 
+    /// Route URCs to the MODEM port (interface 3).
+    ///
+    /// The AT port is opened per command and closed again, so `RING`/`+CLIP` sent
+    /// there are lost. Moving URCs to the otherwise unused MODEM port lets a
+    /// persistent reader see incoming calls. Applied at discovery time, so a module
+    /// reset cannot leave it unset; SMS collection is unaffected because the daemon
+    /// polls `AT+CMGL` and never consumes URCs.
+    pub async fn init_urc_port(&self, port: &str) -> Result<()> {
+        // Caller id arrives as +CLIP only when enabled; the setting is not stored.
+        let clip = self
+            .send_at_command(port, "AT+CLIP=1", Duration::from_millis(1000))
+            .await?;
+        if !clip.contains("OK") {
+            return Err(anyhow!("Failed to enable caller id: {}", clip.trim()));
+        }
+        match self
+            .send_at_command(
+                port,
+                "AT+QURCCFG=\"urcport\",\"usbmodem\"",
+                Duration::from_millis(1000),
+            )
+            .await
+        {
+            Ok(response) if response.contains("OK") => {
+                debug!("URC port set to usbmodem on {}", port);
+            }
+            Ok(response) => {
+                warn!("Failed to set URC port on {}: {}", port, response);
+                return Err(anyhow!("Failed to set URC port: {}", response));
+            }
+            Err(e) => {
+                warn!("Error setting URC port on {}: {}", port, e);
+                return Err(e);
+            }
+        }
+        Ok(())
+    }
+
+    /// The NMEA (voice PCM) and MODEM (URC) ports of the physical modem that owns
+    /// `at_port`.
+    pub fn voice_ports_for_at_port(at_port: &str) -> Result<Option<VoicePorts>> {
+        Ok(Self::pick_voice_ports(
+            &Self::ttyusb_by_usb_device()?,
+            at_port,
+        ))
+    }
+
+    /// Pure half of `voice_ports_for_at_port`, so it can be tested without sysfs.
+    ///
+    /// Ports are grouped per USB device and sorted by index, so the default
+    /// composition maps to DIAG, NMEA, AT, MODEM. A slimmed modem has lost the
+    /// NMEA interface, so the indices no longer line up and it cannot carry
+    /// voice; it yields `None`, as does an unknown AT port.
+    pub fn pick_voice_ports(
+        groups: &BTreeMap<String, Vec<String>>,
+        at_port: &str,
+    ) -> Option<VoicePorts> {
+        let ports = groups
+            .values()
+            .find(|ports| ports.iter().any(|p| p == at_port))?;
+        if ports.len() < 4 || ports[2] != at_port {
+            return None;
+        }
+        Some(VoicePorts {
+            nmea: ports[1].clone(),
+            modem: ports[3].clone(),
+        })
+    }
+
+    /// An AT command issued by the voice bridge (ATD, ATA, ATH, AT+CLCC,
+    /// AT+QPCMV). Takes the same per-port lock as SMS work.
+    pub async fn voice_command(
+        &self,
+        port: &str,
+        command: &str,
+        timeout: Duration,
+    ) -> Result<String> {
+        self.send_at_command(port, command, timeout).await
+    }
+
     /// Initialize IMS settings on modem
     pub async fn init_ims(&self, port: &str) -> Result<()> {
         // Enable IMS (IP Multimedia Subsystem)
@@ -471,7 +563,9 @@ impl AtModemManager {
     }
 
     /// Open serial port with proper settings
-    fn open_serial(port: &str) -> Result<File> {
+    /// Open a serial port with the hardening described below. Exposed to the crate
+    /// so the URC reader can hold the MODEM port open without duplicating this.
+    pub(crate) fn open_serial(port: &str) -> Result<File> {
         // Open and KEEP the port non-blocking. A blocking serial open() waits for
         // carrier (DCD); a wedged modem never asserts it, hanging the thread forever.
         // Keeping O_NONBLOCK set also makes read()/write() return WouldBlock instead
@@ -2289,6 +2383,55 @@ mod tests {
     // command and everything after it is parsed by the modem as a fresh command. The
     // recipient reaches here from an API request body, so it is untrusted.
     // See docs/SECURITY-REVIEW.md finding 3.
+    fn four_port_modem() -> BTreeMap<String, Vec<String>> {
+        let mut groups = BTreeMap::new();
+        groups.insert(
+            "1-1.3.4.3.4".to_string(),
+            (68..=71).map(|n| format!("/dev/ttyUSB{n}")).collect(),
+        );
+        groups
+    }
+
+    #[test]
+    fn test_pick_voice_ports_returns_nmea_and_modem() {
+        assert_eq!(
+            AtModemManager::pick_voice_ports(&four_port_modem(), "/dev/ttyUSB70"),
+            Some(VoicePorts {
+                nmea: "/dev/ttyUSB69".to_string(),
+                modem: "/dev/ttyUSB71".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn test_pick_voice_ports_none_for_slimmed_modem() {
+        let mut groups = BTreeMap::new();
+        groups.insert(
+            "1-1.3.4.3.5".to_string(),
+            (80..=82).map(|n| format!("/dev/ttyUSB{n}")).collect(),
+        );
+        assert_eq!(
+            AtModemManager::pick_voice_ports(&groups, "/dev/ttyUSB81"),
+            None
+        );
+    }
+
+    #[test]
+    fn test_pick_voice_ports_none_when_port_is_not_the_at_port() {
+        assert_eq!(
+            AtModemManager::pick_voice_ports(&four_port_modem(), "/dev/ttyUSB71"),
+            None
+        );
+    }
+
+    #[test]
+    fn test_pick_voice_ports_none_for_unknown_port() {
+        assert_eq!(
+            AtModemManager::pick_voice_ports(&four_port_modem(), "/dev/ttyUSB99"),
+            None
+        );
+    }
+
     #[test]
     fn test_validate_recipient_accepts_e164() {
         assert!(AtModemManager::validate_recipient_with_short_code("+6512345678", false).is_ok());

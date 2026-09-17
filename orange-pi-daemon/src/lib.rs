@@ -13,6 +13,11 @@ pub mod sms_assembler;
 pub mod sms_sender;
 pub mod sync_manager;
 pub mod types;
+pub mod urc_reader;
+pub mod voice_auth;
+pub mod voice_bridge;
+pub mod voice_call;
+pub mod voice_codec;
 pub mod worker_pool;
 
 #[cfg(test)]

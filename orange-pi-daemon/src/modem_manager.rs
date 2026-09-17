@@ -93,7 +93,7 @@ pub struct ModemManager {
     dbus_client: Option<Arc<crate::dbus_client::DBusClient>>,
     /// Signal quality cache
     signal_cache: Arc<SignalCache>,
-    /// Port to modem_id mapping cache
+    /// modem_id -> AT port path, populated at discovery
     port_cache: Arc<RwLock<HashMap<String, String>>>,
     /// Backend mode
     mode: BackendMode,
@@ -254,6 +254,7 @@ impl ModemManager {
                 let id = AtModemManager::port_to_modem_id(&port);
                 if !known.contains(&id) {
                     let _ = self.at_modem.init_ims(&port).await;
+                    let _ = self.at_modem.init_urc_port(&port).await;
                     found.push((id, port));
                 }
             }
@@ -303,12 +304,29 @@ impl ModemManager {
         Ok(current)
     }
 
-    /// Get port for modem ID
-    async fn get_port(&self, modem_id: &str) -> String {
+    /// The AT port serving `modem_id`: the port cached at discovery, falling back to
+    /// the conventional path for the ID. Public so the URC reader can locate the
+    /// matching MODEM port.
+    pub async fn get_port(&self, modem_id: &str) -> String {
         if let Some(port) = self.port_cache.read().await.get(modem_id) {
             return port.clone();
         }
         AtModemManager::modem_id_to_port(modem_id)
+    }
+
+    /// Issue a voice-control AT command on the modem's AT port, sharing the
+    /// per-port lock with SMS work. AT backend only.
+    pub async fn voice_command(
+        &self,
+        modem_id: &str,
+        command: &str,
+        timeout: std::time::Duration,
+    ) -> Result<String> {
+        if self.mode != BackendMode::AtCommand {
+            return Err(anyhow!("voice calls need the AT command backend"));
+        }
+        let port = self.get_port(modem_id).await;
+        self.at_modem.voice_command(&port, command, timeout).await
     }
 
     /// Get the stable USB topology path (e.g. `1-1.4.2.2.2`) for a modem ID.

@@ -17,6 +17,7 @@ use orange_pi_daemon_rust::sync_manager::{
     device_delta, merge_device_reports, DeviceDelta, SyncManager, SyncMode,
 };
 use orange_pi_daemon_rust::types::*;
+use orange_pi_daemon_rust::voice_bridge::{VoiceBridge, VoiceBridgeConfig};
 use orange_pi_daemon_rust::worker_pool::{WorkerPool, WorkerPoolConfig};
 
 // V7.3.0 - EMERGENCY FIX FOR MODEMMANAGER DELETION FAILURE
@@ -747,6 +748,27 @@ async fn main() -> Result<()> {
             }
         }
     });
+
+    // TASK 9: VOICE BRIDGE (only when VOICE_BRIDGE_DOMAIN is set)
+    // wss:// listener for the Cloudflare Realtime adapters plus one URC reader per
+    // voice-capable modem for incoming calls. See docs/voice-call-plan.md.
+    match VoiceBridgeConfig::from_env() {
+        Some(voice_config) => {
+            let bridge = VoiceBridge::new(
+                api_key.clone(),
+                modem_manager.clone(),
+                (*api_client).clone(),
+                latest_devices.clone(),
+            );
+            tokio::spawn(bridge.clone().run_urc_readers());
+            tokio::spawn(async move {
+                if let Err(e) = bridge.serve(voice_config).await {
+                    error!("📞 Voice bridge stopped: {:#}", e);
+                }
+            });
+        }
+        None => info!("📞 Voice bridge disabled (VOICE_BRIDGE_DOMAIN not set)"),
+    }
 
     // Main thread just monitors health
     info!("✨ All tasks spawned - system running in dual-loop mode");
