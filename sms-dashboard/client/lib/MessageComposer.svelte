@@ -260,7 +260,7 @@
       for="sim-selection"
       class="block text-sm font-medium text-stone-600 mb-2"
     >
-      发送卡号
+      发送卡
     </label>
     <input
       id="sim-selection"
@@ -289,7 +289,7 @@
           <div
             class="text-xs text-stone-400 px-2 py-1 border-b border-stone-200 mb-1"
           >
-            可用发送卡 ({filteredSims.length})
+            可用发送卡（{filteredSims.length}）
           </div>
           {#each filteredSims as phone}
             <button
@@ -308,7 +308,7 @@
               </div>
               {#if phone.signal_strength}
                 <div class="text-xs text-stone-400">
-                  信号: {phone.signal_strength}%
+                  信号 {phone.signal_strength}%
                 </div>
               {/if}
             </button>
@@ -365,7 +365,7 @@
           showRecipientHistory = true;
           recipientSearch = e.target.value;
         }}
-        placeholder="输入手机号或短号..."
+        placeholder="输入手机号或短号…"
         class="flex-1 px-4 py-2 cyber-input"
       />
     </div>
@@ -442,7 +442,7 @@
     <textarea
       id="message-content"
       bind:value={messageContent}
-      placeholder="输入短信内容..."
+      placeholder="输入短信内容…"
       rows="4"
       class="w-full px-4 py-2 cyber-input resize-none"
     ></textarea>
@@ -518,7 +518,7 @@
           for="mobile-sim-selection"
           class="block text-sm font-medium text-stone-600 mb-2"
         >
-          发送卡号
+          发送卡
         </label>
         <input
           id="mobile-sim-selection"
@@ -547,7 +547,7 @@
               <div
                 class="text-xs text-stone-400 px-2 py-1 border-b border-stone-200 mb-1"
               >
-                可用发送卡 ({filteredSims.length})
+                可用发送卡（{filteredSims.length}）
               </div>
               {#each filteredSims as phone}
                 <button
@@ -566,7 +566,7 @@
                   </div>
                   {#if phone.signal_strength}
                     <div class="text-xs text-stone-400">
-                      信号: {phone.signal_strength}%
+                      信号 {phone.signal_strength}%
                     </div>
                   {/if}
                 </button>
@@ -623,7 +623,7 @@
               showRecipientHistory = true;
               recipientSearch = e.target.value;
             }}
-            placeholder="输入手机号或短号..."
+            placeholder="输入手机号或短号…"
             class="flex-1 px-4 py-2 cyber-input"
           />
         </div>
@@ -700,7 +700,7 @@
         <textarea
           id="mobile-message-content"
           bind:value={messageContent}
-          placeholder="输入短信内容..."
+          placeholder="输入短信内容…"
           rows="4"
           class="w-full px-4 py-2 cyber-input resize-none"
         ></textarea>

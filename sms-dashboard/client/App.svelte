@@ -1404,7 +1404,7 @@
                   <div class="h-11 px-4 flex items-center gap-2">
                     <div class="min-w-0 flex-1">
                       <h2 id="receiver-picker-title" class="text-sm font-semibold text-stone-900">选择接收卡</h2>
-                      <p class="text-[11px] text-stone-400 mt-0.5">共 {phoneNumbers.length} 台设备</p>
+                      <p class="text-[11px] text-stone-400 mt-0.5">共 {phoneNumbers.length} 张卡</p>
                     </div>
                     <button
                       class="w-9 h-9 -mr-1 flex items-center justify-center rounded-lg text-stone-500

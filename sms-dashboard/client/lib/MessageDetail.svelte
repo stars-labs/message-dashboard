@@ -149,10 +149,10 @@
       </header>
 
       <div class="flex-1 min-h-0 overflow-y-auto">
-        <!-- 本机卡 + 时间 -->
+        <!-- 接收卡 + 时间 -->
         <div class="grid grid-cols-2 border-b border-stone-100 bg-stone-50/70">
           <div class="px-4 py-3 border-r border-stone-100 min-w-0">
-            <p class="text-[11px] text-stone-400">本机卡</p>
+            <p class="text-[11px] text-stone-400">接收卡</p>
             <p class="mt-1 text-sm font-medium text-stone-800 font-mono truncate">
               {#if cardIndex != null}{formatCardNumber(cardIndex)} · {/if}{cardFlag} {cardNumber}
             </p>

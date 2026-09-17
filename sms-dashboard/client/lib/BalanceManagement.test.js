@@ -237,8 +237,10 @@ describe('balance management', () => {
       const view = render(BalanceManagement, {
         props: { phoneNumbers: [phone], balanceChecks: [check] },
       });
-      await waitFor(() => expect(view.getByText('已就绪')).toBeTruthy());
-      expect(view.getByText('需要人工验证')).toBeTruthy();
+      // Wait on the capability that can only appear after the status loads.
+      await waitFor(() => expect(view.getByText('需要人工验证')).toBeTruthy());
+      // Same three words as the daemon's own health: 正常 / 部分异常 / 离线.
+      expect(view.getAllByText('正常').length).toBeGreaterThan(0);
       expect(view.getByText('浏览器任务逐张处理')).toBeTruthy();
     } finally {
       globalThis.fetch = originalFetch;
@@ -695,9 +697,9 @@ describe('balance management', () => {
       props: { phoneNumbers: [phone], balanceChecks: [check] },
     });
 
-    const simSort = view.getByRole('button', { name: '按SIM升序排列' });
+    const simSort = view.getByRole('button', { name: '按卡号升序排列' });
     await fireEvent.click(simSort);
-    expect(view.getByRole('button', { name: '按SIM降序排列' })).toBeTruthy();
+    expect(view.getByRole('button', { name: '按卡号降序排列' })).toBeTruthy();
 
     await fireEvent.click(view.getByRole('button', { name: '查询记录' }));
     const timeSort = view.getByRole('button', { name: '按时间升序排列' });

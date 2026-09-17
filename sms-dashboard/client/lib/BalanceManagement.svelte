@@ -187,7 +187,7 @@
       .sort((a, b) => new Date(normalizeUtcTimestamp(b)) - new Date(normalizeUtcTimestamp(a)))[0] || null
   );
   const overviewColumns = [
-    { key: 'sim', label: 'SIM' },
+    { key: 'sim', label: '卡号' },
     { key: 'carrier', label: '运营商' },
     { key: 'sim_role', label: '主副卡' },
     { key: 'service_type', label: '计费类型' },
@@ -202,7 +202,7 @@
 
   const historyColumns = [
     { key: 'time', label: '时间' },
-    { key: 'sim', label: 'SIM' },
+    { key: 'sim', label: '卡号' },
     { key: 'carrier', label: '运营商' },
     { key: 'method', label: '查询方式' },
     { key: 'status', label: '结果' },
@@ -218,10 +218,10 @@
   function capabilityPresentation(capability) {
     if (runnerStatusLoading) return { label: '检测中', dot: 'bg-stone-300', text: 'text-stone-400' };
     if (!capability || capability.state === 'offline') {
-      return { label: '未运行', dot: 'bg-stone-300', text: 'text-stone-500' };
+      return { label: '离线', dot: 'bg-stone-300', text: 'text-stone-500' };
     }
     if (capability.state === 'degraded') {
-      return { label: '连接异常', dot: 'bg-amber-500', text: 'text-amber-700' };
+      return { label: '部分异常', dot: 'bg-amber-500', text: 'text-amber-700' };
     }
     if (capability.state === 'configuration_required') {
       return { label: '需要配置', dot: 'bg-amber-500', text: 'text-amber-700' };
@@ -233,8 +233,8 @@
         text: capability.detail_code === 'human_verification_required' ? 'text-orange-700' : 'text-emerald-700',
       };
     }
-    if (capability.available) return { label: '已就绪', dot: 'bg-emerald-500', text: 'text-emerald-700' };
-    return { label: '未运行', dot: 'bg-stone-300', text: 'text-stone-500' };
+    if (capability.available) return { label: '正常', dot: 'bg-emerald-500', text: 'text-emerald-700' };
+    return { label: '离线', dot: 'bg-stone-300', text: 'text-stone-500' };
   }
 
   async function loadRunnerStatus() {
@@ -634,7 +634,7 @@
     if (statusFilter !== 'all') {
       parts.push(filterTabs.find(([value]) => value === statusFilter)?.[1] || '当前状态');
     }
-    if (searchQuery.trim()) parts.push(`搜索“${searchQuery.trim()}”`);
+    if (searchQuery.trim()) parts.push(`搜索「${searchQuery.trim()}」`);
     return `${parts.length ? `当前筛选：${parts.join(' · ')}` : '当前全部卡片'}（${count} 张）`;
   }
 
@@ -695,7 +695,7 @@
               <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M4 7h16M4 12h16M4 17h10"/>
               </svg>
-              {loadingPreview ? '计算中' : '批量查询'}
+              {loadingPreview ? '计算中…' : '批量查询'}
             </button>
           {/if}
         </div>
@@ -933,7 +933,7 @@
                       {#if canQueryBalances && row.phone.service_type !== 'postpaid'}
                         <button type="button" onclick={(event) => queryPhone(row, event)}
                           disabled={!!queryingIccid || row.phone.sim_role === 'secondary'}
-                          title={row.phone.sim_role === 'secondary' ? '副卡,余额随主卡查询' : ''}
+                          title={row.phone.sim_role === 'secondary' ? '副卡，余额随主卡查询' : ''}
                           class="text-xs font-semibold text-action-text hover:underline disabled:text-stone-300 disabled:no-underline">
                           {queryingIccid === row.phone.iccid ? '排队中…' : '查询'}
                         </button>
@@ -1269,10 +1269,10 @@
       </header>
       <div class="px-5 py-5 text-sm text-stone-600 leading-6">
         {#if runnerUnavailable}
-          <p>此查询需要 {capabilityLabels[preflight.method.capability] || '本地查询助手'}，当前没有可用实例。</p>
-          <p class="mt-2 text-xs text-stone-400">启动并登录 Balance Agent 后再查询，可立即处理任务。</p>
+          <p>此查询需要 {capabilityLabels[preflight.method.capability] || '查询助手'}，当前没有可用实例。</p>
+          <p class="mt-2 text-xs text-stone-400">在电脑上启动并登录查询助手（Balance Agent）后再查询，可立即处理任务。</p>
         {:else}
-          <p>联通官方网站将在运行 Balance Agent 的电脑上打开，并逐张处理。</p>
+          <p>联通官方网站将在运行查询助手的电脑上打开，并逐张处理。</p>
           <p class="mt-2 text-xs text-stone-400">登录过程中可能需要完成滑块或图片验证。</p>
         {/if}
       </div>
@@ -1331,7 +1331,7 @@
               disabled={!batchPreview.method_summary.sms_ai || !batchPreview.runner_capabilities?.sms_ai?.available}
               class="rounded border-stone-300 text-orange-500 focus:ring-orange-400">
             <span class="flex-1 text-stone-600">
-              AI 辅助短信
+              AI 短信
               {#if batchPreview.method_summary.sms_ai && !batchPreview.runner_capabilities?.sms_ai?.available}
                 <small class="ml-1 text-amber-600">助手未就绪</small>
               {/if}
@@ -1366,7 +1366,7 @@
         <dt class="text-stone-500">未支持运营商</dt><dd class="font-mono tabular-nums text-stone-700">{batchPreview.summary.unsupported}</dd>
         <dt class="text-stone-500">尚未完成单卡验证</dt><dd class="font-mono tabular-nums text-stone-700">{batchPreview.summary.unverified}</dd>
         {#if batchPreview.summary.secondary}
-          <dt class="text-stone-500">副卡(余额随主卡)</dt><dd class="font-mono tabular-nums text-stone-700">{batchPreview.summary.secondary}</dd>
+          <dt class="text-stone-500">副卡（余额随主卡）</dt><dd class="font-mono tabular-nums text-stone-700">{batchPreview.summary.secondary}</dd>
         {/if}
         <dt class="text-stone-500">范围内卡数</dt><dd class="font-mono tabular-nums text-stone-700">{batchPreview.summary.total}</dd>
       </dl>

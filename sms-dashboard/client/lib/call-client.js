@@ -88,7 +88,7 @@ export function describeCallError(error) {
   if (/not configured/i.test(message)) return '服务端还没配置好语音通话，请联系管理员。';
   if (/No call to answer|No active call/i.test(message)) return '这通电话已经结束了。';
   if (/Only a ringing inbound call/i.test(message)) return '这通电话已经不在振铃状态。';
-  if (/number must be E\.164/i.test(message)) return '号码需要是国际格式，例如 +6591234567。';
+  if (/number must be E\.164/i.test(message)) return '号码需要是国际格式，例如 +6591234567';
   if (/连接超时|连接失败|通话已结束/.test(message)) return message;
   if (/Could not (create|publish|subscribe|renegotiate)/i.test(message)) {
     return '媒体服务器没能建立音频通道，请重试。';

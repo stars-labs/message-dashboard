@@ -109,7 +109,7 @@
             ></div>
           {/each}
         </div>
-        <span class="text-xs text-stone-400">加载中</span>
+        <span class="text-xs text-stone-400">加载中…</span>
       {:else}
         <!-- Show data expired only after initial load -->
         <div class="flex gap-0.5 items-end">
@@ -131,7 +131,7 @@
           ></div>
         {/each}
       </div>
-      <span class="text-xs text-orange-600">数据陈旧</span>
+      <span class="text-xs text-orange-600">数据过期</span>
     {:else}
       <div class="flex gap-0.5 items-end">
         {#each [1, 2, 3, 4] as bar}
@@ -171,7 +171,7 @@
               ></div>
             {/each}
           </div>
-          <span class="text-sm font-semibold text-amber-600">搜索网络中</span>
+          <span class="text-sm font-semibold text-amber-600">搜索中</span>
         {:else if status === "failed"}
           <div class="flex gap-0.5 items-end">
             {#each [1, 2, 3, 4] as bar}
@@ -181,7 +181,7 @@
               ></div>
             {/each}
           </div>
-          <span class="text-sm font-semibold text-red-500">连接故障</span>
+          <span class="text-sm font-semibold text-red-500">故障</span>
         {:else if status === "offline"}
           <div class="flex gap-0.5 items-end">
             {#each [1, 2, 3, 4] as bar}
@@ -211,7 +211,7 @@
               ></div>
             {/each}
           </div>
-          <span class="text-sm font-semibold text-orange-600">数据陈旧</span>
+          <span class="text-sm font-semibold text-orange-600">数据过期</span>
         {:else}
           <div class="flex gap-0.5 items-end">
             {#each [1, 2, 3, 4] as bar}
@@ -221,7 +221,7 @@
               ></div>
             {/each}
           </div>
-          <span class="text-sm font-semibold text-stone-400">未知状态</span>
+          <span class="text-sm font-semibold text-stone-400">未知</span>
         {/if}
       </div>
     </div>

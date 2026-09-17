@@ -206,7 +206,7 @@
             id="dialog-sim-index"
             type="number"
             bind:value={simIndex}
-            placeholder="1-95"
+            placeholder="1–95"
             min="1"
             max="95"
             required
@@ -257,7 +257,7 @@
               <option value={option.value}>{option.label}</option>
             {/each}
           </select>
-          <p class="mt-1 text-xs text-stone-400">中国 SIM 的主副卡关系。副卡余额随主卡,余额查询会跳过副卡。</p>
+          <p class="mt-1 text-xs text-stone-400">中国 SIM 的主副卡关系。副卡余额随主卡，余额查询会跳过副卡。</p>
         </div>
 
         {#if simRole === "secondary"}

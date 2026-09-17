@@ -42,7 +42,7 @@ describe('CallPanel dialing', () => {
     await pickSim(view, 'S77');
     await fireEvent.input(view.getByLabelText('对方号码'), { target: { value: '91234567' } });
     expect(dial.disabled).toBe(true);
-    expect(view.container.textContent).toContain('需要国际格式');
+    expect(view.container.textContent).toContain('号码需要是国际格式');
 
     await fireEvent.input(view.getByLabelText('对方号码'), { target: { value: '+6591234567' } });
     expect(dial.disabled).toBe(false);

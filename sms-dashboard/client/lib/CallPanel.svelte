@@ -88,7 +88,7 @@
       return;
     }
     if (!numberReady) {
-      localError = '号码需为国际格式，例如 +6591234567';
+      localError = '号码需要是国际格式，例如 +6591234567';
       return;
     }
     onDial?.({ iccid, number: normalised });
@@ -263,7 +263,7 @@
           />
         </label>
         {#if number && !numberReady}
-          <p class="text-[11px] text-amber-700">需要国际格式：国家码 + 号码，例如 +6591234567</p>
+          <p class="text-[11px] text-amber-700">号码需要是国际格式，例如 +6591234567</p>
         {/if}
 
         <button
