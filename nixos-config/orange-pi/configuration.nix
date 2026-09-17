@@ -28,14 +28,14 @@
   # NETWORK SECURITY
   # =============================================================================
 
-  # DHCP via NetworkManager. Let NetworkManager obtain the office LAN lease
-  # dynamically; applying a stale static block during `nixos-rebuild switch`
-  # could reconfigure the interface to the wrong subnet and drop the box off the
-  # network entirely.
+  # NetworkManager is the only network manager on this host; addressing lives in
+  # the connection profiles declared with it further down. dhcpcd on top of it
+  # produces duplicate leases, default routes, and DNS entries on one interface.
   #
   # Do not set networking.useDHCP here: the NetworkManager module (enabled below)
   # sets it to false itself and manages per-interface addressing. Setting it true
   # causes a conflicting-definition eval error.
+  networking.dhcpcd.enable = false;
   networking.nameservers = [
     "8.8.8.8"
     "8.8.4.4"
@@ -221,6 +221,17 @@
   };
 
   # =============================================================================
+  # NIX STORE MAINTENANCE
+  # =============================================================================
+
+  # Nothing else reclaims old generations or dead store paths on this box.
+  nix.gc = {
+    automatic = true;
+    dates = "weekly";
+    options = "--delete-older-than 14d";
+  };
+
+  # =============================================================================
   # BOOT SECURITY
   # =============================================================================
 
@@ -233,7 +244,11 @@
 
     # Boot loader configuration
     loader = {
-      systemd-boot.enable = true; # Disabled for Lanzaboote
+      systemd-boot = {
+        enable = true;
+        # Keep the ESP from filling with entries for long-gone generations.
+        configurationLimit = 10;
+      };
       efi = {
         canTouchEfiVariables = true;
         efiSysMountPoint = "/boot";
@@ -369,6 +384,17 @@
       "firewire-core"
       "thunderbolt"
 
+      # Modem data path. SMS and calls go over the AT serial ports (option driver);
+      # nothing uses QMI, and qmi_wwan otherwise creates one idle wwu* interface
+      # per modem.
+      "qmi_wwan"
+      "cdc_wdm"
+
+      # The mainline Orange Pi 5 Plus device tree wires the hym8563 alarm IRQ to
+      # the wrong pin, so it storms (~3400 IRQs/s) and keeps i2c-6 busy. The
+      # clock comes from NTP instead; drop this once the DT fix lands upstream.
+      "rtc_hym8563"
+
       # Others
       "vivid"
       "uvcvideo" # Webcam - remove if needed
@@ -447,6 +473,50 @@
   networking.networkmanager = {
     enable = true;
     dns = "systemd-resolved"; # Use systemd-resolved for DNS
+
+    # Declarative connection profiles. NetworkManager owns every interface,
+    # so addressing lives here rather than in networking.interfaces.
+    ensureProfiles.profiles = {
+      # Office uplink: fixed address, the documented deploy and access target
+      # (docs/deployment.md). The office cable is on enP4p65s0.
+      lan-static = {
+        connection = {
+          id = "lan-static";
+          type = "ethernet";
+          interface-name = "enP4p65s0";
+          autoconnect = "true";
+          autoconnect-priority = "100";
+        };
+        ipv4 = {
+          method = "manual";
+          addresses = "10.171.150.102/24";
+          gateway = "10.171.150.1";
+          ignore-auto-dns = "true";
+          route-metric = "100";
+          may-fail = "false";
+        };
+        ipv6.method = "ignore";
+      };
+
+      # Spare port: idle until a backup cable is plugged in, then takes a
+      # lease. Higher route metric keeps the static uplink as default route;
+      # DNS stays on networking.nameservers.
+      lan-dhcp = {
+        connection = {
+          id = "lan-dhcp";
+          type = "ethernet";
+          interface-name = "enP3p49s0";
+          autoconnect = "true";
+          autoconnect-priority = "50";
+        };
+        ipv4 = {
+          method = "auto";
+          ignore-auto-dns = "true";
+          route-metric = "200";
+        };
+        ipv6.method = "ignore";
+      };
+    };
   };
 
   # Enable systemd-resolved for better DNS handling
@@ -465,27 +535,25 @@
   # LOGGING AND MONITORING
   # =============================================================================
 
-  services.journald = {
-    extraConfig = ''
-      # Storage configuration
-      Storage=persistent
-      SystemMaxUse=1G
-      SystemKeepFree=500M
-      RuntimeMaxUse=200M
-      RuntimeKeepFree=100M
-      MaxRetentionSec=30d
+  services.journald.settings.Journal = {
+    # Storage configuration
+    Storage = "persistent";
+    SystemMaxUse = "1G";
+    SystemKeepFree = "500M";
+    RuntimeMaxUse = "200M";
+    RuntimeKeepFree = "100M";
+    MaxRetentionSec = "30d";
 
-      # Compression and forwarding
-      Compress=yes
-      SplitMode=uid
-      RateLimitInterval=30s
-      RateLimitBurst=10000
+    # Compression and forwarding
+    Compress = "yes";
+    SplitMode = "uid";
+    RateLimitIntervalSec = "30s";
+    RateLimitBurst = "10000";
 
-      # Forwarding to syslog for remote logging
-      ForwardToSyslog=yes
-      MaxLevelStore=debug
-      MaxLevelSyslog=info
-    '';
+    # Forwarding to syslog for remote logging
+    ForwardToSyslog = "yes";
+    MaxLevelStore = "debug";
+    MaxLevelSyslog = "info";
   };
 
   # =============================================================================

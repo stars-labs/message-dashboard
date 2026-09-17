@@ -97,6 +97,9 @@
                     messageCheckIntervalMs = 1000; # Check every 1 second
                     signalCheckIntervalSeconds = 10; # Not used by Rust (syncs with phone status)
                     debugBuild = false; # Rust daemon uses RUST_LOG env var
+                    # Cloudflare Realtime adapters connect here; DNS-only A record
+                    # to the office IP, 443 forwarded to the Pi. docs/voice-call-plan.md
+                    voiceBridgeDomain = "voice-bridge.itoken.world";
                   };
                 }
               )

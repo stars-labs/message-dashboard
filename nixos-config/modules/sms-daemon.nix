@@ -83,6 +83,18 @@ in
       '';
     };
 
+    voiceBridgeDomain = mkOption {
+      type = types.nullOr types.str;
+      default = null;
+      example = "voice-bridge.itoken.world";
+      description = ''
+        Public hostname of the voice bridge. When set, the daemon listens on
+        TCP 443 for Cloudflare Realtime WebSocket adapters and obtains its own
+        Let's Encrypt certificate over TLS-ALPN-01 on that port. The hostname
+        must resolve directly (not proxied) to a public IP forwarded to 443.
+      '';
+    };
+
     user = mkOption {
       type = types.str;
       default = "sms-daemon";
@@ -135,6 +147,8 @@ in
       "d /var/lib/sms-daemon 0750 ${cfg.user} ${cfg.group} -"
       "d /var/lib/sms-daemon/tmp 0700 ${cfg.user} ${cfg.group} -"
       "d /var/log/sms-daemon 0750 ${cfg.user} ${cfg.group} -"
+      # Let's Encrypt account key and certificate for the voice bridge.
+      "d /var/lib/sms-daemon/acme 0700 ${cfg.user} ${cfg.group} -"
     ];
 
     # Hardened systemd service
@@ -170,6 +184,9 @@ in
         # Security: Don't expose sensitive paths
         HOME = "/var/lib/sms-daemon";
         TMPDIR = "/var/lib/sms-daemon/tmp";
+      } // optionalAttrs (cfg.voiceBridgeDomain != null) {
+        VOICE_BRIDGE_DOMAIN = cfg.voiceBridgeDomain;
+        VOICE_BRIDGE_ACME_DIR = "/var/lib/sms-daemon/acme";
       };
 
       # Use systemd credentials for API key (more secure than environment variables)
@@ -256,8 +273,9 @@ in
           NoNewPrivileges = true;
           CapabilityBoundingSet = [
             "CAP_NET_RAW" # For network operations
-          ];
-          AmbientCapabilities = [ ];
+          ] ++ optional (cfg.voiceBridgeDomain != null) "CAP_NET_BIND_SERVICE";
+          # The voice bridge binds 443 as the unprivileged service user.
+          AmbientCapabilities = optional (cfg.voiceBridgeDomain != null) "CAP_NET_BIND_SERVICE";
 
           # Kernel protections
           ProtectKernelTunables = true;
