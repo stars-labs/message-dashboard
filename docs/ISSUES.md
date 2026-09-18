@@ -390,3 +390,69 @@ count against it** — "100-port hub" doesn't mean "100 free addresses below
 the root." The binding constraint is addresses per bus, not socket count (this
 is the one-line summary already in `orange-pi-daemon/CLAUDE.md`). Planning a
 USB tree by port count alone will silently brick modems above the line.
+
+---
+
+## #4 — A USB root port was disabled by its hub, and the daemon hung instead of dying
+
+**Date:** 2026-09-18 (Singapore, UTC+8).
+
+**Symptom.** A colleague reported that SMS had stopped arriving. Nothing on the
+dashboard said anything was wrong beyond the daemon pill going offline, and
+nobody was watching it. Message ingest per hour tells the whole story:
+
+| Beijing hour | messages stored |
+| --- | --- |
+| 07 | 1 |
+| 09 | 4 (last at 09:30) |
+| 10 | **0** |
+| 11 | **0** |
+| 12 | 16 (the backlog, collected seconds after a manual restart) |
+
+Collection was down from **09:30 to 12:07 — 2 h 37 min**. No SMS were lost: the
+messages waited in SIM storage and were read after the restart, and no
+storage-full errors appeared.
+
+**Root cause — two layers.**
+
+1. *Electrical.* At 09:30:38 the kernel logged
+   `usb usb3-port1: disabled by hub (EMI?), re-enabling...` and tore down every
+   device below that root port — 1239 kernel events in one minute, every modem
+   on bus 3 disconnected and re-enumerated. This is the same family of fault as
+   the unexplained Pi resets: something electrical on the USB tree, not
+   software. Related: issue #3, which moved the fleet off USB 3 for stability.
+
+2. *Software, and this is what turned minutes into hours.* The daemon neither
+   recovered nor crashed. Its last log line was an `ENODEV` write failure on two
+   ports; after that it produced no logs, completed no read cycles, and sent no
+   heartbeats — while the process stayed alive. `Restart=always` is set on the
+   unit, but systemd only restarts a process that **exits**. A hung daemon is
+   invisible to it.
+
+**What broke.** Only collection. The Worker, D1 and the dashboard were healthy
+throughout, which is why the dashboard kept serving the last data it had. The
+daemon-offline banner was correct and said "新短信不会进来", but it is on a
+screen nobody had open.
+
+**Fix.** `orange-pi-daemon/src/stall_watchdog.rs`: a task checks every 30 s how
+long it has been since the modem reader completed a cycle, and calls
+`std::process::exit(1)` after 5 minutes without one, logging the reason first.
+systemd then restarts the daemon 10 s later. A healthy cycle takes 6–18 s
+across 93 modems, so the threshold is an order of magnitude above normal. The
+first cycle after boot gets a 10-minute grace period, because USB enumeration
+has to finish first. This does not prevent the outage; it bounds it to minutes.
+
+**How to verify it doesn't recur.**
+- The watchdog's decision is a pure function with unit tests, including the
+  exact 157-minute stall from this incident.
+- After a future bus failure, the journal should show
+  `🐕 Collection has stalled: no completed modem read cycle for …` followed by
+  a systemd restart, and ingest should resume within a few minutes.
+- The electrical layer is **not fixed**. Worth checking on site: which hub sits
+  on that bus, whether its power is independent, and cable/shielding quality.
+
+**Lesson.** `Restart=always` protects against crashes, not against hangs, and a
+hang is the worse failure: the process looks healthy, the unit looks active, and
+the only signal is an absence — no logs, no heartbeat, no rows. Liveness has to
+be asserted from progress the service actually makes, not from it still being
+alive.

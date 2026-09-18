@@ -13,6 +13,7 @@ use orange_pi_daemon_rust::logging;
 use orange_pi_daemon_rust::message_store::MessageStore;
 use orange_pi_daemon_rust::modem_manager::ModemManager;
 use orange_pi_daemon_rust::sms_sender::SmsSender;
+use orange_pi_daemon_rust::stall_watchdog::{should_restart, stall_reason, STALL_AFTER};
 use orange_pi_daemon_rust::sync_manager::{
     device_delta, merge_device_reports, DeviceDelta, SyncManager, SyncMode,
 };
@@ -769,6 +770,41 @@ async fn main() -> Result<()> {
         }
         None => info!("📞 Voice bridge disabled (VOICE_BRIDGE_DOMAIN not set)"),
     }
+
+    // TASK 10: STALL WATCHDOG (every 30 seconds)
+    // A hung daemon is worse than a dead one: on 2026-09-18 a USB root port was
+    // disabled by its hub, the daemon stopped reading and stopped reporting but
+    // stayed alive, and Restart=always never fired. Collection was down for
+    // 2h37m until a human restarted it.
+    let watchdog_health = health_tracker.clone();
+    let watchdog_started = Instant::now();
+
+    tokio::spawn(async move {
+        info!(
+            "🐕 Stall watchdog started - restarting if no read cycle completes for {}s",
+            STALL_AFTER.as_secs()
+        );
+        loop {
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            let last_read_age = {
+                let health = watchdog_health.read().await;
+                health
+                    .snapshot(health.queue_snapshot(0, 0, 0, None))
+                    .last_message_read_success_age_seconds
+                    .map(Duration::from_secs)
+            };
+            let uptime = watchdog_started.elapsed();
+            if should_restart(uptime, last_read_age) {
+                error!(
+                    "🐕 Collection has stalled: {}. Exiting so systemd restarts the daemon.",
+                    stall_reason(uptime, last_read_age)
+                );
+                // Exit rather than unwind: the point is to be restarted, and a
+                // stalled runtime cannot be trusted to shut down cleanly.
+                std::process::exit(1);
+            }
+        }
+    });
 
     // Main thread just monitors health
     info!("✨ All tasks spawned - system running in dual-loop mode");
