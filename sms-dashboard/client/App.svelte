@@ -18,7 +18,7 @@
   import ConfirmHost from "./lib/ConfirmHost.svelte";
   import DaemonHealthPanel from "./lib/DaemonHealthPanel.svelte";
   import CallPanel from "./lib/CallPanel.svelte";
-  import { callApi, callElapsedSeconds, countMissedSince, describeCallError, fetchCallHistory, fetchCallState, fetchIceServers, formatDuration } from "./lib/call-client.js";
+  import { callApi, callElapsedSeconds, callPollDelay, countMissedSince, describeCallError, fetchCallHistory, fetchCallState, fetchIceServers, formatDuration } from "./lib/call-client.js";
   import { createCallSession } from "./lib/call-session.js";
   import { createRingtone } from "./lib/call-ringtone.js";
   import BalanceQueryDetail from './lib/BalanceQueryDetail.svelte';
@@ -138,7 +138,6 @@
   // Voice calls. `activeCall` mirrors the Worker's single fleet-wide call lock and
   // is polled while the tab is visible; `callSession` owns this tab's microphone
   // and PeerConnection and is plain (non-reactive) because it holds browser objects.
-  const CALL_POLL_INTERVAL_MS = 3000;
   let showCallPanel = $state(false);
   let activeCall = $state(null);
   let callBusy = $state(false);
@@ -822,19 +821,31 @@
   // ── Voice calls ──────────────────────────────────────────────────────────
   // Polling reads KV only (never D1) and pauses while the tab is hidden, so an
   // idle dashboard costs at most one KV read every 3 s per visible tab.
+  // A timeout chain rather than an interval, so the delay can follow the state:
+  // quick while a call exists or the panel is open, slow otherwise. See
+  // callPollDelay for why the idle rate matters.
   function startCallPolling() {
     if (callPollInterval || !can('messages.read')) return;
-    refreshCallState();
-    callPollInterval = setInterval(() => {
-      if (document.visibilityState === 'visible') refreshCallState();
-    }, CALL_POLL_INTERVAL_MS);
+    const tick = async () => {
+      if (document.visibilityState === 'visible') await refreshCallState();
+      callPollInterval = setTimeout(tick, callPollDelay({ call: activeCall, panelOpen: showCallPanel }));
+    };
+    callPollInterval = setTimeout(tick, 0);
+    document.addEventListener('visibilitychange', pollWhenVisible);
+  }
+
+  // A ring that started while the tab was hidden should show the moment the
+  // operator comes back, not up to ten seconds later.
+  function pollWhenVisible() {
+    if (document.visibilityState === 'visible') refreshCallState();
   }
 
   function stopCallPolling() {
     if (callPollInterval) {
-      clearInterval(callPollInterval);
+      clearTimeout(callPollInterval);
       callPollInterval = null;
     }
+    document.removeEventListener('visibilitychange', pollWhenVisible);
   }
 
   async function refreshCallState() {
@@ -924,6 +935,7 @@
 
   function openCallPanel() {
     showCallPanel = true;
+    refreshCallState();
     const seenAt = new Date().toISOString();
     callsSeenAt = seenAt;
     try {

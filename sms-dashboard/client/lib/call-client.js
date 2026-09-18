@@ -106,6 +106,24 @@ export function matchesPhoneQuery(phone, query) {
     .some((field) => String(field).toLowerCase().includes(q));
 }
 
+/** Poll quickly only while someone is looking at, or taking part in, a call. */
+export const CALL_POLL_ACTIVE_MS = 3000;
+export const CALL_POLL_IDLE_MS = 10000;
+
+/**
+ * How long to wait before asking for the call state again.
+ *
+ * Every poll costs two KV reads — the login session and the call lock — and
+ * that namespace also holds every login session. At a flat 3 s one tab spent
+ * 57,600 reads a day, so two tabs could exhaust the free tier's 100,000 and
+ * sign everybody out. A ring lasts 30 s or more, so an idle dashboard can take
+ * 10 s to notice one; it only needs to be quick once a call exists or the
+ * panel is open.
+ */
+export function callPollDelay({ call = null, panelOpen = false } = {}) {
+  return call || panelOpen ? CALL_POLL_ACTIVE_MS : CALL_POLL_IDLE_MS;
+}
+
 /** Rejecting an inbound call is a hang-up, but it deserves its own label. */
 export function canReject(call) {
   return canAnswer(call);

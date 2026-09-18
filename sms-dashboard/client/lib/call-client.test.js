@@ -1,7 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  CALL_POLL_ACTIVE_MS,
+  CALL_POLL_IDLE_MS,
   callElapsedSeconds,
   callOutcomeLabel,
+  callPollDelay,
   callSim,
   callStateLabel,
   callTone,
@@ -162,5 +165,24 @@ describe('call log helpers', () => {
     expect(formatCallTime('2026-09-17T01:05:00.000Z', now)).toBe('09:05');
     expect(formatCallTime('2026-09-15T14:30:00.000Z', now)).toBe('09/15 22:30');
     expect(formatCallTime(null, now)).toBe('');
+  });
+});
+
+describe('call state polling rate', () => {
+  test('an idle dashboard polls slowly', () => {
+    expect(callPollDelay({ call: null, panelOpen: false })).toBe(CALL_POLL_IDLE_MS);
+    expect(callPollDelay()).toBe(CALL_POLL_IDLE_MS);
+  });
+
+  test('a call or an open panel polls quickly', () => {
+    expect(callPollDelay({ call: { state: 'ringing' } })).toBe(CALL_POLL_ACTIVE_MS);
+    expect(callPollDelay({ call: { state: 'active' } })).toBe(CALL_POLL_ACTIVE_MS);
+    expect(callPollDelay({ panelOpen: true })).toBe(CALL_POLL_ACTIVE_MS);
+  });
+
+  test('the idle rate keeps several tabs inside the KV free tier', () => {
+    // Two KV reads per poll: the login session and the call lock.
+    const readsPerTabPerDay = (86_400_000 / CALL_POLL_IDLE_MS) * 2;
+    expect(readsPerTabPerDay * 5).toBeLessThan(100_000);
   });
 });

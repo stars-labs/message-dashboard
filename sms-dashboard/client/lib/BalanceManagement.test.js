@@ -2,6 +2,13 @@ import { cleanup, fireEvent, render, waitFor } from '@testing-library/svelte';
 import { afterEach, describe, expect, test } from 'bun:test';
 import BalanceManagement from './BalanceManagement.svelte';
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** A D1-style UTC timestamp (`YYYY-MM-DD HH:MM:SS`) offset from now. */
+function d1Timestamp(offsetMs) {
+  return new Date(Date.now() + offsetMs).toISOString().slice(0, 19).replace('T', ' ');
+}
+
 const phone = {
   iccid: '89860117811049221139',
   sim_index: 2,
@@ -21,8 +28,11 @@ const check = {
   status: 'parsed',
   method: 'sms',
   profile_carrier: 'China Mobile',
-  requested_at: '2026-08-14 04:41:01',
-  completed_at: '2026-08-14 04:41:08',
+  // Relative to now, not a fixed date: balance data older than
+  // PREPAID_STALE_DAYS (35) is classed as 数据过期, so a hardcoded 2026-08-14
+  // turned three tests red on 2026-09-18 with no code change at all.
+  requested_at: d1Timestamp(-2 * DAY_MS - 7_000),
+  completed_at: d1Timestamp(-2 * DAY_MS),
   metrics: [{ metric_type: 'cash_balance', value: 264.33, currency: 'CNY' }],
 };
 
