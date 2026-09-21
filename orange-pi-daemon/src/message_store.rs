@@ -514,6 +514,79 @@ impl MessageStore {
 }
 
 #[cfg(test)]
+mod segment_write_tests {
+    use super::*;
+
+    fn changes(store: &MessageStore) -> i64 {
+        let conn = store.conn.lock().unwrap();
+        conn.query_row("SELECT total_changes()", [], |row| row.get(0))
+            .unwrap()
+    }
+
+    /// The AUTOINCREMENT counter. `total_changes()` does not count writes to
+    /// sqlite_sequence, which is how a first fix passed its test while the daemon
+    /// was still writing 2.6 GB an hour.
+    fn sequence(store: &MessageStore) -> i64 {
+        let conn = store.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT seq FROM sqlite_sequence WHERE name = 'multipart_segments'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
+    fn store_part(store: &MessageStore, content: &str, index: u32) {
+        store
+            .store_segment_in_storage(
+                "iccid",
+                "10010",
+                84,
+                9,
+                1,
+                content,
+                "2025-10-09T01:47:57.000Z",
+                "SM",
+                index,
+            )
+            .unwrap();
+    }
+
+    /// The 2026-09-21 finding: an orphan part re-read on every scan must cost
+    /// nothing once it is stored.
+    #[test]
+    fn storing_an_unchanged_segment_again_writes_nothing() {
+        let store = MessageStore::new(":memory:").unwrap();
+        store_part(&store, "part one", 3);
+        let (changes_after_first, sequence_after_first) = (changes(&store), sequence(&store));
+
+        for _ in 0..50 {
+            store_part(&store, "part one", 3);
+        }
+
+        assert_eq!(changes(&store), changes_after_first);
+        assert_eq!(sequence(&store), sequence_after_first);
+    }
+
+    #[test]
+    fn a_segment_that_really_changed_is_updated() {
+        let store = MessageStore::new(":memory:").unwrap();
+        store_part(&store, "part one", 3);
+        let before = changes(&store);
+
+        // Same slot in the concatenation, but the SIM moved it to another index.
+        store_part(&store, "part one", 7);
+
+        assert_eq!(changes(&store), before + 1);
+        let segments = store
+            .get_segments_with_storage("iccid", "10010", 84, 9)
+            .unwrap();
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].4, 7);
+    }
+}
+
+#[cfg(test)]
 mod queue_monitoring_tests {
     use super::*;
 
@@ -684,10 +757,55 @@ impl MessageStore {
     ) -> Result<()> {
         let conn = self.conn.lock().unwrap();
 
+        // Look before writing. A part whose siblings never arrive stays on the SIM
+        // and is re-read on every scan; `INSERT OR REPLACE` deleted and re-inserted
+        // it each time even though nothing differed. By 2026-09-21 that was 664
+        // orphan parts (the oldest from October 2025) rewritten every ten seconds:
+        // 140 writes a second, 10.9 GB an hour onto the SD card, and an id past
+        // 500 million.
+        //
+        // The check has to be a separate SELECT. An upsert whose DO UPDATE is
+        // filtered out by a WHERE clause leaves the table alone, but this table is
+        // AUTOINCREMENT, and SQLite allocates the rowid — and rewrites
+        // sqlite_sequence — before it discovers the conflict. That alone was still
+        // 2.6 GB an hour.
+        let unchanged = conn
+            .query_row(
+                "SELECT 1 FROM multipart_segments
+                  WHERE phone_iccid = ?1 AND ref_id = ?3 AND part_number = ?5
+                    AND sender = ?2 AND total_parts = ?4 AND content = ?6
+                    AND timestamp = ?7 AND sms_storage = ?8 AND sms_index = ?9",
+                params![
+                    iccid,
+                    sender,
+                    ref_id as i64,
+                    total_parts as i64,
+                    part_number as i64,
+                    content,
+                    timestamp,
+                    sms_storage,
+                    sms_index as i64,
+                ],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
+        if unchanged {
+            return Ok(());
+        }
+
         conn.execute(
-            "INSERT OR REPLACE INTO multipart_segments
+            "INSERT INTO multipart_segments
              (phone_iccid, sender, ref_id, total_parts, part_number, content, timestamp, sms_storage, sms_index)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+             ON CONFLICT(phone_iccid, ref_id, part_number) DO UPDATE SET
+                 sender = excluded.sender,
+                 total_parts = excluded.total_parts,
+                 content = excluded.content,
+                 timestamp = excluded.timestamp,
+                 sms_storage = excluded.sms_storage,
+                 sms_index = excluded.sms_index,
+                 created_at = CURRENT_TIMESTAMP",
             params![
                 iccid,
                 sender,

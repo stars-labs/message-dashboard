@@ -4,6 +4,7 @@
 //! Set USE_DBUS=1 to use legacy D-Bus mode (requires ModemManager service).
 
 use crate::at_modem::AtModemManager;
+use crate::partial_sms;
 use crate::signal_cache::SignalCache;
 use crate::types::{Message, MessageWithPath, SignalData, SmsSubmitOutcome};
 use anyhow::{anyhow, Result};
@@ -600,6 +601,56 @@ impl ModemManager {
                             });
 
                             // Delete assembled segments from buffer
+                            if let Err(e) = message_store.delete_segments(iccid, ref_id) {
+                                warn!("Failed to delete segments: {}", e);
+                            }
+                        }
+                        Ok(segments)
+                            if partial_sms::is_orphaned(
+                                &segments
+                                    .iter()
+                                    .map(|(_, _, timestamp, _, _)| timestamp.as_str())
+                                    .collect::<Vec<_>>(),
+                                chrono::Utc::now(),
+                            ) =>
+                        {
+                            // The missing parts are not coming. Deliver what did
+                            // arrive, marked incomplete, so the usual
+                            // store-then-delete path frees the SIM slots.
+                            let numbered: Vec<(u8, String)> = segments
+                                .iter()
+                                .map(|(number, content, _, _, _)| (*number, content.clone()))
+                                .collect();
+                            let timestamp = segments
+                                .iter()
+                                .map(|(_, _, timestamp, _, _)| timestamp.clone())
+                                .min()
+                                .unwrap_or_default();
+                            let locations: Vec<(String, u32)> = segments
+                                .iter()
+                                .map(|(_, _, _, storage, index)| (storage.clone(), *index))
+                                .collect();
+
+                            info!(
+                                "📨 Delivering incomplete multipart message: {}/{} parts, ref_id={} from {}",
+                                segments.len(),
+                                total_parts,
+                                ref_id,
+                                sender
+                            );
+
+                            complete_messages.push(MessageWithPath {
+                                message: Message {
+                                    phone_iccid: iccid.to_string(),
+                                    phone_number: sender.clone(),
+                                    content: partial_sms::assemble_partial(total_parts, &numbered),
+                                    timestamp,
+                                    direction: "received".to_string(),
+                                },
+                                modem_id: modem_id.to_string(),
+                                sms_path: Self::format_at_sms_path(&locations),
+                            });
+
                             if let Err(e) = message_store.delete_segments(iccid, ref_id) {
                                 warn!("Failed to delete segments: {}", e);
                             }

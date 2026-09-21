@@ -520,3 +520,53 @@ one; "returns 0" meant two different things here and only one had been thought
 about. And a supervisor must not share a failure domain with what it supervises.
 In #4 the heartbeat task had stopped along with the reader, which already said
 the whole runtime was stalled — and the watchdog was still put on that runtime.
+
+---
+
+## #6 — Orphaned parts of long SMS were rewritten to the SD card every ten seconds
+
+**Date:** found 2026-09-21; the oldest orphan dated from 2025-10-09.
+
+**Symptom.** None visible. systemd's accounting for the daemon read "76 GB
+written in 19 hours", which was noticed while investigating #4. A sampler on the
+Pi (`/root/io-sample.log`, every five minutes) then showed a healthy daemon
+writing **10.9 GB an hour** — about 260 GB a day, onto a 32 GB SD card from 2021
+with a rated life of 16 TB. A hung daemon wrote nothing, which for a morning made
+the problem look fixed.
+
+**Root cause.** A multipart SMS is assembled, stored and deleted from the SIM
+only once every part is present. When a part is lost in the network, the parts
+that did arrive wait forever. There were 454 such groups — 664 parts on 67 SIMs.
+Every scan re-read them and stored each with `INSERT OR REPLACE`, which deletes
+and re-inserts the row even when nothing differs: 140 writes a second, and an
+`AUTOINCREMENT` id past 500 million. They also held SIM slots, and a SIM that
+fills up makes the carrier drop new SMS.
+
+An earlier fix (`3e7aa1c`) removed 87 *complete* messages stranded on SIMs by
+resets. That was a real bug but a small share of the writes; the commit message
+said as much once the numbers did not add up.
+
+**Fix, in three steps, each measured on the Pi.**
+1. Upsert with a `WHERE` that skips unchanged rows: 10.9 → 2.6 GB/h. Not zero,
+   because the table is `AUTOINCREMENT` and SQLite allocates the rowid — and
+   rewrites `sqlite_sequence` — before it finds the conflict. The unit test had
+   used `total_changes()`, which does not count `sqlite_sequence`, so it passed
+   while the disk was still being written.
+2. `SELECT` first and return when the row is identical; the test now also pins
+   `sqlite_sequence`. **2.6 GB/h → 0 KB in 60 s.**
+3. `partial_sms`: a group whose *newest* part is more than 24 hours old is
+   delivered as one message marked `[不完整 2/4]`, gaps shown as `[…]`, and then
+   goes down the normal store-then-delete path. On deploy: 458 messages
+   delivered and uploaded, 458 SIM deletions, 0 failures, 8 recent parts left
+   waiting as intended. An unreadable timestamp never makes a group old —
+   failing to parse must not be what deletes a message from a SIM.
+
+**How to verify it doesn't recur.** `grep write_bytes /proc/<pid>/io` twice, a
+minute apart, on a running daemon: the difference should be a few KB.
+`SELECT COUNT(*) FROM multipart_segments` should stay in single or low double
+digits.
+
+**Lesson.** Measure the thing itself. The first diagnosis blamed all the writes
+on re-assembly because that was the visible churn; the first fix was "verified"
+by a counter that could not see the write; and a morning's zero was a hung
+process, not a healed one. Each was caught only by measuring the disk again.
