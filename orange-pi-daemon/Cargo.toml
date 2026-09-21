@@ -2,6 +2,9 @@
 name = "orange-pi-daemon-rust"
 version = "8.0.1"
 edition = "2021"
+# src/bin/ holds throwaway diagnostic tools (at_debug, modem_health,
+# test_sms_delete), so bare `cargo run` is ambiguous. Default to the daemon.
+default-run = "orange-pi-daemon-rust"
 
 [lib]
 name = "orange_pi_daemon_rust"
