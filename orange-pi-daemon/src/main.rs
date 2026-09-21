@@ -13,7 +13,7 @@ use orange_pi_daemon_rust::logging;
 use orange_pi_daemon_rust::message_store::MessageStore;
 use orange_pi_daemon_rust::modem_manager::ModemManager;
 use orange_pi_daemon_rust::sms_sender::SmsSender;
-use orange_pi_daemon_rust::stall_watchdog::{should_restart, stall_reason, STALL_AFTER};
+use orange_pi_daemon_rust::stall_watchdog::{self, Heartbeat, STALL_AFTER};
 use orange_pi_daemon_rust::sync_manager::{
     device_delta, merge_device_reports, DeviceDelta, SyncManager, SyncMode,
 };
@@ -235,6 +235,9 @@ async fn main() -> Result<()> {
 
     // TASK 1: MODEM READER (Fast Loop - every 1 second)
     // Reads SMS from modems and saves to database, then deletes from SIM immediately
+    // Beaten by the reader on every completed cycle, read by the watchdog thread.
+    let reader_heartbeat = Heartbeat::default();
+    let reader_beat = reader_heartbeat.clone();
     let modem_reader_store = message_store.clone();
     let modem_reader_manager = modem_manager.clone();
     let modem_reader_pool = worker_pool.clone();
@@ -344,6 +347,7 @@ async fn main() -> Result<()> {
                             .write()
                             .await
                             .record_success(HealthTask::ModemReader);
+                        reader_beat.beat();
                     }
 
                     // Preserve the last successful report for transient AT failures.
@@ -807,40 +811,17 @@ async fn main() -> Result<()> {
         None => info!("📞 Voice bridge disabled (VOICE_BRIDGE_DOMAIN not set)"),
     }
 
-    // TASK 10: STALL WATCHDOG (every 30 seconds)
-    // A hung daemon is worse than a dead one: on 2026-09-18 a USB root port was
-    // disabled by its hub, the daemon stopped reading and stopped reporting but
-    // stayed alive, and Restart=always never fired. Collection was down for
-    // 2h37m until a human restarted it.
-    let watchdog_health = health_tracker.clone();
-    let watchdog_started = Instant::now();
-
-    tokio::spawn(async move {
-        info!(
-            "🐕 Stall watchdog started - restarting if no read cycle completes for {}s",
-            STALL_AFTER.as_secs()
-        );
-        loop {
-            tokio::time::sleep(Duration::from_secs(30)).await;
-            let last_read_age = {
-                let health = watchdog_health.read().await;
-                health
-                    .snapshot(health.queue_snapshot(0, 0, 0, None))
-                    .last_message_read_success_age_seconds
-                    .map(Duration::from_secs)
-            };
-            let uptime = watchdog_started.elapsed();
-            if should_restart(uptime, last_read_age) {
-                error!(
-                    "🐕 Collection has stalled: {}. Exiting so systemd restarts the daemon.",
-                    stall_reason(uptime, last_read_age)
-                );
-                // Exit rather than unwind: the point is to be restarted, and a
-                // stalled runtime cannot be trusted to shut down cleanly.
-                std::process::exit(1);
-            }
-        }
-    });
+    // STALL WATCHDOG — an OS thread, deliberately not a tokio task.
+    // A hung daemon is worse than a dead one. On 2026-09-18 and again on
+    // 2026-09-20 every runtime worker ended up spinning, so collection and
+    // heartbeats stopped while the process stayed alive and Restart=always never
+    // fired. The first watchdog was a task on that same runtime and was starved
+    // with everything else; this one needs nothing from it.
+    stall_watchdog::spawn(reader_heartbeat.clone());
+    info!(
+        "🐕 Stall watchdog thread started - restarting if no read cycle completes for {}s",
+        STALL_AFTER.as_secs()
+    );
 
     // Main thread just monitors health
     info!("✨ All tasks spawned - system running in dual-loop mode");

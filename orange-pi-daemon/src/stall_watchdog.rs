@@ -10,7 +10,9 @@
 //! notices" into "restarted within a few minutes", which is the behaviour the
 //! unit file already expects.
 
-use std::time::Duration;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// How long the reader may go without a completed cycle before this is a stall.
 /// A healthy cycle takes 6–18 s across 93 modems; a slow one under load is
@@ -48,6 +50,58 @@ pub fn stall_reason(uptime: Duration, last_read_age: Option<Duration>) -> String
     }
 }
 
+/// The moment the modem reader last completed a cycle, as unix seconds. Zero
+/// means "never". An atomic rather than the async health tracker, so the
+/// watchdog can read it without the runtime's help.
+#[derive(Clone, Default)]
+pub struct Heartbeat(Arc<AtomicU64>);
+
+impl Heartbeat {
+    pub fn beat(&self) {
+        self.0.store(unix_now(), Ordering::Relaxed);
+    }
+
+    fn age(&self) -> Option<Duration> {
+        match self.0.load(Ordering::Relaxed) {
+            0 => None,
+            at => Some(Duration::from_secs(unix_now().saturating_sub(at))),
+        }
+    }
+}
+
+fn unix_now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Run the watchdog on its own OS thread.
+///
+/// The first version was a tokio task, and on 2026-09-20 it never fired: the
+/// stall it existed to catch was every runtime worker spinning, which starved
+/// the watchdog along with everything else. A supervisor must not depend on
+/// the thing it supervises, so this one needs nothing from the runtime.
+pub fn spawn(heartbeat: Heartbeat) {
+    let started = Instant::now();
+    std::thread::Builder::new()
+        .name("stall-watchdog".into())
+        .spawn(move || loop {
+            std::thread::sleep(Duration::from_secs(30));
+            let (uptime, age) = (started.elapsed(), heartbeat.age());
+            if should_restart(uptime, age) {
+                // eprintln, not tracing: stderr goes straight to the journal and
+                // needs no runtime either.
+                eprintln!(
+                    "stall watchdog: {}. Exiting so systemd restarts the daemon.",
+                    stall_reason(uptime, age)
+                );
+                std::process::exit(1);
+            }
+        })
+        .expect("failed to start the stall watchdog thread");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -78,6 +132,14 @@ mod tests {
             None
         ));
         assert!(should_restart(STARTUP_GRACE, None));
+    }
+
+    #[test]
+    fn a_heartbeat_has_no_age_until_the_first_beat() {
+        let heartbeat = Heartbeat::default();
+        assert!(heartbeat.age().is_none());
+        heartbeat.beat();
+        assert!(heartbeat.age().unwrap() < Duration::from_secs(5));
     }
 
     #[test]

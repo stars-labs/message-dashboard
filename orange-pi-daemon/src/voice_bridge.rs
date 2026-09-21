@@ -656,13 +656,45 @@ fn open_nmea(port: &str) -> Result<AsyncFd<File>> {
     Ok(AsyncFd::new(AtModemManager::open_serial(port)?)?)
 }
 
-/// Read whatever is available. A tty opened with VMIN=0 can report readiness
-/// and then return 0 bytes; that clears readiness instead of spinning.
+/// How many empty reads in a row mean the port is gone rather than idle.
+const MAX_EMPTY_READS: u32 = 50;
+/// Pause after an empty read. This is what guarantees the task really yields.
+const EMPTY_READ_PAUSE: Duration = Duration::from_millis(100);
+
+/// Read whatever is available, or fail once the port has gone away.
+///
+/// A tty opened with VMIN=0 can report readiness and then return 0 bytes, so an
+/// empty read is retried. But when the USB device disappears the tty is hung
+/// up: it reports readable forever, `read` returns 0 forever, and `clear_ready`
+/// does not clear the closed state. The first version of this loop therefore
+/// never suspended — one spinning reader pinned a runtime worker, four of them
+/// pinned all four, and the whole daemon (SMS collection, heartbeats, and the
+/// stall watchdog that lived on the same runtime) stopped while the process
+/// stayed alive. That was the outage of 2026-09-18 and the 23-hour one of
+/// 2026-09-20; both began with a USB re-enumeration.
 async fn read_some(fd: &AsyncFd<File>, buf: &mut [u8]) -> std::io::Result<usize> {
+    let mut empty_reads = 0u32;
     loop {
         let mut guard = fd.readable().await?;
+        if guard.ready().is_read_closed() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "serial port hung up",
+            ));
+        }
         match guard.try_io(|inner| inner.get_ref().read(buf)) {
-            Ok(Ok(0)) => guard.clear_ready(),
+            Ok(Ok(0)) => {
+                guard.clear_ready();
+                empty_reads += 1;
+                if empty_reads >= MAX_EMPTY_READS {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::UnexpectedEof,
+                        "serial port returned no data while reporting readable",
+                    ));
+                }
+                // A real suspension point, whatever the readiness state claims.
+                tokio::time::sleep(EMPTY_READ_PAUSE).await;
+            }
             Ok(result) => return result,
             Err(_would_block) => continue,
         }
@@ -673,6 +705,13 @@ async fn write_all(fd: &AsyncFd<File>, mut data: &[u8]) -> std::io::Result<()> {
     while !data.is_empty() {
         let mut guard = fd.writable().await?;
         match guard.try_io(|inner| inner.get_ref().write(data)) {
+            // A write that accepts nothing would otherwise loop forever.
+            Ok(Ok(0)) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::WriteZero,
+                    "serial port accepted no data",
+                ))
+            }
             Ok(Ok(n)) => data = &data[n..],
             Ok(Err(e)) => return Err(e),
             Err(_would_block) => continue,
@@ -787,5 +826,61 @@ where
                 Some(Ok(_)) => {}
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::fd::{FromRawFd, IntoRawFd};
+    use std::os::unix::net::UnixStream;
+
+    /// A non-blocking fd whose peer can be dropped to simulate a hang-up.
+    fn pair() -> (AsyncFd<File>, UnixStream) {
+        let (ours, theirs) = UnixStream::pair().unwrap();
+        ours.set_nonblocking(true).unwrap();
+        let file = unsafe { File::from_raw_fd(ours.into_raw_fd()) };
+        (AsyncFd::new(file).unwrap(), theirs)
+    }
+
+    #[tokio::test]
+    async fn read_some_returns_data_when_there_is_some() {
+        let (fd, mut peer) = pair();
+        std::io::Write::write_all(&mut peer, b"RING\r\n").unwrap();
+
+        let mut buf = [0u8; 16];
+        let n = read_some(&fd, &mut buf).await.unwrap();
+        assert_eq!(&buf[..n], b"RING\r\n");
+    }
+
+    /// The regression for the 2026-09-18 and 2026-09-20 outages: a port whose
+    /// device vanished must end the read, not spin on it forever.
+    #[tokio::test]
+    async fn read_some_fails_instead_of_spinning_when_the_port_hangs_up() {
+        let (fd, peer) = pair();
+        drop(peer);
+
+        let mut buf = [0u8; 16];
+        let outcome = tokio::time::timeout(Duration::from_secs(10), read_some(&fd, &mut buf)).await;
+        assert!(outcome.expect("read_some must return, not hang").is_err());
+    }
+
+    /// Even while one reader waits on a dead port, other tasks must keep running.
+    /// A single-threaded runtime makes starvation show up as a timeout.
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_dead_port_does_not_starve_other_tasks() {
+        let (fd, peer) = pair();
+        drop(peer);
+        let reader = tokio::spawn(async move {
+            let mut buf = [0u8; 16];
+            let _ = read_some(&fd, &mut buf).await;
+        });
+
+        let ticked = tokio::time::timeout(Duration::from_secs(5), async {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        })
+        .await;
+        assert!(ticked.is_ok(), "another task was starved by the reader");
+        let _ = reader.await;
     }
 }

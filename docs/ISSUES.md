@@ -422,8 +422,9 @@ storage-full errors appeared.
    the unexplained Pi resets: something electrical on the USB tree, not
    software. Related: issue #3, which moved the fleet off USB 3 for stability.
 
-2. *Software, and this is what turned minutes into hours.* The daemon neither
-   recovered nor crashed. Its last log line was an `ENODEV` write failure on two
+2. *Software, and this is what turned minutes into hours.* (Root cause found
+   on 2026-09-21 — see #5. The description below is what was known at the time.)
+   The daemon neither recovered nor crashed. Its last log line was an `ENODEV` write failure on two
    ports; after that it produced no logs, completed no read cycles, and sent no
    heartbeats — while the process stayed alive. `Restart=always` is set on the
    unit, but systemd only restarts a process that **exits**. A hung daemon is
@@ -456,3 +457,66 @@ hang is the worse failure: the process looks healthy, the unit looks active, and
 the only signal is an absence — no logs, no heartbeat, no rows. Liveness has to
 be asserted from progress the service actually makes, not from it still being
 alive.
+
+---
+
+## #5 — The voice bridge's port reader spun forever after a USB re-enumeration, and the watchdog was starved with everything else
+
+**Date:** 2026-09-20 13:38 to 2026-09-21 12:34 (Singapore, UTC+8) — **22 h 56 min**.
+
+**Symptom.** Same as #4: the dashboard showed the daemon offline and no SMS
+arrived. This time nobody restarted it for almost a day. The stall watchdog
+added after #4 did not fire. At 2026-09-20 20:23 a new system generation was
+deployed onto the Pi while the daemon had already been hung for seven hours;
+the daemon binary was unchanged, so systemd did not restart it and nothing
+looked wrong.
+
+**Root cause.** A bug in `orange-pi-daemon/src/voice_bridge.rs`, shipped with
+voice calling on 2026-09-17 — so #4 was this bug too.
+
+`read_some` reads a modem's URC port through tokio's `AsyncFd`. A tty opened
+with `VMIN=0` can report readable and then return 0 bytes, so the loop treated
+an empty read as "nothing yet": clear readiness, try again. But when the USB
+device disappears the tty is hung up. It then reports readable **forever**,
+`read` returns 0 **forever**, and `clear_ready` does not clear the closed state.
+The loop never reached a real suspension point.
+
+Evidence captured from the hung process before restarting it:
+
+- 6 threads left; the 4 tokio workers all in state `R`, together at 190 % CPU.
+  Not blocked — spinning.
+- The last log lines were `ENODEV` write failures at 13:38:58, i.e. a USB
+  re-enumeration, the same trigger as #4.
+- Reproduced in isolation: the old loop against a hung-up fd spun **1,652,632
+  times in 2 s**, and a sibling task that should tick every 10 ms ticked
+  **0 times**.
+
+One spinning reader pins one runtime worker. There are four workers and about
+ninety readers, so after a re-enumeration every worker was pinned and nothing
+else on the runtime ran: not SMS collection, not the heartbeat, and not the
+watchdog — which was a task on that same runtime.
+
+**Fix.**
+- `read_some` returns an error when the fd reports read-closed, gives up after
+  50 consecutive empty reads, and sleeps 100 ms after each empty read so it
+  always yields. The reader task then exits and the supervisor starts a fresh
+  one on the re-enumerated port. `write_all` no longer loops on a zero-length
+  write either.
+- The stall watchdog moved to its own OS thread and reads an atomic heartbeat.
+  It needs nothing from the runtime it supervises, and it logs through stderr
+  for the same reason.
+
+**How to verify it doesn't recur.**
+- `voice_bridge::tests`: a hung-up fd must make `read_some` return rather than
+  hang, and must not starve another task on a single-threaded runtime.
+- After the next USB re-enumeration the journal should show URC readers closing
+  and reopening, with collection uninterrupted. If something else ever pins the
+  runtime, `stall watchdog: …` appears on stderr and systemd restarts the daemon
+  within about five minutes.
+
+**Lesson.** Two, both about what was assumed rather than checked.
+A retry loop needs a proof that it suspends on every path, not only the expected
+one; "returns 0" meant two different things here and only one had been thought
+about. And a supervisor must not share a failure domain with what it supervises.
+In #4 the heartbeat task had stopped along with the reader, which already said
+the whole runtime was stalled — and the watchdog was still put on that runtime.
