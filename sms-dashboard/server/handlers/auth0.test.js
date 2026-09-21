@@ -283,4 +283,61 @@ describe('Auth0 login role reconciliation', () => {
 
     expect(assignments).toEqual([]);
   });
+
+  test('completes a bare callback invocation when roles come from a verified token', async () => {
+    globalThis.fetch = async (url) => {
+      if (String(url).endsWith('/oauth/token')) {
+        return Response.json({ access_token: 'opaque-access-token', id_token: 'id-token' });
+      }
+      if (String(url).endsWith('/userinfo')) {
+        return Response.json({
+          sub: 'auth0|user-2',
+          email: 'user@example.com',
+          email_verified: true,
+        });
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    };
+
+    const originalVerifyToken = auth0Handler.verifyToken;
+    const verifyCalls = [];
+    auth0Handler.verifyToken = async (token, tokenEnv, audience) => {
+      verifyCalls.push({ token, tokenEnv, audience });
+      return { [claim]: ['viewer'] };
+    };
+
+    const callbackEnv = {
+      ...env,
+      AUTH0_DOMAIN: 'tenant.example',
+      AUTH0_CLIENT_SECRET: 'test-secret',
+      DB: {
+        prepare: () => ({
+          bind: () => ({ run: async () => ({ success: true }) }),
+        }),
+      },
+      SESSIONS: {
+        get: async () => null,
+        put: async () => {},
+      },
+    };
+
+    try {
+      // This mirrors the router registration, which passes callback without a receiver.
+      const callback = auth0Handler.callback;
+      const response = await callback({
+        url: 'https://sexy.qzz.io/callback?code=authorization-code',
+        env: callbackEnv,
+        // The router always attaches ctx; the audit log is scheduled through it.
+        ctx: { waitUntil() {} },
+      });
+
+      expect(response.status).toBe(302);
+      expect(response.headers.get('location')).toBe('https://sexy.qzz.io/');
+      expect(verifyCalls).toEqual([
+        { token: 'opaque-access-token', tokenEnv: callbackEnv, audience: env.AUTH0_LOGIN_AUDIENCE },
+      ]);
+    } finally {
+      auth0Handler.verifyToken = originalVerifyToken;
+    }
+  });
 });

@@ -215,7 +215,12 @@ export const auth0Handler = {
         userInfo,
         tokens,
         env,
-        verifyToken: (token, audience) => this.verifyToken(token, env, audience),
+        // `callback` is passed as a bare handler from the router (`router.get('/callback',
+        // auth0Handler.callback)`), so relying on `this` here makes it undefined in
+        // production and crashes with "Cannot read properties of undefined
+        // (reading 'verifyToken')". Call the exported handler explicitly instead of
+        // depending on invocation context.
+        verifyToken: (token, audience) => auth0Handler.verifyToken(token, env, audience),
       });
 
       const user = {
