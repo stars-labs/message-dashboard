@@ -256,6 +256,7 @@ async fn main() -> Result<()> {
                     let mut reports = Vec::new();
                     let mut count = 0;
                     let mut deleted_count = 0;
+                    let mut stale_deleted_count = 0;
                     let mut deletion_failed_count = 0;
                     for result in results {
                         if let Some(report) = result.report.clone() {
@@ -295,7 +296,30 @@ async fn main() -> Result<()> {
                                     }
                                 }
                                 Ok(false) => {
-                                    debug!("Duplicate message skipped");
+                                    // Already in the local store, so the SIM copy is
+                                    // redundant — and it must still be deleted. Skipping
+                                    // it here stranded a message on the SIM for good
+                                    // whenever a reset landed between "stored" and
+                                    // "deleted": it was then re-read and re-assembled on
+                                    // every scan (65 messages, 8 GB of SD writes an hour
+                                    // by 2026-09-18), and a SIM that fills up makes the
+                                    // carrier drop new SMS.
+                                    match modem_reader_manager
+                                        .delete_sms(
+                                            &msg_with_path.modem_id,
+                                            &msg_with_path.sms_path,
+                                        )
+                                        .await
+                                    {
+                                        Ok(_) => {
+                                            stale_deleted_count += 1;
+                                        }
+                                        Err(e) => {
+                                            deletion_failed_count += 1;
+                                            error!("❌ DELETION FAILED (already stored) - modem: {}, path: {}, error: {}",
+                                                   &msg_with_path.modem_id, &msg_with_path.sms_path, e);
+                                        }
+                                    }
                                 }
                                 Err(e) => {
                                     error!("Failed to store message: {}", e);
@@ -307,6 +331,12 @@ async fn main() -> Result<()> {
                     if count > 0 {
                         info!("📥 Modem reader: Stored {} new messages in {:?} (deleted: {}, failed: {})",
                               count, start.elapsed(), deleted_count, deletion_failed_count);
+                    }
+                    if stale_deleted_count > 0 {
+                        info!(
+                            "🧹 Modem reader: removed {} already-stored messages left on SIMs",
+                            stale_deleted_count
+                        );
                     }
 
                     {
@@ -632,6 +662,12 @@ async fn main() -> Result<()> {
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_secs(300)).await; // Every 5 minutes
+
+            // The WAL had grown to 629 MB beside a 14 MB database; a passive
+            // auto-checkpoint never caught up with the write churn.
+            if let Err(e) = segment_cleanup_store.checkpoint_wal() {
+                warn!("🧹 WAL checkpoint failed: {}", e);
+            }
 
             // Clean up segments older than 5 minutes (300 seconds)
             match segment_cleanup_store.cleanup_old_segments(300) {

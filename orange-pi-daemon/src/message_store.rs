@@ -213,6 +213,16 @@ impl MessageStore {
     }
 
     /// Store a message from SIM card (returns true if new, false if duplicate)
+    /// Fold the write-ahead log back into the database and truncate it.
+    ///
+    /// `TRUNCATE` rather than the passive default: a passive checkpoint gives up
+    /// when a reader is active, and under constant writes that meant never.
+    pub fn checkpoint_wal(&self) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
+        Ok(())
+    }
+
     pub fn store_message(&self, message: &Message, modem_id: &str, sms_path: &str) -> Result<bool> {
         let conn = self.conn.lock().unwrap();
 

@@ -742,3 +742,54 @@ fn test_special_characters_in_content() {
         "你好世界 Hello 🌍 'quotes\" <tags>"
     );
 }
+
+// ============================================================================
+// WAL checkpoint (2026-09-18: a 629 MB WAL beside a 14 MB database)
+// ============================================================================
+
+#[test]
+fn test_checkpoint_truncates_the_wal_on_disk() {
+    let dir = std::env::temp_dir().join(format!("sms-wal-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db_path = dir.join("messages.db");
+    let wal_path = dir.join("messages.db-wal");
+
+    let store = MessageStore::new(db_path.to_str().unwrap()).unwrap();
+    for i in 0..200 {
+        let msg = create_test_message(
+            "iccid_wal",
+            &format!("message number {i} with some padding to fill pages"),
+            &format!("2024-01-01T12:{:02}:{:02}.000Z", i / 60, i % 60),
+        );
+        store
+            .store_message(&msg, "modem_0", &format!("at:{i}"))
+            .unwrap();
+    }
+    let before = std::fs::metadata(&wal_path).map(|m| m.len()).unwrap_or(0);
+    assert!(before > 0, "writes should have grown the WAL");
+
+    store.checkpoint_wal().unwrap();
+
+    let after = std::fs::metadata(&wal_path).map(|m| m.len()).unwrap_or(0);
+    assert_eq!(after, 0, "TRUNCATE checkpoint leaves an empty WAL");
+
+    drop(store);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn test_checkpoint_is_harmless_on_an_in_memory_store() {
+    let store = MessageStore::new(":memory:").unwrap();
+    assert!(store.checkpoint_wal().is_ok());
+}
+
+#[test]
+fn test_a_message_already_stored_reports_as_a_duplicate() {
+    // The reader deletes the SIM copy for both outcomes; this pins the contract
+    // it relies on: `false` means "safely held already", never "lost".
+    let store = MessageStore::new(":memory:").unwrap();
+    let msg = create_test_message("iccid_dup", "OTP 123456", "2024-01-01T12:00:00.000Z");
+
+    assert!(store.store_message(&msg, "modem_0", "at:1").unwrap());
+    assert!(!store.store_message(&msg, "modem_0", "at:1").unwrap());
+}
