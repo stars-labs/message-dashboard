@@ -14,6 +14,7 @@ pub mod sms_assembler;
 pub mod sms_sender;
 pub mod stall_watchdog;
 pub mod sync_manager;
+pub mod timeout_tracker;
 pub mod types;
 pub mod urc_reader;
 pub mod voice_auth;

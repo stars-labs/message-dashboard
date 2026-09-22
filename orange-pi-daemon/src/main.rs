@@ -17,6 +17,7 @@ use orange_pi_daemon_rust::stall_watchdog::{self, Heartbeat, STALL_AFTER};
 use orange_pi_daemon_rust::sync_manager::{
     device_delta, merge_device_reports, DeviceDelta, SyncManager, SyncMode,
 };
+use orange_pi_daemon_rust::timeout_tracker::TimeoutTracker;
 use orange_pi_daemon_rust::types::*;
 use orange_pi_daemon_rust::voice_bridge::{VoiceBridge, VoiceBridgeConfig};
 use orange_pi_daemon_rust::worker_pool::{WorkerPool, WorkerPoolConfig};
@@ -246,6 +247,7 @@ async fn main() -> Result<()> {
     let reader_health = health_tracker.clone();
 
     tokio::spawn(async move {
+        let mut timeouts = TimeoutTracker::default();
         loop {
             let start = Instant::now();
 
@@ -262,6 +264,14 @@ async fn main() -> Result<()> {
                     let mut stale_deleted_count = 0;
                     let mut deletion_failed_count = 0;
                     for result in results {
+                        // A modem that keeps timing out is forgotten so the next
+                        // reconcile probes its USB device again. Rediscovery never
+                        // touches a cached modem, so without this a wedged or
+                        // wrongly cached one timed out on every scan for good.
+                        let timed_out = result.error.as_deref() == Some("Timeout");
+                        if timeouts.record(&result.modem_id, timed_out) {
+                            modem_reader_manager.forget_modem(&result.modem_id).await;
+                        }
                         if let Some(report) = result.report.clone() {
                             reports.push((result.modem_id.clone(), report));
                         }

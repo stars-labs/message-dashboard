@@ -570,3 +570,38 @@ digits.
 on re-assembly because that was the visible churn; the first fix was "verified"
 by a counter that could not see the write; and a morning's zero was a hung
 process, not a healed one. Each was caught only by measuring the disk again.
+
+---
+
+## #7 — After a USB re-enumeration, cached ports pointed at the wrong modems and nine SIMs went unread
+
+**Date:** 2026-09-21 21:29 to 2026-09-22 13:24 (Singapore, UTC+8) — about 16 hours, nine SIMs.
+
+**Symptom.** None on the dashboard. Every scan reported `9 timeouts, 90.7%
+success`; the modem count read 97 where 94 modems exist. Found only because a
+day of IO samples was being reviewed for #6.
+
+**Root cause.** The daemon caches each modem as `ttyUSB number → port path`.
+When the kernel re-enumerates a bus (the electrical fault behind #4, #5 — nine
+times in four days) it hands out ttyUSB numbers afresh. A cached `/dev/ttyUSB41`
+that had been one modem's AT port came back as the DIAG port of another. The
+reconcile step only checked that the path still existed, so the stale entry
+survived and timed out on every scan; and rediscovery skipped the modem that now
+owned that path, because "one of its ports is already in use". Two modems lost
+per collision, and a cached modem was never re-probed or reset no matter how
+long it timed out.
+
+**Fix.** The cache now records the USB device a port was discovered on, and
+reconcile drops any entry whose port has moved to another device (unit test
+built from the 21:29 topology). As a backstop, a modem that times out on five
+consecutive scans is forgotten so the next reconcile probes and, if needed,
+resets its device.
+
+**How to verify it doesn't recur.** After the next `disabled by hub` event, the
+journal should show `Dropped N cached modems whose port moved` and the scan line
+should return to `94 successful, 0 timeouts` within two minutes. The device-aware
+check is unit-tested; it has not yet seen a real re-enumeration.
+
+**Lesson.** A partial outage with no error is the hardest kind: the scan line
+said 90.7 % and nobody reads a success rate. The number of modems (97 vs 94) and
+the timeout count are both worth an alert.

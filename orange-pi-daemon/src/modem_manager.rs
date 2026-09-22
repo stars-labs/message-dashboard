@@ -8,7 +8,7 @@ use crate::partial_sms;
 use crate::signal_cache::SignalCache;
 use crate::types::{Message, MessageWithPath, SignalData, SmsSubmitOutcome};
 use anyhow::{anyhow, Result};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
@@ -22,17 +22,45 @@ pub enum BackendMode {
     DBus,
 }
 
+/// Keep a cached modem only while its port still belongs to the USB device it
+/// was discovered on.
+///
+/// A port path alone is not enough. When the kernel re-enumerates a bus, ttyUSB
+/// numbers are handed out afresh: on 2026-09-21 a cached "/dev/ttyUSB41" (an AT
+/// port) came back as the DIAG port of a different modem. Checking only that the
+/// path existed kept the stale entry, every scan then timed out on it, and
+/// rediscovery skipped the modem that now owned that path because "one of its
+/// ports is already in use". Two modems lost per collision, nine SIMs unread
+/// overnight, no error anywhere but a timeout counter.
 fn retain_present_cached_modems(
-    cache: &mut HashMap<String, String>,
-    present_ports: &HashSet<String>,
+    cache: &mut HashMap<String, CachedPort>,
+    groups: &BTreeMap<String, Vec<String>>,
 ) {
-    cache.retain(|_, port| present_ports.contains(port));
+    cache.retain(|_, cached| {
+        groups
+            .get(&cached.usb_device)
+            .is_some_and(|ports| ports.contains(&cached.port))
+    });
+}
+
+/// The AT port a modem was discovered on, and the USB device that owned it then.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CachedPort {
+    pub port: String,
+    pub usb_device: String,
+}
+
+impl CachedPort {
+    fn discovered(port: String) -> Self {
+        let usb_device = AtModemManager::usb_topology_for_port(&port).unwrap_or_default();
+        Self { port, usb_device }
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{retain_present_cached_modems, ModemManager};
-    use std::collections::{HashMap, HashSet};
+    use super::{retain_present_cached_modems, CachedPort, ModemManager};
+    use std::collections::{BTreeMap, HashMap};
 
     #[test]
     fn test_format_storage_aware_at_sms_path() {
@@ -64,25 +92,42 @@ mod tests {
         assert!(ModemManager::parse_at_sms_path("at:").is_err());
     }
 
+    fn cached(port: &str, device: &str) -> CachedPort {
+        CachedPort {
+            port: port.to_string(),
+            usb_device: device.to_string(),
+        }
+    }
+
     #[test]
     fn cached_modems_are_retained_only_while_their_usb_port_is_present() {
         let mut cache = HashMap::from([
-            ("2".to_string(), "/dev/ttyUSB2".to_string()),
-            ("6".to_string(), "/dev/ttyUSB6".to_string()),
+            ("2".to_string(), cached("/dev/ttyUSB2", "1-1.1")),
+            ("6".to_string(), cached("/dev/ttyUSB6", "1-1.2")),
         ]);
-        let present_ports = HashSet::from([
-            "/dev/ttyUSB0".to_string(),
-            "/dev/ttyUSB1".to_string(),
-            "/dev/ttyUSB2".to_string(),
-            "/dev/ttyUSB3".to_string(),
-        ]);
+        let groups = BTreeMap::from([(
+            "1-1.1".to_string(),
+            (0..4).map(|n| format!("/dev/ttyUSB{n}")).collect(),
+        )]);
 
-        retain_present_cached_modems(&mut cache, &present_ports);
+        retain_present_cached_modems(&mut cache, &groups);
 
-        assert_eq!(
-            cache,
-            HashMap::from([("2".to_string(), "/dev/ttyUSB2".to_string(),)])
-        );
+        assert_eq!(cache.keys().collect::<Vec<_>>(), vec!["2"]);
+    }
+
+    /// The 2026-09-21 case: the path still exists, but a re-enumeration handed
+    /// it to another modem. Keeping it meant scanning a DIAG port forever.
+    #[test]
+    fn a_cached_port_that_moved_to_another_device_is_dropped() {
+        let mut cache = HashMap::from([("41".to_string(), cached("/dev/ttyUSB41", "1-1.3.2.1"))]);
+        let groups = BTreeMap::from([(
+            "1-1.3.3.2".to_string(),
+            (40..44).map(|n| format!("/dev/ttyUSB{n}")).collect(),
+        )]);
+
+        retain_present_cached_modems(&mut cache, &groups);
+
+        assert!(cache.is_empty());
     }
 }
 
@@ -95,7 +140,7 @@ pub struct ModemManager {
     /// Signal quality cache
     signal_cache: Arc<SignalCache>,
     /// modem_id -> AT port path, populated at discovery
-    port_cache: Arc<RwLock<HashMap<String, String>>>,
+    port_cache: Arc<RwLock<HashMap<String, CachedPort>>>,
     /// Backend mode
     mode: BackendMode,
 }
@@ -172,7 +217,7 @@ impl ModemManager {
                     .iter()
                     .map(|port| {
                         let id = AtModemManager::port_to_modem_id(port);
-                        cache.insert(id.clone(), port.clone());
+                        cache.insert(id.clone(), CachedPort::discovered(port.clone()));
                         id
                     })
                     .collect();
@@ -211,7 +256,7 @@ impl ModemManager {
         // Snapshot ports already served (so we skip whole devices that are working).
         let active_ports: std::collections::HashSet<String> = {
             let cache = self.port_cache.read().await;
-            cache.values().cloned().collect()
+            cache.values().map(|cached| cached.port.clone()).collect()
         };
 
         // Walk each physical modem (USB device); skip ones that already have a working
@@ -271,7 +316,7 @@ impl ModemManager {
             if !cache.contains_key(&id) {
                 added.push(id.clone());
             }
-            cache.insert(id, port);
+            cache.insert(id, CachedPort::discovered(port));
         }
         if reset_recovered > 0 {
             info!(
@@ -291,10 +336,16 @@ impl ModemManager {
         }
 
         let groups = AtModemManager::ttyusb_by_usb_device()?;
-        let present_ports: HashSet<String> = groups.into_values().flatten().collect();
         {
             let mut cache = self.port_cache.write().await;
-            retain_present_cached_modems(&mut cache, &present_ports);
+            let before = cache.len();
+            retain_present_cached_modems(&mut cache, &groups);
+            if cache.len() < before {
+                info!(
+                    "🔎 Dropped {} cached modems whose port moved to another USB device",
+                    before - cache.len()
+                );
+            }
         }
 
         let known: HashSet<String> = self.port_cache.read().await.keys().cloned().collect();
@@ -305,12 +356,25 @@ impl ModemManager {
         Ok(current)
     }
 
+    /// Drop a modem from the cache so the next reconcile probes its USB device
+    /// again — including the USB reset that rediscovery applies to a silent one.
+    /// Used after a modem has timed out on several consecutive scans; a cached
+    /// entry never gets that treatment on its own.
+    pub async fn forget_modem(&self, modem_id: &str) {
+        if let Some(cached) = self.port_cache.write().await.remove(modem_id) {
+            warn!(
+                "🔎 Forgetting modem {} on {} after repeated timeouts; it will be re-probed",
+                modem_id, cached.port
+            );
+        }
+    }
+
     /// The AT port serving `modem_id`: the port cached at discovery, falling back to
     /// the conventional path for the ID. Public so the URC reader can locate the
     /// matching MODEM port.
     pub async fn get_port(&self, modem_id: &str) -> String {
-        if let Some(port) = self.port_cache.read().await.get(modem_id) {
-            return port.clone();
+        if let Some(cached) = self.port_cache.read().await.get(modem_id) {
+            return cached.port.clone();
         }
         AtModemManager::modem_id_to_port(modem_id)
     }
