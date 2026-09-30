@@ -1,12 +1,16 @@
 import { tmpdir } from 'node:os';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { extractUnicomWebBalance } from '../../server/utils/unicom-web-balance.js';
+import { extractUnicomWebBalance, UNICOM_BALANCE_FIELD } from '../../server/utils/unicom-web-balance.js';
 import { extractM1WebBalance } from '../../server/utils/m1-web-balance.js';
 import { abortableSleep } from '../serial-runner.js';
 
 const LOGIN_ORIGIN = 'https://imgxx.client.10010.com';
 const QUERY_ORIGIN = 'https://www.10010.com';
+// The portal moved its read-only balance call off www.10010.com to
+// mxx.client.10010.com. The old host stays allowed so an in-flight profile still
+// validates; both are carrier-controlled and only ever receive the balance request.
+const BALANCE_API_ORIGINS = Object.freeze([QUERY_ORIGIN, 'https://mxx.client.10010.com']);
 const M1_ORIGIN = 'https://mcardaccount.m1.com.sg';
 
 export function createTemporaryChromePreferences() {
@@ -31,17 +35,21 @@ export const TEMPORARY_CHROME_ARGS = Object.freeze([
   '--disable-features=PasswordManagerOnboarding,PasswordManagerRedesign,PasswordGeneration',
 ]);
 
-function assertOfficialUrl(value, expectedOrigin, label) {
+function assertOfficialUrlIn(value, allowedOrigins, label) {
   let url;
   try {
     url = new URL(value);
   } catch {
     throw new Error(`${label} is not a valid URL`);
   }
-  if (url.origin !== expectedOrigin) {
-    throw new Error(`${label} must use the approved carrier origin`);
+  if (!allowedOrigins.includes(url.origin)) {
+    throw new Error(`${label} must use an approved carrier origin`);
   }
   return url.toString();
+}
+
+function assertOfficialUrl(value, expectedOrigin, label) {
+  return assertOfficialUrlIn(value, [expectedOrigin], label);
 }
 
 export function validateUnicomBrowserJob(job) {
@@ -50,7 +58,7 @@ export function validateUnicomBrowserJob(job) {
   }
   assertOfficialUrl(job.login_url, LOGIN_ORIGIN, 'Login URL');
   assertOfficialUrl(job.skill.query_origin, LOGIN_ORIGIN, 'Query page origin');
-  assertOfficialUrl(job.skill.query_endpoint, QUERY_ORIGIN, 'Balance endpoint');
+  assertOfficialUrlIn(job.skill.query_endpoint, BALANCE_API_ORIGINS, 'Balance endpoint');
 }
 
 export function validateCarrierBrowserJob(job) {
@@ -109,6 +117,9 @@ export function createCarrierBrowserJobProcessor({
     throw new Error('A Playwright-compatible browser launcher is required');
   }
   let activePage = null;
+  // The authenticated account the portal reported for the current task. Set by
+  // the checklogin interception, read by queryBalance.
+  let sessionIdentity = null;
 
 async function workerRequest(path, options = {}) {
   return controlClient.request(path, options);
@@ -437,9 +448,10 @@ async function login(job, page) {
   await waitForChallengeCompletion(job, page);
 }
 
-async function queryBalance(job, context, nativeResponsePromise) {
+async function queryBalance(job, context, nativeResponsePromise, sessionIdentityPromise) {
   await heartbeat(job, 'querying');
   const nativeResponse = await nativeResponsePromise;
+  await sessionIdentityPromise;
 
   // After login, Unicom sometimes redirects to #/errorpage instead of
   // serving balance data — their backend is temporarily unavailable.
@@ -475,8 +487,14 @@ async function queryBalance(job, context, nativeResponsePromise) {
   } catch {
     throw new Error('China Unicom balance endpoint did not return JSON');
   }
+  // The balance payload carries no account number, so the session identity is
+  // merged in. The extractor still matches it against the SIM; this supplies the
+  // proof, it does not bypass the check.
+  const payloadWithIdentity = sessionIdentity
+    ? { ...payload, userInfo: { usernumber: sessionIdentity } }
+    : payload;
   try {
-    return extractUnicomWebBalance(payload, job.sim_number);
+    return extractUnicomWebBalance(payloadWithIdentity, job.sim_number);
   } catch (error) {
     await mkdir(diagnosticsDirectory, { recursive: true });
     const responsePath = join(diagnosticsDirectory, `${job.id.replace(/[^a-zA-Z0-9_-]/g, '_')}.response.json`);
@@ -525,14 +543,40 @@ async function processJob(job, { signal } = {}) {
     if (signal?.aborted) throw new Error('Browser query cancelled');
     page = context.pages()[0] || await context.newPage();
     activePage = page;
+    sessionIdentity = null;
     let parsed;
     if (job.skill.id === 'unicom-web-balance') {
-      const nativeResponsePromise = page.waitForResponse((response) =>
-        response.url().startsWith(job.skill.query_endpoint)
-        && response.request().method() === 'POST',
-      { timeout: 60_000 }).catch(() => null);
+      // The portal calls this endpoint before login (answered with a logged-out
+      // payload) and again after. Wait for the authenticated one.
+      const nativeResponsePromise = page.waitForResponse(async (response) => {
+        if (!response.url().startsWith(job.skill.query_endpoint)) return false;
+        if (response.request().method() !== 'POST') return false;
+        if (!response.ok()) return false;
+        const body = await response.text().catch(() => '');
+        try {
+          // Only the authenticated response carries the balance.
+          return JSON.parse(body)?.[UNICOM_BALANCE_FIELD] != null;
+        } catch {
+          return false;
+        }
+      }, { timeout: 120_000 }).catch(() => null);
+      // The balance payload has no account field, so capture the signed-in number
+      // the portal reports separately on checklogin.
+      const sessionIdentityPromise = page.waitForResponse(async (response) => {
+        if (!/\/mall\/service\/check\/checklogin/.test(response.url())) return false;
+        if (!response.ok()) return false;
+        const body = await response.text().catch(() => '');
+        try {
+          const parsedBody = JSON.parse(body);
+          if (!parsedBody?.isLogin || !parsedBody?.userInfo?.usernumber) return false;
+          sessionIdentity = String(parsedBody.userInfo.usernumber);
+          return true;
+        } catch {
+          return false;
+        }
+      }, { timeout: 120_000 }).catch(() => null);
       await login(job, page);
-      parsed = await queryBalance(job, context, nativeResponsePromise);
+      parsed = await queryBalance(job, context, nativeResponsePromise, sessionIdentityPromise);
     } else {
       await loginM1(job, page);
       parsed = await queryM1Balance(job, page);

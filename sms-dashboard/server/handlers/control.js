@@ -5,6 +5,7 @@ import { normalizeHealthSnapshot } from '../utils/daemon-health.js';
 import {
   findPendingBalanceCheck,
   linkBalanceReply,
+  mergeMultipartReplies,
   updateBalanceCheckForSmsResult,
 } from './balance-queries.js';
 import { processCarrierBillMessages } from '../utils/carrier-billing.js';
@@ -292,6 +293,13 @@ export const controlHandler = {
       // while still 'pending', or marketing SMS would flash into the default list
       // in the window before a background task caught up.
       const filterRules = await loadActiveRules(env.DB);
+
+      // Multi-part carrier replies arrive as separate messages sharing a sender and
+      // timestamp, so group them before linking; otherwise the check closes on
+      // whichever part is processed first.
+      const multipartReplies = mergeMultipartReplies(messages);
+      // Group key -> the check that claimed it, so later parts join that check.
+      const claimedReplyGroups = new Map();
       
       for (const msg of messages) {
         const messageId = msg.id;
@@ -316,11 +324,19 @@ export const controlHandler = {
           }
 
           const phoneNumber = msg.phone_number || null;
-          const balanceCheck = await findPendingBalanceCheck(env.DB, {
+          const reply = multipartReplies.get(messageId);
+          // A later part reuses its group's check rather than re-running the
+          // pending lookup, which would find the same check and could queue a
+          // duplicate follow-up for it.
+          const groupClaim = reply ? claimedReplyGroups.get(reply.key) ?? null : null;
+          const balanceCheck = groupClaim || await findPendingBalanceCheck(env.DB, {
             phone_iccid,
             phone_number: phoneNumber,
             message_timestamp: timestamp,
           });
+          if (reply && !groupClaim && balanceCheck) {
+            claimedReplyGroups.set(reply.key, balanceCheck);
+          }
           const verificationCode = balanceCheck
             ? null
             : extractVerificationCode(msg.content);
@@ -365,8 +381,15 @@ export const controlHandler = {
 
           processed += 1;
           results.push({ id: messageId, status: 'stored' });
-          // Only a newly inserted message may trigger side effects.
-          if (balanceCheck) await linkBalanceReply(env.DB, balanceCheck, record);
+          // Only a newly inserted message may trigger side effects, and a multi-part
+          // reply triggers them once: the part that claimed the check decides it
+          // using the whole merged text. Later parts are inserted already linked.
+          if (balanceCheck) {
+            if (!groupClaim) {
+              await linkBalanceReply(env.DB, balanceCheck, record,
+                reply ? { mergedContent: reply.content } : {});
+            }
+          }
           else newMessages.push(record);
         } catch (err) {
           // Per-message failure must not abort the batch. The daemon retries

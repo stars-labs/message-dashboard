@@ -20,6 +20,8 @@ export function createSmsAiCapability({
   isAIReachable,
   logger = console,
 }) {
+  let probeError = null;
+
   async function release(job, error) {
     try {
       await controlClient.request(
@@ -58,9 +60,12 @@ export function createSmsAiCapability({
     },
 
     async runOne({ signal } = {}) {
-      if (!await isAIReachable(aiBaseUrl)) {
+      const reachable = await isAIReachable(aiBaseUrl, undefined, (error) => {
+        probeError = error?.message || String(error);
+      });
+      if (!reachable) {
         await presence.set('degraded', null, 'vpn_or_ai_unreachable');
-        logger.log('Company AI is unreachable; waiting for VPN connectivity.');
+        logger.log(`Company AI is unreachable (${probeError || 'no response'}); waiting for VPN connectivity.`);
         return { handled: false, retryDelay: 15_000 };
       }
 

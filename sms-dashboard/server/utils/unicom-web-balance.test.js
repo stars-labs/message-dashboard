@@ -57,4 +57,44 @@ describe('China Unicom web balance response parser', () => {
       data: { mobile: '17600419127', currentCharges: 20, points: 1000 },
     }, '+8617600419127')).toThrow('recognized available-balance');
   });
+
+  test('reads curntbalancecust from the portal account-balance response', () => {
+    expect(extractUnicomWebBalance({
+      msg: '',
+      curntbalancecust: '222.88',
+      newCarryOverArrears: '273.80',
+      totalrealfee: '50.92',
+      canusefeecust: '273.80',
+      userInfo: { usernumber: '176****9127' },
+    }, '+8617600419127')).toEqual({
+      balance: 222.88,
+      currency: 'CNY',
+      account_number: '+8617600419127',
+      balance_path: 'curntbalancecust',
+      account_path: 'userInfo.usernumber',
+    });
+  });
+
+  test('ignores nested per-item balance fields when curntbalancecust is present', () => {
+    expect(extractUnicomWebBalance({
+      curntbalancecust: '222.88',
+      userInfo: { usernumber: '176****9127' },
+      realTimeFeeSpecialFlagThree: [
+        { subItems: [{ bill: { integrateitem: '月固定费', balance: '49.00' } }] },
+      ],
+    }, '+8617600419127').balance).toBe(222.88);
+  });
+
+  test('still rejects a balance response with no account proof', () => {
+    expect(() => extractUnicomWebBalance({
+      msg: '', curntbalancecust: '222.88',
+    }, '+8617600419127')).toThrow('does not prove');
+  });
+
+  test('rejects the logged-out portal payload instead of reading it as zero', () => {
+    expect(() => extractUnicomWebBalance({
+      msg: '用户信息获取为空！', code: '1001',
+      userInfo: { usernumber: '176****9127' },
+    }, '+8617600419127')).toThrow('recognized available-balance');
+  });
 });
