@@ -414,15 +414,49 @@ export async function findPendingBalanceCheck(db, {
   ) || null;
 }
 
+// A carrier reply can arrive as several SMS parts. In text mode the daemon cannot
+// read the concatenation header, so each part is uploaded as its own message and
+// the parts of one reply share a sender and an arrival timestamp.
+//
+// Without this grouping the first part processed claims the check and finalizes it
+// on a fragment, so a balance carried by a later part is never parsed.
+//
+// Parts carry no sequence number, so batch order is the only ordering available.
+// Both consumers search for a substring, so concatenation order is not significant.
+export function mergeMultipartReplies(messages = []) {
+  const groups = new Map();
+  for (const message of messages) {
+    if (!message?.id || !message.content) continue;
+    const key = [
+      message.phone_iccid ?? '',
+      message.phone_number ?? '',
+      message.timestamp ?? '',
+    ].join(' ');
+    const group = groups.get(key);
+    if (group) group.push(message);
+    else groups.set(key, [message]);
+  }
+
+  const merged = new Map();
+  for (const [key, group] of groups) {
+    if (group.length < 2) continue;
+    const content = group.map((message) => message.content).join('');
+    for (const message of group) merged.set(message.id, { key, content });
+  }
+  return merged;
+}
+
 export async function linkBalanceReply(
   db,
   check,
   message,
-  { allowFollowUp = true } = {},
+  { allowFollowUp = true, mergedContent = null } = {},
 ) {
   if (!check) return;
 
-  const nextStep = matchingNextStep(check, message.content);
+  // A merged reply is parsed as one message; otherwise the raw part is used.
+  const content = mergedContent ?? message.content;
+  const nextStep = matchingNextStep(check, content);
   const responseWindowOpen = Number(check.response_window_open ?? 1) === 1;
   if (nextStep && allowFollowUp && responseWindowOpen) {
     return queueBalanceFollowUp(
@@ -434,7 +468,7 @@ export async function linkBalanceReply(
     );
   }
 
-  const metrics = parseBalanceMetrics(check.parser_version, message.content);
+  const metrics = parseBalanceMetrics(check.parser_version, content);
   const statements = [db.prepare(`
     UPDATE sim_balance_checks
     SET status = ?,
@@ -450,7 +484,7 @@ export async function linkBalanceReply(
     metrics.length ? 'parsed' : 'response_received',
     message.id,
     message.phone_number,
-    message.content,
+    content,
     check.id,
   )];
 

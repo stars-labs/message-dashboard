@@ -9,6 +9,7 @@ import {
   filterBalancePlanByMethods,
   findPendingBalanceCheck,
   linkBalanceReply,
+  mergeMultipartReplies,
   parseBalanceMetrics,
   updateBalanceCheckForSmsResult,
 } from './balance-queries.js';
@@ -1031,5 +1032,82 @@ describe('POST /api/control/balance-checks/stop', () => {
 
     expect(response.status).toBe(200);
     expect(body.check).toEqual({ id: 'bal-unresolved', status: 'unparsed' });
+  });
+});
+
+describe('multipart carrier replies', () => {
+  // Real S62 reply, split by the carrier into three parts that share a sender and
+  // arrival timestamp. The balance sits in the third part.
+  const parts = [
+    {
+      id: 'part-1',
+      phone_iccid: '898600310123F0100634',
+      phone_number: '10086',
+      timestamp: '2026-09-29T05:35:41.000Z',
+      content: '国移动】',
+    },
+    {
+      id: 'part-2',
+      phone_iccid: '898600310123F0100634',
+      phone_number: '10086',
+      timestamp: '2026-09-29T05:35:41.000Z',
+      content: '有账单消费；\n欢迎您前往中国移动 APP 随时随地查余额。',
+    },
+    {
+      id: 'part-3',
+      phone_iccid: '898600310123F0100634',
+      phone_number: '10086',
+      timestamp: '2026-09-29T05:35:41.000Z',
+      content: '【余额查询】尊敬的客户，您的151****1418账户余额为199.88元，详细如下。',
+    },
+  ];
+
+  test('groups parts that share sender and timestamp', () => {
+    const merged = mergeMultipartReplies(parts);
+    expect(merged.size).toBe(3);
+    // Every part of one reply resolves to the same group and the same merged text.
+    const group = merged.get('part-1');
+    for (const part of parts) {
+      expect(merged.get(part.id).key).toBe(group.key);
+      expect(merged.get(part.id).content).toBe(group.content);
+    }
+    expect(group.content).toContain('199.88');
+  });
+
+  test('leaves a single-part reply ungrouped', () => {
+    expect(mergeMultipartReplies([parts[0]]).size).toBe(0);
+  });
+
+  test('keeps separately delivered replies apart', () => {
+    const merged = mergeMultipartReplies([
+      parts[0],
+      { ...parts[1], id: 'other', timestamp: '2026-09-29T05:36:41.000Z' },
+    ]);
+    expect(merged.size).toBe(0);
+  });
+
+  test('keeps different senders apart', () => {
+    const merged = mergeMultipartReplies([
+      parts[0],
+      { ...parts[1], id: 'other', phone_number: '10010' },
+    ]);
+    expect(merged.size).toBe(0);
+  });
+
+  test('the balance survives whichever part is processed first', () => {
+    const merged = mergeMultipartReplies(parts);
+    const full = merged.get('part-1').content;
+
+    // The fragment carrying the balance is parseable, but the fragment processed
+    // first is not — which is what closed S62 as unparsed before its balance part
+    // was ever examined.
+    expect(parseBalanceMetrics('cn-mobile-balance-v1', parts[0].content)).toEqual([]);
+    expect(parseBalanceMetrics('cn-mobile-balance-v1', parts[2].content)).toHaveLength(1);
+
+    // Merging makes the outcome independent of which part arrives first.
+    expect(merged.get('part-3').content).toBe(full);
+    const metrics = parseBalanceMetrics('cn-mobile-balance-v1', full);
+    expect(metrics).toHaveLength(1);
+    expect(metrics[0]).toMatchObject({ metric_type: 'cash_balance', value: 199.88, currency: 'CNY' });
   });
 });

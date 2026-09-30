@@ -64,9 +64,26 @@ function parseMoney(value) {
   return match ? Number(match[1]) : null;
 }
 
+// The portal's balance endpoint answers with a flat object whose account balance
+// is `curntbalancecust`. Its itemised bill breakdown nests unrelated `balance`
+// fields, so this is read by exact key instead of joining BALANCE_KEYS — the
+// generic scan would otherwise collect several candidates and refuse the response.
+const ACCOUNT_BALANCE_KEY = 'curntbalancecust';
+
+// Exported so the browser workflow can identify the authenticated response.
+export const UNICOM_BALANCE_FIELD = ACCOUNT_BALANCE_KEY;
+
+function explicitAccountBalance(payload) {
+  const amount = parseMoney(payload?.[ACCOUNT_BALANCE_KEY]);
+  return amount == null ? null : { amount, path: ACCOUNT_BALANCE_KEY };
+}
+
 export function extractUnicomWebBalance(payload, expectedPhone) {
   const balances = [];
   const accounts = [];
+  const explicit = explicitAccountBalance(payload);
+  if (explicit) balances.push(explicit);
+
   const dataList = payload?.resource?.dataList;
   if (Array.isArray(dataList)) {
     dataList.forEach((item, index) => {
@@ -79,7 +96,9 @@ export function extractUnicomWebBalance(payload, expectedPhone) {
   }
   walk(payload, (key, value, path) => {
     const normalized = normalizedKey(key);
-    if (BALANCE_KEYS.has(normalized)) {
+    // Skipped once the exact key matched: the nested bill breakdown repeats
+    // `balance` for individual charge items, which are not account balances.
+    if (!explicit && BALANCE_KEYS.has(normalized)) {
       const amount = parseMoney(value);
       if (amount != null) balances.push({ amount, path: path.join('.') });
     }

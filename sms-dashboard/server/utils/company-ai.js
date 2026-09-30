@@ -92,13 +92,27 @@ export async function callCompanyAI({
   return parseCompanyAIContent(await response.json());
 }
 
-export async function companyAIReachable(baseUrl, fetchImpl = fetch) {
+// Liveness probe for the company AI endpoint. It must hit the route callAI uses:
+// a GET on the bare base URL is not a route here, so it answered 404 and the
+// sms_ai loop stopped claiming work while real model calls were succeeding. An
+// unauthenticated POST distinguishes a reachable gateway (4xx) from a dead one.
+const PROBE_PATH = '/v1/messages';
+
+// This gateway answers the route in ~3.9s, so the previous 5s budget reported a
+// healthy endpoint as unreachable on any wobble.
+const PROBE_TIMEOUT_MS = 15_000;
+
+export async function companyAIReachable(baseUrl, fetchImpl = fetch, onError = null) {
   try {
-    const response = await fetchImpl(`${String(baseUrl).replace(/\/+$/, '')}/`, {
-      signal: AbortSignal.timeout(5_000),
+    const response = await fetchImpl(endpoint(baseUrl, PROBE_PATH), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
     });
-    return response.ok;
-  } catch {
+    return response.status !== 404;
+  } catch (error) {
+    onError?.(error);
     return false;
   }
 }
