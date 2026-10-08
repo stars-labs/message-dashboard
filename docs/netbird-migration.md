@@ -45,6 +45,11 @@ NetBird on the Pi authenticates against the starslab Auth0 tenant
 test data (one offline Oracle peer, expired setup keys), so it was backed up
 to `/root/netbird-migration/pre-auth0/` and dropped.
 
+casdoor itself was decommissioned the same day: its three containers,
+network and image are gone from lubancat and `casdoor.starslab.qzz.io` has no
+DNS record. Its root-owned data under `/opt/casdoor` and the nginx site are
+left for a sudo cleanup.
+
 Single-account mode is off: anyone with a Google account can pass Auth0, and
 in that mode every such login would have joined the one network. Each new
 identity now lands in its own empty account, and colleagues join ours only
