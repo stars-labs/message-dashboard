@@ -10,10 +10,19 @@
 # No coturn: NetBird's relay (over 443) is the fallback path, and its built-in
 # STUN answers on 3478/udp. Port 80 is forwarded for the HTTP-01 certificate.
 #
+# Identity: Auth0, tenant starslab.jp.auth0.com.
+# Three Auth0 applications and one API, created 2026-10-08 with the auth0 CLI:
+#   NetBird Dashboard   SPA; callbacks /auth and /silent-auth on the domain
+#   NetBird CLI         native; device code + PKCE on localhost:53000/54000
+#   NetBird Management  machine-to-machine; reads user profiles for the
+#                       dashboard's user list and invites
+#   NetBird API         the audience access tokens are issued for
+# Client ids are public; only the M2M client secret is a secret.
+#
 # Secrets are files under /var/lib/netbird-secrets, root-only, placed by hand
-# during the migration and never part of this repository:
+# and never part of this repository:
 #   datastore-key       DataStoreEncryptionKey carried over from lubancat
-#   oidc-client-secret  casdoor client secret for the NetBird application
+#   auth0-m2m-secret    client secret of the NetBird Management application
 #   relay-auth-secret   generated on the Pi; shared by management and relay
 { config, lib, pkgs, ... }:
 
@@ -22,10 +31,14 @@ let
   voiceDomain = config.services.sms-daemon.voiceBridgeDomain;
   voicePort = config.services.sms-daemon.voiceBridgePort;
   secrets = "/var/lib/netbird-secrets";
-  oidc = {
-    issuer = "https://casdoor.starslab.qzz.io";
-    clientId = "b41aebf81a1368b2abb5";
-    scope = "openid profile email offline_access";
+  auth0 = {
+    domain = "starslab.jp.auth0.com";
+    issuer = "https://starslab.jp.auth0.com/";
+    audience = "https://netbird.starslab.qzz.io/api";
+    dashboardClientId = "omQhm0mq7cVmopL2f9DZVBAYRfBxUXfq";
+    cliClientId = "nwCeXecASkhhsqQ02qn0EzWEeKsvAgVc";
+    managementClientId = "j5t2xcBnKalSOyybCBaZP5wzIQUaZ55Y";
+    scope = "openid profile email offline_access api email_verified";
   };
   relayPort = 33080;
   nginxHttpsPort = 8444;
@@ -38,7 +51,7 @@ in
     coturn.enable = false;
 
     management = {
-      oidcConfigEndpoint = "${oidc.issuer}/.well-known/openid-configuration";
+      oidcConfigEndpoint = "${auth0.issuer}.well-known/openid-configuration";
       disableAnonymousMetrics = true;
       settings = {
         DataStoreEncryptionKey = { _secret = "${secrets}/datastore-key"; };
@@ -58,31 +71,44 @@ in
           Secret = { _secret = "${secrets}/relay-auth-secret"; };
         };
         HttpConfig = {
-          AuthIssuer = oidc.issuer;
-          AuthAudience = oidc.clientId;
+          AuthIssuer = auth0.issuer;
+          AuthAudience = auth0.audience;
           AuthUserIDClaim = "sub";
+        };
+        # Auth0 access tokens carry no profile claims; the management API
+        # fills names and emails from the Auth0 Management API instead.
+        IdpManagerConfig = {
+          ManagerType = "auth0";
+          ClientConfig = {
+            Issuer = auth0.issuer;
+            TokenEndpoint = "${auth0.issuer}oauth/token";
+            ClientID = auth0.managementClientId;
+            ClientSecret = { _secret = "${secrets}/auth0-m2m-secret"; };
+            GrantType = "client_credentials";
+          };
+          ExtraConfig.Audience = "${auth0.issuer}api/v2/";
         };
         DeviceAuthorizationFlow = {
           Provider = "hosted";
           ProviderConfig = {
-            Audience = oidc.clientId;
-            ClientID = oidc.clientId;
-            ClientSecret = { _secret = "${secrets}/oidc-client-secret"; };
-            Domain = "casdoor.starslab.qzz.io";
-            Scope = oidc.scope;
+            Audience = auth0.audience;
+            ClientID = auth0.cliClientId;
+            ClientSecret = "";
+            Domain = auth0.domain;
+            Scope = auth0.scope;
             UseIDToken = false;
-            TokenEndpoint = "${oidc.issuer}/api/login/oauth/access_token";
-            DeviceAuthEndpoint = "${oidc.issuer}/api/device-auth";
+            TokenEndpoint = "${auth0.issuer}oauth/token";
+            DeviceAuthEndpoint = "${auth0.issuer}oauth/device/code";
           };
         };
         PKCEAuthorizationFlow.ProviderConfig = {
-          Audience = oidc.clientId;
-          ClientID = oidc.clientId;
-          ClientSecret = { _secret = "${secrets}/oidc-client-secret"; };
-          Domain = "casdoor.starslab.qzz.io";
-          AuthorizationEndpoint = "${oidc.issuer}/login/oauth/authorize";
-          TokenEndpoint = "${oidc.issuer}/api/login/oauth/access_token";
-          Scope = oidc.scope;
+          Audience = auth0.audience;
+          ClientID = auth0.cliClientId;
+          ClientSecret = "";
+          Domain = auth0.domain;
+          AuthorizationEndpoint = "${auth0.issuer}authorize";
+          TokenEndpoint = "${auth0.issuer}oauth/token";
+          Scope = auth0.scope;
           RedirectURLs = [ "http://localhost:53000/" "http://localhost:54000/" ];
           UseIDToken = false;
         };
@@ -90,12 +116,13 @@ in
     };
 
     dashboard.settings = {
-      AUTH_AUTHORITY = oidc.issuer;
-      AUTH_CLIENT_ID = oidc.clientId;
-      AUTH_AUDIENCE = oidc.clientId;
-      AUTH_SUPPORTED_SCOPES = oidc.scope;
+      AUTH_AUTHORITY = auth0.issuer;
+      AUTH_CLIENT_ID = auth0.dashboardClientId;
+      AUTH_AUDIENCE = auth0.audience;
+      AUTH_SUPPORTED_SCOPES = auth0.scope;
       AUTH_REDIRECT_URI = "/auth";
       AUTH_SILENT_REDIRECT_URI = "/silent-auth";
+      USE_AUTH0 = true;
       NETBIRD_TOKEN_SOURCE = "accessToken";
       NETBIRD_DRAG_QUERY_PARAMS = true;
     };

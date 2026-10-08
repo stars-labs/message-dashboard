@@ -6,8 +6,10 @@ Configuration: `nixos-config/modules/netbird-server.nix`.
 
 ## What changed for users
 
-Nothing on purpose. Same domain, same casdoor login, same accounts and setup
-keys. Devices reconnected on their own when DNS moved.
+Same domain. Login moved from casdoor to Auth0 on 2026-10-08 with a fresh
+account; peers and setup keys from the casdoor era are gone (they were test
+data) and must be re-registered. Devices reconnected on their own when DNS
+moved.
 
 ## What is different underneath
 
@@ -28,36 +30,41 @@ Root-only files in `/var/lib/netbird-secrets/` on the Pi, not in this repository
 
 - `datastore-key` — `DataStoreEncryptionKey`, carried over; the store cannot be
   read with a different key
-- `oidc-client-secret` — the casdoor client secret of the NetBird application
+- `auth0-m2m-secret` — client secret of the "NetBird Management" Auth0
+  application (Management API access for user profiles and invites)
 - `relay-auth-secret` — generated on the Pi, shared by management and relay
 
 The migration copy of `management.json` and the original `store.db` are kept in
 `/root/netbird-migration/` on the Pi. lubancat's `/opt/netbird` is untouched.
 
-## Casdoor application
+## Identity: Auth0
 
-The dashboard (2.94, `@axa-fr/react-oidc`) fetches
-`https://casdoor.starslab.qzz.io/.well-known/openid-configuration` from the
-browser. Casdoor only sends CORS headers for an origin that matches the
-scheme and host of a registered redirect URL of some application, and the
-`netbird` application had an empty list, so the fetch failed with 403 and the
-dashboard showed "There was an error logging you in. Error: Unauthenticated"
-before it ever reached casdoor. Fixed 2026-10-08 by registering:
+NetBird on the Pi authenticates against the starslab Auth0 tenant
+(`starslab.jp.auth0.com`); casdoor is no longer involved. Switched on
+2026-10-08, together with a fresh store: the casdoor-era account held only
+test data (one offline Oracle peer, expired setup keys), so it was backed up
+to `/root/netbird-migration/pre-auth0/` and dropped. In single-account mode
+the first person to log in becomes the owner of the new account.
 
-- `https://netbird.starslab.qzz.io/auth`
-- `https://netbird.starslab.qzz.io/silent-auth`
-- `https://netbird.starslab.qzz.io/`
-- `http://localhost:53000`, `http://localhost:54000` (CLI PKCE)
+Auth0 objects, created with the auth0 CLI (`nix shell nixpkgs#auth0-cli`):
 
-Casdoor accepts the application's client id and secret as HTTP basic auth with
-admin rights, so this can be done from the Pi without a casdoor password:
-`curl -u "<client id>:$(cat /var/lib/netbird-secrets/oidc-client-secret)"`
-against `/api/get-application?id=admin/netbird`, edit `redirectUris`, set
-`clientSecret` to `***` (keeps the stored one), and POST the object to
-`/api/update-application?id=admin/netbird`.
+| Object | Type | Notes |
+|---|---|---|
+| NetBird API | API | identifier `https://netbird.starslab.qzz.io/api`, scope `api`, offline access |
+| NetBird Dashboard | SPA | callbacks `/auth`, `/silent-auth`, `/`; web origin and logout `https://netbird.starslab.qzz.io` |
+| NetBird CLI | Native | callbacks `http://localhost:53000/`, `http://localhost:54000/`; grants code, refresh token, device code |
+| NetBird Management | M2M | Management API grant: read/update/create users and app_metadata |
 
-The application has password sign-in disabled; its login page offers only
-"Sign in with Face ID" and relies on an existing casdoor session.
+Google and the username/password connection are enabled for the dashboard
+and CLI applications. The Google connection still runs on Auth0's shared
+developer keys, which do not support silent re-authentication; add a real
+Google OAuth client in Auth0 to stop the dashboard asking for a fresh login
+when the token expires.
+
+Client ids live in `nixos-config/modules/netbird-server.nix`; only the M2M
+client secret is a secret and sits on the Pi. The dashboard reads the
+`access_token` (`USE_AUTH0`, audience of the API), and the management
+service fills in user names and emails through the Management API.
 
 ## Port 443 sharing
 
@@ -77,8 +84,8 @@ survives — the bridge's Cloudflare allowlist depends on it (daemon:
    `/relay` upgrade → 101, STUN on 3478/udp, and the voice bridge still
    answering with its own certificate.
 3. Point `netbird.starslab.qzz.io` A record at `203.116.47.202` (TTL already 60).
-4. Watch peers reconnect in the dashboard; log in once through casdoor (see
-   "Casdoor application" above).
+4. Log in once through Auth0 (see "Identity: Auth0" above); the first
+   login owns the account.
 5. Stop the five containers on lubancat. Removing its nginx site needs sudo:
    `sudo rm /etc/nginx/sites-enabled/netbird && sudo nginx -t && sudo systemctl reload nginx`.
 6. Delete the `coturn.starslab.qzz.io` record.
