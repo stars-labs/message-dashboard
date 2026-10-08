@@ -34,6 +34,31 @@ Root-only files in `/var/lib/netbird-secrets/` on the Pi, not in this repository
 The migration copy of `management.json` and the original `store.db` are kept in
 `/root/netbird-migration/` on the Pi. lubancat's `/opt/netbird` is untouched.
 
+## Casdoor application
+
+The dashboard (2.94, `@axa-fr/react-oidc`) fetches
+`https://casdoor.starslab.qzz.io/.well-known/openid-configuration` from the
+browser. Casdoor only sends CORS headers for an origin that matches the
+scheme and host of a registered redirect URL of some application, and the
+`netbird` application had an empty list, so the fetch failed with 403 and the
+dashboard showed "There was an error logging you in. Error: Unauthenticated"
+before it ever reached casdoor. Fixed 2026-10-08 by registering:
+
+- `https://netbird.starslab.qzz.io/auth`
+- `https://netbird.starslab.qzz.io/silent-auth`
+- `https://netbird.starslab.qzz.io/`
+- `http://localhost:53000`, `http://localhost:54000` (CLI PKCE)
+
+Casdoor accepts the application's client id and secret as HTTP basic auth with
+admin rights, so this can be done from the Pi without a casdoor password:
+`curl -u "<client id>:$(cat /var/lib/netbird-secrets/oidc-client-secret)"`
+against `/api/get-application?id=admin/netbird`, edit `redirectUris`, set
+`clientSecret` to `***` (keeps the stored one), and POST the object to
+`/api/update-application?id=admin/netbird`.
+
+The application has password sign-in disabled; its login page offers only
+"Sign in with Face ID" and relies on an existing casdoor session.
+
 ## Port 443 sharing
 
 The voice bridge terminates its own TLS and renews over TLS-ALPN-01, so it
@@ -52,7 +77,8 @@ survives — the bridge's Cloudflare allowlist depends on it (daemon:
    `/relay` upgrade → 101, STUN on 3478/udp, and the voice bridge still
    answering with its own certificate.
 3. Point `netbird.starslab.qzz.io` A record at `203.116.47.202` (TTL already 60).
-4. Watch peers reconnect in the dashboard; log in once through casdoor.
+4. Watch peers reconnect in the dashboard; log in once through casdoor (see
+   "Casdoor application" above).
 5. Stop the five containers on lubancat. Removing its nginx site needs sudo:
    `sudo rm /etc/nginx/sites-enabled/netbird && sudo nginx -t && sudo systemctl reload nginx`.
 6. Delete the `coturn.starslab.qzz.io` record.
