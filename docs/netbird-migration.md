@@ -43,8 +43,14 @@ NetBird on the Pi authenticates against the starslab Auth0 tenant
 (`starslab.jp.auth0.com`); casdoor is no longer involved. Switched on
 2026-10-08, together with a fresh store: the casdoor-era account held only
 test data (one offline Oracle peer, expired setup keys), so it was backed up
-to `/root/netbird-migration/pre-auth0/` and dropped. In single-account mode
-the first person to log in becomes the owner of the new account.
+to `/root/netbird-migration/pre-auth0/` and dropped.
+
+Single-account mode is off: anyone with a Google account can pass Auth0, and
+in that mode every such login would have joined the one network. Each new
+identity now lands in its own empty account, and colleagues join ours only
+through an invite sent from the dashboard (the management service creates
+the Auth0 user through the M2M application). Self-service signup on the
+username/password connection is disabled for the same reason.
 
 Auth0 objects, created with the auth0 CLI (`nix shell nixpkgs#auth0-cli`):
 

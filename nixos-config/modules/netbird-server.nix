@@ -53,6 +53,11 @@ in
     management = {
       oidcConfigEndpoint = "${auth0.issuer}.well-known/openid-configuration";
       disableAnonymousMetrics = true;
+      # Anyone with a Google account can pass Auth0. In single-account mode
+      # every such login would join the one network as a user, so each new
+      # identity gets its own empty account instead and people join ours only
+      # through an invite from the dashboard.
+      disableSingleAccountMode = true;
       settings = {
         DataStoreEncryptionKey = { _secret = "${secrets}/datastore-key"; };
         Stuns = [ { Proto = "udp"; URI = "stun:${domain}:3478"; Username = ""; Password = null; } ];
