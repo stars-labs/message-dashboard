@@ -12,6 +12,7 @@
 use crate::api_client::ApiClient;
 use crate::at_modem::{AtModemManager, VoicePorts};
 use crate::modem_manager::ModemManager;
+use crate::proxy_protocol;
 use crate::types::ModemReport;
 use crate::urc_reader::{parse_urc_line, UrcEvent};
 use crate::voice_auth::{self, CallAction, Leg, VoiceRequest};
@@ -24,7 +25,7 @@ use rustls_acme::{is_tls_alpn_challenge, AcmeConfig};
 use std::collections::{HashMap, VecDeque};
 use std::fs::File;
 use std::io::{Read, Write};
-use std::net::{Ipv4Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -52,7 +53,13 @@ const ENDED_MEMORY: usize = 32;
 #[derive(Debug, Clone)]
 pub struct VoiceBridgeConfig {
     pub domain: String,
+    /// Address to bind. `127.0.0.1` when an nginx SNI router in front shares
+    /// port 443 with other services; `0.0.0.0` when the bridge owns the port.
+    pub listen: IpAddr,
     pub port: u16,
+    /// Expect a PROXY protocol v1 header on every connection, so the real
+    /// source address survives the router for the Cloudflare allowlist.
+    pub proxy_protocol: bool,
     pub acme_dir: PathBuf,
     pub acme_production: bool,
 }
@@ -65,6 +72,11 @@ impl VoiceBridgeConfig {
             .filter(|d| !d.is_empty())?;
         Some(Self {
             domain,
+            listen: std::env::var("VOICE_BRIDGE_LISTEN")
+                .ok()
+                .and_then(|a| a.parse().ok())
+                .unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
+            proxy_protocol: std::env::var("VOICE_BRIDGE_PROXY_PROTOCOL").as_deref() == Ok("1"),
             port: std::env::var("VOICE_BRIDGE_PORT")
                 .ok()
                 .and_then(|p| p.parse().ok())
@@ -116,6 +128,31 @@ fn remember_ended(ended: &mut VecDeque<String>, call_id: &str) {
     }
 }
 
+/// Consume the PROXY protocol header and return the source it names.
+///
+/// The header is peeked until its CRLF arrives, then read off the stream for
+/// exactly its own length, so the TLS ClientHello that follows is untouched.
+async fn read_proxy_source(tcp: &mut TcpStream) -> Result<Option<SocketAddr>> {
+    use tokio::io::AsyncReadExt;
+    let mut buf = [0u8; proxy_protocol::MAX_HEADER_LEN];
+    let header = loop {
+        let n = tokio::time::timeout(Duration::from_secs(5), tcp.peek(&mut buf)).await??;
+        if n == 0 {
+            bail!("connection closed before the proxy header");
+        }
+        match proxy_protocol::parse_v1(&buf[..n]) {
+            Ok(header) => break header,
+            Err(proxy_protocol::ParseError::Incomplete) if n < buf.len() => {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            Err(e) => bail!("{:?}", e),
+        }
+    };
+    let mut discard = vec![0u8; header.len];
+    tcp.read_exact(&mut discard).await?;
+    Ok(header.source)
+}
+
 fn now_unix() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -162,11 +199,19 @@ impl VoiceBridge {
             }
         });
 
-        let listener = TcpListener::bind((Ipv4Addr::UNSPECIFIED, config.port)).await?;
+        let listener = TcpListener::bind((config.listen, config.port)).await?;
         info!(
-            "📞 Voice bridge listening on :{} for {}",
-            config.port, config.domain
+            "📞 Voice bridge listening on {}:{} for {}{}",
+            config.listen,
+            config.port,
+            config.domain,
+            if config.proxy_protocol {
+                " (behind a PROXY protocol router)"
+            } else {
+                ""
+            }
         );
+        let proxy_protocol = config.proxy_protocol;
 
         loop {
             let (tcp, peer) = match listener.accept().await {
@@ -181,6 +226,27 @@ impl VoiceBridge {
             let challenge_config = challenge_config.clone();
             let default_config = default_config.clone();
             tokio::spawn(async move {
+                let mut tcp = tcp;
+                // Behind the router every TCP peer is 127.0.0.1; the PROXY header
+                // carries the address the allowlist must judge.
+                let peer = if proxy_protocol {
+                    match read_proxy_source(&mut tcp).await {
+                        Ok(Some(source)) => source,
+                        Ok(None) => {
+                            debug!("📞 Dropping connection with an UNKNOWN proxy source");
+                            return;
+                        }
+                        Err(e) => {
+                            debug!(
+                                "📞 Dropping connection from {} without a proxy header: {}",
+                                peer, e
+                            );
+                            return;
+                        }
+                    }
+                } else {
+                    peer
+                };
                 if let Err(e) = bridge
                     .handle_connection(tcp, peer, challenge_config, default_config)
                     .await
@@ -863,6 +929,51 @@ mod tests {
         let mut buf = [0u8; 16];
         let outcome = tokio::time::timeout(Duration::from_secs(10), read_some(&fd, &mut buf)).await;
         assert!(outcome.expect("read_some must return, not hang").is_err());
+    }
+
+    /// The router prefixes each connection with one PROXY line; the bridge must
+    /// take the source from it and leave the TLS bytes that follow untouched.
+    #[tokio::test]
+    async fn proxy_header_is_consumed_and_names_the_real_source() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let client = tokio::spawn(async move {
+            let mut c = tokio::net::TcpStream::connect(addr).await.unwrap();
+            c.write_all(b"PROXY TCP4 172.70.204.71 10.171.150.102 60498 443\r\n")
+                .await
+                .unwrap();
+            c.write_all(b"\x16\x03\x01hello").await.unwrap();
+            c
+        });
+        let (mut tcp, _) = listener.accept().await.unwrap();
+
+        let source = read_proxy_source(&mut tcp).await.unwrap();
+        assert_eq!(source, Some("172.70.204.71:60498".parse().unwrap()));
+
+        let mut rest = [0u8; 8];
+        tcp.read_exact(&mut rest).await.unwrap();
+        assert_eq!(&rest, b"\x16\x03\x01hello");
+        drop(client.await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn a_connection_without_a_proxy_header_is_refused() {
+        use tokio::io::AsyncWriteExt;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let client = tokio::spawn(async move {
+            let mut c = tokio::net::TcpStream::connect(addr).await.unwrap();
+            // A raw ClientHello, as a client that bypassed the router would send.
+            c.write_all(b"\x16\x03\x01\x02\x00\x01\x00\x01\xfc\x03\x03\r\n")
+                .await
+                .unwrap();
+            c
+        });
+        let (mut tcp, _) = listener.accept().await.unwrap();
+
+        assert!(read_proxy_source(&mut tcp).await.is_err());
+        drop(client.await.unwrap());
     }
 
     /// Even while one reader waits on a dead port, other tasks must keep running.

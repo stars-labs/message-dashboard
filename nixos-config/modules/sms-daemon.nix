@@ -9,6 +9,7 @@ with lib;
 
 let
   cfg = config.services.sms-daemon;
+  voiceBridgeNeedsBindCap = cfg.voiceBridgeDomain != null && cfg.voiceBridgePort < 1024;
 in
 {
   options.services.sms-daemon = {
@@ -92,6 +93,23 @@ in
         TCP 443 for Cloudflare Realtime WebSocket adapters and obtains its own
         Let's Encrypt certificate over TLS-ALPN-01 on that port. The hostname
         must resolve directly (not proxied) to a public IP forwarded to 443.
+      '';
+    };
+
+    voiceBridgePort = mkOption {
+      type = types.port;
+      default = 443;
+      description = "Port the voice bridge listens on.";
+    };
+
+    voiceBridgeBehindProxy = mkOption {
+      type = types.bool;
+      default = false;
+      description = ''
+        Bind the voice bridge to localhost and expect a PROXY protocol v1
+        header on every connection. Used when an nginx SNI router owns port
+        443 and forwards `voiceBridgeDomain` here with `proxy_protocol on`,
+        so the Cloudflare allowlist still sees the real source address.
       '';
     };
 
@@ -187,6 +205,9 @@ in
       } // optionalAttrs (cfg.voiceBridgeDomain != null) {
         VOICE_BRIDGE_DOMAIN = cfg.voiceBridgeDomain;
         VOICE_BRIDGE_ACME_DIR = "/var/lib/sms-daemon/acme";
+        VOICE_BRIDGE_PORT = toString cfg.voiceBridgePort;
+        VOICE_BRIDGE_LISTEN = if cfg.voiceBridgeBehindProxy then "127.0.0.1" else "0.0.0.0";
+        VOICE_BRIDGE_PROXY_PROTOCOL = if cfg.voiceBridgeBehindProxy then "1" else "0";
       };
 
       # Use systemd credentials for API key (more secure than environment variables)
@@ -273,9 +294,10 @@ in
           NoNewPrivileges = true;
           CapabilityBoundingSet = [
             "CAP_NET_RAW" # For network operations
-          ] ++ optional (cfg.voiceBridgeDomain != null) "CAP_NET_BIND_SERVICE";
-          # The voice bridge binds 443 as the unprivileged service user.
-          AmbientCapabilities = optional (cfg.voiceBridgeDomain != null) "CAP_NET_BIND_SERVICE";
+          ] ++ optional voiceBridgeNeedsBindCap "CAP_NET_BIND_SERVICE";
+          # Only a privileged port needs the capability; behind the SNI router
+          # the bridge sits on 8443 and does without it.
+          AmbientCapabilities = optional voiceBridgeNeedsBindCap "CAP_NET_BIND_SERVICE";
 
           # Kernel protections
           ProtectKernelTunables = true;

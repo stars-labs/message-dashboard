@@ -8,6 +8,7 @@ pub mod message_store;
 pub mod modem_manager;
 pub mod native_dbus;
 pub mod partial_sms;
+pub mod proxy_protocol;
 pub mod retry_manager;
 pub mod signal_cache;
 pub mod sms_assembler;
