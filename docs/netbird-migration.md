@@ -35,7 +35,7 @@ Root-only files in `/var/lib/netbird-secrets/` on the Pi, not in this repository
 - `relay-auth-secret` — generated on the Pi, shared by management and relay
 
 The migration copy of `management.json` and the original `store.db` are kept in
-`/root/netbird-migration/` on the Pi. lubancat's `/opt/netbird` is untouched.
+`/root/netbird-migration/` on the Pi; nothing is left on lubancat.
 
 ## Identity: Auth0
 
@@ -45,10 +45,11 @@ NetBird on the Pi authenticates against the starslab Auth0 tenant
 test data (one offline Oracle peer, expired setup keys), so it was backed up
 to `/root/netbird-migration/pre-auth0/` and dropped.
 
-casdoor itself was decommissioned the same day: its three containers,
-network and image are gone from lubancat and `casdoor.starslab.qzz.io` has no
-DNS record. Its root-owned data under `/opt/casdoor` and the nginx site are
-left for a sudo cleanup.
+casdoor itself was decommissioned the same day: containers, images, network,
+`/opt/casdoor`, the nginx site and the `casdoor.starslab.qzz.io` DNS record
+are all gone. lubancat's old NetBird containers, `/opt/netbird` and its nginx
+site went with them on 2026-10-09; the only copies of that setup are under
+`/root/netbird-migration/` on the Pi.
 
 Single-account mode is off: anyone with a Google account can pass Auth0, and
 in that mode every such login would have joined the one network. Each new
