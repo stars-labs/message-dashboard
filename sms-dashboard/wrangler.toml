@@ -1,9 +1,9 @@
 name = "sms-dashboard"
-main = "server/index.js"
+main = "src/index.ts"
 compatibility_date = "2025-01-09"
+compatibility_flags = ["nodejs_compat"]
 account_id = "793e3286eaca411bf1eebaf4b8c7051e"
 
-# No compatibility flags needed for 2025-01-09
 
 # Routes
 workers_dev = true

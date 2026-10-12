@@ -7,12 +7,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 This is a distributed SMS management system with three main components:
 
 1. **Web Dashboard** (`sms-dashboard/`) - Real-time SMS management interface
-   - Frontend: Svelte + TailwindCSS with Vite build system
-   - Backend: Cloudflare Workers with custom routing
-   - Database: Cloudflare D1 (SQLite) with normalized schema
-   - Real-time: WebSocket + SSE fallback with Durable Objects
-   - Auth: Auth0 integration with RBAC
-   - Utilities: Centralized database management, API responses, and device counting
+   - Frontend: Svelte 5 + TailwindCSS with Vite build system
+   - Backend: **ElysiaJS** with **Drizzle ORM** (v2.0.0)
+   - Database: Cloudflare D1 (production) or SQLite (development)
+   - Deployment: Cloudflare Workers OR VPS (dual compatibility)
+   - Auth: Auth0 integration with JWT validation
+   - Real-time: Polling with SSE fallback
 
 2. **SMS Collection Daemon** (`orange-pi-daemon/`) - Zig daemon for hardware integration (v3.4.0)
    - **Lock-Free Architecture**: All components use atomic operations and lock-free data structures
@@ -44,37 +44,30 @@ The system has been refactored from a monolithic `phones` table to a normalized 
 ### Frontend Development
 ```bash
 cd sms-dashboard
-npm install
-npm run dev          # Vite dev server (localhost:5173)
-npm run dev:api      # Wrangler dev server for API testing
-npm run build        # Production build
-npm run preview      # Preview production build
+bun install
+bun run dev          # Vite dev server (localhost:5173)
+bun run build        # Production build
+bun run preview      # Preview production build
 ```
 
-### Backend/API Development
+### Backend/API Development (ElysiaJS)
 ```bash
 cd sms-dashboard
-npm run dev:api                    # Local Workers development
-npx wrangler tail sms-dashboard    # Live production logs
-npx wrangler dev --remote          # Dev against remote D1/KV
+bun run dev:api      # Local development with hot reload
+bun run dev:cf       # Cloudflare Workers emulation
+PORT=3001 bun run src/index.ts  # Run on specific port
 ```
 
 ### Database Operations
 ```bash
 cd sms-dashboard
-npm run db:init                    # Initialize local D1 database
-npm run db:migrate                 # Run migrations on remote database
+bun run db:init      # Initialize local SQLite database
+bun run db:generate  # Generate Drizzle migrations
+bun run db:push      # Push schema changes
+bun run db:studio    # Open Drizzle Studio GUI
 
-# Manual D1 operations
-npx wrangler d1 execute sms-dashboard --local --file=path/to/file.sql
-npx wrangler d1 execute sms-dashboard --remote --command="SELECT * FROM device_view"
-
-# Migration validation
-npx wrangler d1 execute sms-dashboard --remote --file=migrations/validate-migration.sql
-node scripts/validate-migration.js  # Automated validation
-
-# Rollback if needed
-npx wrangler d1 execute sms-dashboard --remote --file=migrations/rollback-to-phones.sql
+# For Cloudflare D1
+bunx wrangler d1 execute sms-dashboard --remote --command="SELECT * FROM device_view"
 ```
 
 ### SMS Daemon (Zig)
@@ -102,7 +95,11 @@ ssh root@10.171.150.102 'systemctl status sms-dashboard-daemon'
 ### Production Deployment
 ```bash
 cd sms-dashboard
-npm run deploy      # Build unified bundle and deploy to Cloudflare
+bun run deploy:cf    # Deploy to Cloudflare Workers
+
+# For VPS deployment
+bun run build:api
+pm2 start "bun run src/index.ts" --name sms-dashboard
 ```
 
 ## Key Technical Patterns
@@ -114,17 +111,19 @@ npm run deploy      # Build unified bundle and deploy to Cloudflare
 - **Authentication**: Auth0 integration in `lib/auth.js`
 - **State Management**: Svelte stores for phones, messages, user state
 
-### Backend Architecture
-- **Custom Router**: Simple router implementation (not itty-router) in `server/index.js`
-- **Middleware Chain**: CORS → Auth0 → RBAC → Handler pattern
-- **API Authentication**: Dual auth system - Auth0 for users, API key for Orange Pi
-- **Database Layer**: Direct D1 SQL queries with prepared statements
-- **WebSocket**: Durable Objects for connection persistence and broadcasting
-- **Utilities**:
-  - `server/utils/database-setup.js` - Table creation and index management
-  - `server/utils/device-count.js` - Centralized device statistics
-  - `server/utils/api-response.js` - Standardized API responses
-  - `server/utils/database-wrapper.js` - D1 connection wrapper with statement caching
+### Backend Architecture (ElysiaJS v2.0.0)
+- **Framework**: ElysiaJS with type-safe routing and validation
+- **ORM**: Drizzle ORM for type-safe database queries
+- **Middleware Chain**: CORS → Auth → Route Handler
+- **API Authentication**: Dual auth system - Auth0 JWT for users, API key for Orange Pi
+- **Database Layer**: Drizzle ORM with support for both D1 and SQLite
+- **Real-time**: Polling with SSE fallback
+- **Key Files**:
+  - `src/index.ts` - Main entry point (works for both CF and VPS)
+  - `src/db/schema/` - Drizzle schema definitions
+  - `src/routes/` - API route handlers
+  - `src/middleware/` - Auth and CORS middleware
+  - `src/services/` - Database, AI, and session services
 
 ### Data Flow
 ```

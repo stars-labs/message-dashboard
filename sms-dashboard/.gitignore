@@ -38,7 +38,12 @@ bun.lockb
 # Build artifacts
 .cache/
 .tmp/
-server/frontend-assets.js
+data/
+*.db
+*.db-shm
+*.db-wal
+backup*/
+temp/
 
 # Secrets - NEVER commit these
 secrets.yaml
