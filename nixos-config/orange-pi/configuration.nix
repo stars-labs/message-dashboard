@@ -28,24 +28,10 @@
   # NETWORK SECURITY
   # =============================================================================
 
-  # Static IP configuration (more secure than DHCP)
-  networking.interfaces = {
-    enP3p49s0 = {
-      useDHCP = false;
-      ipv4.addresses = [
-        {
-          address = "10.171.150.102";
-          prefixLength = 24;
-        }
-      ];
-    };
-  };
-
-  networking.defaultGateway = "10.171.150.1";
-  networking.nameservers = [
-    "8.8.8.8"
-    "8.8.4.4"
-  ];
+  # NetworkManager is the only network manager on this host; its connection
+  # profiles are declared further down. Enabling dhcpcd on top of it produces
+  # duplicate leases, default routes, and DNS entries on the same interface.
+  networking.dhcpcd.enable = false;
 
   # Modern nftables firewall configuration
   networking.firewall.enable = false; # Disable legacy iptables firewall
@@ -453,6 +439,48 @@
   networking.networkmanager = {
     enable = true;
     dns = "systemd-resolved"; # Use systemd-resolved for DNS
+
+    # Declarative connection profiles. NetworkManager owns every interface,
+    # so addressing lives here rather than in networking.interfaces.
+    ensureProfiles.profiles = {
+      # Primary uplink: fixed address, the daemon and dashboard reach the box
+      # at a known IP. DHCP on this segment does not provide working uplink.
+      lan-primary = {
+        connection = {
+          id = "lan-primary";
+          type = "ethernet";
+          interface-name = "enP3p49s0";
+          autoconnect = "true";
+          autoconnect-priority = "100";
+        };
+        ipv4 = {
+          method = "manual";
+          addresses = "10.171.150.102/24";
+          gateway = "10.171.150.1";
+          dns = "8.8.8.8;8.8.4.4;";
+          route-metric = "100";
+          may-fail = "false";
+        };
+        ipv6.method = "ignore";
+      };
+
+      # Spare port: idle until a backup cable is plugged in, then takes a
+      # lease. Higher route metric keeps the primary uplink as default route.
+      lan-spare = {
+        connection = {
+          id = "lan-spare";
+          type = "ethernet";
+          interface-name = "enP4p65s0";
+          autoconnect = "true";
+          autoconnect-priority = "50";
+        };
+        ipv4 = {
+          method = "auto";
+          route-metric = "200";
+        };
+        ipv6.method = "ignore";
+      };
+    };
   };
 
   # Enable systemd-resolved for better DNS handling
