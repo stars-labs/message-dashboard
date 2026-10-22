@@ -22,6 +22,7 @@ pub mod voice_auth;
 pub mod voice_bridge;
 pub mod voice_call;
 pub mod voice_codec;
+pub mod voice_pacer;
 pub mod worker_pool;
 
 #[cfg(test)]

@@ -131,6 +131,7 @@ touch a modem:
 | CLCC parsing, ring reporting | `orange-pi-daemon/src/voice_call.rs` |
 | URC parsing | `orange-pi-daemon/src/urc_reader.rs` |
 | Packet framing, resampling | `orange-pi-daemon/src/voice_codec.rs` |
+| Host-side pacing and `+QPCMV` flow control | `orange-pi-daemon/src/voice_pacer.rs` |
 | Enable switch | NixOS `services.sms-daemon.voiceBridgeDomain` (adds `CAP_NET_BIND_SERVICE`) |
 | Worker routes | `sms-dashboard/server/api/calls.js` |
 | Call log schema | `sms-dashboard/migrations/077_add_call_log.sql` |
@@ -144,8 +145,11 @@ touch a modem:
   it before the call arrived. The daemon sends it right before `ATA` and logs a
   refusal instead of failing; if it is refused, inbound calls connect without
   audio and the setting has to move earlier (for example on the first `RING`).
-- `+QPCMV: 0` flow control is not honoured yet; browser audio is written to the
-  NMEA port as it arrives.
+- Flow control and pacing under load. Since 2026-10-22 browser audio is queued
+  and written as one 1600-byte frame per 100 ms, held while the module reports
+  `+QPCMV: 0`, and capped at 300 ms (oldest dropped). Not yet observed on a real
+  call: whether `+QPCMV: 0` ever appears on the MODEM port, and how often the
+  cap drops audio.
 - Adapter behaviour over `wss://` with a real certificate, packet sizes in both
   directions, and end-to-end latency.
 
@@ -412,6 +416,7 @@ before implementation.
 | 2026-09-17 | Dashboard call UI | Rebuilt | The first pass listed SIMs by a `phone_number` field that `/api/phones` does not return, so every card showed its ICCID. Replaced with a searchable card picker (`S86 🇸🇬 +65…`), an in-call view with duration and mute, an incoming view with answer/reject, a ringtone plus tab-title takeover for inbound calls, a live timer in the top bar, and dialing disabled with a reason while the daemon is offline. |
 | 2026-09-17 | Call audio | Connects; verified by the operator | The first end-to-end call reached the modem: both adapters connected from Cloudflare, `AT+QPCMV=1,0` was accepted, and teardown was clean (`adapter_closed`). The operator confirmed calls connect. Audio quality, pacing and `+QPCMV` flow control are still unmeasured, and no inbound call has been answered with audio checked. |
 | 2026-09-17 | Call history | Added | D1 table `calls` (migration 077), written at start, answer and end; `GET /api/calls/history` lists it, enriched from `device_view`. Outcomes: answered, missed, rejected, cancelled, failed. Talk time is `ended_at - answered_at`, so an unanswered call is 0. The active call stays in KV, so three-second polling still never reads D1, and rows still in progress are excluded from the log to avoid showing the live call twice. |
+| 2026-10-22 | Host pacing and flow control | Implemented, unverified on air | Browser audio no longer goes to the NMEA port as it arrives. `voice_pacer::Pacer` collects adapter packets and the NMEA pump writes one 1600-byte frame per 100 ms tick, the rate the module expects. `+QPCMV: 0` from the URC reader pauses the writes and `+QPCMV: 1` resumes them; audio queued beyond 300 ms is dropped oldest-first so a stall costs sound, not latency. Modem-to-browser audio is unchanged because the module paces that direction itself. Needs a real call to confirm the URCs reach the MODEM port and to measure drops. |
 | 2026-09-17 | One ring, two rows | Fixed (second attempt) | The daemon reports `RING` and the caller id a few hundred milliseconds apart. Both read the KV lock to decide whether the call is new, and eventually consistent reads showed no call to either, so each minted its own call id — every missed call appeared twice, one row never ending. Identity now comes from D1: an inbound report reuses the open row for that SIM from the last two minutes. An unanswered ring left open is also swept after five minutes as `missed` rather than after two hours as `failed`.<br>Reading D1 first was not enough: the second report can arrive before the first one's INSERT commits, so a live ring still logged twice. The database now arbitrates — migration 078 adds a partial unique index allowing one open inbound row per SIM, the losing INSERT is ignored, and the loser reads back the winner. Verified in production: the next ring produced exactly one row. |
 
 ## References

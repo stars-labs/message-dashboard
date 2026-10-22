@@ -18,6 +18,7 @@ use crate::urc_reader::{parse_urc_line, UrcEvent};
 use crate::voice_auth::{self, CallAction, Leg, VoiceRequest};
 use crate::voice_call::{is_ringing, parse_clcc, RingReport, RingTracker};
 use crate::voice_codec::{adapter_to_modem, modem_to_adapter, Packet};
+use crate::voice_pacer::{Pacer, HOST_FRAME_INTERVAL};
 use anyhow::{anyhow, bail, Result};
 use futures_util::{SinkExt, StreamExt};
 use rustls_acme::caches::DirCache;
@@ -103,6 +104,8 @@ struct CallHandles {
 struct ActiveCall {
     handles: CallHandles,
     stop: watch::Sender<bool>,
+    /// `+QPCMV` flow control from the URC reader to the NMEA pump.
+    pcm_ready: watch::Sender<bool>,
     iccid: String,
     modem_id: String,
 }
@@ -398,6 +401,7 @@ impl VoiceBridge {
         };
 
         let (stop_tx, stop_rx) = watch::channel(false);
+        let (pcm_ready_tx, pcm_ready_rx) = watch::channel(true);
         let (to_browser, _) = broadcast::channel(64);
         let (to_modem, from_browser) = mpsc::channel(64);
         let handles = CallHandles {
@@ -413,7 +417,7 @@ impl VoiceBridge {
         let call_id = request.call_id.clone();
         let stop = handles.stop.clone();
         tokio::spawn(async move {
-            let reason = pump_nmea(nmea, to_browser, from_browser, stop).await;
+            let reason = pump_nmea(nmea, to_browser, from_browser, pcm_ready_rx, stop).await;
             bridge.end_call(&call_id, reason).await;
         });
         tokio::spawn(self.clone().watchdog(handles.clone(), modem_id.clone()));
@@ -428,6 +432,7 @@ impl VoiceBridge {
         state.active = Some(ActiveCall {
             handles: handles.clone(),
             stop: stop_tx,
+            pcm_ready: pcm_ready_tx,
             iccid: request.iccid.clone(),
             modem_id,
         });
@@ -580,6 +585,14 @@ impl VoiceBridge {
         }
     }
 
+    /// `+QPCMV: 0` / `+QPCMV: 1` from the modem carrying the active call.
+    async fn on_pcm_ready(&self, modem_id: &str, ready: bool) {
+        let state = self.state.lock().await;
+        if let Some(active) = state.active.as_ref().filter(|a| a.modem_id == modem_id) {
+            let _ = active.pcm_ready.send(ready);
+        }
+    }
+
     /// Fast path for a far-end hangup seen on the URC port.
     async fn on_no_carrier(&self, modem_id: &str) {
         let call_id = {
@@ -679,8 +692,10 @@ impl VoiceBridge {
                 let Some(event) = parse_urc_line(&text) else {
                     continue;
                 };
-                if event == UrcEvent::NoCarrier {
-                    self.on_no_carrier(&modem_id).await;
+                match event {
+                    UrcEvent::NoCarrier => self.on_no_carrier(&modem_id).await,
+                    UrcEvent::PcmReady(ready) => self.on_pcm_ready(&modem_id, ready).await,
+                    _ => {}
                 }
                 match tracker.on_event(&event, Instant::now()) {
                     Some(RingReport::Ringing(from)) => {
@@ -787,16 +802,25 @@ async fn write_all(fd: &AsyncFd<File>, mut data: &[u8]) -> std::io::Result<()> {
 }
 
 /// Moves PCM between the NMEA port and the two legs until the call stops.
+///
+/// Modem audio is forwarded as it arrives: the module paces itself at one
+/// 640-byte frame per 40 ms. Browser audio goes through a [`Pacer`] so the
+/// module receives one 1600-byte frame per 100 ms and nothing while it reports
+/// `+QPCMV: 0`.
 async fn pump_nmea(
     fd: AsyncFd<File>,
     to_browser: broadcast::Sender<Arc<Vec<u8>>>,
     mut from_browser: mpsc::Receiver<Vec<u8>>,
+    mut pcm_ready: watch::Receiver<bool>,
     mut stop: watch::Receiver<bool>,
 ) -> &'static str {
     let mut pending = Vec::with_capacity(MODEM_FRAME * 4);
     let mut buf = [0u8; 4096];
     let mut last_sample = 0i16;
     let mut sequence = 0u32;
+    let mut pacer = Pacer::default();
+    let mut tick = tokio::time::interval(HOST_FRAME_INTERVAL);
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         tokio::select! {
             _ = stop.changed() => return "stopped",
@@ -819,10 +843,30 @@ async fn pump_nmea(
                     let _ = to_browser.send(Arc::new(packet.encode()));
                 }
             }
-            Some(pcm) = from_browser.recv() => {
-                if let Err(e) = write_all(&fd, &pcm).await {
-                    warn!("📞 NMEA write failed: {}", e);
-                    return "nmea_error";
+            Some(pcm) = from_browser.recv() => pacer.push(&pcm),
+            changed = pcm_ready.changed() => {
+                // The sender lives in the call state and goes away on teardown.
+                if changed.is_err() {
+                    return "stopped";
+                }
+                let ready = *pcm_ready.borrow_and_update();
+                pacer.set_ready(ready);
+                if ready {
+                    debug!("📞 Modem ready for PCM again, {} bytes queued", pacer.buffered());
+                } else {
+                    debug!("📞 Modem busy, holding browser audio");
+                }
+            }
+            _ = tick.tick() => {
+                if let Some(frame) = pacer.next_frame() {
+                    if let Err(e) = write_all(&fd, &frame).await {
+                        warn!("📞 NMEA write failed: {}", e);
+                        return "nmea_error";
+                    }
+                }
+                let dropped = pacer.take_dropped();
+                if dropped > 0 {
+                    debug!("📞 Dropped {} bytes of browser audio to keep latency bounded", dropped);
                 }
             }
         }
