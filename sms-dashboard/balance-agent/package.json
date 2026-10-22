@@ -19,7 +19,7 @@
     "pack:mac": "bun run browser:install && bun run build && electron-builder --mac dir"
   },
   "devDependencies": {
-    "electron": "^43.0.0",
+    "electron": "^43.8.3",
     "electron-builder": "^26.0.12"
   },
   "build": {
