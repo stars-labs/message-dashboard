@@ -2,6 +2,37 @@
 
 > Multi-node SMS management platform for 100+ USB modems — Orange Pi Rust daemon → Cloudflare Workers API → Svelte 5 + Bun dashboard, with automated carrier balance queries via SMS AI and browser automation.
 
+## Code Principles
+
+Each rule is a trigger and a required action. Rules marked (test) are meant to
+be enforced by `bun test`; until those tests land, treat them as review
+questions. A change that breaks a rule must say why in its commit message.
+
+**One owner per state**
+- Writing a D1 table, store, or cache you don't own → call its owner instead.
+  Owners: [docs/data-contracts.md](docs/data-contracts.md). Caches (Pi SQLite,
+  IndexedDB) are never a source of truth.
+- Adding state or a new domain to `App.svelte` → not allowed; it may only
+  shrink. (test: line count never grows)
+
+**Pure core, thin shell**
+- Adding a branch (`if`/`switch`/ternary) that decides a value inside a
+  `.svelte` file, handler, or Tokio task → move it to a pure function with a
+  test beside it. Pure = no fetch, D1, DOM, timers, or `Date.now()`.
+- Testing code around a side effect → inject the effect as a parameter
+  (`createCallSession(deps)`); no global mocks.
+
+**One way to do each thing**
+- Client HTTP → `lib/api.js` only. (test: no `fetch(` elsewhere in client)
+- Client state → Svelte 5 runes. (test: no `svelte/store` imports)
+- Replacing a helper → migrate every caller and delete the old one in the
+  same commit.
+
+**Simplest thing that works**
+- Adding a class, factory, wrapper, or config switch → the same commit shows
+  its second real caller or its test seam. Otherwise inline it.
+- No comments that name a pattern or principle in place of a reason.
+
 ## Architecture
 
 ```text
