@@ -25,7 +25,7 @@
   import MessageDetail from './lib/MessageDetail.svelte';
   import BalanceManagement from './lib/BalanceManagement.svelte';
   import PullToRefresh from './lib/PullToRefresh.svelte';
-  import { keywords as keywordsStore } from "./lib/tag-store.js";
+  import { activeKeywords } from "./lib/active-keywords.svelte.js";
   import { api } from "./lib/api.js";
   import { messageCache } from "./lib/message-cache.js";
   import { getPhoneFlag } from "./lib/countries.js";
@@ -1622,7 +1622,7 @@
         message={messageDetail}
         {selectedPhone}
         {filterRules}
-        keywords={$keywordsStore}
+        keywords={activeKeywords()}
         onClose={() => messageDetail = null}
       />
     {/if}

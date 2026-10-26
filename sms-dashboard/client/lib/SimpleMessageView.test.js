@@ -19,6 +19,30 @@ afterEach(() => {
   window.matchMedia = originalMatchMedia;
 });
 
+describe('SimpleMessageView keyword highlighting', () => {
+  test('highlights active keywords once they load', async () => {
+    globalThis.fetch = async () => Response.json({
+      keywords: [{ id: 'k1', keyword: '验证码', tag: 'OTP', color: '#3B82F6', is_active: 1 }],
+    });
+
+    const view = render(SimpleMessageView, {
+      props: {
+        selectedPhone: { iccid: '8986012345678901234', number: '+8617600419127', sim_index: 1, flag: '🇨🇳' },
+        messages: [{
+          id: 'received-1',
+          phone_iccid: '8986012345678901234',
+          phone_number: '10086',
+          content: '您的验证码是 123456',
+          timestamp: '2026-08-14T10:00:00.000Z',
+          type: 'received',
+        }],
+      },
+    });
+
+    await waitFor(() => expect(view.container.querySelector('mark.kw-hl')?.textContent).toBe('验证码'));
+  });
+});
+
 describe('SimpleMessageView message direction', () => {
   test('shows the recipient for sent messages and the sender for received messages', async () => {
     globalThis.fetch = async () => Response.json({ keywords: [] });

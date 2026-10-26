@@ -3,7 +3,7 @@
   import { onMount } from "svelte";
   import { fly } from "svelte/transition";
   import MessageHighlight from "./MessageHighlight.svelte";
-  import { tagActions, keywords as keywordsStore } from "./tag-store.js";
+  import { activeKeywords, loadActiveKeywords } from "./active-keywords.svelte.js";
   import { copyCode } from "./clipboard.js";
   import { formatCardNumber } from "./card-number.js";
   import { getCountryFlag } from "./countries.js";
@@ -44,16 +44,12 @@
   let visibleCount = $state(RENDER_BATCH_SIZE);
   let loadingNextBatch = $state(false);
 
-  let activeKeywords = $state([]);
-
   // id -> readable label, so a hidden message can say WHY it was hidden.
   let ruleLabels = $derived(
     Object.fromEntries((filterRules || []).map(r => [r.id, r.note || r.pattern]))
   );
 
-  // Subscribe to keywords store
-  const unsubscribe = keywordsStore.subscribe(value => { activeKeywords = value; });
-  onMount(() => { tagActions.loadKeywords(); return unsubscribe; });
+  onMount(() => { loadActiveKeywords(); });
 
   // Copy feedback: stores the message.id of the last-copied code for 2 s.
   let copiedId = $state(null);
@@ -456,7 +452,7 @@
                 已过滤{ruleLabels[message.filter_rule_id] ? `: ${ruleLabels[message.filter_rule_id]}` : ''}
               </span>
             {/if}
-            <MessageHighlight content={message.content} keywords={activeKeywords} />
+            <MessageHighlight content={message.content} keywords={activeKeywords()} />
           </div>
 
           <div class="col-start-3 row-start-1 font-mono text-xs text-stone-400 text-right tabular-nums lg:col-start-5">

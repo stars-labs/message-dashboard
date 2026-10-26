@@ -26,7 +26,8 @@ questions. A change that breaks a rule must say why in its commit message.
 - Client HTTP → `lib/api.js` only; `lib/auth.js` owns the session probe.
   Components use `api.get/post/put/delete`; named methods only add behaviour.
   (test: `client/http-boundary.test.js`)
-- Client state → Svelte 5 runes. (test: no `svelte/store` imports)
+- Client state → Svelte 5 runes; shared state lives in a `.svelte.js` module.
+  (test: `client/state-model.test.js`)
 - Replacing a helper → migrate every caller and delete the old one in the
   same commit.
 
