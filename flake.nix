@@ -235,7 +235,9 @@
                   echo "dev-api: missing secrets:$missing" >&2
                   exit 1
                 fi
-                CLOUDFLARE_INCLUDE_PROCESS_ENV=true exec bunx wrangler dev --port 8787
+                # Without --local-upstream, wrangler rewrites request.url to the
+                # production route, so the Auth0 redirect_uri leaves localhost.
+                CLOUDFLARE_INCLUDE_PROCESS_ENV=true exec bunx wrangler dev --port 8787 --local-upstream localhost:8080
               '
             '';
           };
@@ -409,8 +411,11 @@
                 url="$2"
                 log_file="$3"
                 pid_file="$4"
+                # Any HTTP response means the server is listening. /api/health
+                # answers 503 whenever the daemon heartbeat is stale, which is
+                # normal for local D1 data and must not block startup.
                 for _ in $(seq 1 60); do
-                  if curl --fail --silent --output /dev/null "$url"; then
+                  if curl --silent --output /dev/null "$url"; then
                     return 0
                   fi
                   pid="$(cat "$pid_file")"
