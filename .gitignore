@@ -37,3 +37,5 @@ sms-dashboard/modem-sims.csv
 phone_number_list.csv
 # Playwright MCP session output
 .playwright-mcp/
+# Archify diagram sources and review evidence
+.archify/

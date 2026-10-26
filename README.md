@@ -4,22 +4,33 @@ A distributed SMS management system for 100+ USB modems running on Orange Pi har
 
 ## Architecture
 
-```
-Orange Pi 5+ (ARM64, NixOS)          Cloudflare                    Browser
-┌──────────────────────┐     ┌─────────────────────┐     ┌──────────────────┐
-│  Rust Daemon v8.0.0  │     │  Workers (JS)       │     │  Svelte 5        │
-│                      │     │                     │     │  + TailwindCSS   │
-│  AT Commands / D-Bus │────▶│  D1 Database        │◀────│                  │
-│  100+ USB Modems     │ API │  Auth0 + RBAC       │ JWT │  Manual Refresh  │
-│  Worker Pool (16)    │ Key │  Keyword Tagging    │     │  Code Extraction │
-└──────────────────────┘     └─────────────────────┘     └──────────────────┘
-```
+![System architecture](docs/architecture/message-dashboard.svg)
 
-**Daemon** collects SMS from USB modems via direct AT commands (with D-Bus/ModemManager fallback), batches them, and uploads to the API. It also syncs device status, signal quality, and handles outbound SMS sending.
+**Daemon** (Rust 8.0.1, 16 concurrent modem workers) reads SMS from USB modems
+with direct AT commands. ModemManager over D-Bus is opt-in with `USE_DBUS=1`.
+It buffers messages in local SQLite, uploads them to the Worker, syncs device
+status and heartbeats, and polls for outbound SMS to send. An optional voice
+bridge carries call audio between the modems and Cloudflare Realtime.
 
-**API** runs on Cloudflare Workers with a D1 (SQLite) database. Handles device registration, message storage, keyword tagging, and verification code extraction. Auth0 JWT for users, API key for daemon.
+**API** runs on Cloudflare Workers with a D1 (SQLite) database and KV sessions.
+It stores messages and device state, classifies spam, extracts verification
+codes, tags keywords, correlates balance replies, and runs cron maintenance.
 
-**Frontend** is a Svelte 5 SPA served from the same Worker. Shows device list, signal strength, messages with verification code extraction, ICCID mappings, and keyword configuration.
+**Frontend** is a Svelte 5 SPA served from the same Worker. It shows devices,
+messages, balances, carrier bills, and keyword and filter configuration.
+
+**Balance Agent** is an Electron app and CLI that runs on an operator's Mac. It
+claims balance jobs from the Worker, uses an AI model to read carrier SMS
+replies, and drives carrier web portals with Playwright.
+
+### Data flow
+
+![Data flow](docs/architecture/message-dashboard-dataflow.svg)
+
+D1 is the single source of truth and doubles as the work queue. Outbound SMS,
+balance checks, and runner jobs are status rows that the daemon and the Agent
+poll through the Worker. See [docs/architecture](docs/architecture/README.md)
+for each flow step by step.
 
 ## Project Structure
 
@@ -28,10 +39,11 @@ Orange Pi 5+ (ARM64, NixOS)          Cloudflare                    Browser
 │   └── src/
 │       ├── main.rs         # Multi-task event loop
 │       ├── at_modem.rs     # Direct AT command interface
-│       ├── modem_manager.rs # ModemManager orchestration
-│       ├── dbus_client.rs  # Native D-Bus via zbus
-│       ├── api_client.rs   # HTTP uploads to Workers API
-│       ├── sms_sender.rs   # Outbound SMS via D-Bus
+│       ├── modem_manager.rs # AT / D-Bus backend selection
+│       ├── dbus_client.rs  # Optional D-Bus via zbus (USE_DBUS=1)
+│       ├── api_client.rs   # HTTP calls to /api/control/*
+│       ├── sms_sender.rs   # Outbound SMS from pending-sms
+│       ├── voice_bridge.rs # wss bridge for Cloudflare Realtime calls
 │       ├── worker_pool.rs  # Concurrent modem reader pool
 │       ├── sync_manager.rs # Full/incremental sync logic
 │       ├── signal_cache.rs # 30s TTL signal cache
@@ -45,8 +57,10 @@ Orange Pi 5+ (ARM64, NixOS)          Cloudflare                    Browser
 │   ├── server/             # Cloudflare Workers backend
 │   │   ├── index.js        # SimpleRouter + middleware chain
 │   │   ├── handlers/       # API endpoint handlers
-│   │   ├── api/            # Route modules (keywords)
+│   │   ├── api/            # Route modules (keywords, filters, verification, calls)
 │   │   └── middleware/     # CORS, Auth0, RBAC
+│   ├── runner-core/        # Shared runner logic (control client, SMS AI, carrier browser)
+│   ├── balance-agent/      # Electron app + CLI for balance jobs
 │   ├── migrations/         # D1 SQL migrations
 │   ├── config/             # Auth0 role config
 │   └── wrangler.toml       # Cloudflare Workers config
@@ -95,15 +109,16 @@ nixos-rebuild switch --flake .#orange-pi \
 
 ## Database
 
-Cloudflare D1 with normalized 3NF schema:
+Cloudflare D1. Core tables (full rules in [docs/data-contracts.md](docs/data-contracts.md)):
 
 | Table | Purpose |
 |-------|---------|
-| `modems` | Hardware plus current signal, connection, detected ICCID, and USB state (PK: equipment_id/IMEI) |
-| `sims` | SIM cards (PK: iccid), FK to modems |
-| `messages` | SMS content with extracted verification codes |
+| `modems` | Hardware plus current signal, connection, detected ICCID, and USB state (PK: equipment_id/IMEI). Written by the daemon |
+| `sims` | User-owned SIM inventory (PK: iccid) with assigned IMEI. The daemon never writes it |
+| `messages` | Inbound SMS and the outbound send queue, with extracted verification codes |
 | `daemon_health` | Heartbeat monitoring |
-| `device_view` | Primary SIM-centric read view joined by assigned IMEI |
+| `sim_balance_checks` / `sim_balance_skill_jobs` | Balance query state and Agent work queue |
+| `device_view` | Primary SIM-centric read view, joining `sims.imei` to `modems.equipment_id` |
 
 ```bash
 # Query remote DB
@@ -114,6 +129,7 @@ bunx wrangler d1 execute sms-dashboard --remote --command="SELECT * FROM device_
 
 - **Users → Frontend**: Auth0 JWT with fail-closed RBAC (`sms-viewer`/`sms-admin`)
 - **Daemon → API**: API key (stored in SOPS secrets, set via `wrangler secret put API_KEY`)
+- **Balance Agent → API**: Auth0 device flow. An Agent sees only jobs owned by the same Auth0 `sub`
 
 ## Hardware / USB Topology
 
@@ -307,6 +323,6 @@ Steps 1–4 were **completed on 2026-08-06** (3 cables moved off bus1, one now d
 
 - **AT commands over ModemManager**: 1-5ms vs 50-500ms per operation, essential for 100+ modems
 - **Request/refresh over persistent streaming**: Eliminates WebSocket/SSE connection costs on Cloudflare
-- **D1 over external DB**: SQLite at edge, zero cold start, global replication
+- **D1 over external DB**: SQLite bound to the Worker, no separate database service. D1 is also the work queue (status rows, polled), so its read quota is the main scaling limit
 - **NixOS over traditional Linux**: Declarative, reproducible Orange Pi configuration
 - **Local SQLite queue**: Daemon queues messages locally, uploads in batches (10-100) to handle network interruptions
