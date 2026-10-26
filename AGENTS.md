@@ -23,7 +23,9 @@ questions. A change that breaks a rule must say why in its commit message.
   (`createCallSession(deps)`); no global mocks.
 
 **One way to do each thing**
-- Client HTTP → `lib/api.js` only. (test: no `fetch(` elsewhere in client)
+- Client HTTP → `lib/api.js` only; `lib/auth.js` owns the session probe.
+  Components use `api.get/post/put/delete`; named methods only add behaviour.
+  (test: `client/http-boundary.test.js`)
 - Client state → Svelte 5 runes. (test: no `svelte/store` imports)
 - Replacing a helper → migrate every caller and delete the old one in the
   same commit.

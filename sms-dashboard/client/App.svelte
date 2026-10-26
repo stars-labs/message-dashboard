@@ -27,6 +27,7 @@
   import PullToRefresh from './lib/PullToRefresh.svelte';
   import { keywords as keywordsStore } from "./lib/tag-store.js";
   import { api } from "./lib/api.js";
+  import { messageCache } from "./lib/message-cache.js";
   import { getPhoneFlag } from "./lib/countries.js";
   import { auth } from "./lib/auth.js";
   import { getStatusMeta, isAnomalous } from "./lib/device-status.js";
@@ -182,7 +183,7 @@
     });
     if (!confirmed) return;
     const result = await resetDashboardCache({
-      clearMessageCache: () => api.cache.clear(),
+      clearMessageCache: () => messageCache.clearCache(),
       resetOfflineCache: () => resetServiceWorker(),
     });
     if (!result.ok) {
@@ -704,7 +705,7 @@
 
     try {
       // Send message via HTTP API
-      const response = await api.sendMessage({
+      const response = await api.post("/api/messages/send", {
         phone_iccid: newMessage.phone_iccid,
         recipient: newMessage.recipient,
         content: newMessage.content,
@@ -741,28 +742,18 @@
   async function checkDaemonStatus() {
     lastDaemonPollAt = Date.now();
     try {
-      const response = await fetch('/api/daemon/status');
-      if (response.ok) {
-        const data = await response.json();
-        const connected = isDaemonConnected(data.status);
-        daemonStatus = {
-          ...data,
-          connected,
-        };
-      } else {
-        daemonStatus = {
-          ...daemonStatus,
-          status: 'error',
-          message: '采集服务状态检查失败',
-          connected: false,
-        };
-      }
+      const data = await api.get('/api/daemon/status');
+      daemonStatus = {
+        ...data,
+        connected: isDaemonConnected(data.status),
+      };
     } catch (error) {
       console.error('Failed to check daemon status:', error);
       daemonStatus = {
         ...daemonStatus,
         status: 'error',
-        message: '无法连接服务器',
+        // fetch rejects with TypeError only when the request never got a response.
+        message: error instanceof TypeError ? '无法连接服务器' : '采集服务状态检查失败',
         connected: false,
       };
     }

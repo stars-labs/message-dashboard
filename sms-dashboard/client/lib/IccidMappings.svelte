@@ -3,7 +3,7 @@
   import { overlay } from './overlay.js';
   import { onMount } from "svelte";
   import { getModemPosition } from "./modem-position.js";
-  import { api } from "./api";
+  import { api, withQuery } from "./api";
   import { COUNTRIES, getCountryFlag, getCountryName, getCarrierColor } from "./countries.js";
   import { getStatusMeta, hasOperationalIssue, isAnomalous } from "./device-status.js";
   import { formatCardNumber } from "./card-number.js";
@@ -161,7 +161,7 @@
   async function loadMappings() {
     loading = true; error = null;
     try {
-      const response = await api.iccidMappings.list({ page: 1, limit: 10000 });
+      const response = await api.get(withQuery("/api/iccid-mappings", { page: 1, limit: 10000 }));
       if (response?.success) {
         allMappingsCache = response.data?.results || response.data || [];
         filterMappings();
@@ -252,11 +252,11 @@
         balance_threshold: fd.balance_threshold === '' ? null : Number(fd.balance_threshold),
       };
       if (panel.mode === 'add') {
-        const r = await api.iccidMappings.create(payload);
+        const r = await api.post("/api/iccid-mappings", payload);
         if (r.success) { closePanel(); await loadMappings(); }
         else error = r.error || "添加失败";
       } else {
-        const r = await api.iccidMappings.update(panel.mapping.id, payload);
+        const r = await api.put(`/api/iccid-mappings/${panel.mapping.id}`, payload);
         if (r.success) { closePanel(); await loadMappings(); }
         else error = r.error || "保存失败";
       }
@@ -272,7 +272,7 @@
       danger: true,
     }))) return;
     try {
-      const r = await api.iccidMappings.delete(id);
+      const r = await api.delete(`/api/iccid-mappings/${id}`);
       if (r.success) { closePanel(); await loadMappings(); }
       else error = r.error || "删除失败";
     } catch (err) {

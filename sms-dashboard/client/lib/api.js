@@ -43,59 +43,14 @@ export async function fetchWithAuth(endpoint, options = {}) {
   return await response.json();
 }
 
-// Route API method names to HTTP endpoints
-async function apiRequest(method, data = {}) {
-  const httpEndpoints = {
-    'getPhones': { url: '/api/phones', method: 'GET' },
-    'getMessages': { url: '/api/messages', method: 'GET' },
-    'getBalanceChecks': { url: '/api/balance-checks', method: 'GET' },
-    'sendMessage': { url: '/api/messages/send', method: 'POST' },
-    'getUser': { url: '/api/auth/me', method: 'GET' },
-    'listIccidMappings': { url: '/api/iccid-mappings', method: 'GET' },
-    'getIccidMapping': { url: (params) => `/api/iccid-mappings/${params.id}`, method: 'GET' },
-    'getIccidMappingByIccid': { url: (params) => `/api/iccid-mappings/by-iccid/${params.iccid}`, method: 'GET' },
-    'createIccidMapping': { url: '/api/iccid-mappings', method: 'POST' },
-    'updateIccidMapping': { url: (params) => `/api/iccid-mappings/${params.id}`, method: 'PUT' },
-    'deleteIccidMapping': { url: (params) => `/api/iccid-mappings/${params.id}`, method: 'DELETE' }
-  };
-  
-  const endpoint = httpEndpoints[method];
-  if (!endpoint) {
-    throw new Error(`Unknown API method: ${method}`);
-  }
-  
-  const url = typeof endpoint.url === 'function' ? endpoint.url(data) : endpoint.url;
-  const options = {
-    method: endpoint.method
-  };
-  
-  if (endpoint.method === 'GET' && data && Object.keys(data).length > 0) {
-    // Add query params for GET requests
-    const queryString = new URLSearchParams(data).toString();
-    return fetchWithAuth(`${url}?${queryString}`, options);
-  } else if (endpoint.method !== 'GET') {
-    // Add body for non-GET requests
-    options.body = JSON.stringify(data);
-  }
-  
-  return fetchWithAuth(url, options);
+export function withQuery(path, params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return query ? `${path}?${query}` : path;
 }
 
+// Components call the API through get/post/put/delete. A named method exists only
+// when it adds behaviour beyond the request itself (caching, unwrapping, fallbacks).
 export const api = {
-  // Cache management
-  cache: {
-    async getStats() {
-      return await messageCache.getCacheStats();
-    },
-    async clear() {
-      return await messageCache.clearCache();
-    },
-    async prune(maxPerPhone = 200) {
-      return await messageCache.pruneCache(maxPerPhone);
-    }
-  },
-
-  // Generic HTTP methods for AI features
   async get(url, options = {}) {
     return await fetchWithAuth(url, { ...options, method: 'GET' });
   },
@@ -120,20 +75,6 @@ export const api = {
     return await fetchWithAuth(url, { ...options, method: 'DELETE' });
   },
   
-  // Auth
-  async getUser() {
-    try {
-      return await apiRequest('getUser');
-    } catch (error) {
-      // Fallback to HTTP for auth (needed for initial login)
-      return await fetchWithAuth('/api/auth/me');
-    }
-  },
-  
-  async logout() {
-    auth.logout();
-  },
-  
   // No getAuthToken(): the session is an HttpOnly cookie that JavaScript cannot read,
   // and callers do not need it — fetch sends it automatically.
   // See docs/SECURITY-REVIEW.md finding 4.
@@ -141,7 +82,7 @@ export const api = {
   // Phones
   async getPhones() {
     try {
-      const response = await apiRequest('getPhones');
+      const response = await fetchWithAuth('/api/phones');
       return response.success ? response.data : [];
     } catch (error) {
       console.warn('Failed to get phones:', error);
@@ -190,7 +131,7 @@ export const api = {
         apiParams.limit = Math.min(params.limit || 100, 100);
       }
 
-      let response = await apiRequest('getMessages', apiParams);
+      let response = await fetchWithAuth(withQuery('/api/messages', apiParams));
 
       if (response.success && response.sync?.is_incremental) {
         const syncUntil = response.sync.server_time;
@@ -200,14 +141,14 @@ export const api = {
           if (!syncUntil || !cursor?.created_at || !cursor?.id) {
             throw new Error('Incremental message page is missing its stable cursor');
           }
-          response = await apiRequest('getMessages', {
+          response = await fetchWithAuth(withQuery('/api/messages', {
             ...apiParams,
             since: lastSyncTime,
             until: syncUntil,
             before_created_at: cursor.created_at,
             before_id: cursor.id,
             offset: 0,
-          });
+          }));
           if (!response.success || response.sync?.server_time !== syncUntil) {
             throw new Error('Incremental message page changed its synchronization window');
           }
@@ -341,100 +282,13 @@ export const api = {
 
   async getBalanceChecks(params = {}) {
     try {
-      const response = await apiRequest('getBalanceChecks', params);
+      const response = await fetchWithAuth(withQuery('/api/balance-checks', params));
       return response?.success ? response.data || [] : [];
     } catch (error) {
       console.warn('Failed to get balance checks:', error);
       return [];
     }
   },
-  
-  async sendMessage(data) {
-    try {
-      return await apiRequest('sendMessage', data);
-    } catch (error) {
-      console.warn('Failed to send message:', error);
-      throw error;
-    }
-  },
-  
-  // ICCID Mappings
-  iccidMappings: {
-    async list(params = {}) {
-      try {
-        return await apiRequest('listIccidMappings', params);
-      } catch (error) {
-        console.warn('Failed to list ICCID mappings :', error);
-        const query = new URLSearchParams(params).toString();
-        return await fetchWithAuth(`/api/iccid-mappings?${query}`);
-      }
-    },
-    
-    async get(id) {
-      try {
-        return await apiRequest('getIccidMapping', { id });
-      } catch (error) {
-        console.warn('Failed to get ICCID mapping :', error);
-        return await fetchWithAuth(`/api/iccid-mappings/${id}`);
-      }
-    },
-    
-    async getByIccid(iccid) {
-      try {
-        return await apiRequest('getIccidMappingByIccid', { iccid });
-      } catch (error) {
-        console.warn('Failed to get ICCID mapping by ICCID :', error);
-        return await fetchWithAuth(`/api/iccid-mappings/by-iccid/${iccid}`);
-      }
-    },
-    
-    async create(data) {
-      try {
-        return await apiRequest('createIccidMapping', data);
-      } catch (error) {
-        console.warn('Failed to create ICCID mapping :', error);
-        return await fetchWithAuth('/api/iccid-mappings', {
-          method: 'POST',
-          body: JSON.stringify(data),
-        });
-      }
-    },
-    
-    async update(id, data) {
-      try {
-        return await apiRequest('updateIccidMapping', { id, ...data });
-      } catch (error) {
-        console.warn('Failed to update ICCID mapping :', error);
-        return await fetchWithAuth(`/api/iccid-mappings/${id}`, {
-          method: 'PUT',
-          body: JSON.stringify(data),
-        });
-      }
-    },
-    
-    async delete(id) {
-      try {
-        return await apiRequest('deleteIccidMapping', { id });
-      } catch (error) {
-        console.warn('Failed to delete ICCID mapping :', error);
-        return await fetchWithAuth(`/api/iccid-mappings/${id}`, {
-          method: 'DELETE',
-        });
-      }
-    },
-    
-    async bulkImport(data) {
-      try {
-        return await apiRequest('bulkImportIccidMappings', data);
-      } catch (error) {
-        console.warn('Failed to bulk import ICCID mappings :', error);
-        return await fetchWithAuth('/api/iccid-mappings/bulk', {
-          method: 'POST',
-          body: JSON.stringify(data),
-        });
-      }
-    }
-  }
 };
 
 // Nothing to pick up from the URL any more: the login callback delivers the session as

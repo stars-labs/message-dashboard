@@ -3,10 +3,43 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import IccidMappings from './IccidMappings.svelte';
 
 const originalFetch = globalThis.fetch;
+const originalConfirm = globalThis.confirm;
 
 afterEach(() => {
   cleanup();
   globalThis.fetch = originalFetch;
+  globalThis.confirm = originalConfirm;
+});
+
+describe('Mapping writes', () => {
+  test('a failed delete reaches the server exactly once', async () => {
+    const deletes = [];
+    globalThis.fetch = async (url, init = {}) => {
+      if (init.method === 'DELETE') {
+        deletes.push(String(url));
+        return Response.json({ error: 'upstream timeout' }, { status: 500 });
+      }
+      return Response.json({
+        success: true,
+        data: {
+          results: [
+            { id: 'two', iccid: 'iccid-02', phone_number: '+8602', carrier: '联通', country: 'CN', sim_index: 2, is_active: 'active' },
+          ],
+        },
+      });
+    };
+    // No ConfirmHost is mounted, so confirmAction falls back to the native dialog.
+    globalThis.confirm = () => true;
+
+    const view = render(IccidMappings);
+    await waitFor(() => expect(view.getAllByLabelText('编辑').length).toBeGreaterThan(0));
+    await fireEvent.click(view.getAllByLabelText('编辑')[0]);
+    await fireEvent.click(view.getByText('删除映射'));
+
+    await waitFor(() => expect(view.getByText('upstream timeout')).toBeTruthy());
+    expect(deletes).toHaveLength(1);
+    expect(deletes[0]).toEndWith('/api/iccid-mappings/two');
+  });
 });
 
 describe('Device & Card sorting', () => {

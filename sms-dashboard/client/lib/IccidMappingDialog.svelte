@@ -69,7 +69,7 @@
     error = null;
 
     try {
-      const response = await api.iccidMappings.create({
+      const response = await api.post("/api/iccid-mappings", {
         iccid: phone.iccid,
         phone_number: phoneNumber,
         sim_index: simIndex ? parseInt(simIndex) : null,
