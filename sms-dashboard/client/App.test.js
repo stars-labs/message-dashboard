@@ -91,7 +91,6 @@ describe('mobile detail navigation', () => {
     expect(source).toContain('const POLL_INTERVAL_MS = 60000');
     expect(source).toContain('const DAEMON_POLL_INTERVAL_MS = 300000');
     expect(loadData).toContain('api.getMessages({ limit: MESSAGE_PAGE_SIZE })');
-    expect(loadData).not.toContain('authenticatedFetch(`/api/messages');
     expect(polling).toContain("document.visibilityState !== 'visible'");
     expect(polling).toContain('now - lastDaemonPollAt >= DAEMON_POLL_INTERVAL_MS');
     expect(polling).not.toContain('refreshBalanceChecksForView');
