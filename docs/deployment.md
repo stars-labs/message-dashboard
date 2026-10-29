@@ -15,6 +15,9 @@ bunx wrangler d1 execute sms-dashboard --remote --file=migrations/NNN_name.sql
 bun run deploy
 ```
 
+- `bun run deploy` refuses unless you are on `main`, the working tree is clean,
+  and HEAD matches `origin/main`. It tags the deployment with the short commit
+  hash, so `bunx wrangler deployments list` shows which commit is live.
 - Do **not** run `wrangler d1 migrations apply --remote` — production predates
   Wrangler migration bookkeeping. Always apply only the exact new migration file.
 - After deploy: verify `https://sexy.itoken.world/api/health` and the affected workflow.
