@@ -30,14 +30,25 @@ Target: `root@10.171.150.102` (fixed LAN address, NixOS aarch64).
 - **LAN access**: before ping or SSH, confirm the operator's current network/location
   and that `10.171.150.102` is reachable from it.
 
-```bash
-# From repo root — run check-daemon first:
-check-daemon
+CI builds the Pi system for every push to `main` (job "Orange Pi system",
+arm64 runner) and pushes it to Cachix. Deploy by downloading that build:
 
-nix run nixpkgs#nixos-rebuild -- switch --flake .#orange-pi \
-  --target-host root@10.171.150.102 \
-  --build-host root@10.171.150.102 \
-  --use-substitutes --impure
+```bash
+# 1. Push to main and wait for CI to go green. The job summary of
+#    "Orange Pi system" ends with the exact line for step 2.
+# 2. On the Pi, as root (survives a dropped SSH session):
+pi-deploy /nix/store/<hash>-nixos-system-orange-pi-sms-<version>
+```
+
+`pi-deploy` substitutes the closure from `xiongchenyu6.cachix.org` and
+`cache.nixos.org`, sets the system profile and switches; it builds locally
+only when a path is in neither cache. To try an uncommitted change without
+CI, evaluate here and let the Pi build it:
+
+```bash
+drv=$(nix eval --raw .#nixosConfigurations.orange-pi.config.system.build.toplevel.drvPath)
+nix copy --derivation --to ssh://root@10.171.150.102 "$drv"
+ssh root@10.171.150.102 pi-deploy "$drv"
 ```
 
 After deploy: confirm `sms-daemon` is active, check `journalctl -u sms-daemon -f`

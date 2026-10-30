@@ -15,6 +15,7 @@
     # Include SMS daemon module
     ../modules/sms-daemon.nix
     ../modules/netbird-server.nix
+    ../modules/pi-deploy.nix
 
   ];
 

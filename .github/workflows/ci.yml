@@ -1,14 +1,17 @@
 # Gates for every push and pull request. Each job mirrors a local command the
 # agent guides already require: `check-daemon` for the Rust daemon, `bun test`
 # and `bun run build` for the dashboard, and an evaluation of the Orange Pi
-# system so a broken NixOS module is caught before a deploy. Deploys stay
-# manual: the Worker through wrangler, the Pi by pulling from its own side.
+# system so a broken NixOS module is caught before a deploy. On main the Pi
+# system is also built on an arm64 runner and pushed to Cachix, so the Pi only
+# downloads (`pi-deploy <path>`, see docs/deployment.md). Deploys themselves
+# stay manual: the Worker through wrangler, the Pi from its own side.
 name: CI
 
 on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -69,3 +72,49 @@ jobs:
       - uses: cachix/install-nix-action@v31
       - name: Evaluate the Pi system closure
         run: nix eval --raw .#nixosConfigurations.orange-pi.config.system.build.toplevel.drvPath
+
+  pi-system:
+    name: Orange Pi system (arm64 build, Cachix push)
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+      - uses: cachix/install-nix-action@v31
+      - uses: cachix/cachix-action@v17
+        with:
+          name: xiongchenyu6
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          skipPush: true
+      - name: Build the system closure
+        run: |
+          out=$(nix build .#nixosConfigurations.orange-pi.config.system.build.toplevel --print-out-paths --no-link)
+          echo "OUT=$out" >> "$GITHUB_ENV"
+          {
+            echo "## Orange Pi system"
+            echo
+            echo "On the Pi, as root:"
+            echo
+            echo '```'
+            echo "pi-deploy $out"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Push what cache.nixos.org does not serve
+        env:
+          CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+        run: |
+          if [ -z "$CACHIX_AUTH_TOKEN" ]; then
+            echo "CACHIX_AUTH_TOKEN is not set; built only, nothing pushed."
+            exit 0
+          fi
+          # The whole closure would fill the free cache with the kernel and
+          # firmware; the Pi gets those from cache.nixos.org anyway.
+          nix path-info -r "$OUT" > closure.txt
+          ours() {
+            hash=$(basename "$1" | cut -c1-32)
+            curl -sfI -o /dev/null "https://cache.nixos.org/$hash.narinfo" || echo "$1"
+          }
+          export -f ours
+          xargs -P 32 -I{} bash -c 'ours "$@"' _ {} < closure.txt > push.txt
+          echo "closure: $(wc -l < closure.txt) paths, pushing $(wc -l < push.txt)"
+          cachix push xiongchenyu6 < push.txt
