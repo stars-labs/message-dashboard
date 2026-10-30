@@ -607,9 +607,11 @@
               '';
             };
 
-            # Rust daemon development shell
+            # Rust daemon development shell. CI uses it too: small enough to
+            # cache, and it carries the same `check-daemon` gate as the default
+            # shell.
             rust = pkgs.mkShell {
-              packages = with pkgs; [
+              packages = [ check-daemon ] ++ (with pkgs; [
                 cargo
                 rustc
                 rust-analyzer
@@ -617,7 +619,7 @@
                 clippy
                 pkg-config
                 openssl
-              ];
+              ]);
 
               shellHook = ''
                 echo "SMS Dashboard Daemon Development (Rust)"

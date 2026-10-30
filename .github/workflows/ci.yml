@@ -1,0 +1,71 @@
+# Gates for every push and pull request. Each job mirrors a local command the
+# agent guides already require: `check-daemon` for the Rust daemon, `bun test`
+# and `bun run build` for the dashboard, and an evaluation of the Orange Pi
+# system so a broken NixOS module is caught before a deploy. Deploys stay
+# manual: the Worker through wrangler, the Pi by pulling from its own side.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  daemon:
+    name: Daemon (check-daemon)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: cachix/install-nix-action@v31
+      - name: Cache Nix store
+        uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-rust-${{ runner.os }}-${{ hashFiles('flake.lock', 'flake.nix') }}
+          restore-prefixes-first-match: nix-rust-${{ runner.os }}-
+          gc-max-store-size-linux: 2G
+          purge: true
+          purge-prefixes: nix-rust-${{ runner.os }}-
+          purge-created: 0
+          purge-primary-key: never
+      - name: Cache cargo registry and target
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            orange-pi-daemon/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('orange-pi-daemon/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+      - name: rustfmt check and full test suite
+        run: nix develop .#rust -c check-daemon
+
+  dashboard:
+    name: Dashboard (bun test, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sms-dashboard
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+      - run: bun run test
+      - run: bun run build
+
+  nixos:
+    name: Orange Pi system evaluates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: cachix/install-nix-action@v31
+      - name: Evaluate the Pi system closure
+        run: nix eval --raw .#nixosConfigurations.orange-pi.config.system.build.toplevel.drvPath
