@@ -16,13 +16,14 @@ import { readFileSync } from 'node:fs';
 
 GlobalRegistrator.register();
 
-// happy-dom implements no Web Animations API, but Svelte's transition directives
-// call element.animate() unconditionally. Any test that triggers a transition
-// (e.g. clicking a button whose feedback toast uses transition:fly) would
-// otherwise print an unhandled "element.animate is not a function" while still
-// passing — noise that hides real failures. A no-op Animation is enough: these
-// tests assert on DOM state, never on animation progress.
-if (typeof globalThis.Element !== 'undefined' && !globalThis.Element.prototype.animate) {
+// Svelte's transition directives call element.animate() unconditionally, and
+// these tests assert on DOM state, never on animation progress, so a no-op
+// Animation replaces whatever the DOM offers. happy-dom gained a real
+// implementation in 21.x whose `finished` promise rejects with AbortError when
+// Svelte cancels a transition on unmount; nothing awaits that promise, so bun
+// reported it as an unhandled error between tests. Older happy-dom had no
+// animate() at all and printed "element.animate is not a function" instead.
+if (typeof globalThis.Element !== 'undefined') {
   globalThis.Element.prototype.animate = function animate() {
     return {
       cancel() {},
