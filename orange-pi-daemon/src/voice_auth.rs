@@ -136,10 +136,12 @@ pub fn parse_path(path: &str) -> Option<VoiceRequest> {
         ("answer", "-") => CallAction::Answer,
         _ => return None,
     };
+    // Match the modem's ICCID alphabet. Keep the original spelling for HMAC
+    // verification and live SIM lookup.
     if !is_call_id(call_id)
         || iccid.is_empty()
         || iccid.len() > 22
-        || !iccid.bytes().all(|b| b.is_ascii_digit())
+        || !iccid.bytes().all(|b| b.is_ascii_hexdigit())
         || sig.len() != 64
     {
         return None;
@@ -293,6 +295,22 @@ mod tests {
     }
 
     #[test]
+    fn verifies_answer_with_embedded_hex_letters_in_iccid() {
+        let path = concat!(
+            "/voice/11111111-1111-4111-8111-111111111111/down/answer/",
+            "896501230605CF73985/-/1800000000/",
+            "f6809243ed06793b9330f759ac1d17dcf9b5e0f9ae713667ee90ef139bc65dbc"
+        );
+        let request = parse_path(path).unwrap();
+        assert_eq!(request.action, CallAction::Answer);
+        assert_eq!(request.iccid, "896501230605CF73985");
+        assert!(verify("test-key", &request, 1_700_000_000));
+
+        let tampered = parse_path(&path.replace("CF73985", "cF73985")).unwrap();
+        assert!(!verify("test-key", &tampered, 1_700_000_000));
+    }
+
+    #[test]
     fn rejects_malformed_paths() {
         let sig = "0".repeat(64);
         let id = "11111111-1111-4111-8111-111111111111";
@@ -301,7 +319,7 @@ mod tests {
             format!("/voice/{id}/up/dial/8965/6592953543/1800000000/{sig}"), // no +
             format!("/voice/{id}/up/answer/8965/+6592953543/1800000000/{sig}"), // answer with number
             format!("/voice/{id}/sideways/dial/8965/+6592953543/1800000000/{sig}"),
-            format!("/voice/{id}/up/dial/89a5/+6592953543/1800000000/{sig}"),
+            format!("/voice/{id}/up/dial/89g5/+6592953543/1800000000/{sig}"),
             format!("/voice/{id}/up/dial/8965/+6592953543/soon/{sig}"),
             format!("/voice/{id}/up/dial/8965/+6592953543/1800000000/abc"),
             format!("/voice/{id}/up/dial/8965/+6592953543/1800000000/{sig}/extra"),

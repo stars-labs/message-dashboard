@@ -397,12 +397,14 @@ impl AtModemManager {
     /// reset cannot leave it unset; SMS collection is unaffected because the daemon
     /// polls `AT+CMGL` and never consumes URCs.
     pub async fn init_urc_port(&self, port: &str) -> Result<()> {
-        // Caller id arrives as +CLIP only when enabled; the setting is not stored.
-        let clip = self
+        // Caller ID is optional. Route RING even when the modem refuses CLIP.
+        match self
             .send_at_command(port, "AT+CLIP=1", Duration::from_millis(1000))
-            .await?;
-        if !clip.contains("OK") {
-            return Err(anyhow!("Failed to enable caller id: {}", clip.trim()));
+            .await
+        {
+            Ok(response) if response.contains("OK") => {}
+            Ok(response) => warn!(port, "Could not enable caller ID: {}", response.trim()),
+            Err(error) => warn!(port, "Could not enable caller ID: {}", error),
         }
         match self
             .send_at_command(

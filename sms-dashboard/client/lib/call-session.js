@@ -50,6 +50,7 @@ export function createCallSession(deps) {
   let pc = null;
   let mic = null;
   let closed = false;
+  let callId = null;
 
   function release() {
     closed = true;
@@ -88,23 +89,24 @@ export function createCallSession(deps) {
       const offer = { type: pc.localDescription.type, sdp: pc.localDescription.sdp };
       const started = await start({ offer, mid: transceiver.mid });
       assertOpen();
+      callId = started.call.id;
       await pc.setRemoteDescription(started.answer);
 
       await waitForConnected(pc, connectTimeoutMs);
       assertOpen();
 
-      const connected = await api.connect();
+      const connected = await api.connect(callId);
       assertOpen();
       if (connected.offer) {
         await pc.setRemoteDescription(connected.offer);
         await pc.setLocalDescription(await pc.createAnswer());
         const answer = { type: pc.localDescription.type, sdp: pc.localDescription.sdp };
-        await api.renegotiate({ answer });
+        await api.renegotiate({ answer, callId });
       }
     } catch (error) {
       const wasClosed = closed;
       release();
-      if (!wasClosed) await api.hangup().catch(() => {});
+      if (!wasClosed && callId) await api.hangup(callId).catch(() => {});
       throw error;
     }
   }
@@ -115,7 +117,7 @@ export function createCallSession(deps) {
     /** Local hang-up: stop media and release the fleet lock. */
     async hangup() {
       release();
-      await api.hangup();
+      if (callId) await api.hangup(callId);
     },
     /** The call ended elsewhere (far end, daemon, another tab): stop media only. */
     release,

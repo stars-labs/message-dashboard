@@ -991,8 +991,8 @@
       if (callSession) {
         await callSession.hangup();
         callSession = null;
-      } else {
-        await callApi.hangup();
+      } else if (activeCall?.id) {
+        await callApi.hangup(activeCall.id);
       }
     });
   }

@@ -131,6 +131,23 @@ fn remember_ended(ended: &mut VecDeque<String>, call_id: &str) {
     }
 }
 
+async fn finish_modem_call(
+    state: &Mutex<BridgeState>,
+    call_id: &str,
+    cleanup: impl AsyncFnOnce(&str),
+) -> Option<ActiveCall> {
+    let mut state = state.lock().await;
+    let active = state.active.as_ref()?;
+    if active.handles.call_id != call_id {
+        return None;
+    }
+    let _ = active.stop.send(true);
+    // Admission uses the same mutex. Keep it until ATH and PCM cleanup finish.
+    cleanup(&active.modem_id).await;
+    remember_ended(&mut state.ended, call_id);
+    state.active.take()
+}
+
 /// Consume the PROXY protocol header and return the source it names.
 ///
 /// The header is peeked until its CRLF arrives, then read off the stream for
@@ -559,23 +576,15 @@ impl VoiceBridge {
 
     /// Idempotent: only the first caller for a call id does the teardown.
     async fn end_call(&self, call_id: &str, reason: &str) {
-        let active = {
-            let mut state = self.state.lock().await;
-            match &state.active {
-                Some(active) if active.handles.call_id == call_id => {
-                    remember_ended(&mut state.ended, call_id);
-                    state.active.take()
-                }
-                _ => None,
-            }
-        };
+        let active = finish_modem_call(&self.state, call_id, async |modem| {
+            self.release_modem(modem).await
+        })
+        .await;
         let Some(active) = active else {
             return;
         };
 
         info!(call_id, modem_id = %active.modem_id, reason, "📞 Call ended");
-        let _ = active.stop.send(true);
-        self.release_modem(&active.modem_id).await;
         if let Err(e) = self
             .api
             .report_call_ended(Some(call_id), &active.iccid, reason)
@@ -942,6 +951,51 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn next_call_cannot_enter_while_modem_cleanup_is_pending() {
+        let (stop, stopped) = watch::channel(false);
+        let (pcm_ready, _) = watch::channel(true);
+        let (to_browser, _) = broadcast::channel(1);
+        let (to_modem, _) = mpsc::channel(1);
+        let state = Mutex::new(BridgeState {
+            active: Some(ActiveCall {
+                handles: CallHandles {
+                    call_id: "old".into(),
+                    stop: stopped.clone(),
+                    to_browser,
+                    to_modem,
+                    up_seen: Arc::new(AtomicBool::new(false)),
+                    down_seen: Arc::new(AtomicBool::new(false)),
+                },
+                stop,
+                pcm_ready,
+                iccid: "test-sim".into(),
+                modem_id: "modem".into(),
+            }),
+            ..Default::default()
+        });
+
+        let cancelled = tokio::time::timeout(
+            Duration::from_millis(20),
+            finish_modem_call(&state, "old", async |_| std::future::pending().await),
+        )
+        .await;
+        assert!(cancelled.is_err());
+        assert!(state.try_lock().unwrap().active.is_some());
+
+        let ended = finish_modem_call(&state, "old", async |modem| {
+            assert_eq!(modem, "modem");
+            assert!(*stopped.borrow());
+            tokio::task::yield_now().await;
+            assert!(state.try_lock().is_err());
+        })
+        .await;
+        assert!(ended.is_some());
+        let state = state.try_lock().unwrap();
+        assert!(state.active.is_none());
+        assert_eq!(state.ended.front().map(String::as_str), Some("old"));
+    }
     use std::os::fd::{FromRawFd, IntoRawFd};
     use std::os::unix::net::UnixStream;
 

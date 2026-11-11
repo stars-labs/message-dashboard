@@ -1,9 +1,9 @@
+import { CallState } from './call-state.js';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { readFileSync } from 'node:fs';
 import { adapterEndpoint, missingConfig, setupCallRoutes, unansweredOutcome, validNumber } from './calls.js';
 
-const CALL_KEY = 'voice:active-call';
 const SESSION_TOKEN = 'session-token';
 const ICCID = '8965012306052373985';
 const OFFER = { type: 'offer', sdp: 'v=0 offer' };
@@ -17,40 +17,41 @@ function routerStub() {
   return { routes, get: record('GET'), post: record('POST'), put: record('PUT') };
 }
 
-/** Keyed in-memory SESSIONS namespace: holds both the login session and the call lock. */
-function kvStub(call = null) {
-  const store = new Map();
-  store.set(SESSION_TOKEN, {
-    value: JSON.stringify({ expires_at: Date.now() + 60_000, user: { sub: 'auth0|op', roles: ['admin'] } }),
-  });
-  if (call) store.set(CALL_KEY, { value: JSON.stringify(call) });
+function sessionStub() {
   return {
     async get(key) {
-      return store.get(key)?.value ?? null;
+      return key === SESSION_TOKEN
+        ? JSON.stringify({ expires_at: Date.now() + 60_000, user: { sub: 'auth0|op', roles: ['admin'] } })
+        : null;
     },
-    async put(key, value, options) {
-      store.set(key, { value, ttl: options?.expirationTtl });
-    },
-    async delete(key) {
-      store.delete(key);
-    },
-    call: () => (store.has(CALL_KEY) ? JSON.parse(store.get(CALL_KEY).value) : null),
-    ttl: () => store.get(CALL_KEY)?.ttl,
   };
 }
 
-/**
- * A SESSIONS namespace whose call-lock reads always miss, the way an eventually
- * consistent KV read can right after a write. Login sessions still resolve.
- */
-function staleKvStub() {
-  const kv = kvStub();
-  return { ...kv, get: async (key) => (key === CALL_KEY ? null : kv.get(key)) };
+function callStateStub(call = null) {
+  const data = new Map([['initialized', true]]);
+  const object = new CallState({
+    storage: {
+      kv: { get: (key) => data.get(key), put: (key, value) => data.set(key, value), delete: (key) => data.delete(key) },
+      transactionSync: (fn) => fn(),
+    },
+    blockConcurrencyWhile: (fn) => fn(),
+  }, {});
+  const replace = (call) => data.set('call', {
+    call, revision: crypto.randomUUID(), expiresAt: Date.now() + 3_600_000,
+  });
+  if (call) replace(call);
+  return {
+    getByName: () => ({ fetch: (url, options) => object.fetch(new Request(url, options)) }),
+    call: () => data.get('call')?.call ?? null,
+    ttl: () => Math.round((data.get('call').expiresAt - Date.now()) / 1000),
+    replace,
+  };
 }
 
 function envStub(overrides = {}) {
   return {
-    SESSIONS: kvStub(),
+    SESSIONS: sessionStub(),
+    CALL_STATE: callStateStub(),
     REALTIME_APP_ID: 'app',
     REALTIME_APP_SECRET: 'secret',
     TURN_KEY_ID: 'turn',
@@ -121,7 +122,7 @@ function setupWithHistory(call = null) {
   const router = routerStub();
   setupCallRoutes(router);
   const DB = d1Stub();
-  return { router, env: envStub({ SESSIONS: kvStub(call), DB }), DB };
+  return { router, env: envStub({ CALL_STATE: callStateStub(call), DB }), DB };
 }
 
 async function invokeGet(router, path, query, env) {
@@ -183,7 +184,7 @@ async function invoke(router, method, path, body, env, headers) {
 function setup(call = null) {
   const router = routerStub();
   setupCallRoutes(router);
-  const env = envStub({ SESSIONS: kvStub(call) });
+  const env = envStub({ CALL_STATE: callStateStub(call) });
   return { router, env };
 }
 
@@ -259,17 +260,39 @@ describe('outbound media setup', () => {
     expect(body.answer).toEqual({ type: 'answer', sdp: 'v=0 answer' });
     expect(sfu[0]).toEqual({ path: '/sessions/new', method: 'POST', body: undefined });
     expect(sfu[1].body).toEqual({ sessionDescription: OFFER, tracks: [{ location: 'local', mid: '0', trackName: 'mic' }] });
-    expect(env.SESSIONS.call()).toMatchObject({ direction: 'outbound', state: 'connecting', session_id: 'browser' });
+    expect(env.CALL_STATE.call()).toMatchObject({ direction: 'outbound', state: 'connecting', session_id: 'browser' });
   });
 
-  test('an SFU failure releases the lock', async () => {
+  test('dial accepts the modem ICCID with hex letters and preserves its spelling', async () => {
     const { router, env } = setup();
-    stubSfu({ '/sessions/new': [500, { errorCode: 'boom' }] });
+    const iccid = '896501230605cF73985';
+    const sfu = stubSfu({
+      '/sessions/new': [201, { sessionId: 'browser' }],
+      '/sessions/browser/tracks/new': [200, { sessionDescription: { type: 'answer', sdp: 'v=0 answer' }, tracks: [{ trackName: 'mic', mid: '0' }] }],
+    });
+    const request = { number: '+6592953543', offer: OFFER, mid: '0' };
+
+    const invalid = await invoke(router, 'POST', '/api/calls/dial', { ...request, iccid: iccid.replace('c', 'g') }, env);
+    expect(invalid.status).toBe(400);
+    expect(sfu).toHaveLength(0);
+
+    const response = await invoke(router, 'POST', '/api/calls/dial', { ...request, iccid }, env);
+    expect(response.status).toBe(200);
+    expect((await response.json()).call.iccid).toBe(iccid);
+    expect(env.CALL_STATE.call().iccid).toBe(iccid);
+  });
+
+  test.each(['HTTP error', 'network error'])('an SFU %s releases the lock', async (failure) => {
+    const { router, env } = setup();
+    stubSfu(() => {
+      if (failure === 'network error') throw new TypeError('fetch failed');
+      return [500, { errorCode: 'boom' }];
+    });
 
     const response = await invoke(router, 'POST', '/api/calls/dial', { iccid: ICCID, number: '+6592953543', offer: OFFER, mid: '0' }, env);
 
     expect(response.status).toBe(502);
-    expect(env.SESSIONS.call()).toBeNull();
+    expect(env.CALL_STATE.call()).toBeNull();
   });
 
   test('a second dial is refused while any call exists', async () => {
@@ -281,10 +304,80 @@ describe('outbound media setup', () => {
     expect(response.status).toBe(409);
     expect(sfu).toHaveLength(0);
   });
+
+  test('simultaneous dials publish the microphone for only one call', async () => {
+    const { router, env } = setup();
+    const sfu = stubSfu({
+      '/sessions/new': [201, { sessionId: 'browser' }],
+      '/sessions/browser/tracks/new': [200, { sessionDescription: { type: 'answer', sdp: 'answer' } }],
+    });
+    const request = { iccid: ICCID, number: '+6592953543', offer: OFFER, mid: '0' };
+    const responses = await Promise.all([
+      invoke(router, 'POST', '/api/calls/dial', request, env),
+      invoke(router, 'POST', '/api/calls/dial', request, env),
+    ]);
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 409]);
+    expect(sfu.filter(({ path }) => path === '/sessions/new')).toHaveLength(1);
+  });
+
+  test.each([true, false])('a late SFU response leaves the next call intact (success=%s)', async (success) => {
+    const { router, env } = setup();
+    const entered = Promise.withResolvers();
+    const resume = Promise.withResolvers();
+    globalThis.fetch = async (url) => {
+      if (url.endsWith('/sessions/new')) {
+        entered.resolve();
+        await resume.promise;
+        return success
+          ? Response.json({ sessionId: 'browser' })
+          : Response.json({ errorCode: 'boom' }, { status: 502 });
+      }
+      return Response.json({ sessionDescription: { type: 'answer', sdp: 'answer' } });
+    };
+    const dial = invoke(router, 'POST', '/api/calls/dial', {
+      iccid: ICCID, number: '+6592953543', offer: OFFER, mid: '0',
+    }, env);
+    await entered.promise;
+    const oldId = env.CALL_STATE.call().id;
+    await invoke(router, 'POST', '/api/calls/hangup', { call_id: oldId }, env);
+    await invoke(router, 'POST', '/api/control/calls/incoming', { iccid: ICCID }, env);
+    const replacement = env.CALL_STATE.call();
+    resume.resolve();
+
+    expect((await dial).status).toBe(success ? 409 : 502);
+    expect(replacement.id).not.toBe(oldId);
+    expect(env.CALL_STATE.call()).toEqual(replacement);
+  });
 });
 
 describe('bridging to the Pi', () => {
   const connecting = { id: 'call-1', direction: 'outbound', state: 'connecting', iccid: ICCID, number: '+6592953543', session_id: 'browser' };
+
+  test('an empty successful adapter response releases the call for a retry', async () => {
+    const { router, env } = setup(connecting);
+    stubSfu({ '/adapters/websocket/new': [200, {}] });
+
+    const response = await invoke(router, 'POST', '/api/calls/connect', {}, env);
+
+    expect(response.status).toBe(502);
+    expect(env.CALL_STATE.call()).toBeNull();
+  });
+
+  test('a missing modem session ID closes both known adapters', async () => {
+    const { router, env } = setup(connecting);
+    const sfu = stubSfu((path, n) => path === '/adapters/websocket/new'
+      ? [200, { tracks: [{ adapterId: n === 1 ? 'down' : 'up' }] }]
+      : [200, {}]);
+
+    const response = await invoke(router, 'POST', '/api/calls/connect', {}, env);
+
+    expect(response.status).toBe(502);
+    expect(sfu.at(-1)).toMatchObject({
+      path: '/adapters/websocket/close',
+      body: { tracks: [{ adapterId: 'up' }, { adapterId: 'down' }] },
+    });
+    expect(env.CALL_STATE.call()).toBeNull();
+  });
 
   test('creates both adapters with signed endpoints and pulls the modem track', async () => {
     const { router, env } = setup(connecting);
@@ -312,7 +405,7 @@ describe('bridging to the Pi', () => {
     expect(up.endpoint).toContain('/voice/call-1/up/dial/');
 
     expect(sfu[2].body).toEqual({ tracks: [{ location: 'remote', sessionId: 'modem-session', trackName: 'modem' }] });
-    expect(env.SESSIONS.call()).toMatchObject({ state: 'bridging', adapters: { down: 'down-id', up: 'up-id' }, modem_session_id: 'modem-session' });
+    expect(env.CALL_STATE.call()).toMatchObject({ state: 'bridging', adapters: { down: 'down-id', up: 'up-id' }, modem_session_id: 'modem-session' });
   });
 
   test('a per-track adapter error inside a 200 is a failure and closes what was created', async () => {
@@ -328,7 +421,7 @@ describe('bridging to the Pi', () => {
 
     expect(response.status).toBe(502);
     expect(sfu.at(-1)).toMatchObject({ path: '/adapters/websocket/close', body: { tracks: [{ adapterId: 'down-id' }] } });
-    expect(env.SESSIONS.call()).toBeNull();
+    expect(env.CALL_STATE.call()).toBeNull();
   });
 
   test('an inbound call signs an answer endpoint', async () => {
@@ -343,7 +436,7 @@ describe('bridging to the Pi', () => {
     expect(response.status).toBe(200);
     expect((await response.json()).offer).toBeNull();
     expect(sfu[0].body.tracks[0].endpoint).toContain('/down/answer/8965012306052373985/-/');
-    expect(env.SESSIONS.call().state).toBe('active');
+    expect(env.CALL_STATE.call().state).toBe('active');
   });
 
   test('renegotiate applies the browser answer with PUT and marks the call active', async () => {
@@ -355,7 +448,7 @@ describe('bridging to the Pi', () => {
 
     expect(response.status).toBe(200);
     expect(sfu[0]).toEqual({ path: '/sessions/browser/renegotiate', method: 'PUT', body: { sessionDescription: answer } });
-    expect(env.SESSIONS.call().state).toBe('active');
+    expect(env.CALL_STATE.call().state).toBe('active');
   });
 });
 
@@ -379,8 +472,8 @@ describe('answering and hanging up', () => {
     const response = await invoke(router, 'POST', '/api/calls/answer', { offer: OFFER, mid: '0' }, env);
 
     expect(response.status).toBe(200);
-    expect(env.SESSIONS.call()).toMatchObject({ state: 'connecting', session_id: 'browser' });
-    expect(env.SESSIONS.ttl()).toBe(3600);
+    expect(env.CALL_STATE.call()).toMatchObject({ state: 'connecting', session_id: 'browser' });
+    expect(env.CALL_STATE.ttl()).toBe(3600);
   });
 
   test('hangup closes the adapters and clears the lock, and is idempotent', async () => {
@@ -392,8 +485,34 @@ describe('answering and hanging up', () => {
 
     expect(first.status).toBe(200);
     expect(sfu[0].body).toEqual({ tracks: [{ adapterId: 'u' }, { adapterId: 'd' }] });
-    expect(env.SESSIONS.call()).toBeNull();
+    expect(env.CALL_STATE.call()).toBeNull();
     expect((await second.json()).already_clear).toBe(true);
+  });
+
+  test('a late hangup for a previous call leaves the current call alone', async () => {
+    const active = { id: 'new', state: 'active', adapters: { up: 'u' } };
+    const { router, env } = setup(active);
+    const sfu = stubSfu({});
+
+    const response = await invoke(router, 'POST', '/api/calls/hangup', { call_id: 'old' }, env);
+
+    expect((await response.json()).already_clear).toBe(true);
+    expect(env.CALL_STATE.call()).toEqual(active);
+    expect(sfu).toHaveLength(0);
+  });
+
+  test('a new call created while the old adapters close keeps its lock', async () => {
+    const { router, env } = setup({ id: 'old', state: 'active', adapters: { up: 'u' } });
+    const incoming = { id: 'new', state: 'ringing' };
+    stubSfu(() => {
+      env.CALL_STATE.replace(incoming);
+      return [200, { tracks: [] }];
+    });
+
+    const response = await invoke(router, 'POST', '/api/calls/hangup', { call_id: 'old' }, env);
+
+    expect((await response.json()).call).toMatchObject({ id: 'old', state: 'ended' });
+    expect(env.CALL_STATE.call()).toEqual(incoming);
   });
 });
 
@@ -406,8 +525,8 @@ describe('incoming call reporting from the daemon', () => {
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.call).toMatchObject({ direction: 'inbound', state: 'ringing', number: '92953543' });
-    expect(env.SESSIONS.call().iccid).toBe(ICCID);
-    expect(env.SESSIONS.ttl()).toBe(60);
+    expect(env.CALL_STATE.call().iccid).toBe(ICCID);
+    expect(env.CALL_STATE.ttl()).toBe(60);
   });
 
   test('a repeated RING keeps the same call id', async () => {
@@ -424,7 +543,7 @@ describe('incoming call reporting from the daemon', () => {
     const response = await invoke(router, 'POST', '/api/control/calls/incoming', { iccid: '8965012211290057038', from: '90421798' }, env);
 
     expect(response.status).toBe(409);
-    expect(env.SESSIONS.call().iccid).toBe('other');
+    expect(env.CALL_STATE.call().iccid).toBe('other');
   });
 
   test('rejects a report without an iccid', async () => {
@@ -445,7 +564,7 @@ describe('end reporting from the daemon', () => {
 
     expect(response.status).toBe(200);
     expect(sfu).toHaveLength(1);
-    expect(env.SESSIONS.call()).toBeNull();
+    expect(env.CALL_STATE.call()).toBeNull();
   });
 
   test('a ring that stops without a call id clears only a ringing call on that SIM', async () => {
@@ -454,7 +573,7 @@ describe('end reporting from the daemon', () => {
     const response = await invoke(router, 'POST', '/api/control/calls/ended', { iccid: ICCID }, env);
 
     expect(response.status).toBe(200);
-    expect(env.SESSIONS.call()).toBeNull();
+    expect(env.CALL_STATE.call()).toBeNull();
   });
 
   test('a stale report for another call is ignored', async () => {
@@ -465,7 +584,7 @@ describe('end reporting from the daemon', () => {
 
     expect((await byId.json()).ignored).toBe(true);
     expect((await byIccid.json()).ignored).toBe(true);
-    expect(env.SESSIONS.call().id).toBe('current');
+    expect(env.CALL_STATE.call().id).toBe('current');
   });
 });
 
@@ -474,7 +593,7 @@ describe('call history logging', () => {
     const { router, env, DB } = setupWithHistory();
 
     await invoke(router, 'POST', '/api/control/calls/incoming', { iccid: ICCID }, env);
-    const id = env.SESSIONS.call().id;
+    const id = env.CALL_STATE.call().id;
     await invoke(router, 'POST', '/api/control/calls/incoming', { iccid: ICCID }, env);
     await invoke(router, 'POST', '/api/control/calls/incoming', { iccid: ICCID, from: '92953543' }, env);
 
@@ -544,7 +663,7 @@ describe('call history logging', () => {
 
     // Reaching `active` later must not overwrite the operator's answer time.
     stubSfu({ '/sessions/browser/renegotiate': [200, {}] });
-    env.SESSIONS.put(CALL_KEY, JSON.stringify({ ...env.SESSIONS.call(), state: 'bridging' }), {});
+    env.CALL_STATE.replace({ ...env.CALL_STATE.call(), state: 'bridging' });
     await invoke(router, 'POST', '/api/calls/renegotiate', { answer: { type: 'answer', sdp: 'a' } }, env);
 
     expect(DB.row('call-10')).toMatchObject({ answered_by: 'auth0|op', answered_at: answeredAt });
@@ -602,7 +721,7 @@ describe('call history logging', () => {
     const response = await invoke(router, 'POST', '/api/calls/hangup', {}, env);
 
     expect(response.status).toBe(200);
-    expect(env.SESSIONS.call()).toBeNull();
+    expect(env.CALL_STATE.call()).toBeNull();
   });
 
   test('history writes are skipped entirely when D1 is not bound', async () => {
@@ -627,13 +746,13 @@ describe('outcome of a call that never carried audio', () => {
 });
 
 describe('one ring, one row', () => {
-  test('repeat reports that both miss the KV lock share a single row', async () => {
+  test('repeat reports share a single row', async () => {
     const router = routerStub();
     setupCallRoutes(router);
     const DB = d1Stub();
-    const env = envStub({ SESSIONS: staleKvStub(), DB });
+    const env = envStub({ DB });
 
-    // RING, then the caller id a moment later: with a stale lock both look new.
+    // RING, then the caller ID a moment later.
     const first = await invoke(router, 'POST', '/api/control/calls/incoming', { iccid: ICCID }, env);
     const second = await invoke(router, 'POST', '/api/control/calls/incoming', { iccid: ICCID, from: '92953543' }, env);
 
@@ -649,7 +768,7 @@ describe('one ring, one row', () => {
     const router = routerStub();
     setupCallRoutes(router);
     const DB = d1Stub();
-    const env = envStub({ SESSIONS: staleKvStub(), DB });
+    const env = envStub({ DB });
 
     // Truly concurrent: the second request starts before the first has written.
     await Promise.all([
@@ -660,23 +779,24 @@ describe('one ring, one row', () => {
     expect(DB.rows()).toHaveLength(1);
   });
 
-  test('two SIMs ringing at once each get their own row', async () => {
+  test('a second SIM cannot replace the current ringing call', async () => {
     const router = routerStub();
     setupCallRoutes(router);
     const DB = d1Stub();
-    const env = envStub({ SESSIONS: staleKvStub(), DB });
+    const env = envStub({ DB });
 
     await invoke(router, 'POST', '/api/control/calls/incoming', { iccid: ICCID }, env);
     await invoke(router, 'POST', '/api/control/calls/incoming', { iccid: '8965030124051507919' }, env);
 
-    expect(DB.rows()).toHaveLength(2);
+    expect(DB.rows()).toHaveLength(1);
+    expect(env.CALL_STATE.call().iccid).toBe(ICCID);
   });
 
   test('a later ring on the same SIM is a new call, not a rejoin', async () => {
     const router = routerStub();
     setupCallRoutes(router);
     const DB = d1Stub();
-    const env = envStub({ SESSIONS: staleKvStub(), DB });
+    const env = envStub({ DB });
     DB.seedCall({ id: 'old', iccid: ICCID, outcome: 'missed', started_at: '2026-09-17T09:00:00.000Z' });
 
     await invoke(router, 'POST', '/api/control/calls/incoming', { iccid: ICCID }, env);
@@ -688,7 +808,7 @@ describe('one ring, one row', () => {
     const router = routerStub();
     setupCallRoutes(router);
     const DB = d1Stub();
-    const env = envStub({ SESSIONS: staleKvStub(), DB });
+    const env = envStub({ DB });
     DB.seedCall({
       id: 'abandoned',
       iccid: '8965030124051507919',
@@ -778,7 +898,7 @@ describe('authentication', () => {
     const response = await invoke(router, 'POST', '/api/control/calls/incoming', { iccid: ICCID, from: 'b' }, env, { 'X-API-Key': 'wrong' });
 
     expect(response.status).toBe(401);
-    expect(env.SESSIONS.call()).toBeNull();
+    expect(env.CALL_STATE.call()).toBeNull();
   });
 
   test('a browser route without a session is rejected', async () => {

@@ -26,6 +26,14 @@ migrations_dir = "migrations"
 binding = "SESSIONS"
 id = "4d7e71fcf5c44a469aa63e28f60cb6d7"
 
+[[durable_objects.bindings]]
+name = "CALL_STATE"
+class_name = "CallState"
+
+[[migrations]]
+tag = "call-state-v1"
+new_sqlite_classes = ["CallState"]
+
 # Environment variables
 [vars]
 ENVIRONMENT = "production"
@@ -61,7 +69,6 @@ AUTH0_ROLE_NAMESPACE = "https://sexy.itoken.world/roles"  # FULL claim URI holdi
 # wrangler.toml (wrangler v3.88.0^)
 [observability.logs]
 enabled = true
-# No Durable Objects or streaming transport; the client uses request/refresh flows.
 
 # Secrets (set these with wrangler secret put)
 # AUTH0_DOMAIN - Your Auth0 domain (e.g., your-tenant.auth0.com)

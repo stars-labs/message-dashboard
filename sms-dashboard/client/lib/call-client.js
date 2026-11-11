@@ -133,6 +133,7 @@ const STATE_LABELS = {
   ringing: '来电',
   connecting: '正在连接',
   bridging: '正在接通',
+  ending: '正在挂断',
   active: '通话中',
   ended: '已结束',
 };
@@ -229,7 +230,7 @@ export async function fetchCallHistory({ limit = 30, offset = 0, iccid = null } 
 export const callApi = {
   dial: ({ iccid, number, offer, mid }) => post('/api/calls/dial', { iccid, number, offer, mid }),
   answer: ({ offer, mid }) => post('/api/calls/answer', { offer, mid }),
-  connect: () => post('/api/calls/connect'),
-  renegotiate: ({ answer }) => post('/api/calls/renegotiate', { answer }),
-  hangup: () => post('/api/calls/hangup'),
+  connect: (callId) => post('/api/calls/connect', { call_id: callId }),
+  renegotiate: ({ answer, callId }) => post('/api/calls/renegotiate', { answer, call_id: callId }),
+  hangup: (callId) => post('/api/calls/hangup', { call_id: callId }),
 };

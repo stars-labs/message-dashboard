@@ -61,16 +61,16 @@ function fakeDeps({ connectOffer = { type: 'offer', sdp: 'pull-offer' }, connect
       log.push(['api.answer', args]);
       return { call: { id: 'c' }, answer: { type: 'answer', sdp: 'sfu-answer' } };
     },
-    async connect() {
-      log.push(['api.connect']);
+    async connect(callId) {
+      log.push(['api.connect', callId]);
       return { call: { id: 'c' }, offer: connectOffer };
     },
     async renegotiate(args) {
       log.push(['api.renegotiate', args]);
       return { call: { id: 'c' } };
     },
-    async hangup() {
-      log.push(['api.hangup']);
+    async hangup(callId) {
+      log.push(['api.hangup', callId]);
       return { call: null };
     },
   };
@@ -98,10 +98,10 @@ describe('call session negotiation', () => {
       ['setLocal', 'offer'],
       ['api.dial', { iccid: '8965', number: '+6592953543', offer: { type: 'offer', sdp: 'local-offer' }, mid: '0' }],
       ['setRemote', 'answer', 'sfu-answer'],
-      ['api.connect'],
+      ['api.connect', 'c'],
       ['setRemote', 'offer', 'pull-offer'],
       ['setLocal', 'answer'],
-      ['api.renegotiate', { answer: { type: 'answer', sdp: 'local-answer' } }],
+      ['api.renegotiate', { answer: { type: 'answer', sdp: 'local-answer' }, callId: 'c' }],
     ]);
     expect(session.active).toBe(true);
   });
@@ -137,7 +137,7 @@ describe('call session teardown', () => {
     await session.hangup();
 
     expect(stopped).toHaveLength(1);
-    expect(log.slice(-2)).toEqual([['close'], ['api.hangup']]);
+    expect(log.slice(-2)).toEqual([['close'], ['api.hangup', 'c']]);
     expect(session.active).toBe(false);
   });
 
@@ -148,7 +148,7 @@ describe('call session teardown', () => {
     await expect(session.dial({ iccid: '8965', number: '+6592953543' })).rejects.toThrow('音频连接超时');
 
     expect(stopped).toHaveLength(1);
-    expect(log.at(-1)).toEqual(['api.hangup']);
+    expect(log.at(-1)).toEqual(['api.hangup', 'c']);
     expect(log.some(([name]) => name === 'api.connect')).toBe(false);
   });
 
@@ -160,6 +160,7 @@ describe('call session teardown', () => {
 
     expect(stopped).toHaveLength(1);
     expect(log).toContainEqual(['close']);
+    expect(log.some(([name]) => name === 'api.hangup')).toBe(false);
   });
 
   test('release mid-negotiation stops the sequence without a second hangup', async () => {
