@@ -1,0 +1,135 @@
+import { deriveDaemonHealth } from '../utils/daemon-health.js';
+import type { DaemonHealthRow } from '../utils/daemon-health.js';
+import { classifyD1Error, logD1Error } from '../utils/d1-error.js';
+import type { D1ErrorClassification } from '../utils/d1-error.js';
+import type { AppRequest } from '../../shared/worker-context.js';
+
+const DAEMON_HEALTH_SELECT = `
+  SELECT *,
+    CAST((julianday('now') - julianday(last_heartbeat)) * 86400 AS INTEGER) AS seconds_since_heartbeat
+  FROM daemon_health
+  WHERE daemon_id = 'orange-pi-main'
+`;
+
+function json(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-store',
+      ...headers,
+    },
+  });
+}
+
+function unavailableBody(classification: D1ErrorClassification, timestamp: string) {
+  const database: Record<string, unknown> = {
+    status: 'unavailable',
+    code: classification.code,
+  };
+  if (classification.quota) database.quota = classification.quota;
+  if (classification.retryAt) database.retry_at = classification.retryAt.toISOString();
+
+  return {
+    status: 'unavailable',
+    database,
+    daemon: {
+      status: 'unknown',
+      label: 'Unavailable',
+      reasons: ['Database dependency is unavailable'],
+      last_heartbeat: null,
+    },
+    timestamp,
+  };
+}
+
+function unavailableHeaders(classification: D1ErrorClassification): Record<string, string> {
+  return classification.retryAt
+    ? { 'Retry-After': classification.retryAt.toUTCString() }
+    : {};
+}
+
+export const healthHandler = {
+  async live(): Promise<Response> {
+    return json({
+      status: 'alive',
+      timestamp: new Date().toISOString(),
+    });
+  },
+
+  async check(request: AppRequest): Promise<Response> {
+    const { env } = request;
+    const timestamp = new Date().toISOString();
+
+    try {
+      // One indexed application-table read proves D1 is usable and supplies the
+      // daemon state. A constant SELECT 1 can succeed after table reads are blocked.
+      const daemonHealth = await env.DB.prepare(DAEMON_HEALTH_SELECT).first<DaemonHealthRow>();
+      const derived = deriveDaemonHealth(daemonHealth);
+      return json({
+        status: derived.status,
+        database: { status: 'connected' },
+        daemon: {
+          status: derived.status,
+          label: derived.label,
+          reasons: derived.reasons,
+          last_heartbeat: daemonHealth?.last_heartbeat ?? null,
+        },
+        timestamp,
+      }, derived.status === 'healthy' ? 200 : 503);
+    } catch (error) {
+      const classification = classifyD1Error(error);
+      logD1Error('health_readiness', error, classification);
+      return json(
+        unavailableBody(classification, timestamp),
+        503,
+        unavailableHeaders(classification),
+      );
+    }
+  },
+
+  async daemonStatus(request: AppRequest): Promise<Response> {
+    const { env } = request;
+
+    try {
+      const daemonHealth = await env.DB.prepare(DAEMON_HEALTH_SELECT).first<DaemonHealthRow>();
+
+      if (!daemonHealth) {
+        const derived = deriveDaemonHealth(null);
+        return json({
+          status: derived.status,
+          label: derived.label,
+          message: derived.reasons[0],
+          reasons: derived.reasons,
+          snapshot: null,
+          timestamp: new Date().toISOString(),
+        });
+      }
+
+      const derived = deriveDaemonHealth(daemonHealth);
+      const snapshot = derived.snapshot;
+
+      return json({
+        daemon_id: daemonHealth.daemon_id,
+        status: derived.status,
+        label: derived.label,
+        last_heartbeat: daemonHealth.last_heartbeat,
+        seconds_since_heartbeat: daemonHealth.seconds_since_heartbeat,
+        message: derived.reasons[0] || '正常运行中',
+        reasons: derived.reasons,
+        snapshot,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      const classification = classifyD1Error(error);
+      logD1Error('daemon_status', error, classification);
+      return json({
+        status: 'error',
+        code: classification.code,
+        message: 'Service status is temporarily unavailable',
+        retry_at: classification.retryAt?.toISOString() ?? null,
+        timestamp: new Date().toISOString(),
+      }, 503, unavailableHeaders(classification));
+    }
+  },
+};
