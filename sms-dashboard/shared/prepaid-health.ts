@@ -2,7 +2,7 @@ export const PREPAID_STALE_DAYS = 35;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-const COUNTRY_TIME_ZONES = {
+const COUNTRY_TIME_ZONES: Record<string, string> = {
   CN: 'Asia/Shanghai',
   SG: 'Asia/Singapore',
   HK: 'Asia/Hong_Kong',
@@ -18,20 +18,70 @@ const SUMMARY_PRIORITY = [
   'expiring_soon',
   'never_observed',
   'expiry_unknown',
-];
+] as const;
 
-function finiteNumber(value) {
+/** Headline verdict for a SIM. `healthy` is the absence of every reason above. */
+export type SummaryStatus = (typeof SUMMARY_PRIORITY)[number] | 'healthy' | 'not_applicable';
+
+/**
+ * Reasons a health rule can fire. `automation_unsupported` is deliberately not
+ * in SUMMARY_PRIORITY: it is evidence for the UI, never a headline status.
+ */
+export type HealthReason =
+  | (typeof SUMMARY_PRIORITY)[number]
+  | 'automation_unsupported';
+
+export interface Money {
+  value: number | string;
+  currency?: string | null;
+}
+
+export interface CashBalance extends Money {
+  observedAt?: string | null;
+}
+
+export interface AccountExpiry {
+  date?: string | null;
+}
+
+export interface PrepaidHealthInput {
+  serviceType?: string;
+  /** ISO country code from D1, unvalidated. Unknown values fall back to UTC. */
+  country?: string | null;
+  now?: Date;
+  threshold?: Money | null;
+  cashBalance?: CashBalance | null;
+  accountExpiry?: AccountExpiry | null;
+  latestQueryStatus?: string | null;
+  automationSupported?: boolean;
+  expiryExpected?: boolean;
+  verificationPending?: boolean;
+}
+
+export interface PrepaidHealthResult {
+  summaryStatus: SummaryStatus;
+  reasons: HealthReason[];
+}
+
+interface DateParts {
+  year: number;
+  month: number;
+  day: number;
+  time: number;
+}
+
+function finiteNumber(value: unknown): number | null {
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
 
-function timestampValue(value) {
+function timestampValue(value: string | null | undefined): number | null {
   if (!value) return null;
   const time = new Date(value).getTime();
   return Number.isFinite(time) ? time : null;
 }
 
-function dateParts(value) {
+function dateParts(value: unknown): DateParts | null {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ''));
   if (!match) return null;
   const year = Number(match[1]);
@@ -45,8 +95,8 @@ function dateParts(value) {
   return { year, month, day, time };
 }
 
-function regionalDate(now, country) {
-  const timeZone = COUNTRY_TIME_ZONES[country] || 'UTC';
+function regionalDate(now: Date, country: string | null): DateParts | null {
+  const timeZone = (country && COUNTRY_TIME_ZONES[country]) || 'UTC';
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone,
     year: 'numeric',
@@ -57,7 +107,10 @@ function regionalDate(now, country) {
   return dateParts(`${values.year}-${values.month}-${values.day}`);
 }
 
-function currenciesMatch(balance, threshold) {
+function currenciesMatch(
+  balance: Money | null | undefined,
+  threshold: Money | null | undefined,
+): boolean {
   if (!balance?.currency || !threshold?.currency) return true;
   return balance.currency === threshold.currency;
 }
@@ -73,18 +126,18 @@ export function evaluatePrepaidHealth({
   automationSupported = true,
   expiryExpected = false,
   verificationPending = false,
-} = {}) {
+}: PrepaidHealthInput = {}): PrepaidHealthResult {
   if (serviceType === 'postpaid') {
     return { summaryStatus: 'not_applicable', reasons: [] };
   }
 
-  const reasons = new Set();
+  const reasons = new Set<HealthReason>();
   const balanceValue = finiteNumber(cashBalance?.value);
   const thresholdValue = finiteNumber(threshold?.value);
   const observedAt = timestampValue(cashBalance?.observedAt);
   const nowTime = now.getTime();
 
-  if (['failed', 'timed_out'].includes(latestQueryStatus)) {
+  if (latestQueryStatus === 'failed' || latestQueryStatus === 'timed_out') {
     reasons.add('query_failed');
   }
   if (automationSupported === false) reasons.add('automation_unsupported');
@@ -109,11 +162,19 @@ export function evaluatePrepaidHealth({
     if (expiryExpected) reasons.add('expiry_unknown');
   } else {
     const today = regionalDate(now, country);
-    const daysRemaining = Math.round((expiry.time - today.time) / DAY_MS);
-    if (daysRemaining < 0) reasons.add('expired');
-    else if (daysRemaining <= 30) reasons.add('expiring_soon');
+    if (!today) {
+      // Unreachable while COUNTRY_TIME_ZONES holds valid ICU identifiers, but
+      // a bad entry there would otherwise throw on .time and take the caller
+      // down. Degrade to "we do not know" instead.
+      reasons.add('expiry_unknown');
+    } else {
+      const daysRemaining = Math.round((expiry.time - today.time) / DAY_MS);
+      if (daysRemaining < 0) reasons.add('expired');
+      else if (daysRemaining <= 30) reasons.add('expiring_soon');
+    }
   }
 
-  const summaryStatus = SUMMARY_PRIORITY.find((status) => reasons.has(status)) || 'healthy';
+  const summaryStatus =
+    SUMMARY_PRIORITY.find((status) => reasons.has(status)) || 'healthy';
   return { summaryStatus, reasons: [...reasons] };
 }

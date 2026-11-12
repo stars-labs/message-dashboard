@@ -88,6 +88,19 @@ describe('prepaid health policy', () => {
       .not.toContain('expiring_soon');
   });
 
+  test('unknown countries fall back to UTC instead of failing', () => {
+    // country comes from D1 unvalidated. Only CN/SG/HK have a zone; anything
+    // else (including a future country) must still produce a verdict. This
+    // pins the fallback so a future COUNTRY_TIME_ZONES entry with a bad ICU
+    // identifier cannot turn into a thrown RangeError here.
+    const result = evaluate({
+      country: 'ZZ',
+      accountExpiry: { date: '2099-12-31' },
+    });
+
+    expect(result.summaryStatus).toBe('healthy');
+  });
+
   test('reports failed queries without discarding the last observation', () => {
     const result = evaluate({ latestQueryStatus: 'timed_out' });
 
