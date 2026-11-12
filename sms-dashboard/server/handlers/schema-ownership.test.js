@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 const handlerFiles = [
-  './control.js',
+  './control.ts',
   './health.ts',
   '../api/keywords.ts',
 ];

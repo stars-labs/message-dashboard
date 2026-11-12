@@ -10,37 +10,107 @@ import {
 } from './balance-queries.js';
 import { processCarrierBillMessages } from '../utils/carrier-billing.js';
 
+import type { AppRequest, Env } from '../../shared/worker-context.js';
+import type { D1Database } from '../../shared/cf-bindings.js';
+
+/** One entry of the daemon's modem_reports array. Fields the worker reads or stores. */
+interface ModemReport {
+  equipment_id: string;
+  manufacturer?: string | null;
+  model?: string | null;
+  firmware_revision?: string | null;
+  hardware_revision?: string | null;
+  detected_iccid?: string | null;
+  detected_phone_number?: string | null;
+  detected_operator?: string | null;
+  signal_percent?: number | null;
+  rssi?: number | null;
+  modem_index?: number | null;
+  usb_port?: number | null;
+  usb_path?: string | null;
+  last_usb_path?: string | null;
+  status?: string | null;
+  [field: string]: unknown;
+}
+
+/** POST /api/control/devices body. */
+interface DevicesBody {
+  modem_reports?: unknown;
+  removed_equipment_ids?: unknown;
+  sync_mode?: unknown;
+  session_id?: unknown;
+}
+
+/** One SMS as uploaded by the daemon. */
+interface UploadedMessage {
+  id?: unknown;
+  phone_iccid?: unknown;
+  phone_number?: unknown;
+  content?: unknown;
+  timestamp?: unknown;
+}
+
+/** A stored, normalized message, before classification side effects. */
+interface StoredMessage {
+  id: string;
+  phone_iccid: string;
+  phone_number: string | null;
+  content: string;
+  timestamp: string;
+  type: 'received';
+  verification_code: string | null;
+  purpose: 'user' | 'balance_maintenance';
+  balance_check_id: string | null;
+}
+
+/** The three send outcomes the daemon reports. */
+type SmsOutcome = 'confirmed' | 'submitted_unconfirmed' | 'failed';
+
+const SMS_STATUS_FOR_OUTCOME: Record<SmsOutcome, string> = {
+  confirmed: 'sent',
+  submitted_unconfirmed: 'unknown',
+  failed: 'failed',
+};
+
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+/**
+ * Every control route authenticates with the daemon's shared API key, never
+ * Auth0. Returns a Response when the key is wrong.
+ */
+function requireApiKey(request: AppRequest, env: Env): Response | null {
+  const apiKey = request.headers.get('X-API-Key');
+  if (!apiKey || apiKey !== env.API_KEY) {
+    return json({ error: 'Unauthorized' }, 401);
+  }
+  return null;
+}
+
 const DAEMON_SESSION_ID = /^[A-Za-z0-9._:-]{1,120}$/;
 
-export function normalizeDaemonSessionId(value) {
+export function normalizeDaemonSessionId(value: unknown): string | null {
   return typeof value === 'string' && DAEMON_SESSION_ID.test(value) ? value : null;
 }
 
 export const controlHandler = {
   // Synchronize the daemon's canonical modem reports without rewriting unchanged rows.
-  async updateDevices(request) {
+  async updateDevices(request: AppRequest): Promise<Response> {
     const { env } = request;
     
-    // Check API key
-    const apiKey = request.headers.get('X-API-Key');
-    const expectedKey = env.API_KEY;
-    
-    if (!apiKey || apiKey !== expectedKey) {
-      console.error(`[control.js] API key mismatch in updateDevices`);
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-        status: 401,
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
+    const unauthorized = requireApiKey(request, env);
+    if (unauthorized) return unauthorized;
     
     // Parse request body
-    const body = await request.json();
-    const {
-      modem_reports: reports,
-      removed_equipment_ids: removedEquipmentIds,
-      sync_mode = 'incremental',
-      session_id = null,
-    } = body;
+    const body = (await request.json()) as DevicesBody;
+    const reports = body.modem_reports;
+    const removedEquipmentIds = body.removed_equipment_ids;
+    const sync_mode = body.sync_mode ?? 'incremental';
+    const session_id = body.session_id ?? null;
     if (!Array.isArray(reports) || !Array.isArray(removedEquipmentIds)) {
       return new Response(JSON.stringify({
         error: 'modem_reports and removed_equipment_ids must be arrays',
@@ -50,7 +120,7 @@ export const controlHandler = {
       });
     }
 
-    if (!['incremental', 'full'].includes(sync_mode) || (sync_mode === 'full' && !session_id)) {
+    if ((sync_mode !== 'incremental' && sync_mode !== 'full') || (sync_mode === 'full' && !session_id)) {
       return new Response(JSON.stringify({ error: 'Invalid sync mode or missing full-sync session ID' }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' },
@@ -60,11 +130,11 @@ export const controlHandler = {
     try {
       console.log(`[control.js] Received ${reports.length} modem_reports (mode: ${sync_mode}, session: ${session_id})`);
 
-      const acceptedReports = reports.filter((report) => {
+      const acceptedReports = (reports as ModemReport[]).filter((report): report is ModemReport => {
         if (!report?.equipment_id) return false;
         return !(report.equipment_id.startsWith('MODEM_') && !report.manufacturer && !report.model);
       });
-      const removedIds = [...new Set(removedEquipmentIds)];
+      const removedIds = [...new Set(removedEquipmentIds as string[])];
       if (removedIds.some((id) => typeof id !== 'string' || !id)
           || acceptedReports.some((report) => removedIds.includes(report.equipment_id))) {
         return new Response(JSON.stringify({ error: 'Invalid or conflicting removed equipment IDs' }), {
@@ -227,25 +297,14 @@ export const controlHandler = {
   },
   
   // Upload messages from Orange Pi
-  async uploadMessages(request) {
+  async uploadMessages(request: AppRequest): Promise<Response> {
     const { env } = request;
     
-    // Check API key
-    const apiKey = request.headers.get('X-API-Key');
-    
-    // Check against environment API key
-    const expectedKey = env.API_KEY;
-
-    if (!apiKey || apiKey !== expectedKey) {
-      console.error('[control.js] API key mismatch in uploadMessages');
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-        status: 401,
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
+    const unauthorized = requireApiKey(request, env);
+    if (unauthorized) return unauthorized;
     
     try {
-      const { messages } = await request.json();
+      const { messages } = (await request.json()) as { messages?: unknown };
       
       if (!Array.isArray(messages)) {
         return new Response(JSON.stringify({
@@ -257,7 +316,7 @@ export const controlHandler = {
         });
       }
       
-      for (const message of messages) {
+      for (const message of messages as UploadedMessage[]) {
         if (!message?.id || typeof message.id !== 'string') {
           return new Response(JSON.stringify({ success: false, error: 'Every message requires a daemon-assigned id' }), {
             status: 400,
@@ -273,8 +332,8 @@ export const controlHandler = {
       }
 
       let processed = 0;
-      const results = [];
-      const newMessages = [];
+      const results: Array<{ id: string; status: string; retryable?: boolean }> = [];
+      const newMessages: StoredMessage[] = [];
       
       const insertStmt = env.DB.prepare(`
         INSERT INTO messages (
@@ -297,16 +356,16 @@ export const controlHandler = {
       // Multi-part carrier replies arrive as separate messages sharing a sender and
       // timestamp, so group them before linking; otherwise the check closes on
       // whichever part is processed first.
-      const multipartReplies = mergeMultipartReplies(messages);
+      const multipartReplies = mergeMultipartReplies(messages as UploadedMessage[]);
       // Group key -> the check that claimed it, so later parts join that check.
-      const claimedReplyGroups = new Map();
+      const claimedReplyGroups = new Map<string, { id: string }>();
       
-      for (const msg of messages) {
-        const messageId = msg.id;
+      for (const msg of messages as UploadedMessage[]) {
+        const messageId = String(msg.id);
         try {
-          const phone_iccid = msg.phone_iccid;
+          const phone_iccid = String(msg.phone_iccid);
           // Fix timestamp - handle various formatting issues
-          let timestamp = msg.timestamp || new Date().toISOString();
+          let timestamp = typeof msg.timestamp === 'string' ? msg.timestamp : new Date().toISOString();
 
           // First handle URL-encoded + signs (convert to space temporarily for processing)
           timestamp = timestamp.replace(/\+/g, ' ');
@@ -323,7 +382,7 @@ export const controlHandler = {
             }
           }
 
-          const phoneNumber = msg.phone_number || null;
+          const phoneNumber = typeof msg.phone_number === 'string' ? msg.phone_number : null;
           const reply = multipartReplies.get(messageId);
           // A later part reuses its group's check rather than re-running the
           // pending lookup, which would find the same check and could queue a
@@ -341,11 +400,11 @@ export const controlHandler = {
             ? null
             : extractVerificationCode(msg.content);
 
-          const record = {
+          const record: StoredMessage = {
             id: messageId,
             phone_iccid,
             phone_number: phoneNumber,
-            content: msg.content,
+            content: String(msg.content),
             timestamp,
             type: 'received',
             verification_code: verificationCode,
@@ -411,7 +470,7 @@ export const controlHandler = {
               console.error(`Message processing error for message ${msg.id}:`, error);
             }
           })),
-          processCarrierBillMessages(env.DB, newMessages),
+          processCarrierBillMessages(env.DB, newMessages as unknown as Array<Partial<{ id: string }>>),
         ]));
       }
       
@@ -427,10 +486,9 @@ export const controlHandler = {
       });
     } catch (error) {
       console.error('[control.js] Upload messages error:', error);
-      console.error('[control.js] Error stack:', error.stack);
       return new Response(JSON.stringify({
         success: false,
-        error: 'Failed to upload messages: ' + error.message
+        error: 'Failed to upload messages: ' + (error as Error).message
       }), {
         status: 500,
         headers: { 'Content-Type': 'application/json' }
@@ -438,23 +496,14 @@ export const controlHandler = {
     }
   },
   // Cleanup test data
-  async cleanupTestData(request) {
+  async cleanupTestData(request: AppRequest): Promise<Response> {
     const { env } = request;
     
-    // Check API key
-    const apiKey = request.headers.get('X-API-Key');
-    const expectedKey = env.API_KEY;
-
-    if (!apiKey || apiKey !== expectedKey) {
-      console.error('[control.js] API key mismatch in clearMessages');
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-        status: 401,
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
+    const unauthorized = requireApiKey(request, env);
+    if (unauthorized) return unauthorized;
     
     try {
-      const { phoneIds } = await request.json();
+      const { phoneIds } = (await request.json()) as { phoneIds?: unknown };
       
       if (!Array.isArray(phoneIds)) {
         return new Response(JSON.stringify({
@@ -467,12 +516,12 @@ export const controlHandler = {
       }
       
       // Delete test SIMs by ICCID
-      const placeholders = phoneIds.map(() => '?').join(',');
+      const placeholders = (phoneIds as string[]).map(() => '?').join(',');
       const deleteStmt = env.DB.prepare(
         `DELETE FROM sims WHERE iccid IN (${placeholders})`
       );
       
-      const result = await deleteStmt.bind(...phoneIds).run();
+      const result = await deleteStmt.bind(...(phoneIds as string[])).run();
       
       // Also delete any SIMs without ICCID
       const cleanupNullIccid = await env.DB.prepare(
@@ -508,19 +557,11 @@ export const controlHandler = {
   //
   // The atomic transition to 'processing' prevents duplicate sends in the race condition
   // where daemon polls again before the SMS send completes and status is updated to 'sent'.
-  async getPendingSMS(request) {
+  async getPendingSMS(request: AppRequest): Promise<Response> {
     const { env } = request;
     
-    // Check API key
-    const apiKey = request.headers.get('X-API-Key');
-    const expectedKey = env.API_KEY;
-    
-    if (!apiKey || apiKey !== expectedKey) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-        status: 401,
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
+    const unauthorized = requireApiKey(request, env);
+    if (unauthorized) return unauthorized;
     
     try {
       const rawDaemonSessionId = request.headers.get('X-Daemon-Session-Id');
@@ -581,15 +622,10 @@ export const controlHandler = {
                  created_at,
                  id
         LIMIT 50
-      `).all();
+      `).all<{ id: string }>();
 
       if (!pendingIds.results || pendingIds.results.length === 0) {
-        return new Response(JSON.stringify({
-          success: true,
-          pending_messages: []
-        }), {
-          headers: { 'Content-Type': 'application/json' }
-        });
+        return json({ success: true, pending_messages: [] });
       }
 
       // Atomically update status to 'processing' and fetch message details
@@ -632,22 +668,19 @@ export const controlHandler = {
   },
 
   // Update SMS send result from daemon
-  async updateSMSResult(request) {
+  async updateSMSResult(request: AppRequest): Promise<Response> {
     const { env } = request;
     
-    // Check API key
-    const apiKey = request.headers.get('X-API-Key');
-    const expectedKey = env.API_KEY;
-    
-    if (!apiKey || apiKey !== expectedKey) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-        status: 401,
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
+    const unauthorized = requireApiKey(request, env);
+    if (unauthorized) return unauthorized;
     
     try {
-      const { message_id, outcome, error_message, sms_id } = await request.json();
+      const { message_id, outcome, error_message, sms_id } = (await request.json()) as {
+        message_id?: unknown;
+        outcome?: unknown;
+        error_message?: unknown;
+        sms_id?: unknown;
+      };
       
       if (!message_id) {
         return new Response(JSON.stringify({
@@ -659,7 +692,7 @@ export const controlHandler = {
         });
       }
 
-      if (!['confirmed', 'submitted_unconfirmed', 'failed'].includes(outcome)) {
+      if (outcome !== 'confirmed' && outcome !== 'submitted_unconfirmed' && outcome !== 'failed') {
         return new Response(JSON.stringify({
           success: false,
           error: 'outcome must be confirmed, submitted_unconfirmed, or failed'
@@ -670,11 +703,7 @@ export const controlHandler = {
       }
       
       // Update message status
-      const status = {
-        confirmed: 'sent',
-        submitted_unconfirmed: 'unknown',
-        failed: 'failed',
-      }[outcome];
+      const status = SMS_STATUS_FOR_OUTCOME[outcome as SmsOutcome];
       const stmt = env.DB.prepare(`
         UPDATE messages 
         SET status = ?, error_message = ?, sms_id = ?,
@@ -694,11 +723,13 @@ export const controlHandler = {
         });
       }
 
+      // The helper is still JS, and its `errorMessage = null` default types the
+      // parameter as null | undefined. A string is valid at runtime.
       await updateBalanceCheckForSmsResult(
         env.DB,
-        message_id,
+        String(message_id),
         outcome,
-        error_message || null,
+        (typeof error_message === 'string' ? error_message : null) as null,
       );
       
       // Status updates are now picked up by polling
@@ -722,29 +753,18 @@ export const controlHandler = {
   },
 
   // Clear all messages (admin endpoint)
-  async clearMessages(request) {
+  async clearMessages(request: AppRequest): Promise<Response> {
     const { env } = request;
     
-    // Check API key
-    const apiKey = request.headers.get('X-API-Key');
-    const expectedKey = env.API_KEY;
-    
-    if (!apiKey || apiKey !== expectedKey) {
-      return new Response(JSON.stringify({
-        success: false,
-        error: 'Invalid API key'
-      }), {
-        status: 401,
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
+    const unauthorized = requireApiKey(request, env);
+    if (unauthorized) return unauthorized;
 
     try {
       const result = await env.DB.prepare('DELETE FROM messages').run();
       
       return new Response(JSON.stringify({
         success: true,
-        message: `Cleared ${result.changes} messages`
+        message: `Cleared ${result.meta.changes} messages`
       }), {
         headers: { 'Content-Type': 'application/json' }
       });
@@ -752,7 +772,7 @@ export const controlHandler = {
       console.error('[control.js] Clear messages error:', error);
       return new Response(JSON.stringify({
         success: false,
-        error: 'Failed to clear messages: ' + error.message
+        error: 'Failed to clear messages: ' + (error as Error).message
       }), {
         status: 500,
         headers: { 'Content-Type': 'application/json' }
@@ -761,22 +781,14 @@ export const controlHandler = {
   },
 
   // Daemon heartbeat endpoint
-  async heartbeat(request) {
+  async heartbeat(request: AppRequest): Promise<Response> {
     const { env } = request;
     
-    // Check API key
-    const apiKey = request.headers.get('X-API-Key');
-    const expectedKey = env.API_KEY;
-    
-    if (!apiKey || apiKey !== expectedKey) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-        status: 401,
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
+    const unauthorized = requireApiKey(request, env);
+    if (unauthorized) return unauthorized;
     
     try {
-      const body = await request.json();
+      const body = (await request.json()) as Record<string, unknown>;
       const clientIp = request.headers.get('CF-Connecting-IP') ||
         request.headers.get('X-Forwarded-For') || 'unknown';
 
@@ -816,13 +828,12 @@ export const controlHandler = {
       });
     } catch (error) {
       console.error('[control.js] Heartbeat error:', error);
-      console.error('[control.js] Heartbeat error stack:', error.stack);
-      console.error('[control.js] Heartbeat error message:', error.message);
-      const status = error.message?.startsWith('Unsupported health schema') ||
-        error.message?.includes('required') ? 400 : 500;
+      const message = (error as Error).message;
+      const status = message?.startsWith('Unsupported health schema') ||
+        message?.includes('required') ? 400 : 500;
       return new Response(JSON.stringify({
         success: false,
-        error: `Failed to process heartbeat: ${error.message}`
+        error: `Failed to process heartbeat: ${(error as Error).message}`
       }), {
         status,
         headers: { 'Content-Type': 'application/json' }
@@ -832,7 +843,7 @@ export const controlHandler = {
 };
 
 // Process keywords for a message
-async function processMessageKeywords(db, message) {
+async function processMessageKeywords(db: D1Database, message: StoredMessage): Promise<void> {
   try {
     // Get active keywords
     const { results: keywords } = await db.prepare(`
@@ -840,14 +851,14 @@ async function processMessageKeywords(db, message) {
       FROM keyword_tags
       WHERE is_active = TRUE
       ORDER BY priority DESC
-    `).all();
+    `).all<{ id: number; keyword: string; case_sensitive: number; whole_word: number }>();
     
     if (keywords.length === 0) return;
     
     // Find matches for each keyword
-    const matches = [];
+    const matches: Array<{ message_id: string; keyword_tag_id: number; matched_text: string; position: number }> = [];
     for (const keyword of keywords) {
-      const keywordMatches = findKeywordMatches(message.content, keyword.keyword, keyword.case_sensitive, keyword.whole_word);
+      const keywordMatches = findKeywordMatches(message.content, keyword.keyword, Boolean(keyword.case_sensitive), Boolean(keyword.whole_word));
       for (const match of keywordMatches) {
         matches.push({
           message_id: message.id,
