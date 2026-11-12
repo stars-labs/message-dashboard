@@ -17,19 +17,20 @@ const MONTHS = new Map([
 
 const BILL_PATTERN = /^<Singtel>Dear customer, your latest bill for Singtel a\/c (\d{8}) is ready\. The total amount is SGD\$(\d{2,3})\.(\d{2}) due on (\d{2}) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (20\d{2})\. You can view and pay this bill via My Singtel app at www\.singtel\.com\/viewbill \.@?$/;
 
-function bytesToHex(bytes) {
+function bytesToHex(bytes: Uint8Array): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
-async function accountReferenceDigest(accountReference) {
+async function accountReferenceDigest(accountReference: string): Promise<string> {
   const encoded = new TextEncoder().encode(accountReference);
   const digest = await crypto.subtle.digest('SHA-256', encoded);
   return bytesToHex(new Uint8Array(digest));
 }
 
-function isoDate(dayText, monthName, yearText) {
+function isoDate(dayText: string, monthName: string, yearText: string): string | null {
   const day = Number(dayText);
   const month = MONTHS.get(monthName);
+  if (month === undefined) return null;
   const year = Number(yearText);
   const date = new Date(Date.UTC(year, month - 1, day));
   if (date.getUTCFullYear() !== year
@@ -40,11 +41,26 @@ function isoDate(dayText, monthName, yearText) {
   return `${yearText}-${String(month).padStart(2, '0')}-${dayText}`;
 }
 
+export interface SingtelBill {
+  parser_version: string;
+  amount_minor: number;
+  currency: 'SGD';
+  due_date: string;
+  account_ref_last4: string;
+  account_ref_digest: string;
+}
+
+export interface SingtelBillInput {
+  sender: unknown;
+  content: unknown;
+  expectedAccountRefDigest?: string | null;
+}
+
 export async function parseSingtelPostpaidBillSms({
   sender,
   content,
   expectedAccountRefDigest,
-}) {
+}: SingtelBillInput): Promise<SingtelBill | null> {
   if (sender !== 'Singtel'
     || typeof content !== 'string'
     || (expectedAccountRefDigest != null

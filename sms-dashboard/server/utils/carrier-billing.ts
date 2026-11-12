@@ -1,9 +1,52 @@
 import { parseSingtelPostpaidBillSms } from './singtel-postpaid-bill.js';
+import type { SingtelBill } from './singtel-postpaid-bill.js';
+import type { D1Database } from '../../shared/cf-bindings.js';
 
 const RECONCILIATION_PAGE_SIZE = 100;
 const SINGTEL_BILL_PREFIX = '<Singtel>Dear customer, your latest bill for Singtel a/c ';
 
-async function eligibleReceivingSim(db, message) {
+/**
+ * What happened to one candidate message. These are also the summary keys in
+ * handlers/carrier-billing-backfill.js, which counts each outcome.
+ */
+export type BillOutcome =
+  | 'detected'
+  | 'duplicate_detected'
+  | 'parse_conflict'
+  | 'already_processed'
+  | 'ignored'
+  | 'failed';
+
+export interface BillProcessingResult {
+  outcome: BillOutcome;
+  bill_id?: string;
+}
+
+/** The message fields bill processing requires. */
+export interface BillCandidateMessage {
+  id: string;
+  phone_iccid: string;
+  phone_number: string;
+  content: string;
+  timestamp: string;
+  type: string;
+}
+
+interface ReceivingSim {
+  iccid: string;
+  sim_index: number | null;
+}
+
+interface BillingStream {
+  id: string;
+  currency: string;
+  account_ref_digest: string;
+}
+
+async function eligibleReceivingSim(
+  db: D1Database,
+  message: BillCandidateMessage,
+): Promise<ReceivingSim | null> {
   return db.prepare(`
     SELECT iccid, sim_index
     FROM device_view
@@ -11,10 +54,10 @@ async function eligibleReceivingSim(db, message) {
       AND country = 'SG'
       AND carrier = 'Singtel'
       AND service_type = 'postpaid'
-  `).bind(message.phone_iccid).first();
+  `).bind(message.phone_iccid).first<ReceivingSim>();
 }
 
-async function activeStream(db, simIccid) {
+async function activeStream(db: D1Database, simIccid: string): Promise<BillingStream | null> {
   return db.prepare(`
     SELECT id, currency, account_ref_digest
     FROM carrier_billing_accounts
@@ -23,10 +66,14 @@ async function activeStream(db, simIccid) {
       AND country_code = 'SG'
       AND carrier = 'Singtel'
     LIMIT 1
-  `).bind(simIccid).first();
+  `).bind(simIccid).first<BillingStream>();
 }
 
-async function ensureBillingStream(db, sim, parsed) {
+async function ensureBillingStream(
+  db: D1Database,
+  sim: ReceivingSim,
+  parsed: SingtelBill,
+): Promise<BillingStream | null> {
   const existing = await activeStream(db, sim.iccid);
   if (existing) {
     if (existing.account_ref_digest !== parsed.account_ref_digest) return null;
@@ -64,7 +111,10 @@ async function ensureBillingStream(db, sim, parsed) {
   return created;
 }
 
-async function alreadyProcessed(db, sourceMessageId) {
+async function alreadyProcessed(
+  db: D1Database,
+  sourceMessageId: string,
+): Promise<{ bill_id: string } | null> {
   return db.prepare(`
     SELECT id AS bill_id
     FROM carrier_bills
@@ -74,15 +124,18 @@ async function alreadyProcessed(db, sourceMessageId) {
     FROM carrier_bill_events
     WHERE source_message_id = ?
     LIMIT 1
-  `).bind(sourceMessageId, sourceMessageId).first();
+  `).bind(sourceMessageId, sourceMessageId).first<{ bill_id: string }>();
 }
 
-async function addSystemEvent(db, {
-  billId,
-  eventType,
-  sourceMessageId,
-  metadata,
-}) {
+async function addSystemEvent(
+  db: D1Database,
+  { billId, eventType, sourceMessageId, metadata }: {
+    billId: string;
+    eventType: string;
+    sourceMessageId: string;
+    metadata: Record<string, unknown>;
+  },
+) {
   return db.prepare(`
     INSERT OR IGNORE INTO carrier_bill_events (
       id, bill_id, event_type, actor_type, source_message_id, metadata_json
@@ -96,7 +149,12 @@ async function addSystemEvent(db, {
   ).run();
 }
 
-async function storeParsedBill(db, account, message, parsed) {
+async function storeParsedBill(
+  db: D1Database,
+  account: BillingStream,
+  message: BillCandidateMessage,
+  parsed: SingtelBill,
+): Promise<BillProcessingResult> {
   const prior = await alreadyProcessed(db, message.id);
   if (prior) {
     return { outcome: 'already_processed', bill_id: prior.bill_id };
@@ -133,7 +191,8 @@ async function storeParsedBill(db, account, message, parsed) {
     SELECT id, amount_minor, currency
     FROM carrier_bills
     WHERE billing_account_id = ? AND due_date = ?
-  `).bind(account.id, parsed.due_date).first();
+  `).bind(account.id, parsed.due_date)
+    .first<{ id: string; amount_minor: number; currency: string }>();
   if (!existing) {
     const raced = await alreadyProcessed(db, message.id);
     if (raced) return { outcome: 'already_processed', bill_id: raced.bill_id };
@@ -174,35 +233,47 @@ async function storeParsedBill(db, account, message, parsed) {
   };
 }
 
-export async function processCarrierBillMessage(db, message) {
-  if (!message
-    || message.type !== 'received'
-    || message.phone_number !== 'Singtel'
-    || typeof message.id !== 'string'
-    || typeof message.phone_iccid !== 'string'
-    || typeof message.content !== 'string'
-    || typeof message.timestamp !== 'string') {
+export async function processCarrierBillMessage(
+  db: D1Database,
+  message: unknown,
+): Promise<BillProcessingResult> {
+  const m = message as Partial<BillCandidateMessage> | null | undefined;
+  if (!m
+    || m.type !== 'received'
+    || m.phone_number !== 'Singtel'
+    || typeof m.id !== 'string'
+    || typeof m.phone_iccid !== 'string'
+    || typeof m.content !== 'string'
+    || typeof m.timestamp !== 'string') {
     return { outcome: 'ignored' };
   }
 
+  const candidate = m as BillCandidateMessage;
   const parsed = await parseSingtelPostpaidBillSms({
-    sender: message.phone_number,
-    content: message.content,
+    sender: candidate.phone_number,
+    content: candidate.content,
   });
   if (!parsed) return { outcome: 'ignored' };
 
-  const sim = await eligibleReceivingSim(db, message);
+  const sim = await eligibleReceivingSim(db, candidate);
   if (!sim) return { outcome: 'ignored' };
 
   const stream = await ensureBillingStream(db, sim, parsed);
   if (!stream || parsed.currency !== stream.currency) return { outcome: 'ignored' };
-  return storeParsedBill(db, stream, message, parsed);
+  return storeParsedBill(db, stream, candidate, parsed);
 }
 
-export async function processCarrierBillMessages(db, messages, {
-  processMessage = processCarrierBillMessage,
-  logError = console.error,
-} = {}) {
+export async function processCarrierBillMessages(
+  db: D1Database,
+  messages: Array<Partial<BillCandidateMessage> | null | undefined>,
+  {
+    processMessage = processCarrierBillMessage,
+    logError = console.error,
+  }: {
+    processMessage?: typeof processCarrierBillMessage;
+    logError?: (...args: unknown[]) => void;
+  } = {},
+): Promise<BillProcessingResult[]> {
   return Promise.all(messages.map(async (message) => {
     try {
       return await processMessage(db, message);
@@ -213,9 +284,10 @@ export async function processCarrierBillMessages(db, messages, {
   }));
 }
 
-export async function reconcileCarrierBillMessages(db, {
-  pageSize = RECONCILIATION_PAGE_SIZE,
-} = {}) {
+export async function reconcileCarrierBillMessages(
+  db: D1Database,
+  { pageSize = RECONCILIATION_PAGE_SIZE }: { pageSize?: number } = {},
+): Promise<{ scanned: number; detected: number; remaining: number }> {
   const limit = Math.max(1, Math.min(Number(pageSize) || RECONCILIATION_PAGE_SIZE, 500));
   const query = await db.prepare(`
     SELECT DISTINCT
@@ -242,8 +314,8 @@ export async function reconcileCarrierBillMessages(db, {
       )
     ORDER BY m.timestamp DESC, m.id DESC
     LIMIT ?
-  `).bind(SINGTEL_BILL_PREFIX, limit + 1).all();
-  const candidates = query.results ?? [];
+  `).bind(SINGTEL_BILL_PREFIX, limit + 1).all<BillCandidateMessage>();
+  const candidates = query.results;
   const page = candidates.slice(0, limit);
   let detected = 0;
 

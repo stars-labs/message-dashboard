@@ -1,35 +1,12 @@
-import { previewCarrierBillBackfill } from '../utils/carrier-billing-backfill.js';
+import { previewCarrierBillBackfill, AccountNotReadyError } from '../utils/carrier-billing-backfill.js';
+import type { BackfillPreview } from '../utils/carrier-billing-backfill.js';
 import { processCarrierBillMessage } from '../utils/carrier-billing.js';
+import type { BillOutcome } from '../utils/carrier-billing.js';
 import type { AppRequest } from '../../shared/worker-context.js';
 import type { D1Database } from '../../shared/cf-bindings.js';
 
-/** The outcome strings processCarrierBillMessage can return that the summary counts. */
-type BillOutcome = 'detected' | 'duplicate_detected' | 'parse_conflict' | 'already_processed';
-
-/** One candidate in a backfill preview. `message` is stripped before it is returned. */
-interface BackfillCandidate {
-  source_message_ids: string[];
-  source_kind: 'complete' | 'reassembled' | string;
-  disposition: string;
-  message: Record<string, unknown>;
-  [field: string]: unknown;
-}
-
-/** What previewCarrierBillBackfill returns. Declared here because that module is JS. */
-interface BackfillPreview {
-  account: { id: string; version: number; [field: string]: unknown };
-  summary: {
-    candidates: number;
-    complete_messages: number;
-    reassembled_messages: number;
-    new_bills: number;
-    duplicates: number;
-    conflicts: number;
-    already_processed: number;
-  };
-  candidates: BackfillCandidate[];
-  preview_digest: string;
-}
+/** The outcomes the execute summary counts. Processing can also return 'ignored'. */
+type CountedOutcome = Extract<BillOutcome, 'detected' | 'duplicate_detected' | 'parse_conflict' | 'already_processed'>;
 
 /** The request body fields this handler reads. */
 interface BackfillBody {
@@ -75,13 +52,10 @@ async function buildPreview(db: D1Database, accountId: unknown): Promise<BuildPr
     return { response: json({ error: 'account_id is required' }, 400) };
   }
   try {
-    // Through `unknown`: previewCarrierBillBackfill is still JS, so its inferred type
-// lacks the `disposition` it assigns per candidate before returning.
-    return { preview: (await previewCarrierBillBackfill(db, accountId)) as unknown as BackfillPreview };
+    return { preview: await previewCarrierBillBackfill(db, accountId) };
   } catch (error) {
-    const e = error as { code?: string; message?: string };
-    if (e?.code === 'ACCOUNT_NOT_READY') {
-      return { response: json({ error: e.message }, 409) };
+    if (error instanceof AccountNotReadyError) {
+      return { response: json({ error: error.message }, 409) };
     }
     throw error;
   }
@@ -140,15 +114,20 @@ export const carrierBillingBackfillHandler = {
       return json({ error: 'Backfill preview contains no bill candidates' }, 400);
     }
 
-    const summary: Record<BillOutcome, number> = {
+    const summary: Record<CountedOutcome, number> = {
       detected: 0,
       duplicate_detected: 0,
       parse_conflict: 0,
       already_processed: 0,
     };
     for (const candidate of preview.candidates) {
-      const processed = await processCarrierBillMessage(request.env.DB, candidate.message) as { outcome: string };
-      if (Object.hasOwn(summary, processed.outcome)) summary[processed.outcome as BillOutcome] += 1;
+      const processed = await processCarrierBillMessage(request.env.DB, candidate.message);
+      // 'ignored' and 'failed' are not counted: the preview already guaranteed a
+      // parsable bill, so they would indicate a concurrent change, not a summary
+      // category the operator acts on.
+      if (Object.hasOwn(summary, processed.outcome)) {
+        summary[processed.outcome as CountedOutcome] += 1;
+      }
     }
 
     await request.env.DB.prepare(`
