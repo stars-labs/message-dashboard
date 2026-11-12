@@ -6,8 +6,32 @@ import { getUserRoles, setUserRole } from '../utils/auth0-management.js';
 import { indexSession, unindexSession } from '../utils/user-sessions.js';
 import { scheduleAuthAudit } from '../utils/audit-log.js';
 import { boundedErrorText } from '../utils/d1-error.js';
+import type { Env, AppRequest, RequestUser } from '../../shared/worker-context.js';
 
-function logAuthFailure(event, error, details = {}) {
+/** Token set returned by the authorization_code exchange. */
+interface TokenSet {
+  access_token?: string;
+  id_token?: string;
+}
+
+/** What Auth0's /userinfo returns, limited to the fields used here. */
+interface Auth0UserInfo {
+  sub: string;
+  email?: string;
+  name?: string;
+  nickname?: string;
+  picture?: string;
+  email_verified?: unknown;
+  [claim: string]: unknown;
+}
+
+/** Signature of auth0Handler.verifyToken, injectable for tests. */
+type VerifyToken = (
+  token: string,
+  audience?: string,
+) => Promise<Record<string, unknown> | null>;
+
+function logAuthFailure(event: string, error: unknown, details: Record<string, unknown> = {}): void {
   console.error(JSON.stringify({
     event,
     ...details,
@@ -15,7 +39,7 @@ function logAuthFailure(event, error, details = {}) {
   }));
 }
 
-function authenticationUnavailable() {
+function authenticationUnavailable(): Response {
   const body = `<!doctype html>
 <html lang="en">
   <head>
@@ -41,7 +65,12 @@ function authenticationUnavailable() {
   });
 }
 
-export async function resolveLoginRoles({ userInfo, tokens, env, verifyToken }) {
+export async function resolveLoginRoles({ userInfo, tokens, env, verifyToken }: {
+  userInfo: Record<string, unknown>;
+  tokens: TokenSet;
+  env: Env;
+  verifyToken: VerifyToken;
+}): Promise<string[]> {
   const roleConfig = createRoleConfig(env);
   let roles = rolesFromToken(userInfo, roleConfig);
 
@@ -72,7 +101,13 @@ export async function ensureDashboardLoginRole({
   env,
   getUserRoles: loadUserRoles = getUserRoles,
   setUserRole: assignUserRole = setUserRole,
-}) {
+}: {
+  tokenRoles: unknown;
+  userId: string;
+  env: Env;
+  getUserRoles?: (env: Env, userId: string) => Promise<string[]>;
+  setUserRole?: (env: Env, userId: string, roleName: string) => Promise<void>;
+}): Promise<{ roles: string[]; autoAssignedRole: string | null }> {
   const roleConfig = createRoleConfig(env);
   const rolesFromLogin = Array.isArray(tokenRoles) ? tokenRoles : [];
 
@@ -94,7 +129,7 @@ export async function ensureDashboardLoginRole({
 
 export const auth0Handler = {
   // Login - redirect to Auth0
-  async login(request) {
+  async login(request: AppRequest): Promise<Response> {
     console.log('[Auth0 Handler] Login route hit');
     const { env } = request;
     const url = new URL(request.url);
@@ -127,7 +162,7 @@ export const auth0Handler = {
   },
 
   // Callback - handle Auth0 response
-  async callback(request) {
+  async callback(request: AppRequest): Promise<Response> {
     const { env } = request;
     const roleConfig = createRoleConfig(env);
     const url = new URL(request.url);
@@ -180,7 +215,7 @@ export const auth0Handler = {
         });
       }
       
-      const tokens = await tokenResponse.json();
+      const tokens = await tokenResponse.json() as TokenSet;
       
       // Get user info from Auth0
       const userResponse = await fetch(`https://${env.AUTH0_DOMAIN}/userinfo`, {
@@ -200,7 +235,7 @@ export const auth0Handler = {
         });
       }
       
-      const userInfo = await userResponse.json();
+      const userInfo = await userResponse.json() as Auth0UserInfo;
       
       // Create or update user in database
       const userId = userInfo.sub;
@@ -220,10 +255,10 @@ export const auth0Handler = {
         // production and crashes with "Cannot read properties of undefined
         // (reading 'verifyToken')". Call the exported handler explicitly instead of
         // depending on invocation context.
-        verifyToken: (token, audience) => auth0Handler.verifyToken(token, env, audience),
+        verifyToken: (token: string, audience?: string) => auth0Handler.verifyToken(token, env, audience),
       });
 
-      const user = {
+      const user: RequestUser & { provider: string } = {
         id: userId,
         email: userInfo.email,
         name: userInfo.name || userInfo.nickname,
@@ -340,7 +375,7 @@ export const auth0Handler = {
   },
 
   // Logout
-  async logout(request) {
+  async logout(request: AppRequest): Promise<Response> {
     const { env } = request;
 
     // Reads the cookie as well as the header, otherwise a browser logout left the KV
@@ -355,7 +390,7 @@ export const auth0Handler = {
       // accumulate dead tokens until its own TTL expired.
       try {
         const raw = await env.SESSIONS.get(credential.token);
-        const userId = raw ? JSON.parse(raw)?.user?.id : null;
+        const userId: string | null = raw ? (JSON.parse(raw)?.user?.id ?? null) : null;
         if (userId) await unindexSession(env, userId, credential.token);
       } catch (error) {
         console.error('Failed to prune session index on logout:', error);
@@ -366,7 +401,7 @@ export const auth0Handler = {
 
     const url = new URL(request.url);
     const logoutUrl = new URL(`https://${env.AUTH0_DOMAIN}/v2/logout`);
-    logoutUrl.searchParams.set('client_id', env.AUTH0_CLIENT_ID);
+    logoutUrl.searchParams.set('client_id', env.AUTH0_CLIENT_ID ?? '');
     logoutUrl.searchParams.set('returnTo', url.origin);
 
     // Clear the cookie locally too; the Auth0 redirect only ends the IdP session.
@@ -380,7 +415,7 @@ export const auth0Handler = {
   },
 
   // Get current user
-  async me(request) {
+  async me(request: AppRequest): Promise<Response> {
     const { user } = request;
 
     return new Response(JSON.stringify({
@@ -399,13 +434,19 @@ export const auth0Handler = {
   },
 
   // Verify JWT token (for API calls)
-  async verifyToken(token, env, audience = env.AUTH0_AUDIENCE || env.AUTH0_CLIENT_ID) {
+  async verifyToken(
+    token: string,
+    env: Env,
+    audience: string | undefined = env.AUTH0_AUDIENCE || env.AUTH0_CLIENT_ID,
+  ): Promise<Record<string, unknown> | null> {
     try {
       const JWKS = createRemoteJWKSet(new URL(`https://${env.AUTH0_DOMAIN}/.well-known/jwks.json`));
       
+      // Calling with no audience would make jose reject on `aud`; fall back to the
+      // client id so the call is always well-defined.
       const { payload } = await jwtVerify(token, JWKS, {
         issuer: `https://${env.AUTH0_DOMAIN}/`,
-        audience
+        audience: audience ?? env.AUTH0_CLIENT_ID,
       });
       
       return payload;
