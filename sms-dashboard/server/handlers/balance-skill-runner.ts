@@ -4,19 +4,54 @@ import {
   parseBalanceSkillConfig,
   validateBalanceSkillDecision,
 } from '../utils/balance-skill.js';
+import type { BalanceDecision, BalanceSkill } from '../utils/balance-skill.js';
 import {
   authorizeRunnerControl,
   runnerCanAccessOwner,
   RUNNER_SCOPES,
 } from '../utils/runner-auth.js';
+import type { AppRequest } from '../../shared/worker-context.js';
+import type { D1Database, D1PreparedStatement } from '../../shared/cf-bindings.js';
 
 const LEASE_SECONDS = 120;
 
-function json(data, status = 200) {
+/**
+ * The job row loadJob selects, and the last argument of queueBalanceFollowUp.
+ * `check_id` is the balance check's id because the caller rebuilds the object as
+ * `{ ...job, id: job.check_id }`.
+ */
+interface SkillJob {
+  id: string;
+  check_id: string;
+  response_message_id: string;
+  step_index: number;
+  status: string;
+  lease_owner: string | null;
+  lease_expires_at: string | null;
+  attempts: number;
+  check_status: string;
+  sim_iccid: string | null;
+  response_sender: string | null;
+  requested_by_subject: string | null;
+  destination: string | null;
+  skill_config: unknown;
+  sim_number: string | null;
+  response_content: string;
+}
+
+/** Body of POST /api/control/balance-skills/jobs/:id/decision and .../release. */
+interface DecisionBody {
+  runner_id?: unknown;
+  decision?: unknown;
+  model?: unknown;
+  error?: unknown;
+}
+
+function json(data: unknown, status = 200): Response {
   return Response.json(data, { status });
 }
 
-async function readJson(request) {
+async function readJson(request: AppRequest): Promise<Record<string, unknown> | null> {
   try {
     return await request.json();
   } catch {
@@ -24,7 +59,7 @@ async function readJson(request) {
   }
 }
 
-async function loadJob(db, id) {
+async function loadJob(db: D1Database, id: string | undefined): Promise<SkillJob | null> {
   return db.prepare(`
     SELECT
       j.id, j.check_id, j.response_message_id, j.step_index,
@@ -40,10 +75,16 @@ async function loadJob(db, id) {
     LEFT JOIN device_view dv ON dv.iccid = c.sim_iccid
     JOIN messages rm ON rm.id = j.response_message_id
     WHERE j.id = ?
-  `).bind(id).first();
+  `).bind(id).first<SkillJob>();
 }
 
-function decisionStatement(db, job, skill, model, decision) {
+function decisionStatement(
+  db: D1Database,
+  job: SkillJob,
+  skill: BalanceSkill,
+  model: unknown,
+  decision: BalanceDecision,
+): D1PreparedStatement {
   return db.prepare(`
     INSERT INTO sim_balance_skill_decisions (
       check_id, response_message_id, step_index, skill_id, skill_version,
@@ -66,7 +107,7 @@ function decisionStatement(db, job, skill, model, decision) {
 }
 
 export const balanceSkillRunnerHandler = {
-  async claim(request) {
+  async claim(request: AppRequest): Promise<Response> {
     const auth = await authorizeRunnerControl(request, RUNNER_SCOPES.smsAi);
     if (!auth.authorized) {
       return json({ error: 'Unauthorized' }, 401);
@@ -103,7 +144,7 @@ export const balanceSkillRunnerHandler = {
       auth.authMode,
       auth.subject,
       auth.authMode,
-    ).first();
+    ).first<{ id: string }>();
 
     if (!leased) return new Response(null, { status: 204 });
     const job = await loadJob(request.env.DB, leased.id);
@@ -129,18 +170,18 @@ export const balanceSkillRunnerHandler = {
     });
   },
 
-  async decide(request) {
+  async decide(request: AppRequest): Promise<Response> {
     const auth = await authorizeRunnerControl(request, RUNNER_SCOPES.smsAi);
     if (!auth.authorized) {
       return json({ error: 'Unauthorized' }, 401);
     }
-    const body = await readJson(request);
+    const body = (await readJson(request)) as DecisionBody | null;
     if (!body || typeof body.runner_id !== 'string' || !body.decision) {
       return json({ error: 'runner_id and decision are required' }, 400);
     }
 
     const db = request.env.DB;
-    const job = await loadJob(db, request.params.id);
+    const job = await loadJob(db, request.params?.id);
     if (!job) return json({ error: 'Skill job not found' }, 404);
     if (!runnerCanAccessOwner(auth, job.requested_by_subject)) {
       return json({ error: 'Skill job belongs to another account' }, 403);
@@ -156,7 +197,7 @@ export const balanceSkillRunnerHandler = {
     const skill = parseBalanceSkillConfig(job.skill_config);
     if (!skill) return json({ error: 'Balance skill configuration is invalid' }, 409);
 
-    let decision;
+    let decision: BalanceDecision;
     try {
       decision = validateBalanceSkillDecision({
         decision: body.decision,
@@ -164,7 +205,7 @@ export const balanceSkillRunnerHandler = {
         skill,
       });
     } catch (error) {
-      return json({ error: error.message }, 400);
+      return json({ error: (error as Error).message }, 400);
     }
 
     const audit = decisionStatement(db, job, skill, body.model, decision);
@@ -204,7 +245,7 @@ export const balanceSkillRunnerHandler = {
             WHERE c.id = check_id AND c.status = 'parsed' AND c.step_index = ?
           )
       `).bind(job.id, body.runner_id, job.step_index);
-      const results = await db.batch([
+      const results = await db.batch<{ meta?: { changes?: number } }>([
         db.prepare(`
           UPDATE sim_balance_checks
           SET status = 'parsed', completed_at = CURRENT_TIMESTAMP,
@@ -248,16 +289,16 @@ export const balanceSkillRunnerHandler = {
     return json({ success: true, action: 'stop', reason: decision.reason });
   },
 
-  async release(request) {
+  async release(request: AppRequest): Promise<Response> {
     const auth = await authorizeRunnerControl(request, RUNNER_SCOPES.smsAi);
     if (!auth.authorized) {
       return json({ error: 'Unauthorized' }, 401);
     }
-    const body = await readJson(request);
+    const body = (await readJson(request)) as DecisionBody | null;
     if (!body || typeof body.runner_id !== 'string') {
       return json({ error: 'runner_id is required' }, 400);
     }
-    const job = await loadJob(request.env.DB, request.params.id);
+    const job = await loadJob(request.env.DB, request.params?.id);
     if (!job) return json({ error: 'Skill job not found' }, 404);
     if (!runnerCanAccessOwner(auth, job.requested_by_subject)) {
       return json({ error: 'Skill job belongs to another account' }, 403);
@@ -267,7 +308,11 @@ export const balanceSkillRunnerHandler = {
       SET status = 'pending', lease_owner = NULL, lease_expires_at = NULL,
           last_error = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ? AND status = 'leased' AND lease_owner = ?
-    `).bind(String(body.error || 'Runner released the job').slice(0, 1000), request.params.id, body.runner_id).run();
+    `).bind(
+      String(body.error || 'Runner released the job').slice(0, 1000),
+      request.params?.id,
+      body.runner_id,
+    ).run();
     if (Number(result?.meta?.changes || 0) === 0) {
       return json({ error: 'Skill job lease is not active for this runner' }, 409);
     }
