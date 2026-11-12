@@ -30,7 +30,7 @@ export async function fetchWithAuth(endpoint, options = {}) {
     let errorData;
     try {
       errorData = JSON.parse(errorText);
-    } catch (e) {
+    } catch {
       errorData = { error: 'Unknown error' };
     }
     // Include `detail` when the server sends one. Without it an upstream failure
@@ -124,7 +124,7 @@ export const api = {
   async getUser() {
     try {
       return await apiRequest('getUser');
-    } catch (error) {
+    } catch {
       // Fallback to HTTP for auth (needed for initial login)
       return await fetchWithAuth('/api/auth/me');
     }

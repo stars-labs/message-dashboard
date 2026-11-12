@@ -457,8 +457,8 @@ async function queryBalance(job, context, nativeResponsePromise, sessionIdentity
   // serving balance data — their backend is temporarily unavailable.
   // Check the active page URL before attempting the API post so we can
   // release (retry later) rather than fail the job permanently.
-  const activePage = context.pages()[0];
-  if (activePage && isUnicomErrorPage(activePage.url())) {
+  const page = context.pages()[0];
+  if (page && isUnicomErrorPage(page.url())) {
     throw new Error('China Unicom balance service unavailable (redirected to error page); will retry');
   }
 
@@ -499,7 +499,7 @@ async function queryBalance(job, context, nativeResponsePromise, sessionIdentity
     await mkdir(diagnosticsDirectory, { recursive: true });
     const responsePath = join(diagnosticsDirectory, `${job.id.replace(/[^a-zA-Z0-9_-]/g, '_')}.response.json`);
     await writeFile(responsePath, `${JSON.stringify(payload, null, 2)}\n`);
-    throw new Error(`${error.message}; response saved to ${responsePath}`);
+    throw new Error(`${error.message}; response saved to ${responsePath}`, { cause: error });
   }
 }
 

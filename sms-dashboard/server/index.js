@@ -615,7 +615,7 @@ setupCallRoutes(router);
 // Login page route - removed duplicate, using auth0Handler.login above
 
 // Serve frontend for all other routes - check authentication
-router.get('*', async (request, env, ctx) => {
+router.get('*', async (request, env) => {
   const url = new URL(request.url);
 
   // Skip authentication for public routes
@@ -707,7 +707,7 @@ export default {
   },
 
   // Nightly maintenance (cron in wrangler.toml).
-  async scheduled(event, env, ctx) {
+  async scheduled(event, env) {
     console.log(`[scheduled] cron ${event.cron} firing`);
 
     try {

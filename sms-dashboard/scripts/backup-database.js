@@ -527,7 +527,7 @@ async function verifyBackup() {
             console.log(`  ❌ ${tableName}: ${count} rows (expected ${info.rowCount})`);
             allMatch = false;
           }
-        } catch (e) {
+        } catch {
           console.log(`  ❌ ${tableName}: Failed to verify`);
           allMatch = false;
         }

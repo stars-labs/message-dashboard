@@ -42,18 +42,18 @@ function generateAssetsModule() {
   let code = '// Auto-generated frontend assets\n';
   code += 'export const FRONTEND_ASSETS = {\n';
   
-  for (const [path, content] of Object.entries(files)) {
-    const mimeType = getMimeType(path);
+  for (const [assetPath, content] of Object.entries(files)) {
+    const mimeType = getMimeType(assetPath);
     const isText = mimeType.startsWith('text/') || mimeType.includes('javascript') || mimeType.includes('json');
     
     if (isText) {
       // For text files, store as string
       const escaped = JSON.stringify(content.toString('utf-8'));
-      code += `  '${path}': { content: ${escaped}, type: '${mimeType}' },\n`;
+      code += `  '${assetPath}': { content: ${escaped}, type: '${mimeType}' },\n`;
     } else {
       // For binary files, store as base64
       const base64 = content.toString('base64');
-      code += `  '${path}': { content: '${base64}', type: '${mimeType}', encoding: 'base64' },\n`;
+      code += `  '${assetPath}': { content: '${base64}', type: '${mimeType}', encoding: 'base64' },\n`;
     }
   }
   

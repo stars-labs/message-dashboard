@@ -333,8 +333,8 @@ export const auth0Handler = {
           'Set-Cookie': `auth_token=${sessionToken}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=86400`
         }
       });
-    } catch (error) {
-      logAuthFailure('auth_callback_failed', error);
+    } catch (exchangeError) {
+      logAuthFailure('auth_callback_failed', exchangeError);
       return authenticationUnavailable();
     }
   },
@@ -409,7 +409,7 @@ export const auth0Handler = {
       });
       
       return payload;
-    } catch (error) {
+    } catch {
       // JWT verification failed
       return null;
     }

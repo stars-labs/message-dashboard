@@ -272,7 +272,7 @@ async function restoreDatabase() {
   console.log(`  Tables: ${Object.keys(metadata.tables).length}`);
   
   let totalRows = 0;
-  for (const [table, info] of Object.entries(metadata.tables)) {
+  for (const info of Object.values(metadata.tables)) {
     totalRows += info.rowCount;
   }
   console.log(`  Total rows: ${totalRows}`);

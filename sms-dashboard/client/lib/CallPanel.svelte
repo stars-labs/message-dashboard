@@ -71,13 +71,13 @@
 
   /** Tapping a log row loads it back into the dialer, ready to call again. */
   function reuse(entry) {
-    const sim = callable.find((phone) => phone.iccid === entry.iccid);
-    if (sim) {
-      iccid = sim.iccid;
+    const matched = callable.find((phone) => phone.iccid === entry.iccid);
+    if (matched) {
+      iccid = matched.iccid;
       simListOpen = false;
     }
     if (entry.remote_number) number = entry.remote_number;
-    localError = sim ? null : '这通电话用的卡现在不可用，请另选一张卡';
+    localError = matched ? null : '这通电话用的卡现在不可用，请另选一张卡';
   }
 
   function submitDial() {

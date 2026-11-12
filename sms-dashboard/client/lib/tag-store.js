@@ -120,12 +120,11 @@ class TagService {
 
   // Private method for keyword matching
   _performKeywordMatching(content, keywordList) {
-    const matches = [];
     const uniqueTags = new Map();
-    
+
     for (const keyword of keywordList) {
-      const keywordMatches = this._findMatches(content, keyword);
-      for (const match of keywordMatches) {
+      // One entry per match: the count is how many times the tag fired.
+      for (let seen = 0; seen < this._findMatches(content, keyword).length; seen++) {
         if (!uniqueTags.has(keyword.tag)) {
           uniqueTags.set(keyword.tag, {
             tag: keyword.tag,

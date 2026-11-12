@@ -177,7 +177,7 @@ async function cacheMessages(messages) {
   try {
     await initDB();
 
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       const transaction = db.transaction([MESSAGES_STORE], 'readwrite');
       const store = transaction.objectStore(MESSAGES_STORE);
 

@@ -36,8 +36,8 @@ function callStateStub(call = null) {
     },
     blockConcurrencyWhile: (fn) => fn(),
   }, {});
-  const replace = (call) => data.set('call', {
-    call, revision: crypto.randomUUID(), expiresAt: Date.now() + 3_600_000,
+  const replace = (nextCall) => data.set('call', {
+    call: nextCall, revision: crypto.randomUUID(), expiresAt: Date.now() + 3_600_000,
   });
   if (call) replace(call);
   return {
@@ -270,9 +270,9 @@ describe('outbound media setup', () => {
       '/sessions/new': [201, { sessionId: 'browser' }],
       '/sessions/browser/tracks/new': [200, { sessionDescription: { type: 'answer', sdp: 'v=0 answer' }, tracks: [{ trackName: 'mic', mid: '0' }] }],
     });
-    const request = { number: '+6592953543', offer: OFFER, mid: '0' };
+    const dial = { number: '+6592953543', offer: OFFER, mid: '0' };
 
-    const invalid = await invoke(router, 'POST', '/api/calls/dial', { ...request, iccid: iccid.replace('c', 'g') }, env);
+    const invalid = await invoke(router, 'POST', '/api/calls/dial', { ...dial, iccid: iccid.replace('c', 'g') }, env);
     expect(invalid.status).toBe(400);
     expect(sfu).toHaveLength(0);
 
@@ -311,10 +311,10 @@ describe('outbound media setup', () => {
       '/sessions/new': [201, { sessionId: 'browser' }],
       '/sessions/browser/tracks/new': [200, { sessionDescription: { type: 'answer', sdp: 'answer' } }],
     });
-    const request = { iccid: ICCID, number: '+6592953543', offer: OFFER, mid: '0' };
+    const dial = { iccid: ICCID, number: '+6592953543', offer: OFFER, mid: '0' };
     const responses = await Promise.all([
-      invoke(router, 'POST', '/api/calls/dial', request, env),
-      invoke(router, 'POST', '/api/calls/dial', request, env),
+      invoke(router, 'POST', '/api/calls/dial', dial, env),
+      invoke(router, 'POST', '/api/calls/dial', dial, env),
     ]);
     expect(responses.map((response) => response.status).sort()).toEqual([200, 409]);
     expect(sfu.filter(({ path }) => path === '/sessions/new')).toHaveLength(1);

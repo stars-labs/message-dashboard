@@ -91,7 +91,7 @@
         onsuccess?.({
           phone_iccid: phone.iccid,
           phone_number: phoneNumber,
-          ...(response.data || {}),
+          ...response.data,
         });
         close();
       } else {

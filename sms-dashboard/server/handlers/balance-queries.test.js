@@ -340,7 +340,7 @@ describe('POST /api/balance-checks/query', () => {
     const batches = [];
     const db = {
       prepare(sql) {
-        const execute = (params = []) => ({
+        const execute = () => ({
           async all() {
             if (sql.includes('FROM device_view')) return { results: [unicomPhone] };
             if (sql.includes('FROM sim_balance_profiles')) {

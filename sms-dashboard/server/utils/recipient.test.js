@@ -54,7 +54,7 @@ describe('normalizeRecipient — AT command injection', () => {
   });
 
   test('rejects a double quote closing the CMGS argument', () => {
-    expect(normalizeRecipient('+65123\"').ok).toBe(false);
+    expect(normalizeRecipient('+65123"').ok).toBe(false);
   });
 
   test('rejects SMS-entry control characters', () => {

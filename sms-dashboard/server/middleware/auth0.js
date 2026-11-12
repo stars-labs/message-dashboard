@@ -80,7 +80,7 @@ export async function handleAuth0(request) {
     // Store the full Auth0 token payload for role checking
     request.auth0Token = jwtPayload;
     
-  } catch (error) {
+  } catch {
     // Auth0 middleware error
     return new Response(JSON.stringify({ error: 'Authentication failed' }), {
       status: 401,

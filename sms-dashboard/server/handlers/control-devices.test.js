@@ -38,11 +38,11 @@ function d1(database) {
   };
 }
 
-function request(db, body) {
+function apiRequest(db, payload) {
   return {
     env: { API_KEY: 'secret', DB: db },
     headers: new Headers({ 'X-API-Key': 'secret' }),
-    json: async () => body,
+    json: async () => payload,
     ctx: { waitUntil() {} },
   };
 }
@@ -132,16 +132,16 @@ describe('device synchronization write suppression', () => {
   test('suppresses unchanged reports and persists every delta selected by the daemon', async () => {
     const db = d1(sqlite);
 
-    expect((await controlHandler.updateDevices(request(db, body()))).status).toBe(200);
-    expect((await controlHandler.updateDevices(request(db, body()))).status).toBe(200);
+    expect((await controlHandler.updateDevices(apiRequest(db, body()))).status).toBe(200);
+    expect((await controlHandler.updateDevices(apiRequest(db, body()))).status).toBe(200);
     expect(sqlite.query('SELECT COUNT(*) AS count FROM modem_update_log').get().count).toBe(0);
 
-    expect((await controlHandler.updateDevices(request(db, body('incremental', [
+    expect((await controlHandler.updateDevices(apiRequest(db, body('incremental', [
       report({ signal_percent: 60 }),
     ])))).status).toBe(200);
     expect(sqlite.query('SELECT COUNT(*) AS count FROM modem_update_log').get().count).toBe(1);
 
-    expect((await controlHandler.updateDevices(request(db, body('incremental', [
+    expect((await controlHandler.updateDevices(apiRequest(db, body('incremental', [
       report({ signal_percent: 60, status: 'connected' }),
     ])))).status).toBe(200);
     expect(sqlite.query('SELECT COUNT(*) AS count FROM modem_update_log').get().count).toBe(2);
@@ -161,8 +161,8 @@ describe('device synchronization write suppression', () => {
       VALUES ('modem-b', 'iccid-b', 40, -90, '1-2', 'active')
     `).run();
 
-    expect((await controlHandler.updateDevices(request(db, body('full')))).status).toBe(200);
-    expect((await controlHandler.updateDevices(request(db, body('full')))).status).toBe(200);
+    expect((await controlHandler.updateDevices(apiRequest(db, body('full')))).status).toBe(200);
+    expect((await controlHandler.updateDevices(apiRequest(db, body('full')))).status).toBe(200);
 
     expect(sqlite.query(`
       SELECT equipment_id, COUNT(*) AS count
@@ -195,7 +195,7 @@ describe('device synchronization write suppression', () => {
         ('modem-b', 'iccid-b', 40, -90, '1-2', 'active')
     `).run();
 
-    const response = await controlHandler.updateDevices(request(db, body('full', [])));
+    const response = await controlHandler.updateDevices(apiRequest(db, body('full', [])));
 
     expect(response.status).toBe(200);
     expect(sqlite.query(`
@@ -216,7 +216,7 @@ describe('device synchronization write suppression', () => {
 
     const payload = body('incremental', []);
     payload.removed_equipment_ids = ['modem-b'];
-    const response = await controlHandler.updateDevices(request(db, payload));
+    const response = await controlHandler.updateDevices(apiRequest(db, payload));
 
     expect(response.status).toBe(200);
     expect(sqlite.query(`
@@ -236,13 +236,13 @@ describe('device synchronization write suppression', () => {
     const payload = body();
     delete payload.removed_equipment_ids;
 
-    expect((await controlHandler.updateDevices(request(d1(sqlite), payload))).status).toBe(400);
+    expect((await controlHandler.updateDevices(apiRequest(d1(sqlite), payload))).status).toBe(400);
   });
 
   test('rejects the removed legacy device payload without touching D1', async () => {
     const calls = [];
     const db = { prepare(sql) { calls.push(sql); throw new Error('unexpected D1 access'); } };
-    const response = await controlHandler.updateDevices(request(db, {
+    const response = await controlHandler.updateDevices(apiRequest(db, {
       modems: [report()],
       sims: [],
       sync_mode: 'incremental',
@@ -256,7 +256,7 @@ describe('device synchronization write suppression', () => {
 
 describe('message upload idempotency', () => {
   test('requires a daemon-assigned ID before touching D1', async () => {
-    const response = await controlHandler.uploadMessages(request(d1(sqlite), {
+    const response = await controlHandler.uploadMessages(apiRequest(d1(sqlite), {
       messages: [{ phone_iccid: 'iccid-a', content: 'hello', timestamp: '2026-09-03T00:00:00.000Z' }],
     }));
 
@@ -272,14 +272,14 @@ describe('message upload idempotency', () => {
     };
     const second = { ...first, id: '018c1a55-73a0-7b9b-8c06-123456789abd' };
 
-    const initial = await controlHandler.uploadMessages(request(db, { messages: [first, second] }));
+    const initial = await controlHandler.uploadMessages(apiRequest(db, { messages: [first, second] }));
     expect(initial.status).toBe(200);
     expect((await initial.json()).results).toEqual([
       { id: first.id, status: 'stored' },
       { id: second.id, status: 'stored' },
     ]);
 
-    const retry = await controlHandler.uploadMessages(request(db, { messages: [first] }));
+    const retry = await controlHandler.uploadMessages(apiRequest(db, { messages: [first] }));
     expect((await retry.json()).results).toEqual([{ id: first.id, status: 'already_stored' }]);
     expect(sqlite.query('SELECT COUNT(*) AS count FROM messages').get().count).toBe(2);
   });

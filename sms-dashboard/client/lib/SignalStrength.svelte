@@ -12,8 +12,8 @@
   } = $props();
 
   // Calculate signal bars (0-4) based on signal percentage
-  function getSignalBars(signal) {
-    const validSignal = Number(signal) || 0;
+  function getSignalBars(value) {
+    const validSignal = Number(value) || 0;
     if (validSignal >= 75) return 4;
     if (validSignal >= 50) return 3;
     if (validSignal >= 25) return 2;
@@ -22,8 +22,8 @@
   }
 
   // Get signal quality label
-  function getSignalQuality(signal) {
-    const validSignal = Number(signal) || 0;
+  function getSignalQuality(value) {
+    const validSignal = Number(value) || 0;
     if (validSignal >= 75) return "优秀";
     if (validSignal >= 50) return "良好";
     if (validSignal >= 25) return "一般";
@@ -31,8 +31,8 @@
     return "无信号";
   }
 
-  function getSignalColor(signal) {
-    const validSignal = Number(signal) || 0;
+  function getSignalColor(value) {
+    const validSignal = Number(value) || 0;
     if (validSignal >= 75) return "bg-emerald-500";
     if (validSignal >= 50) return "bg-blue-500";
     if (validSignal >= 25) return "bg-amber-500";
@@ -40,8 +40,8 @@
     return "bg-stone-300";
   }
 
-  function getTextColor(signal) {
-    const validSignal = Number(signal) || 0;
+  function getTextColor(value) {
+    const validSignal = Number(value) || 0;
     if (validSignal >= 75) return "text-emerald-600";
     if (validSignal >= 50) return "text-blue-600";
     if (validSignal >= 25) return "text-amber-600";

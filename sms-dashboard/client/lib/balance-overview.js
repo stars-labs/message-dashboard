@@ -119,7 +119,6 @@ export function buildBalanceRows(phones = [], checks = [], now = new Date()) {
     // Use the newest non-cancelled check for health classification so that
     // operational cancellations (rate-limit holds, triggered-in-error batches)
     // don't permanently mark a SIM as 查询失败 when no balance was ever obtained.
-    const latestCheck = phoneChecks[0] || null;
     const latestSignificantCheck =
       phoneChecks.find((check) => !isCancelledCheck(check)) || null;
     const balanceCheck = phoneChecks.find((check) => getCashBalance(check)) || null;

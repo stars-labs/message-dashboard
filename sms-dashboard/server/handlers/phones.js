@@ -113,7 +113,7 @@ export const phonesHandler = {
       }), {
         headers: { 'Content-Type': 'application/json' }
       });
-    } catch (error) {
+    } catch {
       // Error handling - get phone
       return new Response(JSON.stringify({
         success: false,

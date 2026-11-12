@@ -29,7 +29,7 @@ export async function acquireRunLock(filePath, {
     if (error.code !== 'EEXIST') throw error;
     const existingPid = Number.parseInt(await readFile(filePath, 'utf8').catch(() => ''), 10);
     if (Number.isSafeInteger(existingPid) && existingPid > 0 && isProcessRunning(existingPid)) {
-      throw new Error(`Balance Agent CLI is already running (pid ${existingPid})`);
+      throw new Error(`Balance Agent CLI is already running (pid ${existingPid})`, { cause: error });
     }
     await unlink(filePath).catch((unlinkError) => {
       if (unlinkError.code !== 'ENOENT') throw unlinkError;
@@ -38,7 +38,7 @@ export async function acquireRunLock(filePath, {
       handle = await create();
     } catch (retryError) {
       if (retryError.code === 'EEXIST') {
-        throw new Error('Balance Agent CLI was started by another process');
+        throw new Error('Balance Agent CLI was started by another process', { cause: retryError });
       }
       throw retryError;
     }
