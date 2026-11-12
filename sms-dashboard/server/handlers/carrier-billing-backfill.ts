@@ -18,7 +18,15 @@ interface BackfillCandidate {
 /** What previewCarrierBillBackfill returns. Declared here because that module is JS. */
 interface BackfillPreview {
   account: { id: string; version: number; [field: string]: unknown };
-  summary: Record<string, number>;
+  summary: {
+    candidates: number;
+    complete_messages: number;
+    reassembled_messages: number;
+    new_bills: number;
+    duplicates: number;
+    conflicts: number;
+    already_processed: number;
+  };
   candidates: BackfillCandidate[];
   preview_digest: string;
 }
@@ -67,7 +75,9 @@ async function buildPreview(db: D1Database, accountId: unknown): Promise<BuildPr
     return { response: json({ error: 'account_id is required' }, 400) };
   }
   try {
-    return { preview: (await previewCarrierBillBackfill(db, accountId)) as BackfillPreview };
+    // Through `unknown`: previewCarrierBillBackfill is still JS, so its inferred type
+// lacks the `disposition` it assigns per candidate before returning.
+    return { preview: (await previewCarrierBillBackfill(db, accountId)) as unknown as BackfillPreview };
   } catch (error) {
     const e = error as { code?: string; message?: string };
     if (e?.code === 'ACCOUNT_NOT_READY') {
