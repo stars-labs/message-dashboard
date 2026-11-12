@@ -1,22 +1,40 @@
-const MONTHS = new Map([
+/** What the M1 portal yields, once its selectors have been read. */
+export interface M1WebBalance {
+  balance: number;
+  currency: 'SGD';
+  account_number: string;
+  expires_at: string;
+  balance_path: string;
+  expiry_path: string;
+  account_path: string;
+}
+
+/** The text the workflow scraped from the three selectors. */
+export interface M1WebBalanceInput {
+  accountText?: unknown;
+  balanceText?: unknown;
+  validityText?: unknown;
+}
+
+const MONTHS = new Map<string, number>([
   ['jan', 1], ['feb', 2], ['mar', 3], ['apr', 4],
   ['may', 5], ['jun', 6], ['jul', 7], ['aug', 8],
   ['sep', 9], ['oct', 10], ['nov', 11], ['dec', 12],
 ]);
 
-function localSingaporeNumber(value) {
+function localSingaporeNumber(value: unknown): string {
   return String(value || '').replace(/\D/g, '').replace(/^65(?=\d{8}$)/, '');
 }
 
-function parseValidityDate(value) {
+function parseValidityDate(value: unknown): string | null {
   const match = String(value || '').trim().match(
     /\bvalid\s+till\s+(\d{1,2})\s+([a-z]{3})\s+(\d{4})\b/i,
   );
   if (!match) return null;
   const day = Number(match[1]);
   const month = MONTHS.get(match[2].toLocaleLowerCase());
+  if (month === undefined) return null;
   const year = Number(match[3]);
-  if (!month) return null;
   const date = new Date(Date.UTC(year, month - 1, day));
   if (date.getUTCFullYear() !== year
     || date.getUTCMonth() !== month - 1
@@ -24,7 +42,10 @@ function parseValidityDate(value) {
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
-export function extractM1WebBalance({ accountText, balanceText, validityText } = {}, expectedPhone) {
+export function extractM1WebBalance(
+  { accountText, balanceText, validityText }: M1WebBalanceInput = {},
+  expectedPhone: unknown,
+): M1WebBalance {
   const expected = localSingaporeNumber(expectedPhone);
   if (!/^\d{8}$/.test(expected)) throw new Error('M1 balance task SIM is not a valid Singapore number');
   if (localSingaporeNumber(accountText) !== expected) {
@@ -42,7 +63,7 @@ export function extractM1WebBalance({ accountText, balanceText, validityText } =
   return {
     balance,
     currency: 'SGD',
-    account_number: expectedPhone,
+    account_number: String(expectedPhone),
     expires_at: expiresAt,
     balance_path: '.balanceAmt.maBalanceDiv',
     expiry_path: '.balanceForBox .brand-color',

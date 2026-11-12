@@ -1,4 +1,28 @@
-const BALANCE_KEYS = new Set([
+/** A candidate balance and where it was found, for diagnostics. */
+interface BalanceCandidate {
+  amount: number;
+  path: string;
+}
+
+/** A candidate account number and where it was found. */
+interface AccountCandidate {
+  value: string;
+  path: string;
+}
+
+/** What a Unicom web balance query proves. */
+export interface UnicomWebBalance {
+  balance: number;
+  currency: 'CNY';
+  account_number: string;
+  balance_path: string;
+  account_path: string;
+}
+
+/** A value the recursive scan walks. */
+type JsonValue = unknown;
+
+const BALANCE_KEYS = new Set<string>([
   'availablebalance',
   'availablefee',
   'balance',
@@ -12,7 +36,7 @@ const BALANCE_KEYS = new Set([
   '账户余额',
 ]);
 
-const ACCOUNT_KEYS = new Set([
+const ACCOUNT_KEYS = new Set<string>([
   'account',
   'accountnumber',
   'loginname',
@@ -26,15 +50,15 @@ const ACCOUNT_KEYS = new Set([
   '手机号码',
 ]);
 
-function normalizedKey(value) {
+function normalizedKey(value: unknown): string {
   return String(value || '').toLocaleLowerCase().replace(/[\s_-]/g, '');
 }
 
-function normalizePhone(value) {
+function normalizePhone(value: unknown): string {
   return String(value || '').replace(/\D/g, '').replace(/^86(?=1\d{10}$)/, '');
 }
 
-function accountMatches(value, expectedPhone) {
+function accountMatches(value: unknown, expectedPhone: unknown): boolean {
   const expected = normalizePhone(expectedPhone);
   if (normalizePhone(value) === expected) return true;
 
@@ -45,19 +69,23 @@ function accountMatches(value, expectedPhone) {
     && expected.endsWith(masked[2]));
 }
 
-function walk(value, visit, path = []) {
+function walk(
+  value: JsonValue,
+  visit: (key: string, value: unknown, path: string[]) => void,
+  path: string[] = [],
+): void {
   if (!value || typeof value !== 'object') return;
   if (Array.isArray(value)) {
     value.forEach((item, index) => walk(item, visit, [...path, String(index)]));
     return;
   }
-  for (const [key, child] of Object.entries(value)) {
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
     visit(key, child, [...path, key]);
     walk(child, visit, [...path, key]);
   }
 }
 
-function parseMoney(value) {
+function parseMoney(value: unknown): number | null {
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
   if (typeof value !== 'string') return null;
   const match = value.trim().match(/^\s*(?:CNY|RMB|￥|¥)?\s*(-?\d+(?:\.\d{1,2})?)\s*(?:元|CNY|RMB)?\s*$/i);
@@ -73,20 +101,24 @@ const ACCOUNT_BALANCE_KEY = 'curntbalancecust';
 // Exported so the browser workflow can identify the authenticated response.
 export const UNICOM_BALANCE_FIELD = ACCOUNT_BALANCE_KEY;
 
-function explicitAccountBalance(payload) {
+function explicitAccountBalance(payload: Record<string, unknown> | null | undefined) {
   const amount = parseMoney(payload?.[ACCOUNT_BALANCE_KEY]);
   return amount == null ? null : { amount, path: ACCOUNT_BALANCE_KEY };
 }
 
-export function extractUnicomWebBalance(payload, expectedPhone) {
-  const balances = [];
-  const accounts = [];
+export function extractUnicomWebBalance(
+  payload: Record<string, unknown> | null | undefined,
+  expectedPhone: unknown,
+): UnicomWebBalance {
+  const balances: BalanceCandidate[] = [];
+  const accounts: AccountCandidate[] = [];
   const explicit = explicitAccountBalance(payload);
   if (explicit) balances.push(explicit);
 
-  const dataList = payload?.resource?.dataList;
+  const resource = payload?.resource as { dataList?: unknown } | undefined;
+  const dataList = resource?.dataList;
   if (Array.isArray(dataList)) {
-    dataList.forEach((item, index) => {
+    (dataList as Array<Record<string, unknown>>).forEach((item, index) => {
       if (item?.remainTitle !== '剩余话费' || item?.unit !== '元') return;
       const amount = parseMoney(item.number);
       if (amount != null) {
@@ -119,7 +151,7 @@ export function extractUnicomWebBalance(payload, expectedPhone) {
   return {
     balance: balances[0].amount,
     currency: 'CNY',
-    account_number: expectedPhone,
+    account_number: String(expectedPhone),
     balance_path: balances[0].path,
     account_path: account.path,
   };
