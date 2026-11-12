@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 const handlerFiles = [
   './control.js',
-  './health.js',
+  './health.ts',
   '../api/keywords.js',
 ];
 
