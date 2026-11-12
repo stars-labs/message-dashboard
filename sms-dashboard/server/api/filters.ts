@@ -2,14 +2,18 @@
 //
 // Rule mutations affect new ingestion only. Historical changes are a separate,
 // explicitly requested, one-page-at-a-time operation. Nothing here decides what
-// spam is — see utils/spam-filter.js.
+// spam is — see utils/spam-filter.ts.
 
 import { handleAuth0 } from '../middleware/auth0.js';
 import { requirePermission, enrichUserPermissions } from '../middleware/rbac.js';
 import { RULE_TYPE, normalizeSender } from '../utils/spam-filter.js';
+import type { SpamRule } from '../utils/spam-filter.js';
 import { processRuleHistoryPage } from '../utils/filter-history.js';
+import type { Permission } from '../../config/auth0-roles.js';
+import type { AppRequest } from '../../shared/worker-context.js';
+import type { D1Database } from '../../shared/cf-bindings.js';
 
-const VALID_RULE_TYPES = Object.values(RULE_TYPE);
+const VALID_RULE_TYPES: string[] = Object.values(RULE_TYPE);
 
 /** Shortest allowed body keyword. A single character would hide almost everything. */
 const MIN_KEYWORD_LENGTH = 2;
@@ -17,7 +21,32 @@ const MIN_KEYWORD_LENGTH = 2;
 /** Shortest allowed sender pattern, so a stray '1' cannot match half the table. */
 const MIN_SENDER_LENGTH = 3;
 
-function json(body, status = 200) {
+/** The router interface setupFilterRoutes needs. */
+interface Router {
+  get(path: string, ...handlers: import('../../shared/worker-context.js').Handler[]): void;
+  post(path: string, ...handlers: import('../../shared/worker-context.js').Handler[]): void;
+  put(path: string, ...handlers: import('../../shared/worker-context.js').Handler[]): void;
+  delete(path: string, ...handlers: import('../../shared/worker-context.js').Handler[]): void;
+}
+
+/** A filter_rules row. */
+interface FilterRuleRow extends SpamRule {
+  note: string | null;
+  created_by: string | null;
+  is_active: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+interface ValidatedRule {
+  rule_type: string;
+  pattern: string;
+  note: string | null;
+}
+
+type ValidationResult = ValidatedRule | { error: string };
+
+function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: { 'Content-Type': 'application/json' },
@@ -25,32 +54,40 @@ function json(body, status = 200) {
 }
 
 /** Auth0 + RBAC gate. Returns a Response to short-circuit, or null to proceed. */
-async function gate(request, env, ctx, permission) {
+async function gate(
+  request: AppRequest,
+  env: Parameters<typeof handleAuth0>[1],
+  ctx: Parameters<typeof handleAuth0>[2],
+  permission: Permission,
+): Promise<Response | null> {
   const authResponse = await handleAuth0(request, env, ctx);
   if (authResponse) return authResponse;
-  await enrichUserPermissions(request, env, ctx);
+  await enrichUserPermissions(request);
   const permResponse = await requirePermission(permission)(request, env, ctx);
   if (permResponse) return permResponse;
   return null;
 }
 
-/**
- * Validate and normalise a rule payload.
- * @returns {{rule_type: string, pattern: string, note: string|null}|{error: string}}
- */
-function validateRule({ rule_type, pattern, note }) {
-  if (!VALID_RULE_TYPES.includes(rule_type)) {
+/** Validate and normalise a rule payload. */
+function validateRule({ rule_type, pattern, note }: {
+  rule_type: unknown;
+  pattern: unknown;
+  note: unknown;
+}): ValidationResult {
+  if (typeof rule_type !== 'string' || !VALID_RULE_TYPES.includes(rule_type)) {
     return { error: `rule_type must be one of: ${VALID_RULE_TYPES.join(', ')}` };
   }
 
   const trimmed = typeof pattern === 'string' ? pattern.trim() : '';
   if (!trimmed) return { error: 'pattern is required' };
 
+  const noteText = typeof note === 'string' ? note.trim() || null : null;
+
   if (rule_type === RULE_TYPE.BODY_KEYWORD) {
     if (trimmed.length < MIN_KEYWORD_LENGTH) {
       return { error: `body keyword must be at least ${MIN_KEYWORD_LENGTH} characters` };
     }
-    return { rule_type, pattern: trimmed, note: note?.trim() || null };
+    return { rule_type, pattern: trimmed, note: noteText };
   }
 
   if (trimmed.length < MIN_SENDER_LENGTH) {
@@ -64,27 +101,27 @@ function validateRule({ rule_type, pattern, note }) {
     if (digits.length < MIN_SENDER_LENGTH) {
       return { error: `sender pattern must contain at least ${MIN_SENDER_LENGTH} digits` };
     }
-    return { rule_type, pattern: digits, note: note?.trim() || null };
+    return { rule_type, pattern: digits, note: noteText };
   }
 
-  return { rule_type, pattern: trimmed, note: note?.trim() || null };
+  return { rule_type, pattern: trimmed, note: noteText };
 }
 
-function isUniqueViolation(error) {
-  return /UNIQUE constraint failed/i.test(error?.message || '');
+function isUniqueViolation(error: unknown): boolean {
+  return /UNIQUE constraint failed/i.test((error as { message?: string })?.message || '');
 }
 
-export async function listFilterRules(db) {
+export async function listFilterRules(db: D1Database): Promise<{ filters: SpamRule[] }> {
   const { results } = await db.prepare(
     `SELECT *
      FROM filter_rules
-     ORDER BY rule_type, id`
-  ).all();
+     ORDER BY rule_type, id`,
+  ).all<SpamRule>();
 
-  return { filters: results || [] };
+  return { filters: results };
 }
 
-export function setupFilterRoutes(router) {
+export function setupFilterRoutes(router: Router): void {
   // List rule metadata only. Historical hit counts require reading every matched
   // message and are not part of the dashboard's operational rule contract.
   router.get('/api/filters', async (request, env, ctx) => {
@@ -105,19 +142,26 @@ export function setupFilterRoutes(router) {
     if (blocked) return blocked;
 
     try {
-      const validated = validateRule(await request.json());
-      if (validated.error) return json({ error: validated.error }, 400);
+      const body = (await request.json()) as { rule_type?: unknown; pattern?: unknown; note?: unknown };
+      const validated = validateRule({
+        rule_type: body.rule_type,
+        pattern: body.pattern,
+        note: body.note,
+      });
+      if ('error' in validated) return json({ error: validated.error }, 400);
 
       const inserted = await env.DB.prepare(
         `INSERT INTO filter_rules (rule_type, pattern, note, created_by)
          VALUES (?, ?, ?, ?)
-         RETURNING *`
+         RETURNING *`,
       )
         .bind(
           validated.rule_type,
           validated.pattern,
           validated.note,
-          request.user?.sub || null
+          // The middleware builds `user.id`; there is no `sub` on it. Reading
+          // request.user.sub silently stored null for every rule.
+          request.user?.id ?? null,
         )
         .first();
 
@@ -136,14 +180,19 @@ export function setupFilterRoutes(router) {
     const blocked = await gate(request, env, ctx, 'filters.write');
     if (blocked) return blocked;
 
-    const id = Number(request.params.id);
+    const id = Number(request.params?.id);
     try {
       const existing = await env.DB.prepare(`SELECT * FROM filter_rules WHERE id = ?`)
         .bind(id)
-        .first();
+        .first<FilterRuleRow>();
       if (!existing) return json({ error: 'Filter rule not found' }, 404);
 
-      const body = await request.json();
+      const body = (await request.json()) as {
+        rule_type?: unknown;
+        pattern?: unknown;
+        note?: unknown;
+        is_active?: unknown;
+      };
       if (
         (body.rule_type !== undefined && body.rule_type !== existing.rule_type)
         || (
@@ -158,7 +207,7 @@ export function setupFilterRoutes(router) {
         pattern: existing.pattern,
         note: body.note ?? existing.note,
       });
-      if (validated.error) return json({ error: validated.error }, 400);
+      if ('error' in validated) return json({ error: validated.error }, 400);
 
       const isActive = body.is_active === undefined ? existing.is_active : (body.is_active ? 1 : 0);
 
@@ -166,7 +215,7 @@ export function setupFilterRoutes(router) {
         `UPDATE filter_rules
          SET rule_type = ?, pattern = ?, note = ?, is_active = ?, updated_at = CURRENT_TIMESTAMP
          WHERE id = ?
-         RETURNING *`
+         RETURNING *`,
       )
         .bind(validated.rule_type, validated.pattern, validated.note, isActive, id)
         .first();
@@ -186,10 +235,10 @@ export function setupFilterRoutes(router) {
     const blocked = await gate(request, env, ctx, 'filters.delete');
     if (blocked) return blocked;
 
-    const id = Number(request.params.id);
+    const id = Number(request.params?.id);
     try {
       const referenced = await env.DB.prepare(
-        `SELECT 1 FROM messages WHERE filter_rule_id = ? LIMIT 1`
+        `SELECT 1 FROM messages WHERE filter_rule_id = ? LIMIT 1`,
       ).bind(id).first();
       if (referenced) {
         return json({ error: 'Rule has historical messages; deactivate it instead' }, 409);
@@ -212,16 +261,16 @@ export function setupFilterRoutes(router) {
     const blocked = await gate(request, env, ctx, 'filters.write');
     if (blocked) return blocked;
 
-    const id = Number(request.params.id);
+    const id = Number(request.params?.id);
     try {
       const rule = await env.DB.prepare(`SELECT * FROM filter_rules WHERE id = ?`)
         .bind(id)
-        .first();
+        .first<FilterRuleRow>();
       if (!rule) return json({ error: 'Filter rule not found' }, 404);
 
-      const body = await request.json();
-      const since = new Date(body.since);
-      const until = new Date(body.until);
+      const body = (await request.json()) as { since?: unknown; until?: unknown; cursor?: unknown };
+      const since = new Date(body.since as string);
+      const until = new Date(body.until as string);
       if (
         Number.isNaN(since.getTime())
         || Number.isNaN(until.getTime())
@@ -229,23 +278,28 @@ export function setupFilterRoutes(router) {
       ) {
         return json({ error: 'A valid history time range is required' }, 400);
       }
-      const cursor = body.cursor || null;
-      if (
-        cursor
-        && (
-          typeof cursor.created_at !== 'string'
-          || typeof cursor.id !== 'string'
-          || Number.isNaN(new Date(`${cursor.created_at}Z`).getTime())
-        )
-      ) {
-        return json({ error: 'Invalid history cursor' }, 400);
+      const rawCursor: unknown = body.cursor ?? null;
+      let cursor: { created_at: string; id: string } | null = null;
+      if (rawCursor !== null) {
+        const c = rawCursor as { created_at?: unknown; id?: unknown };
+        if (
+          typeof c.created_at !== 'string'
+          || typeof c.id !== 'string'
+          || Number.isNaN(new Date(`${c.created_at}Z`).getTime())
+        ) {
+          return json({ error: 'Invalid history cursor' }, 400);
+        }
+        cursor = { created_at: c.created_at, id: c.id };
       }
 
+      // processRuleHistoryPage is still JS, and its destructured `cursor = null`
+// default makes tsc infer `null | undefined` for the parameter. The cursor
+// shape above is the real contract.
       const result = await processRuleHistoryPage(env.DB, rule, {
         since: since.toISOString(),
         until: until.toISOString(),
         cursor,
-      });
+      } as unknown as Parameters<typeof processRuleHistoryPage>[2]);
       return json(result);
     } catch (error) {
       console.error('[filters] history processing failed:', error);
