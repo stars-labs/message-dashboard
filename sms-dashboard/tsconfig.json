@@ -20,7 +20,10 @@
     "types": []
   },
   "include": [
-    "shared/**/*.ts"
+    "shared/**/*.ts",
+    "config/**/*.ts",
+    "server/index.ts",
+    "server/middleware/**/*.ts"
   ],
   "exclude": ["node_modules", "dist", "balance-agent/dist", "balance-agent/release"]
 }

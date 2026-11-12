@@ -57,11 +57,7 @@ export type Handler = (
   request: AppRequest,
   env: Env,
   ctx: ExecutionContext,
-) =>
-  | Promise<Response | null | undefined>
-  | Response
-  | null
-  | undefined;
+) => Promise<Response | null | undefined> | Response | null | undefined;
 
 /**
  * The Request handlers actually receive. `env` and `ctx` are also passed as
