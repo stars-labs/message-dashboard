@@ -1,11 +1,40 @@
-function json(body, status = 200) {
+import type { AppRequest } from '../../shared/worker-context.js';
+import type { D1Database } from '../../shared/cf-bindings.js';
+
+/** Display urgency derived from action_status and the due date. */
+export type BillUrgency = 'needs_review' | 'paid' | 'waived' | 'overdue' | 'due_soon' | 'open';
+
+/** The four operator mutations. */
+type BillAction = 'payment_planned' | 'mark_paid' | 'waive' | 'reopen';
+
+/** A carrier_bills row joined with its account and notification SIM. */
+interface BillRow {
+  id: string;
+  billing_account_id: string;
+  source_message_id: string | null;
+  amount_minor: number;
+  currency: string;
+  due_date: string;
+  action_status: 'unpaid' | 'payment_planned' | 'paid' | 'waived' | 'needs_review' | string;
+  version: number;
+  display_name?: string;
+  carrier?: string;
+  account_ref_last4: string | null;
+  notification_sim_iccid: string | null;
+  notification_sim_index: number | null;
+  notification_sim_number: string | null;
+  linked_sim_count?: number;
+  [column: string]: unknown;
+}
+
+function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: { 'Content-Type': 'application/json' },
   });
 }
 
-function singaporeDate(now = new Date()) {
+function singaporeDate(now: Date = new Date()): string {
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Singapore',
     year: 'numeric',
@@ -14,13 +43,16 @@ function singaporeDate(now = new Date()) {
   }).format(now);
 }
 
-function dateEpoch(isoDate) {
+function dateEpoch(isoDate: string): number {
   return Date.parse(`${isoDate}T00:00:00Z`);
 }
 
-export function deriveBillUrgency(bill, today = singaporeDate()) {
+export function deriveBillUrgency(
+  bill: Pick<BillRow, 'due_date' | 'action_status'>,
+  today: string = singaporeDate(),
+): { urgency: BillUrgency; days_remaining: number } {
   const daysRemaining = Math.round((dateEpoch(bill.due_date) - dateEpoch(today)) / 86_400_000);
-  let urgency;
+  let urgency: BillUrgency;
   if (bill.action_status === 'needs_review') urgency = 'needs_review';
   else if (bill.action_status === 'paid') urgency = 'paid';
   else if (bill.action_status === 'waived') urgency = 'waived';
@@ -30,25 +62,30 @@ export function deriveBillUrgency(bill, today = singaporeDate()) {
   return { urgency, days_remaining: daysRemaining };
 }
 
-function maskedAccount(last4) {
+function maskedAccount(last4: string | null): string {
   return `•••• ${last4}`;
 }
 
-function presentBill(row, today) {
-  const bill = {
-    ...row,
-    account_ref_masked: maskedAccount(row.account_ref_last4),
+function presentBill(row: BillRow, today: string) {
+  // Built by omitting the raw columns rather than deleting them afterwards:
+  // `delete` on a required property is a type error, and the omission is also
+  // what keeps account_ref_last4 out of the API response.
+  const {
+    account_ref_last4,
+    notification_sim_index,
+    notification_sim_number,
+    ...rest
+  } = row;
+  return {
+    ...rest,
+    account_ref_masked: maskedAccount(account_ref_last4),
     notification_sim: {
       iccid: row.notification_sim_iccid,
-      sim_index: row.notification_sim_index,
-      number: row.notification_sim_number,
+      sim_index: notification_sim_index,
+      number: notification_sim_number,
     },
     ...deriveBillUrgency(row, today),
   };
-  delete bill.account_ref_last4;
-  delete bill.notification_sim_index;
-  delete bill.notification_sim_number;
-  return bill;
 }
 
 const BILL_SELECT = `
@@ -70,19 +107,20 @@ const BILL_SELECT = `
   LEFT JOIN device_view d ON d.iccid = a.notification_sim_iccid
 `;
 
-async function findBill(db, id) {
+async function findBill(db: D1Database, id: string | undefined): Promise<BillRow | null> {
   return db.prepare(`${BILL_SELECT} WHERE b.id = ?`).bind(id).first();
 }
 
-function parseMetadata(value) {
+function parseMetadata(value: unknown): Record<string, unknown> {
   try {
-    return JSON.parse(value || '{}');
+    const parsed = JSON.parse(String(value ?? '{}'));
+    return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : {};
   } catch {
     return {};
   }
 }
 
-async function billDetail(db, id, today) {
+async function billDetail(db: D1Database, id: string | undefined, today: string) {
   const row = await findBill(db, id);
   if (!row) return null;
 
@@ -109,7 +147,7 @@ async function billDetail(db, id, today) {
     `).bind(id).all(),
   ]);
 
-  let sourceMessage = null;
+  let sourceMessage: Record<string, unknown> | null = null;
   if (row.source_message_id) {
     const source = await db.prepare(`
       SELECT id, phone_number AS sender, content, timestamp
@@ -120,9 +158,9 @@ async function billDetail(db, id, today) {
 
   return {
     ...presentBill(row, today),
-    linked_sims: membersResult.results ?? [],
+    linked_sims: membersResult.results,
     source_message: sourceMessage,
-    events: (eventsResult.results ?? []).map((event) => ({
+    events: eventsResult.results.map((event) => ({
       ...event,
       metadata: parseMetadata(event.metadata_json),
       metadata_json: undefined,
@@ -130,7 +168,7 @@ async function billDetail(db, id, today) {
   };
 }
 
-const URGENCY_ORDER = new Map([
+const URGENCY_ORDER = new Map<string, number>([
   ['needs_review', 0],
   ['overdue', 1],
   ['due_soon', 2],
@@ -139,13 +177,13 @@ const URGENCY_ORDER = new Map([
   ['waived', 5],
 ]);
 
-function validIsoDate(value) {
+function validIsoDate(value: unknown): boolean {
   return typeof value === 'string'
     && /^\d{4}-\d{2}-\d{2}$/.test(value)
     && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
 }
 
-async function mutateBill(request, action) {
+async function mutateBill(request: AppRequest, action: BillAction): Promise<Response> {
   const db = request.env.DB;
   const billId = request.params?.id;
   const actor = request.user?.id;
@@ -156,16 +194,17 @@ async function mutateBill(request, action) {
     return json({ error: 'A bounded Idempotency-Key header is required' }, 400);
   }
 
-  let body;
+  let body: Record<string, unknown>;
   try {
     body = await request.json();
   } catch {
     return json({ error: 'Body must be JSON' }, 400);
   }
-  const expectedVersion = body?.expected_version;
-  if (!Number.isInteger(expectedVersion) || expectedVersion < 1) {
+  const expectedVersionRaw = body?.expected_version;
+  if (typeof expectedVersionRaw !== 'number' || !Number.isInteger(expectedVersionRaw) || expectedVersionRaw < 1) {
     return json({ error: 'expected_version must be a positive integer' }, 400);
   }
+  const expectedVersion = expectedVersionRaw;
   const note = body?.note ?? null;
   if (note !== null && (typeof note !== 'string' || note.trim().length > 1000)) {
     return json({ error: 'note must be a string of at most 1000 characters' }, 400);
@@ -196,7 +235,7 @@ async function mutateBill(request, action) {
     }, 409);
   }
 
-  const next = {
+  const next = ({
     payment_planned: {
       status: 'payment_planned',
       event: 'payment_planned',
@@ -206,7 +245,7 @@ async function mutateBill(request, action) {
     mark_paid: { status: 'paid', event: 'paid', planned: false, paid: true },
     waive: { status: 'waived', event: 'waived', planned: false, paid: false },
     reopen: { status: 'unpaid', event: 'reopened', planned: false, paid: false },
-  }[action];
+  } satisfies Record<BillAction, { status: string; event: string; planned: boolean; paid: boolean }>)[action];
 
   const eventId = crypto.randomUUID();
   const metadata = JSON.stringify({
@@ -247,7 +286,7 @@ async function mutateBill(request, action) {
       `).bind(eventId, billId, next.event, actor, idempotencyKey, metadata),
     ]);
 
-    if (Number(results?.[0]?.meta?.changes ?? 0) !== 1) {
+    if (Number((results?.[0] as { meta?: { changes?: number } } | undefined)?.meta?.changes ?? 0) !== 1) {
       const latest = await findBill(db, billId);
       return json({
         error: 'Bill version conflict',
@@ -274,7 +313,7 @@ async function mutateBill(request, action) {
 }
 
 export const carrierBillsHandler = {
-  async list(request, { today = singaporeDate() } = {}) {
+  async list(request: AppRequest, { today = singaporeDate() }: { today?: string } = {}) {
     const url = new URL(request.url);
     const clauses = [];
     const params = [];
@@ -309,8 +348,8 @@ export const carrierBillsHandler = {
       ${where}
       ORDER BY b.due_date, b.id
       LIMIT 500
-    `).bind(...params).all();
-    let bills = (query.results ?? []).map((row) => presentBill(row, today));
+    `).bind(...params).all<BillRow>();
+    let bills = query.results.map((row) => presentBill(row, today));
     if (status) bills = bills.filter((bill) => bill.urgency === status || bill.action_status === status);
     bills.sort((left, right) => (
       (URGENCY_ORDER.get(left.urgency) ?? 99) - (URGENCY_ORDER.get(right.urgency) ?? 99)
@@ -320,7 +359,7 @@ export const carrierBillsHandler = {
     return json({ success: true, today, bills });
   },
 
-  async listAccounts(request) {
+  async listAccounts(request: AppRequest) {
     const [accountsResult, membersResult] = await Promise.all([
       request.env.DB.prepare(`
         SELECT
@@ -337,7 +376,7 @@ export const carrierBillsHandler = {
         FROM carrier_billing_accounts a
         LEFT JOIN device_view d ON d.iccid = a.notification_sim_iccid
         ORDER BY a.carrier, a.display_name, a.id
-      `).bind().all(),
+      `).bind().all<{ id: string; country_code: string; carrier: string; currency: string; display_name: string; account_ref_last4: string | null; status: string; version: number; notification_sim_iccid: string | null; notification_sim_index: number | null; notification_sim_number: string | null; payment_due_count: number }>(),
       request.env.DB.prepare(`
         SELECT
           s.billing_account_id,
@@ -351,10 +390,10 @@ export const carrierBillsHandler = {
         LEFT JOIN device_view d ON d.iccid = s.sim_iccid
         WHERE s.removed_at IS NULL
         ORDER BY s.billing_account_id, d.sim_index, s.sim_iccid
-      `).bind().all(),
+      `).bind().all<{ billing_account_id: string; iccid: string; sim_index: number | null; number: string | null; verification_source: string; verified_at: string | null; verified_by: string | null }>(),
     ]);
-    const members = membersResult.results ?? [];
-    const accounts = (accountsResult.results ?? []).map((account) => ({
+    const members = membersResult.results;
+    const accounts = accountsResult.results.map((account) => ({
       id: account.id,
       country_code: account.country_code,
       carrier: account.carrier,
@@ -376,13 +415,13 @@ export const carrierBillsHandler = {
     return json({ success: true, accounts });
   },
 
-  async get(request, { today = singaporeDate() } = {}) {
+  async get(request: AppRequest, { today = singaporeDate() }: { today?: string } = {}) {
     const bill = await billDetail(request.env.DB, request.params?.id, today);
     return bill ? json({ success: true, bill }) : json({ error: 'Bill not found' }, 404);
   },
 
-  paymentPlanned: (request) => mutateBill(request, 'payment_planned'),
-  markPaid: (request) => mutateBill(request, 'mark_paid'),
-  waive: (request) => mutateBill(request, 'waive'),
-  reopen: (request) => mutateBill(request, 'reopen'),
+  paymentPlanned: (request: AppRequest) => mutateBill(request, 'payment_planned'),
+  markPaid: (request: AppRequest) => mutateBill(request, 'mark_paid'),
+  waive: (request: AppRequest) => mutateBill(request, 'waive'),
+  reopen: (request: AppRequest) => mutateBill(request, 'reopen'),
 };
