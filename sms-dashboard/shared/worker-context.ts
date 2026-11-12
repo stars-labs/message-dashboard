@@ -45,6 +45,12 @@ export interface Env {
 /** The caller as the middleware builds it. `roles` is always present. */
 export interface RequestUser {
   id: string;
+  /**
+   * The raw Auth0 subject. Present when the user came from a stored KV session
+   * (the session snapshots Auth0's own user object); the JWT path maps it to
+   * `id`. Audit fields accept either so a record is never attributed to nobody.
+   */
+  sub?: string;
   email?: string;
   name?: string;
   picture?: string;

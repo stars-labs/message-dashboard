@@ -19,6 +19,62 @@
 
 import { handleAuth0 } from '../middleware/auth0.js';
 import { requirePermission, enrichUserPermissions } from '../middleware/rbac.js';
+import type { AppRequest, Env, Handler } from '../../shared/worker-context.js';
+import type { ExecutionContext, D1Database } from '../../shared/cf-bindings.js';
+import type { Permission } from '../../config/auth0-roles.js';
+
+/** The router shape setupCallRoutes needs. */
+interface Router {
+  get(path: string, ...handlers: Handler[]): void;
+  post(path: string, ...handlers: Handler[]): void;
+}
+
+/** The live call record the fleet Durable Object holds. */
+interface LiveCall {
+  id: string;
+  direction: 'inbound' | 'outbound';
+  state: 'ringing' | 'connecting' | 'bridging' | 'active' | 'ending' | 'ended';
+  iccid?: string;
+  number?: string | null;
+  started_at?: string;
+  requested_by?: string | null;
+  answered_at?: string;
+  answered_by?: string | null;
+  session_id?: string;
+  modem_session_id?: string;
+  bridge_started?: boolean;
+  ended_at?: string;
+  adapters?: { up?: string; down?: string };
+  [field: string]: unknown;
+}
+
+/** The call-state snapshot the Durable Object returns. */
+interface CallSnapshot {
+  call: LiveCall;
+  revision: number;
+}
+
+/** WebRTC session description, as the SFU and the browser exchange it. */
+interface SessionDescription {
+  type: string;
+  sdp: string;
+}
+
+interface SfuResult {
+  ok: boolean;
+  status: number;
+  body: Record<string, unknown> & {
+    errorCode?: unknown;
+    tracks?: Array<{ adapterId?: string; sessionId?: string; errorCode?: unknown }>;
+    sessionId?: string;
+    sessionDescription?: SessionDescription;
+    requiresImmediateRenegotiation?: unknown;
+    error?: unknown;
+  };
+}
+
+/** What readJson returns: anything JSON-shaped, or null when the body is not JSON. */
+type JsonBody = Record<string, unknown>;
 
 /** Safety net: a wedged call disappears on its own rather than blocking the fleet. */
 const CALL_TTL_SECONDS = 3600;
@@ -38,7 +94,7 @@ const SFU_BASE = 'https://rtc.live.cloudflare.com/v1';
 const SFU_REQUEST_TIMEOUT_MS = 15_000;
 const TURN_BASE = 'https://rtc.live.cloudflare.com/v1/turn/keys';
 
-function json(body, status = 200) {
+function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: { 'Content-Type': 'application/json' },
@@ -46,16 +102,21 @@ function json(body, status = 200) {
 }
 
 /** Auth0 + RBAC gate. Returns a Response to short-circuit, or null to proceed. */
-async function gate(request, env, ctx, permission = 'messages.read') {
+async function gate(
+  request: AppRequest,
+  env: Env,
+  ctx: ExecutionContext,
+  permission: Permission = 'messages.read',
+): Promise<Response | null> {
   const authResponse = await handleAuth0(request, env, ctx);
   if (authResponse) return authResponse;
-  await enrichUserPermissions(request, env, ctx);
+  await enrichUserPermissions(request);
   const permResponse = await requirePermission(permission)(request, env, ctx);
   if (permResponse) return permResponse;
   return null;
 }
 
-export function missingConfig(env) {
+export function missingConfig(env: Env): string[] {
   const needed = [
     'REALTIME_APP_ID',
     'REALTIME_APP_SECRET',
@@ -64,47 +125,61 @@ export function missingConfig(env) {
     'VOICE_BRIDGE_HOST',
     'API_KEY',
   ];
-  return needed.filter((k) => !env[k]);
+  return needed.filter((k) => !env[k as keyof Env]);
 }
 
-function notConfigured(env) {
+function notConfigured(env: Env): Response | null {
   const missing = missingConfig(env);
   if (!missing.length) return null;
   return json({ error: 'Voice calling is not configured', detail: `missing ${missing.join(', ')}` }, 503);
 }
 
-const revisions = new WeakMap();
+const revisions = new WeakMap<LiveCall, number>();
 const stateUrl = 'https://call-state/';
 
-async function readCall(env) {
+async function readCall(env: Env): Promise<LiveCall | null> {
   const response = await env.CALL_STATE.getByName('fleet').fetch(stateUrl);
   if (!response.ok) throw new Error('Could not read live call state');
-  const snapshot = await response.json();
+  const snapshot = await response.json() as CallSnapshot | null;
   if (!snapshot) return null;
   revisions.set(snapshot.call, snapshot.revision);
   return snapshot.call;
 }
 
-async function changeCall(env, expected, call, ttl) {
+async function changeCall(
+  env: Env,
+  expected: LiveCall | null,
+  call: LiveCall | null,
+  // Ignored by the Durable Object when `call` is null (a clear has no TTL).
+  ttl: number = CALL_TTL_SECONDS,
+): Promise<boolean> {
   const response = await env.CALL_STATE.getByName('fleet').fetch(stateUrl, {
     method: 'POST',
     body: JSON.stringify({ expected: expected ? revisions.get(expected) : null, call, ttl }),
   });
   if (response.status === 409) return false;
   if (!response.ok) throw new Error('Could not change live call state');
-  if (call) revisions.set(call, await response.json());
+  if (call) revisions.set(call, await response.json() as number);
   return true;
 }
 
-function writeCall(env, call, ttl = CALL_TTL_SECONDS, expected = call) {
-  return changeCall(env, revisions.has(expected) ? expected : null, call, ttl);
+function writeCall(
+  env: Env,
+  call: LiveCall,
+  ttl: number = CALL_TTL_SECONDS,
+  expected: LiveCall | null = call,
+): Promise<boolean> {
+  return changeCall(env, expected && revisions.has(expected) ? expected : null, call, ttl);
 }
 
-function clearCall(env, call) {
+function clearCall(env: Env, call: LiveCall): Promise<boolean> {
   return changeCall(env, call, null);
 }
 
-async function beginEnding(env, matches) {
+async function beginEnding(
+  env: Env,
+  matches: (call: LiveCall) => boolean,
+): Promise<LiveCall | null> {
   let call = await readCall(env);
   const id = call?.id;
   while (call && call.id === id && call.state !== 'ending' && matches(call)) {
@@ -115,7 +190,7 @@ async function beginEnding(env, matches) {
   return null;
 }
 
-function callChanged() {
+function callChanged(): Response {
   return json({ error: 'No active call' }, 409);
 }
 
@@ -123,19 +198,20 @@ function callChanged() {
  * E.164 only. The SMS sender already refuses anything else for ordinary sends,
  * and a dialer is a place where a loose pattern turns a typo into a wrong number.
  */
-export function validNumber(value) {
+export function validNumber(value: unknown): boolean {
   return typeof value === 'string' && /^\+[1-9]\d{6,14}$/.test(value);
 }
 
-function validIccid(value) {
+function validIccid(value: unknown): boolean {
   return typeof value === 'string' && /^[0-9A-Fa-f]{18,22}$/.test(value);
 }
 
-function validDescription(value, type) {
-  return Boolean(value && value.type === type && typeof value.sdp === 'string' && value.sdp);
+function validDescription(value: unknown, type: string): value is SessionDescription {
+  const v = value as { type?: unknown; sdp?: unknown } | null | undefined;
+  return Boolean(v && v.type === type && typeof v.sdp === 'string' && v.sdp);
 }
 
-function toHex(buffer) {
+function toHex(buffer: ArrayBuffer): string {
   return [...new Uint8Array(buffer)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
@@ -147,30 +223,43 @@ function toHex(buffer) {
  * The daemon already holds API_KEY, so no new shared secret is needed. The same
  * test vector lives in the daemon's tests; change both together.
  */
-export async function adapterEndpoint(env, { callId, leg, action, iccid, number, exp }) {
+export async function adapterEndpoint(env: Env, { callId, leg, action, iccid, number, exp }: {
+  callId: string;
+  leg: string;
+  action: 'dial' | 'answer';
+  iccid: string;
+  number: string | null | undefined;
+  exp: number;
+}): Promise<string> {
   const numberSegment = action === 'answer' ? '-' : number;
   const message = [callId, leg, action, iccid, numberSegment, String(exp)].join('\n');
   const key = await crypto.subtle.importKey(
     'raw',
-    new TextEncoder().encode(env.API_KEY),
+    new TextEncoder().encode(env.API_KEY ?? ''),
     { name: 'HMAC', hash: 'SHA-256' },
     false,
     ['sign'],
   );
   const sig = toHex(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(message)));
-  const segments = [callId, leg, action, iccid, numberSegment, String(exp), sig].map(encodeURIComponent);
+  const segments = [callId, leg, action, iccid, numberSegment ?? '', String(exp), sig].map(encodeURIComponent);
   return `wss://${env.VOICE_BRIDGE_HOST}/voice/${segments.join('/')}`;
 }
 
 /** SFU REST call. `body === undefined` sends no body at all, which sessions/new requires. */
-async function sfu(env, method, path, body) {
-  const init = {
+async function sfu(
+  env: Env,
+  method: string,
+  path: string,
+  body?: unknown,
+): Promise<SfuResult> {
+  const headers: Record<string, string> = { Authorization: `Bearer ${env.REALTIME_APP_SECRET}` };
+  const init: RequestInit = {
     method,
-    headers: { Authorization: `Bearer ${env.REALTIME_APP_SECRET}` },
+    headers,
     signal: AbortSignal.timeout(SFU_REQUEST_TIMEOUT_MS),
   };
   if (body !== undefined) {
-    init.headers['Content-Type'] = 'application/json';
+    headers['Content-Type'] = 'application/json';
     init.body = JSON.stringify(body);
   }
   let response;
@@ -181,7 +270,7 @@ async function sfu(env, method, path, body) {
   } catch {
     return { ok: false, status: 502, body: { error: 'SFU connection failed' } };
   }
-  let parsed;
+  let parsed: unknown;
   try {
     parsed = JSON.parse(text);
   } catch {
@@ -189,24 +278,29 @@ async function sfu(env, method, path, body) {
   }
   // The SFU reports per-track failures inside a 200 as well as at the top level.
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) ||
-      (parsed.tracks !== undefined && !Array.isArray(parsed.tracks))) {
+      ((parsed as SfuResult['body']).tracks !== undefined && !Array.isArray((parsed as SfuResult['body']).tracks))) {
     return { ok: false, status: response.status, body: { error: 'Invalid SFU response' } };
   }
-  const trackError = parsed.tracks?.some((track) => !track || track.errorCode);
-  const ok = response.ok && !parsed.errorCode && !trackError;
-  return { ok, status: response.status, body: parsed };
+  const p = parsed as SfuResult['body'];
+  const trackError = p.tracks?.some((track) => !track || track.errorCode);
+  const ok = response.ok && !p.errorCode && !trackError;
+  return { ok, status: response.status, body: p };
 }
 
-function sfuError(message, result) {
+function sfuError(message: string, result: SfuResult): Response {
   return json({ error: message, detail: result.body }, 502);
 }
 
-function validId(value) {
+function validId(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0;
 }
 
 /** Creates the browser session and publishes its mic. Returns { sessionId, answer } or { error }. */
-async function publishMic(env, offer, mid) {
+async function publishMic(
+  env: Env,
+  offer: SessionDescription,
+  mid: string,
+): Promise<{ sessionId: string; answer: SessionDescription } | { error: Response }> {
   const session = await sfu(env, 'POST', '/sessions/new');
   if (!session.ok || !validId(session.body.sessionId)) {
     return { error: sfuError('Could not create an SFU session', session) };
@@ -223,8 +317,8 @@ async function publishMic(env, offer, mid) {
   return { sessionId, answer: tracks.body.sessionDescription };
 }
 
-async function closeAdapters(env, call) {
-  const ids = [call?.adapters?.up, call?.adapters?.down].filter(Boolean);
+async function closeAdapters(env: Env, call: LiveCall | null): Promise<void> {
+  const ids = [call?.adapters?.up, call?.adapters?.down].filter((id): id is string => Boolean(id));
   if (!ids.length) return;
   try {
     await sfu(env, 'POST', '/adapters/websocket/close', { tracks: ids.map((adapterId) => ({ adapterId })) });
@@ -233,7 +327,7 @@ async function closeAdapters(env, call) {
   }
 }
 
-async function failMedia(env, call, response) {
+async function failMedia(env: Env, call: LiveCall, response: Response): Promise<Response> {
   await closeAdapters(env, call);
   if (await clearCall(env, call)) {
     await logCallEnded(env, call, { reason: 'sfu_error', endedBy: 'worker' });
@@ -241,9 +335,9 @@ async function failMedia(env, call, response) {
   return response;
 }
 
-async function readJson(request) {
+async function readJson(request: AppRequest): Promise<JsonBody | null> {
   try {
-    return (await request.json()) || {};
+    return ((await request.json()) as JsonBody) || {};
   } catch {
     return null;
   }
@@ -269,7 +363,7 @@ const D1_MAX_BOUND_PARAMETERS = 100;
 const HISTORY_COLUMNS = `id, direction, iccid, remote_number, outcome, end_reason,
          started_at, answered_at, ended_at, duration_seconds, requested_by, answered_by`;
 
-async function history(env, write) {
+async function history(env: Env, write: (db: D1Database) => Promise<unknown>): Promise<void> {
   if (!env.DB) return;
   try {
     await write(env.DB);
@@ -283,7 +377,7 @@ async function history(env, write) {
  * than a connected call: it can only have been missed, and while it stays open
  * it both hides from the log and holds this SIM's open-ring slot.
  */
-function sweepStaleCalls(db, now) {
+function sweepStaleCalls(db: D1Database, now: string): Promise<unknown> {
   return db.prepare(
     `UPDATE calls
         SET outcome = CASE WHEN answered_at IS NULL THEN 'missed' ELSE 'failed' END,
@@ -306,7 +400,11 @@ function sweepStaleCalls(db, now) {
  * per SIM, so both reports can use the same ID. Live state still works when
  * D1 is unavailable.
  */
-async function claimRing(env, iccid, from) {
+async function claimRing(
+  env: Env,
+  iccid: string,
+  from: unknown,
+): Promise<{ id: string; started_at: string; remote_number: string | null } | null> {
   if (!env.DB) return null;
   try {
     const now = new Date().toISOString();
@@ -323,7 +421,7 @@ async function claimRing(env, iccid, from) {
           AND answered_at IS NULL
         ORDER BY started_at DESC
         LIMIT 1`,
-    ).bind(iccid).first();
+    ).bind(iccid).first<{ id: string; started_at: string; remote_number: string | null }>();
     return row ?? null;
   } catch (error) {
     console.error('call history ring claim failed', error);
@@ -332,7 +430,7 @@ async function claimRing(env, iccid, from) {
 }
 
 /** Open the row for a call that just started. Repeat reports must not duplicate it. */
-function logCallStarted(env, call) {
+function logCallStarted(env: Env, call: LiveCall): Promise<void> {
   return history(env, async (db) => {
     // Sweep first: a ring whose TTL expired with no end report would otherwise
     // sit in progress forever and read as a call that never finished.
@@ -354,14 +452,18 @@ function logCallStarted(env, call) {
 }
 
 /** A caller id that only arrived with a later RING. */
-function logCallerId(env, callId, number) {
+function logCallerId(env: Env, callId: string, number: string): Promise<void> {
   return history(env, (db) => db.prepare(
     `UPDATE calls SET remote_number = ? WHERE id = ? AND remote_number IS NULL`,
   ).bind(number, callId).run());
 }
 
 /** Answer time, and for an inbound call whoever pressed answer. */
-function logCallAnswered(env, callId, { at, by = null }) {
+function logCallAnswered(
+  env: Env,
+  callId: string,
+  { at, by = null }: { at: string; by?: string | null },
+): Promise<void> {
   return history(env, (db) => db.prepare(
     `UPDATE calls
         SET answered_at = COALESCE(answered_at, ?), answered_by = COALESCE(answered_by, ?)
@@ -373,7 +475,11 @@ function logCallAnswered(env, callId, { at, by = null }) {
  * What to call a call that never carried audio, once it is known who ended it.
  * `dashboard` is the operator, `daemon` the Pi, `worker` a setup failure here.
  */
-export function unansweredOutcome(direction, endedBy, reason) {
+export function unansweredOutcome(
+  direction: string | undefined,
+  endedBy: string,
+  reason: string,
+): 'failed' | 'rejected' | 'cancelled' | 'missed' {
   if (endedBy === 'worker' || reason === 'setup_failed' || reason === 'adapter_missing') {
     return 'failed';
   }
@@ -387,7 +493,11 @@ export function unansweredOutcome(direction, endedBy, reason) {
  * first decides. Talk time comes from the row's own `answered_at`, so it is
  * right even if the live state of the call was already gone.
  */
-function logCallEnded(env, call, { reason, endedBy }) {
+function logCallEnded(
+  env: Env,
+  call: LiveCall,
+  { reason, endedBy }: { reason: string; endedBy: 'dashboard' | 'daemon' | 'worker' },
+): Promise<void> {
   return history(env, (db) => {
     const endedAt = new Date().toISOString();
     return db.prepare(
@@ -411,21 +521,21 @@ function logCallEnded(env, call, { reason, endedBy }) {
 }
 
 /** Attach each call's SIM identity, when that SIM is still in inventory. */
-async function enrichCallPage(db, calls) {
-  const iccids = [...new Set(calls.map((call) => call.iccid).filter(Boolean))];
-  const sims = new Map();
+async function enrichCallPage(db: D1Database, calls: Array<Record<string, unknown>>) {
+  const iccids = [...new Set(calls.map((call) => call.iccid).filter((iccid): iccid is string => typeof iccid === 'string' && !!iccid))];
+  const sims = new Map<string, { iccid: string; number: string | null; carrier: string | null; sim_index: number | null }>();
 
   for (let start = 0; start < iccids.length; start += D1_MAX_BOUND_PARAMETERS) {
     const chunk = iccids.slice(start, start + D1_MAX_BOUND_PARAMETERS);
     const placeholders = chunk.map(() => '?').join(', ');
     const result = await db.prepare(
       `SELECT iccid, number, carrier, sim_index FROM device_view WHERE iccid IN (${placeholders})`,
-    ).bind(...chunk).all();
-    for (const sim of result.results || result) sims.set(sim.iccid, sim);
+    ).bind(...chunk).all<{ iccid: string; number: string | null; carrier: string | null; sim_index: number | null }>();
+    for (const sim of result.results) sims.set(sim.iccid, sim);
   }
 
   return calls.map((call) => {
-    const sim = sims.get(call.iccid);
+    const sim = typeof call.iccid === 'string' ? sims.get(call.iccid) : undefined;
     return {
       ...call,
       sim_index: sim?.sim_index ?? null,
@@ -435,15 +545,15 @@ async function enrichCallPage(db, calls) {
   });
 }
 
-function boundedInt(raw, fallback, min, max) {
+function boundedInt(raw: string | null, fallback: number, min: number, max: number): number {
   const value = Number.parseInt(raw ?? '', 10);
   if (!Number.isFinite(value)) return fallback;
   return Math.min(max, Math.max(min, value));
 }
 
-export function setupCallRoutes(router) {
+export function setupCallRoutes(router: Router): void {
   // Current call state, for the dashboard to poll.
-  router.get('/api/calls/state', async (request, env, ctx) => {
+  router.get('/api/calls/state', async (request, env: Env, ctx: ExecutionContext) => {
     const blocked = await gate(request, env, ctx);
     if (blocked) return blocked;
     return json({ call: await readCall(env) });
@@ -451,7 +561,7 @@ export function setupCallRoutes(router) {
 
   // The call log. Read only when someone opens the history — never on the
   // polling path — so it cannot eat the D1 row-read quota.
-  router.get('/api/calls/history', async (request, env, ctx) => {
+  router.get('/api/calls/history', async (request, env: Env, ctx: ExecutionContext) => {
     const blocked = await gate(request, env, ctx);
     if (blocked) return blocked;
     if (!env.DB) return json({ calls: [], has_more: false });
@@ -471,16 +581,16 @@ export function setupCallRoutes(router) {
         WHERE outcome != 'in_progress'${iccid ? ' AND iccid = ?' : ''}
         ORDER BY started_at DESC, id DESC
         LIMIT ? OFFSET ?`,
-    ).bind(...binds).all();
+    ).bind(...binds).all<Record<string, unknown>>();
 
-    const rows = results || [];
+    const rows = results;
     const page = rows.slice(0, limit);
     return json({ calls: await enrichCallPage(env.DB, page), has_more: rows.length > limit });
   });
 
   // Short-lived ICE servers for the browser's PeerConnection. The TURN token
   // itself stays in the Worker; the browser only ever sees a 10-minute credential.
-  router.get('/api/calls/ice', async (request, env, ctx) => {
+  router.get('/api/calls/ice', async (request, env: Env, ctx: ExecutionContext) => {
     const blocked = await gate(request, env, ctx);
     if (blocked) return blocked;
     const unconfigured = notConfigured(env);
@@ -496,7 +606,7 @@ export function setupCallRoutes(router) {
   });
 
   // Place an outbound call: take the lock, then publish the browser mic.
-  router.post('/api/calls/dial', async (request, env, ctx) => {
+  router.post('/api/calls/dial', async (request, env: Env, ctx: ExecutionContext) => {
     const blocked = await gate(request, env, ctx);
     if (blocked) return blocked;
     const unconfigured = notConfigured(env);
@@ -507,32 +617,34 @@ export function setupCallRoutes(router) {
     const { iccid, number, offer, mid } = body;
     if (!validIccid(iccid)) return json({ error: 'iccid is required' }, 400);
     if (!validNumber(number)) return json({ error: 'number must be E.164, for example +6591234567' }, 400);
-    if (!validDescription(offer, 'offer') || !mid) return json({ error: 'offer and mid are required' }, 400);
+    if (!validDescription(offer, 'offer') || !validId(mid)) return json({ error: 'offer and mid are required' }, 400);
 
     const existing = await readCall(env);
     if (existing) return json({ error: 'Another call is already active', call: existing }, 409);
 
-    const call = {
+    const call: LiveCall = {
       id: crypto.randomUUID(),
       direction: 'outbound',
       state: 'connecting',
-      iccid,
-      number,
+      iccid: iccid as string,
+      number: number as string,
       started_at: new Date().toISOString(),
-      requested_by: request.user?.sub ?? request.user?.id ?? null,
+      // The KV session stores the raw Auth0 user (`sub`); the JWT middleware
+      // builds `id`. Accept either, as the original did.
+      requested_by: (request.user?.id ?? request.user?.sub) ?? null,
     };
     if (!await writeCall(env, call)) return json({ error: 'Another call is already active' }, 409);
     await logCallStarted(env, call);
 
     const media = await publishMic(env, offer, mid);
-    if (media.error) return failMedia(env, call, media.error);
+    if ('error' in media) return failMedia(env, call, media.error);
     call.session_id = media.sessionId;
     if (!await writeCall(env, call)) return callChanged();
     return json({ call, answer: media.answer });
   });
 
   // Answer the call the daemon reported as ringing.
-  router.post('/api/calls/answer', async (request, env, ctx) => {
+  router.post('/api/calls/answer', async (request, env: Env, ctx: ExecutionContext) => {
     const blocked = await gate(request, env, ctx);
     if (blocked) return blocked;
     const unconfigured = notConfigured(env);
@@ -541,7 +653,7 @@ export function setupCallRoutes(router) {
     const body = await readJson(request);
     if (!body) return json({ error: 'Invalid JSON body' }, 400);
     const { offer, mid } = body;
-    if (!validDescription(offer, 'offer') || !mid) return json({ error: 'offer and mid are required' }, 400);
+    if (!validDescription(offer, 'offer') || !validId(mid)) return json({ error: 'offer and mid are required' }, 400);
 
     const call = await readCall(env);
     if (!call) return json({ error: 'No call to answer' }, 404);
@@ -552,19 +664,19 @@ export function setupCallRoutes(router) {
     // Take the call out of `ringing` first so a RING report cannot shorten its TTL.
     call.state = 'connecting';
     call.answered_at = new Date().toISOString();
-    call.answered_by = request.user?.sub ?? request.user?.id ?? null;
+    call.answered_by = (request.user?.id ?? request.user?.sub) ?? null;
     if (!await writeCall(env, call)) return callChanged();
     await logCallAnswered(env, call.id, { at: call.answered_at, by: call.answered_by });
 
-    const media = await publishMic(env, offer, mid);
-    if (media.error) return failMedia(env, call, media.error);
+    const media = await publishMic(env, offer, mid as string);
+    if ('error' in media) return failMedia(env, call, media.error);
     call.session_id = media.sessionId;
     if (!await writeCall(env, call)) return callChanged();
     return json({ call, answer: media.answer });
   });
 
   // Bridge the browser session to the Pi. Called once the PeerConnection is up.
-  router.post('/api/calls/connect', async (request, env, ctx) => {
+  router.post('/api/calls/connect', async (request, env: Env, ctx: ExecutionContext) => {
     const blocked = await gate(request, env, ctx);
     if (blocked) return blocked;
     const unconfigured = notConfigured(env);
@@ -584,8 +696,8 @@ export function setupCallRoutes(router) {
 
     const action = call.direction === 'outbound' ? 'dial' : 'answer';
     const exp = Math.floor(Date.now() / 1000) + ENDPOINT_TTL_SECONDS;
-    const endpointFor = (leg) =>
-      adapterEndpoint(env, { callId: call.id, leg, action, iccid: call.iccid, number: call.number, exp });
+    const endpointFor = (leg: string) =>
+      adapterEndpoint(env, { callId: call.id, leg, action, iccid: call.iccid ?? '', number: call.number, exp });
 
     // Browser mic -> Pi. Its response carries no sessionId: it reads an existing track.
     const down = await sfu(env, 'POST', '/adapters/websocket/new', {
@@ -619,7 +731,7 @@ export function setupCallRoutes(router) {
       }],
     });
     const upTrack = up.body.tracks?.[0];
-    if (validId(upTrack?.adapterId)) call.adapters.up = upTrack.adapterId;
+    if (validId(upTrack?.adapterId)) call.adapters = { ...call.adapters, up: upTrack.adapterId };
     if (!up.ok || !validId(upTrack?.adapterId) || !validId(upTrack?.sessionId)) {
       return failMedia(env, call, sfuError('Could not create the incoming audio adapter', up));
     }
@@ -653,7 +765,7 @@ export function setupCallRoutes(router) {
   });
 
   // Apply the browser's answer to the pull offer from /connect.
-  router.post('/api/calls/renegotiate', async (request, env, ctx) => {
+  router.post('/api/calls/renegotiate', async (request, env: Env, ctx: ExecutionContext) => {
     const blocked = await gate(request, env, ctx);
     if (blocked) return blocked;
     const unconfigured = notConfigured(env);
@@ -681,13 +793,13 @@ export function setupCallRoutes(router) {
   });
 
   // Close the adapters for the requested call. Older clients omit the ID.
-  router.post('/api/calls/hangup', async (request, env, ctx) => {
+  router.post('/api/calls/hangup', async (request, env: Env, ctx: ExecutionContext) => {
     const blocked = await gate(request, env, ctx);
     if (blocked) return blocked;
 
     const body = request.body === null ? {} : await readJson(request);
     if (!body) return json({ error: 'Invalid JSON body' }, 400);
-    const { call_id: callId } = body;
+    const callId = body.call_id;
     if (callId !== undefined && (typeof callId !== 'string' || !callId)) {
       return json({ error: 'Invalid call ID' }, 400);
     }
@@ -705,13 +817,14 @@ export function setupCallRoutes(router) {
   });
 
   // Daemon-reported incoming call, repeated on every RING to keep it alive.
-  router.post('/api/control/calls/incoming', async (request, env, ctx) => {
+  router.post('/api/control/calls/incoming', async (request, env: Env, ctx: ExecutionContext) => {
     const authResponse = await handleAuth0(request, env, ctx);
     if (authResponse) return authResponse;
 
     const body = await readJson(request);
     if (!body) return json({ error: 'Invalid JSON body' }, 400);
-    const { iccid, from } = body;
+    const iccid = typeof body.iccid === 'string' ? body.iccid : '';
+    const from = body.from;
     if (!iccid) return json({ error: 'iccid is required' }, 400);
 
     let existing = await readCall(env);
@@ -720,18 +833,18 @@ export function setupCallRoutes(router) {
       if (existing && (existing.state !== 'ringing' || existing.iccid !== iccid)) {
         return json({ ok: false, reason: 'another call is active' }, 409);
       }
-      const call = {
+      const call: LiveCall = {
         id: existing?.id ?? open?.id ?? crypto.randomUUID(),
         direction: 'inbound',
         state: 'ringing',
         iccid,
-        number: from || existing?.number || open?.remote_number || null,
+        number: (typeof from === 'string' ? from : null) || existing?.number || open?.remote_number || null,
         started_at: existing?.started_at ?? open?.started_at ?? new Date().toISOString(),
       };
       if (await writeCall(env, call, RING_TTL_SECONDS, existing)) {
         if (!existing && !open) {
           await logCallStarted(env, call);
-        } else if (from && !(existing?.number ?? open?.remote_number)) {
+        } else if (typeof from === 'string' && from && !(existing?.number ?? open?.remote_number)) {
           await logCallerId(env, call.id, from);
         }
         return json({ ok: true, call });
@@ -743,7 +856,7 @@ export function setupCallRoutes(router) {
   });
 
   // Daemon-reported end: remote hangup, modem failure, or a ring that stopped.
-  router.post('/api/control/calls/ended', async (request, env, ctx) => {
+  router.post('/api/control/calls/ended', async (request, env: Env, ctx: ExecutionContext) => {
     const authResponse = await handleAuth0(request, env, ctx);
     if (authResponse) return authResponse;
 
@@ -752,9 +865,9 @@ export function setupCallRoutes(router) {
     const { call_id: callId, iccid, reason } = body;
     if (!callId && !iccid) return json({ error: 'call_id or iccid is required' }, 400);
 
-    const call = await beginEnding(env, (current) => callId
+    const call = await beginEnding(env, (current) => (callId
       ? current.id === callId
-      : current.iccid === iccid && current.state === 'ringing');
+      : current.iccid === iccid && current.state === 'ringing'));
     if (!call) return json({ ok: true, ignored: true });
 
     await closeAdapters(env, call);
