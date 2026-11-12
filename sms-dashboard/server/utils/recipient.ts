@@ -10,20 +10,21 @@
 // The daemon validates independently; this is the trust boundary, so a bad value never
 // reaches the database or the pending-send queue in the first place.
 
+export type RecipientCheck =
+  | { ok: true; value: string }
+  | { ok: false; reason: string };
+
+const E164 = /^\+?[0-9]{6,15}$/;
+const SHORT_CODE = /^[0-9]{3,5}$/;
+
 /**
  * Validate a recipient as E.164 or a carrier short code.
- *
- * @param {unknown} recipient
- * @returns {{ok: true, value: string} | {ok: false, reason: string}}
  *
  * Rejects rather than sanitises. Stripping separators or control characters would risk
  * sending the message to a different number than the caller asked for, and silently
  * "fixing" a payload hides the attempt; a 400 is both safer and diagnosable.
  */
-const E164 = /^\+?[0-9]{6,15}$/;
-const SHORT_CODE = /^[0-9]{3,5}$/;
-
-export function normalizeRecipient(recipient) {
+export function normalizeRecipient(recipient: unknown): RecipientCheck {
   if (typeof recipient !== 'string') {
     return { ok: false, reason: 'recipient must be a string' };
   }
