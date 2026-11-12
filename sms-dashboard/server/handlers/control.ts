@@ -9,6 +9,7 @@ import {
   updateBalanceCheckForSmsResult,
 } from './balance-queries.js';
 import { processCarrierBillMessages } from '../utils/carrier-billing.js';
+import type { BalanceCheckRow } from './balance-queries.js';
 
 import type { AppRequest, Env } from '../../shared/worker-context.js';
 import type { D1Database } from '../../shared/cf-bindings.js';
@@ -358,7 +359,7 @@ export const controlHandler = {
       // whichever part is processed first.
       const multipartReplies = mergeMultipartReplies(messages as UploadedMessage[]);
       // Group key -> the check that claimed it, so later parts join that check.
-      const claimedReplyGroups = new Map<string, { id: string }>();
+      const claimedReplyGroups = new Map<string, BalanceCheckRow>();
       
       for (const msg of messages as UploadedMessage[]) {
         const messageId = String(msg.id);
@@ -388,11 +389,14 @@ export const controlHandler = {
           // pending lookup, which would find the same check and could queue a
           // duplicate follow-up for it.
           const groupClaim = reply ? claimedReplyGroups.get(reply.key) ?? null : null;
-          const balanceCheck = groupClaim || await findPendingBalanceCheck(env.DB, {
+          // findPendingBalanceCheck returns null for a missing number anyway; pass ''
+          // so the parameter is a string rather than relying on an untyped guard.
+          const balanceCheck: BalanceCheckRow | null = groupClaim || await findPendingBalanceCheck(env.DB, {
             phone_iccid,
-            phone_number: phoneNumber,
+            phone_number: phoneNumber ?? '',
             message_timestamp: timestamp,
           });
+          const responseSender: string | null = phoneNumber;
           if (reply && !groupClaim && balanceCheck) {
             claimedReplyGroups.set(reply.key, balanceCheck);
           }
@@ -445,7 +449,7 @@ export const controlHandler = {
           // using the whole merged text. Later parts are inserted already linked.
           if (balanceCheck) {
             if (!groupClaim) {
-              await linkBalanceReply(env.DB, balanceCheck, record,
+              await linkBalanceReply(env.DB, balanceCheck, { ...record, phone_number: responseSender },
                 reply ? { mergedContent: reply.content } : {});
             }
           }
@@ -729,7 +733,7 @@ export const controlHandler = {
         env.DB,
         String(message_id),
         outcome,
-        (typeof error_message === 'string' ? error_message : null) as null,
+        typeof error_message === 'string' ? error_message : null,
       );
       
       // Status updates are now picked up by polling

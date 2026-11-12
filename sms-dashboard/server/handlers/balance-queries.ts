@@ -6,12 +6,114 @@ import {
   newCarrierWebBalanceIds,
 } from './carrier-web-balance.js';
 import { loadBalanceRunnerStatus } from './balance-runners.js';
+import type { AppRequest } from '../../shared/worker-context.js';
+import type { D1Database, D1PreparedStatement } from '../../shared/cf-bindings.js';
+
+/** A row of device_view as the balance planner reads it. */
+export interface PlanPhone {
+  iccid: string;
+  number: string | null;
+  carrier: string | null;
+  country: string | null;
+  sim_status: string | null;
+  sim_index: number | null;
+  sim_role: string | null;
+  service_type: string | null;
+}
+
+/** A row of sim_balance_profiles. */
+export interface BalanceProfile {
+  id: string;
+  country_code: string;
+  carrier: string;
+  method: 'sms' | 'browser' | string;
+  command: string | null;
+  destination: string | null;
+  parser_version: string;
+  conversation_steps: string | null;
+  skill_config: string | null;
+  expected_senders: string | null;
+  response_window_minutes: number;
+  enabled?: number | null;
+  discovery_enabled?: number | null;
+  [column: string]: unknown;
+}
+
+/** One SIM's balance-query eligibility. */
+export interface PlanItem {
+  phone: PlanPhone;
+  profile: BalanceProfile | null;
+  eligible: boolean;
+  reason: string | null;
+  recentCheck: { id?: string; status?: string; requested_at?: string; [column: string]: unknown } | null;
+}
+
+/** A sim_balance_checks row joined with its profile and messages, as the handlers read it. */
+export interface BalanceCheckRow {
+  id: string;
+  sim_iccid?: string;
+  profile_id?: string;
+  status: string;
+  step_index?: number;
+  parser_version?: string;
+  conversation_steps?: string | null;
+  skill_config?: string | null;
+  expected_senders?: string | null;
+  destination?: string | null;
+  raw_response?: string | null;
+  response_message_id?: string | null;
+  response_sender?: string | null;
+  sim_number?: string | null;
+  response_window_open?: number | null;
+  [column: string]: unknown;
+}
+
+/** A message handed to the balancer: what was received, from whom, when. */
+export interface BalanceMessage {
+  id: string;
+  phone_number?: string | null;
+  content: string;
+  [column: string]: unknown;
+}
+
+/** A parsed balance metric. */
+export interface BalanceMetric {
+  metric_type: string;
+  value: number | null;
+  unit: string | null;
+  currency: string | null;
+  expires_at: string | null;
+}
+
+/** A conversation step from a profile's allowlist. */
+interface ConversationStep {
+  command: string;
+  response_contains: string;
+}
+
+/** The category a profile falls into, and the runner capability it needs. */
+export interface BalanceMethod {
+  category: 'unsupported' | 'browser' | 'sms_ai' | 'direct_sms';
+  capability: 'carrier_browser' | 'sms_ai' | null;
+  interactive: boolean;
+}
+
+/**
+ * D1 rejects a statement with more bound parameters than this. Exported so the
+ * batch handlers can size their own chunks against the same limit.
+ */
+export const D1_MAX_BOUND_PARAMETERS = 100;
+
+function changesOf(result: unknown): number {
+  return Number((result as { meta?: { changes?: number } } | undefined)?.meta?.changes ?? 0);
+}
+
 
 const CHINA_MOBILE_NAMES = ['china mobile', 'cmcc', '中国移动', '移动'];
 const CHINA_UNICOM_NAMES = ['china unicom', 'unicom', '中国联通', '联通'];
 const CHINA_TELECOM_NAMES = ['china telecom', 'telecom', 'ctcc', '中国电信', '电信'];
 const CMHK_NAMES = ['cmhk', 'china mobile hong kong', '中国移动香港', '中移香港', '香港移动'];
-const BATCH_METHODS = new Set(['direct_sms', 'sms_ai', 'browser']);
+const BATCH_METHODS = new Set<string>(['direct_sms', 'sms_ai', 'browser']);
 const MAX_BATCH_SCOPE = 500;
 const BALANCE_COOLDOWN_PREDICATE = `
   status IN ('queued', 'awaiting_response')
@@ -19,26 +121,26 @@ const BALANCE_COOLDOWN_PREDICATE = `
     AND datetime(requested_at) >= datetime('now', '-24 hours'))
 `;
 
-function json(data, status = 200) {
+function json(data: unknown, status = 200): Response {
   return Response.json(data, { status });
 }
 
-function hasApiKey(request) {
+function hasApiKey(request: AppRequest): boolean {
   const actual = request.headers.get('X-API-Key');
   return Boolean(actual && actual === request.env.API_KEY);
 }
 
-function normalizeCarrier(value) {
+function normalizeCarrier(value: unknown): string {
   return typeof value === 'string' ? value.trim().toLocaleLowerCase() : '';
 }
 
-function checkKey(simIccid, profileId) {
+function checkKey(simIccid: string, profileId: string): string {
   return `${simIccid}\u0000${profileId}`;
 }
 
-function requiredServiceType(profile) {
+function requiredServiceType(profile: BalanceProfile | null): string | null {
   try {
-    const parsed = JSON.parse(profile?.skill_config || '{}');
+    const parsed = JSON.parse(profile?.skill_config || '{}') as { required_service_type?: unknown };
     return typeof parsed.required_service_type === 'string'
       ? parsed.required_service_type
       : null;
@@ -47,28 +149,28 @@ function requiredServiceType(profile) {
   }
 }
 
-function parseBatchScope(value) {
+function parseBatchScope(value: unknown): string[] | null {
   if (!Array.isArray(value) || value.length < 1 || value.length > MAX_BATCH_SCOPE) return null;
-  const normalized = value.map((item) => typeof item === 'string' ? item.trim() : '');
+  const normalized: string[] = value.map((item: unknown) => typeof item === 'string' ? item.trim() : '');
   if (normalized.some((item) => !item || item.length > 64)) return null;
   if (new Set(normalized).size !== normalized.length) return null;
   return normalized;
 }
 
-function displayBalanceStatus(record) {
-  if (['response_received', 'unparsed'].includes(record.status)
-    && ['pending', 'leased'].includes(record.skill_job_status)) {
+function displayBalanceStatus(record: Record<string, unknown>): unknown {
+  if (['response_received', 'unparsed'].includes(String(record.status))
+    && ['pending', 'leased'].includes(String(record.skill_job_status))) {
     return record.skill_job_status === 'leased' ? 'skill_processing' : 'skill_pending';
   }
   if (record.status === 'queued' && record.web_job_status) {
-    return ({
+    return (({
       pending: 'web_pending',
       leased: 'web_processing',
       awaiting_otp: 'web_otp',
       authenticating: 'web_authenticating',
       querying: 'web_querying',
       human_verification_required: 'web_human_required',
-    })[record.web_job_status] || record.status;
+    }) as Record<string, string>)[String(record.web_job_status)] || record.status;
   }
   return record.status;
 }
@@ -79,10 +181,16 @@ export function buildBalanceQueryPlan({
   recentChecks = [],
   successfulChecks = [],
   allowDiscovery = false,
-} = {}) {
-  const recentBySim = new Map(recentChecks.map((check) => [check.sim_iccid, check]));
+}: {
+  phones?: PlanPhone[];
+  profiles?: BalanceProfile[];
+  recentChecks?: Array<{ sim_iccid?: string; profile_id?: string }>;
+  successfulChecks?: Array<{ sim_iccid?: string; profile_id?: string }>;
+  allowDiscovery?: boolean;
+} = {}): PlanItem[] {
+  const recentBySim = new Map(recentChecks.map((check) => [String(check.sim_iccid), check]));
   const successful = new Set(
-    successfulChecks.map((check) => checkKey(check.sim_iccid, check.profile_id))
+    successfulChecks.map((check) => checkKey(String(check.sim_iccid), String(check.profile_id)))
   );
 
   return phones.map((phone) => {
@@ -115,7 +223,7 @@ export function buildBalanceQueryPlan({
   });
 }
 
-function summarizePlan(plan) {
+function summarizePlan(plan: PlanItem[]): Record<string, number> {
   const summary = {
     total: plan.length,
     eligible: 0,
@@ -128,12 +236,12 @@ function summarizePlan(plan) {
   };
   for (const item of plan) {
     if (item.eligible) summary.eligible += 1;
-    else if (item.reason in summary) summary[item.reason] += 1;
+    else if (item.reason && item.reason in summary) summary[item.reason as keyof typeof summary] += 1;
   }
   return summary;
 }
 
-export function describeBalanceMethod(profile) {
+export function describeBalanceMethod(profile: BalanceProfile | null): BalanceMethod {
   if (!profile) return { category: 'unsupported', capability: null, interactive: false };
   if (profile.method === 'browser') {
     return { category: 'browser', capability: 'carrier_browser', interactive: true };
@@ -144,26 +252,26 @@ export function describeBalanceMethod(profile) {
   return { category: 'direct_sms', capability: null, interactive: false };
 }
 
-function summarizeMethods(plan) {
+function summarizeMethods(plan: PlanItem[]): Record<string, number> {
   const summary = { direct_sms: 0, sms_ai: 0, browser: 0 };
   for (const item of plan.filter((candidate) => candidate.eligible)) {
     const category = describeBalanceMethod(item.profile).category;
-    if (category in summary) summary[category] += 1;
+    if (category in summary) summary[category as keyof typeof summary] += 1;
   }
   return summary;
 }
 
-export function filterBalancePlanByMethods(plan, methods) {
+export function filterBalancePlanByMethods(plan: PlanItem[], methods: string[]): PlanItem[] {
   const selected = new Set(methods);
   return plan.filter((item) => item.eligible
     && selected.has(describeBalanceMethod(item.profile).category));
 }
 
-async function loadBalanceQueryPlan(db, {
+async function loadBalanceQueryPlan(db: D1Database, {
   phoneIccid = null,
   phoneIccids = null,
   allowDiscovery = false,
-} = {}) {
+}: { phoneIccid?: string | null; phoneIccids?: string[] | null; allowDiscovery?: boolean } = {}): Promise<PlanItem[]> {
   const scopedIccids = phoneIccid ? [phoneIccid] : phoneIccids;
   const phoneWhere = scopedIccids
     ? `WHERE iccid IN (${scopedIccids.map(() => '?').join(', ')})`
@@ -195,15 +303,19 @@ async function loadBalanceQueryPlan(db, {
   ]);
 
   return buildBalanceQueryPlan({
-    phones: phoneResult.results || [],
-    profiles: profileResult.results || [],
-    recentChecks: recentResult.results || [],
-    successfulChecks: successfulResult.results || [],
+    phones: phoneResult.results as unknown as PlanPhone[],
+    profiles: profileResult.results as unknown as BalanceProfile[],
+    recentChecks: recentResult.results,
+    successfulChecks: successfulResult.results,
     allowDiscovery,
   });
 }
 
-async function queueBalanceCheck(db, { phone, profile }, requestedBySubject = null) {
+async function queueBalanceCheck(
+  db: D1Database,
+  { phone, profile }: { phone: PlanPhone; profile: BalanceProfile },
+  requestedBySubject: string | null = null,
+) {
   const requestedAt = new Date().toISOString();
   if (profile.method === 'browser') {
     const { checkId, jobId } = newCarrierWebBalanceIds();
@@ -273,30 +385,30 @@ async function queueBalanceCheck(db, { phone, profile }, requestedBySubject = nu
   };
 }
 
-function parseConversationSteps(value) {
+function parseConversationSteps(value: unknown): ConversationStep[] {
   try {
-    const steps = JSON.parse(value || '[]');
-    return Array.isArray(steps) ? steps : [];
+    const steps = JSON.parse(String(value || '[]'));
+    return Array.isArray(steps) ? steps as ConversationStep[] : [];
   } catch {
     return [];
   }
 }
 
-function matchingNextStep(check, content) {
+function matchingNextStep(check: BalanceCheckRow | null | undefined, content: unknown): ConversationStep | null {
   const step = parseConversationSteps(check?.conversation_steps)[check?.step_index || 0];
   if (!step || typeof step.response_contains !== 'string'
     || typeof step.command !== 'string') return null;
   return String(content || '').includes(step.response_contains) ? step : null;
 }
 
-function attemptedStep(check) {
+function attemptedStep(check: BalanceCheckRow | null | undefined): ConversationStep | null {
   const stepIndex = Number(check?.step_index || 0) - 1;
   if (stepIndex < 0) return null;
   const step = parseConversationSteps(check?.conversation_steps)[stepIndex];
   return step && typeof step.command === 'string' ? step : null;
 }
 
-export function parseBalanceMetrics(parserVersion, content) {
+export function parseBalanceMetrics(parserVersion: unknown, content: unknown): BalanceMetric[] {
   if (typeof content !== 'string') return [];
 
   if (parserVersion === 'cn-telecom-balance-v1') {
@@ -334,7 +446,7 @@ export function parseBalanceMetrics(parserVersion, content) {
   }];
 }
 
-export function carrierMatchesProfile(actualCarrier, profileCarrier) {
+export function carrierMatchesProfile(actualCarrier: unknown, profileCarrier: unknown): boolean {
   const actual = normalizeCarrier(actualCarrier);
   const expected = normalizeCarrier(profileCarrier);
   if (!actual || !expected) return false;
@@ -359,10 +471,10 @@ export function carrierMatchesProfile(actualCarrier, profileCarrier) {
   return actual.includes(expected) || expected.includes(actual);
 }
 
-export function expectedSenderMatches(rawSender, expectedSendersJson) {
-  let expected;
+export function expectedSenderMatches(rawSender: unknown, expectedSendersJson: unknown): boolean {
+  let expected: unknown;
   try {
-    expected = JSON.parse(expectedSendersJson);
+    expected = JSON.parse(String(expectedSendersJson ?? ''));
   } catch {
     return false;
   }
@@ -371,11 +483,11 @@ export function expectedSenderMatches(rawSender, expectedSendersJson) {
     && expected.some((sender) => senderMatches(rawSender, sender));
 }
 
-export async function findPendingBalanceCheck(db, {
+export async function findPendingBalanceCheck(db: D1Database, {
   phone_iccid,
   phone_number,
   message_timestamp = new Date().toISOString(),
-}) {
+}: { phone_iccid: string; phone_number: string; message_timestamp?: string }): Promise<BalanceCheckRow | null> {
   if (!phone_iccid || !phone_number) return null;
 
   const result = await db.prepare(`
@@ -406,9 +518,9 @@ export async function findPendingBalanceCheck(db, {
       ), c.sent_at, c.requested_at))
       AND datetime(?) <= datetime(c.deadline_at)
     ORDER BY c.requested_at DESC
-  `).bind(phone_iccid, message_timestamp, message_timestamp).all();
+  `).bind(phone_iccid, message_timestamp, message_timestamp).all<BalanceCheckRow>();
 
-  const candidates = result.results || [];
+  const candidates = result.results;
   return candidates.find((candidate) =>
     expectedSenderMatches(phone_number, candidate.expected_senders)
   ) || null;
@@ -423,8 +535,10 @@ export async function findPendingBalanceCheck(db, {
 //
 // Parts carry no sequence number, so batch order is the only ordering available.
 // Both consumers search for a substring, so concatenation order is not significant.
-export function mergeMultipartReplies(messages = []) {
-  const groups = new Map();
+export function mergeMultipartReplies(
+  messages: Array<{ id?: unknown; content?: unknown; phone_iccid?: unknown; phone_number?: unknown; timestamp?: unknown }> = [],
+): Map<string, { key: string; content: string }> {
+  const groups = new Map<string, Array<{ id: string; content: string }>>();
   for (const message of messages) {
     if (!message?.id || !message.content) continue;
     const key = [
@@ -432,12 +546,13 @@ export function mergeMultipartReplies(messages = []) {
       message.phone_number ?? '',
       message.timestamp ?? '',
     ].join(' ');
+    const entry = { id: String(message.id), content: String(message.content) };
     const group = groups.get(key);
-    if (group) group.push(message);
-    else groups.set(key, [message]);
+    if (group) group.push(entry);
+    else groups.set(key, [entry]);
   }
 
-  const merged = new Map();
+  const merged = new Map<string, { key: string; content: string }>();
   for (const [key, group] of groups) {
     if (group.length < 2) continue;
     const content = group.map((message) => message.content).join('');
@@ -447,10 +562,10 @@ export function mergeMultipartReplies(messages = []) {
 }
 
 export async function linkBalanceReply(
-  db,
-  check,
-  message,
-  { allowFollowUp = true, mergedContent = null } = {},
+  db: D1Database,
+  check: BalanceCheckRow | null | undefined,
+  message: BalanceMessage,
+  { allowFollowUp = true, mergedContent = null }: { allowFollowUp?: boolean; mergedContent?: string | null } = {},
 ) {
   if (!check) return;
 
@@ -546,12 +661,12 @@ export async function linkBalanceReply(
 
   const results = await db.batch(statements);
   return {
-    linked: Number(results?.[0]?.meta?.changes ?? 1) > 0,
+    linked: Number((results?.[0] as { meta?: { changes?: number } } | undefined)?.meta?.changes ?? 1) > 0,
     results,
   };
 }
 
-export async function expireStaleBalanceChecks(db) {
+export async function expireStaleBalanceChecks(db: D1Database): Promise<{ expired: number; stopped_jobs: number }> {
   const results = await db.batch([
     db.prepare(`
       UPDATE sim_balance_checks
@@ -580,19 +695,19 @@ export async function expireStaleBalanceChecks(db) {
   ]);
 
   return {
-    expired: Number(results?.[0]?.meta?.changes || 0),
-    stopped_jobs: Number(results?.[1]?.meta?.changes || 0),
+    expired: changesOf(results?.[0]),
+    stopped_jobs: changesOf(results?.[1]),
   };
 }
 
 export async function queueBalanceFollowUp(
-  db,
-  check,
-  message,
-  step,
-  fromStatus,
-  extraStatements = [],
-) {
+  db: D1Database,
+  check: BalanceCheckRow & { sim_number?: string | null; destination?: string | null; step_index?: number },
+  message: BalanceMessage,
+  step: { command: string },
+  fromStatus: string,
+  extraStatements: D1PreparedStatement[] = [],
+): Promise<{ queued: boolean; message_id: string | null }> {
   const messageId = `msg-balance-${nanoid()}`;
   const results = await db.batch([
     db.prepare(`
@@ -638,16 +753,16 @@ export async function queueBalanceFollowUp(
     ...extraStatements,
   ]);
 
-  const queued = Number(results?.[0]?.meta?.changes ?? 1) > 0;
+  const queued = Number((results?.[0] as { meta?: { changes?: number } } | undefined)?.meta?.changes ?? 1) > 0;
   return { queued, message_id: queued ? messageId : null };
 }
 
 export async function updateBalanceCheckForSmsResult(
-  db,
-  messageId,
-  outcome,
-  errorMessage = null,
-) {
+  db: D1Database,
+  messageId: string,
+  outcome: string,
+  errorMessage: string | null = null,
+): Promise<void> {
   const submitted = outcome === 'confirmed' || outcome === 'submitted_unconfirmed';
   await db.prepare(`
     UPDATE sim_balance_checks
@@ -676,8 +791,12 @@ export async function updateBalanceCheckForSmsResult(
   ).run();
 }
 
+function parseBody(raw: unknown): Record<string, unknown> | null {
+  return raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : null;
+}
+
 export const balanceQueriesHandler = {
-  async list(request) {
+  async list(request: AppRequest): Promise<Response> {
     const url = new URL(request.url);
     const phoneIccid = url.searchParams.get('phone_iccid');
     const requestedLimit = Number.parseInt(url.searchParams.get('limit') || '100', 10);
@@ -763,18 +882,18 @@ export const balanceQueriesHandler = {
       ${where}
       ORDER BY c.requested_at DESC
       LIMIT ?
-    `).bind(...params, limit).all();
+    `).bind(...params, limit).all<Record<string, unknown>>();
 
-    const checks = (result.results || []).map((check) => {
-      let metrics = [];
-      let profileOutputs = [];
+    const checks = result.results.map((check) => {
+      let metrics: BalanceMetric[] = [];
+      let profileOutputs: string[] = [];
       try {
-        metrics = JSON.parse(check.metrics_json || '[]');
+        metrics = JSON.parse(String(check.metrics_json || '[]')) as BalanceMetric[];
       } catch {
         metrics = [];
       }
       try {
-        const skill = JSON.parse(check.skill_config || '{}');
+        const skill = JSON.parse(String(check.skill_config || '{}')) as { outputs?: unknown };
         profileOutputs = Array.isArray(skill.outputs)
           ? skill.outputs.filter((output) => typeof output === 'string')
           : [];
@@ -798,7 +917,7 @@ export const balanceQueriesHandler = {
     return json({ success: true, data: checks });
   },
 
-  async status(request) {
+  async status(request: AppRequest): Promise<Response> {
     const ids = [...new Set((new URL(request.url).searchParams.get('ids') || '')
       .split(',').map((id) => id.trim()).filter(Boolean))];
     if (!ids.length || ids.length > 100 || ids.some((id) => id.length > 200)) {
@@ -815,17 +934,17 @@ export const balanceQueriesHandler = {
       FROM sim_balance_checks c
       LEFT JOIN sim_balance_web_jobs wj ON wj.check_id = c.id
       WHERE c.id IN (${placeholders})
-    `).bind(...ids).all();
+    `).bind(...ids).all<Record<string, unknown>>();
     return json({
       success: true,
-      data: (result.results || []).map((record) => ({
+      data: result.results.map((record) => ({
         ...record,
         display_status: displayBalanceStatus(record),
       })),
     });
   },
 
-  async detail(request) {
+  async detail(request: AppRequest): Promise<Response> {
     const id = String(request.params?.id || '').trim();
     if (!id || id.length > 200) return json({ error: 'Invalid balance check ID' }, 400);
     const check = await request.env.DB.prepare(`
@@ -851,20 +970,20 @@ export const balanceQueriesHandler = {
       success: true,
       data: {
         id,
-        conversation: messages.results || [],
-        web_events: events.results || [],
+        conversation: messages.results,
+        web_events: events.results,
       },
     });
   },
 
-  async preview(request) {
+  async preview(request: AppRequest): Promise<Response> {
     const requestedBySubject = request.user?.id;
     if (!requestedBySubject) return json({ error: 'Unauthorized' }, 401);
     let phoneIccids = null;
     if (request.method === 'POST') {
-      let body;
+      let body: Record<string, unknown> | null;
       try {
-        body = await request.json();
+        body = parseBody(await request.json());
       } catch {
         return json({ success: false, error: 'Invalid JSON body' }, 400);
       }
@@ -889,26 +1008,27 @@ export const balanceQueriesHandler = {
           sim_index: item.phone.sim_index,
           phone_number: item.phone.number,
           carrier: item.phone.carrier,
-          profile_id: item.profile.id,
+          profile_id: item.profile!.id,
           ...describeBalanceMethod(item.profile),
         })),
     });
   },
 
-  async preflight(request) {
+  async preflight(request: AppRequest): Promise<Response> {
     const requestedBySubject = request.user?.id;
     if (!requestedBySubject) return json({ error: 'Unauthorized' }, 401);
     const phoneIccid = new URL(request.url).searchParams.get('phone_iccid')?.trim();
     if (!phoneIccid) return json({ success: false, error: 'phone_iccid is required' }, 400);
 
-    const [[item], runners] = await Promise.all([
+    const [items, runners] = await Promise.all([
       loadBalanceQueryPlan(request.env.DB, { phoneIccid, allowDiscovery: true }),
       loadBalanceRunnerStatus(request.env.DB, { authSubject: requestedBySubject }),
     ]);
+    const item = items[0];
     if (!item) return json({ success: false, error: 'SIM not found' }, 404);
 
     const method = describeBalanceMethod(item.profile);
-    const runner = method.capability ? runners.capabilities[method.capability] : null;
+    const runner = method.capability ? (runners.capabilities as Record<string, unknown>)[method.capability] : null;
     return json({
       success: true,
       eligible: item.eligible,
@@ -932,12 +1052,12 @@ export const balanceQueriesHandler = {
     });
   },
 
-  async query(request) {
+  async query(request: AppRequest): Promise<Response> {
     const requestedBySubject = request.user?.id;
     if (!requestedBySubject) return json({ error: 'Unauthorized' }, 401);
-    let body;
+    let body: Record<string, unknown> | null;
     try {
-      body = await request.json();
+      body = parseBody(await request.json());
     } catch {
       return json({ success: false, error: 'Invalid JSON body' }, 400);
     }
@@ -952,7 +1072,7 @@ export const balanceQueriesHandler = {
     });
     if (!item) return json({ success: false, error: 'SIM not found' }, 404);
     if (!item.eligible) {
-      const errors = {
+      const errors: Record<string, string> = {
         offline: 'SIM is not active',
         unsupported: 'No balance query profile matches this SIM',
         unverified: 'Balance query profile is not verified for this SIM',
@@ -960,22 +1080,22 @@ export const balanceQueriesHandler = {
       };
       return json({
         success: false,
-        error: errors[item.reason] || 'SIM is not eligible for a balance query',
+        error: (item.reason && errors[item.reason]) || 'SIM is not eligible for a balance query',
         reason: item.reason,
         previous_check: item.recentCheck,
       }, item.reason === 'cooldown' ? 429 : 409);
     }
 
-    const check = await queueBalanceCheck(request.env.DB, item, requestedBySubject);
+    const check = await queueBalanceCheck(request.env.DB, { phone: item.phone, profile: item.profile! }, requestedBySubject);
     return json({ success: true, check }, 202);
   },
 
-  async queryBatch(request) {
+  async queryBatch(request: AppRequest): Promise<Response> {
     const requestedBySubject = request.user?.id;
     if (!requestedBySubject) return json({ error: 'Unauthorized' }, 401);
-    let body;
+    let body: Record<string, unknown> | null;
     try {
-      body = await request.json();
+      body = parseBody(await request.json());
     } catch {
       return json({ success: false, error: 'Invalid JSON body' }, 400);
     }
@@ -983,7 +1103,7 @@ export const balanceQueriesHandler = {
     if (!Array.isArray(methods) || methods.length < 1
       || methods.length > BATCH_METHODS.size
       || new Set(methods).size !== methods.length
-      || methods.some((method) => !BATCH_METHODS.has(method))) {
+      || (methods as unknown[]).some((method) => typeof method !== 'string' || !BATCH_METHODS.has(method))) {
       return json({ success: false, error: 'A unique list of supported methods is required' }, 400);
     }
 
@@ -993,21 +1113,21 @@ export const balanceQueriesHandler = {
     }
 
     const plan = await loadBalanceQueryPlan(request.env.DB, { phoneIccids });
-    const eligible = filterBalancePlanByMethods(plan, methods);
-    const checks = [];
-    const failures = [];
+    const eligible = filterBalancePlanByMethods(plan, methods as string[]);
+    const checks: unknown[] = [];
+    const failures: Array<{ phone_iccid: string; sim_index: number | null; error: string }> = [];
 
     // Queue on the server, one audited transaction per SIM. The daemon fetch endpoint
     // applies a separate maintenance-message cap, so a fleet action cannot monopolise
     // normal user SMS delivery.
     for (const item of eligible) {
       try {
-        checks.push(await queueBalanceCheck(request.env.DB, item, requestedBySubject));
+        checks.push(await queueBalanceCheck(request.env.DB, { phone: item.phone, profile: item.profile! }, requestedBySubject));
       } catch (error) {
         failures.push({
           phone_iccid: item.phone.iccid,
           sim_index: item.phone.sim_index,
-          error: error?.message || 'Failed to queue balance query',
+          error: (error as Error)?.message || 'Failed to queue balance query',
         });
       }
     }
@@ -1027,17 +1147,18 @@ export const balanceQueriesHandler = {
     }, 202);
   },
 
-  async create(request) {
+  async create(request: AppRequest): Promise<Response> {
     if (!hasApiKey(request)) return json({ error: 'Unauthorized' }, 401);
 
-    let body;
+    let body: Record<string, unknown> | null;
     try {
-      body = await request.json();
+      body = parseBody(await request.json());
     } catch {
       return json({ success: false, error: 'Invalid JSON body' }, 400);
     }
 
-    const { phone_iccid, profile_id } = body || {};
+    const phone_iccid = body?.phone_iccid;
+    const profile_id = body?.profile_id;
     if (typeof phone_iccid !== 'string' || typeof profile_id !== 'string') {
       return json({
         success: false,
@@ -1067,7 +1188,7 @@ export const balanceQueriesHandler = {
     if (!profile) {
       return json({ success: false, error: 'Balance profile is not enabled' }, 404);
     }
-    if (!['sms', 'browser'].includes(profile.method)) {
+    if (profile.method !== 'sms' && profile.method !== 'browser') {
       return json({ success: false, error: 'Profile method is not implemented' }, 400);
     }
     if (!phone || phone.sim_status !== 'active') {
@@ -1085,7 +1206,7 @@ export const balanceQueriesHandler = {
       }, 429);
     }
 
-    const check = await queueBalanceCheck(db, { phone, profile });
+    const check = await queueBalanceCheck(db, { phone: phone as unknown as PlanPhone, profile: profile as BalanceProfile });
 
     return json({
       success: true,
@@ -1093,12 +1214,12 @@ export const balanceQueriesHandler = {
     }, 202);
   },
 
-  async continue(request) {
+  async continue(request: AppRequest): Promise<Response> {
     if (!hasApiKey(request)) return json({ error: 'Unauthorized' }, 401);
 
-    let body;
+    let body: Record<string, unknown> | null;
     try {
-      body = await request.json();
+      body = parseBody(await request.json());
     } catch {
       return json({ success: false, error: 'Invalid JSON body' }, 400);
     }
@@ -1117,10 +1238,10 @@ export const balanceQueriesHandler = {
       JOIN sim_balance_profiles p ON p.id = c.profile_id
       LEFT JOIN device_view dv ON dv.iccid = c.sim_iccid
       WHERE c.id = ?
-    `).bind(body.check_id).first();
+    `).bind(body.check_id).first<BalanceCheckRow>();
 
     if (!check) return json({ success: false, error: 'Balance check not found' }, 404);
-    if (!['response_received', 'unparsed'].includes(check.status)) {
+    if (check.status !== 'response_received' && check.status !== 'unparsed') {
       return json({ success: false, error: 'Balance check cannot be continued' }, 409);
     }
 
@@ -1130,9 +1251,9 @@ export const balanceQueriesHandler = {
     }
 
     const result = await queueBalanceFollowUp(request.env.DB, check, {
-      id: check.response_message_id,
+      id: String(check.response_message_id),
       phone_number: check.response_sender,
-      content: check.raw_response,
+      content: String(check.raw_response),
     }, step, check.status);
 
     if (!result.queued) {
@@ -1150,12 +1271,12 @@ export const balanceQueriesHandler = {
     }, 202);
   },
 
-  async retry(request) {
+  async retry(request: AppRequest): Promise<Response> {
     if (!hasApiKey(request)) return json({ error: 'Unauthorized' }, 401);
 
-    let body;
+    let body: Record<string, unknown> | null;
     try {
-      body = await request.json();
+      body = parseBody(await request.json());
     } catch {
       return json({ success: false, error: 'Invalid JSON body' }, 400);
     }
@@ -1182,7 +1303,7 @@ export const balanceQueriesHandler = {
         LIMIT 1
       )
       WHERE c.id = ?
-    `).bind(body.check_id).first();
+    `).bind(body.check_id).first<BalanceCheckRow & { message_id: string; message_content: string; message_recipient: string; message_status: string }>();
 
     const step = attemptedStep(check);
     if (!check || check.status !== 'failed' || check.message_status !== 'failed'
@@ -1207,8 +1328,8 @@ export const balanceQueriesHandler = {
       `).bind(check.id, check.step_index),
     ]);
 
-    if (Number(results?.[0]?.meta?.changes ?? 1) === 0
-      || Number(results?.[1]?.meta?.changes ?? 1) === 0) {
+    if (Number((results?.[0] as { meta?: { changes?: number } } | undefined)?.meta?.changes ?? 1) === 0
+      || Number((results?.[1] as { meta?: { changes?: number } } | undefined)?.meta?.changes ?? 1) === 0) {
       return json({ success: false, error: 'Balance check changed before retry' }, 409);
     }
 
@@ -1223,12 +1344,12 @@ export const balanceQueriesHandler = {
     }, 202);
   },
 
-  async stop(request) {
+  async stop(request: AppRequest): Promise<Response> {
     if (!hasApiKey(request)) return json({ error: 'Unauthorized' }, 401);
 
-    let body;
+    let body: Record<string, unknown> | null;
     try {
-      body = await request.json();
+      body = parseBody(await request.json());
     } catch {
       return json({ success: false, error: 'Invalid JSON body' }, 400);
     }
@@ -1239,9 +1360,9 @@ export const balanceQueriesHandler = {
 
     const check = await request.env.DB.prepare(`
       SELECT id, status FROM sim_balance_checks WHERE id = ?
-    `).bind(body.check_id).first();
+    `).bind(String(body.check_id)).first<{ id: string; status: string }>();
     if (!check) return json({ success: false, error: 'Balance check not found' }, 404);
-    if (!['awaiting_response', 'response_received'].includes(check.status)) {
+    if (check.status !== 'awaiting_response' && check.status !== 'response_received') {
       return json({ success: false, error: 'Balance check is not stoppable' }, 409);
     }
 
@@ -1263,7 +1384,7 @@ export const balanceQueriesHandler = {
       `).bind(check.id),
     ]);
 
-    if (Number(results?.[0]?.meta?.changes ?? 1) === 0) {
+    if (Number((results?.[0] as { meta?: { changes?: number } } | undefined)?.meta?.changes ?? 1) === 0) {
       return json({ success: false, error: 'Balance check changed before stop' }, 409);
     }
 

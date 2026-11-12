@@ -223,11 +223,11 @@ export const balanceSkillRunnerHandler = {
       const result = await queueBalanceFollowUp(db, {
         ...job,
         id: job.check_id,
-      }, {
+      } as unknown as Parameters<typeof queueBalanceFollowUp>[1], {
         id: job.response_message_id,
         phone_number: job.response_sender,
         content: job.response_content,
-      }, { command: decision.selected_option }, job.check_status, [audit, finishJob]);
+      }, { command: decision.selected_option ?? '' }, job.check_status, [audit, finishJob]);
       if (!result.queued) {
         return json({ error: 'Balance check changed before the decision was applied' }, 409);
       }
