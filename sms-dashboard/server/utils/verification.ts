@@ -7,11 +7,43 @@ const EN_CODE_LABEL =
   'otp|passcode|pin|(?:verification|security|authentication|login|access|confirmation|one[- ]time)\\s+(?:code|password)';
 const JA_LABEL = '認証コード|確認コード|ワンタイムパスワード|ワンタイムコード|セキュリティコード';
 
+/** The evidence label attached to a detected code. Used by tests and audit trails. */
+export type VerificationReason =
+  | 'zh_label_before'
+  | 'zh_label_after'
+  | 'ja_label_before'
+  | 'ja_label_after'
+  | 'en_label_before'
+  | 'en_otp_login_before'
+  | 'en_generic_code_before'
+  | 'en_label_after'
+  | 'google_g_code'
+  | 'en_login_action'
+  | 'zh_login_action'
+  | 'en_expiry'
+  | 'en_security'
+  | 'zh_purpose_expiry'
+  | 'zh_expiry_or_security'
+  | 'ja_generic_code_before'
+  | 'ja_login_action'
+  | 'ja_expiry'
+  | 'ja_security';
+
+interface CodePattern {
+  reason: VerificationReason;
+  pattern: RegExp;
+}
+
+export interface DetectedCode {
+  code: string;
+  reason: VerificationReason;
+}
+
 /**
  * Ordered from the most explicit forms to contextual forms. Each expression has
  * exactly one capture group: the code shown in the UI.
  */
-export const VERIFICATION_CODE_PATTERNS = [
+export const VERIFICATION_CODE_PATTERNS: CodePattern[] = [
   {
     reason: 'zh_label_before',
     pattern: new RegExp(`(?:${ZH_LABEL})\\s*(?:是|为|為)?\\s*[:：]?\\s*(\\d{4,8})`),
@@ -102,11 +134,15 @@ const NON_OTP_CODE_ACTION =
 const JA_NON_OTP_CODE_PREFIX =
   /(?:商品|製品|クーポン|プロモーション?|キャンペーン|バウチャー|割引|招待|紹介|注文|予約|会員|ポイント)\s*コード\s*(?:番号)?\s*[:：]?\s*$/;
 
-function candidateOffset(match) {
-  return match.index + match[0].indexOf(match[1]);
+function candidateOffset(match: RegExpMatchArray): number {
+  return (match.index ?? 0) + match[0].indexOf(match[1]);
 }
 
-function isRejectedCandidate(content, match, reason) {
+function isRejectedCandidate(
+  content: string,
+  match: RegExpMatchArray,
+  reason: VerificationReason,
+): boolean {
   const offset = candidateOffset(match);
   const before = content.slice(Math.max(0, offset - 32), offset);
   const after = content.slice(offset + match[1].length, offset + match[1].length + 48);
@@ -127,13 +163,8 @@ function isRejectedCandidate(content, match, reason) {
   return false;
 }
 
-/**
- * Return the code and the evidence that made it trustworthy, or null.
- *
- * @param {unknown} content
- * @returns {{code: string, reason: string}|null}
- */
-export function detectVerificationCode(content) {
+/** Return the code and the evidence that made it trustworthy, or null. */
+export function detectVerificationCode(content: unknown): DetectedCode | null {
   if (typeof content !== 'string' || content === '') return null;
 
   for (const { reason, pattern } of VERIFICATION_CODE_PATTERNS) {
@@ -147,16 +178,16 @@ export function detectVerificationCode(content) {
 }
 
 /** Backwards-compatible string-only API used when persisting a message. */
-export function extractVerificationCode(content) {
+export function extractVerificationCode(content: unknown): string | null {
   return detectVerificationCode(content)?.code ?? null;
 }
 
 /** Single boolean definition used by the spam-filter safety guard. */
-export function hasVerificationCode(content) {
+export function hasVerificationCode(content: unknown): boolean {
   return detectVerificationCode(content) !== null;
 }
 
 // Kept for callers outside this repository; internally use hasVerificationCode().
-export function hasLabelledCode(content) {
+export function hasLabelledCode(content: unknown): boolean {
   return hasVerificationCode(content);
 }
