@@ -1,5 +1,5 @@
 // Integration tests for MessageStore - SQLite persistence layer
-use orange_pi_daemon_rust::message_store::MessageStore;
+use orange_pi_daemon_rust::message_store::{MessageStore, Segment};
 use orange_pi_daemon_rust::types::Message;
 
 // Helper function to create test message
@@ -25,7 +25,7 @@ fn test_store_new_message() {
     // First store should succeed
     let result = store.store_message(&msg, "modem_0", "at:1");
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), true); // New message
+    assert!(result.unwrap()); // New message
 }
 
 #[test]
@@ -268,16 +268,17 @@ fn test_transient_failures_never_exhaust_retries() {
 fn test_store_single_segment() {
     let store = MessageStore::new(":memory:").unwrap();
 
-    let result = store.store_segment(
-        "iccid_001",
-        "+1234567890",
-        42, // ref_id
-        3,  // total_parts
-        1,  // part_number
-        "Part 1 content",
-        "2024-01-01T12:00:00.000Z",
-        1, // sms_index
-    );
+    let result = store.store_segment(Segment {
+        iccid: "iccid_001",
+        sender: "+1234567890",
+        ref_id: 42,
+        total_parts: 3,
+        part_number: 1,
+        content: "Part 1 content",
+        timestamp: "2024-01-01T12:00:00.000Z",
+        sms_storage: "ME",
+        sms_index: 1,
+    });
 
     assert!(result.is_ok());
 }
@@ -287,17 +288,17 @@ fn test_store_segment_preserves_sms_storage() {
     let store = MessageStore::new(":memory:").unwrap();
 
     store
-        .store_segment_in_storage(
-            "iccid_001",
-            "+1234567890",
-            42,
-            2,
-            1,
-            "Part 1",
-            "2024-01-01T12:00:00.000Z",
-            "SM",
-            7,
-        )
+        .store_segment(Segment {
+            iccid: "iccid_001",
+            sender: "+1234567890",
+            ref_id: 42,
+            total_parts: 2,
+            part_number: 1,
+            content: "Part 1",
+            timestamp: "2024-01-01T12:00:00.000Z",
+            sms_storage: "SM",
+            sms_index: 7,
+        })
         .unwrap();
 
     let segments = store
@@ -312,30 +313,30 @@ fn test_incomplete_multipart_keeps_each_physical_location() {
     let store = MessageStore::new(":memory:").unwrap();
 
     store
-        .store_segment_in_storage(
-            "iccid_001",
-            "+1234567890",
-            42,
-            3,
-            1,
-            "Part 1",
-            "2024-01-01T12:00:00.000Z",
-            "ME",
-            7,
-        )
+        .store_segment(Segment {
+            iccid: "iccid_001",
+            sender: "+1234567890",
+            ref_id: 42,
+            total_parts: 3,
+            part_number: 1,
+            content: "Part 1",
+            timestamp: "2024-01-01T12:00:00.000Z",
+            sms_storage: "ME",
+            sms_index: 7,
+        })
         .unwrap();
     store
-        .store_segment_in_storage(
-            "iccid_001",
-            "+1234567890",
-            42,
-            3,
-            2,
-            "Part 2",
-            "2024-01-01T12:00:01.000Z",
-            "SM",
-            9,
-        )
+        .store_segment(Segment {
+            iccid: "iccid_001",
+            sender: "+1234567890",
+            ref_id: 42,
+            total_parts: 3,
+            part_number: 2,
+            content: "Part 2",
+            timestamp: "2024-01-01T12:00:01.000Z",
+            sms_storage: "SM",
+            sms_index: 9,
+        })
         .unwrap();
 
     let segments = store
@@ -352,28 +353,30 @@ fn test_get_segments_incomplete() {
 
     // Store parts 1 and 2 (out of 3)
     store
-        .store_segment(
-            "iccid_001",
-            "+1234567890",
-            42,
-            3,
-            1,
-            "Part 1",
-            "2024-01-01T12:00:00.000Z",
-            1,
-        )
+        .store_segment(Segment {
+            iccid: "iccid_001",
+            sender: "+1234567890",
+            ref_id: 42,
+            total_parts: 3,
+            part_number: 1,
+            content: "Part 1",
+            timestamp: "2024-01-01T12:00:00.000Z",
+            sms_storage: "ME",
+            sms_index: 1,
+        })
         .unwrap();
     store
-        .store_segment(
-            "iccid_001",
-            "+1234567890",
-            42,
-            3,
-            2,
-            "Part 2",
-            "2024-01-01T12:00:00.000Z",
-            2,
-        )
+        .store_segment(Segment {
+            iccid: "iccid_001",
+            sender: "+1234567890",
+            ref_id: 42,
+            total_parts: 3,
+            part_number: 2,
+            content: "Part 2",
+            timestamp: "2024-01-01T12:00:00.000Z",
+            sms_storage: "ME",
+            sms_index: 2,
+        })
         .unwrap();
 
     let segments = store
@@ -388,40 +391,43 @@ fn test_get_segments_complete() {
 
     // Store all 3 parts
     store
-        .store_segment(
-            "iccid_001",
-            "+1234567890",
-            42,
-            3,
-            1,
-            "Part 1",
-            "2024-01-01T12:00:00.000Z",
-            1,
-        )
+        .store_segment(Segment {
+            iccid: "iccid_001",
+            sender: "+1234567890",
+            ref_id: 42,
+            total_parts: 3,
+            part_number: 1,
+            content: "Part 1",
+            timestamp: "2024-01-01T12:00:00.000Z",
+            sms_storage: "ME",
+            sms_index: 1,
+        })
         .unwrap();
     store
-        .store_segment(
-            "iccid_001",
-            "+1234567890",
-            42,
-            3,
-            2,
-            "Part 2",
-            "2024-01-01T12:00:00.000Z",
-            2,
-        )
+        .store_segment(Segment {
+            iccid: "iccid_001",
+            sender: "+1234567890",
+            ref_id: 42,
+            total_parts: 3,
+            part_number: 2,
+            content: "Part 2",
+            timestamp: "2024-01-01T12:00:00.000Z",
+            sms_storage: "ME",
+            sms_index: 2,
+        })
         .unwrap();
     store
-        .store_segment(
-            "iccid_001",
-            "+1234567890",
-            42,
-            3,
-            3,
-            "Part 3",
-            "2024-01-01T12:00:00.000Z",
-            3,
-        )
+        .store_segment(Segment {
+            iccid: "iccid_001",
+            sender: "+1234567890",
+            ref_id: 42,
+            total_parts: 3,
+            part_number: 3,
+            content: "Part 3",
+            timestamp: "2024-01-01T12:00:00.000Z",
+            sms_storage: "ME",
+            sms_index: 3,
+        })
         .unwrap();
 
     let segments = store
@@ -441,40 +447,43 @@ fn test_segment_content_assembly() {
 
     // Store parts out of order
     store
-        .store_segment(
-            "iccid_001",
-            "+1234567890",
-            42,
-            3,
-            3,
-            "World!",
-            "2024-01-01T12:00:00.000Z",
-            3,
-        )
+        .store_segment(Segment {
+            iccid: "iccid_001",
+            sender: "+1234567890",
+            ref_id: 42,
+            total_parts: 3,
+            part_number: 3,
+            content: "World!",
+            timestamp: "2024-01-01T12:00:00.000Z",
+            sms_storage: "ME",
+            sms_index: 3,
+        })
         .unwrap();
     store
-        .store_segment(
-            "iccid_001",
-            "+1234567890",
-            42,
-            3,
-            1,
-            "Hello ",
-            "2024-01-01T12:00:00.000Z",
-            1,
-        )
+        .store_segment(Segment {
+            iccid: "iccid_001",
+            sender: "+1234567890",
+            ref_id: 42,
+            total_parts: 3,
+            part_number: 1,
+            content: "Hello ",
+            timestamp: "2024-01-01T12:00:00.000Z",
+            sms_storage: "ME",
+            sms_index: 1,
+        })
         .unwrap();
     store
-        .store_segment(
-            "iccid_001",
-            "+1234567890",
-            42,
-            3,
-            2,
-            "Rust ",
-            "2024-01-01T12:00:00.000Z",
-            2,
-        )
+        .store_segment(Segment {
+            iccid: "iccid_001",
+            sender: "+1234567890",
+            ref_id: 42,
+            total_parts: 3,
+            part_number: 2,
+            content: "Rust ",
+            timestamp: "2024-01-01T12:00:00.000Z",
+            sms_storage: "ME",
+            sms_index: 2,
+        })
         .unwrap();
 
     let mut segments = store
@@ -495,28 +504,30 @@ fn test_delete_segments_after_assembly() {
 
     // Store segments
     store
-        .store_segment(
-            "iccid_001",
-            "+1234567890",
-            42,
-            2,
-            1,
-            "Part 1",
-            "2024-01-01T12:00:00.000Z",
-            1,
-        )
+        .store_segment(Segment {
+            iccid: "iccid_001",
+            sender: "+1234567890",
+            ref_id: 42,
+            total_parts: 2,
+            part_number: 1,
+            content: "Part 1",
+            timestamp: "2024-01-01T12:00:00.000Z",
+            sms_storage: "ME",
+            sms_index: 1,
+        })
         .unwrap();
     store
-        .store_segment(
-            "iccid_001",
-            "+1234567890",
-            42,
-            2,
-            2,
-            "Part 2",
-            "2024-01-01T12:00:00.000Z",
-            2,
-        )
+        .store_segment(Segment {
+            iccid: "iccid_001",
+            sender: "+1234567890",
+            ref_id: 42,
+            total_parts: 2,
+            part_number: 2,
+            content: "Part 2",
+            timestamp: "2024-01-01T12:00:00.000Z",
+            sms_storage: "ME",
+            sms_index: 2,
+        })
         .unwrap();
 
     // Delete segments
@@ -536,54 +547,58 @@ fn test_multiple_multipart_messages_same_sender() {
 
     // Message 1 (ref_id=10)
     store
-        .store_segment(
-            "iccid_001",
-            "+1234567890",
-            10,
-            2,
-            1,
-            "Msg1 Part1",
-            "2024-01-01T12:00:00.000Z",
-            1,
-        )
+        .store_segment(Segment {
+            iccid: "iccid_001",
+            sender: "+1234567890",
+            ref_id: 10,
+            total_parts: 2,
+            part_number: 1,
+            content: "Msg1 Part1",
+            timestamp: "2024-01-01T12:00:00.000Z",
+            sms_storage: "ME",
+            sms_index: 1,
+        })
         .unwrap();
     store
-        .store_segment(
-            "iccid_001",
-            "+1234567890",
-            10,
-            2,
-            2,
-            "Msg1 Part2",
-            "2024-01-01T12:00:00.000Z",
-            2,
-        )
+        .store_segment(Segment {
+            iccid: "iccid_001",
+            sender: "+1234567890",
+            ref_id: 10,
+            total_parts: 2,
+            part_number: 2,
+            content: "Msg1 Part2",
+            timestamp: "2024-01-01T12:00:00.000Z",
+            sms_storage: "ME",
+            sms_index: 2,
+        })
         .unwrap();
 
     // Message 2 (ref_id=20)
     store
-        .store_segment(
-            "iccid_001",
-            "+1234567890",
-            20,
-            2,
-            1,
-            "Msg2 Part1",
-            "2024-01-01T12:01:00.000Z",
-            3,
-        )
+        .store_segment(Segment {
+            iccid: "iccid_001",
+            sender: "+1234567890",
+            ref_id: 20,
+            total_parts: 2,
+            part_number: 1,
+            content: "Msg2 Part1",
+            timestamp: "2024-01-01T12:01:00.000Z",
+            sms_storage: "ME",
+            sms_index: 3,
+        })
         .unwrap();
     store
-        .store_segment(
-            "iccid_001",
-            "+1234567890",
-            20,
-            2,
-            2,
-            "Msg2 Part2",
-            "2024-01-01T12:01:00.000Z",
-            4,
-        )
+        .store_segment(Segment {
+            iccid: "iccid_001",
+            sender: "+1234567890",
+            ref_id: 20,
+            total_parts: 2,
+            part_number: 2,
+            content: "Msg2 Part2",
+            timestamp: "2024-01-01T12:01:00.000Z",
+            sms_storage: "ME",
+            sms_index: 4,
+        })
         .unwrap();
 
     // Retrieve separately
@@ -610,16 +625,17 @@ fn test_cleanup_old_segments() {
 
     // Store some segments
     store
-        .store_segment(
-            "iccid_001",
-            "+1234567890",
-            42,
-            2,
-            1,
-            "Part 1",
-            "2024-01-01T12:00:00.000Z",
-            1,
-        )
+        .store_segment(Segment {
+            iccid: "iccid_001",
+            sender: "+1234567890",
+            ref_id: 42,
+            total_parts: 2,
+            part_number: 1,
+            content: "Part 1",
+            timestamp: "2024-01-01T12:00:00.000Z",
+            sms_storage: "ME",
+            sms_index: 1,
+        })
         .unwrap();
 
     // Clean up segments older than 0 seconds (all of them)

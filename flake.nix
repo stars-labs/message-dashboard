@@ -177,13 +177,15 @@
             name = "check-daemon";
             runtimeInputs = with pkgs; [
               cargo
+              clippy
               git
               rustfmt
             ];
             text = ''
               cd "$(git rev-parse --show-toplevel)/orange-pi-daemon"
               cargo fmt --all --check
-              cargo test
+              cargo clippy --locked --all-targets --all-features -- -D warnings
+              cargo test --locked
             '';
           };
 
@@ -575,7 +577,7 @@
                 echo "  • dev-api       — Wrangler + Auth0 secrets via SOPS on :8787"
                 echo "  • dev-server    — restart/stop/status the unique :8080 + :8787 pair"
                 echo "  • balance-agent — authenticated CLI for SMS AI and browser balance work"
-                echo "  • check-daemon  — required Rust format check + full test suite"
+                echo "  • check-daemon  — required Rust format check + strict Clippy + full test suite"
                 echo "  • pi-route      — route Pi subnet past the VPN (sudo; run when on VPN)"
                 echo ""
 

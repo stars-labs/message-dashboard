@@ -308,6 +308,10 @@ impl VoiceBridge {
         let api_key = self.api_key.clone();
         let admitted = Arc::new(std::sync::Mutex::new(None));
         let admitted_slot = admitted.clone();
+        #[expect(
+            clippy::result_large_err,
+            reason = "Tungstenite requires an unboxed ErrorResponse in its handshake callback"
+        )]
         let callback = move |request: &Request, response: Response| {
             let path = request.uri().path();
             match voice_auth::parse_path(path) {

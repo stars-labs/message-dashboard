@@ -34,6 +34,25 @@ pub enum MessageStatus {
     Deleted,   // Deleted from SIM card
 }
 
+/// A multipart SMS fragment and its physical location on the modem.
+pub struct Segment<'a> {
+    pub iccid: &'a str,
+    pub sender: &'a str,
+    pub ref_id: u8,
+    pub total_parts: u8,
+    pub part_number: u8,
+    pub content: &'a str,
+    pub timestamp: &'a str,
+    pub sms_storage: &'a str,
+    pub sms_index: u32,
+}
+
+/// Part number, content, timestamp, CPMS storage, and SMS index.
+pub type StoredSegment = (u8, String, String, String, u32);
+/// ICCID, sender, reference, total parts, part number, content, timestamp,
+/// CPMS storage, and SMS index, as returned for startup recovery.
+pub type RecoverySegment = (String, String, u8, u8, u8, String, String, String, u32);
+
 pub struct MessageStore {
     conn: Arc<Mutex<Connection>>,
 }
@@ -538,17 +557,17 @@ mod segment_write_tests {
 
     fn store_part(store: &MessageStore, content: &str, index: u32) {
         store
-            .store_segment_in_storage(
-                "iccid",
-                "10010",
-                84,
-                9,
-                1,
+            .store_segment(Segment {
+                iccid: "iccid",
+                sender: "10010",
+                ref_id: 84,
+                total_parts: 9,
+                part_number: 1,
                 content,
-                "2025-10-09T01:47:57.000Z",
-                "SM",
-                index,
-            )
+                timestamp: "2025-10-09T01:47:57.000Z",
+                sms_storage: "SM",
+                sms_index: index,
+            })
             .unwrap();
     }
 
@@ -668,10 +687,7 @@ impl MessageStore {
 
         for msg_result in messages {
             let (modem_id, message) = msg_result?;
-            result
-                .entry(modem_id)
-                .or_insert_with(Vec::new)
-                .push(message);
+            result.entry(modem_id).or_default().push(message);
         }
 
         Ok(result)
@@ -717,19 +733,9 @@ impl MessageStore {
     // Multipart SMS segment management
     // ============================================================================
 
-    /// Store an incomplete message part
-    pub fn store_segment(
-        &self,
-        iccid: &str,
-        sender: &str,
-        ref_id: u8,
-        total_parts: u8,
-        part_number: u8,
-        content: &str,
-        timestamp: &str,
-        sms_index: u32,
-    ) -> Result<()> {
-        self.store_segment_in_storage(
+    /// Store an incomplete message part together with its CPMS location.
+    pub fn store_segment(&self, segment: Segment<'_>) -> Result<()> {
+        let Segment {
             iccid,
             sender,
             ref_id,
@@ -737,24 +743,9 @@ impl MessageStore {
             part_number,
             content,
             timestamp,
-            "ME",
+            sms_storage,
             sms_index,
-        )
-    }
-
-    /// Store an incomplete message part together with its CPMS location.
-    pub fn store_segment_in_storage(
-        &self,
-        iccid: &str,
-        sender: &str,
-        ref_id: u8,
-        total_parts: u8,
-        part_number: u8,
-        content: &str,
-        timestamp: &str,
-        sms_storage: &str,
-        sms_index: u32,
-    ) -> Result<()> {
+        } = segment;
         let conn = self.conn.lock().unwrap();
 
         // Look before writing. A part whose siblings never arrive stays on the SIM
@@ -850,7 +841,7 @@ impl MessageStore {
         sender: &str,
         ref_id: u8,
         total_parts: u8,
-    ) -> Result<Vec<(u8, String, String, String, u32)>> {
+    ) -> Result<Vec<StoredSegment>> {
         let conn = self.conn.lock().unwrap();
 
         let mut stmt = conn.prepare(
@@ -904,9 +895,7 @@ impl MessageStore {
 
     /// Get all incomplete segments (for recovery on startup)
     /// Returns buffered segment metadata including CPMS storage and index.
-    pub fn get_all_segments(
-        &self,
-    ) -> Result<Vec<(String, String, u8, u8, u8, String, String, String, u32)>> {
+    pub fn get_all_segments(&self) -> Result<Vec<RecoverySegment>> {
         let conn = self.conn.lock().unwrap();
 
         let mut stmt = conn.prepare(

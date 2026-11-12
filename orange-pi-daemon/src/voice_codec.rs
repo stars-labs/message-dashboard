@@ -126,7 +126,9 @@ impl Packet {
 
 fn to_i16(bytes: &[u8]) -> Vec<i16> {
     bytes
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|c| i16::from_le_bytes([c[0], c[1]]))
         .collect()
 }
@@ -170,11 +172,15 @@ pub fn modem_to_adapter(pcm8k_mono: &[u8], last: &mut i16) -> Vec<u8> {
 pub fn adapter_to_modem(pcm48k_stereo: &[u8]) -> Vec<u8> {
     let input = to_i16(pcm48k_stereo);
     let mono: Vec<i32> = input
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|lr| (lr[0] as i32 + lr[1] as i32) / 2)
         .collect();
     let out: Vec<i16> = mono
-        .chunks_exact(RATIO)
+        .as_chunks::<RATIO>()
+        .0
+        .iter()
         .map(|g| (g.iter().sum::<i32>() / RATIO as i32) as i16)
         .collect();
     to_bytes(&out)
@@ -238,7 +244,7 @@ mod tests {
         let out = modem_to_adapter(&pcm, &mut last);
         assert_eq!(out.len(), 2 * RATIO * 2 * 2);
         let samples = to_i16(&out);
-        for pair in samples.chunks_exact(2) {
+        for pair in samples.as_chunks::<2>().0 {
             assert_eq!(
                 pair[0], pair[1],
                 "left and right must carry the same sample"
@@ -280,7 +286,7 @@ mod tests {
     #[test]
     fn test_odd_length_input_is_not_a_panic() {
         let mut last = 0;
-        assert!(modem_to_adapter(&[1, 2, 3], &mut last).len() > 0);
+        assert!(!modem_to_adapter(&[1, 2, 3], &mut last).is_empty());
         assert_eq!(adapter_to_modem(&[1, 2, 3]).len(), 0);
     }
 }

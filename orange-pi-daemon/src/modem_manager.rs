@@ -4,6 +4,7 @@
 //! Set USE_DBUS=1 to use legacy D-Bus mode (requires ModemManager service).
 
 use crate::at_modem::AtModemManager;
+use crate::message_store::Segment;
 use crate::partial_sms;
 use crate::signal_cache::SignalCache;
 use crate::types::{Message, MessageWithPath, SignalData, SmsSubmitOutcome};
@@ -584,10 +585,7 @@ impl ModemManager {
                             concat_info.ref_id,
                             concat_info.total_parts,
                         );
-                        multipart_groups
-                            .entry(key)
-                            .or_insert_with(Vec::new)
-                            .push(sms);
+                        multipart_groups.entry(key).or_default().push(sms);
                     } else {
                         // Single-part message - convert immediately
                         complete_messages.push(MessageWithPath {
@@ -609,17 +607,17 @@ impl ModemManager {
                     // Store new parts to database
                     for part in &parts {
                         let concat_info = part.concat_info.as_ref().unwrap();
-                        if let Err(e) = message_store.store_segment_in_storage(
+                        if let Err(e) = message_store.store_segment(Segment {
                             iccid,
-                            &sender,
+                            sender: &sender,
                             ref_id,
                             total_parts,
-                            concat_info.part_number,
-                            &part.text,
-                            &part.timestamp,
-                            &part.storage,
-                            part.index,
-                        ) {
+                            part_number: concat_info.part_number,
+                            content: &part.text,
+                            timestamp: &part.timestamp,
+                            sms_storage: &part.storage,
+                            sms_index: part.index,
+                        }) {
                             warn!("Failed to store segment: {}", e);
                         }
                     }

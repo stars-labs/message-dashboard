@@ -41,6 +41,12 @@ pub struct SmsAssembler {
     timeout: Duration,
 }
 
+impl Default for SmsAssembler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SmsAssembler {
     /// Create a new SMS assembler with 5-minute timeout
     pub fn new() -> Self {
@@ -88,7 +94,7 @@ impl SmsAssembler {
         );
 
         // Add to buffer
-        let parts = self.buffer.entry(key.clone()).or_insert_with(Vec::new);
+        let parts = self.buffer.entry(key.clone()).or_default();
 
         // Check for duplicate part numbers
         if parts.iter().any(|p| p.part_number == part.part_number) {

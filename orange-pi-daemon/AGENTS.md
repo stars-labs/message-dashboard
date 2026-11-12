@@ -16,7 +16,7 @@
 ## Build and verify
 
 ```bash
-check-daemon          # rustfmt check + all tests — required before every deploy
+check-daemon          # rustfmt check + strict Clippy + all tests — required before every deploy
 
 cd orange-pi-daemon
 cargo build --release
@@ -24,6 +24,9 @@ RUST_LOG=debug cargo run
 ```
 
 `check-daemon` is the only accepted verification gate. Do not substitute `cargo check`.
+Clippy checks all targets and features, including tests and diagnostic binaries,
+and treats every warning as an error. Fix violations rather than suppressing them;
+any unavoidable exception must be narrowly scoped and explain the external constraint.
 
 ## Deploy
 

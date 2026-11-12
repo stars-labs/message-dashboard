@@ -138,7 +138,7 @@ impl ApiClient {
             info!(
                 "📤 Uploading batch {}/{} ({} messages)",
                 batch_num + 1,
-                (total + BATCH_SIZE - 1) / BATCH_SIZE,
+                total.div_ceil(BATCH_SIZE),
                 chunk.len()
             );
 
@@ -188,7 +188,7 @@ impl ApiClient {
         info!(
             "✅ Successfully uploaded {} messages in {} batches",
             results.len(),
-            (total + BATCH_SIZE - 1) / BATCH_SIZE
+            total.div_ceil(BATCH_SIZE)
         );
         Ok(results)
     }

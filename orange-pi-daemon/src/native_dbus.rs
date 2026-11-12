@@ -9,6 +9,12 @@ pub struct NativeDBusClient {
     connection: Option<Connection>,
 }
 
+// D-Bus ObjectManager maps object paths to interfaces and their properties.
+type ManagedObjects = HashMap<
+    zbus::zvariant::OwnedObjectPath,
+    HashMap<String, HashMap<String, zbus::zvariant::OwnedValue>>,
+>;
+
 // ModemManager D-Bus proxy interfaces
 #[proxy(
     interface = "org.freedesktop.ModemManager1",
@@ -26,14 +32,7 @@ trait ModemManager1 {
     default_path = "/org/freedesktop/ModemManager1"
 )]
 trait ObjectManager {
-    fn get_managed_objects(
-        &self,
-    ) -> zbus::Result<
-        HashMap<
-            zbus::zvariant::OwnedObjectPath,
-            HashMap<String, HashMap<String, zbus::zvariant::OwnedValue>>,
-        >,
-    >;
+    fn get_managed_objects(&self) -> zbus::Result<ManagedObjects>;
 }
 
 #[proxy(

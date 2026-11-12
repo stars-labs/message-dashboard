@@ -120,6 +120,12 @@ pub struct AtModemManager {
     timeout: Duration,
 }
 
+impl Default for AtModemManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AtModemManager {
     pub fn new() -> Self {
         Self {
@@ -247,7 +253,7 @@ impl AtModemManager {
         let device_count = groups.len();
         let mut ports = Vec::new();
 
-        for (_dev, dev_ports) in &groups {
+        for dev_ports in groups.values() {
             for port_path in Self::at_probe_order(dev_ports) {
                 match self.probe_port_with_error(&port_path).await {
                     Ok(true) => {
@@ -1261,7 +1267,7 @@ impl AtModemManager {
         }
 
         // Extract index from "+CMGL: 0"
-        let index_part = parts[0].split(':').last()?.trim();
+        let index_part = parts[0].split(':').next_back()?.trim();
         index_part.parse::<u32>().ok()
     }
 
@@ -1310,7 +1316,7 @@ impl AtModemManager {
 
         // Sender address bytes: for BCD it's (digits+1)/2, for alphanumeric sender_len
         // is the number of useful semi-octets (which maps to the same byte count formula)
-        let sender_bytes = (sender_len + 1) / 2;
+        let sender_bytes = sender_len.div_ceil(2);
         if pos + sender_bytes > pdu_bytes.len() {
             return Err(anyhow!("PDU truncated at sender address"));
         }
@@ -1671,8 +1677,9 @@ impl AtModemManager {
     /// Decode SMS content - handles UCS2 hex encoding for Chinese/Unicode
     fn decode_sms_content(raw: &str) -> String {
         // Check if it looks like UCS2 hex (all hex chars, even length, typical length)
-        let is_hex =
-            raw.len() >= 4 && raw.len() % 4 == 0 && raw.chars().all(|c| c.is_ascii_hexdigit());
+        let is_hex = raw.len() >= 4
+            && raw.len().is_multiple_of(4)
+            && raw.chars().all(|c| c.is_ascii_hexdigit());
 
         if is_hex {
             // Try to decode as UCS2 (UTF-16BE) hex string
@@ -1764,7 +1771,7 @@ impl AtModemManager {
     /// Output: "你好"
     fn decode_ucs2_hex(hex: &str) -> Option<String> {
         // Must be even length (2 hex chars per byte)
-        if hex.len() % 2 != 0 {
+        if !hex.len().is_multiple_of(2) {
             return None;
         }
 
@@ -1798,7 +1805,7 @@ impl AtModemManager {
         }
 
         // Extract index from "+CMGL: 1"
-        let index_part = parts[0].split(':').last()?.trim();
+        let index_part = parts[0].split(':').next_back()?.trim();
         let index = index_part.parse::<u32>().ok()?;
 
         // Extract sender (third part, quoted) - may be UCS2 encoded
@@ -1924,7 +1931,7 @@ impl AtModemManager {
 
     /// Check if text contains non-ASCII characters
     fn needs_ucs2(text: &str) -> bool {
-        text.chars().any(|c| !c.is_ascii())
+        !text.is_ascii()
     }
 
     /// Validate an SMS recipient before it is interpolated into an AT command.

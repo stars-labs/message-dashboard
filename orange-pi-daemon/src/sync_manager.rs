@@ -113,6 +113,12 @@ pub struct SyncManager {
     consecutive_failures: u32,
 }
 
+impl Default for SyncManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SyncManager {
     pub fn new() -> Self {
         info!("🔄 Device sync manager initialized");
@@ -236,10 +242,7 @@ mod tests {
 
         // Simulate failures
         for _ in 0..3 {
-            sm.record_failure(
-                SyncMode::Incremental,
-                &std::io::Error::new(std::io::ErrorKind::Other, "test"),
-            );
+            sm.record_failure(SyncMode::Incremental, &std::io::Error::other("test"));
         }
 
         assert!(sm.needs_full_sync());

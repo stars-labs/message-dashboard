@@ -38,11 +38,12 @@ fn create_test_sms(id: &str, iccid: &str, recipient: &str, content: &str) -> Pen
 
 #[tokio::test]
 async fn test_sms_sender_new() {
-    let _sender = create_test_sender().await;
-
-    // Sender should be created successfully
-    // (Can't directly inspect internal state, but we can use public methods)
-    assert!(true); // Construction succeeded
+    let mut sender = create_test_sender().await;
+    sender.update_modem_cache(HashMap::from([("iccid".into(), "modem".into())]));
+    assert_eq!(
+        sender.find_modem_for_iccid("iccid").await.as_deref(),
+        Some("modem")
+    );
 }
 
 // ============================================================================
@@ -59,19 +60,27 @@ async fn test_update_modem_cache() {
 
     sender.update_modem_cache(cache);
 
-    // Cache updated successfully (no panic)
-    assert!(true);
+    assert_eq!(
+        sender.find_modem_for_iccid("iccid_001").await.as_deref(),
+        Some("modem_0")
+    );
+    assert_eq!(
+        sender.find_modem_for_iccid("iccid_002").await.as_deref(),
+        Some("modem_1")
+    );
 }
 
 #[tokio::test]
 async fn test_update_modem_cache_empty() {
     let mut sender = create_test_sender().await;
 
-    let cache = HashMap::new();
-    sender.update_modem_cache(cache);
-
-    // Should handle empty cache
-    assert!(true);
+    sender.update_modem_cache(HashMap::from([("iccid".into(), "modem".into())]));
+    assert_eq!(
+        sender.find_modem_for_iccid("iccid").await.as_deref(),
+        Some("modem")
+    );
+    sender.update_modem_cache(HashMap::new());
+    assert_eq!(sender.find_modem_for_iccid("iccid").await, None);
 }
 
 #[tokio::test]
@@ -88,8 +97,11 @@ async fn test_update_modem_cache_multiple_times() {
     cache2.insert("iccid_002".to_string(), "modem_1".to_string());
     sender.update_modem_cache(cache2);
 
-    // Should replace cache successfully
-    assert!(true);
+    assert_eq!(
+        sender.find_modem_for_iccid("iccid_002").await.as_deref(),
+        Some("modem_1")
+    );
+    assert_eq!(sender.find_modem_for_iccid("iccid_001").await, None);
 }
 
 // ============================================================================
@@ -268,8 +280,12 @@ async fn test_modem_cache_large_scale() {
 
     sender.update_modem_cache(cache);
 
-    // Should handle large cache without issue
-    assert!(true);
+    for i in 0..100 {
+        assert_eq!(
+            sender.find_modem_for_iccid(&format!("iccid_{i:03}")).await,
+            Some(format!("modem_{i}"))
+        );
+    }
 }
 
 #[tokio::test]

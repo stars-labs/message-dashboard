@@ -407,11 +407,13 @@ mod tests {
 
     #[test]
     fn test_worker_pool_stats() {
-        let mut stats = WorkerPoolStats::default();
-        stats.total_modems = 100;
-        stats.successful = 95;
-        stats.failed = 3;
-        stats.timeouts = 2;
+        let stats = WorkerPoolStats {
+            total_modems: 100,
+            successful: 95,
+            failed: 3,
+            timeouts: 2,
+            ..WorkerPoolStats::default()
+        };
 
         assert_eq!(stats.success_rate(), 95.0);
     }
