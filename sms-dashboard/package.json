@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "test": "bun test --conditions=browser",
+    "lint": "oxlint",
     "dev": "bunx vite",
     "dev:api": "bunx wrangler dev",
     "build": "bunx vite build",
@@ -26,6 +27,7 @@
     "@testing-library/svelte": "^5.4.2",
     "autoprefixer": "^10.4.21",
     "happy-dom": "^21.0.4",
+    "oxlint": "^1.93.0",
     "playwright-core": "^1.62.1",
     "postcss": "^8.5.6",
     "svelte": "^5.35.5",
