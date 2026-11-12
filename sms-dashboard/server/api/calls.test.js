@@ -276,7 +276,7 @@ describe('outbound media setup', () => {
     expect(invalid.status).toBe(400);
     expect(sfu).toHaveLength(0);
 
-    const response = await invoke(router, 'POST', '/api/calls/dial', { ...request, iccid }, env);
+    const response = await invoke(router, 'POST', '/api/calls/dial', { ...dial, iccid }, env);
     expect(response.status).toBe(200);
     expect((await response.json()).call.iccid).toBe(iccid);
     expect(env.CALL_STATE.call().iccid).toBe(iccid);
