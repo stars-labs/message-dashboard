@@ -4,7 +4,42 @@ const DEFAULT_CONFIDENCE_THRESHOLD = 0.85;
 const DEFAULT_MAX_TURNS = 4;
 const MAX_BALANCE = 1_000_000;
 
-function sentenceAt(text, index) {
+/** A validated balance-skill configuration row. */
+export interface BalanceSkill {
+  id: string;
+  version: string;
+  objective: string;
+  confidence_threshold: number;
+  max_turns: number;
+  allowed_currencies: string[];
+  forbidden_intents: string[];
+}
+
+/** One numbered option found in a carrier reply. */
+export interface MenuOption {
+  value: string;
+  label: string;
+}
+
+export type DecisionAction = 'reply' | 'complete' | 'stop';
+
+/**
+ * The validated AI decision. `balance` and `currency` are only meaningful for
+ * `complete`; `selected_option` only for `reply`. Keeping them nullable on one
+ * shape matches what gets written to sim_balance_skill_decisions, which stores
+ * every field regardless of action.
+ */
+export interface BalanceDecision {
+  action: DecisionAction;
+  selected_option: string | null;
+  balance: number | null;
+  currency: string | null;
+  confidence: number;
+  reason: string;
+  evidence: string;
+}
+
+function sentenceAt(text: string, index: number): string {
   const before = text.slice(0, index);
   const boundary = Math.max(
     before.lastIndexOf('\n'), before.lastIndexOf('。'), before.lastIndexOf('！'),
@@ -12,50 +47,51 @@ function sentenceAt(text, index) {
   );
   const remainder = text.slice(index);
   const endMatch = remainder.match(/[\n。！？;；]/);
-  const end = endMatch ? index + endMatch.index : text.length;
+  const end = endMatch && endMatch.index !== undefined ? index + endMatch.index : text.length;
   return text.slice(boundary + 1, end).trim();
 }
 
-export function parseBalanceSkillConfig(value) {
-  let config;
+export function parseBalanceSkillConfig(value: unknown): BalanceSkill | null {
+  let config: unknown;
   try {
     config = typeof value === 'string' ? JSON.parse(value) : value;
   } catch {
     return null;
   }
 
-  if (!config || typeof config !== 'object'
-    || typeof config.id !== 'string'
-    || typeof config.version !== 'string'
-    || typeof config.objective !== 'string') return null;
+  const c = config as Record<string, unknown> | null;
+  if (!c || typeof c !== 'object'
+    || typeof c.id !== 'string'
+    || typeof c.version !== 'string'
+    || typeof c.objective !== 'string') return null;
 
   return {
-    id: config.id,
-    version: config.version,
-    objective: config.objective,
-    confidence_threshold: Number.isFinite(Number(config.confidence_threshold))
-      ? Number(config.confidence_threshold)
+    id: c.id,
+    version: c.version,
+    objective: c.objective,
+    confidence_threshold: Number.isFinite(Number(c.confidence_threshold))
+      ? Number(c.confidence_threshold)
       : DEFAULT_CONFIDENCE_THRESHOLD,
-    max_turns: Number.isInteger(Number(config.max_turns))
-      ? Number(config.max_turns)
+    max_turns: Number.isInteger(Number(c.max_turns))
+      ? Number(c.max_turns)
       : DEFAULT_MAX_TURNS,
-    allowed_currencies: Array.isArray(config.allowed_currencies)
-      ? config.allowed_currencies.filter((item) => typeof item === 'string')
+    allowed_currencies: Array.isArray(c.allowed_currencies)
+      ? c.allowed_currencies.filter((item): item is string => typeof item === 'string')
       : [],
-    forbidden_intents: Array.isArray(config.forbidden_intents)
-      ? config.forbidden_intents.filter((item) => typeof item === 'string' && item.length)
+    forbidden_intents: Array.isArray(c.forbidden_intents)
+      ? c.forbidden_intents.filter((item): item is string => typeof item === 'string' && item.length > 0)
       : [],
   };
 }
 
-export function extractBalanceMenuOptions(content) {
-  const options = [];
-  const seen = new Set();
+export function extractBalanceMenuOptions(content: unknown): MenuOption[] {
+  const options: MenuOption[] = [];
+  const seen = new Set<string>();
   const text = String(content || '').replace(/\r\n?/g, '\n');
 
   for (const match of text.matchAll(MENU_OPTION_PATTERN)) {
     const value = match[1];
-    const label = match[2].trim();
+    const label = (match[2] ?? '').trim();
     if (!label || seen.has(value)) continue;
     seen.add(value);
     options.push({ value, label });
@@ -64,7 +100,7 @@ export function extractBalanceMenuOptions(content) {
   for (const match of text.matchAll(DIRECTED_SMS_PATTERN)) {
     const value = match[1];
     if (seen.has(value)) continue;
-    const label = sentenceAt(text, match.index);
+    const label = sentenceAt(text, match.index ?? 0);
     if (!label) continue;
     seen.add(value);
     options.push({ value, label });
@@ -73,10 +109,13 @@ export function extractBalanceMenuOptions(content) {
   return options;
 }
 
-export function buildExplicitBalanceFollowUp(content, skill) {
+export function buildExplicitBalanceFollowUp(
+  content: unknown,
+  skill: BalanceSkill,
+): BalanceDecision | null {
   const text = String(content || '').replace(/\r\n?/g, '\n');
   for (const match of text.matchAll(DIRECTED_SMS_PATTERN)) {
-    const sentence = sentenceAt(text, match.index);
+    const sentence = sentenceAt(text, match.index ?? 0);
     if (!/(?:余额|balance)/i.test(sentence)) continue;
     if (skill.forbidden_intents.some((intent) => sentence.includes(intent))) continue;
     return {
@@ -92,7 +131,7 @@ export function buildExplicitBalanceFollowUp(content, skill) {
   return null;
 }
 
-function stopped(decision, reason) {
+function stopped(decision: BalanceDecision, reason: string): BalanceDecision {
   return {
     ...decision,
     action: 'stop',
@@ -101,27 +140,39 @@ function stopped(decision, reason) {
   };
 }
 
-export function validateBalanceSkillDecision({ decision, content, skill }) {
+/**
+ * Validate an AI decision against the skill and the carrier reply it is about.
+ *
+ * Throws only for a malformed payload (not an object, unknown action); every
+ * policy violation returns a `stop` decision instead, so an over-eager model
+ * degrades to "do not act" rather than to an error the runner must handle.
+ */
+export function validateBalanceSkillDecision({ decision, content, skill }: {
+  decision: unknown;
+  content: unknown;
+  skill: BalanceSkill;
+}): BalanceDecision {
   if (!decision || typeof decision !== 'object') {
     throw new Error('AI decision must be an object');
   }
 
-  const action = decision.action;
-  if (!['reply', 'complete', 'stop'].includes(action)) {
+  const d = decision as Record<string, unknown>;
+  const action = d.action;
+  if (action !== 'reply' && action !== 'complete' && action !== 'stop') {
     throw new Error('AI decision has an invalid action');
   }
 
-  const confidence = Number(decision.confidence);
-  const normalized = {
+  const confidence = Number(d.confidence);
+  const normalized: BalanceDecision = {
     action,
-    selected_option: decision.selected_option == null
+    selected_option: d.selected_option == null
       ? null
-      : String(decision.selected_option),
-    balance: decision.balance == null ? null : Number(decision.balance),
-    currency: decision.currency == null ? null : String(decision.currency),
+      : String(d.selected_option),
+    balance: d.balance == null ? null : Number(d.balance),
+    currency: d.currency == null ? null : String(d.currency),
     confidence: Number.isFinite(confidence) ? confidence : 0,
-    reason: typeof decision.reason === 'string' ? decision.reason.slice(0, 500) : '',
-    evidence: typeof decision.evidence === 'string' ? decision.evidence.slice(0, 500) : '',
+    reason: typeof d.reason === 'string' ? d.reason.slice(0, 500) : '',
+    evidence: typeof d.evidence === 'string' ? d.evidence.slice(0, 500) : '',
   };
 
   if (normalized.confidence < skill.confidence_threshold) {
@@ -145,28 +196,37 @@ export function validateBalanceSkillDecision({ decision, content, skill }) {
     return normalized;
   }
 
-  if (!Number.isFinite(normalized.balance)
-    || normalized.balance < 0
-    || normalized.balance > MAX_BALANCE) {
+  const balance = normalized.balance;
+  if (balance === null || !Number.isFinite(balance) || balance < 0 || balance > MAX_BALANCE) {
     return stopped(normalized, 'AI returned an invalid balance amount');
   }
-  if (!skill.allowed_currencies.includes(normalized.currency)) {
+  const currency = normalized.currency;
+  if (currency === null || !skill.allowed_currencies.includes(currency)) {
     return stopped(normalized, 'AI returned a currency outside the skill allowlist');
   }
-  if (!normalized.evidence || !String(content || '').includes(normalized.evidence)) {
+  const evidence = normalized.evidence;
+  if (!evidence || !String(content || '').includes(evidence)) {
     return stopped(normalized, 'AI evidence is not an exact excerpt from the carrier reply');
   }
-  const evidenceNumbers = [...normalized.evidence.matchAll(/\d+(?:,\d{3})*(?:\.\d+)?/g)]
+  const evidenceNumbers = [...evidence.matchAll(/\d+(?:,\d{3})*(?:\.\d+)?/g)]
     .map((match) => Number(match[0].replaceAll(',', '')))
     .filter(Number.isFinite);
-  if (!evidenceNumbers.some((value) => Math.abs(value - normalized.balance) < 0.000001)) {
+  if (!evidenceNumbers.some((value) => Math.abs(value - balance) < 0.000001)) {
     return stopped(normalized, 'AI balance does not match the numeric value in its evidence');
   }
 
   return normalized;
 }
 
-export function buildBalanceSkillPrompt(job) {
+/** The job fields buildBalanceSkillPrompt reads. */
+export interface SkillPromptJob {
+  skill: BalanceSkill;
+  step_index: number;
+  menu_options: MenuOption[];
+  response_content: unknown;
+}
+
+export function buildBalanceSkillPrompt(job: SkillPromptJob): { system: string; user: string } {
   return {
     system: [
       'You are a read-only telecom balance-query planner.',
