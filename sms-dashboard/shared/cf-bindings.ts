@@ -24,7 +24,7 @@ export interface D1Database {
 /** The subset of KV used by this Worker. */
 export interface KVNamespace {
   get(key: string): Promise<string | null>;
-  get<T>(key: string, type: 'json'): Promise<T | null>;
+  get<T>(key: string, options: { type: 'json' }): Promise<T | null>;
   put(key: string, value: string, options?: { expirationTtl?: number }): Promise<void>;
   delete(key: string): Promise<void>;
 }
