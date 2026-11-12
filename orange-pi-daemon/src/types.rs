@@ -1,11 +1,23 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SmsSubmitOutcome {
+/// A submitted SMS; submission failures are returned through `Result::Err`.
+///
+/// ```
+/// use orange_pi_daemon_rust::types::SmsSubmission;
+/// let submission: Result<SmsSubmission, &str> = Ok(SmsSubmission::Confirmed);
+/// assert_eq!(submission, Ok(SmsSubmission::Confirmed));
+/// ```
+///
+/// A failed send cannot be constructed as a successful submission:
+///
+/// ```compile_fail,E0599
+/// use orange_pi_daemon_rust::types::SmsSubmission;
+/// let submission: Result<SmsSubmission, &str> = Ok(SmsSubmission::Failed);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SmsSubmission {
     Confirmed,
     SubmittedUnconfirmed,
-    Failed,
 }
 
 #[derive(Debug, Clone)]
@@ -157,10 +169,23 @@ impl Default for SignalData {
     }
 }
 
-#[derive(Debug, Deserialize)]
+/// The Worker's pending SMS payload, shared by the API client and sender.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PendingSms {
-    pub id: i64,
+    pub id: String,
     pub recipient: String,
-    pub message: String,
     pub phone_iccid: String,
+    pub content: String,
+    #[serde(default = "default_sms_purpose")]
+    pub purpose: String,
+    pub created_at: String,
+}
+
+fn default_sms_purpose() -> String {
+    "user".to_string()
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct PendingSmsResponse {
+    pub pending_messages: Vec<PendingSms>,
 }

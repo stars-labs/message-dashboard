@@ -7,7 +7,7 @@ use crate::at_modem::AtModemManager;
 use crate::message_store::Segment;
 use crate::partial_sms;
 use crate::signal_cache::SignalCache;
-use crate::types::{Message, MessageWithPath, SignalData, SmsSubmitOutcome};
+use crate::types::{Message, MessageWithPath, SignalData, SmsSubmission};
 use anyhow::{anyhow, Result};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -866,7 +866,7 @@ impl ModemManager {
         modem_id: &str,
         recipient: &str,
         content: &str,
-    ) -> Result<SmsSubmitOutcome> {
+    ) -> Result<SmsSubmission> {
         self.send_sms_with_short_code(modem_id, recipient, content, false)
             .await
     }
@@ -878,7 +878,7 @@ impl ModemManager {
         recipient: &str,
         content: &str,
         allow_short_code: bool,
-    ) -> Result<SmsSubmitOutcome> {
+    ) -> Result<SmsSubmission> {
         // Single choke point for outbound sends, so both backends get the same
         // guarantee. The AT backend interpolates these into serial command strings
         // where a CR is an injection (docs/SECURITY-REVIEW.md finding 3); the D-Bus
@@ -908,7 +908,7 @@ impl ModemManager {
                         "Sent SMS via D-Bus from modem {} to {}",
                         modem_id, recipient
                     );
-                    Ok(SmsSubmitOutcome::Confirmed)
+                    Ok(SmsSubmission::Confirmed)
                 } else {
                     Err(anyhow!("Native D-Bus not available for sending SMS"))
                 }

@@ -1,8 +1,8 @@
 // Integration tests for SmsSender - Outbound SMS handling
 use orange_pi_daemon_rust::api_client::ApiClient;
 use orange_pi_daemon_rust::modem_manager::ModemManager;
-use orange_pi_daemon_rust::sms_sender::{PendingSms, SmsSender};
-use orange_pi_daemon_rust::types::Config;
+use orange_pi_daemon_rust::sms_sender::SmsSender;
+use orange_pi_daemon_rust::types::{Config, PendingSms};
 use std::collections::HashMap;
 use std::sync::Arc;
 

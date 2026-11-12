@@ -6,7 +6,7 @@
 //! - ttyUSB2: AT commands (this is what we use)
 //! - ttyUSB3: PPP/Modem
 
-use crate::types::SmsSubmitOutcome;
+use crate::types::SmsSubmission;
 use anyhow::{anyhow, Result};
 use nix::sys::termios::{self, BaudRate, SetArg};
 use std::collections::{BTreeMap, HashMap};
@@ -2005,7 +2005,7 @@ impl AtModemManager {
         port: &str,
         recipient: &str,
         message: &str,
-    ) -> Result<SmsSubmitOutcome> {
+    ) -> Result<SmsSubmission> {
         Self::validate_recipient(recipient)?;
         self.send_sms_with_short_code(port, recipient, message, false)
             .await
@@ -2017,7 +2017,7 @@ impl AtModemManager {
         recipient: &str,
         message: &str,
         allow_short_code: bool,
-    ) -> Result<SmsSubmitOutcome> {
+    ) -> Result<SmsSubmission> {
         // Validate before touching the modem: both values are interpolated into AT
         // command strings below, and both originate from an API request body.
         Self::validate_recipient_with_short_code(recipient, allow_short_code)?;
@@ -2115,8 +2115,8 @@ impl AtModemManager {
         error.to_string() == SMS_PROMPT_TIMEOUT_ERROR
     }
 
-    fn should_recover_after_submit(outcome: SmsSubmitOutcome) -> bool {
-        matches!(outcome, SmsSubmitOutcome::SubmittedUnconfirmed)
+    fn should_recover_after_submit(outcome: SmsSubmission) -> bool {
+        matches!(outcome, SmsSubmission::SubmittedUnconfirmed)
     }
 
     fn classify_post_submit_recovery_response(response: &str) -> Result<()> {
@@ -2133,7 +2133,7 @@ impl AtModemManager {
         timeout: Duration,
         use_ucs2: bool,
         allow_short_code: bool,
-    ) -> Result<SmsSubmitOutcome> {
+    ) -> Result<SmsSubmission> {
         // Re-checked at the sink rather than trusting send_sms: this is the function
         // that actually writes to the serial port, so the invariant belongs here too.
         Self::validate_recipient_with_short_code(recipient, allow_short_code)?;
@@ -2233,7 +2233,7 @@ impl AtModemManager {
         Self::classify_sms_submit_response(&response_str, timed_out)
     }
 
-    fn classify_sms_submit_response(response: &str, timed_out: bool) -> Result<SmsSubmitOutcome> {
+    fn classify_sms_submit_response(response: &str, timed_out: bool) -> Result<SmsSubmission> {
         let lines = response
             .lines()
             .map(str::trim)
@@ -2245,10 +2245,10 @@ impl AtModemManager {
             .clone()
             .any(|line| line == "OK" || line.starts_with("+CMGS:"))
         {
-            return Ok(SmsSubmitOutcome::Confirmed);
+            return Ok(SmsSubmission::Confirmed);
         }
         if timed_out {
-            return Ok(SmsSubmitOutcome::SubmittedUnconfirmed);
+            return Ok(SmsSubmission::SubmittedUnconfirmed);
         }
         Err(anyhow!("Send SMS failed: {}", response))
     }
@@ -2341,20 +2341,17 @@ mod tests {
     fn treats_post_submit_timeout_without_modem_error_as_unconfirmed_submission() {
         assert_eq!(
             AtModemManager::classify_sms_submit_response("0", true).unwrap(),
-            SmsSubmitOutcome::SubmittedUnconfirmed,
+            SmsSubmission::SubmittedUnconfirmed,
         );
     }
 
     #[test]
     fn recovers_the_at_channel_only_after_an_unconfirmed_submission() {
         assert!(AtModemManager::should_recover_after_submit(
-            SmsSubmitOutcome::SubmittedUnconfirmed
+            SmsSubmission::SubmittedUnconfirmed
         ));
         assert!(!AtModemManager::should_recover_after_submit(
-            SmsSubmitOutcome::Confirmed
-        ));
-        assert!(!AtModemManager::should_recover_after_submit(
-            SmsSubmitOutcome::Failed
+            SmsSubmission::Confirmed
         ));
     }
 
@@ -2380,11 +2377,11 @@ mod tests {
     fn does_not_treat_words_in_the_echo_as_final_result_codes() {
         assert_eq!(
             AtModemManager::classify_sms_submit_response("BOOK", true).unwrap(),
-            SmsSubmitOutcome::SubmittedUnconfirmed,
+            SmsSubmission::SubmittedUnconfirmed,
         );
         assert_eq!(
             AtModemManager::classify_sms_submit_response("NO ERROR", true).unwrap(),
-            SmsSubmitOutcome::SubmittedUnconfirmed,
+            SmsSubmission::SubmittedUnconfirmed,
         );
     }
 

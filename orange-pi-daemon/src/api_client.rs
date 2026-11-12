@@ -209,12 +209,7 @@ impl ApiClient {
             anyhow::bail!("API returned error: {}", response.status());
         }
 
-        #[derive(serde::Deserialize)]
-        struct PendingResponse {
-            pending_messages: Vec<PendingSms>,
-        }
-
-        let data: PendingResponse = response.json().await?;
+        let data: PendingSmsResponse = response.json().await?;
         Ok(data.pending_messages)
     }
 
