@@ -1,6 +1,7 @@
 // Spam/marketing SMS classification.
 //
 import { hasVerificationCode } from './verification.js';
+import type { D1Database } from '../../shared/cf-bindings.js';
 
 const SHORT_CODE_COUNTRY_PREFIXES = ['86', '852'];
 
@@ -18,7 +19,9 @@ export const FILTER_STATUS = {
   CLEAN: 'clean',
   /** Judged spam/marketing — hidden unless ?include_filtered=1. */
   FILTERED: 'filtered',
-};
+} as const;
+
+export type FilterStatus = (typeof FILTER_STATUS)[keyof typeof FILTER_STATUS];
 
 /**
  * Statuses the default message list shows.
@@ -29,7 +32,7 @@ export const FILTER_STATUS = {
  * the backfill progressed — indistinguishable from data loss. Showing a message
  * that later turns out to be spam is the harmless direction.
  */
-export const VISIBLE_FILTER_STATUSES = [FILTER_STATUS.CLEAN, FILTER_STATUS.PENDING];
+export const VISIBLE_FILTER_STATUSES: FilterStatus[] = [FILTER_STATUS.CLEAN, FILTER_STATUS.PENDING];
 
 /** Rule kinds allowed in filter_rules.rule_type. */
 export const RULE_TYPE = {
@@ -37,15 +40,36 @@ export const RULE_TYPE = {
   BODY_KEYWORD: 'body_keyword',
   /** Exact match against the sender's number. */
   SENDER: 'sender',
-};
+} as const;
+
+export type RuleType = (typeof RULE_TYPE)[keyof typeof RULE_TYPE];
+
+/** One active row from filter_rules. */
+export interface SpamRule {
+  id: number;
+  rule_type: RuleType | string;
+  pattern: string;
+}
+
+/** The verdict written to a messages row. */
+export interface Classification {
+  filter_status: FilterStatus;
+  filter_rule_id: number | null;
+}
+
+/** The message fields classification reads. */
+export interface ClassifiableMessage {
+  type?: unknown;
+  content?: unknown;
+  phone_number?: unknown;
+}
 
 /**
  * Reduce a sender number to bare digits so '+8610086', '10086' and '100-86'
  * compare consistently.
- * @param {unknown} raw
- * @returns {string} digits only, or '' when there is nothing usable
+ * @returns digits only, or '' when there is nothing usable
  */
-export function normalizeSender(raw) {
+export function normalizeSender(raw: unknown): string {
   if (typeof raw !== 'string') return '';
   return raw.replace(/\D/g, '');
 }
@@ -54,7 +78,7 @@ export function normalizeSender(raw) {
  * Every way of writing the same sender: the bare digits, plus the digits with a
  * known country code stripped, so '+8610086' and '10086' reduce alike.
  */
-function senderCandidates(digits) {
+function senderCandidates(digits: string): string[] {
   const candidates = [digits];
   for (const prefix of SHORT_CODE_COUNTRY_PREFIXES) {
     if (digits.startsWith(prefix)) candidates.push(digits.slice(prefix.length));
@@ -73,7 +97,7 @@ function senderCandidates(digits) {
  * would attribute one carrier's marketing text to a real account. Spam rules want
  * the looser senderMatchesSpamRule() below instead.
  */
-export function senderMatches(rawSender, rawPattern) {
+export function senderMatches(rawSender: unknown, rawPattern: unknown): boolean {
   if (typeof rawSender !== 'string' || typeof rawPattern !== 'string') return false;
 
   const sender = rawSender.trim();
@@ -106,7 +130,7 @@ export function senderMatches(rawSender, rawPattern) {
  * 'M1 Limited Promo', which is a distinct sender rather than one campaign of the
  * same one.
  */
-export function senderMatchesSpamRule(rawSender, rawPattern) {
+export function senderMatchesSpamRule(rawSender: unknown, rawPattern: unknown): boolean {
   if (typeof rawSender !== 'string' || typeof rawPattern !== 'string') return false;
 
   const sender = rawSender.trim();
@@ -120,8 +144,12 @@ export function senderMatchesSpamRule(rawSender, rawPattern) {
   return senderMatches(sender, pattern);
 }
 
-function clean() {
+function clean(): Classification {
   return { filter_status: FILTER_STATUS.CLEAN, filter_rule_id: null };
+}
+
+function filtered(ruleId: number): Classification {
+  return { filter_status: FILTER_STATUS.FILTERED, filter_rule_id: ruleId };
 }
 
 /**
@@ -130,13 +158,13 @@ function clean() {
  * Received messages carry the SENDER's number in `phone_number` — the `sender`
  * column is never populated by the daemon upload path, so it is not consulted.
  *
- * @param {{type?: string, content?: unknown, phone_number?: unknown}} message
- * @param {Array<{id: number, rule_type: string, pattern: string}>} rules
- *   Active rules, ascending by id. Evaluation stops at the first hit, so the
- *   order determines which rule gets recorded as the reason.
- * @returns {{filter_status: string, filter_rule_id: number|null}}
+ * Active rules are passed ascending by id. Evaluation stops at the first hit, so
+ * the order determines which rule gets recorded as the reason.
  */
-export function classifyMessage(message, rules) {
+export function classifyMessage(
+  message: ClassifiableMessage | null | undefined,
+  rules: SpamRule[] | null | undefined,
+): Classification {
   if (!message) return clean();
 
   // Our own outbound SMS is never hidden, whatever it says.
@@ -159,7 +187,7 @@ export function classifyMessage(message, rules) {
 
     if (rule.rule_type === RULE_TYPE.BODY_KEYWORD) {
       if (content.includes(rule.pattern)) {
-        return { filter_status: FILTER_STATUS.FILTERED, filter_rule_id: rule.id };
+        return filtered(rule.id);
       }
       continue;
     }
@@ -169,7 +197,7 @@ export function classifyMessage(message, rules) {
       // Still anchored at the front: endsWith() or a substring test would wrongly
       // filter a real mobile number such as 13910086 under a '10086' rule.
       if (senderMatchesSpamRule(message.phone_number, rule.pattern)) {
-        return { filter_status: FILTER_STATUS.FILTERED, filter_rule_id: rule.id };
+        return filtered(rule.id);
       }
       continue;
     }
@@ -183,17 +211,15 @@ export function classifyMessage(message, rules) {
 
 /**
  * Load the active rules in evaluation order. The single read path for rules.
- * @param {D1Database} db
- * @returns {Promise<Array<{id: number, rule_type: string, pattern: string}>>}
  */
-export async function loadActiveRules(db) {
+export async function loadActiveRules(db: D1Database): Promise<SpamRule[]> {
   const { results } = await db
     .prepare(
       `SELECT id, rule_type, pattern
        FROM filter_rules
        WHERE is_active = 1
-       ORDER BY id`
+       ORDER BY id`,
     )
-    .all();
-  return results || [];
+    .all<SpamRule>();
+  return results;
 }
