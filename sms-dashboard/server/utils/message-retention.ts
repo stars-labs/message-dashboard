@@ -4,6 +4,8 @@
 // long as anything else, so a rule that turns out to be wrong can still be
 // audited months later.
 
+import type { D1Database } from '../../shared/cf-bindings.js';
+
 /** SQLite date modifier defining the retention window. */
 export const RETENTION_MODIFIER = '-12 months';
 
@@ -25,11 +27,14 @@ const BATCH_SIZE = 200;
 const MAX_BATCHES = 50;
 
 /** How many messages are currently past the retention window. */
-export async function countExpiredMessages(db, modifier = RETENTION_MODIFIER) {
+export async function countExpiredMessages(
+  db: D1Database,
+  modifier: string = RETENTION_MODIFIER,
+): Promise<number> {
   const row = await db
     .prepare(`SELECT COUNT(*) AS n FROM messages WHERE timestamp < ${CUTOFF_EXPR}`)
     .bind(modifier)
-    .first();
+    .first<{ n: number }>();
   return row?.n ?? 0;
 }
 
@@ -44,9 +49,13 @@ export async function countExpiredMessages(db, modifier = RETENTION_MODIFIER) {
  * @returns {Promise<{deleted: number, batches: number, exhausted: boolean}>}
  */
 export async function purgeExpiredMessages(
-  db,
-  { modifier = RETENTION_MODIFIER, batchSize = BATCH_SIZE, maxBatches = MAX_BATCHES } = {}
-) {
+  db: D1Database,
+  { modifier = RETENTION_MODIFIER, batchSize = BATCH_SIZE, maxBatches = MAX_BATCHES }: {
+    modifier?: string;
+    batchSize?: number;
+    maxBatches?: number;
+  } = {},
+): Promise<{ deleted: number; batches: number; exhausted: boolean }> {
   let deleted = 0;
   let batches = 0;
 
@@ -56,9 +65,9 @@ export async function purgeExpiredMessages(
         `SELECT id FROM messages WHERE timestamp < ${CUTOFF_EXPR} ORDER BY timestamp LIMIT ?`
       )
       .bind(modifier, batchSize)
-      .all();
+      .all<{ id: string }>();
 
-    if (!results || results.length === 0) break;
+    if (results.length === 0) break;
 
     const ids = results.map((row) => row.id);
     const placeholders = ids.map(() => '?').join(', ');

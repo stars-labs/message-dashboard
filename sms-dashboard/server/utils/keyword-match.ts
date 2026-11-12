@@ -1,6 +1,17 @@
+/** One occurrence of a configured keyword in a message body. */
+export interface KeywordMatch {
+  text: string;
+  position: number;
+}
+
 /** Find every non-overlapping occurrence of a configured keyword. */
-export function findKeywordMatches(text, keyword, caseSensitive = false, wholeWord = false) {
-  const matches = [];
+export function findKeywordMatches(
+  text: string | null | undefined,
+  keyword: string | null | undefined,
+  caseSensitive = false,
+  wholeWord = false,
+): KeywordMatch[] {
+  const matches: KeywordMatch[] = [];
   if (!text || !keyword) return matches;
 
   const searchText = caseSensitive ? text : text.toLowerCase();
@@ -23,6 +34,6 @@ export function findKeywordMatches(text, keyword, caseSensitive = false, wholeWo
   return matches;
 }
 
-function escapeRegex(value) {
+function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

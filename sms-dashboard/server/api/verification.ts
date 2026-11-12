@@ -2,23 +2,34 @@ import { handleAuth0 } from '../middleware/auth0.js';
 import { enrichUserPermissions, requirePermission } from '../middleware/rbac.js';
 import { reprocessVerificationPage } from '../utils/verification-backfill.js';
 import { sweepPending } from '../utils/spam-backfill.js';
+import type { Handler, AppRequest, Env } from '../../shared/worker-context.js';
+import type { ExecutionContext } from '../../shared/cf-bindings.js';
 
-function json(body, status = 200) {
+/** The router shape this module needs. */
+interface Router {
+  post(path: string, ...handlers: Handler[]): void;
+}
+
+function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: { 'Content-Type': 'application/json' },
   });
 }
 
-async function gate(request, env, ctx) {
+async function gate(
+  request: AppRequest,
+  env: Env,
+  ctx: ExecutionContext,
+): Promise<Response | null> {
   const authResponse = await handleAuth0(request, env, ctx);
   if (authResponse) return authResponse;
-  await enrichUserPermissions(request, env, ctx);
+  await enrichUserPermissions(request);
   return (await requirePermission('filters.write')(request, env, ctx)) || null;
 }
 
-export function setupVerificationRoutes(router) {
-  router.post('/api/verification/reprocess', async (request, env, ctx) => {
+export function setupVerificationRoutes(router: Router): void {
+  router.post('/api/verification/reprocess', async (request: AppRequest, env: Env, ctx: ExecutionContext) => {
     const blocked = await gate(request, env, ctx);
     if (blocked) return blocked;
 

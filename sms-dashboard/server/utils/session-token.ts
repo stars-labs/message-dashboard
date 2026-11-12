@@ -11,12 +11,16 @@
 
 const COOKIE_NAME = 'auth_token';
 
-/**
- * @param {string|null} authHeader   value of the Authorization header
- * @param {string|null} cookieHeader value of the Cookie header
- * @returns {{token: string, source: 'cookie'|'header'} | null}
- */
-export function extractSessionToken(authHeader, cookieHeader) {
+/** Where the credential came from. The cookie is the trusted browser path. */
+export interface SessionCredential {
+  token: string;
+  source: 'cookie' | 'header';
+}
+
+export function extractSessionToken(
+  authHeader: string | null,
+  cookieHeader: string | null,
+): SessionCredential | null {
   const fromCookie = readCookie(cookieHeader, COOKIE_NAME);
   if (fromCookie) {
     return { token: fromCookie, source: 'cookie' };
@@ -40,7 +44,7 @@ export function extractSessionToken(authHeader, cookieHeader) {
  * matched exactly so `xauth_token` or `auth_token_backup` cannot satisfy a lookup for
  * `auth_token`.
  */
-export function readCookie(cookieHeader, name) {
+export function readCookie(cookieHeader: string | null, name: string): string | null {
   if (typeof cookieHeader !== 'string' || !cookieHeader) return null;
 
   for (const part of cookieHeader.split(';')) {

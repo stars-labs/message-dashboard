@@ -11,6 +11,8 @@
 // pre-filters below deliberately err toward over-selecting.
 
 import { classifyMessage, loadActiveRules, FILTER_STATUS } from './spam-filter.js';
+import type { ClassifiableMessage } from './spam-filter.js';
+import type { D1Database } from '../../shared/cf-bindings.js';
 
 /** Rows fetched and updated per iteration. Also the D1 batch size. */
 const PAGE_SIZE = 200;
@@ -18,21 +20,27 @@ const PAGE_SIZE = 200;
 /** Stop starting new pages after this long, to stay inside the Worker's budget. */
 const DEFAULT_BUDGET_MS = 20_000;
 
+/** The message columns the sweep judges. */
+interface PendingRow extends ClassifiableMessage {
+  id: string;
+}
+
 /** How many messages are still waiting to be judged. */
-export async function countPending(db) {
+export async function countPending(db: D1Database): Promise<number> {
   const row = await db
     .prepare(`SELECT COUNT(*) AS n FROM messages WHERE filter_status = ?`)
     .bind(FILTER_STATUS.PENDING)
-    .first();
+    .first<{ n: number }>();
   return row?.n ?? 0;
 }
 
 /**
  * Judge messages currently marked 'pending', in bounded pages.
- *
- * @returns {Promise<{processed: number, remaining: number}>}
  */
-export async function sweepPending(db, { pageSize = PAGE_SIZE, budgetMs = DEFAULT_BUDGET_MS } = {}) {
+export async function sweepPending(
+  db: D1Database,
+  { pageSize = PAGE_SIZE, budgetMs = DEFAULT_BUDGET_MS }: { pageSize?: number; budgetMs?: number } = {},
+): Promise<{ processed: number; remaining: number }> {
   const rules = await loadActiveRules(db);
   const startedAt = Date.now();
   let processed = 0;
@@ -44,15 +52,15 @@ export async function sweepPending(db, { pageSize = PAGE_SIZE, budgetMs = DEFAUL
          FROM messages
          WHERE filter_status = ?
          ORDER BY rowid
-         LIMIT ?`
+         LIMIT ?`,
       )
       .bind(FILTER_STATUS.PENDING, pageSize)
-      .all();
+      .all<PendingRow>();
 
-    if (!results || results.length === 0) break;
+    if (results.length === 0) break;
 
     const update = db.prepare(
-      `UPDATE messages SET filter_status = ?, filter_rule_id = ? WHERE id = ?`
+      `UPDATE messages SET filter_status = ?, filter_rule_id = ? WHERE id = ?`,
     );
 
     // One bound statement per row. Do NOT try to bind many rows onto a single
@@ -61,7 +69,7 @@ export async function sweepPending(db, { pageSize = PAGE_SIZE, budgetMs = DEFAUL
       results.map((row) => {
         const verdict = classifyMessage(row, rules);
         return update.bind(verdict.filter_status, verdict.filter_rule_id, row.id);
-      })
+      }),
     );
 
     processed += results.length;
