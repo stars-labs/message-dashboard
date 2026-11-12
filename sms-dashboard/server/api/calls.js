@@ -262,8 +262,6 @@ async function readJson(request) {
 const STALE_CALL_MS = 2 * 60 * 60 * 1000;
 /** A ring nobody answered cannot last this long either. */
 const STALE_RING_MS = 5 * 60 * 1000;
-/** How far back a repeat RING may find the row it belongs to. */
-const RING_REJOIN_MS = 2 * 60 * 1000;
 
 /** D1 rejects a statement with more bound parameters than this. */
 const D1_MAX_BOUND_PARAMETERS = 100;

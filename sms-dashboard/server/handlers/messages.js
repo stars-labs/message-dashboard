@@ -1,5 +1,4 @@
 import { nanoid } from 'nanoid';
-import { extractVerificationCode } from '../utils/verification';
 import { VISIBLE_FILTER_STATUSES } from '../utils/spam-filter.js';
 import { normalizeRecipient } from '../utils/recipient.js';
 
@@ -233,7 +232,7 @@ export const messagesHandler = {
       }), {
         headers: { 'Content-Type': 'application/json' }
       });
-    } catch (error) {
+    } catch {
       // Error handling - list messages
       return new Response(JSON.stringify({
         success: false,
@@ -271,7 +270,7 @@ export const messagesHandler = {
       }), {
         headers: { 'Content-Type': 'application/json' }
       });
-    } catch (error) {
+    } catch {
       // Error handling - get message
       return new Response(JSON.stringify({
         success: false,
@@ -368,19 +367,6 @@ export const messagesHandler = {
         recipient
       ).run();
 
-      // Broadcast new message event
-      const messageData = {
-        id: messageId,
-        phone_iccid: phone_iccid,
-        phone_number: phone.number,
-        content,
-        timestamp,
-        type: 'sent',
-        recipient,
-        status: 'sending'
-      };
-      // Message creation is now picked up by polling
-
       // Note: SMS sending is now handled by daemon polling /api/control/pending-sms
       // The daemon will pick up this message and send it via real SMS network
 
@@ -399,7 +385,7 @@ export const messagesHandler = {
       }), {
         headers: { 'Content-Type': 'application/json' }
       });
-    } catch (error) {
+    } catch {
       // Error handling - send message
       return new Response(JSON.stringify({
         success: false,
