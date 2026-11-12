@@ -90,10 +90,10 @@ class TagService {
   }
 
   // Client-side tag extraction (fallback)
-  extractClientTags(messageId, content, keywords) {
-    if (!content || !keywords.length) return [];
+  extractClientTags(messageId, content, keywordList) {
+    if (!content || !keywordList.length) return [];
     
-    const extractedTags = this._performKeywordMatching(content, keywords);
+    const extractedTags = this._performKeywordMatching(content, keywordList);
     
     // Update store atomically
     _messageTags.update(currentMap => {
@@ -119,11 +119,11 @@ class TagService {
   }
 
   // Private method for keyword matching
-  _performKeywordMatching(content, keywords) {
+  _performKeywordMatching(content, keywordList) {
     const matches = [];
     const uniqueTags = new Map();
     
-    for (const keyword of keywords) {
+    for (const keyword of keywordList) {
       const keywordMatches = this._findMatches(content, keyword);
       for (const match of keywordMatches) {
         if (!uniqueTags.has(keyword.tag)) {
@@ -183,7 +183,7 @@ export const tagService = new TagService();
 export const tagActions = {
   loadKeywords: () => tagService.loadKeywords(),
   batchLoadTags: (messageIds) => tagService.batchLoadTags(messageIds),
-  extractClientTags: (messageId, content, keywords) => tagService.extractClientTags(messageId, content, keywords),
+  extractClientTags: (messageId, content, keywordList) => tagService.extractClientTags(messageId, content, keywordList),
   getMessageTags: (messageId) => tagService.getMessageTags(messageId),
   clearCache: () => tagService.clearTagCache()
 };
