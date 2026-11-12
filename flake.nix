@@ -189,10 +189,6 @@
 
           # Dev convenience commands. These land on $PATH inside the devShell (via
           # direnv `use flake`), so they work from anywhere in the repo tree.
-          #
-          # `bun` deliberately is NOT declared here: it already comes from the
-          # nix-darwin/NixOS system config, and declaring a second one would mean two
-          # answers to "which bun does this project use".
 
           # Runs the Cloudflare Worker locally with Auth0 secrets injected.
           #
@@ -550,6 +546,7 @@
                 age
 
                 # Frontend development
+                bun
                 oxlint
 
                 # Rust development
