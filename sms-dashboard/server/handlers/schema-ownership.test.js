@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test';
 const handlerFiles = [
   './control.js',
   './health.ts',
-  '../api/keywords.js',
+  '../api/keywords.ts',
 ];
 
 describe('database schema ownership', () => {
