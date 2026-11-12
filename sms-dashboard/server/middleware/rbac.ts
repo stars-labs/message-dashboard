@@ -7,7 +7,7 @@
 // environment switch that can turn authorization off; see docs/SECURITY-REVIEW.md
 // findings 1 and 5.
 //
-// The role -> permission table lives in config/auth0-roles.js.
+// The role -> permission table lives in config/auth0-roles.ts.
 
 import {
   ALL_PERMISSIONS,
@@ -15,16 +15,22 @@ import {
   getKnownRoles,
   permissionsForRoles,
 } from '../../config/auth0-roles.js';
+import type { Permission } from '../../config/auth0-roles.js';
+import type { AppRequest, Handler } from '../../shared/worker-context.js';
 
-function forbidden(message) {
+function forbidden(message: string): Response {
   return new Response(JSON.stringify({ error: 'Forbidden', message }), {
     status: 403,
     headers: { 'Content-Type': 'application/json' },
   });
 }
 
-export function requirePermission(permission) {
-  return async function (request) {
+/**
+ * Build the gate for one permission. The returned function is a Handler, so it can
+ * sit in a route's handler chain and short-circuit with its Response.
+ */
+export function requirePermission(permission: Permission): Handler {
+  return async function (request: AppRequest) {
     const { user, env } = request;
 
     if (!user) {
@@ -38,7 +44,7 @@ export function requirePermission(permission) {
     // means a typo'd or newly added permission fails visibly instead of being waved
     // through, which is what the old `if (smsPermissions.includes(permission))`
     // wrapper did to anything outside the list — `phones.write` among them.
-    if (!ALL_PERMISSIONS.includes(permission)) {
+    if (!(ALL_PERMISSIONS as string[]).includes(permission)) {
       return forbidden(`Unknown permission '${permission}'`);
     }
 
@@ -49,7 +55,7 @@ export function requirePermission(permission) {
       return forbidden(
         granted.length === 0
           ? `You need one of these roles to access this system: ${getKnownRoles(roleConfig).join(', ')}`
-          : `Your role does not grant '${permission}'`
+          : `Your role does not grant '${permission}'`,
       );
     }
 
@@ -65,7 +71,7 @@ export function requirePermission(permission) {
  * before the security review had an else-branch that handed out the full permission set
  * when role checking was disabled.
  */
-export async function enrichUserPermissions(request) {
+export async function enrichUserPermissions(request: AppRequest): Promise<void> {
   const { user, env } = request;
 
   if (!user) return;
