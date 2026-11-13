@@ -19,7 +19,7 @@
 
 import * as v from 'valibot';
 import { parseJson, readJson, type Parsed } from '../../shared/parse-json.js';
-import { queryAll, queryFirst, type D1 } from '../lib/d1.js';
+import { D1_MAX_BOUND_PARAMETERS, queryAll, queryFirst, type D1 } from '../lib/d1.js';
 import { OBJECT_MESSAGE, readBody, type MissingKeyMessages } from '../lib/request-body.js';
 import { handleAuth0, type AuthRequest } from '../middleware/auth0.js';
 import { requirePermission, enrichUserPermissions } from '../middleware/rbac.js';
@@ -519,9 +519,6 @@ function readCallIdBody(request: CallRequest): Promise<Parsed<v.InferOutput<type
 const STALE_CALL_MS = 2 * 60 * 60 * 1000;
 /** A ring nobody answered cannot last this long either. */
 const STALE_RING_MS = 5 * 60 * 1000;
-
-/** D1 rejects a statement with more bound parameters than this. */
-const D1_MAX_BOUND_PARAMETERS = 100;
 
 const HISTORY_COLUMNS = `id, direction, iccid, remote_number, outcome, end_reason,
          started_at, answered_at, ended_at, duration_seconds, requested_by, answered_by`;

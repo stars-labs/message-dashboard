@@ -1,6 +1,9 @@
 import * as v from 'valibot';
 import type { Schema } from '../../shared/parse-json.js';
 
+/** D1 rejects a statement with more bound parameters than this. */
+export const D1_MAX_BOUND_PARAMETERS = 100;
+
 export interface D1RunResult {
   meta: { changes: number; last_row_id: number };
 }

@@ -3,9 +3,7 @@ import * as v from 'valibot';
 import { readJson } from '../../shared/parse-json.js';
 import { VISIBLE_FILTER_STATUSES } from '../utils/spam-filter.js';
 import { normalizeRecipient } from '../utils/recipient.js';
-import { queryAll, queryFirst, type D1 } from '../lib/d1.js';
-
-const D1_MAX_BOUND_PARAMETERS = 100;
+import { D1_MAX_BOUND_PARAMETERS, queryAll, queryFirst, type D1 } from '../lib/d1.js';
 
 /**
  * How many outbound status changes one incremental response carries. Sending is

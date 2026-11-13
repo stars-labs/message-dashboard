@@ -103,12 +103,6 @@ export interface BalanceMethod {
   interactive: boolean;
 }
 
-/**
- * D1 rejects a statement with more bound parameters than this. Exported so the
- * batch handlers can size their own chunks against the same limit.
- */
-export const D1_MAX_BOUND_PARAMETERS = 100;
-
 function changesOf(result: unknown): number {
   return Number((result as { meta?: { changes?: number } } | undefined)?.meta?.changes ?? 0);
 }
