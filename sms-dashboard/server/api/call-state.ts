@@ -1,31 +1,27 @@
+import * as v from 'valibot';
+import { parseJson, readJson } from '../../shared/parse-json.js';
+import type { KV } from '../lib/kv.js';
+
 const KEY = 'call';
 const LEGACY_KEY = 'voice:active-call';
 
-/** A live call as the fleet object stores it. Shape owned by server/api/calls.ts. */
-interface StoredCall {
-  id: string;
-  state?: string;
-  [field: string]: unknown;
-}
+const LegacyCall = v.looseObject({ state: v.optional(v.unknown()) });
 
-/** The durable snapshot: which call, which revision, and when it expires. */
-interface CallRecord {
-  call: StoredCall;
-  revision: string;
-  expiresAt: number;
-}
+const CallRecord = v.object({
+  call: v.unknown(),
+  revision: v.string(),
+  expiresAt: v.number(),
+});
 
-/** The transaction request the Worker sends. */
-interface ChangeRequest {
-  call: StoredCall | null;
-  expected: string | null;
-  ttl: number;
-}
+const ChangeRequest = v.object({
+  call: v.unknown(),
+  expected: v.optional(v.nullable(v.string())),
+  ttl: v.number(),
+});
 
-/** The subset of Durable Object storage this class uses. */
 interface SyncStorage {
   kv: {
-    get(key: string): CallRecord | unknown;
+    get(key: string): unknown;
     put(key: string, value: unknown): void;
     delete(key: string): void;
   };
@@ -39,7 +35,7 @@ interface DurableContext {
 
 /** The KV namespace used once, to migrate a call from before the Durable Object. */
 interface MigrationEnv {
-  SESSIONS: { get(key: string): Promise<string | null> };
+  SESSIONS: KV<'get'>;
 }
 
 // A single object owns the live call. A revision identifies the exact snapshot
@@ -53,7 +49,9 @@ export class CallState {
       if (this.storage.kv.get('initialized')) return;
       const raw = await env.SESSIONS.get(LEGACY_KEY);
       if (raw) {
-        const call = JSON.parse(raw) as StoredCall;
+        const parsed = parseJson(raw, LegacyCall);
+        if (!parsed.ok) throw new Error(`Stored call is unreadable: ${parsed.error}`);
+        const call = parsed.value;
         const ttl = call.state === 'ringing' ? 60 : 3600;
         this.storage.kv.put(KEY, {
           call,
@@ -66,10 +64,15 @@ export class CallState {
   }
 
   async fetch(request: Request): Promise<Response> {
-    const change = request.method === 'POST' ? ((await request.json()) as ChangeRequest) : null;
+    let change: v.InferOutput<typeof ChangeRequest> | null = null;
+    if (request.method === 'POST') {
+      const parsed = await readJson(request, ChangeRequest);
+      if (!parsed.ok) return Response.json({ error: parsed.error }, { status: 400 });
+      change = parsed.value;
+    }
     return this.storage.transactionSync(() => {
-      const stored = this.storage.kv.get(KEY) as CallRecord | undefined;
-      const current = stored && stored.expiresAt > Date.now() ? stored : null;
+      const stored = v.safeParse(CallRecord, this.storage.kv.get(KEY));
+      const current = stored.success && stored.output.expiresAt > Date.now() ? stored.output : null;
       if (!change) return Response.json(current);
       const { call, expected, ttl } = change;
       if ((current?.revision ?? null) !== expected) return Response.json(null, { status: 409 });
