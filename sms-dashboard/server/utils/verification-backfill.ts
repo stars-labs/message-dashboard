@@ -1,6 +1,7 @@
+import * as v from 'valibot';
+import { queryAll, type D1, type D1Batch } from '../lib/d1.js';
 import { extractVerificationCode } from './verification.js';
 import { FILTER_STATUS } from './spam-filter.js';
-import type { D1Database } from '../cf-bindings.js';
 
 const DEFAULT_PAGE_SIZE = 200;
 const MAX_PAGE_SIZE = 500;
@@ -14,12 +15,12 @@ interface CodeChange {
 }
 
 /** The row shape the scan selects. */
-interface ScanRow {
-  row_cursor: number;
-  id: string;
-  content: string | null;
-  verification_code: string | null;
-}
+const ScanRow = v.object({
+  row_cursor: v.number(),
+  id: v.string(),
+  content: v.string(),
+  verification_code: v.nullable(v.string()),
+});
 
 export interface VerificationPage {
   processed: number;
@@ -44,7 +45,7 @@ function normaliseCode(value: unknown): string | null {
  * keeps the operation stateless, resumable, and within a Worker's request budget.
  */
 export async function reprocessVerificationPage(
-  db: D1Database,
+  db: D1<'all' | 'run'> & D1Batch<'all' | 'run'>,
   {
     after = 0,
     pageSize = DEFAULT_PAGE_SIZE,
@@ -61,16 +62,18 @@ export async function reprocessVerificationPage(
     MAX_PAGE_SIZE,
   );
 
-  const { results } = await db
-    .prepare(
-      `SELECT rowid AS row_cursor, id, content, verification_code
+  const results = await queryAll(
+    db
+      .prepare(
+        `SELECT rowid AS row_cursor, id, content, verification_code
        FROM messages
        WHERE rowid > ? AND type = 'received'
        ORDER BY rowid
        LIMIT ?`,
-    )
-    .bind(cursor, boundedPageSize)
-    .all<ScanRow>();
+      )
+      .bind(cursor, boundedPageSize),
+    ScanRow,
+  );
 
   const changes: CodeChange[] = [];
   for (const row of results) {
@@ -101,7 +104,7 @@ export async function reprocessVerificationPage(
     replaced: changes.filter((change) => change.previous && change.next).length,
     next_cursor: lastRow?.row_cursor ?? cursor,
     done: results.length < boundedPageSize,
-    dry_run: Boolean(dryRun),
+    dry_run: dryRun,
     samples: changes.slice(0, SAMPLE_LIMIT),
   };
 }
