@@ -27,6 +27,18 @@ describe('runner Auth0 scopes', () => {
     ).toBe(false);
   });
 
+  test('grants nothing when a claim has the wrong type', () => {
+    const heartbeat = RUNNER_SCOPES.heartbeat;
+    expect(
+      hasRunnerScope({ sub: 'device-1', scope: heartbeat, permissions: ['x', 7] }, heartbeat),
+    ).toBe(false);
+    expect(hasRunnerScope({ sub: 'device-1', permissions: [heartbeat], scope: 5 }, heartbeat)).toBe(
+      false,
+    );
+    expect(hasRunnerScope({ sub: 42, scope: heartbeat }, heartbeat)).toBe(false);
+    expect(hasRunnerScope(null, heartbeat)).toBe(false);
+  });
+
   test('keeps Auth0 and legacy balance-job ownership separate', () => {
     const alice = { authorized: true, authMode: 'auth0_device', subject: 'auth0|alice' };
     const bob = { authorized: true, authMode: 'auth0_device', subject: 'auth0|bob' };

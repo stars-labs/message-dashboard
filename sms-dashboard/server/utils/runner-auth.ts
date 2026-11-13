@@ -1,3 +1,4 @@
+import * as v from 'valibot';
 import { auth0Handler } from '../handlers/auth0.js';
 import type { AppRequest } from '../worker-context.js';
 
@@ -19,12 +20,12 @@ export type RunnerAuth =
   | { authorized: true; authMode: 'auth0_device'; subject: string }
   | { authorized: false };
 
-/** The JWT claims this module reads. */
-interface TokenPayload {
-  sub?: unknown;
-  scope?: unknown;
-  permissions?: unknown;
-}
+/** The claims of a runner's Auth0 access token: its subject, its OAuth scopes and its RBAC permissions. */
+const RunnerClaims = v.object({
+  sub: v.optional(v.string()),
+  scope: v.optional(v.string()),
+  permissions: v.optional(v.array(v.string())),
+});
 
 function bearerToken(request: AppRequest): string | null {
   const authorization = request.headers.get('Authorization') || '';
@@ -32,18 +33,20 @@ function bearerToken(request: AppRequest): string | null {
   return match?.[1]?.trim() || null;
 }
 
-function tokenScopes(payload: TokenPayload | null | undefined): Set<string> {
-  const values: unknown[] = [];
-  if (typeof payload?.scope === 'string') values.push(...payload.scope.split(/\s+/));
-  if (Array.isArray(payload?.permissions)) values.push(...payload.permissions);
-  return new Set(values.filter((value): value is string => typeof value === 'string' && !!value));
+/** The token's subject when it has one and carries the scope; claims of the wrong type grant nothing. */
+function scopedSubject(payload: unknown, requiredScope: RunnerScope): string | null {
+  const claims = v.safeParse(RunnerClaims, payload);
+  if (!claims.success) return null;
+
+  const { sub, scope, permissions } = claims.output;
+  if (sub === undefined || sub === '') return null;
+
+  const granted = new Set([...(scope?.split(/\s+/) ?? []), ...(permissions ?? [])]);
+  return granted.has(requiredScope) ? sub : null;
 }
 
-export function hasRunnerScope(
-  payload: TokenPayload | null | undefined,
-  requiredScope: RunnerScope,
-): boolean {
-  return Boolean(payload?.sub && tokenScopes(payload).has(requiredScope));
+export function hasRunnerScope(payload: unknown, requiredScope: RunnerScope): boolean {
+  return scopedSubject(payload, requiredScope) !== null;
 }
 
 export function runnerCanAccessOwner(
@@ -74,11 +77,12 @@ export async function authorizeRunnerControl(
   if (!token) return { authorized: false };
 
   try {
-    const payload = (await auth0Handler.verifyToken(token, request.env)) as TokenPayload | null;
-    if (!hasRunnerScope(payload, requiredScope)) {
-      return { authorized: false };
-    }
-    return { authorized: true, authMode: 'auth0_device', subject: String(payload?.sub) };
+    const subject = scopedSubject(
+      await auth0Handler.verifyToken(token, request.env),
+      requiredScope,
+    );
+    if (subject === null) return { authorized: false };
+    return { authorized: true, authMode: 'auth0_device', subject };
   } catch {
     return { authorized: false };
   }
