@@ -108,7 +108,7 @@ async function gate(
   ctx: ExecutionContext,
   permission: Permission = 'messages.read',
 ): Promise<Response | null> {
-  const authResponse = await handleAuth0(request, env, ctx);
+  const authResponse = await handleAuth0(request);
   if (authResponse) return authResponse;
   await enrichUserPermissions(request);
   const permResponse = await requirePermission(permission)(request);
@@ -896,8 +896,8 @@ export function setupCallRoutes(router: Router): void {
   });
 
   // Daemon-reported incoming call, repeated on every RING to keep it alive.
-  router.post('/api/control/calls/incoming', async (request, env: Env, ctx: ExecutionContext) => {
-    const authResponse = await handleAuth0(request, env, ctx);
+  router.post('/api/control/calls/incoming', async (request, env: Env) => {
+    const authResponse = await handleAuth0(request);
     if (authResponse) return authResponse;
 
     const body = await readJson(request);
@@ -939,8 +939,8 @@ export function setupCallRoutes(router: Router): void {
   });
 
   // Daemon-reported end: remote hangup, modem failure, or a ring that stopped.
-  router.post('/api/control/calls/ended', async (request, env: Env, ctx: ExecutionContext) => {
-    const authResponse = await handleAuth0(request, env, ctx);
+  router.post('/api/control/calls/ended', async (request, env: Env) => {
+    const authResponse = await handleAuth0(request);
     if (authResponse) return authResponse;
 
     const body = await readJson(request);

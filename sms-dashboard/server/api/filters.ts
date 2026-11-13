@@ -54,13 +54,8 @@ function json(body: unknown, status = 200): Response {
 }
 
 /** Auth0 + RBAC gate. Returns a Response to short-circuit, or null to proceed. */
-async function gate(
-  request: AppRequest,
-  env: Parameters<typeof handleAuth0>[1],
-  ctx: Parameters<typeof handleAuth0>[2],
-  permission: Permission,
-): Promise<Response | null> {
-  const authResponse = await handleAuth0(request, env, ctx);
+async function gate(request: AppRequest, permission: Permission): Promise<Response | null> {
+  const authResponse = await handleAuth0(request);
   if (authResponse) return authResponse;
   await enrichUserPermissions(request);
   const permResponse = await requirePermission(permission)(request);
@@ -130,8 +125,8 @@ export async function listFilterRules(db: D1Database): Promise<{ filters: SpamRu
 export function setupFilterRoutes(router: Router): void {
   // List rule metadata only. Historical hit counts require reading every matched
   // message and are not part of the dashboard's operational rule contract.
-  router.get('/api/filters', async (request, env, ctx) => {
-    const blocked = await gate(request, env, ctx, 'filters.read');
+  router.get('/api/filters', async (request, env) => {
+    const blocked = await gate(request, 'filters.read');
     if (blocked) return blocked;
 
     try {
@@ -143,8 +138,8 @@ export function setupFilterRoutes(router: Router): void {
   });
 
   // Create a prospective rule. Existing messages remain historical facts.
-  router.post('/api/filters', async (request, env, ctx) => {
-    const blocked = await gate(request, env, ctx, 'filters.write');
+  router.post('/api/filters', async (request, env) => {
+    const blocked = await gate(request, 'filters.write');
     if (blocked) return blocked;
 
     try {
@@ -186,8 +181,8 @@ export function setupFilterRoutes(router: Router): void {
   });
 
   // Matching identity is immutable. Notes and prospective active state may change.
-  router.put('/api/filters/:id', async (request, env, ctx) => {
-    const blocked = await gate(request, env, ctx, 'filters.write');
+  router.put('/api/filters/:id', async (request, env) => {
+    const blocked = await gate(request, 'filters.write');
     if (blocked) return blocked;
 
     const id = Number(request.params?.id);
@@ -242,8 +237,8 @@ export function setupFilterRoutes(router: Router): void {
   });
 
   // A referenced rule is historical provenance and cannot be physically deleted.
-  router.delete('/api/filters/:id', async (request, env, ctx) => {
-    const blocked = await gate(request, env, ctx, 'filters.delete');
+  router.delete('/api/filters/:id', async (request, env) => {
+    const blocked = await gate(request, 'filters.delete');
     if (blocked) return blocked;
 
     const id = Number(request.params?.id);
@@ -268,8 +263,8 @@ export function setupFilterRoutes(router: Router): void {
   });
 
   // Historical changes are explicit, bounded, and one page per operator action.
-  router.post('/api/filters/:id/history', async (request, env, ctx) => {
-    const blocked = await gate(request, env, ctx, 'filters.write');
+  router.post('/api/filters/:id/history', async (request, env) => {
+    const blocked = await gate(request, 'filters.write');
     if (blocked) return blocked;
 
     const id = Number(request.params?.id);

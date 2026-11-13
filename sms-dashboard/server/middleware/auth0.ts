@@ -1,9 +1,22 @@
 import * as v from 'valibot';
-import { auth0Handler, StoredSession } from '../handlers/auth0';
-import { readKvJson } from '../lib/kv.js';
-import { createRoleConfig, rolesFromToken } from '../../config/auth0-roles.js';
+import { auth0Handler, StoredSession, type SessionUser } from '../handlers/auth0.js';
+import { readKvJson, type KV } from '../lib/kv.js';
+import { createRoleConfig, rolesFromToken, type RoleEnv } from '../../config/auth0-roles.js';
 import { extractSessionToken } from '../utils/session-token.js';
-import type { AppRequest, Handler } from '../worker-context.js';
+
+interface AuthRequest {
+  url: string;
+  headers: { get(name: string): string | null };
+  env: RoleEnv & {
+    API_KEY?: string;
+    AUTH0_DOMAIN?: string;
+    AUTH0_AUDIENCE?: string;
+    AUTH0_CLIENT_ID?: string;
+    SESSIONS: KV<'get' | 'delete'>;
+  };
+  user?: SessionUser;
+  auth0Token?: Record<string, unknown>;
+}
 
 /** The standard claims read from a verified Auth0 JWT; roles come from the configured claim. */
 const JwtClaims = v.object({
@@ -15,7 +28,7 @@ const JwtClaims = v.object({
 });
 
 // Auth0 authentication middleware
-export const handleAuth0: Handler = async (request: AppRequest) => {
+export async function handleAuth0(request: AuthRequest): Promise<Response | undefined> {
   const { env } = request;
 
   // Check for API key for control endpoints
@@ -105,4 +118,6 @@ export const handleAuth0: Handler = async (request: AppRequest) => {
       headers: { 'Content-Type': 'application/json' },
     });
   }
-};
+
+  return undefined;
+}

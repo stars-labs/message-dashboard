@@ -68,7 +68,7 @@ async function gate(
   ctx: ExecutionContext,
   permission: Permission,
 ): Promise<Response | null> {
-  const authResponse = await handleAuth0(request, env, ctx);
+  const authResponse = await handleAuth0(request);
   if (authResponse) return authResponse;
   await enrichUserPermissions(request);
   const permResponse = await requirePermission(permission)(request);
