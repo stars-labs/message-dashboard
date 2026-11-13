@@ -6,16 +6,62 @@ import { fetchWithAuth } from './api.js';
 import { formatCardNumber } from './card-number.js';
 import { formatClock, toEpochMilliseconds } from './time.js';
 
+/** The live call as the Worker reports it. */
+export interface CallLike {
+  id: string;
+  direction: 'inbound' | 'outbound' | string;
+  state: string;
+  iccid?: string | null;
+  number?: string | null;
+  answered_at?: string | null;
+  started_at?: string | null;
+  [field: string]: unknown;
+}
+
+/** A finished call in the history log. */
+export interface CallLogEntry {
+  id: string;
+  direction: string;
+  outcome?: string | null;
+  started_at?: string | null;
+  [field: string]: unknown;
+}
+
+/** The SIM fields these selectors read. */
+export interface CallPhone {
+  iccid: string;
+  number?: string | null;
+  carrier?: string | null;
+  sim_index?: number | null;
+  [field: string]: unknown;
+}
+
+/** One ICE server entry, as the TURN credentials endpoint issues it. */
+export interface IceServer {
+  urls: string | string[];
+  username?: string;
+  credential?: string;
+}
+
+/** The call state label vocabulary. */
+export type CallTone = 'idle' | 'ringing' | 'pending' | 'active';
+
+export async function fetchCallState(): Promise<CallLike | null> {
+  const { call } = await fetchWithAuth('/api/calls/state');
+  return call ?? null;
+}
+
+
 /**
  * Same rule the Worker enforces in server/api/calls.js. Checking it here first
  * gives an instant message instead of a round trip that is certain to fail.
  */
-export function isValidE164(value) {
+export function isValidE164(value: unknown): boolean {
   return typeof value === 'string' && /^\+[1-9]\d{6,14}$/.test(value.trim());
 }
 
 /** Normalise user input: drop spaces, dashes and brackets, keep a leading +. */
-export function normaliseNumber(value) {
+export function normaliseNumber(value: unknown): string {
   if (typeof value !== 'string') return '';
   const trimmed = value.trim();
   const plus = trimmed.startsWith('+') ? '+' : '';
@@ -27,7 +73,7 @@ export function normaliseNumber(value) {
  * the dashboard already loaded. Returns null when the SIM is unknown (a SIM that
  * was removed, or a list that has not loaded yet).
  */
-export function callSim(call, phones) {
+export function callSim(call: CallLike | null | undefined, phones: CallPhone[] | null | undefined): CallPhone | null {
   if (!call?.iccid || !Array.isArray(phones)) return null;
   return phones.find((phone) => phone.iccid === call.iccid) ?? null;
 }
@@ -37,7 +83,7 @@ export function callSim(call, phones) {
  * from the start for an outbound one, so the timer shows talk time rather than
  * how long the phone rang.
  */
-export function callElapsedSeconds(call, nowMs = Date.now()) {
+export function callElapsedSeconds(call: CallLike | null | undefined, nowMs: number = Date.now()): number {
   const since = call?.answered_at ?? call?.started_at;
   if (!since) return 0;
   const started = Date.parse(since);
@@ -46,9 +92,9 @@ export function callElapsedSeconds(call, nowMs = Date.now()) {
 }
 
 /** mm:ss, or h:mm:ss once a call passes an hour. */
-export function formatDuration(seconds) {
+export function formatDuration(seconds: number | null | undefined): string {
   const total = Math.max(0, Math.floor(seconds || 0));
-  const pad = (n) => String(n).padStart(2, '0');
+  const pad = (n: number) => String(n).padStart(2, '0');
   const minutes = Math.floor(total / 60) % 60;
   const hours = Math.floor(total / 3600);
   return hours ? `${hours}:${pad(minutes)}:${pad(total % 60)}` : `${pad(minutes)}:${pad(total % 60)}`;
@@ -58,7 +104,7 @@ export function formatDuration(seconds) {
  * Which visual treatment a state gets. Kept here so the panel, the top bar and
  * any future surface cannot drift apart on what "ringing" looks like.
  */
-export function callTone(call) {
+export function callTone(call: CallLike | null | undefined): CallTone {
   if (!call) return 'idle';
   if (call.state === 'ringing') return call.direction === 'inbound' ? 'ringing' : 'pending';
   if (call.state === 'active') return 'active';
@@ -71,10 +117,11 @@ export function callTone(call) {
  * messages are English Worker strings or DOMException names, neither of which
  * belongs in front of a user mid-call.
  */
-export function describeCallError(error) {
+export function describeCallError(error: unknown): string | null {
   if (!error) return null;
-  const name = error.name ?? '';
-  const message = error.message ?? String(error);
+  const e = error as { name?: string; message?: string };
+  const name = e?.name ?? '';
+  const message = e?.message ?? String(error);
   if (name === 'NotAllowedError' || /permission denied/i.test(message)) {
     return '浏览器拒绝了麦克风权限。请在地址栏的权限设置里允许麦克风，然后重试。';
   }
@@ -97,7 +144,7 @@ export function describeCallError(error) {
 }
 
 /** Search a SIM by card number, phone number, carrier or ICCID. */
-export function matchesPhoneQuery(phone, query) {
+export function matchesPhoneQuery(phone: CallPhone | null | undefined, query: string | null | undefined): boolean {
   const q = (query ?? '').trim().toLowerCase();
   if (!q) return true;
   const card = phone?.sim_index == null ? '' : formatCardNumber(phone.sim_index);
@@ -120,16 +167,16 @@ export const CALL_POLL_IDLE_MS = 10000;
  * 10 s to notice one; it only needs to be quick once a call exists or the
  * panel is open.
  */
-export function callPollDelay({ call = null, panelOpen = false } = {}) {
+export function callPollDelay({ call = null, panelOpen = false }: { call?: CallLike | null; panelOpen?: boolean } = {}): number {
   return call || panelOpen ? CALL_POLL_ACTIVE_MS : CALL_POLL_IDLE_MS;
 }
 
 /** Rejecting an inbound call is a hang-up, but it deserves its own label. */
-export function canReject(call) {
+export function canReject(call: CallLike | null | undefined): boolean {
   return canAnswer(call);
 }
 
-const STATE_LABELS = {
+const STATE_LABELS: Record<string, string> = {
   ringing: '来电',
   connecting: '正在连接',
   bridging: '正在接通',
@@ -139,17 +186,17 @@ const STATE_LABELS = {
 };
 
 /** Human label for a call, or null when there is no call. */
-export function callStateLabel(call) {
+export function callStateLabel(call: CallLike | null | undefined): string | null {
   if (!call) return null;
-  return STATE_LABELS[call.state] ?? call.state;
+  return STATE_LABELS[call.state] ?? String(call.state);
 }
 
 /** Only one call may exist across the fleet, so dialing needs a clear line. */
-export function canDial(call) {
+export function canDial(call: CallLike | null | undefined): boolean {
   return !call;
 }
 
-export function canAnswer(call) {
+export function canAnswer(call: CallLike | null | undefined): boolean {
   return Boolean(call && call.direction === 'inbound' && call.state === 'ringing');
 }
 
@@ -157,7 +204,7 @@ export function canAnswer(call) {
  * Hang-up must always be available while anything exists: it is also how a user
  * clears a stale lock left by a crashed call.
  */
-export function canHangup(call) {
+export function canHangup(call: CallLike | null | undefined): boolean {
   return Boolean(call);
 }
 
@@ -165,7 +212,7 @@ export function canHangup(call) {
  * How a finished call reads in the log. `in_progress` only appears for a row a
  * crash left behind, so it is labelled rather than hidden.
  */
-const OUTCOME_LABELS = {
+const OUTCOME_LABELS: Record<string, string> = {
   answered: '已接通',
   missed: '未接',
   rejected: '已拒接',
@@ -174,12 +221,12 @@ const OUTCOME_LABELS = {
   in_progress: '进行中',
 };
 
-export function callOutcomeLabel(entry) {
-  return OUTCOME_LABELS[entry?.outcome] ?? entry?.outcome ?? '';
+export function callOutcomeLabel(entry: CallLogEntry | null | undefined): string {
+  return (entry?.outcome ? OUTCOME_LABELS[entry.outcome] : undefined) ?? entry?.outcome ?? '';
 }
 
 /** A call the operator should follow up on: it rang here and nobody answered. */
-export function isMissedCall(entry) {
+export function isMissedCall(entry: CallLogEntry | null | undefined): boolean {
   return entry?.direction === 'inbound' && entry?.outcome === 'missed';
 }
 
@@ -187,7 +234,7 @@ export function isMissedCall(entry) {
  * Missed calls the operator has not looked at yet, for the badge on the call
  * button. `seenAt` is the last time the call panel was opened.
  */
-export function countMissedSince(entries, seenAt) {
+export function countMissedSince(entries: CallLogEntry[] | null | undefined, seenAt: unknown): number {
   const since = toEpochMilliseconds(seenAt) ?? 0;
   return (entries ?? []).filter((entry) => {
     if (!isMissedCall(entry)) return false;
@@ -197,20 +244,15 @@ export function countMissedSince(entries, seenAt) {
 }
 
 /** Clock time for a log row. Shared with every other absolute time in the app. */
-export function formatCallTime(value, now = Date.now()) {
+export function formatCallTime(value: unknown, now: number = Date.now()): string {
   return formatClock(value, now);
 }
 
-function post(path, body) {
+function post(path: string, body: unknown) {
   return fetchWithAuth(path, { method: 'POST', body: JSON.stringify(body ?? {}) });
 }
 
-export async function fetchCallState() {
-  const { call } = await fetchWithAuth('/api/calls/state');
-  return call ?? null;
-}
-
-export async function fetchIceServers() {
+export async function fetchIceServers(): Promise<IceServer[]> {
   const { iceServers } = await fetchWithAuth('/api/calls/ice');
   return iceServers ?? [];
 }
@@ -219,18 +261,30 @@ export async function fetchIceServers() {
  * Call log, newest first. Read straight from D1 rather than the KV call lock,
  * so it is unaffected by the lock's TTL and shows calls that already ended.
  */
-export async function fetchCallHistory({ limit = 30, offset = 0, iccid = null } = {}) {
+export async function fetchCallHistory({ limit = 30, offset = 0, iccid = null }: { limit?: number; offset?: number; iccid?: string | null } = {}): Promise<{ calls: CallLogEntry[]; hasMore: boolean }> {
   const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
   if (iccid) params.set('iccid', iccid);
   const { calls, has_more: hasMore } = await fetchWithAuth(`/api/calls/history?${params}`);
   return { calls: calls ?? [], hasMore: Boolean(hasMore) };
 }
 
-/** The API surface call-session.js drives; each returns the Worker's JSON. */
+/** The browser's SDP offer and its mid, as /dial and /answer take them. */
+export interface MediaOffer {
+  offer: unknown;
+  mid: string;
+}
+
+/** /dial additionally names the SIM and destination. */
+export interface DialParams extends MediaOffer {
+  iccid: string;
+  number: string;
+}
+
+/** The API surface call-session.ts drives; each returns the Worker's JSON. */
 export const callApi = {
-  dial: ({ iccid, number, offer, mid }) => post('/api/calls/dial', { iccid, number, offer, mid }),
-  answer: ({ offer, mid }) => post('/api/calls/answer', { offer, mid }),
-  connect: (callId) => post('/api/calls/connect', { call_id: callId }),
-  renegotiate: ({ answer, callId }) => post('/api/calls/renegotiate', { answer, call_id: callId }),
-  hangup: (callId) => post('/api/calls/hangup', { call_id: callId }),
+  dial: ({ iccid, number, offer, mid }: DialParams) => post('/api/calls/dial', { iccid, number, offer, mid }),
+  answer: ({ offer, mid }: MediaOffer) => post('/api/calls/answer', { offer, mid }),
+  connect: (callId: string) => post('/api/calls/connect', { call_id: callId }),
+  renegotiate: ({ answer, callId }: { answer: unknown; callId?: string }) => post('/api/calls/renegotiate', { answer, call_id: callId }),
+  hangup: (callId?: string) => post('/api/calls/hangup', { call_id: callId }),
 };

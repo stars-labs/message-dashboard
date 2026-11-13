@@ -10,9 +10,42 @@
 /** A PeerConnection that has not connected in this long will not connect. */
 export const CONNECT_TIMEOUT_MS = 15_000;
 
-function waitForConnected(pc, timeoutMs) {
+/** The PeerConnection surface this drives. */
+interface ConnectionLike {
+  connectionState: string;
+  localDescription: { type: string; sdp: string } | null;
+  ontrack: ((event: { streams?: MediaStream[]; track: MediaStreamTrack }) => void) | null;
+  addTransceiver(track: MediaStreamTrack, init: { direction: string }): { mid: string | null };
+  createOffer(): Promise<{ type: string; sdp: string }>;
+  createAnswer(): Promise<{ type: string; sdp: string }>;
+  setLocalDescription(description: unknown): Promise<void>;
+  setRemoteDescription(description: unknown): Promise<void>;
+  addEventListener(type: 'connectionstatechange', listener: () => void): void;
+  removeEventListener(type: 'connectionstatechange', listener: () => void): void;
+  close(): void;
+}
+
+/** The call API call-session drives, matching callApi in call-client.ts. */
+export interface CallSessionApi {
+  dial(params: { iccid: string; number: string; offer: unknown; mid: string | null }): Promise<{ call: { id: string }; answer: unknown }>;
+  answer(params: { offer: unknown; mid: string | null }): Promise<{ call: { id: string }; answer: unknown }>;
+  connect(callId: string): Promise<{ offer?: unknown }>;
+  renegotiate(params: { answer: unknown; callId: string }): Promise<unknown>;
+  hangup(callId?: string): Promise<unknown>;
+}
+
+export interface CallSessionDeps {
+  fetchIce: () => Promise<RTCIceServer[]>;
+  api: CallSessionApi;
+  RTCPeerConnection: new (config: { iceServers: RTCIceServer[]; bundlePolicy: string }) => ConnectionLike;
+  getUserMedia: (constraints: MediaStreamConstraints) => Promise<MediaStream>;
+  audioElement: HTMLAudioElement | null;
+  connectTimeoutMs?: number;
+}
+
+function waitForConnected(pc: ConnectionLike, timeoutMs: number): Promise<void> {
   if (pc.connectionState === 'connected') return Promise.resolve();
-  return new Promise((resolve, reject) => {
+  return new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => {
       cleanup();
       reject(new Error('音频连接超时'));
@@ -43,14 +76,14 @@ function waitForConnected(pc, timeoutMs) {
  * @param {HTMLAudioElement} deps.audioElement  plays the far end
  * @param {number} [deps.connectTimeoutMs]
  */
-export function createCallSession(deps) {
+export function createCallSession(deps: CallSessionDeps) {
   const { fetchIce, api, RTCPeerConnection, getUserMedia, audioElement } = deps;
   const connectTimeoutMs = deps.connectTimeoutMs ?? CONNECT_TIMEOUT_MS;
 
-  let pc = null;
-  let mic = null;
+  let pc: ConnectionLike | null = null;
+  let mic: MediaStream | null = null;
   let closed = false;
-  let callId = null;
+  let callId: string | null = null;
 
   function release() {
     closed = true;
@@ -69,7 +102,7 @@ export function createCallSession(deps) {
   }
 
   /** `start` is api.dial or api.answer, bound to its own arguments. */
-  async function run(start) {
+  async function run(start: (offer: { offer: unknown; mid: string | null }) => Promise<{ call: { id: string }; answer: unknown }>) {
     try {
       mic = await getUserMedia({ audio: true, video: false });
       assertOpen();
@@ -86,7 +119,8 @@ export function createCallSession(deps) {
       const transceiver = pc.addTransceiver(mic.getAudioTracks()[0], { direction: 'sendrecv' });
 
       await pc.setLocalDescription(await pc.createOffer());
-      const offer = { type: pc.localDescription.type, sdp: pc.localDescription.sdp };
+      const local = pc.localDescription!;
+      const offer = { type: local.type, sdp: local.sdp };
       const started = await start({ offer, mid: transceiver.mid });
       assertOpen();
       callId = started.call.id;
@@ -100,7 +134,8 @@ export function createCallSession(deps) {
       if (connected.offer) {
         await pc.setRemoteDescription(connected.offer);
         await pc.setLocalDescription(await pc.createAnswer());
-        const answer = { type: pc.localDescription.type, sdp: pc.localDescription.sdp };
+        const localAnswer = pc.localDescription!;
+        const answer = { type: localAnswer.type, sdp: localAnswer.sdp };
         await api.renegotiate({ answer, callId });
       }
     } catch (error) {
@@ -112,7 +147,7 @@ export function createCallSession(deps) {
   }
 
   return {
-    dial: ({ iccid, number }) => run(({ offer, mid }) => api.dial({ iccid, number, offer, mid })),
+    dial: ({ iccid, number }: { iccid: string; number: string }) => run(({ offer, mid }) => api.dial({ iccid, number, offer, mid })),
     answer: () => run(({ offer, mid }) => api.answer({ offer, mid })),
     /** Local hang-up: stop media and release the fleet lock. */
     async hangup() {
@@ -126,17 +161,17 @@ export function createCallSession(deps) {
      * audio path stays up, so unmuting is instant and the far end hears nothing
      * in between.
      */
-    setMuted(muted) {
+    setMuted(muted: boolean): boolean {
       mic?.getAudioTracks().forEach((track) => {
         track.enabled = !muted;
       });
       return Boolean(muted);
     },
-    get muted() {
+    get muted(): boolean {
       const tracks = mic?.getAudioTracks() ?? [];
       return tracks.length > 0 && tracks.every((track) => track.enabled === false);
     },
-    get active() {
+    get active(): boolean {
       return !closed && pc !== null;
     },
   };
