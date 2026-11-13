@@ -25,6 +25,9 @@ function messageOf(issue: v.BaseIssue<unknown>, missingKeyMessages: object): str
 
 export const NOT_JSON_MESSAGE = 'Body must be JSON';
 
+/** The message for a JSON body that is not an object, for schemas that do not need their own. */
+export const OBJECT_MESSAGE = 'Body must be a JSON object';
+
 /**
  * Reads a JSON request body. The error is the message a 400 should carry:
  * NOT_JSON_MESSAGE, a missing field's message, or the failing validator's own

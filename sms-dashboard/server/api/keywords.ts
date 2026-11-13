@@ -1,6 +1,7 @@
 import * as v from 'valibot';
 import { queryAll, queryFirst, type D1, type D1Batch } from '../lib/d1.js';
-import { readBody, type MissingKeyMessages } from '../lib/request-body.js';
+import { OBJECT_MESSAGE, readBody, type MissingKeyMessages } from '../lib/request-body.js';
+import { HISTORY_MISSING_KEY_MESSAGES, HistoryRequestBody } from '../utils/history-request.js';
 import { handleAuth0, type AuthRequest } from '../middleware/auth0.js';
 import { requirePermission, enrichUserPermissions } from '../middleware/rbac.js';
 import { errorText } from '../utils/d1-error.js';
@@ -79,7 +80,6 @@ const MessageTagRow = v.object({
   color: v.nullable(v.string()),
 });
 
-const BODY_MESSAGE = 'Body must be a JSON object';
 const REQUIRED_MESSAGE = 'Keyword and tag are required';
 const KEYWORD_MESSAGE = 'keyword must be a string';
 const TAG_MESSAGE = 'tag must be a string';
@@ -90,8 +90,6 @@ const ACTIVE_MESSAGE = 'is_active must be true or false';
 const IMMUTABLE_MESSAGE =
   'Keyword and matching options are immutable; create a new keyword instead';
 const MESSAGE_IDS_MESSAGE = 'messageIds must be an array of strings';
-const RANGE_MESSAGE = 'A valid history time range is required';
-const CURSOR_MESSAGE = 'Invalid history cursor';
 
 const Required = v.pipe(v.string(REQUIRED_MESSAGE), v.nonEmpty(REQUIRED_MESSAGE));
 
@@ -124,7 +122,7 @@ const CreateBody = v.object(
     case_sensitive: v.optional(v.boolean(CASE_SENSITIVE_MESSAGE), false),
     whole_word: v.optional(v.boolean(WHOLE_WORD_MESSAGE), false),
   },
-  BODY_MESSAGE,
+  OBJECT_MESSAGE,
 );
 
 const UpdateBody = v.object(
@@ -137,34 +135,12 @@ const UpdateBody = v.object(
     whole_word: v.optional(v.boolean(WHOLE_WORD_MESSAGE)),
     is_active: v.optional(v.boolean(ACTIVE_MESSAGE)),
   },
-  BODY_MESSAGE,
+  OBJECT_MESSAGE,
 );
 
 const BatchBody = v.object(
   { messageIds: v.array(v.string(MESSAGE_IDS_MESSAGE), MESSAGE_IDS_MESSAGE) },
-  BODY_MESSAGE,
-);
-
-const Instant = v.pipe(
-  v.union([v.string(RANGE_MESSAGE), v.number(RANGE_MESSAGE)], RANGE_MESSAGE),
-  v.transform((value) => new Date(value)),
-  v.check((date) => !Number.isNaN(date.getTime()), RANGE_MESSAGE),
-);
-
-const HistoryCursorBody = v.object(
-  {
-    created_at: v.pipe(
-      v.string(CURSOR_MESSAGE),
-      v.check((value) => !Number.isNaN(new Date(`${value}Z`).getTime()), CURSOR_MESSAGE),
-    ),
-    id: v.string(CURSOR_MESSAGE),
-  },
-  CURSOR_MESSAGE,
-);
-
-const HistoryBody = v.object(
-  { since: Instant, until: Instant, cursor: v.nullish(HistoryCursorBody) },
-  BODY_MESSAGE,
+  OBJECT_MESSAGE,
 );
 
 const CREATE_MISSING_KEY_MESSAGES = {
@@ -175,11 +151,6 @@ const CREATE_MISSING_KEY_MESSAGES = {
 const BATCH_MISSING_KEY_MESSAGES = {
   messageIds: MESSAGE_IDS_MESSAGE,
 } as const satisfies MissingKeyMessages<typeof BatchBody>;
-
-const HISTORY_MISSING_KEY_MESSAGES = {
-  since: RANGE_MESSAGE,
-  until: RANGE_MESSAGE,
-} as const satisfies MissingKeyMessages<typeof HistoryBody>;
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -502,10 +473,9 @@ export function setupKeywordRoutes(router: Router): void {
         return json({ error: 'Activate the keyword before applying it to history' }, 409);
       }
 
-      const parsed = await readBody(request, HistoryBody, HISTORY_MISSING_KEY_MESSAGES);
+      const parsed = await readBody(request, HistoryRequestBody, HISTORY_MISSING_KEY_MESSAGES);
       if (!parsed.ok) return json({ error: parsed.error }, 400);
       const { since, until, cursor } = parsed.value;
-      if (since > until) return json({ error: RANGE_MESSAGE }, 400);
 
       const result = await processKeywordHistoryPage(
         request.env.DB,

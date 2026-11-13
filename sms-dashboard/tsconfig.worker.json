@@ -46,6 +46,7 @@
     "server/utils/spam-backfill.ts",
     "server/utils/filter-history.ts",
     "server/utils/keyword-history.ts",
+    "server/utils/history-request.ts",
     "server/handlers/auth0.ts",
     "server/middleware/auth0.ts",
     "server/utils/runner-auth.ts",
