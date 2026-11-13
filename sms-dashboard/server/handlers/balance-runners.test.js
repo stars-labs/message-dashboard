@@ -195,6 +195,26 @@ describe('balance runner control plane', () => {
     expect(response.status).toBe(400);
   });
 
+  test.each([['2'], [true], [null], [[3]]])(
+    'rejects a concurrency of %p instead of coercing it to a number',
+    async (concurrency) => {
+      const response = await balanceRunnersHandler.heartbeat(
+        request(db, {
+          runner_id: 'runner-1',
+          session_id: 'session-1',
+          display_name: 'Runner',
+          platform: 'darwin',
+          version: '1.0.0',
+          capabilities: [{ capability: 'sms_ai', state: 'ready', concurrency }],
+        }),
+      );
+      expect(response.status).toBe(400);
+      expect(
+        sqlite.query('SELECT COUNT(*) AS count FROM balance_runner_installations').get().count,
+      ).toBe(0);
+    },
+  );
+
   test('does not allow a revoked installation to return by heartbeat', async () => {
     sqlite.exec(`
       INSERT INTO balance_runner_installations (

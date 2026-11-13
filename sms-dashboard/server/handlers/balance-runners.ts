@@ -87,7 +87,7 @@ function parseHeartbeat(body: Record<string, unknown> | null | undefined): Heart
     const currentJobId =
       item?.current_job_id == null ? null : boundedString(item.current_job_id, 200);
     const detailCode = item?.detail_code == null ? null : boundedString(item.detail_code, 100);
-    const concurrency = Number(item?.concurrency ?? 1);
+    const concurrency = item?.concurrency === undefined ? 1 : item.concurrency;
     if (!capability || !state) return null;
     if (
       !CAPABILITIES.has(capability) ||
@@ -95,6 +95,7 @@ function parseHeartbeat(body: Record<string, unknown> | null | undefined): Heart
       seen.has(capability) ||
       (item?.current_job_id != null && !currentJobId) ||
       (item?.detail_code != null && !detailCode) ||
+      typeof concurrency !== 'number' ||
       !Number.isInteger(concurrency) ||
       concurrency < 1 ||
       concurrency > 8
