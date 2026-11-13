@@ -499,6 +499,31 @@ describe('carrier bills API', () => {
     ).toEqual([{ event_type: 'paid' }, { event_type: 'waived' }, { event_type: 'reopened' }]);
   });
 
+  test('reopens a resolved bill and clears resolution fields', async () => {
+    await carrierBillsHandler.markPaid(
+      mutation(db, { id: 'bill-1', body: { expected_version: 1 }, idempotencyKey: 'paid-first' }),
+    );
+    const reopened = v.parse(
+      BillBody,
+      await (
+        await carrierBillsHandler.reopen(
+          mutation(db, {
+            id: 'bill-1',
+            body: { expected_version: 2, note: 'Payment was reversed' },
+            idempotencyKey: 'reopen-paid',
+          }),
+        )
+      ).json(),
+    );
+    expect(reopened.bill).toMatchObject({
+      action_status: 'unpaid',
+      paid_at: null,
+      paid_by: null,
+      payment_planned_at: null,
+      version: 3,
+    });
+  });
+
   test('trims the note, ignores a blank one, and keeps the earlier note', async () => {
     await carrierBillsHandler.paymentPlanned(
       mutation(db, {
