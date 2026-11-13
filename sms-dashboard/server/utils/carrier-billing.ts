@@ -1,6 +1,7 @@
+import * as v from 'valibot';
+import { queryAll, queryFirst, type D1 } from '../lib/d1.js';
 import { parseSingtelPostpaidBillSms } from './singtel-postpaid-bill.js';
 import type { SingtelBill } from './singtel-postpaid-bill.js';
-import type { D1Database } from '../cf-bindings.js';
 
 const RECONCILIATION_PAGE_SIZE = 100;
 const SINGTEL_BILL_PREFIX = '<Singtel>Dear customer, your latest bill for Singtel a/c ';
@@ -18,33 +19,51 @@ export interface BillProcessingResult {
 }
 
 /** The message fields bill processing requires. */
-export interface BillCandidateMessage {
-  id: string;
-  phone_iccid: string;
-  phone_number: string;
-  content: string;
-  timestamp: string;
-  type: string;
-}
+const BillCandidate = v.object({
+  id: v.string(),
+  phone_iccid: v.string(),
+  phone_number: v.literal('Singtel'),
+  content: v.string(),
+  timestamp: v.string(),
+  type: v.literal('received'),
+});
 
-interface ReceivingSim {
-  iccid: string;
-  sim_index: number | null;
-}
+export type BillCandidateMessage = v.InferOutput<typeof BillCandidate>;
 
-interface BillingStream {
-  id: string;
-  currency: string;
-  account_ref_digest: string;
-}
+const ReceivingSimRow = v.object({ iccid: v.string(), sim_index: v.nullable(v.number()) });
 
-async function eligibleReceivingSim(
-  db: D1Database,
-  message: BillCandidateMessage,
-): Promise<ReceivingSim | null> {
-  return db
-    .prepare(
-      `
+type ReceivingSim = v.InferOutput<typeof ReceivingSimRow>;
+
+const BillingStreamRow = v.object({
+  id: v.string(),
+  currency: v.string(),
+  account_ref_digest: v.string(),
+});
+
+type BillingStream = v.InferOutput<typeof BillingStreamRow>;
+
+const ProcessedBillRow = v.object({ bill_id: v.string() });
+
+const ExistingBillRow = v.object({
+  id: v.string(),
+  amount_minor: v.number(),
+  currency: v.string(),
+});
+
+const MessageRow = v.object({
+  id: v.string(),
+  phone_iccid: v.string(),
+  phone_number: v.string(),
+  content: v.string(),
+  timestamp: v.nullable(v.string()),
+  type: v.string(),
+});
+
+function eligibleReceivingSim(db: D1, message: BillCandidateMessage): Promise<ReceivingSim | null> {
+  return queryFirst(
+    db
+      .prepare(
+        `
     SELECT iccid, sim_index
     FROM device_view
     WHERE iccid = ?
@@ -52,15 +71,17 @@ async function eligibleReceivingSim(
       AND carrier = 'Singtel'
       AND service_type = 'postpaid'
   `,
-    )
-    .bind(message.phone_iccid)
-    .first<ReceivingSim>();
+      )
+      .bind(message.phone_iccid),
+    ReceivingSimRow,
+  );
 }
 
-async function activeStream(db: D1Database, simIccid: string): Promise<BillingStream | null> {
-  return db
-    .prepare(
-      `
+function activeStream(db: D1, simIccid: string): Promise<BillingStream | null> {
+  return queryFirst(
+    db
+      .prepare(
+        `
     SELECT id, currency, account_ref_digest
     FROM carrier_billing_accounts
     WHERE notification_sim_iccid = ?
@@ -69,13 +90,14 @@ async function activeStream(db: D1Database, simIccid: string): Promise<BillingSt
       AND carrier = 'Singtel'
     LIMIT 1
   `,
-    )
-    .bind(simIccid)
-    .first<BillingStream>();
+      )
+      .bind(simIccid),
+    BillingStreamRow,
+  );
 }
 
 async function ensureBillingStream(
-  db: D1Database,
+  db: D1,
   sim: ReceivingSim,
   parsed: SingtelBill,
 ): Promise<BillingStream | null> {
@@ -131,13 +153,11 @@ async function ensureBillingStream(
   return created;
 }
 
-async function alreadyProcessed(
-  db: D1Database,
-  sourceMessageId: string,
-): Promise<{ bill_id: string } | null> {
-  return db
-    .prepare(
-      `
+function alreadyProcessed(db: D1, sourceMessageId: string): Promise<{ bill_id: string } | null> {
+  return queryFirst(
+    db
+      .prepare(
+        `
     SELECT id AS bill_id
     FROM carrier_bills
     WHERE source_message_id = ?
@@ -147,13 +167,14 @@ async function alreadyProcessed(
     WHERE source_message_id = ?
     LIMIT 1
   `,
-    )
-    .bind(sourceMessageId, sourceMessageId)
-    .first<{ bill_id: string }>();
+      )
+      .bind(sourceMessageId, sourceMessageId),
+    ProcessedBillRow,
+  );
 }
 
-async function addSystemEvent(
-  db: D1Database,
+function addSystemEvent(
+  db: D1,
   {
     billId,
     eventType,
@@ -163,7 +184,7 @@ async function addSystemEvent(
     billId: string;
     eventType: string;
     sourceMessageId: string;
-    metadata: Record<string, unknown>;
+    metadata: object;
   },
 ) {
   return db
@@ -179,7 +200,7 @@ async function addSystemEvent(
 }
 
 async function storeParsedBill(
-  db: D1Database,
+  db: D1,
   account: BillingStream,
   message: BillCandidateMessage,
   parsed: SingtelBill,
@@ -211,7 +232,7 @@ async function storeParsedBill(
     )
     .run();
 
-  if (Number(insert.meta?.changes ?? 0) === 1) {
+  if (insert.meta.changes === 1) {
     await addSystemEvent(db, {
       billId,
       eventType: 'detected',
@@ -221,16 +242,18 @@ async function storeParsedBill(
     return { outcome: 'detected', bill_id: billId };
   }
 
-  const existing = await db
-    .prepare(
-      `
+  const existing = await queryFirst(
+    db
+      .prepare(
+        `
     SELECT id, amount_minor, currency
     FROM carrier_bills
     WHERE billing_account_id = ? AND due_date = ?
   `,
-    )
-    .bind(account.id, parsed.due_date)
-    .first<{ id: string; amount_minor: number; currency: string }>();
+      )
+      .bind(account.id, parsed.due_date),
+    ExistingBillRow,
+  );
   if (!existing) {
     const raced = await alreadyProcessed(db, message.id);
     if (raced) return { outcome: 'already_processed', bill_id: raced.bill_id };
@@ -255,7 +278,7 @@ async function storeParsedBill(
         },
   });
 
-  if (!duplicate && Number(event.meta?.changes ?? 0) === 1) {
+  if (!duplicate && event.meta.changes === 1) {
     await db
       .prepare(
         `
@@ -277,40 +300,35 @@ async function storeParsedBill(
 }
 
 export async function processCarrierBillMessage(
-  db: D1Database,
+  db: D1,
   message: unknown,
 ): Promise<BillProcessingResult> {
-  const m = message as Partial<BillCandidateMessage> | null | undefined;
-  if (
-    !m ||
-    m.type !== 'received' ||
-    m.phone_number !== 'Singtel' ||
-    typeof m.id !== 'string' ||
-    typeof m.phone_iccid !== 'string' ||
-    typeof m.content !== 'string' ||
-    typeof m.timestamp !== 'string'
-  ) {
-    return { outcome: 'ignored' };
-  }
+  const candidate = v.safeParse(BillCandidate, message);
+  if (!candidate.success) return { outcome: 'ignored' };
 
-  const candidate = m as BillCandidateMessage;
   const parsed = await parseSingtelPostpaidBillSms({
-    sender: candidate.phone_number,
-    content: candidate.content,
+    sender: candidate.output.phone_number,
+    content: candidate.output.content,
   });
   if (!parsed) return { outcome: 'ignored' };
 
-  const sim = await eligibleReceivingSim(db, candidate);
+  const sim = await eligibleReceivingSim(db, candidate.output);
   if (!sim) return { outcome: 'ignored' };
 
   const stream = await ensureBillingStream(db, sim, parsed);
-  if (!stream || parsed.currency !== stream.currency) return { outcome: 'ignored' };
-  return storeParsedBill(db, stream, candidate, parsed);
+  if (stream?.currency !== parsed.currency) return { outcome: 'ignored' };
+  return storeParsedBill(db, stream, candidate.output, parsed);
+}
+
+function describeMessage(message: unknown): string {
+  if (typeof message !== 'object' || message === null || !('id' in message)) return 'unknown';
+  const { id } = message;
+  return typeof id === 'string' || typeof id === 'number' ? String(id) : 'unknown';
 }
 
 export async function processCarrierBillMessages(
-  db: D1Database,
-  messages: Array<Partial<BillCandidateMessage> | null | undefined>,
+  db: D1,
+  messages: readonly unknown[],
   {
     processMessage = processCarrierBillMessage,
     logError = console.error,
@@ -320,11 +338,11 @@ export async function processCarrierBillMessages(
   } = {},
 ): Promise<BillProcessingResult[]> {
   return Promise.all(
-    messages.map(async (message) => {
+    messages.map(async (message): Promise<BillProcessingResult> => {
       try {
         return await processMessage(db, message);
       } catch (error) {
-        logError(`Carrier bill processing failed for message ${message?.id ?? 'unknown'}:`, error);
+        logError(`Carrier bill processing failed for message ${describeMessage(message)}:`, error);
         return { outcome: 'failed' };
       }
     }),
@@ -332,13 +350,14 @@ export async function processCarrierBillMessages(
 }
 
 export async function reconcileCarrierBillMessages(
-  db: D1Database,
+  db: D1,
   { pageSize = RECONCILIATION_PAGE_SIZE }: { pageSize?: number } = {},
 ): Promise<{ scanned: number; detected: number; remaining: number }> {
-  const limit = Math.max(1, Math.min(Number(pageSize) || RECONCILIATION_PAGE_SIZE, 500));
-  const query = await db
-    .prepare(
-      `
+  const limit = Math.max(1, Math.min(pageSize || RECONCILIATION_PAGE_SIZE, 500));
+  const candidates = await queryAll(
+    db
+      .prepare(
+        `
     SELECT DISTINCT
       m.id,
       m.phone_iccid,
@@ -364,10 +383,10 @@ export async function reconcileCarrierBillMessages(
     ORDER BY m.timestamp DESC, m.id DESC
     LIMIT ?
   `,
-    )
-    .bind(SINGTEL_BILL_PREFIX, limit + 1)
-    .all<BillCandidateMessage>();
-  const candidates = query.results;
+      )
+      .bind(SINGTEL_BILL_PREFIX, limit + 1),
+    MessageRow,
+  );
   const page = candidates.slice(0, limit);
   let detected = 0;
 
