@@ -19,15 +19,23 @@ const DB_VERSION = 5;
 const MESSAGES_STORE = 'messages';
 const META_STORE = 'meta';
 
-let db = null;
+/** The message shape IndexedDB stores: whatever the server returned, by id. */
+export interface CachedMessage {
+  id: string;
+  phone_iccid?: string | null;
+  timestamp: string;
+  [column: string]: unknown;
+}
+
+let db: IDBDatabase | null = null;
 
 /**
  * Initialize IndexedDB
  */
-async function initDB() {
+async function initDB(): Promise<IDBDatabase> {
   if (db) return db;
 
-  return new Promise((resolve, reject) => {
+  return new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
 
     request.onerror = () => {
@@ -42,7 +50,7 @@ async function initDB() {
     };
 
     request.onupgradeneeded = (event) => {
-      const database = event.target.result;
+      const database = (event.target as IDBOpenDBRequest).result;
 
       // Any upgrade discards the cache rather than trying to migrate rows. The
       // cache is a disposable copy of the server's data, so refetching is always
@@ -77,12 +85,12 @@ async function initDB() {
 /**
  * Get last sync timestamp for a phone (or global)
  */
-async function getLastSyncTime(phoneIccid = 'global') {
+async function getLastSyncTime(phoneIccid: string = 'global'): Promise<string | null> {
   try {
     await initDB();
 
-    return new Promise((resolve) => {
-      const transaction = db.transaction([META_STORE], 'readonly');
+    return new Promise<string | null>((resolve) => {
+      const transaction = db!.transaction([META_STORE], 'readonly');
       const store = transaction.objectStore(META_STORE);
       const request = store.get(`lastSync_${phoneIccid}`);
 
@@ -104,12 +112,12 @@ async function getLastSyncTime(phoneIccid = 'global') {
 /**
  * Set last sync timestamp
  */
-async function setLastSyncTime(phoneIccid = 'global', timestamp) {
+async function setLastSyncTime(phoneIccid: string = 'global', timestamp: string): Promise<void> {
   try {
     await initDB();
 
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction([META_STORE], 'readwrite');
+    return new Promise<void>((resolve, reject) => {
+      const transaction = db!.transaction([META_STORE], 'readwrite');
       const store = transaction.objectStore(META_STORE);
       const request = store.put({ key: `lastSync_${phoneIccid}`, value: timestamp });
 
@@ -124,15 +132,15 @@ async function setLastSyncTime(phoneIccid = 'global', timestamp) {
 /**
  * Get cached messages for a phone (or all)
  */
-async function getCachedMessages(phoneIccid = null, limit = 500) {
+async function getCachedMessages(phoneIccid: string | null = null, limit = 500): Promise<CachedMessage[]> {
   try {
     await initDB();
 
-    return new Promise((resolve) => {
-      const transaction = db.transaction([MESSAGES_STORE], 'readonly');
+    return new Promise<CachedMessage[]>((resolve) => {
+      const transaction = db!.transaction([MESSAGES_STORE], 'readonly');
       const store = transaction.objectStore(MESSAGES_STORE);
 
-      const messages = [];
+      const messages: CachedMessage[] = [];
       let request;
 
       if (phoneIccid) {
@@ -146,13 +154,13 @@ async function getCachedMessages(phoneIccid = null, limit = 500) {
       }
 
       request.onsuccess = (event) => {
-        const cursor = event.target.result;
+        const cursor = (event.target as IDBRequest<IDBCursorWithValue | null>).result;
         if (cursor && messages.length < limit) {
           messages.push(cursor.value);
           cursor.continue();
         } else {
           // Sort by timestamp descending
-          messages.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+          messages.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
           resolve(messages);
         }
       };
@@ -171,14 +179,14 @@ async function getCachedMessages(phoneIccid = null, limit = 500) {
 /**
  * Cache messages
  */
-async function cacheMessages(messages) {
+async function cacheMessages(messages: CachedMessage[]): Promise<void> {
   if (!messages || messages.length === 0) return;
 
   try {
     await initDB();
 
-    return new Promise((resolve) => {
-      const transaction = db.transaction([MESSAGES_STORE], 'readwrite');
+    return new Promise<void>((resolve) => {
+      const transaction = db!.transaction([MESSAGES_STORE], 'readwrite');
       const store = transaction.objectStore(MESSAGES_STORE);
 
       let completed = 0;
@@ -210,12 +218,12 @@ async function cacheMessages(messages) {
 /**
  * Get cache statistics
  */
-async function getCacheStats() {
+async function getCacheStats(): Promise<{ messageCount: number; dbName: string }> {
   try {
     await initDB();
 
     return new Promise((resolve) => {
-      const transaction = db.transaction([MESSAGES_STORE], 'readonly');
+      const transaction = db!.transaction([MESSAGES_STORE], 'readonly');
       const store = transaction.objectStore(MESSAGES_STORE);
       const countRequest = store.count();
 
@@ -231,19 +239,20 @@ async function getCacheStats() {
       };
     });
   } catch (err) {
-    return { messageCount: 0, dbName: DB_NAME, error: err.message };
+    console.warn('[MessageCache] getCacheStats error:', err);
+    return { messageCount: 0, dbName: DB_NAME };
   }
 }
 
 /**
  * Clear all cached data
  */
-async function clearCache() {
+async function clearCache(): Promise<void> {
   try {
     await initDB();
 
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction([MESSAGES_STORE, META_STORE], 'readwrite');
+    return new Promise<void>((resolve, reject) => {
+      const transaction = db!.transaction([MESSAGES_STORE, META_STORE], 'readwrite');
 
       transaction.objectStore(MESSAGES_STORE).clear();
       transaction.objectStore(META_STORE).clear();
@@ -265,21 +274,21 @@ async function clearCache() {
  * Delete old messages to keep cache size manageable
  * Keeps only the most recent N messages per phone
  */
-async function pruneCache(maxMessagesPerPhone = 200) {
+async function pruneCache(maxMessagesPerPhone = 200): Promise<number> {
   try {
     await initDB();
 
     // Get all unique phone ICCIDs
-    const phones = new Set();
-    const transaction1 = db.transaction([MESSAGES_STORE], 'readonly');
+    const phones = new Set<string>();
+    const transaction1 = db!.transaction([MESSAGES_STORE], 'readonly');
     const store1 = transaction1.objectStore(MESSAGES_STORE);
 
-    await new Promise((resolve) => {
+    await new Promise<void>((resolve) => {
       const request = store1.openCursor();
       request.onsuccess = (event) => {
-        const cursor = event.target.result;
+        const cursor = (event.target as IDBRequest<IDBCursorWithValue | null>).result;
         if (cursor) {
-          phones.add(cursor.value.phone_iccid);
+          phones.add((cursor.value as CachedMessage).phone_iccid ?? 'global');
           cursor.continue();
         } else {
           resolve();
@@ -295,7 +304,7 @@ async function pruneCache(maxMessagesPerPhone = 200) {
 
       if (messages.length > maxMessagesPerPhone) {
         const toDelete = messages.slice(maxMessagesPerPhone);
-        const transaction2 = db.transaction([MESSAGES_STORE], 'readwrite');
+        const transaction2 = db!.transaction([MESSAGES_STORE], 'readwrite');
         const store2 = transaction2.objectStore(MESSAGES_STORE);
 
         for (const msg of toDelete) {

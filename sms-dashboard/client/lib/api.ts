@@ -252,7 +252,7 @@ export const api = {
 
       if (!forceRefresh && persistentCacheEnabled) {
         try {
-          cachedMessages = await messageCache.getCachedMessages(phoneIccid as null, params.limit || 500) as ApiMessage[];
+          cachedMessages = await messageCache.getCachedMessages(phoneIccid, params.limit || 500) as ApiMessage[];
           lastSyncTime = await messageCache.getLastSyncTime(cacheKey) as string | null;
         } catch (cacheErr) {
           console.warn('[API] Cache read failed:', cacheErr);
@@ -400,7 +400,7 @@ export const api = {
 
       // Try to return cached data on error
       try {
-        const cachedMessages = await messageCache.getCachedMessages(phoneIccid as null, params.limit || 500) as ApiMessage[];
+        const cachedMessages = await messageCache.getCachedMessages(phoneIccid, params.limit || 500) as ApiMessage[];
         if (cachedMessages.length > 0) {
           return {
             success: true,
