@@ -370,12 +370,12 @@ describe('POST /api/filters', () => {
     ]);
   });
 
-  test('a note that is not text is stored as null', async () => {
+  test('a null note is stored as null', async () => {
     const db = database();
 
     const response = await create(
       db,
-      JSON.stringify({ rule_type: 'sender', pattern: '10086', note: 42 }),
+      JSON.stringify({ rule_type: 'sender', pattern: '10086', note: null }),
     );
 
     expect(response.status).toBe(201);
@@ -385,6 +385,13 @@ describe('POST /api/filters', () => {
   });
 
   const rejected: [string, unknown, string][] = [
+    [
+      'a note that is not text',
+      { rule_type: 'sender', pattern: '10086', note: 42 },
+      'note must be a string',
+    ],
+    ['a body that is null', null, 'Body must be a JSON object'],
+    ['a body that is a number', 5, 'Body must be a JSON object'],
     [
       'an unknown rule type',
       { rule_type: 'regex', pattern: 'abc' },
@@ -433,13 +440,14 @@ describe('POST /api/filters', () => {
     expect(await bodyOf(response)).toEqual({ error: 'That rule already exists' });
   });
 
-  test('answers 500 when the body is not JSON', async () => {
+  test('answers 400 when the body is not JSON', async () => {
     const db = database();
 
     const response = await create(db, 'not json');
 
-    expect(response.status).toBe(500);
-    expect(await bodyOf(response)).toEqual({ error: 'Failed to create filter rule' });
+    expect(response.status).toBe(400);
+    expect(await bodyOf(response)).toEqual({ error: 'Body must be JSON' });
+    expect(ruleRows(db)).toEqual([]);
   });
 
   test('answers 500 when the write fails', async () => {
@@ -478,16 +486,38 @@ describe('PUT /api/filters/:id', () => {
     expect(db.statements).toHaveLength(1);
   });
 
-  test('is_active is true for any truthy value and false for any falsy one', async () => {
+  test('is_active turns a rule on and off', async () => {
     const db = database();
     addRule(db, { rule_type: 'sender', pattern: '10086', is_active: 0 });
 
-    await update(db, '1', JSON.stringify({ is_active: 'yes' }));
+    await update(db, '1', JSON.stringify({ is_active: true }));
     expect(ruleRows(db)).toMatchObject([{ is_active: 1 }]);
 
-    await update(db, '1', JSON.stringify({ is_active: 0 }));
+    await update(db, '1', JSON.stringify({ is_active: false }));
     expect(ruleRows(db)).toMatchObject([{ is_active: 0 }]);
   });
+
+  const malformed: [string, unknown, string][] = [
+    ['an is_active that is not a boolean', { is_active: 'yes' }, 'is_active must be true or false'],
+    ['a note that is not text', { note: 7 }, 'note must be a string'],
+    ['a body that is null', null, 'Body must be a JSON object'],
+    ['a body that is a number', 5, 'Body must be a JSON object'],
+  ];
+
+  for (const [name, body, message] of malformed) {
+    test(`answers 400 to ${name} and changes nothing`, async () => {
+      const db = database();
+      addRule(db, { rule_type: 'sender', pattern: '10086', note: 'old', is_active: 0 });
+
+      const response = await update(db, '1', JSON.stringify(body));
+
+      expect(response.status).toBe(400);
+      expect(await bodyOf(response)).toEqual({ error: message });
+      expect(ruleRows(db)).toEqual([
+        { rule_type: 'sender', pattern: '10086', note: 'old', is_active: 0 },
+      ]);
+    });
+  }
 
   test('an omitted is_active keeps the stored state', async () => {
     const db = database();
@@ -520,14 +550,14 @@ describe('PUT /api/filters/:id', () => {
     expect(ruleRows(db)).toMatchObject([{ note: 'old' }]);
   });
 
-  test('a note that is not text clears the stored one', async () => {
+  test('a null note keeps the stored one', async () => {
     const db = database();
     addRule(db, { rule_type: 'sender', pattern: '10086', note: 'old' });
 
-    const response = await update(db, '1', JSON.stringify({ note: 7 }));
+    const response = await update(db, '1', JSON.stringify({ note: null }));
 
     expect(response.status).toBe(200);
-    expect(ruleRows(db)).toMatchObject([{ note: null }]);
+    expect(ruleRows(db)).toMatchObject([{ note: 'old' }]);
   });
 
   test('accepts the stored rule type and pattern, even untrimmed', async () => {
@@ -591,14 +621,14 @@ describe('PUT /api/filters/:id', () => {
     expect(await bodyOf(response)).toEqual({ error: 'body keyword must be at least 2 characters' });
   });
 
-  test('answers 500 when the body is not JSON', async () => {
+  test('answers 400 when the body is not JSON', async () => {
     const db = database();
     addRule(db, { rule_type: 'sender', pattern: '10086' });
 
     const response = await update(db, '1', 'not json');
 
-    expect(response.status).toBe(500);
-    expect(await bodyOf(response)).toEqual({ error: 'Failed to update filter rule' });
+    expect(response.status).toBe(400);
+    expect(await bodyOf(response)).toEqual({ error: 'Body must be JSON' });
   });
 });
 
@@ -739,7 +769,11 @@ describe('POST /api/filters/:id/history', () => {
 
   const badRanges: [string, unknown][] = [
     ['a missing range', {}],
+    ['a missing end', { since: range.since }],
     ['a range that is not dates', { since: 'yesterday', until: 'today' }],
+    ['a range that is null', { since: null, until: null }],
+    ['a range that is boolean', { since: true, until: false }],
+    ['a range that is an array', { since: [2026], until: [2027] }],
     ['a range that ends before it starts', { since: range.until, until: range.since }],
   ];
 
@@ -758,7 +792,9 @@ describe('POST /api/filters/:id/history', () => {
   const badCursors: [string, unknown][] = [
     ['a cursor with a created_at that is not a date', { created_at: 'x', id: 'a' }],
     ['a cursor without an id', { created_at: '2026-01-01 00:00:00' }],
-    ['a cursor that is not an object', { id: 'a' }],
+    ['a cursor without a created_at', { id: 'a' }],
+    ['a cursor that is not an object', 5],
+    ['a cursor with an id that is not text', { created_at: '2026-01-01 00:00:00', id: 5 }],
   ];
 
   for (const [name, cursor] of badCursors) {
@@ -773,13 +809,32 @@ describe('POST /api/filters/:id/history', () => {
     });
   }
 
-  test('answers 500 when the body is not JSON', async () => {
+  test('answers 400 when the body is not JSON', async () => {
     const db = database();
     addRule(db, { rule_type: 'sender', pattern: '10086' });
 
     const response = await history(db, '1', 'not json');
 
-    expect(response.status).toBe(500);
-    expect(await bodyOf(response)).toEqual({ error: 'Failed to process filter history' });
+    expect(response.status).toBe(400);
+    expect(await bodyOf(response)).toEqual({ error: 'Body must be JSON' });
+  });
+
+  test('answers 400 when the body is not an object', async () => {
+    const db = database();
+    addRule(db, { rule_type: 'sender', pattern: '10086' });
+
+    const response = await history(db, '1', 'null');
+
+    expect(response.status).toBe(400);
+    expect(await bodyOf(response)).toEqual({ error: 'Body must be a JSON object' });
+  });
+
+  test('accepts a null cursor as the first page', async () => {
+    const db = database();
+    addRule(db, { rule_type: 'sender', pattern: '10086' });
+
+    const response = await history(db, '1', JSON.stringify({ ...range, cursor: null }));
+
+    expect(response.status).toBe(200);
   });
 });

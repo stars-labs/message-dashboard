@@ -10,12 +10,10 @@ import { queryAll, queryFirst, type D1, type D1Batch } from '../lib/d1.js';
 import { handleAuth0, type AuthRequest } from '../middleware/auth0.js';
 import { requirePermission, enrichUserPermissions } from '../middleware/rbac.js';
 import { RULE_TYPE, normalizeSender } from '../utils/spam-filter.js';
+import type { RuleType } from '../utils/spam-filter.js';
 import { processRuleHistoryPage } from '../utils/filter-history.js';
-import type { HistoryCursor } from '../utils/filter-history.js';
 import { errorText } from '../utils/d1-error.js';
 import type { Permission } from '../../config/auth0-roles.js';
-
-const VALID_RULE_TYPES: string[] = Object.values(RULE_TYPE);
 
 /** Shortest allowed body keyword. A single character would hide almost everything. */
 const MIN_KEYWORD_LENGTH = 2;
@@ -58,29 +56,80 @@ type FilterRuleRow = v.InferOutput<typeof FilterRuleRow>;
 
 const ReferencedRow = v.object({ referenced: v.number() });
 
-const CreateBody = v.object({
-  rule_type: v.optional(v.unknown()),
-  pattern: v.optional(v.unknown()),
-  note: v.optional(v.unknown()),
-});
+const NOT_JSON_MESSAGE = 'Body must be JSON';
+const BODY_MESSAGE = 'Body must be a JSON object';
+const RULE_TYPE_MESSAGE = `rule_type must be one of: ${Object.values(RULE_TYPE).join(', ')}`;
+const PATTERN_MESSAGE = 'pattern is required';
+const NOTE_MESSAGE = 'note must be a string';
+const ACTIVE_MESSAGE = 'is_active must be true or false';
+const IMMUTABLE_MESSAGE = 'Rule type and pattern are immutable; create a new rule instead';
+const RANGE_MESSAGE = 'A valid history time range is required';
+const CURSOR_MESSAGE = 'Invalid history cursor';
 
-const UpdateBody = v.object({
-  rule_type: v.optional(v.unknown()),
-  pattern: v.optional(v.unknown()),
-  note: v.optional(v.unknown()),
-  is_active: v.optional(v.unknown()),
-});
+const CreateBody = v.object(
+  {
+    rule_type: v.picklist(Object.values(RULE_TYPE), RULE_TYPE_MESSAGE),
+    pattern: v.string(PATTERN_MESSAGE),
+    note: v.nullish(v.string(NOTE_MESSAGE)),
+  },
+  BODY_MESSAGE,
+);
 
-const HistoryBody = v.object({
-  since: v.optional(v.union([v.string(), v.number()])),
-  until: v.optional(v.union([v.string(), v.number()])),
-  cursor: v.optional(v.unknown()),
-});
+const UpdateBody = v.object(
+  {
+    rule_type: v.optional(v.string(IMMUTABLE_MESSAGE)),
+    pattern: v.optional(v.string(IMMUTABLE_MESSAGE)),
+    note: v.nullish(v.string(NOTE_MESSAGE)),
+    is_active: v.optional(v.boolean(ACTIVE_MESSAGE)),
+  },
+  BODY_MESSAGE,
+);
 
-const HistoryCursorBody = v.object({ created_at: v.string(), id: v.string() });
+const Instant = v.pipe(
+  v.union([v.string(RANGE_MESSAGE), v.number(RANGE_MESSAGE)], RANGE_MESSAGE),
+  v.transform((value) => new Date(value)),
+  v.check((date) => !Number.isNaN(date.getTime()), RANGE_MESSAGE),
+);
+
+const HistoryCursorBody = v.object(
+  {
+    created_at: v.pipe(
+      v.string(CURSOR_MESSAGE),
+      v.check((value) => !Number.isNaN(new Date(`${value}Z`).getTime()), CURSOR_MESSAGE),
+    ),
+    id: v.string(CURSOR_MESSAGE),
+  },
+  CURSOR_MESSAGE,
+);
+
+const HistoryBody = v.object(
+  {
+    since: Instant,
+    until: Instant,
+    cursor: v.nullish(HistoryCursorBody),
+  },
+  BODY_MESSAGE,
+);
+
+/**
+ * Valibot reports a missing key with the object's message, so a field that needs
+ * its own message when absent is listed here. Typed against the schemas, so a
+ * field added without one fails to compile.
+ */
+const CREATE_MISSING_KEY_MESSAGES = {
+  rule_type: RULE_TYPE_MESSAGE,
+  pattern: PATTERN_MESSAGE,
+  note: NOTE_MESSAGE,
+} as const satisfies Record<keyof typeof CreateBody.entries, string>;
+
+const HISTORY_MISSING_KEY_MESSAGES = {
+  since: RANGE_MESSAGE,
+  until: RANGE_MESSAGE,
+  cursor: CURSOR_MESSAGE,
+} as const satisfies Record<keyof typeof HistoryBody.entries, string>;
 
 interface ValidatedRule {
-  rule_type: string;
+  rule_type: RuleType;
   pattern: string;
   note: string | null;
 }
@@ -104,10 +153,27 @@ async function gate(request: FilterRequest, permission: Permission): Promise<Res
   return null;
 }
 
-async function readBody<T>(request: FilterRequest, schema: Schema<T>): Promise<T> {
-  const parsed = await readJson(request, schema);
-  if (!parsed.ok) throw new Error(parsed.error);
-  return parsed.value;
+type BodyResult<T> = { body: T } | { response: Response };
+
+function bodyMessage(
+  issue: v.BaseIssue<unknown>,
+  missingKeyMessages: Readonly<Record<string, string>>,
+): string {
+  const key = issue.type === 'object' && issue.path?.length === 1 ? issue.path[0].key : undefined;
+  const missing = typeof key === 'string' ? missingKeyMessages[key] : undefined;
+  return missing ?? issue.message;
+}
+
+async function readBody<T>(
+  request: FilterRequest,
+  schema: Schema<T>,
+  missingKeyMessages: Readonly<Record<string, string>> = {},
+): Promise<BodyResult<T>> {
+  const raw = await readJson(request, v.unknown());
+  if (!raw.ok) return { response: json({ error: NOT_JSON_MESSAGE }, 400) };
+  const parsed = v.safeParse(schema, raw.value);
+  if (parsed.success) return { body: parsed.output };
+  return { response: json({ error: bodyMessage(parsed.issues[0], missingKeyMessages) }, 400) };
 }
 
 /** Validate and normalise a rule payload. */
@@ -116,18 +182,15 @@ function validateRule({
   pattern,
   note,
 }: {
-  rule_type: unknown;
-  pattern: unknown;
-  note: unknown;
+  rule_type: RuleType;
+  pattern: string;
+  note: string | null | undefined;
 }): ValidationResult {
-  if (typeof rule_type !== 'string' || !VALID_RULE_TYPES.includes(rule_type)) {
-    return { error: `rule_type must be one of: ${VALID_RULE_TYPES.join(', ')}` };
-  }
+  const trimmed = pattern.trim();
+  if (!trimmed) return { error: PATTERN_MESSAGE };
 
-  const trimmed = typeof pattern === 'string' ? pattern.trim() : '';
-  if (!trimmed) return { error: 'pattern is required' };
-
-  const noteText = typeof note === 'string' ? note.trim() || null : null;
+  const trimmedNote = note?.trim();
+  const noteText = trimmedNote === undefined || trimmedNote === '' ? null : trimmedNote;
 
   if (rule_type === RULE_TYPE.BODY_KEYWORD) {
     if (trimmed.length < MIN_KEYWORD_LENGTH) {
@@ -155,10 +218,6 @@ function validateRule({
 
 function isUniqueViolation(error: unknown): boolean {
   return /UNIQUE constraint failed/i.test(errorText(error));
-}
-
-function toDate(value: string | number | undefined): Date {
-  return new Date(value ?? Number.NaN);
 }
 
 export async function listFilterRules(db: D1<'all'>): Promise<{ filters: FilterRuleRow[] }> {
@@ -195,7 +254,9 @@ export function setupFilterRoutes(router: Router): void {
     if (blocked) return blocked;
 
     try {
-      const body = await readBody(request, CreateBody);
+      const parsed = await readBody(request, CreateBody, CREATE_MISSING_KEY_MESSAGES);
+      if ('response' in parsed) return parsed.response;
+      const body = parsed.body;
       const validated = validateRule({
         rule_type: body.rule_type,
         pattern: body.pattern,
@@ -242,16 +303,14 @@ export function setupFilterRoutes(router: Router): void {
       );
       if (!existing) return json({ error: 'Filter rule not found' }, 404);
 
-      const body = await readBody(request, UpdateBody);
+      const parsed = await readBody(request, UpdateBody);
+      if ('response' in parsed) return parsed.response;
+      const body = parsed.body;
       if (
         (body.rule_type !== undefined && body.rule_type !== existing.rule_type) ||
-        (body.pattern !== undefined &&
-          (typeof body.pattern !== 'string' || body.pattern.trim() !== existing.pattern))
+        (body.pattern !== undefined && body.pattern.trim() !== existing.pattern)
       ) {
-        return json(
-          { error: 'Rule type and pattern are immutable; create a new rule instead' },
-          400,
-        );
+        return json({ error: IMMUTABLE_MESSAGE }, 400);
       }
       const validated = validateRule({
         rule_type: existing.rule_type,
@@ -324,26 +383,15 @@ export function setupFilterRoutes(router: Router): void {
       );
       if (!rule) return json({ error: 'Filter rule not found' }, 404);
 
-      const body = await readBody(request, HistoryBody);
-      const since = toDate(body.since);
-      const until = toDate(body.until);
-      if (Number.isNaN(since.getTime()) || Number.isNaN(until.getTime()) || since > until) {
-        return json({ error: 'A valid history time range is required' }, 400);
-      }
-      const rawCursor = body.cursor ?? null;
-      let cursor: HistoryCursor | null = null;
-      if (rawCursor !== null) {
-        const parsed = v.safeParse(HistoryCursorBody, rawCursor);
-        if (!parsed.success || Number.isNaN(new Date(`${parsed.output.created_at}Z`).getTime())) {
-          return json({ error: 'Invalid history cursor' }, 400);
-        }
-        cursor = parsed.output;
-      }
+      const parsed = await readBody(request, HistoryBody, HISTORY_MISSING_KEY_MESSAGES);
+      if ('response' in parsed) return parsed.response;
+      const { since, until, cursor } = parsed.body;
+      if (since > until) return json({ error: RANGE_MESSAGE }, 400);
 
       const result = await processRuleHistoryPage(request.env.DB, rule, {
         since: since.toISOString(),
         until: until.toISOString(),
-        cursor,
+        cursor: cursor ?? null,
       });
       return json(result);
     } catch (error) {
