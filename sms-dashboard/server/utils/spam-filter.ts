@@ -1,7 +1,8 @@
 // Spam/marketing SMS classification.
 //
+import * as v from 'valibot';
+import { queryAll, type D1 } from '../lib/d1.js';
 import { hasVerificationCode } from './verification.js';
-import type { D1Database } from '../cf-bindings.js';
 
 const SHORT_CODE_COUNTRY_PREFIXES = ['86', '852'];
 
@@ -44,12 +45,14 @@ export const RULE_TYPE = {
 
 export type RuleType = (typeof RULE_TYPE)[keyof typeof RULE_TYPE];
 
-/** One active row from filter_rules. */
-export interface SpamRule {
-  id: number;
-  rule_type: RuleType | string;
-  pattern: string;
-}
+/** One active row from filter_rules, whose rule_type the table restricts to the known kinds. */
+const SpamRuleRow = v.object({
+  id: v.number(),
+  rule_type: v.picklist(Object.values(RULE_TYPE)),
+  pattern: v.string(),
+});
+
+export type SpamRule = v.InferOutput<typeof SpamRuleRow>;
 
 /** The verdict written to a messages row. */
 export interface Classification {
@@ -183,27 +186,19 @@ export function classifyMessage(
   // verification_code column, so filtering and the 验证码 view cannot disagree.
   if (hasVerificationCode(content)) return clean();
   for (const rule of rules) {
-    if (!rule || !rule.pattern) continue;
+    if (!rule.pattern) continue;
 
-    if (rule.rule_type === RULE_TYPE.BODY_KEYWORD) {
-      if (content.includes(rule.pattern)) {
-        return filtered(rule.id);
-      }
-      continue;
+    switch (rule.rule_type) {
+      case RULE_TYPE.BODY_KEYWORD:
+        if (content.includes(rule.pattern)) return filtered(rule.id);
+        break;
+      case RULE_TYPE.SENDER:
+        // Shortcode prefix match, so one rule covers every campaign extension.
+        // Still anchored at the front: endsWith() or a substring test would wrongly
+        // filter a real mobile number such as 13910086 under a '10086' rule.
+        if (senderMatchesSpamRule(message.phone_number, rule.pattern)) return filtered(rule.id);
+        break;
     }
-
-    if (rule.rule_type === RULE_TYPE.SENDER) {
-      // Shortcode prefix match, so one rule covers every campaign extension.
-      // Still anchored at the front: endsWith() or a substring test would wrongly
-      // filter a real mobile number such as 13910086 under a '10086' rule.
-      if (senderMatchesSpamRule(message.phone_number, rule.pattern)) {
-        return filtered(rule.id);
-      }
-      continue;
-    }
-
-    // Unknown rule_type: ignore it rather than throwing, so one bad row can't
-    // stop the whole upload batch from being classified.
   }
 
   return clean();
@@ -212,14 +207,14 @@ export function classifyMessage(
 /**
  * Load the active rules in evaluation order. The single read path for rules.
  */
-export async function loadActiveRules(db: D1Database): Promise<SpamRule[]> {
-  const { results } = await db
-    .prepare(
+export function loadActiveRules(db: D1<'all'>): Promise<SpamRule[]> {
+  return queryAll(
+    db.prepare(
       `SELECT id, rule_type, pattern
        FROM filter_rules
        WHERE is_active = 1
        ORDER BY id`,
-    )
-    .all<SpamRule>();
-  return results;
+    ),
+    SpamRuleRow,
+  );
 }

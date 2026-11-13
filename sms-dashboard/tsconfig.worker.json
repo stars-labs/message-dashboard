@@ -37,7 +37,8 @@
     "server/api/call-state.ts",
     "server/utils/audit-log.ts",
     "server/utils/balance-skill.ts",
-    "server/utils/auth0-management.ts"
+    "server/utils/auth0-management.ts",
+    "server/utils/spam-filter.ts"
   ],
   "exclude": ["**/*.test.ts"],
   "references": [{ "path": "./tsconfig.shared.json" }]

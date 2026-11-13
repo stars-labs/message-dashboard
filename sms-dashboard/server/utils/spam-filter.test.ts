@@ -1,15 +1,20 @@
-// Run with: bun test server/utils/spam-filter.test.js
+// Run with: bun test server/utils/spam-filter.test.ts
 import { describe, expect, test } from 'bun:test';
+import { sqliteD1 } from '../../test/sqlite-d1.js';
+import type { D1, D1Statement } from '../lib/d1.js';
 import {
   classifyMessage,
+  loadActiveRules,
   normalizeSender,
   senderMatches,
   senderMatchesSpamRule,
+  type ClassifiableMessage,
+  type SpamRule,
 } from './spam-filter.js';
 
 // Mirrors the seed rules in migrations/035_add_message_filter.sql.
 // Ordered by id, which is the order classifyMessage evaluates them in.
-const RULES = [
+const RULES: SpamRule[] = [
   { id: 1, rule_type: 'body_keyword', pattern: '外交部领保中心' },
   { id: 2, rule_type: 'body_keyword', pattern: '中国文化和旅游部温馨提示' },
   { id: 3, rule_type: 'body_keyword', pattern: '中国海关提示' },
@@ -25,7 +30,7 @@ const RULES = [
 ];
 
 // A received message with only the fields the classifier reads.
-function received(fields) {
+function received(fields: ClassifiableMessage): ClassifiableMessage {
   return { type: 'received', content: '', phone_number: null, ...fields };
 }
 
@@ -333,9 +338,77 @@ describe('classifyMessage — malformed input', () => {
     expect(classifyMessage(received({ content: 12345 }), RULES).filter_status).toBe('clean');
   });
 
-  test('ignores a rule with an unknown rule_type instead of throwing', () => {
-    const msg = received({ content: '中国海关提示，请勿携带' });
-    const rules = [{ id: 99, rule_type: 'regex', pattern: '.*' }, RULES[2]];
+  test('skips a rule with an empty pattern instead of matching everything', () => {
+    const msg = received({ content: '中国海关提示，请勿携带', phone_number: '9528' });
+    const rules: SpamRule[] = [
+      { id: 98, rule_type: 'body_keyword', pattern: '' },
+      { id: 99, rule_type: 'sender', pattern: '' },
+      { id: 3, rule_type: 'body_keyword', pattern: '中国海关提示' },
+    ];
     expect(classifyMessage(msg, rules).filter_rule_id).toBe(3);
+    expect(classifyMessage(msg, rules.slice(0, 2)).filter_status).toBe('clean');
+  });
+
+  test('keeps a missing message and missing rules clean', () => {
+    expect(classifyMessage(null, RULES).filter_status).toBe('clean');
+    expect(classifyMessage(undefined, RULES).filter_status).toBe('clean');
+    expect(classifyMessage(received({ phone_number: '10086' }), null).filter_status).toBe('clean');
+    expect(classifyMessage(received({ phone_number: '10086' }), undefined).filter_status).toBe(
+      'clean',
+    );
+  });
+
+  test('ignores a non-string sender', () => {
+    expect(classifyMessage(received({ phone_number: 10086 }), RULES).filter_status).toBe('clean');
+  });
+});
+
+function ruleDatabase() {
+  const d1 = sqliteD1();
+  d1.db.run(`CREATE TABLE filter_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    rule_type TEXT NOT NULL CHECK(rule_type IN ('body_keyword', 'sender')),
+    pattern TEXT NOT NULL,
+    is_active INTEGER NOT NULL DEFAULT 1
+  )`);
+  return d1;
+}
+
+describe('loadActiveRules', () => {
+  test('returns the active rules in id order with exactly the fields classification reads', async () => {
+    const d1 = ruleDatabase();
+    d1.db.run(`INSERT INTO filter_rules (id, rule_type, pattern, is_active) VALUES
+      (3, 'sender', '10010', 1),
+      (1, 'body_keyword', '中国海关提示', 1),
+      (2, 'sender', '10086', 0),
+      (4, 'body_keyword', '请您评价', 1)`);
+
+    expect(await loadActiveRules(d1)).toEqual([
+      { id: 1, rule_type: 'body_keyword', pattern: '中国海关提示' },
+      { id: 3, rule_type: 'sender', pattern: '10010' },
+      { id: 4, rule_type: 'body_keyword', pattern: '请您评价' },
+    ]);
+  });
+
+  test('returns no rules when none are active', async () => {
+    const d1 = ruleDatabase();
+    d1.db.run(`INSERT INTO filter_rules (rule_type, pattern, is_active) VALUES ('sender', '1', 0)`);
+    expect(await loadActiveRules(d1)).toEqual([]);
+  });
+
+  test('rejects a row whose rule_type is outside the known set', async () => {
+    const statement: D1Statement<'all'> = {
+      bind: () => statement,
+      all: () => Promise.resolve({ results: [{ id: 99, rule_type: 'regex', pattern: '.*' }] }),
+    };
+    const db: D1<'all'> = { prepare: () => statement };
+
+    let failure: unknown;
+    try {
+      await loadActiveRules(db);
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(Error);
   });
 });
