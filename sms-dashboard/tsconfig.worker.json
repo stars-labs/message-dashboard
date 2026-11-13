@@ -14,7 +14,12 @@
     "declaration": true,
     "outDir": "./node_modules/.tmp/worker-declarations"
   },
-  "include": ["worker-runtime.d.ts", "server/lib/**/*.ts", "server/handlers/phones.ts"],
+  "include": [
+    "worker-runtime.d.ts",
+    "server/lib/**/*.ts",
+    "server/handlers/phones.ts",
+    "server/asset-cache-control.ts"
+  ],
   "exclude": ["**/*.test.ts"],
   "references": [{ "path": "./tsconfig.shared.json" }]
 }
