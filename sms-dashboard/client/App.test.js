@@ -1,8 +1,63 @@
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/svelte';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
+import postcss from 'postcss';
+import selectorParser from 'postcss-selector-parser';
+import valueParser from 'postcss-value-parser';
 import App from './App.svelte';
 import { auth } from './lib/auth.js';
+
+/**
+ * The parsed app.css. Tests read declarations by selector and property and
+ * compare them in a canonical form, so layout and quote style cannot change
+ * what they assert.
+ */
+const stylesheet = postcss.parse(readFileSync(new URL('./app.css', import.meta.url), 'utf8'));
+
+function cssValue(text) {
+  const parsed = valueParser(text);
+  parsed.walk((node) => {
+    if (node.type === 'function') {
+      node.before = '';
+      node.after = '';
+    }
+    if (node.type === 'div') {
+      node.before = node.value === ',' ? '' : ' ';
+      node.after = ' ';
+    }
+    if (node.type === 'space') node.value = ' ';
+    if (node.type === 'string') node.quote = '"';
+  });
+  return parsed.toString().trim();
+}
+
+const canonicalSelector = selectorParser((root) => {
+  root.walkAttributes((attribute) => {
+    if (attribute.value !== undefined) attribute.quoteMark = '"';
+  });
+});
+
+function cssSelector(text) {
+  return canonicalSelector.processSync(text, { lossless: false });
+}
+
+function declarations(property) {
+  const found = [];
+  stylesheet.walkDecls(property, (decl) => {
+    found.push({ selector: cssSelector(decl.parent.selector), value: cssValue(decl.value) });
+  });
+  return found;
+}
+
+function declarationValue(selector, property) {
+  const match = declarations(property).find((decl) => decl.selector === cssSelector(selector));
+  if (!match) throw new Error(`${selector} does not declare ${property}`);
+  return match.value;
+}
+
+function declaresUnder(property, selector) {
+  return declarations(property).some((decl) => decl.selector === cssSelector(selector));
+}
 
 const originalFetch = globalThis.fetch;
 const originalBaseUrl = auth.baseUrl;
@@ -134,36 +189,36 @@ describe('mobile detail navigation', () => {
   });
 
   test('the shared mobile tab content height is 60px without a vertical offset', () => {
-    const css = readFileSync(new URL('./app.css', import.meta.url), 'utf8');
-    expect(css).toContain('--mobile-tab-content-height: 60px;');
-    expect(css).not.toContain('--mobile-tab-content-top');
-    expect(css).toContain(
-      '--mobile-tab-bar-height: calc(var(--mobile-tab-content-height) + 1px + var(--mobile-tab-safe-area));',
+    expect(declarationValue(':root', '--mobile-tab-content-height')).toBe('60px');
+    expect(declarations('--mobile-tab-content-top')).toEqual([]);
+    expect(declarationValue(':root', '--mobile-tab-bar-height')).toBe(
+      'calc(var(--mobile-tab-content-height) + 1px + var(--mobile-tab-safe-area))',
     );
   });
 
   test('only standalone apps add the 20px bottom safe-area floor', () => {
-    const css = readFileSync(new URL('./app.css', import.meta.url), 'utf8');
     const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
 
-    expect(css).toContain(
-      '--mobile-tab-safe-area: env(safe-area-inset-bottom, 0px);',
+    expect(declarationValue(':root', '--mobile-tab-safe-area')).toBe(
+      'env(safe-area-inset-bottom, 0px)',
     );
-    expect(css).toContain('html.is-standalone {');
-    expect(css).toContain(
-      '--mobile-tab-safe-area: max(20px, env(safe-area-inset-bottom, 0px));',
+    expect(declarationValue('html.is-standalone', '--mobile-tab-safe-area')).toBe(
+      'max(20px, env(safe-area-inset-bottom, 0px))',
     );
     expect(html).toContain("'standalone' in navigator");
     expect(html).toContain("classList.add('is-standalone')");
   });
 
   test('the liquid selection is scoped to iOS standalone mode and reduced motion', () => {
-    const css = readFileSync(new URL('./app.css', import.meta.url), 'utf8');
+    expect(declaresUnder('height', 'html.is-ios.is-standalone .mobile-tab-bar')).toBe(true);
+    expect(declaresUnder('height', 'html.is-ios.is-standalone .mobile-tab-selection')).toBe(true);
+    expect(declarationValue('html.is-ios.is-standalone .mobile-tab-bar', 'backdrop-filter')).toBe(
+      'blur(22px) saturate(165%)',
+    );
 
-    expect(css).toContain('html.is-ios.is-standalone .mobile-tab-bar');
-    expect(css).toContain('html.is-ios.is-standalone .mobile-tab-selection');
-    expect(css).toContain('backdrop-filter: blur(22px) saturate(165%);');
-    expect(css).toContain('@media (prefers-reduced-motion: reduce)');
+    const mediaQueries = [];
+    stylesheet.walkAtRules('media', (rule) => mediaQueries.push(rule.params));
+    expect(mediaQueries).toContain('(prefers-reduced-motion: reduce)');
   });
 
   test('the floating tab pill follows a touch pointer and navigates on release', async () => {
@@ -211,19 +266,33 @@ describe('mobile detail navigation', () => {
   });
 
   test('the full glass tab bar is floating and suppresses native text selection', () => {
-    const css = readFileSync(new URL('./app.css', import.meta.url), 'utf8');
+    const bar = 'html.is-ios.is-standalone .mobile-tab-bar';
+    expect(declarationValue(bar, 'bottom')).toBe('var(--mobile-tab-safe-area)');
+    expect(declarationValue(bar, 'left')).toBe('10px');
+    expect(declarationValue(bar, 'right')).toBe('10px');
+    expect(declarationValue(bar, 'border-radius')).toBe('30px');
+    expect(declarationValue(bar, 'background')).toBe('rgba(245, 245, 244, 0.54)');
+    expect(declarationValue(`${bar}::before`, 'background')).toContain(
+      'radial-gradient(circle at var(--mobile-tab-glow-x) 12%',
+    );
 
-    expect(css).toContain('bottom: var(--mobile-tab-safe-area);');
-    expect(css).toContain('left: 10px;');
-    expect(css).toContain('right: 10px;');
-    expect(css).toContain('border-radius: 30px;');
-    expect(css).toContain('border-radius: 26px;');
-    expect(css).toContain('radial-gradient(circle at var(--mobile-tab-glow-x)');
-    expect(css).toContain('rgba(245, 245, 244, 0.54)');
-    expect(css).toContain('scaleX(var(--mobile-tab-selection-scale-x, 1))');
-    expect(css).toContain('scaleY(var(--mobile-tab-selection-scale-y, 1))');
-    expect(css).toContain('.mobile-tab-button[data-mobile-tab-active="true"] > svg');
-    expect(css).toContain('-webkit-user-select: none;');
-    expect(css).toContain('-webkit-touch-callout: none;');
+    const selection = 'html.is-ios.is-standalone .mobile-tab-selection';
+    expect(declarationValue(selection, 'border-radius')).toBe('26px');
+    expect(declarationValue(selection, 'transform')).toContain(
+      'scaleX(var(--mobile-tab-selection-scale-x, 1))',
+    );
+    expect(declarationValue(selection, 'transform')).toContain(
+      'scaleY(var(--mobile-tab-selection-scale-y, 1))',
+    );
+
+    expect(
+      declarations('transform').some((decl) =>
+        decl.selector.includes(cssSelector('.mobile-tab-button[data-mobile-tab-active="true"] > svg')),
+      ),
+    ).toBe(true);
+
+    const bar1 = '.mobile-tab-bar, .mobile-tab-bar *';
+    expect(declarationValue(bar1, '-webkit-user-select')).toBe('none');
+    expect(declarationValue(bar1, '-webkit-touch-callout')).toBe('none');
   });
 });
