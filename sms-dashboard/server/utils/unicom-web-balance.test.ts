@@ -137,6 +137,28 @@ describe('China Unicom web balance response parser', () => {
     ).toThrow('does not prove');
   });
 
+  test('rejects payloads that are not objects', () => {
+    for (const payload of [null, undefined, 'text', 42, []]) {
+      expect(() => extractUnicomWebBalance(payload, '+8617600419127')).toThrow(
+        'recognized available-balance',
+      );
+    }
+  });
+
+  test('ignores remaining-fee rows that are not objects or not in yuan', () => {
+    expect(() =>
+      extractUnicomWebBalance(
+        {
+          userInfo: { usernumber: '176****9127' },
+          resource: {
+            dataList: [null, 'x', { remainTitle: '剩余话费', number: '1.00', unit: 'MB' }],
+          },
+        },
+        '+8617600419127',
+      ),
+    ).toThrow('recognized available-balance');
+  });
+
   test('rejects the logged-out portal payload instead of reading it as zero', () => {
     expect(() =>
       extractUnicomWebBalance(
