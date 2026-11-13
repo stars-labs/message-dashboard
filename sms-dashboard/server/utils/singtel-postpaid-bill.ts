@@ -76,6 +76,16 @@ export async function parseSingtelPostpaidBillSms({
   if (!match) return null;
 
   const [, accountReference, majorText, minorText, dayText, monthName, yearText] = match;
+  if (
+    accountReference === undefined ||
+    majorText === undefined ||
+    minorText === undefined ||
+    dayText === undefined ||
+    monthName === undefined ||
+    yearText === undefined
+  ) {
+    return null;
+  }
   const dueDate = isoDate(dayText, monthName, yearText);
   if (!dueDate) return null;
 

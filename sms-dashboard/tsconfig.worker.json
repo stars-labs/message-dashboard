@@ -25,7 +25,8 @@
     "server/utils/session-token.ts",
     "server/utils/d1-error.ts",
     "server/middleware/cors.ts",
-    "server/utils/user-sessions.ts"
+    "server/utils/user-sessions.ts",
+    "server/utils/singtel-postpaid-bill.ts"
   ],
   "exclude": ["**/*.test.ts"],
   "references": [{ "path": "./tsconfig.shared.json" }]

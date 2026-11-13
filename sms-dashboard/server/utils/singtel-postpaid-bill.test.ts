@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   SINGTEL_POSTPAID_BILL_PARSER_VERSION,
   parseSingtelPostpaidBillSms,
+  type SingtelBillInput,
 } from './singtel-postpaid-bill.js';
 
 const ACCOUNT_REFERENCE = '12345678';
@@ -15,13 +16,13 @@ function billMessage({
   return `<Singtel>Dear customer, your latest bill for Singtel a/c ${accountReference} is ready. The total amount is ${currency}$${amount} due on ${dueDate}. You can view and pay this bill via My Singtel app at www.singtel.com/viewbill .@`;
 }
 
-async function sha256(value) {
+async function sha256(value: string) {
   const bytes = new TextEncoder().encode(value);
   const digest = await crypto.subtle.digest('SHA-256', bytes);
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
-async function parse(content, overrides = {}) {
+async function parse(content: string, overrides: Partial<SingtelBillInput> = {}) {
   return parseSingtelPostpaidBillSms({
     sender: 'Singtel',
     content,
@@ -43,7 +44,7 @@ describe('Singtel postpaid bill SMS parser', () => {
     ['30 Sep 2026', '2026-09-30'],
   ])('parses the confirmed %s month format', async (dueDate, expectedDate) => {
     const accountDigest = await sha256(ACCOUNT_REFERENCE);
-    await expect(parse(billMessage({ dueDate }))).resolves.toEqual({
+    expect(await parse(billMessage({ dueDate }))).toEqual({
       parser_version: SINGTEL_POSTPAID_BILL_PARSER_VERSION,
       amount_minor: 4280,
       currency: 'SGD',
@@ -54,13 +55,13 @@ describe('Singtel postpaid bill SMS parser', () => {
   });
 
   test('parses a three-digit amount as integer cents', async () => {
-    await expect(parse(billMessage({ amount: '142.08' }))).resolves.toMatchObject({
+    expect(await parse(billMessage({ amount: '142.08' }))).toMatchObject({
       amount_minor: 14208,
     });
   });
 
   test('parses a reassembled historical bill without the trailing fill character', async () => {
-    await expect(parse(billMessage().slice(0, -1))).resolves.toMatchObject({
+    expect(await parse(billMessage().slice(0, -1))).toMatchObject({
       amount_minor: 4280,
       due_date: '2026-01-14',
     });
@@ -69,12 +70,12 @@ describe('Singtel postpaid bill SMS parser', () => {
   test('discovers the account identity from an authentic bill without operator configuration', async () => {
     const accountDigest = await sha256(ACCOUNT_REFERENCE);
 
-    await expect(
-      parseSingtelPostpaidBillSms({
-        sender: 'Singtel',
-        content: billMessage(),
-      }),
-    ).resolves.toMatchObject({
+    const bill = await parseSingtelPostpaidBillSms({
+      sender: 'Singtel',
+      content: billMessage(),
+    });
+
+    expect(bill).toMatchObject({
       account_ref_digest: accountDigest,
       account_ref_last4: '5678',
       amount_minor: 4280,
@@ -100,10 +101,10 @@ describe('Singtel postpaid bill SMS parser', () => {
       {},
     ],
   ])('rejects %s', async (_name, content, overrides) => {
-    await expect(parse(content, overrides)).resolves.toBeNull();
+    expect(await parse(content, overrides)).toBeNull();
   });
 
   test('rejects a bill for a different configured account', async () => {
-    await expect(parse(billMessage({ accountReference: '87654321' }))).resolves.toBeNull();
+    expect(await parse(billMessage({ accountReference: '87654321' }))).toBeNull();
   });
 });
