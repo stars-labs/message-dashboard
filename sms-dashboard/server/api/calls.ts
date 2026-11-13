@@ -769,9 +769,7 @@ export function setupCallRoutes(router: Router): void {
       iccid,
       number,
       started_at: new Date().toISOString(),
-      // The KV session stores the raw Auth0 user (`sub`); the JWT middleware
-      // builds `id`. Accept either, as the original did.
-      requested_by: request.user?.id ?? request.user?.sub ?? null,
+      requested_by: request.user?.id ?? null,
     };
     if (!(await writeCall(env, call)))
       return json({ error: 'Another call is already active' }, 409);
@@ -804,7 +802,7 @@ export function setupCallRoutes(router: Router): void {
     // Take the call out of `ringing` first so a RING report cannot shorten its TTL.
     call.state = 'connecting';
     call.answered_at = new Date().toISOString();
-    call.answered_by = request.user?.id ?? request.user?.sub ?? null;
+    call.answered_by = request.user?.id ?? null;
     if (!(await writeCall(env, call))) return callChanged();
     await logCallAnswered(env, call.id, { at: call.answered_at, by: call.answered_by });
 
