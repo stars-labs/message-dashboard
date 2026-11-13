@@ -4,14 +4,16 @@
 // explicitly requested, one-page-at-a-time operation. Nothing here decides what
 // spam is — see utils/spam-filter.ts.
 
-import { handleAuth0 } from '../middleware/auth0.js';
+import * as v from 'valibot';
+import { readJson, type Schema } from '../../shared/parse-json.js';
+import { queryAll, queryFirst, type D1, type D1Batch } from '../lib/d1.js';
+import { handleAuth0, type AuthRequest } from '../middleware/auth0.js';
 import { requirePermission, enrichUserPermissions } from '../middleware/rbac.js';
 import { RULE_TYPE, normalizeSender } from '../utils/spam-filter.js';
-import type { SpamRule } from '../utils/spam-filter.js';
 import { processRuleHistoryPage } from '../utils/filter-history.js';
+import type { HistoryCursor } from '../utils/filter-history.js';
+import { errorText } from '../utils/d1-error.js';
 import type { Permission } from '../../config/auth0-roles.js';
-import type { AppRequest } from '../worker-context.js';
-import type { D1Database } from '../cf-bindings.js';
 
 const VALID_RULE_TYPES: string[] = Object.values(RULE_TYPE);
 
@@ -21,22 +23,61 @@ const MIN_KEYWORD_LENGTH = 2;
 /** Shortest allowed sender pattern, so a stray '1' cannot match half the table. */
 const MIN_SENDER_LENGTH = 3;
 
-/** The router interface setupFilterRoutes needs. */
-interface Router {
-  get(path: string, ...handlers: import('../worker-context.js').Handler[]): void;
-  post(path: string, ...handlers: import('../worker-context.js').Handler[]): void;
-  put(path: string, ...handlers: import('../worker-context.js').Handler[]): void;
-  delete(path: string, ...handlers: import('../worker-context.js').Handler[]): void;
+type FiltersDb = D1 & D1Batch;
+
+interface FilterRequest extends AuthRequest {
+  env: AuthRequest['env'] & { DB: FiltersDb };
+  params?: Record<string, string>;
+  text(): Promise<string>;
 }
 
-/** A filter_rules row. */
-interface FilterRuleRow extends SpamRule {
-  note: string | null;
-  created_by: string | null;
-  is_active: number;
-  created_at?: string;
-  updated_at?: string;
+type FilterHandler = (request: FilterRequest) => Promise<Response>;
+
+interface Router {
+  get(path: string, handler: FilterHandler): void;
+  post(path: string, handler: FilterHandler): void;
+  put(path: string, handler: FilterHandler): void;
+  delete(path: string, handler: FilterHandler): void;
 }
+
+const FILTER_COLUMNS =
+  'id, rule_type, pattern, note, is_active, created_by, created_at, updated_at';
+
+const FilterRuleRow = v.object({
+  id: v.number(),
+  rule_type: v.picklist(Object.values(RULE_TYPE)),
+  pattern: v.string(),
+  note: v.nullable(v.string()),
+  is_active: v.number(),
+  created_by: v.nullable(v.string()),
+  created_at: v.nullable(v.string()),
+  updated_at: v.nullable(v.string()),
+});
+
+type FilterRuleRow = v.InferOutput<typeof FilterRuleRow>;
+
+const ReferencedRow = v.object({ referenced: v.number() });
+
+const CreateBody = v.object({
+  rule_type: v.optional(v.unknown()),
+  pattern: v.optional(v.unknown()),
+  note: v.optional(v.unknown()),
+});
+
+const UpdateBody = v.object({
+  rule_type: v.optional(v.unknown()),
+  pattern: v.optional(v.unknown()),
+  note: v.optional(v.unknown()),
+  is_active: v.optional(v.unknown()),
+});
+
+const HistoryBody = v.object({
+  since: v.optional(v.union([v.string(), v.number()])),
+  until: v.optional(v.union([v.string(), v.number()])),
+  cursor: v.optional(v.unknown()),
+});
+
+const HistoryCursorBody = v.object({ created_at: v.string(), id: v.string() });
 
 interface ValidatedRule {
   rule_type: string;
@@ -54,13 +95,19 @@ function json(body: unknown, status = 200): Response {
 }
 
 /** Auth0 + RBAC gate. Returns a Response to short-circuit, or null to proceed. */
-async function gate(request: AppRequest, permission: Permission): Promise<Response | null> {
+async function gate(request: FilterRequest, permission: Permission): Promise<Response | null> {
   const authResponse = await handleAuth0(request);
   if (authResponse) return authResponse;
-  await enrichUserPermissions(request);
-  const permResponse = await requirePermission(permission)(request);
+  enrichUserPermissions(request);
+  const permResponse = requirePermission(permission)(request);
   if (permResponse) return permResponse;
   return null;
+}
+
+async function readBody<T>(request: FilterRequest, schema: Schema<T>): Promise<T> {
+  const parsed = await readJson(request, schema);
+  if (!parsed.ok) throw new Error(parsed.error);
+  return parsed.value;
 }
 
 /** Validate and normalise a rule payload. */
@@ -107,30 +154,35 @@ function validateRule({
 }
 
 function isUniqueViolation(error: unknown): boolean {
-  return /UNIQUE constraint failed/i.test((error as { message?: string })?.message || '');
+  return /UNIQUE constraint failed/i.test(errorText(error));
 }
 
-export async function listFilterRules(db: D1Database): Promise<{ filters: SpamRule[] }> {
-  const { results } = await db
-    .prepare(
-      `SELECT *
+function toDate(value: string | number | undefined): Date {
+  return new Date(value ?? Number.NaN);
+}
+
+export async function listFilterRules(db: D1<'all'>): Promise<{ filters: FilterRuleRow[] }> {
+  const filters = await queryAll(
+    db.prepare(
+      `SELECT ${FILTER_COLUMNS}
      FROM filter_rules
      ORDER BY rule_type, id`,
-    )
-    .all<SpamRule>();
+    ),
+    FilterRuleRow,
+  );
 
-  return { filters: results };
+  return { filters };
 }
 
 export function setupFilterRoutes(router: Router): void {
   // List rule metadata only. Historical hit counts require reading every matched
   // message and are not part of the dashboard's operational rule contract.
-  router.get('/api/filters', async (request, env) => {
+  router.get('/api/filters', async (request) => {
     const blocked = await gate(request, 'filters.read');
     if (blocked) return blocked;
 
     try {
-      return json(await listFilterRules(env.DB));
+      return json(await listFilterRules(request.env.DB));
     } catch (error) {
       console.error('[filters] list failed:', error);
       return json({ error: 'Failed to fetch filter rules' }, 500);
@@ -138,16 +190,12 @@ export function setupFilterRoutes(router: Router): void {
   });
 
   // Create a prospective rule. Existing messages remain historical facts.
-  router.post('/api/filters', async (request, env) => {
+  router.post('/api/filters', async (request) => {
     const blocked = await gate(request, 'filters.write');
     if (blocked) return blocked;
 
     try {
-      const body = (await request.json()) as {
-        rule_type?: unknown;
-        pattern?: unknown;
-        note?: unknown;
-      };
+      const body = await readBody(request, CreateBody);
       const validated = validateRule({
         rule_type: body.rule_type,
         pattern: body.pattern,
@@ -155,20 +203,21 @@ export function setupFilterRoutes(router: Router): void {
       });
       if ('error' in validated) return json({ error: validated.error }, 400);
 
-      const inserted = await env.DB.prepare(
-        `INSERT INTO filter_rules (rule_type, pattern, note, created_by)
+      const inserted = await queryFirst(
+        request.env.DB.prepare(
+          `INSERT INTO filter_rules (rule_type, pattern, note, created_by)
          VALUES (?, ?, ?, ?)
-         RETURNING *`,
-      )
-        .bind(
+         RETURNING ${FILTER_COLUMNS}`,
+        ).bind(
           validated.rule_type,
           validated.pattern,
           validated.note,
           // The middleware builds `user.id`; there is no `sub` on it. Reading
           // request.user.sub silently stored null for every rule.
           request.user?.id ?? null,
-        )
-        .first();
+        ),
+        FilterRuleRow,
+      );
 
       return json({ filter: inserted }, 201);
     } catch (error) {
@@ -181,23 +230,19 @@ export function setupFilterRoutes(router: Router): void {
   });
 
   // Matching identity is immutable. Notes and prospective active state may change.
-  router.put('/api/filters/:id', async (request, env) => {
+  router.put('/api/filters/:id', async (request) => {
     const blocked = await gate(request, 'filters.write');
     if (blocked) return blocked;
 
-    const id = Number(request.params?.id);
+    const id = Number(request.params?.['id']);
     try {
-      const existing = await env.DB.prepare(`SELECT * FROM filter_rules WHERE id = ?`)
-        .bind(id)
-        .first<FilterRuleRow>();
+      const existing = await queryFirst(
+        request.env.DB.prepare(`SELECT ${FILTER_COLUMNS} FROM filter_rules WHERE id = ?`).bind(id),
+        FilterRuleRow,
+      );
       if (!existing) return json({ error: 'Filter rule not found' }, 404);
 
-      const body = (await request.json()) as {
-        rule_type?: unknown;
-        pattern?: unknown;
-        note?: unknown;
-        is_active?: unknown;
-      };
+      const body = await readBody(request, UpdateBody);
       if (
         (body.rule_type !== undefined && body.rule_type !== existing.rule_type) ||
         (body.pattern !== undefined &&
@@ -217,14 +262,15 @@ export function setupFilterRoutes(router: Router): void {
 
       const isActive = body.is_active === undefined ? existing.is_active : body.is_active ? 1 : 0;
 
-      const updated = await env.DB.prepare(
-        `UPDATE filter_rules
+      const updated = await queryFirst(
+        request.env.DB.prepare(
+          `UPDATE filter_rules
          SET rule_type = ?, pattern = ?, note = ?, is_active = ?, updated_at = CURRENT_TIMESTAMP
          WHERE id = ?
-         RETURNING *`,
-      )
-        .bind(validated.rule_type, validated.pattern, validated.note, isActive, id)
-        .first();
+         RETURNING ${FILTER_COLUMNS}`,
+        ).bind(validated.rule_type, validated.pattern, validated.note, isActive, id),
+        FilterRuleRow,
+      );
 
       return json({ filter: updated });
     } catch (error) {
@@ -237,23 +283,26 @@ export function setupFilterRoutes(router: Router): void {
   });
 
   // A referenced rule is historical provenance and cannot be physically deleted.
-  router.delete('/api/filters/:id', async (request, env) => {
+  router.delete('/api/filters/:id', async (request) => {
     const blocked = await gate(request, 'filters.delete');
     if (blocked) return blocked;
 
-    const id = Number(request.params?.id);
+    const id = Number(request.params?.['id']);
     try {
-      const referenced = await env.DB.prepare(
-        `SELECT 1 FROM messages WHERE filter_rule_id = ? LIMIT 1`,
-      )
-        .bind(id)
-        .first();
+      const referenced = await queryFirst(
+        request.env.DB.prepare(
+          `SELECT 1 AS referenced FROM messages WHERE filter_rule_id = ? LIMIT 1`,
+        ).bind(id),
+        ReferencedRow,
+      );
       if (referenced) {
         return json({ error: 'Rule has historical messages; deactivate it instead' }, 409);
       }
 
-      const result = await env.DB.prepare(`DELETE FROM filter_rules WHERE id = ?`).bind(id).run();
-      if (!result?.meta?.changes) return json({ error: 'Filter rule not found' }, 404);
+      const result = await request.env.DB.prepare(`DELETE FROM filter_rules WHERE id = ?`)
+        .bind(id)
+        .run();
+      if (!result.meta.changes) return json({ error: 'Filter rule not found' }, 404);
 
       return json({ success: true });
     } catch (error) {
@@ -263,38 +312,35 @@ export function setupFilterRoutes(router: Router): void {
   });
 
   // Historical changes are explicit, bounded, and one page per operator action.
-  router.post('/api/filters/:id/history', async (request, env) => {
+  router.post('/api/filters/:id/history', async (request) => {
     const blocked = await gate(request, 'filters.write');
     if (blocked) return blocked;
 
-    const id = Number(request.params?.id);
+    const id = Number(request.params?.['id']);
     try {
-      const rule = await env.DB.prepare(`SELECT * FROM filter_rules WHERE id = ?`)
-        .bind(id)
-        .first<FilterRuleRow>();
+      const rule = await queryFirst(
+        request.env.DB.prepare(`SELECT ${FILTER_COLUMNS} FROM filter_rules WHERE id = ?`).bind(id),
+        FilterRuleRow,
+      );
       if (!rule) return json({ error: 'Filter rule not found' }, 404);
 
-      const body = (await request.json()) as { since?: unknown; until?: unknown; cursor?: unknown };
-      const since = new Date(body.since as string);
-      const until = new Date(body.until as string);
+      const body = await readBody(request, HistoryBody);
+      const since = toDate(body.since);
+      const until = toDate(body.until);
       if (Number.isNaN(since.getTime()) || Number.isNaN(until.getTime()) || since > until) {
         return json({ error: 'A valid history time range is required' }, 400);
       }
-      const rawCursor: unknown = body.cursor ?? null;
-      let cursor: { created_at: string; id: string } | null = null;
+      const rawCursor = body.cursor ?? null;
+      let cursor: HistoryCursor | null = null;
       if (rawCursor !== null) {
-        const c = rawCursor as { created_at?: unknown; id?: unknown };
-        if (
-          typeof c.created_at !== 'string' ||
-          typeof c.id !== 'string' ||
-          Number.isNaN(new Date(`${c.created_at}Z`).getTime())
-        ) {
+        const parsed = v.safeParse(HistoryCursorBody, rawCursor);
+        if (!parsed.success || Number.isNaN(new Date(`${parsed.output.created_at}Z`).getTime())) {
           return json({ error: 'Invalid history cursor' }, 400);
         }
-        cursor = { created_at: c.created_at, id: c.id };
+        cursor = parsed.output;
       }
 
-      const result = await processRuleHistoryPage(env.DB, rule, {
+      const result = await processRuleHistoryPage(request.env.DB, rule, {
         since: since.toISOString(),
         until: until.toISOString(),
         cursor,
