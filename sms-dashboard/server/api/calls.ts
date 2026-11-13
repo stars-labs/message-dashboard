@@ -111,7 +111,7 @@ async function gate(
   const authResponse = await handleAuth0(request, env, ctx);
   if (authResponse) return authResponse;
   await enrichUserPermissions(request);
-  const permResponse = await requirePermission(permission)(request, env, ctx);
+  const permResponse = await requirePermission(permission)(request);
   if (permResponse) return permResponse;
   return null;
 }

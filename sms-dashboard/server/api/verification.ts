@@ -25,7 +25,7 @@ async function gate(
   const authResponse = await handleAuth0(request, env, ctx);
   if (authResponse) return authResponse;
   await enrichUserPermissions(request);
-  return (await requirePermission('filters.write')(request, env, ctx)) || null;
+  return (await requirePermission('filters.write')(request)) || null;
 }
 
 export function setupVerificationRoutes(router: Router): void {

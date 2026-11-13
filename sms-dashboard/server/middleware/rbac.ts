@@ -9,14 +9,13 @@
 //
 // The role -> permission table lives in config/auth0-roles.ts.
 
-import {
-  ALL_PERMISSIONS,
-  createRoleConfig,
-  getKnownRoles,
-  permissionsForRoles,
-} from '../../config/auth0-roles.js';
-import type { Permission } from '../../config/auth0-roles.js';
-import type { AppRequest, Handler } from '../worker-context.js';
+import { createRoleConfig, getKnownRoles, permissionsForRoles } from '../../config/auth0-roles.js';
+import type { Permission, RoleEnv } from '../../config/auth0-roles.js';
+
+export interface PermissionRequest {
+  user?: { roles?: unknown; permissions?: string[] };
+  env: RoleEnv;
+}
 
 function forbidden(message: string): Response {
   return new Response(JSON.stringify({ error: 'Forbidden', message }), {
@@ -26,11 +25,14 @@ function forbidden(message: string): Response {
 }
 
 /**
- * Build the gate for one permission. The returned function is a Handler, so it can
- * sit in a route's handler chain and short-circuit with its Response.
+ * Build the gate for one permission. It returns a Response to short-circuit the
+ * route, or undefined to let it proceed. A permission the role table does not
+ * grant is denied, so the gate fails closed.
  */
-export function requirePermission(permission: Permission): Handler {
-  return async function (request: AppRequest) {
+export function requirePermission(
+  permission: Permission,
+): (request: PermissionRequest) => Response | undefined {
+  return (request) => {
     const { user, env } = request;
 
     if (!user) {
@@ -40,15 +42,7 @@ export function requirePermission(permission: Permission): Handler {
       });
     }
 
-    // An unrecognised permission is a programming error, not a grant. Denying here
-    // means a typo'd or newly added permission fails visibly instead of being waved
-    // through, which is what the old `if (smsPermissions.includes(permission))`
-    // wrapper did to anything outside the list — `phones.write` among them.
-    if (!(ALL_PERMISSIONS as string[]).includes(permission)) {
-      return forbidden(`Unknown permission '${permission}'`);
-    }
-
-    const roleConfig = createRoleConfig(env || {});
+    const roleConfig = createRoleConfig(env);
     const granted = permissionsForRoles(user.roles, roleConfig);
 
     if (!granted.includes(permission)) {
@@ -59,7 +53,7 @@ export function requirePermission(permission: Permission): Handler {
       );
     }
 
-    return; // Allowed.
+    return undefined;
   };
 }
 
@@ -71,10 +65,10 @@ export function requirePermission(permission: Permission): Handler {
  * before the security review had an else-branch that handed out the full permission set
  * when role checking was disabled.
  */
-export async function enrichUserPermissions(request: AppRequest): Promise<void> {
+export function enrichUserPermissions(request: PermissionRequest): void {
   const { user, env } = request;
 
   if (!user) return;
 
-  user.permissions = permissionsForRoles(user.roles, createRoleConfig(env || {}));
+  user.permissions = permissionsForRoles(user.roles, createRoleConfig(env));
 }

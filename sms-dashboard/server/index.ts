@@ -204,7 +204,7 @@ router.get('/api/phones', async (request, env, ctx) => {
   const authResponse = await handleAuth0(request, env, ctx);
   if (authResponse) return authResponse;
   await enrichUserPermissions(request);
-  const permResponse = await requirePermission('phones.read')(request, env, ctx);
+  const permResponse = await requirePermission('phones.read')(request);
   if (permResponse) return permResponse;
   return phonesHandler.list(request);
 });
@@ -213,7 +213,7 @@ router.get('/api/messages', async (request, env, ctx) => {
   const authResponse = await handleAuth0(request, env, ctx);
   if (authResponse) return authResponse;
   await enrichUserPermissions(request);
-  const permResponse = await requirePermission('messages.read')(request, env, ctx);
+  const permResponse = await requirePermission('messages.read')(request);
   if (permResponse) return permResponse;
   return messagesHandler.list(request);
 });
@@ -222,7 +222,7 @@ router.get('/api/balance-checks', async (request, env, ctx) => {
   const authResponse = await handleAuth0(request, env, ctx);
   if (authResponse) return authResponse;
   await enrichUserPermissions(request);
-  const permResponse = await requirePermission('messages.read')(request, env, ctx);
+  const permResponse = await requirePermission('messages.read')(request);
   if (permResponse) return permResponse;
   return balanceQueriesHandler.list(request);
 });
@@ -231,7 +231,7 @@ router.get('/api/balance-checks/status', async (request, env, ctx) => {
   const authResponse = await handleAuth0(request, env, ctx);
   if (authResponse) return authResponse;
   await enrichUserPermissions(request);
-  const permResponse = await requirePermission('messages.read')(request, env, ctx);
+  const permResponse = await requirePermission('messages.read')(request);
   if (permResponse) return permResponse;
   return balanceQueriesHandler.status(request);
 });
@@ -240,7 +240,7 @@ router.get('/api/carrier-billing/accounts', async (request, env, ctx) => {
   const authResponse = await handleAuth0(request, env, ctx);
   if (authResponse) return authResponse;
   await enrichUserPermissions(request);
-  const permResponse = await requirePermission('bills.read')(request, env, ctx);
+  const permResponse = await requirePermission('bills.read')(request);
   if (permResponse) return permResponse;
   return carrierBillsHandler.listAccounts(request);
 });
@@ -249,7 +249,7 @@ router.post('/api/carrier-billing/backfill/preview', async (request, env, ctx) =
   const authResponse = await handleAuth0(request, env, ctx);
   if (authResponse) return authResponse;
   await enrichUserPermissions(request);
-  const permResponse = await requirePermission('bills.write')(request, env, ctx);
+  const permResponse = await requirePermission('bills.write')(request);
   if (permResponse) return permResponse;
   return carrierBillingBackfillHandler.preview(request);
 });
@@ -258,7 +258,7 @@ router.post('/api/carrier-billing/backfill/execute', async (request, env, ctx) =
   const authResponse = await handleAuth0(request, env, ctx);
   if (authResponse) return authResponse;
   await enrichUserPermissions(request);
-  const permResponse = await requirePermission('bills.write')(request, env, ctx);
+  const permResponse = await requirePermission('bills.write')(request);
   if (permResponse) return permResponse;
   return carrierBillingBackfillHandler.execute(request);
 });
@@ -267,7 +267,7 @@ router.get('/api/carrier-bills', async (request, env, ctx) => {
   const authResponse = await handleAuth0(request, env, ctx);
   if (authResponse) return authResponse;
   await enrichUserPermissions(request);
-  const permResponse = await requirePermission('bills.read')(request, env, ctx);
+  const permResponse = await requirePermission('bills.read')(request);
   if (permResponse) return permResponse;
   return carrierBillsHandler.list(request);
 });
@@ -276,7 +276,7 @@ router.get('/api/carrier-bills/:id', async (request, env, ctx) => {
   const authResponse = await handleAuth0(request, env, ctx);
   if (authResponse) return authResponse;
   await enrichUserPermissions(request);
-  const permResponse = await requirePermission('bills.read')(request, env, ctx);
+  const permResponse = await requirePermission('bills.read')(request);
   if (permResponse) return permResponse;
   return carrierBillsHandler.get(request);
 });
@@ -291,7 +291,7 @@ for (const [path, action] of [
     const authResponse = await handleAuth0(request, env, ctx);
     if (authResponse) return authResponse;
     await enrichUserPermissions(request);
-    const permResponse = await requirePermission('bills.write')(request, env, ctx);
+    const permResponse = await requirePermission('bills.write')(request);
     if (permResponse) return permResponse;
     return carrierBillsHandler[action](request);
   });
@@ -301,7 +301,7 @@ router.get('/api/balance-checks/query-preview', async (request, env, ctx) => {
   const authResponse = await handleAuth0(request, env, ctx);
   if (authResponse) return authResponse;
   await enrichUserPermissions(request);
-  const permResponse = await requirePermission('balances.query')(request, env, ctx);
+  const permResponse = await requirePermission('balances.query')(request);
   if (permResponse) return permResponse;
   return balanceQueriesHandler.preview(request);
 });
@@ -310,7 +310,7 @@ router.post('/api/balance-checks/query-preview', async (request, env, ctx) => {
   const authResponse = await handleAuth0(request, env, ctx);
   if (authResponse) return authResponse;
   await enrichUserPermissions(request);
-  const permResponse = await requirePermission('balances.query')(request, env, ctx);
+  const permResponse = await requirePermission('balances.query')(request);
   if (permResponse) return permResponse;
   return balanceQueriesHandler.preview(request);
 });
@@ -319,7 +319,7 @@ router.get('/api/balance-checks/query-preflight', async (request, env, ctx) => {
   const authResponse = await handleAuth0(request, env, ctx);
   if (authResponse) return authResponse;
   await enrichUserPermissions(request);
-  const permResponse = await requirePermission('balances.query')(request, env, ctx);
+  const permResponse = await requirePermission('balances.query')(request);
   if (permResponse) return permResponse;
   return balanceQueriesHandler.preflight(request);
 });
@@ -328,7 +328,7 @@ router.get('/api/balance-runners', async (request, env, ctx) => {
   const authResponse = await handleAuth0(request, env, ctx);
   if (authResponse) return authResponse;
   await enrichUserPermissions(request);
-  const permResponse = await requirePermission('messages.read')(request, env, ctx);
+  const permResponse = await requirePermission('messages.read')(request);
   if (permResponse) return permResponse;
   return balanceRunnersHandler.status(request);
 });
@@ -337,7 +337,7 @@ router.post('/api/balance-checks/query', async (request, env, ctx) => {
   const authResponse = await handleAuth0(request, env, ctx);
   if (authResponse) return authResponse;
   await enrichUserPermissions(request);
-  const permResponse = await requirePermission('balances.query')(request, env, ctx);
+  const permResponse = await requirePermission('balances.query')(request);
   if (permResponse) return permResponse;
   return balanceQueriesHandler.query(request);
 });
@@ -346,7 +346,7 @@ router.post('/api/balance-checks/query-batch', async (request, env, ctx) => {
   const authResponse = await handleAuth0(request, env, ctx);
   if (authResponse) return authResponse;
   await enrichUserPermissions(request);
-  const permResponse = await requirePermission('balances.query')(request, env, ctx);
+  const permResponse = await requirePermission('balances.query')(request);
   if (permResponse) return permResponse;
   return balanceQueriesHandler.queryBatch(request);
 });
@@ -355,7 +355,7 @@ router.get('/api/balance-checks/:id', async (request, env, ctx) => {
   const authResponse = await handleAuth0(request, env, ctx);
   if (authResponse) return authResponse;
   await enrichUserPermissions(request);
-  const permResponse = await requirePermission('messages.read')(request, env, ctx);
+  const permResponse = await requirePermission('messages.read')(request);
   if (permResponse) return permResponse;
   return balanceQueriesHandler.detail(request);
 });
@@ -364,7 +364,7 @@ router.post('/api/messages/send', async (request, env, ctx) => {
   const authResponse = await handleAuth0(request, env, ctx);
   if (authResponse) return authResponse;
   await enrichUserPermissions(request);
-  const permResponse = await requirePermission('messages.send')(request, env, ctx);
+  const permResponse = await requirePermission('messages.send')(request);
   if (permResponse) return permResponse;
   return messagesHandler.send(request);
 });
@@ -376,7 +376,7 @@ router.get('/api/users', async (request, env, ctx) => {
   const authResponse = await handleAuth0(request, env, ctx);
   if (authResponse) return authResponse;
   await enrichUserPermissions(request);
-  const permResponse = await requirePermission('users.read')(request, env, ctx);
+  const permResponse = await requirePermission('users.read')(request);
   if (permResponse) return permResponse;
   return usersHandler.list(request);
 });
@@ -385,7 +385,7 @@ router.put('/api/users/:id/role', async (request, env, ctx) => {
   const authResponse = await handleAuth0(request, env, ctx);
   if (authResponse) return authResponse;
   await enrichUserPermissions(request);
-  const permResponse = await requirePermission('users.write')(request, env, ctx);
+  const permResponse = await requirePermission('users.write')(request);
   if (permResponse) return permResponse;
   return usersHandler.setRole(request);
 });
@@ -395,7 +395,7 @@ router.get('/api/iccid-mappings', async (request, env, ctx) => {
   const authResponse = await handleAuth0(request, env, ctx);
   if (authResponse) return authResponse;
   await enrichUserPermissions(request);
-  const permResponse = await requirePermission('phones.read')(request, env, ctx);
+  const permResponse = await requirePermission('phones.read')(request);
   if (permResponse) return permResponse;
   return iccidMappingsHandler.list(request);
 });
@@ -404,7 +404,7 @@ router.get('/api/iccid-mappings/:id', async (request, env, ctx) => {
   const authResponse = await handleAuth0(request, env, ctx);
   if (authResponse) return authResponse;
   await enrichUserPermissions(request);
-  const permResponse = await requirePermission('phones.read')(request, env, ctx);
+  const permResponse = await requirePermission('phones.read')(request);
   if (permResponse) return permResponse;
   return iccidMappingsHandler.get(request);
 });
@@ -413,7 +413,7 @@ router.get('/api/iccid-mappings/by-iccid/:iccid', async (request, env, ctx) => {
   const authResponse = await handleAuth0(request, env, ctx);
   if (authResponse) return authResponse;
   await enrichUserPermissions(request);
-  const permResponse = await requirePermission('phones.read')(request, env, ctx);
+  const permResponse = await requirePermission('phones.read')(request);
   if (permResponse) return permResponse;
   return iccidMappingsHandler.getByIccid(request);
 });
@@ -422,7 +422,7 @@ router.post('/api/iccid-mappings', async (request, env, ctx) => {
   const authResponse = await handleAuth0(request, env, ctx);
   if (authResponse) return authResponse;
   await enrichUserPermissions(request);
-  const permResponse = await requirePermission('phones.write')(request, env, ctx);
+  const permResponse = await requirePermission('phones.write')(request);
   if (permResponse) return permResponse;
   return iccidMappingsHandler.create(request);
 });
@@ -431,7 +431,7 @@ router.put('/api/iccid-mappings/:id', async (request, env, ctx) => {
   const authResponse = await handleAuth0(request, env, ctx);
   if (authResponse) return authResponse;
   await enrichUserPermissions(request);
-  const permResponse = await requirePermission('phones.write')(request, env, ctx);
+  const permResponse = await requirePermission('phones.write')(request);
   if (permResponse) return permResponse;
   return iccidMappingsHandler.update(request);
 });
@@ -440,7 +440,7 @@ router.delete('/api/iccid-mappings/:id', async (request, env, ctx) => {
   const authResponse = await handleAuth0(request, env, ctx);
   if (authResponse) return authResponse;
   await enrichUserPermissions(request);
-  const permResponse = await requirePermission('phones.write')(request, env, ctx);
+  const permResponse = await requirePermission('phones.write')(request);
   if (permResponse) return permResponse;
   return iccidMappingsHandler.delete(request);
 });
@@ -449,7 +449,7 @@ router.post('/api/iccid-mappings/bulk', async (request, env, ctx) => {
   const authResponse = await handleAuth0(request, env, ctx);
   if (authResponse) return authResponse;
   await enrichUserPermissions(request);
-  const permResponse = await requirePermission('phones.write')(request, env, ctx);
+  const permResponse = await requirePermission('phones.write')(request);
   if (permResponse) return permResponse;
   return iccidMappingsHandler.bulkImport(request);
 });
