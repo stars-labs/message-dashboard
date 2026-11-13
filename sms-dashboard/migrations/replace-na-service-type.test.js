@@ -70,24 +70,48 @@ describe('balance-managed service type migration', () => {
     database.exec(replaceEnum);
     database.exec(recreateView);
 
-    expect(database.query(`
+    expect(
+      database
+        .query(
+          `
       SELECT iccid, service_type FROM sims ORDER BY sim_index
-    `).all()).toEqual([
+    `,
+        )
+        .all(),
+    ).toEqual([
       { iccid: 'cn-sim', service_type: 'balance_managed' },
       { iccid: 'cn-secondary', service_type: 'balance_managed' },
       { iccid: 'sg-sim', service_type: 'prepaid' },
     ]);
-    expect(database.query(`
+    expect(
+      database
+        .query(
+          `
       SELECT service_type FROM device_view WHERE iccid = 'cn-sim'
-    `).get()).toEqual({ service_type: 'balance_managed' });
-    expect(() => database.query(`
+    `,
+        )
+        .get(),
+    ).toEqual({ service_type: 'balance_managed' });
+    expect(() =>
+      database
+        .query(
+          `
       INSERT INTO sims (iccid, sim_index, phone_number, service_type)
       VALUES ('old-value', 4, '+86000', 'n/a')
-    `).run()).toThrow();
+    `,
+        )
+        .run(),
+    ).toThrow();
     expect(database.query('PRAGMA foreign_key_check').all()).toEqual([]);
-    expect(() => database.query(`
+    expect(() =>
+      database
+        .query(
+          `
       DELETE FROM sims WHERE iccid = 'cn-sim'
-    `).run()).toThrow();
+    `,
+        )
+        .run(),
+    ).toThrow();
     database.close();
   });
 });

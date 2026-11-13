@@ -26,8 +26,10 @@ describe('runner presence client', () => {
     await presence.stop();
 
     expect(bodies).toHaveLength(4);
-    expect(bodies[0].capabilities.map(({ capability, state }) => [capability, state]))
-      .toEqual([['carrier_browser', 'starting'], ['sms_ai', 'starting']]);
+    expect(bodies[0].capabilities.map(({ capability, state }) => [capability, state])).toEqual([
+      ['carrier_browser', 'starting'],
+      ['sms_ai', 'starting'],
+    ]);
     expect(bodies[2].capabilities[0]).toMatchObject({
       capability: 'carrier_browser',
       state: 'busy',

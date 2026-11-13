@@ -42,23 +42,45 @@ describe('M1 prepaid browser balance migration', () => {
   afterEach(() => db.close());
 
   test('renames the shared browser capability and preserves existing jobs', () => {
-    expect(db.query(`
+    expect(
+      db
+        .query(
+          `
       SELECT capability FROM balance_runner_capabilities WHERE runner_id = 'runner-1'
-    `).get()).toEqual({ capability: 'carrier_browser' });
-    expect(db.query(`
+    `,
+        )
+        .get(),
+    ).toEqual({ capability: 'carrier_browser' });
+    expect(
+      db
+        .query(
+          `
       SELECT provider, status FROM sim_balance_web_jobs WHERE id = 'job-1'
-    `).get()).toEqual({ provider: 'china_unicom', status: 'pending' });
-    expect(db.query(`
+    `,
+        )
+        .get(),
+    ).toEqual({ provider: 'china_unicom', status: 'pending' });
+    expect(
+      db
+        .query(
+          `
       SELECT event_type FROM sim_balance_web_events WHERE job_id = 'job-1'
-    `).get()).toEqual({ event_type: 'queued' });
+    `,
+        )
+        .get(),
+    ).toEqual({ event_type: 'queued' });
   });
 
   test('adds a discovery-only prepaid M1 profile that promises balance and expiry', () => {
-    const profile = db.query(`
+    const profile = db
+      .query(
+        `
       SELECT country_code, carrier, method, command, expected_senders,
              parser_version, discovery_enabled, enabled, skill_config
       FROM sim_balance_profiles WHERE id = 'sg-m1-prepaid-browser-v1'
-    `).get();
+    `,
+      )
+      .get();
     expect(profile).toMatchObject({
       country_code: 'SG',
       carrier: 'M1',
@@ -78,14 +100,18 @@ describe('M1 prepaid browser balance migration', () => {
 
   test('accepts M1 jobs and rejects the retired capability name', () => {
     db.exec("INSERT INTO sim_balance_checks VALUES ('check-2')");
-    expect(() => db.exec(`
+    expect(() =>
+      db.exec(`
       INSERT INTO sim_balance_web_jobs (id, check_id, provider)
       VALUES ('job-2', 'check-2', 'm1_prepaid')
-    `)).not.toThrow();
-    expect(() => db.exec(`
+    `),
+    ).not.toThrow();
+    expect(() =>
+      db.exec(`
       INSERT INTO balance_runner_capabilities (
         runner_id, capability, state, session_id
       ) VALUES ('runner-1', 'unicom_browser', 'ready', 'old-session')
-    `)).toThrow();
+    `),
+    ).toThrow();
   });
 });

@@ -38,7 +38,9 @@ export interface DeviceStats {
 
 export async function getDeviceStats(db: D1Database): Promise<DeviceStats> {
   // Get counts from the actual tables (source of truth)
-  const stats = await db.prepare(`
+  const stats = await db
+    .prepare(
+      `
     SELECT
       (SELECT COUNT(*) FROM modems WHERE status IN ('connected', 'registered', 'active')) as connected_modems,
       (SELECT COUNT(*) FROM modems WHERE status = 'disconnected') as disconnected_modems,
@@ -46,13 +48,17 @@ export async function getDeviceStats(db: D1Database): Promise<DeviceStats> {
       (SELECT COUNT(*) FROM device_view WHERE sim_status = 'active') as active_sims,
       (SELECT COUNT(*) FROM device_view WHERE sim_status IN ('no_modem', 'unassigned')) as inactive_sims,
       (SELECT COUNT(*) FROM device_view WHERE sim_status IN ('sim_error', 'iccid_mismatch', 'offline')) as error_sims
-  `).first<DeviceCountRow>();
+  `,
+    )
+    .first<DeviceCountRow>();
 
   const totalSims =
     (stats?.active_sims || 0) + (stats?.inactive_sims || 0) + (stats?.error_sims || 0);
 
   // Get daemon status from daemon_health table
-  const daemonHealth = await db.prepare(`
+  const daemonHealth = await db
+    .prepare(
+      `
     SELECT
       status as daemon_status,
       modem_count as reported_modem_count,
@@ -67,7 +73,9 @@ export async function getDeviceStats(db: D1Database): Promise<DeviceStats> {
     WHERE daemon_id = 'orange-pi-main'
     ORDER BY last_heartbeat DESC
     LIMIT 1
-  `).first<DaemonHealthCountRow>();
+  `,
+    )
+    .first<DaemonHealthCountRow>();
 
   return {
     modems: {

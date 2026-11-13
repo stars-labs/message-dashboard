@@ -7,7 +7,9 @@ const RUNNER_SCOPES = [
 ];
 
 function issuerUrl(issuer, path) {
-  const base = String(issuer || '').trim().replace(/\/+$/, '');
+  const base = String(issuer || '')
+    .trim()
+    .replace(/\/+$/, '');
   if (!base.startsWith('https://')) throw new Error('Auth0 issuer must use HTTPS');
   return `${base}${path}`;
 }
@@ -25,9 +27,8 @@ async function authRequest(url, fields, fetchImpl, signal) {
 
 function authError(payload, fallback) {
   const code = typeof payload?.error === 'string' ? payload.error.trim() : '';
-  const description = typeof payload?.error_description === 'string'
-    ? payload.error_description.trim()
-    : '';
+  const description =
+    typeof payload?.error_description === 'string' ? payload.error_description.trim() : '';
   if (code && description) return `${code}: ${description}`;
   return description || code || fallback;
 }
@@ -37,13 +38,18 @@ export function createAuth0DeviceClient({
   clientId,
   audience,
   fetchImpl = fetch,
-  sleep = (ms, signal) => new Promise((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    signal?.addEventListener('abort', () => {
-      clearTimeout(timer);
-      resolve();
-    }, { once: true });
-  }),
+  sleep = (ms, signal) =>
+    new Promise((resolve) => {
+      const timer = setTimeout(resolve, ms);
+      signal?.addEventListener(
+        'abort',
+        () => {
+          clearTimeout(timer);
+          resolve();
+        },
+        { once: true },
+      );
+    }),
 }) {
   if (!clientId || !audience) throw new Error('Auth0 client ID and audience are required');
 
@@ -90,7 +96,9 @@ export function createAuth0DeviceClient({
           interval += 5;
           continue;
         }
-        throw new Error(payload.error_description || payload.error || `Device login failed (${response.status})`);
+        throw new Error(
+          payload.error_description || payload.error || `Device login failed (${response.status})`,
+        );
       }
       if (signal?.aborted) throw new Error('Device login cancelled');
       throw new Error('Device login expired');
@@ -108,7 +116,9 @@ export function createAuth0DeviceClient({
         signal,
       );
       if (!response.ok || !payload.access_token) {
-        throw new Error(payload.error_description || payload.error || `Token refresh failed (${response.status})`);
+        throw new Error(
+          payload.error_description || payload.error || `Token refresh failed (${response.status})`,
+        );
       }
       return payload;
     },

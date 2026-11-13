@@ -63,7 +63,10 @@ export function groupByPrimary<T>(
     // A secondary that was bucketed under a present primary is re-inserted
     // under that primary below; an orphan (primary not in the set) falls
     // through and renders as a top-level row.
-    if (k.primary_iccid && secondariesByPrimary.get(k.primary_iccid)?.some((c) => c.iccid === k.iccid)) {
+    if (
+      k.primary_iccid &&
+      secondariesByPrimary.get(k.primary_iccid)?.some((c) => c.iccid === k.iccid)
+    ) {
       continue;
     }
     out.push({ ...k.item, __depth: 0, __isSecondary: false });

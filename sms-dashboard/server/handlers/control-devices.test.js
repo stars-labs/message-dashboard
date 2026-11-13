@@ -136,47 +136,93 @@ describe('device synchronization write suppression', () => {
     expect((await controlHandler.updateDevices(apiRequest(db, body()))).status).toBe(200);
     expect(sqlite.query('SELECT COUNT(*) AS count FROM modem_update_log').get().count).toBe(0);
 
-    expect((await controlHandler.updateDevices(apiRequest(db, body('incremental', [
-      report({ signal_percent: 60 }),
-    ])))).status).toBe(200);
+    expect(
+      (
+        await controlHandler.updateDevices(
+          apiRequest(db, body('incremental', [report({ signal_percent: 60 })])),
+        )
+      ).status,
+    ).toBe(200);
     expect(sqlite.query('SELECT COUNT(*) AS count FROM modem_update_log').get().count).toBe(1);
 
-    expect((await controlHandler.updateDevices(apiRequest(db, body('incremental', [
-      report({ signal_percent: 60, status: 'connected' }),
-    ])))).status).toBe(200);
+    expect(
+      (
+        await controlHandler.updateDevices(
+          apiRequest(
+            db,
+            body('incremental', [report({ signal_percent: 60, status: 'connected' })]),
+          ),
+        )
+      ).status,
+    ).toBe(200);
     expect(sqlite.query('SELECT COUNT(*) AS count FROM modem_update_log').get().count).toBe(2);
   });
 
   test('full sync updates present and missing modems once, then becomes write-free', async () => {
     const db = d1(sqlite);
-    sqlite.query(`
+    sqlite
+      .query(
+        `
       INSERT INTO modems (
         equipment_id, manufacturer, model, firmware_revision, hardware_revision,
         detected_iccid, detected_operator, signal_percent, rssi, modem_index,
         usb_port, usb_path, last_usb_path, status
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run('modem-a', 'Quectel', 'EC20', '1', '1', 'iccid-a', 'carrier', 80, -70, 1, 1, '1-1', '1-1', 'active');
-    sqlite.query(`
+    `,
+      )
+      .run(
+        'modem-a',
+        'Quectel',
+        'EC20',
+        '1',
+        '1',
+        'iccid-a',
+        'carrier',
+        80,
+        -70,
+        1,
+        1,
+        '1-1',
+        '1-1',
+        'active',
+      );
+    sqlite
+      .query(
+        `
       INSERT INTO modems (equipment_id, detected_iccid, signal_percent, rssi, usb_path, status)
       VALUES ('modem-b', 'iccid-b', 40, -90, '1-2', 'active')
-    `).run();
+    `,
+      )
+      .run();
 
     expect((await controlHandler.updateDevices(apiRequest(db, body('full')))).status).toBe(200);
     expect((await controlHandler.updateDevices(apiRequest(db, body('full')))).status).toBe(200);
 
-    expect(sqlite.query(`
+    expect(
+      sqlite
+        .query(
+          `
       SELECT equipment_id, COUNT(*) AS count
       FROM modem_update_log
       GROUP BY equipment_id
       ORDER BY equipment_id
-    `).all()).toEqual([
+    `,
+        )
+        .all(),
+    ).toEqual([
       { equipment_id: 'modem-a', count: 1 },
       { equipment_id: 'modem-b', count: 1 },
     ]);
-    expect(sqlite.query(`
+    expect(
+      sqlite
+        .query(
+          `
       SELECT status, verification_status, detected_iccid, signal_percent, rssi, usb_path
       FROM modems WHERE equipment_id = 'modem-b'
-    `).get()).toEqual({
+    `,
+        )
+        .get(),
+    ).toEqual({
       status: 'disconnected',
       verification_status: 'absent',
       detected_iccid: null,
@@ -188,20 +234,30 @@ describe('device synchronization write suppression', () => {
 
   test('an empty full snapshot disconnects every previously present modem', async () => {
     const db = d1(sqlite);
-    sqlite.query(`
+    sqlite
+      .query(
+        `
       INSERT INTO modems (equipment_id, detected_iccid, signal_percent, rssi, usb_path, status)
       VALUES
         ('modem-a', 'iccid-a', 80, -70, '1-1', 'active'),
         ('modem-b', 'iccid-b', 40, -90, '1-2', 'active')
-    `).run();
+    `,
+      )
+      .run();
 
     const response = await controlHandler.updateDevices(apiRequest(db, body('full', [])));
 
     expect(response.status).toBe(200);
-    expect(sqlite.query(`
+    expect(
+      sqlite
+        .query(
+          `
       SELECT equipment_id, status, verification_status
       FROM modems ORDER BY equipment_id
-    `).all()).toEqual([
+    `,
+        )
+        .all(),
+    ).toEqual([
       { equipment_id: 'modem-a', status: 'disconnected', verification_status: 'absent' },
       { equipment_id: 'modem-b', status: 'disconnected', verification_status: 'absent' },
     ]);
@@ -209,20 +265,30 @@ describe('device synchronization write suppression', () => {
 
   test('marks explicitly removed modems disconnected during incremental sync', async () => {
     const db = d1(sqlite);
-    sqlite.query(`
+    sqlite
+      .query(
+        `
       INSERT INTO modems (equipment_id, detected_iccid, signal_percent, rssi, usb_path, status)
       VALUES ('modem-b', 'iccid-b', 40, -90, '1-2', 'active')
-    `).run();
+    `,
+      )
+      .run();
 
     const payload = body('incremental', []);
     payload.removed_equipment_ids = ['modem-b'];
     const response = await controlHandler.updateDevices(apiRequest(db, payload));
 
     expect(response.status).toBe(200);
-    expect(sqlite.query(`
+    expect(
+      sqlite
+        .query(
+          `
       SELECT status, verification_status, detected_iccid, signal_percent, rssi, usb_path
       FROM modems WHERE equipment_id = 'modem-b'
-    `).get()).toEqual({
+    `,
+        )
+        .get(),
+    ).toEqual({
       status: 'disconnected',
       verification_status: 'absent',
       detected_iccid: null,
@@ -241,13 +307,20 @@ describe('device synchronization write suppression', () => {
 
   test('rejects the removed legacy device payload without touching D1', async () => {
     const calls = [];
-    const db = { prepare(sql) { calls.push(sql); throw new Error('unexpected D1 access'); } };
-    const response = await controlHandler.updateDevices(apiRequest(db, {
-      modems: [report()],
-      sims: [],
-      sync_mode: 'incremental',
-      session_id: 'session-1',
-    }));
+    const db = {
+      prepare(sql) {
+        calls.push(sql);
+        throw new Error('unexpected D1 access');
+      },
+    };
+    const response = await controlHandler.updateDevices(
+      apiRequest(db, {
+        modems: [report()],
+        sims: [],
+        sync_mode: 'incremental',
+        session_id: 'session-1',
+      }),
+    );
 
     expect(response.status).toBe(400);
     expect(calls).toHaveLength(0);
@@ -256,9 +329,13 @@ describe('device synchronization write suppression', () => {
 
 describe('message upload idempotency', () => {
   test('requires a daemon-assigned ID before touching D1', async () => {
-    const response = await controlHandler.uploadMessages(apiRequest(d1(sqlite), {
-      messages: [{ phone_iccid: 'iccid-a', content: 'hello', timestamp: '2026-09-03T00:00:00.000Z' }],
-    }));
+    const response = await controlHandler.uploadMessages(
+      apiRequest(d1(sqlite), {
+        messages: [
+          { phone_iccid: 'iccid-a', content: 'hello', timestamp: '2026-09-03T00:00:00.000Z' },
+        ],
+      }),
+    );
 
     expect(response.status).toBe(400);
     expect(sqlite.query('SELECT COUNT(*) AS count FROM messages').get().count).toBe(0);
@@ -268,11 +345,15 @@ describe('message upload idempotency', () => {
     const db = d1(sqlite);
     const first = {
       id: '018c1a55-73a0-7b9b-8c06-123456789abc',
-      phone_iccid: 'iccid-a', content: 'same SMS', timestamp: '2026-09-03T00:00:00.000Z',
+      phone_iccid: 'iccid-a',
+      content: 'same SMS',
+      timestamp: '2026-09-03T00:00:00.000Z',
     };
     const second = { ...first, id: '018c1a55-73a0-7b9b-8c06-123456789abd' };
 
-    const initial = await controlHandler.uploadMessages(apiRequest(db, { messages: [first, second] }));
+    const initial = await controlHandler.uploadMessages(
+      apiRequest(db, { messages: [first, second] }),
+    );
     expect(initial.status).toBe(200);
     expect((await initial.json()).results).toEqual([
       { id: first.id, status: 'stored' },

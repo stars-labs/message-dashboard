@@ -58,7 +58,7 @@ describe('rolesFromToken', () => {
 describe('permissionsForRoles', () => {
   test('viewer gets read messages, phones, and bills plus message sending', () => {
     expect(permissionsForRoles(['viewer'], config).sort()).toEqual(
-      ['bills.read', 'messages.read', 'messages.send', 'phones.read'].sort()
+      ['bills.read', 'messages.read', 'messages.send', 'phones.read'].sort(),
     );
   });
 
@@ -138,7 +138,17 @@ describe('permission coverage', () => {
 
   test('viewer cannot reach any write permission', () => {
     const viewerPerms = permissionsForRoles(['viewer'], config);
-    for (const p of ['balances.query', 'bills.write', 'phones.write', 'keywords.write', 'keywords.delete', 'filters.write', 'filters.delete', 'users.read', 'users.write']) {
+    for (const p of [
+      'balances.query',
+      'bills.write',
+      'phones.write',
+      'keywords.write',
+      'keywords.delete',
+      'filters.write',
+      'filters.delete',
+      'users.read',
+      'users.write',
+    ]) {
       expect(viewerPerms).not.toContain(p);
     }
   });

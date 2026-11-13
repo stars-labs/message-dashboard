@@ -7,4 +7,6 @@ console.log('1. Go to https://sexy.itoken.world');
 console.log('2. Navigate to the Keywords tab');
 console.log('3. Click the reprocess button for each keyword');
 console.log('');
-console.log('Alternatively, you can deploy the fixed code and new messages will be processed correctly.');
+console.log(
+  'Alternatively, you can deploy the fixed code and new messages will be processed correctly.',
+);

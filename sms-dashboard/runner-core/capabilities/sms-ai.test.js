@@ -9,21 +9,28 @@ const skill = {
   forbidden_intents: ['充值', '办理'],
 };
 
-function createHarness({ content, callAI = async () => { throw new Error('AI must not run'); } }) {
+function createHarness({
+  content,
+  callAI = async () => {
+    throw new Error('AI must not run');
+  },
+}) {
   const requests = [];
   const states = [];
   const errors = [];
   const responses = [
-    new Response(JSON.stringify({
-      id: 'job-1',
-      check_id: 'check-1',
-      response_content: content,
-      menu_options: [
-        { value: '0', label: '业务查询与退订' },
-        { value: '1', label: '话费与AI豆' },
-      ],
-      skill,
-    })),
+    new Response(
+      JSON.stringify({
+        id: 'job-1',
+        check_id: 'check-1',
+        response_content: content,
+        menu_options: [
+          { value: '0', label: '业务查询与退订' },
+          { value: '1', label: '话费与AI豆' },
+        ],
+        skill,
+      }),
+    ),
     new Response(JSON.stringify({ success: true })),
   ];
   const capability = createSmsAiCapability({
@@ -40,7 +47,12 @@ function createHarness({ content, callAI = async () => { throw new Error('AI mus
     aiModel: 'model',
     callAI,
     isAIReachable: async () => true,
-    logger: { log() {}, error(message) { errors.push(message); } },
+    logger: {
+      log() {},
+      error(message) {
+        errors.push(message);
+      },
+    },
   });
   return { capability, requests, states, errors };
 }
@@ -65,8 +77,13 @@ describe('SMS AI capability', () => {
         prompts += 1;
         expect(JSON.parse(prompt.user).menu_options.length).toBe(2);
         return {
-          action: 'reply', selected_option: '1', balance: null, currency: null,
-          confidence: 0.96, reason: '话费查询', evidence: '1.话费与AI豆',
+          action: 'reply',
+          selected_option: '1',
+          balance: null,
+          currency: null,
+          confidence: 0.96,
+          reason: '话费查询',
+          evidence: '1.话费与AI豆',
         };
       },
     });

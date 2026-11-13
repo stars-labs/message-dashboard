@@ -1,9 +1,6 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import {
-  carrierBillsHandler,
-  deriveBillUrgency,
-} from './carrier-bills.js';
+import { carrierBillsHandler, deriveBillUrgency } from './carrier-bills.js';
 
 function d1(database) {
   const bound = (sql, params) => ({
@@ -26,21 +23,26 @@ function d1(database) {
       return { bind: (...params) => bound(sql, params) };
     },
     async batch(statements) {
-      return database.transaction(() => statements.map((statement) => {
-        const result = database.query(statement.sql).run(...statement.params);
-        return { meta: { changes: result.changes } };
-      }))();
+      return database.transaction(() =>
+        statements.map((statement) => {
+          const result = database.query(statement.sql).run(...statement.params);
+          return { meta: { changes: result.changes } };
+        }),
+      )();
     },
   };
 }
 
-function request(db, {
-  url = 'https://dashboard.example/api/carrier-bills',
-  id,
-  body,
-  idempotencyKey,
-  user = { id: 'auth0|admin', email: 'admin@example.com' },
-} = {}) {
+function request(
+  db,
+  {
+    url = 'https://dashboard.example/api/carrier-bills',
+    id,
+    body,
+    idempotencyKey,
+    user = { id: 'auth0|admin', email: 'admin@example.com' },
+  } = {},
+) {
   const headers = new Headers();
   if (idempotencyKey) headers.set('Idempotency-Key', idempotencyKey);
   return {
@@ -96,7 +98,10 @@ beforeEach(async () => {
       '2026-08-20T00:00:00Z', 'received'
     );
   `);
-  for (const name of ['066_add_carrier_billing.sql', '067_add_carrier_billing_account_events.sql']) {
+  for (const name of [
+    '066_add_carrier_billing.sql',
+    '067_add_carrier_billing_account_events.sql',
+  ]) {
     const migration = await Bun.file(new URL(`../../migrations/${name}`, import.meta.url)).text();
     database.exec(migration);
   }
@@ -138,8 +143,10 @@ describe('carrier bill urgency', () => {
     ['waived', '2026-08-31', '2026-09-01', 'waived', -1],
     ['needs_review', '2026-09-30', '2026-09-01', 'needs_review', 29],
   ])('derives %s / %s as %s', (actionStatus, dueDate, today, urgency, daysRemaining) => {
-    expect(deriveBillUrgency({ action_status: actionStatus, due_date: dueDate }, today))
-      .toEqual({ urgency, days_remaining: daysRemaining });
+    expect(deriveBillUrgency({ action_status: actionStatus, due_date: dueDate }, today)).toEqual({
+      urgency,
+      days_remaining: daysRemaining,
+    });
   });
 });
 
@@ -166,16 +173,18 @@ describe('carrier bills API', () => {
     const response = await carrierBillsHandler.listAccounts(request(db));
     const body = await json(response);
 
-    expect(body.accounts).toEqual([expect.objectContaining({
-      id: 'account-1',
-      account_ref_masked: '•••• 5678',
-      payment_due_count: 1,
-      notification_sim: expect.objectContaining({ sim_index: 79 }),
-      linked_sims: [
-        expect.objectContaining({ iccid: 'notification-sim', sim_index: 79 }),
-        expect.objectContaining({ iccid: 'linked-sim', sim_index: 80 }),
-      ],
-    })]);
+    expect(body.accounts).toEqual([
+      expect.objectContaining({
+        id: 'account-1',
+        account_ref_masked: '•••• 5678',
+        payment_due_count: 1,
+        notification_sim: expect.objectContaining({ sim_index: 79 }),
+        linked_sims: [
+          expect.objectContaining({ iccid: 'notification-sim', sim_index: 79 }),
+          expect.objectContaining({ iccid: 'linked-sim', sim_index: 80 }),
+        ],
+      }),
+    ]);
   });
 
   test('returns bill detail with retained source evidence and immutable events', async () => {
@@ -195,19 +204,27 @@ describe('carrier bills API', () => {
   });
 
   test('records a payment plan with optimistic concurrency and user audit', async () => {
-    const response = await carrierBillsHandler.paymentPlanned(request(db, {
-      id: 'bill-1',
-      body: { expected_version: 1, note: 'Pay on Friday' },
-      idempotencyKey: 'plan-bill-1-v1',
-    }));
+    const response = await carrierBillsHandler.paymentPlanned(
+      request(db, {
+        id: 'bill-1',
+        body: { expected_version: 1, note: 'Pay on Friday' },
+        idempotencyKey: 'plan-bill-1-v1',
+      }),
+    );
     const body = await json(response);
 
     expect(response.status).toBe(200);
     expect(body.bill).toMatchObject({ action_status: 'payment_planned', version: 2 });
-    expect(database.query(`
+    expect(
+      database
+        .query(
+          `
       SELECT event_type, actor_type, actor_subject, idempotency_key
       FROM carrier_bill_events WHERE event_type = 'payment_planned'
-    `).get()).toEqual({
+    `,
+        )
+        .get(),
+    ).toEqual({
       event_type: 'payment_planned',
       actor_type: 'user',
       actor_subject: 'auth0|admin',
@@ -216,11 +233,12 @@ describe('carrier bills API', () => {
   });
 
   test('returns the prior result when the same idempotency key is retried', async () => {
-    const actionRequest = () => request(db, {
-      id: 'bill-1',
-      body: { expected_version: 1 },
-      idempotencyKey: 'paid-bill-1-v1',
-    });
+    const actionRequest = () =>
+      request(db, {
+        id: 'bill-1',
+        body: { expected_version: 1 },
+        idempotencyKey: 'paid-bill-1-v1',
+      });
     await carrierBillsHandler.markPaid(actionRequest());
     const retry = await carrierBillsHandler.markPaid(actionRequest());
     const body = await json(retry);
@@ -228,39 +246,55 @@ describe('carrier bills API', () => {
     expect(retry.status).toBe(200);
     expect(body.idempotent).toBe(true);
     expect(body.bill).toMatchObject({ action_status: 'paid', version: 2, paid_by: 'auth0|admin' });
-    expect(database.query(`
+    expect(
+      database
+        .query(
+          `
       SELECT COUNT(*) AS count FROM carrier_bill_events WHERE event_type = 'paid'
-    `).get().count).toBe(1);
+    `,
+        )
+        .get().count,
+    ).toBe(1);
   });
 
   test('rejects stale versions and missing idempotency keys without mutation', async () => {
-    const stale = await carrierBillsHandler.waive(request(db, {
-      id: 'bill-1',
-      body: { expected_version: 99 },
-      idempotencyKey: 'waive-stale',
-    }));
-    const missingKey = await carrierBillsHandler.waive(request(db, {
-      id: 'bill-1',
-      body: { expected_version: 1 },
-    }));
+    const stale = await carrierBillsHandler.waive(
+      request(db, {
+        id: 'bill-1',
+        body: { expected_version: 99 },
+        idempotencyKey: 'waive-stale',
+      }),
+    );
+    const missingKey = await carrierBillsHandler.waive(
+      request(db, {
+        id: 'bill-1',
+        body: { expected_version: 1 },
+      }),
+    );
 
     expect(stale.status).toBe(409);
     expect(missingKey.status).toBe(400);
-    expect(database.query(`SELECT action_status, version FROM carrier_bills`).get())
-      .toEqual({ action_status: 'unpaid', version: 1 });
+    expect(database.query(`SELECT action_status, version FROM carrier_bills`).get()).toEqual({
+      action_status: 'unpaid',
+      version: 1,
+    });
   });
 
   test('reopens a resolved bill and clears resolution fields', async () => {
-    await carrierBillsHandler.markPaid(request(db, {
-      id: 'bill-1',
-      body: { expected_version: 1 },
-      idempotencyKey: 'paid-first',
-    }));
-    const response = await carrierBillsHandler.reopen(request(db, {
-      id: 'bill-1',
-      body: { expected_version: 2, note: 'Payment was reversed' },
-      idempotencyKey: 'reopen-paid',
-    }));
+    await carrierBillsHandler.markPaid(
+      request(db, {
+        id: 'bill-1',
+        body: { expected_version: 1 },
+        idempotencyKey: 'paid-first',
+      }),
+    );
+    const response = await carrierBillsHandler.reopen(
+      request(db, {
+        id: 'bill-1',
+        body: { expected_version: 2, note: 'Payment was reversed' },
+        idempotencyKey: 'reopen-paid',
+      }),
+    );
     const body = await json(response);
 
     expect(body.bill).toMatchObject({

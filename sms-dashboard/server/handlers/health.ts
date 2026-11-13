@@ -44,9 +44,7 @@ function unavailableBody(classification: D1ErrorClassification, timestamp: strin
 }
 
 function unavailableHeaders(classification: D1ErrorClassification): Record<string, string> {
-  return classification.retryAt
-    ? { 'Retry-After': classification.retryAt.toUTCString() }
-    : {};
+  return classification.retryAt ? { 'Retry-After': classification.retryAt.toUTCString() } : {};
 }
 
 export const healthHandler = {
@@ -66,17 +64,20 @@ export const healthHandler = {
       // daemon state. A constant SELECT 1 can succeed after table reads are blocked.
       const daemonHealth = await env.DB.prepare(DAEMON_HEALTH_SELECT).first<DaemonHealthRow>();
       const derived = deriveDaemonHealth(daemonHealth);
-      return json({
-        status: derived.status,
-        database: { status: 'connected' },
-        daemon: {
+      return json(
+        {
           status: derived.status,
-          label: derived.label,
-          reasons: derived.reasons,
-          last_heartbeat: daemonHealth?.last_heartbeat ?? null,
+          database: { status: 'connected' },
+          daemon: {
+            status: derived.status,
+            label: derived.label,
+            reasons: derived.reasons,
+            last_heartbeat: daemonHealth?.last_heartbeat ?? null,
+          },
+          timestamp,
         },
-        timestamp,
-      }, derived.status === 'healthy' ? 200 : 503);
+        derived.status === 'healthy' ? 200 : 503,
+      );
     } catch (error) {
       const classification = classifyD1Error(error);
       logD1Error('health_readiness', error, classification);
@@ -123,13 +124,17 @@ export const healthHandler = {
     } catch (error) {
       const classification = classifyD1Error(error);
       logD1Error('daemon_status', error, classification);
-      return json({
-        status: 'error',
-        code: classification.code,
-        message: 'Service status is temporarily unavailable',
-        retry_at: classification.retryAt?.toISOString() ?? null,
-        timestamp: new Date().toISOString(),
-      }, 503, unavailableHeaders(classification));
+      return json(
+        {
+          status: 'error',
+          code: classification.code,
+          message: 'Service status is temporarily unavailable',
+          retry_at: classification.retryAt?.toISOString() ?? null,
+          timestamp: new Date().toISOString(),
+        },
+        503,
+        unavailableHeaders(classification),
+      );
     }
   },
 };

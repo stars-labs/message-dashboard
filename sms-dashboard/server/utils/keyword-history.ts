@@ -43,18 +43,19 @@ function cursorFor(row: KeywordHistoryRow): HistoryCursor {
 export async function processKeywordHistoryPage(
   db: D1Database,
   keyword: HistoryKeyword,
-  { since, until, cursor = null, pageSize = KEYWORD_HISTORY_PAGE_SIZE }: {
+  {
+    since,
+    until,
+    cursor = null,
+    pageSize = KEYWORD_HISTORY_PAGE_SIZE,
+  }: {
     since: string;
     until: string;
     cursor?: HistoryCursor | null;
     pageSize?: unknown;
   },
 ): Promise<KeywordHistoryPage> {
-  const conditions = [
-    `purpose = 'user'`,
-    `created_at >= datetime(?)`,
-    `created_at <= datetime(?)`,
-  ];
+  const conditions = [`purpose = 'user'`, `created_at >= datetime(?)`, `created_at <= datetime(?)`];
   const params: unknown[] = [since, until];
 
   if (cursor) {
@@ -66,13 +67,16 @@ export async function processKeywordHistoryPage(
     1,
     Math.min(Number(pageSize) || KEYWORD_HISTORY_PAGE_SIZE, KEYWORD_HISTORY_PAGE_SIZE),
   );
-  const { results } = await db.prepare(
-    `SELECT id, type, content, filter_status, verification_code, created_at
+  const { results } = await db
+    .prepare(
+      `SELECT id, type, content, filter_status, verification_code, created_at
      FROM messages
      WHERE ${conditions.join('\n       AND ')}
      ORDER BY created_at, id
      LIMIT ?`,
-  ).bind(...params, limit + 1).all<KeywordHistoryRow>();
+    )
+    .bind(...params, limit + 1)
+    .all<KeywordHistoryRow>();
 
   const hasMore = results.length > limit;
   const page = results.slice(0, limit);
@@ -82,10 +86,11 @@ export async function processKeywordHistoryPage(
 
   for (const message of page) {
     if (
-      (message.type !== undefined && message.type !== 'received')
-      || message.filter_status === 'filtered'
-      || message.verification_code
-    ) continue;
+      (message.type !== undefined && message.type !== 'received') ||
+      message.filter_status === 'filtered' ||
+      message.verification_code
+    )
+      continue;
 
     eligible++;
     const matches = findKeywordMatches(
@@ -97,15 +102,20 @@ export async function processKeywordHistoryPage(
     if (matches.length > 0) matchedMessages++;
 
     for (const match of matches) {
-      statements.push(db.prepare(
-        `INSERT OR IGNORE INTO message_tags
+      statements.push(
+        db
+          .prepare(
+            `INSERT OR IGNORE INTO message_tags
            (message_id, keyword_tag_id, matched_text, position)
          VALUES (?, ?, ?, ?)`,
-      ).bind(message.id, keyword.id, match.text, match.position));
+          )
+          .bind(message.id, keyword.id, match.text, match.position),
+      );
     }
   }
 
-  const resultsForWrites = statements.length > 0 ? await db.batch<{ meta?: { changes?: number } }>(statements) : [];
+  const resultsForWrites =
+    statements.length > 0 ? await db.batch<{ meta?: { changes?: number } }>(statements) : [];
   const inserted = resultsForWrites.reduce(
     (total, result) => total + Number(result?.meta?.changes || 0),
     0,

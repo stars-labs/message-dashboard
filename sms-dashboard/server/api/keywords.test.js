@@ -19,8 +19,10 @@ function request(path, body, params = {}) {
   return {
     url: `https://example.com${path}`,
     params,
-    headers: { get: (name) => name === 'Cookie' ? 'auth_token=session' : null },
-    async json() { return body; },
+    headers: { get: (name) => (name === 'Cookie' ? 'auth_token=session' : null) },
+    async json() {
+      return body;
+    },
   };
 }
 
@@ -38,29 +40,45 @@ describe('keyword rule D1 reads', () => {
   test('creating a keyword never scans or writes historical messages', async () => {
     const calls = [];
     const keyword = {
-      id: 7, keyword: 'code', tag: 'OTP', color: '#3B82F6', priority: 0,
-      case_sensitive: 0, whole_word: 0, is_active: 1,
+      id: 7,
+      keyword: 'code',
+      tag: 'OTP',
+      color: '#3B82F6',
+      priority: 0,
+      case_sensitive: 0,
+      whole_word: 0,
+      is_active: 1,
     };
     const db = {
       prepare(sql) {
         calls.push(sql);
         const statement = {
-          bind() { return statement; },
+          bind() {
+            return statement;
+          },
           async first() {
             if (sql.includes('SELECT id FROM keyword_tags')) return null;
             if (sql.includes('SELECT * FROM keyword_tags')) return keyword;
             return null;
           },
-          async run() { return { meta: { last_row_id: 7, changes: 1 } }; },
+          async run() {
+            return { meta: { last_row_id: 7, changes: 1 } };
+          },
         };
         return statement;
       },
     };
     const env = authenticatedEnv(db);
-    const route = collectRoutes().find(({ method, path }) => method === 'post' && path === '/api/keywords');
+    const route = collectRoutes().find(
+      ({ method, path }) => method === 'post' && path === '/api/keywords',
+    );
     const req = request('/api/keywords', {
-      keyword: 'code', tag: 'OTP', color: '#3B82F6', priority: 0,
-      case_sensitive: false, whole_word: false,
+      keyword: 'code',
+      tag: 'OTP',
+      color: '#3B82F6',
+      priority: 0,
+      case_sensitive: false,
+      whole_word: false,
     });
     req.env = env;
 
@@ -74,14 +92,22 @@ describe('keyword rule D1 reads', () => {
   test('updates metadata only and rejects changes to matching identity', async () => {
     const calls = [];
     const existing = {
-      id: 7, keyword: 'code', tag: 'OTP', color: '#3B82F6', priority: 0,
-      case_sensitive: 0, whole_word: 0, is_active: 1,
+      id: 7,
+      keyword: 'code',
+      tag: 'OTP',
+      color: '#3B82F6',
+      priority: 0,
+      case_sensitive: 0,
+      whole_word: 0,
+      is_active: 1,
     };
     const db = {
       prepare(sql) {
         calls.push(sql);
         const statement = {
-          bind() { return statement; },
+          bind() {
+            return statement;
+          },
           async first() {
             if (sql.trimStart().startsWith('SELECT')) return existing;
             return { ...existing, tag: 'Login' };
@@ -91,7 +117,9 @@ describe('keyword rule D1 reads', () => {
       },
     };
     const env = authenticatedEnv(db);
-    const route = collectRoutes().find(({ method, path }) => method === 'put' && path === '/api/keywords/:id');
+    const route = collectRoutes().find(
+      ({ method, path }) => method === 'put' && path === '/api/keywords/:id',
+    );
     const req = request('/api/keywords/7', { tag: 'Login' }, { id: '7' });
     req.env = env;
 
@@ -113,14 +141,20 @@ describe('keyword rule D1 reads', () => {
       prepare(sql) {
         query = sql;
         const statement = {
-          bind() { return statement; },
-          async all() { return { results: [] }; },
+          bind() {
+            return statement;
+          },
+          async all() {
+            return { results: [] };
+          },
         };
         return statement;
       },
     };
     const env = authenticatedEnv(db);
-    const route = collectRoutes().find(({ method, path }) => method === 'post' && path === '/api/messages/batch-tags');
+    const route = collectRoutes().find(
+      ({ method, path }) => method === 'post' && path === '/api/messages/batch-tags',
+    );
     const req = request('/api/messages/batch-tags', { messageIds: ['m-1'] });
     req.env = env;
 

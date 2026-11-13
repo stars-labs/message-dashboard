@@ -31,10 +31,12 @@ class D1Adapter {
   }
 
   async batch(statements) {
-    return this.database.transaction(() => statements.map((statement) => {
-      this.database.query(statement.sql).run(...statement.params);
-      return { meta: { changes: this.database.query('SELECT changes() AS value').get().value } };
-    }))();
+    return this.database.transaction(() =>
+      statements.map((statement) => {
+        this.database.query(statement.sql).run(...statement.params);
+        return { meta: { changes: this.database.query('SELECT changes() AS value').get().value } };
+      }),
+    )();
   }
 }
 
@@ -131,8 +133,9 @@ describe('carrier browser balance job protocol', () => {
     expect(job.login_url).toContain('10010.com');
     expect(job.otp_requested_at).toBeNull();
     expect(JSON.stringify(job)).not.toContain('cookie');
-    expect(sqlite.query("SELECT status FROM sim_balance_web_jobs WHERE id='job-1'").get().status)
-      .toBe('leased');
+    expect(
+      sqlite.query("SELECT status FROM sim_balance_web_jobs WHERE id='job-1'").get().status,
+    ).toBe('leased');
   });
 
   test('forces the pending-job index on the claim hot path', async () => {
@@ -148,8 +151,9 @@ describe('carrier browser balance job protocol', () => {
 
     const response = await carrierWebBalanceHandler.claim(request(db));
     expect(response.status).toBe(204);
-    expect(sqlite.query("SELECT status FROM sim_balance_web_jobs WHERE id='job-1'").get().status)
-      .toBe('pending');
+    expect(
+      sqlite.query("SELECT status FROM sim_balance_web_jobs WHERE id='job-1'").get().status,
+    ).toBe('pending');
   });
 
   test('keeps the five-second claim path free of maintenance work', async () => {
@@ -158,16 +162,19 @@ describe('carrier browser balance job protocol', () => {
     const response = await carrierWebBalanceHandler.claim(request(db));
 
     expect(response.status).toBe(204);
-    expect(sqlite.query("SELECT status FROM sim_balance_checks WHERE id='check-1'").get().status)
-      .toBe('queued');
+    expect(
+      sqlite.query("SELECT status FROM sim_balance_checks WHERE id='check-1'").get().status,
+    ).toBe('queued');
   });
 
   test('returns only an OTP from the same SIM, allowlisted sender and request window', async () => {
     const job = await claim();
-    await carrierWebBalanceHandler.otpRequested(request(db, {
-      id: job.id,
-      body: { runner_id: 'runner-1' },
-    }));
+    await carrierWebBalanceHandler.otpRequested(
+      request(db, {
+        id: job.id,
+        body: { runner_id: 'runner-1' },
+      }),
+    );
     sqlite.exec(`
       INSERT INTO messages VALUES (
         'wrong-context', 'iccid-1', '10010', '优惠码123456', CURRENT_TIMESTAMP,
@@ -178,20 +185,24 @@ describe('carrier browser balance job protocol', () => {
         'received', '654321', CURRENT_TIMESTAMP
       );
     `);
-    const response = await carrierWebBalanceHandler.otp(request(db, {
-      id: job.id,
-      runnerId: 'runner-1',
-    }));
+    const response = await carrierWebBalanceHandler.otp(
+      request(db, {
+        id: job.id,
+        runnerId: 'runner-1',
+      }),
+    );
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ code: '654321' });
   });
 
   test('advances an OTP cursor with the daemon source message id', async () => {
     const job = await claim();
-    await carrierWebBalanceHandler.otpRequested(request(db, {
-      id: job.id,
-      body: { runner_id: 'runner-1' },
-    }));
+    await carrierWebBalanceHandler.otpRequested(
+      request(db, {
+        id: job.id,
+        body: { runner_id: 'runner-1' },
+      }),
+    );
     sqlite.exec(`
       INSERT INTO messages VALUES (
         'source-message-1', 'iccid-1', '10010', '优惠码123456', CURRENT_TIMESTAMP,
@@ -204,10 +215,12 @@ describe('carrier browser balance job protocol', () => {
     `);
     sqlite.exec("UPDATE sim_balance_web_jobs SET otp_requested_at = '2026-09-04 09:59:00'");
 
-    const first = await carrierWebBalanceHandler.otp(request(db, {
-      id: job.id,
-      runnerId: 'runner-1',
-    }));
+    const first = await carrierWebBalanceHandler.otp(
+      request(db, {
+        id: job.id,
+        runnerId: 'runner-1',
+      }),
+    );
     expect(first.status).toBe(200);
     expect(await first.json()).toEqual({
       code: null,
@@ -225,7 +238,8 @@ describe('carrier browser balance job protocol', () => {
       );
     `);
     const secondRequest = request(db, { id: job.id, runnerId: 'runner-1' });
-    secondRequest.url += '&after_created_at=2026-09-04%2010%3A00%3A00&after_source_message_id=source-message-2';
+    secondRequest.url +=
+      '&after_created_at=2026-09-04%2010%3A00%3A00&after_source_message_id=source-message-2';
     const second = await carrierWebBalanceHandler.otp(secondRequest);
 
     expect(second.status).toBe(200);
@@ -234,46 +248,58 @@ describe('carrier browser balance job protocol', () => {
 
   test('extends the lease while waiting for human verification', async () => {
     const job = await claim();
-    const response = await carrierWebBalanceHandler.heartbeat(request(db, {
-      id: job.id,
-      body: {
-        runner_id: 'runner-1',
-        status: 'human_verification_required',
-        reason: '请完成滑块验证',
-      },
-    }));
+    const response = await carrierWebBalanceHandler.heartbeat(
+      request(db, {
+        id: job.id,
+        body: {
+          runner_id: 'runner-1',
+          status: 'human_verification_required',
+          reason: '请完成滑块验证',
+        },
+      }),
+    );
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ lease_seconds: 900 });
-    expect(sqlite.query("SELECT status, human_reason FROM sim_balance_web_jobs WHERE id='job-1'").get())
-      .toEqual({
-        status: 'human_verification_required',
-        human_reason: '请完成滑块验证',
-      });
+    expect(
+      sqlite.query("SELECT status, human_reason FROM sim_balance_web_jobs WHERE id='job-1'").get(),
+    ).toEqual({
+      status: 'human_verification_required',
+      human_reason: '请完成滑块验证',
+    });
   });
 
   test('renews a lease without appending duplicate heartbeat events', async () => {
     const job = await claim();
-    const heartbeatRequest = () => request(db, {
-      id: job.id,
-      body: { runner_id: 'runner-1', status: 'awaiting_otp' },
-    });
+    const heartbeatRequest = () =>
+      request(db, {
+        id: job.id,
+        body: { runner_id: 'runner-1', status: 'awaiting_otp' },
+      });
 
     await carrierWebBalanceHandler.heartbeat(heartbeatRequest());
     await carrierWebBalanceHandler.heartbeat(heartbeatRequest());
 
-    expect(sqlite.query(`
+    expect(
+      sqlite
+        .query(
+          `
       SELECT COUNT(*) AS count FROM sim_balance_web_events
       WHERE job_id = 'job-1' AND event_type = 'awaiting_otp'
-    `).get().count).toBe(1);
+    `,
+        )
+        .get().count,
+    ).toBe(1);
   });
 
   test('matches only the M1 login OTP for an M1 prepaid job', async () => {
     switchToM1();
     const job = await claim();
-    await carrierWebBalanceHandler.otpRequested(request(db, {
-      id: job.id,
-      body: { runner_id: 'runner-1' },
-    }));
+    await carrierWebBalanceHandler.otpRequested(
+      request(db, {
+        id: job.id,
+        body: { runner_id: 'runner-1' },
+      }),
+    );
     sqlite.exec(`
       INSERT INTO messages VALUES (
         'wrong-sender', 'iccid-1', '10010',
@@ -287,10 +313,12 @@ describe('carrier browser balance job protocol', () => {
       );
     `);
 
-    const response = await carrierWebBalanceHandler.otp(request(db, {
-      id: job.id,
-      runnerId: 'runner-1',
-    }));
+    const response = await carrierWebBalanceHandler.otp(
+      request(db, {
+        id: job.id,
+        runnerId: 'runner-1',
+      }),
+    );
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ code: '222222' });
@@ -298,63 +326,91 @@ describe('carrier browser balance job protocol', () => {
 
   test('stores a balance only for the task account', async () => {
     const job = await claim();
-    const mismatch = await carrierWebBalanceHandler.complete(request(db, {
-      id: job.id,
-      body: {
-        runner_id: 'runner-1', balance: 18.25, currency: 'CNY',
-        account_number: '+8618600000000',
-      },
-    }));
+    const mismatch = await carrierWebBalanceHandler.complete(
+      request(db, {
+        id: job.id,
+        body: {
+          runner_id: 'runner-1',
+          balance: 18.25,
+          currency: 'CNY',
+          account_number: '+8618600000000',
+        },
+      }),
+    );
     expect(mismatch.status).toBe(409);
 
-    const response = await carrierWebBalanceHandler.complete(request(db, {
-      id: job.id,
-      body: {
-        runner_id: 'runner-1', balance: 18.25, currency: 'CNY',
-        account_number: '+8617600419127',
-      },
-    }));
+    const response = await carrierWebBalanceHandler.complete(
+      request(db, {
+        id: job.id,
+        body: {
+          runner_id: 'runner-1',
+          balance: 18.25,
+          currency: 'CNY',
+          account_number: '+8617600419127',
+        },
+      }),
+    );
     expect(response.status).toBe(200);
-    expect(sqlite.query("SELECT status FROM sim_balance_checks WHERE id='check-1'").get().status)
-      .toBe('parsed');
-    expect(sqlite.query("SELECT value, currency FROM sim_balance_metrics WHERE check_id='check-1'").get())
-      .toEqual({ value: 18.25, currency: 'CNY' });
+    expect(
+      sqlite.query("SELECT status FROM sim_balance_checks WHERE id='check-1'").get().status,
+    ).toBe('parsed');
+    expect(
+      sqlite
+        .query("SELECT value, currency FROM sim_balance_metrics WHERE check_id='check-1'")
+        .get(),
+    ).toEqual({ value: 18.25, currency: 'CNY' });
   });
 
   test('stores both cash balance and account expiry for M1 prepaid', async () => {
     switchToM1();
     const job = await claim();
 
-    const partial = await carrierWebBalanceHandler.complete(request(db, {
-      id: job.id,
-      body: {
-        runner_id: 'runner-1',
-        balance: 9.97,
-        currency: 'SGD',
-        account_number: '+6590950236',
-      },
-    }));
+    const partial = await carrierWebBalanceHandler.complete(
+      request(db, {
+        id: job.id,
+        body: {
+          runner_id: 'runner-1',
+          balance: 9.97,
+          currency: 'SGD',
+          account_number: '+6590950236',
+        },
+      }),
+    );
     expect(partial.status).toBe(400);
-    expect(sqlite.query(`
+    expect(
+      sqlite
+        .query(
+          `
       SELECT COUNT(*) AS count FROM sim_balance_metrics WHERE check_id = 'check-1'
-    `).get().count).toBe(0);
+    `,
+        )
+        .get().count,
+    ).toBe(0);
 
-    const response = await carrierWebBalanceHandler.complete(request(db, {
-      id: job.id,
-      body: {
-        runner_id: 'runner-1',
-        balance: 9.97,
-        currency: 'SGD',
-        account_number: '+6590950236',
-        expires_at: '2026-09-20',
-      },
-    }));
+    const response = await carrierWebBalanceHandler.complete(
+      request(db, {
+        id: job.id,
+        body: {
+          runner_id: 'runner-1',
+          balance: 9.97,
+          currency: 'SGD',
+          account_number: '+6590950236',
+          expires_at: '2026-09-20',
+        },
+      }),
+    );
 
     expect(response.status).toBe(200);
-    expect(sqlite.query(`
+    expect(
+      sqlite
+        .query(
+          `
       SELECT metric_type, value, currency, expires_at
       FROM sim_balance_metrics WHERE check_id = 'check-1' ORDER BY metric_type
-    `).all()).toEqual([
+    `,
+        )
+        .all(),
+    ).toEqual([
       { metric_type: 'account_expiry', value: null, currency: null, expires_at: '2026-09-20' },
       { metric_type: 'cash_balance', value: 9.97, currency: 'SGD', expires_at: null },
     ]);
@@ -362,19 +418,25 @@ describe('carrier browser balance job protocol', () => {
 
   test('does not requeue a browser login after an OTP was requested', async () => {
     const job = await claim();
-    await carrierWebBalanceHandler.otpRequested(request(db, {
-      id: job.id,
-      body: { runner_id: 'runner-1' },
-    }));
-    const response = await carrierWebBalanceHandler.release(request(db, {
-      id: job.id,
-      body: { runner_id: 'runner-1', error: 'Browser closed' },
-    }));
+    await carrierWebBalanceHandler.otpRequested(
+      request(db, {
+        id: job.id,
+        body: { runner_id: 'runner-1' },
+      }),
+    );
+    const response = await carrierWebBalanceHandler.release(
+      request(db, {
+        id: job.id,
+        body: { runner_id: 'runner-1', error: 'Browser closed' },
+      }),
+    );
     expect(await response.json()).toEqual({ success: true, status: 'failed' });
-    expect(sqlite.query("SELECT status FROM sim_balance_web_jobs WHERE id='job-1'").get().status)
-      .toBe('failed');
-    expect(sqlite.query("SELECT status FROM sim_balance_checks WHERE id='check-1'").get().status)
-      .toBe('failed');
+    expect(
+      sqlite.query("SELECT status FROM sim_balance_web_jobs WHERE id='job-1'").get().status,
+    ).toBe('failed');
+    expect(
+      sqlite.query("SELECT status FROM sim_balance_checks WHERE id='check-1'").get().status,
+    ).toBe('failed');
   });
 
   test('reconciles a terminal web job whose parent check is still queued', async () => {
@@ -388,22 +450,40 @@ describe('carrier browser balance job protocol', () => {
     const result = await reconcileTerminalWebBalanceJobs(db);
 
     expect(result.reconciled).toBe(1);
-    expect(sqlite.query(`
+    expect(
+      sqlite
+        .query(
+          `
       SELECT status, completed_at, error FROM sim_balance_checks WHERE id = 'check-1'
-    `).get()).toEqual({
+    `,
+        )
+        .get(),
+    ).toEqual({
       status: 'failed',
       completed_at: expect.any(String),
       error: 'Runner stopped before completion',
     });
-    expect(sqlite.query(`
+    expect(
+      sqlite
+        .query(
+          `
       SELECT event_type, detail_json FROM sim_balance_web_events
       WHERE job_id = 'job-1' ORDER BY id DESC LIMIT 1
-    `).get()).toEqual({
+    `,
+        )
+        .get(),
+    ).toEqual({
       event_type: 'reconciled',
       detail_json: '{"web_job_status":"stopped"}',
     });
-    expect(sqlite.query(`
+    expect(
+      sqlite
+        .query(
+          `
       SELECT lease_owner, lease_expires_at FROM sim_balance_web_jobs WHERE id = 'job-1'
-    `).get()).toEqual({ lease_owner: null, lease_expires_at: null });
+    `,
+        )
+        .get(),
+    ).toEqual({ lease_owner: null, lease_expires_at: null });
   });
 });

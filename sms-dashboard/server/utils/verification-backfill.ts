@@ -45,7 +45,11 @@ function normaliseCode(value: unknown): string | null {
  */
 export async function reprocessVerificationPage(
   db: D1Database,
-  { after = 0, pageSize = DEFAULT_PAGE_SIZE, dryRun = false }: {
+  {
+    after = 0,
+    pageSize = DEFAULT_PAGE_SIZE,
+    dryRun = false,
+  }: {
     after?: unknown;
     pageSize?: unknown;
     dryRun?: boolean;
@@ -84,9 +88,7 @@ export async function reprocessVerificationPage(
        WHERE id = ?`,
     );
     await db.batch(
-      changes.map((change) =>
-        update.bind(change.next, FILTER_STATUS.PENDING, change.id),
-      ),
+      changes.map((change) => update.bind(change.next, FILTER_STATUS.PENDING, change.id)),
     );
   }
 

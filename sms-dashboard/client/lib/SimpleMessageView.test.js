@@ -76,7 +76,11 @@ describe('SimpleMessageView render budget', () => {
     globalThis.fetch = async () => Response.json({ keywords: [] });
     let toggles = 0;
     const view = render(SimpleMessageView, {
-      props: { onToggleFiltered: () => { toggles += 1; } },
+      props: {
+        onToggleFiltered: () => {
+          toggles += 1;
+        },
+      },
     });
 
     await fireEvent.click(view.getByRole('button', { name: '显示垃圾短信' }));
@@ -104,13 +108,15 @@ describe('SimpleMessageView render budget', () => {
     globalThis.fetch = async () => Response.json({ keywords: [] });
     const view = render(SimpleMessageView, {
       props: {
-        messages: [{
-          id: 'only-one-tree',
-          phone_number: '10086',
-          content: 'hello',
-          timestamp: '2026-08-26T00:00:00.000Z',
-          type: 'received',
-        }],
+        messages: [
+          {
+            id: 'only-one-tree',
+            phone_number: '10086',
+            content: 'hello',
+            timestamp: '2026-08-26T00:00:00.000Z',
+            type: 'received',
+          },
+        ],
       },
     });
 
@@ -135,7 +141,9 @@ describe('SimpleMessageView render budget', () => {
       props: {
         messages,
         hasMore: true,
-        onLoadMore: async () => { loads += 1; },
+        onLoadMore: async () => {
+          loads += 1;
+        },
       },
     });
 
@@ -171,11 +179,13 @@ describe('SimpleMessageView row activation', () => {
 
   test('opens the detail drawer when a row is clicked', async () => {
     let opened = null;
-    const view = renderList((m) => { opened = m; });
+    const view = renderList((m) => {
+      opened = m;
+    });
 
-    const rows = view.getAllByRole('button').filter(
-      (el) => el.tagName === 'DIV' && el.textContent.includes('100860011575')
-    );
+    const rows = view
+      .getAllByRole('button')
+      .filter((el) => el.tagName === 'DIV' && el.textContent.includes('100860011575'));
     expect(rows.length).toBeGreaterThan(0);
 
     await fireEvent.click(rows[0]);
@@ -184,11 +194,13 @@ describe('SimpleMessageView row activation', () => {
 
   test('opens the detail drawer on Enter for keyboard users', async () => {
     let opened = null;
-    const view = renderList((m) => { opened = m; });
+    const view = renderList((m) => {
+      opened = m;
+    });
 
-    const rows = view.getAllByRole('button').filter(
-      (el) => el.tagName === 'DIV' && el.textContent.includes('100860011575')
-    );
+    const rows = view
+      .getAllByRole('button')
+      .filter((el) => el.tagName === 'DIV' && el.textContent.includes('100860011575'));
     await fireEvent.keyDown(rows[0], { key: 'Enter' });
     expect(opened).toBe(message);
   });
@@ -198,11 +210,13 @@ describe('SimpleMessageView row activation', () => {
   // opens the drawer, which makes the primary interaction of the app feel broken.
   test('copying a verification code does NOT open the drawer', async () => {
     let opened = null;
-    const view = renderList((m) => { opened = m; });
+    const view = renderList((m) => {
+      opened = m;
+    });
 
-    const codeButtons = view.getAllByRole('button').filter(
-      (el) => el.tagName === 'BUTTON' && el.textContent.trim() === '345030'
-    );
+    const codeButtons = view
+      .getAllByRole('button')
+      .filter((el) => el.tagName === 'BUTTON' && el.textContent.trim() === '345030');
     expect(codeButtons.length).toBeGreaterThan(0);
 
     await fireEvent.click(codeButtons[0]);

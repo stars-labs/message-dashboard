@@ -25,7 +25,8 @@ class Auth0Service {
   user: AuthUser | null;
 
   constructor() {
-    this.baseUrl = import.meta.env.VITE_API_BASE_URL ||
+    this.baseUrl =
+      import.meta.env.VITE_API_BASE_URL ||
       (typeof window !== 'undefined' ? window.location.origin : '');
     this.user = null;
   }
@@ -44,7 +45,7 @@ class Auth0Service {
   async getUser(): Promise<AuthUser | null> {
     try {
       const response = await fetch(`${this.baseUrl}/api/auth/me`, {
-        credentials: 'same-origin'
+        credentials: 'same-origin',
       });
 
       if (response.ok) {
@@ -74,7 +75,7 @@ class Auth0Service {
   async authenticatedFetch(url: string, options: RequestInit = {}): Promise<Response> {
     const response = await fetch(url, {
       ...options,
-      credentials: 'same-origin'
+      credentials: 'same-origin',
     });
 
     if (response.status === 401) {

@@ -51,7 +51,10 @@ export interface BalanceCheckLike {
 
 const STATUS_META: Record<string, BalanceStatusMeta> = {
   queued: { label: '排队中', className: 'bg-stone-100 text-stone-600 border-stone-200' },
-  awaiting_response: { label: '等待回复', className: 'bg-amber-50 text-amber-700 border-amber-200' },
+  awaiting_response: {
+    label: '等待回复',
+    className: 'bg-amber-50 text-amber-700 border-amber-200',
+  },
   response_received: { label: '已收到回复', className: 'bg-sky-50 text-sky-700 border-sky-200' },
   skill_pending: { label: '等待 AI', className: 'bg-cyan-50 text-cyan-700 border-cyan-200' },
   skill_processing: { label: 'AI 判断中', className: 'bg-cyan-50 text-cyan-700 border-cyan-200' },
@@ -60,7 +63,10 @@ const STATUS_META: Record<string, BalanceStatusMeta> = {
   web_otp: { label: '等待登录码', className: 'bg-amber-50 text-amber-700 border-amber-200' },
   web_authenticating: { label: '正在登录', className: 'bg-sky-50 text-sky-700 border-sky-200' },
   web_querying: { label: '查询中', className: 'bg-sky-50 text-sky-700 border-sky-200' },
-  web_human_required: { label: '需要人工验证', className: 'bg-amber-50 text-amber-800 border-amber-300' },
+  web_human_required: {
+    label: '需要人工验证',
+    className: 'bg-amber-50 text-amber-800 border-amber-300',
+  },
   parsed: { label: '已解析', className: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
   failed: { label: '失败', className: 'bg-red-50 text-red-700 border-red-200' },
   timed_out: { label: '已超时', className: 'bg-stone-100 text-stone-600 border-stone-200' },
@@ -78,24 +84,30 @@ const METRIC_LABELS: Record<string, string> = {
 };
 
 export function getBalanceStatusMeta(status: string | null | undefined): BalanceStatusMeta {
-  return (status ? STATUS_META[status] : undefined) || {
-    label: status || '未知',
-    className: 'bg-stone-100 text-stone-600 border-stone-200',
-  };
+  return (
+    (status ? STATUS_META[status] : undefined) || {
+      label: status || '未知',
+      className: 'bg-stone-100 text-stone-600 border-stone-200',
+    }
+  );
 }
 
 export function getBalanceTimestamp(check: BalanceCheckLike | null | undefined): string | null {
   const conversation = getBalanceConversation(check);
-  return conversation.at(-1)?.timestamp
-    || check?.response_timestamp
-    || check?.completed_at
-    || check?.sent_at
-    || check?.outbound_timestamp
-    || check?.requested_at
-    || null;
+  return (
+    conversation.at(-1)?.timestamp ||
+    check?.response_timestamp ||
+    check?.completed_at ||
+    check?.sent_at ||
+    check?.outbound_timestamp ||
+    check?.requested_at ||
+    null
+  );
 }
 
-export function getBalanceConversation(check: BalanceCheckLike | null | undefined): BalanceConversationMessage[] {
+export function getBalanceConversation(
+  check: BalanceCheckLike | null | undefined,
+): BalanceConversationMessage[] {
   if (Array.isArray(check?.conversation) && check.conversation.length) {
     return check.conversation;
   }
@@ -123,13 +135,18 @@ export function getBalanceConversation(check: BalanceCheckLike | null | undefine
   return messages;
 }
 
-export function getLatestBalanceReply(check: BalanceCheckLike | null | undefined): BalanceConversationMessage | null {
-  return [...getBalanceConversation(check)]
-    .reverse()
-    .find((message) => message.type === 'received') || null;
+export function getLatestBalanceReply(
+  check: BalanceCheckLike | null | undefined,
+): BalanceConversationMessage | null {
+  return (
+    [...getBalanceConversation(check)].reverse().find((message) => message.type === 'received') ||
+    null
+  );
 }
 
-export function getCashBalance(check: BalanceCheckLike | null | undefined): BalanceMetricRow | null {
+export function getCashBalance(
+  check: BalanceCheckLike | null | undefined,
+): BalanceMetricRow | null {
   return check?.metrics?.find((metric) => metric.metric_type === 'cash_balance') || null;
 }
 

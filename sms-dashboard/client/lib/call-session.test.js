@@ -47,7 +47,11 @@ function fakePeerFactory(log, { connect = true } = {}) {
   };
 }
 
-function fakeDeps({ connectOffer = { type: 'offer', sdp: 'pull-offer' }, connect = true, dialError = null } = {}) {
+function fakeDeps({
+  connectOffer = { type: 'offer', sdp: 'pull-offer' },
+  connect = true,
+  dialError = null,
+} = {}) {
   const log = [];
   const stopped = [];
   const track = { kind: 'audio', stop: () => stopped.push(true) };
@@ -96,7 +100,15 @@ describe('call session negotiation', () => {
       ['pc', [{ urls: 'turn:x' }]],
       ['addTransceiver', 'audio', 'sendrecv'],
       ['setLocal', 'offer'],
-      ['api.dial', { iccid: '8965', number: '+6592953543', offer: { type: 'offer', sdp: 'local-offer' }, mid: '0' }],
+      [
+        'api.dial',
+        {
+          iccid: '8965',
+          number: '+6592953543',
+          offer: { type: 'offer', sdp: 'local-offer' },
+          mid: '0',
+        },
+      ],
       ['setRemote', 'answer', 'sfu-answer'],
       ['api.connect', 'c'],
       ['setRemote', 'offer', 'pull-offer'],
@@ -145,7 +157,9 @@ describe('call session teardown', () => {
     const { deps, log, stopped } = fakeDeps({ connect: false });
     const session = createCallSession(deps);
 
-    await expect(session.dial({ iccid: '8965', number: '+6592953543' })).rejects.toThrow('音频连接超时');
+    await expect(session.dial({ iccid: '8965', number: '+6592953543' })).rejects.toThrow(
+      '音频连接超时',
+    );
 
     expect(stopped).toHaveLength(1);
     expect(log.at(-1)).toEqual(['api.hangup', 'c']);
@@ -153,10 +167,14 @@ describe('call session teardown', () => {
   });
 
   test('a refused dial releases local media without leaving a peer open', async () => {
-    const { deps, log, stopped } = fakeDeps({ dialError: new Error('Another call is already active') });
+    const { deps, log, stopped } = fakeDeps({
+      dialError: new Error('Another call is already active'),
+    });
     const session = createCallSession(deps);
 
-    await expect(session.dial({ iccid: '8965', number: '+6592953543' })).rejects.toThrow('Another call');
+    await expect(session.dial({ iccid: '8965', number: '+6592953543' })).rejects.toThrow(
+      'Another call',
+    );
 
     expect(stopped).toHaveLength(1);
     expect(log).toContainEqual(['close']);
@@ -172,7 +190,9 @@ describe('call session teardown', () => {
       return original(args);
     };
 
-    await expect(session.dial({ iccid: '8965', number: '+6592953543' })).rejects.toThrow('通话已结束');
+    await expect(session.dial({ iccid: '8965', number: '+6592953543' })).rejects.toThrow(
+      '通话已结束',
+    );
 
     expect(log.some(([name]) => name === 'api.hangup')).toBe(false);
     expect(log.some(([name]) => name === 'api.connect')).toBe(false);

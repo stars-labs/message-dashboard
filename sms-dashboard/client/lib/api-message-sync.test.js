@@ -101,7 +101,13 @@ describe('message synchronization cursors', () => {
     }));
     const cursor = { created_at: '2026-09-02 02:00:00', id: 'message-99' };
     const urls = installResponses([
-      page({ data: firstMessages, serverTime: until, incremental: true, hasMore: true, nextCursor: cursor }),
+      page({
+        data: firstMessages,
+        serverTime: until,
+        incremental: true,
+        hasMore: true,
+        nextCursor: cursor,
+      }),
       page({
         data: [{ id: 'message-100', timestamp: '2026-09-02T01:30:00.000Z' }],
         serverTime: until,
@@ -140,7 +146,6 @@ describe('message synchronization cursors', () => {
     expect(urls[2].searchParams.get('since')).toBe(resetTime);
   });
 });
-
 
 describe('outbound status updates', () => {
   test('a refreshed row replaces the cached copy instead of being dropped as a duplicate', async () => {

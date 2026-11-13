@@ -109,10 +109,7 @@ export const usersHandler = {
 
     // Allow-list, not a blocklist: only these two strings can ever be assigned.
     if (typeof role !== 'string' || !knownRoles.includes(role)) {
-      return json(
-        { success: false, error: `role must be one of: ${knownRoles.join(', ')}` },
-        400,
-      );
+      return json({ success: false, error: `role must be one of: ${knownRoles.join(', ')}` }, 400);
     }
 
     // Self-change guard. Blocks an admin demoting themselves into lockout, and means

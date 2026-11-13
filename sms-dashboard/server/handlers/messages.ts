@@ -39,7 +39,12 @@ interface DeviceSummary {
  */
 async function outboundStatusChanges(
   db: D1Database,
-  { since, until, phoneIccid, limit }: {
+  {
+    since,
+    until,
+    phoneIccid,
+    limit,
+  }: {
     since: string;
     until: string;
     phoneIccid: string | null;
@@ -60,13 +65,18 @@ async function outboundStatusChanges(
   }
   params.push(limit);
 
-  const result = await db.prepare(`
+  const result = await db
+    .prepare(
+      `
     SELECT m.*
     FROM messages m
     WHERE ${conditions.join(' AND ')}
     ORDER BY m.updated_at DESC
     LIMIT ?
-  `).bind(...params).all<MessageRow>();
+  `,
+    )
+    .bind(...params)
+    .all<MessageRow>();
   return result.results || [];
 }
 
@@ -77,11 +87,16 @@ async function enrichMessagePage(db: D1Database, messages: MessageRow[]) {
   for (let start = 0; start < iccids.length; start += D1_MAX_BOUND_PARAMETERS) {
     const chunk = iccids.slice(start, start + D1_MAX_BOUND_PARAMETERS);
     const placeholders = chunk.map(() => '?').join(', ');
-    const result = await db.prepare(`
+    const result = await db
+      .prepare(
+        `
       SELECT iccid, number, carrier, sim_status, sim_index, country
       FROM device_view
       WHERE iccid IN (${placeholders})
-    `).bind(...chunk).all<DeviceSummary>();
+    `,
+      )
+      .bind(...chunk)
+      .all<DeviceSummary>();
     for (const device of result.results) devicesByIccid.set(device.iccid, device);
   }
 
@@ -121,9 +136,7 @@ export const messagesHandler = {
     const phoneIccid = url.searchParams.get('phone_iccid');
     const requestedLimit = Number.parseInt(url.searchParams.get('limit') || '50', 10);
     const requestedOffset = Number.parseInt(url.searchParams.get('offset') || '0', 10);
-    const limit = Number.isFinite(requestedLimit)
-      ? Math.min(Math.max(requestedLimit, 1), 500)
-      : 50;
+    const limit = Number.isFinite(requestedLimit) ? Math.min(Math.max(requestedLimit, 1), 500) : 50;
     const offset = Number.isFinite(requestedOffset) ? Math.max(requestedOffset, 0) : 0;
     const since = url.searchParams.get('since');
     const isIncremental = since !== null;
@@ -153,13 +166,18 @@ export const messagesHandler = {
           return json({ success: false, error: 'Invalid since timestamp' }, 400);
         }
         if (requestedOffset !== 0) {
-          return json({ success: false, error: 'Incremental sync uses a keyset cursor, not offset' }, 400);
+          return json(
+            { success: false, error: 'Incremental sync uses a keyset cursor, not offset' },
+            400,
+          );
         }
         if (requestedUntil && Number.isNaN(Date.parse(requestedUntil))) {
           return json({ success: false, error: 'Invalid until timestamp' }, 400);
         }
-        if ((beforeCreatedAt === null) !== (beforeId === null)
-            || (beforeCreatedAt && Number.isNaN(Date.parse(beforeCreatedAt)))) {
+        if (
+          (beforeCreatedAt === null) !== (beforeId === null) ||
+          (beforeCreatedAt && Number.isNaN(Date.parse(beforeCreatedAt)))
+        ) {
           return json({ success: false, error: 'Invalid incremental page cursor' }, 400);
         }
         const syncUntil = requestedUntil || serverTime;
@@ -196,7 +214,9 @@ export const messagesHandler = {
       // unbounded COUNT/SUM over message history.
       listParams.push(limit + 1, offset);
 
-      const messagesResult = await env.DB.prepare(query).bind(...listParams).all<MessageRow>();
+      const messagesResult = await env.DB.prepare(query)
+        .bind(...listParams)
+        .all<MessageRow>();
       const rawMessages = messagesResult.results;
       const hasMore = rawMessages.length > limit;
       const pageRows = rawMessages.slice(0, limit);
@@ -207,14 +227,15 @@ export const messagesHandler = {
       // 等待发送 forever. Ask separately for outbound rows whose updated_at moved
       // inside this window but which are too old for the page above. Outbound
       // volume is low and the window is the poll interval, so this stays small.
-      const refreshRows = isIncremental && since
-        ? await outboundStatusChanges(env.DB, {
-            since,
-            until: requestedUntil || serverTime,
-            phoneIccid,
-            limit: OUTBOUND_REFRESH_LIMIT,
-          })
-        : [];
+      const refreshRows =
+        isIncremental && since
+          ? await outboundStatusChanges(env.DB, {
+              since,
+              until: requestedUntil || serverTime,
+              phoneIccid,
+              limit: OUTBOUND_REFRESH_LIMIT,
+            })
+          : [];
       const seenIds = new Set(pageRows.map((row) => row.id));
       const extraRows = refreshRows.filter((row) => !seenIds.has(row.id));
       const messages = await enrichMessagePage(env.DB, [...pageRows, ...extraRows]);
@@ -225,9 +246,10 @@ export const messagesHandler = {
         offset,
         has_more: hasMore,
         next_offset: !isIncremental && hasMore ? offset + limit : null,
-        next_cursor: isIncremental && hasMore && lastPageRow
-          ? { created_at: lastPageRow.created_at, id: lastPageRow.id }
-          : null,
+        next_cursor:
+          isIncremental && hasMore && lastPageRow
+            ? { created_at: lastPageRow.created_at, id: lastPageRow.id }
+            : null,
       };
 
       return json({
@@ -235,7 +257,7 @@ export const messagesHandler = {
         data: messages,
         pagination,
         sync: {
-          server_time: isIncremental ? (requestedUntil || serverTime) : serverTime,
+          server_time: isIncremental ? requestedUntil || serverTime : serverTime,
           is_incremental: isIncremental,
           // Rows already known to the client whose status changed.
           status_refreshed: extraRows.length,
@@ -253,9 +275,13 @@ export const messagesHandler = {
     const messageId = request.params?.id;
 
     try {
-      const message = await env.DB.prepare(`
+      const message = await env.DB.prepare(
+        `
         SELECT * FROM messages WHERE id = ?
-      `).bind(messageId).first<MessageRow>();
+      `,
+      )
+        .bind(messageId)
+        .first<MessageRow>();
 
       if (!message) {
         return json({ success: false, error: 'Message not found' }, 404);
@@ -278,10 +304,13 @@ export const messagesHandler = {
 
       // Validate input
       if (!phone_iccid || !body.recipient || !content) {
-        return json({
-          success: false,
-          error: 'Missing required fields: phone_iccid, recipient, and content are required',
-        }, 400);
+        return json(
+          {
+            success: false,
+            error: 'Missing required fields: phone_iccid, recipient, and content are required',
+          },
+          400,
+        );
       }
 
       // The recipient ends up inside an `AT+CMGS="..."` command on the daemon, where a
@@ -298,43 +327,54 @@ export const messagesHandler = {
       const phoneIccid = String(phone_iccid);
 
       // Get phone details - check for active statuses
-      const phone = await env.DB.prepare(`
+      const phone = await env.DB.prepare(
+        `
         SELECT * FROM device_view WHERE iccid = ? AND sim_status = 'active'
-      `).bind(phoneIccid).first<{ number: string | null }>();
+      `,
+      )
+        .bind(phoneIccid)
+        .first<{ number: string | null }>();
 
       if (!phone) {
         // Check if phone exists with any status
-        const anyPhone = await env.DB.prepare(`
+        const anyPhone = await env.DB.prepare(
+          `
           SELECT iccid, sim_status FROM device_view WHERE iccid = ?
-        `).bind(phoneIccid).first<{ iccid: string; sim_status: string | null }>();
+        `,
+        )
+          .bind(phoneIccid)
+          .first<{ iccid: string; sim_status: string | null }>();
 
         if (anyPhone) {
-          return json({
-            success: false,
-            error: `Phone found but status is '${anyPhone.sim_status}' (not active)`,
-          }, 400);
+          return json(
+            {
+              success: false,
+              error: `Phone found but status is '${anyPhone.sim_status}' (not active)`,
+            },
+            400,
+          );
         }
-        return json({
-          success: false,
-          error: `Phone with ICCID '${phoneIccid}' not found in database`,
-        }, 400);
+        return json(
+          {
+            success: false,
+            error: `Phone with ICCID '${phoneIccid}' not found in database`,
+          },
+          400,
+        );
       }
 
       // Create message record - simple and clean
       const messageId = `msg-sent-${nanoid()}`;
       const timestamp = new Date().toISOString();
 
-      await env.DB.prepare(`
+      await env.DB.prepare(
+        `
         INSERT INTO messages (id, phone_iccid, phone_number, content, timestamp, type, recipient, status)
         VALUES (?, ?, ?, ?, ?, 'sent', ?, 'sending')
-      `).bind(
-        messageId,
-        phoneIccid,
-        phone.number,
-        String(content),
-        timestamp,
-        recipient,
-      ).run();
+      `,
+      )
+        .bind(messageId, phoneIccid, phone.number, String(content), timestamp, recipient)
+        .run();
 
       // Note: SMS sending is now handled by daemon polling /api/control/pending-sms
       // The daemon will pick up this message and send it via real SMS network

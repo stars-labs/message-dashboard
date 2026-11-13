@@ -21,8 +21,8 @@ describe('hasLabelledCode — Chinese labels', () => {
     ['动态码 4821'],
     ['动态密码：620914'],
     ['短信验证码：112233，2分钟内有效'],
-    ['您的驗證碼是 445566'],   // traditional — Singapore SIMs see this
-    ['123456 是您的验证码'],    // reversed order
+    ['您的驗證碼是 445566'], // traditional — Singapore SIMs see this
+    ['123456 是您的验证码'], // reversed order
   ])('detects %j', (content) => {
     expect(hasLabelledCode(content)).toBe(true);
   });
@@ -96,12 +96,20 @@ describe('hasLabelledCode — must NOT fire on marketing text', () => {
   test.each([
     // Mentions the word but carries no code. These are the 4 anti-fraud
     // broadcasts found in the real message table.
-    ['【广州市反诈中心联合广州联通】提醒您:接到机票退改签的电话或短信，请务必通过官方渠道进行核实，切勿泄露银行卡号、支付密码、验证码等个人信息。'],
-    ['公益短信：【郴州公安提醒】如遇客服来电，要求办理退款、理赔等，一定要通过官方途径核查！不得在网站上填写银行卡号、密码、验证码等信息'],
+    [
+      '【广州市反诈中心联合广州联通】提醒您:接到机票退改签的电话或短信，请务必通过官方渠道进行核实，切勿泄露银行卡号、支付密码、验证码等个人信息。',
+    ],
+    [
+      '公益短信：【郴州公安提醒】如遇客服来电，要求办理退款、理赔等，一定要通过官方途径核查！不得在网站上填写银行卡号、密码、验证码等信息',
+    ],
     ['短信验证码的请求，做好信息安全防范！联通好服务，用心为客户【上海联通】'],
     // Real marketing bodies with plenty of digits but no labelled code.
-    ['【中国联通】尊敬的用户，您在中国联通订购的"广东在网得24个月沃视频月卡优惠"(方案编号: 25GD300965)，将于2026-08-31到期。'],
-    ['外交部领保中心祝您健康平安！当地报警电话：999。外交部全球领事保护与服务应急热线+86-10-12308/65612308。'],
+    [
+      '【中国联通】尊敬的用户，您在中国联通订购的"广东在网得24个月沃视频月卡优惠"(方案编号: 25GD300965)，将于2026-08-31到期。',
+    ],
+    [
+      '外交部领保中心祝您健康平安！当地报警电话：999。外交部全球领事保护与服务应急热线+86-10-12308/65612308。',
+    ],
     ['中国海关提示，请勿携带下列物品进入中国境内'],
     ['【12306】刘洋购票成功，8月5日G6588次，福田站19:59开。'],
     // Japanese marketing / non-OTP numbers must not match.
@@ -130,9 +138,11 @@ describe('extractVerificationCode', () => {
   });
 
   test('preserves the separator in a WhatsApp verification code', () => {
-    expect(extractVerificationCode(
-      "<#> Your WhatsApp code: 367-140 Don't share this code with others 4sgLq1p5sV6"
-    )).toBe('367-140');
+    expect(
+      extractVerificationCode(
+        "<#> Your WhatsApp code: 367-140 Don't share this code with others 4sgLq1p5sV6",
+      ),
+    ).toBe('367-140');
   });
 
   test('extracts the M1 selfcare login OTP', () => {

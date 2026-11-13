@@ -49,7 +49,9 @@ function dbStub() {
 function mockAuth0({
   roles = ['viewer'],
   failOn = null,
-  users = [{ user_id: 'auth0|1', email: 'a@poloniex.com', name: 'A', last_login: null, logins_count: 3 }],
+  users = [
+    { user_id: 'auth0|1', email: 'a@poloniex.com', name: 'A', last_login: null, logins_count: 3 },
+  ],
   members = { rol_viewer: ['auth0|1'], rol_admin: [] },
   roleNames = { admin: 'admin', viewer: 'viewer' },
 } = {}) {
@@ -154,7 +156,10 @@ describe('GET /api/users', () => {
       email: `u${i}@poloniex.com`,
     }));
 
-    mockAuth0({ users: many, members: { rol_viewer: many.slice(0, 30).map((u) => u.user_id), rol_admin: [] } });
+    mockAuth0({
+      users: many,
+      members: { rol_viewer: many.slice(0, 30).map((u) => u.user_id), rol_admin: [] },
+    });
 
     const body = await (await usersHandler.list(request())).json();
     expect(body.users).toHaveLength(60);
@@ -236,7 +241,11 @@ describe('PUT /api/users/:id/role — role allow-list', () => {
   test('rejects a non-JSON body', async () => {
     mockAuth0();
     const res = await usersHandler.setRole(
-      request({ json: async () => { throw new Error('not json'); } })
+      request({
+        json: async () => {
+          throw new Error('not json');
+        },
+      }),
     );
     expect(res.status).toBe(400);
   });
@@ -253,7 +262,7 @@ describe('PUT /api/users/:id/role — self-change guard', () => {
     mockAuth0();
 
     const res = await usersHandler.setRole(
-      request({ params: { id: 'auth0|admin' }, json: async () => ({ role: 'viewer' }) })
+      request({ params: { id: 'auth0|admin' }, json: async () => ({ role: 'viewer' }) }),
     );
 
     expect(res.status).toBe(403);
@@ -269,7 +278,7 @@ describe('PUT /api/users/:id/role — self-change guard', () => {
         user: { id: 'auth0|self', email: 'v@poloniex.com', roles: ['viewer'] },
         params: { id: 'auth0|self' },
         json: async () => ({ role: 'admin' }),
-      })
+      }),
     );
     expect(res.status).toBe(403);
   });

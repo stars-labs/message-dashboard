@@ -118,19 +118,22 @@ interface Endpoint {
 
 /** Route API method names to HTTP endpoints */
 const httpEndpoints = {
-    'getPhones': { url: '/api/phones', method: 'GET' },
-    'getMessages': { url: '/api/messages', method: 'GET' },
-    'getBalanceChecks': { url: '/api/balance-checks', method: 'GET' },
-    'sendMessage': { url: '/api/messages/send', method: 'POST' },
-    'getUser': { url: '/api/auth/me', method: 'GET' },
-    'listIccidMappings': { url: '/api/iccid-mappings', method: 'GET' },
-    'getIccidMapping': { url: (params) => `/api/iccid-mappings/${params.id}`, method: 'GET' },
-    'getIccidMappingByIccid': { url: (params) => `/api/iccid-mappings/by-iccid/${params.iccid}`, method: 'GET' },
-    'createIccidMapping': { url: '/api/iccid-mappings', method: 'POST' },
-    'updateIccidMapping': { url: (params) => `/api/iccid-mappings/${params.id}`, method: 'PUT' },
-    'deleteIccidMapping': { url: (params) => `/api/iccid-mappings/${params.id}`, method: 'DELETE' },
-    'bulkImportIccidMappings': { url: '/api/iccid-mappings/bulk', method: 'POST' },
-  } satisfies Record<string, Endpoint>;
+  getPhones: { url: '/api/phones', method: 'GET' },
+  getMessages: { url: '/api/messages', method: 'GET' },
+  getBalanceChecks: { url: '/api/balance-checks', method: 'GET' },
+  sendMessage: { url: '/api/messages/send', method: 'POST' },
+  getUser: { url: '/api/auth/me', method: 'GET' },
+  listIccidMappings: { url: '/api/iccid-mappings', method: 'GET' },
+  getIccidMapping: { url: (params) => `/api/iccid-mappings/${params.id}`, method: 'GET' },
+  getIccidMappingByIccid: {
+    url: (params) => `/api/iccid-mappings/by-iccid/${params.iccid}`,
+    method: 'GET',
+  },
+  createIccidMapping: { url: '/api/iccid-mappings', method: 'POST' },
+  updateIccidMapping: { url: (params) => `/api/iccid-mappings/${params.id}`, method: 'PUT' },
+  deleteIccidMapping: { url: (params) => `/api/iccid-mappings/${params.id}`, method: 'DELETE' },
+  bulkImportIccidMappings: { url: '/api/iccid-mappings/bulk', method: 'POST' },
+} satisfies Record<string, Endpoint>;
 
 /** A method name the endpoint table actually contains. */
 type ApiMethod = keyof typeof httpEndpoints;
@@ -140,26 +143,25 @@ async function apiRequest(method: ApiMethod, data: EndpointParams = {}): Promise
   if (!endpoint) {
     throw new Error(`Unknown API method: ${method}`);
   }
-  
-  const url = typeof endpoint.url === 'function'
-    ? endpoint.url(data as Record<string, string | number | undefined>)
-    : endpoint.url;
+
+  const url =
+    typeof endpoint.url === 'function'
+      ? endpoint.url(data as Record<string, string | number | undefined>)
+      : endpoint.url;
   const options: RequestInit = {
     method: endpoint.method,
   };
-  
+
   if (endpoint.method === 'GET' && data && Object.keys(data).length > 0) {
     // Add query params for GET requests
-    const query = Object.fromEntries(
-      Object.entries(data).map(([k, v]) => [k, String(v)]),
-    );
+    const query = Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v)]));
     const queryString = new URLSearchParams(query).toString();
     return fetchWithAuth(`${url}?${queryString}`, options);
   } else if (endpoint.method !== 'GET') {
     // Add body for non-GET requests
     options.body = JSON.stringify(data);
   }
-  
+
   return fetchWithAuth(url, options);
 }
 
@@ -174,34 +176,34 @@ export const api = {
     },
     async prune(maxPerPhone = 200) {
       return await messageCache.pruneCache(maxPerPhone);
-    }
+    },
   },
 
   // Generic HTTP methods for AI features
   async get(url: string, options: RequestInit = {}) {
     return await fetchWithAuth(url, { ...options, method: 'GET' });
   },
-  
+
   async post(url: string, data: unknown = {}, options: RequestInit = {}) {
     return await fetchWithAuth(url, {
       ...options,
       method: 'POST',
-      body: JSON.stringify(data)
+      body: JSON.stringify(data),
     });
   },
-  
+
   async put(url: string, data: unknown = {}, options: RequestInit = {}) {
     return await fetchWithAuth(url, {
       ...options,
       method: 'PUT',
-      body: JSON.stringify(data)
+      body: JSON.stringify(data),
     });
   },
-  
+
   async delete(url: string, options: RequestInit = {}) {
     return await fetchWithAuth(url, { ...options, method: 'DELETE' });
   },
-  
+
   // Auth
   async getUser() {
     try {
@@ -211,15 +213,15 @@ export const api = {
       return await fetchWithAuth('/api/auth/me');
     }
   },
-  
+
   async logout() {
     auth.logout();
   },
-  
+
   // No getAuthToken(): the session is an HttpOnly cookie that JavaScript cannot read,
   // and callers do not need it — fetch sends it automatically.
   // See docs/SECURITY-REVIEW.md finding 4.
-  
+
   // Phones
   async getPhones() {
     try {
@@ -231,13 +233,14 @@ export const api = {
       return [];
     }
   },
-  
+
   // Messages - with client-side caching for reduced D1 reads
   async getMessages(params: GetMessagesParams = {}): Promise<ApiMessagePage> {
     const phoneIccid = params.phone_iccid || null;
-    const includeFiltered = params.include_filtered === true
-      || params.include_filtered === 1
-      || params.include_filtered === '1';
+    const includeFiltered =
+      params.include_filtered === true ||
+      params.include_filtered === 1 ||
+      params.include_filtered === '1';
     const cacheKey = includeFiltered
       ? `filtered:${phoneIccid || 'global'}`
       : phoneIccid || 'global';
@@ -252,8 +255,11 @@ export const api = {
 
       if (!forceRefresh && persistentCacheEnabled) {
         try {
-          cachedMessages = await messageCache.getCachedMessages(phoneIccid, params.limit || 500) as ApiMessage[];
-          lastSyncTime = await messageCache.getLastSyncTime(cacheKey) as string | null;
+          cachedMessages = (await messageCache.getCachedMessages(
+            phoneIccid,
+            params.limit || 500,
+          )) as ApiMessage[];
+          lastSyncTime = (await messageCache.getLastSyncTime(cacheKey)) as string | null;
         } catch (cacheErr) {
           console.warn('[API] Cache read failed:', cacheErr);
         }
@@ -265,7 +271,11 @@ export const api = {
       }
 
       // Step 2: Fetch new messages from API (incremental if we have cache)
-      const { force_refresh: _forceRefresh, reset_sync: _resetSync, ...apiParams } = params as GetMessagesParams;
+      const {
+        force_refresh: _forceRefresh,
+        reset_sync: _resetSync,
+        ...apiParams
+      } = params as GetMessagesParams;
       if (lastSyncTime && !forceRefresh) {
         apiParams.since = lastSyncTime;
         // Reduce limit for incremental sync since we're only getting new messages
@@ -311,7 +321,6 @@ export const api = {
         const newMessages: ApiMessage[] = response.data || [];
         const serverTime = response.sync?.server_time || new Date().toISOString();
 
-
         // Step 3: Cache new messages
         if (persistentCacheEnabled && newMessages.length > 0) {
           try {
@@ -343,18 +352,17 @@ export const api = {
         // changed (已发送 / 发送失败), and dropping them as "duplicates" was why a
         // sent SMS stayed at 等待发送 for the life of the cache.
         if (response.sync?.is_incremental && cachedMessages.length > 0) {
-          const existingIds = new Set(cachedMessages.map(m => m.id));
-          const uniqueNewMessages = newMessages.filter(m => !existingIds.has(m.id));
-          const freshById = new Map(newMessages.map(m => [m.id, m]));
+          const existingIds = new Set(cachedMessages.map((m) => m.id));
+          const uniqueNewMessages = newMessages.filter((m) => !existingIds.has(m.id));
+          const freshById = new Map(newMessages.map((m) => [m.id, m]));
           const merged = [
             ...uniqueNewMessages,
-            ...cachedMessages.map(m => freshById.get(m.id) ?? m),
+            ...cachedMessages.map((m) => freshById.get(m.id) ?? m),
           ];
           // Sort by timestamp descending and limit
           merged.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
           const limitedMerged = merged.slice(0, params.limit || 500);
           const requestedLimit = params.limit || 500;
-
 
           return {
             success: true,
@@ -363,10 +371,14 @@ export const api = {
               ...response.pagination,
               // An incremental response only describes newly ingested rows. A
               // full local page may still have older server pages behind it.
-              has_more: response.pagination?.has_more === true
-                || cachedMessages.length >= requestedLimit,
+              has_more:
+                response.pagination?.has_more === true || cachedMessages.length >= requestedLimit,
             },
-            sync: { ...response.sync, from_cache: cachedMessages.length, new_count: uniqueNewMessages.length }
+            sync: {
+              ...response.sync,
+              from_cache: cachedMessages.length,
+              new_count: uniqueNewMessages.length,
+            },
           };
         }
 
@@ -388,7 +400,7 @@ export const api = {
             offset: 0,
             has_more: cachedMessages.length >= (params.limit || 500),
           },
-          sync: { from_cache: cachedMessages.length, is_offline: true }
+          sync: { from_cache: cachedMessages.length, is_offline: true },
         };
       }
 
@@ -400,7 +412,10 @@ export const api = {
 
       // Try to return cached data on error
       try {
-        const cachedMessages = await messageCache.getCachedMessages(phoneIccid, params.limit || 500) as ApiMessage[];
+        const cachedMessages = (await messageCache.getCachedMessages(
+          phoneIccid,
+          params.limit || 500,
+        )) as ApiMessage[];
         if (cachedMessages.length > 0) {
           return {
             success: true,
@@ -410,7 +425,7 @@ export const api = {
               offset: 0,
               has_more: cachedMessages.length >= (params.limit || 500),
             },
-            sync: { from_cache: cachedMessages.length, is_offline: true }
+            sync: { from_cache: cachedMessages.length, is_offline: true },
           };
         }
       } catch (cacheErr) {
@@ -430,7 +445,7 @@ export const api = {
       return [];
     }
   },
-  
+
   async sendMessage(data: unknown) {
     try {
       return await apiRequest('sendMessage', data as EndpointParams);
@@ -439,7 +454,7 @@ export const api = {
       throw error;
     }
   },
-  
+
   // ICCID Mappings
   iccidMappings: {
     async list(params: EndpointParams = {}) {
@@ -451,7 +466,7 @@ export const api = {
         return await fetchWithAuth(`/api/iccid-mappings?${query}`);
       }
     },
-    
+
     async get(id: string) {
       try {
         return await apiRequest('getIccidMapping', { id });
@@ -460,7 +475,7 @@ export const api = {
         return await fetchWithAuth(`/api/iccid-mappings/${id}`);
       }
     },
-    
+
     async getByIccid(iccid: string) {
       try {
         return await apiRequest('getIccidMappingByIccid', { iccid });
@@ -469,7 +484,7 @@ export const api = {
         return await fetchWithAuth(`/api/iccid-mappings/by-iccid/${iccid}`);
       }
     },
-    
+
     async create(data: unknown) {
       try {
         return await apiRequest('createIccidMapping', data as EndpointParams);
@@ -481,7 +496,7 @@ export const api = {
         });
       }
     },
-    
+
     async update(id: string, data: Record<string, unknown>) {
       try {
         return await apiRequest('updateIccidMapping', { id, ...data } as EndpointParams);
@@ -493,7 +508,7 @@ export const api = {
         });
       }
     },
-    
+
     async delete(id: string) {
       try {
         return await apiRequest('deleteIccidMapping', { id });
@@ -504,7 +519,7 @@ export const api = {
         });
       }
     },
-    
+
     async bulkImport(data: unknown) {
       try {
         return await apiRequest('bulkImportIccidMappings', data as EndpointParams);
@@ -515,8 +530,8 @@ export const api = {
           body: JSON.stringify(data),
         });
       }
-    }
-  }
+    },
+  },
 };
 
 // Nothing to pick up from the URL any more: the login callback delivers the session as

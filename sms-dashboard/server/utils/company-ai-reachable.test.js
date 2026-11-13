@@ -38,8 +38,9 @@ describe('company AI liveness probe', () => {
   });
 
   test('treats a connection failure as unreachable', async () => {
-    expect(await companyAIReachable('https://ai.example.com/api/cc', stubFetch(0, { throws: true })))
-      .toBe(false);
+    expect(
+      await companyAIReachable('https://ai.example.com/api/cc', stubFetch(0, { throws: true })),
+    ).toBe(false);
   });
 
   test('tolerates a trailing slash on the configured base URL', async () => {
@@ -55,7 +56,9 @@ describe('company AI liveness probe', () => {
     const fetchImpl = async (url, options) => {
       const started = Date.now();
       const signal = options.signal;
-      const onAbort = () => { abortedAt = Date.now() - started; };
+      const onAbort = () => {
+        abortedAt = Date.now() - started;
+      };
       signal.addEventListener('abort', onAbort, { once: true });
       // Outlast a 4s gateway response, then clean up.
       await new Promise((resolve) => setTimeout(resolve, 4_000));

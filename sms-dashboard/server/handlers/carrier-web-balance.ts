@@ -108,9 +108,9 @@ function validIsoDate(value: unknown): boolean {
   if (!match) return false;
   const [year, month, day] = match.slice(1).map(Number);
   const date = new Date(Date.UTC(year, month - 1, day));
-  return date.getUTCFullYear() === year
-    && date.getUTCMonth() === month - 1
-    && date.getUTCDate() === day;
+  return (
+    date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
+  );
 }
 
 function expectedSenderMatches(rawSender: unknown, expectedSendersJson: unknown): boolean {
@@ -129,7 +129,9 @@ function leaseIsActive(job: WebJob | null, runnerId: string): boolean {
 }
 
 async function loadJob(db: D1Database, id: string | undefined): Promise<WebJob | null> {
-  return db.prepare(`
+  return db
+    .prepare(
+      `
     SELECT
       j.*, c.sim_iccid, c.status AS check_status, c.profile_id,
       c.requested_by_subject,
@@ -141,7 +143,10 @@ async function loadJob(db: D1Database, id: string | undefined): Promise<WebJob |
     JOIN sim_balance_profiles p ON p.id = c.profile_id
     LEFT JOIN device_view dv ON dv.iccid = c.sim_iccid
     WHERE j.id = ?
-  `).bind(id).first<WebJob>();
+  `,
+    )
+    .bind(id)
+    .first<WebJob>();
 }
 
 function eventStatement(
@@ -150,22 +155,32 @@ function eventStatement(
   eventType: string,
   detail: Record<string, unknown> = {},
 ): D1PreparedStatement {
-  return db.prepare(`
+  return db
+    .prepare(
+      `
     INSERT INTO sim_balance_web_events (job_id, event_type, detail_json)
     VALUES (?, ?, ?)
-  `).bind(jobId, eventType, JSON.stringify(detail));
+  `,
+    )
+    .bind(jobId, eventType, JSON.stringify(detail));
 }
 
 export async function reconcileTerminalWebBalanceJobs(db: D1Database) {
   const results = await db.batch([
-    db.prepare(`
+    db
+      .prepare(
+        `
       INSERT INTO sim_balance_web_events (job_id, event_type, detail_json)
       SELECT j.id, 'reconciled', json_object('web_job_status', j.status)
       FROM sim_balance_web_jobs j
       JOIN sim_balance_checks c ON c.id = j.check_id
       WHERE c.status = 'queued' AND j.status IN ('failed', 'stopped')
-    `).bind(),
-    db.prepare(`
+    `,
+      )
+      .bind(),
+    db
+      .prepare(
+        `
       UPDATE sim_balance_checks
       SET status = 'failed', completed_at = CURRENT_TIMESTAMP,
           error = COALESCE((
@@ -179,23 +194,35 @@ export async function reconcileTerminalWebBalanceJobs(db: D1Database) {
         SELECT check_id FROM sim_balance_web_jobs
         WHERE status IN ('failed', 'stopped')
       )
-    `).bind(),
-    db.prepare(`
+    `,
+      )
+      .bind(),
+    db
+      .prepare(
+        `
       UPDATE sim_balance_web_jobs
       SET lease_owner = NULL, lease_expires_at = NULL,
           updated_at = CURRENT_TIMESTAMP
       WHERE status IN ('failed', 'stopped')
         AND (lease_owner IS NOT NULL OR lease_expires_at IS NOT NULL)
-    `).bind(),
+    `,
+      )
+      .bind(),
   ]);
 
-  return { reconciled: Number((results?.[1] as { meta?: { changes?: number } } | undefined)?.meta?.changes ?? 0) };
+  return {
+    reconciled: Number(
+      (results?.[1] as { meta?: { changes?: number } } | undefined)?.meta?.changes ?? 0,
+    ),
+  };
 }
 
 export async function maintainWebBalanceJobs(db: D1Database) {
   const expiredReason = 'Browser runner lease expired after login flow started';
   const expired = await db.batch([
-    db.prepare(`
+    db
+      .prepare(
+        `
       UPDATE sim_balance_checks
       SET status = 'failed', completed_at = CURRENT_TIMESTAMP,
           error = ?, updated_at = CURRENT_TIMESTAMP
@@ -205,19 +232,27 @@ export async function maintainWebBalanceJobs(db: D1Database) {
                          'human_verification_required')
           AND datetime(lease_expires_at) < datetime('now')
       )
-    `).bind(expiredReason),
-    db.prepare(`
+    `,
+      )
+      .bind(expiredReason),
+    db
+      .prepare(
+        `
       UPDATE sim_balance_web_jobs
       SET status = 'failed', lease_owner = NULL, lease_expires_at = NULL,
           last_error = ?, updated_at = CURRENT_TIMESTAMP
       WHERE status IN ('leased', 'awaiting_otp', 'authenticating', 'querying',
                        'human_verification_required')
         AND datetime(lease_expires_at) < datetime('now')
-    `).bind(expiredReason),
+    `,
+      )
+      .bind(expiredReason),
   ]);
   const terminal = await reconcileTerminalWebBalanceJobs(db);
   return {
-    expired: Number((expired?.[0] as { meta?: { changes?: number } } | undefined)?.meta?.changes ?? 0),
+    expired: Number(
+      (expired?.[0] as { meta?: { changes?: number } } | undefined)?.meta?.changes ?? 0,
+    ),
     reconciled: terminal.reconciled,
   };
 }
@@ -226,7 +261,10 @@ async function requireLease(
   request: AppRequest,
   body: WebJobBody | null,
   auth: RunnerAuth,
-): Promise<{ job: WebJob; body: WebJobBody & { runner_id: string }; response?: undefined } | { response: Response; job?: undefined; body?: undefined }> {
+): Promise<
+  | { job: WebJob; body: WebJobBody & { runner_id: string }; response?: undefined }
+  | { response: Response; job?: undefined; body?: undefined }
+> {
   if (!body || typeof body.runner_id !== 'string') {
     return { response: json({ error: 'runner_id is required' }, 400) };
   }
@@ -236,7 +274,9 @@ async function requireLease(
     return { response: json({ error: 'Web balance job belongs to another account' }, 403) };
   }
   if (!leaseIsActive(job, body.runner_id)) {
-    return { response: json({ error: 'Web balance job lease is not active for this runner' }, 409) };
+    return {
+      response: json({ error: 'Web balance job lease is not active for this runner' }, 409),
+    };
   }
   if (job.check_status !== 'queued') {
     return { response: json({ error: 'Balance check is no longer queued' }, 409) };
@@ -253,7 +293,8 @@ export const carrierWebBalanceHandler = {
     const runnerId = new URL(request.url).searchParams.get('runner_id')?.trim();
     if (!runnerId || runnerId.length > 200) return json({ error: 'runner_id is required' }, 400);
 
-    const leased = await request.env.DB.prepare(`
+    const leased = await request.env.DB.prepare(
+      `
       UPDATE sim_balance_web_jobs
       SET status = 'leased', lease_owner = ?,
           lease_expires_at = datetime('now', '+' || ? || ' seconds'),
@@ -272,13 +313,10 @@ export const carrierWebBalanceHandler = {
         LIMIT 1
       )
       RETURNING id
-    `).bind(
-      runnerId,
-      NORMAL_LEASE_SECONDS,
-      auth.authMode,
-      auth.subject,
-      auth.authMode,
-    ).first();
+    `,
+    )
+      .bind(runnerId, NORMAL_LEASE_SECONDS, auth.authMode, auth.subject, auth.authMode)
+      .first();
 
     if (!leased) return new Response(null, { status: 204 });
     const job = await loadJob(request.env.DB, (leased as { id: string }).id);
@@ -291,24 +329,30 @@ export const carrierWebBalanceHandler = {
     const provider = PROVIDERS[job!.provider as WebProvider];
     if (!job || !skill || !provider || skill.id !== provider.skillId) {
       await request.env.DB.batch([
-        request.env.DB.prepare(`
+        request.env.DB.prepare(
+          `
           UPDATE sim_balance_web_jobs
           SET status = 'failed', lease_owner = NULL, lease_expires_at = NULL,
               last_error = 'Invalid web skill configuration', updated_at = CURRENT_TIMESTAMP
           WHERE id = ? AND lease_owner = ?
-        `).bind(job!.id, runnerId),
-        request.env.DB.prepare(`
+        `,
+        ).bind(job!.id, runnerId),
+        request.env.DB.prepare(
+          `
           UPDATE sim_balance_checks
           SET status = 'failed', completed_at = CURRENT_TIMESTAMP,
               error = 'Invalid web skill configuration', updated_at = CURRENT_TIMESTAMP
           WHERE id = ? AND status = 'queued'
-        `).bind(job!.check_id),
+        `,
+        ).bind(job!.check_id),
       ]);
       return new Response(null, { status: 204 });
     }
 
     const claimed = job!;
-    await eventStatement(request.env.DB, claimed.id, 'claimed', { attempts: claimed.attempts }).run();
+    await eventStatement(request.env.DB, claimed.id, 'claimed', {
+      attempts: claimed.attempts,
+    }).run();
     return json({
       id: claimed.id,
       check_id: claimed.check_id,
@@ -333,13 +377,15 @@ export const carrierWebBalanceHandler = {
     if (job.otp_requested_at) return json({ error: 'OTP was already requested for this job' }, 409);
 
     await request.env.DB.batch([
-      request.env.DB.prepare(`
+      request.env.DB.prepare(
+        `
         UPDATE sim_balance_web_jobs
         SET status = 'awaiting_otp', otp_requested_at = CURRENT_TIMESTAMP,
             lease_expires_at = datetime('now', '+' || ? || ' seconds'),
             updated_at = CURRENT_TIMESTAMP
         WHERE id = ? AND lease_owner = ? AND status = 'leased'
-      `).bind(NORMAL_LEASE_SECONDS, job.id, leased.runner_id),
+      `,
+      ).bind(NORMAL_LEASE_SECONDS, job.id, leased.runner_id),
       eventStatement(request.env.DB, job.id, 'otp_requested'),
     ]);
     return json({ success: true, status: 'awaiting_otp' });
@@ -360,14 +406,12 @@ export const carrierWebBalanceHandler = {
     const afterCreatedAt = url.searchParams.get('after_created_at')?.trim() || null;
     const afterSourceMessageId = url.searchParams.get('after_source_message_id')?.trim() || null;
     const hasCursor = Boolean(
-      afterCreatedAt
-      && afterSourceMessageId
-      && afterCreatedAt.length <= 40
-      && afterSourceMessageId.length <= 200
+      afterCreatedAt &&
+      afterSourceMessageId &&
+      afterCreatedAt.length <= 40 &&
+      afterSourceMessageId.length <= 200,
     );
-    const cursorPredicate = hasCursor
-      ? 'AND (created_at > ? OR (created_at = ? AND id > ?))'
-      : '';
+    const cursorPredicate = hasCursor ? 'AND (created_at > ? OR (created_at = ? AND id > ?))' : '';
     const statement = request.env.DB.prepare(`
       SELECT id, phone_number, content, verification_code, created_at
       FROM messages
@@ -378,21 +422,32 @@ export const carrierWebBalanceHandler = {
       ORDER BY created_at, id
       LIMIT 20
     `);
-    const result = await (hasCursor
-      ? statement.bind(
-        job.sim_iccid,
-        job.otp_requested_at,
-        afterCreatedAt,
-        afterCreatedAt,
-        afterSourceMessageId,
-      )
-      : statement.bind(job.sim_iccid, job.otp_requested_at)).all();
+    const result = await (
+      hasCursor
+        ? statement.bind(
+            job.sim_iccid,
+            job.otp_requested_at,
+            afterCreatedAt,
+            afterCreatedAt,
+            afterSourceMessageId,
+          )
+        : statement.bind(job.sim_iccid, job.otp_requested_at)
+    ).all();
     const provider = PROVIDERS[job.provider as WebProvider];
-    const candidates = result.results as Array<{ id: string; phone_number: string | null; content: string | null; verification_code: string; created_at: string }>;
-    const message = provider && candidates.find((candidate) =>
-      expectedSenderMatches(candidate.phone_number, job.expected_senders)
-      && provider.otpContext.test(candidate.content || '')
-    );
+    const candidates = result.results as Array<{
+      id: string;
+      phone_number: string | null;
+      content: string | null;
+      verification_code: string;
+      created_at: string;
+    }>;
+    const message =
+      provider &&
+      candidates.find(
+        (candidate) =>
+          expectedSenderMatches(candidate.phone_number, job.expected_senders) &&
+          provider.otpContext.test(candidate.content || ''),
+      );
     if (!message) {
       const last = candidates.at(-1);
       if (!last) return new Response(null, { status: 204 });
@@ -406,12 +461,14 @@ export const carrierWebBalanceHandler = {
     }
 
     await request.env.DB.batch([
-      request.env.DB.prepare(`
+      request.env.DB.prepare(
+        `
         UPDATE sim_balance_web_jobs
         SET otp_message_id = ?, lease_expires_at = datetime('now', '+' || ? || ' seconds'),
             updated_at = CURRENT_TIMESTAMP
         WHERE id = ? AND lease_owner = ?
-      `).bind(message.id, NORMAL_LEASE_SECONDS, job.id, runnerId),
+      `,
+      ).bind(message.id, NORMAL_LEASE_SECONDS, job.id, runnerId),
       eventStatement(request.env.DB, job.id, 'otp_matched', { message_id: message.id }),
     ]);
     return json({ code: message.verification_code });
@@ -426,23 +483,32 @@ export const carrierWebBalanceHandler = {
     const lease = await requireLease(request, body, auth);
     if (lease.response) return lease.response;
     const { job, body: leased } = lease;
-    if (!HEARTBEAT_STATUSES.has(String(leased.status))) return json({ error: 'Invalid web job status' }, 400);
+    if (!HEARTBEAT_STATUSES.has(String(leased.status)))
+      return json({ error: 'Invalid web job status' }, 400);
 
     const human = leased.status === 'human_verification_required';
     const leaseSeconds = human ? HUMAN_LEASE_SECONDS : NORMAL_LEASE_SECONDS;
-    const reason = human ? String(leased.reason || 'Official site requested human verification').slice(0, 500) : null;
-    const statements = [request.env.DB.prepare(`
+    const reason = human
+      ? String(leased.reason || 'Official site requested human verification').slice(0, 500)
+      : null;
+    const statements = [
+      request.env.DB.prepare(
+        `
         UPDATE sim_balance_web_jobs
         SET status = ?, human_reason = ?,
             lease_expires_at = datetime('now', '+' || ? || ' seconds'),
             updated_at = CURRENT_TIMESTAMP
         WHERE id = ? AND lease_owner = ?
-      `).bind(leased.status, reason, leaseSeconds, job.id, leased.runner_id)];
+      `,
+      ).bind(leased.status, reason, leaseSeconds, job.id, leased.runner_id),
+    ];
     if (job.status !== leased.status || job.human_reason !== reason) {
-      statements.push(eventStatement(request.env.DB, job.id, String(leased.status), {
-        status: leased.status,
-        ...(reason ? { reason } : {}),
-      }));
+      statements.push(
+        eventStatement(request.env.DB, job.id, String(leased.status), {
+          status: leased.status,
+          ...(reason ? { reason } : {}),
+        }),
+      );
     }
     await request.env.DB.batch(statements);
     return json({ success: true, status: leased.status, lease_seconds: leaseSeconds });
@@ -466,8 +532,10 @@ export const carrierWebBalanceHandler = {
     if (leased.currency !== provider.currency) {
       return json({ error: `currency must be ${provider.currency}` }, 400);
     }
-    if (normalizePhone(leased.account_number, job.provider)
-      !== normalizePhone(job.sim_number, job.provider)) {
+    if (
+      normalizePhone(leased.account_number, job.provider) !==
+      normalizePhone(job.sim_number, job.provider)
+    ) {
       return json({ error: 'Authenticated account does not match the balance task SIM' }, 409);
     }
 
@@ -477,14 +545,17 @@ export const carrierWebBalanceHandler = {
     }
 
     const statements = [
-      request.env.DB.prepare(`
+      request.env.DB.prepare(
+        `
         UPDATE sim_balance_checks
         SET status = 'parsed', completed_at = CURRENT_TIMESTAMP,
             raw_response = ?,
             error = NULL, updated_at = CURRENT_TIMESTAMP
         WHERE id = ? AND status = 'queued'
-      `).bind(provider.rawResponse, job.check_id),
-      request.env.DB.prepare(`
+      `,
+      ).bind(provider.rawResponse, job.check_id),
+      request.env.DB.prepare(
+        `
         INSERT INTO sim_balance_metrics (
           check_id, metric_type, value, unit, currency, expires_at
         ) SELECT id, 'cash_balance', ?, NULL, ?, NULL
@@ -492,25 +563,32 @@ export const carrierWebBalanceHandler = {
         ON CONFLICT(check_id, metric_type) DO UPDATE SET
           value = excluded.value, currency = excluded.currency,
           created_at = CURRENT_TIMESTAMP
-      `).bind(balance, provider.currency, job.check_id),
+      `,
+      ).bind(balance, provider.currency, job.check_id),
     ];
     if (provider.expiryRequired) {
-      statements.push(request.env.DB.prepare(`
+      statements.push(
+        request.env.DB.prepare(
+          `
         INSERT INTO sim_balance_metrics (
           check_id, metric_type, value, unit, currency, expires_at
         ) SELECT id, 'account_expiry', NULL, NULL, NULL, ?
           FROM sim_balance_checks WHERE id = ? AND status = 'parsed'
         ON CONFLICT(check_id, metric_type) DO UPDATE SET
           expires_at = excluded.expires_at, created_at = CURRENT_TIMESTAMP
-      `).bind(expiresAt, job.check_id));
+      `,
+        ).bind(expiresAt, job.check_id),
+      );
     }
     statements.push(
-      request.env.DB.prepare(`
+      request.env.DB.prepare(
+        `
         UPDATE sim_balance_web_jobs
         SET status = 'completed', lease_owner = NULL, lease_expires_at = NULL,
             human_reason = NULL, updated_at = CURRENT_TIMESTAMP
         WHERE id = ? AND lease_owner = ?
-      `).bind(job.id, leased.runner_id),
+      `,
+      ).bind(job.id, leased.runner_id),
       eventStatement(request.env.DB, job.id, 'completed', {
         currency: provider.currency,
         parser_version: job.profile_parser_version,
@@ -518,7 +596,10 @@ export const carrierWebBalanceHandler = {
       }),
     );
     const results = await request.env.DB.batch(statements);
-    if (Number((results?.[0] as { meta?: { changes?: number } } | undefined)?.meta?.changes ?? 1) === 0) {
+    if (
+      Number((results?.[0] as { meta?: { changes?: number } } | undefined)?.meta?.changes ?? 1) ===
+      0
+    ) {
       return json({ error: 'Balance check changed before completion' }, 409);
     }
     return json({ success: true, status: 'parsed' });
@@ -535,18 +616,22 @@ export const carrierWebBalanceHandler = {
     const { job, body: leased } = lease;
     const error = String(leased.error || 'Web balance query failed').slice(0, 1000);
     await request.env.DB.batch([
-      request.env.DB.prepare(`
+      request.env.DB.prepare(
+        `
         UPDATE sim_balance_checks
         SET status = 'failed', completed_at = CURRENT_TIMESTAMP,
             error = ?, updated_at = CURRENT_TIMESTAMP
         WHERE id = ? AND status = 'queued'
-      `).bind(error, job.check_id),
-      request.env.DB.prepare(`
+      `,
+      ).bind(error, job.check_id),
+      request.env.DB.prepare(
+        `
         UPDATE sim_balance_web_jobs
         SET status = 'failed', lease_owner = NULL, lease_expires_at = NULL,
             last_error = ?, updated_at = CURRENT_TIMESTAMP
         WHERE id = ? AND lease_owner = ?
-      `).bind(error, job.id, leased.runner_id),
+      `,
+      ).bind(error, job.id, leased.runner_id),
       eventStatement(request.env.DB, job.id, 'failed', { error }),
     ]);
     return json({ success: true, status: 'failed' });
@@ -564,43 +649,58 @@ export const carrierWebBalanceHandler = {
     const error = String(leased.error || 'Runner released the job').slice(0, 1000);
     const terminal = Boolean(job.otp_requested_at);
     const statements = [
-      request.env.DB.prepare(`
+      request.env.DB.prepare(
+        `
         UPDATE sim_balance_web_jobs
         SET status = ?, lease_owner = NULL, lease_expires_at = NULL,
             last_error = ?, updated_at = CURRENT_TIMESTAMP
         WHERE id = ? AND lease_owner = ?
-      `).bind(terminal ? 'failed' : 'pending', error, job.id, leased.runner_id),
+      `,
+      ).bind(terminal ? 'failed' : 'pending', error, job.id, leased.runner_id),
       eventStatement(request.env.DB, job.id, terminal ? 'failed_after_otp' : 'released', { error }),
     ];
     if (terminal) {
-      statements.push(request.env.DB.prepare(`
+      statements.push(
+        request.env.DB.prepare(
+          `
         UPDATE sim_balance_checks
         SET status = 'failed', completed_at = CURRENT_TIMESTAMP,
             error = ?, updated_at = CURRENT_TIMESTAMP
         WHERE id = ? AND status = 'queued'
-      `).bind(error, job.check_id));
+      `,
+        ).bind(error, job.check_id),
+      );
     }
     await request.env.DB.batch(statements);
     return json({ success: true, status: terminal ? 'failed' : 'pending' });
   },
 };
 
-function providerForProfile(profile: { skill_config?: string | null } | null | undefined): WebProvider {
+function providerForProfile(
+  profile: { skill_config?: string | null } | null | undefined,
+): WebProvider {
   let skill: { id?: unknown } | null;
   try {
     skill = JSON.parse(profile?.skill_config || '{}');
   } catch {
     skill = null;
   }
-  const entry = (Object.entries(PROVIDERS) as Array<[WebProvider, ProviderConfig]>)
-    .find(([, config]) => config.skillId === skill?.id);
+  const entry = (Object.entries(PROVIDERS) as Array<[WebProvider, ProviderConfig]>).find(
+    ([, config]) => config.skillId === skill?.id,
+  );
   if (!entry) throw new Error('Unsupported browser balance profile');
   return entry[0];
 }
 
 export function createCarrierWebBalanceStatements(
   db: D1Database,
-  { checkId, jobId, phone, profile, requestedBySubject = null }: {
+  {
+    checkId,
+    jobId,
+    phone,
+    profile,
+    requestedBySubject = null,
+  }: {
     checkId: string;
     jobId: string;
     phone: { iccid: string };
@@ -609,21 +709,23 @@ export function createCarrierWebBalanceStatements(
   },
 ): D1PreparedStatement[] {
   return [
-    db.prepare(`
+    db
+      .prepare(
+        `
       INSERT INTO sim_balance_checks (
         id, sim_iccid, profile_id, status, parser_version, requested_by_subject
       ) VALUES (?, ?, ?, 'queued', ?, ?)
-    `).bind(
-      checkId,
-      phone.iccid,
-      profile.id,
-      profile.parser_version,
-      requestedBySubject,
-    ),
-    db.prepare(`
+    `,
+      )
+      .bind(checkId, phone.iccid, profile.id, profile.parser_version, requestedBySubject),
+    db
+      .prepare(
+        `
       INSERT INTO sim_balance_web_jobs (id, check_id, provider)
       VALUES (?, ?, ?)
-    `).bind(jobId, checkId, providerForProfile(profile)),
+    `,
+      )
+      .bind(jobId, checkId, providerForProfile(profile)),
     eventStatement(db, jobId, 'queued'),
   ];
 }

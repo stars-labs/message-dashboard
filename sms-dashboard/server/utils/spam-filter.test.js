@@ -143,8 +143,7 @@ describe('classifyMessage — body keyword rules', () => {
   test('first matching rule wins when a message contains two patterns', () => {
     // The real 领保中心 SMS also embeds the 文旅部 text further down.
     const msg = received({
-      content:
-        '外交部领保中心祝您健康平安！……中国文化和旅游部温馨提示，文明旅游"三讲三不"。',
+      content: '外交部领保中心祝您健康平安！……中国文化和旅游部温馨提示，文明旅游"三讲三不"。',
     });
     // Rule 1 comes before rule 2, so provenance must point at rule 1.
     expect(classifyMessage(msg, RULES).filter_rule_id).toBe(1);

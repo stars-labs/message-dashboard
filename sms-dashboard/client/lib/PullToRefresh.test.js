@@ -9,10 +9,7 @@ let originalStandaloneDescriptor;
 beforeEach(() => {
   originalMatchMedia = window.matchMedia;
   window.matchMedia = () => ({ matches: false });
-  originalStandaloneDescriptor = Object.getOwnPropertyDescriptor(
-    window.navigator,
-    'standalone',
-  );
+  originalStandaloneDescriptor = Object.getOwnPropertyDescriptor(window.navigator, 'standalone');
   Object.defineProperty(window.navigator, 'standalone', {
     configurable: true,
     value: true,
@@ -22,11 +19,7 @@ beforeEach(() => {
 afterEach(() => {
   window.matchMedia = originalMatchMedia;
   if (originalStandaloneDescriptor) {
-    Object.defineProperty(
-      window.navigator,
-      'standalone',
-      originalStandaloneDescriptor,
-    );
+    Object.defineProperty(window.navigator, 'standalone', originalStandaloneDescriptor);
   } else {
     delete window.navigator.standalone;
   }
@@ -35,9 +28,7 @@ afterEach(() => {
 
 function dispatchTouch(target, type, { x = 0, y = 0 } = {}) {
   const event = new Event(type, { bubbles: true, cancelable: true });
-  const touches = type === 'touchend' || type === 'touchcancel'
-    ? []
-    : [{ clientX: x, clientY: y }];
+  const touches = type === 'touchend' || type === 'touchcancel' ? [] : [{ clientX: x, clientY: y }];
   Object.defineProperty(event, 'touches', { value: touches });
   target.dispatchEvent(event);
   return event;
@@ -147,7 +138,11 @@ describe('PullToRefresh', () => {
   test('an intentional pull is claimed and refreshes on release', async () => {
     let refreshes = 0;
     const { container } = render(PullToRefresh, {
-      props: { onRefresh: () => { refreshes += 1; } },
+      props: {
+        onRefresh: () => {
+          refreshes += 1;
+        },
+      },
     });
     const root = container.querySelector('[data-pull-to-refresh-root]');
     await tick();
@@ -163,7 +158,11 @@ describe('PullToRefresh', () => {
   test('a cancelled OS gesture never refreshes', async () => {
     let refreshes = 0;
     const { container } = render(PullToRefresh, {
-      props: { onRefresh: () => { refreshes += 1; } },
+      props: {
+        onRefresh: () => {
+          refreshes += 1;
+        },
+      },
     });
     const root = container.firstElementChild;
     await tick();

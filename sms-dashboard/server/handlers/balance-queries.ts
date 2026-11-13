@@ -45,7 +45,12 @@ export interface PlanItem {
   profile: BalanceProfile | null;
   eligible: boolean;
   reason: string | null;
-  recentCheck: { id?: string; status?: string; requested_at?: string; [column: string]: unknown } | null;
+  recentCheck: {
+    id?: string;
+    status?: string;
+    requested_at?: string;
+    [column: string]: unknown;
+  } | null;
 }
 
 /** A sim_balance_checks row joined with its profile and messages, as the handlers read it. */
@@ -108,7 +113,6 @@ function changesOf(result: unknown): number {
   return Number((result as { meta?: { changes?: number } } | undefined)?.meta?.changes ?? 0);
 }
 
-
 const CHINA_MOBILE_NAMES = ['china mobile', 'cmcc', '中国移动', '移动'];
 const CHINA_UNICOM_NAMES = ['china unicom', 'unicom', '中国联通', '联通'];
 const CHINA_TELECOM_NAMES = ['china telecom', 'telecom', 'ctcc', '中国电信', '电信'];
@@ -141,9 +145,7 @@ function checkKey(simIccid: string, profileId: string): string {
 function requiredServiceType(profile: BalanceProfile | null): string | null {
   try {
     const parsed = JSON.parse(profile?.skill_config || '{}') as { required_service_type?: unknown };
-    return typeof parsed.required_service_type === 'string'
-      ? parsed.required_service_type
-      : null;
+    return typeof parsed.required_service_type === 'string' ? parsed.required_service_type : null;
   } catch {
     return null;
   }
@@ -151,26 +153,34 @@ function requiredServiceType(profile: BalanceProfile | null): string | null {
 
 function parseBatchScope(value: unknown): string[] | null {
   if (!Array.isArray(value) || value.length < 1 || value.length > MAX_BATCH_SCOPE) return null;
-  const normalized: string[] = value.map((item: unknown) => typeof item === 'string' ? item.trim() : '');
+  const normalized: string[] = value.map((item: unknown) =>
+    typeof item === 'string' ? item.trim() : '',
+  );
   if (normalized.some((item) => !item || item.length > 64)) return null;
   if (new Set(normalized).size !== normalized.length) return null;
   return normalized;
 }
 
 function displayBalanceStatus(record: Record<string, unknown>): unknown {
-  if (['response_received', 'unparsed'].includes(String(record.status))
-    && ['pending', 'leased'].includes(String(record.skill_job_status))) {
+  if (
+    ['response_received', 'unparsed'].includes(String(record.status)) &&
+    ['pending', 'leased'].includes(String(record.skill_job_status))
+  ) {
     return record.skill_job_status === 'leased' ? 'skill_processing' : 'skill_pending';
   }
   if (record.status === 'queued' && record.web_job_status) {
-    return (({
-      pending: 'web_pending',
-      leased: 'web_processing',
-      awaiting_otp: 'web_otp',
-      authenticating: 'web_authenticating',
-      querying: 'web_querying',
-      human_verification_required: 'web_human_required',
-    }) as Record<string, string>)[String(record.web_job_status)] || record.status;
+    return (
+      (
+        {
+          pending: 'web_pending',
+          leased: 'web_processing',
+          awaiting_otp: 'web_otp',
+          authenticating: 'web_authenticating',
+          querying: 'web_querying',
+          human_verification_required: 'web_human_required',
+        } as Record<string, string>
+      )[String(record.web_job_status)] || record.status
+    );
   }
   return record.status;
 }
@@ -190,20 +200,25 @@ export function buildBalanceQueryPlan({
 } = {}): PlanItem[] {
   const recentBySim = new Map(recentChecks.map((check) => [String(check.sim_iccid), check]));
   const successful = new Set(
-    successfulChecks.map((check) => checkKey(String(check.sim_iccid), String(check.profile_id)))
+    successfulChecks.map((check) => checkKey(String(check.sim_iccid), String(check.profile_id))),
   );
 
   return phones.map((phone) => {
     const matchingProfiles = profiles
-      .filter((profile) => ['sms', 'browser'].includes(profile.method)
-        && phone.country === profile.country_code
-        && carrierMatchesProfile(phone.carrier, profile.carrier))
+      .filter(
+        (profile) =>
+          ['sms', 'browser'].includes(profile.method) &&
+          phone.country === profile.country_code &&
+          carrierMatchesProfile(phone.carrier, profile.carrier),
+      )
       .sort((a, b) => Number(b.enabled || 0) - Number(a.enabled || 0));
-    const profile = matchingProfiles.find((candidate) =>
-      Number(candidate.enabled) === 1
-      || (Number(candidate.discovery_enabled) === 1
-        && (allowDiscovery || successful.has(checkKey(phone.iccid, candidate.id))))
-    ) || null;
+    const profile =
+      matchingProfiles.find(
+        (candidate) =>
+          Number(candidate.enabled) === 1 ||
+          (Number(candidate.discovery_enabled) === 1 &&
+            (allowDiscovery || successful.has(checkKey(phone.iccid, candidate.id)))),
+      ) || null;
 
     const serviceType = requiredServiceType(profile);
     let reason = null;
@@ -236,7 +251,8 @@ function summarizePlan(plan: PlanItem[]): Record<string, number> {
   };
   for (const item of plan) {
     if (item.eligible) summary.eligible += 1;
-    else if (item.reason && item.reason in summary) summary[item.reason as keyof typeof summary] += 1;
+    else if (item.reason && item.reason in summary)
+      summary[item.reason as keyof typeof summary] += 1;
   }
   return summary;
 }
@@ -263,15 +279,19 @@ function summarizeMethods(plan: PlanItem[]): Record<string, number> {
 
 export function filterBalancePlanByMethods(plan: PlanItem[], methods: string[]): PlanItem[] {
   const selected = new Set(methods);
-  return plan.filter((item) => item.eligible
-    && selected.has(describeBalanceMethod(item.profile).category));
+  return plan.filter(
+    (item) => item.eligible && selected.has(describeBalanceMethod(item.profile).category),
+  );
 }
 
-async function loadBalanceQueryPlan(db: D1Database, {
-  phoneIccid = null,
-  phoneIccids = null,
-  allowDiscovery = false,
-}: { phoneIccid?: string | null; phoneIccids?: string[] | null; allowDiscovery?: boolean } = {}): Promise<PlanItem[]> {
+async function loadBalanceQueryPlan(
+  db: D1Database,
+  {
+    phoneIccid = null,
+    phoneIccids = null,
+    allowDiscovery = false,
+  }: { phoneIccid?: string | null; phoneIccids?: string[] | null; allowDiscovery?: boolean } = {},
+): Promise<PlanItem[]> {
   const scopedIccids = phoneIccid ? [phoneIccid] : phoneIccids;
   const phoneWhere = scopedIccids
     ? `WHERE iccid IN (${scopedIccids.map(() => '?').join(', ')})`
@@ -283,23 +303,35 @@ async function loadBalanceQueryPlan(db: D1Database, {
   `);
   const [phoneResult, profileResult, recentResult, successfulResult] = await Promise.all([
     scopedIccids ? phoneStatement.bind(...scopedIccids).all() : phoneStatement.all(),
-    db.prepare(`
+    db
+      .prepare(
+        `
       SELECT * FROM sim_balance_profiles
       WHERE method IN ('sms', 'browser')
         AND (discovery_enabled = 1 OR enabled = 1)
       ORDER BY enabled DESC, id
-    `).all(),
-    db.prepare(`
+    `,
+      )
+      .all(),
+    db
+      .prepare(
+        `
       SELECT sim_iccid, profile_id, id, status, requested_at
       FROM sim_balance_checks
       WHERE ${BALANCE_COOLDOWN_PREDICATE}
       ORDER BY datetime(requested_at) DESC
-    `).all(),
-    db.prepare(`
+    `,
+      )
+      .all(),
+    db
+      .prepare(
+        `
       SELECT DISTINCT sim_iccid, profile_id
       FROM sim_balance_checks
       WHERE status = 'parsed'
-    `).all(),
+    `,
+      )
+      .all(),
   ]);
 
   return buildBalanceQueryPlan({
@@ -319,13 +351,15 @@ async function queueBalanceCheck(
   const requestedAt = new Date().toISOString();
   if (profile.method === 'browser') {
     const { checkId, jobId } = newCarrierWebBalanceIds();
-    await db.batch(createCarrierWebBalanceStatements(db, {
-      checkId,
-      jobId,
-      phone,
-      profile,
-      requestedBySubject,
-    }));
+    await db.batch(
+      createCarrierWebBalanceStatements(db, {
+        checkId,
+        jobId,
+        phone,
+        profile,
+        requestedBySubject,
+      }),
+    );
     return {
       id: checkId,
       sim_iccid: phone.iccid,
@@ -342,20 +376,26 @@ async function queueBalanceCheck(
   const messageId = `msg-balance-${nanoid()}`;
 
   await db.batch([
-    db.prepare(`
+    db
+      .prepare(
+        `
       INSERT INTO sim_balance_checks (
         id, sim_iccid, profile_id, status, outbound_message_id, parser_version,
         requested_by_subject
       ) VALUES (?, ?, ?, 'queued', ?, ?, ?)
-    `).bind(
-      checkId,
-      phone.iccid,
-      profile.id,
-      messageId,
-      profile.parser_version,
-      requestedBySubject,
-    ),
-    db.prepare(`
+    `,
+      )
+      .bind(
+        checkId,
+        phone.iccid,
+        profile.id,
+        messageId,
+        profile.parser_version,
+        requestedBySubject,
+      ),
+    db
+      .prepare(
+        `
       INSERT INTO messages (
         id, phone_iccid, phone_number, content, timestamp, type, recipient,
         status, filter_status, purpose, balance_check_id
@@ -363,14 +403,9 @@ async function queueBalanceCheck(
         ?, ?, ?, ?, CURRENT_TIMESTAMP, 'sent', ?,
         'sending', 'filtered', 'balance_maintenance', ?
       )
-    `).bind(
-      messageId,
-      phone.iccid,
-      phone.number,
-      profile.command,
-      profile.destination,
-      checkId,
-    ),
+    `,
+      )
+      .bind(messageId, phone.iccid, phone.number, profile.command, profile.destination, checkId),
   ]);
 
   return {
@@ -388,16 +423,19 @@ async function queueBalanceCheck(
 function parseConversationSteps(value: unknown): ConversationStep[] {
   try {
     const steps = JSON.parse(String(value || '[]'));
-    return Array.isArray(steps) ? steps as ConversationStep[] : [];
+    return Array.isArray(steps) ? (steps as ConversationStep[]) : [];
   } catch {
     return [];
   }
 }
 
-function matchingNextStep(check: BalanceCheckRow | null | undefined, content: unknown): ConversationStep | null {
+function matchingNextStep(
+  check: BalanceCheckRow | null | undefined,
+  content: unknown,
+): ConversationStep | null {
   const step = parseConversationSteps(check?.conversation_steps)[check?.step_index || 0];
-  if (!step || typeof step.response_contains !== 'string'
-    || typeof step.command !== 'string') return null;
+  if (!step || typeof step.response_contains !== 'string' || typeof step.command !== 'string')
+    return null;
   return String(content || '').includes(step.response_contains) ? step : null;
 }
 
@@ -416,34 +454,40 @@ export function parseBalanceMetrics(parserVersion: unknown, content: unknown): B
     // balance). The SMS reports both; 总余额 includes prepaid amounts and is
     // the canonical figure displayed in the Telecom app.
     // Fall back to 当前号码通用余额 for older SMS formats that omit 总余额.
-    const cashMatch = content.match(
-      /当前号码总余额(?:为|是)?[：:\s]*([0-9]+(?:\.[0-9]{1,2})?)\s*元/
-    ) || content.match(
-      /(?:当前可用余额|当前号码通用余额)(?:为|是)?[：:\s]*([0-9]+(?:\.[0-9]{1,2})?)\s*元/
-    );
+    const cashMatch =
+      content.match(/当前号码总余额(?:为|是)?[：:\s]*([0-9]+(?:\.[0-9]{1,2})?)\s*元/) ||
+      content.match(
+        /(?:当前可用余额|当前号码通用余额)(?:为|是)?[：:\s]*([0-9]+(?:\.[0-9]{1,2})?)\s*元/,
+      );
     if (!cashMatch) return [];
 
-    return [{
+    return [
+      {
+        metric_type: 'cash_balance',
+        value: Number(cashMatch[1]),
+        unit: null,
+        currency: 'CNY',
+        expires_at: null,
+      },
+    ];
+  }
+
+  if (parserVersion !== 'cn-mobile-balance-v1') return [];
+
+  const cashMatch = content.match(
+    /(?:账户|话费|可用)?余额(?:为|是)?[：:\s]*([0-9]+(?:\.[0-9]{1,2})?)\s*元/,
+  );
+  if (!cashMatch) return [];
+
+  return [
+    {
       metric_type: 'cash_balance',
       value: Number(cashMatch[1]),
       unit: null,
       currency: 'CNY',
       expires_at: null,
-    }];
-  }
-
-  if (parserVersion !== 'cn-mobile-balance-v1') return [];
-
-  const cashMatch = content.match(/(?:账户|话费|可用)?余额(?:为|是)?[：:\s]*([0-9]+(?:\.[0-9]{1,2})?)\s*元/);
-  if (!cashMatch) return [];
-
-  return [{
-    metric_type: 'cash_balance',
-    value: Number(cashMatch[1]),
-    unit: null,
-    currency: 'CNY',
-    expires_at: null,
-  }];
+    },
+  ];
 }
 
 export function carrierMatchesProfile(actualCarrier: unknown, profileCarrier: unknown): boolean {
@@ -479,18 +523,22 @@ export function expectedSenderMatches(rawSender: unknown, expectedSendersJson: u
     return false;
   }
 
-  return Array.isArray(expected)
-    && expected.some((sender) => senderMatches(rawSender, sender));
+  return Array.isArray(expected) && expected.some((sender) => senderMatches(rawSender, sender));
 }
 
-export async function findPendingBalanceCheck(db: D1Database, {
-  phone_iccid,
-  phone_number,
-  message_timestamp = new Date().toISOString(),
-}: { phone_iccid: string; phone_number: string; message_timestamp?: string }): Promise<BalanceCheckRow | null> {
+export async function findPendingBalanceCheck(
+  db: D1Database,
+  {
+    phone_iccid,
+    phone_number,
+    message_timestamp = new Date().toISOString(),
+  }: { phone_iccid: string; phone_number: string; message_timestamp?: string },
+): Promise<BalanceCheckRow | null> {
   if (!phone_iccid || !phone_number) return null;
 
-  const result = await db.prepare(`
+  const result = await db
+    .prepare(
+      `
     SELECT
       c.id,
       c.sim_iccid,
@@ -518,12 +566,17 @@ export async function findPendingBalanceCheck(db: D1Database, {
       ), c.sent_at, c.requested_at))
       AND datetime(?) <= datetime(c.deadline_at)
     ORDER BY c.requested_at DESC
-  `).bind(phone_iccid, message_timestamp, message_timestamp).all<BalanceCheckRow>();
+  `,
+    )
+    .bind(phone_iccid, message_timestamp, message_timestamp)
+    .all<BalanceCheckRow>();
 
   const candidates = result.results;
-  return candidates.find((candidate) =>
-    expectedSenderMatches(phone_number, candidate.expected_senders)
-  ) || null;
+  return (
+    candidates.find((candidate) =>
+      expectedSenderMatches(phone_number, candidate.expected_senders),
+    ) || null
+  );
 }
 
 // A carrier reply can arrive as several SMS parts. In text mode the daemon cannot
@@ -536,7 +589,13 @@ export async function findPendingBalanceCheck(db: D1Database, {
 // Parts carry no sequence number, so batch order is the only ordering available.
 // Both consumers search for a substring, so concatenation order is not significant.
 export function mergeMultipartReplies(
-  messages: Array<{ id?: unknown; content?: unknown; phone_iccid?: unknown; phone_number?: unknown; timestamp?: unknown }> = [],
+  messages: Array<{
+    id?: unknown;
+    content?: unknown;
+    phone_iccid?: unknown;
+    phone_number?: unknown;
+    timestamp?: unknown;
+  }> = [],
 ): Map<string, { key: string; content: string }> {
   const groups = new Map<string, Array<{ id: string; content: string }>>();
   for (const message of messages) {
@@ -565,7 +624,10 @@ export async function linkBalanceReply(
   db: D1Database,
   check: BalanceCheckRow | null | undefined,
   message: BalanceMessage,
-  { allowFollowUp = true, mergedContent = null }: { allowFollowUp?: boolean; mergedContent?: string | null } = {},
+  {
+    allowFollowUp = true,
+    mergedContent = null,
+  }: { allowFollowUp?: boolean; mergedContent?: string | null } = {},
 ) {
   if (!check) return;
 
@@ -574,17 +636,14 @@ export async function linkBalanceReply(
   const nextStep = matchingNextStep(check, content);
   const responseWindowOpen = Number(check.response_window_open ?? 1) === 1;
   if (nextStep && allowFollowUp && responseWindowOpen) {
-    return queueBalanceFollowUp(
-      db,
-      check,
-      message,
-      nextStep,
-      check.status || 'awaiting_response',
-    );
+    return queueBalanceFollowUp(db, check, message, nextStep, check.status || 'awaiting_response');
   }
 
   const metrics = parseBalanceMetrics(check.parser_version, content);
-  const statements = [db.prepare(`
+  const statements = [
+    db
+      .prepare(
+        `
     UPDATE sim_balance_checks
     SET status = ?,
         completed_at = CURRENT_TIMESTAMP,
@@ -595,16 +654,22 @@ export async function linkBalanceReply(
         updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
       AND status IN ('queued', 'awaiting_response', 'failed', 'timed_out')
-  `).bind(
-    metrics.length ? 'parsed' : 'response_received',
-    message.id,
-    message.phone_number,
-    content,
-    check.id,
-  )];
+  `,
+      )
+      .bind(
+        metrics.length ? 'parsed' : 'response_received',
+        message.id,
+        message.phone_number,
+        content,
+        check.id,
+      ),
+  ];
 
   for (const metric of metrics) {
-    statements.push(db.prepare(`
+    statements.push(
+      db
+        .prepare(
+          `
       INSERT INTO sim_balance_metrics (
         check_id, metric_type, value, unit, currency, expires_at
       ) VALUES (?, ?, ?, ?, ?, ?)
@@ -614,20 +679,31 @@ export async function linkBalanceReply(
         currency = excluded.currency,
         expires_at = excluded.expires_at,
         created_at = CURRENT_TIMESTAMP
-    `).bind(
-      check.id,
-      metric.metric_type,
-      metric.value,
-      metric.unit,
-      metric.currency,
-      metric.expires_at,
-    ));
+    `,
+        )
+        .bind(
+          check.id,
+          metric.metric_type,
+          metric.value,
+          metric.unit,
+          metric.currency,
+          metric.expires_at,
+        ),
+    );
   }
 
   const skill = parseBalanceSkillConfig(check.skill_config);
-  if (!metrics.length && skill && allowFollowUp && responseWindowOpen
-    && Number(check.step_index || 0) < skill.max_turns) {
-    statements.push(db.prepare(`
+  if (
+    !metrics.length &&
+    skill &&
+    allowFollowUp &&
+    responseWindowOpen &&
+    Number(check.step_index || 0) < skill.max_turns
+  ) {
+    statements.push(
+      db
+        .prepare(
+          `
       INSERT OR IGNORE INTO sim_balance_skill_jobs (
         id, check_id, response_message_id, step_index
       )
@@ -636,15 +712,16 @@ export async function linkBalanceReply(
       WHERE id = ?
         AND status = 'response_received'
         AND response_message_id = ?
-    `).bind(
-      `skill-${nanoid()}`,
-      message.id,
-      check.id,
-      message.id,
-    ));
+    `,
+        )
+        .bind(`skill-${nanoid()}`, message.id, check.id, message.id),
+    );
   }
 
-  statements.push(db.prepare(`
+  statements.push(
+    db
+      .prepare(
+        `
     UPDATE messages
     SET purpose = 'balance_maintenance',
         balance_check_id = ?,
@@ -657,18 +734,26 @@ export async function linkBalanceReply(
         WHERE c.id = ?
           AND c.response_message_id = messages.id
       )
-  `).bind(check.id, message.id, check.id, check.id));
+  `,
+      )
+      .bind(check.id, message.id, check.id, check.id),
+  );
 
   const results = await db.batch(statements);
   return {
-    linked: Number((results?.[0] as { meta?: { changes?: number } } | undefined)?.meta?.changes ?? 1) > 0,
+    linked:
+      Number((results?.[0] as { meta?: { changes?: number } } | undefined)?.meta?.changes ?? 1) > 0,
     results,
   };
 }
 
-export async function expireStaleBalanceChecks(db: D1Database): Promise<{ expired: number; stopped_jobs: number }> {
+export async function expireStaleBalanceChecks(
+  db: D1Database,
+): Promise<{ expired: number; stopped_jobs: number }> {
   const results = await db.batch([
-    db.prepare(`
+    db
+      .prepare(
+        `
       UPDATE sim_balance_checks
       SET status = 'timed_out',
           completed_at = CURRENT_TIMESTAMP,
@@ -676,8 +761,12 @@ export async function expireStaleBalanceChecks(db: D1Database): Promise<{ expire
           updated_at = CURRENT_TIMESTAMP
       WHERE status = 'awaiting_response'
         AND deadline_at < CURRENT_TIMESTAMP
-    `).bind(),
-    db.prepare(`
+    `,
+      )
+      .bind(),
+    db
+      .prepare(
+        `
       UPDATE sim_balance_skill_jobs
       SET status = 'stopped',
           lease_owner = NULL,
@@ -691,7 +780,9 @@ export async function expireStaleBalanceChecks(db: D1Database): Promise<{ expire
           WHERE c.id = sim_balance_skill_jobs.check_id
             AND c.status = 'timed_out'
         )
-    `).bind(),
+    `,
+      )
+      .bind(),
   ]);
 
   return {
@@ -702,7 +793,11 @@ export async function expireStaleBalanceChecks(db: D1Database): Promise<{ expire
 
 export async function queueBalanceFollowUp(
   db: D1Database,
-  check: BalanceCheckRow & { sim_number?: string | null; destination?: string | null; step_index?: number },
+  check: BalanceCheckRow & {
+    sim_number?: string | null;
+    destination?: string | null;
+    step_index?: number;
+  },
   message: BalanceMessage,
   step: { command: string },
   fromStatus: string,
@@ -710,7 +805,9 @@ export async function queueBalanceFollowUp(
 ): Promise<{ queued: boolean; message_id: string | null }> {
   const messageId = `msg-balance-${nanoid()}`;
   const results = await db.batch([
-    db.prepare(`
+    db
+      .prepare(
+        `
       INSERT INTO messages (
         id, phone_iccid, phone_number, content, timestamp, type, recipient,
         status, filter_status, purpose, balance_check_id
@@ -719,16 +816,20 @@ export async function queueBalanceFollowUp(
         'sending', 'filtered', 'balance_maintenance', c.id
       FROM sim_balance_checks c
       WHERE c.id = ? AND c.status = ? AND c.step_index = ?
-    `).bind(
-      messageId,
-      check.sim_number || null,
-      step.command,
-      check.destination,
-      check.id,
-      fromStatus,
-      check.step_index || 0,
-    ),
-    db.prepare(`
+    `,
+      )
+      .bind(
+        messageId,
+        check.sim_number || null,
+        step.command,
+        check.destination,
+        check.id,
+        fromStatus,
+        check.step_index || 0,
+      ),
+    db
+      .prepare(
+        `
     UPDATE sim_balance_checks
     SET status = 'queued',
         step_index = step_index + 1,
@@ -742,18 +843,21 @@ export async function queueBalanceFollowUp(
     WHERE id = ?
       AND status = ?
       AND step_index = ?
-    `).bind(
-      message.id,
-      message.phone_number,
-      message.content,
-      check.id,
-      fromStatus,
-      check.step_index || 0,
-    ),
+    `,
+      )
+      .bind(
+        message.id,
+        message.phone_number,
+        message.content,
+        check.id,
+        fromStatus,
+        check.step_index || 0,
+      ),
     ...extraStatements,
   ]);
 
-  const queued = Number((results?.[0] as { meta?: { changes?: number } } | undefined)?.meta?.changes ?? 1) > 0;
+  const queued =
+    Number((results?.[0] as { meta?: { changes?: number } } | undefined)?.meta?.changes ?? 1) > 0;
   return { queued, message_id: queued ? messageId : null };
 }
 
@@ -764,7 +868,9 @@ export async function updateBalanceCheckForSmsResult(
   errorMessage: string | null = null,
 ): Promise<void> {
   const submitted = outcome === 'confirmed' || outcome === 'submitted_unconfirmed';
-  await db.prepare(`
+  await db
+    .prepare(
+      `
     UPDATE sim_balance_checks
     SET status = ?,
         sent_at = CASE WHEN ? THEN COALESCE(sent_at, CURRENT_TIMESTAMP) ELSE sent_at END,
@@ -781,18 +887,23 @@ export async function updateBalanceCheckForSmsResult(
       SELECT balance_check_id FROM messages WHERE id = ?
     )
       AND status = 'queued'
-  `).bind(
-    submitted ? 'awaiting_response' : 'failed',
-    submitted ? 1 : 0,
-    submitted ? 1 : 0,
-    submitted ? 1 : 0,
-    submitted ? null : (errorMessage || 'SMS send failed'),
-    messageId,
-  ).run();
+  `,
+    )
+    .bind(
+      submitted ? 'awaiting_response' : 'failed',
+      submitted ? 1 : 0,
+      submitted ? 1 : 0,
+      submitted ? 1 : 0,
+      submitted ? null : errorMessage || 'SMS send failed',
+      messageId,
+    )
+    .run();
 }
 
 function parseBody(raw: unknown): Record<string, unknown> | null {
-  return raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : null;
+  return raw && typeof raw === 'object' && !Array.isArray(raw)
+    ? (raw as Record<string, unknown>)
+    : null;
 }
 
 export const balanceQueriesHandler = {
@@ -812,7 +923,8 @@ export const balanceQueriesHandler = {
     }
 
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-    const result = await request.env.DB.prepare(`
+    const result = await request.env.DB.prepare(
+      `
       SELECT
         c.id,
         c.sim_iccid,
@@ -882,7 +994,10 @@ export const balanceQueriesHandler = {
       ${where}
       ORDER BY c.requested_at DESC
       LIMIT ?
-    `).bind(...params, limit).all<Record<string, unknown>>();
+    `,
+    )
+      .bind(...params, limit)
+      .all<Record<string, unknown>>();
 
     const checks = result.results.map((check) => {
       let metrics: BalanceMetric[] = [];
@@ -918,13 +1033,20 @@ export const balanceQueriesHandler = {
   },
 
   async status(request: AppRequest): Promise<Response> {
-    const ids = [...new Set((new URL(request.url).searchParams.get('ids') || '')
-      .split(',').map((id) => id.trim()).filter(Boolean))];
+    const ids = [
+      ...new Set(
+        (new URL(request.url).searchParams.get('ids') || '')
+          .split(',')
+          .map((id) => id.trim())
+          .filter(Boolean),
+      ),
+    ];
     if (!ids.length || ids.length > 100 || ids.some((id) => id.length > 200)) {
       return json({ error: 'ids must contain 1 to 100 balance check IDs' }, 400);
     }
     const placeholders = ids.map(() => '?').join(', ');
-    const result = await request.env.DB.prepare(`
+    const result = await request.env.DB.prepare(
+      `
       SELECT c.id, c.status, c.updated_at, c.completed_at,
         (SELECT sj.status FROM sim_balance_skill_jobs sj
          WHERE sj.check_id = c.id ORDER BY sj.created_at DESC, sj.rowid DESC LIMIT 1)
@@ -934,7 +1056,10 @@ export const balanceQueriesHandler = {
       FROM sim_balance_checks c
       LEFT JOIN sim_balance_web_jobs wj ON wj.check_id = c.id
       WHERE c.id IN (${placeholders})
-    `).bind(...ids).all<Record<string, unknown>>();
+    `,
+    )
+      .bind(...ids)
+      .all<Record<string, unknown>>();
     return json({
       success: true,
       data: result.results.map((record) => ({
@@ -947,24 +1072,36 @@ export const balanceQueriesHandler = {
   async detail(request: AppRequest): Promise<Response> {
     const id = String(request.params?.id || '').trim();
     if (!id || id.length > 200) return json({ error: 'Invalid balance check ID' }, 400);
-    const check = await request.env.DB.prepare(`
+    const check = await request.env.DB.prepare(
+      `
       SELECT id FROM sim_balance_checks WHERE id = ?
-    `).bind(id).first();
+    `,
+    )
+      .bind(id)
+      .first();
     if (!check) return json({ error: 'Balance check not found' }, 404);
     const [messages, events] = await Promise.all([
-      request.env.DB.prepare(`
+      request.env.DB.prepare(
+        `
         SELECT id, type, content, timestamp, status, phone_number, recipient
         FROM messages
         WHERE balance_check_id = ?
         ORDER BY timestamp, id
-      `).bind(id).all(),
-      request.env.DB.prepare(`
+      `,
+      )
+        .bind(id)
+        .all(),
+      request.env.DB.prepare(
+        `
         SELECT e.id, e.event_type, e.detail_json, e.created_at
         FROM sim_balance_web_events e
         JOIN sim_balance_web_jobs j ON j.id = e.job_id
         WHERE j.check_id = ?
         ORDER BY e.created_at, e.id
-      `).bind(id).all(),
+      `,
+      )
+        .bind(id)
+        .all(),
     ]);
     return json({
       success: true,
@@ -1028,7 +1165,9 @@ export const balanceQueriesHandler = {
     if (!item) return json({ success: false, error: 'SIM not found' }, 404);
 
     const method = describeBalanceMethod(item.profile);
-    const runner = method.capability ? (runners.capabilities as Record<string, unknown>)[method.capability] : null;
+    const runner = method.capability
+      ? (runners.capabilities as Record<string, unknown>)[method.capability]
+      : null;
     return json({
       success: true,
       eligible: item.eligible,
@@ -1039,16 +1178,20 @@ export const balanceQueriesHandler = {
         number: item.phone.number,
         carrier: item.phone.carrier,
       },
-      profile: item.profile ? {
-        id: item.profile.id,
-        method: item.profile.method,
-        carrier: item.profile.carrier,
-      } : null,
+      profile: item.profile
+        ? {
+            id: item.profile.id,
+            method: item.profile.method,
+            carrier: item.profile.carrier,
+          }
+        : null,
       method,
-      runner: runner ? {
-        required: true,
-        ...runner,
-      } : { required: false, available: true, state: 'not_required' },
+      runner: runner
+        ? {
+            required: true,
+            ...runner,
+          }
+        : { required: false, available: true, state: 'not_required' },
     });
   },
 
@@ -1078,15 +1221,22 @@ export const balanceQueriesHandler = {
         unverified: 'Balance query profile is not verified for this SIM',
         cooldown: 'This SIM has already been queried in the last 24 hours',
       };
-      return json({
-        success: false,
-        error: (item.reason && errors[item.reason]) || 'SIM is not eligible for a balance query',
-        reason: item.reason,
-        previous_check: item.recentCheck,
-      }, item.reason === 'cooldown' ? 429 : 409);
+      return json(
+        {
+          success: false,
+          error: (item.reason && errors[item.reason]) || 'SIM is not eligible for a balance query',
+          reason: item.reason,
+          previous_check: item.recentCheck,
+        },
+        item.reason === 'cooldown' ? 429 : 409,
+      );
     }
 
-    const check = await queueBalanceCheck(request.env.DB, { phone: item.phone, profile: item.profile! }, requestedBySubject);
+    const check = await queueBalanceCheck(
+      request.env.DB,
+      { phone: item.phone, profile: item.profile! },
+      requestedBySubject,
+    );
     return json({ success: true, check }, 202);
   },
 
@@ -1100,10 +1250,15 @@ export const balanceQueriesHandler = {
       return json({ success: false, error: 'Invalid JSON body' }, 400);
     }
     const methods = body?.methods;
-    if (!Array.isArray(methods) || methods.length < 1
-      || methods.length > BATCH_METHODS.size
-      || new Set(methods).size !== methods.length
-      || (methods as unknown[]).some((method) => typeof method !== 'string' || !BATCH_METHODS.has(method))) {
+    if (
+      !Array.isArray(methods) ||
+      methods.length < 1 ||
+      methods.length > BATCH_METHODS.size ||
+      new Set(methods).size !== methods.length ||
+      (methods as unknown[]).some(
+        (method) => typeof method !== 'string' || !BATCH_METHODS.has(method),
+      )
+    ) {
       return json({ success: false, error: 'A unique list of supported methods is required' }, 400);
     }
 
@@ -1122,7 +1277,13 @@ export const balanceQueriesHandler = {
     // normal user SMS delivery.
     for (const item of eligible) {
       try {
-        checks.push(await queueBalanceCheck(request.env.DB, { phone: item.phone, profile: item.profile! }, requestedBySubject));
+        checks.push(
+          await queueBalanceCheck(
+            request.env.DB,
+            { phone: item.phone, profile: item.profile! },
+            requestedBySubject,
+          ),
+        );
       } catch (error) {
         failures.push({
           phone_iccid: item.phone.iccid,
@@ -1132,19 +1293,22 @@ export const balanceQueriesHandler = {
       }
     }
 
-    return json({
-      success: true,
-      batch_id: `balance-batch-${nanoid()}`,
-      summary: {
-        ...summarizePlan(plan),
-        selected: eligible.length,
-        methods,
-        queued: checks.length,
-        failed_to_queue: failures.length,
+    return json(
+      {
+        success: true,
+        batch_id: `balance-batch-${nanoid()}`,
+        summary: {
+          ...summarizePlan(plan),
+          selected: eligible.length,
+          methods,
+          queued: checks.length,
+          failed_to_queue: failures.length,
+        },
+        checks,
+        failures,
       },
-      checks,
-      failures,
-    }, 202);
+      202,
+    );
   },
 
   async create(request: AppRequest): Promise<Response> {
@@ -1160,29 +1324,47 @@ export const balanceQueriesHandler = {
     const phone_iccid = body?.phone_iccid;
     const profile_id = body?.profile_id;
     if (typeof phone_iccid !== 'string' || typeof profile_id !== 'string') {
-      return json({
-        success: false,
-        error: 'phone_iccid and profile_id are required',
-      }, 400);
+      return json(
+        {
+          success: false,
+          error: 'phone_iccid and profile_id are required',
+        },
+        400,
+      );
     }
 
     const db = request.env.DB;
     const [profile, phone, recent] = await Promise.all([
-      db.prepare(`
+      db
+        .prepare(
+          `
         SELECT * FROM sim_balance_profiles
         WHERE id = ? AND (discovery_enabled = 1 OR enabled = 1)
-      `).bind(profile_id).first(),
-      db.prepare(`
+      `,
+        )
+        .bind(profile_id)
+        .first(),
+      db
+        .prepare(
+          `
         SELECT iccid, number, carrier, country, sim_status
         FROM device_view WHERE iccid = ?
-      `).bind(phone_iccid).first(),
-      db.prepare(`
+      `,
+        )
+        .bind(phone_iccid)
+        .first(),
+      db
+        .prepare(
+          `
         SELECT id, status, requested_at
         FROM sim_balance_checks
         WHERE sim_iccid = ?
           AND (${BALANCE_COOLDOWN_PREDICATE})
         ORDER BY requested_at DESC LIMIT 1
-      `).bind(phone_iccid).first(),
+      `,
+        )
+        .bind(phone_iccid)
+        .first(),
     ]);
 
     if (!profile) {
@@ -1194,24 +1376,35 @@ export const balanceQueriesHandler = {
     if (!phone || phone.sim_status !== 'active') {
       return json({ success: false, error: 'SIM is not active' }, 409);
     }
-    if (phone.country !== profile.country_code
-      || !carrierMatchesProfile(phone.carrier, profile.carrier)) {
+    if (
+      phone.country !== profile.country_code ||
+      !carrierMatchesProfile(phone.carrier, profile.carrier)
+    ) {
       return json({ success: false, error: 'SIM does not match the carrier profile' }, 409);
     }
     if (recent) {
-      return json({
-        success: false,
-        error: 'This SIM has already been queried in the last 24 hours',
-        previous_check: recent,
-      }, 429);
+      return json(
+        {
+          success: false,
+          error: 'This SIM has already been queried in the last 24 hours',
+          previous_check: recent,
+        },
+        429,
+      );
     }
 
-    const check = await queueBalanceCheck(db, { phone: phone as unknown as PlanPhone, profile: profile as BalanceProfile });
+    const check = await queueBalanceCheck(db, {
+      phone: phone as unknown as PlanPhone,
+      profile: profile as BalanceProfile,
+    });
 
-    return json({
-      success: true,
-      check,
-    }, 202);
+    return json(
+      {
+        success: true,
+        check,
+      },
+      202,
+    );
   },
 
   async continue(request: AppRequest): Promise<Response> {
@@ -1228,7 +1421,8 @@ export const balanceQueriesHandler = {
       return json({ success: false, error: 'check_id is required' }, 400);
     }
 
-    const check = await request.env.DB.prepare(`
+    const check = await request.env.DB.prepare(
+      `
       SELECT
         c.id, c.sim_iccid, c.status, c.step_index, c.response_message_id,
         c.response_sender, c.raw_response, c.parser_version,
@@ -1238,7 +1432,10 @@ export const balanceQueriesHandler = {
       JOIN sim_balance_profiles p ON p.id = c.profile_id
       LEFT JOIN device_view dv ON dv.iccid = c.sim_iccid
       WHERE c.id = ?
-    `).bind(body.check_id).first<BalanceCheckRow>();
+    `,
+    )
+      .bind(body.check_id)
+      .first<BalanceCheckRow>();
 
     if (!check) return json({ success: false, error: 'Balance check not found' }, 404);
     if (check.status !== 'response_received' && check.status !== 'unparsed') {
@@ -1250,25 +1447,34 @@ export const balanceQueriesHandler = {
       return json({ success: false, error: 'No allowlisted next step matches the reply' }, 409);
     }
 
-    const result = await queueBalanceFollowUp(request.env.DB, check, {
-      id: String(check.response_message_id),
-      phone_number: check.response_sender,
-      content: String(check.raw_response),
-    }, step, check.status);
+    const result = await queueBalanceFollowUp(
+      request.env.DB,
+      check,
+      {
+        id: String(check.response_message_id),
+        phone_number: check.response_sender,
+        content: String(check.raw_response),
+      },
+      step,
+      check.status,
+    );
 
     if (!result.queued) {
       return json({ success: false, error: 'Balance check changed before it was continued' }, 409);
     }
 
-    return json({
-      success: true,
-      check: {
-        id: check.id,
-        status: 'queued',
-        step_index: (check.step_index || 0) + 1,
-        outbound_message_id: result.message_id,
+    return json(
+      {
+        success: true,
+        check: {
+          id: check.id,
+          status: 'queued',
+          step_index: (check.step_index || 0) + 1,
+          outbound_message_id: result.message_id,
+        },
       },
-    }, 202);
+      202,
+    );
   },
 
   async retry(request: AppRequest): Promise<Response> {
@@ -1285,7 +1491,8 @@ export const balanceQueriesHandler = {
       return json({ success: false, error: 'check_id is required' }, 400);
     }
 
-    const check = await request.env.DB.prepare(`
+    const check = await request.env.DB.prepare(
+      `
       SELECT
         c.id, c.status, c.step_index,
         p.destination, p.conversation_steps,
@@ -1303,45 +1510,71 @@ export const balanceQueriesHandler = {
         LIMIT 1
       )
       WHERE c.id = ?
-    `).bind(body.check_id).first<BalanceCheckRow & { message_id: string; message_content: string; message_recipient: string; message_status: string }>();
+    `,
+    )
+      .bind(body.check_id)
+      .first<
+        BalanceCheckRow & {
+          message_id: string;
+          message_content: string;
+          message_recipient: string;
+          message_status: string;
+        }
+      >();
 
     const step = attemptedStep(check);
-    if (!check || check.status !== 'failed' || check.message_status !== 'failed'
-      || !step || check.message_content !== step.command
-      || check.message_recipient !== check.destination) {
+    if (
+      !check ||
+      check.status !== 'failed' ||
+      check.message_status !== 'failed' ||
+      !step ||
+      check.message_content !== step.command ||
+      check.message_recipient !== check.destination
+    ) {
       return json({ success: false, error: 'No allowlisted failed step can be retried' }, 409);
     }
 
     const results = await request.env.DB.batch([
-      request.env.DB.prepare(`
+      request.env.DB.prepare(
+        `
         UPDATE messages
         SET status = 'sending', error_message = NULL,
             processing_session_id = NULL, updated_at = CURRENT_TIMESTAMP
         WHERE id = ? AND status = 'failed'
           AND purpose = 'balance_maintenance'
-      `).bind(check.message_id),
-      request.env.DB.prepare(`
+      `,
+      ).bind(check.message_id),
+      request.env.DB.prepare(
+        `
         UPDATE sim_balance_checks
         SET status = 'queued', completed_at = NULL, deadline_at = NULL, error = NULL,
             updated_at = CURRENT_TIMESTAMP
         WHERE id = ? AND status = 'failed' AND step_index = ?
-      `).bind(check.id, check.step_index),
+      `,
+      ).bind(check.id, check.step_index),
     ]);
 
-    if (Number((results?.[0] as { meta?: { changes?: number } } | undefined)?.meta?.changes ?? 1) === 0
-      || Number((results?.[1] as { meta?: { changes?: number } } | undefined)?.meta?.changes ?? 1) === 0) {
+    if (
+      Number((results?.[0] as { meta?: { changes?: number } } | undefined)?.meta?.changes ?? 1) ===
+        0 ||
+      Number((results?.[1] as { meta?: { changes?: number } } | undefined)?.meta?.changes ?? 1) ===
+        0
+    ) {
       return json({ success: false, error: 'Balance check changed before retry' }, 409);
     }
 
-    return json({
-      success: true,
-      check: {
-        id: check.id,
-        status: 'queued',
-        step_index: check.step_index,
-        outbound_message_id: check.message_id,
+    return json(
+      {
+        success: true,
+        check: {
+          id: check.id,
+          status: 'queued',
+          step_index: check.step_index,
+          outbound_message_id: check.message_id,
+        },
       },
-    }, 202);
+      202,
+    );
   },
 
   async stop(request: AppRequest): Promise<Response> {
@@ -1358,9 +1591,13 @@ export const balanceQueriesHandler = {
       return json({ success: false, error: 'check_id is required' }, 400);
     }
 
-    const check = await request.env.DB.prepare(`
+    const check = await request.env.DB.prepare(
+      `
       SELECT id, status FROM sim_balance_checks WHERE id = ?
-    `).bind(String(body.check_id)).first<{ id: string; status: string }>();
+    `,
+    )
+      .bind(String(body.check_id))
+      .first<{ id: string; status: string }>();
     if (!check) return json({ success: false, error: 'Balance check not found' }, 404);
     if (check.status !== 'awaiting_response' && check.status !== 'response_received') {
       return json({ success: false, error: 'Balance check is not stoppable' }, 409);
@@ -1368,23 +1605,30 @@ export const balanceQueriesHandler = {
 
     const finalStatus = check.status === 'awaiting_response' ? 'timed_out' : 'unparsed';
     const results = await request.env.DB.batch([
-      request.env.DB.prepare(`
+      request.env.DB.prepare(
+        `
         UPDATE sim_balance_checks
         SET status = ?, completed_at = CURRENT_TIMESTAMP,
             error = CASE WHEN ? = 'timed_out' THEN 'Stopped by operator' ELSE error END,
             updated_at = CURRENT_TIMESTAMP
         WHERE id = ? AND status = ?
-      `).bind(finalStatus, finalStatus, check.id, check.status),
-      request.env.DB.prepare(`
+      `,
+      ).bind(finalStatus, finalStatus, check.id, check.status),
+      request.env.DB.prepare(
+        `
         UPDATE sim_balance_skill_jobs
         SET status = 'stopped', lease_owner = NULL, lease_expires_at = NULL,
             last_error = COALESCE(last_error, 'Stopped by operator'),
             updated_at = CURRENT_TIMESTAMP
         WHERE check_id = ? AND status IN ('pending', 'leased')
-      `).bind(check.id),
+      `,
+      ).bind(check.id),
     ]);
 
-    if (Number((results?.[0] as { meta?: { changes?: number } } | undefined)?.meta?.changes ?? 1) === 0) {
+    if (
+      Number((results?.[0] as { meta?: { changes?: number } } | undefined)?.meta?.changes ?? 1) ===
+      0
+    ) {
       return json({ success: false, error: 'Balance check changed before stop' }, 409);
     }
 

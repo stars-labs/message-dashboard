@@ -86,41 +86,61 @@ function insertMessage({
   timestamp = '2026-08-24T01:02:03Z',
   type = 'received',
 } = {}) {
-  database.query(`
+  database
+    .query(
+      `
     INSERT INTO messages (id, phone_iccid, phone_number, content, timestamp, type)
     VALUES (?, ?, ?, ?, ?, ?)
-  `).run(id, iccid, sender, content, timestamp, type);
+  `,
+    )
+    .run(id, iccid, sender, content, timestamp, type);
   return { id, phone_iccid: iccid, phone_number: sender, content, timestamp, type };
 }
 
 function bills() {
-  return database.query(`
+  return database
+    .query(
+      `
     SELECT billing_account_id, source_message_id, amount_minor, currency,
       due_date, action_status, version
     FROM carrier_bills ORDER BY due_date
-  `).all();
+  `,
+    )
+    .all();
 }
 
 function events() {
-  return database.query(`
+  return database
+    .query(
+      `
     SELECT event_type, source_message_id FROM carrier_bill_events
     ORDER BY event_type, source_message_id
-  `).all();
+  `,
+    )
+    .all();
 }
 
 function accounts() {
-  return database.query(`
+  return database
+    .query(
+      `
     SELECT notification_sim_iccid, account_ref_last4, status, created_by
     FROM carrier_billing_accounts
-  `).all();
+  `,
+    )
+    .all();
 }
 
 function members() {
-  return database.query(`
+  return database
+    .query(
+      `
     SELECT sim_iccid, verification_source, verified_by
     FROM carrier_billing_account_sims
     WHERE removed_at IS NULL
-  `).all();
+  `,
+    )
+    .all();
 }
 
 describe('carrier bill SMS processing', () => {
@@ -128,26 +148,32 @@ describe('carrier bill SMS processing', () => {
     const result = await processCarrierBillMessage(db, insertMessage());
 
     expect(result).toMatchObject({ outcome: 'detected', bill_id: expect.any(String) });
-    expect(bills()).toEqual([{
-      billing_account_id: expect.any(String),
-      source_message_id: 'message-1',
-      amount_minor: 4280,
-      currency: 'SGD',
-      due_date: '2026-09-14',
-      action_status: 'unpaid',
-      version: 1,
-    }]);
-    expect(accounts()).toEqual([{
-      notification_sim_iccid: 'notification-sim',
-      account_ref_last4: '5678',
-      status: 'active',
-      created_by: 'system:sms',
-    }]);
-    expect(members()).toEqual([{
-      sim_iccid: 'notification-sim',
-      verification_source: 'contract_or_bill',
-      verified_by: 'system:sms',
-    }]);
+    expect(bills()).toEqual([
+      {
+        billing_account_id: expect.any(String),
+        source_message_id: 'message-1',
+        amount_minor: 4280,
+        currency: 'SGD',
+        due_date: '2026-09-14',
+        action_status: 'unpaid',
+        version: 1,
+      },
+    ]);
+    expect(accounts()).toEqual([
+      {
+        notification_sim_iccid: 'notification-sim',
+        account_ref_last4: '5678',
+        status: 'active',
+        created_by: 'system:sms',
+      },
+    ]);
+    expect(members()).toEqual([
+      {
+        sim_iccid: 'notification-sim',
+        verification_source: 'contract_or_bill',
+        verified_by: 'system:sms',
+      },
+    ]);
     expect(events()).toEqual([{ event_type: 'detected', source_message_id: 'message-1' }]);
   });
 
@@ -210,7 +236,9 @@ describe('carrier bill SMS processing', () => {
 
   test('rejects an account whose notification SIM inventory is no longer eligible', async () => {
     const message = insertMessage();
-    database.query(`UPDATE sims SET service_type = 'prepaid' WHERE iccid = 'notification-sim'`).run();
+    database
+      .query(`UPDATE sims SET service_type = 'prepaid' WHERE iccid = 'notification-sim'`)
+      .run();
 
     expect(await processCarrierBillMessage(db, message)).toEqual({ outcome: 'ignored' });
     expect(bills()).toEqual([]);
@@ -238,22 +266,15 @@ describe('carrier bill SMS processing', () => {
       return { outcome: 'detected' };
     };
 
-    const results = await processCarrierBillMessages(db, [
-      { id: 'broken' },
-      { id: 'healthy' },
-    ], {
+    const results = await processCarrierBillMessages(db, [{ id: 'broken' }, { id: 'healthy' }], {
       processMessage,
       logError: (message, error) => errors.push([message, error.message]),
     });
 
-    expect(results).toEqual([
-      { outcome: 'failed' },
-      { outcome: 'detected' },
-    ]);
+    expect(results).toEqual([{ outcome: 'failed' }, { outcome: 'detected' }]);
     expect(processed).toEqual(['healthy']);
-    expect(errors).toEqual([[
-      'Carrier bill processing failed for message broken:',
-      'database unavailable',
-    ]]);
+    expect(errors).toEqual([
+      ['Carrier bill processing failed for message broken:', 'database unavailable'],
+    ]);
   });
 });

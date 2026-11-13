@@ -53,11 +53,13 @@ export function logD1Error(
   error: unknown,
   classification: D1ErrorClassification,
 ): void {
-  console.error(JSON.stringify({
-    event: 'd1_unavailable',
-    operation,
-    error_code: classification.code,
-    quota: classification.quota ?? null,
-    error: boundedErrorText(error),
-  }));
+  console.error(
+    JSON.stringify({
+      event: 'd1_unavailable',
+      operation,
+      error_code: classification.code,
+      quota: classification.quota ?? null,
+      error: boundedErrorText(error),
+    }),
+  );
 }

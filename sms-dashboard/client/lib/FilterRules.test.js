@@ -13,16 +13,19 @@ afterEach(() => {
 
 describe('FilterRules', () => {
   test('does not render an expensive historical hit count', async () => {
-    globalThis.fetch = async () => Response.json({
-      filters: [{
-        id: 1,
-        rule_type: 'sender',
-        pattern: '10655446',
-        note: 'China Unicom marketing',
-        is_active: 1,
-      }],
-      pending: 0,
-    });
+    globalThis.fetch = async () =>
+      Response.json({
+        filters: [
+          {
+            id: 1,
+            rule_type: 'sender',
+            pattern: '10655446',
+            note: 'China Unicom marketing',
+            is_active: 1,
+          },
+        ],
+        pending: 0,
+      });
 
     const view = render(FilterRules);
     await waitFor(() => expect(view.getAllByText('10655446').length).toBeGreaterThan(0));
@@ -32,16 +35,19 @@ describe('FilterRules', () => {
   });
 
   test('does not expose the old automatic pending-message sweep', async () => {
-    globalThis.fetch = async () => Response.json({
-      filters: [{
-        id: 1,
-        rule_type: 'sender',
-        pattern: '10655446',
-        note: null,
-        is_active: 1,
-      }],
-      pending: 5000,
-    });
+    globalThis.fetch = async () =>
+      Response.json({
+        filters: [
+          {
+            id: 1,
+            rule_type: 'sender',
+            pattern: '10655446',
+            note: null,
+            is_active: 1,
+          },
+        ],
+        pending: 5000,
+      });
 
     const view = render(FilterRules);
     await waitFor(() => expect(view.getAllByText('10655446').length).toBeGreaterThan(0));
@@ -66,13 +72,15 @@ describe('FilterRules', () => {
         });
       }
       return Response.json({
-        filters: [{
-          id: 1,
-          rule_type: 'sender',
-          pattern: '10655446',
-          note: null,
-          is_active: 1,
-        }],
+        filters: [
+          {
+            id: 1,
+            rule_type: 'sender',
+            pattern: '10655446',
+            note: null,
+            is_active: 1,
+          },
+        ],
       });
     };
 

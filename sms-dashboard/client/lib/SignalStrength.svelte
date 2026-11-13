@@ -1,7 +1,7 @@
 <script>
   let {
     signal = 0, // 0-100 signal strength
-    status = "offline",
+    status = 'offline',
     rssi = null, // RSSI in dBm
     rsrq = null, // RSRQ in dB
     rsrp = null, // RSRP in dBm
@@ -24,29 +24,29 @@
   // Get signal quality label
   function getSignalQuality(value) {
     const validSignal = Number(value) || 0;
-    if (validSignal >= 75) return "优秀";
-    if (validSignal >= 50) return "良好";
-    if (validSignal >= 25) return "一般";
-    if (validSignal > 0) return "较弱";
-    return "无信号";
+    if (validSignal >= 75) return '优秀';
+    if (validSignal >= 50) return '良好';
+    if (validSignal >= 25) return '一般';
+    if (validSignal > 0) return '较弱';
+    return '无信号';
   }
 
   function getSignalColor(value) {
     const validSignal = Number(value) || 0;
-    if (validSignal >= 75) return "bg-emerald-500";
-    if (validSignal >= 50) return "bg-blue-500";
-    if (validSignal >= 25) return "bg-amber-500";
-    if (validSignal > 0) return "bg-orange-500";
-    return "bg-stone-300";
+    if (validSignal >= 75) return 'bg-emerald-500';
+    if (validSignal >= 50) return 'bg-blue-500';
+    if (validSignal >= 25) return 'bg-amber-500';
+    if (validSignal > 0) return 'bg-orange-500';
+    return 'bg-stone-300';
   }
 
   function getTextColor(value) {
     const validSignal = Number(value) || 0;
-    if (validSignal >= 75) return "text-emerald-600";
-    if (validSignal >= 50) return "text-blue-600";
-    if (validSignal >= 25) return "text-amber-600";
-    if (validSignal > 0) return "text-orange-600";
-    return "text-stone-400";
+    if (validSignal >= 75) return 'text-emerald-600';
+    if (validSignal >= 50) return 'text-blue-600';
+    if (validSignal >= 25) return 'text-amber-600';
+    if (validSignal > 0) return 'text-orange-600';
+    return 'text-stone-400';
   }
 
   let bars = $derived(getSignalBars(signal) || 0);
@@ -58,18 +58,16 @@
 {#if compact}
   <!-- Compact view for list -->
   <div class="flex items-center gap-1.5">
-    {#if status === "online" || status === "active" || status === "registered" || status === "connected"}
+    {#if status === 'online' || status === 'active' || status === 'registered' || status === 'connected'}
       <div class="flex gap-0.5 items-end">
         {#each [1, 2, 3, 4] as bar}
           <div
-            class="w-1 rounded-sm {bar <= bars
-              ? color
-              : 'bg-stone-200'}"
+            class="w-1 rounded-sm {bar <= bars ? color : 'bg-stone-200'}"
             style="height: {4 + bar * 3}px"
           ></div>
         {/each}
       </div>
-    {:else if status === "searching"}
+    {:else if status === 'searching'}
       <div class="flex gap-0.5 items-end">
         {#each [1, 2, 3, 4] as bar}
           <div
@@ -79,26 +77,20 @@
         {/each}
       </div>
       <span class="text-xs text-amber-600">搜索中</span>
-    {:else if status === "failed"}
+    {:else if status === 'failed'}
       <div class="flex gap-0.5 items-end">
         {#each [1, 2, 3, 4] as bar}
-          <div
-            class="w-1 bg-red-500 rounded-sm"
-            style="height: {4 + bar * 3}px"
-          ></div>
+          <div class="w-1 bg-red-500 rounded-sm" style="height: {4 + bar * 3}px"></div>
         {/each}
       </div>
       <span class="text-xs text-red-500">故障</span>
-    {:else if status === "offline"}
+    {:else if status === 'offline'}
       <div class="flex gap-0.5 items-end">
         {#each [1, 2, 3, 4] as bar}
-          <div
-            class="w-1 bg-stone-300 rounded-sm"
-            style="height: {4 + bar * 3}px"
-          ></div>
+          <div class="w-1 bg-stone-300 rounded-sm" style="height: {4 + bar * 3}px"></div>
         {/each}
       </div>
-    {:else if status === "unknown"}
+    {:else if status === 'unknown'}
       {#if isInitialLoad}
         <!-- Show loading animation during initial load -->
         <div class="flex gap-0.5 items-end">
@@ -122,23 +114,17 @@
         </div>
         <span class="text-xs text-stone-400">数据过期</span>
       {/if}
-    {:else if status === "stale"}
+    {:else if status === 'stale'}
       <div class="flex gap-0.5 items-end">
         {#each [1, 2, 3, 4] as bar}
-          <div
-            class="w-1 bg-orange-500 rounded-sm"
-            style="height: {4 + bar * 3}px"
-          ></div>
+          <div class="w-1 bg-orange-500 rounded-sm" style="height: {4 + bar * 3}px"></div>
         {/each}
       </div>
       <span class="text-xs text-orange-600">数据过期</span>
     {:else}
       <div class="flex gap-0.5 items-end">
         {#each [1, 2, 3, 4] as bar}
-          <div
-            class="w-1 bg-stone-200 rounded-sm"
-            style="height: {4 + bar * 3}px"
-          ></div>
+          <div class="w-1 bg-stone-200 rounded-sm" style="height: {4 + bar * 3}px"></div>
         {/each}
       </div>
       <span class="text-xs text-stone-400">未知</span>
@@ -150,19 +136,17 @@
     <div class="flex items-center justify-between">
       <span class="text-sm font-medium text-stone-600">信号强度</span>
       <div class="flex items-center gap-2">
-        {#if status === "online" || status === "active" || status === "registered" || status === "connected"}
+        {#if status === 'online' || status === 'active' || status === 'registered' || status === 'connected'}
           <div class="flex gap-0.5 items-end">
             {#each [1, 2, 3, 4] as bar}
               <div
-                class="w-1.5 rounded-sm {bar <= bars
-                  ? color
-                  : 'bg-stone-200'}"
+                class="w-1.5 rounded-sm {bar <= bars ? color : 'bg-stone-200'}"
                 style="height: {bar * 4 + 6}px"
               ></div>
             {/each}
           </div>
           <span class="text-sm font-semibold {textColor}">{quality}</span>
-        {:else if status === "searching"}
+        {:else if status === 'searching'}
           <div class="flex gap-0.5 items-end">
             {#each [1, 2, 3, 4] as bar}
               <div
@@ -172,27 +156,21 @@
             {/each}
           </div>
           <span class="text-sm font-semibold text-amber-600">搜索中</span>
-        {:else if status === "failed"}
+        {:else if status === 'failed'}
           <div class="flex gap-0.5 items-end">
             {#each [1, 2, 3, 4] as bar}
-              <div
-                class="w-1.5 bg-red-500 rounded-sm"
-                style="height: {bar * 4 + 6}px"
-              ></div>
+              <div class="w-1.5 bg-red-500 rounded-sm" style="height: {bar * 4 + 6}px"></div>
             {/each}
           </div>
           <span class="text-sm font-semibold text-red-500">故障</span>
-        {:else if status === "offline"}
+        {:else if status === 'offline'}
           <div class="flex gap-0.5 items-end">
             {#each [1, 2, 3, 4] as bar}
-              <div
-                class="w-1.5 bg-stone-300 rounded-sm"
-                style="height: {bar * 4 + 6}px"
-              ></div>
+              <div class="w-1.5 bg-stone-300 rounded-sm" style="height: {bar * 4 + 6}px"></div>
             {/each}
           </div>
           <span class="text-sm font-semibold text-stone-400">离线</span>
-        {:else if status === "unknown"}
+        {:else if status === 'unknown'}
           <div class="flex gap-0.5 items-end">
             {#each [1, 2, 3, 4] as bar}
               <div
@@ -202,23 +180,17 @@
             {/each}
           </div>
           <span class="text-sm font-semibold text-stone-400">数据过期</span>
-        {:else if status === "stale"}
+        {:else if status === 'stale'}
           <div class="flex gap-0.5 items-end">
             {#each [1, 2, 3, 4] as bar}
-              <div
-                class="w-1.5 bg-orange-500 rounded-sm"
-                style="height: {bar * 4 + 6}px"
-              ></div>
+              <div class="w-1.5 bg-orange-500 rounded-sm" style="height: {bar * 4 + 6}px"></div>
             {/each}
           </div>
           <span class="text-sm font-semibold text-orange-600">数据过期</span>
         {:else}
           <div class="flex gap-0.5 items-end">
             {#each [1, 2, 3, 4] as bar}
-              <div
-                class="w-1.5 bg-stone-200 rounded-sm"
-                style="height: {bar * 4 + 6}px"
-              ></div>
+              <div class="w-1.5 bg-stone-200 rounded-sm" style="height: {bar * 4 + 6}px"></div>
             {/each}
           </div>
           <span class="text-sm font-semibold text-stone-400">未知</span>
@@ -226,7 +198,7 @@
       </div>
     </div>
 
-    {#if status === "online" && (rssi || rsrq || rsrp || snr)}
+    {#if status === 'online' && (rssi || rsrq || rsrp || snr)}
       <div class="grid grid-cols-2 gap-2 text-xs">
         {#if rssi}
           <div class="flex justify-between">

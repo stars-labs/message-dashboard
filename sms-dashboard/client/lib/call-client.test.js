@@ -124,8 +124,9 @@ describe('call display helpers', () => {
     expect(describeCallError(busy)).toContain('被其他程序占用');
 
     expect(describeCallError(new Error('Another call is already active'))).toContain('另一路通话');
-    expect(describeCallError(new Error('Voice calling is not configured: missing TURN_KEY_ID')))
-      .toContain('还没配置');
+    expect(
+      describeCallError(new Error('Voice calling is not configured: missing TURN_KEY_ID')),
+    ).toContain('还没配置');
     expect(describeCallError(new Error('No active call'))).toContain('已经结束');
     expect(describeCallError(new Error('音频连接超时'))).toBe('音频连接超时');
     expect(describeCallError(null)).toBeNull();

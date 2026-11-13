@@ -20,8 +20,12 @@ function d1(database) {
   const bound = (sql, params) => ({
     sql,
     params,
-    async first() { return database.query(sql).get(...params) ?? null; },
-    async all() { return { results: database.query(sql).all(...params) }; },
+    async first() {
+      return database.query(sql).get(...params) ?? null;
+    },
+    async all() {
+      return { results: database.query(sql).all(...params) };
+    },
     async run() {
       const result = database.query(sql).run(...params);
       return { meta: { changes: result.changes } };
@@ -33,10 +37,12 @@ function d1(database) {
       return { bind: (...params) => bound(sql, params) };
     },
     async batch(statements) {
-      return database.transaction(() => statements.map((statement) => {
-        const result = database.query(statement.sql).run(...statement.params);
-        return { meta: { changes: result.changes } };
-      }))();
+      return database.transaction(() =>
+        statements.map((statement) => {
+          const result = database.query(statement.sql).run(...statement.params);
+          return { meta: { changes: result.changes } };
+        }),
+      )();
     },
   };
 }
@@ -82,10 +88,15 @@ beforeEach(async () => {
     INSERT INTO sims VALUES
       ('notification-sim', 79, '+6590000079', 'postpaid', 'SG', 'Singtel');
   `);
-  for (const name of ['066_add_carrier_billing.sql', '067_add_carrier_billing_account_events.sql']) {
+  for (const name of [
+    '066_add_carrier_billing.sql',
+    '067_add_carrier_billing_account_events.sql',
+  ]) {
     database.exec(await Bun.file(new URL(`../../migrations/${name}`, import.meta.url)).text());
   }
-  database.query(`
+  database
+    .query(
+      `
     INSERT INTO carrier_billing_accounts (
       id, country_code, carrier, currency, display_name,
       notification_sim_iccid, account_ref_digest, account_ref_last4,
@@ -94,7 +105,9 @@ beforeEach(async () => {
       'account-1', 'SG', 'Singtel', 'SGD', 'Singtel corporate',
       'notification-sim', ?, '5678', 'active', 'auth0|admin'
     )
-  `).run(await sha256(ACCOUNT_REFERENCE));
+  `,
+    )
+    .run(await sha256(ACCOUNT_REFERENCE));
   database.exec(`
     INSERT INTO carrier_billing_account_sims (
       billing_account_id, sim_iccid, verification_source, verified_at, verified_by
@@ -120,16 +133,16 @@ beforeEach(async () => {
       const secondId = index === 2 ? 'message-3-part-0' : `message-${index + 1}-part-2`;
       const secondTimestamp = index === 2 ? timestamp : timestamp.replace('00Z', '30Z');
       insert.run(firstId, content.slice(0, splitAt), timestamp);
-      insert.run(
-        secondId,
-        content.slice(splitAt, -1),
-        secondTimestamp,
-      );
+      insert.run(secondId, content.slice(splitAt, -1), secondTimestamp);
     } else {
       insert.run(`message-${index + 1}`, content, timestamp);
     }
   }
-  insert.run('rebate', 'We will provide a goodwill rebate on your next bill.', '2026-09-01T00:00:00Z');
+  insert.run(
+    'rebate',
+    'We will provide a goodwill rebate on your next bill.',
+    '2026-09-01T00:00:00Z',
+  );
   db = d1(database);
 });
 
@@ -161,20 +174,29 @@ describe('historical carrier bill backfill', () => {
   });
 
   test('executes only an exact preview and is idempotent on retry', async () => {
-    const previewResponse = await carrierBillingBackfillHandler.preview(request(db, {
-      account_id: 'account-1',
-    }));
+    const previewResponse = await carrierBillingBackfillHandler.preview(
+      request(db, {
+        account_id: 'account-1',
+      }),
+    );
     const preview = await previewResponse.json();
-    const wrong = await carrierBillingBackfillHandler.execute(request(db, {
-      account_id: 'account-1',
-      expected_version: preview.account.version,
-      preview_digest: '0'.repeat(64),
-    }, 'wrong-preview'));
-    const executeRequest = () => request(db, {
-      account_id: 'account-1',
-      expected_version: preview.account.version,
-      preview_digest: preview.preview_digest,
-    });
+    const wrong = await carrierBillingBackfillHandler.execute(
+      request(
+        db,
+        {
+          account_id: 'account-1',
+          expected_version: preview.account.version,
+          preview_digest: '0'.repeat(64),
+        },
+        'wrong-preview',
+      ),
+    );
+    const executeRequest = () =>
+      request(db, {
+        account_id: 'account-1',
+        expected_version: preview.account.version,
+        preview_digest: preview.preview_digest,
+      });
     const executed = await carrierBillingBackfillHandler.execute(executeRequest());
     const result = await executed.json();
     const retry = await carrierBillingBackfillHandler.execute(executeRequest());
@@ -182,12 +204,23 @@ describe('historical carrier bill backfill', () => {
     expect(previewResponse.status).toBe(200);
     expect(wrong.status).toBe(409);
     expect(executed.status).toBe(200);
-    expect(result.summary).toEqual({ detected: 9, duplicate_detected: 0, parse_conflict: 0, already_processed: 0 });
+    expect(result.summary).toEqual({
+      detected: 9,
+      duplicate_detected: 0,
+      parse_conflict: 0,
+      already_processed: 0,
+    });
     expect(database.query(`SELECT COUNT(*) AS count FROM carrier_bills`).get().count).toBe(9);
-    expect(database.query(`
+    expect(
+      database
+        .query(
+          `
       SELECT COUNT(*) AS count FROM carrier_billing_account_events
       WHERE event_type = 'backfill_executed'
-    `).get().count).toBe(1);
+    `,
+        )
+        .get().count,
+    ).toBe(1);
     expect(retry.status).toBe(200);
     expect((await retry.json()).idempotent).toBe(true);
   });

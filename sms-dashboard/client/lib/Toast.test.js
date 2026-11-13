@@ -38,7 +38,13 @@ describe('Toast', () => {
   test('invokes onClose after the dismiss button is clicked', async () => {
     let closed = false;
     const { container } = render(Toast, {
-      props: { message: 'bye', duration: 0, onClose: () => { closed = true; } },
+      props: {
+        message: 'bye',
+        duration: 0,
+        onClose: () => {
+          closed = true;
+        },
+      },
     });
 
     container.querySelector('button').click();

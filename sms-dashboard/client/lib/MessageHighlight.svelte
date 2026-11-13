@@ -21,12 +21,18 @@
 <!-- Deliberately one line with no whitespace between block tags: segments are adjacent
      runs of the original SMS text, so any newline or indentation Svelte kept as a text
      node would insert spaces into the rendered message. -->
-<span class="break-words">{#if segments}{#each segments as segment}{#if segment.match}<mark class="kw-hl" style:--kw-color={segment.match.color} title={segment.match.tag}>{segment.text}</mark>{:else}{segment.text}{/if}{/each}{:else}{content}{/if}</span>
+<span class="break-words"
+  >{#if segments}{#each segments as segment}{#if segment.match}<mark
+          class="kw-hl"
+          style:--kw-color={segment.match.color}
+          title={segment.match.tag}>{segment.text}</mark
+        >{:else}{segment.text}{/if}{/each}{:else}{content}{/if}</span
+>
 
 <style>
   :global(.kw-hl) {
-    background: color-mix(in srgb, var(--kw-color, #3B82F6) 15%, transparent);
-    border-bottom: 2px solid var(--kw-color, #3B82F6);
+    background: color-mix(in srgb, var(--kw-color, #3b82f6) 15%, transparent);
+    border-bottom: 2px solid var(--kw-color, #3b82f6);
     color: inherit;
     padding: 0 1px;
     border-radius: 2px;

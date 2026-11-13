@@ -43,8 +43,8 @@ export async function testAIConnection(
   }
 
   logger.info(
-    `[ai-connection] test url=${configuration.aiBaseUrl} model=${configuration.aiModel}`
-    + ` protocol=${configuration.aiProtocol}`,
+    `[ai-connection] test url=${configuration.aiBaseUrl} model=${configuration.aiModel}` +
+      ` protocol=${configuration.aiProtocol}`,
   );
 
   const startedAt = now();

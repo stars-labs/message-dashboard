@@ -27,10 +27,14 @@ describe('serial capability runner', () => {
   });
 
   test('once mode propagates a job error', async () => {
-    await expect(runSerialCapability({
-      once: true,
-      runOne: async () => { throw new Error('job failed'); },
-      onError: () => {},
-    })).rejects.toThrow('job failed');
+    await expect(
+      runSerialCapability({
+        once: true,
+        runOne: async () => {
+          throw new Error('job failed');
+        },
+        onError: () => {},
+      }),
+    ).rejects.toThrow('job failed');
   });
 });

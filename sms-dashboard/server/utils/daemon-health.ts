@@ -105,30 +105,56 @@ function advance(snapshot: HealthSnapshot, heartbeatAge: number): HealthSnapshot
 
 export function deriveDaemonHealth(row: DaemonHealthRow | null | undefined): DaemonHealth {
   if (!row) {
-    return { status: 'unknown', label: '检测中', reasons: ['等待采集服务首次连接'], snapshot: null };
+    return {
+      status: 'unknown',
+      label: '检测中',
+      reasons: ['等待采集服务首次连接'],
+      snapshot: null,
+    };
   }
   const heartbeatAge = age(row.seconds_since_heartbeat) ?? Infinity;
   const stored = parseHealthSnapshot(row.metadata);
   if (!stored) {
-    return { status: 'unknown', label: '检测中', reasons: ['健康报告格式无效或缺失'], snapshot: null };
+    return {
+      status: 'unknown',
+      label: '检测中',
+      reasons: ['健康报告格式无效或缺失'],
+      snapshot: null,
+    };
   }
   const snapshot = advance(stored, heartbeatAge);
   if (heartbeatAge > 180) {
-    return { status: 'offline', label: '离线', reasons: [`${Math.floor(heartbeatAge / 60)} 分钟未收到心跳`], snapshot };
+    return {
+      status: 'offline',
+      label: '离线',
+      reasons: [`${Math.floor(heartbeatAge / 60)} 分钟未收到心跳`],
+      snapshot,
+    };
   }
   const reasons: string[] = [];
   if (heartbeatAge > 90) reasons.push(`${Math.floor(heartbeatAge)} 秒未收到心跳`);
-  if (snapshot.last_message_read_success_age_seconds === null || snapshot.last_message_read_success_age_seconds > 300) {
+  if (
+    snapshot.last_message_read_success_age_seconds === null ||
+    snapshot.last_message_read_success_age_seconds > 300
+  ) {
     reasons.push('短信读取已中断');
   }
   const queued = snapshot.queue.pending + snapshot.queue.in_flight;
-  if (queued > 0 && (snapshot.last_upload_success_age_seconds === null || snapshot.last_upload_success_age_seconds > 300)) {
+  if (
+    queued > 0 &&
+    (snapshot.last_upload_success_age_seconds === null ||
+      snapshot.last_upload_success_age_seconds > 300)
+  ) {
     reasons.push('消息上传已中断');
   }
-  if (snapshot.queue.oldest_unacknowledged_age_seconds !== null && snapshot.queue.oldest_unacknowledged_age_seconds > 300) {
+  if (
+    snapshot.queue.oldest_unacknowledged_age_seconds !== null &&
+    snapshot.queue.oldest_unacknowledged_age_seconds > 300
+  ) {
     reasons.push('消息积压超过 5 分钟');
   }
-  if (snapshot.queue.dead_letter > 0) reasons.push(`${snapshot.queue.dead_letter} 条消息需要人工处理`);
+  if (snapshot.queue.dead_letter > 0)
+    reasons.push(`${snapshot.queue.dead_letter} 条消息需要人工处理`);
   return {
     status: reasons.length ? 'degraded' : 'healthy',
     label: reasons.length ? '部分异常' : '正常',

@@ -16,9 +16,12 @@ describe('Balance Agent CLI Keychain store', () => {
 
     expect(invocation.args).toEqual([
       'add-generic-password',
-      '-a', 'auth0RefreshToken',
-      '-s', 'io.qzz.message-dashboard.balance-agent.cli',
-      '-U', '-w',
+      '-a',
+      'auth0RefreshToken',
+      '-s',
+      'io.qzz.message-dashboard.balance-agent.cli',
+      '-U',
+      '-w',
     ]);
     expect(invocation.args).not.toContain('refresh-secret');
     expect(invocation.options).toEqual({ input: 'refresh-secret' });

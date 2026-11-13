@@ -80,12 +80,14 @@ describe('reprocessVerificationPage', () => {
   });
 
   test('adds a code to an existing WhatsApp message', async () => {
-    const db = fakeDb([{
-      id: 'whatsapp',
-      content: "<#> Your WhatsApp code: 367-140 Don't share this code with others 4sgLq1p5sV6",
-      verification_code: null,
-      filter_status: 'clean',
-    }]);
+    const db = fakeDb([
+      {
+        id: 'whatsapp',
+        content: "<#> Your WhatsApp code: 367-140 Don't share this code with others 4sgLq1p5sV6",
+        verification_code: null,
+        filter_status: 'clean',
+      },
+    ]);
 
     const result = await reprocessVerificationPage(db);
 
@@ -95,13 +97,15 @@ describe('reprocessVerificationPage', () => {
   });
 
   test('restores a filtered M1 selfcare OTP for reclassification', async () => {
-    const db = fakeDb([{
-      id: 'm1-selfcare',
-      content: 'OTP for login to selfcare portal is 159571',
-      verification_code: null,
-      filter_status: FILTER_STATUS.FILTERED,
-      filter_rule_id: 32,
-    }]);
+    const db = fakeDb([
+      {
+        id: 'm1-selfcare',
+        content: 'OTP for login to selfcare portal is 159571',
+        verification_code: null,
+        filter_status: FILTER_STATUS.FILTERED,
+        filter_rule_id: 32,
+      },
+    ]);
 
     const result = await reprocessVerificationPage(db);
 

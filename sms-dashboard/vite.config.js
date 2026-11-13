@@ -1,6 +1,6 @@
-import { defineConfig } from 'vite'
-import { svelte } from '@sveltejs/vite-plugin-svelte'
-import { VitePWA } from 'vite-plugin-pwa'
+import { defineConfig } from 'vite';
+import { svelte } from '@sveltejs/vite-plugin-svelte';
+import { VitePWA } from 'vite-plugin-pwa';
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -62,16 +62,16 @@ export default defineConfig({
       ['/api', '/login', '/callback', '/logout'].map((path) => [
         path,
         { target: 'http://localhost:8787' },
-      ])
-    )
+      ]),
+    ),
   },
   build: {
     outDir: 'dist',
     assetsDir: 'assets',
     rollupOptions: {
       output: {
-        manualChunks: undefined
-      }
-    }
-  }
-})
+        manualChunks: undefined,
+      },
+    },
+  },
+});

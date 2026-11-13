@@ -4,7 +4,11 @@ import { createRingtone } from './call-ringtone.js';
 function fakeAudioContext() {
   const created = { oscillators: 0, closed: false, resumed: false };
   class FakeContext {
-    constructor() { FakeContext.last = this; this.currentTime = 0; this.destination = {}; }
+    constructor() {
+      FakeContext.last = this;
+      this.currentTime = 0;
+      this.destination = {};
+    }
     createOscillator() {
       created.oscillators += 1;
       return { type: '', frequency: {}, connect() {}, start() {}, stop() {} };
@@ -15,8 +19,12 @@ function fakeAudioContext() {
         connect() {},
       };
     }
-    resume() { created.resumed = true; }
-    close() { created.closed = true; }
+    resume() {
+      created.resumed = true;
+    }
+    close() {
+      created.closed = true;
+    }
   }
   return { FakeContext, created };
 }
@@ -45,7 +53,9 @@ describe('incoming call ringtone', () => {
   });
 
   test('a browser that blocks audio does not break call handling', () => {
-    const Blocked = function Blocked() { throw new Error('autoplay blocked'); };
+    const Blocked = function Blocked() {
+      throw new Error('autoplay blocked');
+    };
     const ringtone = createRingtone(Blocked);
 
     expect(ringtone.start()).toBe(false);

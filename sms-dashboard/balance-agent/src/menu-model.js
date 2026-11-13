@@ -30,13 +30,10 @@ function statusIndicator(value) {
 export function createMenuBarModel(state = {}, { openAtLogin = false } = {}) {
   const humanVerification = state.browserDetail === 'human_verification_required';
   const busy = ['authorizing', 'starting', 'busy'].some((value) =>
-    [state.auth, state.smsAi, state.browser].includes(value));
-  const degraded = state.error
-    || state.smsAi === 'degraded'
-    || state.browser === 'degraded';
-  const ready = state.auth === 'signed_in'
-    && state.smsAi === 'ready'
-    && state.browser === 'ready';
+    [state.auth, state.smsAi, state.browser].includes(value),
+  );
+  const degraded = state.error || state.smsAi === 'degraded' || state.browser === 'degraded';
+  const ready = state.auth === 'signed_in' && state.smsAi === 'ready' && state.browser === 'ready';
 
   let appearance = 'idle';
   if (ready) appearance = 'ready';
@@ -81,17 +78,19 @@ export function createMenuBarModel(state = {}, { openAtLogin = false } = {}) {
 
   if (error) items.push({ id: 'status-error', label: `异常 · ${error}`, indicator: 'error' });
   if (humanVerification) {
-    items.push(
-      { type: 'separator' },
-      { id: 'show-verification', label: '显示验证窗口' },
-    );
+    items.push({ type: 'separator' }, { id: 'show-verification', label: '显示验证窗口' });
   }
 
   items.push(
     { type: 'separator' },
     { id: 'open-dashboard', label: '打开 Dashboard', enabled: Boolean(dashboardUrl) },
     { id: 'open-settings', label: '设置...' },
-    { id: 'open-at-login', label: '登录时自动启动', type: 'checkbox', checked: Boolean(openAtLogin) },
+    {
+      id: 'open-at-login',
+      label: '登录时自动启动',
+      type: 'checkbox',
+      checked: Boolean(openAtLogin),
+    },
     { type: 'separator' },
     { id: 'quit', label: '退出 Balance Agent' },
   );

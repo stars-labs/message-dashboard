@@ -94,7 +94,7 @@ describe('revokeUserSessions', () => {
     expect(e.SESSIONS.store.has('usess:auth0|1')).toBe(false);
   });
 
-  test('leaves other users\' sessions alone', async () => {
+  test("leaves other users' sessions alone", async () => {
     const e = env({
       'usess:auth0|1': JSON.stringify(['tok-a']),
       'tok-a': 'x',

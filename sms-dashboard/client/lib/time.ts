@@ -38,11 +38,22 @@ export function formatClock(value: unknown, now: number = Date.now()): string {
   if (timestamp === null) return '';
   const zone = { timeZone: 'Asia/Shanghai' };
   const date = new Date(timestamp);
-  const sameDay = date.toLocaleDateString('zh-CN', zone) === new Date(now).toLocaleDateString('zh-CN', zone);
+  const sameDay =
+    date.toLocaleDateString('zh-CN', zone) === new Date(now).toLocaleDateString('zh-CN', zone);
   return sameDay
-    ? date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false, ...zone })
+    ? date.toLocaleTimeString('zh-CN', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+        ...zone,
+      })
     : date.toLocaleString('zh-CN', {
-        month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false, ...zone,
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+        ...zone,
       });
 }
 
@@ -52,7 +63,11 @@ export function formatFullTime(value: unknown): string {
   if (timestamp === null) return '—';
   return new Date(timestamp).toLocaleString('zh-CN', {
     timeZone: 'Asia/Shanghai',
-    year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', hour12: false,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
   });
 }

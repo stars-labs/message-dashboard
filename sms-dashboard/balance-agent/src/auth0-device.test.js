@@ -35,7 +35,11 @@ describe('Auth0 device client', () => {
     });
     const token = await client.poll(
       { device_code: 'device', expires_in: 60, interval: 1 },
-      { onPending: () => { pending += 1; } },
+      {
+        onPending: () => {
+          pending += 1;
+        },
+      },
     );
     expect(token.access_token).toBe('access');
     expect(pending).toBe(1);
@@ -46,10 +50,14 @@ describe('Auth0 device client', () => {
       issuer: 'https://tenant.example',
       clientId: 'native-client',
       audience: 'audience',
-      fetchImpl: async () => Response.json({
-        error: 'unauthorized_client',
-        error_description: 'Grant type is not enabled for this application.',
-      }, { status: 400 }),
+      fetchImpl: async () =>
+        Response.json(
+          {
+            error: 'unauthorized_client',
+            error_description: 'Grant type is not enabled for this application.',
+          },
+          { status: 400 },
+        ),
     });
 
     await expect(client.begin()).rejects.toThrow(

@@ -10,10 +10,12 @@ import {
 
 describe('balance query presentation', () => {
   test('uses the latest conversation timestamp', () => {
-    expect(getBalanceTimestamp({
-      requested_at: '2026-08-14 04:00:00',
-      response_timestamp: '2026-08-14T04:01:00.000Z',
-    })).toBe('2026-08-14T04:01:00.000Z');
+    expect(
+      getBalanceTimestamp({
+        requested_at: '2026-08-14 04:00:00',
+        response_timestamp: '2026-08-14T04:01:00.000Z',
+      }),
+    ).toBe('2026-08-14T04:01:00.000Z');
   });
 
   test('formats parsed cash balances', () => {

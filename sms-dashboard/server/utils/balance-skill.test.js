@@ -38,16 +38,22 @@ describe('balance runtime skill safety', () => {
     expect(extractBalanceMenuOptions(content)).toEqual([
       { value: '1029', label: '如您想查询账户级余额，请发送1029至10001' },
     ]);
-    expect(validateBalanceSkillDecision({
-      skill,
-      content,
-      decision: {
-        action: 'reply', selected_option: '1029', confidence: 0.98,
-        reason: '运营商明确指向账户级余额查询',
-      },
-    }).action).toBe('reply');
+    expect(
+      validateBalanceSkillDecision({
+        skill,
+        content,
+        decision: {
+          action: 'reply',
+          selected_option: '1029',
+          confidence: 0.98,
+          reason: '运营商明确指向账户级余额查询',
+        },
+      }).action,
+    ).toBe('reply');
     expect(buildExplicitBalanceFollowUp(content, skill)).toMatchObject({
-      action: 'reply', selected_option: '1029', confidence: 1,
+      action: 'reply',
+      selected_option: '1029',
+      confidence: 1,
     });
   });
 
@@ -60,7 +66,10 @@ describe('balance runtime skill safety', () => {
       skill,
       content: '1.话费查询\n2.最新活动',
       decision: {
-        action: 'reply', selected_option: '1', confidence: 0.96, reason: 'balance menu',
+        action: 'reply',
+        selected_option: '1',
+        confidence: 0.96,
+        reason: 'balance menu',
       },
     });
     expect(result.action).toBe('reply');
@@ -87,7 +96,10 @@ describe('balance runtime skill safety', () => {
       skill,
       content: '当前可用话费余额为82.36元。',
       decision: {
-        action: 'complete', balance: 82.36, currency: 'CNY', confidence: 0.98,
+        action: 'complete',
+        balance: 82.36,
+        currency: 'CNY',
+        confidence: 0.98,
         evidence: '余额为82.36元',
       },
     });
@@ -95,7 +107,10 @@ describe('balance runtime skill safety', () => {
       skill,
       content: '当前可用话费余额为82.36元。',
       decision: {
-        action: 'complete', balance: 99, currency: 'CNY', confidence: 0.98,
+        action: 'complete',
+        balance: 99,
+        currency: 'CNY',
+        confidence: 0.98,
         evidence: '余额为99元',
       },
     });
@@ -103,7 +118,10 @@ describe('balance runtime skill safety', () => {
       skill,
       content: '当前可用话费余额为82.36元。',
       decision: {
-        action: 'complete', balance: 99, currency: 'CNY', confidence: 0.98,
+        action: 'complete',
+        balance: 99,
+        currency: 'CNY',
+        confidence: 0.98,
         evidence: '余额为82.36元',
       },
     });

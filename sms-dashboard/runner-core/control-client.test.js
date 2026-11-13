@@ -38,8 +38,10 @@ describe('runner control client', () => {
 
     await client.request('/one');
     await client.request('/two');
-    expect(headers.map((value) => value.Authorization))
-      .toEqual(['Bearer token-1', 'Bearer token-2']);
+    expect(headers.map((value) => value.Authorization)).toEqual([
+      'Bearer token-1',
+      'Bearer token-2',
+    ]);
   });
 
   test('rejects an unsafe base URL or missing credentials', () => {

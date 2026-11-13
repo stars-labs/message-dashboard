@@ -3,12 +3,7 @@
   import { formatTimeAgo } from './time.js';
   import { overlay } from './overlay.js';
 
-  let {
-    status,
-    refreshing = false,
-    onRefresh = null,
-    onClose = null,
-  } = $props();
+  let { status, refreshing = false, onRefresh = null, onClose = null } = $props();
 
   let meta = $derived(getDaemonStatusMeta(status?.status));
   let snapshot = $derived(status?.snapshot ?? null);
@@ -18,7 +13,11 @@
   }
 </script>
 
-<div class="fixed inset-0 z-[59] bg-stone-900/10 lg:bg-transparent" onclick={onClose} role="presentation"></div>
+<div
+  class="fixed inset-0 z-[59] bg-stone-900/10 lg:bg-transparent"
+  onclick={onClose}
+  role="presentation"
+></div>
 <div
   role="dialog"
   aria-modal="false"
@@ -43,8 +42,18 @@
       aria-label="刷新状态"
       class="w-8 h-8 flex items-center justify-center rounded-md text-stone-400 hover:bg-stone-100 hover:text-stone-700 disabled:opacity-50"
     >
-      <svg class="w-4 h-4 {refreshing ? 'animate-spin' : ''}" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M20 11a8 8 0 10-2.34 5.66M20 4v7h-7"/>
+      <svg
+        class="w-4 h-4 {refreshing ? 'animate-spin' : ''}"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        viewBox="0 0 24 24"
+      >
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          d="M20 11a8 8 0 10-2.34 5.66M20 4v7h-7"
+        />
       </svg>
     </button>
     <button
@@ -54,15 +63,26 @@
       class="w-8 h-8 flex items-center justify-center rounded-md text-stone-400 hover:bg-stone-100 hover:text-stone-700"
     >
       <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-        <path stroke-linecap="round" d="M6 6l12 12M18 6L6 18"/>
+        <path stroke-linecap="round" d="M6 6l12 12M18 6L6 18" />
       </svg>
     </button>
   </header>
 
   {#if status?.reasons?.length}
-    <div class="px-4 py-2.5 border-b border-stone-100 {status.status === 'offline' || status.status === 'error' ? 'bg-red-50' : 'bg-amber-50'}">
+    <div
+      class="px-4 py-2.5 border-b border-stone-100 {status.status === 'offline' ||
+      status.status === 'error'
+        ? 'bg-red-50'
+        : 'bg-amber-50'}"
+    >
       {#each status.reasons as reason}
-        <p class="text-xs leading-relaxed {status.status === 'offline' || status.status === 'error' ? 'text-red-700' : 'text-amber-800'}">{reason}</p>
+        <p
+          class="text-xs leading-relaxed {status.status === 'offline' || status.status === 'error'
+            ? 'text-red-700'
+            : 'text-amber-800'}"
+        >
+          {reason}
+        </p>
       {/each}
     </div>
   {/if}
@@ -109,7 +129,9 @@
     </div>
     <div class="px-3 py-2.5 min-w-0">
       <p class="text-[10px] text-stone-400">版本</p>
-      <p class="text-xs font-mono text-stone-700 mt-0.5 truncate" title={snapshot?.version}>{snapshot?.version || '—'}</p>
+      <p class="text-xs font-mono text-stone-700 mt-0.5 truncate" title={snapshot?.version}>
+        {snapshot?.version || '—'}
+      </p>
     </div>
   </footer>
 </div>

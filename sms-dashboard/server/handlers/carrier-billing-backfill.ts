@@ -1,4 +1,7 @@
-import { previewCarrierBillBackfill, AccountNotReadyError } from '../utils/carrier-billing-backfill.js';
+import {
+  previewCarrierBillBackfill,
+  AccountNotReadyError,
+} from '../utils/carrier-billing-backfill.js';
 import type { BackfillPreview } from '../utils/carrier-billing-backfill.js';
 import { processCarrierBillMessage } from '../utils/carrier-billing.js';
 import type { BillOutcome } from '../utils/carrier-billing.js';
@@ -6,7 +9,10 @@ import type { AppRequest } from '../worker-context.js';
 import type { D1Database } from '../cf-bindings.js';
 
 /** The outcomes the execute summary counts. Processing can also return 'ignored'. */
-type CountedOutcome = Extract<BillOutcome, 'detected' | 'duplicate_detected' | 'parse_conflict' | 'already_processed'>;
+type CountedOutcome = Extract<
+  BillOutcome,
+  'detected' | 'duplicate_detected' | 'parse_conflict' | 'already_processed'
+>;
 
 /** The request body fields this handler reads. */
 interface BackfillBody {
@@ -15,10 +21,7 @@ interface BackfillBody {
   preview_digest?: unknown;
 }
 
-type ReadJsonResult =
-  | { body: BackfillBody }
-  | { response: Response }
-  | { error: Response };
+type ReadJsonResult = { body: BackfillBody } | { response: Response } | { error: Response };
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -83,29 +86,42 @@ export const carrierBillingBackfillHandler = {
     if ('response' in parsed) return parsed.response;
     const body = parsed.body;
     const accountId = body.account_id;
-    const prior = await request.env.DB.prepare(`
+    const prior = await request.env.DB.prepare(
+      `
       SELECT billing_account_id, metadata_json
       FROM carrier_billing_account_events
       WHERE actor_subject = ? AND idempotency_key = ?
-    `).bind(actor, key).first<{ billing_account_id: string; metadata_json: string | null }>();
+    `,
+    )
+      .bind(actor, key)
+      .first<{ billing_account_id: string; metadata_json: string | null }>();
     if (prior) {
       if (prior.billing_account_id !== accountId) {
         return json({ error: 'Idempotency key was already used for another account' }, 409);
       }
       let metadata: { summary?: unknown } = {};
-      try { metadata = JSON.parse(prior.metadata_json || '{}'); } catch { metadata = {}; }
+      try {
+        metadata = JSON.parse(prior.metadata_json || '{}');
+      } catch {
+        metadata = {};
+      }
       return json({ success: true, idempotent: true, summary: metadata.summary ?? null });
     }
 
     const result = await buildPreview(request.env.DB, accountId);
     if ('response' in result) return result.response;
     const preview = result.preview;
-    if (!Number.isInteger(body.expected_version)
-      || body.expected_version !== preview.account.version) {
-      return json({
-        error: 'Billing account version conflict',
-        current_version: preview.account.version,
-      }, 409);
+    if (
+      !Number.isInteger(body.expected_version) ||
+      body.expected_version !== preview.account.version
+    ) {
+      return json(
+        {
+          error: 'Billing account version conflict',
+          current_version: preview.account.version,
+        },
+        409,
+      );
     }
     if (body.preview_digest !== preview.preview_digest) {
       return json({ error: 'Backfill preview changed; run preview again' }, 409);
@@ -130,22 +146,28 @@ export const carrierBillingBackfillHandler = {
       }
     }
 
-    await request.env.DB.prepare(`
+    await request.env.DB.prepare(
+      `
       INSERT INTO carrier_billing_account_events (
         id, billing_account_id, event_type, actor_subject,
         idempotency_key, metadata_json
       ) VALUES (?, ?, 'backfill_executed', ?, ?, ?)
-    `).bind(
-      crypto.randomUUID(),
-      accountId,
-      actor,
-      key,
-      JSON.stringify({
-        preview_digest: preview.preview_digest,
-        summary,
-        source_message_groups: preview.candidates.map((candidate) => candidate.source_message_ids),
-      }),
-    ).run();
+    `,
+    )
+      .bind(
+        crypto.randomUUID(),
+        accountId,
+        actor,
+        key,
+        JSON.stringify({
+          preview_digest: preview.preview_digest,
+          summary,
+          source_message_groups: preview.candidates.map(
+            (candidate) => candidate.source_message_ids,
+          ),
+        }),
+      )
+      .run();
     return json({ success: true, summary });
   },
 };

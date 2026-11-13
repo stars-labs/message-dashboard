@@ -69,10 +69,12 @@ describe('Singtel postpaid bill SMS parser', () => {
   test('discovers the account identity from an authentic bill without operator configuration', async () => {
     const accountDigest = await sha256(ACCOUNT_REFERENCE);
 
-    await expect(parseSingtelPostpaidBillSms({
-      sender: 'Singtel',
-      content: billMessage(),
-    })).resolves.toMatchObject({
+    await expect(
+      parseSingtelPostpaidBillSms({
+        sender: 'Singtel',
+        content: billMessage(),
+      }),
+    ).resolves.toMatchObject({
       account_ref_digest: accountDigest,
       account_ref_last4: '5678',
       amount_minor: 4280,
@@ -85,10 +87,18 @@ describe('Singtel postpaid bill SMS parser', () => {
     ['malformed amount', billMessage({ amount: '42.8' }), {}],
     ['malformed date', billMessage({ dueDate: '31 Feb 2026' }), {}],
     ['unsupported currency', billMessage({ currency: 'USD' }), {}],
-    ['rebate notice', 'We sincerely apologize for the recent network disruption. As a small gesture, you will receive a $10 goodwill rebate on your bill - no action needed.', {}],
+    [
+      'rebate notice',
+      'We sincerely apologize for the recent network disruption. As a small gesture, you will receive a $10 goodwill rebate on your bill - no action needed.',
+      {},
+    ],
     ['OTP', '<Singtel>Your OTP is 123456. Do not share it with anyone.', {}],
     ['generic bill text', 'Your bill is ready. Please pay it soon.', {}],
-    ['historical fragment', '<Singtel>Dear customer, your latest bill for Singtel a/c 12345678 is ready. The total amount is SGD$42.80 due on 14 Mar 2026. You can view and pay this b', {}],
+    [
+      'historical fragment',
+      '<Singtel>Dear customer, your latest bill for Singtel a/c 12345678 is ready. The total amount is SGD$42.80 due on 14 Mar 2026. You can view and pay this b',
+      {},
+    ],
   ])('rejects %s', async (_name, content, overrides) => {
     await expect(parse(content, overrides)).resolves.toBeNull();
   });

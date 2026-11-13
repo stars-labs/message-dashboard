@@ -1,70 +1,80 @@
 <script>
-  import { onMount, onDestroy } from "svelte";
-  import PhoneList from "./lib/PhoneList.svelte";
-  import SimpleMessageView from "./lib/SimpleMessageView.svelte";
-  import MessageComposer from "./lib/MessageComposer.svelte";
-  import IccidMappings from "./lib/IccidMappings.svelte";
-  import PhoneDetails from "./lib/PhoneDetails.svelte";
-  import IccidMappingDialog from "./lib/IccidMappingDialog.svelte";
-  import KeywordConfig from "./lib/KeywordConfig.svelte";
-  import FilterRules from "./lib/FilterRules.svelte";
-  import UserManagement from "./lib/UserManagement.svelte";
-  import ErrorBoundary from "./lib/ErrorBoundary.svelte";
-  import Toast from "./lib/Toast.svelte";
-  import SwUpdatePrompt from "./lib/SwUpdatePrompt.svelte";
-  import { resetDashboardCache, resetServiceWorker } from "./lib/sw-reset.js";
-  import { overlay } from "./lib/overlay.js";
-  import { confirmAction } from "./lib/confirm.svelte.js";
-  import ConfirmHost from "./lib/ConfirmHost.svelte";
-  import DaemonHealthPanel from "./lib/DaemonHealthPanel.svelte";
-  import CallPanel from "./lib/CallPanel.svelte";
-  import { callApi, callElapsedSeconds, callPollDelay, countMissedSince, describeCallError, fetchCallHistory, fetchCallState, fetchIceServers, formatDuration } from "./lib/call-client.js";
-  import { createCallSession } from "./lib/call-session.js";
-  import { createRingtone } from "./lib/call-ringtone.js";
+  import { onMount, onDestroy } from 'svelte';
+  import PhoneList from './lib/PhoneList.svelte';
+  import SimpleMessageView from './lib/SimpleMessageView.svelte';
+  import MessageComposer from './lib/MessageComposer.svelte';
+  import IccidMappings from './lib/IccidMappings.svelte';
+  import PhoneDetails from './lib/PhoneDetails.svelte';
+  import IccidMappingDialog from './lib/IccidMappingDialog.svelte';
+  import KeywordConfig from './lib/KeywordConfig.svelte';
+  import FilterRules from './lib/FilterRules.svelte';
+  import UserManagement from './lib/UserManagement.svelte';
+  import ErrorBoundary from './lib/ErrorBoundary.svelte';
+  import Toast from './lib/Toast.svelte';
+  import SwUpdatePrompt from './lib/SwUpdatePrompt.svelte';
+  import { resetDashboardCache, resetServiceWorker } from './lib/sw-reset.js';
+  import { overlay } from './lib/overlay.js';
+  import { confirmAction } from './lib/confirm.svelte.js';
+  import ConfirmHost from './lib/ConfirmHost.svelte';
+  import DaemonHealthPanel from './lib/DaemonHealthPanel.svelte';
+  import CallPanel from './lib/CallPanel.svelte';
+  import {
+    callApi,
+    callElapsedSeconds,
+    callPollDelay,
+    countMissedSince,
+    describeCallError,
+    fetchCallHistory,
+    fetchCallState,
+    fetchIceServers,
+    formatDuration,
+  } from './lib/call-client.js';
+  import { createCallSession } from './lib/call-session.js';
+  import { createRingtone } from './lib/call-ringtone.js';
   import BalanceQueryDetail from './lib/BalanceQueryDetail.svelte';
   import MessageDetail from './lib/MessageDetail.svelte';
   import BalanceManagement from './lib/BalanceManagement.svelte';
   import PullToRefresh from './lib/PullToRefresh.svelte';
-  import { keywords as keywordsStore } from "./lib/tag-store.js";
-  import { api } from "./lib/api.js";
-  import { getPhoneFlag } from "./lib/countries.js";
-  import { auth } from "./lib/auth.js";
-  import { getStatusMeta, isAnomalous } from "./lib/device-status.js";
-  import { formatCardNumber } from "./lib/card-number.js";
-  import { formatTimeAgo } from "./lib/time.js";
+  import { keywords as keywordsStore } from './lib/tag-store.js';
+  import { api } from './lib/api.js';
+  import { getPhoneFlag } from './lib/countries.js';
+  import { auth } from './lib/auth.js';
+  import { getStatusMeta, isAnomalous } from './lib/device-status.js';
+  import { formatCardNumber } from './lib/card-number.js';
+  import { formatTimeAgo } from './lib/time.js';
   import { isActiveBalanceCheck } from './lib/balance-polling.js';
-  import { getDaemonStatusMeta, isDaemonConnected } from "./lib/daemon-status.js";
+  import { getDaemonStatusMeta, isDaemonConnected } from './lib/daemon-status.js';
   import {
     getMobileTabDragX,
     getMobileTabIndexAtPoint,
     getMobileTabOptics,
     getMobileTabs,
     getMobileTabState,
-  } from "./lib/mobile-tab-state.js";
+  } from './lib/mobile-tab-state.js';
   import {
     MESSAGE_PAGE_SIZE,
     hasMoreMessages,
     mergeMessagePage,
     nextMessageOffset,
-  } from "./lib/message-page.js";
+  } from './lib/message-page.js';
 
   let selectedPhoneIccid = $state(null);
   let selectedPhone = $state(null);
-  
+
   // Manual function to update selected phone
   function updateSelectedPhone() {
     selectedPhone = selectedPhoneIccid
       ? phoneNumbers.find((p) => p.iccid === selectedPhoneIccid)
       : null;
   }
-  
+
   // Manual function to handle phone selection changes
   function handlePhoneSelection() {
     updateSelectedPhone();
     loadMessagesForPhone(selectedPhoneIccid);
     refreshBalanceChecksForView();
   }
-  
+
   // Centralized function to calculate online devices.
   // Daemon liveness is tracked by the heartbeat (offline after 3 min silence),
   // not by per-device updated_at. Device sync is incremental — updated_at only
@@ -72,17 +82,17 @@
   // stable online devices. sim_status='active' is the sole online signal.
   function calculateOnlineDevices(phones) {
     if (!phones || phones.length === 0) return 0;
-    return phones.filter(p => p?.status === 'active').length;
+    return phones.filter((p) => p?.status === 'active').length;
   }
-  
+
   // Device counts come from the already-loaded phone list. Keeping a second D1
   // aggregate for the same facts made the dashboard poll the whole message table.
   function updateStatsFromPhones() {
     stats.onlineDevices = calculateOnlineDevices(phoneNumbers);
     stats.totalDevices = phoneNumbers?.length || 0;
   }
-  let selectedCountry = $state("all");
-  let searchTerm = $state("");
+  let selectedCountry = $state('all');
+  let searchTerm = $state('');
   let showPhoneList = $state(false);
   let messages = $state([]);
   let hasMoreMessagePages = $state(false);
@@ -94,14 +104,14 @@
   let latestSelectedBalanceCheck = $derived(
     selectedPhoneIccid
       ? balanceChecks.find((check) => check.sim_iccid === selectedPhoneIccid) || null
-      : null
+      : null,
   );
   let phoneNumbers = $state([]);
   let user = $state(null);
   let loading = $state(true);
   let dataLoading = $state(true); // Track data loading separately
-  let currentView = $state("dashboard");
-  let iccidMappingsFilter = $state("all");
+  let currentView = $state('dashboard');
+  let iccidMappingsFilter = $state('all');
   let showIccidMappingDialog = $state(false);
   let showMoreMenu = $state(false); // iOS bottom tab: 更多 sheet
   let showSendDrawer = $state(false); // desktop: send drawer (<1600px)
@@ -175,8 +185,9 @@
     // reads as a refresh, so it has to say what it actually does first.
     const confirmed = await confirmAction({
       title: '清除本地缓存',
-      message: '会删除这台设备上缓存的短信副本和离线资源，然后重新加载页面。\n\n'
-        + '服务器上的短信不受影响，重新加载后会重新拉取。',
+      message:
+        '会删除这台设备上缓存的短信副本和离线资源，然后重新加载页面。\n\n' +
+        '服务器上的短信不受影响，重新加载后会重新拉取。',
       confirmLabel: '清除并重载',
       danger: true,
     });
@@ -196,10 +207,7 @@
     if (pullRefreshing) return;
     pullRefreshing = true;
     try {
-      await Promise.all([
-        loadData(),
-        swUpdatePrompt?.checkForUpdate?.(),
-      ]);
+      await Promise.all([loadData(), swUpdatePrompt?.checkForUpdate?.()]);
     } finally {
       pullRefreshing = false;
     }
@@ -214,7 +222,7 @@
   }
 
   function removeToast(id) {
-    toasts = toasts.filter(t => t.id !== id);
+    toasts = toasts.filter((t) => t.id !== id);
   }
   let phoneToMap = $state(null);
   let daemonStatus = $state({
@@ -233,11 +241,11 @@
   // Anomaly counts for the health strip, derived from the live phone list.
   // Computed here (in App) so the same numbers feed both the health strip and
   // the status-alert banner without duplicating the filter logic.
-  let anomalySimError    = $derived(phoneNumbers.filter(p => p.status === 'sim_error').length);
-  let anomalyMismatch    = $derived(phoneNumbers.filter(p => p.status === 'iccid_mismatch').length);
-  let anomalyOffline     = $derived(phoneNumbers.filter(p => p.status === 'offline').length);
-  let anomalyTotal       = $derived(phoneNumbers.filter(p => isAnomalous(p.status)).length);
-  let daemonMeta         = $derived(getDaemonStatusMeta(daemonStatus.status));
+  let anomalySimError = $derived(phoneNumbers.filter((p) => p.status === 'sim_error').length);
+  let anomalyMismatch = $derived(phoneNumbers.filter((p) => p.status === 'iccid_mismatch').length);
+  let anomalyOffline = $derived(phoneNumbers.filter((p) => p.status === 'offline').length);
+  let anomalyTotal = $derived(phoneNumbers.filter((p) => isAnomalous(p.status)).length);
+  let daemonMeta = $derived(getDaemonStatusMeta(daemonStatus.status));
   // Permission gate. `user.permissions` comes from /api/auth/me, which derives it from
   // the caller's Auth0 roles. This is UX only — the server enforces the same rules on
   // every endpoint, so hiding a control is a convenience, never a security boundary.
@@ -248,11 +256,13 @@
 
   let canManagePhones = $derived(can('phones.write'));
   let mobileTabs = $derived(getMobileTabs(canManagePhones));
-  let mobileTabState = $derived(getMobileTabState({
-    currentView,
-    showMoreMenu,
-    canManagePhones,
-  }));
+  let mobileTabState = $derived(
+    getMobileTabState({
+      currentView,
+      showMoreMenu,
+      canManagePhones,
+    }),
+  );
   let mobileTabPointerId = $state(null);
   let mobileTabDragIndex = $state(null);
   let mobileTabDragX = $state(null);
@@ -266,12 +276,10 @@
     mobileTabDragX !== null
       ? `${mobileTabDragX}px`
       : mobileTabState.index === 0
-      ? '0%'
-      : `calc(${mobileTabState.index * 100}% + ${mobileTabState.index * 8}px)`,
+        ? '0%'
+        : `calc(${mobileTabState.index * 100}% + ${mobileTabState.index * 8}px)`,
   );
-  let mobileTabGlowPosition = $derived(
-    mobileTabGlowX === null ? '50%' : `${mobileTabGlowX}px`,
-  );
+  let mobileTabGlowPosition = $derived(mobileTabGlowX === null ? '50%' : `${mobileTabGlowX}px`);
 
   function activateMobileTab(target) {
     if (target === 'more') {
@@ -304,11 +312,12 @@
   function handleMobileTabPointerDown(event) {
     const root = document.documentElement;
     if (
-      event.pointerType !== 'touch'
-      || event.button !== 0
-      || !root.classList.contains('is-ios')
-      || !root.classList.contains('is-standalone')
-    ) return;
+      event.pointerType !== 'touch' ||
+      event.button !== 0 ||
+      !root.classList.contains('is-ios') ||
+      !root.classList.contains('is-standalone')
+    )
+      return;
 
     event.preventDefault();
     mobileTabPointerId = event.pointerId;
@@ -398,34 +407,28 @@
       dataLoading = false;
       return;
     }
-    
+
     try {
-      const balanceRequest = currentView === 'balances'
-        ? api.getBalanceChecks({ limit: 100 })
-        : Promise.resolve([]);
-      const [phonesResponse, messagesResponse, nextBalanceChecks] =
-        await Promise.all([
-          api.getPhones(),
-          api.getMessages({ limit: MESSAGE_PAGE_SIZE }),
-          balanceRequest,
-        ]);
+      const balanceRequest =
+        currentView === 'balances' ? api.getBalanceChecks({ limit: 100 }) : Promise.resolve([]);
+      const [phonesResponse, messagesResponse, nextBalanceChecks] = await Promise.all([
+        api.getPhones(),
+        api.getMessages({ limit: MESSAGE_PAGE_SIZE }),
+        balanceRequest,
+      ]);
 
       // Handle different response formats
-      if (
-        phonesResponse &&
-        phonesResponse.data &&
-        Array.isArray(phonesResponse.data)
-      ) {
-        phoneNumbers = phonesResponse.data.map(phone => ({
+      if (phonesResponse && phonesResponse.data && Array.isArray(phonesResponse.data)) {
+        phoneNumbers = phonesResponse.data.map((phone) => ({
           ...phone,
-          flag: getPhoneFlag(phone)
+          flag: getPhoneFlag(phone),
         }));
         updateStatsFromPhones();
         updateSelectedPhone();
       } else if (Array.isArray(phonesResponse)) {
-        phoneNumbers = phonesResponse.map(phone => ({
+        phoneNumbers = phonesResponse.map((phone) => ({
           ...phone,
-          flag: getPhoneFlag(phone)
+          flag: getPhoneFlag(phone),
         }));
         updateStatsFromPhones();
         updateSelectedPhone();
@@ -434,7 +437,6 @@
         updateStatsFromPhones();
         updateSelectedPhone();
       }
-      
 
       dataError = null;
       if (messagesResponse && messagesResponse.success && Array.isArray(messagesResponse.data)) {
@@ -469,7 +471,7 @@
       // Mark data as loaded
       dataLoading = false;
     } catch (error) {
-      console.warn("Failed to load data:", error);
+      console.warn('Failed to load data:', error);
       // Keep whatever was on screen. Zeroing the counters here read as "the
       // whole fleet is offline" when all that happened was a failed request.
       dataError = error?.message || '数据加载失败';
@@ -496,14 +498,16 @@
     loading = false;
 
     if (user) {
-      loadData().finally(() => {
-        dataLoading = false;
-        startPolling();
-        startCallPolling();
-        loadCallHistory();
-      }).catch((error) => {
-        console.error("Failed to load data:", error);
-      });
+      loadData()
+        .finally(() => {
+          dataLoading = false;
+          startPolling();
+          startCallPolling();
+          loadCallHistory();
+        })
+        .catch((error) => {
+          console.error('Failed to load data:', error);
+        });
     } else {
       dataLoading = false;
     }
@@ -524,7 +528,7 @@
     handlePhoneSelection();
     showPhoneList = false;
   }
-  
+
   // Load messages for a specific phone (race-condition safe)
   async function loadMessagesForPhone(phoneIccid, { replace = true, resetSync = false } = {}) {
     if (!user) return;
@@ -549,28 +553,44 @@
         // Detect genuinely new messages: must have a timestamp newer than anything we've seen
         if (lastKnownTimestamp && messages.length > 0) {
           const cutoff = new Date(lastKnownTimestamp).getTime();
-          console.log('[New Message Detection] lastKnownTimestamp:', lastKnownTimestamp, 'cutoff:', new Date(cutoff));
+          console.log(
+            '[New Message Detection] lastKnownTimestamp:',
+            lastKnownTimestamp,
+            'cutoff:',
+            new Date(cutoff),
+          );
           const freshIds = response.data
-            .filter(m => m.timestamp && new Date(m.timestamp).getTime() > cutoff)
-            .map(m => m.id);
+            .filter((m) => m.timestamp && new Date(m.timestamp).getTime() > cutoff)
+            .map((m) => m.id);
           console.log('[New Message Detection] Found', freshIds.length, 'new messages:', freshIds);
           if (freshIds.length > 0) {
-            freshIds.forEach(id => newMessageIds.add(id));
-            console.log('[New Message Detection] Added new message IDs, newMessageIds size:', newMessageIds.size);
+            freshIds.forEach((id) => newMessageIds.add(id));
+            console.log(
+              '[New Message Detection] Added new message IDs, newMessageIds size:',
+              newMessageIds.size,
+            );
             // Auto-clear "新" badges after 10 seconds (design: highlight fades to a normal row)
             setTimeout(() => {
-              freshIds.forEach(id => newMessageIds.delete(id));
+              freshIds.forEach((id) => newMessageIds.delete(id));
               console.log('[New Message Detection] Auto-cleared badges after 10s');
             }, 10000);
           }
         } else {
-          console.log('[New Message Detection] Skipped - lastKnownTimestamp:', lastKnownTimestamp, 'messages.length:', messages.length);
+          console.log(
+            '[New Message Detection] Skipped - lastKnownTimestamp:',
+            lastKnownTimestamp,
+            'messages.length:',
+            messages.length,
+          );
         }
         // Update the high-water mark to the newest timestamp in this batch
-        const newest = response.data.reduce((max, m) => {
-          const t = m.timestamp ? new Date(m.timestamp).getTime() : 0;
-          return t > max ? t : max;
-        }, lastKnownTimestamp ? new Date(lastKnownTimestamp).getTime() : 0);
+        const newest = response.data.reduce(
+          (max, m) => {
+            const t = m.timestamp ? new Date(m.timestamp).getTime() : 0;
+            return t > max ? t : max;
+          },
+          lastKnownTimestamp ? new Date(lastKnownTimestamp).getTime() : 0,
+        );
         if (newest > 0) lastKnownTimestamp = new Date(newest).toISOString();
         // Polls merge into loaded history and preserve it on an empty incremental
         // response. Scope/filter changes replace the list, including with empty.
@@ -624,13 +644,11 @@
         const check = balanceChecks.find((candidate) => candidate.id === id);
         if (!check) return false;
         const update = updates.get(check.id);
-        return update
-          && isActiveBalanceCheck(check)
-          && !isActiveBalanceCheck(update);
+        return update && isActiveBalanceCheck(check) && !isActiveBalanceCheck(update);
       });
-      balanceChecks = balanceChecks.map((check) => (
-        updates.has(check.id) ? { ...check, ...updates.get(check.id) } : check
-      ));
+      balanceChecks = balanceChecks.map((check) =>
+        updates.has(check.id) ? { ...check, ...updates.get(check.id) } : check,
+      );
       if (!reachedTerminal) return;
     }
 
@@ -696,12 +714,9 @@
       updateStatsFromPhones();
       updateSelectedPhone();
     }
-
   }
 
   async function handleMessageSent(newMessage) {
-
-
     try {
       // Send message via HTTP API
       const response = await api.sendMessage({
@@ -712,7 +727,7 @@
 
       if (response.success) {
         // Find the sender's phone number from the selected SIM's ICCID
-        const senderPhone = phoneNumbers.find(p => p.iccid === newMessage.phone_iccid);
+        const senderPhone = phoneNumbers.find((p) => p.iccid === newMessage.phone_iccid);
         const senderNumber = senderPhone?.number || newMessage.phone_iccid;
 
         // Add to local messages immediately with sending status using backend ID
@@ -723,17 +738,17 @@
           recipient: newMessage.recipient, // CORRECT: Recipient's number (接收号码)
           content: newMessage.content,
           timestamp: new Date().toISOString(),
-          type: "sent",
-          status: "sending",
+          type: 'sent',
+          status: 'sending',
         };
 
         messages = [sentMessage, ...messages];
         return response;
       }
-      throw new Error(response.error || "发送请求未被接受");
+      throw new Error(response.error || '发送请求未被接受');
     } catch (error) {
-      console.error("Failed to send message:", error);
-      showToast("发送失败: " + error.message, 'error');
+      console.error('Failed to send message:', error);
+      showToast('发送失败: ' + error.message, 'error');
       throw error;
     }
   }
@@ -787,11 +802,12 @@
     if (pollInterval) return;
     pollInterval = setInterval(async () => {
       if (
-        document.visibilityState !== 'visible'
-        || !user
-        || pollInFlight
-        || !['dashboard', 'balances'].includes(currentView)
-      ) return;
+        document.visibilityState !== 'visible' ||
+        !user ||
+        pollInFlight ||
+        !['dashboard', 'balances'].includes(currentView)
+      )
+        return;
       pollInFlight = true;
       try {
         if (currentView === 'dashboard') {
@@ -828,7 +844,10 @@
     if (callPollInterval || !can('messages.read')) return;
     const tick = async () => {
       if (document.visibilityState === 'visible') await refreshCallState();
-      callPollInterval = setTimeout(tick, callPollDelay({ call: activeCall, panelOpen: showCallPanel }));
+      callPollInterval = setTimeout(
+        tick,
+        callPollDelay({ call: activeCall, panelOpen: showCallPanel }),
+      );
     };
     callPollInterval = setTimeout(tick, 0);
     document.addEventListener('visibilitychange', pollWhenVisible);
@@ -872,7 +891,11 @@
     if (!call && activeCallId) loadCallHistory();
     activeCallId = call?.id ?? null;
     // Surface a new incoming call once, without reopening a panel the user closed.
-    if (call?.direction === 'inbound' && call.state === 'ringing' && call.id !== lastRingingCallId) {
+    if (
+      call?.direction === 'inbound' &&
+      call.state === 'ringing' &&
+      call.id !== lastRingingCallId
+    ) {
       lastRingingCallId = call.id;
       showCallPanel = true;
     }
@@ -996,7 +1019,6 @@
       }
     });
   }
-
 </script>
 
 {#if loading}
@@ -1008,7 +1030,6 @@
       <span class="w-3 h-3 rounded-full bg-emerald-100 animate-pulse [animation-delay:.4s]"></span>
     </div>
   </div>
-
 {:else if authError}
   <!-- The identity service is unreachable. Offering a login button here would
        bounce the operator straight back, so say what is wrong and offer a retry. -->
@@ -1017,7 +1038,7 @@
       <div class="bg-white border border-stone-200 rounded-2xl p-10 shadow-raised text-center">
         <h1 class="text-lg font-semibold text-stone-900 tracking-tight">无法连接服务器</h1>
         <p class="text-sm text-stone-500 mt-2 mb-6 leading-relaxed">
-          没能确认登录状态，这通常是网络问题或服务端故障，不是你被登出了。<br>
+          没能确认登录状态，这通常是网络问题或服务端故障，不是你被登出了。<br />
           <span class="text-stone-400 text-xs font-mono">{authError}</span>
         </p>
         <button
@@ -1030,7 +1051,6 @@
       </div>
     </div>
   </div>
-
 {:else if !user}
   <!-- Login: product mark + tagline + button + daemon status footnote (§9) -->
   <div class="min-h-screen flex items-center justify-center bg-[#F7F5F2]">
@@ -1042,7 +1062,7 @@
         </div>
         <h1 class="text-lg font-semibold text-stone-900 tracking-tight">验证码中心</h1>
         <p class="text-sm text-stone-500 mt-2 mb-6 leading-relaxed">
-          需要公司邮箱和 sms 角色。<br>首次登录后默认为查看者。
+          需要公司邮箱和 sms 角色。<br />首次登录后默认为查看者。
         </p>
         <button
           onclick={() => auth.login()}
@@ -1052,8 +1072,7 @@
           使用 Auth0 登录
         </button>
         <p class="mt-5 text-[11px] font-mono text-stone-400">
-          95 modems ·
-          采集服务{daemonMeta.label}
+          95 modems · 采集服务{daemonMeta.label}
         </p>
       </div>
     </div>
@@ -1064,53 +1083,67 @@
          product mark · title · nav (4 items) · daemon pill · send button · avatar -->
     <header class="bg-white border-b border-stone-200 sticky top-0 z-40 lg:flex-shrink-0">
       <div class="px-4 lg:px-5 flex items-center h-[52px] gap-3 lg:gap-6">
-
         <!-- Product mark + title -->
         <div class="flex items-center gap-2.5 shrink-0">
           <img src="/favicon.svg" alt="" class="w-[30px] h-[30px] rounded-[8px]" />
-          <span class="text-[17px] leading-none font-semibold text-stone-900 tracking-[-0.01em]">验证码中心</span>
+          <span class="text-[17px] leading-none font-semibold text-stone-900 tracking-[-0.01em]"
+            >验证码中心</span
+          >
         </div>
 
         <!-- Nav — 4 items per design (desktop only) -->
         <nav class="hidden lg:flex items-center gap-0.5 flex-1">
-          <button onclick={() => navigate("dashboard")}
+          <button
+            onclick={() => navigate('dashboard')}
             class="text-sm px-3 py-1.5 rounded-[7px] transition-all
               {currentView === 'dashboard'
-                ? 'bg-stone-100 font-semibold text-stone-900'
-                : 'text-stone-500 hover:text-stone-900 hover:bg-stone-50'}">
+              ? 'bg-stone-100 font-semibold text-stone-900'
+              : 'text-stone-500 hover:text-stone-900 hover:bg-stone-50'}"
+          >
             消息
           </button>
           {#if can('phones.write')}
-            <button onclick={() => { iccidMappingsFilter = 'all'; navigate('iccid-mappings'); }}
+            <button
+              onclick={() => {
+                iccidMappingsFilter = 'all';
+                navigate('iccid-mappings');
+              }}
               class="text-sm px-3 py-1.5 rounded-[7px] transition-all
                 {currentView === 'iccid-mappings'
-                  ? 'bg-stone-100 font-semibold text-stone-900'
-                  : 'text-stone-500 hover:text-stone-900 hover:bg-stone-50'}">
+                ? 'bg-stone-100 font-semibold text-stone-900'
+                : 'text-stone-500 hover:text-stone-900 hover:bg-stone-50'}"
+            >
               设备与卡
             </button>
           {/if}
-          <button onclick={() => navigate('balances')}
+          <button
+            onclick={() => navigate('balances')}
             class="text-sm px-3 py-1.5 rounded-[7px] transition-all
               {currentView === 'balances'
-                ? 'bg-stone-100 font-semibold text-stone-900'
-                : 'text-stone-500 hover:text-stone-900 hover:bg-stone-50'}">
+              ? 'bg-stone-100 font-semibold text-stone-900'
+              : 'text-stone-500 hover:text-stone-900 hover:bg-stone-50'}"
+          >
             余额
           </button>
           {#if can('keywords.read') || can('filters.read')}
-            <button onclick={() => navigate(can('filters.read') ? 'filters' : 'keywords')}
+            <button
+              onclick={() => navigate(can('filters.read') ? 'filters' : 'keywords')}
               class="text-sm px-3 py-1.5 rounded-[7px] transition-all
-                {(currentView === 'keywords' || currentView === 'filters')
-                  ? 'bg-stone-100 font-semibold text-stone-900'
-                  : 'text-stone-500 hover:text-stone-900 hover:bg-stone-50'}">
+                {currentView === 'keywords' || currentView === 'filters'
+                ? 'bg-stone-100 font-semibold text-stone-900'
+                : 'text-stone-500 hover:text-stone-900 hover:bg-stone-50'}"
+            >
               规则
             </button>
           {/if}
           {#if can('users.read')}
-            <button onclick={() => navigate('users')}
+            <button
+              onclick={() => navigate('users')}
               class="text-sm px-3 py-1.5 rounded-[7px] transition-all
                 {currentView === 'users'
-                  ? 'bg-stone-100 font-semibold text-stone-900'
-                  : 'text-stone-500 hover:text-stone-900 hover:bg-stone-50'}">
+                ? 'bg-stone-100 font-semibold text-stone-900'
+                : 'text-stone-500 hover:text-stone-900 hover:bg-stone-50'}"
+            >
               用户
             </button>
           {/if}
@@ -1118,19 +1151,30 @@
 
         <!-- Right side: daemon pill + send button + avatar -->
         <div class="hidden lg:flex items-center gap-3 ml-auto shrink-0">
-
           {#if can('messages.read')}
-            <button onclick={() => (showCallPanel ? (showCallPanel = false) : openCallPanel())}
+            <button
+              onclick={() => (showCallPanel ? (showCallPanel = false) : openCallPanel())}
               aria-haspopup="dialog"
               aria-expanded={showCallPanel}
               class="flex items-center gap-1.5 px-2.5 py-[5px] border rounded-[7px] text-xs transition-colors
                 {activeCall?.state === 'ringing'
-                  ? 'bg-emerald-600 border-emerald-600 text-white hover:bg-emerald-700 animate-pulse'
-                  : activeCall
-                    ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100'
-                    : 'bg-stone-50 border-stone-200 text-stone-700 hover:bg-stone-100'}">
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M3 5a2 2 0 012-2h2.3a1 1 0 01.95.68l1.1 3.3a1 1 0 01-.5 1.2l-1.6.8a11 11 0 005.1 5.1l.8-1.6a1 1 0 011.2-.5l3.3 1.1a1 1 0 01.68.95V19a2 2 0 01-2 2h-1C9.7 21 3 14.3 3 6V5z"/>
+                ? 'bg-emerald-600 border-emerald-600 text-white hover:bg-emerald-700 animate-pulse'
+                : activeCall
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100'
+                  : 'bg-stone-50 border-stone-200 text-stone-700 hover:bg-stone-100'}"
+            >
+              <svg
+                class="w-3.5 h-3.5"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  d="M3 5a2 2 0 012-2h2.3a1 1 0 01.95.68l1.1 3.3a1 1 0 01-.5 1.2l-1.6.8a11 11 0 005.1 5.1l.8-1.6a1 1 0 011.2-.5l3.3 1.1a1 1 0 01.68.95V19a2 2 0 01-2 2h-1C9.7 21 3 14.3 3 6V5z"
+                />
               </svg>
               <span class="font-medium tabular-nums">
                 {#if activeCall?.state === 'ringing'}来电{:else if callDuration}{callDuration}{:else}通话{/if}
@@ -1140,17 +1184,22 @@
                   title="{missedCallCount} 通未接来电"
                   class="min-w-[16px] h-4 px-1 flex items-center justify-center rounded-full
                     bg-rose-600 text-white text-[10px] font-medium tabular-nums"
-                >{missedCallCount}</span>
+                  >{missedCallCount}</span
+                >
               {/if}
             </button>
           {/if}
 
           <!-- Daemon status pill -->
-          <button onclick={openDaemonDetails}
+          <button
+            onclick={openDaemonDetails}
             aria-haspopup="dialog"
             aria-expanded={showDaemonDetails}
             class="flex items-center gap-1.5 px-2.5 py-[5px] bg-stone-50 border border-stone-200
-              rounded-[7px] text-xs transition-colors hover:bg-stone-100 {daemonRefreshing ? 'opacity-60' : ''}">
+              rounded-[7px] text-xs transition-colors hover:bg-stone-100 {daemonRefreshing
+              ? 'opacity-60'
+              : ''}"
+          >
             <span class="w-1.5 h-1.5 rounded-full shrink-0 {daemonMeta.dotClass}"></span>
             <span class="font-medium {daemonMeta.textClass}">采集服务{daemonMeta.label}</span>
             {#if daemonStatus.reasons?.[0]}
@@ -1165,34 +1214,51 @@
 
           <!-- Send button — only on <1600px (≥1600px has resident 3rd column) -->
           {#if can('messages.send')}
-            <button onclick={() => showSendDrawer = !showSendDrawer}
+            <button
+              onclick={() => (showSendDrawer = !showSendDrawer)}
               class="2xl:hidden flex items-center gap-1.5 px-3.5 py-[7px] bg-orange-500
-                hover:bg-orange-600 text-white text-sm font-medium rounded-[8px] transition-colors">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/>
+                hover:bg-orange-600 text-white text-sm font-medium rounded-[8px] transition-colors"
+            >
+              <svg
+                class="w-4 h-4"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.5"
+                viewBox="0 0 24 24"
+              >
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
               </svg>
               发送短信
             </button>
           {/if}
 
           <!-- A broom, not a refresh arrow: this clears local data and reloads. -->
-          <button onclick={handleResetLocalCache}
+          <button
+            onclick={handleResetLocalCache}
             title="清除本地缓存并重新加载"
             aria-label="清除本地缓存并重新加载"
             class="w-[26px] h-[26px] rounded-full text-stone-400 hover:text-stone-700 hover:bg-stone-100
-              flex items-center justify-center transition-colors shrink-0">
+              flex items-center justify-center transition-colors shrink-0"
+          >
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                d="M19 5l-7 7M14 3l7 7-9 9H5v-3l9-9z"/>
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M19 5l-7 7M14 3l7 7-9 9H5v-3l9-9z"
+              />
             </svg>
           </button>
 
           <!-- Avatar -->
           {#if user}
             {@const initials = (user.name || user.email || '?')[0].toUpperCase()}
-            <button onclick={() => auth.logout()} title="退出登录"
+            <button
+              onclick={() => auth.logout()}
+              title="退出登录"
               class="w-[26px] h-[26px] rounded-full bg-stone-200 hover:bg-stone-300 flex items-center
-                justify-center text-[11px] font-semibold text-stone-700 transition-colors shrink-0">
+                justify-center text-[11px] font-semibold text-stone-700 transition-colors shrink-0"
+            >
               {initials}
             </button>
           {/if}
@@ -1204,14 +1270,24 @@
             class="lg:hidden ml-auto min-w-0 max-w-[190px] h-9 px-2.5 flex items-center gap-1.5
               border border-stone-200 bg-stone-50 text-stone-700 rounded-lg transition-colors
               hover:bg-stone-100 active:bg-stone-200"
-            onclick={() => { showMoreMenu = false; showPhoneList = true; }}
+            onclick={() => {
+              showMoreMenu = false;
+              showPhoneList = true;
+            }}
             aria-haspopup="dialog"
             aria-expanded={showPhoneList}
-            aria-label={selectedPhone ? `切换接收卡，当前为${selectedPhone.number || formatCardNumber(selectedPhone.sim_index)}` : '选择接收卡'}
+            aria-label={selectedPhone
+              ? `切换接收卡，当前为${selectedPhone.number || formatCardNumber(selectedPhone.sim_index)}`
+              : '选择接收卡'}
           >
-            <svg class="w-4 h-4 text-stone-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <rect x="7" y="2" width="10" height="20" rx="2" stroke-width="2"/>
-              <path stroke-linecap="round" stroke-width="2" d="M10 5h4M11 18h2"/>
+            <svg
+              class="w-4 h-4 text-stone-500 shrink-0"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <rect x="7" y="2" width="10" height="20" rx="2" stroke-width="2" />
+              <path stroke-linecap="round" stroke-width="2" d="M10 5h4M11 18h2" />
             </svg>
             <span class="truncate text-xs font-medium">
               {#if selectedPhone}
@@ -1222,61 +1298,8 @@
                 全部设备
               {/if}
             </span>
-            <svg class="w-3.5 h-3.5 text-stone-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 9l6 6 6-6"/>
-            </svg>
-          </button>
-        {/if}
-
-      </div>
-    </header>
-    <!-- Content below header fills remaining height on desktop. The mobile padding
-         uses the same safe-area-aware height as the fixed bottom tab bar. -->
-    <!-- Pull-to-refresh wraps the whole content area so every mobile view gets it.
-         Standalone (home-screen) launches hide Safari's own pull-to-refresh, so the
-         gesture has to come from the app. Desktop binds no listeners. -->
-    <PullToRefresh onRefresh={handlePullRefresh}>
-    <div class="pb-[var(--mobile-tab-bar-height)] lg:pb-0 lg:flex-1 lg:min-h-0 lg:flex lg:flex-col lg:overflow-hidden">
-
-    <!-- Daemon offline / error banner (§9 error state).
-         "下面显示的是那时的数据" — reassures users the existing data is still visible.
-         No "查看硬件诊断" button — that page doesn't exist. -->
-    {#if daemonStatus.status === 'offline' || daemonStatus.status === 'error'}
-      <div class="bg-red-50 border-b border-red-200 px-4 py-3">
-        <div class="flex items-start gap-3">
-          <span class="mt-0.5 shrink-0">
-            <span class="inline-block w-2.5 h-2.5 rounded-full bg-red-500"></span>
-          </span>
-          <div class="flex-1 min-w-0">
-            <p class="text-sm font-semibold text-red-800">
-              采集服务{daemonMeta.label}
-            </p>
-            <p class="text-xs text-red-600 mt-0.5 leading-relaxed">
-              {#if daemonStatus.last_heartbeat}
-                最后一次心跳是 <strong>{formatTimeAgo(daemonStatus.last_heartbeat)}</strong>。
-                下面显示的是那时的数据，新短信不会进来。
-              {:else}
-                {daemonStatus.message || '设备数据可能不是最新的。历史消息仍可查看。'}
-              {/if}
-            </p>
-            <p class="text-xs text-red-500 mt-1">通常是 Orange Pi 掉线或 USB 集线器断电。</p>
-          </div>
-          <button onclick={() => window.location.reload()}
-            class="shrink-0 px-3 py-1.5 text-xs font-medium text-red-700 border border-red-300
-              rounded-lg hover:bg-red-100 transition-colors">
-            重新连接
-          </button>
-        </div>
-      </div>
-    {/if}
-
-    <!-- Status Alert Banner -->
-    {#if phoneNumbers.some((p) => ['sim_error', 'iccid_mismatch'].includes(p.status))}
-      <div class="bg-yellow-50 border-b border-yellow-200 px-4 py-2">
-        <div class="flex items-center justify-between">
-          <div class="flex items-center gap-2">
             <svg
-              class="w-5 h-5 text-yellow-600 flex-shrink-0"
+              class="w-3.5 h-3.5 text-stone-400 shrink-0"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -1285,152 +1308,269 @@
                 stroke-linecap="round"
                 stroke-linejoin="round"
                 stroke-width="2"
-                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                d="M6 9l6 6 6-6"
               />
             </svg>
-            <span class="text-sm text-yellow-800">
-              {#if phoneNumbers.filter((p) => p.status === "sim_error").length > 0}
-                <strong
-                  >{phoneNumbers.filter((p) => p.status === "sim_error")
-                    .length}</strong
-                > 张{getStatusMeta('sim_error').label}
-              {/if}
-              {#if phoneNumbers.filter((p) => p.status === "iccid_mismatch").length > 0}
-                {#if phoneNumbers.filter((p) => p.status === "sim_error").length > 0}
-                  •
-                {/if}
-                <strong
-                  >{phoneNumbers.filter((p) => p.status === "iccid_mismatch")
-                    .length}</strong
-                > 张{getStatusMeta('iccid_mismatch').label}
-              {/if}
-            </span>
-          </div>
-          {#if can('phones.write')}
-            <!-- Deep-links into the ICCID page, which a viewer cannot open — the hash
-                 guard would bounce them straight back to the dashboard. -->
-            <button
-              onclick={() => { iccidMappingsFilter = "error"; navigate("iccid-mappings"); }}
-              class="text-xs text-yellow-600 hover:text-yellow-700 underline"
-            >
-              查看详情
-            </button>
-          {/if}
-        </div>
+          </button>
+        {/if}
       </div>
-    {/if}
+    </header>
+    <!-- Content below header fills remaining height on desktop. The mobile padding
+         uses the same safe-area-aware height as the fixed bottom tab bar. -->
+    <!-- Pull-to-refresh wraps the whole content area so every mobile view gets it.
+         Standalone (home-screen) launches hide Safari's own pull-to-refresh, so the
+         gesture has to come from the app. Desktop binds no listeners. -->
+    <PullToRefresh onRefresh={handlePullRefresh}>
+      <div
+        class="pb-[var(--mobile-tab-bar-height)] lg:pb-0 lg:flex-1 lg:min-h-0 lg:flex lg:flex-col lg:overflow-hidden"
+      >
+        <!-- Daemon offline / error banner (§9 error state).
+         "下面显示的是那时的数据" — reassures users the existing data is still visible.
+         No "查看硬件诊断" button — that page doesn't exist. -->
+        {#if daemonStatus.status === 'offline' || daemonStatus.status === 'error'}
+          <div class="bg-red-50 border-b border-red-200 px-4 py-3">
+            <div class="flex items-start gap-3">
+              <span class="mt-0.5 shrink-0">
+                <span class="inline-block w-2.5 h-2.5 rounded-full bg-red-500"></span>
+              </span>
+              <div class="flex-1 min-w-0">
+                <p class="text-sm font-semibold text-red-800">
+                  采集服务{daemonMeta.label}
+                </p>
+                <p class="text-xs text-red-600 mt-0.5 leading-relaxed">
+                  {#if daemonStatus.last_heartbeat}
+                    最后一次心跳是 <strong>{formatTimeAgo(daemonStatus.last_heartbeat)}</strong>。
+                    下面显示的是那时的数据，新短信不会进来。
+                  {:else}
+                    {daemonStatus.message || '设备数据可能不是最新的。历史消息仍可查看。'}
+                  {/if}
+                </p>
+                <p class="text-xs text-red-500 mt-1">通常是 Orange Pi 掉线或 USB 集线器断电。</p>
+              </div>
+              <button
+                onclick={() => window.location.reload()}
+                class="shrink-0 px-3 py-1.5 text-xs font-medium text-red-700 border border-red-300
+              rounded-lg hover:bg-red-100 transition-colors"
+              >
+                重新连接
+              </button>
+            </div>
+          </div>
+        {/if}
 
-    <!-- Mobile nav: bottom tab bar (rendered at the bottom of the outer div).
+        <!-- Status Alert Banner -->
+        {#if phoneNumbers.some((p) => ['sim_error', 'iccid_mismatch'].includes(p.status))}
+          <div class="bg-yellow-50 border-b border-yellow-200 px-4 py-2">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <svg
+                  class="w-5 h-5 text-yellow-600 flex-shrink-0"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                  />
+                </svg>
+                <span class="text-sm text-yellow-800">
+                  {#if phoneNumbers.filter((p) => p.status === 'sim_error').length > 0}
+                    <strong>{phoneNumbers.filter((p) => p.status === 'sim_error').length}</strong>
+                    张{getStatusMeta('sim_error').label}
+                  {/if}
+                  {#if phoneNumbers.filter((p) => p.status === 'iccid_mismatch').length > 0}
+                    {#if phoneNumbers.filter((p) => p.status === 'sim_error').length > 0}
+                      •
+                    {/if}
+                    <strong
+                      >{phoneNumbers.filter((p) => p.status === 'iccid_mismatch').length}</strong
+                    >
+                    张{getStatusMeta('iccid_mismatch').label}
+                  {/if}
+                </span>
+              </div>
+              {#if can('phones.write')}
+                <!-- Deep-links into the ICCID page, which a viewer cannot open — the hash
+                 guard would bounce them straight back to the dashboard. -->
+                <button
+                  onclick={() => {
+                    iccidMappingsFilter = 'error';
+                    navigate('iccid-mappings');
+                  }}
+                  class="text-xs text-yellow-600 hover:text-yellow-700 underline"
+                >
+                  查看详情
+                </button>
+              {/if}
+            </div>
+          </div>
+        {/if}
+
+        <!-- Mobile nav: bottom tab bar (rendered at the bottom of the outer div).
          The old horizontal button row crammed 5 items into 390px with ~32px
          tap targets (below the 44px iOS minimum) and wrapped on narrow screens.
          Replaced by a 4-tab bottom bar: 验证码 / 设备 / 发送 / 更多.
          "更多" is a sheet that lists 规则 and 用户管理 per permission. -->
 
+        {#if currentView === 'dashboard'}
+          <ErrorBoundary componentName="Dashboard">
+            <!-- Health Strip — flat full-width bar, 40px, matches design §一 exactly. -->
+            <div class="lg:flex-shrink-0 bg-white border-b border-stone-200 flex-shrink-0">
+              <div class="flex items-center gap-6 px-5 h-10 overflow-x-auto">
+                <!-- Online count: 22px bold mono + /95 small + label -->
+                <div class="flex items-baseline gap-1.5 shrink-0">
+                  <span
+                    class="font-mono text-[22px] font-semibold text-stone-900 leading-none tabular-nums tracking-[-0.02em]"
+                  >
+                    {stats.onlineDevices}
+                  </span>
+                  <span class="font-mono text-sm text-stone-400"
+                    >/ {stats.totalDevices || phoneNumbers.length}</span
+                  >
+                  <span class="text-xs text-stone-600">张卡在线</span>
+                </div>
 
-    {#if currentView === "dashboard"}
-      <ErrorBoundary componentName="Dashboard">
-        <!-- Health Strip — flat full-width bar, 40px, matches design §一 exactly. -->
-        <div class="lg:flex-shrink-0 bg-white border-b border-stone-200 flex-shrink-0">
-          <div class="flex items-center gap-6 px-5 h-10 overflow-x-auto">
-
-            <!-- Online count: 22px bold mono + /95 small + label -->
-            <div class="flex items-baseline gap-1.5 shrink-0">
-              <span class="font-mono text-[22px] font-semibold text-stone-900 leading-none tabular-nums tracking-[-0.02em]">
-                {stats.onlineDevices}
-              </span>
-              <span class="font-mono text-sm text-stone-400">/ {stats.totalDevices || phoneNumbers.length}</span>
-              <span class="text-xs text-stone-600">张卡在线</span>
-            </div>
-
-            <!-- Anomaly chips — only rendered when the count is non-zero so the
+                <!-- Anomaly chips — only rendered when the count is non-zero so the
                  strip stays uncluttered when everything is healthy. Each links to
                  the ICCID page pre-filtered to the anomaly group. -->
-            {#if anomalySimError > 0 || anomalyMismatch > 0 || anomalyOffline > 0}
-              <div class="h-4 w-px bg-stone-200 shrink-0"></div>
-              <div class="flex items-center gap-3 shrink-0">
-                {#if anomalySimError > 0}
-                  <span class="flex items-center gap-1.5 text-xs text-stone-600">
-                    <span class="inline-block w-2 h-2 rounded-sm bg-red-500 shrink-0"></span>
-                    读卡失败 <strong class="font-mono tabular-nums">{anomalySimError}</strong>
-                  </span>
-                {/if}
-                {#if anomalyMismatch > 0}
-                  <span class="flex items-center gap-1.5 text-xs text-stone-600">
-                    <span class="inline-block w-2 h-2 rounded-sm bg-amber-500 shrink-0"></span>
-                    ICCID 不匹配 <strong class="font-mono tabular-nums">{anomalyMismatch}</strong>
-                  </span>
-                {/if}
-                {#if anomalyOffline > 0}
-                  <span class="flex items-center gap-1.5 text-xs text-stone-600">
-                    <span class="inline-block w-2 h-2 rounded-sm bg-stone-300 shrink-0"></span>
-                    离线 <strong class="font-mono tabular-nums">{anomalyOffline}</strong>
+                {#if anomalySimError > 0 || anomalyMismatch > 0 || anomalyOffline > 0}
+                  <div class="h-4 w-px bg-stone-200 shrink-0"></div>
+                  <div class="flex items-center gap-3 shrink-0">
+                    {#if anomalySimError > 0}
+                      <span class="flex items-center gap-1.5 text-xs text-stone-600">
+                        <span class="inline-block w-2 h-2 rounded-sm bg-red-500 shrink-0"></span>
+                        读卡失败 <strong class="font-mono tabular-nums">{anomalySimError}</strong>
+                      </span>
+                    {/if}
+                    {#if anomalyMismatch > 0}
+                      <span class="flex items-center gap-1.5 text-xs text-stone-600">
+                        <span class="inline-block w-2 h-2 rounded-sm bg-amber-500 shrink-0"></span>
+                        ICCID 不匹配
+                        <strong class="font-mono tabular-nums">{anomalyMismatch}</strong>
+                      </span>
+                    {/if}
+                    {#if anomalyOffline > 0}
+                      <span class="flex items-center gap-1.5 text-xs text-stone-600">
+                        <span class="inline-block w-2 h-2 rounded-sm bg-stone-300 shrink-0"></span>
+                        离线 <strong class="font-mono tabular-nums">{anomalyOffline}</strong>
+                      </span>
+                    {/if}
+                  </div>
+
+                  {#if can('phones.write')}
+                    <button
+                      onclick={() => {
+                        iccidMappingsFilter = 'error';
+                        navigate('iccid-mappings');
+                      }}
+                      class="text-xs text-action-text font-medium border-b border-[#fdba74] hover:border-orange-400 transition-colors shrink-0"
+                    >
+                      处理 →
+                    </button>
+                  {/if}
+                {:else if phoneNumbers.length > 0}
+                  <div class="h-4 w-px bg-stone-200 shrink-0"></div>
+                  <span class="flex items-center gap-1.5 text-xs text-emerald-600">
+                    <span
+                      class="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0"
+                    ></span>
+                    全部正常
                   </span>
                 {/if}
               </div>
+            </div>
 
-              {#if can('phones.write')}
-                <button
-                  onclick={() => { iccidMappingsFilter = "error"; navigate("iccid-mappings"); }}
-                  class="text-xs text-action-text font-medium border-b border-[#fdba74] hover:border-orange-400 transition-colors shrink-0"
-                >
-                  处理 →
-                </button>
-              {/if}
-            {:else if phoneNumbers.length > 0}
-              <div class="h-4 w-px bg-stone-200 shrink-0"></div>
-              <span class="flex items-center gap-1.5 text-xs text-emerald-600">
-                <span class="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0"></span>
-                全部正常
-              </span>
-            {/if}
-
-          </div>
-        </div>
-
-      <!-- Main Content.
+            <!-- Main Content.
            Desktop grid: 2xl (≥1600px) = 3 cols (phone · messages · send),
            lg-2xl (<1600px) = 2 cols (phone · messages), send is a drawer. -->
-      <div class="px-0 sm:px-4 lg:px-5 lg:pt-4 lg:pb-4 lg:flex-1 lg:min-h-0 lg:flex lg:flex-col">
-        <div class="lg:grid lg:gap-4 lg:flex-1 lg:min-h-0 lg:grid-cols-[288px_1fr] {can('messages.send') ? '2xl:grid-cols-[288px_1fr_352px]' : ''}">
-          <!-- Mobile receiver picker: a bottom sheet keeps the message context visible. -->
-          {#if showPhoneList}
-            <div class="lg:hidden fixed inset-0 z-50" role="presentation">
-              <button
-                class="absolute inset-0 bottom-[var(--mobile-tab-bar-height)] w-full bg-stone-900/35"
-                onclick={() => (showPhoneList = false)}
-                aria-label="关闭接收卡选择"
-              ></button>
+            <div
+              class="px-0 sm:px-4 lg:px-5 lg:pt-4 lg:pb-4 lg:flex-1 lg:min-h-0 lg:flex lg:flex-col"
+            >
               <div
-                class="absolute left-0 right-0 bottom-[var(--mobile-tab-bar-height)] h-[min(68dvh,620px)] max-h-[calc(100dvh_-_52px_-_var(--mobile-tab-bar-height))]
+                class="lg:grid lg:gap-4 lg:flex-1 lg:min-h-0 lg:grid-cols-[288px_1fr] {can(
+                  'messages.send',
+                )
+                  ? '2xl:grid-cols-[288px_1fr_352px]'
+                  : ''}"
+              >
+                <!-- Mobile receiver picker: a bottom sheet keeps the message context visible. -->
+                {#if showPhoneList}
+                  <div class="lg:hidden fixed inset-0 z-50" role="presentation">
+                    <button
+                      class="absolute inset-0 bottom-[var(--mobile-tab-bar-height)] w-full bg-stone-900/35"
+                      onclick={() => (showPhoneList = false)}
+                      aria-label="关闭接收卡选择"
+                    ></button>
+                    <div
+                      class="absolute left-0 right-0 bottom-[var(--mobile-tab-bar-height)] h-[min(68dvh,620px)] max-h-[calc(100dvh_-_52px_-_var(--mobile-tab-bar-height))]
                   bg-white rounded-t-2xl shadow-[0_-12px_36px_rgba(28,25,23,.2)] overflow-hidden
                   flex flex-col"
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="receiver-picker-title"
-                use:overlay={{ onClose: () => (showPhoneList = false) }}
-              >
-                <div class="flex-shrink-0 border-b border-stone-200">
-                  <div class="flex justify-center pt-2 pb-1" aria-hidden="true">
-                    <span class="w-9 h-1 rounded-full bg-stone-300"></span>
-                  </div>
-                  <div class="h-11 px-4 flex items-center gap-2">
-                    <div class="min-w-0 flex-1">
-                      <h2 id="receiver-picker-title" class="text-sm font-semibold text-stone-900">选择接收卡</h2>
-                      <p class="text-[11px] text-stone-400 mt-0.5">共 {phoneNumbers.length} 张卡</p>
-                    </div>
-                    <button
-                      class="w-9 h-9 -mr-1 flex items-center justify-center rounded-lg text-stone-500
-                        hover:bg-stone-100 active:bg-stone-200"
-                      onclick={() => (showPhoneList = false)}
-                      aria-label="关闭"
+                      role="dialog"
+                      aria-modal="true"
+                      aria-labelledby="receiver-picker-title"
+                      use:overlay={{ onClose: () => (showPhoneList = false) }}
                     >
-                      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-                      </svg>
-                    </button>
+                      <div class="flex-shrink-0 border-b border-stone-200">
+                        <div class="flex justify-center pt-2 pb-1" aria-hidden="true">
+                          <span class="w-9 h-1 rounded-full bg-stone-300"></span>
+                        </div>
+                        <div class="h-11 px-4 flex items-center gap-2">
+                          <div class="min-w-0 flex-1">
+                            <h2
+                              id="receiver-picker-title"
+                              class="text-sm font-semibold text-stone-900"
+                            >
+                              选择接收卡
+                            </h2>
+                            <p class="text-[11px] text-stone-400 mt-0.5">
+                              共 {phoneNumbers.length} 张卡
+                            </p>
+                          </div>
+                          <button
+                            class="w-9 h-9 -mr-1 flex items-center justify-center rounded-lg text-stone-500
+                        hover:bg-stone-100 active:bg-stone-200"
+                            onclick={() => (showPhoneList = false)}
+                            aria-label="关闭"
+                          >
+                            <svg
+                              class="w-5 h-5"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="2"
+                                d="M6 18L18 6M6 6l12 12"
+                              />
+                            </svg>
+                          </button>
+                        </div>
+                      </div>
+                      <div class="flex-1 min-h-0">
+                        <PhoneList
+                          {phoneNumbers}
+                          {selectedPhone}
+                          bind:selectedPhoneIccid
+                          bind:selectedCountry
+                          bind:searchTerm
+                          onSelectPhone={selectPhone}
+                          onSetIccidMapping={handleSetIccidMapping}
+                          mobile={true}
+                          {daemonStatus}
+                          isLoading={dataLoading}
+                        />
+                      </div>
+                    </div>
                   </div>
-                </div>
-                <div class="flex-1 min-h-0">
+                {/if}
+
+                <!-- Desktop Phone List — fixed 288px column -->
+                <div class="hidden lg:flex lg:flex-col h-full min-h-0">
                   <PhoneList
                     {phoneNumbers}
                     {selectedPhone}
@@ -1439,172 +1579,178 @@
                     bind:searchTerm
                     onSelectPhone={selectPhone}
                     onSetIccidMapping={handleSetIccidMapping}
-                    mobile={true}
                     {daemonStatus}
                     isLoading={dataLoading}
                   />
                 </div>
+
+                <!-- Message View Column — fills remaining space -->
+                <div
+                  class="flex flex-col h-full min-h-0 {selectedPhone
+                    ? 'lg:grid lg:grid-rows-[minmax(300px,1fr)_auto] lg:gap-3'
+                    : ''}"
+                >
+                  <div class="min-h-0 flex flex-col">
+                    <SimpleMessageView
+                      {messages}
+                      {selectedPhone}
+                      isLoading={dataLoading}
+                      {newMessageIds}
+                      onClearPhone={() => selectPhone(null)}
+                      {showFiltered}
+                      {filterRules}
+                      onToggleFiltered={toggleFiltered}
+                      {balanceChecks}
+                      onOpenBalance={openBalanceCheck}
+                      onOpenMessage={(message) => (messageDetail = message)}
+                      hasMore={hasMoreMessagePages}
+                      onLoadMore={loadOlderMessages}
+                      loadingMore={loadingOlderMessages}
+                      loadError={dataError}
+                      fromCache={messagesFromCache}
+                      onRetry={() => {
+                        dataLoading = true;
+                        loadData().finally(() => (dataLoading = false));
+                      }}
+                    />
+                  </div>
+                  {#if selectedPhone}
+                    <div class="hidden lg:block min-h-0">
+                      <PhoneDetails
+                        phone={selectedPhone}
+                        mobile={false}
+                        {daemonStatus}
+                        balanceCheck={latestSelectedBalanceCheck}
+                        onOpenBalance={openBalanceCheck}
+                        phones={phoneNumbers}
+                      />
+                    </div>
+                  {/if}
+                </div>
+
+                <!-- Send panel: resident 3rd column at ≥1600px, hidden below -->
+                {#if can('messages.send')}
+                  <div class="hidden 2xl:flex 2xl:flex-col h-full min-h-0">
+                    <MessageComposer
+                      {selectedPhone}
+                      {phoneNumbers}
+                      {messages}
+                      onmessagesent={handleMessageSent}
+                    />
+                  </div>
+                {/if}
               </div>
             </div>
-          {/if}
-
-          <!-- Desktop Phone List — fixed 288px column -->
-          <div class="hidden lg:flex lg:flex-col h-full min-h-0">
-            <PhoneList
-              {phoneNumbers}
-              {selectedPhone}
-              bind:selectedPhoneIccid
-              bind:selectedCountry
-              bind:searchTerm
-              onSelectPhone={selectPhone}
-              onSetIccidMapping={handleSetIccidMapping}
-              {daemonStatus}
-              isLoading={dataLoading}
-            />
-          </div>
-
-          <!-- Message View Column — fills remaining space -->
-          <div class="flex flex-col h-full min-h-0 {selectedPhone ? 'lg:grid lg:grid-rows-[minmax(300px,1fr)_auto] lg:gap-3' : ''}">
-            <div class="min-h-0 flex flex-col">
-              <SimpleMessageView
-                {messages}
-                {selectedPhone}
-                isLoading={dataLoading}
-                {newMessageIds}
-                onClearPhone={() => selectPhone(null)}
-                {showFiltered}
-                {filterRules}
-                onToggleFiltered={toggleFiltered}
-                {balanceChecks}
-                onOpenBalance={openBalanceCheck}
-                onOpenMessage={(message) => messageDetail = message}
-                hasMore={hasMoreMessagePages}
-                onLoadMore={loadOlderMessages}
-                loadingMore={loadingOlderMessages}
-                loadError={dataError}
-                fromCache={messagesFromCache}
-                onRetry={() => { dataLoading = true; loadData().finally(() => (dataLoading = false)); }}
-              />
-            </div>
-            {#if selectedPhone}
-              <div class="hidden lg:block min-h-0">
-                <PhoneDetails
-                  phone={selectedPhone}
-                  mobile={false}
-                  {daemonStatus}
-                  balanceCheck={latestSelectedBalanceCheck}
-                  onOpenBalance={openBalanceCheck}
-                  phones={phoneNumbers}
+          </ErrorBoundary>
+        {:else if currentView === 'send'}
+          <ErrorBoundary componentName="MessageComposer">
+            <div class="lg:flex-1 lg:min-h-0 lg:overflow-auto lg:px-8 lg:py-6">
+              <div class="lg:max-w-[420px] lg:h-full lg:mx-auto">
+                <MessageComposer
+                  {selectedPhone}
+                  {phoneNumbers}
+                  {messages}
+                  mobilePage={true}
+                  onmessagesent={handleMessageSent}
                 />
               </div>
-            {/if}
-          </div>
-
-          <!-- Send panel: resident 3rd column at ≥1600px, hidden below -->
-          {#if can('messages.send')}
-            <div class="hidden 2xl:flex 2xl:flex-col h-full min-h-0">
-              <MessageComposer
-                {selectedPhone}
+            </div>
+          </ErrorBoundary>
+        {:else if currentView === 'iccid-mappings'}
+          <ErrorBoundary componentName="IccidMappings">
+            <!-- ICCID Mappings View -->
+            <div class="px-0 py-0 sm:px-4 sm:py-6 lg:px-8 lg:flex-1 lg:min-h-0 lg:overflow-hidden">
+              <IccidMappings initialStatusFilter={iccidMappingsFilter} />
+            </div>
+          </ErrorBoundary>
+        {:else if currentView === 'balances'}
+          <ErrorBoundary componentName="BalanceManagement">
+            <div class="lg:flex-1 lg:min-h-0 lg:overflow-hidden">
+              <BalanceManagement
                 {phoneNumbers}
-                {messages}
-                onmessagesent={handleMessageSent}
+                {balanceChecks}
+                canQueryBalances={can('balances.query')}
+                canWriteBills={can('bills.write')}
+                onQueriesChanged={refreshBalanceChecksForView}
+                onOpenBalance={openBalanceCheck}
               />
             </div>
-          {/if}
-        </div>
-      </div>
-      </ErrorBoundary>
-    {:else if currentView === "send"}
-      <ErrorBoundary componentName="MessageComposer">
-        <div class="lg:flex-1 lg:min-h-0 lg:overflow-auto lg:px-8 lg:py-6">
-          <div class="lg:max-w-[420px] lg:h-full lg:mx-auto">
-            <MessageComposer
-              {selectedPhone}
-              {phoneNumbers}
-              {messages}
-              mobilePage={true}
-              onmessagesent={handleMessageSent}
-            />
-          </div>
-        </div>
-      </ErrorBoundary>
-    {:else if currentView === "iccid-mappings"}
-      <ErrorBoundary componentName="IccidMappings">
-        <!-- ICCID Mappings View -->
-        <div class="px-0 py-0 sm:px-4 sm:py-6 lg:px-8 lg:flex-1 lg:min-h-0 lg:overflow-hidden">
-          <IccidMappings initialStatusFilter={iccidMappingsFilter} />
-        </div>
-      </ErrorBoundary>
-    {:else if currentView === "balances"}
-      <ErrorBoundary componentName="BalanceManagement">
-        <div class="lg:flex-1 lg:min-h-0 lg:overflow-hidden">
-          <BalanceManagement
-            {phoneNumbers}
-            {balanceChecks}
-            canQueryBalances={can('balances.query')}
-            canWriteBills={can('bills.write')}
-            onQueriesChanged={refreshBalanceChecksForView}
-            onOpenBalance={openBalanceCheck}
-          />
-        </div>
-      </ErrorBoundary>
-    {:else if currentView === "keywords" || currentView === "filters"}
-      <div class="px-0 py-0 lg:px-8 lg:py-6 lg:flex-1 lg:min-h-0 lg:overflow-auto bg-white lg:bg-transparent">
-        {#if can('keywords.read') && can('filters.read')}
-          <div class="flex items-center p-1 m-3 lg:inline-flex lg:m-0 lg:mb-5 bg-stone-200/70 rounded-lg" aria-label="规则类型">
-            <button
-              onclick={() => navigate('filters')}
-              class="flex-1 lg:flex-none px-3 py-1.5 rounded-md text-sm transition-colors
+          </ErrorBoundary>
+        {:else if currentView === 'keywords' || currentView === 'filters'}
+          <div
+            class="px-0 py-0 lg:px-8 lg:py-6 lg:flex-1 lg:min-h-0 lg:overflow-auto bg-white lg:bg-transparent"
+          >
+            {#if can('keywords.read') && can('filters.read')}
+              <div
+                class="flex items-center p-1 m-3 lg:inline-flex lg:m-0 lg:mb-5 bg-stone-200/70 rounded-lg"
+                aria-label="规则类型"
+              >
+                <button
+                  onclick={() => navigate('filters')}
+                  class="flex-1 lg:flex-none px-3 py-1.5 rounded-md text-sm transition-colors
                 {currentView === 'filters'
-                  ? 'bg-white text-stone-900 font-semibold shadow-sm'
-                  : 'text-stone-500 hover:text-stone-800'}"
-            >垃圾过滤</button>
-            <button
-              onclick={() => navigate('keywords')}
-              class="flex-1 lg:flex-none px-3 py-1.5 rounded-md text-sm transition-colors
+                    ? 'bg-white text-stone-900 font-semibold shadow-sm'
+                    : 'text-stone-500 hover:text-stone-800'}">垃圾过滤</button
+                >
+                <button
+                  onclick={() => navigate('keywords')}
+                  class="flex-1 lg:flex-none px-3 py-1.5 rounded-md text-sm transition-colors
                 {currentView === 'keywords'
-                  ? 'bg-white text-stone-900 font-semibold shadow-sm'
-                  : 'text-stone-500 hover:text-stone-800'}"
-            >关键词高亮</button>
-          </div>
-        {/if}
+                    ? 'bg-white text-stone-900 font-semibold shadow-sm'
+                    : 'text-stone-500 hover:text-stone-800'}">关键词高亮</button
+                >
+              </div>
+            {/if}
 
-        {#if currentView === "filters"}
-          <ErrorBoundary componentName="FilterRules">
-            <FilterRules />
-          </ErrorBoundary>
-        {:else}
-          <ErrorBoundary componentName="Keywords">
-            <KeywordConfig />
+            {#if currentView === 'filters'}
+              <ErrorBoundary componentName="FilterRules">
+                <FilterRules />
+              </ErrorBoundary>
+            {:else}
+              <ErrorBoundary componentName="Keywords">
+                <KeywordConfig />
+              </ErrorBoundary>
+            {/if}
+          </div>
+        {:else if currentView === 'users'}
+          <ErrorBoundary componentName="UserManagement">
+            <div class="px-0 py-0 lg:px-8 lg:py-6 lg:flex-1 lg:min-h-0 lg:overflow-auto">
+              <UserManagement currentUserId={user?.id ?? null} />
+            </div>
           </ErrorBoundary>
         {/if}
       </div>
-    {:else if currentView === "users"}
-      <ErrorBoundary componentName="UserManagement">
-        <div class="px-0 py-0 lg:px-8 lg:py-6 lg:flex-1 lg:min-h-0 lg:overflow-auto">
-          <UserManagement currentUserId={user?.id ?? null} />
-        </div>
-      </ErrorBoundary>
-    {/if}
-    </div><!-- end content wrapper -->
+      <!-- end content wrapper -->
     </PullToRefresh>
 
     <!-- ── Send drawer (<1600px, desktop only) ──────────────────────────── -->
     {#if showSendDrawer && can('messages.send')}
-      <div class="hidden lg:block 2xl:hidden fixed inset-0 z-30 bg-stone-900/28"
-        onclick={() => showSendDrawer = false}
-        role="presentation">
-      </div>
-      <div class="hidden lg:flex 2xl:hidden fixed top-0 right-0 bottom-0 z-40 w-[400px] flex-col
+      <div
+        class="hidden lg:block 2xl:hidden fixed inset-0 z-30 bg-stone-900/28"
+        onclick={() => (showSendDrawer = false)}
+        role="presentation"
+      ></div>
+      <div
+        class="hidden lg:flex 2xl:hidden fixed top-0 right-0 bottom-0 z-40 w-[400px] flex-col
         bg-white border-l border-stone-200"
-        style="box-shadow: -16px 0 40px rgba(28,25,23,.16);">
-        <div class="flex items-center justify-between px-5 py-4 border-b border-stone-200 flex-shrink-0">
+        style="box-shadow: -16px 0 40px rgba(28,25,23,.16);"
+      >
+        <div
+          class="flex items-center justify-between px-5 py-4 border-b border-stone-200 flex-shrink-0"
+        >
           <h3 class="text-sm font-semibold text-stone-900">发送短信</h3>
-          <button onclick={() => showSendDrawer = false}
+          <button
+            onclick={() => (showSendDrawer = false)}
             aria-label="关闭发送短信"
-            class="p-1.5 text-stone-400 hover:text-stone-700 hover:bg-stone-100 rounded-lg transition-colors">
+            class="p-1.5 text-stone-400 hover:text-stone-700 hover:bg-stone-100 rounded-lg transition-colors"
+          >
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M6 18L18 6M6 6l12 12"
+              />
             </svg>
           </button>
         </div>
@@ -1620,10 +1766,7 @@
     {/if}
 
     {#if balanceDetailCheck}
-      <BalanceQueryDetail
-        check={balanceDetailCheck}
-        onClose={() => balanceDetailCheck = null}
-      />
+      <BalanceQueryDetail check={balanceDetailCheck} onClose={() => (balanceDetailCheck = null)} />
     {/if}
 
     {#if messageDetail}
@@ -1632,14 +1775,15 @@
         {selectedPhone}
         {filterRules}
         keywords={$keywordsStore}
-        onClose={() => messageDetail = null}
+        onClose={() => (messageDetail = null)}
       />
     {/if}
 
     <!-- ── iOS bottom tab bar ────────────────────────────────────────────── -->
     <!-- lg:hidden: desktop uses the top nav. The safe-area padding keeps controls
          clear of both Safari chrome and the home indicator. -->
-    <nav class="mobile-tab-bar lg:hidden fixed bottom-0 left-0 right-0 z-40
+    <nav
+      class="mobile-tab-bar lg:hidden fixed bottom-0 left-0 right-0 z-40
       bg-white border-t border-stone-200
       flex items-stretch touch-manipulation isolate"
       style="box-shadow: 0 -1px 0 rgba(28,25,23,.06); padding-bottom: var(--mobile-tab-safe-area); --mobile-tab-selection-width: {mobileTabSelectionWidth}; --mobile-tab-selection-x: {mobileTabSelectionX}; --mobile-tab-glow-x: {mobileTabGlowPosition}; --mobile-tab-icon-shift-x: {mobileTabIconShiftX}px;"
@@ -1647,75 +1791,119 @@
       onpointerdown={handleMobileTabPointerDown}
       onpointermove={handleMobileTabPointerMove}
       onpointerup={(event) => finishMobileTabPointer(event, true)}
-      onpointercancel={(event) => finishMobileTabPointer(event, false)}>
-
+      onpointercancel={(event) => finishMobileTabPointer(event, false)}
+    >
       <span class="mobile-tab-selection" data-mobile-tab-selection aria-hidden="true"></span>
 
       <!-- 验证码 tab -->
-      <button onclick={() => handleMobileTabClick('dashboard')}
+      <button
+        onclick={() => handleMobileTabClick('dashboard')}
         data-mobile-tab-active={mobileTabVisualId === 'dashboard'}
         class="mobile-tab-button relative z-[1] flex-1 flex flex-col items-center justify-center gap-0.5 min-h-[var(--mobile-tab-content-height)]
           touch-manipulation active:bg-stone-100 transition-colors
-          {mobileTabVisualId === 'dashboard' ? 'text-[#c2410c]' : 'text-stone-400'}">
+          {mobileTabVisualId === 'dashboard' ? 'text-[#c2410c]' : 'text-stone-400'}"
+      >
         <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round"
-            d="M7 8h10M7 12h6m-6 4h10M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z"/>
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            d="M7 8h10M7 12h6m-6 4h10M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z"
+          />
         </svg>
         <span class="text-[10px] font-semibold leading-none">验证码</span>
       </button>
 
       <!-- 设备 tab — links to iccid-mappings; gated to phones.write -->
       {#if canManagePhones}
-        <button onclick={() => handleMobileTabClick('iccid-mappings')}
+        <button
+          onclick={() => handleMobileTabClick('iccid-mappings')}
           data-mobile-tab-active={mobileTabVisualId === 'iccid-mappings'}
           class="mobile-tab-button relative z-[1] flex-1 flex flex-col items-center justify-center gap-0.5 min-h-[var(--mobile-tab-content-height)]
             touch-manipulation active:bg-stone-100 transition-colors
-            {mobileTabVisualId === 'iccid-mappings' ? 'text-[#c2410c]' : 'text-stone-400'}">
-          <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
-            <rect x="5" y="5" width="14" height="14" rx="2"/>
-            <rect x="9" y="9" width="6" height="6" rx="1"/>
-            <path stroke-linecap="round" d="M9 2v3m6-3v3M9 19v3m6-3v3M2 9h3m-3 6h3m14-6h3m-3 6h3"/>
+            {mobileTabVisualId === 'iccid-mappings' ? 'text-[#c2410c]' : 'text-stone-400'}"
+        >
+          <svg
+            class="w-6 h-6"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <rect x="5" y="5" width="14" height="14" rx="2" />
+            <rect x="9" y="9" width="6" height="6" rx="1" />
+            <path stroke-linecap="round" d="M9 2v3m6-3v3M9 19v3m6-3v3M2 9h3m-3 6h3m14-6h3m-3 6h3" />
           </svg>
           <span class="text-[10px] font-semibold leading-none">设备</span>
         </button>
       {/if}
 
       <!-- 余额 tab -->
-      <button onclick={() => handleMobileTabClick('balances')}
+      <button
+        onclick={() => handleMobileTabClick('balances')}
         data-mobile-tab-active={mobileTabVisualId === 'balances'}
         class="mobile-tab-button relative z-[1] flex-1 flex flex-col items-center justify-center gap-0.5 min-h-[var(--mobile-tab-content-height)]
           touch-manipulation active:bg-stone-100 transition-colors
-          {mobileTabVisualId === 'balances' ? 'text-[#c2410c]' : 'text-stone-400'}">
-        <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M4 7.5A2.5 2.5 0 016.5 5H19a1 1 0 011 1v12a1 1 0 01-1 1H6.5A2.5 2.5 0 014 16.5v-9z"/>
-          <path stroke-linecap="round" stroke-linejoin="round" d="M4 8h13m0 3h4v4h-4a2 2 0 010-4z"/>
+          {mobileTabVisualId === 'balances' ? 'text-[#c2410c]' : 'text-stone-400'}"
+      >
+        <svg
+          class="w-6 h-6"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            d="M4 7.5A2.5 2.5 0 016.5 5H19a1 1 0 011 1v12a1 1 0 01-1 1H6.5A2.5 2.5 0 014 16.5v-9z"
+          />
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            d="M4 8h13m0 3h4v4h-4a2 2 0 010-4z"
+          />
         </svg>
         <span class="text-[10px] font-semibold leading-none">余额</span>
       </button>
 
       <!-- 发送 tab — a first-class route, like the other primary tabs. -->
-      <button onclick={() => handleMobileTabClick('send')}
+      <button
+        onclick={() => handleMobileTabClick('send')}
         data-mobile-tab-active={mobileTabVisualId === 'send'}
         class="mobile-tab-button relative z-[1] flex-1 flex flex-col items-center justify-center gap-0.5 min-h-[var(--mobile-tab-content-height)]
           touch-manipulation active:bg-stone-100 transition-colors
-          {mobileTabVisualId === 'send' ? 'text-[#c2410c]' : 'text-stone-400 hover:text-stone-600'}">
-        <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
-          <path stroke-linecap="round" stroke-linejoin="round"
-            d="M5 5h9a3 3 0 013 3v1M5 5a3 3 0 00-3 3v5a3 3 0 003 3h2l3.5 3v-3H13"/>
-          <path stroke-linecap="round" stroke-linejoin="round" d="M14 12h8m-3-3 3 3-3 3"/>
+          {mobileTabVisualId === 'send' ? 'text-[#c2410c]' : 'text-stone-400 hover:text-stone-600'}"
+      >
+        <svg
+          class="w-6 h-6"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            d="M5 5h9a3 3 0 013 3v1M5 5a3 3 0 00-3 3v5a3 3 0 003 3h2l3.5 3v-3H13"
+          />
+          <path stroke-linecap="round" stroke-linejoin="round" d="M14 12h8m-3-3 3 3-3 3" />
         </svg>
         <span class="text-[10px] font-semibold leading-none">发送</span>
       </button>
 
       <!-- 更多 tab — reveals a sheet with 规则 + 用户管理 -->
-      <button onclick={() => handleMobileTabClick('more')}
+      <button
+        onclick={() => handleMobileTabClick('more')}
         data-mobile-tab-active={mobileTabVisualId === 'more'}
         class="mobile-tab-button relative z-[1] flex-1 flex flex-col items-center justify-center gap-0.5 min-h-[var(--mobile-tab-content-height)]
           touch-manipulation active:bg-stone-100 transition-colors
-          {mobileTabVisualId === 'more' ? 'text-[#c2410c]' : 'text-stone-400'}">
+          {mobileTabVisualId === 'more' ? 'text-[#c2410c]' : 'text-stone-400'}"
+      >
         <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round"
-            d="M4 6h16M4 12h16M4 18h16"/>
+          <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16" />
         </svg>
         <span class="text-[10px] font-semibold leading-none">更多</span>
       </button>
@@ -1723,122 +1911,227 @@
 
     <!-- ── 更多 bottom sheet ────────────────────────────────────────────── -->
     {#if showMoreMenu}
-      <div class="lg:hidden fixed inset-0 z-[35] bg-stone-900/20"
-        onclick={() => showMoreMenu = false}
-        role="presentation">
-      </div>
-      <div class="lg:hidden fixed bottom-[var(--mobile-tab-bar-height)] left-0 right-0 z-40 bg-white border-t border-stone-200 rounded-t-2xl
+      <div
+        class="lg:hidden fixed inset-0 z-[35] bg-stone-900/20"
+        onclick={() => (showMoreMenu = false)}
+        role="presentation"
+      ></div>
+      <div
+        class="lg:hidden fixed bottom-[var(--mobile-tab-bar-height)] left-0 right-0 z-40 bg-white border-t border-stone-200 rounded-t-2xl
         shadow-[0_-8px_30px_rgba(28,25,23,.18)] max-h-[calc(100dvh_-_var(--mobile-tab-bar-height)_-_16px)] overflow-y-auto"
         role="dialog"
         aria-modal="true"
         aria-label="更多"
-        use:overlay={{ onClose: () => (showMoreMenu = false) }}>
+        use:overlay={{ onClose: () => (showMoreMenu = false) }}
+      >
         <div class="p-4 space-y-1">
-          <p class="text-[11px] font-semibold text-stone-400 uppercase tracking-widest px-3 mb-2">运行状态</p>
-          <button onclick={() => { showMoreMenu = false; openDaemonDetails(); }}
-            class="w-full flex items-center justify-between px-3 py-3 rounded-lg hover:bg-stone-50 transition-colors text-left">
+          <p class="text-[11px] font-semibold text-stone-400 uppercase tracking-widest px-3 mb-2">
+            运行状态
+          </p>
+          <button
+            onclick={() => {
+              showMoreMenu = false;
+              openDaemonDetails();
+            }}
+            class="w-full flex items-center justify-between px-3 py-3 rounded-lg hover:bg-stone-50 transition-colors text-left"
+          >
             <div class="flex items-center gap-2.5">
               <span class="w-2 h-2 rounded-full {daemonMeta.dotClass}"></span>
               <div>
                 <div class="text-sm font-medium text-stone-800">采集服务{daemonMeta.label}</div>
-                <div class="text-xs text-stone-400 mt-0.5">心跳 {formatTimeAgo(daemonStatus.last_heartbeat)}</div>
+                <div class="text-xs text-stone-400 mt-0.5">
+                  心跳 {formatTimeAgo(daemonStatus.last_heartbeat)}
+                </div>
               </div>
             </div>
-            <svg class="w-4 h-4 text-stone-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+            <svg
+              class="w-4 h-4 text-stone-300"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M9 5l7 7-7 7"
+              />
             </svg>
           </button>
 
           {#if can('messages.read')}
-            <button onclick={() => { showMoreMenu = false; openCallPanel(); }}
-              class="w-full flex items-center justify-between px-3 py-3 rounded-lg hover:bg-stone-50 transition-colors text-left">
+            <button
+              onclick={() => {
+                showMoreMenu = false;
+                openCallPanel();
+              }}
+              class="w-full flex items-center justify-between px-3 py-3 rounded-lg hover:bg-stone-50 transition-colors text-left"
+            >
               <div class="flex items-center gap-2.5">
-                <span class="w-2 h-2 rounded-full {activeCall ? 'bg-emerald-500' : 'bg-stone-300'}"></span>
+                <span class="w-2 h-2 rounded-full {activeCall ? 'bg-emerald-500' : 'bg-stone-300'}"
+                ></span>
                 <div class="text-sm font-medium text-stone-800">
                   {#if activeCall?.state === 'ringing'}来电振铃{:else if callDuration}通话中 {callDuration}{:else}语音通话{/if}
                 </div>
                 {#if !activeCall && missedCallCount > 0}
-                  <span class="min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full
-                    bg-rose-600 text-white text-[10px] font-medium tabular-nums">{missedCallCount}</span>
+                  <span
+                    class="min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full
+                    bg-rose-600 text-white text-[10px] font-medium tabular-nums"
+                    >{missedCallCount}</span
+                  >
                 {/if}
               </div>
-              <svg class="w-4 h-4 text-stone-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+              <svg
+                class="w-4 h-4 text-stone-300"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M9 5l7 7-7 7"
+                />
               </svg>
             </button>
           {/if}
 
           <div class="border-t border-stone-100 my-2"></div>
-          <p class="text-[11px] font-semibold text-stone-400 uppercase tracking-widest px-3 mb-2">规则</p>
+          <p class="text-[11px] font-semibold text-stone-400 uppercase tracking-widest px-3 mb-2">
+            规则
+          </p>
 
           {#if can('filters.read')}
-            <button onclick={() => navigate('filters')}
-              class="w-full flex items-center justify-between px-3 py-3 rounded-xl hover:bg-stone-50 transition-colors text-left">
+            <button
+              onclick={() => navigate('filters')}
+              class="w-full flex items-center justify-between px-3 py-3 rounded-xl hover:bg-stone-50 transition-colors text-left"
+            >
               <div>
                 <div class="text-sm font-medium text-stone-800">垃圾过滤</div>
                 <div class="text-xs text-stone-400 mt-0.5">隐藏非验证码推广短信</div>
               </div>
-              <svg class="w-4 h-4 text-stone-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+              <svg
+                class="w-4 h-4 text-stone-300"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M9 5l7 7-7 7"
+                />
               </svg>
             </button>
           {/if}
 
           {#if can('keywords.read')}
-            <button onclick={() => navigate('keywords')}
-              class="w-full flex items-center justify-between px-3 py-3 rounded-xl hover:bg-stone-50 transition-colors text-left">
+            <button
+              onclick={() => navigate('keywords')}
+              class="w-full flex items-center justify-between px-3 py-3 rounded-xl hover:bg-stone-50 transition-colors text-left"
+            >
               <div>
                 <div class="text-sm font-medium text-stone-800">关键词高亮</div>
                 <div class="text-xs text-stone-400 mt-0.5">标色识别验证码类型</div>
               </div>
-              <svg class="w-4 h-4 text-stone-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+              <svg
+                class="w-4 h-4 text-stone-300"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M9 5l7 7-7 7"
+                />
               </svg>
             </button>
           {/if}
 
           {#if can('users.read')}
             <div class="border-t border-stone-100 my-2"></div>
-            <p class="text-[11px] font-semibold text-stone-400 uppercase tracking-widest px-3 mb-2">管理</p>
-            <button onclick={() => navigate('users')}
-              class="w-full flex items-center justify-between px-3 py-3 rounded-xl hover:bg-stone-50 transition-colors text-left">
+            <p class="text-[11px] font-semibold text-stone-400 uppercase tracking-widest px-3 mb-2">
+              管理
+            </p>
+            <button
+              onclick={() => navigate('users')}
+              class="w-full flex items-center justify-between px-3 py-3 rounded-xl hover:bg-stone-50 transition-colors text-left"
+            >
               <div>
                 <div class="text-sm font-medium text-stone-800">用户管理</div>
                 <div class="text-xs text-stone-400 mt-0.5">管理员 / 查看者角色</div>
               </div>
-              <svg class="w-4 h-4 text-stone-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+              <svg
+                class="w-4 h-4 text-stone-300"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M9 5l7 7-7 7"
+                />
               </svg>
             </button>
           {/if}
 
           <div class="border-t border-stone-100 my-2"></div>
-          <p class="text-[11px] font-semibold text-stone-400 uppercase tracking-widest px-3 mb-2">账户</p>
+          <p class="text-[11px] font-semibold text-stone-400 uppercase tracking-widest px-3 mb-2">
+            账户
+          </p>
           <!-- Self-service recovery for stale IndexedDB rows or a bad service worker. -->
-          <button onclick={handleResetLocalCache}
-            class="w-full flex items-center justify-between px-3 py-3 rounded-xl hover:bg-stone-50 transition-colors text-left">
+          <button
+            onclick={handleResetLocalCache}
+            class="w-full flex items-center justify-between px-3 py-3 rounded-xl hover:bg-stone-50 transition-colors text-left"
+          >
             <div>
               <div class="text-sm font-medium text-stone-700">重置本地缓存</div>
               <div class="text-xs text-stone-400 mt-0.5">清除短信与离线缓存后重新加载</div>
             </div>
-            <svg class="w-4 h-4 text-stone-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+            <svg
+              class="w-4 h-4 text-stone-300"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+              />
             </svg>
           </button>
-          <button onclick={() => auth.logout()}
-            class="w-full flex items-center justify-between px-3 py-3 rounded-xl hover:bg-stone-50 transition-colors text-left">
+          <button
+            onclick={() => auth.logout()}
+            class="w-full flex items-center justify-between px-3 py-3 rounded-xl hover:bg-stone-50 transition-colors text-left"
+          >
             <div class="text-sm font-medium text-stone-700">退出登录</div>
-            <svg class="w-4 h-4 text-stone-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
+            <svg
+              class="w-4 h-4 text-stone-300"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
+              />
             </svg>
           </button>
         </div>
       </div>
     {/if}
-
-  </div><!-- end outer -->
+  </div>
+  <!-- end outer -->
 {/if}
 
 {#if showDaemonDetails}
@@ -1846,7 +2139,7 @@
     status={daemonStatus}
     refreshing={daemonRefreshing}
     onRefresh={handleRefreshDaemon}
-    onClose={() => showDaemonDetails = false}
+    onClose={() => (showDaemonDetails = false)}
   />
 {/if}
 
@@ -1899,7 +2192,12 @@
 {#if toasts.length}
   <div class="fixed top-4 right-4 z-[100] flex flex-col gap-2 items-end">
     {#each toasts as toast (toast.id)}
-      <Toast message={toast.message} type={toast.type} duration={toast.duration} onClose={() => removeToast(toast.id)} />
+      <Toast
+        message={toast.message}
+        type={toast.type}
+        duration={toast.duration}
+        onClose={() => removeToast(toast.id)}
+      />
     {/each}
   </div>
 {/if}

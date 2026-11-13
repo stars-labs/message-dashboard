@@ -1,8 +1,4 @@
-import {
-  getBalanceTimestamp,
-  getCashBalance,
-  normalizeUtcTimestamp,
-} from './balance-query.js';
+import { getBalanceTimestamp, getCashBalance, normalizeUtcTimestamp } from './balance-query.js';
 import { evaluatePrepaidHealth } from '../../shared/prepaid-health.js';
 import type { SummaryStatus } from '../../shared/prepaid-health.js';
 import type { BalanceCheckLike, BalanceMetricRow } from './balance-query.js';
@@ -143,7 +139,8 @@ export function getBalanceThreshold(
   phone: BalancePhone | null | undefined,
   metric: BalanceMetricRow | null = null,
 ): { value: number; currency: string | null } | null {
-  const currency = metric?.currency || (phone?.country ? COUNTRY_CURRENCIES[phone.country] : undefined) || null;
+  const currency =
+    metric?.currency || (phone?.country ? COUNTRY_CURRENCIES[phone.country] : undefined) || null;
   // Per-SIM override wins; empty falls back to the currency default.
   const override = phone?.balance_threshold;
   if (override != null && override !== '' && Number.isFinite(Number(override))) {
@@ -173,20 +170,22 @@ export function buildBalanceRows(
     // Use the newest non-cancelled check for health classification so that
     // operational cancellations (rate-limit holds, triggered-in-error batches)
     // don't permanently mark a SIM as 查询失败 when no balance was ever obtained.
-    const latestSignificantCheck =
-      phoneChecks.find((check) => !isCancelledCheck(check)) || null;
+    const latestSignificantCheck = phoneChecks.find((check) => !isCancelledCheck(check)) || null;
     const balanceCheck = phoneChecks.find((check) => getCashBalance(check)) || null;
     const balanceMetric = getCashBalance(balanceCheck);
-    const threshold = phone.service_type === 'postpaid'
-      ? null
-      : getBalanceThreshold(phone, balanceMetric);
+    const threshold =
+      phone.service_type === 'postpaid' ? null : getBalanceThreshold(phone, balanceMetric);
     const balanceTimestamp = balanceCheck ? getBalanceTimestamp(balanceCheck) : null;
-    const expiryCheck = phoneChecks.find((check) => check.metrics?.some(
-      (metric) => metric.metric_type === 'account_expiry' && metric.expires_at
-    )) || null;
-    const expiryMetric = expiryCheck?.metrics?.find(
-      (metric) => metric.metric_type === 'account_expiry' && metric.expires_at
-    ) || null;
+    const expiryCheck =
+      phoneChecks.find((check) =>
+        check.metrics?.some(
+          (metric) => metric.metric_type === 'account_expiry' && metric.expires_at,
+        ),
+      ) || null;
+    const expiryMetric =
+      expiryCheck?.metrics?.find(
+        (metric) => metric.metric_type === 'account_expiry' && metric.expires_at,
+      ) || null;
     const expiryTimestamp = expiryCheck ? getBalanceTimestamp(expiryCheck) : null;
     const expiryDate = expiryMetric ? String(expiryMetric.expires_at).slice(0, 10) : null;
 
@@ -200,14 +199,17 @@ export function buildBalanceRows(
         country: phone.country,
         now,
         threshold,
-        cashBalance: balanceMetric ? {
-          value: balanceMetric.value ?? 0,
-          currency: balanceMetric.currency,
-          observedAt: normalizeUtcTimestamp(balanceTimestamp),
-        } : null,
+        cashBalance: balanceMetric
+          ? {
+              value: balanceMetric.value ?? 0,
+              currency: balanceMetric.currency,
+              observedAt: normalizeUtcTimestamp(balanceTimestamp),
+            }
+          : null,
         accountExpiry: expiryDate ? { date: expiryDate } : null,
         latestQueryStatus: latestSignificantCheck?.status || null,
-        expiryExpected: latestSignificantCheck?.profile_outputs?.includes('account_expiry') === true,
+        expiryExpected:
+          latestSignificantCheck?.profile_outputs?.includes('account_expiry') === true,
       });
     }
     const health = healthResult.summaryStatus;
@@ -256,8 +258,11 @@ export function buildBalanceRows(
 }
 
 export function countBalanceHealth(rows: BalanceRow[] = []): Record<string, number> {
-  return rows.reduce<Record<string, number>>((counts, row) => {
-    counts[row.health] = (counts[row.health] || 0) + 1;
-    return counts;
-  }, Object.fromEntries(Object.keys(BALANCE_HEALTH_META).map((status) => [status, 0])));
+  return rows.reduce<Record<string, number>>(
+    (counts, row) => {
+      counts[row.health] = (counts[row.health] || 0) + 1;
+      return counts;
+    },
+    Object.fromEntries(Object.keys(BALANCE_HEALTH_META).map((status) => [status, 0])),
+  );
 }

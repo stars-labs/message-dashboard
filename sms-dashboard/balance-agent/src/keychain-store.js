@@ -16,11 +16,13 @@ function runSecurityCommand(args, { input = null, inherit = false } = {}) {
       else child.stdin.end(`${input}\n`);
     }
     child.on('error', reject);
-    child.on('close', (code) => resolve({
-      code,
-      stdout: Buffer.concat(stdout).toString('utf8'),
-      stderr: Buffer.concat(stderr).toString('utf8'),
-    }));
+    child.on('close', (code) =>
+      resolve({
+        code,
+        stdout: Buffer.concat(stdout).toString('utf8'),
+        stderr: Buffer.concat(stderr).toString('utf8'),
+      }),
+    );
   });
 }
 
@@ -64,19 +66,17 @@ export function createKeychainStore({
         if (result.code !== 0 && !notFound(result)) throw commandError('delete', result);
         return;
       }
-      const result = await runCommand(
-        ['add-generic-password', ...identity(key), '-U', '-w'],
-        { input: String(value) },
-      );
+      const result = await runCommand(['add-generic-password', ...identity(key), '-U', '-w'], {
+        input: String(value),
+      });
       if (result.code !== 0) throw commandError('write', result);
     },
 
     async promptSet(key) {
       requireMacOS();
-      const result = await runCommand(
-        ['add-generic-password', ...identity(key), '-U', '-w'],
-        { inherit: true },
-      );
+      const result = await runCommand(['add-generic-password', ...identity(key), '-U', '-w'], {
+        inherit: true,
+      });
       if (result.code !== 0) throw commandError('write', result);
     },
   });

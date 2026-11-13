@@ -15,17 +15,22 @@ describe('D1 write-amplification migration', () => {
       CREATE INDEX idx_daemon_health_heartbeat ON daemon_health(last_heartbeat);
     `);
 
-    const migration = await Bun.file(new URL(
-      './071_reduce_d1_write_amplification.sql',
-      import.meta.url,
-    )).text();
+    const migration = await Bun.file(
+      new URL('./071_reduce_d1_write_amplification.sql', import.meta.url),
+    ).text();
     database.exec(migration);
 
-    expect(database.query(`
+    expect(
+      database
+        .query(
+          `
       SELECT name FROM sqlite_master
       WHERE name IN ('update_modems_timestamp', 'idx_daemon_health_heartbeat')
       ORDER BY name
-    `).all()).toEqual([]);
+    `,
+        )
+        .all(),
+    ).toEqual([]);
     database.close();
   });
 });

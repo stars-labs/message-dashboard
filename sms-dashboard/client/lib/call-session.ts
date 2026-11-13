@@ -27,8 +27,16 @@ interface ConnectionLike {
 
 /** The call API call-session drives, matching callApi in call-client.ts. */
 export interface CallSessionApi {
-  dial(params: { iccid: string; number: string; offer: unknown; mid: string | null }): Promise<{ call: { id: string }; answer: unknown }>;
-  answer(params: { offer: unknown; mid: string | null }): Promise<{ call: { id: string }; answer: unknown }>;
+  dial(params: {
+    iccid: string;
+    number: string;
+    offer: unknown;
+    mid: string | null;
+  }): Promise<{ call: { id: string }; answer: unknown }>;
+  answer(params: {
+    offer: unknown;
+    mid: string | null;
+  }): Promise<{ call: { id: string }; answer: unknown }>;
   connect(callId: string): Promise<{ offer?: unknown }>;
   renegotiate(params: { answer: unknown; callId: string }): Promise<unknown>;
   hangup(callId?: string): Promise<unknown>;
@@ -37,7 +45,10 @@ export interface CallSessionApi {
 export interface CallSessionDeps {
   fetchIce: () => Promise<RTCIceServer[]>;
   api: CallSessionApi;
-  RTCPeerConnection: new (config: { iceServers: RTCIceServer[]; bundlePolicy: string }) => ConnectionLike;
+  RTCPeerConnection: new (config: {
+    iceServers: RTCIceServer[];
+    bundlePolicy: string;
+  }) => ConnectionLike;
   getUserMedia: (constraints: MediaStreamConstraints) => Promise<MediaStream>;
   audioElement: HTMLAudioElement | null;
   connectTimeoutMs?: number;
@@ -102,7 +113,12 @@ export function createCallSession(deps: CallSessionDeps) {
   }
 
   /** `start` is api.dial or api.answer, bound to its own arguments. */
-  async function run(start: (offer: { offer: unknown; mid: string | null }) => Promise<{ call: { id: string }; answer: unknown }>) {
+  async function run(
+    start: (offer: {
+      offer: unknown;
+      mid: string | null;
+    }) => Promise<{ call: { id: string }; answer: unknown }>,
+  ) {
     try {
       mic = await getUserMedia({ audio: true, video: false });
       assertOpen();
@@ -147,7 +163,8 @@ export function createCallSession(deps: CallSessionDeps) {
   }
 
   return {
-    dial: ({ iccid, number }: { iccid: string; number: string }) => run(({ offer, mid }) => api.dial({ iccid, number, offer, mid })),
+    dial: ({ iccid, number }: { iccid: string; number: string }) =>
+      run(({ offer, mid }) => api.dial({ iccid, number, offer, mid })),
     answer: () => run(({ offer, mid }) => api.answer({ offer, mid })),
     /** Local hang-up: stop media and release the fleet lock. */
     async hangup() {

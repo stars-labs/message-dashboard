@@ -73,11 +73,13 @@ export const phonesHandler = {
         throw new Error('Database binding not found');
       }
 
-      const { results } = await env.DB.prepare(`
+      const { results } = await env.DB.prepare(
+        `
         SELECT ${DEVICE_COLUMNS}
         FROM device_view dv
         ORDER BY dv.primary_port, dv.iccid
-      `).all<DeviceRow>();
+      `,
+      ).all<DeviceRow>();
 
       return json({ success: true, data: results });
     } catch (error) {
@@ -96,11 +98,15 @@ export const phonesHandler = {
     const phoneId = request.params?.id;
 
     try {
-      const phone = await env.DB.prepare(`
+      const phone = await env.DB.prepare(
+        `
         SELECT ${DEVICE_COLUMNS}
         FROM device_view dv
         WHERE dv.iccid = ? OR dv.id = ?
-      `).bind(phoneId, phoneId).first<DeviceRow>();
+      `,
+      )
+        .bind(phoneId, phoneId)
+        .first<DeviceRow>();
 
       if (!phone) {
         return json({ success: false, error: 'Phone not found' }, 404);

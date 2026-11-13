@@ -43,17 +43,20 @@ function listRequest(db, query = '') {
 
 describe('message list D1 reads', () => {
   test('incremental sync bounds the list by ingestion time without a joined device scan', async () => {
-    const db = dbStub({ messages: [{
-      id: 'message-1',
-      phone_iccid: 'iccid-1',
-      content: 'test',
-    }] });
+    const db = dbStub({
+      messages: [
+        {
+          id: 'message-1',
+          phone_iccid: 'iccid-1',
+          content: 'test',
+        },
+      ],
+    });
     const since = '2026-09-02T00:00:00.000Z';
 
-    const response = await messagesHandler.list(listRequest(
-      db,
-      `?phone_iccid=iccid-1&limit=50&since=${encodeURIComponent(since)}`,
-    ));
+    const response = await messagesHandler.list(
+      listRequest(db, `?phone_iccid=iccid-1&limit=50&since=${encodeURIComponent(since)}`),
+    );
     const body = await response.json();
 
     expect(response.status).toBe(200);
@@ -100,14 +103,16 @@ describe('message list D1 reads', () => {
         { id: 'message-2', phone_iccid: 'iccid-1', phone_number: 'sender-2' },
         { id: 'message-3', phone_iccid: null, phone_number: 'sender-3' },
       ],
-      devices: [{
-        iccid: 'iccid-1',
-        number: '+6512345678',
-        carrier: 'Singtel',
-        sim_status: 'active',
-        sim_index: 1,
-        country: 'SG',
-      }],
+      devices: [
+        {
+          iccid: 'iccid-1',
+          number: '+6512345678',
+          carrier: 'Singtel',
+          sim_status: 'active',
+          sim_index: 1,
+          country: 'SG',
+        },
+      ],
     });
 
     const response = await messagesHandler.list(listRequest(db, '?limit=100'));
@@ -140,10 +145,12 @@ describe('message list D1 reads', () => {
     const since = '2026-09-01T23:00:00.000Z';
     const until = '2026-09-02T01:00:00.000Z';
 
-    const response = await messagesHandler.list(listRequest(
-      db,
-      `?limit=100&since=${encodeURIComponent(since)}&until=${encodeURIComponent(until)}`,
-    ));
+    const response = await messagesHandler.list(
+      listRequest(
+        db,
+        `?limit=100&since=${encodeURIComponent(since)}&until=${encodeURIComponent(until)}`,
+      ),
+    );
     const body = await response.json();
 
     expect(response.status).toBe(200);
@@ -161,10 +168,12 @@ describe('message list D1 reads', () => {
     const beforeCreatedAt = '2026-09-02 00:00:10';
     const beforeId = 'message-100';
 
-    const response = await messagesHandler.list(listRequest(
-      db,
-      `?since=2026-09-01T23%3A00%3A00.000Z&until=2026-09-02T01%3A00%3A00.000Z&before_created_at=${encodeURIComponent(beforeCreatedAt)}&before_id=${beforeId}`,
-    ));
+    const response = await messagesHandler.list(
+      listRequest(
+        db,
+        `?since=2026-09-01T23%3A00%3A00.000Z&until=2026-09-02T01%3A00%3A00.000Z&before_created_at=${encodeURIComponent(beforeCreatedAt)}&before_id=${beforeId}`,
+      ),
+    );
 
     expect(response.status).toBe(200);
     expect(db.calls[0].sql).toContain('m.created_at < ?');
@@ -189,26 +198,26 @@ describe('message list D1 reads', () => {
   });
 });
 
-
 describe('outbound status changes reach the dashboard', () => {
   const since = '2026-09-02T00:00:00.000Z';
 
   test('an incremental sync carries an already-known row whose status moved', async () => {
     const db = dbStub({
       messages: [{ id: 'new-inbound', phone_iccid: 'iccid-1', content: 'code 1234' }],
-      statusChanges: [{
-        id: 'sent-earlier',
-        phone_iccid: 'iccid-1',
-        type: 'sent',
-        status: 'sent',
-        content: 'hello',
-      }],
+      statusChanges: [
+        {
+          id: 'sent-earlier',
+          phone_iccid: 'iccid-1',
+          type: 'sent',
+          status: 'sent',
+          content: 'hello',
+        },
+      ],
     });
 
-    const response = await messagesHandler.list(listRequest(
-      db,
-      `?phone_iccid=iccid-1&limit=50&since=${encodeURIComponent(since)}`,
-    ));
+    const response = await messagesHandler.list(
+      listRequest(db, `?phone_iccid=iccid-1&limit=50&since=${encodeURIComponent(since)}`),
+    );
     const body = await response.json();
 
     const refresh = db.calls.find((call) => call.sql.includes("m.type = 'sent'"));
@@ -226,10 +235,9 @@ describe('outbound status changes reach the dashboard', () => {
     const row = { id: 'same-row', phone_iccid: 'iccid-1', type: 'sent', status: 'sent' };
     const db = dbStub({ messages: [row], statusChanges: [row] });
 
-    const response = await messagesHandler.list(listRequest(
-      db,
-      `?phone_iccid=iccid-1&limit=50&since=${encodeURIComponent(since)}`,
-    ));
+    const response = await messagesHandler.list(
+      listRequest(db, `?phone_iccid=iccid-1&limit=50&since=${encodeURIComponent(since)}`),
+    );
     const body = await response.json();
 
     expect(body.data.map((message) => message.id)).toEqual(['same-row']);

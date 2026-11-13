@@ -7,7 +7,9 @@
 
   onMount(() => {
     // Trigger enter animation
-    requestAnimationFrame(() => { visible = true; });
+    requestAnimationFrame(() => {
+      visible = true;
+    });
     if (duration > 0) {
       const timer = setTimeout(() => dismiss(), duration);
       return () => clearTimeout(timer);
@@ -22,13 +24,13 @@
   const icons = {
     success: '✓',
     error: '✕',
-    info: 'ℹ'
+    info: 'ℹ',
   };
 
   const colors = {
     success: 'bg-emerald-50 border-emerald-200 text-emerald-800',
     error: 'bg-red-50 border-red-200 text-red-800',
-    info: 'bg-blue-50 border-blue-200 text-blue-800'
+    info: 'bg-blue-50 border-blue-200 text-blue-800',
   };
 </script>
 
@@ -37,9 +39,14 @@
 <div
   role="alert"
   aria-live="assertive"
-  class="transition-all duration-200 {visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2'}"
+  class="transition-all duration-200 {visible
+    ? 'opacity-100 translate-y-0'
+    : 'opacity-0 -translate-y-2'}"
 >
-  <div class="flex items-center gap-3 px-4 py-3 rounded-lg border shadow-lg {colors[type] || colors.info} max-w-sm">
+  <div
+    class="flex items-center gap-3 px-4 py-3 rounded-lg border shadow-lg {colors[type] ||
+      colors.info} max-w-sm"
+  >
     <span class="text-lg font-bold shrink-0">{icons[type] || icons.info}</span>
     <span class="text-sm">{message}</span>
     <button

@@ -14,7 +14,9 @@ function memoryStore(initial = {}) {
   const values = { ...initial };
   return {
     values,
-    async get(key) { return values[key] || null; },
+    async get(key) {
+      return values[key] || null;
+    },
     async set(key, value) {
       if (value == null) delete values[key];
       else values[key] = value;
@@ -71,7 +73,9 @@ describe('runner authentication session', () => {
     });
 
     await session.signIn({
-      onDeviceCode: (device) => { displayed = device; },
+      onDeviceCode: (device) => {
+        displayed = device;
+      },
     });
 
     expect(displayed).toEqual({

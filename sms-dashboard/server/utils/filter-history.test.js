@@ -17,11 +17,16 @@ describe('bounded filter history processing', () => {
       prepare(sql) {
         const statement = {
           params: [],
-          bind(...params) { statement.params = params; return statement; },
+          bind(...params) {
+            statement.params = params;
+            return statement;
+          },
           async all() {
             calls.push({ operation: 'all', sql, params: statement.params });
             if (sql.includes('FROM filter_rules')) {
-              return { results: [{ id: 9, rule_type: 'sender', pattern: '10655446', is_active: 1 }] };
+              return {
+                results: [{ id: 9, rule_type: 'sender', pattern: '10655446', is_active: 1 }],
+              };
             }
             return { results: rows };
           },
@@ -34,16 +39,20 @@ describe('bounded filter history processing', () => {
       },
     };
 
-    const result = await processRuleHistoryPage(db, {
-      id: 9,
-      rule_type: 'sender',
-      pattern: '10655446',
-      is_active: 1,
-    }, {
-      since: '2026-09-01T00:00:00.000Z',
-      until: '2026-09-04T00:00:00.000Z',
-      pageSize: 2,
-    });
+    const result = await processRuleHistoryPage(
+      db,
+      {
+        id: 9,
+        rule_type: 'sender',
+        pattern: '10655446',
+        is_active: 1,
+      },
+      {
+        since: '2026-09-01T00:00:00.000Z',
+        until: '2026-09-04T00:00:00.000Z',
+        pageSize: 2,
+      },
+    );
 
     const candidateQuery = calls.find(({ sql }) => sql?.includes('FROM messages'));
     expect(candidateQuery.sql).toContain('verification_code IS NULL');

@@ -42,8 +42,12 @@ export interface BalanceDecision {
 function sentenceAt(text: string, index: number): string {
   const before = text.slice(0, index);
   const boundary = Math.max(
-    before.lastIndexOf('\n'), before.lastIndexOf('。'), before.lastIndexOf('！'),
-    before.lastIndexOf('？'), before.lastIndexOf(';'), before.lastIndexOf('；'),
+    before.lastIndexOf('\n'),
+    before.lastIndexOf('。'),
+    before.lastIndexOf('！'),
+    before.lastIndexOf('？'),
+    before.lastIndexOf(';'),
+    before.lastIndexOf('；'),
   );
   const remainder = text.slice(index);
   const endMatch = remainder.match(/[\n。！？;；]/);
@@ -60,10 +64,14 @@ export function parseBalanceSkillConfig(value: unknown): BalanceSkill | null {
   }
 
   const c = config as Record<string, unknown> | null;
-  if (!c || typeof c !== 'object'
-    || typeof c.id !== 'string'
-    || typeof c.version !== 'string'
-    || typeof c.objective !== 'string') return null;
+  if (
+    !c ||
+    typeof c !== 'object' ||
+    typeof c.id !== 'string' ||
+    typeof c.version !== 'string' ||
+    typeof c.objective !== 'string'
+  )
+    return null;
 
   return {
     id: c.id,
@@ -72,14 +80,14 @@ export function parseBalanceSkillConfig(value: unknown): BalanceSkill | null {
     confidence_threshold: Number.isFinite(Number(c.confidence_threshold))
       ? Number(c.confidence_threshold)
       : DEFAULT_CONFIDENCE_THRESHOLD,
-    max_turns: Number.isInteger(Number(c.max_turns))
-      ? Number(c.max_turns)
-      : DEFAULT_MAX_TURNS,
+    max_turns: Number.isInteger(Number(c.max_turns)) ? Number(c.max_turns) : DEFAULT_MAX_TURNS,
     allowed_currencies: Array.isArray(c.allowed_currencies)
       ? c.allowed_currencies.filter((item): item is string => typeof item === 'string')
       : [],
     forbidden_intents: Array.isArray(c.forbidden_intents)
-      ? c.forbidden_intents.filter((item): item is string => typeof item === 'string' && item.length > 0)
+      ? c.forbidden_intents.filter(
+          (item): item is string => typeof item === 'string' && item.length > 0,
+        )
       : [],
   };
 }
@@ -147,7 +155,11 @@ function stopped(decision: BalanceDecision, reason: string): BalanceDecision {
  * policy violation returns a `stop` decision instead, so an over-eager model
  * degrades to "do not act" rather than to an error the runner must handle.
  */
-export function validateBalanceSkillDecision({ decision, content, skill }: {
+export function validateBalanceSkillDecision({
+  decision,
+  content,
+  skill,
+}: {
   decision: unknown;
   content: unknown;
   skill: BalanceSkill;
@@ -165,9 +177,7 @@ export function validateBalanceSkillDecision({ decision, content, skill }: {
   const confidence = Number(d.confidence);
   const normalized: BalanceDecision = {
     action,
-    selected_option: d.selected_option == null
-      ? null
-      : String(d.selected_option),
+    selected_option: d.selected_option == null ? null : String(d.selected_option),
     balance: d.balance == null ? null : Number(d.balance),
     currency: d.currency == null ? null : String(d.currency),
     confidence: Number.isFinite(confidence) ? confidence : 0,
@@ -176,20 +186,23 @@ export function validateBalanceSkillDecision({ decision, content, skill }: {
   };
 
   if (normalized.confidence < skill.confidence_threshold) {
-    return stopped(normalized, `AI confidence ${normalized.confidence} is below the required threshold`);
+    return stopped(
+      normalized,
+      `AI confidence ${normalized.confidence} is below the required threshold`,
+    );
   }
 
   if (action === 'stop') return normalized;
 
   if (action === 'reply') {
-    const option = extractBalanceMenuOptions(content)
-      .find((candidate) => candidate.value === normalized.selected_option);
+    const option = extractBalanceMenuOptions(content).find(
+      (candidate) => candidate.value === normalized.selected_option,
+    );
     if (!option) return stopped(normalized, 'Selected option is not present in the carrier reply');
     if (!/^\d{1,5}$/.test(option.value)) {
       return stopped(normalized, 'Selected option is not a permitted numeric menu response');
     }
-    const forbidden = skill.forbidden_intents
-      .find((intent) => option.label.includes(intent));
+    const forbidden = skill.forbidden_intents.find((intent) => option.label.includes(intent));
     if (forbidden) {
       return stopped(normalized, `Selected option contains forbidden intent: ${forbidden}`);
     }

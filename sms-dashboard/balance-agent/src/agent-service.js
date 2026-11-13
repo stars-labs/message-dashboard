@@ -12,8 +12,9 @@ import { callCompanyAI, companyAIReachable } from '../../server/utils/company-ai
 import { testAIConnection } from './ai-connection.js';
 
 function requiredSettings(settings) {
-  return ['dashboardUrl', 'auth0Issuer', 'auth0ClientId', 'auth0Audience']
-    .filter((key) => !settings[key]);
+  return ['dashboardUrl', 'auth0Issuer', 'auth0ClientId', 'auth0Audience'].filter(
+    (key) => !settings[key],
+  );
 }
 
 export function createAgentService({
@@ -80,8 +81,7 @@ export function createAgentService({
   async function runAiTest(input = {}) {
     const candidate = { ...settings, ...input };
     candidate.aiProtocol = String(candidate.aiProtocol || 'anthropic').trim();
-    candidate.aiToken = String(input?.aiToken || '').trim()
-      || await secureStore.get('aiToken');
+    candidate.aiToken = String(input?.aiToken || '').trim() || (await secureStore.get('aiToken'));
     return testAIConnection(candidate, { logger });
   }
 
@@ -298,7 +298,8 @@ export function createAgentService({
     },
 
     async signIn() {
-      if (requiredSettings(settings).length) throw new Error('Save dashboard and Auth0 settings first');
+      if (requiredSettings(settings).length)
+        throw new Error('Save dashboard and Auth0 settings first');
       loginController?.abort();
       loginController = new AbortController();
       publish({ auth: 'authorizing', error: null });

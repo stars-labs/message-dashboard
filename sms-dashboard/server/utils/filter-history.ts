@@ -1,9 +1,4 @@
-import {
-  classifyMessage,
-  FILTER_STATUS,
-  loadActiveRules,
-  RULE_TYPE,
-} from './spam-filter.js';
+import { classifyMessage, FILTER_STATUS, loadActiveRules, RULE_TYPE } from './spam-filter.js';
 import type { ClassifiableMessage, SpamRule } from './spam-filter.js';
 import type { D1Database } from '../cf-bindings.js';
 
@@ -47,7 +42,12 @@ function historyCursor(row: HistoryRow): HistoryCursor {
 export async function processRuleHistoryPage(
   db: D1Database,
   rule: HistoryRule,
-  { since, until, cursor = null, pageSize = FILTER_HISTORY_PAGE_SIZE }: {
+  {
+    since,
+    until,
+    cursor = null,
+    pageSize = FILTER_HISTORY_PAGE_SIZE,
+  }: {
     since: string;
     until: string;
     cursor?: HistoryCursor | null;
@@ -86,14 +86,20 @@ export async function processRuleHistoryPage(
     params.push(rule.id);
   }
 
-  const limit = Math.max(1, Math.min(Number(pageSize) || FILTER_HISTORY_PAGE_SIZE, FILTER_HISTORY_PAGE_SIZE));
-  const { results } = await db.prepare(
-    `SELECT id, type, content, phone_number, filter_status, filter_rule_id, created_at
+  const limit = Math.max(
+    1,
+    Math.min(Number(pageSize) || FILTER_HISTORY_PAGE_SIZE, FILTER_HISTORY_PAGE_SIZE),
+  );
+  const { results } = await db
+    .prepare(
+      `SELECT id, type, content, phone_number, filter_status, filter_rule_id, created_at
      FROM messages
      WHERE ${conditions.join('\n       AND ')}
      ORDER BY created_at, id
      LIMIT ?`,
-  ).bind(...params, limit + 1).all<HistoryRow>();
+    )
+    .bind(...params, limit + 1)
+    .all<HistoryRow>();
 
   const hasMore = results.length > limit;
   const page = results.slice(0, limit);
@@ -107,15 +113,20 @@ export async function processRuleHistoryPage(
   for (const message of page) {
     const verdict = classifyMessage(message, activeRules);
     if (
-      verdict.filter_status === message.filter_status
-      && verdict.filter_rule_id === message.filter_rule_id
-    ) continue;
+      verdict.filter_status === message.filter_status &&
+      verdict.filter_rule_id === message.filter_rule_id
+    )
+      continue;
 
-    changed.push(db.prepare(
-      `UPDATE messages
+    changed.push(
+      db
+        .prepare(
+          `UPDATE messages
        SET filter_status = ?, filter_rule_id = ?
        WHERE id = ?`,
-    ).bind(verdict.filter_status, verdict.filter_rule_id, message.id));
+        )
+        .bind(verdict.filter_status, verdict.filter_rule_id, message.id),
+    );
   }
 
   if (changed.length > 0) await db.batch(changed);

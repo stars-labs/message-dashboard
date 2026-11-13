@@ -13,13 +13,18 @@ export function createRunnerPresence({
   clearIntervalFn = clearInterval,
   logger = console,
 }) {
-  const states = new Map(capabilities.map((capability) => [capability, {
-    capability,
-    state: 'starting',
-    current_job_id: null,
-    concurrency: 1,
-    detail_code: null,
-  }]));
+  const states = new Map(
+    capabilities.map((capability) => [
+      capability,
+      {
+        capability,
+        state: 'starting',
+        current_job_id: null,
+        concurrency: 1,
+        detail_code: null,
+      },
+    ]),
+  );
   let timer = null;
   let pending = Promise.resolve();
   let lastError = null;
@@ -30,26 +35,28 @@ export function createRunnerPresence({
 
   function send(selected = []) {
     const capabilitySnapshots = snapshots(selected);
-    pending = pending.then(async () => {
-      const response = await controlClient.request('/api/control/balance-runners/heartbeat', {
-        method: 'POST',
-        body: JSON.stringify({
-          runner_id: runnerId,
-          session_id: sessionId,
-          display_name: displayName,
-          platform,
-          version,
-          capabilities: capabilitySnapshots,
-        }),
+    pending = pending
+      .then(async () => {
+        const response = await controlClient.request('/api/control/balance-runners/heartbeat', {
+          method: 'POST',
+          body: JSON.stringify({
+            runner_id: runnerId,
+            session_id: sessionId,
+            display_name: displayName,
+            platform,
+            version,
+            capabilities: capabilitySnapshots,
+          }),
+        });
+        if (!response.ok) throw new Error(`heartbeat rejected (${response.status})`);
+        lastError = null;
+      })
+      .catch((error) => {
+        if (error.message !== lastError) {
+          logger.error(`Runner presence unavailable: ${error.message}`);
+          lastError = error.message;
+        }
       });
-      if (!response.ok) throw new Error(`heartbeat rejected (${response.status})`);
-      lastError = null;
-    }).catch((error) => {
-      if (error.message !== lastError) {
-        logger.error(`Runner presence unavailable: ${error.message}`);
-        lastError = error.message;
-      }
-    });
     return pending;
   }
 
@@ -62,9 +69,12 @@ export function createRunnerPresence({
     async set(capability, nextState, jobId = null, nextDetailCode = null) {
       const current = states.get(capability);
       if (!current) throw new Error(`Unknown runner capability: ${capability}`);
-      if (current.state === nextState
-        && current.current_job_id === jobId
-        && current.detail_code === nextDetailCode) return;
+      if (
+        current.state === nextState &&
+        current.current_job_id === jobId &&
+        current.detail_code === nextDetailCode
+      )
+        return;
       states.set(capability, {
         ...current,
         state: nextState,

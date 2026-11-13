@@ -45,7 +45,13 @@ export function registerConfirmHost(): () => void {
 }
 
 export function confirmAction(options: ConfirmOptions): Promise<boolean> {
-  const { message, title = '请确认', confirmLabel = '确认', cancelLabel = '取消', danger = false } = options;
+  const {
+    message,
+    title = '请确认',
+    confirmLabel = '确认',
+    cancelLabel = '取消',
+    danger = false,
+  } = options;
   if (!hosted) {
     return Promise.resolve(globalThis.confirm?.(message) ?? false);
   }

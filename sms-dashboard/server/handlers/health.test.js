@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { healthHandler } from './health.js';
 
-const QUOTA_ERROR = "Your account has exceeded D1's free tier daily row read limit. Upgrade to a paid plan or wait until tomorrow (midnight UTC) to continue.";
+const QUOTA_ERROR =
+  "Your account has exceeded D1's free tier daily row read limit. Upgrade to a paid plan or wait until tomorrow (midnight UTC) to continue.";
 
 function dbStub({ row = null, error = null } = {}) {
   const calls = [];
@@ -64,7 +65,7 @@ describe('Worker health monitoring', () => {
     expect(body.status).toBe('healthy');
     expect(body.database).toEqual({ status: 'connected' });
     expect(db.calls).toHaveLength(1);
-    expect(db.calls[0]).toContain("FROM daemon_health");
+    expect(db.calls[0]).toContain('FROM daemon_health');
     expect(db.calls[0]).toContain("WHERE daemon_id = 'orange-pi-main'");
     expect(db.calls[0]).not.toContain('SELECT 1');
   });
@@ -84,7 +85,9 @@ describe('Worker health monitoring', () => {
       retry_at: expect.any(String),
     });
     expect(body).not.toHaveProperty('error');
-    expect(response.headers.get('Retry-After')).toBe(new Date(body.database.retry_at).toUTCString());
+    expect(response.headers.get('Retry-After')).toBe(
+      new Date(body.database.retry_at).toUTCString(),
+    );
     expect(new Date(body.database.retry_at).getUTCHours()).toBe(0);
   });
 

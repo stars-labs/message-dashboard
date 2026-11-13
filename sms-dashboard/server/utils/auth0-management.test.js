@@ -48,7 +48,12 @@ const realFetch = globalThis.fetch;
 function mockFetch(responses) {
   let i = 0;
   globalThis.fetch = async (url, init = {}) => {
-    calls.push({ url: String(url), method: init.method || 'GET', body: init.body, headers: init.headers });
+    calls.push({
+      url: String(url),
+      method: init.method || 'GET',
+      body: init.body,
+      headers: init.headers,
+    });
     const r = responses[Math.min(i++, responses.length - 1)];
     return new Response(typeof r.body === 'string' ? r.body : JSON.stringify(r.body), {
       status: r.status ?? 200,
@@ -57,7 +62,12 @@ function mockFetch(responses) {
 }
 
 const TOKEN_OK = { body: { access_token: 'mgmt-token', expires_in: 86400 } };
-const ROLES_OK = { body: [{ id: 'rol_admin', name: 'admin' }, { id: 'rol_viewer', name: 'viewer' }] };
+const ROLES_OK = {
+  body: [
+    { id: 'rol_admin', name: 'admin' },
+    { id: 'rol_viewer', name: 'viewer' },
+  ],
+};
 
 beforeEach(() => {
   calls = [];
@@ -156,7 +166,15 @@ describe('resolveRoleIds', () => {
   });
 
   test('honours renamed roles', async () => {
-    mockFetch([TOKEN_OK, { body: [{ id: 'r1', name: 'superuser' }, { id: 'r2', name: 'viewer' }] }]);
+    mockFetch([
+      TOKEN_OK,
+      {
+        body: [
+          { id: 'r1', name: 'superuser' },
+          { id: 'r2', name: 'viewer' },
+        ],
+      },
+    ]);
 
     const env = makeEnv({ AUTH0_ADMIN_ROLE: 'superuser' });
     expect(await resolveRoleIds(env)).toEqual({ superuser: 'r1', viewer: 'r2' });
@@ -167,7 +185,14 @@ describe('listUsers / getUserRoles', () => {
   test('listUsers returns the paginated users collection', async () => {
     mockFetch([
       TOKEN_OK,
-      { body: { users: [{ user_id: 'auth0|1', email: 'a@poloniex.com' }], total: 1, start: 0, limit: 100 } },
+      {
+        body: {
+          users: [{ user_id: 'auth0|1', email: 'a@poloniex.com' }],
+          total: 1,
+          start: 0,
+          limit: 100,
+        },
+      },
     ]);
 
     const users = await listUsers(makeEnv());
@@ -177,17 +202,19 @@ describe('listUsers / getUserRoles', () => {
   });
 
   test('listUsers pages until it has every user', async () => {
-    const page = (n, ids) => ({ body: { users: ids.map((i) => ({ user_id: `auth0|${i}` })), total: n, start: 0, limit: 100 } });
+    const page = (n, ids) => ({
+      body: { users: ids.map((i) => ({ user_id: `auth0|${i}` })), total: n, start: 0, limit: 100 },
+    });
     mockFetch([
       TOKEN_OK,
       page(3, [1, 2]), // first page, 2 of 3
-      page(3, [3]),    // second page, the remainder
+      page(3, [3]), // second page, the remainder
     ]);
 
     expect(await listUsers(makeEnv())).toHaveLength(3);
   });
 
-  test('getRoleMembers asks for the role\'s members, not each user\'s roles', async () => {
+  test("getRoleMembers asks for the role's members, not each user's roles", async () => {
     mockFetch([TOKEN_OK, { body: { users: [{ user_id: 'auth0|1' }], total: 1 } }]);
 
     const members = await getRoleMembers(makeEnv(), 'rol_admin');

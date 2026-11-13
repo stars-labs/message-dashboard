@@ -3,12 +3,14 @@ import { activeBalanceCheckIds, balancePollDelay } from './balance-polling.js';
 
 describe('active balance query polling', () => {
   test('polls only non-terminal checks', () => {
-    expect(activeBalanceCheckIds([
-      { id: 'queued', status: 'queued' },
-      { id: 'otp', status: 'queued', display_status: 'web_otp' },
-      { id: 'done', status: 'parsed' },
-      { id: 'failed', status: 'failed' },
-    ])).toEqual(['queued', 'otp']);
+    expect(
+      activeBalanceCheckIds([
+        { id: 'queued', status: 'queued' },
+        { id: 'otp', status: 'queued', display_status: 'web_otp' },
+        { id: 'done', status: 'parsed' },
+        { id: 'failed', status: 'failed' },
+      ]),
+    ).toEqual(['queued', 'otp']);
   });
 
   test('uses fast polling for fifteen seconds then settles at five seconds', () => {

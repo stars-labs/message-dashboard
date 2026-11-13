@@ -2,12 +2,7 @@ function claimPath(runnerId) {
   return `/api/control/carrier-web-balance/jobs/claim?runner_id=${encodeURIComponent(runnerId)}`;
 }
 
-export function createCarrierBrowserCapability({
-  controlClient,
-  presence,
-  runnerId,
-  processJob,
-}) {
+export function createCarrierBrowserCapability({ controlClient, presence, runnerId, processJob }) {
   return Object.freeze({
     async runOne({ signal } = {}) {
       const response = await controlClient.request(claimPath(runnerId), { signal });

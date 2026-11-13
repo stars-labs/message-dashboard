@@ -1,6 +1,11 @@
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { nanoid } from 'nanoid';
-import { createRoleConfig, hasAnyRole, isEmailAllowed, rolesFromToken } from '../../config/auth0-roles.js';
+import {
+  createRoleConfig,
+  hasAnyRole,
+  isEmailAllowed,
+  rolesFromToken,
+} from '../../config/auth0-roles.js';
 import { extractSessionToken } from '../utils/session-token.js';
 import { getUserRoles, setUserRole } from '../utils/auth0-management.js';
 import { indexSession, unindexSession } from '../utils/user-sessions.js';
@@ -26,17 +31,20 @@ interface Auth0UserInfo {
 }
 
 /** Signature of auth0Handler.verifyToken, injectable for tests. */
-type VerifyToken = (
-  token: string,
-  audience?: string,
-) => Promise<Record<string, unknown> | null>;
+type VerifyToken = (token: string, audience?: string) => Promise<Record<string, unknown> | null>;
 
-function logAuthFailure(event: string, error: unknown, details: Record<string, unknown> = {}): void {
-  console.error(JSON.stringify({
-    event,
-    ...details,
-    error: boundedErrorText(error),
-  }));
+function logAuthFailure(
+  event: string,
+  error: unknown,
+  details: Record<string, unknown> = {},
+): void {
+  console.error(
+    JSON.stringify({
+      event,
+      ...details,
+      error: boundedErrorText(error),
+    }),
+  );
 }
 
 function authenticationUnavailable(): Response {
@@ -65,7 +73,12 @@ function authenticationUnavailable(): Response {
   });
 }
 
-export async function resolveLoginRoles({ userInfo, tokens, env, verifyToken }: {
+export async function resolveLoginRoles({
+  userInfo,
+  tokens,
+  env,
+  verifyToken,
+}: {
   userInfo: Record<string, unknown>;
   tokens: TokenSet;
   env: Env;
@@ -134,22 +147,25 @@ export const auth0Handler = {
     const { env } = request;
     const url = new URL(request.url);
     const redirectUri = `${url.origin}/callback`;
-    
+
     if (!env.AUTH0_DOMAIN || !env.AUTH0_CLIENT_ID) {
       // Auth0 not configured - return error
-      return new Response('Auth0 configuration missing. Please configure AUTH0_DOMAIN and AUTH0_CLIENT_ID.', { 
-        status: 500,
-        headers: { 'Content-Type': 'text/plain' }
-      });
+      return new Response(
+        'Auth0 configuration missing. Please configure AUTH0_DOMAIN and AUTH0_CLIENT_ID.',
+        {
+          status: 500,
+          headers: { 'Content-Type': 'text/plain' },
+        },
+      );
     }
-    
+
     const authUrl = new URL(`https://${env.AUTH0_DOMAIN}/authorize`);
     authUrl.searchParams.set('response_type', 'code');
     authUrl.searchParams.set('client_id', env.AUTH0_CLIENT_ID);
     authUrl.searchParams.set('redirect_uri', redirectUri);
     authUrl.searchParams.set('scope', 'openid profile email');
     authUrl.searchParams.set('state', nanoid());
-    
+
     // Browser login creates a Dashboard session from the verified ID token. The
     // runner API audience belongs to the Native Balance Agent and must not be
     // requested by this Regular Web Application unless a separate login audience
@@ -157,7 +173,7 @@ export const auth0Handler = {
     if (env.AUTH0_LOGIN_AUDIENCE) {
       authUrl.searchParams.set('audience', env.AUTH0_LOGIN_AUDIENCE);
     }
-    
+
     return Response.redirect(authUrl.toString(), 302);
   },
 
@@ -168,78 +184,83 @@ export const auth0Handler = {
     const url = new URL(request.url);
     const code = url.searchParams.get('code');
     const error = url.searchParams.get('error');
-    
-    
+
     if (error) {
-      console.error(JSON.stringify({
-        event: 'auth_provider_callback_failed',
-        provider_error: error.slice(0, 100),
-      }));
+      console.error(
+        JSON.stringify({
+          event: 'auth_provider_callback_failed',
+          provider_error: error.slice(0, 100),
+        }),
+      );
       return new Response('Authentication failed', {
         status: 401,
         headers: { 'Cache-Control': 'no-store' },
       });
     }
-    
+
     if (!code) {
       return new Response('Authorization code missing', { status: 400 });
     }
-    
+
     try {
       // Exchange code for tokens
       const redirectUri = `${url.origin}/callback`;
       // Token exchange with Auth0
-      
+
       const tokenResponse = await fetch(`https://${env.AUTH0_DOMAIN}/oauth/token`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
         },
         body: JSON.stringify({
           grant_type: 'authorization_code',
           client_id: env.AUTH0_CLIENT_ID,
           client_secret: env.AUTH0_CLIENT_SECRET,
           code: code,
-          redirect_uri: redirectUri
-        })
+          redirect_uri: redirectUri,
+        }),
       });
-      
+
       if (!tokenResponse.ok) {
-        console.error(JSON.stringify({
-          event: 'auth_token_exchange_failed',
-          status: tokenResponse.status,
-        }));
+        console.error(
+          JSON.stringify({
+            event: 'auth_token_exchange_failed',
+            status: tokenResponse.status,
+          }),
+        );
         return new Response('Authentication failed', {
           status: 401,
           headers: { 'Cache-Control': 'no-store' },
         });
       }
-      
-      const tokens = await tokenResponse.json() as TokenSet;
-      
+
+      const tokens = (await tokenResponse.json()) as TokenSet;
+
       // Get user info from Auth0
       const userResponse = await fetch(`https://${env.AUTH0_DOMAIN}/userinfo`, {
         headers: {
-          'Authorization': `Bearer ${tokens.access_token}`
-        }
+          Authorization: `Bearer ${tokens.access_token}`,
+        },
       });
-      
+
       if (!userResponse.ok) {
-        console.error(JSON.stringify({
-          event: 'auth_userinfo_failed',
-          status: userResponse.status,
-        }));
+        console.error(
+          JSON.stringify({
+            event: 'auth_userinfo_failed',
+            status: userResponse.status,
+          }),
+        );
         return new Response('Authentication failed', {
           status: 401,
           headers: { 'Cache-Control': 'no-store' },
         });
       }
-      
-      const userInfo = await userResponse.json() as Auth0UserInfo;
-      
+
+      const userInfo = (await userResponse.json()) as Auth0UserInfo;
+
       // Create or update user in database
       const userId = userInfo.sub;
-      
+
       // Roles come from the namespaced claim only, via the shared config so this
       // path cannot drift from the JWT middleware. The previous version preferred a
       // top-level `roles` claim and, failing that, base64-decoded the access token
@@ -255,7 +276,8 @@ export const auth0Handler = {
         // production and crashes with "Cannot read properties of undefined
         // (reading 'verifyToken')". Call the exported handler explicitly instead of
         // depending on invocation context.
-        verifyToken: (token: string, audience?: string) => auth0Handler.verifyToken(token, env, audience),
+        verifyToken: (token: string, audience?: string) =>
+          auth0Handler.verifyToken(token, env, audience),
       });
 
       const user: RequestUser & { provider: string } = {
@@ -264,9 +286,9 @@ export const auth0Handler = {
         name: userInfo.name || userInfo.nickname,
         picture: userInfo.picture,
         provider: 'auth0',
-        roles: userRoles
+        roles: userRoles,
       };
-      
+
       // Email policy: verified address, on an allowed domain. Runs unconditionally —
       // the old version only ran when ALLOWED_EMAIL_DOMAINS was set, so an unset list
       // meant no email check at all, and it read the domain from the first '@' with a
@@ -335,11 +357,11 @@ export const auth0Handler = {
       const sessionData = {
         user: user,
         id_token: tokens.id_token,
-        expires_at: Date.now() + (24 * 60 * 60 * 1000) // 24 hours
+        expires_at: Date.now() + 24 * 60 * 60 * 1000, // 24 hours
       };
 
       await env.SESSIONS.put(sessionToken, JSON.stringify(sessionData), {
-        expirationTtl: 24 * 60 * 60 // 24 hours in seconds
+        expirationTtl: 24 * 60 * 60, // 24 hours in seconds
       });
 
       // Reverse index so a role change can find and kill this session. Without it a
@@ -364,9 +386,9 @@ export const auth0Handler = {
       return new Response(null, {
         status: 302,
         headers: {
-          'Location': frontendUrl.toString(),
-          'Set-Cookie': `auth_token=${sessionToken}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=86400`
-        }
+          Location: frontendUrl.toString(),
+          'Set-Cookie': `auth_token=${sessionToken}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=86400`,
+        },
       });
     } catch (exchangeError) {
       logAuthFailure('auth_callback_failed', exchangeError);
@@ -382,7 +404,7 @@ export const auth0Handler = {
     // session alive until it expired 24 hours later.
     const credential = extractSessionToken(
       request.headers.get('Authorization'),
-      request.headers.get('Cookie')
+      request.headers.get('Cookie'),
     );
 
     if (credential) {
@@ -408,9 +430,9 @@ export const auth0Handler = {
     return new Response(null, {
       status: 302,
       headers: {
-        'Location': logoutUrl.toString(),
-        'Set-Cookie': 'auth_token=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0'
-      }
+        Location: logoutUrl.toString(),
+        'Set-Cookie': 'auth_token=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0',
+      },
     });
   },
 
@@ -418,19 +440,22 @@ export const auth0Handler = {
   async me(request: AppRequest): Promise<Response> {
     const { user } = request;
 
-    return new Response(JSON.stringify({
-      success: true,
-      user: {
-        ...user,
-        // Explicit rather than relying on enrichUserPermissions having run: if this
-        // route is ever wired without it, the client sees "no permissions" and hides
-        // everything, instead of `undefined` which `.includes()` would throw on.
-        roles: Array.isArray(user?.roles) ? user.roles : [],
-        permissions: Array.isArray(user?.permissions) ? user.permissions : []
-      }
-    }), {
-      headers: { 'Content-Type': 'application/json' }
-    });
+    return new Response(
+      JSON.stringify({
+        success: true,
+        user: {
+          ...user,
+          // Explicit rather than relying on enrichUserPermissions having run: if this
+          // route is ever wired without it, the client sees "no permissions" and hides
+          // everything, instead of `undefined` which `.includes()` would throw on.
+          roles: Array.isArray(user?.roles) ? user.roles : [],
+          permissions: Array.isArray(user?.permissions) ? user.permissions : [],
+        },
+      }),
+      {
+        headers: { 'Content-Type': 'application/json' },
+      },
+    );
   },
 
   // Verify JWT token (for API calls)
@@ -441,18 +466,18 @@ export const auth0Handler = {
   ): Promise<Record<string, unknown> | null> {
     try {
       const JWKS = createRemoteJWKSet(new URL(`https://${env.AUTH0_DOMAIN}/.well-known/jwks.json`));
-      
+
       // Calling with no audience would make jose reject on `aud`; fall back to the
       // client id so the call is always well-defined.
       const { payload } = await jwtVerify(token, JWKS, {
         issuer: `https://${env.AUTH0_DOMAIN}/`,
         audience: audience ?? env.AUTH0_CLIENT_ID,
       });
-      
+
       return payload;
     } catch {
       // JWT verification failed
       return null;
     }
-  }
+  },
 };

@@ -11,7 +11,6 @@ describe('outbound message status presentation', () => {
   });
 
   test('exposes the stored failure as the status tooltip', () => {
-    expect(getOutboundStatusMeta('failed', '+CMS ERROR: 350').title)
-      .toBe('+CMS ERROR: 350');
+    expect(getOutboundStatusMeta('failed', '+CMS ERROR: 350').title).toBe('+CMS ERROR: 350');
   });
 });

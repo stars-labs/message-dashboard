@@ -51,7 +51,7 @@
       console.log(
         `[${dryRun ? 'dry-run' : 'WRITE'}] cursor=${cursor} ` +
           `processed=${page.processed} changed=${page.changed} ` +
-          `added=${page.added} replaced=${page.replaced} done=${page.done}`
+          `added=${page.added} replaced=${page.replaced} done=${page.done}`,
       );
       if (page.done) break;
       cursor = page.next_cursor;
@@ -67,7 +67,7 @@
 
   const proceed = confirm(
     `Dry-run would change ${preview.totals.changed} stored message(s) ` +
-      `(added ${preview.totals.added}, replaced ${preview.totals.replaced}). Apply now?`
+      `(added ${preview.totals.added}, replaced ${preview.totals.replaced}). Apply now?`,
   );
   if (!proceed) {
     console.log('Skipped write pass. Re-paste after inspecting the dry-run output.');

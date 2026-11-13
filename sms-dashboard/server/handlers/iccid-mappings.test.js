@@ -57,11 +57,17 @@ async function createMigratedDatabase() {
     );
     CREATE VIEW device_view AS SELECT iccid FROM sims;
   `);
-  const migration = await Bun.file(new URL('../../migrations/058_add_sim_service_type.sql', import.meta.url)).text();
+  const migration = await Bun.file(
+    new URL('../../migrations/058_add_sim_service_type.sql', import.meta.url),
+  ).text();
   database.exec(migration);
-  const migration2 = await Bun.file(new URL('../../migrations/059_add_sim_primary_secondary.sql', import.meta.url)).text();
+  const migration2 = await Bun.file(
+    new URL('../../migrations/059_add_sim_primary_secondary.sql', import.meta.url),
+  ).text();
   database.exec(migration2);
-  const migration3 = await Bun.file(new URL('../../migrations/062_add_balance_threshold.sql', import.meta.url)).text();
+  const migration3 = await Bun.file(
+    new URL('../../migrations/062_add_balance_threshold.sql', import.meta.url),
+  ).text();
   database.exec(migration3);
   return database;
 }
@@ -79,10 +85,12 @@ describe('SIM service type validation', () => {
     expect(resolveServiceType({ service_type: 'prepaid' })).toEqual({
       error: 'A valid service_type_source is required for prepaid or postpaid SIMs',
     });
-    expect(resolveServiceType({
-      service_type: 'postpaid',
-      service_type_source: 'contract_or_bill',
-    })).toEqual({
+    expect(
+      resolveServiceType({
+        service_type: 'postpaid',
+        service_type_source: 'contract_or_bill',
+      }),
+    ).toEqual({
       serviceType: 'postpaid',
       serviceTypeSource: 'contract_or_bill',
       serviceTypeProvided: true,
@@ -90,10 +98,15 @@ describe('SIM service type validation', () => {
   });
 
   test('preserves an existing confirmation when an update omits the fields', () => {
-    expect(resolveServiceType({}, {
-      service_type: 'prepaid',
-      service_type_source: 'carrier_account',
-    })).toEqual({
+    expect(
+      resolveServiceType(
+        {},
+        {
+          service_type: 'prepaid',
+          service_type_source: 'carrier_account',
+        },
+      ),
+    ).toEqual({
       serviceType: 'prepaid',
       serviceTypeSource: 'carrier_account',
       serviceTypeProvided: false,
@@ -101,10 +114,12 @@ describe('SIM service type validation', () => {
   });
 
   test('clears source metadata when explicitly reset to unknown', () => {
-    expect(resolveServiceType({
-      service_type: 'unknown',
-      service_type_source: 'carrier_message',
-    })).toEqual({
+    expect(
+      resolveServiceType({
+        service_type: 'unknown',
+        service_type_source: 'carrier_message',
+      }),
+    ).toEqual({
       serviceType: 'unknown',
       serviceTypeSource: null,
       serviceTypeProvided: true,
@@ -112,10 +127,12 @@ describe('SIM service type validation', () => {
   });
 
   test('accepts balance-managed SIMs without verification metadata', () => {
-    expect(resolveServiceType({
-      service_type: 'balance_managed',
-      service_type_source: 'carrier_message',
-    })).toEqual({
+    expect(
+      resolveServiceType({
+        service_type: 'balance_managed',
+        service_type_source: 'carrier_message',
+      }),
+    ).toEqual({
       serviceType: 'balance_managed',
       serviceTypeSource: null,
       serviceTypeProvided: true,
@@ -154,10 +171,14 @@ describe('SIM service type validation', () => {
     });
     expect(createResponse.status).toBe(201);
 
-    const confirmed = database.query(`
+    const confirmed = database
+      .query(
+        `
       SELECT service_type, service_type_source, service_type_verified_at, updated_by
       FROM sims WHERE iccid = 'test-iccid'
-    `).get();
+    `,
+      )
+      .get();
     expect(confirmed.service_type).toBe('postpaid');
     expect(confirmed.service_type_source).toBe('contract_or_bill');
     expect(confirmed.service_type_verified_at).toBeTruthy();
@@ -178,22 +199,32 @@ describe('SIM service type validation', () => {
     });
     expect(updateResponse.status).toBe(200);
 
-    const reset = database.query(`
+    const reset = database
+      .query(
+        `
       SELECT service_type, service_type_source, service_type_verified_at
       FROM sims WHERE iccid = 'test-iccid'
-    `).get();
+    `,
+      )
+      .get();
     expect(reset).toEqual({
       service_type: 'unknown',
       service_type_source: null,
       service_type_verified_at: null,
     });
-    expect(() => database.query(`
+    expect(() =>
+      database
+        .query(
+          `
       UPDATE sims
       SET service_type = 'postpaid',
           service_type_source = NULL,
           service_type_verified_at = NULL
       WHERE iccid = 'test-iccid'
-    `).run()).toThrow('invalid SIM service type verification metadata');
+    `,
+        )
+        .run(),
+    ).toThrow('invalid SIM service type verification metadata');
     database.close();
   });
 });
@@ -233,10 +264,14 @@ describe('SIM primary/secondary role validation', () => {
     const database = new Database(':memory:');
     database.exec(`CREATE TABLE sims (iccid TEXT PRIMARY KEY, sim_role TEXT, primary_iccid TEXT)`);
     const env = { DB: createD1Adapter(database) };
-    const result = await resolveSimRole({
-      sim_role: 'secondary',
-      primary_iccid: 'missing-iccid',
-    }, null, env);
+    const result = await resolveSimRole(
+      {
+        sim_role: 'secondary',
+        primary_iccid: 'missing-iccid',
+      },
+      null,
+      env,
+    );
     expect(result).toEqual({ error: 'primary_iccid does not match any SIM' });
     database.close();
   });
@@ -244,12 +279,18 @@ describe('SIM primary/secondary role validation', () => {
   test('secondary pointing at a standalone SIM is rejected', async () => {
     const database = new Database(':memory:');
     database.exec(`CREATE TABLE sims (iccid TEXT PRIMARY KEY, sim_role TEXT, primary_iccid TEXT)`);
-    database.exec(`INSERT INTO sims (iccid, sim_role, primary_iccid) VALUES ('solo', 'standalone', NULL)`);
+    database.exec(
+      `INSERT INTO sims (iccid, sim_role, primary_iccid) VALUES ('solo', 'standalone', NULL)`,
+    );
     const env = { DB: createD1Adapter(database) };
-    const result = await resolveSimRole({
-      sim_role: 'secondary',
-      primary_iccid: 'solo',
-    }, null, env);
+    const result = await resolveSimRole(
+      {
+        sim_role: 'secondary',
+        primary_iccid: 'solo',
+      },
+      null,
+      env,
+    );
     expect(result.error).toBe('primary_iccid points to a standalone SIM, not a primary');
     database.close();
   });
@@ -257,12 +298,18 @@ describe('SIM primary/secondary role validation', () => {
   test('secondary pointing at a real primary succeeds', async () => {
     const database = new Database(':memory:');
     database.exec(`CREATE TABLE sims (iccid TEXT PRIMARY KEY, sim_role TEXT, primary_iccid TEXT)`);
-    database.exec(`INSERT INTO sims (iccid, sim_role, primary_iccid) VALUES ('main', 'primary', NULL)`);
+    database.exec(
+      `INSERT INTO sims (iccid, sim_role, primary_iccid) VALUES ('main', 'primary', NULL)`,
+    );
     const env = { DB: createD1Adapter(database) };
-    const result = await resolveSimRole({
-      sim_role: 'secondary',
-      primary_iccid: 'main',
-    }, null, env);
+    const result = await resolveSimRole(
+      {
+        sim_role: 'secondary',
+        primary_iccid: 'main',
+      },
+      null,
+      env,
+    );
     expect(result).toEqual({
       role: 'secondary',
       primaryIccid: 'main',
@@ -273,26 +320,35 @@ describe('SIM primary/secondary role validation', () => {
 
   test('SQL trigger refuses secondary with NULL primary_iccid on insert', async () => {
     const database = await createMigratedDatabase();
-    expect(() => database.exec(
-      `INSERT INTO sims (iccid, sim_index, phone_number, sim_role) VALUES ('x', 1, 'n', 'secondary')`
-    )).toThrow('secondary SIM requires primary_iccid');
+    expect(() =>
+      database.exec(
+        `INSERT INTO sims (iccid, sim_index, phone_number, sim_role) VALUES ('x', 1, 'n', 'secondary')`,
+      ),
+    ).toThrow('secondary SIM requires primary_iccid');
     database.close();
   });
 
   test('SQL trigger refuses primary with a primary_iccid set', async () => {
     const database = await createMigratedDatabase();
-    expect(() => database.exec(
-      `INSERT INTO sims (iccid, sim_index, phone_number, sim_role, primary_iccid) VALUES ('p', 1, 'n', 'primary', 'whatever')`
-    )).toThrow('secondary SIM requires primary_iccid');
+    expect(() =>
+      database.exec(
+        `INSERT INTO sims (iccid, sim_index, phone_number, sim_role, primary_iccid) VALUES ('p', 1, 'n', 'primary', 'whatever')`,
+      ),
+    ).toThrow('secondary SIM requires primary_iccid');
     database.close();
   });
 
   test('ON DELETE RESTRICT blocks deleting a primary with secondaries attached', async () => {
     const database = await createMigratedDatabase();
-    database.exec(`INSERT INTO sims (iccid, sim_index, phone_number, sim_role, primary_iccid) VALUES ('main', 1, 'n', 'primary', NULL)`);
-    database.exec(`INSERT INTO sims (iccid, sim_index, phone_number, sim_role, primary_iccid) VALUES ('sec', 2, 'n2', 'secondary', 'main')`);
-    expect(() => database.exec(`DELETE FROM sims WHERE iccid = 'main'`))
-      .toThrow('FOREIGN KEY constraint failed');
+    database.exec(
+      `INSERT INTO sims (iccid, sim_index, phone_number, sim_role, primary_iccid) VALUES ('main', 1, 'n', 'primary', NULL)`,
+    );
+    database.exec(
+      `INSERT INTO sims (iccid, sim_index, phone_number, sim_role, primary_iccid) VALUES ('sec', 2, 'n2', 'secondary', 'main')`,
+    );
+    expect(() => database.exec(`DELETE FROM sims WHERE iccid = 'main'`)).toThrow(
+      'FOREIGN KEY constraint failed',
+    );
     database.close();
   });
 
@@ -303,9 +359,12 @@ describe('SIM primary/secondary role validation', () => {
 
     // Create a primary
     const primaryResp = await iccidMappingsHandler.create({
-      env, user,
+      env,
+      user,
       json: async () => ({
-        iccid: 'primary-1', sim_index: 1, phone_number: '+861',
+        iccid: 'primary-1',
+        sim_index: 1,
+        phone_number: '+861',
         sim_role: 'primary',
       }),
     });
@@ -313,31 +372,44 @@ describe('SIM primary/secondary role validation', () => {
 
     // Create a secondary pointing at it
     const secResp = await iccidMappingsHandler.create({
-      env, user,
+      env,
+      user,
       json: async () => ({
-        iccid: 'secondary-1', sim_index: 2, phone_number: '+862',
-        sim_role: 'secondary', primary_iccid: 'primary-1',
+        iccid: 'secondary-1',
+        sim_index: 2,
+        phone_number: '+862',
+        sim_role: 'secondary',
+        primary_iccid: 'primary-1',
       }),
     });
     expect(secResp.status).toBe(201);
 
-    const sec = database.query(`SELECT sim_role, primary_iccid FROM sims WHERE iccid = 'secondary-1'`).get();
+    const sec = database
+      .query(`SELECT sim_role, primary_iccid FROM sims WHERE iccid = 'secondary-1'`)
+      .get();
     expect(sec).toEqual({ sim_role: 'secondary', primary_iccid: 'primary-1' });
 
     // Flip it back to standalone via update — primary_iccid must clear
     const updateResp = await iccidMappingsHandler.update({
-      env, user, params: { id: 'secondary-1' },
+      env,
+      user,
+      params: { id: 'secondary-1' },
       json: async () => ({
-        phone_number: '+862', sim_index: 2, sim_role: 'standalone',
+        phone_number: '+862',
+        sim_index: 2,
+        sim_role: 'standalone',
       }),
     });
     expect(updateResp.status).toBe(200);
-    const cleared = database.query(`SELECT sim_role, primary_iccid FROM sims WHERE iccid = 'secondary-1'`).get();
+    const cleared = database
+      .query(`SELECT sim_role, primary_iccid FROM sims WHERE iccid = 'secondary-1'`)
+      .get();
     expect(cleared).toEqual({ sim_role: 'standalone', primary_iccid: null });
 
     // Now deleting the primary should succeed (no secondaries attached)
     const delResp = await iccidMappingsHandler.delete({
-      env, params: { id: 'primary-1' },
+      env,
+      params: { id: 'primary-1' },
     });
     expect(delResp.status).toBe(200);
     database.close();
@@ -349,12 +421,20 @@ describe('SIM primary/secondary role validation', () => {
     const user = { email: 'op@example.com' };
 
     await iccidMappingsHandler.create({
-      env, user,
+      env,
+      user,
       json: async () => ({ iccid: 'p', sim_index: 1, phone_number: 'n', sim_role: 'primary' }),
     });
     await iccidMappingsHandler.create({
-      env, user,
-      json: async () => ({ iccid: 's', sim_index: 2, phone_number: 'n2', sim_role: 'secondary', primary_iccid: 'p' }),
+      env,
+      user,
+      json: async () => ({
+        iccid: 's',
+        sim_index: 2,
+        phone_number: 'n2',
+        sim_role: 'secondary',
+        primary_iccid: 'p',
+      }),
     });
 
     const delResp = await iccidMappingsHandler.delete({ env, params: { id: 'p' } });

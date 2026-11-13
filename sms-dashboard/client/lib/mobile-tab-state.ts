@@ -1,6 +1,12 @@
 export type MobileTab = 'dashboard' | 'iccid-mappings' | 'balances' | 'send' | 'more';
 
-const ADMIN_TABS: readonly MobileTab[] = Object.freeze(['dashboard', 'iccid-mappings', 'balances', 'send', 'more']);
+const ADMIN_TABS: readonly MobileTab[] = Object.freeze([
+  'dashboard',
+  'iccid-mappings',
+  'balances',
+  'send',
+  'more',
+]);
 const VIEWER_TABS: readonly MobileTab[] = Object.freeze(['dashboard', 'balances', 'send', 'more']);
 const MORE_VIEWS = new Set<string>(['keywords', 'filters', 'users']);
 
@@ -16,15 +22,17 @@ export function getMobileTabs(canManagePhones: boolean): readonly MobileTab[] {
   return canManagePhones ? ADMIN_TABS : VIEWER_TABS;
 }
 
-export function getMobileTabState({ currentView, showMoreMenu, canManagePhones }: {
+export function getMobileTabState({
+  currentView,
+  showMoreMenu,
+  canManagePhones,
+}: {
   currentView: string;
   showMoreMenu: boolean;
   canManagePhones: boolean;
 }): { count: number; index: number } {
   const tabs = getMobileTabs(canManagePhones);
-  const selectedView = showMoreMenu || MORE_VIEWS.has(currentView)
-    ? 'more'
-    : currentView;
+  const selectedView = showMoreMenu || MORE_VIEWS.has(currentView) ? 'more' : currentView;
   const index = (tabs as readonly string[]).indexOf(selectedView);
 
   return {
@@ -42,19 +50,19 @@ export function getMobileTabIndexAtPoint({ clientX, left, width, count }: TabGeo
 export function getMobileTabDragX({ clientX, left, width, count }: TabGeometry): number {
   const tabWidth = width / count;
   const selectionWidth = tabWidth - 8;
-  const centeredX = clientX - left - (selectionWidth / 2) - 4;
+  const centeredX = clientX - left - selectionWidth / 2 - 4;
   return Math.max(0, Math.min(width - tabWidth, centeredX));
 }
 
-export function getMobileTabOptics({ clientX, left, width, count }: TabGeometry): { glowX: number; iconShiftX: number } {
+export function getMobileTabOptics({ clientX, left, width, count }: TabGeometry): {
+  glowX: number;
+  iconShiftX: number;
+} {
   const tabWidth = width / count;
   const localX = Math.max(0, Math.min(width, clientX - left));
   const index = getMobileTabIndexAtPoint({ clientX, left, width, count });
   const tabCenterX = (index + 0.5) * tabWidth;
-  const normalizedOffset = Math.max(
-    -1,
-    Math.min(1, (localX - tabCenterX) / (tabWidth / 2)),
-  );
+  const normalizedOffset = Math.max(-1, Math.min(1, (localX - tabCenterX) / (tabWidth / 2)));
 
   return {
     glowX: localX,

@@ -25,31 +25,29 @@ describe('balance overview', () => {
   });
 
   test('a per-SIM balance_threshold overrides the currency default', () => {
-    expect(getBalanceThreshold({ ...phone('cn1', 'CN'), balance_threshold: 50 }))
-      .toEqual({ value: 50, currency: 'CNY' });
+    expect(getBalanceThreshold({ ...phone('cn1', 'CN'), balance_threshold: 50 })).toEqual({
+      value: 50,
+      currency: 'CNY',
+    });
   });
 
   test('empty or null balance_threshold falls back to the currency default', () => {
-    expect(getBalanceThreshold({ ...phone('cn1', 'CN'), balance_threshold: null }))
-      .toEqual({ value: 100, currency: 'CNY' });
-    expect(getBalanceThreshold({ ...phone('cn1', 'CN'), balance_threshold: '' }))
-      .toEqual({ value: 100, currency: 'CNY' });
+    expect(getBalanceThreshold({ ...phone('cn1', 'CN'), balance_threshold: null })).toEqual({
+      value: 100,
+      currency: 'CNY',
+    });
+    expect(getBalanceThreshold({ ...phone('cn1', 'CN'), balance_threshold: '' })).toEqual({
+      value: 100,
+      currency: 'CNY',
+    });
   });
 
   test('a custom threshold affects the low-balance classification', () => {
     const phoneWithOverride = { ...phone('cn1', 'CN'), balance_threshold: 50 };
-    const above = buildBalanceRows(
-      [phoneWithOverride],
-      [check('cn1', 'parsed', 60, 'CNY')],
-      now
-    );
+    const above = buildBalanceRows([phoneWithOverride], [check('cn1', 'parsed', 60, 'CNY')], now);
     expect(above[0].health).toBe('healthy');
 
-    const below = buildBalanceRows(
-      [phoneWithOverride],
-      [check('cn1', 'parsed', 40, 'CNY')],
-      now
-    );
+    const below = buildBalanceRows([phoneWithOverride], [check('cn1', 'parsed', 40, 'CNY')], now);
     expect(below[0].health).toBe('low_balance');
   });
 
@@ -97,7 +95,7 @@ describe('balance overview', () => {
     const rows = buildBalanceRows(
       [primary, secondary],
       [check(primary.iccid, 'parsed', 340.76, 'CNY')],
-      now
+      now,
     );
 
     expect(rows.map((row) => row.health)).toEqual(['healthy', 'healthy']);
@@ -145,8 +143,14 @@ describe('balance overview', () => {
 
   test('cancelled checks are ignored for health — SIM falls back to unknown instead of failed', () => {
     const checks = [
-      { ...check('cn1', 'failed', null, null, '2026-08-14 07:30:00'), error: 'Manually cancelled: Unicom rate limit in effect' },
-      { ...check('cn1', 'failed', null, null, '2026-08-14 07:00:00'), error: 'Cancelled: China Unicom batch was triggered in error' },
+      {
+        ...check('cn1', 'failed', null, null, '2026-08-14 07:30:00'),
+        error: 'Manually cancelled: Unicom rate limit in effect',
+      },
+      {
+        ...check('cn1', 'failed', null, null, '2026-08-14 07:00:00'),
+        error: 'Cancelled: China Unicom batch was triggered in error',
+      },
     ];
     const [row] = buildBalanceRows([phone('cn1', 'CN')], checks, now);
 
@@ -157,7 +161,10 @@ describe('balance overview', () => {
 
   test('cancelled check does not shadow a real earlier failure', () => {
     const checks = [
-      { ...check('cn1', 'failed', null, null, '2026-08-14 08:00:00'), error: 'Cancelled: triggered in error' },
+      {
+        ...check('cn1', 'failed', null, null, '2026-08-14 08:00:00'),
+        error: 'Cancelled: triggered in error',
+      },
       check('cn1', 'failed', null, null, '2026-08-14 07:00:00'),
     ];
     const [row] = buildBalanceRows([phone('cn1', 'CN')], checks, now);
@@ -176,9 +183,11 @@ describe('balance overview', () => {
       expires_at: '2026-08-30',
     });
 
-    const [row] = buildBalanceRows([
-      { ...phone('sg2', 'SG'), service_type: 'prepaid' },
-    ], [balance], now);
+    const [row] = buildBalanceRows(
+      [{ ...phone('sg2', 'SG'), service_type: 'prepaid' }],
+      [balance],
+      now,
+    );
 
     expect(row.health).toBe('low_balance');
     expect(row.healthReasons).toEqual(expect.arrayContaining(['low_balance', 'expiring_soon']));
@@ -191,18 +200,22 @@ describe('balance overview', () => {
       profile_outputs: ['cash_balance', 'account_expiry'],
     };
 
-    const [row] = buildBalanceRows([
-      { ...phone('sg2', 'SG'), service_type: 'prepaid' },
-    ], [balance], now);
+    const [row] = buildBalanceRows(
+      [{ ...phone('sg2', 'SG'), service_type: 'prepaid' }],
+      [balance],
+      now,
+    );
 
     expect(row.health).toBe('expiry_unknown');
     expect(row.healthReasons).toContain('expiry_unknown');
   });
 
   test('excludes postpaid SIMs from prepaid balance health', () => {
-    const [row] = buildBalanceRows([
-      { ...phone('sg2', 'SG'), service_type: 'postpaid' },
-    ], [check('sg2', 'parsed', 0, 'SGD')], now);
+    const [row] = buildBalanceRows(
+      [{ ...phone('sg2', 'SG'), service_type: 'postpaid' }],
+      [check('sg2', 'parsed', 0, 'SGD')],
+      now,
+    );
 
     expect(row.health).toBe('not_applicable');
     expect(row.threshold).toBeNull();

@@ -115,7 +115,7 @@ describe('requirePermission — fails closed regardless of env', () => {
   for (const value of ['false', 'FALSE', '0', 'no', '', undefined, 'true', 'yes']) {
     test(`denies a roleless user when USE_AUTH0_ROLES=${JSON.stringify(value)}`, async () => {
       const result = await requirePermission('messages.read')(
-        req({ roles: [] }, { USE_AUTH0_ROLES: value })
+        req({ roles: [] }, { USE_AUTH0_ROLES: value }),
       );
       expect(result).toBeInstanceOf(Response);
       expect(result.status).toBe(403);
@@ -123,10 +123,13 @@ describe('requirePermission — fails closed regardless of env', () => {
   }
 
   test('denies a viewer phones.write even with the old bypass flags set', async () => {
-    const request = req({ roles: ['viewer'] }, {
-      USE_AUTH0_ROLES: 'false',
-      AUTH0_ALLOW_NO_ROLES: 'true',
-    });
+    const request = req(
+      { roles: ['viewer'] },
+      {
+        USE_AUTH0_ROLES: 'false',
+        AUTH0_ALLOW_NO_ROLES: 'true',
+      },
+    );
     expect(await isAllowed(request, 'phones.write')).toBe(false);
   });
 
@@ -141,7 +144,9 @@ describe('requirePermission — unknown permissions', () => {
     const result = await requirePermission('admin.destroy')(req({ roles: ['admin'] }));
     expect(result).toBeInstanceOf(Response);
     expect(result.status).toBe(403);
-    expect(await result.json()).toMatchObject({ message: expect.stringContaining('Unknown permission') });
+    expect(await result.json()).toMatchObject({
+      message: expect.stringContaining('Unknown permission'),
+    });
   });
 });
 

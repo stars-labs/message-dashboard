@@ -8,8 +8,9 @@ import MessageDetail from './MessageDetail.svelte';
 // A body long enough to exercise the reason this drawer exists. Production's
 // longest message is 776 characters; a third of all messages exceed the two
 // lines a list row can show.
-const LONG_BODY = '【心级服务 让爱连接】尊敬的客户，感谢您长期以来的支持，'
-  + '中国移动特开展“请您评价”调研活动，邀请您参与2道问题调研，期待您的10分满意！'.repeat(8);
+const LONG_BODY =
+  '【心级服务 让爱连接】尊敬的客户，感谢您长期以来的支持，' +
+  '中国移动特开展“请您评价”调研活动，邀请您参与2道问题调研，期待您的10分满意！'.repeat(8);
 
 const received = (fields = {}) => ({
   id: 'msg-1',
@@ -71,7 +72,12 @@ describe('MessageDetail', () => {
   test('closes on the close button', async () => {
     let closed = false;
     const { getAllByRole } = render(MessageDetail, {
-      props: { message: received(), onClose: () => { closed = true; } },
+      props: {
+        message: received(),
+        onClose: () => {
+          closed = true;
+        },
+      },
     });
     await fireEvent.click(getAllByRole('button', { name: '关闭' })[0]);
     expect(closed).toBe(true);
@@ -80,7 +86,12 @@ describe('MessageDetail', () => {
   test('closes on Escape', async () => {
     let closed = false;
     render(MessageDetail, {
-      props: { message: received(), onClose: () => { closed = true; } },
+      props: {
+        message: received(),
+        onClose: () => {
+          closed = true;
+        },
+      },
     });
     await fireEvent.keyDown(window, { key: 'Escape' });
     expect(closed).toBe(true);
@@ -89,7 +100,12 @@ describe('MessageDetail', () => {
   test('closes after a deliberate swipe right from the mobile left edge', async () => {
     let closed = false;
     const { getByRole } = render(MessageDetail, {
-      props: { message: received(), onClose: () => { closed = true; } },
+      props: {
+        message: received(),
+        onClose: () => {
+          closed = true;
+        },
+      },
     });
     const drawer = getByRole('region', { name: '短信详情' });
 
@@ -110,7 +126,12 @@ describe('MessageDetail', () => {
   test('keeps the drawer open for vertical scrolling near the left edge', async () => {
     let closed = false;
     const { getByRole } = render(MessageDetail, {
-      props: { message: received(), onClose: () => { closed = true; } },
+      props: {
+        message: received(),
+        onClose: () => {
+          closed = true;
+        },
+      },
     });
     const drawer = getByRole('region', { name: '短信详情' });
 
@@ -131,9 +152,7 @@ describe('MessageDetail', () => {
   // the drawer's own controls.
   test('leaves room for the mobile tab bar', () => {
     const { container } = render(MessageDetail, { props: { message: received() } });
-    expect(
-      container.querySelector('.bottom-\\[var\\(--mobile-tab-bar-height\\)\\]'),
-    ).toBeTruthy();
+    expect(container.querySelector('.bottom-\\[var\\(--mobile-tab-bar-height\\)\\]')).toBeTruthy();
   });
 
   test('names the rule that filtered a hidden message', () => {

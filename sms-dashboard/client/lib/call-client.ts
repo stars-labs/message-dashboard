@@ -51,7 +51,6 @@ export async function fetchCallState(): Promise<CallLike | null> {
   return call ?? null;
 }
 
-
 /**
  * Same rule the Worker enforces in server/api/calls.js. Checking it here first
  * gives an instant message instead of a round trip that is certain to fail.
@@ -73,7 +72,10 @@ export function normaliseNumber(value: unknown): string {
  * the dashboard already loaded. Returns null when the SIM is unknown (a SIM that
  * was removed, or a list that has not loaded yet).
  */
-export function callSim(call: CallLike | null | undefined, phones: CallPhone[] | null | undefined): CallPhone | null {
+export function callSim(
+  call: CallLike | null | undefined,
+  phones: CallPhone[] | null | undefined,
+): CallPhone | null {
   if (!call?.iccid || !Array.isArray(phones)) return null;
   return phones.find((phone) => phone.iccid === call.iccid) ?? null;
 }
@@ -83,7 +85,10 @@ export function callSim(call: CallLike | null | undefined, phones: CallPhone[] |
  * from the start for an outbound one, so the timer shows talk time rather than
  * how long the phone rang.
  */
-export function callElapsedSeconds(call: CallLike | null | undefined, nowMs: number = Date.now()): number {
+export function callElapsedSeconds(
+  call: CallLike | null | undefined,
+  nowMs: number = Date.now(),
+): number {
   const since = call?.answered_at ?? call?.started_at;
   if (!since) return 0;
   const started = Date.parse(since);
@@ -97,7 +102,9 @@ export function formatDuration(seconds: number | null | undefined): string {
   const pad = (n: number) => String(n).padStart(2, '0');
   const minutes = Math.floor(total / 60) % 60;
   const hours = Math.floor(total / 3600);
-  return hours ? `${hours}:${pad(minutes)}:${pad(total % 60)}` : `${pad(minutes)}:${pad(total % 60)}`;
+  return hours
+    ? `${hours}:${pad(minutes)}:${pad(total % 60)}`
+    : `${pad(minutes)}:${pad(total % 60)}`;
 }
 
 /**
@@ -144,7 +151,10 @@ export function describeCallError(error: unknown): string | null {
 }
 
 /** Search a SIM by card number, phone number, carrier or ICCID. */
-export function matchesPhoneQuery(phone: CallPhone | null | undefined, query: string | null | undefined): boolean {
+export function matchesPhoneQuery(
+  phone: CallPhone | null | undefined,
+  query: string | null | undefined,
+): boolean {
   const q = (query ?? '').trim().toLowerCase();
   if (!q) return true;
   const card = phone?.sim_index == null ? '' : formatCardNumber(phone.sim_index);
@@ -167,7 +177,10 @@ export const CALL_POLL_IDLE_MS = 10000;
  * 10 s to notice one; it only needs to be quick once a call exists or the
  * panel is open.
  */
-export function callPollDelay({ call = null, panelOpen = false }: { call?: CallLike | null; panelOpen?: boolean } = {}): number {
+export function callPollDelay({
+  call = null,
+  panelOpen = false,
+}: { call?: CallLike | null; panelOpen?: boolean } = {}): number {
   return call || panelOpen ? CALL_POLL_ACTIVE_MS : CALL_POLL_IDLE_MS;
 }
 
@@ -234,7 +247,10 @@ export function isMissedCall(entry: CallLogEntry | null | undefined): boolean {
  * Missed calls the operator has not looked at yet, for the badge on the call
  * button. `seenAt` is the last time the call panel was opened.
  */
-export function countMissedSince(entries: CallLogEntry[] | null | undefined, seenAt: unknown): number {
+export function countMissedSince(
+  entries: CallLogEntry[] | null | undefined,
+  seenAt: unknown,
+): number {
   const since = toEpochMilliseconds(seenAt) ?? 0;
   return (entries ?? []).filter((entry) => {
     if (!isMissedCall(entry)) return false;
@@ -261,7 +277,14 @@ export async function fetchIceServers(): Promise<IceServer[]> {
  * Call log, newest first. Read straight from D1 rather than the KV call lock,
  * so it is unaffected by the lock's TTL and shows calls that already ended.
  */
-export async function fetchCallHistory({ limit = 30, offset = 0, iccid = null }: { limit?: number; offset?: number; iccid?: string | null } = {}): Promise<{ calls: CallLogEntry[]; hasMore: boolean }> {
+export async function fetchCallHistory({
+  limit = 30,
+  offset = 0,
+  iccid = null,
+}: { limit?: number; offset?: number; iccid?: string | null } = {}): Promise<{
+  calls: CallLogEntry[];
+  hasMore: boolean;
+}> {
   const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
   if (iccid) params.set('iccid', iccid);
   const { calls, has_more: hasMore } = await fetchWithAuth(`/api/calls/history?${params}`);
@@ -282,9 +305,11 @@ export interface DialParams extends MediaOffer {
 
 /** The API surface call-session.ts drives; each returns the Worker's JSON. */
 export const callApi = {
-  dial: ({ iccid, number, offer, mid }: DialParams) => post('/api/calls/dial', { iccid, number, offer, mid }),
+  dial: ({ iccid, number, offer, mid }: DialParams) =>
+    post('/api/calls/dial', { iccid, number, offer, mid }),
   answer: ({ offer, mid }: MediaOffer) => post('/api/calls/answer', { offer, mid }),
   connect: (callId: string) => post('/api/calls/connect', { call_id: callId }),
-  renegotiate: ({ answer, callId }: { answer: unknown; callId?: string }) => post('/api/calls/renegotiate', { answer, call_id: callId }),
+  renegotiate: ({ answer, callId }: { answer: unknown; callId?: string }) =>
+    post('/api/calls/renegotiate', { answer, call_id: callId }),
   hangup: (callId?: string) => post('/api/calls/hangup', { call_id: callId }),
 };

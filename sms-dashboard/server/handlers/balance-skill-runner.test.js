@@ -26,12 +26,14 @@ class D1Adapter {
   }
 
   async batch(statements) {
-    return this.database.transaction(() => statements.map((statement) => {
-      this.database.query(statement.sql).run(...statement.params);
-      return {
-        meta: { changes: this.database.query('SELECT changes() AS value').get().value },
-      };
-    }))();
+    return this.database.transaction(() =>
+      statements.map((statement) => {
+        this.database.query(statement.sql).run(...statement.params);
+        return {
+          meta: { changes: this.database.query('SELECT changes() AS value').get().value },
+        };
+      }),
+    )();
   }
 }
 
@@ -100,11 +102,15 @@ describe('balance skill runner D1 flow', () => {
   afterEach(() => sqlite.close());
 
   function seedJob(content) {
-    sqlite.query(`
+    sqlite
+      .query(
+        `
       INSERT INTO messages (
         id, phone_iccid, phone_number, content, type, status, filter_status, purpose
       ) VALUES ('reply-1', 'iccid-1', '10086', ?, 'received', 'received', 'filtered', 'balance_maintenance')
-    `).run(content);
+    `,
+      )
+      .run(content);
     sqlite.exec(`
       INSERT INTO sim_balance_checks (
         id, sim_iccid, profile_id, status, response_message_id, response_sender,
@@ -130,20 +136,26 @@ describe('balance skill runner D1 flow', () => {
     const job = await claim();
     expect(job.menu_options[0]).toEqual({ value: '11', label: '账务查询' });
 
-    const response = await balanceSkillRunnerHandler.decide(workerRequest(db, {
-      id: job.id,
-      body: {
-        runner_id: 'runner-1', model: 'company-model',
-        decision: { action: 'reply', selected_option: '11', confidence: 0.98 },
-      },
-    }));
+    const response = await balanceSkillRunnerHandler.decide(
+      workerRequest(db, {
+        id: job.id,
+        body: {
+          runner_id: 'runner-1',
+          model: 'company-model',
+          decision: { action: 'reply', selected_option: '11', confidence: 0.98 },
+        },
+      }),
+    );
     expect(response.status).toBe(202);
-    expect(sqlite.query("SELECT content, recipient FROM messages WHERE type='sent'").get())
-      .toEqual({ content: '11', recipient: '10086' });
-    expect(sqlite.query("SELECT status, step_index FROM sim_balance_checks WHERE id='check-1'").get())
-      .toEqual({ status: 'queued', step_index: 1 });
-    expect(sqlite.query("SELECT status FROM sim_balance_skill_jobs WHERE id='job-1'").get().status)
-      .toBe('completed');
+    expect(sqlite.query("SELECT content, recipient FROM messages WHERE type='sent'").get()).toEqual(
+      { content: '11', recipient: '10086' },
+    );
+    expect(
+      sqlite.query("SELECT status, step_index FROM sim_balance_checks WHERE id='check-1'").get(),
+    ).toEqual({ status: 'queued', step_index: 1 });
+    expect(
+      sqlite.query("SELECT status FROM sim_balance_skill_jobs WHERE id='job-1'").get().status,
+    ).toBe('completed');
   });
 
   test('does not let a legacy runner claim a Dashboard-owned job', async () => {
@@ -152,45 +164,61 @@ describe('balance skill runner D1 flow', () => {
 
     const response = await balanceSkillRunnerHandler.claim(workerRequest(db));
     expect(response.status).toBe(204);
-    expect(sqlite.query("SELECT status FROM sim_balance_skill_jobs WHERE id='job-1'").get().status)
-      .toBe('pending');
+    expect(
+      sqlite.query("SELECT status FROM sim_balance_skill_jobs WHERE id='job-1'").get().status,
+    ).toBe('pending');
   });
 
   test('stores a balance only when the AI value matches exact SMS evidence', async () => {
     seedJob('当前可用话费余额为82.36元。');
     const job = await claim();
-    const response = await balanceSkillRunnerHandler.decide(workerRequest(db, {
-      id: job.id,
-      body: {
-        runner_id: 'runner-1', model: 'company-model',
-        decision: {
-          action: 'complete', balance: 82.36, currency: 'CNY', confidence: 0.99,
-          evidence: '余额为82.36元',
+    const response = await balanceSkillRunnerHandler.decide(
+      workerRequest(db, {
+        id: job.id,
+        body: {
+          runner_id: 'runner-1',
+          model: 'company-model',
+          decision: {
+            action: 'complete',
+            balance: 82.36,
+            currency: 'CNY',
+            confidence: 0.99,
+            evidence: '余额为82.36元',
+          },
         },
-      },
-    }));
+      }),
+    );
     expect(response.status).toBe(200);
-    expect(sqlite.query("SELECT status FROM sim_balance_checks WHERE id='check-1'").get().status)
-      .toBe('parsed');
-    expect(sqlite.query("SELECT value, currency FROM sim_balance_metrics WHERE check_id='check-1'").get())
-      .toEqual({ value: 82.36, currency: 'CNY' });
+    expect(
+      sqlite.query("SELECT status FROM sim_balance_checks WHERE id='check-1'").get().status,
+    ).toBe('parsed');
+    expect(
+      sqlite
+        .query("SELECT value, currency FROM sim_balance_metrics WHERE check_id='check-1'")
+        .get(),
+    ).toEqual({ value: 82.36, currency: 'CNY' });
   });
 
   test('terminalizes a safely stopped unresolved reply as unparsed', async () => {
     seedJob('请前往运营商APP查询余额。');
     const job = await claim();
-    const response = await balanceSkillRunnerHandler.decide(workerRequest(db, {
-      id: job.id,
-      body: {
-        runner_id: 'runner-1', model: 'company-model',
-        decision: { action: 'stop', confidence: 0.99, reason: '没有余额信息' },
-      },
-    }));
+    const response = await balanceSkillRunnerHandler.decide(
+      workerRequest(db, {
+        id: job.id,
+        body: {
+          runner_id: 'runner-1',
+          model: 'company-model',
+          decision: { action: 'stop', confidence: 0.99, reason: '没有余额信息' },
+        },
+      }),
+    );
 
     expect(response.status).toBe(200);
-    expect(sqlite.query("SELECT status FROM sim_balance_checks WHERE id='check-1'").get().status)
-      .toBe('unparsed');
-    expect(sqlite.query("SELECT status FROM sim_balance_skill_jobs WHERE id='job-1'").get().status)
-      .toBe('stopped');
+    expect(
+      sqlite.query("SELECT status FROM sim_balance_checks WHERE id='check-1'").get().status,
+    ).toBe('unparsed');
+    expect(
+      sqlite.query("SELECT status FROM sim_balance_skill_jobs WHERE id='job-1'").get().status,
+    ).toBe('stopped');
   });
 });

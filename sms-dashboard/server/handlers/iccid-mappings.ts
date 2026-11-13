@@ -30,12 +30,15 @@ export interface ExistingSim {
 type SimInput = Record<string, unknown>;
 
 export type ServiceTypeResolution =
-  | { serviceType: SimServiceType; serviceTypeSource: SimServiceTypeSource | null; serviceTypeProvided: boolean }
+  | {
+      serviceType: SimServiceType;
+      serviceTypeSource: SimServiceTypeSource | null;
+      serviceTypeProvided: boolean;
+    }
   | { error: string };
 
 export type SimRoleResolution =
-  | { role: SimRole; primaryIccid: string | null; roleProvided: boolean }
-  | { error: string };
+  { role: SimRole; primaryIccid: string | null; roleProvided: boolean } | { error: string };
 
 /** A device_view row as this handler returns it. */
 interface SimMappingRow {
@@ -87,7 +90,10 @@ export function resolveServiceType(
     ? (data.service_type_source as string | null) || null
     : existing?.service_type_source || null;
 
-  if (!serviceTypeSource || !(SIM_SERVICE_TYPE_SOURCES as readonly string[]).includes(serviceTypeSource)) {
+  if (
+    !serviceTypeSource ||
+    !(SIM_SERVICE_TYPE_SOURCES as readonly string[]).includes(serviceTypeSource)
+  ) {
     return {
       error: 'A valid service_type_source is required for prepaid or postpaid SIMs',
     };
@@ -123,14 +129,14 @@ export async function resolveSimRole(
   let primaryIccid: string | null = null;
   if (role === 'secondary') {
     primaryIccid = hasOwn(data, 'primary_iccid')
-      ? ((data.primary_iccid as string | null) || null)
-      : (existing?.primary_iccid || null);
+      ? (data.primary_iccid as string | null) || null
+      : existing?.primary_iccid || null;
     if (!primaryIccid) {
       return { error: 'primary_iccid is required for a secondary SIM' };
     }
-    const target = await env.DB.prepare(
-      'SELECT sim_role FROM sims WHERE iccid = ?',
-    ).bind(primaryIccid).first<{ sim_role: string | null }>();
+    const target = await env.DB.prepare('SELECT sim_role FROM sims WHERE iccid = ?')
+      .bind(primaryIccid)
+      .first<{ sim_role: string | null }>();
     if (!target) return { error: 'primary_iccid does not match any SIM' };
     if (target.sim_role !== 'primary') {
       return { error: `primary_iccid points to a ${target.sim_role} SIM, not a primary` };
@@ -213,7 +219,9 @@ export const iccidMappingsHandler = {
       query += ` ORDER BY sim_index ASC LIMIT ? OFFSET ?`;
       params.push(limit, offset);
 
-      const result = await env.DB.prepare(query).bind(...params).all<SimMappingRow>();
+      const result = await env.DB.prepare(query)
+        .bind(...params)
+        .all<SimMappingRow>();
       const mappings = result.results;
 
       // Get total count
@@ -226,7 +234,9 @@ export const iccidMappingsHandler = {
         countParams.push(searchPattern, searchPattern, searchPattern, searchPattern);
       }
 
-      const totalResult = await env.DB.prepare(countQuery).bind(...countParams).first<{ total: number }>();
+      const totalResult = await env.DB.prepare(countQuery)
+        .bind(...countParams)
+        .first<{ total: number }>();
       const total = totalResult?.total || 0;
 
       return json({
@@ -241,11 +251,14 @@ export const iccidMappingsHandler = {
       });
     } catch (error) {
       console.error('[iccid-mappings] Error listing ICCID mappings:', error);
-      return json({
-        success: false,
-        error: 'Failed to fetch ICCID mappings',
-        details: (error as Error).message,
-      }, 500);
+      return json(
+        {
+          success: false,
+          error: 'Failed to fetch ICCID mappings',
+          details: (error as Error).message,
+        },
+        500,
+      );
     }
   },
 
@@ -293,22 +306,17 @@ export const iccidMappingsHandler = {
     const data = (await request.json()) as SimInput;
 
     try {
-      const {
-        iccid,
-        phone_number,
-        sim_index,
-        country_code,
-        carrier,
-        imei,
-        notes,
-      } = data;
+      const { iccid, phone_number, sim_index, country_code, carrier, imei, notes } = data;
       const balanceThreshold = parseBalanceThreshold(data.balance_threshold);
 
       if (!iccid || !phone_number || !sim_index) {
-        return json({
-          success: false,
-          error: 'ICCID, phone number, and sim_index are required',
-        }, 400);
+        return json(
+          {
+            success: false,
+            error: 'ICCID, phone number, and sim_index are required',
+          },
+          400,
+        );
       }
 
       // Check if SIM exists
@@ -320,7 +328,8 @@ export const iccidMappingsHandler = {
 
       if (!simExists) {
         // INSERT new SIM (NO status field - computed dynamically)
-        await env.DB.prepare(`
+        await env.DB.prepare(
+          `
           INSERT INTO sims (
             iccid, sim_index, phone_number, country_code, carrier, imei, notes,
             service_type, service_type_source, service_type_verified_at,
@@ -331,26 +340,30 @@ export const iccidMappingsHandler = {
             CASE WHEN ? = 'unknown' OR ? = 'balance_managed' THEN NULL ELSE CURRENT_TIMESTAMP END,
             ?, ?, ?,
             CURRENT_TIMESTAMP, ?)
-        `).bind(
-          iccid,
-          sim_index,
-          phone_number,
-          country_code || null,
-          carrier || null,
-          imei || null,
-          notes || null,
-          service.serviceType,
-          service.serviceTypeSource,
-          service.serviceType,
-          service.serviceType,
-          role.role,
-          role.primaryIccid,
-          balanceThreshold,
-          user?.email || 'system',
-        ).run();
+        `,
+        )
+          .bind(
+            iccid,
+            sim_index,
+            phone_number,
+            country_code || null,
+            carrier || null,
+            imei || null,
+            notes || null,
+            service.serviceType,
+            service.serviceTypeSource,
+            service.serviceType,
+            service.serviceType,
+            role.role,
+            role.primaryIccid,
+            balanceThreshold,
+            user?.email || 'system',
+          )
+          .run();
       } else {
         // UPDATE existing SIM (NO status field - computed dynamically)
-        await env.DB.prepare(`
+        await env.DB.prepare(
+          `
           UPDATE sims
           SET sim_index = ?, phone_number = ?, country_code = ?, carrier = ?, imei = ?, notes = ?,
               service_type = ?, service_type_source = ?,
@@ -364,28 +377,32 @@ export const iccidMappingsHandler = {
               balance_threshold = ?,
               updated_at = CURRENT_TIMESTAMP, updated_by = ?
           WHERE iccid = ?
-        `).bind(
-          sim_index,
-          phone_number,
-          country_code || null,
-          carrier || null,
-          imei || null,
-          notes || null,
-          service.serviceType,
-          service.serviceTypeSource,
-          service.serviceTypeProvided ? 1 : 0,
-          service.serviceType,
-          service.serviceType,
-          role.role,
-          role.primaryIccid,
-          balanceThreshold,
-          user?.email || 'system',
-          iccid,
-        ).run();
+        `,
+        )
+          .bind(
+            sim_index,
+            phone_number,
+            country_code || null,
+            carrier || null,
+            imei || null,
+            notes || null,
+            service.serviceType,
+            service.serviceTypeSource,
+            service.serviceTypeProvided ? 1 : 0,
+            service.serviceType,
+            service.serviceType,
+            role.role,
+            role.primaryIccid,
+            balanceThreshold,
+            user?.email || 'system',
+            iccid,
+          )
+          .run();
       }
 
       // Return updated mapping with computed status from device_view
-      const mapping = await env.DB.prepare(`
+      const mapping = await env.DB.prepare(
+        `
         SELECT
           iccid, sim_index, number as phone_number,
           country as country_code, carrier, equipment_id as imei,
@@ -395,16 +412,22 @@ export const iccidMappingsHandler = {
           created_at, updated_at
         FROM device_view
         WHERE iccid = ?
-      `).bind(iccid).first<SimMappingRow>();
+      `,
+      )
+        .bind(iccid)
+        .first<SimMappingRow>();
 
       return json({ success: true, data: mapping }, simExists ? 200 : 201);
     } catch (error) {
       console.error('[iccid-mappings] Error creating ICCID mapping:', error);
-      return json({
-        success: false,
-        error: 'Failed to create ICCID mapping',
-        details: (error as Error).message,
-      }, 500);
+      return json(
+        {
+          success: false,
+          error: 'Failed to create ICCID mapping',
+          details: (error as Error).message,
+        },
+        500,
+      );
     }
   },
 
@@ -415,14 +438,7 @@ export const iccidMappingsHandler = {
     const data = (await request.json()) as SimInput;
 
     try {
-      const {
-        phone_number,
-        sim_index,
-        country_code,
-        carrier,
-        imei,
-        notes,
-      } = data;
+      const { phone_number, sim_index, country_code, carrier, imei, notes } = data;
       const balanceThreshold = parseBalanceThreshold(data.balance_threshold);
 
       const existing = await env.DB.prepare(EXISTING_SIM_SELECT).bind(id).first<ExistingSim>();
@@ -435,7 +451,8 @@ export const iccidMappingsHandler = {
       if ('error' in role) return badRequest(role.error);
 
       // Update sims table (NO status field)
-      await env.DB.prepare(`
+      await env.DB.prepare(
+        `
         UPDATE sims
         SET
           phone_number = ?,
@@ -457,24 +474,27 @@ export const iccidMappingsHandler = {
           updated_at = CURRENT_TIMESTAMP,
           updated_by = ?
         WHERE iccid = ?
-      `).bind(
-        phone_number || null,
-        sim_index || null,
-        country_code || null,
-        carrier || null,
-        imei || null,
-        notes || null,
-        service.serviceType,
-        service.serviceTypeSource,
-        service.serviceTypeProvided ? 1 : 0,
-        service.serviceType,
-        service.serviceType,
-        role.role,
-        role.primaryIccid,
-        balanceThreshold,
-        user?.email || 'system',
-        id,
-      ).run();
+      `,
+      )
+        .bind(
+          phone_number || null,
+          sim_index || null,
+          country_code || null,
+          carrier || null,
+          imei || null,
+          notes || null,
+          service.serviceType,
+          service.serviceTypeSource,
+          service.serviceTypeProvided ? 1 : 0,
+          service.serviceType,
+          service.serviceType,
+          role.role,
+          role.primaryIccid,
+          balanceThreshold,
+          user?.email || 'system',
+          id,
+        )
+        .run();
 
       // Return updated mapping with computed status from device_view
       const mapping = await env.DB.prepare(DETAIL_SELECT).bind(id).first<SimMappingRow>();
@@ -498,9 +518,13 @@ export const iccidMappingsHandler = {
     try {
       // Actually delete the SIM from sims table. If this SIM is a primary with
       // secondaries still attached, the ON DELETE RESTRICT FK aborts.
-      await env.DB.prepare(`
+      await env.DB.prepare(
+        `
         DELETE FROM sims WHERE iccid = ?
-      `).bind(id).run();
+      `,
+      )
+        .bind(id)
+        .run();
 
       return json({
         success: true,
@@ -508,10 +532,14 @@ export const iccidMappingsHandler = {
       });
     } catch (error) {
       if (/FOREIGN KEY constraint failed/i.test((error as Error)?.message || '')) {
-        return json({
-          success: false,
-          error: 'This is a primary SIM with secondary SIMs still attached. Set them back to standalone first.',
-        }, 409);
+        return json(
+          {
+            success: false,
+            error:
+              'This is a primary SIM with secondary SIMs still attached. Set them back to standalone first.',
+          },
+          409,
+        );
       }
       console.error('[iccid-mappings] Error deleting ICCID mapping:', error);
       return json({ success: false, error: 'Failed to delete ICCID mapping' }, 500);
@@ -544,7 +572,9 @@ export const iccidMappingsHandler = {
           }
 
           // Check if SIM exists
-          const existing = await env.DB.prepare(EXISTING_SIM_SELECT).bind(iccid).first<ExistingSim>();
+          const existing = await env.DB.prepare(EXISTING_SIM_SELECT)
+            .bind(iccid)
+            .first<ExistingSim>();
           const service = resolveServiceType(mapping, existing);
           if ('error' in service) {
             failed++;
@@ -560,7 +590,8 @@ export const iccidMappingsHandler = {
 
           if (existing) {
             // Update existing
-            await env.DB.prepare(`
+            await env.DB.prepare(
+              `
               UPDATE sims
               SET
                 sim_index = ?,
@@ -581,27 +612,31 @@ export const iccidMappingsHandler = {
                 updated_at = CURRENT_TIMESTAMP,
                 updated_by = ?
               WHERE iccid = ?
-            `).bind(
-              sim_index,
-              phone_number,
-              country_code || null,
-              carrier || null,
-              imei || null,
-              notes || null,
-              service.serviceType,
-              service.serviceTypeSource,
-              service.serviceTypeProvided ? 1 : 0,
-              service.serviceType,
-              service.serviceType,
-              role.role,
-              role.primaryIccid,
-              user?.email || 'system',
-              iccid,
-            ).run();
+            `,
+            )
+              .bind(
+                sim_index,
+                phone_number,
+                country_code || null,
+                carrier || null,
+                imei || null,
+                notes || null,
+                service.serviceType,
+                service.serviceTypeSource,
+                service.serviceTypeProvided ? 1 : 0,
+                service.serviceType,
+                service.serviceType,
+                role.role,
+                role.primaryIccid,
+                user?.email || 'system',
+                iccid,
+              )
+              .run();
             updated++;
           } else {
             // Create new
-            await env.DB.prepare(`
+            await env.DB.prepare(
+              `
               INSERT INTO sims (
                 iccid, sim_index, phone_number, country_code, carrier, imei, notes,
                 service_type, service_type_source, service_type_verified_at,
@@ -612,27 +647,32 @@ export const iccidMappingsHandler = {
                 CASE WHEN ? = 'unknown' OR ? = 'balance_managed' THEN NULL ELSE CURRENT_TIMESTAMP END,
                 ?, ?,
                 CURRENT_TIMESTAMP, ?)
-            `).bind(
-              iccid,
-              sim_index,
-              phone_number,
-              country_code || null,
-              carrier || null,
-              imei || null,
-              notes || null,
-              service.serviceType,
-              service.serviceTypeSource,
-              service.serviceType,
-              service.serviceType,
-              role.role,
-              role.primaryIccid,
-              user?.email || 'system',
-            ).run();
+            `,
+            )
+              .bind(
+                iccid,
+                sim_index,
+                phone_number,
+                country_code || null,
+                carrier || null,
+                imei || null,
+                notes || null,
+                service.serviceType,
+                service.serviceTypeSource,
+                service.serviceType,
+                service.serviceType,
+                role.role,
+                role.primaryIccid,
+                user?.email || 'system',
+              )
+              .run();
             created++;
           }
         } catch (error) {
           failed++;
-          errors.push(`Failed to import mapping for ICCID ${mapping.iccid}: ${(error as Error).message}`);
+          errors.push(
+            `Failed to import mapping for ICCID ${mapping.iccid}: ${(error as Error).message}`,
+          );
         }
       }
 
@@ -648,11 +688,14 @@ export const iccidMappingsHandler = {
       });
     } catch (error) {
       console.error('[iccid-mappings] Error in bulk import:', error);
-      return json({
-        success: false,
-        error: 'Failed to import ICCID mappings',
-        details: (error as Error).message,
-      }, 500);
+      return json(
+        {
+          success: false,
+          error: 'Failed to import ICCID mappings',
+          details: (error as Error).message,
+        },
+        500,
+      );
     }
   },
 };

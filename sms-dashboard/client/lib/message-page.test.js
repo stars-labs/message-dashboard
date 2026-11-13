@@ -16,10 +16,7 @@ describe('message pagination', () => {
   test('replaces the current scope and sorts newest first', () => {
     const result = mergeMessagePage(
       [message('old-scope', '2026-08-20T00:00:00Z')],
-      [
-        message('older', '2026-08-21T00:00:00Z'),
-        message('newer', '2026-08-22T00:00:00Z'),
-      ],
+      [message('older', '2026-08-21T00:00:00Z'), message('newer', '2026-08-22T00:00:00Z')],
       { replace: true },
     );
 
@@ -32,10 +29,10 @@ describe('message pagination', () => {
       message('one', '2026-08-21T00:00:00Z'),
     ];
     const updatedTwo = { ...message('two', '2026-08-22T00:00:00Z'), content: 'updated' };
-    const result = mergeMessagePage(
-      current,
-      [message('three', '2026-08-23T00:00:00Z'), updatedTwo],
-    );
+    const result = mergeMessagePage(current, [
+      message('three', '2026-08-23T00:00:00Z'),
+      updatedTwo,
+    ]);
 
     expect(result.map(({ id }) => id)).toEqual(['three', 'two', 'one']);
     expect(result.find(({ id }) => id === 'two').content).toBe('updated');

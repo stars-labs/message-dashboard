@@ -61,7 +61,9 @@ async function initDB(): Promise<IDBDatabase> {
             database.deleteObjectStore(name);
           }
         }
-        console.debug(`[MessageCache] cleared cache upgrading v${event.oldVersion} -> v${DB_VERSION}`);
+        console.debug(
+          `[MessageCache] cleared cache upgrading v${event.oldVersion} -> v${DB_VERSION}`,
+        );
       }
 
       // Messages store with indexes
@@ -69,7 +71,9 @@ async function initDB(): Promise<IDBDatabase> {
         const messagesStore = database.createObjectStore(MESSAGES_STORE, { keyPath: 'id' });
         messagesStore.createIndex('phone_iccid', 'phone_iccid', { unique: false });
         messagesStore.createIndex('timestamp', 'timestamp', { unique: false });
-        messagesStore.createIndex('phone_timestamp', ['phone_iccid', 'timestamp'], { unique: false });
+        messagesStore.createIndex('phone_timestamp', ['phone_iccid', 'timestamp'], {
+          unique: false,
+        });
       }
 
       // Meta store for sync timestamps
@@ -132,7 +136,10 @@ async function setLastSyncTime(phoneIccid: string = 'global', timestamp: string)
 /**
  * Get cached messages for a phone (or all)
  */
-async function getCachedMessages(phoneIccid: string | null = null, limit = 500): Promise<CachedMessage[]> {
+async function getCachedMessages(
+  phoneIccid: string | null = null,
+  limit = 500,
+): Promise<CachedMessage[]> {
   try {
     await initDB();
 
@@ -160,7 +167,9 @@ async function getCachedMessages(phoneIccid: string | null = null, limit = 500):
           cursor.continue();
         } else {
           // Sort by timestamp descending
-          messages.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+          messages.sort(
+            (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+          );
           resolve(messages);
         }
       };
@@ -192,7 +201,7 @@ async function cacheMessages(messages: CachedMessage[]): Promise<void> {
       let completed = 0;
       const total = messages.length;
 
-      messages.forEach(msg => {
+      messages.forEach((msg) => {
         const request = store.put(msg);
         request.onsuccess = () => {
           completed++;
@@ -230,7 +239,7 @@ async function getCacheStats(): Promise<{ messageCount: number; dbName: string }
       countRequest.onsuccess = () => {
         resolve({
           messageCount: countRequest.result,
-          dbName: DB_NAME
+          dbName: DB_NAME,
         });
       };
 
@@ -337,5 +346,5 @@ export const messageCache = {
   cacheMessages,
   getCacheStats,
   clearCache,
-  pruneCache
+  pruneCache,
 };

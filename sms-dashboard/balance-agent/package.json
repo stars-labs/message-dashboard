@@ -36,7 +36,9 @@
     "protocols": [
       {
         "name": "Balance Agent",
-        "schemes": ["message-dashboard-runner"]
+        "schemes": [
+          "message-dashboard-runner"
+        ]
       }
     ],
     "mac": {
@@ -46,7 +48,9 @@
       "extendInfo": {
         "LSUIElement": true
       },
-      "target": ["dir"]
+      "target": [
+        "dir"
+      ]
     },
     "directories": {
       "output": "release"

@@ -23,7 +23,8 @@ const profile = {
   destination: '10086',
   expected_senders: '["10086"]',
   parser_version: 'cn-mobile-balance-v1',
-  conversation_steps: '[{"response_contains":"1.话费与AI豆","command":"1"},{"response_contains":"101.查询余额","command":"101"}]',
+  conversation_steps:
+    '[{"response_contains":"1.话费与AI豆","command":"1"},{"response_contains":"101.查询余额","command":"101"}]',
   response_window_minutes: 30,
   discovery_enabled: 1,
   enabled: 0,
@@ -128,18 +129,30 @@ describe('balance-query carrier and sender guards', () => {
 
 describe('balance query execution requirements', () => {
   test('classifies direct, AI-assisted and browser profiles', () => {
-    expect(describeBalanceMethod({ method: 'sms', skill_config: null }))
-      .toEqual({ category: 'direct_sms', capability: null, interactive: false });
-    expect(describeBalanceMethod({
-      method: 'sms',
-      skill_config: JSON.stringify({
-        id: 'balance-menu', version: '1', objective: 'Read balance',
-        max_turns: 2, minimum_confidence: 0.9, currencies: ['CNY'],
-        forbidden_intents: ['recharge'],
+    expect(describeBalanceMethod({ method: 'sms', skill_config: null })).toEqual({
+      category: 'direct_sms',
+      capability: null,
+      interactive: false,
+    });
+    expect(
+      describeBalanceMethod({
+        method: 'sms',
+        skill_config: JSON.stringify({
+          id: 'balance-menu',
+          version: '1',
+          objective: 'Read balance',
+          max_turns: 2,
+          minimum_confidence: 0.9,
+          currencies: ['CNY'],
+          forbidden_intents: ['recharge'],
+        }),
       }),
-    })).toEqual({ category: 'sms_ai', capability: 'sms_ai', interactive: false });
-    expect(describeBalanceMethod({ method: 'browser' }))
-      .toEqual({ category: 'browser', capability: 'carrier_browser', interactive: true });
+    ).toEqual({ category: 'sms_ai', capability: 'sms_ai', interactive: false });
+    expect(describeBalanceMethod({ method: 'browser' })).toEqual({
+      category: 'browser',
+      capability: 'carrier_browser',
+      interactive: true,
+    });
   });
 });
 
@@ -201,7 +214,9 @@ describe('balance-query planning', () => {
 
   test('allows an explicit single-SIM discovery query but still enforces cooldown', () => {
     const [available] = buildBalanceQueryPlan({
-      phones: [phone], profiles: [profile], allowDiscovery: true,
+      phones: [phone],
+      profiles: [profile],
+      allowDiscovery: true,
     });
     const [cooldown] = buildBalanceQueryPlan({
       phones: [phone],
@@ -242,15 +257,28 @@ describe('balance-query planning', () => {
 
   test('queues only the explicitly confirmed batch method categories', () => {
     const plan = [
-      { eligible: true, profile: { method: 'sms', skill_config: null }, phone: { iccid: 'direct' } },
-      { eligible: true, profile: { method: 'sms', skill_config: JSON.stringify({ id: 'skill', version: '1', objective: 'balance' }) }, phone: { iccid: 'ai' } },
+      {
+        eligible: true,
+        profile: { method: 'sms', skill_config: null },
+        phone: { iccid: 'direct' },
+      },
+      {
+        eligible: true,
+        profile: {
+          method: 'sms',
+          skill_config: JSON.stringify({ id: 'skill', version: '1', objective: 'balance' }),
+        },
+        phone: { iccid: 'ai' },
+      },
       { eligible: true, profile: { method: 'browser' }, phone: { iccid: 'browser' } },
       { eligible: false, profile: { method: 'sms' }, phone: { iccid: 'offline' } },
     ];
-    expect(filterBalancePlanByMethods(plan, ['direct_sms', 'sms_ai'])
-      .map((item) => item.phone.iccid)).toEqual(['direct', 'ai']);
-    expect(filterBalancePlanByMethods(plan, ['browser'])
-      .map((item) => item.phone.iccid)).toEqual(['browser']);
+    expect(
+      filterBalancePlanByMethods(plan, ['direct_sms', 'sms_ai']).map((item) => item.phone.iccid),
+    ).toEqual(['direct', 'ai']);
+    expect(filterBalancePlanByMethods(plan, ['browser']).map((item) => item.phone.iccid)).toEqual([
+      'browser',
+    ]);
   });
 });
 
@@ -261,7 +289,11 @@ describe('POST /api/balance-checks/query-batch', () => {
         user: { id: 'auth0|dashboard-user' },
         json: async () => ({ methods }),
         env: {
-          DB: { prepare: () => { throw new Error('database must not be read'); } },
+          DB: {
+            prepare: () => {
+              throw new Error('database must not be read');
+            },
+          },
         },
       });
       expect(response.status).toBe(400);
@@ -274,7 +306,11 @@ describe('POST /api/balance-checks/query-batch', () => {
         user: { id: 'auth0|dashboard-user' },
         json: async () => ({ methods: ['browser'], phone_iccids: phoneIccids }),
         env: {
-          DB: { prepare: () => { throw new Error('database must not be read'); } },
+          DB: {
+            prepare: () => {
+              throw new Error('database must not be read');
+            },
+          },
         },
       });
       expect(response.status).toBe(400);
@@ -300,7 +336,9 @@ describe('POST /api/balance-checks/query-preview', () => {
         };
         return {
           all: () => execute(),
-          bind(...params) { return { all: () => execute(params) }; },
+          bind(...params) {
+            return { all: () => execute(params) };
+          },
         };
       },
     };
@@ -364,19 +402,25 @@ describe('POST /api/balance-checks/query', () => {
       },
     };
 
-    const response = await balanceQueriesHandler.query(request(db, {
-      phone_iccid: unicomPhone.iccid,
-    }));
+    const response = await balanceQueriesHandler.query(
+      request(db, {
+        phone_iccid: unicomPhone.iccid,
+      }),
+    );
     const body = await response.json();
 
     expect(response.status).toBe(202);
     expect(body.check.profile_id).toBe(browserProfile.id);
     const checkInsert = batches[0].find((statement) =>
-      statement.sql.includes('INSERT INTO sim_balance_checks')
+      statement.sql.includes('INSERT INTO sim_balance_checks'),
     );
     expect(checkInsert.params.at(-1)).toBe('auth0|dashboard-user');
-    expect(batches[0].some((statement) => statement.sql.includes('sim_balance_web_jobs'))).toBe(true);
-    expect(batches[0].some((statement) => statement.sql.includes('INSERT INTO messages'))).toBe(false);
+    expect(batches[0].some((statement) => statement.sql.includes('sim_balance_web_jobs'))).toBe(
+      true,
+    );
+    expect(batches[0].some((statement) => statement.sql.includes('INSERT INTO messages'))).toBe(
+      false,
+    );
   });
 });
 
@@ -402,25 +446,44 @@ describe('GET /api/balance-checks/query-preflight', () => {
           if (sql.includes('FROM device_view')) return { results: [unicomPhone] };
           if (sql.includes('FROM sim_balance_profiles')) return { results: [browserProfile] };
           if (sql.includes('FROM balance_runner_installations')) {
-            return { results: [{
-              id: 'runner-1', display_name: 'Runner', auth_mode: 'auth0_device',
-              auth_subject: 'auth0|dashboard-user',
-              platform: 'darwin', version: '1', last_heartbeat: '2026-08-15 03:00:00',
-              seconds_since_heartbeat: 10,
-            }] };
+            return {
+              results: [
+                {
+                  id: 'runner-1',
+                  display_name: 'Runner',
+                  auth_mode: 'auth0_device',
+                  auth_subject: 'auth0|dashboard-user',
+                  platform: 'darwin',
+                  version: '1',
+                  last_heartbeat: '2026-08-15 03:00:00',
+                  seconds_since_heartbeat: 10,
+                },
+              ],
+            };
           }
           if (sql.includes('FROM balance_runner_capabilities')) {
-            return { results: [{
-              runner_id: 'runner-1', capability: 'carrier_browser', state: 'ready',
-              current_job_id: null, concurrency: 1, detail_code: null,
-              last_heartbeat: '2026-08-15 03:00:00', seconds_since_heartbeat: 10,
-            }] };
+            return {
+              results: [
+                {
+                  runner_id: 'runner-1',
+                  capability: 'carrier_browser',
+                  state: 'ready',
+                  current_job_id: null,
+                  concurrency: 1,
+                  detail_code: null,
+                  last_heartbeat: '2026-08-15 03:00:00',
+                  seconds_since_heartbeat: 10,
+                },
+              ],
+            };
           }
           return { results: [] };
         };
         return {
           all: execute,
-          bind() { return { all: execute }; },
+          bind() {
+            return { all: execute };
+          },
         };
       },
     };
@@ -457,18 +520,20 @@ describe('POST /api/control/balance-checks', () => {
 
   test('queues only the allowlisted destination and command', async () => {
     const db = dbStub();
-    const response = await balanceQueriesHandler.create(request(db, {
-      phone_iccid: phone.iccid,
-      profile_id: profile.id,
-      destination: '+6599999999',
-      command: 'SUBSCRIBE',
-    }));
+    const response = await balanceQueriesHandler.create(
+      request(db, {
+        phone_iccid: phone.iccid,
+        profile_id: profile.id,
+        destination: '+6599999999',
+        command: 'SUBSCRIBE',
+      }),
+    );
 
     expect(response.status).toBe(202);
     expect(db.batches).toHaveLength(1);
 
     const messageInsert = db.batches[0].find((statement) =>
-      statement.sql.includes('INSERT INTO messages')
+      statement.sql.includes('INSERT INTO messages'),
     );
     expect(messageInsert.params[1]).toBe(phone.iccid);
     expect(messageInsert.params[2]).toBe(phone.number);
@@ -491,22 +556,30 @@ describe('POST /api/control/balance-checks', () => {
       profileResult: browserProfile,
       phoneResult: { ...phone, carrier: '联通' },
     });
-    const response = await balanceQueriesHandler.create(request(db, {
-      phone_iccid: phone.iccid,
-      profile_id: browserProfile.id,
-    }));
+    const response = await balanceQueriesHandler.create(
+      request(db, {
+        phone_iccid: phone.iccid,
+        profile_id: browserProfile.id,
+      }),
+    );
 
     expect(response.status).toBe(202);
-    expect(db.batches[0].some((statement) => statement.sql.includes('sim_balance_web_jobs'))).toBe(true);
-    expect(db.batches[0].some((statement) => statement.sql.includes('INSERT INTO messages'))).toBe(false);
+    expect(db.batches[0].some((statement) => statement.sql.includes('sim_balance_web_jobs'))).toBe(
+      true,
+    );
+    expect(db.batches[0].some((statement) => statement.sql.includes('INSERT INTO messages'))).toBe(
+      false,
+    );
   });
 
   test('rejects an offline SIM', async () => {
     const db = dbStub({ phoneResult: { ...phone, sim_status: 'offline' } });
-    const response = await balanceQueriesHandler.create(request(db, {
-      phone_iccid: phone.iccid,
-      profile_id: profile.id,
-    }));
+    const response = await balanceQueriesHandler.create(
+      request(db, {
+        phone_iccid: phone.iccid,
+        profile_id: profile.id,
+      }),
+    );
 
     expect(response.status).toBe(409);
     expect(db.batches).toHaveLength(0);
@@ -514,12 +587,18 @@ describe('POST /api/control/balance-checks', () => {
 
   test('enforces the per-SIM 24-hour limit', async () => {
     const db = dbStub({
-      recent: { id: 'bal-previous', status: 'awaiting_response', requested_at: '2026-08-14 01:00:00' },
+      recent: {
+        id: 'bal-previous',
+        status: 'awaiting_response',
+        requested_at: '2026-08-14 01:00:00',
+      },
     });
-    const response = await balanceQueriesHandler.create(request(db, {
-      phone_iccid: phone.iccid,
-      profile_id: profile.id,
-    }));
+    const response = await balanceQueriesHandler.create(
+      request(db, {
+        phone_iccid: phone.iccid,
+        profile_id: profile.id,
+      }),
+    );
 
     expect(response.status).toBe(429);
     expect(db.batches).toHaveLength(0);
@@ -527,14 +606,16 @@ describe('POST /api/control/balance-checks', () => {
 
   test('does not count failed or timed-out attempts against the daily limit', async () => {
     const db = dbStub();
-    const response = await balanceQueriesHandler.create(request(db, {
-      phone_iccid: phone.iccid,
-      profile_id: profile.id,
-    }));
+    const response = await balanceQueriesHandler.create(
+      request(db, {
+        phone_iccid: phone.iccid,
+        profile_id: profile.id,
+      }),
+    );
 
     expect(response.status).toBe(202);
-    const recentQuery = db.calls.find((call) =>
-      call.operation === 'first' && call.sql.includes('FROM sim_balance_checks')
+    const recentQuery = db.calls.find(
+      (call) => call.operation === 'first' && call.sql.includes('FROM sim_balance_checks'),
     );
     expect(recentQuery.sql).toContain("status IN ('response_received', 'parsed', 'unparsed')");
     expect(recentQuery.sql).not.toContain("status != 'failed'");
@@ -543,10 +624,12 @@ describe('POST /api/control/balance-checks', () => {
 
   test('rejects a SIM from a different carrier', async () => {
     const db = dbStub({ phoneResult: { ...phone, carrier: '联通' } });
-    const response = await balanceQueriesHandler.create(request(db, {
-      phone_iccid: phone.iccid,
-      profile_id: profile.id,
-    }));
+    const response = await balanceQueriesHandler.create(
+      request(db, {
+        phone_iccid: phone.iccid,
+        profile_id: profile.id,
+      }),
+    );
 
     expect(response.status).toBe(409);
     expect(db.batches).toHaveLength(0);
@@ -566,16 +649,20 @@ describe('GET /api/balance-checks', () => {
                 expect(sql).not.toContain('conversation_json');
                 expect(params).toEqual([phone.iccid, 25]);
                 return {
-                  results: [{
-                    id: 'bal-1',
-                    sim_iccid: phone.iccid,
-                    status: 'parsed',
-                    skill_config: '{"outputs":["cash_balance","account_expiry"]}',
-                    outbound_content: '10086',
-                    response_content: '余额82.36元',
-                    conversation_json: '[{"id":"msg-1","type":"received","content":"余额82.36元"}]',
-                    metrics_json: '[{"metric_type":"cash_balance","value":82.36,"currency":"CNY"}]',
-                  }],
+                  results: [
+                    {
+                      id: 'bal-1',
+                      sim_iccid: phone.iccid,
+                      status: 'parsed',
+                      skill_config: '{"outputs":["cash_balance","account_expiry"]}',
+                      outbound_content: '10086',
+                      response_content: '余额82.36元',
+                      conversation_json:
+                        '[{"id":"msg-1","type":"received","content":"余额82.36元"}]',
+                      metrics_json:
+                        '[{"metric_type":"cash_balance","value":82.36,"currency":"CNY"}]',
+                    },
+                  ],
                 };
               },
             };
@@ -591,11 +678,13 @@ describe('GET /api/balance-checks', () => {
 
     expect(response.status).toBe(200);
     expect(body.data).toHaveLength(1);
-    expect(body.data[0].metrics).toEqual([{
-      metric_type: 'cash_balance',
-      value: 82.36,
-      currency: 'CNY',
-    }]);
+    expect(body.data[0].metrics).toEqual([
+      {
+        metric_type: 'cash_balance',
+        value: 82.36,
+        currency: 'CNY',
+      },
+    ]);
     expect(body.data[0].conversation).toBeUndefined();
     expect(body.data[0].profile_outputs).toEqual(['cash_balance', 'account_expiry']);
     expect(body.data[0].skill_config).toBeUndefined();
@@ -610,10 +699,16 @@ describe('GET /api/balance-checks', () => {
           bind(...params) {
             query = { sql, params };
             return {
-              all: async () => ({ results: [{
-                id: 'bal-1', status: 'queued', web_job_status: 'awaiting_otp',
-                updated_at: '2026-09-04 10:00:00',
-              }] }),
+              all: async () => ({
+                results: [
+                  {
+                    id: 'bal-1',
+                    status: 'queued',
+                    web_job_status: 'awaiting_otp',
+                    updated_at: '2026-09-04 10:00:00',
+                  },
+                ],
+              }),
             };
           },
         };
@@ -652,7 +747,8 @@ describe('GET /api/balance-checks', () => {
       },
     };
     const response = await balanceQueriesHandler.detail({
-      env: { DB: db }, params: { id: 'bal-1' },
+      env: { DB: db },
+      params: { id: 'bal-1' },
     });
 
     expect(await response.json()).toEqual({
@@ -769,7 +865,6 @@ describe('balance reply correlation', () => {
     expect(followUp.params).not.toContain('2');
   });
 
-
   test('parses a final China Mobile balance and stores a typed metric', async () => {
     const db = dbStub();
     const check = {
@@ -789,9 +884,7 @@ describe('balance reply correlation', () => {
     expect(db.batches[0][0].sql).toContain("'failed'");
     expect(db.batches[0][0].sql).toContain('error = NULL');
     const metricInsert = db.batches[0][1];
-    expect(metricInsert.params).toEqual([
-      'bal-final', 'cash_balance', 82.36, null, 'CNY', null,
-    ]);
+    expect(metricInsert.params).toEqual(['bal-final', 'cash_balance', 82.36, null, 'CNY', null]);
   });
 
   test('expires awaiting replies using each profile response window', async () => {
@@ -814,37 +907,47 @@ describe('balance reply correlation', () => {
   test('parses China Telecom total balance (当前号码总余额) when present', () => {
     // The full SMS format reports both 可用余额 and 总余额; we take 总余额 (263.36)
     // as it is the canonical account total shown in the Telecom app.
-    expect(parseBalanceMetrics(
-      'cn-telecom-balance-v1',
-      '【中国电信】尊敬的孙*客户：截止至8月18日，您的手机账户当前可用余额为86.36元，当前号码总余额为263.36元，预存费用余额为263.36元，赠送费用余额为0.00元。感谢您的使用！',
-    )).toEqual([{
-      metric_type: 'cash_balance',
-      value: 263.36,
-      unit: null,
-      currency: 'CNY',
-      expires_at: null,
-    }]);
+    expect(
+      parseBalanceMetrics(
+        'cn-telecom-balance-v1',
+        '【中国电信】尊敬的孙*客户：截止至8月18日，您的手机账户当前可用余额为86.36元，当前号码总余额为263.36元，预存费用余额为263.36元，赠送费用余额为0.00元。感谢您的使用！',
+      ),
+    ).toEqual([
+      {
+        metric_type: 'cash_balance',
+        value: 263.36,
+        unit: null,
+        currency: 'CNY',
+        expires_at: null,
+      },
+    ]);
   });
 
   test('falls back to 当前可用余额 when 总余额 is absent', () => {
-    expect(parseBalanceMetrics(
-      'cn-telecom-balance-v1',
-      '【中国电信】您的手机账户当前可用余额为86.36元。',
-    )[0]?.value).toBe(86.36);
+    expect(
+      parseBalanceMetrics(
+        'cn-telecom-balance-v1',
+        '【中国电信】您的手机账户当前可用余额为86.36元。',
+      )[0]?.value,
+    ).toBe(86.36);
   });
 
   test('parses China Telecom general balance (当前号码通用余额) without treating charges as balance', () => {
-    expect(parseBalanceMetrics(
-      'cn-telecom-balance-v1',
-      '当前号码通用余额为140.76元，本月已产生费用149.00元。',
-    )[0]?.value).toBe(140.76);
+    expect(
+      parseBalanceMetrics(
+        'cn-telecom-balance-v1',
+        '当前号码通用余额为140.76元，本月已产生费用149.00元。',
+      )[0]?.value,
+    ).toBe(140.76);
   });
 
   test('parses China Telecom SMS with only 总余额 and no 可用余额', () => {
-    expect(parseBalanceMetrics(
-      'cn-telecom-balance-v1',
-      '当前号码总余额为263.36元，预存费用余额为263.36元。',
-    )[0]?.value).toBe(263.36);
+    expect(
+      parseBalanceMetrics(
+        'cn-telecom-balance-v1',
+        '当前号码总余额为263.36元，预存费用余额为263.36元。',
+      )[0]?.value,
+    ).toBe(263.36);
   });
 
   test('queues the discovered 101 command from the second-level menu', async () => {
@@ -898,19 +1001,20 @@ describe('balance reply correlation', () => {
 
     expect(db.batches[0][0].params[0]).toBe('response_received');
     const jobInsert = db.batches[0].find((statement) =>
-      statement.sql.includes('INSERT OR IGNORE INTO sim_balance_skill_jobs')
+      statement.sql.includes('INSERT OR IGNORE INTO sim_balance_skill_jobs'),
     );
     expect(jobInsert).toBeDefined();
     expect(jobInsert.params.slice(1)).toEqual([
-      'msg-unfamiliar-menu', 'bal-runtime-skill', 'msg-unfamiliar-menu',
+      'msg-unfamiliar-menu',
+      'bal-runtime-skill',
+      'msg-unfamiliar-menu',
     ]);
   });
 
   test('does not parse current charges as cash balance', () => {
-    expect(parseBalanceMetrics(
-      'cn-mobile-balance-v1',
-      '本月已产生话费25.60元，当前欠费0元。',
-    )).toEqual([]);
+    expect(
+      parseBalanceMetrics('cn-mobile-balance-v1', '本月已产生话费25.60元，当前欠费0元。'),
+    ).toEqual([]);
   });
 });
 
@@ -930,9 +1034,11 @@ describe('POST /api/control/balance-checks/continue', () => {
       parser_version: profile.parser_version,
     };
     const db = dbStub({ recent: existing });
-    const response = await balanceQueriesHandler.continue(request(db, {
-      check_id: existing.id,
-    }));
+    const response = await balanceQueriesHandler.continue(
+      request(db, {
+        check_id: existing.id,
+      }),
+    );
     const body = await response.json();
 
     expect(response.status).toBe(202);
@@ -951,9 +1057,11 @@ describe('POST /api/control/balance-checks/continue', () => {
         conversation_steps: profile.conversation_steps,
       },
     });
-    const response = await balanceQueriesHandler.continue(request(db, {
-      check_id: 'bal-other',
-    }));
+    const response = await balanceQueriesHandler.continue(
+      request(db, {
+        check_id: 'bal-other',
+      }),
+    );
 
     expect(response.status).toBe(409);
     expect(db.batches).toHaveLength(0);
@@ -974,9 +1082,11 @@ describe('POST /api/control/balance-checks/retry', () => {
       message_status: 'failed',
     };
     const db = dbStub({ recent: failed });
-    const response = await balanceQueriesHandler.retry(request(db, {
-      check_id: failed.id,
-    }));
+    const response = await balanceQueriesHandler.retry(
+      request(db, {
+        check_id: failed.id,
+      }),
+    );
     const body = await response.json();
 
     expect(response.status).toBe(202);
@@ -999,9 +1109,11 @@ describe('POST /api/control/balance-checks/retry', () => {
         message_status: 'failed',
       },
     });
-    const response = await balanceQueriesHandler.retry(request(db, {
-      check_id: 'bal-tampered',
-    }));
+    const response = await balanceQueriesHandler.retry(
+      request(db, {
+        check_id: 'bal-tampered',
+      }),
+    );
 
     expect(response.status).toBe(409);
     expect(db.batches).toHaveLength(0);
@@ -1011,23 +1123,30 @@ describe('POST /api/control/balance-checks/retry', () => {
 describe('POST /api/control/balance-checks/stop', () => {
   test('terminalizes an awaiting reply as timed out', async () => {
     const db = dbStub({ recent: { id: 'bal-waiting', status: 'awaiting_response' } });
-    const response = await balanceQueriesHandler.stop(request(db, {
-      check_id: 'bal-waiting',
-    }));
+    const response = await balanceQueriesHandler.stop(
+      request(db, {
+        check_id: 'bal-waiting',
+      }),
+    );
     const body = await response.json();
 
     expect(response.status).toBe(200);
     expect(body.check).toEqual({ id: 'bal-waiting', status: 'timed_out' });
     expect(db.batches[0][0].params).toEqual([
-      'timed_out', 'timed_out', 'bal-waiting', 'awaiting_response',
+      'timed_out',
+      'timed_out',
+      'bal-waiting',
+      'awaiting_response',
     ]);
   });
 
   test('terminalizes an unresolved received reply as unparsed', async () => {
     const db = dbStub({ recent: { id: 'bal-unresolved', status: 'response_received' } });
-    const response = await balanceQueriesHandler.stop(request(db, {
-      check_id: 'bal-unresolved',
-    }));
+    const response = await balanceQueriesHandler.stop(
+      request(db, {
+        check_id: 'bal-unresolved',
+      }),
+    );
     const body = await response.json();
 
     expect(response.status).toBe(200);
@@ -1108,6 +1227,10 @@ describe('multipart carrier replies', () => {
     expect(merged.get('part-3').content).toBe(full);
     const metrics = parseBalanceMetrics('cn-mobile-balance-v1', full);
     expect(metrics).toHaveLength(1);
-    expect(metrics[0]).toMatchObject({ metric_type: 'cash_balance', value: 199.88, currency: 'CNY' });
+    expect(metrics[0]).toMatchObject({
+      metric_type: 'cash_balance',
+      value: 199.88,
+      currency: 'CNY',
+    });
   });
 });

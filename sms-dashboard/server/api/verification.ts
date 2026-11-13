@@ -29,26 +29,27 @@ async function gate(
 }
 
 export function setupVerificationRoutes(router: Router): void {
-  router.post('/api/verification/reprocess', async (request: AppRequest, env: Env, ctx: ExecutionContext) => {
-    const blocked = await gate(request, env, ctx);
-    if (blocked) return blocked;
+  router.post(
+    '/api/verification/reprocess',
+    async (request: AppRequest, env: Env, ctx: ExecutionContext) => {
+      const blocked = await gate(request, env, ctx);
+      if (blocked) return blocked;
 
-    try {
-      const url = new URL(request.url);
-      const page = await reprocessVerificationPage(env.DB, {
-        after: url.searchParams.get('after') || 0,
-        pageSize: url.searchParams.get('limit') || undefined,
-        dryRun: url.searchParams.get('dry_run') === '1',
-      });
+      try {
+        const url = new URL(request.url);
+        const page = await reprocessVerificationPage(env.DB, {
+          after: url.searchParams.get('after') || 0,
+          pageSize: url.searchParams.get('limit') || undefined,
+          dryRun: url.searchParams.get('dry_run') === '1',
+        });
 
-      const filterSweep = page.dry_run || page.changed === 0
-        ? null
-        : await sweepPending(env.DB);
+        const filterSweep = page.dry_run || page.changed === 0 ? null : await sweepPending(env.DB);
 
-      return json({ success: true, ...page, filter_sweep: filterSweep });
-    } catch (error) {
-      console.error('[verification] reprocess failed:', error);
-      return json({ error: 'Failed to reprocess verification codes' }, 500);
-    }
-  });
+        return json({ success: true, ...page, filter_sweep: filterSweep });
+      } catch (error) {
+        console.error('[verification] reprocess failed:', error);
+        return json({ error: 'Failed to reprocess verification codes' }, 500);
+      }
+    },
+  );
 }

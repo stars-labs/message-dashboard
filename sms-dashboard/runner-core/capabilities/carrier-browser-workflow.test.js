@@ -122,16 +122,25 @@ describe('carrier browser workflow', () => {
     const controller = new AbortController();
     controller.abort();
 
-    await expect(processor.processJob(validJob(), { signal: controller.signal }))
-      .rejects.toThrow('cancelled');
+    await expect(processor.processJob(validJob(), { signal: controller.signal })).rejects.toThrow(
+      'cancelled',
+    );
     expect(launched).toBe(false);
   });
 
   test('detects Unicom error page URLs', () => {
-    expect(isUnicomErrorPage('https://imgxx.client.10010.com/shengyuhuafeiwt2024/index.html#/errorpage')).toBe(true);
-    expect(isUnicomErrorPage('https://imgxx.client.10010.com/shengyuhuafeiwt2024/index.html#/Errorpage')).toBe(true);
-    expect(isUnicomErrorPage('https://imgxx.client.10010.com/shengyuhuafeiwt2024/index.html#/')).toBe(false);
-    expect(isUnicomErrorPage('https://imgxx.client.10010.com/shengyuhuafeiwt2024/index.html#/home')).toBe(false);
+    expect(
+      isUnicomErrorPage('https://imgxx.client.10010.com/shengyuhuafeiwt2024/index.html#/errorpage'),
+    ).toBe(true);
+    expect(
+      isUnicomErrorPage('https://imgxx.client.10010.com/shengyuhuafeiwt2024/index.html#/Errorpage'),
+    ).toBe(true);
+    expect(
+      isUnicomErrorPage('https://imgxx.client.10010.com/shengyuhuafeiwt2024/index.html#/'),
+    ).toBe(false);
+    expect(
+      isUnicomErrorPage('https://imgxx.client.10010.com/shengyuhuafeiwt2024/index.html#/home'),
+    ).toBe(false);
     expect(isUnicomErrorPage(null)).toBe(false);
     expect(isUnicomErrorPage('')).toBe(false);
   });
@@ -141,7 +150,11 @@ describe('carrier browser workflow', () => {
       controlClient: { request: async () => new Response(null, { status: 204 }) },
       presence: { set: async () => {} },
       runnerId: 'runner-1',
-      browser: { launchPersistentContext: async () => { throw new Error('must not launch'); } },
+      browser: {
+        launchPersistentContext: async () => {
+          throw new Error('must not launch');
+        },
+      },
       executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
     });
 

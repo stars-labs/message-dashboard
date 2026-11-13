@@ -1,11 +1,14 @@
 <!doctype html>
 <html lang="zh-CN">
   <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'">
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'"
+    />
     <title>Balance Agent</title>
-    <link rel="stylesheet" href="./styles.css">
+    <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <header>
@@ -58,24 +61,56 @@
         </div>
         <form id="settings-form">
           <div id="configuration-results" class="configuration-results" hidden>
-            <div><span class="indicator" id="dashboard-test-dot"></span><strong>Dashboard</strong><small id="dashboard-test-result"></small></div>
-            <div><span class="indicator" id="ai-full-test-dot"></span><strong>公司 AI / VPN</strong><small id="ai-full-test-result"></small></div>
-            <div><span class="indicator" id="browser-test-dot"></span><strong>浏览器</strong><small id="browser-test-result"></small></div>
+            <div>
+              <span class="indicator" id="dashboard-test-dot"></span><strong>Dashboard</strong
+              ><small id="dashboard-test-result"></small>
+            </div>
+            <div>
+              <span class="indicator" id="ai-full-test-dot"></span><strong>公司 AI / VPN</strong
+              ><small id="ai-full-test-result"></small>
+            </div>
+            <div>
+              <span class="indicator" id="browser-test-dot"></span><strong>浏览器</strong
+              ><small id="browser-test-result"></small>
+            </div>
           </div>
           <div class="form-grid">
-            <label>设备名称<input name="installationName" autocomplete="off"></label>
-            <label>Dashboard URL<input name="dashboardUrl" type="url" placeholder="https://dashboard.example.com"></label>
-            <label>Auth0 issuer<input name="auth0Issuer" type="url" placeholder="https://tenant.auth0.com"></label>
-            <label>Auth0 client ID<input name="auth0ClientId" autocomplete="off"></label>
-            <label class="wide">Auth0 audience<input name="auth0Audience" autocomplete="off"></label>
+            <label>设备名称<input name="installationName" autocomplete="off" /></label>
+            <label
+              >Dashboard URL<input
+                name="dashboardUrl"
+                type="url"
+                placeholder="https://dashboard.example.com"
+            /></label>
+            <label
+              >Auth0 issuer<input
+                name="auth0Issuer"
+                type="url"
+                placeholder="https://tenant.auth0.com"
+            /></label>
+            <label>Auth0 client ID<input name="auth0ClientId" autocomplete="off" /></label>
+            <label class="wide"
+              >Auth0 audience<input name="auth0Audience" autocomplete="off"
+            /></label>
           </div>
 
           <div class="section-heading subsection"><h2>AI 设置</h2></div>
           <div class="form-grid">
-            <label>AI URL<input name="aiBaseUrl" type="url"></label>
-            <label>模型<input name="aiModel" autocomplete="off"></label>
-            <label>协议<select name="aiProtocol"><option value="anthropic">Anthropic</option><option value="openai">OpenAI</option></select></label>
-            <label>AI token<input name="aiToken" type="password" placeholder="保持空白则不修改" autocomplete="new-password"></label>
+            <label>AI URL<input name="aiBaseUrl" type="url" /></label>
+            <label>模型<input name="aiModel" autocomplete="off" /></label>
+            <label
+              >协议<select name="aiProtocol">
+                <option value="anthropic">Anthropic</option>
+                <option value="openai">OpenAI</option>
+              </select></label
+            >
+            <label
+              >AI token<input
+                name="aiToken"
+                type="password"
+                placeholder="保持空白则不修改"
+                autocomplete="new-password"
+            /></label>
           </div>
           <div class="connection-test">
             <div>
@@ -86,7 +121,9 @@
             <button id="test-ai" type="button" class="secondary">测试连接</button>
           </div>
 
-          <label class="login-setting"><input id="open-at-login" type="checkbox"> 登录系统后自动启动</label>
+          <label class="login-setting"
+            ><input id="open-at-login" type="checkbox" /> 登录系统后自动启动</label
+          >
           <div class="form-actions">
             <span id="save-result"></span>
             <button type="submit" class="primary">保存设置</button>

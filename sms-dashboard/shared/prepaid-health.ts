@@ -27,9 +27,7 @@ export type SummaryStatus = (typeof SUMMARY_PRIORITY)[number] | 'healthy' | 'not
  * Reasons a health rule can fire. `automation_unsupported` is deliberately not
  * in SUMMARY_PRIORITY: it is evidence for the UI, never a headline status.
  */
-export type HealthReason =
-  | (typeof SUMMARY_PRIORITY)[number]
-  | 'automation_unsupported';
+export type HealthReason = (typeof SUMMARY_PRIORITY)[number] | 'automation_unsupported';
 
 export interface Money {
   value: number | string;
@@ -90,9 +88,12 @@ function dateParts(value: string | null | undefined): DateParts | null {
   const day = Number(match[3]);
   const time = Date.UTC(year, month - 1, day);
   const date = new Date(time);
-  if (date.getUTCFullYear() !== year
-    || date.getUTCMonth() !== month - 1
-    || date.getUTCDate() !== day) return null;
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  )
+    return null;
   return { year, month, day, time };
 }
 
@@ -151,9 +152,11 @@ export function evaluatePrepaidHealth({
       reasons.add('stale');
     }
     if (balanceValue <= 0) reasons.add('zero_or_negative_balance');
-    if (thresholdValue != null
-      && currenciesMatch(cashBalance, threshold)
-      && balanceValue < thresholdValue) {
+    if (
+      thresholdValue != null &&
+      currenciesMatch(cashBalance, threshold) &&
+      balanceValue < thresholdValue
+    ) {
       reasons.add('low_balance');
     }
   }
@@ -175,7 +178,6 @@ export function evaluatePrepaidHealth({
     }
   }
 
-  const summaryStatus =
-    SUMMARY_PRIORITY.find((status) => reasons.has(status)) || 'healthy';
+  const summaryStatus = SUMMARY_PRIORITY.find((status) => reasons.has(status)) || 'healthy';
   return { summaryStatus, reasons: [...reasons] };
 }

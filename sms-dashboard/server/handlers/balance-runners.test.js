@@ -29,10 +29,12 @@ class D1Adapter {
 
   async batch(statements) {
     const database = this.database;
-    return this.database.transaction(() => statements.map((statement) => {
-      this.database.query(statement.sql).run(...statement.params);
-      return { meta: { changes: database.query('SELECT changes() AS value').get().value } };
-    }))();
+    return this.database.transaction(() =>
+      statements.map((statement) => {
+        this.database.query(statement.sql).run(...statement.params);
+        return { meta: { changes: database.query('SELECT changes() AS value').get().value } };
+      }),
+    )();
   }
 }
 
@@ -76,34 +78,57 @@ describe('balance runner control plane', () => {
     const response = await balanceRunnersHandler.check(request(db, null));
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ success: true });
-    expect(sqlite.query('SELECT COUNT(*) AS count FROM balance_runner_installations').get().count).toBe(0);
+    expect(
+      sqlite.query('SELECT COUNT(*) AS count FROM balance_runner_installations').get().count,
+    ).toBe(0);
 
     const unauthorized = await balanceRunnersHandler.check(request(db, null, 'wrong'));
     expect(unauthorized.status).toBe(401);
   });
 
   test('registers a legacy runner heartbeat without storing a credential', async () => {
-    const response = await balanceRunnersHandler.heartbeat(request(db, {
-      runner_id: 'workstation-legacy',
-      session_id: 'session-1',
-      display_name: 'Workstation',
-      platform: 'darwin',
-      version: 'development',
-      capabilities: [{
-        capability: 'sms_ai', state: 'ready', concurrency: 1,
-        current_job_id: null, detail_code: null,
-      }],
-    }));
+    const response = await balanceRunnersHandler.heartbeat(
+      request(db, {
+        runner_id: 'workstation-legacy',
+        session_id: 'session-1',
+        display_name: 'Workstation',
+        platform: 'darwin',
+        version: 'development',
+        capabilities: [
+          {
+            capability: 'sms_ai',
+            state: 'ready',
+            concurrency: 1,
+            current_job_id: null,
+            detail_code: null,
+          },
+        ],
+      }),
+    );
 
     expect(response.status).toBe(200);
-    expect(sqlite.query(`
+    expect(
+      sqlite
+        .query(
+          `
       SELECT id, auth_mode, auth_subject FROM balance_runner_installations
-    `).get()).toEqual({
-      id: 'workstation-legacy', auth_mode: 'legacy_api_key', auth_subject: null,
+    `,
+        )
+        .get(),
+    ).toEqual({
+      id: 'workstation-legacy',
+      auth_mode: 'legacy_api_key',
+      auth_subject: null,
     });
-    expect(sqlite.query(`
+    expect(
+      sqlite
+        .query(
+          `
       SELECT capability, state, session_id FROM balance_runner_capabilities
-    `).get()).toEqual({ capability: 'sms_ai', state: 'ready', session_id: 'session-1' });
+    `,
+        )
+        .get(),
+    ).toEqual({ capability: 'sms_ai', state: 'ready', session_id: 'session-1' });
   });
 
   test('refreshes installation liveness without rewriting unchanged capabilities', async () => {
@@ -116,35 +141,54 @@ describe('balance runner control plane', () => {
       ) VALUES ('runner-1', 'sms_ai', 'ready', 'session-1', datetime('now', '-120 seconds'));
     `);
 
-    const response = await balanceRunnersHandler.heartbeat(request(db, {
-      runner_id: 'runner-1', session_id: 'session-1', display_name: 'Runner',
-      platform: 'darwin', version: '1', capabilities: [],
-    }));
+    const response = await balanceRunnersHandler.heartbeat(
+      request(db, {
+        runner_id: 'runner-1',
+        session_id: 'session-1',
+        display_name: 'Runner',
+        platform: 'darwin',
+        version: '1',
+        capabilities: [],
+      }),
+    );
 
     expect(response.status).toBe(200);
     const status = await loadBalanceRunnerStatus(db);
     expect(status.capabilities.sms_ai).toMatchObject({ available: true, state: 'ready' });
-    expect(sqlite.query(`
+    expect(
+      sqlite
+        .query(
+          `
       SELECT CAST((julianday('now') - julianday(last_heartbeat)) * 86400 AS INTEGER) AS age
       FROM balance_runner_capabilities WHERE runner_id = 'runner-1'
-    `).get().age).toBeGreaterThanOrEqual(119);
+    `,
+        )
+        .get().age,
+    ).toBeGreaterThanOrEqual(119);
   });
 
   test('rejects unknown capabilities and invalid concurrency', async () => {
     const base = {
-      runner_id: 'runner-1', session_id: 'session-1', display_name: 'Runner',
-      platform: 'darwin', version: '1.0.0',
+      runner_id: 'runner-1',
+      session_id: 'session-1',
+      display_name: 'Runner',
+      platform: 'darwin',
+      version: '1.0.0',
     };
-    let response = await balanceRunnersHandler.heartbeat(request(db, {
-      ...base,
-      capabilities: [{ capability: 'shell', state: 'ready', concurrency: 1 }],
-    }));
+    let response = await balanceRunnersHandler.heartbeat(
+      request(db, {
+        ...base,
+        capabilities: [{ capability: 'shell', state: 'ready', concurrency: 1 }],
+      }),
+    );
     expect(response.status).toBe(400);
 
-    response = await balanceRunnersHandler.heartbeat(request(db, {
-      ...base,
-      capabilities: [{ capability: 'sms_ai', state: 'ready', concurrency: 99 }],
-    }));
+    response = await balanceRunnersHandler.heartbeat(
+      request(db, {
+        ...base,
+        capabilities: [{ capability: 'sms_ai', state: 'ready', concurrency: 99 }],
+      }),
+    );
     expect(response.status).toBe(400);
   });
 
@@ -154,13 +198,20 @@ describe('balance runner control plane', () => {
         id, display_name, auth_mode, platform, version, revoked_at
       ) VALUES ('runner-1', 'Runner', 'legacy_api_key', 'darwin', '1', CURRENT_TIMESTAMP)
     `);
-    const response = await balanceRunnersHandler.heartbeat(request(db, {
-      runner_id: 'runner-1', session_id: 'session-1', display_name: 'Runner',
-      platform: 'darwin', version: '1',
-      capabilities: [{ capability: 'sms_ai', state: 'ready', concurrency: 1 }],
-    }));
+    const response = await balanceRunnersHandler.heartbeat(
+      request(db, {
+        runner_id: 'runner-1',
+        session_id: 'session-1',
+        display_name: 'Runner',
+        platform: 'darwin',
+        version: '1',
+        capabilities: [{ capability: 'sms_ai', state: 'ready', concurrency: 1 }],
+      }),
+    );
     expect(response.status).toBe(403);
-    expect(sqlite.query('SELECT COUNT(*) AS count FROM balance_runner_capabilities').get().count).toBe(0);
+    expect(
+      sqlite.query('SELECT COUNT(*) AS count FROM balance_runner_capabilities').get().count,
+    ).toBe(0);
   });
 
   test('does not let the legacy credential overwrite a device-owned runner ID', async () => {
@@ -169,15 +220,26 @@ describe('balance runner control plane', () => {
         id, display_name, auth_mode, auth_subject, platform, version
       ) VALUES ('runner-1', 'Runner', 'auth0_device', 'auth0|device-1', 'darwin', '1')
     `);
-    const response = await balanceRunnersHandler.heartbeat(request(db, {
-      runner_id: 'runner-1', session_id: 'session-1', display_name: 'Runner',
-      platform: 'darwin', version: '1',
-      capabilities: [{ capability: 'sms_ai', state: 'ready', concurrency: 1 }],
-    }));
+    const response = await balanceRunnersHandler.heartbeat(
+      request(db, {
+        runner_id: 'runner-1',
+        session_id: 'session-1',
+        display_name: 'Runner',
+        platform: 'darwin',
+        version: '1',
+        capabilities: [{ capability: 'sms_ai', state: 'ready', concurrency: 1 }],
+      }),
+    );
     expect(response.status).toBe(409);
-    expect(sqlite.query(`
+    expect(
+      sqlite
+        .query(
+          `
       SELECT auth_mode, auth_subject FROM balance_runner_installations WHERE id = 'runner-1'
-    `).get()).toEqual({ auth_mode: 'auth0_device', auth_subject: 'auth0|device-1' });
+    `,
+        )
+        .get(),
+    ).toEqual({ auth_mode: 'auth0_device', auth_subject: 'auth0|device-1' });
   });
 
   test('reports ready capabilities and expires stale heartbeats', async () => {
@@ -196,7 +258,10 @@ describe('balance runner control plane', () => {
 
     const status = await loadBalanceRunnerStatus(db);
     expect(status.capabilities.sms_ai.available).toBe(true);
-    expect(status.capabilities.carrier_browser).toMatchObject({ available: false, state: 'offline' });
+    expect(status.capabilities.carrier_browser).toMatchObject({
+      available: false,
+      state: 'offline',
+    });
     expect(status.runners.find((runner) => runner.id === 'stale').online).toBe(false);
   });
 

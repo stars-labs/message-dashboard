@@ -51,22 +51,30 @@ const ACCOUNT_KEYS = new Set<string>([
 ]);
 
 function normalizedKey(value: unknown): string {
-  return String(value || '').toLocaleLowerCase().replace(/[\s_-]/g, '');
+  return String(value || '')
+    .toLocaleLowerCase()
+    .replace(/[\s_-]/g, '');
 }
 
 function normalizePhone(value: unknown): string {
-  return String(value || '').replace(/\D/g, '').replace(/^86(?=1\d{10}$)/, '');
+  return String(value || '')
+    .replace(/\D/g, '')
+    .replace(/^86(?=1\d{10}$)/, '');
 }
 
 function accountMatches(value: unknown, expectedPhone: unknown): boolean {
   const expected = normalizePhone(expectedPhone);
   if (normalizePhone(value) === expected) return true;
 
-  const masked = String(value || '').trim().match(/^(\d{3})\*+(\d{4})$/);
-  return Boolean(masked
-    && expected.length === 11
-    && expected.startsWith(masked[1])
-    && expected.endsWith(masked[2]));
+  const masked = String(value || '')
+    .trim()
+    .match(/^(\d{3})\*+(\d{4})$/);
+  return Boolean(
+    masked &&
+    expected.length === 11 &&
+    expected.startsWith(masked[1]) &&
+    expected.endsWith(masked[2]),
+  );
 }
 
 function walk(
@@ -88,7 +96,9 @@ function walk(
 function parseMoney(value: unknown): number | null {
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
   if (typeof value !== 'string') return null;
-  const match = value.trim().match(/^\s*(?:CNY|RMB|￥|¥)?\s*(-?\d+(?:\.\d{1,2})?)\s*(?:元|CNY|RMB)?\s*$/i);
+  const match = value
+    .trim()
+    .match(/^\s*(?:CNY|RMB|￥|¥)?\s*(-?\d+(?:\.\d{1,2})?)\s*(?:元|CNY|RMB)?\s*$/i);
   return match ? Number(match[1]) : null;
 }
 
@@ -140,9 +150,11 @@ export function extractUnicomWebBalance(
   });
 
   if (balances.length !== 1) {
-    throw new Error(balances.length
-      ? 'Unicom response contains multiple candidate balance fields'
-      : 'Unicom response does not contain a recognized available-balance field');
+    throw new Error(
+      balances.length
+        ? 'Unicom response contains multiple candidate balance fields'
+        : 'Unicom response does not contain a recognized available-balance field',
+    );
   }
 
   const account = accounts.find((candidate) => accountMatches(candidate.value, expectedPhone));

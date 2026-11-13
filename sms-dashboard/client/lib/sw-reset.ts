@@ -27,7 +27,9 @@ export interface SwResetResult {
   cachesDeleted: number;
 }
 
-export async function resetServiceWorker(env: SwResetEnv | typeof globalThis = globalThis): Promise<SwResetResult> {
+export async function resetServiceWorker(
+  env: SwResetEnv | typeof globalThis = globalThis,
+): Promise<SwResetResult> {
   const { navigator, caches } = env;
   let ok = true;
   let unregistered = 0;
@@ -67,7 +69,10 @@ export async function resetServiceWorker(env: SwResetEnv | typeof globalThis = g
  * Clear both persistent message data (IndexedDB) and offline application caches.
  * The operations are independent so one failure never prevents the other cleanup.
  */
-export async function resetDashboardCache({ clearMessageCache, resetOfflineCache }: {
+export async function resetDashboardCache({
+  clearMessageCache,
+  resetOfflineCache,
+}: {
   clearMessageCache: () => Promise<unknown>;
   resetOfflineCache: () => Promise<SwResetResult>;
 }): Promise<SwResetResult> {
@@ -75,9 +80,10 @@ export async function resetDashboardCache({ clearMessageCache, resetOfflineCache
     clearMessageCache(),
     resetOfflineCache(),
   ]);
-  const offline = offlineResult.status === 'fulfilled'
-    ? offlineResult.value
-    : { ok: false, unregistered: 0, cachesDeleted: 0 };
+  const offline =
+    offlineResult.status === 'fulfilled'
+      ? offlineResult.value
+      : { ok: false, unregistered: 0, cachesDeleted: 0 };
 
   return {
     ...offline,

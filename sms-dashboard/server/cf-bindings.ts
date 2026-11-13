@@ -31,7 +31,9 @@ export interface KVNamespace {
 
 /** A Durable Object namespace, keyed by name. */
 export interface DurableObjectNamespace {
-  getByName(name: string): { fetch(input: string | Request, init?: RequestInit): Promise<Response> };
+  getByName(name: string): {
+    fetch(input: string | Request, init?: RequestInit): Promise<Response>;
+  };
 }
 
 /** Cloudflare's execution context, as passed to fetch and scheduled. */

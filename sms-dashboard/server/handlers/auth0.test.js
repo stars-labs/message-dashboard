@@ -115,7 +115,9 @@ describe('Auth0 login role token selection', () => {
       userInfo: { [claim]: ['admin'] },
       tokens: {},
       env,
-      verifyToken: async () => { throw new Error('must not run'); },
+      verifyToken: async () => {
+        throw new Error('must not run');
+      },
     });
     expect(roles).toEqual(['admin']);
   });
@@ -152,10 +154,12 @@ describe('Auth0 login role token selection', () => {
     const logs = [];
     console.error = (...args) => logs.push(args);
     const quotaError = new Error(
-      "D1_ERROR: Your account has exceeded D1's free tier daily row read limit."
+      "D1_ERROR: Your account has exceeded D1's free tier daily row read limit.",
     );
     const { request, waits, sessionWrites } = callbackRequest({
-      dbRun: async () => { throw quotaError; },
+      dbRun: async () => {
+        throw quotaError;
+      },
     });
 
     const response = await auth0Handler.callback(request);
@@ -172,7 +176,9 @@ describe('Auth0 login role token selection', () => {
     mockSuccessfulAuth({ email_verified: false });
     console.error = () => {};
     const { request, waits, sessionWrites } = callbackRequest({
-      dbRun: async () => { throw new Error("exceeded D1's free tier daily row read limit"); },
+      dbRun: async () => {
+        throw new Error("exceeded D1's free tier daily row read limit");
+      },
     });
 
     const response = await auth0Handler.callback(request);
@@ -187,7 +193,9 @@ describe('Auth0 login role token selection', () => {
     const logs = [];
     console.error = (...args) => logs.push(args);
     const { request } = callbackRequest({
-      sessionPut: async () => { throw new Error('sensitive KV provider detail'); },
+      sessionPut: async () => {
+        throw new Error('sensitive KV provider detail');
+      },
     });
 
     const response = await auth0Handler.callback(request);
@@ -217,7 +225,8 @@ describe('Auth0 login role token selection', () => {
   test('does not reflect an Auth0 callback error description', async () => {
     console.error = () => {};
     const { request } = callbackRequest();
-    request.url = 'https://sexy.itoken.world/callback?error=access_denied&error_description=sensitive-provider-detail';
+    request.url =
+      'https://sexy.itoken.world/callback?error=access_denied&error_description=sensitive-provider-detail';
 
     const response = await auth0Handler.callback(request);
     const body = await response.text();
@@ -273,13 +282,17 @@ describe('Auth0 login role reconciliation', () => {
   test('fails closed without changing roles when the Management API lookup fails', async () => {
     const assignments = [];
 
-    await expect(ensureDashboardLoginRole({
-      tokenRoles: [],
-      userId: 'auth0|admin',
-      env: roleEnv,
-      getUserRoles: async () => { throw new Error('management unavailable'); },
-      setUserRole: async (...args) => assignments.push(args),
-    })).rejects.toThrow('management unavailable');
+    await expect(
+      ensureDashboardLoginRole({
+        tokenRoles: [],
+        userId: 'auth0|admin',
+        env: roleEnv,
+        getUserRoles: async () => {
+          throw new Error('management unavailable');
+        },
+        setUserRole: async (...args) => assignments.push(args),
+      }),
+    ).rejects.toThrow('management unavailable');
 
     expect(assignments).toEqual([]);
   });

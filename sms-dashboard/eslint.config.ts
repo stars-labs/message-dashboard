@@ -23,7 +23,7 @@ const unusedVars: [
 export default defineConfig([
   // Whatever git ignores is not source: local worktrees, caches, builds.
   includeIgnoreFile(fileURLToPath(new URL('.gitignore', import.meta.url))),
-    globalIgnores([
+  globalIgnores([
     'docs/',
     'balance-agent/dist/',
     'balance-agent/release/',

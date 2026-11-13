@@ -58,7 +58,8 @@ describe('balance management', () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async (url) => {
       const value = String(url);
-      if (value.includes('/api/balance-runners')) return Response.json({ success: true, capabilities: {} });
+      if (value.includes('/api/balance-runners'))
+        return Response.json({ success: true, capabilities: {} });
       if (value.includes('/api/carrier-billing/accounts')) {
         return Response.json({ success: true, accounts: [] });
       }
@@ -66,22 +67,24 @@ describe('balance management', () => {
         return Response.json({
           success: true,
           today: '2026-09-10',
-          bills: [{
-            id: 'bill-1',
-            billing_account_id: 'account-1',
-            account_display_name: 'Singtel corporate',
-            account_ref_masked: '•••• 5678',
-            carrier: 'Singtel',
-            amount_minor: 4280,
-            currency: 'SGD',
-            due_date: '2026-09-14',
-            urgency: 'due_soon',
-            days_remaining: 4,
-            action_status: 'unpaid',
-            linked_sim_count: 1,
-            notification_sim: { iccid: 'notification-sim', sim_index: 79 },
-            version: 1,
-          }],
+          bills: [
+            {
+              id: 'bill-1',
+              billing_account_id: 'account-1',
+              account_display_name: 'Singtel corporate',
+              account_ref_masked: '•••• 5678',
+              carrier: 'Singtel',
+              amount_minor: 4280,
+              currency: 'SGD',
+              due_date: '2026-09-14',
+              urgency: 'due_soon',
+              days_remaining: 4,
+              action_status: 'unpaid',
+              linked_sim_count: 1,
+              notification_sim: { iccid: 'notification-sim', sim_index: 79 },
+              version: 1,
+            },
+          ],
         });
       }
       throw new Error(`Unexpected request: ${value}`);
@@ -108,8 +111,10 @@ describe('balance management', () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async (url) => {
       const value = String(url);
-      if (value.includes('/api/balance-runners')) return Response.json({ success: true, capabilities: {} });
-      if (value.includes('/api/carrier-billing/accounts')) return Response.json({ success: true, accounts: [] });
+      if (value.includes('/api/balance-runners'))
+        return Response.json({ success: true, capabilities: {} });
+      if (value.includes('/api/carrier-billing/accounts'))
+        return Response.json({ success: true, accounts: [] });
       if (value.endsWith('/api/carrier-bills/bill-1')) {
         return Response.json({
           success: true,
@@ -127,19 +132,37 @@ describe('balance management', () => {
             version: 1,
             linked_sims: [{ iccid: 'notification-sim', sim_index: 79 }],
             source_message: { content: 'retained bill source', sender: 'Singtel' },
-            events: [{ id: 'event-1', event_type: 'detected', actor_type: 'system', created_at: '2026-08-20' }],
+            events: [
+              {
+                id: 'event-1',
+                event_type: 'detected',
+                actor_type: 'system',
+                created_at: '2026-08-20',
+              },
+            ],
           },
         });
       }
       if (value.includes('/api/carrier-bills')) {
         return Response.json({
           success: true,
-          bills: [{
-            id: 'bill-1', account_ref_masked: '•••• 5678', account_display_name: 'Singtel corporate',
-            carrier: 'Singtel', amount_minor: 4280, currency: 'SGD', due_date: '2026-09-14',
-            urgency: 'due_soon', days_remaining: 4, action_status: 'unpaid', linked_sim_count: 1,
-            notification_sim: { sim_index: 79 }, version: 1,
-          }],
+          bills: [
+            {
+              id: 'bill-1',
+              account_ref_masked: '•••• 5678',
+              account_display_name: 'Singtel corporate',
+              carrier: 'Singtel',
+              amount_minor: 4280,
+              currency: 'SGD',
+              due_date: '2026-09-14',
+              urgency: 'due_soon',
+              days_remaining: 4,
+              action_status: 'unpaid',
+              linked_sim_count: 1,
+              notification_sim: { sim_index: 79 },
+              version: 1,
+            },
+          ],
         });
       }
       throw new Error(`Unexpected request: ${value}`);
@@ -149,7 +172,9 @@ describe('balance management', () => {
         props: { phoneNumbers: [phone], balanceChecks: [check], canWriteBills: true },
       });
       await fireEvent.click(adminView.getByRole('button', { name: '后付费账单' }));
-      await waitFor(() => expect(adminView.getAllByRole('button', { name: '查看账单' }).length).toBeGreaterThan(0));
+      await waitFor(() =>
+        expect(adminView.getAllByRole('button', { name: '查看账单' }).length).toBeGreaterThan(0),
+      );
       await fireEvent.click(adminView.getAllByRole('button', { name: '查看账单' })[0]);
       await waitFor(() => expect(adminView.getByText('retained bill source')).toBeTruthy());
       expect(adminView.getByRole('button', { name: '标记已付款' })).toBeTruthy();
@@ -159,7 +184,9 @@ describe('balance management', () => {
         props: { phoneNumbers: [phone], balanceChecks: [check], canWriteBills: false },
       });
       await fireEvent.click(viewerView.getByRole('button', { name: '后付费账单' }));
-      await waitFor(() => expect(viewerView.getAllByRole('button', { name: '查看账单' }).length).toBeGreaterThan(0));
+      await waitFor(() =>
+        expect(viewerView.getAllByRole('button', { name: '查看账单' }).length).toBeGreaterThan(0),
+      );
       await fireEvent.click(viewerView.getAllByRole('button', { name: '查看账单' })[0]);
       await waitFor(() => expect(viewerView.getByText('retained bill source')).toBeTruthy());
       expect(viewerView.queryByRole('button', { name: '标记已付款' })).toBeNull();
@@ -174,15 +201,18 @@ describe('balance management', () => {
     const unlinked = { ...phone, iccid: 'unlinked-sim', sim_index: 80, service_type: 'postpaid' };
     globalThis.fetch = async (url) => {
       const value = String(url);
-      if (value.includes('/api/balance-runners')) return Response.json({ success: true, capabilities: {} });
+      if (value.includes('/api/balance-runners'))
+        return Response.json({ success: true, capabilities: {} });
       if (value.includes('/api/carrier-billing/accounts')) {
         return Response.json({
           success: true,
-          accounts: [{
-            id: 'account-1',
-            account_ref_masked: '•••• 5678',
-            linked_sims: [{ iccid: 'linked-sim', sim_index: 79 }],
-          }],
+          accounts: [
+            {
+              id: 'account-1',
+              account_ref_masked: '•••• 5678',
+              linked_sims: [{ iccid: 'linked-sim', sim_index: 79 }],
+            },
+          ],
         });
       }
       throw new Error(`Unexpected request: ${value}`);
@@ -203,14 +233,17 @@ describe('balance management', () => {
     const linked = { ...phone, iccid: 'linked-sim', sim_index: 79, service_type: 'postpaid' };
     globalThis.fetch = async (url) => {
       const value = String(url);
-      if (value.includes('/api/balance-runners')) return Response.json({ success: true, capabilities: {} });
+      if (value.includes('/api/balance-runners'))
+        return Response.json({ success: true, capabilities: {} });
       if (value.includes('/api/carrier-billing/accounts')) {
         return Response.json({
           success: true,
-          accounts: [{
-            id: 'account-1',
-            linked_sims: [{ iccid: 'linked-sim', sim_index: 79 }],
-          }],
+          accounts: [
+            {
+              id: 'account-1',
+              linked_sims: [{ iccid: 'linked-sim', sim_index: 79 }],
+            },
+          ],
         });
       }
       throw new Error(`Unexpected request: ${value}`);
@@ -231,17 +264,20 @@ describe('balance management', () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async (url) => {
       expect(String(url)).toContain('/api/balance-runners');
-      return new Response(JSON.stringify({
-        success: true,
-        capabilities: {
-          sms_ai: { available: true, state: 'ready' },
-          carrier_browser: {
-            available: true,
-            state: 'busy',
-            detail_code: 'human_verification_required',
+      return new Response(
+        JSON.stringify({
+          success: true,
+          capabilities: {
+            sms_ai: { available: true, state: 'ready' },
+            carrier_browser: {
+              available: true,
+              state: 'busy',
+              detail_code: 'human_verification_required',
+            },
           },
-        },
-      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
     };
     try {
       const view = render(BalanceManagement, {
@@ -263,7 +299,9 @@ describe('balance management', () => {
       props: {
         phoneNumbers: [phone],
         balanceChecks: [check],
-        onOpenBalance: (value) => { opened = value; },
+        onOpenBalance: (value) => {
+          opened = value;
+        },
       },
     });
 
@@ -277,9 +315,7 @@ describe('balance management', () => {
   });
 
   test('shows balance and expiry risks at the same time', () => {
-    const expiringSoon = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000)
-      .toISOString()
-      .slice(0, 10);
+    const expiringSoon = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
     const atRisk = {
       ...check,
       metrics: [
@@ -309,16 +345,19 @@ describe('balance management', () => {
     };
     globalThis.fetch = async (url) => {
       const value = String(url);
-      if (value.includes('/api/balance-runners')) return Response.json({ success: true, capabilities: {} });
+      if (value.includes('/api/balance-runners'))
+        return Response.json({ success: true, capabilities: {} });
       if (value.includes('/api/carrier-billing/accounts')) {
         return Response.json({
           success: true,
-          accounts: [{
-            id: 'account-1',
-            payment_due_count: 1,
-            notification_sim: { iccid: postpaid.iccid, sim_index: 79 },
-            linked_sims: [{ iccid: postpaid.iccid, sim_index: 79 }],
-          }],
+          accounts: [
+            {
+              id: 'account-1',
+              payment_due_count: 1,
+              notification_sim: { iccid: postpaid.iccid, sim_index: 79 },
+              linked_sims: [{ iccid: postpaid.iccid, sim_index: 79 }],
+            },
+          ],
         });
       }
       throw new Error(`Unexpected request: ${value}`);
@@ -346,16 +385,19 @@ describe('balance management', () => {
     const postpaid = { ...phone, iccid: 'postpaid-sim', sim_index: 79, service_type: 'postpaid' };
     globalThis.fetch = async (url) => {
       const value = String(url);
-      if (value.includes('/api/balance-runners')) return Response.json({ success: true, capabilities: {} });
+      if (value.includes('/api/balance-runners'))
+        return Response.json({ success: true, capabilities: {} });
       if (value.includes('/api/carrier-billing/accounts')) {
         return Response.json({
           success: true,
-          accounts: [{
-            id: 'account-1',
-            payment_due_count: 1,
-            notification_sim: { iccid: postpaid.iccid, sim_index: 79 },
-            linked_sims: [{ iccid: postpaid.iccid, sim_index: 79 }],
-          }],
+          accounts: [
+            {
+              id: 'account-1',
+              payment_due_count: 1,
+              notification_sim: { iccid: postpaid.iccid, sim_index: 79 },
+              linked_sims: [{ iccid: postpaid.iccid, sim_index: 79 }],
+            },
+          ],
         });
       }
       if (value.includes('/api/carrier-bills/bill-1')) {
@@ -381,17 +423,19 @@ describe('balance management', () => {
       if (value.includes('/api/carrier-bills')) {
         return Response.json({
           success: true,
-          bills: [{
-            id: 'bill-1',
-            carrier: 'Singtel',
-            amount_minor: 7202,
-            currency: 'SGD',
-            due_date: '2026-09-07',
-            urgency: 'due_soon',
-            days_remaining: 7,
-            action_status: 'unpaid',
-            notification_sim: { iccid: postpaid.iccid, sim_index: 79 },
-          }],
+          bills: [
+            {
+              id: 'bill-1',
+              carrier: 'Singtel',
+              amount_minor: 7202,
+              currency: 'SGD',
+              due_date: '2026-09-07',
+              urgency: 'due_soon',
+              days_remaining: 7,
+              action_status: 'unpaid',
+              notification_sim: { iccid: postpaid.iccid, sim_index: 79 },
+            },
+          ],
         });
       }
       throw new Error(`Unexpected request: ${value}`);
@@ -503,8 +547,9 @@ describe('balance management', () => {
       });
       await fireEvent.click(view.getAllByRole('button', { name: '查询' })[0]);
       await waitFor(() => expect(view.getByText('查询助手未就绪')).toBeTruthy());
-      expect(view.getByRole('link', { name: '打开查询助手' }).getAttribute('href'))
-        .toBe('message-dashboard-runner://open');
+      expect(view.getByRole('link', { name: '打开查询助手' }).getAttribute('href')).toBe(
+        'message-dashboard-runner://open',
+      );
       expect(queued).toBe(0);
       await fireEvent.click(view.getByRole('button', { name: '仍然排队' }));
       await waitFor(() => expect(queued).toBe(1));
@@ -565,7 +610,14 @@ describe('balance management', () => {
         previewScope = JSON.parse(options.body).phone_iccids;
         return Response.json({
           success: true,
-          summary: { eligible: 6, cooldown: 0, offline: 0, unsupported: 0, unverified: 0, total: 6 },
+          summary: {
+            eligible: 6,
+            cooldown: 0,
+            offline: 0,
+            unsupported: 0,
+            unverified: 0,
+            total: 6,
+          },
           method_summary: { direct_sms: 1, sms_ai: 2, browser: 3 },
           runner_capabilities: {
             sms_ai: { available: true, state: 'ready' },
@@ -577,7 +629,10 @@ describe('balance management', () => {
         const body = JSON.parse(options.body);
         submittedMethods = body.methods;
         submittedScope = body.phone_iccids;
-        return Response.json({ success: true, summary: { queued: 6, failed_to_queue: 0 } }, { status: 202 });
+        return Response.json(
+          { success: true, summary: { queued: 6, failed_to_queue: 0 } },
+          { status: 202 },
+        );
       }
       throw new Error(`Unexpected request: ${value}`);
     };
@@ -586,7 +641,9 @@ describe('balance management', () => {
         props: { phoneNumbers: [phone], balanceChecks: [check], canQueryBalances: true },
       });
       await fireEvent.click(view.getByRole('button', { name: '批量查询' }));
-      await waitFor(() => expect(view.getByRole('button', { name: '确认查询 3 张卡' })).toBeTruthy());
+      await waitFor(() =>
+        expect(view.getByRole('button', { name: '确认查询 3 张卡' })).toBeTruthy(),
+      );
       const browser = view.getByRole('checkbox', { name: /浏览器登录/ });
       expect(browser.checked).toBe(false);
       await fireEvent.click(browser);
@@ -622,7 +679,14 @@ describe('balance management', () => {
         previewScope = JSON.parse(options.body).phone_iccids;
         return Response.json({
           success: true,
-          summary: { eligible: 1, cooldown: 0, offline: 0, unsupported: 0, unverified: 0, total: 1 },
+          summary: {
+            eligible: 1,
+            cooldown: 0,
+            offline: 0,
+            unsupported: 0,
+            unverified: 0,
+            total: 1,
+          },
           method_summary: { direct_sms: 0, sms_ai: 0, browser: 1 },
           runner_capabilities: { carrier_browser: { available: true, state: 'ready' } },
         });
@@ -665,7 +729,14 @@ describe('balance management', () => {
         previewScope = JSON.parse(options.body).phone_iccids;
         return Response.json({
           success: true,
-          summary: { eligible: 1, cooldown: 0, offline: 0, unsupported: 0, unverified: 0, total: 1 },
+          summary: {
+            eligible: 1,
+            cooldown: 0,
+            offline: 0,
+            unsupported: 0,
+            unverified: 0,
+            total: 1,
+          },
           method_summary: { direct_sms: 1, sms_ai: 0, browser: 0 },
           runner_capabilities: {},
         });
@@ -698,7 +769,9 @@ describe('balance management', () => {
 
     expect(view.container.querySelectorAll('[data-mobile-balance-row]')).toHaveLength(1);
     // One placeholder across every SIM search in the app.
-    expect(view.getByRole('searchbox', { name: '搜索 SIM' }).placeholder).toBe('卡号 / 号码 / 运营商 / ICCID');
+    expect(view.getByRole('searchbox', { name: '搜索 SIM' }).placeholder).toBe(
+      '卡号 / 号码 / 运营商 / ICCID',
+    );
     expect(view.getByRole('button', { name: '查询 S02 余额' })).toBeTruthy();
   });
 

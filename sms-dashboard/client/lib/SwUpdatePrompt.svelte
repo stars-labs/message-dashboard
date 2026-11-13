@@ -34,8 +34,8 @@
       // so a static import would break `vite dev` runs without it. Tests inject the
       // same registration contract without replacing browser globals.
       try {
-        const registerSW = registerServiceWorker
-          || (await import('virtual:pwa-register')).registerSW;
+        const registerSW =
+          registerServiceWorker || (await import('virtual:pwa-register')).registerSW;
         if (disposed) return;
         updateSW = registerSW({
           immediate: true,

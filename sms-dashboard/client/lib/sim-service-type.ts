@@ -3,7 +3,9 @@ export interface LabelledOption<T extends string> {
   label: string;
 }
 
-export const SIM_SERVICE_TYPES: LabelledOption<'unknown' | 'prepaid' | 'postpaid' | 'balance_managed'>[] = [
+export const SIM_SERVICE_TYPES: LabelledOption<
+  'unknown' | 'prepaid' | 'postpaid' | 'balance_managed'
+>[] = [
   { value: 'unknown', label: '待确认' },
   { value: 'prepaid', label: '预付费' },
   { value: 'postpaid', label: '后付费' },

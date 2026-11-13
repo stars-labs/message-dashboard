@@ -11,7 +11,10 @@ beforeEach(async () => {
     CREATE TABLE messages (id TEXT PRIMARY KEY);
     INSERT INTO sims VALUES ('notification-sim');
   `);
-  for (const name of ['066_add_carrier_billing.sql', '067_add_carrier_billing_account_events.sql']) {
+  for (const name of [
+    '066_add_carrier_billing.sql',
+    '067_add_carrier_billing_account_events.sql',
+  ]) {
     database.exec(await Bun.file(new URL(`./${name}`, import.meta.url)).text());
   }
   database.exec(`
@@ -28,40 +31,78 @@ beforeEach(async () => {
 
 describe('carrier billing account event migration', () => {
   test('adds optimistic account versions and mutation ownership', () => {
-    expect(database.query(`
+    expect(
+      database
+        .query(
+          `
       SELECT version, last_mutation_id FROM carrier_billing_accounts WHERE id = 'account-1'
-    `).get()).toEqual({ version: 1, last_mutation_id: null });
+    `,
+        )
+        .get(),
+    ).toEqual({ version: 1, last_mutation_id: null });
 
-    database.query(`
+    database
+      .query(
+        `
       UPDATE carrier_billing_accounts
       SET version = version + 1, last_mutation_id = 'mutation-1'
       WHERE id = 'account-1' AND version = 1
-    `).run();
-    expect(database.query(`
+    `,
+      )
+      .run();
+    expect(
+      database
+        .query(
+          `
       SELECT version, last_mutation_id FROM carrier_billing_accounts WHERE id = 'account-1'
-    `).get()).toEqual({ version: 2, last_mutation_id: 'mutation-1' });
+    `,
+        )
+        .get(),
+    ).toEqual({ version: 2, last_mutation_id: 'mutation-1' });
   });
 
   test('keeps account mutations append-only and user-idempotent', () => {
-    database.query(`
+    database
+      .query(
+        `
       INSERT INTO carrier_billing_account_events (
         id, billing_account_id, event_type, actor_subject,
         idempotency_key, metadata_json
       ) VALUES (?, 'account-1', 'members_changed', 'auth0|admin', ?, '{}')
-    `).run('event-1', 'members-account-1-v1');
+    `,
+      )
+      .run('event-1', 'members-account-1-v1');
 
-    expect(() => database.query(`
+    expect(() =>
+      database
+        .query(
+          `
       INSERT INTO carrier_billing_account_events (
         id, billing_account_id, event_type, actor_subject,
         idempotency_key, metadata_json
       ) VALUES (?, 'account-1', 'members_changed', 'auth0|admin', ?, '{}')
-    `).run('event-2', 'members-account-1-v1')).toThrow();
-    expect(() => database.query(`
+    `,
+        )
+        .run('event-2', 'members-account-1-v1'),
+    ).toThrow();
+    expect(() =>
+      database
+        .query(
+          `
       UPDATE carrier_billing_account_events SET metadata_json = '{"changed":true}'
       WHERE id = 'event-1'
-    `).run()).toThrow('immutable');
-    expect(() => database.query(`
+    `,
+        )
+        .run(),
+    ).toThrow('immutable');
+    expect(() =>
+      database
+        .query(
+          `
       DELETE FROM carrier_billing_account_events WHERE id = 'event-1'
-    `).run()).toThrow('immutable');
+    `,
+        )
+        .run(),
+    ).toThrow('immutable');
   });
 });

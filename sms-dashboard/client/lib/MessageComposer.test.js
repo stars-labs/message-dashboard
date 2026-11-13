@@ -46,8 +46,9 @@ describe('MessageComposer mobile route', () => {
     const page = container.querySelector('[data-mobile-composer]');
     const recipient = page.querySelector('#mobile-recipient-number');
     const content = page.querySelector('#mobile-message-content');
-    const sendButton = [...page.querySelectorAll('button')]
-      .find((button) => button.textContent.trim() === '发送短信');
+    const sendButton = [...page.querySelectorAll('button')].find(
+      (button) => button.textContent.trim() === '发送短信',
+    );
 
     await fireEvent.input(recipient, { target: { value: '81234567' } });
     await fireEvent.input(content, { target: { value: 'retry this message' } });
@@ -75,7 +76,9 @@ describe('MessageComposer mobile route', () => {
         mobilePage: true,
         selectedPhone: phone,
         phoneNumbers: [phone],
-        onmessagesent: async (message) => { submitted = message; },
+        onmessagesent: async (message) => {
+          submitted = message;
+        },
       },
     });
 
@@ -83,8 +86,9 @@ describe('MessageComposer mobile route', () => {
     const page = view.container.querySelector('[data-mobile-composer]');
     const countrySelector = page.querySelector('.country-code-container > button');
     await fireEvent.click(countrySelector);
-    const noCountryCode = [...page.querySelectorAll('.country-code-container button')]
-      .find((button) => button.textContent.includes('不加区号'));
+    const noCountryCode = [...page.querySelectorAll('.country-code-container button')].find(
+      (button) => button.textContent.includes('不加区号'),
+    );
     await fireEvent.click(noCountryCode);
     await fireEvent.input(page.querySelector('#mobile-recipient-number'), {
       target: { value: '10010' },
@@ -92,8 +96,11 @@ describe('MessageComposer mobile route', () => {
     await fireEvent.input(page.querySelector('#mobile-message-content'), {
       target: { value: 'YE' },
     });
-    await fireEvent.click([...page.querySelectorAll('button')]
-      .find((button) => button.textContent.trim() === '发送短信'));
+    await fireEvent.click(
+      [...page.querySelectorAll('button')].find(
+        (button) => button.textContent.trim() === '发送短信',
+      ),
+    );
 
     await waitFor(() => expect(submitted?.recipient).toBe('10010'));
     cleanup();

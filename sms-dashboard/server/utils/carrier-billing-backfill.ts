@@ -94,10 +94,15 @@ async function sha256(value: string): Promise<string> {
 async function dispositionFor(
   db: D1Database,
   accountId: string,
-  candidate: Pick<BackfillCandidate, 'source_message_ids' | 'due_date' | 'amount_minor' | 'currency'>,
+  candidate: Pick<
+    BackfillCandidate,
+    'source_message_ids' | 'due_date' | 'amount_minor' | 'currency'
+  >,
 ): Promise<BackfillDisposition> {
   const placeholders = candidate.source_message_ids.map(() => '?').join(', ');
-  const processed = await db.prepare(`
+  const processed = await db
+    .prepare(
+      `
     SELECT id AS bill_id
     FROM carrier_bills
     WHERE source_message_id IN (${placeholders})
@@ -106,17 +111,22 @@ async function dispositionFor(
     FROM carrier_bill_events
     WHERE source_message_id IN (${placeholders})
     LIMIT 1
-  `).bind(
-    ...candidate.source_message_ids,
-    ...candidate.source_message_ids,
-  ).first();
+  `,
+    )
+    .bind(...candidate.source_message_ids, ...candidate.source_message_ids)
+    .first();
   if (processed) return 'already_processed';
 
-  const cycle = await db.prepare(`
+  const cycle = await db
+    .prepare(
+      `
     SELECT amount_minor, currency
     FROM carrier_bills
     WHERE billing_account_id = ? AND due_date = ?
-  `).bind(accountId, candidate.due_date).first<{ amount_minor: number; currency: string }>();
+  `,
+    )
+    .bind(accountId, candidate.due_date)
+    .first<{ amount_minor: number; currency: string }>();
   if (!cycle) return 'new';
   return cycle.amount_minor === candidate.amount_minor && cycle.currency === candidate.currency
     ? 'duplicate'
@@ -127,7 +137,9 @@ export async function previewCarrierBillBackfill(
   db: D1Database,
   accountId: string,
 ): Promise<BackfillPreview> {
-  const account = await db.prepare(`
+  const account = await db
+    .prepare(
+      `
     SELECT
       a.id, a.display_name, a.account_ref_digest, a.account_ref_last4,
       a.notification_sim_iccid, a.status, a.version,
@@ -148,12 +160,19 @@ export async function previewCarrierBillBackfill(
           AND s.sim_iccid = a.notification_sim_iccid
           AND s.removed_at IS NULL
       )
-  `).bind(accountId).first<BillableAccount>();
+  `,
+    )
+    .bind(accountId)
+    .first<BillableAccount>();
   if (!account) {
-    throw new AccountNotReadyError('Billing account must be active with a verified notification SIM');
+    throw new AccountNotReadyError(
+      'Billing account must be active with a verified notification SIM',
+    );
   }
 
-  const query = await db.prepare(`
+  const query = await db
+    .prepare(
+      `
     SELECT id, phone_iccid, phone_number, content, timestamp, type
     FROM messages
     WHERE phone_iccid = ?
@@ -161,11 +180,10 @@ export async function previewCarrierBillBackfill(
       AND type = 'received'
       AND (instr(content, ?) = 1 OR trim(content) = ?)
     ORDER BY timestamp, id
-  `).bind(
-    account.notification_sim_iccid,
-    BILL_PREFIX,
-    BILL_FRAGMENT_SUFFIX,
-  ).all<ScanMessage>();
+  `,
+    )
+    .bind(account.notification_sim_iccid, BILL_PREFIX, BILL_FRAGMENT_SUFFIX)
+    .all<ScanMessage>();
   const messages = query.results;
   const used = new Set<string>();
   const candidates: Array<Omit<BackfillCandidate, 'disposition'>> = [];
@@ -249,11 +267,13 @@ export async function previewCarrierBillBackfill(
   const summary: BackfillSummary = {
     candidates: resolved.length,
     complete_messages: resolved.filter((candidate) => candidate.source_kind === 'complete').length,
-    reassembled_messages: resolved.filter((candidate) => candidate.source_kind === 'reassembled').length,
+    reassembled_messages: resolved.filter((candidate) => candidate.source_kind === 'reassembled')
+      .length,
     new_bills: resolved.filter((candidate) => candidate.disposition === 'new').length,
     duplicates: resolved.filter((candidate) => candidate.disposition === 'duplicate').length,
     conflicts: resolved.filter((candidate) => candidate.disposition === 'conflict').length,
-    already_processed: resolved.filter((candidate) => candidate.disposition === 'already_processed').length,
+    already_processed: resolved.filter((candidate) => candidate.disposition === 'already_processed')
+      .length,
   };
 
   return {
@@ -269,10 +289,12 @@ export async function previewCarrierBillBackfill(
     },
     summary,
     candidates: resolved,
-    preview_digest: await sha256(JSON.stringify({
-      account_id: accountId,
-      account_version: account.version,
-      candidates: digestEvidence,
-    })),
+    preview_digest: await sha256(
+      JSON.stringify({
+        account_id: accountId,
+        account_version: account.version,
+        candidates: digestEvidence,
+      }),
+    ),
   };
 }

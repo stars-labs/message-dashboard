@@ -2,12 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import {
-  defaultConfigPath,
-  defaultRunLockPath,
-  runCli,
-  selectedCapabilities,
-} from './cli.js';
+import { defaultConfigPath, defaultRunLockPath, runCli, selectedCapabilities } from './cli.js';
 import { createSettingsStore } from './settings-store.js';
 
 let directory;
@@ -20,12 +15,16 @@ function memorySecureStore(initial = {}) {
   const values = { ...initial };
   return {
     values,
-    async get(key) { return values[key] || null; },
+    async get(key) {
+      return values[key] || null;
+    },
     async set(key, value) {
       if (value == null) delete values[key];
       else values[key] = value;
     },
-    async promptSet(key) { values[key] = 'prompted-secret'; },
+    async promptSet(key) {
+      values[key] = 'prompted-secret';
+    },
   };
 }
 
@@ -45,14 +44,18 @@ async function harness(initialCredentials = {}) {
 
 describe('Balance Agent CLI', () => {
   test('honors XDG config and state homes with standard fallbacks', () => {
-    expect(defaultConfigPath({ xdgConfigHome: '/xdg/config', home: '/home/test' }))
-      .toBe('/xdg/config/message-dashboard/balance-agent.json');
-    expect(defaultConfigPath({ xdgConfigHome: '', home: '/home/test' }))
-      .toBe('/home/test/.config/message-dashboard/balance-agent.json');
-    expect(defaultRunLockPath({ xdgStateHome: '/xdg/state', home: '/home/test' }))
-      .toBe('/xdg/state/message-dashboard/balance-agent-cli.lock');
-    expect(defaultRunLockPath({ xdgStateHome: '', home: '/home/test' }))
-      .toBe('/home/test/.local/state/message-dashboard/balance-agent-cli.lock');
+    expect(defaultConfigPath({ xdgConfigHome: '/xdg/config', home: '/home/test' })).toBe(
+      '/xdg/config/message-dashboard/balance-agent.json',
+    );
+    expect(defaultConfigPath({ xdgConfigHome: '', home: '/home/test' })).toBe(
+      '/home/test/.config/message-dashboard/balance-agent.json',
+    );
+    expect(defaultRunLockPath({ xdgStateHome: '/xdg/state', home: '/home/test' })).toBe(
+      '/xdg/state/message-dashboard/balance-agent-cli.lock',
+    );
+    expect(defaultRunLockPath({ xdgStateHome: '', home: '/home/test' })).toBe(
+      '/home/test/.local/state/message-dashboard/balance-agent-cli.lock',
+    );
   });
 
   test('validates capability names', () => {
@@ -64,20 +67,29 @@ describe('Balance Agent CLI', () => {
 
   test('saves non-secret configuration and reports local status', async () => {
     const context = await harness({ auth0RefreshToken: 'refresh', aiToken: 'secret' });
-    const configured = await runCli([
-      'configure',
-      '--dashboard-url', 'https://dashboard.example',
-      '--auth0-issuer', 'https://tenant.example',
-      '--auth0-client-id', 'native-client',
-      '--auth0-audience', 'dashboard-api',
-      '--ai-base-url', 'https://ai.example',
-      '--ai-model', 'company-model',
-    ], {
-      settingsStore: context.settingsStore,
-      secureStore: context.secureStore,
-      output: context.write,
-      error: context.writeError,
-    });
+    const configured = await runCli(
+      [
+        'configure',
+        '--dashboard-url',
+        'https://dashboard.example',
+        '--auth0-issuer',
+        'https://tenant.example',
+        '--auth0-client-id',
+        'native-client',
+        '--auth0-audience',
+        'dashboard-api',
+        '--ai-base-url',
+        'https://ai.example',
+        '--ai-model',
+        'company-model',
+      ],
+      {
+        settingsStore: context.settingsStore,
+        secureStore: context.secureStore,
+        output: context.write,
+        error: context.writeError,
+      },
+    );
     expect(configured).toBe(0);
 
     const status = await runCli(['status'], {
@@ -94,20 +106,24 @@ describe('Balance Agent CLI', () => {
 
   test('stores and clears the AI token only through the secure store', async () => {
     const context = await harness();
-    expect(await runCli(['credentials', 'set-ai-token'], {
-      secureStore: context.secureStore,
-      settingsStore: context.settingsStore,
-      output: context.write,
-      error: context.writeError,
-    })).toBe(0);
+    expect(
+      await runCli(['credentials', 'set-ai-token'], {
+        secureStore: context.secureStore,
+        settingsStore: context.settingsStore,
+        output: context.write,
+        error: context.writeError,
+      }),
+    ).toBe(0);
     expect(context.secureStore.values.aiToken).toBe('prompted-secret');
 
-    expect(await runCli(['credentials', 'clear-ai-token'], {
-      secureStore: context.secureStore,
-      settingsStore: context.settingsStore,
-      output: context.write,
-      error: context.writeError,
-    })).toBe(0);
+    expect(
+      await runCli(['credentials', 'clear-ai-token'], {
+        secureStore: context.secureStore,
+        settingsStore: context.settingsStore,
+        output: context.write,
+        error: context.writeError,
+      }),
+    ).toBe(0);
     expect(context.secureStore.values.aiToken).toBeUndefined();
   });
 
@@ -143,16 +159,24 @@ describe('Balance Agent CLI', () => {
       secureStore: context.secureStore,
       output: context.write,
       error: context.writeError,
-      acquireLock: async () => async () => { events.push('unlock'); },
+      acquireLock: async () => async () => {
+        events.push('unlock');
+      },
       createService: (options) => {
         serviceOptions = options;
         return {
-          async initialize() { events.push('initialize'); },
+          async initialize() {
+            events.push('initialize');
+          },
           async snapshot() {
             return { auth: 'signed_in', smsAi: 'ready', browser: 'stopped' };
           },
-          async wait() { events.push('wait'); },
-          async shutdown() { events.push('shutdown'); },
+          async wait() {
+            events.push('wait');
+          },
+          async shutdown() {
+            events.push('shutdown');
+          },
         };
       },
     });

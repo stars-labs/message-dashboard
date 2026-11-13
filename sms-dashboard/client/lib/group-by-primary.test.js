@@ -17,9 +17,9 @@ test('all standalone: order unchanged, all depth 0', () => {
 test('one primary two secondaries: secondaries follow primary, depth 1', () => {
   const items = [
     sim({ iccid: 'S1', sim_index: 2, sim_role: 'secondary', primary_iccid: 'P' }),
-    sim({ iccid: 'P',  sim_index: 1, sim_role: 'primary' }),
+    sim({ iccid: 'P', sim_index: 1, sim_role: 'primary' }),
     sim({ iccid: 'S2', sim_index: 3, sim_role: 'secondary', primary_iccid: 'P' }),
-    sim({ iccid: 'X',  sim_index: 4 }),
+    sim({ iccid: 'X', sim_index: 4 }),
   ];
   const out = groupByPrimary(items);
   expect(out.map((r) => r.iccid)).toEqual(['P', 'S1', 'S2', 'X']);
@@ -43,7 +43,10 @@ test('orphan secondary (primary not in set) renders at depth 0', () => {
 test('balance-page shape: resolve through row.phone, preserve row payload', () => {
   const rows = [
     { phone: sim({ iccid: 'P', sim_index: 1, sim_role: 'primary' }), checks: [] },
-    { phone: sim({ iccid: 'S', sim_index: 2, sim_role: 'secondary', primary_iccid: 'P' }), checks: [{ id: 9 }] },
+    {
+      phone: sim({ iccid: 'S', sim_index: 2, sim_role: 'secondary', primary_iccid: 'P' }),
+      checks: [{ id: 9 }],
+    },
   ];
   const out = groupByPrimary(rows, (row) => row.phone);
   expect(out.map((r) => r.phone.iccid)).toEqual(['P', 'S']);

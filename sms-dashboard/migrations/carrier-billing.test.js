@@ -27,14 +27,18 @@ beforeEach(async () => {
     new URL('./066_add_carrier_billing.sql', import.meta.url),
   ).text();
   database.exec(migration);
-  database.query(`
+  database
+    .query(
+      `
     INSERT INTO carrier_billing_accounts (
       id, country_code, carrier, currency, display_name,
       notification_sim_iccid, account_ref_digest, account_ref_last4,
       status, created_by
     ) VALUES (?, 'SG', 'Singtel', 'SGD', 'Singtel corporate account',
       'notification-sim', ?, '5678', 'active', 'auth0|admin')
-  `).run('account-1', 'a'.repeat(64));
+  `,
+    )
+    .run('account-1', 'a'.repeat(64));
   const streamMigration = await Bun.file(
     new URL('./069_unique_active_billing_stream_per_sim.sql', import.meta.url),
   ).text();
@@ -51,13 +55,9 @@ describe('carrier billing migration', () => {
       ) VALUES (?, 'SG', 'Singtel', 'SGD', ?, 'notification-sim', ?, ?, ?, 'system:sms')
     `);
 
-    expect(() => insert.run(
-      'account-2',
-      'Duplicate active stream',
-      'b'.repeat(64),
-      '4321',
-      'active',
-    )).toThrow();
+    expect(() =>
+      insert.run('account-2', 'Duplicate active stream', 'b'.repeat(64), '4321', 'active'),
+    ).toThrow();
     insert.run('account-3', 'Inactive history', 'c'.repeat(64), '8765', 'inactive');
   });
 
@@ -71,10 +71,16 @@ describe('carrier billing migration', () => {
     `);
 
     insert.run('bill-1', 4280, '2026-09-14');
-    expect(database.query(`
+    expect(
+      database
+        .query(
+          `
       SELECT amount_minor, typeof(amount_minor) AS amount_type, due_date
       FROM carrier_bills WHERE id = 'bill-1'
-    `).get()).toEqual({
+    `,
+        )
+        .get(),
+    ).toEqual({
       amount_minor: 4280,
       amount_type: 'integer',
       due_date: '2026-09-14',
@@ -92,62 +98,98 @@ describe('carrier billing migration', () => {
       ) VALUES (?, ?, 'contract_or_bill', '2026-08-24T00:00:00Z', 'auth0|admin')
     `);
     insert.run('account-1', 'linked-sim');
-    expect(database.query(`
+    expect(
+      database
+        .query(
+          `
       SELECT sim_iccid, verification_source, removed_at
       FROM carrier_billing_account_sims
-    `).get()).toEqual({
+    `,
+        )
+        .get(),
+    ).toEqual({
       sim_iccid: 'linked-sim',
       verification_source: 'contract_or_bill',
       removed_at: null,
     });
     expect(() => insert.run('account-1', 'unknown-sim')).toThrow();
 
-    database.query(`
+    database
+      .query(
+        `
       INSERT INTO carrier_billing_accounts (
         id, country_code, carrier, currency, display_name,
         notification_sim_iccid, account_ref_digest, account_ref_last4,
         status, created_by
       ) VALUES ('account-2', 'SG', 'Singtel', 'SGD', 'Second account',
         'other-sim', ?, '4321', 'active', 'auth0|admin')
-    `).run('b'.repeat(64));
+    `,
+      )
+      .run('b'.repeat(64));
     expect(() => insert.run('account-2', 'linked-sim')).toThrow();
 
-    database.query(`
+    database
+      .query(
+        `
       UPDATE carrier_billing_account_sims
       SET removed_at = '2026-08-25T00:00:00Z'
       WHERE billing_account_id = 'account-1' AND sim_iccid = 'linked-sim'
-    `).run();
+    `,
+      )
+      .run();
     insert.run('account-2', 'linked-sim');
   });
 
   test('keeps evidence immutable and rejects duplicate bills', () => {
-    database.query(`
+    database
+      .query(
+        `
       INSERT INTO carrier_bills (
         id, billing_account_id, source_message_id, amount_minor, currency,
         due_date, received_at, parser_version
       ) VALUES ('bill-1', 'account-1', 'message-1', 4280, 'SGD',
         '2026-09-14', '2026-08-24T00:00:00Z',
         'sg-singtel-postpaid-bill-sms-v1')
-    `).run();
+    `,
+      )
+      .run();
 
-    expect(() => database.query(`
+    expect(() =>
+      database
+        .query(
+          `
       UPDATE carrier_bills SET amount_minor = 9999 WHERE id = 'bill-1'
-    `).run()).toThrow('immutable');
-    expect(() => database.query(`
+    `,
+        )
+        .run(),
+    ).toThrow('immutable');
+    expect(() =>
+      database
+        .query(
+          `
       INSERT INTO carrier_bills (
         id, billing_account_id, amount_minor, currency, due_date,
         received_at, parser_version
       ) VALUES ('duplicate-cycle', 'account-1', 4280, 'SGD', '2026-09-14',
         '2026-08-24T00:00:01Z', 'sg-singtel-postpaid-bill-sms-v1')
-    `).run()).toThrow();
-    expect(() => database.query(`
+    `,
+        )
+        .run(),
+    ).toThrow();
+    expect(() =>
+      database
+        .query(
+          `
       INSERT INTO carrier_bills (
         id, billing_account_id, source_message_id, amount_minor, currency,
         due_date, received_at, parser_version
       ) VALUES ('duplicate-source', 'account-1', 'message-1', 4280, 'SGD',
         '2026-10-14', '2026-08-24T00:00:01Z',
         'sg-singtel-postpaid-bill-sms-v1')
-    `).run()).toThrow();
+    `,
+        )
+        .run(),
+    ).toThrow();
   });
 
   test('preserves normalized history when retained source messages are deleted', () => {
@@ -166,12 +208,24 @@ describe('carrier billing migration', () => {
       DELETE FROM messages WHERE id = 'message-1';
     `);
 
-    expect(database.query(`
+    expect(
+      database
+        .query(
+          `
       SELECT source_message_id FROM carrier_bills WHERE id = 'bill-1'
-    `).get()).toEqual({ source_message_id: null });
-    expect(database.query(`
+    `,
+        )
+        .get(),
+    ).toEqual({ source_message_id: null });
+    expect(
+      database
+        .query(
+          `
       SELECT source_message_id FROM carrier_bill_events WHERE id = 'event-1'
-    `).get()).toEqual({ source_message_id: null });
+    `,
+        )
+        .get(),
+    ).toEqual({ source_message_id: null });
     expect(database.query('PRAGMA foreign_key_check').all()).toEqual([]);
   });
 
@@ -187,12 +241,24 @@ describe('carrier billing migration', () => {
       ) VALUES ('event-1', 'bill-1', 'paid', 'user', '{}');
     `);
 
-    expect(() => database.query(`
+    expect(() =>
+      database
+        .query(
+          `
       UPDATE carrier_bill_events SET metadata_json = '{"changed":true}'
       WHERE id = 'event-1'
-    `).run()).toThrow('immutable');
-    expect(() => database.query(`
+    `,
+        )
+        .run(),
+    ).toThrow('immutable');
+    expect(() =>
+      database
+        .query(
+          `
       DELETE FROM carrier_bill_events WHERE id = 'event-1'
-    `).run()).toThrow('immutable');
+    `,
+        )
+        .run(),
+    ).toThrow('immutable');
   });
 });

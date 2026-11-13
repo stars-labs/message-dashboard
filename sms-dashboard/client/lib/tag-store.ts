@@ -43,7 +43,7 @@ const _messageTags = writable<Map<string, MessageTagList>>(new Map());
 const _keywords = writable<KeywordTagRow[]>([]);
 const _loadingStates = writable({
   keywords: false,
-  tags: false
+  tags: false,
 });
 
 // Public readonly stores
@@ -54,7 +54,7 @@ export const isLoading = { subscribe: _loadingStates.subscribe };
 // Derived computed values
 export const tagStats = derived(_messageTags, ($messageTags) => {
   const totalMessages = $messageTags.size;
-  const taggedMessages = Array.from($messageTags.values()).filter(tags => tags.length > 0).length;
+  const taggedMessages = Array.from($messageTags.values()).filter((tags) => tags.length > 0).length;
   return { totalMessages, taggedMessages };
 });
 
@@ -67,15 +67,15 @@ class TagService {
   async loadKeywords(): Promise<KeywordTagRow[]> {
     const current = get(_loadingStates);
     if (current.keywords) return []; // Prevent concurrent loads
-    
-    _loadingStates.update(state => ({ ...state, keywords: true }));
-    
+
+    _loadingStates.update((state) => ({ ...state, keywords: true }));
+
     try {
       const response = await api.get('/api/keywords');
       const activeKeywords = ((response.keywords || []) as KeywordTagRow[])
-        .filter(k => k.is_active)
+        .filter((k) => k.is_active)
         .sort((a, b) => (b.priority || 0) - (a.priority || 0));
-      
+
       _keywords.set(activeKeywords);
       return activeKeywords;
     } catch (error) {
@@ -83,27 +83,29 @@ class TagService {
       _keywords.set([]);
       return [];
     } finally {
-      _loadingStates.update(state => ({ ...state, keywords: false }));
+      _loadingStates.update((state) => ({ ...state, keywords: false }));
     }
   }
 
   // Batch tag loading with deduplication
   async batchLoadTags(messageIds: string[]): Promise<void> {
     if (!messageIds || messageIds.length === 0) return;
-    
+
     const current = get(_loadingStates);
     if (current.tags) return; // Prevent concurrent batch loads
-    
-    _loadingStates.update(state => ({ ...state, tags: true }));
-    
+
+    _loadingStates.update((state) => ({ ...state, tags: true }));
+
     try {
       const response = await api.post('/api/messages/batch-tags', { messageIds });
-      
+
       if (response.success && response.data) {
         // Atomic update - all or nothing
-        _messageTags.update(currentMap => {
+        _messageTags.update((currentMap) => {
           const newMap = new Map(currentMap);
-          for (const [messageId, tags] of Object.entries(response.data as Record<string, MessageTagList>)) {
+          for (const [messageId, tags] of Object.entries(
+            response.data as Record<string, MessageTagList>,
+          )) {
             newMap.set(messageId, tags);
           }
           return newMap;
@@ -113,25 +115,30 @@ class TagService {
       console.error('[TagService] Failed to batch load tags:', error);
       throw error; // Let caller handle fallback
     } finally {
-      _loadingStates.update(state => ({ ...state, tags: false }));
+      _loadingStates.update((state) => ({ ...state, tags: false }));
     }
   }
 
   // Client-side tag extraction (fallback)
-  extractClientTags(messageId: string, content: string | null | undefined, keywordList: KeywordTagRow[]): MessageTagList {
+  extractClientTags(
+    messageId: string,
+    content: string | null | undefined,
+    keywordList: KeywordTagRow[],
+  ): MessageTagList {
     if (!content || !keywordList.length) return [];
-    
+
     const extractedTags = this._performKeywordMatching(content, keywordList);
-    
+
     // Update store atomically
-    _messageTags.update(currentMap => {
+    _messageTags.update((currentMap) => {
       const newMap = new Map(currentMap);
-      if (!newMap.has(messageId)) { // Only set if not already present
+      if (!newMap.has(messageId)) {
+        // Only set if not already present
         newMap.set(messageId, extractedTags);
       }
       return newMap;
     });
-    
+
     return extractedTags;
   }
 
@@ -157,7 +164,7 @@ class TagService {
           uniqueTags.set(keyword.tag, {
             tag: keyword.tag,
             color: keyword.color || '#3B82F6',
-            count: 1
+            count: 1,
           });
         } else {
           const existing = uniqueTags.get(keyword.tag);
@@ -165,7 +172,7 @@ class TagService {
         }
       }
     }
-    
+
     return Array.from(uniqueTags.values());
   }
 
@@ -174,10 +181,10 @@ class TagService {
     // Moved here for single responsibility
     const matches: TagMatch[] = [];
     if (!text || !keyword.keyword) return matches;
-    
+
     let searchText = keyword.case_sensitive ? text : text.toLowerCase();
     let searchKeyword = keyword.case_sensitive ? keyword.keyword : keyword.keyword.toLowerCase();
-    
+
     if (keyword.whole_word) {
       const wordBoundary = `\\b${this._escapeRegex(searchKeyword)}\\b`;
       const regex = new RegExp(wordBoundary, keyword.case_sensitive ? 'g' : 'gi');
@@ -190,12 +197,12 @@ class TagService {
       while ((position = searchText.indexOf(searchKeyword, position)) !== -1) {
         matches.push({
           text: text.substr(position, keyword.keyword.length),
-          position: position
+          position: position,
         });
         position += keyword.keyword.length;
       }
     }
-    
+
     return matches;
   }
 
@@ -211,7 +218,11 @@ export const tagService = new TagService();
 export const tagActions = {
   loadKeywords: () => tagService.loadKeywords(),
   batchLoadTags: (messageIds: string[]) => tagService.batchLoadTags(messageIds),
-  extractClientTags: (messageId: string, content: string | null | undefined, keywordList: KeywordTagRow[]) => tagService.extractClientTags(messageId, content, keywordList),
+  extractClientTags: (
+    messageId: string,
+    content: string | null | undefined,
+    keywordList: KeywordTagRow[],
+  ) => tagService.extractClientTags(messageId, content, keywordList),
   getMessageTags: (messageId: string) => tagService.getMessageTags(messageId),
-  clearCache: () => tagService.clearTagCache()
+  clearCache: () => tagService.clearTagCache(),
 };

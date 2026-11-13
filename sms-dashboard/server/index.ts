@@ -9,10 +9,7 @@ import { messagesHandler } from './handlers/messages';
 import { iccidMappingsHandler } from './handlers/iccid-mappings';
 import { healthHandler } from './handlers/health';
 import { usersHandler } from './handlers/users';
-import {
-  balanceQueriesHandler,
-  expireStaleBalanceChecks,
-} from './handlers/balance-queries.js';
+import { balanceQueriesHandler, expireStaleBalanceChecks } from './handlers/balance-queries.js';
 import { balanceSkillRunnerHandler } from './handlers/balance-skill-runner.js';
 import {
   maintainWebBalanceJobs,
@@ -94,13 +91,12 @@ class SimpleRouter {
 
     for (const route of routes) {
       if (route.path === '*' || route.path === pathname || this.matchPath(route.path, pathname)) {
-        
         // Extract route parameters if any
         if (route.path.includes(':')) {
           const params: Record<string, string> = {};
           const patternParts = route.path.split('/');
           const pathParts = pathname.split('/');
-          
+
           for (let i = 0; i < patternParts.length; i++) {
             if (patternParts[i].startsWith(':')) {
               const paramName = patternParts[i].substring(1);
@@ -116,11 +112,11 @@ class SimpleRouter {
               }
             }
           }
-          
+
           // Add params to request
           request.params = params;
         }
-        
+
         // Execute handlers in sequence
         let response: Response | null | undefined;
         for (const handler of route.handlers) {
@@ -149,11 +145,11 @@ class SimpleRouter {
     if (pattern.includes(':')) {
       const patternParts = pattern.split('/');
       const pathParts = pathname.split('/');
-      
+
       if (patternParts.length !== pathParts.length) {
         return false;
       }
-      
+
       for (let i = 0; i < patternParts.length; i++) {
         if (patternParts[i].startsWith(':')) {
           // This is a parameter, any value matches
@@ -163,7 +159,7 @@ class SimpleRouter {
           return false;
         }
       }
-      
+
       return true;
     }
 
@@ -184,7 +180,7 @@ router.get('/api/daemon/status', (request) => healthHandler.daemonStatus(request
 // icons) are redirected to the real PNG. This used to return an empty 204, which is
 // why the dashboard had no icon at all.
 router.get('/favicon.ico', (request) =>
-  Response.redirect(new URL('/favicon-32.png', request.url).toString(), 301)
+  Response.redirect(new URL('/favicon-32.png', request.url).toString(), 301),
 );
 
 // Auth routes
@@ -470,7 +466,7 @@ router.post('/api/control/messages', async (request) => {
     // Control messages error
     return new Response(JSON.stringify({ error: errorText(error) }), {
       status: 500,
-      headers: { 'Content-Type': 'application/json' }
+      headers: { 'Content-Type': 'application/json' },
     });
   }
 });
@@ -484,7 +480,7 @@ router.post('/api/control/devices', async (request) => {
     // Control devices error
     return new Response(JSON.stringify({ error: errorText(error) }), {
       status: 500,
-      headers: { 'Content-Type': 'application/json' }
+      headers: { 'Content-Type': 'application/json' },
     });
   }
 });
@@ -496,7 +492,7 @@ router.delete('/api/control/messages', async (request) => {
   } catch (error) {
     return new Response(JSON.stringify({ error: errorText(error) }), {
       status: 500,
-      headers: { 'Content-Type': 'application/json' }
+      headers: { 'Content-Type': 'application/json' },
     });
   }
 });
@@ -509,7 +505,7 @@ router.post('/api/control/cleanup-test-data', async (request) => {
     // Cleanup error
     return new Response(JSON.stringify({ error: errorText(error) }), {
       status: 500,
-      headers: { 'Content-Type': 'application/json' }
+      headers: { 'Content-Type': 'application/json' },
     });
   }
 });
@@ -522,7 +518,7 @@ router.get('/api/control/pending-sms', async (request) => {
     // Pending SMS error
     return new Response(JSON.stringify({ error: errorText(error) }), {
       status: 500,
-      headers: { 'Content-Type': 'application/json' }
+      headers: { 'Content-Type': 'application/json' },
     });
   }
 });
@@ -535,7 +531,7 @@ router.post('/api/control/sms-result', async (request) => {
     // SMS result error
     return new Response(JSON.stringify({ error: errorText(error) }), {
       status: 500,
-      headers: { 'Content-Type': 'application/json' }
+      headers: { 'Content-Type': 'application/json' },
     });
   }
 });
@@ -604,7 +600,6 @@ router.post('/api/control/carrier-web-balance/jobs/:id/release', async (request)
   return carrierWebBalanceHandler.release(request);
 });
 
-
 router.post('/api/control/heartbeat', async (request) => {
   // Daemon heartbeat endpoint
   try {
@@ -613,7 +608,7 @@ router.post('/api/control/heartbeat', async (request) => {
     // Heartbeat error
     return new Response(JSON.stringify({ error: errorText(error) }), {
       status: 500,
-      headers: { 'Content-Type': 'application/json' }
+      headers: { 'Content-Type': 'application/json' },
     });
   }
 });
@@ -635,7 +630,7 @@ router.get('*', async (request, env) => {
   const url = new URL(request.url);
 
   // Routes that bypass the session gate. Empty today: everything except the
-// explicit /login, /callback and /api paths below goes through auth.
+  // explicit /login, /callback and /api paths below goes through auth.
   const publicRoutes: string[] = [];
   if (publicRoutes.includes(url.pathname)) {
     return serveFrontend(request);
@@ -688,17 +683,18 @@ export default {
     console.log(`[Worker] Received request: ${request.method} ${request.url}`);
 
     try {
-
       // Handle regular routes
       const response = await router.handle(request, env, ctx);
 
       if (!response) {
         const pathname = new URL(request.url).pathname;
         if (pathname === '/api' || pathname.startsWith('/api/')) {
-          return handleCORS(new Response(JSON.stringify({ error: 'Not Found' }), {
-            status: 404,
-            headers: { 'Content-Type': 'application/json' }
-          }));
+          return handleCORS(
+            new Response(JSON.stringify({ error: 'Not Found' }), {
+              status: 404,
+              headers: { 'Content-Type': 'application/json' },
+            }),
+          );
         }
 
         console.log(`[Worker] No route matched, serving frontend`);
@@ -712,13 +708,12 @@ export default {
         return handleCORS(response);
       }
       return response;
-
     } catch (error) {
       console.error(`[Worker] Error:`, error);
       // Worker error
       return new Response(JSON.stringify({ error: 'Internal Server Error' }), {
         status: 500,
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json' },
       });
     }
   },
@@ -729,9 +724,7 @@ export default {
 
     try {
       const timeouts = await expireStaleBalanceChecks(env.DB);
-      console.log(
-        `[scheduled] balance checks: expired ${timeouts.expired}`,
-      );
+      console.log(`[scheduled] balance checks: expired ${timeouts.expired}`);
     } catch (error) {
       console.error('[scheduled] balance check maintenance failed:', error);
     }
@@ -761,17 +754,21 @@ export default {
     // 'pending' is the cursor, so this self-heals an interrupted backfill.
     try {
       const sweep = await sweepPending(env.DB);
-      console.log(`[scheduled] classification: swept ${sweep.processed}, ${sweep.remaining} remaining`);
+      console.log(
+        `[scheduled] classification: swept ${sweep.processed}, ${sweep.remaining} remaining`,
+      );
     } catch (error) {
       console.error('[scheduled] classification sweep failed:', error);
     }
 
     try {
       const bills = await reconcileCarrierBillMessages(env.DB);
-      console.log(`[scheduled] carrier bills: scanned ${bills.scanned}, detected ${bills.detected}, remaining=${bills.remaining}`);
+      console.log(
+        `[scheduled] carrier bills: scanned ${bills.scanned}, detected ${bills.detected}, remaining=${bills.remaining}`,
+      );
     } catch (error) {
       console.error('[scheduled] carrier bill reconciliation failed:', error);
     }
-  }
+  },
 };
 export { CallState } from './api/call-state.js';

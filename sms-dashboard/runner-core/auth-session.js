@@ -1,12 +1,7 @@
 import { assertRunnerAccessToken } from './access-token.js';
 import { createAuth0DeviceClient } from './auth0-device.js';
 
-export function createAuthSession({
-  getConfiguration,
-  secureStore,
-  fetchImpl = fetch,
-  sleep,
-}) {
+export function createAuthSession({ getConfiguration, secureStore, fetchImpl = fetch, sleep }) {
   let accessToken = null;
   let accessTokenExpiresAt = 0;
 

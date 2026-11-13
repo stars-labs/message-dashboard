@@ -6,16 +6,25 @@ describe('bounded keyword history processing', () => {
     const calls = [];
     const rows = [
       {
-        id: 'm-1', content: 'Your code is 1234', filter_status: 'clean',
-        verification_code: null, created_at: '2026-09-01 00:00:00',
+        id: 'm-1',
+        content: 'Your code is 1234',
+        filter_status: 'clean',
+        verification_code: null,
+        created_at: '2026-09-01 00:00:00',
       },
       {
-        id: 'm-2', content: 'code in filtered mail', filter_status: 'filtered',
-        verification_code: null, created_at: '2026-09-02 00:00:00',
+        id: 'm-2',
+        content: 'code in filtered mail',
+        filter_status: 'filtered',
+        verification_code: null,
+        created_at: '2026-09-02 00:00:00',
       },
       {
-        id: 'm-3', content: 'lookahead row', filter_status: 'clean',
-        verification_code: null, created_at: '2026-09-03 00:00:00',
+        id: 'm-3',
+        content: 'lookahead row',
+        filter_status: 'clean',
+        verification_code: null,
+        created_at: '2026-09-03 00:00:00',
       },
     ];
     const db = {
@@ -23,7 +32,10 @@ describe('bounded keyword history processing', () => {
         const statement = {
           sql,
           params: [],
-          bind(...params) { statement.params = params; return statement; },
+          bind(...params) {
+            statement.params = params;
+            return statement;
+          },
           async all() {
             calls.push({ operation: 'all', sql, params: statement.params });
             return { results: rows };
@@ -37,21 +49,27 @@ describe('bounded keyword history processing', () => {
       },
     };
 
-    const result = await processKeywordHistoryPage(db, {
-      id: 7,
-      keyword: 'code',
-      case_sensitive: 0,
-      whole_word: 0,
-    }, {
-      since: '2026-09-01T00:00:00.000Z',
-      until: '2026-09-04T00:00:00.000Z',
-      pageSize: 2,
-    });
+    const result = await processKeywordHistoryPage(
+      db,
+      {
+        id: 7,
+        keyword: 'code',
+        case_sensitive: 0,
+        whole_word: 0,
+      },
+      {
+        since: '2026-09-01T00:00:00.000Z',
+        until: '2026-09-04T00:00:00.000Z',
+        pageSize: 2,
+      },
+    );
 
     const pageRead = calls.find(({ operation }) => operation === 'all');
     expect(pageRead.sql).toContain("purpose = 'user'");
     expect(pageRead.sql).toContain('ORDER BY created_at, id');
-    expect(pageRead.sql).not.toMatch(/instr\s*\(|LIKE|verification_code IS NULL|filter_status\s*[=<>]/i);
+    expect(pageRead.sql).not.toMatch(
+      /instr\s*\(|LIKE|verification_code IS NULL|filter_status\s*[=<>]/i,
+    );
     expect(pageRead.params.at(-1)).toBe(3);
 
     const writes = calls.find(({ operation }) => operation === 'batch').statements;
@@ -72,11 +90,16 @@ describe('bounded keyword history processing', () => {
     const db = {
       prepare(sql) {
         const statement = {
-          bind(...params) { statement.params = params; return statement; },
+          bind(...params) {
+            statement.params = params;
+            return statement;
+          },
           async all() {
             expect(sql).toContain('(created_at > ? OR (created_at = ? AND id > ?))');
             expect(statement.params.slice(2, 5)).toEqual([
-              '2026-09-02 00:00:00', '2026-09-02 00:00:00', 'm-2',
+              '2026-09-02 00:00:00',
+              '2026-09-02 00:00:00',
+              'm-2',
             ]);
             throw new Error('D1 unavailable');
           },
@@ -85,12 +108,21 @@ describe('bounded keyword history processing', () => {
       },
     };
 
-    await expect(processKeywordHistoryPage(db, {
-      id: 7, keyword: 'code', case_sensitive: 0, whole_word: 0,
-    }, {
-      since: '2026-09-01T00:00:00.000Z',
-      until: '2026-09-04T00:00:00.000Z',
-      cursor: { created_at: '2026-09-02 00:00:00', id: 'm-2' },
-    })).rejects.toThrow('D1 unavailable');
+    await expect(
+      processKeywordHistoryPage(
+        db,
+        {
+          id: 7,
+          keyword: 'code',
+          case_sensitive: 0,
+          whole_word: 0,
+        },
+        {
+          since: '2026-09-01T00:00:00.000Z',
+          until: '2026-09-04T00:00:00.000Z',
+          cursor: { created_at: '2026-09-02 00:00:00', id: 'm-2' },
+        },
+      ),
+    ).rejects.toThrow('D1 unavailable');
   });
 });

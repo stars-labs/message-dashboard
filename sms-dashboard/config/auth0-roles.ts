@@ -24,12 +24,7 @@ type CanonicalRole = typeof ADMIN | typeof VIEWER;
  * docs/SECURITY-REVIEW.md.
  */
 export const ROLE_PERMISSIONS = {
-  [VIEWER]: [
-    'bills.read',
-    'messages.read',
-    'messages.send',
-    'phones.read',
-  ],
+  [VIEWER]: ['bills.read', 'messages.read', 'messages.send', 'phones.read'],
   [ADMIN]: [
     'bills.read',
     'bills.write',
@@ -53,9 +48,7 @@ export const ROLE_PERMISSIONS = {
 export type Permission = (typeof ROLE_PERMISSIONS)[CanonicalRole][number];
 
 /** Every permission the system recognises. Anything else denies. */
-export const ALL_PERMISSIONS: Permission[] = [
-  ...new Set(Object.values(ROLE_PERMISSIONS).flat()),
-];
+export const ALL_PERMISSIONS: Permission[] = [...new Set(Object.values(ROLE_PERMISSIONS).flat())];
 
 export interface RoleConfig {
   ADMIN_ROLE: string;
@@ -184,7 +177,10 @@ export function isEmailAllowed(
     return { allowed: false, reason: 'Email address is not verified', domain: null };
   }
 
-  const domain = email.slice(email.lastIndexOf('@') + 1).trim().toLowerCase();
+  const domain = email
+    .slice(email.lastIndexOf('@') + 1)
+    .trim()
+    .toLowerCase();
 
   if (!domain || !email.includes('@')) {
     return { allowed: false, reason: 'Malformed email address', domain: null };

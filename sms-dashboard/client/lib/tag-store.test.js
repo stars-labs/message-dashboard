@@ -16,44 +16,34 @@ const keyword = (overrides) => ({
 
 describe('tagService.extractClientTags keyword grouping', () => {
   test('sums every occurrence of one keyword', () => {
-    const tags = tagService._performKeywordMatching(
-      'urgent now and urgent later',
-      [keyword()],
-    );
+    const tags = tagService._performKeywordMatching('urgent now and urgent later', [keyword()]);
 
     expect(tags).toEqual([{ tag: 'urgent', color: '#ff0000', count: 2 }]);
   });
 
   test('sums matches across keywords that share a tag', () => {
     // Two phrases feed the same tag, so the chip shows the combined count.
-    const tags = tagService._performKeywordMatching(
-      'urgent and asap',
-      [
-        keyword({ keyword: 'urgent', tag: 'priority' }),
-        keyword({ keyword: 'asap', tag: 'priority' }),
-      ],
-    );
+    const tags = tagService._performKeywordMatching('urgent and asap', [
+      keyword({ keyword: 'urgent', tag: 'priority' }),
+      keyword({ keyword: 'asap', tag: 'priority' }),
+    ]);
 
     expect(tags).toEqual([{ tag: 'priority', color: '#ff0000', count: 2 }]);
   });
 
   test('keeps the colour of the keyword that introduced the tag', () => {
-    const tags = tagService._performKeywordMatching(
-      'urgent and asap',
-      [
-        keyword({ keyword: 'urgent', tag: 'priority', color: '#aa0000' }),
-        keyword({ keyword: 'asap', tag: 'priority', color: '#00aa00' }),
-      ],
-    );
+    const tags = tagService._performKeywordMatching('urgent and asap', [
+      keyword({ keyword: 'urgent', tag: 'priority', color: '#aa0000' }),
+      keyword({ keyword: 'asap', tag: 'priority', color: '#00aa00' }),
+    ]);
 
     expect(tags[0].color).toBe('#aa0000');
   });
 
   test('omits keywords that do not occur', () => {
-    const tags = tagService._performKeywordMatching(
-      'nothing to see here',
-      [keyword({ keyword: 'absent', tag: 'absent' })],
-    );
+    const tags = tagService._performKeywordMatching('nothing to see here', [
+      keyword({ keyword: 'absent', tag: 'absent' }),
+    ]);
 
     expect(tags).toEqual([]);
   });

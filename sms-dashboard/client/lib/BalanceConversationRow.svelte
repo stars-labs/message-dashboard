@@ -13,16 +13,17 @@
 
   let statusMeta = $derived(getBalanceStatusMeta(check?.display_status || check?.status));
   let receiverIndex = $derived(check?.sim_index ?? selectedPhone?.sim_index);
-  let receiverNumber = $derived(check?.sim_number || selectedPhone?.number || check?.sim_iccid || '—');
+  let receiverNumber = $derived(
+    check?.sim_number || selectedPhone?.number || check?.sim_iccid || '—',
+  );
   let receiverFlag = $derived(
-    check?.sim_country ? getCountryFlag(check.sim_country) : selectedPhone?.flag || ''
+    check?.sim_country ? getCountryFlag(check.sim_country) : selectedPhone?.flag || '',
   );
   let summary = $derived(
-    getLatestBalanceReply(check)?.content
-      || check?.error
-      || `发送 ${check?.outbound_content || check?.command || '—'} 至 ${check?.outbound_recipient || check?.destination || '—'}`
+    getLatestBalanceReply(check)?.content ||
+      check?.error ||
+      `发送 ${check?.outbound_content || check?.command || '—'} 至 ${check?.outbound_recipient || check?.destination || '—'}`,
   );
-
 </script>
 
 <button
@@ -41,19 +42,25 @@
     <span class="mt-0.5 flex items-center gap-1.5 text-[11px] text-stone-400 min-w-0">
       <span class="shrink-0 text-stone-300">卡片</span>
       {#if receiverIndex != null}
-        <span class="font-semibold text-stone-500 tabular-nums shrink-0">{formatCardNumber(receiverIndex)}</span>
+        <span class="font-semibold text-stone-500 tabular-nums shrink-0"
+          >{formatCardNumber(receiverIndex)}</span
+        >
         <span class="text-stone-300 shrink-0">·</span>
       {/if}
       <span class="truncate">{receiverFlag} {receiverNumber}</span>
     </span>
   </span>
 
-  <span class="inline-flex w-fit items-center px-2 py-1 rounded-md border text-xs font-medium {statusMeta.className}">
+  <span
+    class="inline-flex w-fit items-center px-2 py-1 rounded-md border text-xs font-medium {statusMeta.className}"
+  >
     {statusMeta.label}
   </span>
 
   <span class="min-w-0">
-    <span class="inline-flex items-center text-[10px] px-1.5 py-0.5 rounded bg-orange-50 text-orange-700 mr-1.5 font-medium">
+    <span
+      class="inline-flex items-center text-[10px] px-1.5 py-0.5 rounded bg-orange-50 text-orange-700 mr-1.5 font-medium"
+    >
       运营商服务
     </span>
     <span class="text-sm text-stone-600 leading-snug line-clamp-2">{summary}</span>
@@ -72,7 +79,9 @@
   aria-label={`查看${formatCardNumber(receiverIndex)}余额查询详情`}
 >
   <span class="flex items-center gap-2">
-    <span class="inline-flex items-center px-2 py-0.5 rounded-md border text-xs font-medium {statusMeta.className}">
+    <span
+      class="inline-flex items-center px-2 py-0.5 rounded-md border text-xs font-medium {statusMeta.className}"
+    >
       {statusMeta.label}
     </span>
     <span class="text-sm font-semibold text-stone-700">余额查询</span>
@@ -83,7 +92,9 @@
   <span class="mt-1 flex items-center gap-1.5 font-mono text-[11px] text-stone-400 min-w-0">
     <span class="text-stone-300 shrink-0">卡片</span>
     {#if receiverIndex != null}
-      <span class="font-semibold text-stone-500 tabular-nums shrink-0">{formatCardNumber(receiverIndex)}</span>
+      <span class="font-semibold text-stone-500 tabular-nums shrink-0"
+        >{formatCardNumber(receiverIndex)}</span
+      >
       <span class="text-stone-300 shrink-0">·</span>
     {/if}
     <span class="truncate">{receiverFlag} {receiverNumber}</span>

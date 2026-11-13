@@ -6,9 +6,21 @@ afterEach(cleanup);
 
 // Field names match /api/phones (device_view): `number`, not `phone_number`.
 const phones = [
-  { iccid: '8965012306052373985', number: '+6597817169', sim_index: 86, carrier: 'Singtel', flag: '🇸🇬' },
+  {
+    iccid: '8965012306052373985',
+    number: '+6597817169',
+    sim_index: 86,
+    carrier: 'Singtel',
+    flag: '🇸🇬',
+  },
   { iccid: '8965030124051507919', number: '+6590421798', sim_index: 77, carrier: 'M1', flag: '🇸🇬' },
-  { iccid: '8986011781104922113', number: '+8617600419127', sim_index: 1, carrier: '联通', flag: '🇨🇳' },
+  {
+    iccid: '8986011781104922113',
+    number: '+8617600419127',
+    sim_index: 1,
+    carrier: '联通',
+    flag: '🇨🇳',
+  },
 ];
 
 function pickSim(view, cardNumber) {
@@ -53,7 +65,9 @@ describe('CallPanel dialing', () => {
     const view = render(CallPanel, { props: { phones, onDial: (a) => dialed.push(a) } });
 
     await pickSim(view, 'S77');
-    await fireEvent.input(view.getByLabelText('对方号码'), { target: { value: ' +65 9123-4567 ' } });
+    await fireEvent.input(view.getByLabelText('对方号码'), {
+      target: { value: ' +65 9123-4567 ' },
+    });
     await fireEvent.click(view.getByText('拨打'));
 
     expect(dialed).toEqual([{ iccid: phones[1].iccid, number: '+6591234567' }]);
@@ -79,13 +93,23 @@ describe('CallPanel dialing', () => {
 });
 
 describe('CallPanel during a call', () => {
-  const inbound = { direction: 'inbound', state: 'ringing', number: '92953543', iccid: phones[0].iccid };
+  const inbound = {
+    direction: 'inbound',
+    state: 'ringing',
+    number: '92953543',
+    iccid: phones[0].iccid,
+  };
 
   test('a ringing inbound call shows the caller, its SIM, answer and reject', async () => {
     const answered = [];
     const hungUp = [];
     const view = render(CallPanel, {
-      props: { phones, call: inbound, onAnswer: () => answered.push(true), onHangup: () => hungUp.push(true) },
+      props: {
+        phones,
+        call: inbound,
+        onAnswer: () => answered.push(true),
+        onHangup: () => hungUp.push(true),
+      },
     });
 
     expect(view.getByTestId('call-number').textContent).toBe('92953543');
@@ -123,7 +147,10 @@ describe('CallPanel during a call', () => {
 
   test('mute is unavailable before the audio path is up', () => {
     const view = render(CallPanel, {
-      props: { phones, call: { direction: 'outbound', state: 'connecting', number: '+6591234567' } },
+      props: {
+        phones,
+        call: { direction: 'outbound', state: 'connecting', number: '+6591234567' },
+      },
     });
 
     expect(view.getByText('静音').disabled).toBe(true);
@@ -147,13 +174,25 @@ describe('CallPanel during a call', () => {
 describe('CallPanel call log', () => {
   const history = [
     {
-      id: 'c1', direction: 'inbound', outcome: 'missed', iccid: phones[0].iccid, sim_index: 86,
-      remote_number: '+6592401051', started_at: new Date().toISOString(), duration_seconds: 0,
+      id: 'c1',
+      direction: 'inbound',
+      outcome: 'missed',
+      iccid: phones[0].iccid,
+      sim_index: 86,
+      remote_number: '+6592401051',
+      started_at: new Date().toISOString(),
+      duration_seconds: 0,
     },
     {
-      id: 'c2', direction: 'outbound', outcome: 'answered', iccid: phones[1].iccid, sim_index: 77,
-      remote_number: '+6591234567', started_at: new Date(Date.now() - 3_600_000).toISOString(),
-      answered_at: new Date(Date.now() - 3_590_000).toISOString(), duration_seconds: 125,
+      id: 'c2',
+      direction: 'outbound',
+      outcome: 'answered',
+      iccid: phones[1].iccid,
+      sim_index: 77,
+      remote_number: '+6591234567',
+      started_at: new Date(Date.now() - 3_600_000).toISOString(),
+      answered_at: new Date(Date.now() - 3_590_000).toISOString(),
+      duration_seconds: 125,
     },
   ];
 
@@ -194,7 +233,11 @@ describe('CallPanel call log', () => {
 
   test('the log is hidden while a call is up', () => {
     const view = render(CallPanel, {
-      props: { phones, history, call: { direction: 'inbound', state: 'ringing', number: '92953543' } },
+      props: {
+        phones,
+        history,
+        call: { direction: 'inbound', state: 'ringing', number: '92953543' },
+      },
     });
     expect(view.queryByText('通话记录')).toBeNull();
   });

@@ -7,14 +7,17 @@
       // iOS respects maximum-scale for its automatic input-focus zoom while
       // modern WebKit still permits user-initiated pinch zoom. Keep this iOS-
       // only so other mobile browsers retain their normal zoom semantics.
-      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
-        || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-      const isStandalone = 'standalone' in navigator
-        ? navigator.standalone === true
-        : window.matchMedia('(display-mode: standalone)').matches;
+      const isIOS =
+        /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      const isStandalone =
+        'standalone' in navigator
+          ? navigator.standalone === true
+          : window.matchMedia('(display-mode: standalone)').matches;
       if (isIOS) {
         document.documentElement.classList.add('is-ios');
-        document.getElementById('app-viewport')
+        document
+          .getElementById('app-viewport')
           .setAttribute('content', 'width=device-width, initial-scale=1.0, maximum-scale=1.0');
       }
       if (isStandalone) {
@@ -33,9 +36,12 @@
          in-app gesture (client/lib/PullToRefresh.svelte) is what replaces it, so it
          has to ship before or with this link, never after. -->
     <link rel="manifest" href="/manifest.webmanifest" />
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
   </head>
   <body>
     <div id="app"></div>

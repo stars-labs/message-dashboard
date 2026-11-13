@@ -68,18 +68,12 @@ Credentials are stored in macOS Keychain. The CLI never accepts secret values as
 command-line arguments.`;
 }
 
-function defaultConfigPath({
-  xdgConfigHome = process.env.XDG_CONFIG_HOME,
-  home = homedir(),
-} = {}) {
+function defaultConfigPath({ xdgConfigHome = process.env.XDG_CONFIG_HOME, home = homedir() } = {}) {
   const configHome = String(xdgConfigHome || '').trim() || join(home, '.config');
   return join(configHome, 'message-dashboard', 'balance-agent.json');
 }
 
-function defaultRunLockPath({
-  xdgStateHome = process.env.XDG_STATE_HOME,
-  home = homedir(),
-} = {}) {
+function defaultRunLockPath({ xdgStateHome = process.env.XDG_STATE_HOME, home = homedir() } = {}) {
   const stateHome = String(xdgStateHome || '').trim() || join(home, '.local', 'state');
   return join(stateHome, 'message-dashboard', 'balance-agent-cli.lock');
 }
@@ -92,8 +86,9 @@ function defaultBrowserExecutable(platform = process.platform) {
 }
 
 function requiredSettings(settings) {
-  return ['dashboardUrl', 'auth0Issuer', 'auth0ClientId', 'auth0Audience']
-    .filter((key) => !settings[key]);
+  return ['dashboardUrl', 'auth0Issuer', 'auth0ClientId', 'auth0Audience'].filter(
+    (key) => !settings[key],
+  );
 }
 
 function selectedCapabilities(value = 'all') {
@@ -188,7 +183,9 @@ async function status(argv, { settingsStore, secureStore, output }) {
   ]);
   output(`Configuration: ${missing.length ? `incomplete (${missing.join(', ')})` : 'ready'}`);
   output(`Authentication: ${signedIn ? 'signed in' : 'signed out'}`);
-  output(`SMS AI: ${settings.aiBaseUrl && settings.aiModel && hasAiToken ? 'configured' : 'configuration required'}`);
+  output(
+    `SMS AI: ${settings.aiBaseUrl && settings.aiModel && hasAiToken ? 'configured' : 'configuration required'}`,
+  );
   output(`Browser: ${defaultBrowserExecutable()}`);
 }
 
@@ -242,14 +239,17 @@ async function doctor(argv, { settingsStore, secureStore, output }) {
   return results.every(([, result]) => result.ok) ? 0 : 1;
 }
 
-async function run(argv, {
-  settingsStore,
-  secureStore,
-  output,
-  createService = createAgentService,
-  acquireLock = acquireRunLock,
-  runLockPath = defaultRunLockPath(),
-}) {
+async function run(
+  argv,
+  {
+    settingsStore,
+    secureStore,
+    output,
+    createService = createAgentService,
+    acquireLock = acquireRunLock,
+    runLockPath = defaultRunLockPath(),
+  },
+) {
   const { values, positionals } = parseCommand(argv, {
     capability: { type: 'string', default: 'all' },
     once: { type: 'boolean', default: false },
@@ -280,7 +280,9 @@ async function run(argv, {
   const releaseLock = await acquireLock(runLockPath);
   let stopping = false;
   let stopResolve;
-  const stopped = new Promise((resolve) => { stopResolve = resolve; });
+  const stopped = new Promise((resolve) => {
+    stopResolve = resolve;
+  });
   const stop = () => {
     if (stopping) return;
     stopping = true;
@@ -319,8 +321,9 @@ async function run(argv, {
 export async function runCli(argv, dependencies = {}) {
   const output = dependencies.output || ((message) => console.log(message));
   const error = dependencies.error || ((message) => console.error(message));
-  const settingsStore = dependencies.settingsStore
-    || createSettingsStore(dependencies.configPath || defaultConfigPath());
+  const settingsStore =
+    dependencies.settingsStore ||
+    createSettingsStore(dependencies.configPath || defaultConfigPath());
   const secureStore = dependencies.secureStore || createKeychainStore();
   const context = { ...dependencies, output, error, settingsStore, secureStore };
   const [command = 'help', ...rest] = argv;
@@ -330,11 +333,11 @@ export async function runCli(argv, dependencies = {}) {
       output(help());
       return 0;
     }
-    if (command === 'configure') return await configure(rest, context) ?? 0;
-    if (command === 'credentials') return await credentials(rest, context) ?? 0;
-    if (command === 'login') return await login(rest, context) ?? 0;
-    if (command === 'logout') return await logout(rest, context) ?? 0;
-    if (command === 'status') return await status(rest, context) ?? 0;
+    if (command === 'configure') return (await configure(rest, context)) ?? 0;
+    if (command === 'credentials') return (await credentials(rest, context)) ?? 0;
+    if (command === 'login') return (await login(rest, context)) ?? 0;
+    if (command === 'logout') return (await logout(rest, context)) ?? 0;
+    if (command === 'status') return (await status(rest, context)) ?? 0;
     if (command === 'doctor') return await doctor(rest, context);
     if (command === 'run') return await run(rest, context);
     throw new Error(`Unknown command: ${command}`);

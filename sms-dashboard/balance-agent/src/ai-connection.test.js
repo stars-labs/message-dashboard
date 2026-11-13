@@ -43,7 +43,9 @@ describe('AI connection test', () => {
   });
 
   test('surfaces API error body in 401 message', () => {
-    const err = new Error('Company AI request failed (401): {"error":"invalid_api_key","message":"API key does not exist"}');
+    const err = new Error(
+      'Company AI request failed (401): {"error":"invalid_api_key","message":"API key does not exist"}',
+    );
     const msg = describeAIConnectionError(err);
     expect(msg).toContain('认证失败');
     expect(msg).toContain('invalid_api_key');

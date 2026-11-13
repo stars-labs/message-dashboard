@@ -68,11 +68,10 @@ export function onSwipeMove(state: SwipeDismissState, x: number, y: number): num
 }
 
 export function onSwipeEnd(state: SwipeDismissState): 'dismiss' | 'cancel' {
-  const result = state.active
-    && state.axis === 'horizontal'
-    && state.distance >= DISMISS_DISTANCE
-    ? 'dismiss'
-    : 'cancel';
+  const result =
+    state.active && state.axis === 'horizontal' && state.distance >= DISMISS_DISTANCE
+      ? 'dismiss'
+      : 'cancel';
 
   state.active = false;
   state.axis = null;

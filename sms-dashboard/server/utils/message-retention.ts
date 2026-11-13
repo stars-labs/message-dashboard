@@ -50,7 +50,11 @@ export async function countExpiredMessages(
  */
 export async function purgeExpiredMessages(
   db: D1Database,
-  { modifier = RETENTION_MODIFIER, batchSize = BATCH_SIZE, maxBatches = MAX_BATCHES }: {
+  {
+    modifier = RETENTION_MODIFIER,
+    batchSize = BATCH_SIZE,
+    maxBatches = MAX_BATCHES,
+  }: {
     modifier?: string;
     batchSize?: number;
     maxBatches?: number;
@@ -62,7 +66,7 @@ export async function purgeExpiredMessages(
   for (; batches < maxBatches; batches++) {
     const { results } = await db
       .prepare(
-        `SELECT id FROM messages WHERE timestamp < ${CUTOFF_EXPR} ORDER BY timestamp LIMIT ?`
+        `SELECT id FROM messages WHERE timestamp < ${CUTOFF_EXPR} ORDER BY timestamp LIMIT ?`,
       )
       .bind(modifier, batchSize)
       .all<{ id: string }>();
@@ -91,7 +95,7 @@ export async function purgeExpiredMessages(
   if (deleted > 0 || exhausted) {
     console.log(
       `[retention] deleted ${deleted} messages older than ${modifier} in ${batches} batch(es)` +
-        (exhausted ? ' — batch cap hit, more remain for the next run' : '')
+        (exhausted ? ' — batch cap hit, more remain for the next run' : ''),
     );
   }
 

@@ -45,11 +45,19 @@ export function safeColor(color: unknown): string {
  * Concatenating every segment's `text` always reproduces `text.trim()` exactly — the
  * segments are a partition, never a transformation.
  */
-export function getSegments(text: string | null | undefined, kws: HighlightKeyword[] | null | undefined): HighlightSegment[] | null {
+export function getSegments(
+  text: string | null | undefined,
+  kws: HighlightKeyword[] | null | undefined,
+): HighlightSegment[] | null {
   if (!text || !kws || kws.length === 0) return null;
 
   const trimmed = text.trim();
-  const matches: Array<{ position: number; text: string; color?: string | null; tag?: string | null }> = [];
+  const matches: Array<{
+    position: number;
+    text: string;
+    color?: string | null;
+    tag?: string | null;
+  }> = [];
 
   for (const kw of kws) {
     if (!kw.keyword) continue;
@@ -60,7 +68,7 @@ export function getSegments(text: string | null | undefined, kws: HighlightKeywo
     if (kw.whole_word) {
       const regex = new RegExp(
         `\\b${searchKw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`,
-        kw.case_sensitive ? 'g' : 'gi'
+        kw.case_sensitive ? 'g' : 'gi',
       );
       // matchAll advances past zero-length matches on its own, so a pathological
       // keyword cannot spin here the way a manual lastIndex loop could.

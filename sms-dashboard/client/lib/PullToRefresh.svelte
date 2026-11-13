@@ -36,8 +36,7 @@
   // Matches the app's `lg:` breakpoint: desktop has real browser chrome and its own
   // refresh affordances, so no listeners are attached there at all.
   const isDesktop = () =>
-    typeof window !== 'undefined'
-      && window.matchMedia('(min-width: 1024px)').matches;
+    typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches;
 
   function isStandalone() {
     if (typeof window === 'undefined' || typeof navigator === 'undefined') return false;
@@ -148,9 +147,7 @@
     };
   });
 
-  const label = $derived(
-    refreshing ? '正在刷新' : pull >= THRESHOLD ? '松手刷新' : '下拉刷新',
-  );
+  const label = $derived(refreshing ? '正在刷新' : pull >= THRESHOLD ? '松手刷新' : '下拉刷新');
 
   // Arrow rotates through 180° as the pull approaches the trigger point.
   const rotation = $derived(Math.min(pull / THRESHOLD, 1) * 180);
@@ -172,13 +169,27 @@
   >
     {#if refreshing}
       <svg class="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2.5"
-          stroke-linecap="round" stroke-dasharray="42" stroke-dashoffset="14" />
+        <circle
+          cx="12"
+          cy="12"
+          r="9"
+          stroke="currentColor"
+          stroke-width="2.5"
+          stroke-linecap="round"
+          stroke-dasharray="42"
+          stroke-dashoffset="14"
+        />
       </svg>
     {:else}
-      <svg class="w-4 h-4" viewBox="0 0 24 24"
-        fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"
-        style="transform: rotate({rotation}deg);">
+      <svg
+        class="w-4 h-4"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2.5"
+        aria-hidden="true"
+        style="transform: rotate({rotation}deg);"
+      >
         <path stroke-linecap="round" stroke-linejoin="round" d="M12 5v14M5 12l7 7 7-7" />
       </svg>
     {/if}

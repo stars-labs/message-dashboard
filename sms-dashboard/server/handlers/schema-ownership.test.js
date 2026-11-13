@@ -1,10 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-const handlerFiles = [
-  './control.ts',
-  './health.ts',
-  '../api/keywords.ts',
-];
+const handlerFiles = ['./control.ts', './health.ts', '../api/keywords.ts'];
 
 describe('database schema ownership', () => {
   test('request handlers never create tables or indexes', async () => {

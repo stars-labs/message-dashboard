@@ -1,5 +1,7 @@
 function normalizedBaseUrl(value) {
-  const baseUrl = String(value || '').trim().replace(/\/+$/, '');
+  const baseUrl = String(value || '')
+    .trim()
+    .replace(/\/+$/, '');
   if (!/^https?:\/\//.test(baseUrl)) throw new Error('Runner API base URL must use HTTP or HTTPS');
   return baseUrl;
 }

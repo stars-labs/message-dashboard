@@ -14,13 +14,15 @@ function dbStub() {
         async all() {
           calls.push(sql);
           return {
-            results: [{
-              id: 1,
-              rule_type: 'sender',
-              pattern: '10655446',
-              note: 'China Unicom marketing',
-              is_active: 1,
-            }],
+            results: [
+              {
+                id: 1,
+                rule_type: 'sender',
+                pattern: '10655446',
+                note: 'China Unicom marketing',
+                is_active: 1,
+              },
+            ],
           };
         },
         async first() {
@@ -40,13 +42,15 @@ describe('filter rule list D1 reads', () => {
     const result = await listFilterRules(db);
 
     expect(result).toEqual({
-      filters: [{
-        id: 1,
-        rule_type: 'sender',
-        pattern: '10655446',
-        note: 'China Unicom marketing',
-        is_active: 1,
-      }],
+      filters: [
+        {
+          id: 1,
+          rule_type: 'sender',
+          pattern: '10655446',
+          note: 'China Unicom marketing',
+          is_active: 1,
+        },
+      ],
     });
     expect(db.calls).toHaveLength(1);
     expect(db.calls[0]).toContain('FROM filter_rules');
@@ -60,14 +64,18 @@ describe('filter rule list D1 reads', () => {
       get() {},
       put() {},
       delete() {},
-      post(path, handler) { routes.push({ path, handler }); },
+      post(path, handler) {
+        routes.push({ path, handler });
+      },
     });
     const calls = [];
     const db = {
       prepare(sql) {
         calls.push(sql);
         const statement = {
-          bind() { return statement; },
+          bind() {
+            return statement;
+          },
           async first() {
             return { id: 7, rule_type: 'sender', pattern: '10655446', note: null, is_active: 1 };
           },
@@ -89,8 +97,10 @@ describe('filter rule list D1 reads', () => {
     const request = {
       url: 'https://example.com/api/filters',
       env,
-      headers: { get: (name) => name === 'Cookie' ? 'auth_token=session' : null },
-      async json() { return { rule_type: 'sender', pattern: '10655446' }; },
+      headers: { get: (name) => (name === 'Cookie' ? 'auth_token=session' : null) },
+      async json() {
+        return { rule_type: 'sender', pattern: '10655446' };
+      },
     };
 
     const route = routes.find(({ path }) => path === '/api/filters');
@@ -111,7 +121,9 @@ describe('filter rule list D1 reads', () => {
       get() {},
       post() {},
       delete() {},
-      put(path, handler) { routes.push({ path, handler }); },
+      put(path, handler) {
+        routes.push({ path, handler });
+      },
     });
     const calls = [];
     const existing = { id: 7, rule_type: 'sender', pattern: '10655446', note: null, is_active: 1 };
@@ -119,7 +131,9 @@ describe('filter rule list D1 reads', () => {
       prepare(sql) {
         calls.push(sql);
         const statement = {
-          bind() { return statement; },
+          bind() {
+            return statement;
+          },
           async first() {
             return sql.startsWith('SELECT') ? existing : { ...existing, is_active: 0 };
           },
@@ -143,8 +157,10 @@ describe('filter rule list D1 reads', () => {
       url: 'https://example.com/api/filters/7',
       env,
       params: { id: '7' },
-      headers: { get: (name) => name === 'Cookie' ? 'auth_token=session' : null },
-      async json() { return { is_active: false }; },
+      headers: { get: (name) => (name === 'Cookie' ? 'auth_token=session' : null) },
+      async json() {
+        return { is_active: false };
+      },
     };
 
     const response = await route.handler(request, env, {});

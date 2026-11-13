@@ -11,14 +11,23 @@ afterEach(() => {
 
 describe('Device & Card sorting', () => {
   test('keeps the desktop table in its own scroll region', async () => {
-    globalThis.fetch = async () => Response.json({
-      success: true,
-      data: {
-        results: [
-          { id: 'two', iccid: 'iccid-02', phone_number: '+8602', carrier: '联通', country: 'CN', sim_index: 2, is_active: 'active' },
-        ],
-      },
-    });
+    globalThis.fetch = async () =>
+      Response.json({
+        success: true,
+        data: {
+          results: [
+            {
+              id: 'two',
+              iccid: 'iccid-02',
+              phone_number: '+8602',
+              carrier: '联通',
+              country: 'CN',
+              sim_index: 2,
+              is_active: 'active',
+            },
+          ],
+        },
+      });
 
     const view = render(IccidMappings);
     await waitFor(() => expect(view.getAllByText('S02').length).toBeGreaterThan(0));
@@ -29,15 +38,32 @@ describe('Device & Card sorting', () => {
   });
 
   test('sorts rows by a clicked column and toggles direction', async () => {
-    globalThis.fetch = async () => Response.json({
-      success: true,
-      data: {
-        results: [
-          { id: 'ten', iccid: 'iccid-10', phone_number: '+8610', carrier: '移动', country: 'CN', sim_index: 10, is_active: 'active' },
-          { id: 'two', iccid: 'iccid-02', phone_number: '+8602', carrier: '联通', country: 'CN', sim_index: 2, is_active: 'active' },
-        ],
-      },
-    });
+    globalThis.fetch = async () =>
+      Response.json({
+        success: true,
+        data: {
+          results: [
+            {
+              id: 'ten',
+              iccid: 'iccid-10',
+              phone_number: '+8610',
+              carrier: '移动',
+              country: 'CN',
+              sim_index: 10,
+              is_active: 'active',
+            },
+            {
+              id: 'two',
+              iccid: 'iccid-02',
+              phone_number: '+8602',
+              carrier: '联通',
+              country: 'CN',
+              sim_index: 2,
+              is_active: 'active',
+            },
+          ],
+        },
+      });
 
     const view = render(IccidMappings);
     await waitFor(() => expect(view.getAllByText('S10').length).toBeGreaterThan(0));
@@ -52,15 +78,32 @@ describe('Device & Card sorting', () => {
   });
 
   test('filters mappings by carrier', async () => {
-    globalThis.fetch = async () => Response.json({
-      success: true,
-      data: {
-        results: [
-          { id: 'mobile', iccid: 'mobile-iccid', phone_number: '+86135', carrier: '移动', country: 'CN', sim_index: 2, is_active: 'active' },
-          { id: 'unicom', iccid: 'unicom-iccid', phone_number: '+86186', carrier: '联通', country: 'CN', sim_index: 3, is_active: 'active' },
-        ],
-      },
-    });
+    globalThis.fetch = async () =>
+      Response.json({
+        success: true,
+        data: {
+          results: [
+            {
+              id: 'mobile',
+              iccid: 'mobile-iccid',
+              phone_number: '+86135',
+              carrier: '移动',
+              country: 'CN',
+              sim_index: 2,
+              is_active: 'active',
+            },
+            {
+              id: 'unicom',
+              iccid: 'unicom-iccid',
+              phone_number: '+86186',
+              carrier: '联通',
+              country: 'CN',
+              sim_index: 3,
+              is_active: 'active',
+            },
+          ],
+        },
+      });
 
     const view = render(IccidMappings);
     await waitFor(() => expect(view.getAllByText('S02').length).toBeGreaterThan(0));
@@ -79,15 +122,32 @@ describe('Device & Card sorting', () => {
   });
 
   test('filters Hong Kong Mobile separately from mainland China Mobile', async () => {
-    globalThis.fetch = async () => Response.json({
-      success: true,
-      data: {
-        results: [
-          { id: 'cn-mobile', iccid: 'cn-mobile-iccid', phone_number: '+86135', carrier: '移动', country: 'CN', sim_index: 2, is_active: 'active' },
-          { id: 'hk-mobile', iccid: 'hk-mobile-iccid', phone_number: '+85260000000', carrier: '移动', country: 'HK', sim_index: 3, is_active: 'active' },
-        ],
-      },
-    });
+    globalThis.fetch = async () =>
+      Response.json({
+        success: true,
+        data: {
+          results: [
+            {
+              id: 'cn-mobile',
+              iccid: 'cn-mobile-iccid',
+              phone_number: '+86135',
+              carrier: '移动',
+              country: 'CN',
+              sim_index: 2,
+              is_active: 'active',
+            },
+            {
+              id: 'hk-mobile',
+              iccid: 'hk-mobile-iccid',
+              phone_number: '+85260000000',
+              carrier: '移动',
+              country: 'HK',
+              sim_index: 3,
+              is_active: 'active',
+            },
+          ],
+        },
+      });
 
     const view = render(IccidMappings);
     await waitFor(() => expect(view.getAllByText('S02').length).toBeGreaterThan(0));

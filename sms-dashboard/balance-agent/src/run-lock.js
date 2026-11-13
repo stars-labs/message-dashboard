@@ -10,10 +10,10 @@ function processIsRunning(pid) {
   }
 }
 
-export async function acquireRunLock(filePath, {
-  pid = process.pid,
-  isProcessRunning = processIsRunning,
-} = {}) {
+export async function acquireRunLock(
+  filePath,
+  { pid = process.pid, isProcessRunning = processIsRunning } = {},
+) {
   await mkdir(dirname(filePath), { recursive: true });
 
   async function create() {
@@ -29,7 +29,9 @@ export async function acquireRunLock(filePath, {
     if (error.code !== 'EEXIST') throw error;
     const existingPid = Number.parseInt(await readFile(filePath, 'utf8').catch(() => ''), 10);
     if (Number.isSafeInteger(existingPid) && existingPid > 0 && isProcessRunning(existingPid)) {
-      throw new Error(`Balance Agent CLI is already running (pid ${existingPid})`, { cause: error });
+      throw new Error(`Balance Agent CLI is already running (pid ${existingPid})`, {
+        cause: error,
+      });
     }
     await unlink(filePath).catch((unlinkError) => {
       if (unlinkError.code !== 'ENOENT') throw unlinkError;

@@ -28,15 +28,17 @@ function endpoint(baseUrl: unknown, path: string): string {
 }
 
 export function parseCompanyAIContent(payload: CompanyAIResponseBody | null | undefined): unknown {
-  let content: unknown = payload?.choices?.[0]?.message?.content
-    ?? payload?.content?.find((part) => part?.type === 'text')?.text;
+  let content: unknown =
+    payload?.choices?.[0]?.message?.content ??
+    payload?.content?.find((part) => part?.type === 'text')?.text;
   if (Array.isArray(content)) {
     content = (content as Array<{ text?: unknown }>).map((part) => part?.text || '').join('');
   }
   if (typeof content !== 'string') {
     throw new Error('Company AI response does not contain message content');
   }
-  const cleaned = content.trim()
+  const cleaned = content
+    .trim()
     .replace(/^```(?:json)?\s*/i, '')
     .replace(/\s*```$/, '');
   try {
@@ -46,7 +48,14 @@ export function parseCompanyAIContent(payload: CompanyAIResponseBody | null | un
   }
 }
 
-async function postChat({ baseUrl, token, model, prompt, includeResponseFormat, fetchImpl }: {
+async function postChat({
+  baseUrl,
+  token,
+  model,
+  prompt,
+  includeResponseFormat,
+  fetchImpl,
+}: {
   baseUrl: string;
   token: string;
   model: string;
@@ -80,7 +89,13 @@ async function postChat({ baseUrl, token, model, prompt, includeResponseFormat, 
   });
 }
 
-async function postMessages({ baseUrl, token, model, prompt, fetchImpl }: {
+async function postMessages({
+  baseUrl,
+  token,
+  model,
+  prompt,
+  fetchImpl,
+}: {
   baseUrl: string;
   token: string;
   model: string;
@@ -118,11 +133,21 @@ export async function callCompanyAI({
     response = await postMessages({ baseUrl, token, model, prompt, fetchImpl });
   } else if (protocol === 'openai') {
     response = await postChat({
-      baseUrl, token, model, prompt, includeResponseFormat: true, fetchImpl,
+      baseUrl,
+      token,
+      model,
+      prompt,
+      includeResponseFormat: true,
+      fetchImpl,
     });
     if (response.status === 400 || response.status === 422) {
       response = await postChat({
-        baseUrl, token, model, prompt, includeResponseFormat: false, fetchImpl,
+        baseUrl,
+        token,
+        model,
+        prompt,
+        includeResponseFormat: false,
+        fetchImpl,
       });
     }
   } else {

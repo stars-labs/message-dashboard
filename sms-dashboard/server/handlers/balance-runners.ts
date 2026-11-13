@@ -14,7 +14,8 @@ const STATES = new Set([
 const ONLINE_SECONDS = 90;
 
 type RunnerCapability = 'sms_ai' | 'carrier_browser';
-type RunnerState = 'starting' | 'ready' | 'busy' | 'degraded' | 'configuration_required' | 'stopping';
+type RunnerState =
+  'starting' | 'ready' | 'busy' | 'degraded' | 'configuration_required' | 'stopping';
 
 /** One capability entry in a heartbeat body, after validation. */
 interface HeartbeatCapability {
@@ -83,16 +84,22 @@ function parseHeartbeat(body: Record<string, unknown> | null | undefined): Heart
   for (const item of rawCapabilities as Array<Record<string, unknown>>) {
     const capability = boundedString(item?.capability, 100);
     const state = boundedString(item?.state, 100);
-    const currentJobId = item?.current_job_id == null
-      ? null
-      : boundedString(item.current_job_id, 200);
+    const currentJobId =
+      item?.current_job_id == null ? null : boundedString(item.current_job_id, 200);
     const detailCode = item?.detail_code == null ? null : boundedString(item.detail_code, 100);
     const concurrency = Number(item?.concurrency ?? 1);
     if (!capability || !state) return null;
-    if (!CAPABILITIES.has(capability) || !STATES.has(state) || seen.has(capability)
-      || (item?.current_job_id != null && !currentJobId)
-      || (item?.detail_code != null && !detailCode)
-      || !Number.isInteger(concurrency) || concurrency < 1 || concurrency > 8) return null;
+    if (
+      !CAPABILITIES.has(capability) ||
+      !STATES.has(state) ||
+      seen.has(capability) ||
+      (item?.current_job_id != null && !currentJobId) ||
+      (item?.detail_code != null && !detailCode) ||
+      !Number.isInteger(concurrency) ||
+      concurrency < 1 ||
+      concurrency > 8
+    )
+      return null;
     seen.add(capability);
     capabilities.push({ capability, state, currentJobId, detailCode, concurrency });
   }
@@ -104,14 +111,17 @@ function capabilitySummary(rows: CapabilityRow[]): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const capability of CAPABILITIES) {
     const candidates = rows.filter((row) => row.capability === capability);
-    const online = candidates.filter((row) => Number(row.seconds_since_heartbeat) <= ONLINE_SECONDS
-      && row.state !== 'stopping');
+    const online = candidates.filter(
+      (row) => Number(row.seconds_since_heartbeat) <= ONLINE_SECONDS && row.state !== 'stopping',
+    );
     const ready = online.find((row) => ['ready', 'busy'].includes(row.state));
     const selected = ready || online[0] || candidates[0] || null;
     result[capability] = {
       available: Boolean(ready),
       state: selected
-        ? (Number(selected.seconds_since_heartbeat) > ONLINE_SECONDS ? 'offline' : selected.state)
+        ? Number(selected.seconds_since_heartbeat) > ONLINE_SECONDS
+          ? 'offline'
+          : selected.state
         : 'offline',
       runner_id: selected?.runner_id || null,
       current_job_id: selected?.current_job_id || null,
@@ -126,9 +136,7 @@ export async function loadBalanceRunnerStatus(
   db: D1Database,
   { authSubject = null }: { authSubject?: string | null } = {},
 ) {
-  const ownerFilter = authSubject
-    ? " AND auth_mode = 'auth0_device' AND auth_subject = ?"
-    : '';
+  const ownerFilter = authSubject ? " AND auth_mode = 'auth0_device' AND auth_subject = ?" : '';
   const capabilityOwnerFilter = authSubject
     ? " AND r.auth_mode = 'auth0_device' AND r.auth_subject = ?"
     : '';
@@ -191,17 +199,26 @@ export const balanceRunnersHandler = {
     const heartbeat = parseHeartbeat(body);
     if (!heartbeat) return json({ error: 'Invalid runner heartbeat' }, 400);
 
-    const existing = await request.env.DB.prepare(`
+    const existing = await request.env.DB.prepare(
+      `
       SELECT auth_mode, auth_subject, revoked_at
       FROM balance_runner_installations WHERE id = ?
-    `).bind(heartbeat.runnerId).first<{ auth_mode: string; auth_subject: string | null; revoked_at: string | null }>();
+    `,
+    )
+      .bind(heartbeat.runnerId)
+      .first<{ auth_mode: string; auth_subject: string | null; revoked_at: string | null }>();
     if (existing?.revoked_at) return json({ error: 'Runner installation is revoked' }, 403);
-    if (existing && (existing.auth_mode !== auth.authMode
-      || (auth.authMode === 'auth0_device' && existing.auth_subject !== auth.subject))) {
+    if (
+      existing &&
+      (existing.auth_mode !== auth.authMode ||
+        (auth.authMode === 'auth0_device' && existing.auth_subject !== auth.subject))
+    ) {
       return json({ error: 'Runner identity does not match this installation' }, 409);
     }
 
-    const statements = [request.env.DB.prepare(`
+    const statements = [
+      request.env.DB.prepare(
+        `
       INSERT INTO balance_runner_installations (
         id, display_name, auth_mode, auth_subject, platform, version, last_heartbeat
       ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
@@ -214,17 +231,21 @@ export const balanceRunnersHandler = {
         last_heartbeat = CURRENT_TIMESTAMP,
         updated_at = CURRENT_TIMESTAMP
       WHERE balance_runner_installations.revoked_at IS NULL
-    `).bind(
-      heartbeat.runnerId,
-      heartbeat.displayName,
-      auth.authMode,
-      auth.subject,
-      heartbeat.platform,
-      heartbeat.version,
-    )];
+    `,
+      ).bind(
+        heartbeat.runnerId,
+        heartbeat.displayName,
+        auth.authMode,
+        auth.subject,
+        heartbeat.platform,
+        heartbeat.version,
+      ),
+    ];
 
     for (const capability of heartbeat.capabilities) {
-      statements.push(request.env.DB.prepare(`
+      statements.push(
+        request.env.DB.prepare(
+          `
         INSERT INTO balance_runner_capabilities (
           runner_id, capability, state, session_id, current_job_id,
           concurrency, detail_code, last_heartbeat
@@ -237,15 +258,17 @@ export const balanceRunnersHandler = {
           detail_code = excluded.detail_code,
           last_heartbeat = CURRENT_TIMESTAMP,
           updated_at = CURRENT_TIMESTAMP
-      `).bind(
-        heartbeat.runnerId,
-        capability.capability,
-        capability.state,
-        heartbeat.sessionId,
-        capability.currentJobId,
-        capability.concurrency,
-        capability.detailCode,
-      ));
+      `,
+        ).bind(
+          heartbeat.runnerId,
+          capability.capability,
+          capability.state,
+          heartbeat.sessionId,
+          capability.currentJobId,
+          capability.concurrency,
+          capability.detailCode,
+        ),
+      );
     }
 
     await request.env.DB.batch(statements);

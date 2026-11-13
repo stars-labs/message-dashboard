@@ -2,7 +2,12 @@ import { describe, expect, it, mock } from 'bun:test';
 import { resetDashboardCache, resetServiceWorker } from './sw-reset.js';
 
 /** Minimal stand-ins for the two browser APIs the reset touches. */
-function fakeEnv({ registrations = 1, cacheKeys = ['workbox-precache-v2'], unregister, deleteCache } = {}) {
+function fakeEnv({
+  registrations = 1,
+  cacheKeys = ['workbox-precache-v2'],
+  unregister,
+  deleteCache,
+} = {}) {
   const regs = Array.from({ length: registrations }, () => ({
     unregister: unregister ?? mock(async () => true),
   }));
@@ -35,7 +40,9 @@ describe('resetServiceWorker', () => {
     // recoverable, a dead worker with a stale cache is not. Caches must be cleared
     // even if unregister fails.
     const env = fakeEnv({
-      unregister: mock(async () => { throw new Error('boom'); }),
+      unregister: mock(async () => {
+        throw new Error('boom');
+      }),
       cacheKeys: ['stale'],
     });
     const result = await resetServiceWorker(env);
@@ -45,7 +52,11 @@ describe('resetServiceWorker', () => {
   });
 
   it('reports failure when cache deletion throws', async () => {
-    const env = fakeEnv({ deleteCache: mock(async () => { throw new Error('nope'); }) });
+    const env = fakeEnv({
+      deleteCache: mock(async () => {
+        throw new Error('nope');
+      }),
+    });
     const result = await resetServiceWorker(env);
     expect(result.ok).toBe(false);
   });
@@ -79,7 +90,9 @@ describe('resetDashboardCache', () => {
   });
 
   it('reports failure but still attempts both independent cache clears', async () => {
-    const clearMessageCache = mock(async () => { throw new Error('IndexedDB blocked'); });
+    const clearMessageCache = mock(async () => {
+      throw new Error('IndexedDB blocked');
+    });
     const resetOfflineCache = mock(async () => ({ ok: true, unregistered: 0, cachesDeleted: 1 }));
 
     const result = await resetDashboardCache({ clearMessageCache, resetOfflineCache });

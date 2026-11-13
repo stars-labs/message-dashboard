@@ -11,17 +11,17 @@ describe('isForeignError — browser extensions', () => {
         message: 'Failed to connect to MetaMask',
         stack:
           'Error: Failed to connect to MetaMask\n    at chrome-extension://nkbihfbeogaeaoehlefnkodbefgpgknn/scripts/inpage.js:1:1',
-      })
+      }),
     ).toBe(true);
   });
 
   test('treats an extension filename as foreign', () => {
     expect(
-      isForeignError({ filename: 'chrome-extension://abcdef/contentscript.js', message: 'boom' })
+      isForeignError({ filename: 'chrome-extension://abcdef/contentscript.js', message: 'boom' }),
     ).toBe(true);
   });
 
-  test('recognises other browsers\' extension protocols', () => {
+  test("recognises other browsers' extension protocols", () => {
     for (const proto of ['moz-extension', 'safari-extension', 'ms-browser-extension']) {
       expect(isForeignError({ filename: `${proto}://x/y.js`, message: 'boom' })).toBe(true);
     }
@@ -32,7 +32,7 @@ describe('isForeignError — benign browser noise', () => {
   test('ignores ResizeObserver loop warnings', () => {
     expect(isForeignError({ message: 'ResizeObserver loop limit exceeded' })).toBe(true);
     expect(
-      isForeignError({ message: 'ResizeObserver loop completed with undelivered notifications.' })
+      isForeignError({ message: 'ResizeObserver loop completed with undelivered notifications.' }),
     ).toBe(true);
   });
 
@@ -50,12 +50,14 @@ describe('isForeignError — real application errors', () => {
         message: "Cannot read properties of undefined (reading 'iccid')",
         filename: 'https://sexy.itoken.world/assets/index-abc123.js',
         stack: 'TypeError: ...\n    at https://sexy.itoken.world/assets/index-abc123.js:42:7',
-      })
+      }),
     ).toBe(false);
   });
 
   test('does not treat an API failure as foreign', () => {
-    expect(isForeignError({ message: 'Auth0 Management API request failed: ... (429)' })).toBe(false);
+    expect(isForeignError({ message: 'Auth0 Management API request failed: ... (429)' })).toBe(
+      false,
+    );
   });
 
   test('does not treat a stackless app error as foreign', () => {

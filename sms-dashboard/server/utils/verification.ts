@@ -58,7 +58,9 @@ export const VERIFICATION_CODE_PATTERNS: CodePattern[] = [
   },
   {
     reason: 'ja_label_after',
-    pattern: new RegExp(`(\\d{4,8})\\s*(?:は|が)?\\s*(?:あなたの|お客様の)?[^\\n。]{0,24}?(?:${JA_LABEL})`),
+    pattern: new RegExp(
+      `(\\d{4,8})\\s*(?:は|が)?\\s*(?:あなたの|お客様の)?[^\\n。]{0,24}?(?:${JA_LABEL})`,
+    ),
   },
   {
     reason: 'en_label_before',
@@ -78,7 +80,8 @@ export const VERIFICATION_CODE_PATTERNS: CodePattern[] = [
   },
   {
     reason: 'en_label_after',
-    pattern: /\b(\d{4,8})\b\s+is\s+your(?:\s+[a-z][a-z0-9_-]*){0,3}\s+(?:verification\s+|security\s+|authentication\s+|login\s+)?(?:code|otp|pin|password|passcode)\b/i,
+    pattern:
+      /\b(\d{4,8})\b\s+is\s+your(?:\s+[a-z][a-z0-9_-]*){0,3}\s+(?:verification\s+|security\s+|authentication\s+|login\s+)?(?:code|otp|pin|password|passcode)\b/i,
   },
   {
     reason: 'google_g_code',
@@ -86,11 +89,13 @@ export const VERIFICATION_CODE_PATTERNS: CodePattern[] = [
   },
   {
     reason: 'en_login_action',
-    pattern: /\b(?:use|enter|input|type)\s+(?:this\s+)?(?:code\s+)?(\d{4,8})\b[^\n.]{0,32}?\b(?:to\s+)?(?:log\s*in|sign\s*in|verify|authenticate|confirm|complete)\b/i,
+    pattern:
+      /\b(?:use|enter|input|type)\s+(?:this\s+)?(?:code\s+)?(\d{4,8})\b[^\n.]{0,32}?\b(?:to\s+)?(?:log\s*in|sign\s*in|verify|authenticate|confirm|complete)\b/i,
   },
   {
     reason: 'zh_login_action',
-    pattern: /(?:输入|輸入|使用|填入|填写|填寫)\s*(\d{4,8})\s*(?:以|来|來|完成|进行|進行)?\s*(?:身份)?(?:登录|登入|登錄|验证|驗證|认证|認證|确认|確認)/,
+    pattern:
+      /(?:输入|輸入|使用|填入|填写|填寫)\s*(\d{4,8})\s*(?:以|来|來|完成|进行|進行)?\s*(?:身份)?(?:登录|登入|登錄|验证|驗證|认证|認證|确认|確認)/,
   },
   {
     reason: 'en_expiry',
@@ -98,16 +103,17 @@ export const VERIFICATION_CODE_PATTERNS: CodePattern[] = [
   },
   {
     reason: 'en_security',
-    pattern: /\b(\d{4,8})\b[^\n.]{0,8}?[.!,:;]?\s*(?:do\s+not|never)\s+share\s+(?:it|this|the\s+(?:code|otp|pin|passcode)|with\b)/i,
+    pattern:
+      /\b(\d{4,8})\b[^\n.]{0,8}?[.!,:;]?\s*(?:do\s+not|never)\s+share\s+(?:it|this|the\s+(?:code|otp|pin|passcode)|with\b)/i,
   },
   {
     reason: 'zh_purpose_expiry',
-    pattern:
-      /(\d{4,8})[。．.!！]?\s*(?:仅|僅|只)?用于[^\n。]{1,24}[，,]\s*\d+\s*分(?:钟|鐘)内有效/,
+    pattern: /(\d{4,8})[。．.!！]?\s*(?:仅|僅|只)?用于[^\n。]{1,24}[，,]\s*\d+\s*分(?:钟|鐘)内有效/,
   },
   {
     reason: 'zh_expiry_or_security',
-    pattern: /(\d{4,8})[^\n。]{0,24}?(?:\d+\s*分钟内有效|\d+\s*分鐘內有效|有效期(?:为|為)?\s*\d+\s*分钟|有效期(?:为|為)?\s*\d+\s*分鐘|请勿(?:向他人)?泄露|請勿(?:向他人)?洩露|不要告知他人|切勿转发|切勿轉發)/,
+    pattern:
+      /(\d{4,8})[^\n。]{0,24}?(?:\d+\s*分钟内有效|\d+\s*分鐘內有效|有效期(?:为|為)?\s*\d+\s*分钟|有效期(?:为|為)?\s*\d+\s*分鐘|请勿(?:向他人)?泄露|請勿(?:向他人)?洩露|不要告知他人|切勿转发|切勿轉發)/,
   },
   {
     reason: 'ja_generic_code_before',
@@ -115,15 +121,18 @@ export const VERIFICATION_CODE_PATTERNS: CodePattern[] = [
   },
   {
     reason: 'ja_login_action',
-    pattern: /(\d{4,8})\s*を\s*(?:入力|使用)(?:し(?:てください)?)?[^\n。]{0,24}?(?:ログイン|サインイン|認証|確認)/,
+    pattern:
+      /(\d{4,8})\s*を\s*(?:入力|使用)(?:し(?:てください)?)?[^\n。]{0,24}?(?:ログイン|サインイン|認証|確認)/,
   },
   {
     reason: 'ja_expiry',
-    pattern: /(\d{4,8})[^\n。]{0,16}?(?:有効期限\s*(?:は|が)?\s*\d+\s*分|\d+\s*分(?:間|以内)?\s*有効)/,
+    pattern:
+      /(\d{4,8})[^\n。]{0,16}?(?:有効期限\s*(?:は|が)?\s*\d+\s*分|\d+\s*分(?:間|以内)?\s*有効)/,
   },
   {
     reason: 'ja_security',
-    pattern: /(\d{4,8})[^\n。]{0,24}?(?:誰とも|誰にも|他人|第三者)[^\n。]{0,8}?(?:共有|教え|伝え)(?:しないで|しない|ず|ないでください)/,
+    pattern:
+      /(\d{4,8})[^\n。]{0,24}?(?:誰とも|誰にも|他人|第三者)[^\n。]{0,8}?(?:共有|教え|伝え)(?:しないで|しない|ず|ないでください)/,
   },
 ];
 

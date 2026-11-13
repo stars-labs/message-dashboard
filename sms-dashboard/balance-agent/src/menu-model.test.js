@@ -29,21 +29,31 @@ describe('Balance Agent menu bar model', () => {
     const model = createMenuBarModel(readyState(), { openAtLogin: true });
     expect(model.appearance).toBe('ready');
     expect(model.tooltip).toContain('就绪');
-    expect(model.items.map((entry) => entry.label).filter(Boolean)).toContain('Balance Agent · HMBP');
+    expect(model.items.map((entry) => entry.label).filter(Boolean)).toContain(
+      'Balance Agent · HMBP',
+    );
     expect(item(model, 'agent-header').enabled).not.toBe(false);
-    expect(statusItems(model).slice(0, 3).map((entry) => entry.indicator)).toEqual([
-      'ready', 'ready', 'ready',
-    ]);
-    expect(statusItems(model).slice(0, 3).every((entry) => entry.enabled !== false)).toBe(true);
+    expect(
+      statusItems(model)
+        .slice(0, 3)
+        .map((entry) => entry.indicator),
+    ).toEqual(['ready', 'ready', 'ready']);
+    expect(
+      statusItems(model)
+        .slice(0, 3)
+        .every((entry) => entry.enabled !== false),
+    ).toBe(true);
     expect(item(model, 'open-dashboard').enabled).toBe(true);
     expect(item(model, 'open-at-login')).toMatchObject({ type: 'checkbox', checked: true });
   });
 
   test('prioritizes human verification over ordinary busy state', () => {
-    const model = createMenuBarModel(readyState({
-      browser: 'busy',
-      browserDetail: 'human_verification_required',
-    }));
+    const model = createMenuBarModel(
+      readyState({
+        browser: 'busy',
+        browserDetail: 'human_verification_required',
+      }),
+    );
     expect(model.appearance).toBe('attention');
     expect(model.tooltip).toContain('需要操作');
     expect(item(model, 'show-verification').label).toBe('显示验证窗口');
@@ -69,9 +79,11 @@ describe('Balance Agent menu bar model', () => {
     });
     expect(model.appearance).toBe('idle');
     expect(item(model, 'open-dashboard').enabled).toBe(false);
-    expect(statusItems(model).slice(0, 3).map((entry) => entry.indicator)).toEqual([
-      'inactive', 'inactive', 'inactive',
-    ]);
+    expect(
+      statusItems(model)
+        .slice(0, 3)
+        .map((entry) => entry.indicator),
+    ).toEqual(['inactive', 'inactive', 'inactive']);
     expect(item(model, 'show-verification')).toBeUndefined();
   });
 

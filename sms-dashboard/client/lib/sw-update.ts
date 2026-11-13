@@ -42,7 +42,10 @@ export function dismiss(state: UpdateState): void {
  * User accepted. `updateSW(true)` tells the waiting worker to take over and
  * reloads the page.
  */
-export function applyUpdate(state: UpdateState, updateSW?: ((reloadPage?: boolean) => Promise<void>) | null): void {
+export function applyUpdate(
+  state: UpdateState,
+  updateSW?: ((reloadPage?: boolean) => Promise<void>) | null,
+): void {
   if (!state.available || state.applying) return;
   state.available = false;
   state.applying = true;

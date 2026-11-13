@@ -69,7 +69,11 @@ async function gate(
 }
 
 /** Validate and normalise a rule payload. */
-function validateRule({ rule_type, pattern, note }: {
+function validateRule({
+  rule_type,
+  pattern,
+  note,
+}: {
   rule_type: unknown;
   pattern: unknown;
   note: unknown;
@@ -112,11 +116,13 @@ function isUniqueViolation(error: unknown): boolean {
 }
 
 export async function listFilterRules(db: D1Database): Promise<{ filters: SpamRule[] }> {
-  const { results } = await db.prepare(
-    `SELECT *
+  const { results } = await db
+    .prepare(
+      `SELECT *
      FROM filter_rules
      ORDER BY rule_type, id`,
-  ).all<SpamRule>();
+    )
+    .all<SpamRule>();
 
   return { filters: results };
 }
@@ -142,7 +148,11 @@ export function setupFilterRoutes(router: Router): void {
     if (blocked) return blocked;
 
     try {
-      const body = (await request.json()) as { rule_type?: unknown; pattern?: unknown; note?: unknown };
+      const body = (await request.json()) as {
+        rule_type?: unknown;
+        pattern?: unknown;
+        note?: unknown;
+      };
       const validated = validateRule({
         rule_type: body.rule_type,
         pattern: body.pattern,
@@ -194,13 +204,14 @@ export function setupFilterRoutes(router: Router): void {
         is_active?: unknown;
       };
       if (
-        (body.rule_type !== undefined && body.rule_type !== existing.rule_type)
-        || (
-          body.pattern !== undefined
-          && (typeof body.pattern !== 'string' || body.pattern.trim() !== existing.pattern)
-        )
+        (body.rule_type !== undefined && body.rule_type !== existing.rule_type) ||
+        (body.pattern !== undefined &&
+          (typeof body.pattern !== 'string' || body.pattern.trim() !== existing.pattern))
       ) {
-        return json({ error: 'Rule type and pattern are immutable; create a new rule instead' }, 400);
+        return json(
+          { error: 'Rule type and pattern are immutable; create a new rule instead' },
+          400,
+        );
       }
       const validated = validateRule({
         rule_type: existing.rule_type,
@@ -209,7 +220,7 @@ export function setupFilterRoutes(router: Router): void {
       });
       if ('error' in validated) return json({ error: validated.error }, 400);
 
-      const isActive = body.is_active === undefined ? existing.is_active : (body.is_active ? 1 : 0);
+      const isActive = body.is_active === undefined ? existing.is_active : body.is_active ? 1 : 0;
 
       const updated = await env.DB.prepare(
         `UPDATE filter_rules
@@ -239,14 +250,14 @@ export function setupFilterRoutes(router: Router): void {
     try {
       const referenced = await env.DB.prepare(
         `SELECT 1 FROM messages WHERE filter_rule_id = ? LIMIT 1`,
-      ).bind(id).first();
+      )
+        .bind(id)
+        .first();
       if (referenced) {
         return json({ error: 'Rule has historical messages; deactivate it instead' }, 409);
       }
 
-      const result = await env.DB.prepare(`DELETE FROM filter_rules WHERE id = ?`)
-        .bind(id)
-        .run();
+      const result = await env.DB.prepare(`DELETE FROM filter_rules WHERE id = ?`).bind(id).run();
       if (!result?.meta?.changes) return json({ error: 'Filter rule not found' }, 404);
 
       return json({ success: true });
@@ -271,11 +282,7 @@ export function setupFilterRoutes(router: Router): void {
       const body = (await request.json()) as { since?: unknown; until?: unknown; cursor?: unknown };
       const since = new Date(body.since as string);
       const until = new Date(body.until as string);
-      if (
-        Number.isNaN(since.getTime())
-        || Number.isNaN(until.getTime())
-        || since > until
-      ) {
+      if (Number.isNaN(since.getTime()) || Number.isNaN(until.getTime()) || since > until) {
         return json({ error: 'A valid history time range is required' }, 400);
       }
       const rawCursor: unknown = body.cursor ?? null;
@@ -283,9 +290,9 @@ export function setupFilterRoutes(router: Router): void {
       if (rawCursor !== null) {
         const c = rawCursor as { created_at?: unknown; id?: unknown };
         if (
-          typeof c.created_at !== 'string'
-          || typeof c.id !== 'string'
-          || Number.isNaN(new Date(`${c.created_at}Z`).getTime())
+          typeof c.created_at !== 'string' ||
+          typeof c.id !== 'string' ||
+          Number.isNaN(new Date(`${c.created_at}Z`).getTime())
         ) {
           return json({ error: 'Invalid history cursor' }, 400);
         }

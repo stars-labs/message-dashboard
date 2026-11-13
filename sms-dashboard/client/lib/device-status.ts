@@ -107,6 +107,9 @@ export function hasOperationalIssue(status: string | null | undefined): boolean 
  * @param {string | null | undefined} status
  * @param {boolean} daemonConnected
  */
-export function getEffectiveDeviceStatus(status: string | null | undefined, daemonConnected: boolean): string {
-  return daemonConnected ? (status || 'offline') : 'offline';
+export function getEffectiveDeviceStatus(
+  status: string | null | undefined,
+  daemonConnected: boolean,
+): string {
+  return daemonConnected ? status || 'offline' : 'offline';
 }

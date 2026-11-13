@@ -55,14 +55,18 @@ export class CallState {
       if (raw) {
         const call = JSON.parse(raw) as StoredCall;
         const ttl = call.state === 'ringing' ? 60 : 3600;
-        this.storage.kv.put(KEY, { call, revision: crypto.randomUUID(), expiresAt: Date.now() + ttl * 1000 });
+        this.storage.kv.put(KEY, {
+          call,
+          revision: crypto.randomUUID(),
+          expiresAt: Date.now() + ttl * 1000,
+        });
       }
       this.storage.kv.put('initialized', true);
     });
   }
 
   async fetch(request: Request): Promise<Response> {
-    const change = request.method === 'POST' ? (await request.json() as ChangeRequest) : null;
+    const change = request.method === 'POST' ? ((await request.json()) as ChangeRequest) : null;
     return this.storage.transactionSync(() => {
       const stored = this.storage.kv.get(KEY) as CallRecord | undefined;
       const current = stored && stored.expiresAt > Date.now() ? stored : null;

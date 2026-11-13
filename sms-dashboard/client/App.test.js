@@ -83,25 +83,36 @@ function responseFor(url) {
     });
   }
   if (path === '/api/phones') {
-    return Response.json({ success: true, data: [{
-      iccid: '8986000000000000001',
-      sim_index: 1,
-      number: '+8613800000000',
-      country: 'CN',
-      status: 'active',
-      updated_at: new Date().toISOString(),
-    }] });
+    return Response.json({
+      success: true,
+      data: [
+        {
+          iccid: '8986000000000000001',
+          sim_index: 1,
+          number: '+8613800000000',
+          country: 'CN',
+          status: 'active',
+          updated_at: new Date().toISOString(),
+        },
+      ],
+    });
   }
   if (path === '/api/messages') {
-    return Response.json({ success: true, data: [{
-      id: 'message-1',
-      type: 'received',
-      content: '用于测试导航关闭详情的短信',
-      phone_number: '10086',
-      phone_iccid: '8986000000000000001',
-      phone_sim_index: 1,
-      timestamp: '2026-08-26T12:00:00.000Z',
-    }], pagination: { total: 1 } });
+    return Response.json({
+      success: true,
+      data: [
+        {
+          id: 'message-1',
+          type: 'received',
+          content: '用于测试导航关闭详情的短信',
+          phone_number: '10086',
+          phone_iccid: '8986000000000000001',
+          phone_sim_index: 1,
+          timestamp: '2026-08-26T12:00:00.000Z',
+        },
+      ],
+      pagination: { total: 1 },
+    });
   }
   if (path === '/api/balance-checks') {
     return Response.json({ success: true, data: [] });
@@ -177,15 +188,14 @@ describe('mobile detail navigation', () => {
       expect([...button.classList].some((className) => className.startsWith('pt-'))).toBe(false);
       expect([...button.classList].some((className) => className.startsWith('pb-'))).toBe(false);
     }
-    const balances = [...mobileNav.querySelectorAll('button')]
-      .find((button) => button.textContent.includes('余额'));
+    const balances = [...mobileNav.querySelectorAll('button')].find((button) =>
+      button.textContent.includes('余额'),
+    );
     await fireEvent.click(balances);
 
     expect(view.queryByRole('region', { name: '短信详情' })).toBeNull();
     expect(window.location.hash).toBe('#balances');
-    expect(mobileNav.style.getPropertyValue('--mobile-tab-selection-x')).toBe(
-      'calc(200% + 16px)',
-    );
+    expect(mobileNav.style.getPropertyValue('--mobile-tab-selection-x')).toBe('calc(200% + 16px)');
   });
 
   test('the shared mobile tab content height is 60px without a vertical offset', () => {
@@ -250,8 +260,9 @@ describe('mobile detail navigation', () => {
     expect(mobileNav.style.getPropertyValue('--mobile-tab-selection-x')).toBe('230px');
     expect(mobileNav.style.getPropertyValue('--mobile-tab-glow-x')).toBe('280px');
     expect(mobileNav.style.getPropertyValue('--mobile-tab-icon-shift-x')).toBe('1.2px');
-    expect(mobileNav.querySelector('[data-mobile-tab-active="true"]')?.textContent)
-      .toContain('余额');
+    expect(mobileNav.querySelector('[data-mobile-tab-active="true"]')?.textContent).toContain(
+      '余额',
+    );
 
     await fireEvent.pointerUp(mobileNav, {
       pointerId: 1,
@@ -287,7 +298,9 @@ describe('mobile detail navigation', () => {
 
     expect(
       declarations('transform').some((decl) =>
-        decl.selector.includes(cssSelector('.mobile-tab-button[data-mobile-tab-active="true"] > svg')),
+        decl.selector.includes(
+          cssSelector('.mobile-tab-button[data-mobile-tab-active="true"] > svg'),
+        ),
       ),
     ).toBe(true);
 

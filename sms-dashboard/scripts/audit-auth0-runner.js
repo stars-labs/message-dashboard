@@ -6,7 +6,9 @@ for (let index = 2; index < process.argv.length; index += 2) {
 const audience = args.get('--audience');
 const clientId = args.get('--client-id');
 const roleName = args.get('--role') || 'balance-runner';
-const domain = String(process.env.AUTH0_DOMAIN || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+const domain = String(process.env.AUTH0_DOMAIN || '')
+  .replace(/^https?:\/\//, '')
+  .replace(/\/+$/, '');
 const m2mClientId = process.env.AUTH0_M2M_CLIENT_ID;
 const m2mClientSecret = process.env.AUTH0_M2M_CLIENT_SECRET;
 
@@ -25,7 +27,8 @@ const tokenResponse = await fetch(`https://${domain}/oauth/token`, {
     audience: `https://${domain}/api/v2/`,
   }),
 });
-if (!tokenResponse.ok) throw new Error(`Auth0 Management token request failed (${tokenResponse.status})`);
+if (!tokenResponse.ok)
+  throw new Error(`Auth0 Management token request failed (${tokenResponse.status})`);
 const managementToken = (await tokenResponse.json()).access_token;
 if (!managementToken) throw new Error('Auth0 Management token response had no access token');
 
@@ -69,43 +72,52 @@ if (Array.isArray(bindings?.bindings)) {
     actionSummaries.push({
       name: action.name || binding.display_name || actionId,
       deployed: action.status === 'built',
-      mutates_access_token_scopes: /accessToken\s*\.\s*(?:addScope|removeScope)|setCustomClaim\s*\(\s*['"]scope['"]/i.test(code),
+      mutates_access_token_scopes:
+        /accessToken\s*\.\s*(?:addScope|removeScope)|setCustomClaim\s*\(\s*['"]scope['"]/i.test(
+          code,
+        ),
       mentions_heartbeat_scope: code.includes('balance:runners:heartbeat'),
     });
   }
 }
 
 const report = {
-  api: api ? {
-    name: api.name,
-    identifier: api.identifier,
-    rbac_enabled: Boolean(api.enforce_policies),
-    token_dialect: api.token_dialect,
-    allow_offline_access: Boolean(api.allow_offline_access),
-    scopes: (api.scopes || []).map(({ value }) => value).sort(),
-  } : (resourceServers?.unavailable
-    ? { unavailable: resourceServers.status }
-    : { missing: true }),
-  role: role ? {
-    name: role.name,
-    permissions: Array.isArray(rolePermissions)
-      ? rolePermissions.map(({ permission_name: name, resource_server_identifier: apiIdentifier }) => ({
-        name,
-        api: apiIdentifier,
-      })).sort((left, right) => left.name.localeCompare(right.name))
-      : { unavailable: rolePermissions.status },
-  } : (roles?.unavailable ? { unavailable: roles.status } : { missing: true }),
+  api: api
+    ? {
+        name: api.name,
+        identifier: api.identifier,
+        rbac_enabled: Boolean(api.enforce_policies),
+        token_dialect: api.token_dialect,
+        allow_offline_access: Boolean(api.allow_offline_access),
+        scopes: (api.scopes || []).map(({ value }) => value).sort(),
+      }
+    : resourceServers?.unavailable
+      ? { unavailable: resourceServers.status }
+      : { missing: true },
+  role: role
+    ? {
+        name: role.name,
+        permissions: Array.isArray(rolePermissions)
+          ? rolePermissions
+              .map(({ permission_name: name, resource_server_identifier: apiIdentifier }) => ({
+                name,
+                api: apiIdentifier,
+              }))
+              .sort((left, right) => left.name.localeCompare(right.name))
+          : { unavailable: rolePermissions.status },
+      }
+    : roles?.unavailable
+      ? { unavailable: roles.status }
+      : { missing: true },
   user_delegated_client_grants: Array.isArray(clientGrants)
     ? clientGrants.map((grant) => ({
-      subject_type: grant.subject_type,
-      audience: grant.audience,
-      scopes: [...(grant.scope || [])].sort(),
-      allow_all_scopes: Boolean(grant.allow_all_scopes),
-    }))
+        subject_type: grant.subject_type,
+        audience: grant.audience,
+        scopes: [...(grant.scope || [])].sort(),
+        allow_all_scopes: Boolean(grant.allow_all_scopes),
+      }))
     : { unavailable: clientGrants.status },
-  post_login_actions: bindings?.unavailable
-    ? { unavailable: bindings.status }
-    : actionSummaries,
+  post_login_actions: bindings?.unavailable ? { unavailable: bindings.status } : actionSummaries,
 };
 
 console.log(JSON.stringify(report, null, 2));

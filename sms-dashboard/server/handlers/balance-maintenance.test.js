@@ -27,12 +27,14 @@ class D1Adapter {
   }
 
   async batch(statements) {
-    return this.database.transaction(() => statements.map((statement) => {
-      this.database.query(statement.sql).run(...statement.params);
-      return {
-        meta: { changes: this.database.query('SELECT changes() AS value').get().value },
-      };
-    }))();
+    return this.database.transaction(() =>
+      statements.map((statement) => {
+        this.database.query(statement.sql).run(...statement.params);
+        return {
+          meta: { changes: this.database.query('SELECT changes() AS value').get().value },
+        };
+      }),
+    )();
   }
 }
 
@@ -127,28 +129,48 @@ describe('balance timeout maintenance D1 flow', () => {
     const result = await expireStaleBalanceChecks(db);
 
     expect(result.expired).toBe(1);
-    expect(sqlite.query(`
+    expect(
+      sqlite
+        .query(
+          `
       SELECT status, response_message_id, error
       FROM sim_balance_checks WHERE id = 'check-failed'
-    `).get()).toEqual({
+    `,
+        )
+        .get(),
+    ).toEqual({
       status: 'failed',
       response_message_id: null,
       error: 'SMS submission was not confirmed',
     });
-    expect(sqlite.query(`
+    expect(
+      sqlite
+        .query(
+          `
       SELECT id, purpose, balance_check_id
       FROM messages WHERE id IN ('reply-one', 'reply-two') ORDER BY id
-    `).all()).toEqual([
+    `,
+        )
+        .all(),
+    ).toEqual([
       { id: 'reply-one', purpose: 'user', balance_check_id: null },
       { id: 'reply-two', purpose: 'user', balance_check_id: null },
     ]);
-    expect(sqlite.query(`
+    expect(
+      sqlite
+        .query(
+          `
       SELECT id, status FROM sim_balance_checks
       WHERE id IN ('check-stale', 'check-fresh') ORDER BY id
-    `).all()).toEqual([
+    `,
+        )
+        .all(),
+    ).toEqual([
       { id: 'check-fresh', status: 'awaiting_response' },
       { id: 'check-stale', status: 'timed_out' },
     ]);
-    expect(sqlite.query(`SELECT COUNT(*) AS value FROM sim_balance_skill_jobs`).get().value).toBe(0);
+    expect(sqlite.query(`SELECT COUNT(*) AS value FROM sim_balance_skill_jobs`).get().value).toBe(
+      0,
+    );
   });
 });

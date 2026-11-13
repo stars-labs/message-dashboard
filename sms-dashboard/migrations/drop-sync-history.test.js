@@ -14,14 +14,17 @@ describe('drop obsolete device sync history', () => {
       CREATE INDEX idx_sync_history_session ON sync_history(session_id);
     `);
 
-    const migration = readFileSync(
-      new URL('./073_drop_sync_history.sql', import.meta.url),
-      'utf8',
-    );
+    const migration = readFileSync(new URL('./073_drop_sync_history.sql', import.meta.url), 'utf8');
     database.exec(migration);
 
-    expect(database.query(`
+    expect(
+      database
+        .query(
+          `
       SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'sync_history'
-    `).get()).toBeNull();
+    `,
+        )
+        .get(),
+    ).toBeNull();
   });
 });

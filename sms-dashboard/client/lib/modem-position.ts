@@ -9,7 +9,9 @@ export interface ModemPathMapping {
   last_usb_path?: string | null;
 }
 
-export function getModemPosition(mapping: ModemPathMapping | null | undefined): ModemPosition | null {
+export function getModemPosition(
+  mapping: ModemPathMapping | null | undefined,
+): ModemPosition | null {
   if (mapping?.usb_path) {
     return { path: mapping.usb_path, isLastKnown: false };
   }

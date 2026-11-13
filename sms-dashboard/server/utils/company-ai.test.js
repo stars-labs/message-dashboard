@@ -3,9 +3,11 @@ import { callCompanyAI, parseCompanyAIContent } from './company-ai.js';
 
 describe('company AI client', () => {
   test('parses JSON content with or without a markdown fence', () => {
-    expect(parseCompanyAIContent({
-      choices: [{ message: { content: '```json\n{"action":"stop"}\n```' } }],
-    })).toEqual({ action: 'stop' });
+    expect(
+      parseCompanyAIContent({
+        choices: [{ message: { content: '```json\n{"action":"stop"}\n```' } }],
+      }),
+    ).toEqual({ action: 'stop' });
   });
 
   test('uses bearer auth and retries without response_format when unsupported', async () => {

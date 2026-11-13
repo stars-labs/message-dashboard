@@ -1,5 +1,13 @@
 import {
-  app, BrowserWindow, ipcMain, Menu, nativeImage, Notification, safeStorage, shell, Tray,
+  app,
+  BrowserWindow,
+  ipcMain,
+  Menu,
+  nativeImage,
+  Notification,
+  safeStorage,
+  shell,
+  Tray,
 } from 'electron';
 import { join } from 'node:path';
 import log from 'electron-log/main.js';
@@ -85,7 +93,9 @@ function createWindow() {
       window.hide();
     }
   });
-  window.on('closed', () => { window = null; });
+  window.on('closed', () => {
+    window = null;
+  });
 }
 
 function trayImage() {
@@ -94,10 +104,9 @@ function trayImage() {
 
 function statusImage(indicator) {
   if (!indicator) return undefined;
-  const image = nativeImage.createFromPath(join(
-    import.meta.dirname,
-    `assets/status-${indicator}.png`,
-  ));
+  const image = nativeImage.createFromPath(
+    join(import.meta.dirname, `assets/status-${indicator}.png`),
+  );
   return image.isEmpty() ? undefined : image;
 }
 
@@ -147,10 +156,16 @@ function menuTemplate(model) {
       } else showWindow();
     },
     'status-error': showWindow,
-    'show-verification': () => { void showVerificationWindow(); },
-    'open-dashboard': () => { void openDashboard(); },
+    'show-verification': () => {
+      void showVerificationWindow();
+    },
+    'open-dashboard': () => {
+      void openDashboard();
+    },
     'open-settings': showWindow,
-    'open-at-login': (item) => { setOpenAtLogin(item.checked); },
+    'open-at-login': (item) => {
+      setOpenAtLogin(item.checked);
+    },
     quit: () => app.quit(),
   };
   return model.items.map((item) => {
@@ -196,7 +211,9 @@ app.on('open-url', (event) => {
   event.preventDefault();
   showWindow();
 });
-app.on('before-quit', () => { quitting = true; });
+app.on('before-quit', () => {
+  quitting = true;
+});
 app.on('will-quit', async (event) => {
   if (!service) return;
   event.preventDefault();
@@ -227,20 +244,25 @@ async function startApplication() {
     browser: chromium,
     browserExecutablePath: app.isPackaged
       ? packagedExecutable
-      : (process.env.UNICOM_BROWSER_EXECUTABLE || (process.platform === 'darwin'
-        ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
-        : process.env.CHROME_BIN || '/usr/bin/google-chrome')),
+      : process.env.UNICOM_BROWSER_EXECUTABLE ||
+        (process.platform === 'darwin'
+          ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+          : process.env.CHROME_BIN || '/usr/bin/google-chrome'),
     appVersion: app.getVersion(),
     logger: log,
     onState: (state) => {
       acceptState(state);
-      if (state.browserDetail === 'human_verification_required'
-        && previousBrowserDetail !== state.browserDetail) {
+      if (
+        state.browserDetail === 'human_verification_required' &&
+        previousBrowserDetail !== state.browserDetail
+      ) {
         const notification = new Notification({
           title: '余额查询需要操作',
           body: '请在已打开的联通页面完成人工验证。',
         });
-        notification.on('click', () => { void showVerificationWindow(); });
+        notification.on('click', () => {
+          void showVerificationWindow();
+        });
         notification.show();
       }
       previousBrowserDetail = state.browserDetail;
@@ -254,7 +276,9 @@ async function startApplication() {
     return withApplicationState(latestState);
   });
   ipcMain.handle('agent:test-ai', (_event, settings) => service.testAI(settings));
-  ipcMain.handle('agent:test-configuration', (_event, settings) => service.testConfiguration(settings));
+  ipcMain.handle('agent:test-configuration', (_event, settings) =>
+    service.testConfiguration(settings),
+  );
   ipcMain.handle('agent:sign-in', () => service.signIn());
   ipcMain.handle('agent:sign-out', () => service.signOut());
   ipcMain.handle('agent:set-open-at-login', (_event, enabled) => setOpenAtLogin(enabled));

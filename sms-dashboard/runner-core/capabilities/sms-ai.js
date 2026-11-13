@@ -41,7 +41,7 @@ export function createSmsAiCapability({
 
   return Object.freeze({
     async checkConfiguration() {
-      if (!await isAIReachable(aiBaseUrl)) {
+      if (!(await isAIReachable(aiBaseUrl))) {
         throw new Error('Company AI is unreachable; connect to the VPN and retry');
       }
       const result = await callAI({
@@ -65,7 +65,9 @@ export function createSmsAiCapability({
       });
       if (!reachable) {
         await presence.set('degraded', null, 'vpn_or_ai_unreachable');
-        logger.log(`Company AI is unreachable (${probeError || 'no response'}); waiting for VPN connectivity.`);
+        logger.log(
+          `Company AI is unreachable (${probeError || 'no response'}); waiting for VPN connectivity.`,
+        );
         return { handled: false, retryDelay: 15_000 };
       }
 
@@ -79,14 +81,15 @@ export function createSmsAiCapability({
       const job = await response.json();
       await presence.set('busy', job.id);
       try {
-        const proposed = buildExplicitBalanceFollowUp(job.response_content, job.skill)
-          || await callAI({
+        const proposed =
+          buildExplicitBalanceFollowUp(job.response_content, job.skill) ||
+          (await callAI({
             baseUrl: aiBaseUrl,
             token: aiToken,
             model: aiModel,
             prompt: buildBalanceSkillPrompt(job),
             protocol: aiProtocol,
-          });
+          }));
         const decision = validateBalanceSkillDecision({
           decision: proposed,
           content: job.response_content,

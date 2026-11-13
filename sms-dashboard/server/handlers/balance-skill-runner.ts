@@ -60,7 +60,9 @@ async function readJson(request: AppRequest): Promise<Record<string, unknown> | 
 }
 
 async function loadJob(db: D1Database, id: string | undefined): Promise<SkillJob | null> {
-  return db.prepare(`
+  return db
+    .prepare(
+      `
     SELECT
       j.id, j.check_id, j.response_message_id, j.step_index,
       j.status, j.lease_owner, j.lease_expires_at, j.attempts,
@@ -75,7 +77,10 @@ async function loadJob(db: D1Database, id: string | undefined): Promise<SkillJob
     LEFT JOIN device_view dv ON dv.iccid = c.sim_iccid
     JOIN messages rm ON rm.id = j.response_message_id
     WHERE j.id = ?
-  `).bind(id).first<SkillJob>();
+  `,
+    )
+    .bind(id)
+    .first<SkillJob>();
 }
 
 function decisionStatement(
@@ -85,25 +90,29 @@ function decisionStatement(
   model: unknown,
   decision: BalanceDecision,
 ): D1PreparedStatement {
-  return db.prepare(`
+  return db
+    .prepare(
+      `
     INSERT INTO sim_balance_skill_decisions (
       check_id, response_message_id, step_index, skill_id, skill_version,
       model, action, selected_option, confidence, reason, evidence, decision_json
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).bind(
-    job.check_id,
-    job.response_message_id,
-    job.step_index,
-    skill.id,
-    skill.version,
-    String(model || 'unknown').slice(0, 200),
-    decision.action,
-    decision.selected_option,
-    decision.confidence,
-    decision.reason,
-    decision.evidence,
-    JSON.stringify(decision),
-  );
+  `,
+    )
+    .bind(
+      job.check_id,
+      job.response_message_id,
+      job.step_index,
+      skill.id,
+      skill.version,
+      String(model || 'unknown').slice(0, 200),
+      decision.action,
+      decision.selected_option,
+      decision.confidence,
+      decision.reason,
+      decision.evidence,
+      JSON.stringify(decision),
+    );
 }
 
 export const balanceSkillRunnerHandler = {
@@ -117,7 +126,8 @@ export const balanceSkillRunnerHandler = {
       return json({ error: 'runner_id is required' }, 400);
     }
 
-    const leased = await request.env.DB.prepare(`
+    const leased = await request.env.DB.prepare(
+      `
       UPDATE sim_balance_skill_jobs
       SET status = 'leased',
           lease_owner = ?,
@@ -138,24 +148,25 @@ export const balanceSkillRunnerHandler = {
         LIMIT 1
       )
       RETURNING id
-    `).bind(
-      runnerId,
-      LEASE_SECONDS,
-      auth.authMode,
-      auth.subject,
-      auth.authMode,
-    ).first<{ id: string }>();
+    `,
+    )
+      .bind(runnerId, LEASE_SECONDS, auth.authMode, auth.subject, auth.authMode)
+      .first<{ id: string }>();
 
     if (!leased) return new Response(null, { status: 204 });
     const job = await loadJob(request.env.DB, leased.id);
     const skill = parseBalanceSkillConfig(job?.skill_config);
     if (!job || !skill || Number(job.step_index) >= Number(skill.max_turns)) {
-      await request.env.DB.prepare(`
+      await request.env.DB.prepare(
+        `
         UPDATE sim_balance_skill_jobs
         SET status = 'stopped', lease_owner = NULL, lease_expires_at = NULL,
             last_error = ?, updated_at = CURRENT_TIMESTAMP
         WHERE id = ? AND lease_owner = ?
-      `).bind('Skill configuration is invalid or maximum turns reached', leased.id, runnerId).run();
+      `,
+      )
+        .bind('Skill configuration is invalid or maximum turns reached', leased.id, runnerId)
+        .run();
       return new Response(null, { status: 204 });
     }
 
@@ -186,8 +197,11 @@ export const balanceSkillRunnerHandler = {
     if (!runnerCanAccessOwner(auth, job.requested_by_subject)) {
       return json({ error: 'Skill job belongs to another account' }, 403);
     }
-    if (job.status !== 'leased' || job.lease_owner !== body.runner_id
-      || new Date(`${job.lease_expires_at}Z`) <= new Date()) {
+    if (
+      job.status !== 'leased' ||
+      job.lease_owner !== body.runner_id ||
+      new Date(`${job.lease_expires_at}Z`) <= new Date()
+    ) {
       return json({ error: 'Skill job lease is not active for this runner' }, 409);
     }
     if (!['response_received', 'unparsed'].includes(job.check_status)) {
@@ -210,7 +224,9 @@ export const balanceSkillRunnerHandler = {
 
     const audit = decisionStatement(db, job, skill, body.model, decision);
     if (decision.action === 'reply') {
-      const finishJob = db.prepare(`
+      const finishJob = db
+        .prepare(
+          `
         UPDATE sim_balance_skill_jobs
         SET status = 'completed', lease_owner = NULL, lease_expires_at = NULL,
             updated_at = CURRENT_TIMESTAMP
@@ -219,15 +235,24 @@ export const balanceSkillRunnerHandler = {
             SELECT 1 FROM sim_balance_checks c
             WHERE c.id = check_id AND c.status = 'queued' AND c.step_index = ?
           )
-      `).bind(job.id, body.runner_id, Number(job.step_index) + 1);
-      const result = await queueBalanceFollowUp(db, {
-        ...job,
-        id: job.check_id,
-      } as unknown as Parameters<typeof queueBalanceFollowUp>[1], {
-        id: job.response_message_id,
-        phone_number: job.response_sender,
-        content: job.response_content,
-      }, { command: decision.selected_option ?? '' }, job.check_status, [audit, finishJob]);
+      `,
+        )
+        .bind(job.id, body.runner_id, Number(job.step_index) + 1);
+      const result = await queueBalanceFollowUp(
+        db,
+        {
+          ...job,
+          id: job.check_id,
+        } as unknown as Parameters<typeof queueBalanceFollowUp>[1],
+        {
+          id: job.response_message_id,
+          phone_number: job.response_sender,
+          content: job.response_content,
+        },
+        { command: decision.selected_option ?? '' },
+        job.check_status,
+        [audit, finishJob],
+      );
       if (!result.queued) {
         return json({ error: 'Balance check changed before the decision was applied' }, 409);
       }
@@ -235,7 +260,9 @@ export const balanceSkillRunnerHandler = {
     }
 
     if (decision.action === 'complete') {
-      const finishJob = db.prepare(`
+      const finishJob = db
+        .prepare(
+          `
         UPDATE sim_balance_skill_jobs
         SET status = 'completed', lease_owner = NULL, lease_expires_at = NULL,
             updated_at = CURRENT_TIMESTAMP
@@ -244,15 +271,23 @@ export const balanceSkillRunnerHandler = {
             SELECT 1 FROM sim_balance_checks c
             WHERE c.id = check_id AND c.status = 'parsed' AND c.step_index = ?
           )
-      `).bind(job.id, body.runner_id, job.step_index);
+      `,
+        )
+        .bind(job.id, body.runner_id, job.step_index);
       const results = await db.batch<{ meta?: { changes?: number } }>([
-        db.prepare(`
+        db
+          .prepare(
+            `
           UPDATE sim_balance_checks
           SET status = 'parsed', completed_at = CURRENT_TIMESTAMP,
               error = NULL, updated_at = CURRENT_TIMESTAMP
           WHERE id = ? AND status = ? AND step_index = ?
-        `).bind(job.check_id, job.check_status, job.step_index),
-        db.prepare(`
+        `,
+          )
+          .bind(job.check_id, job.check_status, job.step_index),
+        db
+          .prepare(
+            `
           INSERT INTO sim_balance_metrics (
             check_id, metric_type, value, unit, currency, expires_at
           )
@@ -262,7 +297,9 @@ export const balanceSkillRunnerHandler = {
           ON CONFLICT(check_id, metric_type) DO UPDATE SET
             value = excluded.value, currency = excluded.currency,
             created_at = CURRENT_TIMESTAMP
-        `).bind(decision.balance, decision.currency, job.check_id, job.step_index),
+        `,
+          )
+          .bind(decision.balance, decision.currency, job.check_id, job.step_index),
         audit,
         finishJob,
       ]);
@@ -272,19 +309,27 @@ export const balanceSkillRunnerHandler = {
       return json({ success: true, action: 'complete', status: 'parsed' });
     }
 
-    const finishJob = db.prepare(`
+    const finishJob = db
+      .prepare(
+        `
       UPDATE sim_balance_skill_jobs
       SET status = 'stopped', lease_owner = NULL, lease_expires_at = NULL,
           updated_at = CURRENT_TIMESTAMP
       WHERE id = ? AND status = 'leased' AND lease_owner = ?
-    `).bind(job.id, body.runner_id);
-    const finishCheck = db.prepare(`
+    `,
+      )
+      .bind(job.id, body.runner_id);
+    const finishCheck = db
+      .prepare(
+        `
       UPDATE sim_balance_checks
       SET status = 'unparsed', completed_at = CURRENT_TIMESTAMP,
           updated_at = CURRENT_TIMESTAMP
       WHERE id = ? AND status IN ('response_received', 'unparsed')
         AND step_index = ?
-    `).bind(job.check_id, job.step_index);
+    `,
+      )
+      .bind(job.check_id, job.step_index);
     await db.batch([audit, finishCheck, finishJob]);
     return json({ success: true, action: 'stop', reason: decision.reason });
   },
@@ -303,16 +348,20 @@ export const balanceSkillRunnerHandler = {
     if (!runnerCanAccessOwner(auth, job.requested_by_subject)) {
       return json({ error: 'Skill job belongs to another account' }, 403);
     }
-    const result = await request.env.DB.prepare(`
+    const result = await request.env.DB.prepare(
+      `
       UPDATE sim_balance_skill_jobs
       SET status = 'pending', lease_owner = NULL, lease_expires_at = NULL,
           last_error = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ? AND status = 'leased' AND lease_owner = ?
-    `).bind(
-      String(body.error || 'Runner released the job').slice(0, 1000),
-      request.params?.id,
-      body.runner_id,
-    ).run();
+    `,
+    )
+      .bind(
+        String(body.error || 'Runner released the job').slice(0, 1000),
+        request.params?.id,
+        body.runner_id,
+      )
+      .run();
     if (Number(result?.meta?.changes || 0) === 0) {
       return json({ error: 'Skill job lease is not active for this runner' }, 409);
     }

@@ -15,7 +15,8 @@ const MONTHS = new Map([
   ['Dec', 12],
 ]);
 
-const BILL_PATTERN = /^<Singtel>Dear customer, your latest bill for Singtel a\/c (\d{8}) is ready\. The total amount is SGD\$(\d{2,3})\.(\d{2}) due on (\d{2}) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (20\d{2})\. You can view and pay this bill via My Singtel app at www\.singtel\.com\/viewbill \.@?$/;
+const BILL_PATTERN =
+  /^<Singtel>Dear customer, your latest bill for Singtel a\/c (\d{8}) is ready\. The total amount is SGD\$(\d{2,3})\.(\d{2}) due on (\d{2}) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (20\d{2})\. You can view and pay this bill via My Singtel app at www\.singtel\.com\/viewbill \.@?$/;
 
 function bytesToHex(bytes: Uint8Array): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
@@ -33,9 +34,11 @@ function isoDate(dayText: string, monthName: string, yearText: string): string |
   if (month === undefined) return null;
   const year = Number(yearText);
   const date = new Date(Date.UTC(year, month - 1, day));
-  if (date.getUTCFullYear() !== year
-    || date.getUTCMonth() !== month - 1
-    || date.getUTCDate() !== day) {
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
     return null;
   }
   return `${yearText}-${String(month).padStart(2, '0')}-${dayText}`;
@@ -61,10 +64,11 @@ export async function parseSingtelPostpaidBillSms({
   content,
   expectedAccountRefDigest,
 }: SingtelBillInput): Promise<SingtelBill | null> {
-  if (sender !== 'Singtel'
-    || typeof content !== 'string'
-    || (expectedAccountRefDigest != null
-      && !/^[a-f\d]{64}$/i.test(expectedAccountRefDigest))) {
+  if (
+    sender !== 'Singtel' ||
+    typeof content !== 'string' ||
+    (expectedAccountRefDigest != null && !/^[a-f\d]{64}$/i.test(expectedAccountRefDigest))
+  ) {
     return null;
   }
 
@@ -76,10 +80,10 @@ export async function parseSingtelPostpaidBillSms({
   if (!dueDate) return null;
 
   const digest = await accountReferenceDigest(accountReference);
-  if (expectedAccountRefDigest != null
-    && digest !== expectedAccountRefDigest.toLowerCase()) return null;
+  if (expectedAccountRefDigest != null && digest !== expectedAccountRefDigest.toLowerCase())
+    return null;
 
-  const amountMinor = (Number(majorText) * 100) + Number(minorText);
+  const amountMinor = Number(majorText) * 100 + Number(minorText);
   if (!Number.isSafeInteger(amountMinor)) return null;
 
   return {

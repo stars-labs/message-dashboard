@@ -39,7 +39,10 @@ function tokenScopes(payload: TokenPayload | null | undefined): Set<string> {
   return new Set(values.filter((value): value is string => typeof value === 'string' && !!value));
 }
 
-export function hasRunnerScope(payload: TokenPayload | null | undefined, requiredScope: RunnerScope): boolean {
+export function hasRunnerScope(
+  payload: TokenPayload | null | undefined,
+  requiredScope: RunnerScope,
+): boolean {
   return Boolean(payload?.sub && tokenScopes(payload).has(requiredScope));
 }
 
@@ -49,9 +52,11 @@ export function runnerCanAccessOwner(
 ): boolean {
   if (!auth.authorized) return false;
   if (auth.authMode === 'auth0_device') {
-    return typeof auth.subject === 'string'
-      && auth.subject.length > 0
-      && requestedBySubject === auth.subject;
+    return (
+      typeof auth.subject === 'string' &&
+      auth.subject.length > 0 &&
+      requestedBySubject === auth.subject
+    );
   }
   return auth.authMode === 'legacy_api_key' && requestedBySubject == null;
 }

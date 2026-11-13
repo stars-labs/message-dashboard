@@ -29,11 +29,13 @@
     const handleWindowError = (event) => {
       if (!event.error) return;
 
-      if (isForeignError({
-        message: event.message ?? event.error?.message,
-        filename: event.filename,
-        stack: event.error?.stack,
-      })) {
+      if (
+        isForeignError({
+          message: event.message ?? event.error?.message,
+          filename: event.filename,
+          stack: event.error?.stack,
+        })
+      ) {
         return;
       }
 
@@ -76,11 +78,15 @@
           错误详情（仅开发环境）
         </summary>
         <pre class="mt-2 p-2 bg-red-100 rounded text-xs overflow-auto">
-{JSON.stringify({
-  message: errorDetails.message,
-  stack: errorDetails.stack,
-  name: errorDetails.name
-}, null, 2)}
+{JSON.stringify(
+            {
+              message: errorDetails.message,
+              stack: errorDetails.stack,
+              name: errorDetails.name,
+            },
+            null,
+            2,
+          )}
         </pre>
       </details>
     {/if}

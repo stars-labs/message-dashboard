@@ -59,7 +59,8 @@ export function toError(reason: unknown): Error {
         ? candidate.message
         : safeStringify(reason);
     const error = new Error(message);
-    if (typeof (reason as { stack?: unknown }).stack === 'string') error.stack = (reason as { stack: string }).stack;
+    if (typeof (reason as { stack?: unknown }).stack === 'string')
+      error.stack = (reason as { stack: string }).stack;
     return error;
   }
 

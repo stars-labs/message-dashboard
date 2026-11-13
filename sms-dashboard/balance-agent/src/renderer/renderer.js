@@ -31,15 +31,18 @@ function render(state) {
   const authAction = document.querySelector('#auth-action');
   const signedIn = current.auth === 'signed_in';
   document.querySelector('#overall-status').textContent = labels[current.auth] || current.auth;
-  document.querySelector('#installation-name').textContent = current.settings?.installationName || '本机服务';
+  document.querySelector('#installation-name').textContent =
+    current.settings?.installationName || '本机服务';
   document.querySelector('#auth-state').textContent = labels[current.auth] || current.auth;
-  document.querySelector('#auth-detail').textContent = current.settings?.dashboardUrl || '未配置 Dashboard';
+  document.querySelector('#auth-detail').textContent =
+    current.settings?.dashboardUrl || '未配置 Dashboard';
   document.querySelector('#auth-dot').className = `indicator ${statusClass(current.auth)}`;
   setCapability('sms', current.smsAi);
   setCapability('browser', current.browser);
-  document.querySelector('#browser-state').textContent = current.browserDetail === 'human_verification_required'
-    ? '需要人工验证'
-    : (labels[current.browser] || current.browser);
+  document.querySelector('#browser-state').textContent =
+    current.browserDetail === 'human_verification_required'
+      ? '需要人工验证'
+      : labels[current.browser] || current.browser;
   authAction.textContent = signedIn ? '退出登录' : '登录';
   authAction.disabled = current.auth === 'authorizing';
 
@@ -60,12 +63,15 @@ function populateSettings(state) {
     if (form.elements[key]) form.elements[key].value = value;
   }
   if (!form.elements.aiProtocol.value) form.elements.aiProtocol.value = 'anthropic';
-  form.elements.aiToken.placeholder = state.hasAiToken ? '已安全保存，保持空白则不修改' : '输入 AI token';
+  form.elements.aiToken.placeholder = state.hasAiToken
+    ? '已安全保存，保持空白则不修改'
+    : '输入 AI token';
 }
 
 for (const tab of document.querySelectorAll('.tab')) {
   tab.addEventListener('click', () => {
-    for (const item of document.querySelectorAll('.tab')) item.classList.toggle('active', item === tab);
+    for (const item of document.querySelectorAll('.tab'))
+      item.classList.toggle('active', item === tab);
     document.querySelector('#status-panel').hidden = tab.dataset.tab !== 'status';
     document.querySelector('#settings-panel').hidden = tab.dataset.tab !== 'settings';
   });
@@ -93,7 +99,9 @@ document.querySelector('#settings-form').addEventListener('submit', async (event
   document.querySelector('#save-result').textContent = '已保存';
   render(result);
   populateSettings(result);
-  setTimeout(() => { document.querySelector('#save-result').textContent = ''; }, 1800);
+  setTimeout(() => {
+    document.querySelector('#save-result').textContent = '';
+  }, 1800);
 });
 
 document.querySelector('#test-ai').addEventListener('click', async (event) => {

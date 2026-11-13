@@ -10,9 +10,7 @@
 // The daemon validates independently; this is the trust boundary, so a bad value never
 // reaches the database or the pending-send queue in the first place.
 
-export type RecipientCheck =
-  | { ok: true; value: string }
-  | { ok: false; reason: string };
+export type RecipientCheck = { ok: true; value: string } | { ok: false; reason: string };
 
 const E164 = /^\+?[0-9]{6,15}$/;
 const SHORT_CODE = /^[0-9]{3,5}$/;
@@ -42,7 +40,8 @@ export function normalizeRecipient(recipient: unknown): RecipientCheck {
   if (!E164.test(value) && !SHORT_CODE.test(value)) {
     return {
       ok: false,
-      reason: 'recipient must be a 3-5 digit short code or E.164: an optional leading "+" followed by 6-15 digits',
+      reason:
+        'recipient must be a 3-5 digit short code or E.164: an optional leading "+" followed by 6-15 digits',
     };
   }
 

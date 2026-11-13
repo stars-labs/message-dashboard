@@ -39,7 +39,10 @@ export async function countPending(db: D1Database): Promise<number> {
  */
 export async function sweepPending(
   db: D1Database,
-  { pageSize = PAGE_SIZE, budgetMs = DEFAULT_BUDGET_MS }: { pageSize?: number; budgetMs?: number } = {},
+  {
+    pageSize = PAGE_SIZE,
+    budgetMs = DEFAULT_BUDGET_MS,
+  }: { pageSize?: number; budgetMs?: number } = {},
 ): Promise<{ processed: number; remaining: number }> {
   const rules = await loadActiveRules(db);
   const startedAt = Date.now();

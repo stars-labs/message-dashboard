@@ -16,30 +16,40 @@ describe('carrier normalization', () => {
   });
 
   test('builds one localized option for duplicate aliases', () => {
-    expect(buildCarrierOptions([
-      { carrier: '电信', country: 'CN' },
-      { carrier: 'China Telecom', country: 'CN' },
-      { carrier: '联通', country: 'CN' },
-      { carrier: 'China Unicom', country: 'CN' },
-      { carrier: 'Singtel', country: 'SG' },
-    ])).toEqual(expect.arrayContaining([
-      { key: 'china-telecom', label: '电信' },
-      { key: 'china-unicom', label: '联通' },
-      { key: 'singtel', label: 'Singtel' },
-    ]));
-    expect(buildCarrierOptions([
-      { carrier: '电信', country: 'CN' },
-      { carrier: 'China Telecom', country: 'CN' },
-    ])).toHaveLength(1);
+    expect(
+      buildCarrierOptions([
+        { carrier: '电信', country: 'CN' },
+        { carrier: 'China Telecom', country: 'CN' },
+        { carrier: '联通', country: 'CN' },
+        { carrier: 'China Unicom', country: 'CN' },
+        { carrier: 'Singtel', country: 'SG' },
+      ]),
+    ).toEqual(
+      expect.arrayContaining([
+        { key: 'china-telecom', label: '电信' },
+        { key: 'china-unicom', label: '联通' },
+        { key: 'singtel', label: 'Singtel' },
+      ]),
+    );
+    expect(
+      buildCarrierOptions([
+        { carrier: '电信', country: 'CN' },
+        { carrier: 'China Telecom', country: 'CN' },
+      ]),
+    ).toHaveLength(1);
   });
 
   test('builds separate options for Hong Kong and mainland Mobile records', () => {
-    expect(buildCarrierOptions([
-      { carrier: '移动', country: 'CN' },
-      { carrier: '移动', country: 'HK' },
-    ])).toEqual(expect.arrayContaining([
-      { key: 'china-mobile', label: '移动' },
-      { key: 'cmhk', label: 'CMHK' },
-    ]));
+    expect(
+      buildCarrierOptions([
+        { carrier: '移动', country: 'CN' },
+        { carrier: '移动', country: 'HK' },
+      ]),
+    ).toEqual(
+      expect.arrayContaining([
+        { key: 'china-mobile', label: '移动' },
+        { key: 'cmhk', label: 'CMHK' },
+      ]),
+    );
   });
 });

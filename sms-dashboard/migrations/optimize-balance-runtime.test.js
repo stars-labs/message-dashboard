@@ -26,20 +26,31 @@ describe('balance runtime migration', () => {
 
     sqlite.exec(await Bun.file('migrations/076_optimize_balance_runtime.sql').text());
 
-    expect(sqlite.query("SELECT deadline_at FROM sim_balance_checks WHERE id='check'").get())
-      .toEqual({ deadline_at: '2026-09-04 10:31:00' });
-    const indexes = sqlite.query(`
+    expect(
+      sqlite.query("SELECT deadline_at FROM sim_balance_checks WHERE id='check'").get(),
+    ).toEqual({ deadline_at: '2026-09-04 10:31:00' });
+    const indexes = sqlite
+      .query(
+        `
       SELECT name FROM sqlite_master WHERE type = 'index' ORDER BY name
-    `).all().map(({ name }) => name);
+    `,
+      )
+      .all()
+      .map(({ name }) => name);
     expect(indexes).toContain('idx_balance_checks_status_deadline');
     expect(indexes).toContain('idx_balance_web_jobs_pending_claim');
-    const claimPlan = sqlite.query(`
+    const claimPlan = sqlite
+      .query(
+        `
       EXPLAIN QUERY PLAN
       SELECT id FROM sim_balance_web_jobs
       WHERE status = 'pending' AND attempts < 3
       ORDER BY created_at, id LIMIT 1
-    `).all();
-    expect(claimPlan.some(({ detail }) => detail.includes('idx_balance_web_jobs_pending_claim')))
-      .toBe(true);
+    `,
+      )
+      .all();
+    expect(
+      claimPlan.some(({ detail }) => detail.includes('idx_balance_web_jobs_pending_claim')),
+    ).toBe(true);
   });
 });

@@ -15,10 +15,14 @@ describe('Balance Agent CLI run lock', () => {
     directory = await mkdtemp(join(tmpdir(), 'balance-agent-lock-'));
     const lockPath = join(directory, 'agent.lock');
     const release = await acquireRunLock(lockPath, { pid: 100, isProcessRunning: () => true });
-    await expect(acquireRunLock(lockPath, { pid: 200, isProcessRunning: () => true }))
-      .rejects.toThrow('already running (pid 100)');
+    await expect(
+      acquireRunLock(lockPath, { pid: 200, isProcessRunning: () => true }),
+    ).rejects.toThrow('already running (pid 100)');
     await release();
-    const releaseSecond = await acquireRunLock(lockPath, { pid: 200, isProcessRunning: () => true });
+    const releaseSecond = await acquireRunLock(lockPath, {
+      pid: 200,
+      isProcessRunning: () => true,
+    });
     await releaseSecond();
   });
 

@@ -61,7 +61,12 @@ describe('balance query conversation', () => {
   test('renders one grouped row and opens its details', async () => {
     let opened = null;
     const { getAllByRole, getAllByText } = render(BalanceConversationRow, {
-      props: { check, onOpen: (value) => { opened = value; } },
+      props: {
+        check,
+        onOpen: (value) => {
+          opened = value;
+        },
+      },
     });
 
     expect(getAllByText('余额查询').length).toBe(2);
@@ -74,16 +79,19 @@ describe('balance query conversation', () => {
   test('shows the request, reply and parsed result in a mobile-safe detail layer', async () => {
     let closed = false;
     const { container, getByText, getAllByRole, getAllByText } = render(BalanceQueryDetail, {
-      props: { check, onClose: () => { closed = true; } },
+      props: {
+        check,
+        onClose: () => {
+          closed = true;
+        },
+      },
     });
 
     expect(getAllByText('发送至 10086')).toHaveLength(2);
     expect(getByText('1.话费与AI豆')).toBeTruthy();
     expect(getByText('尊敬的客户，账户余额82.36元。')).toBeTruthy();
     expect(getByText('账户余额')).toBeTruthy();
-    expect(
-      container.querySelector('.bottom-\\[var\\(--mobile-tab-bar-height\\)\\]'),
-    ).toBeTruthy();
+    expect(container.querySelector('.bottom-\\[var\\(--mobile-tab-bar-height\\)\\]')).toBeTruthy();
 
     await fireEvent.click(getAllByRole('button', { name: '关闭' })[0]);
     expect(closed).toBe(true);

@@ -101,28 +101,32 @@ describe('outbound SMS daemon session leases', () => {
 describe('outbound SMS submission outcomes', () => {
   test('records an unconfirmed modem submission as unknown without failing its balance check', async () => {
     const db = dbStub();
-    const response = await controlHandler.updateSMSResult(resultRequest(db, {
-      message_id: 'msg-1',
-      outcome: 'submitted_unconfirmed',
-    }));
+    const response = await controlHandler.updateSMSResult(
+      resultRequest(db, {
+        message_id: 'msg-1',
+        outcome: 'submitted_unconfirmed',
+      }),
+    );
 
     expect(response.status).toBe(200);
-    const messageUpdate = db.calls.find((call) =>
-      call.operation === 'run' && call.sql.includes('SET status = ?, error_message = ?')
+    const messageUpdate = db.calls.find(
+      (call) => call.operation === 'run' && call.sql.includes('SET status = ?, error_message = ?'),
     );
     expect(messageUpdate.params).toEqual(['unknown', null, null, 'msg-1']);
-    const balanceUpdate = db.calls.find((call) =>
-      call.operation === 'run' && call.sql.includes('UPDATE sim_balance_checks')
+    const balanceUpdate = db.calls.find(
+      (call) => call.operation === 'run' && call.sql.includes('UPDATE sim_balance_checks'),
     );
     expect(balanceUpdate.params).toEqual(['awaiting_response', 1, 1, 1, null, 'msg-1']);
   });
 
   test('rejects the removed boolean success result', async () => {
     const db = dbStub();
-    const response = await controlHandler.updateSMSResult(resultRequest(db, {
-      message_id: 'msg-1',
-      success: true,
-    }));
+    const response = await controlHandler.updateSMSResult(
+      resultRequest(db, {
+        message_id: 'msg-1',
+        success: true,
+      }),
+    );
 
     expect(response.status).toBe(400);
     expect(db.calls).toHaveLength(0);
