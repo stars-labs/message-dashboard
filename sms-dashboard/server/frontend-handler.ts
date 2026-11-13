@@ -1,8 +1,7 @@
 import { FRONTEND_ASSETS } from './frontend-assets.js';
 import { cacheControlFor } from './asset-cache-control.js';
-import type { AppRequest } from './worker-context.js';
 
-export function serveFrontend(request: AppRequest): Response {
+export function serveFrontend(request: { url: string }): Response {
   const url = new URL(request.url);
   let pathname = url.pathname;
 
@@ -35,7 +34,7 @@ export function serveFrontend(request: AppRequest): Response {
   }
 
   // Prepare response body
-  let body: Uint8Array | string;
+  let body: Uint8Array<ArrayBuffer> | string;
   if (asset.encoding === 'base64') {
     // Decode base64 for binary files
     const binaryString = atob(asset.content);
@@ -49,19 +48,19 @@ export function serveFrontend(request: AppRequest): Response {
   }
 
   // Return the asset with appropriate headers
-  const headers: Record<string, string> = {
+  const headers = new Headers({
     'Content-Type': asset.type,
     'Cache-Control': cacheControlFor(pathname),
     'Access-Control-Allow-Origin': '*',
-  };
+  });
 
   // Add additional headers for HTML to potentially bypass Cloudflare challenges
   if (asset.type === 'text/html') {
-    headers['X-Content-Type-Options'] = 'nosniff';
-    headers['X-Frame-Options'] = 'DENY';
+    headers.set('X-Content-Type-Options', 'nosniff');
+    headers.set('X-Frame-Options', 'DENY');
   }
 
-  const response = new Response(body as BodyInit, { headers });
+  const response = new Response(body, { headers });
 
   return response;
 }
