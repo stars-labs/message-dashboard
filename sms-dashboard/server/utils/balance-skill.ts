@@ -1,19 +1,45 @@
+import * as v from 'valibot';
+import { parseJson } from '../../shared/parse-json.js';
+
 const MENU_OPTION_PATTERN = /(?:^|\n)\s*([0-9]{1,5})(?:\s*[.、:：]\s*|\s+)([^\r\n]+)/g;
 const DIRECTED_SMS_PATTERN = /(?:请)?发送\s*([0-9]{1,5})\s*至\s*[0-9]{3,5}/g;
 const DEFAULT_CONFIDENCE_THRESHOLD = 0.85;
 const DEFAULT_MAX_TURNS = 4;
 const MAX_BALANCE = 1_000_000;
 
-/** A validated balance-skill configuration row. */
-export interface BalanceSkill {
-  id: string;
-  version: string;
-  objective: string;
-  confidence_threshold: number;
-  max_turns: number;
-  allowed_currencies: string[];
-  forbidden_intents: string[];
+function textList(value: unknown, keep: (item: string) => boolean): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string' && keep(item))
+    : [];
 }
+
+const BalanceSkillSchema = v.pipe(
+  v.object({
+    id: v.string(),
+    version: v.string(),
+    objective: v.string(),
+    confidence_threshold: v.optional(v.unknown()),
+    max_turns: v.optional(v.unknown()),
+    allowed_currencies: v.optional(v.unknown()),
+    forbidden_intents: v.optional(v.unknown()),
+  }),
+  v.transform((config) => ({
+    id: config.id,
+    version: config.version,
+    objective: config.objective,
+    confidence_threshold: Number.isFinite(Number(config.confidence_threshold))
+      ? Number(config.confidence_threshold)
+      : DEFAULT_CONFIDENCE_THRESHOLD,
+    max_turns: Number.isInteger(Number(config.max_turns))
+      ? Number(config.max_turns)
+      : DEFAULT_MAX_TURNS,
+    allowed_currencies: textList(config.allowed_currencies, () => true),
+    forbidden_intents: textList(config.forbidden_intents, (item) => item.length > 0),
+  })),
+);
+
+/** A validated balance-skill configuration row. */
+export type BalanceSkill = v.InferOutput<typeof BalanceSkillSchema>;
 
 /** One numbered option found in a carrier reply. */
 export interface MenuOption {
@@ -21,7 +47,9 @@ export interface MenuOption {
   label: string;
 }
 
-export type DecisionAction = 'reply' | 'complete' | 'stop';
+const DecisionActionSchema = v.picklist(['reply', 'complete', 'stop']);
+
+export type DecisionAction = v.InferOutput<typeof DecisionActionSchema>;
 
 /**
  * The validated AI decision. `balance` and `currency` are only meaningful for
@@ -39,6 +67,16 @@ export interface BalanceDecision {
   evidence: string;
 }
 
+const ProposedDecision = v.object({
+  action: v.optional(v.unknown()),
+  selected_option: v.optional(v.unknown()),
+  balance: v.optional(v.unknown()),
+  currency: v.optional(v.unknown()),
+  confidence: v.optional(v.unknown()),
+  reason: v.optional(v.unknown()),
+  evidence: v.optional(v.unknown()),
+});
+
 function sentenceAt(text: string, index: number): string {
   const before = text.slice(0, index);
   const boundary = Math.max(
@@ -50,65 +88,75 @@ function sentenceAt(text: string, index: number): string {
     before.lastIndexOf('；'),
   );
   const remainder = text.slice(index);
-  const endMatch = remainder.match(/[\n。！？;；]/);
-  const end = endMatch && endMatch.index !== undefined ? index + endMatch.index : text.length;
+  const endIndex = /[\n。！？;；]/.exec(remainder)?.index;
+  const end = endIndex === undefined ? text.length : index + endIndex;
   return text.slice(boundary + 1, end).trim();
 }
 
-export function parseBalanceSkillConfig(value: unknown): BalanceSkill | null {
-  let config: unknown;
-  try {
-    config = typeof value === 'string' ? JSON.parse(value) : value;
-  } catch {
-    return null;
-  }
-
-  const c = config as Record<string, unknown> | null;
-  if (
-    !c ||
-    typeof c !== 'object' ||
-    typeof c.id !== 'string' ||
-    typeof c.version !== 'string' ||
-    typeof c.objective !== 'string'
-  )
-    return null;
-
-  return {
-    id: c.id,
-    version: c.version,
-    objective: c.objective,
-    confidence_threshold: Number.isFinite(Number(c.confidence_threshold))
-      ? Number(c.confidence_threshold)
-      : DEFAULT_CONFIDENCE_THRESHOLD,
-    max_turns: Number.isInteger(Number(c.max_turns)) ? Number(c.max_turns) : DEFAULT_MAX_TURNS,
-    allowed_currencies: Array.isArray(c.allowed_currencies)
-      ? c.allowed_currencies.filter((item): item is string => typeof item === 'string')
-      : [],
-    forbidden_intents: Array.isArray(c.forbidden_intents)
-      ? c.forbidden_intents.filter(
-          (item): item is string => typeof item === 'string' && item.length > 0,
-        )
-      : [],
-  };
+function normalizedText(content: string | null | undefined): string {
+  return (content ?? '').replace(/\r\n?/g, '\n');
 }
 
-export function extractBalanceMenuOptions(content: unknown): MenuOption[] {
+function jsonText(value: unknown): string {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => (item === null || item === undefined ? '' : jsonText(item)))
+      .join(',');
+  }
+  switch (typeof value) {
+    case 'string':
+      return value;
+    case 'number':
+    case 'boolean':
+    case 'bigint':
+      return String(value);
+    case 'object':
+      return '[object Object]';
+    case 'function':
+    case 'symbol':
+    case 'undefined':
+      return '';
+  }
+}
+
+function textOrNull(value: unknown): string | null {
+  return value === null || value === undefined ? null : jsonText(value);
+}
+
+function numberOrNull(value: unknown): number | null {
+  return value === null || value === undefined ? null : Number(value);
+}
+
+function boundedText(value: unknown): string {
+  return typeof value === 'string' ? value.slice(0, 500) : '';
+}
+
+export function parseBalanceSkillConfig(value: unknown): BalanceSkill | null {
+  if (typeof value === 'string') {
+    const parsed = parseJson(value, BalanceSkillSchema);
+    return parsed.ok ? parsed.value : null;
+  }
+  const parsed = v.safeParse(BalanceSkillSchema, value);
+  return parsed.success ? parsed.output : null;
+}
+
+export function extractBalanceMenuOptions(content: string | null | undefined): MenuOption[] {
   const options: MenuOption[] = [];
   const seen = new Set<string>();
-  const text = String(content || '').replace(/\r\n?/g, '\n');
+  const text = normalizedText(content);
 
   for (const match of text.matchAll(MENU_OPTION_PATTERN)) {
     const value = match[1];
     const label = (match[2] ?? '').trim();
-    if (!label || seen.has(value)) continue;
+    if (value === undefined || !label || seen.has(value)) continue;
     seen.add(value);
     options.push({ value, label });
   }
 
   for (const match of text.matchAll(DIRECTED_SMS_PATTERN)) {
     const value = match[1];
-    if (seen.has(value)) continue;
-    const label = sentenceAt(text, match.index ?? 0);
+    if (value === undefined || seen.has(value)) continue;
+    const label = sentenceAt(text, match.index);
     if (!label) continue;
     seen.add(value);
     options.push({ value, label });
@@ -118,17 +166,17 @@ export function extractBalanceMenuOptions(content: unknown): MenuOption[] {
 }
 
 export function buildExplicitBalanceFollowUp(
-  content: unknown,
+  content: string | null | undefined,
   skill: BalanceSkill,
 ): BalanceDecision | null {
-  const text = String(content || '').replace(/\r\n?/g, '\n');
+  const text = normalizedText(content);
   for (const match of text.matchAll(DIRECTED_SMS_PATTERN)) {
-    const sentence = sentenceAt(text, match.index ?? 0);
+    const sentence = sentenceAt(text, match.index);
     if (!/(?:余额|balance)/i.test(sentence)) continue;
     if (skill.forbidden_intents.some((intent) => sentence.includes(intent))) continue;
     return {
       action: 'reply',
-      selected_option: match[1],
+      selected_option: match[1] ?? null,
       balance: null,
       currency: null,
       confidence: 1,
@@ -161,28 +209,30 @@ export function validateBalanceSkillDecision({
   skill,
 }: {
   decision: unknown;
-  content: unknown;
+  content: string | null | undefined;
   skill: BalanceSkill;
 }): BalanceDecision {
-  if (!decision || typeof decision !== 'object') {
+  const proposed = v.safeParse(ProposedDecision, decision);
+  if (!proposed.success) {
     throw new Error('AI decision must be an object');
   }
 
-  const d = decision as Record<string, unknown>;
-  const action = d.action;
-  if (action !== 'reply' && action !== 'complete' && action !== 'stop') {
+  const d = proposed.output;
+  const parsedAction = v.safeParse(DecisionActionSchema, d.action);
+  if (!parsedAction.success) {
     throw new Error('AI decision has an invalid action');
   }
+  const action = parsedAction.output;
 
   const confidence = Number(d.confidence);
   const normalized: BalanceDecision = {
     action,
-    selected_option: d.selected_option == null ? null : String(d.selected_option),
-    balance: d.balance == null ? null : Number(d.balance),
-    currency: d.currency == null ? null : String(d.currency),
+    selected_option: textOrNull(d.selected_option),
+    balance: numberOrNull(d.balance),
+    currency: textOrNull(d.currency),
     confidence: Number.isFinite(confidence) ? confidence : 0,
-    reason: typeof d.reason === 'string' ? d.reason.slice(0, 500) : '',
-    evidence: typeof d.evidence === 'string' ? d.evidence.slice(0, 500) : '',
+    reason: boundedText(d.reason),
+    evidence: boundedText(d.evidence),
   };
 
   if (normalized.confidence < skill.confidence_threshold) {
@@ -218,7 +268,7 @@ export function validateBalanceSkillDecision({
     return stopped(normalized, 'AI returned a currency outside the skill allowlist');
   }
   const evidence = normalized.evidence;
-  if (!evidence || !String(content || '').includes(evidence)) {
+  if (!evidence || !(content ?? '').includes(evidence)) {
     return stopped(normalized, 'AI evidence is not an exact excerpt from the carrier reply');
   }
   const evidenceNumbers = [...evidence.matchAll(/\d+(?:,\d{3})*(?:\.\d+)?/g)]
