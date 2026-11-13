@@ -12,7 +12,7 @@
     "typecheck": "tsc -b && tsc -p tsconfig.legacy.json",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "check": "bun run typecheck && bun run lint && bun run check:worker-types && bun run test && bun run build",
+    "check": "bun run format:check && bun run typecheck && bun run lint && bun run check:worker-types && bun run test && bun run build",
     "check:worker-types": "bunx wrangler types && git -C .. diff --exit-code -- sms-dashboard/worker-configuration.d.ts",
     "dev": "bunx vite",
     "dev:api": "bunx wrangler dev",
