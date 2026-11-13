@@ -10,7 +10,23 @@
 // instead of 24 hours. True instant revocation would need a per-request D1 lookup, which
 // is not worth the added latency on every API call.
 
-import type { Env } from '../worker-context.js';
+import * as v from 'valibot';
+
+interface SessionStore {
+  get(key: string, options: { type: 'json' }): Promise<unknown>;
+  put(key: string, value: string, options: { expirationTtl: number }): Promise<void>;
+  delete(key: string): Promise<void>;
+}
+
+type SessionEnv<Op extends keyof SessionStore> = { SESSIONS: Pick<SessionStore, Op> };
+
+const TokenIndex = v.fallback(
+  v.pipe(
+    v.array(v.unknown()),
+    v.transform((items) => items.filter((item): item is string => typeof item === 'string')),
+  ),
+  () => [],
+);
 
 const INDEX_PREFIX = 'usess:';
 
@@ -21,13 +37,17 @@ function indexKey(userId: string): string {
   return `${INDEX_PREFIX}${userId}`;
 }
 
-async function readIndex(env: Env, userId: string): Promise<string[]> {
-  const raw = await env.SESSIONS.get<unknown>(indexKey(userId), { type: 'json' });
-  return Array.isArray(raw) ? raw.filter((t): t is string => typeof t === 'string') : [];
+async function readIndex(env: SessionEnv<'get'>, userId: string): Promise<string[]> {
+  const raw = await env.SESSIONS.get(indexKey(userId), { type: 'json' });
+  return v.parse(TokenIndex, raw);
 }
 
 /** Record that `token` is a live session for `userId`. Called at login. */
-export async function indexSession(env: Env, userId: string, token: string): Promise<void> {
+export async function indexSession(
+  env: SessionEnv<'get' | 'put'>,
+  userId: string | null | undefined,
+  token: string | null | undefined,
+): Promise<void> {
   if (!userId || !token) return;
 
   const tokens = await readIndex(env, userId);
@@ -40,7 +60,11 @@ export async function indexSession(env: Env, userId: string, token: string): Pro
 }
 
 /** Drop a single token from the index. Called at logout. */
-export async function unindexSession(env: Env, userId: string, token: string): Promise<void> {
+export async function unindexSession(
+  env: SessionEnv<'get' | 'put' | 'delete'>,
+  userId: string | null | undefined,
+  token: string | null | undefined,
+): Promise<void> {
   if (!userId || !token) return;
 
   const remaining = (await readIndex(env, userId)).filter((t) => t !== token);
@@ -62,7 +86,10 @@ export async function unindexSession(env: Env, userId: string, token: string): P
  * failure part-way leaves the index pointing at already-dead tokens (harmless) rather
  * than orphaning live sessions with no way to find them.
  */
-export async function revokeUserSessions(env: Env, userId: string): Promise<number> {
+export async function revokeUserSessions(
+  env: SessionEnv<'get' | 'delete'>,
+  userId: string | null | undefined,
+): Promise<number> {
   if (!userId) return 0;
 
   const tokens = await readIndex(env, userId);

@@ -1,61 +1,87 @@
-// Run with: bun test server/utils/user-sessions.test.js
 import { describe, expect, test } from 'bun:test';
+import * as v from 'valibot';
+import { parseJson } from '../../shared/parse-json.js';
 import { indexSession, revokeUserSessions, unindexSession } from './user-sessions.js';
 
-function kvStub(initial = {}) {
+function kvStub(initial: Record<string, string> = {}) {
   const store = new Map(Object.entries(initial));
   return {
     store,
-    async get(key, options) {
+    get: (key: string) => {
       const raw = store.get(key);
-      if (raw === undefined) return null;
-      return options?.type === 'json' ? JSON.parse(raw) : raw;
+      if (raw === undefined) return Promise.resolve(null);
+      const parsed = parseJson(raw, v.unknown());
+      return parsed.ok ? Promise.resolve(parsed.value) : Promise.reject(new Error(parsed.error));
     },
-    async put(key, value) {
+    put: (key: string, value: string) => {
       store.set(key, value);
+      return Promise.resolve();
     },
-    async delete(key) {
+    delete: (key: string) => {
       store.delete(key);
+      return Promise.resolve();
     },
   };
 }
 
-const env = (initial) => ({ SESSIONS: kvStub(initial) });
+const env = (initial?: Record<string, string>) => {
+  const sessions = kvStub(initial);
+  return { SESSIONS: sessions, store: sessions.store };
+};
+
+function indexAt(store: Map<string, string>, key: string): unknown {
+  const raw = store.get(key);
+  if (raw === undefined) return undefined;
+  const parsed = parseJson(raw, v.unknown());
+  return parsed.ok ? parsed.value : undefined;
+}
 
 describe('indexSession', () => {
   test('records a token under the user', async () => {
     const e = env();
     await indexSession(e, 'auth0|1', 'tok-a');
-    expect(JSON.parse(e.SESSIONS.store.get('usess:auth0|1'))).toEqual(['tok-a']);
+    expect(indexAt(e.store, 'usess:auth0|1')).toEqual(['tok-a']);
   });
 
   test('accumulates multiple sessions for one user', async () => {
     const e = env();
     await indexSession(e, 'auth0|1', 'tok-a');
     await indexSession(e, 'auth0|1', 'tok-b');
-    expect(JSON.parse(e.SESSIONS.store.get('usess:auth0|1'))).toEqual(['tok-a', 'tok-b']);
+    expect(indexAt(e.store, 'usess:auth0|1')).toEqual(['tok-a', 'tok-b']);
   });
 
   test('does not duplicate the same token', async () => {
     const e = env();
     await indexSession(e, 'auth0|1', 'tok-a');
     await indexSession(e, 'auth0|1', 'tok-a');
-    expect(JSON.parse(e.SESSIONS.store.get('usess:auth0|1'))).toEqual(['tok-a']);
+    expect(indexAt(e.store, 'usess:auth0|1')).toEqual(['tok-a']);
   });
 
   test('keeps users separate', async () => {
     const e = env();
     await indexSession(e, 'auth0|1', 'tok-a');
     await indexSession(e, 'auth0|2', 'tok-b');
-    expect(JSON.parse(e.SESSIONS.store.get('usess:auth0|1'))).toEqual(['tok-a']);
-    expect(JSON.parse(e.SESSIONS.store.get('usess:auth0|2'))).toEqual(['tok-b']);
+    expect(indexAt(e.store, 'usess:auth0|1')).toEqual(['tok-a']);
+    expect(indexAt(e.store, 'usess:auth0|2')).toEqual(['tok-b']);
   });
 
   test('ignores missing arguments rather than writing junk keys', async () => {
     const e = env();
     await indexSession(e, null, 'tok');
     await indexSession(e, 'auth0|1', null);
-    expect(e.SESSIONS.store.size).toBe(0);
+    expect(e.store.size).toBe(0);
+  });
+
+  test('drops non-string entries from a stored index', async () => {
+    const e = env({ 'usess:auth0|1': JSON.stringify(['tok-a', 7, null]) });
+    await indexSession(e, 'auth0|1', 'tok-b');
+    expect(indexAt(e.store, 'usess:auth0|1')).toEqual(['tok-a', 'tok-b']);
+  });
+
+  test('treats an index that is not an array as empty', async () => {
+    const e = env({ 'usess:auth0|1': JSON.stringify({ not: 'an array' }) });
+    await indexSession(e, 'auth0|1', 'tok-a');
+    expect(indexAt(e.store, 'usess:auth0|1')).toEqual(['tok-a']);
   });
 });
 
@@ -63,20 +89,20 @@ describe('unindexSession', () => {
   test('removes only the given token', async () => {
     const e = env({ 'usess:auth0|1': JSON.stringify(['tok-a', 'tok-b']) });
     await unindexSession(e, 'auth0|1', 'tok-a');
-    expect(JSON.parse(e.SESSIONS.store.get('usess:auth0|1'))).toEqual(['tok-b']);
+    expect(indexAt(e.store, 'usess:auth0|1')).toEqual(['tok-b']);
   });
 
   test('deletes the index entirely once empty', async () => {
     const e = env({ 'usess:auth0|1': JSON.stringify(['tok-a']) });
     await unindexSession(e, 'auth0|1', 'tok-a');
-    expect(e.SESSIONS.store.has('usess:auth0|1')).toBe(false);
+    expect(e.store.has('usess:auth0|1')).toBe(false);
   });
 
   test('is a no-op for an unknown token or user', async () => {
     const e = env({ 'usess:auth0|1': JSON.stringify(['tok-a']) });
     await unindexSession(e, 'auth0|1', 'nope');
     await unindexSession(e, 'auth0|other', 'tok-a');
-    expect(JSON.parse(e.SESSIONS.store.get('usess:auth0|1'))).toEqual(['tok-a']);
+    expect(indexAt(e.store, 'usess:auth0|1')).toEqual(['tok-a']);
   });
 });
 
@@ -89,9 +115,9 @@ describe('revokeUserSessions', () => {
     });
 
     expect(await revokeUserSessions(e, 'auth0|1')).toBe(2);
-    expect(e.SESSIONS.store.has('tok-a')).toBe(false);
-    expect(e.SESSIONS.store.has('tok-b')).toBe(false);
-    expect(e.SESSIONS.store.has('usess:auth0|1')).toBe(false);
+    expect(e.store.has('tok-a')).toBe(false);
+    expect(e.store.has('tok-b')).toBe(false);
+    expect(e.store.has('usess:auth0|1')).toBe(false);
   });
 
   test("leaves other users' sessions alone", async () => {
@@ -103,8 +129,8 @@ describe('revokeUserSessions', () => {
     });
 
     await revokeUserSessions(e, 'auth0|1');
-    expect(e.SESSIONS.store.has('tok-b')).toBe(true);
-    expect(e.SESSIONS.store.has('usess:auth0|2')).toBe(true);
+    expect(e.store.has('tok-b')).toBe(true);
+    expect(e.store.has('usess:auth0|2')).toBe(true);
   });
 
   test('returns 0 for a user with no sessions', async () => {

@@ -24,7 +24,8 @@
     "server/utils/recipient.ts",
     "server/utils/session-token.ts",
     "server/utils/d1-error.ts",
-    "server/middleware/cors.ts"
+    "server/middleware/cors.ts",
+    "server/utils/user-sessions.ts"
   ],
   "exclude": ["**/*.test.ts"],
   "references": [{ "path": "./tsconfig.shared.json" }]
