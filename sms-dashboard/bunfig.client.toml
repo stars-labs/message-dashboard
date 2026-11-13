@@ -1,0 +1,6 @@
+[test]
+# Client tests only: installs a DOM and registers the Svelte compiler as a Bun
+# loader, so `.svelte` imports work. Everything else runs on Bun's own fetch,
+# Request and Response, which match the Worker runtime; happy-dom's versions
+# hide Set-Cookie and would let cookie assertions pass vacuously.
+preload = ["./test/setup.js"]

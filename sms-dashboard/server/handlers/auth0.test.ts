@@ -212,6 +212,25 @@ describe('Auth0 callback', () => {
     expect(waits).toHaveLength(1);
   });
 
+  test('delivers the session only as an HttpOnly, Secure, SameSite=Lax cookie', async () => {
+    mockSuccessfulAuth();
+    const { request, waits, sessionWrites } = callbackRequest();
+
+    const response = await auth0Handler.callback(request);
+    await Promise.all(waits);
+
+    const cookies = response.headers.getSetCookie();
+    expect(cookies).toHaveLength(1);
+    const match =
+      /^auth_token=([^;]+); Path=\/; HttpOnly; Secure; SameSite=Lax; Max-Age=86400$/.exec(
+        cookies[0] ?? '',
+      );
+    expect(match).not.toBeNull();
+    const token = match?.[1] ?? 'no token';
+    expect(sessionWrites).toContain(token);
+    expect(response.headers.get('location')).not.toContain(token);
+  });
+
   test('creates the session when the non-critical D1 login audit hits quota', async () => {
     mockSuccessfulAuth();
     const quotaError = new Error(
@@ -416,6 +435,9 @@ describe('Auth0 logout', () => {
     expect(location.searchParams.get('client_id')).toBe('dashboard-client');
     expect(location.searchParams.get('returnTo')).toBe('https://sexy.itoken.world');
     expect(deleted).toEqual(['session-1']);
+    expect(response.headers.getSetCookie()).toEqual([
+      'auth_token=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0',
+    ]);
   });
 
   test('ends the session but answers 500 when AUTH0_DOMAIN is not configured', async () => {

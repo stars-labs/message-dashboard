@@ -7,7 +7,7 @@
 //  2. Bun must know how to load `.svelte` files. Bun has no built-in Svelte
 //     loader, so we register a plugin that runs the Svelte compiler on demand.
 //
-// Loaded via the `preload` key in bunfig.toml, so every test file gets it.
+// Preloaded for client tests only, by bunfig.client.toml (`bun run test:client`).
 
 import { GlobalRegistrator } from '@happy-dom/global-registrator';
 import { plugin } from 'bun';

@@ -5,7 +5,9 @@
   "main": "src/index.js",
   "type": "module",
   "scripts": {
-    "test": "bun test --conditions=browser",
+    "test": "bun run test:runtime && bun run test:client",
+    "test:runtime": "bun test --path-ignore-patterns='client/**'",
+    "test:client": "bun --config=bunfig.client.toml test --conditions=browser ./client/",
     "lint": "bun run lint:strict && bun run lint:legacy",
     "lint:strict": "bun run --bun eslint . --max-warnings 0",
     "lint:legacy": "oxlint",
