@@ -7,13 +7,15 @@ import {
   hasAnyRole,
   isEmailAllowed,
   rolesFromToken,
+  type RoleEnv,
 } from '../../config/auth0-roles.js';
+import type { D1 } from '../lib/d1.js';
+import { readKvJson, type KV } from '../lib/kv.js';
 import { extractSessionToken } from '../utils/session-token.js';
-import { getUserRoles, setUserRole } from '../utils/auth0-management.js';
+import { getUserRoles, setUserRole, type Auth0ManagementEnv } from '../utils/auth0-management.js';
 import { indexSession, unindexSession } from '../utils/user-sessions.js';
 import { scheduleAuthAudit } from '../utils/audit-log.js';
 import { boundedErrorText } from '../utils/d1-error.js';
-import type { Env, AppRequest, RequestUser } from '../worker-context.js';
 
 /** The authorization_code token response (RFC 6749 §5.1; id_token per OpenID Connect Core §3.1.3.3). */
 const TokenSet = v.object({
@@ -21,7 +23,81 @@ const TokenSet = v.object({
   id_token: v.optional(v.string()),
 });
 
-type TokenSet = v.InferOutput<typeof TokenSet>;
+interface LoginTokens {
+  access_token?: string | undefined;
+  id_token?: string | undefined;
+}
+
+/** The user the login callback stores in the session and the middleware attaches to requests. */
+export const SessionUser = v.object({
+  id: v.string(),
+  sub: v.optional(v.string()),
+  email: v.optional(v.string()),
+  name: v.optional(v.string()),
+  picture: v.optional(v.string()),
+  provider: v.optional(v.string()),
+  roles: v.array(v.string()),
+});
+
+export type SessionUser = v.InferOutput<typeof SessionUser>;
+
+/** The KV session written by the login callback under the auth_token value. */
+export const StoredSession = v.object({
+  user: SessionUser,
+  id_token: v.optional(v.string()),
+  expires_at: v.number(),
+});
+
+function nonEmpty(value: string | undefined): string | undefined {
+  return value === undefined || value === '' ? undefined : value;
+}
+
+const COOKIE_CLEARED = 'auth_token=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0';
+
+interface CallbackEnv extends Auth0ManagementEnv {
+  AUTH0_CLIENT_ID?: string;
+  AUTH0_CLIENT_SECRET?: string;
+  AUTH0_AUDIENCE?: string;
+  AUTH0_LOGIN_AUDIENCE?: string;
+  ALLOWED_EMAIL_DOMAINS?: string;
+  DB: D1<'run'>;
+}
+
+interface LoginRolesEnv extends RoleEnv {
+  AUTH0_CLIENT_ID?: string;
+  AUTH0_LOGIN_AUDIENCE?: string;
+}
+
+interface LoginRequest {
+  url: string;
+  env: { AUTH0_DOMAIN?: string; AUTH0_CLIENT_ID?: string; AUTH0_LOGIN_AUDIENCE?: string };
+}
+
+interface CallbackRequest {
+  url: string;
+  env: CallbackEnv;
+  ctx: { waitUntil(promise: Promise<unknown>): void };
+}
+
+interface LogoutRequest {
+  url: string;
+  headers: { get(name: string): string | null };
+  env: {
+    AUTH0_DOMAIN?: string;
+    AUTH0_CLIENT_ID?: string;
+    SESSIONS: KV<'get' | 'put' | 'delete'>;
+  };
+}
+
+interface MeRequest {
+  user?: SessionUser & { permissions?: string[] };
+}
+
+interface VerifyEnv {
+  AUTH0_DOMAIN?: string;
+  AUTH0_AUDIENCE?: string;
+  AUTH0_CLIENT_ID?: string;
+}
 
 /** What Auth0's /userinfo returns for the openid profile email scopes (OpenID Connect Core §5.1). */
 const UserInfo = v.object({
@@ -86,8 +162,8 @@ export async function resolveLoginRoles({
   verifyToken,
 }: {
   userInfo: Record<string, unknown>;
-  tokens: TokenSet;
-  env: Env;
+  tokens: LoginTokens;
+  env: LoginRolesEnv;
   verifyToken: VerifyToken;
 }): Promise<string[]> {
   const roleConfig = createRoleConfig(env);
@@ -121,17 +197,16 @@ export async function ensureDashboardLoginRole({
   getUserRoles: loadUserRoles = getUserRoles,
   setUserRole: assignUserRole = setUserRole,
 }: {
-  tokenRoles: unknown;
+  tokenRoles: string[];
   userId: string;
-  env: Env;
-  getUserRoles?: (env: Env, userId: string) => Promise<string[]>;
-  setUserRole?: (env: Env, userId: string, roleName: string) => Promise<void>;
+  env: Auth0ManagementEnv;
+  getUserRoles?: (env: Auth0ManagementEnv, userId: string) => Promise<string[]>;
+  setUserRole?: (env: Auth0ManagementEnv, userId: string, roleName: string) => Promise<void>;
 }): Promise<{ roles: string[]; autoAssignedRole: string | null }> {
   const roleConfig = createRoleConfig(env);
-  const rolesFromLogin = Array.isArray(tokenRoles) ? tokenRoles : [];
 
-  if (hasAnyRole(rolesFromLogin, roleConfig)) {
-    return { roles: rolesFromLogin, autoAssignedRole: null };
+  if (hasAnyRole(tokenRoles, roleConfig)) {
+    return { roles: tokenRoles, autoAssignedRole: null };
   }
 
   const assignedRoles = await loadUserRoles(env, userId);
@@ -148,7 +223,7 @@ export async function ensureDashboardLoginRole({
 
 export const auth0Handler = {
   // Login - redirect to Auth0
-  async login(request: AppRequest): Promise<Response> {
+  login(request: LoginRequest): Response {
     console.log('[Auth0 Handler] Login route hit');
     const { env } = request;
     const url = new URL(request.url);
@@ -184,7 +259,7 @@ export const auth0Handler = {
   },
 
   // Callback - handle Auth0 response
-  async callback(request: AppRequest): Promise<Response> {
+  callback: async (request: CallbackRequest): Promise<Response> => {
     const { env } = request;
     const roleConfig = createRoleConfig(env);
     const url = new URL(request.url);
@@ -209,11 +284,14 @@ export const auth0Handler = {
     }
 
     try {
+      const domain = env.AUTH0_DOMAIN;
+      if (!domain) throw new Error('AUTH0_DOMAIN is not configured');
+
       // Exchange code for tokens
       const redirectUri = `${url.origin}/callback`;
       // Token exchange with Auth0
 
-      const tokenResponse = await fetch(`https://${env.AUTH0_DOMAIN}/oauth/token`, {
+      const tokenResponse = await fetch(`https://${domain}/oauth/token`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -247,7 +325,7 @@ export const auth0Handler = {
       const tokens = tokenBody.value;
 
       // Get user info from Auth0
-      const userResponse = await fetch(`https://${env.AUTH0_DOMAIN}/userinfo`, {
+      const userResponse = await fetch(`https://${domain}/userinfo`, {
         headers: {
           Authorization: `Bearer ${tokens.access_token}`,
         },
@@ -300,10 +378,10 @@ export const auth0Handler = {
           auth0Handler.verifyToken(token, env, audience),
       });
 
-      const user: RequestUser & { provider: string } = {
+      const user: SessionUser = {
         id: userId,
         email: userInfo.email,
-        name: userInfo.name || userInfo.nickname,
+        name: nonEmpty(userInfo.name) ?? userInfo.nickname,
         picture: userInfo.picture,
         provider: 'auth0',
         roles: userRoles,
@@ -319,7 +397,7 @@ export const auth0Handler = {
         scheduleAuthAudit(request, {
           action: 'login_denied',
           resourceId: user.id,
-          userEmail: user.email || null,
+          userEmail: nonEmpty(user.email) ?? null,
           details: { reason: emailCheck.reason, domain: emailCheck.domain },
         });
 
@@ -349,7 +427,7 @@ export const auth0Handler = {
           scheduleAuthAudit(request, {
             action: 'role_autoassigned',
             resourceId: user.id,
-            userEmail: user.email || null,
+            userEmail: nonEmpty(user.email) ?? null,
             details: { role: roleResolution.autoAssignedRole, domain: emailCheck.domain },
           });
         }
@@ -392,7 +470,7 @@ export const auth0Handler = {
       scheduleAuthAudit(request, {
         action: 'login',
         resourceId: user.id,
-        userEmail: user.email || null,
+        userEmail: nonEmpty(user.email) ?? null,
         details: { provider: 'auth0', roles: user.roles },
       });
 
@@ -417,7 +495,7 @@ export const auth0Handler = {
   },
 
   // Logout
-  async logout(request: AppRequest): Promise<Response> {
+  logout: async (request: LogoutRequest): Promise<Response> => {
     const { env } = request;
 
     // Reads the cookie as well as the header, otherwise a browser logout left the KV
@@ -431,9 +509,12 @@ export const auth0Handler = {
       // Read the session first so the reverse index can be pruned; otherwise it would
       // accumulate dead tokens until its own TTL expired.
       try {
-        const raw = await env.SESSIONS.get(credential.token);
-        const userId: string | null = raw ? (JSON.parse(raw)?.user?.id ?? null) : null;
-        if (userId) await unindexSession(env, userId, credential.token);
+        const stored = await readKvJson(env.SESSIONS, credential.token, StoredSession);
+        if (stored?.ok === true) {
+          await unindexSession(env, stored.value.user.id, credential.token);
+        } else if (stored !== null) {
+          console.error('Failed to prune session index on logout:', stored.error);
+        }
       } catch (error) {
         console.error('Failed to prune session index on logout:', error);
       }
@@ -445,10 +526,7 @@ export const auth0Handler = {
     if (!env.AUTH0_DOMAIN) {
       return new Response('Auth0 configuration missing. Please configure AUTH0_DOMAIN.', {
         status: 500,
-        headers: {
-          'Content-Type': 'text/plain',
-          'Set-Cookie': 'auth_token=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0',
-        },
+        headers: { 'Content-Type': 'text/plain', 'Set-Cookie': COOKIE_CLEARED },
       });
     }
     const logoutUrl = new URL(`https://${env.AUTH0_DOMAIN}/v2/logout`);
@@ -460,13 +538,13 @@ export const auth0Handler = {
       status: 302,
       headers: {
         Location: logoutUrl.toString(),
-        'Set-Cookie': 'auth_token=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0',
+        'Set-Cookie': COOKIE_CLEARED,
       },
     });
   },
 
   // Get current user
-  async me(request: AppRequest): Promise<Response> {
+  me(request: MeRequest): Response {
     const { user } = request;
 
     return new Response(
@@ -477,8 +555,8 @@ export const auth0Handler = {
           // Explicit rather than relying on enrichUserPermissions having run: if this
           // route is ever wired without it, the client sees "no permissions" and hides
           // everything, instead of `undefined` which `.includes()` would throw on.
-          roles: Array.isArray(user?.roles) ? user.roles : [],
-          permissions: Array.isArray(user?.permissions) ? user.permissions : [],
+          roles: user?.roles ?? [],
+          permissions: user?.permissions ?? [],
         },
       }),
       {
@@ -490,17 +568,20 @@ export const auth0Handler = {
   // Verify JWT token (for API calls)
   async verifyToken(
     token: string,
-    env: Env,
-    audience: string | undefined = env.AUTH0_AUDIENCE || env.AUTH0_CLIENT_ID,
+    env: VerifyEnv,
+    audience: string | undefined = nonEmpty(env.AUTH0_AUDIENCE) ?? env.AUTH0_CLIENT_ID,
   ): Promise<Record<string, unknown> | null> {
+    if (!env.AUTH0_DOMAIN) return null;
+
     try {
       const JWKS = createRemoteJWKSet(new URL(`https://${env.AUTH0_DOMAIN}/.well-known/jwks.json`));
 
       // Calling with no audience would make jose reject on `aud`; fall back to the
       // client id so the call is always well-defined.
+      const expectedAudience = audience ?? env.AUTH0_CLIENT_ID;
       const { payload } = await jwtVerify(token, JWKS, {
         issuer: `https://${env.AUTH0_DOMAIN}/`,
-        audience: audience ?? env.AUTH0_CLIENT_ID,
+        ...(expectedAudience === undefined ? {} : { audience: expectedAudience }),
       });
 
       return payload;
