@@ -44,7 +44,8 @@
     "server/frontend-handler.ts",
     "server/utils/verification-backfill.ts",
     "server/utils/spam-backfill.ts",
-    "server/utils/filter-history.ts"
+    "server/utils/filter-history.ts",
+    "server/utils/keyword-history.ts"
   ],
   "exclude": ["**/*.test.ts"],
   "references": [{ "path": "./tsconfig.shared.json" }]

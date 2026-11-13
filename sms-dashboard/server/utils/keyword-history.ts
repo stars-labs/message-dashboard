@@ -1,5 +1,6 @@
+import * as v from 'valibot';
+import { queryAll, type D1, type D1Batch, type D1Statement } from '../lib/d1.js';
 import { findKeywordMatches } from './keyword-match.js';
-import type { D1Database } from '../cf-bindings.js';
 import type { HistoryCursor } from './filter-history.js';
 
 export const KEYWORD_HISTORY_PAGE_SIZE = 200;
@@ -13,14 +14,16 @@ export interface HistoryKeyword {
 }
 
 /** One message row the page scans. */
-interface KeywordHistoryRow {
-  id: string;
-  type?: string | null;
-  content: string | null;
-  filter_status: string | null;
-  verification_code: string | null;
-  created_at: string;
-}
+const KeywordHistoryRow = v.object({
+  id: v.string(),
+  type: v.nullable(v.string()),
+  content: v.string(),
+  filter_status: v.string(),
+  verification_code: v.nullable(v.string()),
+  created_at: v.string(),
+});
+
+type KeywordHistoryRow = v.InferOutput<typeof KeywordHistoryRow>;
 
 export interface KeywordHistoryPage {
   processed: number;
@@ -41,7 +44,7 @@ function cursorFor(row: KeywordHistoryRow): HistoryCursor {
  * number of D1 rows. Eligibility and matching happen in memory after the read.
  */
 export async function processKeywordHistoryPage(
-  db: D1Database,
+  db: D1<'all' | 'run'> & D1Batch<'all' | 'run'>,
   keyword: HistoryKeyword,
   {
     since,
@@ -67,26 +70,28 @@ export async function processKeywordHistoryPage(
     1,
     Math.min(Number(pageSize) || KEYWORD_HISTORY_PAGE_SIZE, KEYWORD_HISTORY_PAGE_SIZE),
   );
-  const { results } = await db
-    .prepare(
-      `SELECT id, type, content, filter_status, verification_code, created_at
+  const results = await queryAll(
+    db
+      .prepare(
+        `SELECT id, type, content, filter_status, verification_code, created_at
      FROM messages
      WHERE ${conditions.join('\n       AND ')}
      ORDER BY created_at, id
      LIMIT ?`,
-    )
-    .bind(...params, limit + 1)
-    .all<KeywordHistoryRow>();
+      )
+      .bind(...params, limit + 1),
+    KeywordHistoryRow,
+  );
 
   const hasMore = results.length > limit;
   const page = results.slice(0, limit);
-  const statements = [];
+  const statements: D1Statement<'all' | 'run'>[] = [];
   let eligible = 0;
   let matchedMessages = 0;
 
   for (const message of page) {
     if (
-      (message.type !== undefined && message.type !== 'received') ||
+      message.type !== 'received' ||
       message.filter_status === 'filtered' ||
       message.verification_code
     )
@@ -114,12 +119,8 @@ export async function processKeywordHistoryPage(
     }
   }
 
-  const resultsForWrites =
-    statements.length > 0 ? await db.batch<{ meta?: { changes?: number } }>(statements) : [];
-  const inserted = resultsForWrites.reduce(
-    (total, result) => total + Number(result?.meta?.changes || 0),
-    0,
-  );
+  const resultsForWrites = statements.length > 0 ? await db.batch(statements) : [];
+  const inserted = resultsForWrites.reduce((total, result) => total + result.meta.changes, 0);
 
   const last = page.at(-1);
   return {
