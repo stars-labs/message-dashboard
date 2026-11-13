@@ -40,6 +40,8 @@ if (typeof globalThis.Element !== 'undefined') {
   };
 }
 
+const jsTranspiler = new Bun.Transpiler({ loader: 'ts' });
+
 plugin({
   name: 'svelte',
   setup(build) {
@@ -58,6 +60,16 @@ plugin({
     build.onLoad({ filter: /\.svelte\.js$/ }, ({ path }) => {
       const source = readFileSync(path, 'utf8');
       const { js } = compileModule(source, { filename: path, generate: 'client' });
+      return { contents: js.code, loader: 'js' };
+    });
+
+    // `.svelte.ts` modules: the Svelte compiler parses JavaScript, so the types
+    // have to be stripped first. `compileModule` cannot do it itself, and Bun's
+    // own TS handling does not apply inside this plugin's onLoad.
+    build.onLoad({ filter: /\.svelte\.ts$/ }, ({ path }) => {
+      const source = readFileSync(path, 'utf8');
+      const code = jsTranspiler.transformSync(source);
+      const { js } = compileModule(code, { filename: path, generate: 'client' });
       return { contents: js.code, loader: 'js' };
     });
   },
