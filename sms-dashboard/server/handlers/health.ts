@@ -1,15 +1,27 @@
+import * as v from 'valibot';
+import { queryFirst, type D1 } from '../lib/d1.js';
 import { deriveDaemonHealth } from '../utils/daemon-health.js';
-import type { DaemonHealthRow } from '../utils/daemon-health.js';
 import { classifyD1Error, logD1Error } from '../utils/d1-error.js';
 import type { D1ErrorClassification } from '../utils/d1-error.js';
-import type { AppRequest } from '../worker-context.js';
+
+interface HealthRequest {
+  env: { DB: D1<'first'> };
+}
 
 const DAEMON_HEALTH_SELECT = `
-  SELECT *,
+  SELECT daemon_id, last_heartbeat, metadata,
     CAST((julianday('now') - julianday(last_heartbeat)) * 86400 AS INTEGER) AS seconds_since_heartbeat
   FROM daemon_health
   WHERE daemon_id = 'orange-pi-main'
 `;
+
+/** julianday() of an unreadable last_heartbeat is NULL, so the age can be null. */
+const DaemonHealthRow = v.object({
+  daemon_id: v.string(),
+  last_heartbeat: v.string(),
+  metadata: v.nullable(v.string()),
+  seconds_since_heartbeat: v.nullable(v.number()),
+});
 
 function json(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), {
@@ -23,12 +35,12 @@ function json(body: unknown, status = 200, headers: Record<string, string> = {})
 }
 
 function unavailableBody(classification: D1ErrorClassification, timestamp: string) {
-  const database: Record<string, unknown> = {
+  const database = {
     status: 'unavailable',
     code: classification.code,
+    ...(classification.quota ? { quota: classification.quota } : {}),
+    ...(classification.retryAt ? { retry_at: classification.retryAt.toISOString() } : {}),
   };
-  if (classification.quota) database.quota = classification.quota;
-  if (classification.retryAt) database.retry_at = classification.retryAt.toISOString();
 
   return {
     status: 'unavailable',
@@ -48,21 +60,21 @@ function unavailableHeaders(classification: D1ErrorClassification): Record<strin
 }
 
 export const healthHandler = {
-  async live(): Promise<Response> {
+  live(): Response {
     return json({
       status: 'alive',
       timestamp: new Date().toISOString(),
     });
   },
 
-  async check(request: AppRequest): Promise<Response> {
+  async check(request: HealthRequest): Promise<Response> {
     const { env } = request;
     const timestamp = new Date().toISOString();
 
     try {
       // One indexed application-table read proves D1 is usable and supplies the
       // daemon state. A constant SELECT 1 can succeed after table reads are blocked.
-      const daemonHealth = await env.DB.prepare(DAEMON_HEALTH_SELECT).first<DaemonHealthRow>();
+      const daemonHealth = await queryFirst(env.DB.prepare(DAEMON_HEALTH_SELECT), DaemonHealthRow);
       const derived = deriveDaemonHealth(daemonHealth);
       return json(
         {
@@ -89,11 +101,11 @@ export const healthHandler = {
     }
   },
 
-  async daemonStatus(request: AppRequest): Promise<Response> {
+  async daemonStatus(request: HealthRequest): Promise<Response> {
     const { env } = request;
 
     try {
-      const daemonHealth = await env.DB.prepare(DAEMON_HEALTH_SELECT).first<DaemonHealthRow>();
+      const daemonHealth = await queryFirst(env.DB.prepare(DAEMON_HEALTH_SELECT), DaemonHealthRow);
 
       if (!daemonHealth) {
         const derived = deriveDaemonHealth(null);
@@ -116,7 +128,7 @@ export const healthHandler = {
         label: derived.label,
         last_heartbeat: daemonHealth.last_heartbeat,
         seconds_since_heartbeat: daemonHealth.seconds_since_heartbeat,
-        message: derived.reasons[0] || '正常运行中',
+        message: derived.reasons[0] ?? '正常运行中',
         reasons: derived.reasons,
         snapshot,
         timestamp: new Date().toISOString(),

@@ -49,7 +49,8 @@
     "server/handlers/auth0.ts",
     "server/middleware/auth0.ts",
     "server/utils/runner-auth.ts",
-    "server/handlers/users.ts"
+    "server/handlers/users.ts",
+    "server/handlers/health.ts"
   ],
   "exclude": ["**/*.test.ts"],
   "references": [{ "path": "./tsconfig.shared.json" }]
