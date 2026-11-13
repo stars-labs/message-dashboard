@@ -11,11 +11,31 @@
 //   * the target's live sessions are revoked, or a demotion would not take effect for up
 //     to 24 hours (roles are snapshotted into the session at login)
 
+import * as v from 'valibot';
 import { createRoleConfig, getKnownRoles } from '../../config/auth0-roles.js';
-import { getUserRoles, listUsersWithRoles, setUserRole } from '../utils/auth0-management.js';
+import { readJson } from '../../shared/parse-json.js';
+import type { D1 } from '../lib/d1.js';
+import type { KV } from '../lib/kv.js';
+import {
+  Auth0ManagementError,
+  getUserRoles,
+  listUsersWithRoles,
+  setUserRole,
+  type Auth0ManagementEnv,
+} from '../utils/auth0-management.js';
 import { revokeUserSessions } from '../utils/user-sessions.js';
 import { writeAuditLog } from '../utils/audit-log.js';
-import type { AppRequest } from '../worker-context.js';
+
+interface ListRequest {
+  env: Auth0ManagementEnv;
+}
+
+interface SetRoleRequest {
+  env: Auth0ManagementEnv & { SESSIONS: KV<'get' | 'put' | 'delete'>; DB: D1<'run'> };
+  params?: Record<string, string>;
+  user?: { id: string; email?: string };
+  text(): Promise<string>;
+}
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -24,21 +44,16 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-/** The error shape managementFailure reads. Auth0ManagementError satisfies it. */
-interface ManagementErrorLike {
-  message?: string;
-  body?: string | null;
-}
-
 /** Map an Auth0ManagementError to a response without leaking its body to the client. */
 function managementFailure(error: unknown): Response {
-  const e = error as ManagementErrorLike | null | undefined;
-  console.error('Auth0 Management API error:', e?.message, e?.body);
+  const message = error instanceof Error ? error.message : undefined;
+  const body = error instanceof Auth0ManagementError ? error.body : undefined;
+  console.error('Auth0 Management API error:', message, body);
   return json(
     {
       success: false,
       error: 'Auth0 Management API request failed',
-      detail: e?.message ?? 'unknown error',
+      detail: message ?? 'unknown error',
     },
     502,
   );
@@ -46,7 +61,7 @@ function managementFailure(error: unknown): Response {
 
 export const usersHandler = {
   /** GET /api/users — every tenant user with their current role. */
-  async list(request: AppRequest): Promise<Response> {
+  async list(request: ListRequest): Promise<Response> {
     const { env } = request;
     const roleConfig = createRoleConfig(env);
 
@@ -88,9 +103,9 @@ export const usersHandler = {
   },
 
   /** PUT /api/users/:id/role — body { role: 'admin' | 'viewer' }. */
-  async setRole(request: AppRequest): Promise<Response> {
+  async setRole(request: SetRoleRequest): Promise<Response> {
     const { env, user } = request;
-    const targetId = request.params?.id;
+    const targetId = request.params?.['id'];
     const roleConfig = createRoleConfig(env);
     const knownRoles = getKnownRoles(roleConfig);
 
@@ -98,19 +113,17 @@ export const usersHandler = {
       return json({ success: false, error: 'Missing user id' }, 400);
     }
 
-    let body: { role?: unknown };
-    try {
-      body = await request.json();
-    } catch {
+    const parsed = await readJson(request, v.unknown());
+    if (!parsed.ok) {
       return json({ success: false, error: 'Body must be JSON' }, 400);
     }
 
-    const role = body?.role;
-
     // Allow-list, not a blocklist: only these two strings can ever be assigned.
-    if (typeof role !== 'string' || !knownRoles.includes(role)) {
+    const body = v.safeParse(v.object({ role: v.picklist(knownRoles) }), parsed.value);
+    if (!body.success) {
       return json({ success: false, error: `role must be one of: ${knownRoles.join(', ')}` }, 400);
     }
+    const { role } = body.output;
 
     // Self-change guard. Blocks an admin demoting themselves into lockout, and means
     // this endpoint can never be used to escalate the caller's own privileges.
