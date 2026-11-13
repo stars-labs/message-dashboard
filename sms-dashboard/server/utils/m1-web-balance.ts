@@ -31,21 +31,26 @@ const MONTHS = new Map<string, number>([
   ['dec', 12],
 ]);
 
+function textOf(value: unknown): string {
+  return typeof value === 'string' || typeof value === 'number' ? String(value) : '';
+}
+
 function localSingaporeNumber(value: unknown): string {
-  return String(value || '')
+  return textOf(value)
     .replace(/\D/g, '')
     .replace(/^65(?=\d{8}$)/, '');
 }
 
 function parseValidityDate(value: unknown): string | null {
-  const match = String(value || '')
+  const match = textOf(value)
     .trim()
     .match(/\bvalid\s+till\s+(\d{1,2})\s+([a-z]{3})\s+(\d{4})\b/i);
-  if (!match) return null;
-  const day = Number(match[1]);
-  const month = MONTHS.get(match[2].toLocaleLowerCase());
+  const [, dayText, monthText, yearText] = match ?? [];
+  if (dayText === undefined || monthText === undefined || yearText === undefined) return null;
+  const day = Number(dayText);
+  const month = MONTHS.get(monthText.toLocaleLowerCase());
   if (month === undefined) return null;
-  const year = Number(match[3]);
+  const year = Number(yearText);
   const date = new Date(Date.UTC(year, month - 1, day));
   if (
     date.getUTCFullYear() !== year ||
@@ -67,11 +72,12 @@ export function extractM1WebBalance(
     throw new Error('M1 portal does not prove the authenticated account number');
   }
 
-  const balanceMatch = String(balanceText || '')
+  const balanceMatch = textOf(balanceText)
     .trim()
     .match(/^\$\s*(\d+(?:\.\d{1,2})?)$/);
-  if (!balanceMatch) throw new Error('M1 portal does not contain an exact SGD balance');
-  const balance = Number(balanceMatch[1]);
+  const amountText = balanceMatch?.[1];
+  if (amountText === undefined) throw new Error('M1 portal does not contain an exact SGD balance');
+  const balance = Number(amountText);
   if (!Number.isFinite(balance)) throw new Error('M1 portal SGD balance is invalid');
 
   const expiresAt = parseValidityDate(validityText);
@@ -80,7 +86,7 @@ export function extractM1WebBalance(
   return {
     balance,
     currency: 'SGD',
-    account_number: String(expectedPhone),
+    account_number: textOf(expectedPhone),
     expires_at: expiresAt,
     balance_path: '.balanceAmt.maBalanceDiv',
     expiry_path: '.balanceForBox .brand-color',

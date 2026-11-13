@@ -58,4 +58,25 @@ describe('M1 prepaid portal balance parser', () => {
       ),
     ).toThrow('validity date');
   });
+
+  test('rejects scraped text that is missing or not text', () => {
+    expect(() => extractM1WebBalance({}, '+6590950236')).toThrow('authenticated account');
+    expect(() =>
+      extractM1WebBalance(
+        { accountText: '9095 0236', balanceText: { amount: 9.97 }, validityText: null },
+        '+6590950236',
+      ),
+    ).toThrow('SGD balance');
+    expect(() =>
+      extractM1WebBalance(
+        { accountText: '9095 0236', balanceText: '$9.97', validityText: undefined },
+        '+6590950236',
+      ),
+    ).toThrow('validity date');
+  });
+
+  test('rejects an expected phone that is not a Singapore number', () => {
+    expect(() => extractM1WebBalance({}, '+8613800000000')).toThrow('not a valid Singapore number');
+    expect(() => extractM1WebBalance({}, null)).toThrow('not a valid Singapore number');
+  });
 });
