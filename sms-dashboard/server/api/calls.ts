@@ -17,6 +17,9 @@
 // Daemon routes live under /api/control/, which the auth0 middleware gates with
 // X-API-Key.
 
+import * as v from 'valibot';
+import type { Parsed } from '../../shared/parse-json.js';
+import { OBJECT_MESSAGE, readBody, type MissingKeyMessages } from '../lib/request-body.js';
 import { handleAuth0 } from '../middleware/auth0.js';
 import { requirePermission, enrichUserPermissions } from '../middleware/rbac.js';
 import type { AppRequest, Env, Handler } from '../worker-context.js';
@@ -72,9 +75,6 @@ interface SfuResult {
     error?: unknown;
   };
 }
-
-/** What readJson returns: anything JSON-shaped, or null when the body is not JSON. */
-type JsonBody = Record<string, unknown>;
 
 /** Safety net: a wedged call disappears on its own rather than blocking the fleet. */
 const CALL_TTL_SECONDS = 3600;
@@ -197,21 +197,110 @@ function callChanged(): Response {
   return json({ error: 'No active call' }, 409);
 }
 
+const ICCID_MESSAGE = 'iccid is required';
+const NUMBER_MESSAGE = 'number must be E.164, for example +6591234567';
+const MEDIA_MESSAGE = 'offer and mid are required';
+const ANSWER_MESSAGE = 'answer is required';
+const CALL_ID_MESSAGE = 'Invalid call ID';
+
 /**
  * E.164 only. The SMS sender already refuses anything else for ordinary sends,
  * and a dialer is a place where a loose pattern turns a typo into a wrong number.
  */
+const PhoneNumber = v.pipe(v.string(NUMBER_MESSAGE), v.regex(/^\+[1-9]\d{6,14}$/, NUMBER_MESSAGE));
+
 export function validNumber(value: unknown): boolean {
-  return typeof value === 'string' && /^\+[1-9]\d{6,14}$/.test(value);
+  return v.is(PhoneNumber, value);
 }
 
-function validIccid(value: unknown): boolean {
-  return typeof value === 'string' && /^[0-9A-Fa-f]{18,22}$/.test(value);
+function sessionDescriptionBody(type: 'offer' | 'answer', message: string) {
+  return v.object(
+    {
+      type: v.literal(type, message),
+      sdp: v.pipe(v.string(message), v.minLength(1, message)),
+    },
+    message,
+  );
 }
+
+const Mid = v.pipe(v.string(MEDIA_MESSAGE), v.minLength(1, MEDIA_MESSAGE));
+const CallId = v.optional(v.pipe(v.string(CALL_ID_MESSAGE), v.minLength(1, CALL_ID_MESSAGE)));
+
+const DialBody = v.object(
+  {
+    iccid: v.pipe(v.string(ICCID_MESSAGE), v.regex(/^[0-9A-Fa-f]{18,22}$/, ICCID_MESSAGE)),
+    number: PhoneNumber,
+    offer: sessionDescriptionBody('offer', MEDIA_MESSAGE),
+    mid: Mid,
+  },
+  OBJECT_MESSAGE,
+);
+
+const DIAL_MISSING_KEY_MESSAGES = {
+  iccid: ICCID_MESSAGE,
+  number: NUMBER_MESSAGE,
+  offer: MEDIA_MESSAGE,
+  mid: MEDIA_MESSAGE,
+} as const satisfies MissingKeyMessages<typeof DialBody>;
+
+const AnswerBody = v.object(
+  { offer: sessionDescriptionBody('offer', MEDIA_MESSAGE), mid: Mid },
+  OBJECT_MESSAGE,
+);
+
+const ANSWER_MISSING_KEY_MESSAGES = {
+  offer: MEDIA_MESSAGE,
+  mid: MEDIA_MESSAGE,
+} as const satisfies MissingKeyMessages<typeof AnswerBody>;
+
+const CallIdBody = v.object({ call_id: CallId }, OBJECT_MESSAGE);
+
+const RenegotiateBody = v.object(
+  { answer: sessionDescriptionBody('answer', ANSWER_MESSAGE), call_id: CallId },
+  OBJECT_MESSAGE,
+);
+
+const RENEGOTIATE_MISSING_KEY_MESSAGES = {
+  answer: ANSWER_MESSAGE,
+} as const satisfies MissingKeyMessages<typeof RenegotiateBody>;
+
+/** The daemon's RING report: `from` is null until the network sends a caller id. */
+const IncomingBody = v.object(
+  {
+    iccid: v.pipe(v.string(ICCID_MESSAGE), v.minLength(1, ICCID_MESSAGE)),
+    from: v.nullish(v.string('from must be a string')),
+  },
+  OBJECT_MESSAGE,
+);
+
+const INCOMING_MISSING_KEY_MESSAGES = {
+  iccid: ICCID_MESSAGE,
+} as const satisfies MissingKeyMessages<typeof IncomingBody>;
+
+/** The daemon's end report: `call_id` is null for a ring that stopped unanswered. */
+const EndedBody = v.pipe(
+  v.object(
+    {
+      call_id: v.nullish(v.string(CALL_ID_MESSAGE)),
+      iccid: v.nullish(v.string('iccid must be a string')),
+      reason: v.nullish(v.string('reason must be a string')),
+    },
+    OBJECT_MESSAGE,
+  ),
+  v.check(
+    ({ call_id, iccid }) => (call_id ?? '') !== '' || (iccid ?? '') !== '',
+    'call_id or iccid is required',
+  ),
+);
 
 function validDescription(value: unknown, type: string): value is SessionDescription {
-  const v = value as { type?: unknown; sdp?: unknown } | null | undefined;
-  return Boolean(v && v.type === type && typeof v.sdp === 'string' && v.sdp);
+  const description = value as { type?: unknown; sdp?: unknown } | null | undefined;
+  return Boolean(
+    description &&
+    description.type === type &&
+    typeof description.sdp === 'string' &&
+    description.sdp,
+  );
 }
 
 function toHex(buffer: ArrayBuffer): string {
@@ -352,12 +441,11 @@ async function failMedia(env: Env, call: LiveCall, response: Response): Promise<
   return response;
 }
 
-async function readJson(request: AppRequest): Promise<JsonBody | null> {
-  try {
-    return ((await request.json()) as JsonBody) || {};
-  } catch {
-    return null;
-  }
+/** A route whose body is optional reads a request without one as `{}`. */
+function readCallIdBody(request: AppRequest): Promise<Parsed<v.InferOutput<typeof CallIdBody>>> {
+  return request.body === null
+    ? Promise.resolve({ ok: true, value: {} })
+    : readBody(request, CallIdBody, {});
 }
 
 // ---------------------------------------------------------------------------
@@ -667,14 +755,9 @@ export function setupCallRoutes(router: Router): void {
     const unconfigured = notConfigured(env);
     if (unconfigured) return unconfigured;
 
-    const body = await readJson(request);
-    if (!body) return json({ error: 'Invalid JSON body' }, 400);
-    const { iccid, number, offer, mid } = body;
-    if (!validIccid(iccid)) return json({ error: 'iccid is required' }, 400);
-    if (!validNumber(number))
-      return json({ error: 'number must be E.164, for example +6591234567' }, 400);
-    if (!validDescription(offer, 'offer') || !validId(mid))
-      return json({ error: 'offer and mid are required' }, 400);
+    const parsed = await readBody(request, DialBody, DIAL_MISSING_KEY_MESSAGES);
+    if (!parsed.ok) return json({ error: parsed.error }, 400);
+    const { iccid, number, offer, mid } = parsed.value;
 
     const existing = await readCall(env);
     if (existing) return json({ error: 'Another call is already active', call: existing }, 409);
@@ -683,8 +766,8 @@ export function setupCallRoutes(router: Router): void {
       id: crypto.randomUUID(),
       direction: 'outbound',
       state: 'connecting',
-      iccid: iccid as string,
-      number: number as string,
+      iccid,
+      number,
       started_at: new Date().toISOString(),
       // The KV session stores the raw Auth0 user (`sub`); the JWT middleware
       // builds `id`. Accept either, as the original did.
@@ -708,11 +791,9 @@ export function setupCallRoutes(router: Router): void {
     const unconfigured = notConfigured(env);
     if (unconfigured) return unconfigured;
 
-    const body = await readJson(request);
-    if (!body) return json({ error: 'Invalid JSON body' }, 400);
-    const { offer, mid } = body;
-    if (!validDescription(offer, 'offer') || !validId(mid))
-      return json({ error: 'offer and mid are required' }, 400);
+    const parsed = await readBody(request, AnswerBody, ANSWER_MISSING_KEY_MESSAGES);
+    if (!parsed.ok) return json({ error: parsed.error }, 400);
+    const { offer, mid } = parsed.value;
 
     const call = await readCall(env);
     if (!call) return json({ error: 'No call to answer' }, 404);
@@ -727,7 +808,7 @@ export function setupCallRoutes(router: Router): void {
     if (!(await writeCall(env, call))) return callChanged();
     await logCallAnswered(env, call.id, { at: call.answered_at, by: call.answered_by });
 
-    const media = await publishMic(env, offer, mid as string);
+    const media = await publishMic(env, offer, mid);
     if ('error' in media) return failMedia(env, call, media.error);
     call.session_id = media.sessionId;
     if (!(await writeCall(env, call))) return callChanged();
@@ -741,10 +822,11 @@ export function setupCallRoutes(router: Router): void {
     const unconfigured = notConfigured(env);
     if (unconfigured) return unconfigured;
 
-    const body = request.body === null ? {} : await readJson(request);
-    if (!body) return json({ error: 'Invalid JSON body' }, 400);
+    const parsed = await readCallIdBody(request);
+    if (!parsed.ok) return json({ error: parsed.error }, 400);
+    const { call_id: callId } = parsed.value;
     const call = await readCall(env);
-    if (!call || (body.call_id !== undefined && body.call_id !== call.id)) {
+    if (!call || (callId !== undefined && callId !== call.id)) {
       return json({ error: 'No active call' }, 404);
     }
     if (call.state !== 'connecting' || !call.session_id || call.bridge_started) {
@@ -845,19 +927,19 @@ export function setupCallRoutes(router: Router): void {
     const unconfigured = notConfigured(env);
     if (unconfigured) return unconfigured;
 
-    const body = await readJson(request);
-    if (!body) return json({ error: 'Invalid JSON body' }, 400);
-    if (!validDescription(body.answer, 'answer')) return json({ error: 'answer is required' }, 400);
+    const parsed = await readBody(request, RenegotiateBody, RENEGOTIATE_MISSING_KEY_MESSAGES);
+    if (!parsed.ok) return json({ error: parsed.error }, 400);
+    const { answer, call_id: callId } = parsed.value;
 
     const call = await readCall(env);
-    if (!call || (body.call_id !== undefined && body.call_id !== call.id)) {
+    if (!call || (callId !== undefined && callId !== call.id)) {
       return json({ error: 'No active call' }, 404);
     }
     if (call.state !== 'bridging')
       return json({ error: 'Call is not waiting for renegotiation', call }, 409);
 
     const result = await sfu(env, 'PUT', `/sessions/${call.session_id}/renegotiate`, {
-      sessionDescription: body.answer,
+      sessionDescription: answer,
     });
     if (!result.ok)
       return failMedia(env, call, sfuError('Could not renegotiate the session', result));
@@ -873,13 +955,10 @@ export function setupCallRoutes(router: Router): void {
     const blocked = await gate(request, env, ctx);
     if (blocked) return blocked;
 
-    const body = request.body === null ? {} : await readJson(request);
-    if (!body) return json({ error: 'Invalid JSON body' }, 400);
-    const callId = body.call_id;
-    if (callId !== undefined && (typeof callId !== 'string' || !callId)) {
-      return json({ error: 'Invalid call ID' }, 400);
-    }
-    const call = await beginEnding(env, (current) => !callId || current.id === callId);
+    const parsed = await readCallIdBody(request);
+    if (!parsed.ok) return json({ error: parsed.error }, 400);
+    const { call_id: callId } = parsed.value;
+    const call = await beginEnding(env, (current) => callId === undefined || current.id === callId);
     if (!call) {
       return json({ call: null, already_clear: true });
     }
@@ -897,11 +976,10 @@ export function setupCallRoutes(router: Router): void {
     const authResponse = await handleAuth0(request);
     if (authResponse) return authResponse;
 
-    const body = await readJson(request);
-    if (!body) return json({ error: 'Invalid JSON body' }, 400);
-    const iccid = typeof body.iccid === 'string' ? body.iccid : '';
-    const from = typeof body.from === 'string' && body.from ? body.from : null;
-    if (!iccid) return json({ error: 'iccid is required' }, 400);
+    const parsed = await readBody(request, IncomingBody, INCOMING_MISSING_KEY_MESSAGES);
+    if (!parsed.ok) return json({ error: parsed.error }, 400);
+    const { iccid } = parsed.value;
+    const from = parsed.value.from || null;
 
     let existing = await readCall(env);
     const open = existing ? null : await claimRing(env, iccid, from);
@@ -936,10 +1014,9 @@ export function setupCallRoutes(router: Router): void {
     const authResponse = await handleAuth0(request);
     if (authResponse) return authResponse;
 
-    const body = await readJson(request);
-    if (!body) return json({ error: 'Invalid JSON body' }, 400);
-    const { call_id: callId, iccid, reason } = body;
-    if (!callId && !iccid) return json({ error: 'call_id or iccid is required' }, 400);
+    const parsed = await readBody(request, EndedBody, {});
+    if (!parsed.ok) return json({ error: parsed.error }, 400);
+    const { call_id: callId, iccid, reason } = parsed.value;
 
     const call = await beginEnding(env, (current) =>
       callId ? current.id === callId : current.iccid === iccid && current.state === 'ringing',
@@ -949,7 +1026,7 @@ export function setupCallRoutes(router: Router): void {
     await closeAdapters(env, call);
     await clearCall(env, call);
     await logCallEnded(env, call, {
-      reason: typeof reason === 'string' && reason ? reason.slice(0, 40) : 'ended',
+      reason: reason ? reason.slice(0, 40) : 'ended',
       endedBy: 'daemon',
     });
     return json({ ok: true, call_id: call.id });

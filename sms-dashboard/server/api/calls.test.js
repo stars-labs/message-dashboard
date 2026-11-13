@@ -172,14 +172,19 @@ function request(path, body, env, headers = {}) {
     ...(daemon ? { 'x-api-key': env.API_KEY } : { cookie: `auth_token=${SESSION_TOKEN}` }),
   };
   for (const [name, value] of Object.entries(headers)) all[name.toLowerCase()] = value;
+  // A string is the raw body text; anything else is sent as its JSON.
+  const text = typeof body === 'string' ? body : JSON.stringify(body ?? {});
   return {
     url: `https://example.test${path}`,
     method: 'POST',
     env,
     ctx: {},
     headers: { get: (name) => all[name.toLowerCase()] ?? null },
+    async text() {
+      return text;
+    },
     async json() {
-      return body ?? {};
+      return JSON.parse(text);
     },
   };
 }
@@ -1258,6 +1263,52 @@ describe('call history API', () => {
     const response = await handler({ ...req, method: 'GET' }, env, {});
 
     expect(response.status).toBe(401);
+  });
+});
+
+describe('malformed bodies', () => {
+  const ACTIVE = { id: 'call-1', state: 'active', direction: 'outbound', iccid: ICCID };
+  const RINGING = { id: 'ring-1', state: 'ringing', direction: 'inbound', iccid: ICCID };
+  const CONNECTING = { ...ACTIVE, state: 'connecting', session_id: 'session-1' };
+  const BRIDGING = { ...ACTIVE, state: 'bridging', session_id: 'session-1' };
+  const ANSWER = { type: 'answer', sdp: 'v=0 answer' };
+
+  test.each([
+    ['dial', '{not json', null, 'Body must be JSON'],
+    ['dial', 'null', null, 'Body must be a JSON object'],
+    ['hangup', 'null', ACTIVE, 'Body must be a JSON object'],
+    ['hangup', '[]', ACTIVE, 'Body must be a JSON object'],
+    ['connect', { call_id: 5 }, CONNECTING, 'Invalid call ID'],
+    ['renegotiate', { answer: ANSWER, call_id: 5 }, BRIDGING, 'Invalid call ID'],
+    ['incoming', { iccid: ICCID, from: 5 }, null, 'from must be a string'],
+    ['ended', { call_id: 5, iccid: ICCID }, ACTIVE, 'Invalid call ID'],
+    ['ended', { iccid: ICCID, reason: 5 }, RINGING, 'reason must be a string'],
+    ['ended', { iccid: 5 }, RINGING, 'iccid must be a string'],
+  ])('%s answers 400 to %j and leaves the call as it was', async (route, body, call, error) => {
+    const { router, env } = setup(call);
+    const daemon = route === 'incoming' || route === 'ended';
+    const path = `/api/${daemon ? 'control/' : ''}calls/${route}`;
+
+    const response = await invoke(router, 'POST', path, body, env);
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toBe(error);
+    expect(env.CALL_STATE.call()).toEqual(call);
+  });
+
+  test("ended accepts the daemon's null call id for a ring that stopped", async () => {
+    const { router, env } = setup(RINGING);
+
+    const response = await invoke(
+      router,
+      'POST',
+      '/api/control/calls/ended',
+      { call_id: null, iccid: ICCID, reason: 'no_carrier' },
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    expect(env.CALL_STATE.call()).toBeNull();
   });
 });
 
