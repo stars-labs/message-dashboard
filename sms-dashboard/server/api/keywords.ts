@@ -1,55 +1,114 @@
-import { handleAuth0 } from '../middleware/auth0.js';
+import * as v from 'valibot';
+import { readJson, type Schema } from '../../shared/parse-json.js';
+import { queryAll, queryFirst, type D1, type D1Batch } from '../lib/d1.js';
+import { handleAuth0, type AuthRequest } from '../middleware/auth0.js';
 import { requirePermission, enrichUserPermissions } from '../middleware/rbac.js';
+import { errorText } from '../utils/d1-error.js';
 import { DEFAULT_KEYWORD_COLOR, normalizeKeywordColor } from '../utils/keyword-color.js';
 import { processKeywordHistoryPage } from '../utils/keyword-history.js';
-import type { Handler, AppRequest, Env } from '../worker-context.js';
-import type { ExecutionContext } from '../cf-bindings.js';
 import type { Permission } from '../../config/auth0-roles.js';
 
-/** The router shape setupKeywordRoutes needs. */
+const MAX_BATCH_MESSAGES = 100;
+
+type KeywordsDb = D1 & D1Batch;
+
+interface KeywordRequest extends AuthRequest {
+  env: AuthRequest['env'] & { DB: KeywordsDb };
+  params?: Record<string, string>;
+  text(): Promise<string>;
+}
+
+type KeywordHandler = (request: KeywordRequest) => Promise<Response>;
+
 interface Router {
-  get(path: string, ...handlers: Handler[]): void;
-  post(path: string, ...handlers: Handler[]): void;
-  put(path: string, ...handlers: Handler[]): void;
-  delete(path: string, ...handlers: Handler[]): void;
+  get(path: string, handler: KeywordHandler): void;
+  post(path: string, handler: KeywordHandler): void;
+  put(path: string, handler: KeywordHandler): void;
+  delete(path: string, handler: KeywordHandler): void;
 }
 
-/** A keyword_tags row. */
-interface KeywordRow {
-  id: number;
-  keyword: string;
-  tag: string;
-  color: string | null;
-  priority: number;
-  case_sensitive: number;
-  whole_word: number;
-  is_active: number;
-  usage_count?: number;
-  [column: string]: unknown;
-}
+const KEYWORD_COLUMNS =
+  'id, keyword, tag, color, priority, is_active, case_sensitive, whole_word, created_by, created_at, updated_at';
 
-/** The body accepted by POST /api/keywords. */
-interface KeywordCreateBody {
-  keyword?: unknown;
-  tag?: unknown;
-  color?: unknown;
-  priority?: unknown;
-  case_sensitive?: unknown;
-  whole_word?: unknown;
-}
+const KEYWORD_COLUMNS_OF_KT = KEYWORD_COLUMNS.split(', ')
+  .map((column) => `kt.${column}`)
+  .join(', ');
 
-/** One joined message_tags row. */
-interface MessageTagRow {
-  message_id: string;
-  id: number;
-  keyword: string;
-  tag: string;
-  color: string | null;
-  priority: number;
-  position: number;
-  matched_text: string | null;
-  length: number;
-}
+const KeywordRow = v.object({
+  id: v.number(),
+  keyword: v.string(),
+  tag: v.string(),
+  color: v.nullable(v.string()),
+  priority: v.nullable(v.number()),
+  is_active: v.nullable(v.number()),
+  case_sensitive: v.nullable(v.number()),
+  whole_word: v.nullable(v.number()),
+  created_by: v.nullable(v.string()),
+  created_at: v.nullable(v.string()),
+  updated_at: v.nullable(v.string()),
+});
+
+type KeywordRow = v.InferOutput<typeof KeywordRow>;
+
+const KeywordUsageRow = v.object({ ...KeywordRow.entries, usage_count: v.number() });
+
+const IdRow = v.object({ id: v.number() });
+
+const ReferencedRow = v.object({ referenced: v.number() });
+
+const BatchTagRow = v.object({
+  message_id: v.string(),
+  id: v.number(),
+  keyword: v.string(),
+  tag: v.string(),
+  color: v.nullable(v.string()),
+  priority: v.nullable(v.number()),
+  position: v.number(),
+  matched_text: v.string(),
+  length: v.number(),
+});
+
+const MessageTagRow = v.object({
+  message_id: v.string(),
+  keyword_tag_id: v.number(),
+  matched_text: v.string(),
+  position: v.number(),
+  created_at: v.nullable(v.string()),
+  keyword: v.string(),
+  tag: v.string(),
+  color: v.nullable(v.string()),
+});
+
+const CreateBody = v.object({
+  keyword: v.optional(v.unknown()),
+  tag: v.optional(v.unknown()),
+  color: v.optional(v.unknown()),
+  priority: v.optional(v.unknown()),
+  case_sensitive: v.optional(v.unknown()),
+  whole_word: v.optional(v.unknown()),
+});
+
+const UpdateBody = v.object({
+  keyword: v.optional(v.unknown()),
+  tag: v.optional(v.unknown()),
+  color: v.optional(v.unknown()),
+  priority: v.optional(v.unknown()),
+  case_sensitive: v.optional(v.unknown()),
+  whole_word: v.optional(v.unknown()),
+  is_active: v.optional(v.unknown()),
+});
+
+const BatchBody = v.object({
+  messageIds: v.fallback(v.optional(v.array(v.unknown()), []), []),
+});
+
+const HistoryBody = v.object({
+  since: v.optional(v.union([v.string(), v.number()])),
+  until: v.optional(v.union([v.string(), v.number()])),
+  cursor: v.optional(v.unknown()),
+});
+
+const HistoryCursorBody = v.object({ created_at: v.string(), id: v.string() });
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -58,74 +117,75 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-/**
- * Auth0 + RBAC gate, at the head of every route here. Returns a Response to
- * short-circuit, or null to proceed.
- */
-async function gate(
-  request: AppRequest,
-  env: Env,
-  ctx: ExecutionContext,
-  permission: Permission,
-): Promise<Response | null> {
+/** Auth0 + RBAC gate, at the head of every route here. Returns a Response to short-circuit, or null to proceed. */
+async function gate(request: KeywordRequest, permission: Permission): Promise<Response | null> {
   const authResponse = await handleAuth0(request);
   if (authResponse) return authResponse;
-  await enrichUserPermissions(request);
-  const permResponse = await requirePermission(permission)(request);
+  enrichUserPermissions(request);
+  const permResponse = requirePermission(permission)(request);
   if (permResponse) return permResponse;
   return null;
 }
 
-/**
- * Keyword-tag API endpoints
- */
+async function readBody<T>(request: KeywordRequest, schema: Schema<T>): Promise<T> {
+  const parsed = await readJson(request, schema);
+  if (!parsed.ok) throw new Error(parsed.error);
+  return parsed.value;
+}
+
+function toDate(value: string | number | undefined): Date {
+  return new Date(value ?? Number.NaN);
+}
+
 export function setupKeywordRoutes(router: Router): void {
-  // Get all keyword tags
-  router.get('/api/keywords', async (request, env, ctx) => {
-    const blocked = await gate(request, env, ctx, 'keywords.read');
+  router.get('/api/keywords', async (request) => {
+    const blocked = await gate(request, 'keywords.read');
     if (blocked) return blocked;
 
     try {
-      const { results } = await env.DB.prepare(
-        `
-                SELECT 
-                    kt.*,
+      const keywords = await queryAll(
+        request.env.DB.prepare(
+          `
+                SELECT
+                    ${KEYWORD_COLUMNS_OF_KT},
                     COUNT(DISTINCT mt.message_id) as usage_count
                 FROM keyword_tags kt
                 LEFT JOIN message_tags mt ON kt.id = mt.keyword_tag_id
                 GROUP BY kt.id
                 ORDER BY kt.priority DESC, kt.keyword ASC
             `,
-      ).all<KeywordRow>();
+        ),
+        KeywordUsageRow,
+      );
 
-      return json({ keywords: results });
+      return json({ keywords });
     } catch (error) {
       console.error('Error fetching keywords:', error);
       return json({ error: 'Failed to fetch keywords' }, 500);
     }
   });
 
-  // Get single keyword tag
-  router.get('/api/keywords/:id', async (request, env, ctx) => {
-    const blocked = await gate(request, env, ctx, 'keywords.read');
+  router.get('/api/keywords/:id', async (request) => {
+    const blocked = await gate(request, 'keywords.read');
     if (blocked) return blocked;
 
-    const id = request.params?.id;
+    const id = request.params?.['id'];
 
     try {
-      const keyword = await env.DB.prepare(
-        `
-                SELECT 
-                    kt.*,
+      const keyword = await queryFirst(
+        request.env.DB.prepare(
+          `
+                SELECT
+                    ${KEYWORD_COLUMNS_OF_KT},
                     COUNT(DISTINCT mt.message_id) as usage_count
                 FROM keyword_tags kt
                 LEFT JOIN message_tags mt ON kt.id = mt.keyword_tag_id
                 WHERE kt.id = ?
                 GROUP BY kt.id
             `,
-      )
-        .bind(id)
-        .first();
+        ).bind(id),
+        KeywordUsageRow,
+      );
 
       if (!keyword) {
         return json({ error: 'Keyword not found' }, 404);
@@ -138,18 +198,18 @@ export function setupKeywordRoutes(router: Router): void {
     }
   });
 
-  // Create new keyword tag
-  router.post('/api/keywords', async (request, env, ctx) => {
-    const blocked = await gate(request, env, ctx, 'keywords.write');
+  router.post('/api/keywords', async (request) => {
+    const blocked = await gate(request, 'keywords.write');
     if (blocked) return blocked;
 
     const user = request.user;
 
     try {
-      const data = (await request.json()) as KeywordCreateBody;
-      const { keyword, tag, color, priority, case_sensitive, whole_word } = data;
+      const { keyword, tag, color, priority, case_sensitive, whole_word } = await readBody(
+        request,
+        CreateBody,
+      );
 
-      // Validate required fields
       if (typeof keyword !== 'string' || !keyword || typeof tag !== 'string' || !tag) {
         return json({ error: 'Keyword and tag are required' }, 400);
       }
@@ -163,19 +223,18 @@ export function setupKeywordRoutes(router: Router): void {
         return json({ error: `Invalid color: ${colorCheck.reason}` }, 400);
       }
 
-      // Check for duplicate keyword
-      const existing = await env.DB.prepare(
-        'SELECT id FROM keyword_tags WHERE keyword = ? AND is_active = TRUE',
-      )
-        .bind(keyword)
-        .first();
+      const existing = await queryFirst(
+        request.env.DB.prepare(
+          'SELECT id FROM keyword_tags WHERE keyword = ? AND is_active = TRUE',
+        ).bind(keyword),
+        IdRow,
+      );
 
       if (existing) {
         return json({ error: 'Keyword already exists' }, 409);
       }
 
-      // Insert new keyword tag
-      const result = await env.DB.prepare(
+      const result = await request.env.DB.prepare(
         `
                 INSERT INTO keyword_tags (
                     keyword, tag, color, priority, case_sensitive, whole_word, created_by
@@ -193,9 +252,12 @@ export function setupKeywordRoutes(router: Router): void {
         )
         .run();
 
-      const newKeyword = await env.DB.prepare('SELECT * FROM keyword_tags WHERE id = ?')
-        .bind(result.meta.last_row_id)
-        .first<KeywordRow>();
+      const newKeyword = await queryFirst(
+        request.env.DB.prepare(`SELECT ${KEYWORD_COLUMNS} FROM keyword_tags WHERE id = ?`).bind(
+          result.meta.last_row_id,
+        ),
+        KeywordRow,
+      );
 
       return json({ keyword: newKeyword }, 201);
     } catch (error) {
@@ -203,28 +265,27 @@ export function setupKeywordRoutes(router: Router): void {
       return json(
         {
           error: 'Failed to create keyword',
-          details: (error as Error).message,
+          details: errorText(error),
         },
         500,
       );
     }
   });
 
-  // Update keyword tag
-  router.put('/api/keywords/:id', async (request, env, ctx) => {
-    const blocked = await gate(request, env, ctx, 'keywords.write');
+  router.put('/api/keywords/:id', async (request) => {
+    const blocked = await gate(request, 'keywords.write');
     if (blocked) return blocked;
 
-    const id = request.params?.id;
+    const id = request.params?.['id'];
 
     try {
-      const data = (await request.json()) as KeywordCreateBody & { is_active?: unknown };
-      const { keyword, tag, color, priority, case_sensitive, whole_word, is_active } = data;
+      const { keyword, tag, color, priority, case_sensitive, whole_word, is_active } =
+        await readBody(request, UpdateBody);
 
-      // Check if keyword exists
-      const existing = await env.DB.prepare('SELECT * FROM keyword_tags WHERE id = ?')
-        .bind(id)
-        .first<KeywordRow>();
+      const existing = await queryFirst(
+        request.env.DB.prepare(`SELECT ${KEYWORD_COLUMNS} FROM keyword_tags WHERE id = ?`).bind(id),
+        KeywordRow,
+      );
 
       if (!existing) {
         return json({ error: 'Keyword not found' }, 404);
@@ -266,24 +327,27 @@ export function setupKeywordRoutes(router: Router): void {
         resolvedColor = storedCheck.ok ? storedCheck.value : DEFAULT_KEYWORD_COLOR;
       }
 
-      // Update keyword tag
-      const updated = await env.DB.prepare(
-        `
+      let nextTag: unknown = existing.tag;
+      if (tag) nextTag = tag;
+
+      const updated = await queryFirst(
+        request.env.DB.prepare(
+          `
                 UPDATE keyword_tags
                 SET tag = ?, color = ?, priority = ?, is_active = ?,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
-                RETURNING *
+                RETURNING ${KEYWORD_COLUMNS}
             `,
-      )
-        .bind(
-          tag || existing.tag,
+        ).bind(
+          nextTag,
           resolvedColor,
           priority !== undefined ? Number(priority) : existing.priority,
           is_active !== undefined ? Boolean(is_active) : existing.is_active,
           id,
-        )
-        .first<KeywordRow>();
+        ),
+        KeywordRow,
+      );
 
       return json({ keyword: updated });
     } catch (error) {
@@ -292,32 +356,33 @@ export function setupKeywordRoutes(router: Router): void {
     }
   });
 
-  // Delete keyword tag
-  router.delete('/api/keywords/:id', async (request, env, ctx) => {
-    const blocked = await gate(request, env, ctx, 'keywords.delete');
+  router.delete('/api/keywords/:id', async (request) => {
+    const blocked = await gate(request, 'keywords.delete');
     if (blocked) return blocked;
 
-    const id = request.params?.id;
+    const id = request.params?.['id'];
 
     try {
-      const existing = await env.DB.prepare('SELECT * FROM keyword_tags WHERE id = ?')
-        .bind(id)
-        .first<KeywordRow>();
+      const existing = await queryFirst(
+        request.env.DB.prepare('SELECT id FROM keyword_tags WHERE id = ?').bind(id),
+        IdRow,
+      );
 
       if (!existing) {
         return json({ error: 'Keyword not found' }, 404);
       }
 
-      const referenced = await env.DB.prepare(
-        'SELECT 1 FROM message_tags WHERE keyword_tag_id = ? LIMIT 1',
-      )
-        .bind(id)
-        .first();
+      const referenced = await queryFirst(
+        request.env.DB.prepare(
+          'SELECT 1 AS referenced FROM message_tags WHERE keyword_tag_id = ? LIMIT 1',
+        ).bind(id),
+        ReferencedRow,
+      );
       if (referenced) {
         return json({ error: 'Keyword has historical messages; deactivate it instead' }, 409);
       }
 
-      await env.DB.prepare('DELETE FROM keyword_tags WHERE id = ?').bind(id).run();
+      await request.env.DB.prepare('DELETE FROM keyword_tags WHERE id = ?').bind(id).run();
 
       return json({ success: true });
     } catch (error) {
@@ -326,25 +391,25 @@ export function setupKeywordRoutes(router: Router): void {
     }
   });
 
-  // NEW: Batch get tags for multiple messages - to reduce XHR requests
-  router.post('/api/messages/batch-tags', async (request, env, ctx) => {
-    const blocked = await gate(request, env, ctx, 'messages.read');
+  // Batch get tags for multiple messages - to reduce XHR requests
+  router.post('/api/messages/batch-tags', async (request) => {
+    const blocked = await gate(request, 'messages.read');
     if (blocked) return blocked;
 
-    const { messageIds } = (await request.json()) as { messageIds?: unknown };
+    const { messageIds } = await readBody(request, BatchBody);
 
-    if (!Array.isArray(messageIds) || messageIds.length === 0) {
+    if (messageIds.length === 0) {
       return json({ success: true, data: {} });
     }
 
     try {
-      // Limit to 100 messages to prevent abuse
-      const limitedIds = (messageIds as unknown[]).slice(0, 100);
+      const limitedIds = messageIds.slice(0, MAX_BATCH_MESSAGES);
       const placeholders = limitedIds.map(() => '?').join(',');
 
-      const result = await env.DB.prepare(
-        `
-                SELECT 
+      const rows = await queryAll(
+        request.env.DB.prepare(
+          `
+                SELECT
                     mt.message_id,
                     kt.id,
                     kt.keyword,
@@ -360,30 +425,33 @@ export function setupKeywordRoutes(router: Router): void {
                   AND kt.is_active = TRUE
                 ORDER BY mt.message_id, mt.position ASC
             `,
-      )
-        .bind(...limitedIds)
-        .all<MessageTagRow>();
+        ).bind(...limitedIds),
+        BatchTagRow,
+      );
 
-      // Group tags by message ID
-      const tagsByMessage: Record<string, unknown[]> = {};
-      const tags = result.results;
+      const tagsByMessage = new Map<
+        string,
+        Pick<
+          v.InferOutput<typeof BatchTagRow>,
+          'id' | 'keyword' | 'tag' | 'color' | 'priority' | 'position' | 'length'
+        >[]
+      >();
 
-      for (const tag of tags) {
-        if (!tagsByMessage[tag.message_id]) {
-          tagsByMessage[tag.message_id] = [];
-        }
-        tagsByMessage[tag.message_id].push({
-          id: tag.id,
-          keyword: tag.keyword,
-          tag: tag.tag,
-          color: tag.color,
-          priority: tag.priority,
-          position: tag.position,
-          length: tag.length,
+      for (const row of rows) {
+        const tags = tagsByMessage.get(row.message_id) ?? [];
+        tags.push({
+          id: row.id,
+          keyword: row.keyword,
+          tag: row.tag,
+          color: row.color,
+          priority: row.priority,
+          position: row.position,
+          length: row.length,
         });
+        tagsByMessage.set(row.message_id, tags);
       }
 
-      return json({ success: true, data: tagsByMessage });
+      return json({ success: true, data: Object.fromEntries(tagsByMessage) });
     } catch (error) {
       console.error('Error batch fetching message tags:', error);
       return json({ error: 'Failed to fetch message tags' }, 500);
@@ -391,16 +459,17 @@ export function setupKeywordRoutes(router: Router): void {
   });
 
   // Historical tagging is explicit, bounded, and one page per operator action.
-  router.post('/api/keywords/:id/history', async (request, env, ctx) => {
-    const blocked = await gate(request, env, ctx, 'keywords.write');
+  router.post('/api/keywords/:id/history', async (request) => {
+    const blocked = await gate(request, 'keywords.write');
     if (blocked) return blocked;
 
-    const id = request.params?.id;
+    const id = request.params?.['id'];
 
     try {
-      const keyword = await env.DB.prepare('SELECT * FROM keyword_tags WHERE id = ?')
-        .bind(id)
-        .first<KeywordRow>();
+      const keyword = await queryFirst(
+        request.env.DB.prepare(`SELECT ${KEYWORD_COLUMNS} FROM keyword_tags WHERE id = ?`).bind(id),
+        KeywordRow,
+      );
 
       if (!keyword) {
         return json({ error: 'Keyword not found' }, 404);
@@ -409,39 +478,35 @@ export function setupKeywordRoutes(router: Router): void {
         return json({ error: 'Activate the keyword before applying it to history' }, 409);
       }
 
-      const body = (await request.json()) as { since?: unknown; until?: unknown; cursor?: unknown };
-      const since = new Date(body.since as string);
-      const until = new Date(body.until as string);
+      const body = await readBody(request, HistoryBody);
+      const since = toDate(body.since);
+      const until = toDate(body.until);
       if (Number.isNaN(since.getTime()) || Number.isNaN(until.getTime()) || since > until) {
         return json({ error: 'A valid history time range is required' }, 400);
       }
-      const rawCursor: unknown = body.cursor ?? null;
-      let cursor: { created_at: string; id: string } | null = null;
+      const rawCursor = body.cursor ?? null;
+      let cursor: v.InferOutput<typeof HistoryCursorBody> | null = null;
       if (rawCursor !== null) {
-        const c = rawCursor as { created_at?: unknown; id?: unknown };
-        if (
-          typeof c.created_at !== 'string' ||
-          typeof c.id !== 'string' ||
-          Number.isNaN(new Date(`${c.created_at}Z`).getTime())
-        ) {
+        const parsed = v.safeParse(HistoryCursorBody, rawCursor);
+        if (!parsed.success || Number.isNaN(new Date(`${parsed.output.created_at}Z`).getTime())) {
           return json({ error: 'Invalid history cursor' }, 400);
         }
-        cursor = { created_at: c.created_at, id: c.id };
+        cursor = parsed.output;
       }
 
       const result = await processKeywordHistoryPage(
-        env.DB,
+        request.env.DB,
         {
           id: keyword.id,
           keyword: keyword.keyword,
-          case_sensitive: keyword.case_sensitive,
-          whole_word: keyword.whole_word,
+          case_sensitive: Boolean(keyword.case_sensitive),
+          whole_word: Boolean(keyword.whole_word),
         },
         {
           since: since.toISOString(),
           until: until.toISOString(),
           cursor,
-        } as unknown as Parameters<typeof processKeywordHistoryPage>[2],
+        },
       );
 
       return json(result);
@@ -451,18 +516,22 @@ export function setupKeywordRoutes(router: Router): void {
     }
   });
 
-  // Get message tags for a specific message
-  router.get('/api/messages/:id/tags', async (request, env, ctx) => {
-    const blocked = await gate(request, env, ctx, 'messages.read');
+  router.get('/api/messages/:id/tags', async (request) => {
+    const blocked = await gate(request, 'messages.read');
     if (blocked) return blocked;
 
-    const id = request.params?.id;
+    const id = request.params?.['id'];
 
     try {
-      const { results } = await env.DB.prepare(
-        `
-                SELECT 
-                    mt.*,
+      const tags = await queryAll(
+        request.env.DB.prepare(
+          `
+                SELECT
+                    mt.message_id,
+                    mt.keyword_tag_id,
+                    mt.matched_text,
+                    mt.position,
+                    mt.created_at,
                     kt.keyword,
                     kt.tag,
                     kt.color
@@ -471,11 +540,11 @@ export function setupKeywordRoutes(router: Router): void {
                 WHERE mt.message_id = ? AND kt.is_active = TRUE
                 ORDER BY mt.position ASC
             `,
-      )
-        .bind(id)
-        .all();
+        ).bind(id),
+        MessageTagRow,
+      );
 
-      return json({ tags: results });
+      return json({ tags });
     } catch (error) {
       console.error('Error fetching message tags:', error);
       return json({ error: 'Failed to fetch message tags' }, 500);

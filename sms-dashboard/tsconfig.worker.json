@@ -56,7 +56,8 @@
     "server/handlers/iccid-mappings.ts",
     "server/handlers/carrier-bills.ts",
     "server/handlers/carrier-billing-backfill.ts",
-    "server/api/filters.ts"
+    "server/api/filters.ts",
+    "server/api/keywords.ts"
   ],
   "exclude": ["**/*.test.ts"],
   "references": [{ "path": "./tsconfig.shared.json" }]
