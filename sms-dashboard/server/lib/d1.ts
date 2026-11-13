@@ -1,10 +1,14 @@
 import * as v from 'valibot';
 import type { Schema } from '../../shared/parse-json.js';
 
+export interface D1RunResult {
+  meta: { changes: number; last_row_id: number };
+}
+
 interface StatementOperations {
   all(): Promise<{ results: unknown[] }>;
   first(): Promise<unknown>;
-  run(): Promise<{ meta: { changes: number; last_row_id: number } }>;
+  run(): Promise<D1RunResult>;
 }
 
 export type D1Operation = keyof StatementOperations;
@@ -20,6 +24,11 @@ export type D1Statement<Op extends D1Operation = D1Operation> = Pick<StatementOp
 
 export interface D1<Op extends D1Operation = D1Operation> {
   prepare(query: string): D1Statement<Op>;
+}
+
+/** Runs statements from the same database as one transaction; only their write metadata is read. */
+export interface D1Batch<Op extends D1Operation = D1Operation> {
+  batch(statements: D1Statement<Op>[]): Promise<D1RunResult[]>;
 }
 
 /** D1 returns untyped rows; every read goes through a row schema so a schema drift throws instead of leaking. */

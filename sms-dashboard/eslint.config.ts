@@ -56,7 +56,7 @@ export default defineConfig([
     ...joinedServerFiles().map((file) => `!${file}`),
     '!server/**/*.test.ts',
     'client/',
-    'test/',
+    'test/*.js',
     'scripts/',
     'runner-core/',
     'balance-agent/',
