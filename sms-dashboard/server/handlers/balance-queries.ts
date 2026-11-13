@@ -618,10 +618,7 @@ export async function linkBalanceReply(
   db: D1Database,
   check: BalanceCheckRow | null | undefined,
   message: BalanceMessage,
-  {
-    allowFollowUp = true,
-    mergedContent = null,
-  }: { allowFollowUp?: boolean; mergedContent?: string | null } = {},
+  { mergedContent = null }: { mergedContent?: string | null } = {},
 ) {
   if (!check) return;
 
@@ -629,7 +626,7 @@ export async function linkBalanceReply(
   const content = mergedContent ?? message.content;
   const nextStep = matchingNextStep(check, content);
   const responseWindowOpen = Number(check.response_window_open ?? 1) === 1;
-  if (nextStep && allowFollowUp && responseWindowOpen) {
+  if (nextStep && responseWindowOpen) {
     return queueBalanceFollowUp(db, check, message, nextStep, check.status || 'awaiting_response');
   }
 
@@ -690,7 +687,6 @@ export async function linkBalanceReply(
   if (
     !metrics.length &&
     skill &&
-    allowFollowUp &&
     responseWindowOpen &&
     Number(check.step_index || 0) < skill.max_turns
   ) {
