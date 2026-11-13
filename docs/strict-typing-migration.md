@@ -98,12 +98,23 @@ it: request bodies, query/params, D1 rows, KV values, `fetch` responses
 
 ## Dependencies and tests
 
-- A handler or utility declares only what it uses, structurally:
-  `env: { DB: D1<'all' | 'first'> }` (`D1<Op>` from `server/lib/d1.ts`), not
-  `AppRequest` / `Env`. The router's call site then checks that the real
-  request provides it.
+- A handler or utility declares only what it uses, structurally, through the
+  ports in `server/lib/`: `D1<'all' | 'first' | 'run'>`, `D1Batch<Op>` (d1.ts),
+  `KV<'get' | 'put' | 'delete'>` + `readKvJson` (kv.ts). Not `AppRequest` / `Env`.
+  The router's call site then checks that the real request provides it.
 - Tests pass plain objects that implement exactly those members. No `as`, no
   `eslint-disable`, no "test double" helper that casts.
+- Code whose behaviour is SQL is tested against real SQLite through
+  `test/sqlite-d1.ts`, not against canned rows. Pin the old behaviour first:
+  the test passes before the refactor and after it.
+- A value read from settings or config with a closed set of values (e.g. the AI
+  protocol) is a valibot `picklist`; code takes the union and switches over it
+  exhaustively. Never widen a union to `string` to keep a branch testable.
+- Lint is `strictTypeChecked` + `stylisticTypeChecked` +
+  `switch-exhaustiveness-check`. `||` → `??` only where the left side cannot be
+  `''`/`0`/`false` by meaning; otherwise make the intent explicit and test it.
+- Controls (break code to prove a check fails) are made with the Edit tool and
+  reverted with it, like any other edit.
 - Every re-typed file gets a TypeScript test (`*.test.ts`) covering its
   behaviour, including the schema-mismatch path. A file with no tests gets them
   in the same commit.
