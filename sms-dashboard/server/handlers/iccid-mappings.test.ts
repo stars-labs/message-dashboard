@@ -2,52 +2,13 @@ import { describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import * as v from 'valibot';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
+import { createSimsSchema } from '../../test/sims-schema.js';
 import type { D1, D1Statement } from '../lib/d1.js';
 import { iccidMappingsHandler, resolveServiceType, resolveSimRole } from './iccid-mappings.js';
 
-const MIGRATIONS = [
-  '058_add_sim_service_type',
-  '059_add_sim_primary_secondary',
-  '060_add_na_service_type',
-  '061_recreate_device_view',
-  '062_add_balance_threshold',
-  '063_replace_na_service_type',
-  '064_recreate_device_view',
-];
-
 async function createMigratedDatabase() {
   const database = new Database(':memory:');
-  database.run(`
-    PRAGMA foreign_keys = ON;
-    CREATE TABLE sims (
-      iccid TEXT PRIMARY KEY,
-      sim_index INTEGER NOT NULL,
-      phone_number TEXT NOT NULL,
-      country_code TEXT,
-      carrier TEXT,
-      imei TEXT,
-      notes TEXT,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_by TEXT
-    );
-    CREATE TABLE modems (
-      equipment_id TEXT PRIMARY KEY,
-      manufacturer TEXT,
-      model TEXT,
-      usb_port TEXT,
-      usb_path TEXT,
-      last_usb_path TEXT,
-      status TEXT,
-      detected_operator TEXT,
-      signal_percent INTEGER,
-      detected_iccid TEXT,
-      detected_phone_number TEXT
-    );
-  `);
-  for (const name of MIGRATIONS) {
-    database.run(await Bun.file(new URL(`../../migrations/${name}.sql`, import.meta.url)).text());
-  }
+  await createSimsSchema(database);
   return database;
 }
 
