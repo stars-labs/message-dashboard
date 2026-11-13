@@ -9,6 +9,7 @@ import {
   updateBalanceCheckForSmsResult,
 } from './balance-queries.js';
 import { processCarrierBillMessages } from '../utils/carrier-billing.js';
+import { secretMatches } from '../lib/secret.js';
 import type { BalanceCheckRow } from './balance-queries.js';
 
 import type { AppRequest, Env } from '../worker-context.js';
@@ -84,9 +85,8 @@ function json(body: unknown, status = 200): Response {
  * Every control route authenticates with the daemon's shared API key, never
  * Auth0. Returns a Response when the key is wrong.
  */
-function requireApiKey(request: AppRequest, env: Env): Response | null {
-  const apiKey = request.headers.get('X-API-Key');
-  if (!apiKey || apiKey !== env.API_KEY) {
+async function requireApiKey(request: AppRequest, env: Env): Promise<Response | null> {
+  if (!(await secretMatches(request.headers.get('X-API-Key'), env.API_KEY))) {
     return json({ error: 'Unauthorized' }, 401);
   }
   return null;
@@ -103,7 +103,7 @@ export const controlHandler = {
   async updateDevices(request: AppRequest): Promise<Response> {
     const { env } = request;
 
-    const unauthorized = requireApiKey(request, env);
+    const unauthorized = await requireApiKey(request, env);
     if (unauthorized) return unauthorized;
 
     // Parse request body
@@ -336,7 +336,7 @@ export const controlHandler = {
   async uploadMessages(request: AppRequest): Promise<Response> {
     const { env } = request;
 
-    const unauthorized = requireApiKey(request, env);
+    const unauthorized = await requireApiKey(request, env);
     if (unauthorized) return unauthorized;
 
     try {
@@ -577,7 +577,7 @@ export const controlHandler = {
   async cleanupTestData(request: AppRequest): Promise<Response> {
     const { env } = request;
 
-    const unauthorized = requireApiKey(request, env);
+    const unauthorized = await requireApiKey(request, env);
     if (unauthorized) return unauthorized;
 
     try {
@@ -645,7 +645,7 @@ export const controlHandler = {
   async getPendingSMS(request: AppRequest): Promise<Response> {
     const { env } = request;
 
-    const unauthorized = requireApiKey(request, env);
+    const unauthorized = await requireApiKey(request, env);
     if (unauthorized) return unauthorized;
 
     try {
@@ -779,7 +779,7 @@ export const controlHandler = {
   async updateSMSResult(request: AppRequest): Promise<Response> {
     const { env } = request;
 
-    const unauthorized = requireApiKey(request, env);
+    const unauthorized = await requireApiKey(request, env);
     if (unauthorized) return unauthorized;
 
     try {
@@ -881,7 +881,7 @@ export const controlHandler = {
   async clearMessages(request: AppRequest): Promise<Response> {
     const { env } = request;
 
-    const unauthorized = requireApiKey(request, env);
+    const unauthorized = await requireApiKey(request, env);
     if (unauthorized) return unauthorized;
 
     try {
@@ -915,7 +915,7 @@ export const controlHandler = {
   async heartbeat(request: AppRequest): Promise<Response> {
     const { env } = request;
 
-    const unauthorized = requireApiKey(request, env);
+    const unauthorized = await requireApiKey(request, env);
     if (unauthorized) return unauthorized;
 
     try {

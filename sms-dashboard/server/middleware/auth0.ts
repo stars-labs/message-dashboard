@@ -1,6 +1,7 @@
 import * as v from 'valibot';
 import { auth0Handler, StoredSession, type SessionUser } from '../handlers/auth0.js';
 import { readKvJson, type KV } from '../lib/kv.js';
+import { secretMatches } from '../lib/secret.js';
 import { createRoleConfig, rolesFromToken, type RoleEnv } from '../../config/auth0-roles.js';
 import { extractSessionToken } from '../utils/session-token.js';
 
@@ -33,8 +34,7 @@ export async function handleAuth0(request: AuthRequest): Promise<Response | unde
 
   // Check for API key for control endpoints
   if (request.url.includes('/api/control/')) {
-    const apiKey = request.headers.get('X-API-Key');
-    if (!apiKey || apiKey !== env.API_KEY) {
+    if (!(await secretMatches(request.headers.get('X-API-Key'), env.API_KEY))) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
         status: 401,
         headers: { 'Content-Type': 'application/json' },

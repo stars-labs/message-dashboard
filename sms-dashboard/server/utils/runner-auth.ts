@@ -1,5 +1,6 @@
 import * as v from 'valibot';
 import { auth0Handler } from '../handlers/auth0.js';
+import { secretMatches } from '../lib/secret.js';
 
 interface RunnerRequest {
   headers: { get(name: string): string | null };
@@ -73,8 +74,7 @@ export async function authorizeRunnerControl(
   request: RunnerRequest,
   requiredScope: RunnerScope,
 ): Promise<RunnerAuth> {
-  const apiKey = request.headers.get('X-API-Key');
-  if (apiKey && apiKey === request.env.API_KEY) {
+  if (await secretMatches(request.headers.get('X-API-Key'), request.env.API_KEY)) {
     return { authorized: true, authMode: 'legacy_api_key', subject: null };
   }
 
