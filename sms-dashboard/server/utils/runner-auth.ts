@@ -1,6 +1,15 @@
 import * as v from 'valibot';
 import { auth0Handler } from '../handlers/auth0.js';
-import type { AppRequest } from '../worker-context.js';
+
+interface RunnerRequest {
+  headers: { get(name: string): string | null };
+  env: {
+    API_KEY?: string;
+    AUTH0_DOMAIN?: string;
+    AUTH0_AUDIENCE?: string;
+    AUTH0_CLIENT_ID?: string;
+  };
+}
 
 export const RUNNER_SCOPES = Object.freeze({
   heartbeat: 'balance:runners:heartbeat',
@@ -27,10 +36,10 @@ const RunnerClaims = v.object({
   permissions: v.optional(v.array(v.string())),
 });
 
-function bearerToken(request: AppRequest): string | null {
-  const authorization = request.headers.get('Authorization') || '';
-  const match = authorization.match(/^Bearer\s+(.+)$/i);
-  return match?.[1]?.trim() || null;
+function bearerToken(request: RunnerRequest): string | null {
+  const authorization = request.headers.get('Authorization') ?? '';
+  const token = /^Bearer\s+(.+)$/i.exec(authorization)?.[1]?.trim();
+  return token === undefined || token === '' ? null : token;
 }
 
 /** The token's subject when it has one and carries the scope; claims of the wrong type grant nothing. */
@@ -55,17 +64,13 @@ export function runnerCanAccessOwner(
 ): boolean {
   if (!auth.authorized) return false;
   if (auth.authMode === 'auth0_device') {
-    return (
-      typeof auth.subject === 'string' &&
-      auth.subject.length > 0 &&
-      requestedBySubject === auth.subject
-    );
+    return auth.subject.length > 0 && requestedBySubject === auth.subject;
   }
-  return auth.authMode === 'legacy_api_key' && requestedBySubject == null;
+  return requestedBySubject === null || requestedBySubject === undefined;
 }
 
 export async function authorizeRunnerControl(
-  request: AppRequest,
+  request: RunnerRequest,
   requiredScope: RunnerScope,
 ): Promise<RunnerAuth> {
   const apiKey = request.headers.get('X-API-Key');
@@ -74,7 +79,7 @@ export async function authorizeRunnerControl(
   }
 
   const token = bearerToken(request);
-  if (!token) return { authorized: false };
+  if (token === null) return { authorized: false };
 
   try {
     const subject = scopedSubject(
