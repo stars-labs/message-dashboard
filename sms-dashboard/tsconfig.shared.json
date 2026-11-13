@@ -12,5 +12,6 @@
     "declaration": true,
     "outDir": "./node_modules/.tmp/shared-declarations"
   },
-  "include": ["shared/**/*.ts", "config/**/*.ts"]
+  "include": ["shared/**/*.ts", "config/**/*.ts"],
+  "exclude": ["**/*.test.ts"]
 }

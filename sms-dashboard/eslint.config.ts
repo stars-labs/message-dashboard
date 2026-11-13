@@ -29,7 +29,8 @@ export default defineConfig([
     'balance-agent/release/',
     // Areas that have not joined the strict gate. oxlint covers them instead;
     // each Phase 1 series removes its own line here as that area joins.
-    'server/',
+    'server/*',
+    '!server/lib/',
     'client/',
     'test/',
     'scripts/',
@@ -71,6 +72,36 @@ export default defineConfig([
       '@typescript-eslint/no-unused-vars': unusedVars,
       // `as const` stays legal; no `as`, no `<T>x`, no `!` non-null assertion.
       '@typescript-eslint/consistent-type-assertions': ['error', { assertionStyle: 'never' }],
+    },
+  },
+  {
+    name: 'Untyped data enters through a schema',
+    files: ['**/*.ts'],
+    ignores: ['shared/parse-json.ts', 'server/lib/d1.ts', '**/*.test.ts'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            "CallExpression[callee.type='MemberExpression'][callee.property.name=/^(first|all|raw|get|json)$/][typeArguments]",
+          message:
+            'A type argument here is an unchecked cast. Parse the value with a schema: readJson / parseJson (shared/parse-json.ts) or queryAll / queryFirst (server/lib/d1.ts).',
+        },
+        {
+          selector:
+            "CallExpression[callee.type='MemberExpression'][callee.property.name='json'][arguments.length=0]",
+          message: 'Read JSON bodies with readJson(body, schema) from shared/parse-json.ts.',
+        },
+        {
+          selector: "CallExpression[callee.object.name='JSON'][callee.property.name='parse']",
+          message: 'Parse JSON text with parseJson(text, schema) from shared/parse-json.ts.',
+        },
+        {
+          selector:
+            "CallExpression[callee.type='MemberExpression'][callee.property.name=/^(all|first|raw)$/][arguments.length=0]",
+          message: 'Read D1 rows with queryAll / queryFirst from server/lib/d1.ts.',
+        },
+      ],
     },
   },
   {

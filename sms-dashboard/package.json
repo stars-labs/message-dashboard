@@ -25,7 +25,8 @@
   },
   "dependencies": {
     "jose": "^6.0.11",
-    "nanoid": "^5.1.5"
+    "nanoid": "^5.1.5",
+    "valibot": "^1.5.0"
   },
   "devDependencies": {
     "@eslint-community/eslint-plugin-eslint-comments": "^4.8.1",

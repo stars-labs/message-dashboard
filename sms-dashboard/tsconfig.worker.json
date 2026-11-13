@@ -1,0 +1,17 @@
+// The Cloudflare Worker. Until the whole server joins the strict gate this
+// project holds server/lib only: worker-configuration.d.ts types the Durable
+// Object binding through server/index.ts, which would pull every file in.
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "tsBuildInfoFile": "./node_modules/.tmp/worker.tsbuildinfo",
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "declaration": true,
+    "outDir": "./node_modules/.tmp/worker-declarations"
+  },
+  "include": ["server/lib/**/*.ts"],
+  "exclude": ["**/*.test.ts"],
+  "references": [{ "path": "./tsconfig.shared.json" }]
+}

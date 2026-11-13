@@ -1,0 +1,15 @@
+// Tests of the areas that have joined the strict gate. They run under Bun.
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "tsBuildInfoFile": "./node_modules/.tmp/test.tsbuildinfo",
+    "types": ["bun"],
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "declaration": true,
+    "outDir": "./node_modules/.tmp/test-declarations"
+  },
+  "include": ["shared/**/*.test.ts", "config/**/*.test.ts", "server/lib/**/*.test.ts"],
+  "references": [{ "path": "./tsconfig.shared.json" }, { "path": "./tsconfig.worker.json" }]
+}

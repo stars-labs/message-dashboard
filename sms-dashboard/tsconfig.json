@@ -3,5 +3,10 @@
 // the server and client projects here as each is made clean.
 {
   "files": [],
-  "references": [{ "path": "./tsconfig.shared.json" }, { "path": "./tsconfig.tooling.json" }]
+  "references": [
+    { "path": "./tsconfig.shared.json" },
+    { "path": "./tsconfig.worker.json" },
+    { "path": "./tsconfig.test.json" },
+    { "path": "./tsconfig.tooling.json" }
+  ]
 }
