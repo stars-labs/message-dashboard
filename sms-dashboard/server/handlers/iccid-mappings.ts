@@ -3,22 +3,22 @@ import { readJson } from '../../shared/parse-json.js';
 import { queryAll, queryFirst, type D1 } from '../lib/d1.js';
 import { errorText } from '../utils/d1-error.js';
 
-export const SIM_SERVICE_TYPES = ['unknown', 'prepaid', 'postpaid', 'balance_managed'] as const;
-export const SIM_SERVICE_TYPE_SOURCES = [
+const SIM_SERVICE_TYPES = ['unknown', 'prepaid', 'postpaid', 'balance_managed'] as const;
+const SIM_SERVICE_TYPE_SOURCES = [
   'carrier_account',
   'carrier_support',
   'contract_or_bill',
   'carrier_message',
 ] as const;
-export const SIM_ROLES = ['standalone', 'primary', 'secondary'] as const;
+const SIM_ROLES = ['standalone', 'primary', 'secondary'] as const;
 
 const ServiceType = v.picklist(SIM_SERVICE_TYPES);
 const ServiceTypeSource = v.picklist(SIM_SERVICE_TYPE_SOURCES);
 const SimRole = v.picklist(SIM_ROLES);
 
-export type SimServiceType = v.InferOutput<typeof ServiceType>;
-export type SimServiceTypeSource = v.InferOutput<typeof ServiceTypeSource>;
-export type SimRole = v.InferOutput<typeof SimRole>;
+type SimServiceType = v.InferOutput<typeof ServiceType>;
+type SimServiceTypeSource = v.InferOutput<typeof ServiceTypeSource>;
+type SimRole = v.InferOutput<typeof SimRole>;
 
 const ExistingSimRow = v.object({
   iccid: v.string(),
@@ -28,7 +28,7 @@ const ExistingSimRow = v.object({
   primary_iccid: v.nullable(v.string()),
 });
 
-export type ExistingSim = v.InferOutput<typeof ExistingSimRow>;
+type ExistingSim = v.InferOutput<typeof ExistingSimRow>;
 
 const PrimaryTargetRow = v.object({ sim_role: v.string() });
 
