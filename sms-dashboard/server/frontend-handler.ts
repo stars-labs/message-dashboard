@@ -2,16 +2,6 @@ import { FRONTEND_ASSETS } from './frontend-assets.js';
 import { cacheControlFor } from './asset-cache-control.js';
 import type { AppRequest } from '../shared/worker-context.js';
 
-/** One inlined asset, as scripts/build-unified.js emits it. */
-interface FrontendAsset {
-  content: string;
-  type: string;
-  encoding?: 'base64';
-}
-
-/** The generated map. Declared here so this module does not need the generated file typed. */
-type FrontendAssetMap = Record<string, FrontendAsset>;
-
 export function serveFrontend(request: AppRequest): Response {
   const url = new URL(request.url);
   let pathname = url.pathname;
@@ -33,13 +23,13 @@ export function serveFrontend(request: AppRequest): Response {
   
   
   // Try to find the exact file
-  let asset = (FRONTEND_ASSETS as FrontendAssetMap)[assetKey];
+  let asset = FRONTEND_ASSETS[assetKey];
   
   console.log(`[Frontend Handler] Asset found: ${asset ? 'YES' : 'NO'}`);
   
   // If not found and no extension, try index.html (for SPA routing)
   if (!asset && !pathname.includes('.')) {
-    asset = (FRONTEND_ASSETS as FrontendAssetMap)['index.html'];
+    asset = FRONTEND_ASSETS['index.html'];
   }
   
   // If still not found, return 404
