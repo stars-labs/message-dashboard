@@ -28,7 +28,8 @@
     "server/utils/user-sessions.ts",
     "server/utils/singtel-postpaid-bill.ts",
     "server/utils/m1-web-balance.ts",
-    "server/utils/unicom-web-balance.ts"
+    "server/utils/unicom-web-balance.ts",
+    "server/utils/daemon-health.ts"
   ],
   "exclude": ["**/*.test.ts"],
   "references": [{ "path": "./tsconfig.shared.json" }]

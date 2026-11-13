@@ -51,32 +51,45 @@ function text(value: unknown, maxLength: number): string | null {
   return typeof value === 'string' && value.trim() ? value.trim().slice(0, maxLength) : null;
 }
 
-/** Raw upload shape. Everything is unknown because it crosses the daemon boundary. */
-type RawSnapshot = Record<string, unknown> & {
-  schema_version?: unknown;
-  queue?: Record<string, unknown>;
-};
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
 
-export function normalizeHealthSnapshot(raw: RawSnapshot | null | undefined): HealthSnapshot {
-  if (!raw || raw.schema_version !== HEALTH_SCHEMA_VERSION) {
-    throw new Error(`Unsupported health schema version: ${raw?.schema_version ?? 'missing'}`);
+function field(value: unknown, key: string): unknown {
+  return isRecord(value) ? value[key] : undefined;
+}
+
+function describeVersion(value: unknown): string {
+  return typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean' ||
+    typeof value === 'bigint'
+    ? String(value)
+    : 'missing';
+}
+
+/** The daemon upload is unknown: it crosses the daemon boundary and is read field by field. */
+export function normalizeHealthSnapshot(raw: unknown): HealthSnapshot {
+  const schemaVersion = field(raw, 'schema_version');
+  if (schemaVersion !== HEALTH_SCHEMA_VERSION) {
+    throw new Error(`Unsupported health schema version: ${describeVersion(schemaVersion)}`);
   }
-  const session_id = text(raw.session_id, 120);
-  const version = text(raw.version, 80);
+  const session_id = text(field(raw, 'session_id'), 120);
+  const version = text(field(raw, 'version'), 80);
   if (!session_id || !version) throw new Error('session_id and version are required');
-  const queue = raw.queue ?? {};
+  const queue = field(raw, 'queue');
   return {
     schema_version: HEALTH_SCHEMA_VERSION,
     session_id,
     version,
-    uptime_seconds: age(raw.uptime_seconds) ?? 0,
-    last_message_read_success_age_seconds: age(raw.last_message_read_success_age_seconds),
-    last_upload_success_age_seconds: age(raw.last_upload_success_age_seconds),
+    uptime_seconds: age(field(raw, 'uptime_seconds')) ?? 0,
+    last_message_read_success_age_seconds: age(field(raw, 'last_message_read_success_age_seconds')),
+    last_upload_success_age_seconds: age(field(raw, 'last_upload_success_age_seconds')),
     queue: {
-      pending: age(queue.pending) ?? 0,
-      in_flight: age(queue.in_flight) ?? 0,
-      dead_letter: age(queue.dead_letter) ?? 0,
-      oldest_unacknowledged_age_seconds: age(queue.oldest_unacknowledged_age_seconds),
+      pending: age(field(queue, 'pending')) ?? 0,
+      in_flight: age(field(queue, 'in_flight')) ?? 0,
+      dead_letter: age(field(queue, 'dead_letter')) ?? 0,
+      oldest_unacknowledged_age_seconds: age(field(queue, 'oldest_unacknowledged_age_seconds')),
     },
   };
 }
