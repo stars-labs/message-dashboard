@@ -5,6 +5,8 @@ import {
 import type { BackfillPreview } from '../utils/carrier-billing-backfill.js';
 import { processCarrierBillMessage } from '../utils/carrier-billing.js';
 import type { BillOutcome } from '../utils/carrier-billing.js';
+import * as v from 'valibot';
+import { readJson, type Schema } from '../../shared/parse-json.js';
 import type { AppRequest } from '../worker-context.js';
 import type { D1Database } from '../cf-bindings.js';
 
@@ -14,14 +16,19 @@ type CountedOutcome = Extract<
   'detected' | 'duplicate_detected' | 'parse_conflict' | 'already_processed'
 >;
 
-/** The request body fields this handler reads. */
-interface BackfillBody {
-  account_id?: unknown;
-  expected_version?: unknown;
-  preview_digest?: unknown;
-}
+const AccountId = v.pipe(v.string(), v.nonEmpty());
 
-type ReadJsonResult = { body: BackfillBody } | { response: Response } | { error: Response };
+/** Request body of POST /api/carrier-billing/backfill/preview. */
+const PreviewBody = v.object({ account_id: AccountId });
+
+/** Request body of POST /api/carrier-billing/backfill/execute: the preview the operator saw. */
+const ExecuteBody = v.object({
+  account_id: AccountId,
+  expected_version: v.pipe(v.number(), v.integer()),
+  preview_digest: v.string(),
+});
+
+type BodyResult<T> = { body: T } | { response: Response };
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -30,12 +37,23 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-async function readJson(request: AppRequest): Promise<ReadJsonResult> {
-  try {
-    return { body: (await request.json()) as BackfillBody };
-  } catch {
-    return { error: json({ error: 'Body must be JSON' }, 400) };
-  }
+async function readBody<T>(request: AppRequest, schema: Schema<T>): Promise<BodyResult<T>> {
+  const raw = await readJson(request, v.unknown());
+  if (!raw.ok) return { response: json({ error: 'Body must be JSON' }, 400) };
+  const parsed = v.safeParse(schema, raw.value);
+  if (parsed.success) return { body: parsed.output };
+  const field = parsed.issues[0].path?.[0]?.key;
+  return {
+    response: json(
+      {
+        error:
+          field === 'expected_version' || field === 'preview_digest'
+            ? 'expected_version must be an integer and preview_digest a string'
+            : 'account_id is required',
+      },
+      400,
+    ),
+  };
 }
 
 function publicPreview(preview: BackfillPreview) {
@@ -50,10 +68,7 @@ function publicPreview(preview: BackfillPreview) {
 
 type BuildPreviewResult = { preview: BackfillPreview } | { response: Response };
 
-async function buildPreview(db: D1Database, accountId: unknown): Promise<BuildPreviewResult> {
-  if (typeof accountId !== 'string' || !accountId) {
-    return { response: json({ error: 'account_id is required' }, 400) };
-  }
+async function buildPreview(db: D1Database, accountId: string): Promise<BuildPreviewResult> {
   try {
     return { preview: await previewCarrierBillBackfill(db, accountId) };
   } catch (error) {
@@ -66,8 +81,7 @@ async function buildPreview(db: D1Database, accountId: unknown): Promise<BuildPr
 
 export const carrierBillingBackfillHandler = {
   async preview(request: AppRequest): Promise<Response> {
-    const parsed = await readJson(request);
-    if ('error' in parsed) return parsed.error;
+    const parsed = await readBody(request, PreviewBody);
     if ('response' in parsed) return parsed.response;
     const result = await buildPreview(request.env.DB, parsed.body.account_id);
     if ('response' in result) return result.response;
@@ -81,8 +95,7 @@ export const carrierBillingBackfillHandler = {
     if (!key || key.length > 200) {
       return json({ error: 'A bounded Idempotency-Key header is required' }, 400);
     }
-    const parsed = await readJson(request);
-    if ('error' in parsed) return parsed.error;
+    const parsed = await readBody(request, ExecuteBody);
     if ('response' in parsed) return parsed.response;
     const body = parsed.body;
     const accountId = body.account_id;
@@ -111,10 +124,7 @@ export const carrierBillingBackfillHandler = {
     const result = await buildPreview(request.env.DB, accountId);
     if ('response' in result) return result.response;
     const preview = result.preview;
-    if (
-      !Number.isInteger(body.expected_version) ||
-      body.expected_version !== preview.account.version
-    ) {
+    if (body.expected_version !== preview.account.version) {
       return json(
         {
           error: 'Billing account version conflict',
