@@ -195,8 +195,3 @@ export function extractVerificationCode(content: unknown): string | null {
 export function hasVerificationCode(content: unknown): boolean {
   return detectVerificationCode(content) !== null;
 }
-
-// Kept for callers outside this repository; internally use hasVerificationCode().
-export function hasLabelledCode(content: unknown): boolean {
-  return hasVerificationCode(content);
-}

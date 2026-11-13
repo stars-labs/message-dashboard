@@ -3,15 +3,14 @@ import { describe, expect, test } from 'bun:test';
 import {
   detectVerificationCode,
   extractVerificationCode,
-  hasLabelledCode,
   hasVerificationCode,
 } from './verification.js';
 
-// hasLabelledCode() is the OTP safety guard used by the spam filter: a message
+// hasVerificationCode() is the OTP safety guard used by the spam filter: a message
 // that carries an explicitly LABELLED code is never filtered, whatever rule it
 // matched. It must be high precision in the "is a code" direction — a false
 // negative here means a real verification code gets hidden.
-describe('hasLabelledCode — Chinese labels', () => {
+describe('hasVerificationCode — Chinese labels', () => {
   test.each([
     ['验证码：754852，感谢您使用网上营业厅【中国联通】'],
     ['验证码:123456'],
@@ -24,11 +23,11 @@ describe('hasLabelledCode — Chinese labels', () => {
     ['您的驗證碼是 445566'], // traditional — Singapore SIMs see this
     ['123456 是您的验证码'], // reversed order
   ])('detects %j', (content) => {
-    expect(hasLabelledCode(content)).toBe(true);
+    expect(hasVerificationCode(content)).toBe(true);
   });
 });
 
-describe('hasLabelledCode — English labels', () => {
+describe('hasVerificationCode — English labels', () => {
   test.each([
     ['Your Google verification code is 123456'],
     ['Your verification code is: 998877'],
@@ -48,11 +47,11 @@ describe('hasLabelledCode — English labels', () => {
     ["<#> Your WhatsApp code: 367-140 Don't share this code with others 4sgLq1p5sV6"],
     ["<#> Your WhatsApp code: 168-396 Don't share this code with others 4sgLq1p5sV6"],
   ])('detects %j', (content) => {
-    expect(hasLabelledCode(content)).toBe(true);
+    expect(hasVerificationCode(content)).toBe(true);
   });
 });
 
-describe('hasLabelledCode — Japanese labels', () => {
+describe('hasVerificationCode — Japanese labels', () => {
   test.each([
     ['認証コードは 123456 です'],
     ['確認コード：123456'],
@@ -63,7 +62,7 @@ describe('hasLabelledCode — Japanese labels', () => {
     ['123456 が認証コードです'],
     ['123456 がお客様の認証コードです'],
   ])('detects %j', (content) => {
-    expect(hasLabelledCode(content)).toBe(true);
+    expect(hasVerificationCode(content)).toBe(true);
   });
 });
 
@@ -92,7 +91,7 @@ describe('hasVerificationCode — contextual OTPs without an explicit label', ()
   });
 });
 
-describe('hasLabelledCode — must NOT fire on marketing text', () => {
+describe('hasVerificationCode — must NOT fire on marketing text', () => {
   test.each([
     // Mentions the word but carries no code. These are the 4 anti-fraud
     // broadcasts found in the real message table.
@@ -121,14 +120,14 @@ describe('hasLabelledCode — must NOT fire on marketing text', () => {
     ['クーポンコード: 789012 をレジでご提示ください'],
     ['予約コード: 654321 をお持ちください'],
   ])('ignores %j', (content) => {
-    expect(hasLabelledCode(content)).toBe(false);
+    expect(hasVerificationCode(content)).toBe(false);
   });
 
   test('ignores non-string input', () => {
-    expect(hasLabelledCode(null)).toBe(false);
-    expect(hasLabelledCode(undefined)).toBe(false);
-    expect(hasLabelledCode(12345)).toBe(false);
-    expect(hasLabelledCode('')).toBe(false);
+    expect(hasVerificationCode(null)).toBe(false);
+    expect(hasVerificationCode(undefined)).toBe(false);
+    expect(hasVerificationCode(12345)).toBe(false);
+    expect(hasVerificationCode('')).toBe(false);
   });
 });
 
