@@ -36,7 +36,14 @@ from the reviewing session first — ask, don't improvise.
 - **oxlint is removed**: package, `.oxlintrc.json`, `lint` script, `flake.nix`
   devshell entry, CI step. Delete `docs/web-lint-audit.md` (superseded by this file).
   Timing: see "Gate migration" below.
-- `bun run check` runs typecheck → lint → test → build; CI runs `bun run check`.
+- Formatting is Prettier's, with `prettier-plugin-svelte`. `eslint-config-prettier`
+  is the last entry in the ESLint config so no lint rule fights the formatter.
+  `.prettierrc` keeps this repo's existing style (semicolons, single quotes,
+  `trailingComma: "all"`, `printWidth: 100`) to keep the format commit's churn
+  down. The format commit touches formatting only, the whole dashboard at once
+  (all areas, joined or not), and its hash goes into `.git-blame-ignore-revs`.
+- `bun run check` runs format check → typecheck → lint → test → build; CI runs
+  `bun run check`.
 
 **Daemon (`orange-pi-daemon/`)**
 
@@ -118,6 +125,10 @@ types import `server/`).
 0. **Foundation.** base tsconfig + references, `wrangler types` with drift gate
    (`wrangler types --check`), ESLint config, `check` script, CI, legacy gate.
    Joins: shared + config, made clean.
+0a. **Close the legacy gap**: legacy includes become globs (`server/**/*.ts`,
+   `client/**/*.ts`) so no TS file is orphaned; fix what that exposes.
+0b. **Prettier**: config + `eslint-config-prettier` commit, then the format-only
+   commit, then `.git-blame-ignore-revs`.
 1. **Re-type existing TS under the strict config**, one area per commit series:
    server → client/lib. Each series ends with that area joining. Valibot
    boundaries land here.
