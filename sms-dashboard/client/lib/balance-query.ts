@@ -1,4 +1,55 @@
-const STATUS_META = {
+/** The display metadata for one balance-check status (server or derived). */
+export interface BalanceStatusMeta {
+  label: string;
+  className: string;
+}
+
+/** A conversation message, built from a check or read from its detail payload. */
+export interface BalanceConversationMessage {
+  id: string;
+  type: 'sent' | 'received';
+  content?: string | null;
+  recipient?: string | null;
+  phone_number?: string | null;
+  timestamp?: string | null;
+  status?: string | null;
+}
+
+/** A balance metric row as the API returns it. */
+export interface BalanceMetricRow {
+  metric_type: string;
+  value: number | string | null;
+  unit?: string | null;
+  currency?: string | null;
+  expires_at?: string | null;
+}
+
+/** The balance check fields these helpers read. */
+export interface BalanceCheckLike {
+  id: string;
+  status?: string | null;
+  conversation?: BalanceConversationMessage[];
+  outbound_message_id?: string | null;
+  outbound_content?: string | null;
+  command?: string | null;
+  outbound_recipient?: string | null;
+  destination?: string | null;
+  outbound_timestamp?: string | null;
+  sent_at?: string | null;
+  outbound_status?: string | null;
+  response_content?: string | null;
+  raw_response?: string | null;
+  response_message_id?: string | null;
+  response_phone_number?: string | null;
+  response_sender?: string | null;
+  response_timestamp?: string | null;
+  completed_at?: string | null;
+  requested_at?: string | null;
+  metrics?: BalanceMetricRow[];
+  [column: string]: unknown;
+}
+
+const STATUS_META: Record<string, BalanceStatusMeta> = {
   queued: { label: '排队中', className: 'bg-stone-100 text-stone-600 border-stone-200' },
   awaiting_response: { label: '等待回复', className: 'bg-amber-50 text-amber-700 border-amber-200' },
   response_received: { label: '已收到回复', className: 'bg-sky-50 text-sky-700 border-sky-200' },
@@ -16,7 +67,7 @@ const STATUS_META = {
   unparsed: { label: '待识别', className: 'bg-amber-50 text-amber-700 border-amber-200' },
 };
 
-const METRIC_LABELS = {
+const METRIC_LABELS: Record<string, string> = {
   cash_balance: '账户余额',
   current_charges: '本期费用',
   arrears: '欠费金额',
@@ -26,14 +77,14 @@ const METRIC_LABELS = {
   voice_remaining: '剩余通话',
 };
 
-export function getBalanceStatusMeta(status) {
-  return STATUS_META[status] || {
+export function getBalanceStatusMeta(status: string | null | undefined): BalanceStatusMeta {
+  return (status ? STATUS_META[status] : undefined) || {
     label: status || '未知',
     className: 'bg-stone-100 text-stone-600 border-stone-200',
   };
 }
 
-export function getBalanceTimestamp(check) {
+export function getBalanceTimestamp(check: BalanceCheckLike | null | undefined): string | null {
   const conversation = getBalanceConversation(check);
   return conversation.at(-1)?.timestamp
     || check?.response_timestamp
@@ -44,12 +95,12 @@ export function getBalanceTimestamp(check) {
     || null;
 }
 
-export function getBalanceConversation(check) {
+export function getBalanceConversation(check: BalanceCheckLike | null | undefined): BalanceConversationMessage[] {
   if (Array.isArray(check?.conversation) && check.conversation.length) {
     return check.conversation;
   }
 
-  const messages = [];
+  const messages: BalanceConversationMessage[] = [];
   if (check?.outbound_content || check?.command) {
     messages.push({
       id: check.outbound_message_id || `${check.id}-outbound`,
@@ -72,21 +123,21 @@ export function getBalanceConversation(check) {
   return messages;
 }
 
-export function getLatestBalanceReply(check) {
+export function getLatestBalanceReply(check: BalanceCheckLike | null | undefined): BalanceConversationMessage | null {
   return [...getBalanceConversation(check)]
     .reverse()
     .find((message) => message.type === 'received') || null;
 }
 
-export function getCashBalance(check) {
+export function getCashBalance(check: BalanceCheckLike | null | undefined): BalanceMetricRow | null {
   return check?.metrics?.find((metric) => metric.metric_type === 'cash_balance') || null;
 }
 
-export function getBalanceMetricLabel(metricType) {
-  return METRIC_LABELS[metricType] || metricType || '未知指标';
+export function getBalanceMetricLabel(metricType: string | null | undefined): string {
+  return (metricType ? METRIC_LABELS[metricType] : undefined) || metricType || '未知指标';
 }
 
-export function formatBalanceMetric(metric) {
+export function formatBalanceMetric(metric: BalanceMetricRow | null | undefined): string {
   if (!metric || metric.value == null) return '暂未取得';
   const value = Number(metric.value);
   if (!Number.isFinite(value)) return '暂未取得';
@@ -106,7 +157,7 @@ export function formatBalanceMetric(metric) {
   return `${value}${metric.unit ? ` ${metric.unit}` : ''}`;
 }
 
-export function normalizeUtcTimestamp(value) {
+export function normalizeUtcTimestamp<T extends string | null | undefined>(value: T): T | string {
   if (!value || typeof value !== 'string') return value;
   return /(?:Z|[+-]\d{2}:?\d{2})$/.test(value) ? value : `${value}Z`;
 }

@@ -21,7 +21,17 @@ const HORIZONTAL_RATIO = 1;
 // clearly exceeds ordinary tap jitter, otherwise iOS suppresses the eventual click.
 const ACTIVATION_SLOP = 8;
 
-export function createPullState() {
+/** The gesture state carried between touch handlers. */
+export interface PullState {
+  startY: number;
+  startX: number;
+  pull: number;
+  active: boolean;
+  refreshing: boolean;
+  cancelled: boolean;
+}
+
+export function createPullState(): PullState {
   return {
     startY: 0,
     startX: 0,
@@ -36,7 +46,7 @@ export function createPullState() {
  * Rubber-band damping: tracks the finger closely at first, then resists, approaching
  * MAX_PULL asymptotically so the indicator never runs away with a long drag.
  */
-export function damp(distance) {
+export function damp(distance: number): number {
   if (distance <= 0) return 0;
   return MAX_PULL * (1 - Math.exp(-distance / MAX_PULL));
 }
@@ -45,7 +55,7 @@ export function damp(distance) {
  * Begin a gesture. Only arms when the container is already at the top — a pull that
  * starts mid-list has to remain an ordinary scroll.
  */
-export function onStart(state, y, scrollTop, x = 0) {
+export function onStart(state: PullState, y: number, scrollTop: number, x = 0): void {
   if (state.refreshing || scrollTop > 0) {
     state.active = false;
     return;
@@ -58,7 +68,7 @@ export function onStart(state, y, scrollTop, x = 0) {
 }
 
 /** Update the pull distance. Returns the damped offset the indicator should use. */
-export function onMove(state, y, x = 0) {
+export function onMove(state: PullState, y: number, x = 0): number {
   if (!state.active || state.cancelled) return state.pull;
 
   const dy = y - state.startY;
@@ -83,7 +93,7 @@ export function onMove(state, y, x = 0) {
  * `touchcancel` is not a release: iOS may send it when WebKit or the system takes
  * ownership of the sequence, so it must never cross the refresh threshold.
  */
-export function onCancel(state) {
+export function onCancel(state: PullState): void {
   state.active = false;
   state.cancelled = false;
   state.pull = 0;
@@ -94,7 +104,7 @@ export function onCancel(state) {
  * On 'refresh' the state is left refreshing so a second pull cannot run loadData()
  * concurrently; the caller clears that flag once its refresh settles.
  */
-export function onEnd(state) {
+export function onEnd(state: PullState): 'refresh' | 'cancel' {
   const shouldRefresh = state.active && !state.cancelled && state.pull >= THRESHOLD;
   state.active = false;
   state.cancelled = false;
