@@ -13,7 +13,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check": "bun run format:check && bun run typecheck && bun run lint && bun run check:worker-types && bun run test && bun run build",
-    "check:worker-types": "bunx wrangler types --strict-vars=false && git -C .. diff --exit-code -- sms-dashboard/worker-configuration.d.ts",
+    "check:worker-types": "bunx wrangler types --strict-vars=false --include-runtime=false && bunx wrangler types worker-runtime.d.ts --include-env=false && git -C .. diff --exit-code -- sms-dashboard/worker-configuration.d.ts sms-dashboard/worker-runtime.d.ts",
     "dev": "bunx vite",
     "dev:api": "bunx wrangler dev",
     "build": "bunx vite build",

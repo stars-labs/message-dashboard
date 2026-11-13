@@ -1,33 +1,43 @@
-import type { AppRequest } from '../worker-context.js';
+import * as v from 'valibot';
+import { queryAll, queryFirst, type D1 } from '../lib/d1.js';
+
+interface ListRequest {
+  env: { DB: D1<'all'> };
+}
+
+interface GetRequest {
+  env: { DB: D1<'first'> };
+  params?: Record<string, string>;
+}
 
 /** One row of device_view, aliased to the names the client consumes. */
-interface DeviceRow {
-  id: string;
-  imei: string | null;
-  iccid: string | null;
-  number: string | null;
-  country: string | null;
-  carrier: string | null;
-  service_type: string | null;
-  service_type_source: string | null;
-  service_type_verified_at: string | null;
-  sim_role: string | null;
-  primary_iccid: string | null;
-  balance_threshold: number | null;
-  status: string | null;
-  signal: number | null;
-  operator: string | null;
-  manufacturer: string | null;
-  model: string | null;
-  usb_port: number | null;
-  usb_path: string | null;
-  last_usb_path: string | null;
-  modem_status: string | null;
-  sim_index: number | null;
-  notes: string | null;
-  created_at: string | null;
-  updated_at: string | null;
-}
+const DeviceRow = v.object({
+  id: v.string(),
+  imei: v.nullable(v.string()),
+  iccid: v.string(),
+  number: v.string(),
+  country: v.nullable(v.string()),
+  carrier: v.nullable(v.string()),
+  service_type: v.string(),
+  service_type_source: v.nullable(v.string()),
+  service_type_verified_at: v.nullable(v.string()),
+  sim_role: v.string(),
+  primary_iccid: v.nullable(v.string()),
+  balance_threshold: v.nullable(v.number()),
+  status: v.string(),
+  signal: v.nullable(v.number()),
+  operator: v.nullable(v.string()),
+  manufacturer: v.nullable(v.string()),
+  model: v.nullable(v.string()),
+  usb_port: v.nullable(v.number()),
+  usb_path: v.nullable(v.string()),
+  last_usb_path: v.nullable(v.string()),
+  modem_status: v.nullable(v.string()),
+  sim_index: v.number(),
+  notes: v.nullable(v.string()),
+  created_at: v.nullable(v.string()),
+  updated_at: v.nullable(v.string()),
+});
 
 const DEVICE_COLUMNS = `
           dv.id,
@@ -65,26 +75,25 @@ function json(body: unknown, status = 200): Response {
 
 export const phonesHandler = {
   // List all phones
-  async list(request: AppRequest): Promise<Response> {
+  async list(request: ListRequest): Promise<Response> {
     const { env } = request;
 
     try {
-      if (!env.DB) {
-        throw new Error('Database binding not found');
-      }
-
-      const { results } = await env.DB.prepare(
-        `
+      const results = await queryAll(
+        env.DB.prepare(
+          `
         SELECT ${DEVICE_COLUMNS}
         FROM device_view dv
         ORDER BY dv.primary_port, dv.iccid
       `,
-      ).all<DeviceRow>();
+        ),
+        DeviceRow,
+      );
 
       return json({ success: true, data: results });
     } catch (error) {
       // Log error details server-side for debugging
-      console.error('[Phones] List error:', (error as Error)?.stack || error);
+      console.error('[Phones] List error:', (error instanceof Error && error.stack) || error);
 
       // Return generic error to client without exposing stack trace
       return json({ success: false, error: 'Failed to fetch phones' }, 500);
@@ -92,21 +101,24 @@ export const phonesHandler = {
   },
 
   // Get specific phone
-  async get(request: AppRequest): Promise<Response> {
+  async get(request: GetRequest): Promise<Response> {
     const { env } = request;
-    // The router only dispatches here for /api/phones/:id, so params is set.
-    const phoneId = request.params?.id;
+    const phoneId = request.params?.['id'];
+    if (!phoneId) {
+      return json({ success: false, error: 'Phone not found' }, 404);
+    }
 
     try {
-      const phone = await env.DB.prepare(
-        `
+      const phone = await queryFirst(
+        env.DB.prepare(
+          `
         SELECT ${DEVICE_COLUMNS}
         FROM device_view dv
         WHERE dv.iccid = ? OR dv.id = ?
       `,
-      )
-        .bind(phoneId, phoneId)
-        .first<DeviceRow>();
+        ).bind(phoneId, phoneId),
+        DeviceRow,
+      );
 
       if (!phone) {
         return json({ success: false, error: 'Phone not found' }, 404);

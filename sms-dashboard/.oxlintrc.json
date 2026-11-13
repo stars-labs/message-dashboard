@@ -25,6 +25,7 @@
     "config/**",
     "eslint.config.ts",
     "worker-configuration.d.ts",
+    "worker-runtime.d.ts",
     "tsconfig*.json"
   ],
   "overrides": [

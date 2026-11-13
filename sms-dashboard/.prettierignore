@@ -3,6 +3,7 @@ dist
 balance-agent/dist
 balance-agent/release
 worker-configuration.d.ts
+worker-runtime.d.ts
 server/frontend-assets.js
 bun.lock
 *.md
