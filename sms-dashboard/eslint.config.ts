@@ -6,6 +6,7 @@ import js from '@eslint/js';
 import comments from '@eslint-community/eslint-plugin-eslint-comments/configs';
 import { defineConfig, globalIgnores } from 'eslint/config';
 import { includeIgnoreFile } from '@eslint/config-helpers';
+import prettier from 'eslint-config-prettier';
 import tseslint from 'typescript-eslint';
 import { fileURLToPath } from 'node:url';
 
@@ -77,4 +78,6 @@ export default defineConfig([
     files: ['shared/**/*.ts', 'config/**/*.ts'],
     languageOptions: { sourceType: 'module' },
   },
+  // Last: switches off every rule Prettier owns, so the two never disagree.
+  prettier,
 ]);
