@@ -1,12 +1,37 @@
-function endpoint(baseUrl, path) {
+/** The two chat protocols the company gateway exposes. */
+export type CompanyAIProtocol = 'anthropic' | 'openai';
+
+/** The two-part prompt every call sends. */
+export interface CompanyAIPrompt {
+  system: string;
+  user: string;
+}
+
+/** One model call. */
+export interface CompanyAICall {
+  baseUrl: string;
+  token: string;
+  model: string;
+  prompt: CompanyAIPrompt;
+  protocol?: CompanyAIProtocol | string;
+  fetchImpl?: typeof fetch;
+}
+
+/** A response body, as the two wire protocols shape it. */
+interface CompanyAIResponseBody {
+  choices?: Array<{ message?: { content?: unknown } }>;
+  content?: Array<{ type?: string; text?: unknown }>;
+}
+
+function endpoint(baseUrl: unknown, path: string): string {
   return `${String(baseUrl || '').replace(/\/+$/, '')}${path}`;
 }
 
-export function parseCompanyAIContent(payload) {
-  let content = payload?.choices?.[0]?.message?.content
+export function parseCompanyAIContent(payload: CompanyAIResponseBody | null | undefined): unknown {
+  let content: unknown = payload?.choices?.[0]?.message?.content
     ?? payload?.content?.find((part) => part?.type === 'text')?.text;
   if (Array.isArray(content)) {
-    content = content.map((part) => part?.text || '').join('');
+    content = (content as Array<{ text?: unknown }>).map((part) => part?.text || '').join('');
   }
   if (typeof content !== 'string') {
     throw new Error('Company AI response does not contain message content');
@@ -21,7 +46,14 @@ export function parseCompanyAIContent(payload) {
   }
 }
 
-async function postChat({ baseUrl, token, model, prompt, includeResponseFormat, fetchImpl }) {
+async function postChat({ baseUrl, token, model, prompt, includeResponseFormat, fetchImpl }: {
+  baseUrl: string;
+  token: string;
+  model: string;
+  prompt: CompanyAIPrompt;
+  includeResponseFormat: boolean;
+  fetchImpl: typeof fetch;
+}): Promise<Response> {
   const body = {
     model,
     messages: [
@@ -43,7 +75,13 @@ async function postChat({ baseUrl, token, model, prompt, includeResponseFormat, 
   });
 }
 
-async function postMessages({ baseUrl, token, model, prompt, fetchImpl }) {
+async function postMessages({ baseUrl, token, model, prompt, fetchImpl }: {
+  baseUrl: string;
+  token: string;
+  model: string;
+  prompt: CompanyAIPrompt;
+  fetchImpl: typeof fetch;
+}): Promise<Response> {
   return fetchImpl(endpoint(baseUrl, '/v1/messages'), {
     method: 'POST',
     headers: {
@@ -69,7 +107,7 @@ export async function callCompanyAI({
   prompt,
   protocol = 'anthropic',
   fetchImpl = fetch,
-}) {
+}: CompanyAICall): Promise<unknown> {
   let response;
   if (protocol === 'anthropic') {
     response = await postMessages({ baseUrl, token, model, prompt, fetchImpl });
@@ -102,7 +140,11 @@ const PROBE_PATH = '/v1/messages';
 // healthy endpoint as unreachable on any wobble.
 const PROBE_TIMEOUT_MS = 15_000;
 
-export async function companyAIReachable(baseUrl, fetchImpl = fetch, onError = null) {
+export async function companyAIReachable(
+  baseUrl: string,
+  fetchImpl: typeof fetch = fetch,
+  onError: ((error: unknown) => void) | null = null,
+): Promise<boolean> {
   try {
     const response = await fetchImpl(endpoint(baseUrl, PROBE_PATH), {
       method: 'POST',
