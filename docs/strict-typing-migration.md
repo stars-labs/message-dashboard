@@ -83,17 +83,44 @@ Every value from outside the process is `unknown` until a valibot schema parses
 it: request bodies, query/params, D1 rows, KV values, `fetch` responses
 (Auth0, carrier sites, AI), `postMessage`/IPC, IndexedDB, `localStorage`.
 
-- D1: no `.first<T>()` / `.all<T>()` type arguments. A small typed helper takes
-  a schema and returns parsed rows. Row schemas live next to the query that
-  produces them; `device_view` row shape is defined once.
+- Bodies and JSON text: `readJson(body, schema)` / `parseJson(text, schema)`
+  from `shared/parse-json.ts`. They return `{ ok, value } | { ok: false, error }`;
+  the handler answers the bad input itself.
+- D1: `queryAll` / `queryFirst` from `server/lib/d1.ts`. No `.first<T>()` /
+  `.all<T>()` type arguments. ESLint enforces both rules.
+- Row schemas live next to the query that produces them and list exactly the
+  selected columns (no `SELECT *` into a schema). A column is non-null in the
+  schema only if the table declares it `NOT NULL` / primary key, or the view
+  expression cannot yield null.
+- Verify every row schema by running its real SQL against a local snapshot of
+  production D1 (`.wrangler/state/v3/d1`) and parsing every row; then break one
+  field and confirm the harness reports the failure.
+
+## Dependencies and tests
+
+- A handler or utility declares only what it uses, structurally:
+  `env: { DB: D1<'all' | 'first'> }` (`D1<Op>` from `server/lib/d1.ts`), not
+  `AppRequest` / `Env`. The router's call site then checks that the real
+  request provides it.
+- Tests pass plain objects that implement exactly those members. No `as`, no
+  `eslint-disable`, no "test double" helper that casts.
+- Every re-typed file gets a TypeScript test (`*.test.ts`) covering its
+  behaviour, including the schema-mismatch path. A file with no tests gets them
+  in the same commit.
+- Dead code found on the way (unrouted handlers, unused exports) is deleted in
+  its own `refactor` commit, with the search that proves it unused in the message.
 - Branded `Iccid` etc. in TS come only from schemas, never from a cast.
 - Errors: `catch (error)` stays `unknown`; read it via one shared helper, not
   `(error as Error)`.
 - Index-signature types (`[k: string]: unknown`) are removed; model the real shape.
 - Replace the NUL byte literal in `server/handlers/balance-queries.ts:548` with `'\0'`.
-- Cloudflare types come from `wrangler types` (generated `worker-configuration.d.ts`,
-  checked in, drift gate `wrangler types --check`). Delete `shared/cf-bindings.ts`
-  and the hand-written `Env`; bindings are ambient globals, no re-export file.
+- Cloudflare types come from `wrangler types`, checked in as two files:
+  `worker-runtime.d.ts` (runtime globals) and `worker-configuration.d.ts` (`Env`).
+  The drift gate regenerates both and fails on any diff (`wrangler types --check`
+  does not detect edits). Server files join `tsconfig.worker.json` one at a time
+  with the runtime file; `worker-configuration.d.ts` joins with the last file,
+  because its Durable Object type imports `server/index.ts`. That commit deletes
+  `server/cf-bindings.ts` and the hand-written `Env`.
 
 ## Order
 
