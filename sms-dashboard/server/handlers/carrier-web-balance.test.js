@@ -268,6 +268,67 @@ describe('carrier browser balance job protocol', () => {
     });
   });
 
+  test.each([
+    ['a list holding a status', ['awaiting_otp'], 'Invalid web job status'],
+    ['a number', 1, 'Invalid web job status'],
+    ['an unknown status', 'completed', 'Invalid web job status'],
+  ])('refuses a heartbeat whose status is %s', async (_case, status, message) => {
+    const job = await claim();
+    const response = await carrierWebBalanceHandler.heartbeat(
+      request(db, { id: job.id, body: { runner_id: 'runner-1', status } }),
+    );
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: message });
+  });
+
+  test.each([
+    ['an object', { text: 'x' }],
+    ['a number', 5],
+    ['a list', ['x']],
+  ])('refuses a heartbeat whose reason is %s', async (_case, reason) => {
+    const job = await claim();
+    const response = await carrierWebBalanceHandler.heartbeat(
+      request(db, {
+        id: job.id,
+        body: { runner_id: 'runner-1', status: 'human_verification_required', reason },
+      }),
+    );
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'reason must be text' });
+    expect(
+      sqlite.query("SELECT status FROM sim_balance_web_jobs WHERE id='job-1'").get().status,
+    ).toBe('leased');
+  });
+
+  test('falls back to the default reason when a heartbeat gives an empty one', async () => {
+    const job = await claim();
+    const response = await carrierWebBalanceHandler.heartbeat(
+      request(db, {
+        id: job.id,
+        body: { runner_id: 'runner-1', status: 'human_verification_required', reason: '' },
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(
+      sqlite.query("SELECT human_reason FROM sim_balance_web_jobs WHERE id='job-1'").get(),
+    ).toEqual({ human_reason: 'Official site requested human verification' });
+  });
+
+  test.each(['fail', 'release'])('refuses a %s whose error is not text', async (action) => {
+    const job = await claim();
+    const response = await carrierWebBalanceHandler[action](
+      request(db, { id: job.id, body: { runner_id: 'runner-1', error: { message: 'x' } } }),
+    );
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'error must be text' });
+    expect(
+      sqlite.query("SELECT status FROM sim_balance_web_jobs WHERE id='job-1'").get().status,
+    ).toBe('leased');
+    expect(
+      sqlite.query("SELECT status FROM sim_balance_checks WHERE id='check-1'").get().status,
+    ).toBe('queued');
+  });
+
   test('renews a lease without appending duplicate heartbeat events', async () => {
     const job = await claim();
     const heartbeatRequest = () =>

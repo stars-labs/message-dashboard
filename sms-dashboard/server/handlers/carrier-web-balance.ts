@@ -483,13 +483,16 @@ export const carrierWebBalanceHandler = {
     const lease = await requireLease(request, body, auth);
     if (lease.response) return lease.response;
     const { job, body: leased } = lease;
-    if (!HEARTBEAT_STATUSES.has(String(leased.status)))
+    if (typeof leased.status !== 'string' || !HEARTBEAT_STATUSES.has(leased.status))
       return json({ error: 'Invalid web job status' }, 400);
+    if (leased.reason != null && typeof leased.reason !== 'string') {
+      return json({ error: 'reason must be text' }, 400);
+    }
 
     const human = leased.status === 'human_verification_required';
     const leaseSeconds = human ? HUMAN_LEASE_SECONDS : NORMAL_LEASE_SECONDS;
     const reason = human
-      ? String(leased.reason || 'Official site requested human verification').slice(0, 500)
+      ? (leased.reason || 'Official site requested human verification').slice(0, 500)
       : null;
     const statements = [
       request.env.DB.prepare(
@@ -619,7 +622,10 @@ export const carrierWebBalanceHandler = {
     const lease = await requireLease(request, body, auth);
     if (lease.response) return lease.response;
     const { job, body: leased } = lease;
-    const error = String(leased.error || 'Web balance query failed').slice(0, 1000);
+    if (leased.error != null && typeof leased.error !== 'string') {
+      return json({ error: 'error must be text' }, 400);
+    }
+    const error = (leased.error || 'Web balance query failed').slice(0, 1000);
     await request.env.DB.batch([
       request.env.DB.prepare(
         `
@@ -651,7 +657,10 @@ export const carrierWebBalanceHandler = {
     const lease = await requireLease(request, body, auth);
     if (lease.response) return lease.response;
     const { job, body: leased } = lease;
-    const error = String(leased.error || 'Runner released the job').slice(0, 1000);
+    if (leased.error != null && typeof leased.error !== 'string') {
+      return json({ error: 'error must be text' }, 400);
+    }
+    const error = (leased.error || 'Runner released the job').slice(0, 1000);
     const terminal = Boolean(job.otp_requested_at);
     const statements = [
       request.env.DB.prepare(
