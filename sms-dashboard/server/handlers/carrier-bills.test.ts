@@ -240,12 +240,16 @@ describe('carrier bills API', () => {
     expect(await ids('?status=paid')).toEqual(['bill-paid']);
     expect(await ids('?status=unpaid')).toEqual(['bill-overdue', 'bill-1']);
     expect(await ids('?carrier=Nobody')).toEqual([]);
+    expect(await ids('?to=2024-02-29')).toEqual([]);
   });
 
   test('answers 400 for a from or to that is not an ISO date', async () => {
     for (const [query, error] of [
       ['?from=yesterday', 'from must be an ISO date'],
+      ['?from=2026-13-01', 'from must be an ISO date'],
       ['?to=2026-9-1', 'to must be an ISO date'],
+      ['?to=2026-02-30', 'to must be an ISO date'],
+      ['?to=2026-00-10', 'to must be an ISO date'],
     ]) {
       const response = await carrierBillsHandler.list(listRequest(db, query));
       expect(response.status).toBe(400);

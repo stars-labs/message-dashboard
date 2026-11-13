@@ -298,10 +298,9 @@ const URGENCY_ORDER = new Map<string, number>([
 ]);
 
 function validIsoDate(value: string): boolean {
-  return (
-    /^\d{4}-\d{2}-\d{2}$/.test(value) &&
-    new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value
-  );
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const time = dateEpoch(value);
+  return !Number.isNaN(time) && new Date(time).toISOString().slice(0, 10) === value;
 }
 
 function emptyToNull(value: string | null | undefined): string | null {
