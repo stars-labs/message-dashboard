@@ -1,5 +1,5 @@
-/** The two chat protocols the company gateway exposes. */
-export type CompanyAIProtocol = 'anthropic' | 'openai';
+import * as v from 'valibot';
+import { parseJson, readJson } from '../../shared/parse-json.js';
 
 /** The two-part prompt every call sends. */
 export interface CompanyAIPrompt {
@@ -7,32 +7,66 @@ export interface CompanyAIPrompt {
   user: string;
 }
 
-/** One model call. */
+export interface CompanyAIRequest {
+  method: 'POST';
+  headers: Record<string, string>;
+  body: string;
+  signal: AbortSignal;
+}
+
+/** The part of `fetch` a model call uses; the real `fetch` satisfies it. */
+export type CompanyAIFetch = (
+  url: string,
+  init: CompanyAIRequest,
+) => Promise<Pick<Response, 'ok' | 'status' | 'text'>>;
+
+/** The part of `fetch` the liveness probe uses. */
+export type CompanyAIProbeFetch = (
+  url: string,
+  init: CompanyAIRequest,
+) => Promise<Pick<Response, 'status'>>;
+
+/** One model call. `protocol` is 'anthropic' or 'openai'; anything else is rejected. */
 export interface CompanyAICall {
   baseUrl: string;
   token: string;
   model: string;
   prompt: CompanyAIPrompt;
-  protocol?: CompanyAIProtocol | string;
-  fetchImpl?: typeof fetch;
+  protocol?: string;
+  fetchImpl?: CompanyAIFetch;
 }
 
 /** A response body, as the two wire protocols shape it. */
-interface CompanyAIResponseBody {
-  choices?: Array<{ message?: { content?: unknown } }>;
-  content?: Array<{ type?: string; text?: unknown }>;
+const ResponseBody = v.object({
+  choices: v.optional(
+    v.array(
+      v.object({
+        message: v.optional(v.object({ content: v.optional(v.unknown()) })),
+      }),
+    ),
+  ),
+  content: v.optional(
+    v.array(v.object({ type: v.optional(v.unknown()), text: v.optional(v.unknown()) })),
+  ),
+});
+
+function endpoint(baseUrl: string, path: string): string {
+  return `${baseUrl.replace(/\/+$/, '')}${path}`;
 }
 
-function endpoint(baseUrl: unknown, path: string): string {
-  return `${String(baseUrl || '').replace(/\/+$/, '')}${path}`;
+function partText(part: unknown): string {
+  const text = v.is(v.object({ text: v.unknown() }), part) ? part.text : undefined;
+  return typeof text === 'string' || typeof text === 'number' ? String(text) : '';
 }
 
-export function parseCompanyAIContent(payload: CompanyAIResponseBody | null | undefined): unknown {
-  let content: unknown =
-    payload?.choices?.[0]?.message?.content ??
-    payload?.content?.find((part) => part?.type === 'text')?.text;
+export function parseCompanyAIContent(payload: unknown): unknown {
+  const body = v.safeParse(ResponseBody, payload);
+  let content: unknown = body.success
+    ? (body.output.choices?.[0]?.message?.content ??
+      body.output.content?.find((part) => part.type === 'text')?.text)
+    : undefined;
   if (Array.isArray(content)) {
-    content = (content as Array<{ text?: unknown }>).map((part) => part?.text || '').join('');
+    content = content.map((part: unknown) => partText(part)).join('');
   }
   if (typeof content !== 'string') {
     throw new Error('Company AI response does not contain message content');
@@ -41,11 +75,9 @@ export function parseCompanyAIContent(payload: CompanyAIResponseBody | null | un
     .trim()
     .replace(/^```(?:json)?\s*/i, '')
     .replace(/\s*```$/, '');
-  try {
-    return JSON.parse(cleaned);
-  } catch {
-    throw new Error('Company AI response is not valid JSON');
-  }
+  const parsed = parseJson(cleaned, v.unknown());
+  if (!parsed.ok) throw new Error('Company AI response is not valid JSON');
+  return parsed.value;
 }
 
 async function postChat({
@@ -61,8 +93,8 @@ async function postChat({
   model: string;
   prompt: CompanyAIPrompt;
   includeResponseFormat: boolean;
-  fetchImpl: typeof fetch;
-}): Promise<Response> {
+  fetchImpl: CompanyAIFetch;
+}) {
   const body: {
     model: string;
     messages: { role: string; content: string }[];
@@ -89,7 +121,7 @@ async function postChat({
   });
 }
 
-async function postMessages({
+function postMessages({
   baseUrl,
   token,
   model,
@@ -100,8 +132,8 @@ async function postMessages({
   token: string;
   model: string;
   prompt: CompanyAIPrompt;
-  fetchImpl: typeof fetch;
-}): Promise<Response> {
+  fetchImpl: CompanyAIFetch;
+}) {
   return fetchImpl(endpoint(baseUrl, '/v1/messages'), {
     method: 'POST',
     headers: {
@@ -157,7 +189,9 @@ export async function callCompanyAI({
     const detail = (await response.text()).slice(0, 500);
     throw new Error(`Company AI request failed (${response.status}): ${detail}`);
   }
-  return parseCompanyAIContent(await response.json());
+  const payload = await readJson(response, v.unknown());
+  if (!payload.ok) throw new Error('Company AI response is not valid JSON');
+  return parseCompanyAIContent(payload.value);
 }
 
 // Liveness probe for the company AI endpoint. It must hit the route callAI uses:
@@ -172,7 +206,7 @@ const PROBE_TIMEOUT_MS = 15_000;
 
 export async function companyAIReachable(
   baseUrl: string,
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl: CompanyAIProbeFetch = fetch,
   onError: ((error: unknown) => void) | null = null,
 ): Promise<boolean> {
   try {

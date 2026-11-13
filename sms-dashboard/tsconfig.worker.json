@@ -30,7 +30,8 @@
     "server/utils/m1-web-balance.ts",
     "server/utils/unicom-web-balance.ts",
     "server/utils/daemon-health.ts",
-    "server/utils/verification.ts"
+    "server/utils/verification.ts",
+    "server/utils/company-ai.ts"
   ],
   "exclude": ["**/*.test.ts"],
   "references": [{ "path": "./tsconfig.shared.json" }]
