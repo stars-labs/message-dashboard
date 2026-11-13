@@ -51,7 +51,8 @@
     "server/utils/runner-auth.ts",
     "server/handlers/users.ts",
     "server/handlers/health.ts",
-    "server/handlers/messages.ts"
+    "server/handlers/messages.ts",
+    "server/api/verification.ts"
   ],
   "exclude": ["**/*.test.ts"],
   "references": [{ "path": "./tsconfig.shared.json" }]

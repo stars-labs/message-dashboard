@@ -4,7 +4,7 @@ import { readKvJson, type KV } from '../lib/kv.js';
 import { createRoleConfig, rolesFromToken, type RoleEnv } from '../../config/auth0-roles.js';
 import { extractSessionToken } from '../utils/session-token.js';
 
-interface AuthRequest {
+export interface AuthRequest {
   url: string;
   headers: { get(name: string): string | null };
   env: RoleEnv & {
