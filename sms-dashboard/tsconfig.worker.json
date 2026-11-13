@@ -59,7 +59,8 @@
     "server/handlers/carrier-billing-backfill.ts",
     "server/api/filters.ts",
     "server/api/keywords.ts",
-    "server/handlers/balance-runners.ts"
+    "server/handlers/balance-runners.ts",
+    "server/handlers/carrier-web-balance.ts"
   ],
   "exclude": ["**/*.test.ts"],
   "references": [{ "path": "./tsconfig.shared.json" }]
