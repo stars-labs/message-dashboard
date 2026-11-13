@@ -1,4 +1,3 @@
-// Run with: bun test server/utils/verification.test.js
 import { describe, expect, test } from 'bun:test';
 import {
   detectVerificationCode,

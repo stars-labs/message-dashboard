@@ -143,18 +143,19 @@ const NON_OTP_CODE_ACTION =
 const JA_NON_OTP_CODE_PREFIX =
   /(?:商品|製品|クーポン|プロモーション?|キャンペーン|バウチャー|割引|招待|紹介|注文|予約|会員|ポイント)\s*コード\s*(?:番号)?\s*[:：]?\s*$/;
 
-function candidateOffset(match: RegExpMatchArray): number {
-  return (match.index ?? 0) + match[0].indexOf(match[1]);
+function candidateOffset(match: RegExpMatchArray, code: string): number {
+  return (match.index ?? 0) + match[0].indexOf(code);
 }
 
 function isRejectedCandidate(
   content: string,
   match: RegExpMatchArray,
+  code: string,
   reason: VerificationReason,
 ): boolean {
-  const offset = candidateOffset(match);
+  const offset = candidateOffset(match, code);
   const before = content.slice(Math.max(0, offset - 32), offset);
-  const after = content.slice(offset + match[1].length, offset + match[1].length + 48);
+  const after = content.slice(offset + code.length, offset + code.length + 48);
 
   // A date fragment cannot be an OTP without an explicit OTP label.
   if (!reason.includes('label') && /^\s*(?:年|[-/]\s*\d)/.test(after)) return true;
@@ -178,15 +179,16 @@ export function detectVerificationCode(content: unknown): DetectedCode | null {
 
   for (const { reason, pattern } of VERIFICATION_CODE_PATTERNS) {
     const match = content.match(pattern);
-    if (match && !isRejectedCandidate(content, match, reason)) {
-      return { code: match[1], reason };
+    const code = match?.[1];
+    if (match && code !== undefined && !isRejectedCandidate(content, match, code, reason)) {
+      return { code, reason };
     }
   }
 
   return null;
 }
 
-/** Backwards-compatible string-only API used when persisting a message. */
+/** The code alone, as persisted with a message. */
 export function extractVerificationCode(content: unknown): string | null {
   return detectVerificationCode(content)?.code ?? null;
 }
