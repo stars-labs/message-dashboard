@@ -10,8 +10,15 @@
 // classes by scanning source text, so a template like `bg-${c}-500` would
 // produce nothing in the output bundle.
 
-/** @type {Record<string, {label: string, dotClass: string, badgeClass: string, rowClass: string, sortOrder: number}>} */
-const STATUS = {
+export interface DeviceStatusMeta {
+  label: string;
+  dotClass: string;
+  badgeClass: string;
+  rowClass: string;
+  sortOrder: number;
+}
+
+const STATUS: Record<string, DeviceStatusMeta> = {
   active: {
     label: '在线',
     dotClass: 'bg-emerald-500',
@@ -58,7 +65,7 @@ const STATUS = {
   },
 };
 
-const FALLBACK = {
+const FALLBACK: DeviceStatusMeta = {
   label: '离线',
   dotClass: 'bg-stone-300',
   badgeClass: 'bg-stone-100 text-stone-500 border border-stone-200',
@@ -72,15 +79,15 @@ const FALLBACK = {
  *
  * @param {string | null | undefined} status
  */
-export function getStatusMeta(status) {
-  return STATUS[status] ?? FALLBACK;
+export function getStatusMeta(status: string | null | undefined): DeviceStatusMeta {
+  return (status ? STATUS[status] : undefined) ?? FALLBACK;
 }
 
 /**
  * Whether a status requires user action (tinted row in the list).
  * @param {string | null | undefined} status
  */
-export function isAnomalous(status) {
+export function isAnomalous(status: string | null | undefined): boolean {
   return getStatusMeta(status).sortOrder >= 2;
 }
 
@@ -90,8 +97,8 @@ export function isAnomalous(status) {
  * "待映射" filter instead of counting the same card in two buckets.
  * @param {string | null | undefined} status
  */
-export function hasOperationalIssue(status) {
-  return ['offline', 'sim_error', 'iccid_mismatch'].includes(status);
+export function hasOperationalIssue(status: string | null | undefined): boolean {
+  return ['offline', 'sim_error', 'iccid_mismatch'].includes(String(status));
 }
 
 /**
@@ -100,6 +107,6 @@ export function hasOperationalIssue(status) {
  * @param {string | null | undefined} status
  * @param {boolean} daemonConnected
  */
-export function getEffectiveDeviceStatus(status, daemonConnected) {
+export function getEffectiveDeviceStatus(status: string | null | undefined, daemonConnected: boolean): string {
   return daemonConnected ? (status || 'offline') : 'offline';
 }

@@ -15,7 +15,22 @@ const HEX_COLOR = /^#(?:[0-9A-Fa-f]{3,4}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/;
  * Coerce a stored keyword colour to something safe for a CSS custom property.
  * Anything that is not a plain hex literal becomes the default.
  */
-export function safeColor(color) {
+/** A keyword as stored, as the highlighter reads it. */
+export interface HighlightKeyword {
+  keyword?: string | null;
+  color?: string | null;
+  tag?: string | null;
+  case_sensitive?: boolean | number | null;
+  whole_word?: boolean | number | null;
+}
+
+/** One rendered slice: plain text, or a keyword match with its style. */
+export interface HighlightSegment {
+  text: string;
+  match: { color: string; tag: string | null } | null;
+}
+
+export function safeColor(color: unknown): string {
   return typeof color === 'string' && HEX_COLOR.test(color.trim())
     ? color.trim()
     : DEFAULT_KEYWORD_COLOR;
@@ -30,11 +45,11 @@ export function safeColor(color) {
  * Concatenating every segment's `text` always reproduces `text.trim()` exactly — the
  * segments are a partition, never a transformation.
  */
-export function getSegments(text, kws) {
+export function getSegments(text: string | null | undefined, kws: HighlightKeyword[] | null | undefined): HighlightSegment[] | null {
   if (!text || !kws || kws.length === 0) return null;
 
   const trimmed = text.trim();
-  const matches = [];
+  const matches: Array<{ position: number; text: string; color?: string | null; tag?: string | null }> = [];
 
   for (const kw of kws) {
     if (!kw.keyword) continue;
@@ -50,7 +65,7 @@ export function getSegments(text, kws) {
       // matchAll advances past zero-length matches on its own, so a pathological
       // keyword cannot spin here the way a manual lastIndex loop could.
       for (const m of trimmed.matchAll(regex)) {
-        matches.push({ position: m.index, text: m[0], color: kw.color, tag: kw.tag });
+        matches.push({ position: m.index ?? 0, text: m[0], color: kw.color, tag: kw.tag });
       }
     } else {
       let pos = 0;
@@ -72,7 +87,7 @@ export function getSegments(text, kws) {
   matches.sort((a, b) => a.position - b.position);
 
   // Remove overlaps (keep first match at each position)
-  const filtered = [];
+  const filtered: typeof matches = [];
   let lastEnd = -1;
   for (const m of matches) {
     if (m.position >= lastEnd) {
@@ -81,13 +96,13 @@ export function getSegments(text, kws) {
     }
   }
 
-  const segments = [];
+  const segments: HighlightSegment[] = [];
   let lastPos = 0;
   for (const m of filtered) {
     if (m.position > lastPos) {
       segments.push({ text: trimmed.substring(lastPos, m.position), match: null });
     }
-    segments.push({ text: m.text, match: { color: safeColor(m.color), tag: m.tag } });
+    segments.push({ text: m.text, match: { color: safeColor(m.color), tag: m.tag ?? null } });
     lastPos = m.position + m.text.length;
   }
   if (lastPos < trimmed.length) {

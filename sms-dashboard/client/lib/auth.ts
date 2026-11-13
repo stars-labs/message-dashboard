@@ -9,33 +9,47 @@
 //
 // Authentication state is therefore whether /api/auth/me answers, not whether a string
 // exists on the client.
+/** The user object the server returns from /api/auth/me. */
+export interface AuthUser {
+  id: string;
+  email?: string | null;
+  name?: string | null;
+  picture?: string | null;
+  roles?: string[];
+  permissions?: string[];
+  [claim: string]: unknown;
+}
+
 class Auth0Service {
+  baseUrl: string;
+  user: AuthUser | null;
+
   constructor() {
     this.baseUrl = import.meta.env.VITE_API_BASE_URL ||
       (typeof window !== 'undefined' ? window.location.origin : '');
     this.user = null;
   }
 
-  async login() {
+  async login(): Promise<void> {
     // Use replace to prevent back button issues
     window.location.replace(`${this.baseUrl}/login`);
   }
 
-  async logout() {
+  async logout(): Promise<void> {
     this.user = null;
     // The server clears the cookie and deletes the KV session, then redirects to Auth0.
     window.location.href = `${this.baseUrl}/logout`;
   }
 
-  async getUser() {
+  async getUser(): Promise<AuthUser | null> {
     try {
       const response = await fetch(`${this.baseUrl}/api/auth/me`, {
         credentials: 'same-origin'
       });
 
       if (response.ok) {
-        const data = await response.json();
-        this.user = data.user;
+        const data = (await response.json()) as { user?: AuthUser };
+        this.user = data.user ?? null;
         return this.user;
       }
 
@@ -52,12 +66,12 @@ class Auth0Service {
     }
   }
 
-  isAuthenticated() {
+  isAuthenticated(): boolean {
     return !!this.user;
   }
 
   // Helper method to make authenticated API calls
-  async authenticatedFetch(url, options = {}) {
+  async authenticatedFetch(url: string, options: RequestInit = {}): Promise<Response> {
     const response = await fetch(url, {
       ...options,
       credentials: 'same-origin'

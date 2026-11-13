@@ -1,4 +1,17 @@
-export const COUNTRIES = [
+export interface Country {
+  code: string;
+  name: string;
+  flag: string;
+}
+
+/** A phone row or a raw number, either accepted by the inference helper. */
+export type PhoneLike = string | {
+  number?: string | null;
+  country?: string | null;
+  mapped_country?: string | null;
+} | null | undefined;
+
+export const COUNTRIES: Country[] = [
   { code: "CN", name: "中国", flag: "🇨🇳" },
   { code: "HK", name: "香港", flag: "🇭🇰" },
   { code: "SG", name: "新加坡", flag: "🇸🇬" },
@@ -24,7 +37,7 @@ export const COUNTRIES = [
   { code: "MX", name: "墨西哥", flag: "🇲🇽" },
 ];
 
-export const COUNTRY_FILTER_TABS = [
+export const COUNTRY_FILTER_TABS: Country[] = [
   { code: "all", name: "全部", flag: "🌍" },
   { code: "CN", name: "中国", flag: "🇨🇳" },
   { code: "HK", name: "香港", flag: "🇭🇰" },
@@ -34,19 +47,19 @@ export const COUNTRY_FILTER_TABS = [
 const FLAG_MAP = Object.fromEntries(COUNTRIES.map(c => [c.code, c.flag]));
 const NAME_MAP = Object.fromEntries(COUNTRIES.map(c => [c.code, c.name]));
 
-export function getCountryFlag(code) {
-  return FLAG_MAP[code] || "🌍";
+export function getCountryFlag(code: string | null | undefined): string {
+  return (code && FLAG_MAP[code]) || "🌍";
 }
 
-export function getCountryName(code) {
-  return NAME_MAP[code] || code || "";
+export function getCountryName(code: string | null | undefined): string {
+  return (code && NAME_MAP[code]) || code || "";
 }
 
-export function inferCountryFromNumber(numberOrPhone) {
+export function inferCountryFromNumber(numberOrPhone: PhoneLike): string | null {
   // Accept either a phone object or a raw number string
   if (typeof numberOrPhone === 'object' && numberOrPhone !== null) {
     if (numberOrPhone.country || numberOrPhone.mapped_country) {
-      return numberOrPhone.country || numberOrPhone.mapped_country;
+      return numberOrPhone.country || numberOrPhone.mapped_country || null;
     }
     numberOrPhone = numberOrPhone.number;
   }
@@ -69,12 +82,12 @@ export function inferCountryFromNumber(numberOrPhone) {
   return null;
 }
 
-export function getPhoneFlag(phone) {
+export function getPhoneFlag(phone: PhoneLike): string {
   const code = typeof phone === 'string' ? phone : inferCountryFromNumber(phone);
   return code ? getCountryFlag(code) : "📱";
 }
 
-export function getCarrierColor(carrier) {
+export function getCarrierColor(carrier: string | null | undefined): string {
   if (!carrier) return "";
   const c = carrier.toUpperCase();
 
