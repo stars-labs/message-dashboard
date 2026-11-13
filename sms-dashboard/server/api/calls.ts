@@ -19,8 +19,8 @@
 
 import { handleAuth0 } from '../middleware/auth0.js';
 import { requirePermission, enrichUserPermissions } from '../middleware/rbac.js';
-import type { AppRequest, Env, Handler } from '../../shared/worker-context.js';
-import type { ExecutionContext, D1Database } from '../../shared/cf-bindings.js';
+import type { AppRequest, Env, Handler } from '../worker-context.js';
+import type { ExecutionContext, D1Database } from '../cf-bindings.js';
 import type { Permission } from '../../config/auth0-roles.js';
 
 /** The router shape setupCallRoutes needs. */

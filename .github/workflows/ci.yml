@@ -1,6 +1,6 @@
 # Gates for every push and pull request. Each job mirrors a local command the
-# agent guides already require: `check-daemon` for the Rust daemon, `bun run lint`,
-# `bun test` and `bun run build` for the dashboard, and an evaluation of the Orange Pi
+# agent guides already require: `check-daemon` for the Rust daemon, `bun run check`
+# (typecheck, lint, test, build) for the dashboard, and an evaluation of the Orange Pi
 # system so a broken NixOS module is caught before a deploy. On main the Pi
 # system is also built on an arm64 runner and pushed to Cachix, so the Pi only
 # downloads (`pi-deploy <path>`, see docs/deployment.md). Deploys themselves
@@ -50,7 +50,7 @@ jobs:
         run: nix develop .#rust -c check-daemon
 
   dashboard:
-    name: Dashboard (lint, typecheck, bun test, build)
+    name: Dashboard (bun run check)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -61,10 +61,7 @@ jobs:
         with:
           bun-version: 1.4.2
       - run: bun install --frozen-lockfile
-      - run: bun run lint
-      - run: bun run typecheck
-      - run: bun run test
-      - run: bun run build
+      - run: bun run check
 
   nixos:
     name: Orange Pi system evaluates

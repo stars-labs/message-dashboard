@@ -1,5 +1,5 @@
 import { findKeywordMatches } from './keyword-match.js';
-import type { D1Database } from '../../shared/cf-bindings.js';
+import type { D1Database } from '../cf-bindings.js';
 import type { HistoryCursor } from './filter-history.js';
 
 export const KEYWORD_HISTORY_PAGE_SIZE = 200;

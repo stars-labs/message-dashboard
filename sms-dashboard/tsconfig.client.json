@@ -1,0 +1,16 @@
+// The Svelte 5 SPA. DOM only: nothing in client/ runs under Node.
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "tsBuildInfoFile": "./node_modules/.tmp/client.tsbuildinfo",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["vite/client", "svelte"],
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "declaration": true,
+    "outDir": "./node_modules/.tmp/client-declarations"
+  },
+  "include": ["client/**/*.ts", "client/**/*.d.ts"],
+  "references": [{ "path": "./tsconfig.shared.json" }]
+}

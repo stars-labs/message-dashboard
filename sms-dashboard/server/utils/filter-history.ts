@@ -5,7 +5,7 @@ import {
   RULE_TYPE,
 } from './spam-filter.js';
 import type { ClassifiableMessage, SpamRule } from './spam-filter.js';
-import type { D1Database } from '../../shared/cf-bindings.js';
+import type { D1Database } from '../cf-bindings.js';
 
 export const FILTER_HISTORY_PAGE_SIZE = 200;
 

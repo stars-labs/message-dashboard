@@ -1,4 +1,4 @@
-import type { AppRequest } from '../../shared/worker-context.js';
+import type { AppRequest } from '../worker-context.js';
 
 /** One row of device_view, aliased to the names the client consumes. */
 interface DeviceRow {

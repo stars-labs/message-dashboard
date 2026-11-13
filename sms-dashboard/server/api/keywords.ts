@@ -2,8 +2,8 @@ import { handleAuth0 } from '../middleware/auth0.js';
 import { requirePermission, enrichUserPermissions } from '../middleware/rbac.js';
 import { DEFAULT_KEYWORD_COLOR, normalizeKeywordColor } from '../utils/keyword-color.js';
 import { processKeywordHistoryPage } from '../utils/keyword-history.js';
-import type { Handler, AppRequest, Env } from '../../shared/worker-context.js';
-import type { ExecutionContext } from '../../shared/cf-bindings.js';
+import type { Handler, AppRequest, Env } from '../worker-context.js';
+import type { ExecutionContext } from '../cf-bindings.js';
 import type { Permission } from '../../config/auth0-roles.js';
 
 /** The router shape setupKeywordRoutes needs. */

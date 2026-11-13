@@ -2,7 +2,7 @@ import { deriveDaemonHealth } from '../utils/daemon-health.js';
 import type { DaemonHealthRow } from '../utils/daemon-health.js';
 import { classifyD1Error, logD1Error } from '../utils/d1-error.js';
 import type { D1ErrorClassification } from '../utils/d1-error.js';
-import type { AppRequest } from '../../shared/worker-context.js';
+import type { AppRequest } from '../worker-context.js';
 
 const DAEMON_HEALTH_SELECT = `
   SELECT *,

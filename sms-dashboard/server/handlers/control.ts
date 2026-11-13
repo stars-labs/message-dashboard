@@ -11,8 +11,8 @@ import {
 import { processCarrierBillMessages } from '../utils/carrier-billing.js';
 import type { BalanceCheckRow } from './balance-queries.js';
 
-import type { AppRequest, Env } from '../../shared/worker-context.js';
-import type { D1Database } from '../../shared/cf-bindings.js';
+import type { AppRequest, Env } from '../worker-context.js';
+import type { D1Database } from '../cf-bindings.js';
 
 /** One entry of the daemon's modem_reports array. Fields the worker reads or stores. */
 interface ModemReport {

@@ -3,7 +3,7 @@
  * Single source of truth for device statistics
  */
 
-import type { D1Database } from '../../shared/cf-bindings.js';
+import type { D1Database } from '../cf-bindings.js';
 
 interface DeviceCountRow {
   connected_modems: number;

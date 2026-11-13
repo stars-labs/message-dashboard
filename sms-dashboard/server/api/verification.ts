@@ -2,8 +2,8 @@ import { handleAuth0 } from '../middleware/auth0.js';
 import { enrichUserPermissions, requirePermission } from '../middleware/rbac.js';
 import { reprocessVerificationPage } from '../utils/verification-backfill.js';
 import { sweepPending } from '../utils/spam-backfill.js';
-import type { Handler, AppRequest, Env } from '../../shared/worker-context.js';
-import type { ExecutionContext } from '../../shared/cf-bindings.js';
+import type { Handler, AppRequest, Env } from '../worker-context.js';
+import type { ExecutionContext } from '../cf-bindings.js';
 
 /** The router shape this module needs. */
 interface Router {

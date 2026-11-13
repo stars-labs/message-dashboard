@@ -1,6 +1,6 @@
 import { FRONTEND_ASSETS } from './frontend-assets.js';
 import { cacheControlFor } from './asset-cache-control.js';
-import type { AppRequest } from '../shared/worker-context.js';
+import type { AppRequest } from './worker-context.js';
 
 export function serveFrontend(request: AppRequest): Response {
   const url = new URL(request.url);

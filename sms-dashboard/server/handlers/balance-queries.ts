@@ -6,8 +6,8 @@ import {
   newCarrierWebBalanceIds,
 } from './carrier-web-balance.js';
 import { loadBalanceRunnerStatus } from './balance-runners.js';
-import type { AppRequest } from '../../shared/worker-context.js';
-import type { D1Database, D1PreparedStatement } from '../../shared/cf-bindings.js';
+import type { AppRequest } from '../worker-context.js';
+import type { D1Database, D1PreparedStatement } from '../cf-bindings.js';
 
 /** A row of device_view as the balance planner reads it. */
 export interface PlanPhone {

@@ -1,5 +1,5 @@
 import { boundedErrorText, classifyD1Error } from './d1-error.js';
-import type { AppRequest, Env } from '../../shared/worker-context.js';
+import type { AppRequest, Env } from '../worker-context.js';
 
 /** One audit_logs row. `details` is serialized; callers choose its shape. */
 export interface AuditEvent {

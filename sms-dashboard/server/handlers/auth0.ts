@@ -6,7 +6,7 @@ import { getUserRoles, setUserRole } from '../utils/auth0-management.js';
 import { indexSession, unindexSession } from '../utils/user-sessions.js';
 import { scheduleAuthAudit } from '../utils/audit-log.js';
 import { boundedErrorText } from '../utils/d1-error.js';
-import type { Env, AppRequest, RequestUser } from '../../shared/worker-context.js';
+import type { Env, AppRequest, RequestUser } from '../worker-context.js';
 
 /** Token set returned by the authorization_code exchange. */
 interface TokenSet {

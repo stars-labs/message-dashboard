@@ -1,5 +1,5 @@
-import type { AppRequest } from '../../shared/worker-context.js';
-import type { D1Database } from '../../shared/cf-bindings.js';
+import type { AppRequest } from '../worker-context.js';
+import type { D1Database } from '../cf-bindings.js';
 
 /** Display urgency derived from action_status and the due date. */
 export type BillUrgency = 'needs_review' | 'paid' | 'waived' | 'overdue' | 'due_soon' | 'open';

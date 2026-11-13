@@ -1,6 +1,6 @@
 import { authorizeRunnerControl, RUNNER_SCOPES } from '../utils/runner-auth.js';
-import type { AppRequest } from '../../shared/worker-context.js';
-import type { D1Database } from '../../shared/cf-bindings.js';
+import type { AppRequest } from '../worker-context.js';
+import type { D1Database } from '../cf-bindings.js';
 
 const CAPABILITIES = new Set(['sms_ai', 'carrier_browser']);
 const STATES = new Set([

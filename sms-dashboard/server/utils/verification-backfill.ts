@@ -1,6 +1,6 @@
 import { extractVerificationCode } from './verification.js';
 import { FILTER_STATUS } from './spam-filter.js';
-import type { D1Database } from '../../shared/cf-bindings.js';
+import type { D1Database } from '../cf-bindings.js';
 
 const DEFAULT_PAGE_SIZE = 200;
 const MAX_PAGE_SIZE = 500;

@@ -1,7 +1,7 @@
 // Spam/marketing SMS classification.
 //
 import { hasVerificationCode } from './verification.js';
-import type { D1Database } from '../../shared/cf-bindings.js';
+import type { D1Database } from '../cf-bindings.js';
 
 const SHORT_CODE_COUNTRY_PREFIXES = ['86', '852'];
 

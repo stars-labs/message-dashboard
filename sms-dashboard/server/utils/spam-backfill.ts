@@ -12,7 +12,7 @@
 
 import { classifyMessage, loadActiveRules, FILTER_STATUS } from './spam-filter.js';
 import type { ClassifiableMessage } from './spam-filter.js';
-import type { D1Database } from '../../shared/cf-bindings.js';
+import type { D1Database } from '../cf-bindings.js';
 
 /** Rows fetched and updated per iteration. Also the D1 batch size. */
 const PAGE_SIZE = 200;

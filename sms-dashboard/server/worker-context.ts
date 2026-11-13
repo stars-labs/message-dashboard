@@ -1,7 +1,7 @@
 // Worker bindings and the request object the middleware hands to handlers.
 //
 // Types-only module: every export is erased at runtime. Import it with
-// `import type { Env } from '../shared/worker-context.js'`.
+// `import type { Env } from './worker-context.js'`.
 
 import type {
   D1Database,

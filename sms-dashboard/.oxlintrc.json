@@ -19,7 +19,12 @@
     "dist/**",
     "balance-agent/dist/**",
     "balance-agent/release/**",
-    "server/frontend-assets.js"
+    "server/frontend-assets.js",
+    "shared/**",
+    "config/**",
+    "eslint.config.ts",
+    "worker-configuration.d.ts",
+    "tsconfig*.json"
   ],
   "overrides": [
     {

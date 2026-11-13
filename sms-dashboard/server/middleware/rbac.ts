@@ -16,7 +16,7 @@ import {
   permissionsForRoles,
 } from '../../config/auth0-roles.js';
 import type { Permission } from '../../config/auth0-roles.js';
-import type { AppRequest, Handler } from '../../shared/worker-context.js';
+import type { AppRequest, Handler } from '../worker-context.js';
 
 function forbidden(message: string): Response {
   return new Response(JSON.stringify({ error: 'Forbidden', message }), {

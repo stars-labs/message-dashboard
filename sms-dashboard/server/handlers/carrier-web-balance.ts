@@ -6,8 +6,8 @@ import {
   RUNNER_SCOPES,
 } from '../utils/runner-auth.js';
 import type { RunnerAuth } from '../utils/runner-auth.js';
-import type { AppRequest } from '../../shared/worker-context.js';
-import type { D1Database, D1PreparedStatement } from '../../shared/cf-bindings.js';
+import type { AppRequest } from '../worker-context.js';
+import type { D1Database, D1PreparedStatement } from '../cf-bindings.js';
 
 /** The browser-driven balance providers. Keys are sim_balance_web_jobs.provider. */
 type WebProvider = 'china_unicom' | 'm1_prepaid';

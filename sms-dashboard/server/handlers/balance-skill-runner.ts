@@ -10,8 +10,8 @@ import {
   runnerCanAccessOwner,
   RUNNER_SCOPES,
 } from '../utils/runner-auth.js';
-import type { AppRequest } from '../../shared/worker-context.js';
-import type { D1Database, D1PreparedStatement } from '../../shared/cf-bindings.js';
+import type { AppRequest } from '../worker-context.js';
+import type { D1Database, D1PreparedStatement } from '../cf-bindings.js';
 
 const LEASE_SECONDS = 120;
 

@@ -35,6 +35,7 @@ from the reviewing session first — ask, don't improvise.
     `no-unsafe-argument` (same as family-tree). Nothing else is relaxed anywhere.
 - **oxlint is removed**: package, `.oxlintrc.json`, `lint` script, `flake.nix`
   devshell entry, CI step. Delete `docs/web-lint-audit.md` (superseded by this file).
+  Timing: see "Gate migration" below.
 - `bun run check` runs typecheck → lint → test → build; CI runs `bun run check`.
 
 **Daemon (`orange-pi-daemon/`)**
@@ -83,24 +84,48 @@ it: request bodies, query/params, D1 rows, KV values, `fetch` responses
   `(error as Error)`.
 - Index-signature types (`[k: string]: unknown`) are removed; model the real shape.
 - Replace the NUL byte literal in `server/handlers/balance-queries.ts:548` with `'\0'`.
-- Cloudflare types come from `wrangler types` (generated, checked in, with a
-  drift gate like daemon-wire). Delete `shared/cf-bindings.ts` and the
-  hand-written `Env`.
+- Cloudflare types come from `wrangler types` (generated `worker-configuration.d.ts`,
+  checked in, drift gate `wrangler types --check`). Delete `shared/cf-bindings.ts`
+  and the hand-written `Env`; bindings are ambient globals, no re-export file.
 
 ## Order
 
 Stop after each phase and report the commit range to the reviewing session.
 Do not start the next phase until it is approved.
 
-0. **Foundation.** base tsconfig + references, `wrangler types`, ESLint config,
-   remove oxlint, `check` script, CI. Not-yet-converted JS is simply outside every
-   project; nothing is baselined or ignored by list.
+### Gate migration
+
+The strict flags cannot land on existing code in one green commit, so areas join
+the strict gate one at a time:
+
+- **Strict gate**: `tsconfig.json` references + ESLint `files`. It lists only
+  areas that have joined. ESLint never sees a `.js` file.
+- **Legacy gate**: the pre-migration tsconfig renamed to `tsconfig.legacy.json`,
+  plus oxlint, both scoped to the areas that have not joined yet. No area is ever
+  unchecked.
+- An area moves from legacy to strict in the same commit that makes it clean
+  under the strict config. The commit that moves the last area deletes
+  `tsconfig.legacy.json`, oxlint (package, config, flake entry) and
+  `docs/web-lint-audit.md`.
+- `bun run check` runs both gates while both exist; every commit passes it.
+
+Worker-only declarations live in `server/`, not `shared/`: `worker-context.ts`
+and `secrets-env.d.ts`. Secrets set with `wrangler secret put` are declared once,
+in `server/secrets-env.d.ts`, as optional properties merged into the generated
+`Env`. `shared/` never includes `worker-configuration.d.ts` (its Durable Object
+types import `server/`).
+
+0. **Foundation.** base tsconfig + references, `wrangler types` with drift gate
+   (`wrangler types --check`), ESLint config, `check` script, CI, legacy gate.
+   Joins: shared + config, made clean.
 1. **Re-type existing TS under the strict config**, one area per commit series:
-   shared + config → server → client/lib. Valibot boundaries land here.
+   server → client/lib. Each series ends with that area joining. Valibot
+   boundaries land here.
 2. **Remaining server JS + all server tests** to TS.
 3. **Client:** Svelte `lang="ts"`, `svelte-check`, client tests.
-4. **runner-core, balance-agent, scripts, configs, test setup.** Remove `allowJs`;
-   add a gate that fails on any tracked non-generated JS file.
+4. **runner-core, balance-agent, scripts, configs, test setup.** The last area
+   joining removes the legacy gate; add a gate that fails on any tracked
+   non-generated JS file.
 5. **Daemon lints** (D1): `[lints]` + `clippy.toml`, fix findings. `indexing_slicing`
    and `unwrap_used` in AT parsing get real error paths, not `.get().unwrap()`.
 6. **Daemon types** (D2): enums, newtypes.

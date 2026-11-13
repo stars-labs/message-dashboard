@@ -1,6 +1,6 @@
 import { parseSingtelPostpaidBillSms } from './singtel-postpaid-bill.js';
 import type { SingtelBill } from './singtel-postpaid-bill.js';
-import type { D1Database } from '../../shared/cf-bindings.js';
+import type { D1Database } from '../cf-bindings.js';
 
 const RECONCILIATION_PAGE_SIZE = 100;
 const SINGTEL_BILL_PREFIX = '<Singtel>Dear customer, your latest bill for Singtel a/c ';

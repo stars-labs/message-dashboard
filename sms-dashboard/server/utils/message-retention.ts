@@ -4,7 +4,7 @@
 // long as anything else, so a rule that turns out to be wrong can still be
 // audited months later.
 
-import type { D1Database } from '../../shared/cf-bindings.js';
+import type { D1Database } from '../cf-bindings.js';
 
 /** SQLite date modifier defining the retention window. */
 export const RETENTION_MODIFIER = '-12 months';

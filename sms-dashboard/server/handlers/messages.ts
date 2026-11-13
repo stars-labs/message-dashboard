@@ -1,8 +1,8 @@
 import { nanoid } from 'nanoid';
 import { VISIBLE_FILTER_STATUSES } from '../utils/spam-filter.js';
 import { normalizeRecipient } from '../utils/recipient.js';
-import type { AppRequest } from '../../shared/worker-context.js';
-import type { D1Database } from '../../shared/cf-bindings.js';
+import type { AppRequest } from '../worker-context.js';
+import type { D1Database } from '../cf-bindings.js';
 
 const D1_MAX_BOUND_PARAMETERS = 100;
 

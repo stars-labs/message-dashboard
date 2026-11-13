@@ -31,8 +31,8 @@ import { purgeExpiredMessages } from './utils/message-retention.js';
 import { sweepPending } from './utils/spam-backfill.js';
 import { reconcileCarrierBillMessages } from './utils/carrier-billing.js';
 import { readCookie } from './utils/session-token.js';
-import type { Handler, AppRequest, Env } from '../shared/worker-context.js';
-import type { ExecutionContext } from '../shared/cf-bindings.js';
+import type { Handler, AppRequest, Env } from './worker-context.js';
+import type { ExecutionContext } from './cf-bindings.js';
 import { errorText } from './utils/d1-error.js';
 
 type Method = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'OPTIONS';

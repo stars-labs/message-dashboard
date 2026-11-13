@@ -1,0 +1,15 @@
+// Build and lint tooling: ESLint's own config runs under Bun, not in the Worker
+// or the browser.
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "tsBuildInfoFile": "./node_modules/.tmp/tooling.tsbuildinfo",
+    "types": ["bun"],
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "declaration": true,
+    "outDir": "./node_modules/.tmp/tooling-declarations"
+  },
+  "include": ["eslint.config.ts"]
+}

@@ -15,7 +15,7 @@ import { createRoleConfig, getKnownRoles } from '../../config/auth0-roles.js';
 import { getUserRoles, listUsersWithRoles, setUserRole } from '../utils/auth0-management.js';
 import { revokeUserSessions } from '../utils/user-sessions.js';
 import { writeAuditLog } from '../utils/audit-log.js';
-import type { AppRequest } from '../../shared/worker-context.js';
+import type { AppRequest } from '../worker-context.js';
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {

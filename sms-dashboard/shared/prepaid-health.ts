@@ -81,8 +81,9 @@ function timestampValue(value: string | null | undefined): number | null {
   return Number.isFinite(time) ? time : null;
 }
 
-function dateParts(value: unknown): DateParts | null {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ''));
+function dateParts(value: string | null | undefined): DateParts | null {
+  if (!value) return null;
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
   if (!match) return null;
   const year = Number(match[1]);
   const month = Number(match[2]);
@@ -104,7 +105,7 @@ function regionalDate(now: Date, country: string | null): DateParts | null {
     day: '2-digit',
   }).formatToParts(now);
   const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  return dateParts(`${values.year}-${values.month}-${values.day}`);
+  return dateParts(`${values['year']}-${values['month']}-${values['day']}`);
 }
 
 function currenciesMatch(
@@ -140,7 +141,7 @@ export function evaluatePrepaidHealth({
   if (latestQueryStatus === 'failed' || latestQueryStatus === 'timed_out') {
     reasons.add('query_failed');
   }
-  if (automationSupported === false) reasons.add('automation_unsupported');
+  if (!automationSupported) reasons.add('automation_unsupported');
   if (verificationPending) reasons.add('verification_pending');
 
   if (balanceValue == null) {

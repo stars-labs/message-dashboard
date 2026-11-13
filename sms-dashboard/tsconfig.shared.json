@@ -1,0 +1,16 @@
+// Runs in both the Worker and the browser, so it assumes neither: ES2023 only,
+// no DOM and no Node globals. worker-configuration.d.ts is deliberately absent:
+// its Durable Object types import server/index.ts, which would drag the whole
+// server (still on the legacy gate) into this project.
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "tsBuildInfoFile": "./node_modules/.tmp/shared.tsbuildinfo",
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "declaration": true,
+    "outDir": "./node_modules/.tmp/shared-declarations"
+  },
+  "include": ["shared/**/*.ts", "config/**/*.ts"]
+}

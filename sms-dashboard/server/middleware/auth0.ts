@@ -1,7 +1,7 @@
 import { auth0Handler } from '../handlers/auth0';
 import { createRoleConfig, rolesFromToken } from '../../config/auth0-roles.js';
 import { extractSessionToken } from '../utils/session-token.js';
-import type { AppRequest, Handler, RequestUser } from '../../shared/worker-context.js';
+import type { AppRequest, Handler, RequestUser } from '../worker-context.js';
 
 /** The session payload KV holds under the auth_token value. */
 interface StoredSession {

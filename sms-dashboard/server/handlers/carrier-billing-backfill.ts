@@ -2,8 +2,8 @@ import { previewCarrierBillBackfill, AccountNotReadyError } from '../utils/carri
 import type { BackfillPreview } from '../utils/carrier-billing-backfill.js';
 import { processCarrierBillMessage } from '../utils/carrier-billing.js';
 import type { BillOutcome } from '../utils/carrier-billing.js';
-import type { AppRequest } from '../../shared/worker-context.js';
-import type { D1Database } from '../../shared/cf-bindings.js';
+import type { AppRequest } from '../worker-context.js';
+import type { D1Database } from '../cf-bindings.js';
 
 /** The outcomes the execute summary counts. Processing can also return 'ignored'. */
 type CountedOutcome = Extract<BillOutcome, 'detected' | 'duplicate_detected' | 'parse_conflict' | 'already_processed'>;

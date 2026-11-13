@@ -1,8 +1,8 @@
 // ICCID Mappings handler - manages user-authoritative sims table
 // New schema: sims table is purely user-managed, status computed dynamically
 
-import type { AppRequest } from '../../shared/worker-context.js';
-import type { D1Database } from '../../shared/cf-bindings.js';
+import type { AppRequest } from '../worker-context.js';
+import type { D1Database } from '../cf-bindings.js';
 
 export const SIM_SERVICE_TYPES = ['unknown', 'prepaid', 'postpaid', 'balance_managed'] as const;
 export const SIM_SERVICE_TYPE_SOURCES = [

@@ -11,7 +11,7 @@
 // success: the callers use this to grant and revoke access.
 
 import { createRoleConfig } from '../../config/auth0-roles.js';
-import type { Env } from '../../shared/worker-context.js';
+import type { Env } from '../worker-context.js';
 
 const TOKEN_CACHE_PREFIX = 'mgmt-token:';
 const ROLE_ID_CACHE_KEY = 'mgmt-role-ids';

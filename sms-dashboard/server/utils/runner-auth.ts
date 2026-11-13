@@ -1,5 +1,5 @@
 import { auth0Handler } from '../handlers/auth0.js';
-import type { AppRequest } from '../../shared/worker-context.js';
+import type { AppRequest } from '../worker-context.js';
 
 export const RUNNER_SCOPES = Object.freeze({
   heartbeat: 'balance:runners:heartbeat',

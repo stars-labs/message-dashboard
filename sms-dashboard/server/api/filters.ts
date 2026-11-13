@@ -10,8 +10,8 @@ import { RULE_TYPE, normalizeSender } from '../utils/spam-filter.js';
 import type { SpamRule } from '../utils/spam-filter.js';
 import { processRuleHistoryPage } from '../utils/filter-history.js';
 import type { Permission } from '../../config/auth0-roles.js';
-import type { AppRequest } from '../../shared/worker-context.js';
-import type { D1Database } from '../../shared/cf-bindings.js';
+import type { AppRequest } from '../worker-context.js';
+import type { D1Database } from '../cf-bindings.js';
 
 const VALID_RULE_TYPES: string[] = Object.values(RULE_TYPE);
 
@@ -23,10 +23,10 @@ const MIN_SENDER_LENGTH = 3;
 
 /** The router interface setupFilterRoutes needs. */
 interface Router {
-  get(path: string, ...handlers: import('../../shared/worker-context.js').Handler[]): void;
-  post(path: string, ...handlers: import('../../shared/worker-context.js').Handler[]): void;
-  put(path: string, ...handlers: import('../../shared/worker-context.js').Handler[]): void;
-  delete(path: string, ...handlers: import('../../shared/worker-context.js').Handler[]): void;
+  get(path: string, ...handlers: import('../worker-context.js').Handler[]): void;
+  post(path: string, ...handlers: import('../worker-context.js').Handler[]): void;
+  put(path: string, ...handlers: import('../worker-context.js').Handler[]): void;
+  delete(path: string, ...handlers: import('../worker-context.js').Handler[]): void;
 }
 
 /** A filter_rules row. */

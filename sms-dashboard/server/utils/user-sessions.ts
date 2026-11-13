@@ -10,7 +10,7 @@
 // instead of 24 hours. True instant revocation would need a per-request D1 lookup, which
 // is not worth the added latency on every API call.
 
-import type { Env } from '../../shared/worker-context.js';
+import type { Env } from '../worker-context.js';
 
 const INDEX_PREFIX = 'usess:';
 
