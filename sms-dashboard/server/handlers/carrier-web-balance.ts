@@ -523,7 +523,7 @@ export const carrierWebBalanceHandler = {
     const lease = await requireLease(request, body, auth);
     if (lease.response) return lease.response;
     const { job, body: leased } = lease;
-    const balance = Number(leased.balance);
+    const balance = typeof leased.balance === 'number' ? leased.balance : Number.NaN;
     if (!Number.isFinite(balance) || balance < -100000 || balance > 1000000) {
       return json({ error: 'balance is invalid' }, 400);
     }

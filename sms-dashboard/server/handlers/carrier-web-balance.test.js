@@ -361,6 +361,33 @@ describe('carrier browser balance job protocol', () => {
     ).toEqual({ value: 18.25, currency: 'CNY' });
   });
 
+  test.each([
+    ['null', null],
+    ['an empty string', ''],
+    ['an empty list', []],
+    ['a boolean', true],
+    ['a numeric string', '18.25'],
+    ['a missing value', undefined],
+  ])('refuses a completion whose balance is %s', async (_case, balance) => {
+    const job = await claim();
+    const response = await carrierWebBalanceHandler.complete(
+      request(db, {
+        id: job.id,
+        body: {
+          runner_id: 'runner-1',
+          balance,
+          currency: 'CNY',
+          account_number: '+8617600419127',
+        },
+      }),
+    );
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'balance is invalid' });
+    expect(
+      sqlite.query("SELECT status FROM sim_balance_checks WHERE id='check-1'").get().status,
+    ).toBe('queued');
+  });
+
   test('stores both cash balance and account expiry for M1 prepaid', async () => {
     switchToM1();
     const job = await claim();
