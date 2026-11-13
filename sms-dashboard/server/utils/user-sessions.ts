@@ -11,14 +11,9 @@
 // is not worth the added latency on every API call.
 
 import * as v from 'valibot';
+import { readKvJson, type KV, type KVOperation } from '../lib/kv.js';
 
-interface SessionStore {
-  get(key: string, options: { type: 'json' }): Promise<unknown>;
-  put(key: string, value: string, options: { expirationTtl: number }): Promise<void>;
-  delete(key: string): Promise<void>;
-}
-
-type SessionEnv<Op extends keyof SessionStore> = { SESSIONS: Pick<SessionStore, Op> };
+type SessionEnv<Op extends KVOperation> = { SESSIONS: KV<Op> };
 
 const TokenIndex = v.fallback(
   v.pipe(
@@ -38,8 +33,10 @@ function indexKey(userId: string): string {
 }
 
 async function readIndex(env: SessionEnv<'get'>, userId: string): Promise<string[]> {
-  const raw = await env.SESSIONS.get(indexKey(userId), { type: 'json' });
-  return v.parse(TokenIndex, raw);
+  const stored = await readKvJson(env.SESSIONS, indexKey(userId), TokenIndex);
+  if (stored === null) return [];
+  if (!stored.ok) throw new Error(`Session index for ${userId} is not JSON: ${stored.error}`);
+  return stored.value;
 }
 
 /** Record that `token` is a live session for `userId`. Called at login. */

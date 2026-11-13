@@ -7,12 +7,7 @@ function kvStub(initial: Record<string, string> = {}) {
   const store = new Map(Object.entries(initial));
   return {
     store,
-    get: (key: string) => {
-      const raw = store.get(key);
-      if (raw === undefined) return Promise.resolve(null);
-      const parsed = parseJson(raw, v.unknown());
-      return parsed.ok ? Promise.resolve(parsed.value) : Promise.reject(new Error(parsed.error));
-    },
+    get: (key: string) => Promise.resolve(store.get(key) ?? null),
     put: (key: string, value: string) => {
       store.set(key, value);
       return Promise.resolve();
@@ -141,5 +136,16 @@ describe('revokeUserSessions', () => {
   test('tolerates a corrupt index without throwing', async () => {
     const e = env({ 'usess:auth0|1': JSON.stringify({ not: 'an array' }) });
     expect(await revokeUserSessions(e, 'auth0|1')).toBe(0);
+  });
+
+  test('fails loudly when the stored index is not JSON, so revocation never silently skips', async () => {
+    const e = env({ 'usess:auth0|1': '["tok-a"' });
+    let thrown: unknown;
+    try {
+      await revokeUserSessions(e, 'auth0|1');
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(Error);
   });
 });
