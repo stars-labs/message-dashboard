@@ -97,6 +97,8 @@ export default defineConfig([
       '@typescript-eslint/no-unused-vars': unusedVars,
       // `as const` stays legal; no `as`, no `<T>x`, no `!` non-null assertion.
       '@typescript-eslint/consistent-type-assertions': ['error', { assertionStyle: 'never' }],
+      '@typescript-eslint/no-shadow': 'error',
+      'preserve-caught-error': 'error',
       // A switch over a union names every member; a `default` cannot hide a new one.
       '@typescript-eslint/switch-exhaustiveness-check': [
         'error',
