@@ -1,20 +1,12 @@
+import * as v from 'valibot';
+import { parseJson, readJson, type Schema } from '../../shared/parse-json.js';
+import { queryFirst, type D1 } from '../lib/d1.js';
 import {
   previewCarrierBillBackfill,
   AccountNotReadyError,
 } from '../utils/carrier-billing-backfill.js';
 import type { BackfillPreview } from '../utils/carrier-billing-backfill.js';
 import { processCarrierBillMessage } from '../utils/carrier-billing.js';
-import type { BillOutcome } from '../utils/carrier-billing.js';
-import * as v from 'valibot';
-import { readJson, type Schema } from '../../shared/parse-json.js';
-import type { AppRequest } from '../worker-context.js';
-import type { D1Database } from '../cf-bindings.js';
-
-/** The outcomes the execute summary counts. Processing can also return 'ignored'. */
-type CountedOutcome = Extract<
-  BillOutcome,
-  'detected' | 'duplicate_detected' | 'parse_conflict' | 'already_processed'
->;
 
 const AccountId = v.pipe(v.string(), v.nonEmpty());
 
@@ -28,6 +20,36 @@ const ExecuteBody = v.object({
   preview_digest: v.string(),
 });
 
+/** The outcomes an execution counts; processing can also report 'ignored' and 'failed'. */
+const ExecuteSummary = v.object({
+  detected: v.number(),
+  duplicate_detected: v.number(),
+  parse_conflict: v.number(),
+  already_processed: v.number(),
+});
+
+type ExecuteSummary = v.InferOutput<typeof ExecuteSummary>;
+
+/** The stored result of an execution, which a retry with the same key replays. */
+const StoredExecution = v.object({ summary: v.optional(ExecuteSummary) });
+
+const PriorExecutionRow = v.object({
+  billing_account_id: v.string(),
+  metadata_json: v.string(),
+});
+
+interface PreviewRequest {
+  env: { DB: D1<'first' | 'all'> };
+  text(): Promise<string>;
+}
+
+interface ExecuteRequest {
+  env: { DB: D1 };
+  user?: { id: string };
+  headers: { get(name: string): string | null };
+  text(): Promise<string>;
+}
+
 type BodyResult<T> = { body: T } | { response: Response };
 
 function json(body: unknown, status = 200): Response {
@@ -37,7 +59,10 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-async function readBody<T>(request: AppRequest, schema: Schema<T>): Promise<BodyResult<T>> {
+async function readBody<T>(
+  request: { text(): Promise<string> },
+  schema: Schema<T>,
+): Promise<BodyResult<T>> {
   const raw = await readJson(request, v.unknown());
   if (!raw.ok) return { response: json({ error: 'Body must be JSON' }, 400) };
   const parsed = v.safeParse(schema, raw.value);
@@ -68,7 +93,10 @@ function publicPreview(preview: BackfillPreview) {
 
 type BuildPreviewResult = { preview: BackfillPreview } | { response: Response };
 
-async function buildPreview(db: D1Database, accountId: string): Promise<BuildPreviewResult> {
+async function buildPreview(
+  db: D1<'first' | 'all'>,
+  accountId: string,
+): Promise<BuildPreviewResult> {
   try {
     return { preview: await previewCarrierBillBackfill(db, accountId) };
   } catch (error) {
@@ -80,7 +108,7 @@ async function buildPreview(db: D1Database, accountId: string): Promise<BuildPre
 }
 
 export const carrierBillingBackfillHandler = {
-  async preview(request: AppRequest): Promise<Response> {
+  async preview(request: PreviewRequest): Promise<Response> {
     const parsed = await readBody(request, PreviewBody);
     if ('response' in parsed) return parsed.response;
     const result = await buildPreview(request.env.DB, parsed.body.account_id);
@@ -88,7 +116,7 @@ export const carrierBillingBackfillHandler = {
     return json(publicPreview(result.preview));
   },
 
-  async execute(request: AppRequest): Promise<Response> {
+  async execute(request: ExecuteRequest): Promise<Response> {
     const actor = request.user?.id;
     const key = request.headers.get('Idempotency-Key')?.trim();
     if (!actor) return json({ error: 'Unauthorized' }, 401);
@@ -99,26 +127,26 @@ export const carrierBillingBackfillHandler = {
     if ('response' in parsed) return parsed.response;
     const body = parsed.body;
     const accountId = body.account_id;
-    const prior = await request.env.DB.prepare(
-      `
+    const prior = await queryFirst(
+      request.env.DB.prepare(
+        `
       SELECT billing_account_id, metadata_json
       FROM carrier_billing_account_events
       WHERE actor_subject = ? AND idempotency_key = ?
     `,
-    )
-      .bind(actor, key)
-      .first<{ billing_account_id: string; metadata_json: string | null }>();
+      ).bind(actor, key),
+      PriorExecutionRow,
+    );
     if (prior) {
       if (prior.billing_account_id !== accountId) {
         return json({ error: 'Idempotency key was already used for another account' }, 409);
       }
-      let metadata: { summary?: unknown } = {};
-      try {
-        metadata = JSON.parse(prior.metadata_json || '{}');
-      } catch {
-        metadata = {};
-      }
-      return json({ success: true, idempotent: true, summary: metadata.summary ?? null });
+      const stored = parseJson(prior.metadata_json, StoredExecution);
+      return json({
+        success: true,
+        idempotent: true,
+        summary: stored.ok ? (stored.value.summary ?? null) : null,
+      });
     }
 
     const result = await buildPreview(request.env.DB, accountId);
@@ -140,7 +168,7 @@ export const carrierBillingBackfillHandler = {
       return json({ error: 'Backfill preview contains no bill candidates' }, 400);
     }
 
-    const summary: Record<CountedOutcome, number> = {
+    const summary: ExecuteSummary = {
       detected: 0,
       duplicate_detected: 0,
       parse_conflict: 0,
@@ -148,11 +176,18 @@ export const carrierBillingBackfillHandler = {
     };
     for (const candidate of preview.candidates) {
       const processed = await processCarrierBillMessage(request.env.DB, candidate.message);
-      // 'ignored' and 'failed' are not counted: the preview already guaranteed a
-      // parsable bill, so they would indicate a concurrent change, not a summary
-      // category the operator acts on.
-      if (Object.hasOwn(summary, processed.outcome)) {
-        summary[processed.outcome as CountedOutcome] += 1;
+      // The preview already guaranteed a parsable bill, so 'ignored' and 'failed'
+      // would indicate a concurrent change, not a summary category the operator acts on.
+      switch (processed.outcome) {
+        case 'detected':
+        case 'duplicate_detected':
+        case 'parse_conflict':
+        case 'already_processed':
+          summary[processed.outcome] += 1;
+          break;
+        case 'ignored':
+        case 'failed':
+          break;
       }
     }
 
