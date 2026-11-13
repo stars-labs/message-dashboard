@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from 
 import { Database } from 'bun:sqlite';
 import * as v from 'valibot';
 import type { Schema } from '../../shared/parse-json.js';
-import { createWebBalanceSchema } from '../../test/web-balance-schema.js';
+import { createBalanceSchema } from '../../test/balance-schema.js';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
 import type { D1, D1Batch } from '../lib/d1.js';
 import { auth0Handler } from './auth0.js';
@@ -19,7 +19,7 @@ const BROWSER_SCOPE = 'balance:browser:run';
 const SIM_NUMBER = '+8617600419127';
 const M1_NUMBER = '+6590950236';
 
-type TestDb = D1 & D1Batch;
+type TestDb = D1 & D1Batch<'run'>;
 
 interface RequestOptions {
   id?: string;
@@ -74,7 +74,7 @@ let verifySpy: Mock<typeof auth0Handler.verifyToken>;
 
 beforeEach(async () => {
   sqlite = new Database(':memory:');
-  await createWebBalanceSchema(sqlite);
+  await createBalanceSchema(sqlite);
   sqlite.run(`
     INSERT INTO sims (iccid, sim_index, phone_number) VALUES ('iccid-1', 1, '${SIM_NUMBER}');
     INSERT INTO sim_balance_checks (

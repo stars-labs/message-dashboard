@@ -5,6 +5,7 @@ import {
   validateBalanceSkillDecision,
 } from '../utils/balance-skill.js';
 import type { BalanceDecision, BalanceSkill } from '../utils/balance-skill.js';
+import type { CheckStatus } from '../utils/balance-status.js';
 import {
   authorizeRunnerControl,
   runnerCanAccessOwner,
@@ -29,7 +30,7 @@ interface SkillJob {
   lease_owner: string | null;
   lease_expires_at: string | null;
   attempts: number;
-  check_status: string;
+  check_status: CheckStatus;
   sim_iccid: string | null;
   response_sender: string | null;
   requested_by_subject: string | null;

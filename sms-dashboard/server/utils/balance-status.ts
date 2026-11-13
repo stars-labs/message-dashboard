@@ -27,6 +27,10 @@ export const WEB_JOB_STATUSES = [
   'stopped',
 ] as const;
 
+/** sim_balance_skill_jobs.status, as the table's CHECK constraint lists it. */
+export const SKILL_JOB_STATUSES = ['pending', 'leased', 'completed', 'stopped'] as const;
+
 export type CheckStatus = (typeof CHECK_STATUSES)[number];
 export type ActiveWebJobStatus = (typeof ACTIVE_WEB_JOB_STATUSES)[number];
 export type WebJobStatus = (typeof WEB_JOB_STATUSES)[number];
+export type SkillJobStatus = (typeof SKILL_JOB_STATUSES)[number];

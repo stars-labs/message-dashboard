@@ -28,10 +28,6 @@ import {
 const WEB_PROVIDERS = ['china_unicom', 'm1_prepaid'] as const;
 
 type WebProvider = (typeof WEB_PROVIDERS)[number];
-interface Preparer<Statement> {
-  prepare(query: string): { bind(...values: unknown[]): Statement };
-}
-
 type WebEventType =
   | ActiveWebJobStatus
   | 'queued'
@@ -242,12 +238,12 @@ async function loadJob(db: D1<'first'>, id: string | undefined): Promise<WebJob 
   );
 }
 
-function eventStatement<Statement>(
-  db: Preparer<Statement>,
+function eventStatement(
+  db: D1<'run'>,
   jobId: string,
   eventType: WebEventType,
   detail: Readonly<Record<string, string | number>> = {},
-): Statement {
+): D1Statement<'run'> {
   return db
     .prepare(
       `
@@ -778,8 +774,8 @@ function providerForProfile(profile: { skill_config?: string | null }): WebProvi
   return provider;
 }
 
-export function createCarrierWebBalanceStatements<Statement>(
-  db: Preparer<Statement>,
+export function createCarrierWebBalanceStatements(
+  db: D1<'run'>,
   {
     checkId,
     jobId,
@@ -793,7 +789,7 @@ export function createCarrierWebBalanceStatements<Statement>(
     profile: { id: string; parser_version: string; skill_config?: string | null };
     requestedBySubject?: string | null;
   },
-): Statement[] {
+): D1Statement<'run'>[] {
   return [
     db
       .prepare(

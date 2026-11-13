@@ -110,8 +110,9 @@ it: request bodies, query/params, D1 rows, KV values, `fetch` responses
   `eslint-disable`, no "test double" helper that casts.
 - Code whose behaviour is SQL is tested against real SQLite through
   `test/sqlite-d1.ts`, not against canned rows, on tables built by running the
-  real migration files (`test/sims-schema.ts`, `test/runner-schema.ts`). Pin the
-  old behaviour first: the test passes before the refactor and after it.
+  real migration files (`test/sims-schema.ts`, `test/runner-schema.ts`,
+  `test/balance-schema.ts`). Pin the old behaviour first: the test passes before
+  the refactor and after it.
 - Server tests run on native Bun; only `client/` tests load happy-dom
   (`bunfig.client.toml`). Build requests as real `Request` objects.
 - A value read from settings or config with a closed set of values (e.g. the AI
@@ -131,7 +132,6 @@ it: request bodies, query/params, D1 rows, KV values, `fetch` responses
 - Errors: `catch (error)` stays `unknown`; read it via one shared helper, not
   `(error as Error)`.
 - Index-signature types (`[k: string]: unknown`) are removed; model the real shape.
-- Replace the NUL byte literal in `server/handlers/balance-queries.ts:548` with `'\0'`.
 - Cloudflare types come from `wrangler types`, checked in as two files:
   `worker-runtime.d.ts` (runtime globals) and `worker-configuration.d.ts` (`Env`).
   The drift gate regenerates both and fails on any diff (`wrangler types --check`

@@ -10,7 +10,7 @@ import {
 } from './balance-queries.js';
 import { processCarrierBillMessages } from '../utils/carrier-billing.js';
 import { secretMatches } from '../lib/secret.js';
-import type { BalanceCheckRow } from './balance-queries.js';
+import type { BalanceCheckRow, SmsOutcome } from './balance-queries.js';
 
 import type { AppRequest, Env } from '../worker-context.js';
 import type { D1Database } from '../cf-bindings.js';
@@ -64,9 +64,6 @@ interface StoredMessage {
   purpose: 'user' | 'balance_maintenance';
   balance_check_id: string | null;
 }
-
-/** The three send outcomes the daemon reports. */
-type SmsOutcome = 'confirmed' | 'submitted_unconfirmed' | 'failed';
 
 const SMS_STATUS_FOR_OUTCOME: Record<SmsOutcome, string> = {
   confirmed: 'sent',
