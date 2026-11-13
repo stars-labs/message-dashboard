@@ -1,6 +1,6 @@
 import * as v from 'valibot';
-import { readJson, type Schema } from '../../shared/parse-json.js';
 import { queryAll, queryFirst, type D1, type D1Batch } from '../lib/d1.js';
+import { readBody, type MissingKeyMessages } from '../lib/request-body.js';
 import { handleAuth0, type AuthRequest } from '../middleware/auth0.js';
 import { requirePermission, enrichUserPermissions } from '../middleware/rbac.js';
 import { errorText } from '../utils/d1-error.js';
@@ -79,7 +79,6 @@ const MessageTagRow = v.object({
   color: v.nullable(v.string()),
 });
 
-const NOT_JSON_MESSAGE = 'Body must be JSON';
 const BODY_MESSAGE = 'Body must be a JSON object';
 const REQUIRED_MESSAGE = 'Keyword and tag are required';
 const KEYWORD_MESSAGE = 'keyword must be a string';
@@ -168,29 +167,19 @@ const HistoryBody = v.object(
   BODY_MESSAGE,
 );
 
-/**
- * Valibot reports a missing key with the object's message, so a field that needs
- * its own message when absent is listed here. Typed against the schemas, so a
- * field added without one fails to compile.
- */
 const CREATE_MISSING_KEY_MESSAGES = {
   keyword: REQUIRED_MESSAGE,
   tag: REQUIRED_MESSAGE,
-  color: 'Invalid color',
-  priority: PRIORITY_MESSAGE,
-  case_sensitive: CASE_SENSITIVE_MESSAGE,
-  whole_word: WHOLE_WORD_MESSAGE,
-} as const satisfies Record<keyof typeof CreateBody.entries, string>;
+} as const satisfies MissingKeyMessages<typeof CreateBody>;
 
 const BATCH_MISSING_KEY_MESSAGES = {
   messageIds: MESSAGE_IDS_MESSAGE,
-} as const satisfies Record<keyof typeof BatchBody.entries, string>;
+} as const satisfies MissingKeyMessages<typeof BatchBody>;
 
 const HISTORY_MISSING_KEY_MESSAGES = {
   since: RANGE_MESSAGE,
   until: RANGE_MESSAGE,
-  cursor: CURSOR_MESSAGE,
-} as const satisfies Record<keyof typeof HistoryBody.entries, string>;
+} as const satisfies MissingKeyMessages<typeof HistoryBody>;
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -207,29 +196,6 @@ async function gate(request: KeywordRequest, permission: Permission): Promise<Re
   const permResponse = requirePermission(permission)(request);
   if (permResponse) return permResponse;
   return null;
-}
-
-type BodyResult<T> = { body: T } | { response: Response };
-
-function bodyMessage(
-  issue: v.BaseIssue<unknown>,
-  missingKeyMessages: Readonly<Record<string, string>>,
-): string {
-  const key = issue.type === 'object' && issue.path?.length === 1 ? issue.path[0].key : undefined;
-  const missing = typeof key === 'string' ? missingKeyMessages[key] : undefined;
-  return missing ?? issue.message;
-}
-
-async function readBody<T>(
-  request: KeywordRequest,
-  schema: Schema<T>,
-  missingKeyMessages: Readonly<Record<string, string>> = {},
-): Promise<BodyResult<T>> {
-  const raw = await readJson(request, v.unknown());
-  if (!raw.ok) return { response: json({ error: NOT_JSON_MESSAGE }, 400) };
-  const parsed = v.safeParse(schema, raw.value);
-  if (parsed.success) return { body: parsed.output };
-  return { response: json({ error: bodyMessage(parsed.issues[0], missingKeyMessages) }, 400) };
 }
 
 export function setupKeywordRoutes(router: Router): void {
@@ -301,8 +267,8 @@ export function setupKeywordRoutes(router: Router): void {
 
     try {
       const parsed = await readBody(request, CreateBody, CREATE_MISSING_KEY_MESSAGES);
-      if ('response' in parsed) return parsed.response;
-      const { keyword, tag, color, priority, case_sensitive, whole_word } = parsed.body;
+      if (!parsed.ok) return json({ error: parsed.error }, 400);
+      const { keyword, tag, color, priority, case_sensitive, whole_word } = parsed.value;
 
       const existing = await queryFirst(
         request.env.DB.prepare(
@@ -361,9 +327,9 @@ export function setupKeywordRoutes(router: Router): void {
         return json({ error: 'Keyword not found' }, 404);
       }
 
-      const parsed = await readBody(request, UpdateBody);
-      if ('response' in parsed) return parsed.response;
-      const { keyword, tag, color, priority, case_sensitive, whole_word, is_active } = parsed.body;
+      const parsed = await readBody(request, UpdateBody, {});
+      if (!parsed.ok) return json({ error: parsed.error }, 400);
+      const { keyword, tag, color, priority, case_sensitive, whole_word, is_active } = parsed.value;
 
       if (
         (keyword !== undefined && keyword !== existing.keyword) ||
@@ -453,8 +419,8 @@ export function setupKeywordRoutes(router: Router): void {
     if (blocked) return blocked;
 
     const parsed = await readBody(request, BatchBody, BATCH_MISSING_KEY_MESSAGES);
-    if ('response' in parsed) return parsed.response;
-    const { messageIds } = parsed.body;
+    if (!parsed.ok) return json({ error: parsed.error }, 400);
+    const { messageIds } = parsed.value;
 
     if (messageIds.length === 0) {
       return json({ success: true, data: {} });
@@ -537,8 +503,8 @@ export function setupKeywordRoutes(router: Router): void {
       }
 
       const parsed = await readBody(request, HistoryBody, HISTORY_MISSING_KEY_MESSAGES);
-      if ('response' in parsed) return parsed.response;
-      const { since, until, cursor } = parsed.body;
+      if (!parsed.ok) return json({ error: parsed.error }, 400);
+      const { since, until, cursor } = parsed.value;
       if (since > until) return json({ error: RANGE_MESSAGE }, 400);
 
       const result = await processKeywordHistoryPage(

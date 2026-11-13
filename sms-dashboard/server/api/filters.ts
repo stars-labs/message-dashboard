@@ -5,8 +5,8 @@
 // spam is — see utils/spam-filter.ts.
 
 import * as v from 'valibot';
-import { readJson, type Schema } from '../../shared/parse-json.js';
 import { queryAll, queryFirst, type D1, type D1Batch } from '../lib/d1.js';
+import { readBody, type MissingKeyMessages } from '../lib/request-body.js';
 import { handleAuth0, type AuthRequest } from '../middleware/auth0.js';
 import { requirePermission, enrichUserPermissions } from '../middleware/rbac.js';
 import { RULE_TYPE, normalizeSender } from '../utils/spam-filter.js';
@@ -56,7 +56,6 @@ type FilterRuleRow = v.InferOutput<typeof FilterRuleRow>;
 
 const ReferencedRow = v.object({ referenced: v.number() });
 
-const NOT_JSON_MESSAGE = 'Body must be JSON';
 const BODY_MESSAGE = 'Body must be a JSON object';
 const RULE_TYPE_MESSAGE = `rule_type must be one of: ${Object.values(RULE_TYPE).join(', ')}`;
 const PATTERN_MESSAGE = 'pattern is required';
@@ -111,22 +110,15 @@ const HistoryBody = v.object(
   BODY_MESSAGE,
 );
 
-/**
- * Valibot reports a missing key with the object's message, so a field that needs
- * its own message when absent is listed here. Typed against the schemas, so a
- * field added without one fails to compile.
- */
 const CREATE_MISSING_KEY_MESSAGES = {
   rule_type: RULE_TYPE_MESSAGE,
   pattern: PATTERN_MESSAGE,
-  note: NOTE_MESSAGE,
-} as const satisfies Record<keyof typeof CreateBody.entries, string>;
+} as const satisfies MissingKeyMessages<typeof CreateBody>;
 
 const HISTORY_MISSING_KEY_MESSAGES = {
   since: RANGE_MESSAGE,
   until: RANGE_MESSAGE,
-  cursor: CURSOR_MESSAGE,
-} as const satisfies Record<keyof typeof HistoryBody.entries, string>;
+} as const satisfies MissingKeyMessages<typeof HistoryBody>;
 
 interface ValidatedRule {
   rule_type: RuleType;
@@ -151,29 +143,6 @@ async function gate(request: FilterRequest, permission: Permission): Promise<Res
   const permResponse = requirePermission(permission)(request);
   if (permResponse) return permResponse;
   return null;
-}
-
-type BodyResult<T> = { body: T } | { response: Response };
-
-function bodyMessage(
-  issue: v.BaseIssue<unknown>,
-  missingKeyMessages: Readonly<Record<string, string>>,
-): string {
-  const key = issue.type === 'object' && issue.path?.length === 1 ? issue.path[0].key : undefined;
-  const missing = typeof key === 'string' ? missingKeyMessages[key] : undefined;
-  return missing ?? issue.message;
-}
-
-async function readBody<T>(
-  request: FilterRequest,
-  schema: Schema<T>,
-  missingKeyMessages: Readonly<Record<string, string>> = {},
-): Promise<BodyResult<T>> {
-  const raw = await readJson(request, v.unknown());
-  if (!raw.ok) return { response: json({ error: NOT_JSON_MESSAGE }, 400) };
-  const parsed = v.safeParse(schema, raw.value);
-  if (parsed.success) return { body: parsed.output };
-  return { response: json({ error: bodyMessage(parsed.issues[0], missingKeyMessages) }, 400) };
 }
 
 /** Validate and normalise a rule payload. */
@@ -255,8 +224,8 @@ export function setupFilterRoutes(router: Router): void {
 
     try {
       const parsed = await readBody(request, CreateBody, CREATE_MISSING_KEY_MESSAGES);
-      if ('response' in parsed) return parsed.response;
-      const body = parsed.body;
+      if (!parsed.ok) return json({ error: parsed.error }, 400);
+      const body = parsed.value;
       const validated = validateRule({
         rule_type: body.rule_type,
         pattern: body.pattern,
@@ -303,9 +272,9 @@ export function setupFilterRoutes(router: Router): void {
       );
       if (!existing) return json({ error: 'Filter rule not found' }, 404);
 
-      const parsed = await readBody(request, UpdateBody);
-      if ('response' in parsed) return parsed.response;
-      const body = parsed.body;
+      const parsed = await readBody(request, UpdateBody, {});
+      if (!parsed.ok) return json({ error: parsed.error }, 400);
+      const body = parsed.value;
       if (
         (body.rule_type !== undefined && body.rule_type !== existing.rule_type) ||
         (body.pattern !== undefined && body.pattern.trim() !== existing.pattern)
@@ -384,8 +353,8 @@ export function setupFilterRoutes(router: Router): void {
       if (!rule) return json({ error: 'Filter rule not found' }, 404);
 
       const parsed = await readBody(request, HistoryBody, HISTORY_MISSING_KEY_MESSAGES);
-      if ('response' in parsed) return parsed.response;
-      const { since, until, cursor } = parsed.body;
+      if (!parsed.ok) return json({ error: parsed.error }, 400);
+      const { since, until, cursor } = parsed.value;
       if (since > until) return json({ error: RANGE_MESSAGE }, 400);
 
       const result = await processRuleHistoryPage(request.env.DB, rule, {

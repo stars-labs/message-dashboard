@@ -1,6 +1,7 @@
 import * as v from 'valibot';
-import { parseJson, readJson, type Schema } from '../../shared/parse-json.js';
+import { parseJson } from '../../shared/parse-json.js';
 import { queryFirst, type D1 } from '../lib/d1.js';
+import { readBody, type MissingKeyMessages } from '../lib/request-body.js';
 import {
   previewCarrierBillBackfill,
   AccountNotReadyError,
@@ -11,37 +12,30 @@ import { processCarrierBillMessage } from '../utils/carrier-billing.js';
 const ACCOUNT_MESSAGE = 'account_id is required';
 const PREVIEW_MESSAGE = 'expected_version must be an integer and preview_digest a string';
 
-const AccountId = v.pipe(v.string(), v.nonEmpty());
+const AccountId = v.pipe(v.string(ACCOUNT_MESSAGE), v.nonEmpty(ACCOUNT_MESSAGE));
 
 /** Request body of POST /api/carrier-billing/backfill/preview. */
-const PreviewBody = v.object({ account_id: AccountId });
+const PreviewBody = v.object({ account_id: AccountId }, ACCOUNT_MESSAGE);
+
+const PREVIEW_MISSING_KEY_MESSAGES = {
+  account_id: ACCOUNT_MESSAGE,
+} as const satisfies MissingKeyMessages<typeof PreviewBody>;
 
 /** Request body of POST /api/carrier-billing/backfill/execute: the preview the operator saw. */
-const ExecuteBody = v.object({
-  account_id: AccountId,
-  expected_version: v.pipe(v.number(), v.integer()),
-  preview_digest: v.string(),
-});
+const ExecuteBody = v.object(
+  {
+    account_id: AccountId,
+    expected_version: v.pipe(v.number(PREVIEW_MESSAGE), v.integer(PREVIEW_MESSAGE)),
+    preview_digest: v.string(PREVIEW_MESSAGE),
+  },
+  ACCOUNT_MESSAGE,
+);
 
-/**
- * The 400 message for a body whose first problem is the named field, missing
- * or invalid; a body that is not an object answers ACCOUNT_MESSAGE. Typed
- * against ExecuteBody, so a new field cannot go without a message.
- */
-const FIELD_MESSAGES = {
+const EXECUTE_MISSING_KEY_MESSAGES = {
   account_id: ACCOUNT_MESSAGE,
   expected_version: PREVIEW_MESSAGE,
   preview_digest: PREVIEW_MESSAGE,
-} as const satisfies Record<keyof typeof ExecuteBody.entries, string>;
-
-function isBodyField(key: unknown): key is keyof typeof FIELD_MESSAGES {
-  return typeof key === 'string' && Object.hasOwn(FIELD_MESSAGES, key);
-}
-
-function bodyMessage(issue: v.BaseIssue<unknown>): string {
-  const key = issue.path?.[0]?.key;
-  return isBodyField(key) ? FIELD_MESSAGES[key] : ACCOUNT_MESSAGE;
-}
+} as const satisfies MissingKeyMessages<typeof ExecuteBody>;
 
 /** The outcomes an execution counts; processing can also report 'ignored' and 'failed'. */
 const ExecuteSummary = v.object({
@@ -73,24 +67,11 @@ interface ExecuteRequest {
   text(): Promise<string>;
 }
 
-type BodyResult<T> = { body: T } | { response: Response };
-
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: { 'Content-Type': 'application/json' },
   });
-}
-
-async function readBody<T>(
-  request: { text(): Promise<string> },
-  schema: Schema<T>,
-): Promise<BodyResult<T>> {
-  const raw = await readJson(request, v.unknown());
-  if (!raw.ok) return { response: json({ error: 'Body must be JSON' }, 400) };
-  const parsed = v.safeParse(schema, raw.value);
-  if (parsed.success) return { body: parsed.output };
-  return { response: json({ error: bodyMessage(parsed.issues[0]) }, 400) };
 }
 
 function publicPreview(preview: BackfillPreview) {
@@ -121,9 +102,9 @@ async function buildPreview(
 
 export const carrierBillingBackfillHandler = {
   async preview(request: PreviewRequest): Promise<Response> {
-    const parsed = await readBody(request, PreviewBody);
-    if ('response' in parsed) return parsed.response;
-    const result = await buildPreview(request.env.DB, parsed.body.account_id);
+    const parsed = await readBody(request, PreviewBody, PREVIEW_MISSING_KEY_MESSAGES);
+    if (!parsed.ok) return json({ error: parsed.error }, 400);
+    const result = await buildPreview(request.env.DB, parsed.value.account_id);
     if ('response' in result) return result.response;
     return json(publicPreview(result.preview));
   },
@@ -135,9 +116,9 @@ export const carrierBillingBackfillHandler = {
     if (!key || key.length > 200) {
       return json({ error: 'A bounded Idempotency-Key header is required' }, 400);
     }
-    const parsed = await readBody(request, ExecuteBody);
-    if ('response' in parsed) return parsed.response;
-    const body = parsed.body;
+    const parsed = await readBody(request, ExecuteBody, EXECUTE_MISSING_KEY_MESSAGES);
+    if (!parsed.ok) return json({ error: parsed.error }, 400);
+    const body = parsed.value;
     const accountId = body.account_id;
     const prior = await queryFirst(
       request.env.DB.prepare(
