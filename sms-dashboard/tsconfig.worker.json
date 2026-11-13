@@ -20,7 +20,8 @@
     "server/handlers/phones.ts",
     "server/asset-cache-control.ts",
     "server/utils/keyword-match.ts",
-    "server/utils/keyword-color.ts"
+    "server/utils/keyword-color.ts",
+    "server/utils/recipient.ts"
   ],
   "exclude": ["**/*.test.ts"],
   "references": [{ "path": "./tsconfig.shared.json" }]

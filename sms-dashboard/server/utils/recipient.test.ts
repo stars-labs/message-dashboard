@@ -1,5 +1,3 @@
-// Run with: bun test server/utils/recipient.test.js
-//
 // The recipient of an outbound SMS is stored, then handed to the Rust daemon, which
 // interpolates it into an `AT+CMGS="..."` command. A CR in the value terminates that
 // command and the modem executes whatever follows. The daemon validates too, but this
@@ -111,6 +109,8 @@ describe('normalizeRecipient — malformed input', () => {
   });
 
   test('gives a reason on rejection', () => {
-    expect(normalizeRecipient('+65 123').reason).toBeTruthy();
+    const result = normalizeRecipient('+65 123');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBeTruthy();
   });
 });
