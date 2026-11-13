@@ -1065,6 +1065,31 @@ describe('POST /api/control/balance-checks/continue', () => {
     expect(db.batches).toHaveLength(1);
   });
 
+  test('rejects a check with no recorded reply', async () => {
+    const reply = {
+      id: 'bal-no-reply',
+      status: 'unparsed',
+      step_index: 0,
+      response_message_id: 'msg-menu',
+      raw_response: '1.话费与AI豆',
+      conversation_steps: profile.conversation_steps,
+    };
+    for (const missing of [
+      { response_message_id: null },
+      { raw_response: null, conversation_steps: '[{"response_contains":"","command":"1"}]' },
+    ]) {
+      const db = dbStub({ recent: { ...reply, ...missing } });
+      const response = await balanceQueriesHandler.continue(request(db, { check_id: reply.id }));
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({
+        success: false,
+        error: 'Balance check cannot be continued',
+      });
+      expect(db.batches).toHaveLength(0);
+    }
+  });
+
   test('rejects a reply that has no configured next step', async () => {
     const db = dbStub({
       recent: {

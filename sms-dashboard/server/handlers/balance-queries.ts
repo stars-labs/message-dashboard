@@ -1438,7 +1438,11 @@ export const balanceQueriesHandler = {
       .first<BalanceCheckRow>();
 
     if (!check) return json({ success: false, error: 'Balance check not found' }, 404);
-    if (check.status !== 'response_received' && check.status !== 'unparsed') {
+    if (
+      (check.status !== 'response_received' && check.status !== 'unparsed') ||
+      check.response_message_id == null ||
+      check.raw_response == null
+    ) {
       return json({ success: false, error: 'Balance check cannot be continued' }, 409);
     }
 
