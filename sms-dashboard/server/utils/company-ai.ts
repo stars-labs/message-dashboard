@@ -54,7 +54,12 @@ async function postChat({ baseUrl, token, model, prompt, includeResponseFormat, 
   includeResponseFormat: boolean;
   fetchImpl: typeof fetch;
 }): Promise<Response> {
-  const body = {
+  const body: {
+    model: string;
+    messages: { role: string; content: string }[];
+    temperature: number;
+    response_format?: { type: 'json_object' };
+  } = {
     model,
     messages: [
       { role: 'system', content: prompt.system },
