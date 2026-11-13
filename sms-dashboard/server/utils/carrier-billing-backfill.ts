@@ -1,5 +1,6 @@
+import * as v from 'valibot';
+import { queryAll, queryFirst, type D1 } from '../lib/d1.js';
 import { parseSingtelPostpaidBillSms } from './singtel-postpaid-bill.js';
-import type { D1Database } from '../cf-bindings.js';
 
 const BILL_PREFIX = '<Singtel>Dear customer, your latest bill for Singtel a/c ';
 const BILL_FRAGMENT_SUFFIX = 'ill via My Singtel app at www.singtel.com/viewbill .';
@@ -14,14 +15,14 @@ export interface BackfillCandidate {
   amount_minor: number;
   currency: string;
   due_date: string;
-  received_at: string;
+  received_at: string | null;
   parser_version: string;
   message: {
     id: string;
     phone_iccid: string;
     phone_number: 'Singtel';
     content: string;
-    timestamp: string;
+    timestamp: string | null;
     type: 'received';
   };
   disposition: BackfillDisposition;
@@ -51,25 +52,35 @@ export interface BackfillPreview {
 }
 
 /** The billing account row the preview requires. */
-interface BillableAccount {
-  id: string;
-  display_name: string;
-  account_ref_digest: string;
-  account_ref_last4: string;
-  notification_sim_iccid: string;
-  status: string;
-  version: number;
-  notification_sim_index: number | null;
-}
+const BillableAccountRow = v.object({
+  id: v.string(),
+  display_name: v.string(),
+  account_ref_digest: v.string(),
+  account_ref_last4: v.string(),
+  notification_sim_iccid: v.string(),
+  status: v.picklist(['pending_verification', 'active', 'inactive']),
+  version: v.number(),
+  notification_sim_index: v.nullable(v.number()),
+});
 
 /** The message columns the scan reads. */
-interface ScanMessage {
-  id: string;
-  phone_iccid: string;
-  phone_number: string;
-  content: string;
-  timestamp: string;
-  type: string;
+const ScanMessageRow = v.object({
+  id: v.string(),
+  phone_iccid: v.string(),
+  phone_number: v.string(),
+  content: v.string(),
+  timestamp: v.nullable(v.string()),
+  type: v.string(),
+});
+
+type ScanMessage = v.InferOutput<typeof ScanMessageRow>;
+
+const ProcessedRow = v.object({ bill_id: v.string() });
+
+const CycleRow = v.object({ amount_minor: v.number(), currency: v.string() });
+
+function timeOf(timestamp: string | null): number {
+  return timestamp === null ? Number.NaN : Date.parse(timestamp);
 }
 
 /** Thrown when the account is not active or its notification SIM is unverified. */
@@ -92,7 +103,7 @@ async function sha256(value: string): Promise<string> {
 }
 
 async function dispositionFor(
-  db: D1Database,
+  db: D1<'first'>,
   accountId: string,
   candidate: Pick<
     BackfillCandidate,
@@ -100,9 +111,10 @@ async function dispositionFor(
   >,
 ): Promise<BackfillDisposition> {
   const placeholders = candidate.source_message_ids.map(() => '?').join(', ');
-  const processed = await db
-    .prepare(
-      `
+  const processed = await queryFirst(
+    db
+      .prepare(
+        `
     SELECT id AS bill_id
     FROM carrier_bills
     WHERE source_message_id IN (${placeholders})
@@ -112,21 +124,24 @@ async function dispositionFor(
     WHERE source_message_id IN (${placeholders})
     LIMIT 1
   `,
-    )
-    .bind(...candidate.source_message_ids, ...candidate.source_message_ids)
-    .first();
+      )
+      .bind(...candidate.source_message_ids, ...candidate.source_message_ids),
+    ProcessedRow,
+  );
   if (processed) return 'already_processed';
 
-  const cycle = await db
-    .prepare(
-      `
+  const cycle = await queryFirst(
+    db
+      .prepare(
+        `
     SELECT amount_minor, currency
     FROM carrier_bills
     WHERE billing_account_id = ? AND due_date = ?
   `,
-    )
-    .bind(accountId, candidate.due_date)
-    .first<{ amount_minor: number; currency: string }>();
+      )
+      .bind(accountId, candidate.due_date),
+    CycleRow,
+  );
   if (!cycle) return 'new';
   return cycle.amount_minor === candidate.amount_minor && cycle.currency === candidate.currency
     ? 'duplicate'
@@ -134,12 +149,13 @@ async function dispositionFor(
 }
 
 export async function previewCarrierBillBackfill(
-  db: D1Database,
+  db: D1<'first' | 'all'>,
   accountId: string,
 ): Promise<BackfillPreview> {
-  const account = await db
-    .prepare(
-      `
+  const account = await queryFirst(
+    db
+      .prepare(
+        `
     SELECT
       a.id, a.display_name, a.account_ref_digest, a.account_ref_last4,
       a.notification_sim_iccid, a.status, a.version,
@@ -161,18 +177,20 @@ export async function previewCarrierBillBackfill(
           AND s.removed_at IS NULL
       )
   `,
-    )
-    .bind(accountId)
-    .first<BillableAccount>();
+      )
+      .bind(accountId),
+    BillableAccountRow,
+  );
   if (!account) {
     throw new AccountNotReadyError(
       'Billing account must be active with a verified notification SIM',
     );
   }
 
-  const query = await db
-    .prepare(
-      `
+  const messages = await queryAll(
+    db
+      .prepare(
+        `
     SELECT id, phone_iccid, phone_number, content, timestamp, type
     FROM messages
     WHERE phone_iccid = ?
@@ -181,15 +199,14 @@ export async function previewCarrierBillBackfill(
       AND (instr(content, ?) = 1 OR trim(content) = ?)
     ORDER BY timestamp, id
   `,
-    )
-    .bind(account.notification_sim_iccid, BILL_PREFIX, BILL_FRAGMENT_SUFFIX)
-    .all<ScanMessage>();
-  const messages = query.results;
+      )
+      .bind(account.notification_sim_iccid, BILL_PREFIX, BILL_FRAGMENT_SUFFIX),
+    ScanMessageRow,
+  );
   const used = new Set<string>();
-  const candidates: Array<Omit<BackfillCandidate, 'disposition'>> = [];
+  const candidates: Omit<BackfillCandidate, 'disposition'>[] = [];
 
-  for (let index = 0; index < messages.length; index += 1) {
-    const first = messages[index];
+  for (const first of messages) {
     if (used.has(first.id) || !first.content.startsWith(BILL_PREFIX)) continue;
 
     let content = first.content;
@@ -202,12 +219,12 @@ export async function previewCarrierBillBackfill(
     let reassembled = false;
 
     if (!parsed && content.endsWith('b')) {
-      const firstTime = Date.parse(first.timestamp);
+      const firstTime = timeOf(first.timestamp);
       let second: ScanMessage | null = null;
       let secondGap = Number.POSITIVE_INFINITY;
       for (const message of messages) {
         if (used.has(message.id) || message.content.trim() !== BILL_FRAGMENT_SUFFIX) continue;
-        const gap = Date.parse(message.timestamp) - firstTime;
+        const gap = timeOf(message.timestamp) - firstTime;
         if (!Number.isFinite(gap) || gap < 0 || gap > MAX_FRAGMENT_GAP_MS) continue;
         if (gap < secondGap || (gap === secondGap && second !== null && message.id < second.id)) {
           second = message;
