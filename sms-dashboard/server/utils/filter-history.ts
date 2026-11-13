@@ -1,6 +1,7 @@
+import * as v from 'valibot';
+import { queryAll, type D1, type D1Batch, type D1Statement } from '../lib/d1.js';
 import { classifyMessage, FILTER_STATUS, loadActiveRules, RULE_TYPE } from './spam-filter.js';
-import type { ClassifiableMessage, SpamRule } from './spam-filter.js';
-import type { D1Database } from '../cf-bindings.js';
+import type { SpamRule } from './spam-filter.js';
 
 export const FILTER_HISTORY_PAGE_SIZE = 200;
 
@@ -16,12 +17,17 @@ export interface HistoryRule extends SpamRule {
 }
 
 /** One message row the page scans. */
-interface HistoryRow extends ClassifiableMessage {
-  id: string;
-  filter_status: string | null;
-  filter_rule_id: number | null;
-  created_at: string;
-}
+const HistoryRow = v.object({
+  id: v.string(),
+  type: v.string(),
+  content: v.string(),
+  phone_number: v.nullable(v.string()),
+  filter_status: v.string(),
+  filter_rule_id: v.nullable(v.number()),
+  created_at: v.string(),
+});
+
+type HistoryRow = v.InferOutput<typeof HistoryRow>;
 
 export interface RuleHistoryPage {
   mode: 'apply' | 'release';
@@ -40,7 +46,7 @@ function historyCursor(row: HistoryRow): HistoryCursor {
  * Rule mutations never call this function; an operator must request every page.
  */
 export async function processRuleHistoryPage(
-  db: D1Database,
+  db: D1<'all' | 'run'> & D1Batch<'all' | 'run'>,
   rule: HistoryRule,
   {
     since,
@@ -90,16 +96,18 @@ export async function processRuleHistoryPage(
     1,
     Math.min(Number(pageSize) || FILTER_HISTORY_PAGE_SIZE, FILTER_HISTORY_PAGE_SIZE),
   );
-  const { results } = await db
-    .prepare(
-      `SELECT id, type, content, phone_number, filter_status, filter_rule_id, created_at
+  const results = await queryAll(
+    db
+      .prepare(
+        `SELECT id, type, content, phone_number, filter_status, filter_rule_id, created_at
      FROM messages
      WHERE ${conditions.join('\n       AND ')}
      ORDER BY created_at, id
      LIMIT ?`,
-    )
-    .bind(...params, limit + 1)
-    .all<HistoryRow>();
+      )
+      .bind(...params, limit + 1),
+    HistoryRow,
+  );
 
   const hasMore = results.length > limit;
   const page = results.slice(0, limit);
@@ -108,7 +116,7 @@ export async function processRuleHistoryPage(
   }
 
   const activeRules = await loadActiveRules(db);
-  const changed = [];
+  const changed: D1Statement<'all' | 'run'>[] = [];
 
   for (const message of page) {
     const verdict = classifyMessage(message, activeRules);
