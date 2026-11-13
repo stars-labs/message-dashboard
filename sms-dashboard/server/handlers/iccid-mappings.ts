@@ -1,6 +1,8 @@
 // ICCID Mappings handler - manages user-authoritative sims table
 // New schema: sims table is purely user-managed, status computed dynamically
 
+import * as v from 'valibot';
+import { readJson } from '../../shared/parse-json.js';
 import type { AppRequest } from '../worker-context.js';
 import type { D1Database } from '../cf-bindings.js';
 
@@ -58,15 +60,51 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-/**
- * Coerce the per-SIM balance threshold from the API payload into a nullable
- * number. Empty string / null / undefined → null (fall back to the currency
- * default in the client lib). Non-finite values are also rejected to null.
- */
-function parseBalanceThreshold(value: unknown): number | null {
-  if (value == null || value === '') return null;
-  const num = Number(value);
-  return Number.isFinite(num) ? num : null;
+const NonEmptyString = v.pipe(v.string(), v.nonEmpty());
+const SimIndex = v.pipe(v.number(), v.integer(), v.minValue(1));
+const OptionalText = v.optional(v.nullable(v.string()));
+
+const SimWriteFields = {
+  country_code: OptionalText,
+  carrier: OptionalText,
+  imei: OptionalText,
+  notes: OptionalText,
+  service_type: OptionalText,
+  service_type_source: OptionalText,
+  sim_role: OptionalText,
+  primary_iccid: OptionalText,
+};
+
+/** One SIM as bulk import receives it; the threshold is not imported. */
+const SimMapping = v.object({
+  iccid: NonEmptyString,
+  phone_number: NonEmptyString,
+  sim_index: SimIndex,
+  ...SimWriteFields,
+});
+
+/** Request body of POST /api/iccid-mappings. A null threshold uses the currency default in the client. */
+const CreateBody = v.object({
+  ...SimMapping.entries,
+  balance_threshold: v.optional(v.nullable(v.number())),
+});
+
+/** Request body of PUT /api/iccid-mappings/:id; the ICCID comes from the path. */
+const UpdateBody = v.object({
+  phone_number: NonEmptyString,
+  sim_index: SimIndex,
+  ...SimWriteFields,
+  balance_threshold: v.optional(v.nullable(v.number())),
+});
+
+const BulkBody = v.object({ mappings: v.array(v.unknown()) });
+
+const PositiveIntegerText = v.pipe(v.string(), v.regex(/^[1-9]\d*$/), v.transform(Number));
+
+function positiveInteger(raw: string | null, fallback: number): number | null {
+  if (raw === null || raw === '') return fallback;
+  const parsed = v.safeParse(PositiveIntegerText, raw);
+  return parsed.success ? parsed.output : null;
 }
 
 export function resolveServiceType(
@@ -174,8 +212,10 @@ export const iccidMappingsHandler = {
   async list(request: AppRequest): Promise<Response> {
     const { env } = request;
     const url = new URL(request.url);
-    const page = parseInt(url.searchParams.get('page') || '1');
-    const limit = parseInt(url.searchParams.get('limit') || '20');
+    const page = positiveInteger(url.searchParams.get('page'), 1);
+    const limit = positiveInteger(url.searchParams.get('limit'), 20);
+    if (page === null || limit === null)
+      return badRequest('page and limit must be positive integers');
     const search = url.searchParams.get('search') || '';
     const offset = (page - 1) * limit;
 
@@ -303,21 +343,22 @@ export const iccidMappingsHandler = {
   // Create or update ICCID mapping
   async create(request: AppRequest): Promise<Response> {
     const { env, user } = request;
-    const data = (await request.json()) as SimInput;
+    const parsed = await readJson(request, CreateBody);
+    if (!parsed.ok) {
+      return json(
+        {
+          success: false,
+          error: 'ICCID, phone number, and sim_index are required',
+          details: parsed.error,
+        },
+        400,
+      );
+    }
+    const data = parsed.value;
 
     try {
       const { iccid, phone_number, sim_index, country_code, carrier, imei, notes } = data;
-      const balanceThreshold = parseBalanceThreshold(data.balance_threshold);
-
-      if (!iccid || !phone_number || !sim_index) {
-        return json(
-          {
-            success: false,
-            error: 'ICCID, phone number, and sim_index are required',
-          },
-          400,
-        );
-      }
+      const balanceThreshold = data.balance_threshold ?? null;
 
       // Check if SIM exists
       const simExists = await env.DB.prepare(EXISTING_SIM_SELECT).bind(iccid).first<ExistingSim>();
@@ -435,11 +476,18 @@ export const iccidMappingsHandler = {
   async update(request: AppRequest): Promise<Response> {
     const { env, user } = request;
     const id = request.params?.id;
-    const data = (await request.json()) as SimInput;
+    const parsed = await readJson(request, UpdateBody);
+    if (!parsed.ok) {
+      return json(
+        { success: false, error: 'phone_number and sim_index are required', details: parsed.error },
+        400,
+      );
+    }
+    const data = parsed.value;
 
     try {
       const { phone_number, sim_index, country_code, carrier, imei, notes } = data;
-      const balanceThreshold = parseBalanceThreshold(data.balance_threshold);
+      const balanceThreshold = data.balance_threshold ?? null;
 
       const existing = await env.DB.prepare(EXISTING_SIM_SELECT).bind(id).first<ExistingSim>();
       if (!existing) {
@@ -549,11 +597,12 @@ export const iccidMappingsHandler = {
   // Bulk import ICCID mappings
   async bulkImport(request: AppRequest): Promise<Response> {
     const { env, user } = request;
-    const { mappings } = (await request.json()) as { mappings?: unknown };
+    const body = await readJson(request, BulkBody);
 
-    if (!Array.isArray(mappings)) {
+    if (!body.ok) {
       return json({ success: false, error: 'Mappings must be an array' }, 400);
     }
+    const { mappings } = body.value;
 
     try {
       let created = 0;
@@ -561,15 +610,16 @@ export const iccidMappingsHandler = {
       let failed = 0;
       const errors: string[] = [];
 
-      for (const mapping of mappings as SimInput[]) {
+      for (const candidate of mappings) {
+        const parsed = v.safeParse(SimMapping, candidate);
+        if (!parsed.success) {
+          failed++;
+          errors.push(`Missing required fields for mapping: ${JSON.stringify(candidate)}`);
+          continue;
+        }
+        const mapping = parsed.output;
         try {
           const { iccid, phone_number, sim_index, country_code, carrier, imei, notes } = mapping;
-
-          if (!iccid || !phone_number || !sim_index) {
-            failed++;
-            errors.push(`Missing required fields for mapping: ${JSON.stringify(mapping)}`);
-            continue;
-          }
 
           // Check if SIM exists
           const existing = await env.DB.prepare(EXISTING_SIM_SELECT)
