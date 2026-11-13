@@ -23,7 +23,8 @@
     "server/utils/keyword-color.ts",
     "server/utils/recipient.ts",
     "server/utils/session-token.ts",
-    "server/utils/d1-error.ts"
+    "server/utils/d1-error.ts",
+    "server/middleware/cors.ts"
   ],
   "exclude": ["**/*.test.ts"],
   "references": [{ "path": "./tsconfig.shared.json" }]

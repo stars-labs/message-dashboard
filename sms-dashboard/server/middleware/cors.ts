@@ -4,8 +4,6 @@
 // answers a preflight when given nothing), and `corsPreflight` is the adapter the
 // router needs, since a route handler is invoked with (request, env, ctx).
 
-import type { Handler } from '../worker-context.js';
-
 const HEADERS = {
   'Access-Control-Allow-Origin': '*', // Allow all origins for WebSocket compatibility
   'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
@@ -36,4 +34,4 @@ export function handleCORS(response?: Response | null): Response {
 }
 
 /** Router adapter for OPTIONS '*'. */
-export const corsPreflight: Handler = () => handleCORS();
+export const corsPreflight = (): Response => handleCORS();
