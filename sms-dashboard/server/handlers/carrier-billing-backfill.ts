@@ -8,6 +8,9 @@ import {
 import type { BackfillPreview } from '../utils/carrier-billing-backfill.js';
 import { processCarrierBillMessage } from '../utils/carrier-billing.js';
 
+const ACCOUNT_MESSAGE = 'account_id is required';
+const PREVIEW_MESSAGE = 'expected_version must be an integer and preview_digest a string';
+
 const AccountId = v.pipe(v.string(), v.nonEmpty());
 
 /** Request body of POST /api/carrier-billing/backfill/preview. */
@@ -19,6 +22,26 @@ const ExecuteBody = v.object({
   expected_version: v.pipe(v.number(), v.integer()),
   preview_digest: v.string(),
 });
+
+/**
+ * The 400 message for a body whose first problem is the named field, missing
+ * or invalid; a body that is not an object answers ACCOUNT_MESSAGE. Typed
+ * against ExecuteBody, so a new field cannot go without a message.
+ */
+const FIELD_MESSAGES = {
+  account_id: ACCOUNT_MESSAGE,
+  expected_version: PREVIEW_MESSAGE,
+  preview_digest: PREVIEW_MESSAGE,
+} as const satisfies Record<keyof typeof ExecuteBody.entries, string>;
+
+function isBodyField(key: unknown): key is keyof typeof FIELD_MESSAGES {
+  return typeof key === 'string' && Object.hasOwn(FIELD_MESSAGES, key);
+}
+
+function bodyMessage(issue: v.BaseIssue<unknown>): string {
+  const key = issue.path?.[0]?.key;
+  return isBodyField(key) ? FIELD_MESSAGES[key] : ACCOUNT_MESSAGE;
+}
 
 /** The outcomes an execution counts; processing can also report 'ignored' and 'failed'. */
 const ExecuteSummary = v.object({
@@ -67,18 +90,7 @@ async function readBody<T>(
   if (!raw.ok) return { response: json({ error: 'Body must be JSON' }, 400) };
   const parsed = v.safeParse(schema, raw.value);
   if (parsed.success) return { body: parsed.output };
-  const field = parsed.issues[0].path?.[0]?.key;
-  return {
-    response: json(
-      {
-        error:
-          field === 'expected_version' || field === 'preview_digest'
-            ? 'expected_version must be an integer and preview_digest a string'
-            : 'account_id is required',
-      },
-      400,
-    ),
-  };
+  return { response: json({ error: bodyMessage(parsed.issues[0]) }, 400) };
 }
 
 function publicPreview(preview: BackfillPreview) {

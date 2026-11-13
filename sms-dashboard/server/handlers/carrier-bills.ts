@@ -112,10 +112,22 @@ const AccountMemberRow = v.object({
 });
 
 /** Request body of the four bill mutations; the note is stored trimmed. */
-const MutationBody = v.object({
-  expected_version: v.pipe(v.number(), v.integer(), v.minValue(1)),
-  note: v.optional(v.nullable(v.pipe(v.string(), v.trim(), v.maxLength(1000)))),
-});
+const VERSION_MESSAGE = 'expected_version must be a positive integer';
+const NOTE_MESSAGE = 'note must be a string of at most 1000 characters';
+
+const MutationBody = v.object(
+  {
+    expected_version: v.pipe(
+      v.number(VERSION_MESSAGE),
+      v.integer(VERSION_MESSAGE),
+      v.minValue(1, VERSION_MESSAGE),
+    ),
+    note: v.optional(
+      v.nullable(v.pipe(v.string(NOTE_MESSAGE), v.trim(), v.maxLength(1000, NOTE_MESSAGE))),
+    ),
+  },
+  VERSION_MESSAGE,
+);
 
 type BillDb = D1<'all' | 'first' | 'run'> & D1Batch<'all' | 'first' | 'run'>;
 
@@ -321,18 +333,7 @@ async function mutateBill(request: MutationRequest, action: BillAction): Promise
   const raw = await readJson(request, v.unknown());
   if (!raw.ok) return json({ error: 'Body must be JSON' }, 400);
   const body = v.safeParse(MutationBody, raw.value);
-  if (!body.success) {
-    const invalidField = body.issues[0].path?.[0]?.key;
-    return json(
-      {
-        error:
-          invalidField === 'note'
-            ? 'note must be a string of at most 1000 characters'
-            : 'expected_version must be a positive integer',
-      },
-      400,
-    );
-  }
+  if (!body.success) return json({ error: body.issues[0].message }, 400);
   const expectedVersion = body.output.expected_version;
   const note = emptyToNull(body.output.note);
 
