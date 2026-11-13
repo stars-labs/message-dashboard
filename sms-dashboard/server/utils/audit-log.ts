@@ -1,5 +1,5 @@
 import { boundedErrorText, classifyD1Error } from './d1-error.js';
-import type { AppRequest, Env } from '../worker-context.js';
+import type { D1, D1RunResult } from '../lib/d1.js';
 
 /** One audit_logs row. `details` is serialized; callers choose its shape. */
 export interface AuditEvent {
@@ -7,14 +7,18 @@ export interface AuditEvent {
   resourceType?: string;
   resourceId: string | null;
   userEmail?: string | null;
-  details?: Record<string, unknown>;
+  details?: object;
+}
+
+interface AuditEnv {
+  DB: D1<'run'>;
 }
 
 /** Single writer for audit_logs. Callers decide whether the event is required. */
 export async function writeAuditLog(
-  env: Env,
+  env: AuditEnv,
   { action, resourceType = 'user', resourceId, userEmail = null, details = {} }: AuditEvent,
-): Promise<unknown> {
+): Promise<D1RunResult> {
   return env.DB.prepare(
     `
     INSERT INTO audit_logs (action, resource_type, resource_id, user_email, details, timestamp)
@@ -29,7 +33,10 @@ export async function writeAuditLog(
  * Authentication audit events are observability, not an authentication authority.
  * Keep them off the callback's critical path and always contain their failures.
  */
-export function scheduleAuthAudit(request: AppRequest, event: AuditEvent): void {
+export function scheduleAuthAudit(
+  request: { env: AuditEnv; ctx: { waitUntil(promise: Promise<unknown>): void } },
+  event: AuditEvent,
+): void {
   const promise = writeAuditLog(request.env, event).catch((error: unknown) => {
     const classification = classifyD1Error(error);
     console.error(

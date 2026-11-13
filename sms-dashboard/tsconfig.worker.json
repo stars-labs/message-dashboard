@@ -34,7 +34,8 @@
     "server/utils/company-ai.ts",
     "server/utils/message-retention.ts",
     "server/middleware/rbac.ts",
-    "server/api/call-state.ts"
+    "server/api/call-state.ts",
+    "server/utils/audit-log.ts"
   ],
   "exclude": ["**/*.test.ts"],
   "references": [{ "path": "./tsconfig.shared.json" }]
