@@ -1205,7 +1205,7 @@ export const balanceQueriesHandler = {
       return json({ success: false, error: 'Invalid JSON body' }, 400);
     }
 
-    if (typeof body?.phone_iccid !== 'string') {
+    if (typeof body?.phone_iccid !== 'string' || !body.phone_iccid) {
       return json({ success: false, error: 'phone_iccid is required' }, 400);
     }
 

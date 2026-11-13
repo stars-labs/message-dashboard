@@ -424,6 +424,24 @@ describe('POST /api/balance-checks/query', () => {
   });
 });
 
+describe('POST /api/balance-checks/query with an empty SIM', () => {
+  test('rejects an empty phone_iccid instead of planning the whole fleet', async () => {
+    const response = await balanceQueriesHandler.query({
+      user: { id: 'auth0|dashboard-user' },
+      json: async () => ({ phone_iccid: '' }),
+      env: {
+        DB: {
+          prepare: () => {
+            throw new Error('database must not be read');
+          },
+        },
+      },
+    });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ success: false, error: 'phone_iccid is required' });
+  });
+});
+
 describe('GET /api/balance-checks/query-preflight', () => {
   test('describes an interactive browser query and current runner availability', async () => {
     const browserProfile = {
