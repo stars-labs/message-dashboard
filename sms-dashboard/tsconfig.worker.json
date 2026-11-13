@@ -18,7 +18,8 @@
     "worker-runtime.d.ts",
     "server/lib/**/*.ts",
     "server/handlers/phones.ts",
-    "server/asset-cache-control.ts"
+    "server/asset-cache-control.ts",
+    "server/utils/keyword-match.ts"
   ],
   "exclude": ["**/*.test.ts"],
   "references": [{ "path": "./tsconfig.shared.json" }]

@@ -28,7 +28,7 @@ export function findKeywordMatches(
 
   let position = 0;
   while ((position = searchText.indexOf(searchKeyword, position)) !== -1) {
-    matches.push({ text: text.substr(position, keyword.length), position });
+    matches.push({ text: text.slice(position, position + keyword.length), position });
     position += keyword.length;
   }
   return matches;
