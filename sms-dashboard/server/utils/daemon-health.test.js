@@ -36,4 +36,17 @@ describe('daemon health v3', () => {
     expect(result.reasons).toContain('消息积压超过 5 分钟');
     expect(result.reasons).toContain('1 条消息需要人工处理');
   });
+  test('treats stored metadata that lacks the snapshot fields as an invalid report', () => {
+    for (const metadata of [
+      JSON.stringify({ schema_version: 3 }),
+      JSON.stringify({ ...snapshot(), queue: undefined }),
+      JSON.stringify({ ...snapshot(), uptime_seconds: 'long' }),
+      { schema_version: 3, session_id: 'rust-daemon-test' },
+    ]) {
+      const result = deriveDaemonHealth({ seconds_since_heartbeat: 2, metadata });
+      expect(result.status).toBe('unknown');
+      expect(result.reasons).toEqual(['健康报告格式无效或缺失']);
+      expect(result.snapshot).toBeNull();
+    }
+  });
 });

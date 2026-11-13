@@ -1,3 +1,6 @@
+import * as v from 'valibot';
+import { parseJson, type Schema } from '../../shared/parse-json.js';
+
 export const HEALTH_SCHEMA_VERSION = 3;
 
 /** Ages in seconds. `null` means "never happened"; the daemon omits them on first boot. */
@@ -78,13 +81,30 @@ export function normalizeHealthSnapshot(raw: RawSnapshot | null | undefined): He
   };
 }
 
+const StoredAge = v.nullable(v.number());
+
+const StoredSnapshot: Schema<HealthSnapshot> = v.object({
+  schema_version: v.literal(HEALTH_SCHEMA_VERSION),
+  session_id: v.string(),
+  version: v.string(),
+  uptime_seconds: v.number(),
+  last_message_read_success_age_seconds: StoredAge,
+  last_upload_success_age_seconds: StoredAge,
+  queue: v.object({
+    pending: v.number(),
+    in_flight: v.number(),
+    dead_letter: v.number(),
+    oldest_unacknowledged_age_seconds: StoredAge,
+  }),
+});
+
 export function parseHealthSnapshot(metadata: unknown): HealthSnapshot | null {
-  try {
-    const value = typeof metadata === 'string' ? JSON.parse(metadata) : metadata;
-    return value?.schema_version === HEALTH_SCHEMA_VERSION ? (value as HealthSnapshot) : null;
-  } catch {
-    return null;
+  if (typeof metadata === 'string') {
+    const parsed = parseJson(metadata, StoredSnapshot);
+    return parsed.ok ? parsed.value : null;
   }
+  const result = v.safeParse(StoredSnapshot, metadata);
+  return result.success ? result.output : null;
 }
 
 /** Age every "seconds since" field by the time elapsed since the snapshot was taken. */
