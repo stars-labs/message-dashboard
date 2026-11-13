@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { balanceRunnersHandler, loadBalanceRunnerStatus } from './balance-runners.js';
+import { balanceRunnersHandler } from './balance-runners.js';
 
 class D1Adapter {
   constructor(database) {
@@ -44,6 +44,12 @@ function request(db, body, apiKey = 'secret') {
     headers: new Headers({ 'X-API-Key': apiKey }),
     json: async () => body,
   };
+}
+
+async function statusFor(db, subject) {
+  const response = await balanceRunnersHandler.status({ env: { DB: db }, user: { id: subject } });
+  expect(response.status).toBe(200);
+  return response.json();
 }
 
 describe('balance runner control plane', () => {
@@ -153,18 +159,15 @@ describe('balance runner control plane', () => {
     );
 
     expect(response.status).toBe(200);
-    const status = await loadBalanceRunnerStatus(db);
-    expect(status.capabilities.sms_ai).toMatchObject({ available: true, state: 'ready' });
-    expect(
+    const age = (table, column) =>
       sqlite
         .query(
-          `
-      SELECT CAST((julianday('now') - julianday(last_heartbeat)) * 86400 AS INTEGER) AS age
-      FROM balance_runner_capabilities WHERE runner_id = 'runner-1'
-    `,
+          `SELECT CAST((julianday('now') - julianday(last_heartbeat)) * 86400 AS INTEGER) AS age
+           FROM ${table} WHERE ${column} = 'runner-1'`,
         )
-        .get().age,
-    ).toBeGreaterThanOrEqual(119);
+        .get().age;
+    expect(age('balance_runner_installations', 'id')).toBeLessThan(5);
+    expect(age('balance_runner_capabilities', 'runner_id')).toBeGreaterThanOrEqual(119);
   });
 
   test('rejects unknown capabilities and invalid concurrency', async () => {
@@ -245,10 +248,10 @@ describe('balance runner control plane', () => {
   test('reports ready capabilities and expires stale heartbeats', async () => {
     sqlite.exec(`
       INSERT INTO balance_runner_installations (
-        id, display_name, auth_mode, platform, version, last_heartbeat
+        id, display_name, auth_mode, auth_subject, platform, version, last_heartbeat
       ) VALUES
-        ('online', 'Online', 'legacy_api_key', 'darwin', '1', CURRENT_TIMESTAMP),
-        ('stale', 'Stale', 'legacy_api_key', 'darwin', '1', datetime('now', '-120 seconds'));
+        ('online', 'Online', 'auth0_device', 'auth0|alice', 'darwin', '1', CURRENT_TIMESTAMP),
+        ('stale', 'Stale', 'auth0_device', 'auth0|alice', 'darwin', '1', datetime('now', '-120 seconds'));
       INSERT INTO balance_runner_capabilities (
         runner_id, capability, state, session_id, last_heartbeat
       ) VALUES
@@ -256,7 +259,7 @@ describe('balance runner control plane', () => {
         ('stale', 'carrier_browser', 'ready', 'session-2', datetime('now', '-120 seconds'));
     `);
 
-    const status = await loadBalanceRunnerStatus(db);
+    const status = await statusFor(db, 'auth0|alice');
     expect(status.capabilities.sms_ai.available).toBe(true);
     expect(status.capabilities.carrier_browser).toMatchObject({
       available: false,
@@ -281,9 +284,14 @@ describe('balance runner control plane', () => {
         ('legacy', 'carrier_browser', 'ready', 'legacy-session');
     `);
 
-    const status = await loadBalanceRunnerStatus(db, { authSubject: 'auth0|alice' });
+    const status = await statusFor(db, 'auth0|alice');
     expect(status.runners.map((runner) => runner.id)).toEqual(['alice']);
     expect(status.capabilities.sms_ai.available).toBe(true);
     expect(status.capabilities.carrier_browser.available).toBe(false);
+  });
+
+  test('refuses a status request without a signed-in user', async () => {
+    const response = await balanceRunnersHandler.status({ env: { DB: db } });
+    expect(response.status).toBe(401);
   });
 });

@@ -1131,7 +1131,7 @@ export const balanceQueriesHandler = {
     }
     const [plan, runners] = await Promise.all([
       loadBalanceQueryPlan(request.env.DB, { phoneIccids }),
-      loadBalanceRunnerStatus(request.env.DB, { authSubject: requestedBySubject }),
+      loadBalanceRunnerStatus(request.env.DB, requestedBySubject),
     ]);
     return json({
       success: true,
@@ -1159,7 +1159,7 @@ export const balanceQueriesHandler = {
 
     const [items, runners] = await Promise.all([
       loadBalanceQueryPlan(request.env.DB, { phoneIccid, allowDiscovery: true }),
-      loadBalanceRunnerStatus(request.env.DB, { authSubject: requestedBySubject }),
+      loadBalanceRunnerStatus(request.env.DB, requestedBySubject),
     ]);
     const item = items[0];
     if (!item) return json({ success: false, error: 'SIM not found' }, 404);

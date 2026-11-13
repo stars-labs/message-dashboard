@@ -132,39 +132,37 @@ function capabilitySummary(rows: CapabilityRow[]): Record<string, unknown> {
   return result;
 }
 
-export async function loadBalanceRunnerStatus(
-  db: D1Database,
-  { authSubject = null }: { authSubject?: string | null } = {},
-) {
-  const ownerFilter = authSubject ? " AND auth_mode = 'auth0_device' AND auth_subject = ?" : '';
-  const capabilityOwnerFilter = authSubject
-    ? " AND r.auth_mode = 'auth0_device' AND r.auth_subject = ?"
-    : '';
-  const installationStatement = db.prepare(`
+/** The runners a dashboard user owns: device installations signed in as that Auth0 subject. */
+export async function loadBalanceRunnerStatus(db: D1Database, authSubject: string) {
+  const [installations, capabilityRows] = await Promise.all([
+    db
+      .prepare(
+        `
       SELECT id, display_name, auth_mode, platform, version, last_heartbeat,
         CAST((julianday('now') - julianday(last_heartbeat)) * 86400 AS INTEGER)
           AS seconds_since_heartbeat
       FROM balance_runner_installations
-      WHERE revoked_at IS NULL${ownerFilter}
+      WHERE revoked_at IS NULL AND auth_mode = 'auth0_device' AND auth_subject = ?
       ORDER BY datetime(last_heartbeat) DESC, id
-    `);
-  const capabilityStatement = db.prepare(`
+    `,
+      )
+      .bind(authSubject)
+      .all<InstallationRow>(),
+    db
+      .prepare(
+        `
       SELECT c.runner_id, c.capability, c.state, c.current_job_id, c.concurrency,
         c.detail_code, r.last_heartbeat,
         CAST((julianday('now') - julianday(r.last_heartbeat)) * 86400 AS INTEGER)
           AS seconds_since_heartbeat
       FROM balance_runner_capabilities c
       JOIN balance_runner_installations r ON r.id = c.runner_id
-      WHERE r.revoked_at IS NULL${capabilityOwnerFilter}
+      WHERE r.revoked_at IS NULL AND r.auth_mode = 'auth0_device' AND r.auth_subject = ?
       ORDER BY datetime(r.last_heartbeat) DESC, c.runner_id
-    `);
-  const [installations, capabilityRows] = await Promise.all([
-    authSubject
-      ? installationStatement.bind(authSubject).all<InstallationRow>()
-      : installationStatement.all<InstallationRow>(),
-    authSubject
-      ? capabilityStatement.bind(authSubject).all<CapabilityRow>()
-      : capabilityStatement.all<CapabilityRow>(),
+    `,
+      )
+      .bind(authSubject)
+      .all<CapabilityRow>(),
   ]);
 
   const rows = capabilityRows.results;
@@ -280,7 +278,7 @@ export const balanceRunnersHandler = {
     if (!authSubject) return json({ error: 'Unauthorized' }, 401);
     return json({
       success: true,
-      ...(await loadBalanceRunnerStatus(request.env.DB, { authSubject })),
+      ...(await loadBalanceRunnerStatus(request.env.DB, authSubject)),
     });
   },
 };
