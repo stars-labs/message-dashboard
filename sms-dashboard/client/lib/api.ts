@@ -1,11 +1,77 @@
 import { auth } from './auth';
 import { messageCache } from './message-cache';
+import type { PagedMessage } from './message-page';
 
 // Runtime cursors keep polling cheap even when IndexedDB is unavailable or the
 // current view deliberately avoids persistent caching (for example spam audit).
-const volatileMessageCursors = new Map();
+const volatileMessageCursors = new Map<string, string>();
 
-export async function fetchWithAuth(endpoint, options = {}) {
+/** The server's error body. `detail` is present for upstream failures. */
+interface ApiErrorBody {
+  error?: string;
+  detail?: string;
+}
+
+/** A message row as the API returns it. */
+export interface ApiMessage extends PagedMessage {
+  timestamp: string;
+  type?: string | null;
+  content?: string | null;
+  phone_iccid?: string | null;
+  phone_number?: string | null;
+  [column: string]: unknown;
+}
+
+/** The paging envelope /api/messages returns. */
+export interface ApiMessagePagination {
+  has_more?: boolean;
+  next_cursor?: { created_at?: string; id?: string } | null;
+  limit?: number;
+  offset?: number;
+  [column: string]: unknown;
+}
+
+export interface ApiMessageSync {
+  server_time?: string;
+  is_incremental?: boolean;
+  from_cache?: number;
+  new_count?: number;
+  is_offline?: boolean;
+  [column: string]: unknown;
+}
+
+/** The /api/messages response, before and after the client merges cache. */
+export interface ApiMessagePage {
+  success?: boolean;
+  data?: ApiMessage[];
+  pagination?: ApiMessagePagination;
+  sync?: ApiMessageSync;
+  failed?: boolean;
+  [column: string]: unknown;
+}
+
+/** Parameters /api/messages accepts. */
+export interface GetMessagesParams {
+  phone_iccid?: string | null;
+  limit?: number;
+  include_filtered?: boolean | number | string;
+  force_refresh?: boolean;
+  reset_sync?: boolean;
+  since?: string;
+  until?: string;
+  before_created_at?: string;
+  before_id?: string;
+  offset?: number;
+  [column: string]: unknown;
+}
+
+/** A balance check row as /api/balance-checks returns it. */
+export interface ApiBalanceCheck {
+  id: string;
+  [column: string]: unknown;
+}
+
+export async function fetchWithAuth(endpoint: string, options: RequestInit = {}): Promise<any> {
   const fullUrl = `${auth.baseUrl}${endpoint}`;
 
   // Credentials travel as the HttpOnly auth_token cookie, which the browser attaches
@@ -27,9 +93,9 @@ export async function fetchWithAuth(endpoint, options = {}) {
 
   if (!response.ok) {
     const errorText = await response.text();
-    let errorData;
+    let errorData: ApiErrorBody;
     try {
-      errorData = JSON.parse(errorText);
+      errorData = JSON.parse(errorText) as ApiErrorBody;
     } catch {
       errorData = { error: 'Unknown error' };
     }
@@ -43,9 +109,15 @@ export async function fetchWithAuth(endpoint, options = {}) {
   return await response.json();
 }
 
-// Route API method names to HTTP endpoints
-async function apiRequest(method, data = {}) {
-  const httpEndpoints = {
+type EndpointParams = Record<string, unknown>;
+
+interface Endpoint {
+  url: string | ((params: Record<string, string | number | undefined>) => string);
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE';
+}
+
+/** Route API method names to HTTP endpoints */
+const httpEndpoints = {
     'getPhones': { url: '/api/phones', method: 'GET' },
     'getMessages': { url: '/api/messages', method: 'GET' },
     'getBalanceChecks': { url: '/api/balance-checks', method: 'GET' },
@@ -56,22 +128,32 @@ async function apiRequest(method, data = {}) {
     'getIccidMappingByIccid': { url: (params) => `/api/iccid-mappings/by-iccid/${params.iccid}`, method: 'GET' },
     'createIccidMapping': { url: '/api/iccid-mappings', method: 'POST' },
     'updateIccidMapping': { url: (params) => `/api/iccid-mappings/${params.id}`, method: 'PUT' },
-    'deleteIccidMapping': { url: (params) => `/api/iccid-mappings/${params.id}`, method: 'DELETE' }
-  };
-  
-  const endpoint = httpEndpoints[method];
+    'deleteIccidMapping': { url: (params) => `/api/iccid-mappings/${params.id}`, method: 'DELETE' },
+    'bulkImportIccidMappings': { url: '/api/iccid-mappings/bulk', method: 'POST' },
+  } satisfies Record<string, Endpoint>;
+
+/** A method name the endpoint table actually contains. */
+type ApiMethod = keyof typeof httpEndpoints;
+
+async function apiRequest(method: ApiMethod, data: EndpointParams = {}): Promise<any> {
+  const endpoint: Endpoint = httpEndpoints[method];
   if (!endpoint) {
     throw new Error(`Unknown API method: ${method}`);
   }
   
-  const url = typeof endpoint.url === 'function' ? endpoint.url(data) : endpoint.url;
-  const options = {
-    method: endpoint.method
+  const url = typeof endpoint.url === 'function'
+    ? endpoint.url(data as Record<string, string | number | undefined>)
+    : endpoint.url;
+  const options: RequestInit = {
+    method: endpoint.method,
   };
   
   if (endpoint.method === 'GET' && data && Object.keys(data).length > 0) {
     // Add query params for GET requests
-    const queryString = new URLSearchParams(data).toString();
+    const query = Object.fromEntries(
+      Object.entries(data).map(([k, v]) => [k, String(v)]),
+    );
+    const queryString = new URLSearchParams(query).toString();
     return fetchWithAuth(`${url}?${queryString}`, options);
   } else if (endpoint.method !== 'GET') {
     // Add body for non-GET requests
@@ -96,11 +178,11 @@ export const api = {
   },
 
   // Generic HTTP methods for AI features
-  async get(url, options = {}) {
+  async get(url: string, options: RequestInit = {}) {
     return await fetchWithAuth(url, { ...options, method: 'GET' });
   },
   
-  async post(url, data = {}, options = {}) {
+  async post(url: string, data: unknown = {}, options: RequestInit = {}) {
     return await fetchWithAuth(url, {
       ...options,
       method: 'POST',
@@ -108,7 +190,7 @@ export const api = {
     });
   },
   
-  async put(url, data = {}, options = {}) {
+  async put(url: string, data: unknown = {}, options: RequestInit = {}) {
     return await fetchWithAuth(url, {
       ...options,
       method: 'PUT',
@@ -116,7 +198,7 @@ export const api = {
     });
   },
   
-  async delete(url, options = {}) {
+  async delete(url: string, options: RequestInit = {}) {
     return await fetchWithAuth(url, { ...options, method: 'DELETE' });
   },
   
@@ -151,7 +233,7 @@ export const api = {
   },
   
   // Messages - with client-side caching for reduced D1 reads
-  async getMessages(params = {}) {
+  async getMessages(params: GetMessagesParams = {}): Promise<ApiMessagePage> {
     const phoneIccid = params.phone_iccid || null;
     const includeFiltered = params.include_filtered === true
       || params.include_filtered === 1
@@ -165,13 +247,13 @@ export const api = {
 
     try {
       // Step 1: Get cached messages first for immediate display
-      let cachedMessages = [];
-      let lastSyncTime = null;
+      let cachedMessages: ApiMessage[] = [];
+      let lastSyncTime: string | null = null;
 
       if (!forceRefresh && persistentCacheEnabled) {
         try {
-          cachedMessages = await messageCache.getCachedMessages(phoneIccid, params.limit || 500);
-          lastSyncTime = await messageCache.getLastSyncTime(cacheKey);
+          cachedMessages = await messageCache.getCachedMessages(phoneIccid as null, params.limit || 500) as ApiMessage[];
+          lastSyncTime = await messageCache.getLastSyncTime(cacheKey) as string | null;
         } catch (cacheErr) {
           console.warn('[API] Cache read failed:', cacheErr);
         }
@@ -183,7 +265,7 @@ export const api = {
       }
 
       // Step 2: Fetch new messages from API (incremental if we have cache)
-      const { force_refresh: _forceRefresh, reset_sync: _resetSync, ...apiParams } = params;
+      const { force_refresh: _forceRefresh, reset_sync: _resetSync, ...apiParams } = params as GetMessagesParams;
       if (lastSyncTime && !forceRefresh) {
         apiParams.since = lastSyncTime;
         // Reduce limit for incremental sync since we're only getting new messages
@@ -194,7 +276,7 @@ export const api = {
 
       if (response.success && response.sync?.is_incremental) {
         const syncUntil = response.sync.server_time;
-        const collected = [...(response.data || [])];
+        const collected: ApiMessage[] = [...(response.data || [])];
         while (response.pagination?.has_more === true) {
           const cursor = response.pagination?.next_cursor;
           if (!syncUntil || !cursor?.created_at || !cursor?.id) {
@@ -202,7 +284,7 @@ export const api = {
           }
           response = await apiRequest('getMessages', {
             ...apiParams,
-            since: lastSyncTime,
+            since: lastSyncTime ?? undefined,
             until: syncUntil,
             before_created_at: cursor.created_at,
             before_id: cursor.id,
@@ -226,7 +308,7 @@ export const api = {
       }
 
       if (response.success) {
-        const newMessages = response.data || [];
+        const newMessages: ApiMessage[] = response.data || [];
         const serverTime = response.sync?.server_time || new Date().toISOString();
 
 
@@ -269,7 +351,7 @@ export const api = {
             ...cachedMessages.map(m => freshById.get(m.id) ?? m),
           ];
           // Sort by timestamp descending and limit
-          merged.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+          merged.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
           const limitedMerged = merged.slice(0, params.limit || 500);
           const requestedLimit = params.limit || 500;
 
@@ -318,7 +400,7 @@ export const api = {
 
       // Try to return cached data on error
       try {
-        const cachedMessages = await messageCache.getCachedMessages(phoneIccid, params.limit || 500);
+        const cachedMessages = await messageCache.getCachedMessages(phoneIccid as null, params.limit || 500) as ApiMessage[];
         if (cachedMessages.length > 0) {
           return {
             success: true,
@@ -339,7 +421,7 @@ export const api = {
     }
   },
 
-  async getBalanceChecks(params = {}) {
+  async getBalanceChecks(params: EndpointParams = {}): Promise<ApiBalanceCheck[]> {
     try {
       const response = await apiRequest('getBalanceChecks', params);
       return response?.success ? response.data || [] : [];
@@ -349,9 +431,9 @@ export const api = {
     }
   },
   
-  async sendMessage(data) {
+  async sendMessage(data: unknown) {
     try {
-      return await apiRequest('sendMessage', data);
+      return await apiRequest('sendMessage', data as EndpointParams);
     } catch (error) {
       console.warn('Failed to send message:', error);
       throw error;
@@ -360,17 +442,17 @@ export const api = {
   
   // ICCID Mappings
   iccidMappings: {
-    async list(params = {}) {
+    async list(params: EndpointParams = {}) {
       try {
         return await apiRequest('listIccidMappings', params);
       } catch (error) {
         console.warn('Failed to list ICCID mappings :', error);
-        const query = new URLSearchParams(params).toString();
+        const query = new URLSearchParams(params as Record<string, string>).toString();
         return await fetchWithAuth(`/api/iccid-mappings?${query}`);
       }
     },
     
-    async get(id) {
+    async get(id: string) {
       try {
         return await apiRequest('getIccidMapping', { id });
       } catch (error) {
@@ -379,7 +461,7 @@ export const api = {
       }
     },
     
-    async getByIccid(iccid) {
+    async getByIccid(iccid: string) {
       try {
         return await apiRequest('getIccidMappingByIccid', { iccid });
       } catch (error) {
@@ -388,9 +470,9 @@ export const api = {
       }
     },
     
-    async create(data) {
+    async create(data: unknown) {
       try {
-        return await apiRequest('createIccidMapping', data);
+        return await apiRequest('createIccidMapping', data as EndpointParams);
       } catch (error) {
         console.warn('Failed to create ICCID mapping :', error);
         return await fetchWithAuth('/api/iccid-mappings', {
@@ -400,9 +482,9 @@ export const api = {
       }
     },
     
-    async update(id, data) {
+    async update(id: string, data: Record<string, unknown>) {
       try {
-        return await apiRequest('updateIccidMapping', { id, ...data });
+        return await apiRequest('updateIccidMapping', { id, ...data } as EndpointParams);
       } catch (error) {
         console.warn('Failed to update ICCID mapping :', error);
         return await fetchWithAuth(`/api/iccid-mappings/${id}`, {
@@ -412,7 +494,7 @@ export const api = {
       }
     },
     
-    async delete(id) {
+    async delete(id: string) {
       try {
         return await apiRequest('deleteIccidMapping', { id });
       } catch (error) {
@@ -423,9 +505,9 @@ export const api = {
       }
     },
     
-    async bulkImport(data) {
+    async bulkImport(data: unknown) {
       try {
-        return await apiRequest('bulkImportIccidMappings', data);
+        return await apiRequest('bulkImportIccidMappings', data as EndpointParams);
       } catch (error) {
         console.warn('Failed to bulk import ICCID mappings :', error);
         return await fetchWithAuth('/api/iccid-mappings/bulk', {
