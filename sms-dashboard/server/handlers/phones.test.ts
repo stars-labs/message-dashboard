@@ -30,11 +30,10 @@ const row = {
   updated_at: '2026-01-01 00:00:00',
 };
 
-function dbReturning(rows: object[]): D1<'all' | 'first'> {
-  const statement: D1Statement<'all' | 'first'> = {
+function dbReturning(rows: object[]): D1<'all'> {
+  const statement: D1Statement<'all'> = {
     bind: () => statement,
     all: () => Promise.resolve({ results: rows }),
-    first: () => Promise.resolve(rows[0] ?? null),
   };
   return { prepare: () => statement };
 }
@@ -52,29 +51,5 @@ describe('phonesHandler.list', () => {
     });
     expect(response.status).toBe(500);
     expect(await response.json()).toEqual({ success: false, error: 'Failed to fetch phones' });
-  });
-});
-
-describe('phonesHandler.get', () => {
-  test('returns the matching row', async () => {
-    const response = await phonesHandler.get({
-      env: { DB: dbReturning([row]) },
-      params: { id: row.iccid },
-    });
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ success: true, data: row });
-  });
-
-  test('answers 404 when no row matches', async () => {
-    const response = await phonesHandler.get({
-      env: { DB: dbReturning([]) },
-      params: { id: 'missing' },
-    });
-    expect(response.status).toBe(404);
-  });
-
-  test('answers 404 without querying when the route carries no id', async () => {
-    const response = await phonesHandler.get({ env: { DB: dbReturning([row]) } });
-    expect(response.status).toBe(404);
   });
 });

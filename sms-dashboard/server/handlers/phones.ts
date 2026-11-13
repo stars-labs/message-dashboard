@@ -1,13 +1,8 @@
 import * as v from 'valibot';
-import { queryAll, queryFirst, type D1 } from '../lib/d1.js';
+import { queryAll, type D1 } from '../lib/d1.js';
 
 interface ListRequest {
   env: { DB: D1<'all'> };
-}
-
-interface GetRequest {
-  env: { DB: D1<'first'> };
-  params?: Record<string, string>;
 }
 
 /** One row of device_view, aliased to the names the client consumes. */
@@ -97,37 +92,6 @@ export const phonesHandler = {
 
       // Return generic error to client without exposing stack trace
       return json({ success: false, error: 'Failed to fetch phones' }, 500);
-    }
-  },
-
-  // Get specific phone
-  async get(request: GetRequest): Promise<Response> {
-    const { env } = request;
-    const phoneId = request.params?.['id'];
-    if (!phoneId) {
-      return json({ success: false, error: 'Phone not found' }, 404);
-    }
-
-    try {
-      const phone = await queryFirst(
-        env.DB.prepare(
-          `
-        SELECT ${DEVICE_COLUMNS}
-        FROM device_view dv
-        WHERE dv.iccid = ? OR dv.id = ?
-      `,
-        ).bind(phoneId, phoneId),
-        DeviceRow,
-      );
-
-      if (!phone) {
-        return json({ success: false, error: 'Phone not found' }, 404);
-      }
-
-      return json({ success: true, data: phone });
-    } catch {
-      // Error handling - get phone
-      return json({ success: false, error: 'Failed to fetch phone' }, 500);
     }
   },
 };
