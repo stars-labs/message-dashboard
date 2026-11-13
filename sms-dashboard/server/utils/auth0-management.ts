@@ -58,14 +58,16 @@ const RoleIdMapSchema = v.record(v.string(), v.string());
 
 type RoleIdMap = v.InferOutput<typeof RoleIdMapSchema>;
 
+/** OAuth 2.0 client-credentials response (RFC 6749 §5.1); expires_in is recommended, not required. */
 const TokenResponse = v.object({
-  access_token: v.optional(v.unknown()),
-  expires_in: v.optional(v.unknown()),
+  access_token: v.pipe(v.string(), v.nonEmpty()),
+  expires_in: v.optional(v.number()),
 });
 
+/** A users page requested with include_totals=true. */
 const UsersPage = v.object({
-  users: v.optional(v.unknown()),
-  total: v.optional(v.unknown()),
+  users: v.array(Auth0UserSchema),
+  total: v.number(),
 });
 
 function malformed(path: string, body: string, error: string): Auth0ManagementError {
@@ -143,15 +145,10 @@ export async function getManagementToken(env: Auth0ManagementEnv): Promise<strin
   }
 
   const parsed = v.safeParse(TokenResponse, json.value);
-  const fields = parsed.success
-    ? parsed.output
-    : { access_token: undefined, expires_in: undefined };
-  const accessToken = fields.access_token;
-  if (typeof accessToken !== 'string' || !accessToken) {
+  if (!parsed.success) {
     throw new Auth0ManagementError('Auth0 token response had no access_token', 502, body);
   }
-
-  const expiresIn = Number(fields.expires_in) || 0;
+  const { access_token: accessToken, expires_in: expiresIn = 0 } = parsed.output;
   const ttl = Math.floor(expiresIn - expiresIn * TTL_LEEWAY);
 
   // KV rejects expirationTtl below 60s; skip caching rather than fail the request.
@@ -199,13 +196,14 @@ async function mgmtFetch(
   return json.value;
 }
 
-function parseItems<T>(items: unknown[], schema: v.GenericSchema<unknown, T>, path: string): T[] {
-  return items.map((item) => {
-    const parsed = v.safeParse(schema, item);
-    if (!parsed.success) throw malformed(path, JSON.stringify(item), v.summarize(parsed.issues));
-    return parsed.output;
-  });
+/** A Management API response body parsed by its schema; any other shape is a 502. */
+function parseResponse<T>(body: unknown, schema: v.GenericSchema<unknown, T>, path: string): T {
+  const parsed = v.safeParse(schema, body);
+  if (!parsed.success) throw malformed(path, JSON.stringify(body), v.summarize(parsed.issues));
+  return parsed.output;
 }
+
+const RoleList = v.array(Auth0RoleSchema);
 
 const PER_PAGE = 100;
 // Bounds the worst case rather than looping forever on a paging bug. 1000 users is far
@@ -224,14 +222,11 @@ async function fetchPagedUsers(
   for (let page = 0; page < MAX_PAGES; page++) {
     const sep = path.includes('?') ? '&' : '?';
     const pagePath = `${path}${sep}per_page=${PER_PAGE}&page=${page}&include_totals=true`;
-    const parsed = v.safeParse(UsersPage, await mgmtFetch(env, pagePath));
+    const usersPage = parseResponse(await mgmtFetch(env, pagePath), UsersPage, pagePath);
+    const batch = usersPage.users;
 
-    if (!parsed.success) break;
-    const batch = parsed.output.users;
-    if (!Array.isArray(batch)) break;
-
-    items.push(...parseItems(batch, Auth0UserSchema, pagePath));
-    total = Number(parsed.output.total) || items.length;
+    items.push(...batch);
+    total = usersPage.total;
 
     if (items.length >= total || batch.length === 0) break;
 
@@ -254,11 +249,11 @@ export async function resolveRoleIds(env: Auth0ManagementEnv): Promise<RoleIdMap
 
   const config = createRoleConfig(env);
   const rolesPath = '/roles?per_page=100';
-  const roles = await mgmtFetch(env, rolesPath);
+  const roles = parseResponse(await mgmtFetch(env, rolesPath), RoleList, rolesPath);
   const wanted = [config.ADMIN_ROLE, config.VIEWER_ROLE];
   const map: RoleIdMap = {};
 
-  for (const role of parseItems(Array.isArray(roles) ? roles : [], Auth0RoleSchema, rolesPath)) {
+  for (const role of roles) {
     if (wanted.includes(role.name)) map[role.name] = role.id;
   }
 
@@ -334,8 +329,7 @@ export async function listUsersWithRoles(
 /** The role names currently assigned to a user. */
 export async function getUserRoles(env: Auth0ManagementEnv, userId: string): Promise<string[]> {
   const path = `/users/${encodeURIComponent(userId)}/roles`;
-  const roles = await mgmtFetch(env, path);
-  return parseItems(Array.isArray(roles) ? roles : [], Auth0RoleSchema, path).map((r) => r.name);
+  return parseResponse(await mgmtFetch(env, path), RoleList, path).map((r) => r.name);
 }
 
 export async function assignRoleByName(

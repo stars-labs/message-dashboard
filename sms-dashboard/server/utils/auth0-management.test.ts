@@ -255,11 +255,12 @@ describe('resolveRoleIds', () => {
     expect(error.body).toBe('["viewer"]');
   });
 
-  test('treats a roles response that is not a list as having no roles', async () => {
+  test('fails with 502 for a roles response that is not a list', async () => {
     mockFetch([TOKEN_OK, { body: { roles: [] } }]);
 
     const error = await failure(resolveRoleIds(makeEnv()));
-    expect(error.message).toMatch(/do not exist in Auth0: admin, viewer\./);
+    expect(error.status).toBe(502);
+    expect(error.message).toMatch(/unexpected shape/);
   });
 
   test('ignores roles the app does not use', async () => {
@@ -340,15 +341,18 @@ describe('listUsers / getUserRoles', () => {
     expect(calls).toHaveLength(11);
   });
 
-  test('listUsers stops on an empty page and when the response has no users list', async () => {
+  test('listUsers stops on an empty page', async () => {
     mockFetch([TOKEN_OK, { body: { users: [], total: 5 } }]);
     expect(await listUsers(makeEnv())).toEqual([]);
+  });
 
-    mockFetch([TOKEN_OK, { body: { total: 5 } }]);
-    expect(await listUsers(makeEnv())).toEqual([]);
-
-    mockFetch([TOKEN_OK, { body: '' }]);
-    expect(await listUsers(makeEnv())).toEqual([]);
+  test('listUsers fails with 502 instead of returning a truncated list for a malformed page', async () => {
+    for (const body of [{ total: 5 }, '', { users: 'nope', total: 1 }, { users: [] }]) {
+      mockFetch([TOKEN_OK, { body }]);
+      const error = await listUsers(makeEnv()).catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(Auth0ManagementError);
+      expect(error instanceof Auth0ManagementError && error.status).toBe(502);
+    }
   });
 
   test('listUsers keeps the profile fields it asks Auth0 for', async () => {
@@ -386,12 +390,12 @@ describe('listUsers / getUserRoles', () => {
     expect(calls[1]?.url).toContain('auth0%7Cabc');
   });
 
-  test('getUserRoles reads a response that is not a list as no roles', async () => {
-    mockFetch([TOKEN_OK, { body: { roles: [] } }]);
-    expect(await getUserRoles(makeEnv(), 'auth0|abc')).toEqual([]);
-
-    mockFetch([TOKEN_OK, { body: '' }]);
-    expect(await getUserRoles(makeEnv(), 'auth0|abc')).toEqual([]);
+  test('getUserRoles fails with 502 instead of reporting no roles for a response that is not a list', async () => {
+    for (const body of [{ roles: [] }, '']) {
+      mockFetch([TOKEN_OK, { body }]);
+      const error = await failure(getUserRoles(makeEnv(), 'auth0|abc'));
+      expect(error.status).toBe(502);
+    }
   });
 
   test('getUserRoles rejects a role without a name', async () => {
