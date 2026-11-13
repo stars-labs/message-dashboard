@@ -26,49 +26,55 @@ export type CompanyAIProbeFetch = (
   init: CompanyAIRequest,
 ) => Promise<Pick<Response, 'status'>>;
 
-/** One model call. `protocol` is 'anthropic' or 'openai'; anything else is rejected. */
+/** The chat protocols the company gateway exposes. Settings are parsed with this schema. */
+export const CompanyAIProtocol = v.picklist(['anthropic', 'openai']);
+export type CompanyAIProtocol = v.InferOutput<typeof CompanyAIProtocol>;
+
 export interface CompanyAICall {
   baseUrl: string;
   token: string;
   model: string;
   prompt: CompanyAIPrompt;
-  protocol?: string;
+  protocol?: CompanyAIProtocol;
   fetchImpl?: CompanyAIFetch;
 }
 
-/** A response body, as the two wire protocols shape it. */
-const ResponseBody = v.object({
-  choices: v.optional(
-    v.array(
-      v.object({
-        message: v.optional(v.object({ content: v.optional(v.unknown()) })),
-      }),
-    ),
-  ),
-  content: v.optional(
-    v.array(v.object({ type: v.optional(v.unknown()), text: v.optional(v.unknown()) })),
+const TextPart = v.object({ type: v.string(), text: v.optional(v.string()) });
+
+/** Anthropic Messages: the reply is a list of content blocks. */
+const MessagesResponse = v.object({ content: v.array(TextPart) });
+
+/** OpenAI Chat Completions: the reply is the first choice's message content. */
+const ChatResponse = v.object({
+  choices: v.tupleWithRest(
+    [v.object({ message: v.object({ content: v.union([v.string(), v.array(TextPart)]) }) })],
+    v.unknown(),
   ),
 });
+
+/** The gateway may answer in either wire format whichever protocol was called. */
+const ResponseBody = v.union([ChatResponse, MessagesResponse]);
 
 function endpoint(baseUrl: string, path: string): string {
   return `${baseUrl.replace(/\/+$/, '')}${path}`;
 }
 
-function partText(part: unknown): string {
-  const text = v.is(v.object({ text: v.unknown() }), part) ? part.text : undefined;
-  return typeof text === 'string' || typeof text === 'number' ? String(text) : '';
+function textOf(parts: v.InferOutput<typeof TextPart>[]): string {
+  return parts.map((part) => part.text ?? '').join('');
 }
 
-export function parseCompanyAIContent(payload: unknown): unknown {
-  const body = v.safeParse(ResponseBody, payload);
-  let content: unknown = body.success
-    ? (body.output.choices?.[0]?.message?.content ??
-      body.output.content?.find((part) => part.type === 'text')?.text)
-    : undefined;
-  if (Array.isArray(content)) {
-    content = content.map((part: unknown) => partText(part)).join('');
+function contentOf(body: v.InferOutput<typeof ResponseBody>): string | undefined {
+  if ('choices' in body) {
+    const { content } = body.choices[0].message;
+    return typeof content === 'string' ? content : textOf(content);
   }
-  if (typeof content !== 'string') {
+  return body.content.find((part) => part.type === 'text')?.text;
+}
+
+function parseCompanyAIContent(payload: unknown): unknown {
+  const body = v.safeParse(ResponseBody, payload);
+  const content = body.success ? contentOf(body.output) : undefined;
+  if (content === undefined) {
     throw new Error('Company AI response does not contain message content');
   }
   const cleaned = content
@@ -152,6 +158,29 @@ function postMessages({
   });
 }
 
+async function post({
+  protocol,
+  ...request
+}: {
+  baseUrl: string;
+  token: string;
+  model: string;
+  prompt: CompanyAIPrompt;
+  protocol: CompanyAIProtocol;
+  fetchImpl: CompanyAIFetch;
+}) {
+  switch (protocol) {
+    case 'anthropic':
+      return postMessages(request);
+    case 'openai': {
+      const response = await postChat({ ...request, includeResponseFormat: true });
+      return response.status === 400 || response.status === 422
+        ? postChat({ ...request, includeResponseFormat: false })
+        : response;
+    }
+  }
+}
+
 export async function callCompanyAI({
   baseUrl,
   token,
@@ -160,31 +189,7 @@ export async function callCompanyAI({
   protocol = 'anthropic',
   fetchImpl = fetch,
 }: CompanyAICall): Promise<unknown> {
-  let response;
-  if (protocol === 'anthropic') {
-    response = await postMessages({ baseUrl, token, model, prompt, fetchImpl });
-  } else if (protocol === 'openai') {
-    response = await postChat({
-      baseUrl,
-      token,
-      model,
-      prompt,
-      includeResponseFormat: true,
-      fetchImpl,
-    });
-    if (response.status === 400 || response.status === 422) {
-      response = await postChat({
-        baseUrl,
-        token,
-        model,
-        prompt,
-        includeResponseFormat: false,
-        fetchImpl,
-      });
-    }
-  } else {
-    throw new Error(`Unsupported company AI protocol: ${protocol}`);
-  }
+  const response = await post({ baseUrl, token, model, prompt, protocol, fetchImpl });
   if (!response.ok) {
     const detail = (await response.text()).slice(0, 500);
     throw new Error(`Company AI request failed (${response.status}): ${detail}`);

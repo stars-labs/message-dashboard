@@ -3,7 +3,7 @@ import * as v from 'valibot';
 import { parseJson } from '../../shared/parse-json.js';
 import {
   callCompanyAI,
-  parseCompanyAIContent,
+  CompanyAIProtocol,
   type CompanyAIFetch,
   type CompanyAIRequest,
 } from './company-ai.js';
@@ -19,8 +19,16 @@ function recordingFetch(respond: (call: number) => Response) {
   return { calls, fetchImpl };
 }
 
-async function failureOf(call: Promise<unknown>): Promise<string> {
-  const error = await call.then(
+function answering(body: unknown): CompanyAIFetch {
+  return recordingFetch(() => Response.json(body)).fetchImpl;
+}
+
+function call(fetchImpl: CompanyAIFetch) {
+  return callCompanyAI({ baseUrl: 'https://x', token: 't', model: 'm', prompt, fetchImpl });
+}
+
+async function failureOf(pending: Promise<unknown>): Promise<string> {
+  const error = await pending.then(
     () => null,
     (caught: unknown) => caught,
   );
@@ -33,49 +41,104 @@ function bodyOf(init: CompanyAIRequest): Record<string, unknown> {
   return parsed.value;
 }
 
-describe('company AI client', () => {
-  test('parses JSON content with or without a markdown fence', () => {
+describe('CompanyAIProtocol', () => {
+  test('accepts the two gateway protocols and nothing else', () => {
+    expect(v.is(CompanyAIProtocol, 'anthropic')).toBe(true);
+    expect(v.is(CompanyAIProtocol, 'openai')).toBe(true);
+    expect(v.is(CompanyAIProtocol, 'grpc')).toBe(false);
+    expect(v.is(CompanyAIProtocol, undefined)).toBe(false);
+  });
+});
+
+describe('company AI reply parsing', () => {
+  test('parses JSON content with or without a markdown fence', async () => {
     expect(
-      parseCompanyAIContent({
-        choices: [{ message: { content: '```json\n{"action":"stop"}\n```' } }],
-      }),
+      await call(
+        answering({ choices: [{ message: { content: '```json\n{"action":"stop"}\n```' } }] }),
+      ),
     ).toEqual({ action: 'stop' });
     expect(
-      parseCompanyAIContent({ choices: [{ message: { content: '{"action":"go"}' } }] }),
+      await call(answering({ choices: [{ message: { content: '{"action":"go"}' } }] })),
     ).toEqual({ action: 'go' });
   });
 
-  test('joins content parts returned as an array', () => {
+  test('joins chat content returned as text parts', async () => {
     expect(
-      parseCompanyAIContent({
-        choices: [
-          { message: { content: [{ text: '{"a":' }, null, { text: 1 }, { text: '}' }, {}] } },
-        ],
-      }),
+      await call(
+        answering({
+          choices: [
+            {
+              message: {
+                content: [
+                  { type: 'text', text: '{"a":' },
+                  { type: 'image_url' },
+                  { type: 'text', text: '1}' },
+                ],
+              },
+            },
+          ],
+        }),
+      ),
     ).toEqual({ a: 1 });
   });
 
-  test('rejects a body without message content', () => {
-    for (const payload of [null, undefined, 'text', {}, { choices: [] }, { content: [] }]) {
-      expect(() => parseCompanyAIContent(payload)).toThrow('does not contain message content');
+  test('reads the first text block of a Messages reply', async () => {
+    expect(
+      await call(
+        answering({
+          content: [
+            { type: 'thinking' },
+            { type: 'text', text: '{"b":2}' },
+            { type: 'text', text: '{"ignored":true}' },
+          ],
+        }),
+      ),
+    ).toEqual({ b: 2 });
+  });
+
+  test('rejects a reply without message content', async () => {
+    for (const body of [
+      null,
+      'text',
+      {},
+      { choices: [] },
+      { content: [] },
+      { content: [{ type: 'thinking' }] },
+    ]) {
+      expect(await failureOf(call(answering(body)))).toBe(
+        'Company AI response does not contain message content',
+      );
     }
   });
 
-  test('rejects a body that does not match the response schema', () => {
-    expect(() => parseCompanyAIContent({ choices: 'nope', content: 7 })).toThrow(
-      'does not contain message content',
-    );
+  test('rejects a reply that matches neither wire format', async () => {
+    for (const body of [
+      { choices: 'nope' },
+      { choices: [{ message: { content: 7 } }] },
+      { content: [{ type: 'text', text: 7 }] },
+    ]) {
+      expect(await failureOf(call(answering(body)))).toBe(
+        'Company AI response does not contain message content',
+      );
+    }
   });
 
-  test('rejects content that is not JSON', () => {
-    expect(() =>
-      parseCompanyAIContent({ choices: [{ message: { content: 'not json' } }] }),
-    ).toThrow('not valid JSON');
+  test('rejects content that is not JSON', async () => {
+    expect(
+      await failureOf(call(answering({ choices: [{ message: { content: 'not json' } }] }))),
+    ).toBe('Company AI response is not valid JSON');
   });
 
+  test('rejects a response body that is not JSON', async () => {
+    const { fetchImpl } = recordingFetch(() => new Response('<html>', { status: 200 }));
+    expect(await failureOf(call(fetchImpl))).toBe('Company AI response is not valid JSON');
+  });
+});
+
+describe('company AI requests', () => {
   test('uses bearer auth and retries without response_format when unsupported', async () => {
-    const { calls, fetchImpl } = recordingFetch((call) =>
-      call === 1
+    const { calls, fetchImpl } = recordingFetch((n) =>
+      n === 1
         ? new Response('unsupported', { status: 400 })
         : Response.json({
             choices: [{ message: { content: '{"action":"stop","confidence":1}' } }],
@@ -98,8 +161,8 @@ describe('company AI client', () => {
   });
 
   test('also retries without response_format on a 422', async () => {
-    const { calls, fetchImpl } = recordingFetch((call) =>
-      call === 1
+    const { calls, fetchImpl } = recordingFetch((n) =>
+      n === 1
         ? new Response('unprocessable', { status: 422 })
         : Response.json({ choices: [{ message: { content: '{"ok":true}' } }] }),
     );
@@ -133,53 +196,10 @@ describe('company AI client', () => {
     expect(calls[0] && bodyOf(calls[0].init)['system']).toBe('system');
   });
 
-  test('rejects an unsupported protocol without calling the gateway', async () => {
-    const { calls, fetchImpl } = recordingFetch(() => new Response('{}'));
-    expect(
-      await failureOf(
-        callCompanyAI({
-          baseUrl: 'https://x',
-          token: 't',
-          model: 'm',
-          prompt,
-          protocol: 'grpc',
-          fetchImpl,
-        }),
-      ),
-    ).toBe('Unsupported company AI protocol: grpc');
-    expect(calls).toHaveLength(0);
-  });
-
   test('reports a failed request with a bounded detail', async () => {
     const { fetchImpl } = recordingFetch(() => new Response('x'.repeat(900), { status: 500 }));
-    const error = await callCompanyAI({
-      baseUrl: 'https://x',
-      token: 't',
-      model: 'm',
-      prompt,
-      fetchImpl,
-    }).catch((caught: unknown) => caught);
-    expect(error).toBeInstanceOf(Error);
-    expect(error instanceof Error && error.message).toBe(
+    expect(await failureOf(call(fetchImpl))).toBe(
       `Company AI request failed (500): ${'x'.repeat(500)}`,
     );
-  });
-
-  test('rejects a response body that is not JSON', async () => {
-    const { fetchImpl } = recordingFetch(() => new Response('<html>', { status: 200 }));
-    expect(
-      await failureOf(
-        callCompanyAI({ baseUrl: 'https://x', token: 't', model: 'm', prompt, fetchImpl }),
-      ),
-    ).toBe('Company AI response is not valid JSON');
-  });
-
-  test('rejects a response body that does not match the response schema', async () => {
-    const { fetchImpl } = recordingFetch(() => Response.json({ choices: 'nope' }));
-    expect(
-      await failureOf(
-        callCompanyAI({ baseUrl: 'https://x', token: 't', model: 'm', prompt, fetchImpl }),
-      ),
-    ).toBe('Company AI response does not contain message content');
   });
 });
