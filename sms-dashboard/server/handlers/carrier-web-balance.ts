@@ -532,14 +532,19 @@ export const carrierWebBalanceHandler = {
     if (leased.currency !== provider.currency) {
       return json({ error: `currency must be ${provider.currency}` }, 400);
     }
-    if (
-      normalizePhone(leased.account_number, job.provider) !==
-      normalizePhone(job.sim_number, job.provider)
-    ) {
+    const account = normalizePhone(
+      typeof leased.account_number === 'string' ? leased.account_number : '',
+      job.provider,
+    );
+    if (account === '' || account !== normalizePhone(job.sim_number, job.provider)) {
       return json({ error: 'Authenticated account does not match the balance task SIM' }, 409);
     }
 
-    const expiresAt = provider.expiryRequired ? String(leased.expires_at || '') : null;
+    const expiresAt = provider.expiryRequired
+      ? typeof leased.expires_at === 'string'
+        ? leased.expires_at
+        : ''
+      : null;
     if (provider.expiryRequired && !validIsoDate(expiresAt)) {
       return json({ error: 'expires_at must be a real ISO calendar date' }, 400);
     }

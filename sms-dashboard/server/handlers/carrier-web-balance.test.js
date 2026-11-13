@@ -388,6 +388,66 @@ describe('carrier browser balance job protocol', () => {
     ).toBe('queued');
   });
 
+  test.each([
+    ['missing', undefined],
+    ['null', null],
+    ['a number', 8617600419127],
+    ['a list', ['+8617600419127']],
+  ])('refuses a completion whose account number is %s', async (_case, accountNumber) => {
+    const job = await claim();
+    const response = await carrierWebBalanceHandler.complete(
+      request(db, {
+        id: job.id,
+        body: {
+          runner_id: 'runner-1',
+          balance: 18.25,
+          currency: 'CNY',
+          account_number: accountNumber,
+        },
+      }),
+    );
+    expect(response.status).toBe(409);
+    expect(
+      sqlite.query("SELECT status FROM sim_balance_checks WHERE id='check-1'").get().status,
+    ).toBe('queued');
+  });
+
+  test('does not match a missing account number to a SIM without a number', async () => {
+    sqlite.exec("UPDATE sims SET number = ''");
+    const job = await claim();
+    const response = await carrierWebBalanceHandler.complete(
+      request(db, {
+        id: job.id,
+        body: { runner_id: 'runner-1', balance: 18.25, currency: 'CNY' },
+      }),
+    );
+    expect(response.status).toBe(409);
+    expect(
+      sqlite.query("SELECT status FROM sim_balance_checks WHERE id='check-1'").get().status,
+    ).toBe('queued');
+  });
+
+  test('refuses an M1 completion whose expiry is a list holding a date', async () => {
+    switchToM1();
+    const job = await claim();
+    const response = await carrierWebBalanceHandler.complete(
+      request(db, {
+        id: job.id,
+        body: {
+          runner_id: 'runner-1',
+          balance: 9.97,
+          currency: 'SGD',
+          account_number: '+6590950236',
+          expires_at: ['2026-09-20'],
+        },
+      }),
+    );
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: 'expires_at must be a real ISO calendar date',
+    });
+  });
+
   test('stores both cash balance and account expiry for M1 prepaid', async () => {
     switchToM1();
     const job = await claim();
