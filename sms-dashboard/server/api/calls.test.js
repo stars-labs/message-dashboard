@@ -201,6 +201,7 @@ function stubSfu(responses) {
       body: init.body === undefined ? undefined : JSON.parse(init.body),
     });
     const entry = typeof responses === 'function' ? responses(path, calls.length) : responses[path];
+    if (entry instanceof Response) return entry;
     const [status, body] = entry ?? [404, { errorCode: 'not_found' }];
     return new Response(JSON.stringify(body), { status });
   };
@@ -460,6 +461,23 @@ describe('bridging to the Pi', () => {
   test('an empty successful adapter response releases the call for a retry', async () => {
     const { router, env } = setup(connecting);
     stubSfu({ '/adapters/websocket/new': [200, {}] });
+
+    const response = await invoke(router, 'POST', '/api/calls/connect', {}, env);
+
+    expect(response.status).toBe(502);
+    expect(env.CALL_STATE.call()).toBeNull();
+  });
+
+  test('a successful status without a JSON body is a failure, not a subscribed call', async () => {
+    const { router, env } = setup(connecting);
+    stubSfu((path, n) => {
+      if (path === '/adapters/websocket/new' && n === 1)
+        return [200, { tracks: [{ adapterId: 'down-id' }] }];
+      if (path === '/adapters/websocket/new')
+        return [200, { tracks: [{ adapterId: 'up-id', sessionId: 'modem-session' }] }];
+      if (path === '/sessions/browser/tracks/new') return new Response('upstream hiccup');
+      return [200, {}];
+    });
 
     const response = await invoke(router, 'POST', '/api/calls/connect', {}, env);
 
@@ -1263,6 +1281,30 @@ describe('call history API', () => {
     const response = await handler({ ...req, method: 'GET' }, env, {});
 
     expect(response.status).toBe(401);
+  });
+});
+
+describe('ICE servers', () => {
+  const ICE = { iceServers: [{ urls: ['stun:stun.cloudflare.com:3478'] }] };
+
+  test('passes the TURN service credentials through', async () => {
+    const { router, env } = setup();
+    globalThis.fetch = async () => Response.json(ICE);
+
+    const response = await invokeGet(router, '/api/calls/ice', null, env);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(ICE);
+  });
+
+  test('a successful status without a JSON body is an upstream failure', async () => {
+    const { router, env } = setup();
+    globalThis.fetch = async () => new Response('upstream hiccup');
+
+    const response = await invokeGet(router, '/api/calls/ice', null, env);
+
+    expect(response.status).toBe(502);
+    expect((await response.json()).error).toBe('Could not issue ICE servers');
   });
 });
 

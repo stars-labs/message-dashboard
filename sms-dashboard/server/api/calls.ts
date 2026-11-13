@@ -18,7 +18,7 @@
 // X-API-Key.
 
 import * as v from 'valibot';
-import type { Parsed } from '../../shared/parse-json.js';
+import { parseJson, type Parsed } from '../../shared/parse-json.js';
 import { OBJECT_MESSAGE, readBody, type MissingKeyMessages } from '../lib/request-body.js';
 import { handleAuth0 } from '../middleware/auth0.js';
 import { requirePermission, enrichUserPermissions } from '../middleware/rbac.js';
@@ -63,18 +63,42 @@ interface SessionDescription {
   sdp: string;
 }
 
+/** The fields of a Realtime SFU response the bridge reads; an error is reported in a 200 too. */
+const SfuBody = v.object({
+  sessionId: v.optional(v.string()),
+  sessionDescription: v.optional(
+    v.object({ type: v.picklist(['offer', 'answer']), sdp: v.string() }),
+  ),
+  requiresImmediateRenegotiation: v.optional(v.boolean()),
+  tracks: v.optional(
+    v.array(
+      v.object({
+        adapterId: v.optional(v.string()),
+        sessionId: v.optional(v.string()),
+        errorCode: v.nullish(v.string()),
+      }),
+    ),
+  ),
+  errorCode: v.nullish(v.string()),
+});
+
+/** `detail` is what the SFU sent, passed to the browser when a step fails. */
 interface SfuResult {
   ok: boolean;
   status: number;
-  body: Record<string, unknown> & {
-    errorCode?: unknown;
-    tracks?: Array<{ adapterId?: string; sessionId?: string; errorCode?: unknown }>;
-    sessionId?: string;
-    sessionDescription?: SessionDescription;
-    requiresImmediateRenegotiation?: unknown;
-    error?: unknown;
-  };
+  body: v.InferOutput<typeof SfuBody>;
+  detail: unknown;
 }
+
+const IceServers = v.object({
+  iceServers: v.array(
+    v.object({
+      urls: v.union([v.string(), v.array(v.string())]),
+      username: v.optional(v.string()),
+      credential: v.optional(v.string()),
+    }),
+  ),
+});
 
 /** Safety net: a wedged call disappears on its own rather than blocking the fleet. */
 const CALL_TTL_SECONDS = 3600;
@@ -367,32 +391,26 @@ async function sfu(env: Env, method: string, path: string, body?: unknown): Prom
     response = await fetch(`${SFU_BASE}/apps/${env.REALTIME_APP_ID}${path}`, init);
     text = await response.text();
   } catch {
-    return { ok: false, status: 502, body: { error: 'SFU connection failed' } };
+    return { ok: false, status: 502, body: {}, detail: { error: 'SFU connection failed' } };
   }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    parsed = { raw: text };
+  const raw = parseJson(text, v.unknown());
+  const parsed = raw.ok ? v.safeParse(SfuBody, raw.value) : null;
+  if (!raw.ok || !parsed?.success) {
+    return {
+      ok: false,
+      status: response.status,
+      body: {},
+      detail: { error: 'Invalid SFU response', raw: text },
+    };
   }
-  // The SFU reports per-track failures inside a 200 as well as at the top level.
-  if (
-    !parsed ||
-    typeof parsed !== 'object' ||
-    Array.isArray(parsed) ||
-    ((parsed as SfuResult['body']).tracks !== undefined &&
-      !Array.isArray((parsed as SfuResult['body']).tracks))
-  ) {
-    return { ok: false, status: response.status, body: { error: 'Invalid SFU response' } };
-  }
-  const p = parsed as SfuResult['body'];
-  const trackError = p.tracks?.some((track) => !track || track.errorCode);
-  const ok = response.ok && !p.errorCode && !trackError;
-  return { ok, status: response.status, body: p };
+  const reply = parsed.output;
+  const trackError = reply.tracks?.some((track) => track.errorCode);
+  const ok = response.ok && !reply.errorCode && !trackError;
+  return { ok, status: response.status, body: reply, detail: raw.value };
 }
 
 function sfuError(message: string, result: SfuResult): Response {
-  return json({ error: message, detail: result.body }, 502);
+  return json({ error: message, detail: result.detail }, 502);
 }
 
 function validId(value: unknown): value is string {
@@ -743,9 +761,12 @@ export function setupCallRoutes(router: Router): void {
         body: JSON.stringify({ ttl: 600 }),
       },
     );
-    if (!response.ok)
-      return json({ error: 'Could not issue ICE servers', detail: await response.text() }, 502);
-    return json(await response.json());
+    const text = await response.text();
+    const iceServers = parseJson(text, IceServers);
+    if (!response.ok || !iceServers.ok) {
+      return json({ error: 'Could not issue ICE servers', detail: text }, 502);
+    }
+    return json(iceServers.value);
   });
 
   // Place an outbound call: take the lock, then publish the browser mic.
