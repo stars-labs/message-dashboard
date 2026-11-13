@@ -198,6 +198,133 @@ describe('message list D1 reads', () => {
   });
 });
 
+describe('message send', () => {
+  function sendDb({ active = { number: '+6512345678' }, any = null, runError = null } = {}) {
+    const inserts = [];
+    const db = {
+      inserts,
+      prepare(sql) {
+        const statement = (params = []) => ({
+          bind: (...next) => statement(next),
+          async first() {
+            if (sql.includes("sim_status = 'active'")) return active;
+            return any;
+          },
+          async run() {
+            if (runError) throw runError;
+            inserts.push({ sql, params });
+            return { meta: { changes: 1, last_row_id: 1 } };
+          },
+        });
+        return statement();
+      },
+    };
+    return db;
+  }
+
+  function sendRequest(db, body) {
+    return {
+      env: { DB: db },
+      text: async () => (typeof body === 'string' ? body : JSON.stringify(body)),
+      json: async () => (typeof body === 'string' ? JSON.parse(body) : body),
+    };
+  }
+
+  const valid = { phone_iccid: 'iccid-1', recipient: '+6587654321', content: 'hello' };
+
+  test('stores a sending message addressed to the normalised recipient', async () => {
+    const db = sendDb();
+    const response = await messagesHandler.send(sendRequest(db, valid));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.messageId).toMatch(/^msg-sent-/);
+    expect(body.data).toMatchObject({
+      id: body.messageId,
+      phone_iccid: 'iccid-1',
+      recipient: '+6587654321',
+      content: 'hello',
+      type: 'sent',
+      status: 'pending',
+    });
+    expect(db.inserts).toHaveLength(1);
+    expect(db.inserts[0].params).toEqual([
+      body.messageId,
+      'iccid-1',
+      '+6512345678',
+      'hello',
+      body.data.timestamp,
+      '+6587654321',
+    ]);
+  });
+
+  test('answers 400 when a required field is missing or empty', async () => {
+    for (const bad of [
+      { ...valid, phone_iccid: undefined },
+      { ...valid, recipient: '' },
+      { ...valid, content: '' },
+      {},
+    ]) {
+      const response = await messagesHandler.send(sendRequest(sendDb(), bad));
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toMatch(/^Missing required fields/);
+    }
+  });
+
+  test('answers 400 for a recipient that is not a phone number', async () => {
+    const response = await messagesHandler.send(
+      sendRequest(sendDb(), { ...valid, recipient: '+65123\r\nAT+CMGD=1' }),
+    );
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toMatch(/^Invalid recipient: /);
+  });
+
+  test('answers 400 when the SIM is unknown', async () => {
+    const response = await messagesHandler.send(sendRequest(sendDb({ active: null }), valid));
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toBe("Phone with ICCID 'iccid-1' not found in database");
+  });
+
+  test('answers 400 when the SIM is not active', async () => {
+    const response = await messagesHandler.send(
+      sendRequest(
+        sendDb({ active: null, any: { iccid: 'iccid-1', sim_status: 'offline' } }),
+        valid,
+      ),
+    );
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toBe("Phone found but status is 'offline' (not active)");
+  });
+
+  test('answers 500 when the message cannot be stored', async () => {
+    const response = await messagesHandler.send(
+      sendRequest(sendDb({ runError: new Error('D1 down') }), valid),
+    );
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ success: false, error: 'Failed to send message' });
+  });
+
+  test('answers 400 for a body that is not JSON', async () => {
+    const response = await messagesHandler.send(sendRequest(sendDb(), 'not json'));
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toMatch(/^Missing required fields/);
+  });
+
+  test('answers 400 for fields that are not strings instead of sending their text', async () => {
+    for (const bad of [
+      { ...valid, content: { text: 'hi' } },
+      { ...valid, phone_iccid: 8986 },
+      { ...valid, recipient: 6587654321 },
+    ]) {
+      const db = sendDb();
+      const response = await messagesHandler.send(sendRequest(db, bad));
+      expect(response.status).toBe(400);
+      expect(db.inserts).toHaveLength(0);
+    }
+  });
+});
+
 describe('outbound status changes reach the dashboard', () => {
   const since = '2026-09-02T00:00:00.000Z';
 

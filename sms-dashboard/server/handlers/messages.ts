@@ -1,4 +1,6 @@
 import { nanoid } from 'nanoid';
+import * as v from 'valibot';
+import { readJson } from '../../shared/parse-json.js';
 import { VISIBLE_FILTER_STATUSES } from '../utils/spam-filter.js';
 import { normalizeRecipient } from '../utils/recipient.js';
 import type { AppRequest } from '../worker-context.js';
@@ -121,12 +123,12 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-/** Request body of POST /api/messages/send, before validation. */
-interface SendBody {
-  phone_iccid?: unknown;
-  recipient?: unknown;
-  content?: unknown;
-}
+/** Request body of POST /api/messages/send; the recipient is validated further by normalizeRecipient. */
+const SendBody = v.object({
+  phone_iccid: v.pipe(v.string(), v.nonEmpty()),
+  recipient: v.pipe(v.string(), v.nonEmpty()),
+  content: v.pipe(v.string(), v.nonEmpty()),
+});
 
 export const messagesHandler = {
   // List messages with pagination
@@ -299,11 +301,10 @@ export const messagesHandler = {
     const { env } = request;
 
     try {
-      const body = (await request.json()) as SendBody;
-      const { phone_iccid, content } = body;
+      const parsed = await readJson(request, SendBody);
 
       // Validate input
-      if (!phone_iccid || !body.recipient || !content) {
+      if (!parsed.ok) {
         return json(
           {
             success: false,
@@ -317,14 +318,14 @@ export const messagesHandler = {
       // CR would terminate the command and let the rest execute as AT commands. Only
       // E.164 gets past here, and the NORMALISED value is what we store — never
       // body.recipient. See docs/SECURITY-REVIEW.md finding 3.
-      const recipientCheck = normalizeRecipient(body.recipient);
+      const { phone_iccid: phoneIccid, content } = parsed.value;
+      const recipientCheck = normalizeRecipient(parsed.value.recipient);
 
       if (!recipientCheck.ok) {
         return json({ success: false, error: `Invalid recipient: ${recipientCheck.reason}` }, 400);
       }
 
       const recipient = recipientCheck.value;
-      const phoneIccid = String(phone_iccid);
 
       // Get phone details - check for active statuses
       const phone = await env.DB.prepare(
@@ -373,7 +374,7 @@ export const messagesHandler = {
         VALUES (?, ?, ?, ?, ?, 'sent', ?, 'sending')
       `,
       )
-        .bind(messageId, phoneIccid, phone.number, String(content), timestamp, recipient)
+        .bind(messageId, phoneIccid, phone.number, content, timestamp, recipient)
         .run();
 
       // Note: SMS sending is now handled by daemon polling /api/control/pending-sms
