@@ -42,9 +42,7 @@ function localSingaporeNumber(value: unknown): string {
 }
 
 function parseValidityDate(value: unknown): string | null {
-  const match = textOf(value)
-    .trim()
-    .match(/\bvalid\s+till\s+(\d{1,2})\s+([a-z]{3})\s+(\d{4})\b/i);
+  const match = /\bvalid\s+till\s+(\d{1,2})\s+([a-z]{3})\s+(\d{4})\b/i.exec(textOf(value).trim());
   const [, dayText, monthText, yearText] = match ?? [];
   if (dayText === undefined || monthText === undefined || yearText === undefined) return null;
   const day = Number(dayText);
@@ -72,9 +70,7 @@ export function extractM1WebBalance(
     throw new Error('M1 portal does not prove the authenticated account number');
   }
 
-  const balanceMatch = textOf(balanceText)
-    .trim()
-    .match(/^\$\s*(\d+(?:\.\d{1,2})?)$/);
+  const balanceMatch = /^\$\s*(\d+(?:\.\d{1,2})?)$/.exec(textOf(balanceText).trim());
   const amountText = balanceMatch?.[1];
   if (amountText === undefined) throw new Error('M1 portal does not contain an exact SGD balance');
   const balance = Number(amountText);

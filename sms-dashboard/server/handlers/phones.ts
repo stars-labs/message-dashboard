@@ -88,7 +88,10 @@ export const phonesHandler = {
       return json({ success: true, data: results });
     } catch (error) {
       // Log error details server-side for debugging
-      console.error('[Phones] List error:', (error instanceof Error && error.stack) || error);
+      console.error(
+        '[Phones] List error:',
+        error instanceof Error ? (error.stack ?? error) : error,
+      );
 
       // Return generic error to client without exposing stack trace
       return json({ success: false, error: 'Failed to fetch phones' }, 500);

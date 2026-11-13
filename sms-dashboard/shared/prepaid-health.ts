@@ -98,7 +98,7 @@ function dateParts(value: string | null | undefined): DateParts | null {
 }
 
 function regionalDate(now: Date, country: string | null): DateParts | null {
-  const timeZone = (country && COUNTRY_TIME_ZONES[country]) || 'UTC';
+  const timeZone = (country ? COUNTRY_TIME_ZONES[country] : undefined) ?? 'UTC';
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone,
     year: 'numeric',
@@ -178,6 +178,6 @@ export function evaluatePrepaidHealth({
     }
   }
 
-  const summaryStatus = SUMMARY_PRIORITY.find((status) => reasons.has(status)) || 'healthy';
+  const summaryStatus = SUMMARY_PRIORITY.find((status) => reasons.has(status)) ?? 'healthy';
   return { summaryStatus, reasons: [...reasons] };
 }

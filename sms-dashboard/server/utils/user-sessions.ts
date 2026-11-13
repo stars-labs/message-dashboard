@@ -13,7 +13,9 @@
 import * as v from 'valibot';
 import { readKvJson, type KV, type KVOperation } from '../lib/kv.js';
 
-type SessionEnv<Op extends KVOperation> = { SESSIONS: KV<Op> };
+interface SessionEnv<Op extends KVOperation> {
+  SESSIONS: KV<Op>;
+}
 
 const TokenIndex = v.fallback(
   v.pipe(

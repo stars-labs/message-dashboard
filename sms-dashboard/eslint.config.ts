@@ -87,7 +87,7 @@ export default defineConfig([
   {
     name: 'TypeScript, linted with type information',
     files: ['**/*.ts'],
-    extends: [tseslint.configs.strictTypeChecked],
+    extends: [tseslint.configs.strictTypeChecked, tseslint.configs.stylisticTypeChecked],
     languageOptions: {
       parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
     },
@@ -97,6 +97,11 @@ export default defineConfig([
       '@typescript-eslint/no-unused-vars': unusedVars,
       // `as const` stays legal; no `as`, no `<T>x`, no `!` non-null assertion.
       '@typescript-eslint/consistent-type-assertions': ['error', { assertionStyle: 'never' }],
+      // A switch over a union names every member; a `default` cannot hide a new one.
+      '@typescript-eslint/switch-exhaustiveness-check': [
+        'error',
+        { considerDefaultExhaustiveForUnions: false, requireDefaultForNonUnion: true },
+      ],
     },
   },
   {

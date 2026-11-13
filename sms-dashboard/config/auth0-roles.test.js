@@ -25,6 +25,15 @@ describe('createRoleConfig', () => {
     expect(c.ADMIN_ROLE).toBe('superuser');
     expect(c.VIEWER_ROLE).toBe('readonly');
   });
+
+  test('an env var set to the empty string falls back to the default', () => {
+    const c = createRoleConfig({
+      AUTH0_ADMIN_ROLE: '',
+      AUTH0_VIEWER_ROLE: '',
+      AUTH0_ROLE_NAMESPACE: '',
+    });
+    expect(c).toEqual(config);
+  });
 });
 
 describe('rolesFromToken', () => {

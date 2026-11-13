@@ -72,7 +72,7 @@ export async function parseSingtelPostpaidBillSms({
     return null;
   }
 
-  const match = content.trim().match(BILL_PATTERN);
+  const match = BILL_PATTERN.exec(content.trim());
   if (!match) return null;
 
   const [, accountReference, majorText, minorText, dayText, monthName, yearText] = match;

@@ -69,7 +69,7 @@ function accountMatches(value: string, expectedPhone: unknown): boolean {
   const expected = normalizePhone(expectedPhone);
   if (normalizePhone(value) === expected) return true;
 
-  const [, prefix, suffix] = value.trim().match(/^(\d{3})\*+(\d{4})$/) ?? [];
+  const [, prefix, suffix] = /^(\d{3})\*+(\d{4})$/.exec(value.trim()) ?? [];
   return (
     prefix !== undefined &&
     suffix !== undefined &&
@@ -100,9 +100,9 @@ function walk(
 function parseMoney(value: unknown): number | null {
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
   if (typeof value !== 'string') return null;
-  const match = value
-    .trim()
-    .match(/^\s*(?:CNY|RMB|￥|¥)?\s*(-?\d+(?:\.\d{1,2})?)\s*(?:元|CNY|RMB)?\s*$/i);
+  const match = /^\s*(?:CNY|RMB|￥|¥)?\s*(-?\d+(?:\.\d{1,2})?)\s*(?:元|CNY|RMB)?\s*$/i.exec(
+    value.trim(),
+  );
   const amountText = match?.[1];
   return amountText === undefined ? null : Number(amountText);
 }

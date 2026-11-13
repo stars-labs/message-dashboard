@@ -64,12 +64,16 @@ export interface RoleEnv {
   AUTH0_ROLE_NAMESPACE?: string;
 }
 
-// Create config from environment variables
+/** An env var set to the empty string counts as unset. */
+function configured(value: string | undefined, fallback: string): string {
+  return value === undefined || value === '' ? fallback : value;
+}
+
 export function createRoleConfig(env: RoleEnv = {}): RoleConfig {
   return {
-    ADMIN_ROLE: env.AUTH0_ADMIN_ROLE || ADMIN,
-    VIEWER_ROLE: env.AUTH0_VIEWER_ROLE || VIEWER,
-    ROLE_CLAIM: env.AUTH0_ROLE_NAMESPACE || DEFAULT_ROLE_CLAIM,
+    ADMIN_ROLE: configured(env.AUTH0_ADMIN_ROLE, ADMIN),
+    VIEWER_ROLE: configured(env.AUTH0_VIEWER_ROLE, VIEWER),
+    ROLE_CLAIM: configured(env.AUTH0_ROLE_NAMESPACE, DEFAULT_ROLE_CLAIM),
   };
 }
 
@@ -186,17 +190,17 @@ export function isEmailAllowed(
     return { allowed: false, reason: 'Malformed email address', domain: null };
   }
 
-  const configured = (env.ALLOWED_EMAIL_DOMAINS || '')
+  const allowedDomains = (env.ALLOWED_EMAIL_DOMAINS ?? '')
     .split(',')
     .map((d) => d.trim().toLowerCase())
     .filter(Boolean);
 
   // No list configured means no domain restriction; the role check remains the gate.
-  if (configured.length === 0) {
+  if (allowedDomains.length === 0) {
     return { allowed: true, reason: null, domain };
   }
 
-  if (!configured.includes(domain)) {
+  if (!allowedDomains.includes(domain)) {
     return { allowed: false, reason: 'Email domain not allowed', domain };
   }
 
