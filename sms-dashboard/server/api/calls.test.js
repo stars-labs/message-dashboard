@@ -836,6 +836,24 @@ describe('call history logging', () => {
     });
   });
 
+  test('a blank caller id on the first RING leaves the number for a later RING to fill', async () => {
+    const { router, env, DB } = setupWithHistory();
+
+    await invoke(router, 'POST', '/api/control/calls/incoming', { iccid: ICCID, from: '' }, env);
+    const id = env.CALL_STATE.call().id;
+    expect(DB.row(id).remote_number).toBeNull();
+
+    await invoke(
+      router,
+      'POST',
+      '/api/control/calls/incoming',
+      { iccid: ICCID, from: '92953543' },
+      env,
+    );
+
+    expect(DB.row(id).remote_number).toBe('92953543');
+  });
+
   test('a ring the daemon reports as over is a missed call', async () => {
     const { router, env, DB } = setupWithHistory({
       id: 'ring-1',

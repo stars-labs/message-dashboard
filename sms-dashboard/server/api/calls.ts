@@ -422,7 +422,7 @@ function sweepStaleCalls(db: D1Database, now: string): Promise<unknown> {
 async function claimRing(
   env: Env,
   iccid: string,
-  from: unknown,
+  from: string | null,
 ): Promise<{ id: string; started_at: string; remote_number: string | null } | null> {
   try {
     const now = new Date().toISOString();
@@ -431,7 +431,7 @@ async function claimRing(
       `INSERT OR IGNORE INTO calls (id, direction, iccid, remote_number, outcome, started_at)
        VALUES (?, 'inbound', ?, ?, 'in_progress', ?)`,
     )
-      .bind(crypto.randomUUID(), iccid, from ?? null, now)
+      .bind(crypto.randomUUID(), iccid, from, now)
       .run();
 
     const row = await env.DB.prepare(
@@ -900,7 +900,7 @@ export function setupCallRoutes(router: Router): void {
     const body = await readJson(request);
     if (!body) return json({ error: 'Invalid JSON body' }, 400);
     const iccid = typeof body.iccid === 'string' ? body.iccid : '';
-    const from = body.from;
+    const from = typeof body.from === 'string' && body.from ? body.from : null;
     if (!iccid) return json({ error: 'iccid is required' }, 400);
 
     let existing = await readCall(env);
@@ -914,17 +914,13 @@ export function setupCallRoutes(router: Router): void {
         direction: 'inbound',
         state: 'ringing',
         iccid,
-        number:
-          (typeof from === 'string' ? from : null) ||
-          existing?.number ||
-          open?.remote_number ||
-          null,
+        number: from || existing?.number || open?.remote_number || null,
         started_at: existing?.started_at ?? open?.started_at ?? new Date().toISOString(),
       };
       if (await writeCall(env, call, RING_TTL_SECONDS, existing)) {
         if (!existing && !open) {
           await logCallStarted(env, call);
-        } else if (typeof from === 'string' && from && !(existing?.number ?? open?.remote_number)) {
+        } else if (from && !(existing?.number ?? open?.remote_number)) {
           await logCallerId(env, call.id, from);
         }
         return json({ ok: true, call });
