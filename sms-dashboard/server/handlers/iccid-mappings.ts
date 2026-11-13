@@ -1,10 +1,7 @@
-// ICCID Mappings handler - manages user-authoritative sims table
-// New schema: sims table is purely user-managed, status computed dynamically
-
 import * as v from 'valibot';
 import { readJson } from '../../shared/parse-json.js';
-import type { AppRequest } from '../worker-context.js';
-import type { D1Database } from '../cf-bindings.js';
+import { queryAll, queryFirst, type D1 } from '../lib/d1.js';
+import { errorText } from '../utils/d1-error.js';
 
 export const SIM_SERVICE_TYPES = ['unknown', 'prepaid', 'postpaid', 'balance_managed'] as const;
 export const SIM_SERVICE_TYPE_SOURCES = [
@@ -15,50 +12,76 @@ export const SIM_SERVICE_TYPE_SOURCES = [
 ] as const;
 export const SIM_ROLES = ['standalone', 'primary', 'secondary'] as const;
 
-export type SimServiceType = (typeof SIM_SERVICE_TYPES)[number];
-export type SimServiceTypeSource = (typeof SIM_SERVICE_TYPE_SOURCES)[number];
-export type SimRole = (typeof SIM_ROLES)[number];
+const ServiceType = v.picklist(SIM_SERVICE_TYPES);
+const ServiceTypeSource = v.picklist(SIM_SERVICE_TYPE_SOURCES);
+const SimRole = v.picklist(SIM_ROLES);
 
-/** The columns the resolvers read off an existing sims row. */
-export interface ExistingSim {
-  iccid: string;
-  service_type: string | null;
-  service_type_source: string | null;
-  sim_role: string | null;
-  primary_iccid: string | null;
-}
+export type SimServiceType = v.InferOutput<typeof ServiceType>;
+export type SimServiceTypeSource = v.InferOutput<typeof ServiceTypeSource>;
+export type SimRole = v.InferOutput<typeof SimRole>;
 
-/** Request bodies are narrowed field by field, so every field arrives as unknown. */
-type SimInput = Record<string, unknown>;
+const ExistingSimRow = v.object({
+  iccid: v.string(),
+  service_type: v.string(),
+  service_type_source: v.nullable(v.string()),
+  sim_role: v.string(),
+  primary_iccid: v.nullable(v.string()),
+});
 
-export type ServiceTypeResolution =
-  | {
-      serviceType: SimServiceType;
-      serviceTypeSource: SimServiceTypeSource | null;
-      serviceTypeProvided: boolean;
-    }
-  | { error: string };
+export type ExistingSim = v.InferOutput<typeof ExistingSimRow>;
 
-export type SimRoleResolution =
-  { role: SimRole; primaryIccid: string | null; roleProvided: boolean } | { error: string };
+const PrimaryTargetRow = v.object({ sim_role: v.string() });
 
-/** A device_view row as this handler returns it. */
-interface SimMappingRow {
-  iccid: string;
-  sim_index: number | null;
-  phone_number: string | null;
-  [column: string]: unknown;
-}
+const MappingListRow = v.object({
+  id: v.string(),
+  iccid: v.string(),
+  sim_index: v.number(),
+  phone_number: v.string(),
+  country: v.nullable(v.string()),
+  carrier: v.nullable(v.string()),
+  service_type: v.string(),
+  service_type_source: v.nullable(v.string()),
+  service_type_verified_at: v.nullable(v.string()),
+  sim_role: v.string(),
+  primary_iccid: v.nullable(v.string()),
+  balance_threshold: v.nullable(v.number()),
+  equipment_id: v.nullable(v.string()),
+  notes: v.nullable(v.string()),
+  is_active: v.string(),
+  signal_quality: v.nullable(v.number()),
+  modem_status: v.nullable(v.string()),
+  detected_iccid: v.nullable(v.string()),
+  operator: v.nullable(v.string()),
+  usb_path: v.nullable(v.string()),
+  last_usb_path: v.nullable(v.string()),
+  created_at: v.nullable(v.string()),
+  updated_at: v.nullable(v.string()),
+});
 
-const hasOwn = (value: object, key: string): boolean =>
-  Object.prototype.hasOwnProperty.call(value, key);
+const MappingDetailRow = v.omit(MappingListRow, ['balance_threshold']);
 
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  });
-}
+const SavedMappingRow = v.object({
+  iccid: v.string(),
+  sim_index: v.number(),
+  phone_number: v.string(),
+  country_code: v.nullable(v.string()),
+  carrier: v.nullable(v.string()),
+  imei: v.nullable(v.string()),
+  notes: v.nullable(v.string()),
+  service_type: v.string(),
+  service_type_source: v.nullable(v.string()),
+  service_type_verified_at: v.nullable(v.string()),
+  sim_role: v.string(),
+  primary_iccid: v.nullable(v.string()),
+  balance_threshold: v.nullable(v.number()),
+  status: v.string(),
+  usb_path: v.nullable(v.string()),
+  last_usb_path: v.nullable(v.string()),
+  created_at: v.nullable(v.string()),
+  updated_at: v.nullable(v.string()),
+});
+
+const TotalRow = v.object({ total: v.number() });
 
 const NonEmptyString = v.pipe(v.string(), v.nonEmpty());
 const SimIndex = v.pipe(v.number(), v.integer(), v.minValue(1));
@@ -101,100 +124,160 @@ const BulkBody = v.object({ mappings: v.array(v.unknown()) });
 
 const PositiveIntegerText = v.pipe(v.string(), v.regex(/^[1-9]\d*$/), v.transform(Number));
 
-function positiveInteger(raw: string | null, fallback: number): number | null {
-  if (raw === null || raw === '') return fallback;
-  const parsed = v.safeParse(PositiveIntegerText, raw);
-  return parsed.success ? parsed.output : null;
+type ServiceTypeResolution =
+  | {
+      serviceType: SimServiceType;
+      serviceTypeSource: SimServiceTypeSource | null;
+      serviceTypeProvided: boolean;
+    }
+  | { error: string };
+
+type SimRoleResolution =
+  { role: SimRole; primaryIccid: string | null; roleProvided: boolean } | { error: string };
+
+interface ServiceTypeInput {
+  service_type?: string | null | undefined;
+  service_type_source?: string | null | undefined;
 }
 
-export function resolveServiceType(
-  data: SimInput,
-  existing: ExistingSim | null = null,
-): ServiceTypeResolution {
-  const serviceTypeProvided = hasOwn(data, 'service_type') || hasOwn(data, 'service_type_source');
-  const serviceType = hasOwn(data, 'service_type')
-    ? String(data.service_type || 'unknown')
-    : existing?.service_type || 'unknown';
-
-  if (!(SIM_SERVICE_TYPES as readonly string[]).includes(serviceType)) {
-    return { error: 'service_type must be unknown, prepaid, postpaid, or balance_managed' };
-  }
-
-  if (serviceType === 'unknown' || serviceType === 'balance_managed') {
-    return { serviceType, serviceTypeSource: null, serviceTypeProvided };
-  }
-
-  const serviceTypeSource = hasOwn(data, 'service_type_source')
-    ? (data.service_type_source as string | null) || null
-    : existing?.service_type_source || null;
-
-  if (
-    !serviceTypeSource ||
-    !(SIM_SERVICE_TYPE_SOURCES as readonly string[]).includes(serviceTypeSource)
-  ) {
-    return {
-      error: 'A valid service_type_source is required for prepaid or postpaid SIMs',
-    };
-  }
-
-  return {
-    // Narrowed by the allow-list check above.
-    serviceType: serviceType as SimServiceType,
-    serviceTypeSource: serviceTypeSource as SimServiceTypeSource,
-    serviceTypeProvided,
-  };
+interface SimRoleInput {
+  sim_role?: string | null | undefined;
+  primary_iccid?: string | null | undefined;
 }
 
-/**
- * Resolve the primary/secondary role for a SIM. Unlike resolveServiceType,
- * this is async: a secondary must point at a real primary SIM, which requires
- * a cross-row DB lookup the SQL triggers cannot do safely.
- */
-export async function resolveSimRole(
-  data: SimInput,
-  existing: ExistingSim | null,
-  env: { DB: D1Database },
-): Promise<SimRoleResolution> {
-  const roleProvided = hasOwn(data, 'sim_role') || hasOwn(data, 'primary_iccid');
-  const role = hasOwn(data, 'sim_role')
-    ? String(data.sim_role || 'standalone')
-    : existing?.sim_role || 'standalone';
+interface Operator {
+  email?: string;
+}
 
-  if (!(SIM_ROLES as readonly string[]).includes(role)) {
-    return { error: 'sim_role must be standalone, primary, or secondary' };
-  }
+interface ListRequest {
+  url: string;
+  env: { DB: D1<'all' | 'first'> };
+}
 
-  let primaryIccid: string | null = null;
-  if (role === 'secondary') {
-    primaryIccid = hasOwn(data, 'primary_iccid')
-      ? (data.primary_iccid as string | null) || null
-      : existing?.primary_iccid || null;
-    if (!primaryIccid) {
-      return { error: 'primary_iccid is required for a secondary SIM' };
-    }
-    const target = await env.DB.prepare('SELECT sim_role FROM sims WHERE iccid = ?')
-      .bind(primaryIccid)
-      .first<{ sim_role: string | null }>();
-    if (!target) return { error: 'primary_iccid does not match any SIM' };
-    if (target.sim_role !== 'primary') {
-      return { error: `primary_iccid points to a ${target.sim_role} SIM, not a primary` };
-    }
-  }
+interface GetRequest {
+  env: { DB: D1<'first'> };
+  params?: Record<string, string>;
+}
 
-  return { role: role as SimRole, primaryIccid, roleProvided };
+interface WriteRequest {
+  env: { DB: D1<'first' | 'run'> };
+  user?: Operator;
+  text(): Promise<string>;
+}
+
+interface UpdateRequest extends WriteRequest {
+  params?: Record<string, string>;
+}
+
+interface DeleteRequest {
+  env: { DB: D1<'run'> };
+  params?: Record<string, string>;
+}
+
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
 }
 
 function badRequest(error: string): Response {
   return json({ success: false, error }, 400);
 }
 
-/** The sims columns both the resolver and the writes care about. */
+function positiveInteger(raw: string | null, fallback: number): number | null {
+  if (raw === null || raw === '') return fallback;
+  const parsed = v.safeParse(PositiveIntegerText, raw);
+  return parsed.success ? parsed.output : null;
+}
+
+function emptyToNull(value: string | null | undefined): string | null {
+  return value === undefined || value === '' ? null : value;
+}
+
+function updatedBy(user: Operator | undefined): string {
+  const email = user?.email;
+  return email === undefined || email === '' ? 'system' : email;
+}
+
+export function resolveServiceType(
+  data: ServiceTypeInput,
+  existing: Pick<ExistingSim, 'service_type' | 'service_type_source'> | null = null,
+): ServiceTypeResolution {
+  const serviceTypeProvided = 'service_type' in data || 'service_type_source' in data;
+  const requested =
+    'service_type' in data ? emptyToNull(data.service_type) : emptyToNull(existing?.service_type);
+  const serviceType = v.safeParse(ServiceType, requested ?? 'unknown');
+
+  if (!serviceType.success) {
+    return { error: 'service_type must be unknown, prepaid, postpaid, or balance_managed' };
+  }
+
+  if (serviceType.output === 'unknown' || serviceType.output === 'balance_managed') {
+    return { serviceType: serviceType.output, serviceTypeSource: null, serviceTypeProvided };
+  }
+
+  const requestedSource =
+    'service_type_source' in data
+      ? emptyToNull(data.service_type_source)
+      : emptyToNull(existing?.service_type_source);
+  const serviceTypeSource = v.safeParse(ServiceTypeSource, requestedSource);
+
+  if (!serviceTypeSource.success) {
+    return {
+      error: 'A valid service_type_source is required for prepaid or postpaid SIMs',
+    };
+  }
+
+  return {
+    serviceType: serviceType.output,
+    serviceTypeSource: serviceTypeSource.output,
+    serviceTypeProvided,
+  };
+}
+
+/** Async because a secondary must point at a real primary SIM, a cross-row lookup the SQL triggers cannot do safely. */
+export async function resolveSimRole(
+  data: SimRoleInput,
+  existing: Pick<ExistingSim, 'sim_role' | 'primary_iccid'> | null,
+  env: { DB: D1<'first'> },
+): Promise<SimRoleResolution> {
+  const roleProvided = 'sim_role' in data || 'primary_iccid' in data;
+  const requested =
+    'sim_role' in data ? emptyToNull(data.sim_role) : emptyToNull(existing?.sim_role);
+  const role = v.safeParse(SimRole, requested ?? 'standalone');
+
+  if (!role.success) {
+    return { error: 'sim_role must be standalone, primary, or secondary' };
+  }
+
+  let primaryIccid: string | null = null;
+  if (role.output === 'secondary') {
+    primaryIccid =
+      'primary_iccid' in data
+        ? emptyToNull(data.primary_iccid)
+        : emptyToNull(existing?.primary_iccid);
+    if (primaryIccid === null) {
+      return { error: 'primary_iccid is required for a secondary SIM' };
+    }
+    const target = await queryFirst(
+      env.DB.prepare('SELECT sim_role FROM sims WHERE iccid = ?').bind(primaryIccid),
+      PrimaryTargetRow,
+    );
+    if (!target) return { error: 'primary_iccid does not match any SIM' };
+    if (target.sim_role !== 'primary') {
+      return { error: `primary_iccid points to a ${target.sim_role} SIM, not a primary` };
+    }
+  }
+
+  return { role: role.output, primaryIccid, roleProvided };
+}
+
 const EXISTING_SIM_SELECT = `
   SELECT iccid, service_type, service_type_source, sim_role, primary_iccid
   FROM sims WHERE iccid = ?
 `;
 
-/** The shape the detail endpoints read back. */
 const DETAIL_SELECT = `
   SELECT
     iccid as id, iccid, sim_index, number as phone_number,
@@ -208,15 +291,15 @@ const DETAIL_SELECT = `
 `;
 
 export const iccidMappingsHandler = {
-  // List all ICCID mappings with pagination
-  async list(request: AppRequest): Promise<Response> {
+  async list(request: ListRequest): Promise<Response> {
     const { env } = request;
     const url = new URL(request.url);
     const page = positiveInteger(url.searchParams.get('page'), 1);
     const limit = positiveInteger(url.searchParams.get('limit'), 20);
-    if (page === null || limit === null)
+    if (page === null || limit === null) {
       return badRequest('page and limit must be positive integers');
-    const search = url.searchParams.get('search') || '';
+    }
+    const search = url.searchParams.get('search') ?? '';
     const offset = (page - 1) * limit;
 
     try {
@@ -259,12 +342,8 @@ export const iccidMappingsHandler = {
       query += ` ORDER BY sim_index ASC LIMIT ? OFFSET ?`;
       params.push(limit, offset);
 
-      const result = await env.DB.prepare(query)
-        .bind(...params)
-        .all<SimMappingRow>();
-      const mappings = result.results;
+      const mappings = await queryAll(env.DB.prepare(query).bind(...params), MappingListRow);
 
-      // Get total count
       let countQuery = `SELECT COUNT(*) as total FROM device_view WHERE 1=1`;
       const countParams: unknown[] = [];
 
@@ -274,10 +353,11 @@ export const iccidMappingsHandler = {
         countParams.push(searchPattern, searchPattern, searchPattern, searchPattern);
       }
 
-      const totalResult = await env.DB.prepare(countQuery)
-        .bind(...countParams)
-        .first<{ total: number }>();
-      const total = totalResult?.total || 0;
+      const totalResult = await queryFirst(
+        env.DB.prepare(countQuery).bind(...countParams),
+        TotalRow,
+      );
+      const total = totalResult?.total ?? 0;
 
       return json({
         success: true,
@@ -295,20 +375,19 @@ export const iccidMappingsHandler = {
         {
           success: false,
           error: 'Failed to fetch ICCID mappings',
-          details: (error as Error).message,
+          details: errorText(error),
         },
         500,
       );
     }
   },
 
-  // Get a specific ICCID mapping
-  async get(request: AppRequest): Promise<Response> {
+  async get(request: GetRequest): Promise<Response> {
     const { env } = request;
-    const id = request.params?.id;
+    const id = request.params?.['id'];
 
     try {
-      const mapping = await env.DB.prepare(DETAIL_SELECT).bind(id).first<SimMappingRow>();
+      const mapping = await queryFirst(env.DB.prepare(DETAIL_SELECT).bind(id), MappingDetailRow);
 
       if (!mapping) {
         return json({ success: false, error: 'ICCID mapping not found' }, 404);
@@ -321,13 +400,12 @@ export const iccidMappingsHandler = {
     }
   },
 
-  // Get mapping by ICCID
-  async getByIccid(request: AppRequest): Promise<Response> {
+  async getByIccid(request: GetRequest): Promise<Response> {
     const { env } = request;
-    const iccid = request.params?.iccid;
+    const iccid = request.params?.['iccid'];
 
     try {
-      const mapping = await env.DB.prepare(DETAIL_SELECT).bind(iccid).first<SimMappingRow>();
+      const mapping = await queryFirst(env.DB.prepare(DETAIL_SELECT).bind(iccid), MappingDetailRow);
 
       if (!mapping) {
         return json({ success: false, error: 'ICCID not found' }, 404);
@@ -340,8 +418,7 @@ export const iccidMappingsHandler = {
     }
   },
 
-  // Create or update ICCID mapping
-  async create(request: AppRequest): Promise<Response> {
+  async create(request: WriteRequest): Promise<Response> {
     const { env, user } = request;
     const parsed = await readJson(request, CreateBody);
     if (!parsed.ok) {
@@ -360,15 +437,16 @@ export const iccidMappingsHandler = {
       const { iccid, phone_number, sim_index, country_code, carrier, imei, notes } = data;
       const balanceThreshold = data.balance_threshold ?? null;
 
-      // Check if SIM exists
-      const simExists = await env.DB.prepare(EXISTING_SIM_SELECT).bind(iccid).first<ExistingSim>();
+      const simExists = await queryFirst(
+        env.DB.prepare(EXISTING_SIM_SELECT).bind(iccid),
+        ExistingSimRow,
+      );
       const service = resolveServiceType(data, simExists);
       if ('error' in service) return badRequest(service.error);
       const role = await resolveSimRole(data, simExists, env);
       if ('error' in role) return badRequest(role.error);
 
       if (!simExists) {
-        // INSERT new SIM (NO status field - computed dynamically)
         await env.DB.prepare(
           `
           INSERT INTO sims (
@@ -387,10 +465,10 @@ export const iccidMappingsHandler = {
             iccid,
             sim_index,
             phone_number,
-            country_code || null,
-            carrier || null,
-            imei || null,
-            notes || null,
+            emptyToNull(country_code),
+            emptyToNull(carrier),
+            emptyToNull(imei),
+            emptyToNull(notes),
             service.serviceType,
             service.serviceTypeSource,
             service.serviceType,
@@ -398,11 +476,10 @@ export const iccidMappingsHandler = {
             role.role,
             role.primaryIccid,
             balanceThreshold,
-            user?.email || 'system',
+            updatedBy(user),
           )
           .run();
       } else {
-        // UPDATE existing SIM (NO status field - computed dynamically)
         await env.DB.prepare(
           `
           UPDATE sims
@@ -423,10 +500,10 @@ export const iccidMappingsHandler = {
           .bind(
             sim_index,
             phone_number,
-            country_code || null,
-            carrier || null,
-            imei || null,
-            notes || null,
+            emptyToNull(country_code),
+            emptyToNull(carrier),
+            emptyToNull(imei),
+            emptyToNull(notes),
             service.serviceType,
             service.serviceTypeSource,
             service.serviceTypeProvided ? 1 : 0,
@@ -435,15 +512,15 @@ export const iccidMappingsHandler = {
             role.role,
             role.primaryIccid,
             balanceThreshold,
-            user?.email || 'system',
+            updatedBy(user),
             iccid,
           )
           .run();
       }
 
-      // Return updated mapping with computed status from device_view
-      const mapping = await env.DB.prepare(
-        `
+      const mapping = await queryFirst(
+        env.DB.prepare(
+          `
         SELECT
           iccid, sim_index, number as phone_number,
           country as country_code, carrier, equipment_id as imei,
@@ -454,9 +531,9 @@ export const iccidMappingsHandler = {
         FROM device_view
         WHERE iccid = ?
       `,
-      )
-        .bind(iccid)
-        .first<SimMappingRow>();
+        ).bind(iccid),
+        SavedMappingRow,
+      );
 
       return json({ success: true, data: mapping }, simExists ? 200 : 201);
     } catch (error) {
@@ -465,17 +542,16 @@ export const iccidMappingsHandler = {
         {
           success: false,
           error: 'Failed to create ICCID mapping',
-          details: (error as Error).message,
+          details: errorText(error),
         },
         500,
       );
     }
   },
 
-  // Update an ICCID mapping
-  async update(request: AppRequest): Promise<Response> {
+  async update(request: UpdateRequest): Promise<Response> {
     const { env, user } = request;
-    const id = request.params?.id;
+    const id = request.params?.['id'];
     const parsed = await readJson(request, UpdateBody);
     if (!parsed.ok) {
       return json(
@@ -489,7 +565,10 @@ export const iccidMappingsHandler = {
       const { phone_number, sim_index, country_code, carrier, imei, notes } = data;
       const balanceThreshold = data.balance_threshold ?? null;
 
-      const existing = await env.DB.prepare(EXISTING_SIM_SELECT).bind(id).first<ExistingSim>();
+      const existing = await queryFirst(
+        env.DB.prepare(EXISTING_SIM_SELECT).bind(id),
+        ExistingSimRow,
+      );
       if (!existing) {
         return json({ success: false, error: 'ICCID mapping not found' }, 404);
       }
@@ -498,7 +577,6 @@ export const iccidMappingsHandler = {
       const role = await resolveSimRole(data, existing, env);
       if ('error' in role) return badRequest(role.error);
 
-      // Update sims table (NO status field)
       await env.DB.prepare(
         `
         UPDATE sims
@@ -525,12 +603,12 @@ export const iccidMappingsHandler = {
       `,
       )
         .bind(
-          phone_number || null,
-          sim_index || null,
-          country_code || null,
-          carrier || null,
-          imei || null,
-          notes || null,
+          phone_number,
+          sim_index,
+          emptyToNull(country_code),
+          emptyToNull(carrier),
+          emptyToNull(imei),
+          emptyToNull(notes),
           service.serviceType,
           service.serviceTypeSource,
           service.serviceTypeProvided ? 1 : 0,
@@ -539,13 +617,12 @@ export const iccidMappingsHandler = {
           role.role,
           role.primaryIccid,
           balanceThreshold,
-          user?.email || 'system',
+          updatedBy(user),
           id,
         )
         .run();
 
-      // Return updated mapping with computed status from device_view
-      const mapping = await env.DB.prepare(DETAIL_SELECT).bind(id).first<SimMappingRow>();
+      const mapping = await queryFirst(env.DB.prepare(DETAIL_SELECT).bind(id), MappingDetailRow);
 
       if (!mapping) {
         return json({ success: false, error: 'ICCID mapping not found' }, 404);
@@ -558,14 +635,12 @@ export const iccidMappingsHandler = {
     }
   },
 
-  // Delete an ICCID mapping
-  async delete(request: AppRequest): Promise<Response> {
+  async delete(request: DeleteRequest): Promise<Response> {
     const { env } = request;
-    const id = request.params?.id;
+    const id = request.params?.['id'];
 
     try {
-      // Actually delete the SIM from sims table. If this SIM is a primary with
-      // secondaries still attached, the ON DELETE RESTRICT FK aborts.
+      // If this SIM is a primary with secondaries still attached, the ON DELETE RESTRICT FK aborts.
       await env.DB.prepare(
         `
         DELETE FROM sims WHERE iccid = ?
@@ -579,7 +654,7 @@ export const iccidMappingsHandler = {
         message: 'ICCID mapping deleted successfully',
       });
     } catch (error) {
-      if (/FOREIGN KEY constraint failed/i.test((error as Error)?.message || '')) {
+      if (/FOREIGN KEY constraint failed/i.test(errorText(error))) {
         return json(
           {
             success: false,
@@ -594,8 +669,7 @@ export const iccidMappingsHandler = {
     }
   },
 
-  // Bulk import ICCID mappings
-  async bulkImport(request: AppRequest): Promise<Response> {
+  async bulkImport(request: WriteRequest): Promise<Response> {
     const { env, user } = request;
     const body = await readJson(request, BulkBody);
 
@@ -621,10 +695,10 @@ export const iccidMappingsHandler = {
         try {
           const { iccid, phone_number, sim_index, country_code, carrier, imei, notes } = mapping;
 
-          // Check if SIM exists
-          const existing = await env.DB.prepare(EXISTING_SIM_SELECT)
-            .bind(iccid)
-            .first<ExistingSim>();
+          const existing = await queryFirst(
+            env.DB.prepare(EXISTING_SIM_SELECT).bind(iccid),
+            ExistingSimRow,
+          );
           const service = resolveServiceType(mapping, existing);
           if ('error' in service) {
             failed++;
@@ -639,7 +713,6 @@ export const iccidMappingsHandler = {
           }
 
           if (existing) {
-            // Update existing
             await env.DB.prepare(
               `
               UPDATE sims
@@ -667,10 +740,10 @@ export const iccidMappingsHandler = {
               .bind(
                 sim_index,
                 phone_number,
-                country_code || null,
-                carrier || null,
-                imei || null,
-                notes || null,
+                emptyToNull(country_code),
+                emptyToNull(carrier),
+                emptyToNull(imei),
+                emptyToNull(notes),
                 service.serviceType,
                 service.serviceTypeSource,
                 service.serviceTypeProvided ? 1 : 0,
@@ -678,13 +751,12 @@ export const iccidMappingsHandler = {
                 service.serviceType,
                 role.role,
                 role.primaryIccid,
-                user?.email || 'system',
+                updatedBy(user),
                 iccid,
               )
               .run();
             updated++;
           } else {
-            // Create new
             await env.DB.prepare(
               `
               INSERT INTO sims (
@@ -703,26 +775,24 @@ export const iccidMappingsHandler = {
                 iccid,
                 sim_index,
                 phone_number,
-                country_code || null,
-                carrier || null,
-                imei || null,
-                notes || null,
+                emptyToNull(country_code),
+                emptyToNull(carrier),
+                emptyToNull(imei),
+                emptyToNull(notes),
                 service.serviceType,
                 service.serviceTypeSource,
                 service.serviceType,
                 service.serviceType,
                 role.role,
                 role.primaryIccid,
-                user?.email || 'system',
+                updatedBy(user),
               )
               .run();
             created++;
           }
         } catch (error) {
           failed++;
-          errors.push(
-            `Failed to import mapping for ICCID ${mapping.iccid}: ${(error as Error).message}`,
-          );
+          errors.push(`Failed to import mapping for ICCID ${mapping.iccid}: ${errorText(error)}`);
         }
       }
 
@@ -742,7 +812,7 @@ export const iccidMappingsHandler = {
         {
           success: false,
           error: 'Failed to import ICCID mappings',
-          details: (error as Error).message,
+          details: errorText(error),
         },
         500,
       );

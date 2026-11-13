@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
+import * as v from 'valibot';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
+import type { D1, D1Statement } from '../lib/d1.js';
 import { iccidMappingsHandler, resolveServiceType, resolveSimRole } from './iccid-mappings.js';
 
 const MIGRATIONS = [
@@ -15,7 +17,7 @@ const MIGRATIONS = [
 
 async function createMigratedDatabase() {
   const database = new Database(':memory:');
-  database.exec(`
+  database.run(`
     PRAGMA foreign_keys = ON;
     CREATE TABLE sims (
       iccid TEXT PRIMARY KEY,
@@ -44,45 +46,93 @@ async function createMigratedDatabase() {
     );
   `);
   for (const name of MIGRATIONS) {
-    database.exec(await Bun.file(new URL(`../../migrations/${name}.sql`, import.meta.url)).text());
+    database.run(await Bun.file(new URL(`../../migrations/${name}.sql`, import.meta.url)).text());
   }
   return database;
 }
 
-function bodyOf(value) {
-  return { text: async () => JSON.stringify(value), json: async () => value };
+function bodyOf(value: unknown) {
+  return { text: () => Promise.resolve(JSON.stringify(value)) };
 }
 
-function rawBodyOf(text) {
-  return {
-    text: async () => text,
-    json: async () => JSON.parse(text),
-  };
+function rawBodyOf(text: string) {
+  return { text: () => Promise.resolve(text) };
 }
 
-function insertSim(database, iccid, index, overrides = {}) {
-  const row = {
-    phone_number: `+65000000${String(index).padStart(2, '0')}`,
-    country_code: 'SG',
-    carrier: 'Singtel',
-    imei: null,
-    notes: null,
-    ...overrides,
-  };
+function insertSim(
+  database: Database,
+  iccid: string,
+  index: number,
+  overrides: { carrier?: string; notes?: string } = {},
+) {
   database
     .query(
-      `INSERT INTO sims (iccid, sim_index, phone_number, country_code, carrier, imei, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO sims (iccid, sim_index, phone_number, country_code, carrier, notes)
+       VALUES (?, ?, ?, 'SG', ?, ?)`,
     )
-    .run(iccid, index, row.phone_number, row.country_code, row.carrier, row.imei, row.notes);
+    .run(
+      iccid,
+      index,
+      `+65000000${String(index).padStart(2, '0')}`,
+      overrides.carrier ?? 'Singtel',
+      overrides.notes ?? null,
+    );
 }
 
-function failingDb() {
+function failingDb(): D1 {
   return {
     prepare() {
       throw new Error('D1 is down');
     },
   };
+}
+
+function rowsDb(row: unknown): D1<'all' | 'first'> {
+  function statement(): D1Statement<'all' | 'first'> {
+    return {
+      bind: statement,
+      all: () => Promise.resolve({ results: [row] }),
+      first: () => Promise.resolve(row),
+    };
+  }
+  return { prepare: statement };
+}
+
+const NumberRow = v.object({ n: v.number() });
+
+function count(database: Database, sql: string): number {
+  return v.parse(NumberRow, database.query(sql).get()).n;
+}
+
+const ErrorBody = v.looseObject({ success: v.literal(false), error: v.string() });
+const DataBody = v.looseObject({ data: v.record(v.string(), v.unknown()) });
+const ListBody = v.object({
+  success: v.literal(true),
+  data: v.array(v.looseObject({ iccid: v.string() })),
+  pagination: v.object({
+    page: v.number(),
+    limit: v.number(),
+    total: v.number(),
+    totalPages: v.number(),
+  }),
+});
+const BulkBody = v.object({
+  success: v.literal(true),
+  summary: v.object({
+    total: v.number(),
+    created: v.number(),
+    updated: v.number(),
+    failed: v.number(),
+  }),
+  errors: v.optional(v.array(v.string())),
+});
+
+async function errorOf(response: Response): Promise<string> {
+  return v.parse(ErrorBody, await response.json()).error;
+}
+
+async function dataOf(response: Response) {
+  return v.parse(DataBody, await response.json()).data;
 }
 
 const user = { email: 'operator@example.com' };
@@ -149,8 +199,8 @@ describe('SIM service type validation', () => {
 
   test('an empty or null service_type resets to unknown instead of keeping the existing one', () => {
     const existing = { service_type: 'prepaid', service_type_source: 'carrier_account' };
-    for (const service_type of ['', null]) {
-      expect(resolveServiceType({ service_type }, existing)).toEqual({
+    for (const serviceType of ['', null]) {
+      expect(resolveServiceType({ service_type: serviceType }, existing)).toEqual({
         serviceType: 'unknown',
         serviceTypeSource: null,
         serviceTypeProvided: true,
@@ -202,17 +252,25 @@ describe('SIM service type validation', () => {
     });
     expect(createResponse.status).toBe(201);
 
-    const confirmed = database
-      .query(
-        `
+    const confirmed = v.parse(
+      v.object({
+        service_type: v.string(),
+        service_type_source: v.string(),
+        service_type_verified_at: v.string(),
+        updated_by: v.string(),
+      }),
+      database
+        .query(
+          `
       SELECT service_type, service_type_source, service_type_verified_at, updated_by
       FROM sims WHERE iccid = 'test-iccid'
     `,
-      )
-      .get();
+        )
+        .get(),
+    );
     expect(confirmed.service_type).toBe('postpaid');
     expect(confirmed.service_type_source).toBe('contract_or_bill');
-    expect(confirmed.service_type_verified_at).toBeTruthy();
+    expect(confirmed.service_type_verified_at).not.toBe('');
     expect(confirmed.updated_by).toBe(user.email);
 
     const updateResponse = await iccidMappingsHandler.update({
@@ -263,7 +321,7 @@ describe('SIM service type validation', () => {
 describe('SIM primary/secondary role validation', () => {
   function roleDatabase() {
     const database = new Database(':memory:');
-    database.exec(`CREATE TABLE sims (iccid TEXT PRIMARY KEY, sim_role TEXT, primary_iccid TEXT)`);
+    database.run(`CREATE TABLE sims (iccid TEXT PRIMARY KEY, sim_role TEXT, primary_iccid TEXT)`);
     return database;
   }
 
@@ -323,7 +381,7 @@ describe('SIM primary/secondary role validation', () => {
 
   test('secondary pointing at a standalone SIM is rejected', async () => {
     const database = roleDatabase();
-    database.exec(
+    database.run(
       `INSERT INTO sims (iccid, sim_role, primary_iccid) VALUES ('solo', 'standalone', NULL)`,
     );
     const env = { DB: sqliteD1(database) };
@@ -335,13 +393,13 @@ describe('SIM primary/secondary role validation', () => {
       null,
       env,
     );
-    expect(result.error).toBe('primary_iccid points to a standalone SIM, not a primary');
+    expect(result).toEqual({ error: 'primary_iccid points to a standalone SIM, not a primary' });
     database.close();
   });
 
   test('secondary pointing at a real primary succeeds', async () => {
     const database = roleDatabase();
-    database.exec(
+    database.run(
       `INSERT INTO sims (iccid, sim_role, primary_iccid) VALUES ('main', 'primary', NULL)`,
     );
     const env = { DB: sqliteD1(database) };
@@ -363,7 +421,7 @@ describe('SIM primary/secondary role validation', () => {
 
   test('an existing secondary keeps its primary when the update omits the role fields', async () => {
     const database = roleDatabase();
-    database.exec(
+    database.run(
       `INSERT INTO sims (iccid, sim_role, primary_iccid) VALUES ('main', 'primary', NULL)`,
     );
     const env = { DB: sqliteD1(database) };
@@ -375,7 +433,7 @@ describe('SIM primary/secondary role validation', () => {
   test('SQL trigger refuses secondary with NULL primary_iccid on insert', async () => {
     const database = await createMigratedDatabase();
     expect(() =>
-      database.exec(
+      database.run(
         `INSERT INTO sims (iccid, sim_index, phone_number, sim_role) VALUES ('x', 1, 'n', 'secondary')`,
       ),
     ).toThrow('secondary SIM requires primary_iccid');
@@ -385,7 +443,7 @@ describe('SIM primary/secondary role validation', () => {
   test('SQL trigger refuses primary with a primary_iccid set', async () => {
     const database = await createMigratedDatabase();
     expect(() =>
-      database.exec(
+      database.run(
         `INSERT INTO sims (iccid, sim_index, phone_number, sim_role, primary_iccid) VALUES ('p', 1, 'n', 'primary', 'whatever')`,
       ),
     ).toThrow('secondary SIM requires primary_iccid');
@@ -394,13 +452,13 @@ describe('SIM primary/secondary role validation', () => {
 
   test('ON DELETE RESTRICT blocks deleting a primary with secondaries attached', async () => {
     const database = await createMigratedDatabase();
-    database.exec(
+    database.run(
       `INSERT INTO sims (iccid, sim_index, phone_number, sim_role, primary_iccid) VALUES ('main', 1, 'n', 'primary', NULL)`,
     );
-    database.exec(
+    database.run(
       `INSERT INTO sims (iccid, sim_index, phone_number, sim_role, primary_iccid) VALUES ('sec', 2, 'n2', 'secondary', 'main')`,
     );
-    expect(() => database.exec(`DELETE FROM sims WHERE iccid = 'main'`)).toThrow(
+    expect(() => database.run(`DELETE FROM sims WHERE iccid = 'main'`)).toThrow(
       'FOREIGN KEY constraint failed',
     );
     database.close();
@@ -489,8 +547,7 @@ describe('SIM primary/secondary role validation', () => {
 
     const delResp = await iccidMappingsHandler.delete({ env, params: { id: 'p' } });
     expect(delResp.status).toBe(409);
-    const body = await delResp.json();
-    expect(body.error).toMatch(/primary SIM with secondary/);
+    expect(await errorOf(delResp)).toMatch(/primary SIM with secondary/);
     database.close();
   });
 });
@@ -511,12 +568,12 @@ describe('ICCID mapping reads', () => {
       env,
       url: 'https://example.com/api/iccid-mappings',
     });
-    const body = await response.json();
+    const body = v.parse(ListBody, await response.json());
 
     expect(response.status).toBe(200);
     expect(body.pagination).toEqual({ page: 1, limit: 20, total: 3, totalPages: 1 });
     expect(body.data.map((row) => row.iccid)).toEqual(['iccid-a', 'iccid-b', 'iccid-c']);
-    expect(body.data[1]).toMatchObject({
+    expect(body.data[1]).toEqual({
       id: 'iccid-b',
       iccid: 'iccid-b',
       sim_index: 2,
@@ -538,6 +595,8 @@ describe('ICCID mapping reads', () => {
       operator: null,
       usb_path: null,
       last_usb_path: null,
+      created_at: expect.any(String),
+      updated_at: expect.any(String),
     });
     database.close();
   });
@@ -549,7 +608,7 @@ describe('ICCID mapping reads', () => {
       env,
       url: 'https://example.com/api/iccid-mappings?search=Singtel',
     });
-    const searchedBody = await searched.json();
+    const searchedBody = v.parse(ListBody, await searched.json());
     expect(searchedBody.data.map((row) => row.iccid)).toEqual(['iccid-a', 'iccid-c']);
     expect(searchedBody.pagination.total).toBe(2);
 
@@ -557,7 +616,7 @@ describe('ICCID mapping reads', () => {
       env,
       url: 'https://example.com/api/iccid-mappings?page=2&limit=2',
     });
-    const pagedBody = await paged.json();
+    const pagedBody = v.parse(ListBody, await paged.json());
     expect(pagedBody.data.map((row) => row.iccid)).toEqual(['iccid-c']);
     expect(pagedBody.pagination).toEqual({ page: 2, limit: 2, total: 3, totalPages: 2 });
     database.close();
@@ -594,16 +653,26 @@ describe('ICCID mapping reads', () => {
     });
   });
 
+  test('list answers 500 when a row does not match the schema', async () => {
+    const response = await iccidMappingsHandler.list({
+      env: { DB: rowsDb({ iccid: 5 }) },
+      url: 'https://example.com/api/iccid-mappings',
+    });
+
+    expect(response.status).toBe(500);
+    expect(await errorOf(response)).toBe('Failed to fetch ICCID mappings');
+  });
+
   test('get and getByIccid return one mapping or 404', async () => {
     const { database, env } = await seeded();
 
     const found = await iccidMappingsHandler.get({ env, params: { id: 'iccid-a' } });
     expect(found.status).toBe(200);
-    expect((await found.json()).data).toMatchObject({ iccid: 'iccid-a', sim_index: 1 });
+    expect(await dataOf(found)).toMatchObject({ iccid: 'iccid-a', sim_index: 1 });
 
     const byIccid = await iccidMappingsHandler.getByIccid({ env, params: { iccid: 'iccid-c' } });
     expect(byIccid.status).toBe(200);
-    expect((await byIccid.json()).data).toMatchObject({ iccid: 'iccid-c', sim_index: 3 });
+    expect(await dataOf(byIccid)).toMatchObject({ iccid: 'iccid-c', sim_index: 3 });
 
     const missing = await iccidMappingsHandler.get({ env, params: { id: 'nope' } });
     expect(missing.status).toBe(404);
@@ -618,19 +687,22 @@ describe('ICCID mapping reads', () => {
     database.close();
   });
 
-  test('get and getByIccid answer 500 when the database fails', async () => {
-    const env = { DB: failingDb() };
+  test('get and getByIccid answer 500 when the database fails or a row has the wrong shape', async () => {
+    for (const db of [failingDb(), rowsDb({ iccid: 5 })]) {
+      const get = await iccidMappingsHandler.get({ env: { DB: db }, params: { id: 'a' } });
+      expect(get.status).toBe(500);
+      expect(await get.json()).toEqual({ success: false, error: 'Failed to fetch ICCID mapping' });
 
-    const get = await iccidMappingsHandler.get({ env, params: { id: 'a' } });
-    expect(get.status).toBe(500);
-    expect(await get.json()).toEqual({ success: false, error: 'Failed to fetch ICCID mapping' });
-
-    const byIccid = await iccidMappingsHandler.getByIccid({ env, params: { iccid: 'a' } });
-    expect(byIccid.status).toBe(500);
-    expect(await byIccid.json()).toEqual({
-      success: false,
-      error: 'Failed to fetch ICCID mapping',
-    });
+      const byIccid = await iccidMappingsHandler.getByIccid({
+        env: { DB: db },
+        params: { iccid: 'a' },
+      });
+      expect(byIccid.status).toBe(500);
+      expect(await byIccid.json()).toEqual({
+        success: false,
+        error: 'Failed to fetch ICCID mapping',
+      });
+    }
   });
 });
 
@@ -652,7 +724,7 @@ describe('ICCID mapping writes', () => {
     ]) {
       const response = await iccidMappingsHandler.create({ env, user, ...bodyOf(body) });
       expect(response.status).toBe(400);
-      expect((await response.json()).error).toBe('ICCID, phone number, and sim_index are required');
+      expect(await errorOf(response)).toBe('ICCID, phone number, and sim_index are required');
     }
     database.close();
   });
@@ -699,7 +771,7 @@ describe('ICCID mapping writes', () => {
 
     const created = await iccidMappingsHandler.create({ env, user, ...bodyOf(payload) });
     expect(created.status).toBe(201);
-    expect((await created.json()).data).toMatchObject({
+    expect(await dataOf(created)).toMatchObject({
       iccid: 'iccid-new',
       sim_index: 7,
       phone_number: '+6599999999',
@@ -719,8 +791,8 @@ describe('ICCID mapping writes', () => {
       ...bodyOf({ ...payload, carrier: 'M1', notes: '' }),
     });
     expect(repeated.status).toBe(200);
-    expect((await repeated.json()).data).toMatchObject({ carrier: 'M1', notes: null });
-    expect(database.query(`SELECT COUNT(*) AS n FROM sims`).get().n).toBe(2);
+    expect(await dataOf(repeated)).toMatchObject({ carrier: 'M1', notes: null });
+    expect(count(database, `SELECT COUNT(*) AS n FROM sims`)).toBe(2);
     database.close();
   });
 
@@ -732,7 +804,7 @@ describe('ICCID mapping writes', () => {
       ['with', { balance_threshold: 8 }],
       ['null', { balance_threshold: null }],
       ['omitted', {}],
-    ]) {
+    ] as const) {
       const response = await iccidMappingsHandler.create({
         env,
         user,
@@ -758,15 +830,15 @@ describe('ICCID mapping writes', () => {
     const { database, env } = await seeded();
     const base = { phone_number: '+1', sim_index: 5 };
 
-    for (const balance_threshold of ['8', 'abc', '']) {
+    for (const balanceThreshold of ['8', 'abc', '']) {
       const response = await iccidMappingsHandler.create({
         env,
         user,
-        ...bodyOf({ ...base, iccid: 'text', balance_threshold }),
+        ...bodyOf({ ...base, iccid: 'text', balance_threshold: balanceThreshold }),
       });
       expect(response.status).toBe(400);
     }
-    expect(database.query(`SELECT COUNT(*) AS n FROM sims WHERE iccid = 'text'`).get().n).toBe(0);
+    expect(count(database, `SELECT COUNT(*) AS n FROM sims WHERE iccid = 'text'`)).toBe(0);
     database.close();
   });
 
@@ -789,36 +861,9 @@ describe('ICCID mapping writes', () => {
     ]) {
       const response = await iccidMappingsHandler.create({ env, user, ...request });
       expect(response.status).toBe(400);
-      expect((await response.json()).error).toBe('ICCID, phone number, and sim_index are required');
+      expect(await errorOf(response)).toBe('ICCID, phone number, and sim_index are required');
     }
-    expect(database.query(`SELECT COUNT(*) AS n FROM sims WHERE iccid = 'x'`).get().n).toBe(0);
-    database.close();
-  });
-
-  test('update answers 400 for a body that is not JSON or lacks phone_number and sim_index', async () => {
-    const { database, env } = await seeded();
-
-    for (const request of [
-      rawBodyOf('not json'),
-      bodyOf({ sim_index: 1 }),
-      bodyOf({ phone_number: '+1' }),
-      bodyOf({ phone_number: '', sim_index: 1 }),
-      bodyOf({ phone_number: '+1', sim_index: 0 }),
-      bodyOf({ phone_number: '+1', sim_index: 1, carrier: 7 }),
-      bodyOf({ phone_number: '+1', sim_index: 1, balance_threshold: 'abc' }),
-    ]) {
-      const response = await iccidMappingsHandler.update({
-        env,
-        user,
-        params: { id: 'iccid-a' },
-        ...request,
-      });
-      expect(response.status).toBe(400);
-      expect((await response.json()).error).toBe('phone_number and sim_index are required');
-    }
-    expect(database.query(`SELECT phone_number FROM sims WHERE iccid = 'iccid-a'`).get()).toEqual({
-      phone_number: '+6500000001',
-    });
+    expect(count(database, `SELECT COUNT(*) AS n FROM sims WHERE iccid = 'x'`)).toBe(0);
     database.close();
   });
 
@@ -870,6 +915,33 @@ describe('ICCID mapping writes', () => {
     database.close();
   });
 
+  test('update answers 400 for a body that is not JSON or lacks phone_number and sim_index', async () => {
+    const { database, env } = await seeded();
+
+    for (const request of [
+      rawBodyOf('not json'),
+      bodyOf({ sim_index: 1 }),
+      bodyOf({ phone_number: '+1' }),
+      bodyOf({ phone_number: '', sim_index: 1 }),
+      bodyOf({ phone_number: '+1', sim_index: 0 }),
+      bodyOf({ phone_number: '+1', sim_index: 1, carrier: 7 }),
+      bodyOf({ phone_number: '+1', sim_index: 1, balance_threshold: 'abc' }),
+    ]) {
+      const response = await iccidMappingsHandler.update({
+        env,
+        user,
+        params: { id: 'iccid-a' },
+        ...request,
+      });
+      expect(response.status).toBe(400);
+      expect(await errorOf(response)).toBe('phone_number and sim_index are required');
+    }
+    expect(database.query(`SELECT phone_number FROM sims WHERE iccid = 'iccid-a'`).get()).toEqual({
+      phone_number: '+6500000001',
+    });
+    database.close();
+  });
+
   test('update rewrites the row, returns the detail, and attributes it to the user', async () => {
     const { database, env } = await seeded();
 
@@ -887,7 +959,7 @@ describe('ICCID mapping writes', () => {
     });
 
     expect(response.status).toBe(200);
-    expect((await response.json()).data).toMatchObject({
+    expect(await dataOf(response)).toMatchObject({
       iccid: 'iccid-a',
       sim_index: 9,
       phone_number: '+6588888888',
@@ -905,7 +977,7 @@ describe('ICCID mapping writes', () => {
 
   test('update clears the balance threshold when the body omits it', async () => {
     const { database, env } = await seeded();
-    database.exec(`UPDATE sims SET balance_threshold = 15 WHERE iccid = 'iccid-a'`);
+    database.run(`UPDATE sims SET balance_threshold = 15 WHERE iccid = 'iccid-a'`);
 
     await iccidMappingsHandler.update({
       env,
@@ -923,15 +995,19 @@ describe('ICCID mapping writes', () => {
   test('update attributes the change to system when there is no user email', async () => {
     const { database, env } = await seeded();
 
-    await iccidMappingsHandler.update({
-      env,
-      params: { id: 'iccid-a' },
-      ...bodyOf({ phone_number: '+1', sim_index: 1 }),
-    });
+    for (const operator of [undefined, { email: '' }]) {
+      database.run(`UPDATE sims SET updated_by = 'someone' WHERE iccid = 'iccid-a'`);
+      await iccidMappingsHandler.update({
+        env,
+        ...(operator ? { user: operator } : {}),
+        params: { id: 'iccid-a' },
+        ...bodyOf({ phone_number: '+1', sim_index: 1 }),
+      });
 
-    expect(database.query(`SELECT updated_by FROM sims WHERE iccid = 'iccid-a'`).get()).toEqual({
-      updated_by: 'system',
-    });
+      expect(database.query(`SELECT updated_by FROM sims WHERE iccid = 'iccid-a'`).get()).toEqual({
+        updated_by: 'system',
+      });
+    }
     database.close();
   });
 
@@ -959,7 +1035,7 @@ describe('ICCID mapping writes', () => {
       success: true,
       message: 'ICCID mapping deleted successfully',
     });
-    expect(database.query(`SELECT COUNT(*) AS n FROM sims`).get().n).toBe(0);
+    expect(count(database, `SELECT COUNT(*) AS n FROM sims`)).toBe(0);
 
     const again = await iccidMappingsHandler.delete({ env, params: { id: 'iccid-a' } });
     expect(again.status).toBe(200);
@@ -998,6 +1074,20 @@ describe('ICCID mapping bulk import', () => {
     database.close();
   });
 
+  test('answers 400 for a body that is not JSON', async () => {
+    const { database, env } = await seeded();
+
+    const response = await iccidMappingsHandler.bulkImport({
+      env,
+      user,
+      ...rawBodyOf('not json'),
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ success: false, error: 'Mappings must be an array' });
+    database.close();
+  });
+
   test('creates, updates and reports failures per mapping', async () => {
     const { database, env } = await seeded();
 
@@ -1014,7 +1104,7 @@ describe('ICCID mapping bulk import', () => {
         ],
       }),
     });
-    const body = await response.json();
+    const body = v.parse(BulkBody, await response.json());
 
     expect(response.status).toBe(200);
     expect(body.summary).toEqual({ total: 5, created: 1, updated: 1, failed: 3 });
@@ -1029,38 +1119,6 @@ describe('ICCID mapping bulk import', () => {
       { iccid: 'existing', phone_number: '+9', carrier: 'M1' },
       { iccid: 'fresh', phone_number: '+2', carrier: null },
     ]);
-    database.close();
-  });
-
-  test('a database error on one mapping is reported and the rest continue', async () => {
-    const { database, env } = await seeded();
-    database.exec(`UPDATE sims SET imei = 'taken' WHERE iccid = 'existing'`);
-
-    const response = await iccidMappingsHandler.bulkImport({
-      env,
-      user,
-      ...bodyOf({
-        mappings: [
-          { iccid: 'clash', phone_number: '+2', sim_index: 2, imei: 'taken' },
-          { iccid: 'fine', phone_number: '+3', sim_index: 3 },
-        ],
-      }),
-    });
-    const body = await response.json();
-
-    expect(body.summary).toEqual({ total: 2, created: 1, updated: 0, failed: 1 });
-    expect(body.errors).toHaveLength(1);
-    expect(body.errors[0]).toStartWith('Failed to import mapping for ICCID clash: ');
-    database.close();
-  });
-
-  test('answers 400 for a body that is not JSON', async () => {
-    const { database, env } = await seeded();
-
-    const response = await iccidMappingsHandler.bulkImport({ env, user, ...rawBodyOf('not json') });
-
-    expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ success: false, error: 'Mappings must be an array' });
     database.close();
   });
 
@@ -1079,7 +1137,7 @@ describe('ICCID mapping bulk import', () => {
         ],
       }),
     });
-    const body = await response.json();
+    const body = v.parse(BulkBody, await response.json());
 
     expect(response.status).toBe(200);
     expect(body.summary).toEqual({ total: 4, created: 1, updated: 0, failed: 3 });
@@ -1092,6 +1150,28 @@ describe('ICCID mapping bulk import', () => {
       { iccid: 'existing' },
       { iccid: 'fine' },
     ]);
+    database.close();
+  });
+
+  test('a database error on one mapping is reported and the rest continue', async () => {
+    const { database, env } = await seeded();
+    database.run(`UPDATE sims SET imei = 'taken' WHERE iccid = 'existing'`);
+
+    const response = await iccidMappingsHandler.bulkImport({
+      env,
+      user,
+      ...bodyOf({
+        mappings: [
+          { iccid: 'clash', phone_number: '+2', sim_index: 2, imei: 'taken' },
+          { iccid: 'fine', phone_number: '+3', sim_index: 3 },
+        ],
+      }),
+    });
+    const body = v.parse(BulkBody, await response.json());
+
+    expect(body.summary).toEqual({ total: 2, created: 1, updated: 0, failed: 1 });
+    expect(body.errors).toHaveLength(1);
+    expect(body.errors?.[0]).toStartWith('Failed to import mapping for ICCID clash: ');
     database.close();
   });
 
