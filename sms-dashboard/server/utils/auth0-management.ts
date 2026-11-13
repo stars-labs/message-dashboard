@@ -10,8 +10,17 @@
 // Every failure throws. A Management API error must never be swallowed into an apparent
 // success: the callers use this to grant and revoke access.
 
-import { createRoleConfig } from '../../config/auth0-roles.js';
-import type { Env } from '../worker-context.js';
+import * as v from 'valibot';
+import { createRoleConfig, type RoleEnv } from '../../config/auth0-roles.js';
+import { parseJson } from '../../shared/parse-json.js';
+import { readKvJson, type KV } from '../lib/kv.js';
+
+export interface Auth0ManagementEnv extends RoleEnv {
+  AUTH0_DOMAIN?: string;
+  AUTH0_M2M_CLIENT_ID?: string;
+  AUTH0_M2M_CLIENT_SECRET?: string;
+  SESSIONS: KV<'get' | 'put'>;
+}
 
 const TOKEN_CACHE_PREFIX = 'mgmt-token:';
 const ROLE_ID_CACHE_KEY = 'mgmt-role-ids';
@@ -31,35 +40,67 @@ export class Auth0ManagementError extends Error {
 }
 
 /** The Management API user record, limited to the fields this app requests. */
-export interface Auth0User {
-  user_id: string;
-  email?: string;
-  name?: string;
-  last_login?: string;
-  logins_count?: number;
-}
+const Auth0UserSchema = v.object({
+  user_id: v.string(),
+  email: v.nullish(v.string()),
+  name: v.nullish(v.string()),
+  last_login: v.nullish(v.string()),
+  logins_count: v.nullish(v.number()),
+});
+
+export type Auth0User = v.InferOutput<typeof Auth0UserSchema>;
 
 /** A role as the Management API returns it. */
-interface Auth0Role {
-  id: string;
-  name: string;
-}
+const Auth0RoleSchema = v.object({ id: v.string(), name: v.string() });
 
 /** Role name -> role id cache. */
-type RoleIdMap = Record<string, string>;
+const RoleIdMapSchema = v.record(v.string(), v.string());
 
-function requireConfig(env: Env): void {
-  const missing = ['AUTH0_DOMAIN', 'AUTH0_M2M_CLIENT_ID', 'AUTH0_M2M_CLIENT_SECRET'].filter(
-    (k) => !env[k as keyof Env],
+type RoleIdMap = v.InferOutput<typeof RoleIdMapSchema>;
+
+const TokenResponse = v.object({
+  access_token: v.optional(v.unknown()),
+  expires_in: v.optional(v.unknown()),
+});
+
+const UsersPage = v.object({
+  users: v.optional(v.unknown()),
+  total: v.optional(v.unknown()),
+});
+
+function malformed(path: string, body: string, error: string): Auth0ManagementError {
+  return new Auth0ManagementError(
+    `Auth0 Management API returned an unexpected shape for ${path}: ${error}`,
+    502,
+    body,
   );
+}
 
-  if (missing.length) {
+function requireConfig(env: Auth0ManagementEnv): {
+  domain: string;
+  clientId: string;
+  clientSecret: string;
+} {
+  const {
+    AUTH0_DOMAIN: domain,
+    AUTH0_M2M_CLIENT_ID: clientId,
+    AUTH0_M2M_CLIENT_SECRET: secret,
+  } = env;
+
+  if (!domain || !clientId || !secret) {
+    const missing = [
+      ['AUTH0_DOMAIN', domain],
+      ['AUTH0_M2M_CLIENT_ID', clientId],
+      ['AUTH0_M2M_CLIENT_SECRET', secret],
+    ].filter(([, value]) => !value);
     throw new Auth0ManagementError(
-      `Auth0 Management API is not configured: missing ${missing.join(', ')}`,
+      `Auth0 Management API is not configured: missing ${missing.map(([name]) => name).join(', ')}`,
       500,
       null,
     );
   }
+
+  return { domain, clientId, clientSecret: secret };
 }
 
 /**
@@ -68,21 +109,21 @@ function requireConfig(env: Env): void {
  * Without caching this would mint a token per request, which Auth0 rate-limits and
  * bills against the tenant's M2M quota.
  */
-export async function getManagementToken(env: Env): Promise<string> {
-  requireConfig(env);
+export async function getManagementToken(env: Auth0ManagementEnv): Promise<string> {
+  const { domain, clientId, clientSecret } = requireConfig(env);
 
-  const cacheKey = `${TOKEN_CACHE_PREFIX}${env.AUTH0_M2M_CLIENT_ID}`;
+  const cacheKey = `${TOKEN_CACHE_PREFIX}${clientId}`;
   const cached = await env.SESSIONS.get(cacheKey);
   if (cached) return cached;
 
-  const response = await fetch(`https://${env.AUTH0_DOMAIN}/oauth/token`, {
+  const response = await fetch(`https://${domain}/oauth/token`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       grant_type: 'client_credentials',
-      client_id: env.AUTH0_M2M_CLIENT_ID,
-      client_secret: env.AUTH0_M2M_CLIENT_SECRET,
-      audience: `https://${env.AUTH0_DOMAIN}/api/v2/`,
+      client_id: clientId,
+      client_secret: clientSecret,
+      audience: `https://${domain}/api/v2/`,
     }),
   });
 
@@ -96,42 +137,46 @@ export async function getManagementToken(env: Env): Promise<string> {
     );
   }
 
-  let parsed: { access_token?: unknown; expires_in?: unknown };
-  try {
-    parsed = JSON.parse(body);
-  } catch {
+  const json = parseJson(body, v.unknown());
+  if (!json.ok) {
     throw new Auth0ManagementError('Auth0 token response was not JSON', 502, body);
   }
 
-  if (typeof parsed.access_token !== 'string' || !parsed.access_token) {
+  const parsed = v.safeParse(TokenResponse, json.value);
+  const fields = parsed.success
+    ? parsed.output
+    : { access_token: undefined, expires_in: undefined };
+  const accessToken = fields.access_token;
+  if (typeof accessToken !== 'string' || !accessToken) {
     throw new Auth0ManagementError('Auth0 token response had no access_token', 502, body);
   }
 
-  const expiresIn = Number(parsed.expires_in) || 0;
+  const expiresIn = Number(fields.expires_in) || 0;
   const ttl = Math.floor(expiresIn - expiresIn * TTL_LEEWAY);
 
   // KV rejects expirationTtl below 60s; skip caching rather than fail the request.
   if (ttl >= 60) {
-    await env.SESSIONS.put(cacheKey, parsed.access_token, { expirationTtl: ttl });
+    await env.SESSIONS.put(cacheKey, accessToken, { expirationTtl: ttl });
   }
 
-  return parsed.access_token;
+  return accessToken;
 }
 
 /** One Management API call. Returns the parsed body, or null for an empty 2xx. */
 async function mgmtFetch(
-  env: Env,
+  env: Auth0ManagementEnv,
   path: string,
-  init: { method?: string; body?: string; headers?: Record<string, string> } = {},
+  { method = 'GET', body }: { method?: 'GET' | 'POST' | 'DELETE'; body?: string } = {},
 ): Promise<unknown> {
+  const { domain } = requireConfig(env);
   const token = await getManagementToken(env);
 
-  const response = await fetch(`https://${env.AUTH0_DOMAIN}/api/v2${path}`, {
-    ...init,
+  const response = await fetch(`https://${domain}/api/v2${path}`, {
+    method,
+    ...(body === undefined ? {} : { body }),
     headers: {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
-      ...init.headers,
     },
   });
 
@@ -139,7 +184,7 @@ async function mgmtFetch(
 
   if (!response.ok) {
     throw new Auth0ManagementError(
-      `Auth0 Management API ${init.method || 'GET'} ${path} failed (${response.status})`,
+      `Auth0 Management API ${method} ${path} failed (${response.status})`,
       response.status,
       text,
     );
@@ -147,11 +192,19 @@ async function mgmtFetch(
 
   if (!text) return null;
 
-  try {
-    return JSON.parse(text);
-  } catch {
+  const json = parseJson(text, v.unknown());
+  if (!json.ok) {
     throw new Auth0ManagementError(`Auth0 Management API returned non-JSON for ${path}`, 502, text);
   }
+  return json.value;
+}
+
+function parseItems<T>(items: unknown[], schema: v.GenericSchema<unknown, T>, path: string): T[] {
+  return items.map((item) => {
+    const parsed = v.safeParse(schema, item);
+    if (!parsed.success) throw malformed(path, JSON.stringify(item), v.summarize(parsed.issues));
+    return parsed.output;
+  });
 }
 
 const PER_PAGE = 100;
@@ -159,28 +212,26 @@ const PER_PAGE = 100;
 // beyond this deployment; exceeding it is reported, never silently truncated.
 const MAX_PAGES = 10;
 
-/** Fetch a paginated Management API collection. */
-async function fetchPaged<T = Record<string, unknown>>(
-  env: Env,
+/** Fetch a paginated Management API collection of users. */
+async function fetchPagedUsers(
+  env: Auth0ManagementEnv,
   path: string,
-  collectionKey: string,
-): Promise<{ items: T[]; truncated: boolean; total: number }> {
-  const items: T[] = [];
+): Promise<{ items: Auth0User[]; truncated: boolean; total: number }> {
+  const items: Auth0User[] = [];
   let total = 0;
   let truncated = false;
 
   for (let page = 0; page < MAX_PAGES; page++) {
     const sep = path.includes('?') ? '&' : '?';
-    const body = (await mgmtFetch(
-      env,
-      `${path}${sep}per_page=${PER_PAGE}&page=${page}&include_totals=true`,
-    )) as Record<string, unknown> | null;
+    const pagePath = `${path}${sep}per_page=${PER_PAGE}&page=${page}&include_totals=true`;
+    const parsed = v.safeParse(UsersPage, await mgmtFetch(env, pagePath));
 
-    const batch = body?.[collectionKey];
+    if (!parsed.success) break;
+    const batch = parsed.output.users;
     if (!Array.isArray(batch)) break;
 
-    items.push(...(batch as T[]));
-    total = Number(body?.total) || items.length;
+    items.push(...parseItems(batch, Auth0UserSchema, pagePath));
+    total = Number(parsed.output.total) || items.length;
 
     if (items.length >= total || batch.length === 0) break;
 
@@ -197,16 +248,17 @@ async function fetchPaged<T = Record<string, unknown>>(
  * Throws when a configured role does not exist in the tenant: assigning against a
  * missing id would silently target `/roles/undefined/users`.
  */
-export async function resolveRoleIds(env: Env): Promise<RoleIdMap> {
-  const cached = await env.SESSIONS.get<RoleIdMap>(ROLE_ID_CACHE_KEY, { type: 'json' });
-  if (cached) return cached;
+export async function resolveRoleIds(env: Auth0ManagementEnv): Promise<RoleIdMap> {
+  const cached = await readKvJson(env.SESSIONS, ROLE_ID_CACHE_KEY, RoleIdMapSchema);
+  if (cached?.ok) return cached.value;
 
   const config = createRoleConfig(env);
-  const roles = await mgmtFetch(env, '/roles?per_page=100');
+  const rolesPath = '/roles?per_page=100';
+  const roles = await mgmtFetch(env, rolesPath);
   const wanted = [config.ADMIN_ROLE, config.VIEWER_ROLE];
   const map: RoleIdMap = {};
 
-  for (const role of (Array.isArray(roles) ? roles : []) as Auth0Role[]) {
+  for (const role of parseItems(Array.isArray(roles) ? roles : [], Auth0RoleSchema, rolesPath)) {
     if (wanted.includes(role.name)) map[role.name] = role.id;
   }
 
@@ -224,11 +276,10 @@ export async function resolveRoleIds(env: Env): Promise<RoleIdMap> {
 }
 
 /** Users in the tenant, with only the fields the admin UI needs. */
-export async function listUsers(env: Env): Promise<Auth0User[]> {
-  const { items } = await fetchPaged<Auth0User>(
+export async function listUsers(env: Auth0ManagementEnv): Promise<Auth0User[]> {
+  const { items } = await fetchPagedUsers(
     env,
     '/users?fields=user_id,email,name,last_login,logins_count&include_fields=true',
-    'users',
   );
 
   return items;
@@ -242,12 +293,11 @@ export async function listUsers(env: Env): Promise<Auth0User[]> {
  * version was concurrent via Promise.all and reliably returned HTTP 429 (rate limited)
  * once the tenant had more than a handful of users.
  */
-export async function getRoleMembers(env: Env, roleId: string): Promise<Auth0User[]> {
-  const { items } = await fetchPaged<Auth0User>(
-    env,
-    `/roles/${encodeURIComponent(roleId)}/users`,
-    'users',
-  );
+export async function getRoleMembers(
+  env: Auth0ManagementEnv,
+  roleId: string,
+): Promise<Auth0User[]> {
+  const { items } = await fetchPagedUsers(env, `/roles/${encodeURIComponent(roleId)}/users`);
   return items;
 }
 
@@ -257,7 +307,7 @@ export async function getRoleMembers(env: Env, roleId: string): Promise<Auth0Use
  * role — regardless of how many users exist.
  */
 export async function listUsersWithRoles(
-  env: Env,
+  env: Auth0ManagementEnv,
 ): Promise<{ users: Auth0User[]; roleByUserId: Map<string, string> }> {
   const config = createRoleConfig(env);
   const roleIds = await resolveRoleIds(env);
@@ -267,7 +317,11 @@ export async function listUsersWithRoles(
 
   // Sequential, not Promise.all: two calls that must not race the rate limiter.
   for (const roleName of [config.VIEWER_ROLE, config.ADMIN_ROLE]) {
-    const members = await getRoleMembers(env, roleIds[roleName]);
+    const roleId = roleIds[roleName];
+    if (roleId === undefined) {
+      throw new Auth0ManagementError(`Unknown role '${roleName}'`, 500, null);
+    }
+    const members = await getRoleMembers(env, roleId);
     for (const member of members) {
       // Admin is applied last so it wins if somebody holds both.
       roleByUserId.set(member.user_id, roleName);
@@ -278,12 +332,17 @@ export async function listUsersWithRoles(
 }
 
 /** The role names currently assigned to a user. */
-export async function getUserRoles(env: Env, userId: string): Promise<string[]> {
-  const roles = await mgmtFetch(env, `/users/${encodeURIComponent(userId)}/roles`);
-  return (Array.isArray(roles) ? (roles as Auth0Role[]) : []).map((r) => r.name);
+export async function getUserRoles(env: Auth0ManagementEnv, userId: string): Promise<string[]> {
+  const path = `/users/${encodeURIComponent(userId)}/roles`;
+  const roles = await mgmtFetch(env, path);
+  return parseItems(Array.isArray(roles) ? roles : [], Auth0RoleSchema, path).map((r) => r.name);
 }
 
-export async function assignRoleByName(env: Env, userId: string, roleName: string): Promise<void> {
+export async function assignRoleByName(
+  env: Auth0ManagementEnv,
+  userId: string,
+  roleName: string,
+): Promise<void> {
   const ids = await resolveRoleIds(env);
   const id = ids[roleName];
 
@@ -298,14 +357,14 @@ export async function assignRoleByName(env: Env, userId: string, roleName: strin
 }
 
 export async function removeRolesByName(
-  env: Env,
+  env: Auth0ManagementEnv,
   userId: string,
   roleNames: string[],
 ): Promise<void> {
   if (!roleNames.length) return;
 
   const ids = await resolveRoleIds(env);
-  const toRemove = roleNames.map((n) => ids[n]).filter(Boolean);
+  const toRemove = roleNames.map((n) => ids[n]).filter((id) => id !== undefined && id !== '');
 
   if (!toRemove.length) return;
 
@@ -322,7 +381,11 @@ export async function removeRolesByName(
  * with both roles (over-privileged but working) rather than none (locked out). The
  * caller is expected to have already validated `roleName`.
  */
-export async function setUserRole(env: Env, userId: string, roleName: string): Promise<void> {
+export async function setUserRole(
+  env: Auth0ManagementEnv,
+  userId: string,
+  roleName: string,
+): Promise<void> {
   const config = createRoleConfig(env);
   const known = [config.ADMIN_ROLE, config.VIEWER_ROLE];
 
