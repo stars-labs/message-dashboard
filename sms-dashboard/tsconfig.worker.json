@@ -60,6 +60,7 @@
     "server/api/filters.ts",
     "server/api/keywords.ts",
     "server/handlers/balance-runners.ts",
+    "server/utils/balance-status.ts",
     "server/handlers/carrier-web-balance.ts",
     "server/api/calls.ts"
   ],

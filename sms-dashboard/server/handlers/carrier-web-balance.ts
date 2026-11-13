@@ -18,34 +18,22 @@ import {
   type RunnerRequest,
 } from '../utils/runner-auth.js';
 import { senderMatches } from '../utils/spam-filter.js';
+import {
+  ACTIVE_WEB_JOB_STATUSES,
+  CHECK_STATUSES,
+  WEB_JOB_STATUSES,
+  type ActiveWebJobStatus,
+} from '../utils/balance-status.js';
 
 const WEB_PROVIDERS = ['china_unicom', 'm1_prepaid'] as const;
-const ACTIVE_STATUSES = [
-  'leased',
-  'awaiting_otp',
-  'authenticating',
-  'querying',
-  'human_verification_required',
-] as const;
-const JOB_STATUSES = ['pending', ...ACTIVE_STATUSES, 'completed', 'failed', 'stopped'] as const;
-const CHECK_STATUSES = [
-  'queued',
-  'awaiting_response',
-  'response_received',
-  'parsed',
-  'failed',
-  'timed_out',
-  'unparsed',
-] as const;
 
 type WebProvider = (typeof WEB_PROVIDERS)[number];
-type ActiveStatus = (typeof ACTIVE_STATUSES)[number];
 interface Preparer<Statement> {
   prepare(query: string): { bind(...values: unknown[]): Statement };
 }
 
 type WebEventType =
-  | ActiveStatus
+  | ActiveWebJobStatus
   | 'queued'
   | 'claimed'
   | 'otp_requested'
@@ -88,7 +76,7 @@ const INVALID_BALANCE = 'balance is invalid';
 const REASON_NOT_TEXT = 'reason must be text';
 const ERROR_NOT_TEXT = 'error must be text';
 
-const ActiveStatusSchema = v.picklist(ACTIVE_STATUSES);
+const ActiveStatusSchema = v.picklist(ACTIVE_WEB_JOB_STATUSES);
 
 const LeasedRow = v.object({ id: v.string() });
 
@@ -97,7 +85,7 @@ const WebJobRow = v.object({
   id: v.string(),
   check_id: v.string(),
   provider: v.picklist(WEB_PROVIDERS),
-  status: v.picklist(JOB_STATUSES),
+  status: v.picklist(WEB_JOB_STATUSES),
   lease_owner: v.nullable(v.string()),
   lease_expires_at: v.nullable(v.string()),
   attempts: v.number(),
@@ -137,7 +125,7 @@ const LEASE_MISSING_KEY_MESSAGES = {
 
 const HeartbeatBody = v.object(
   {
-    status: v.picklist(ACTIVE_STATUSES, INVALID_STATUS),
+    status: v.picklist(ACTIVE_WEB_JOB_STATUSES, INVALID_STATUS),
     reason: v.nullish(v.string(REASON_NOT_TEXT)),
   },
   INVALID_STATUS,
