@@ -1,5 +1,7 @@
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { nanoid } from 'nanoid';
+import * as v from 'valibot';
+import { parseJson, readJson } from '../../shared/parse-json.js';
 import {
   createRoleConfig,
   hasAnyRole,
@@ -13,22 +15,26 @@ import { scheduleAuthAudit } from '../utils/audit-log.js';
 import { boundedErrorText } from '../utils/d1-error.js';
 import type { Env, AppRequest, RequestUser } from '../worker-context.js';
 
-/** Token set returned by the authorization_code exchange. */
-interface TokenSet {
-  access_token?: string;
-  id_token?: string;
-}
+/** The authorization_code token response (RFC 6749 §5.1; id_token per OpenID Connect Core §3.1.3.3). */
+const TokenSet = v.object({
+  access_token: v.string(),
+  id_token: v.optional(v.string()),
+});
 
-/** What Auth0's /userinfo returns, limited to the fields used here. */
-interface Auth0UserInfo {
-  sub: string;
-  email?: string;
-  name?: string;
-  nickname?: string;
-  picture?: string;
-  email_verified?: unknown;
-  [claim: string]: unknown;
-}
+type TokenSet = v.InferOutput<typeof TokenSet>;
+
+/** What Auth0's /userinfo returns for the openid profile email scopes (OpenID Connect Core §5.1). */
+const UserInfo = v.object({
+  sub: v.string(),
+  email: v.optional(v.string()),
+  email_verified: v.optional(v.boolean()),
+  name: v.optional(v.string()),
+  nickname: v.optional(v.string()),
+  picture: v.optional(v.string()),
+});
+
+/** The same body read as a bag of claims, because the roles claim has a configured name. */
+const Claims = v.record(v.string(), v.unknown());
 
 /** Signature of auth0Handler.verifyToken, injectable for tests. */
 type VerifyToken = (token: string, audience?: string) => Promise<Record<string, unknown> | null>;
@@ -234,7 +240,11 @@ export const auth0Handler = {
         });
       }
 
-      const tokens = (await tokenResponse.json()) as TokenSet;
+      const tokenBody = await readJson(tokenResponse, TokenSet);
+      if (!tokenBody.ok) {
+        throw new Error(`Auth0 token response is malformed: ${tokenBody.error}`);
+      }
+      const tokens = tokenBody.value;
 
       // Get user info from Auth0
       const userResponse = await fetch(`https://${env.AUTH0_DOMAIN}/userinfo`, {
@@ -256,7 +266,17 @@ export const auth0Handler = {
         });
       }
 
-      const userInfo = (await userResponse.json()) as Auth0UserInfo;
+      const userBody = await userResponse.text();
+      const infoParsed = parseJson(userBody, UserInfo);
+      if (!infoParsed.ok) {
+        throw new Error(`Auth0 userinfo response is malformed: ${infoParsed.error}`);
+      }
+      const claimsParsed = parseJson(userBody, Claims);
+      if (!claimsParsed.ok) {
+        throw new Error(`Auth0 userinfo response is malformed: ${claimsParsed.error}`);
+      }
+      const claims = claimsParsed.value;
+      const userInfo = infoParsed.value;
 
       // Create or update user in database
       const userId = userInfo.sub;
@@ -268,7 +288,7 @@ export const auth0Handler = {
       // roles are persisted into the KV session below, so they are a real
       // authorization input. See docs/SECURITY-REVIEW.md finding 5.
       const userRoles = await resolveLoginRoles({
-        userInfo,
+        userInfo: claims,
         tokens,
         env,
         // `callback` is passed as a bare handler from the router (`router.get('/callback',

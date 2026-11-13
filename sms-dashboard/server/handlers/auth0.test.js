@@ -209,6 +209,36 @@ describe('Auth0 login role token selection', () => {
     expect(logs.flat().join(' ')).toContain('auth_callback_failed');
   });
 
+  test('answers 503 without a session when the token response has no access_token', async () => {
+    globalThis.fetch = async (url) => {
+      if (String(url).endsWith('/oauth/token')) return Response.json({ id_token: 'id-token' });
+      return Response.json({
+        sub: 'auth0|user-1',
+        email: 'user@example.com',
+        email_verified: true,
+        [claim]: ['viewer'],
+      });
+    };
+    console.error = () => {};
+    const { request, sessionWrites } = callbackRequest();
+
+    const response = await auth0Handler.callback(request);
+
+    expect(response.status).toBe(503);
+    expect(sessionWrites).toHaveLength(0);
+  });
+
+  test('answers 503 without a session when the userinfo response has no subject', async () => {
+    mockSuccessfulAuth({ sub: undefined });
+    console.error = () => {};
+    const { request, sessionWrites } = callbackRequest();
+
+    const response = await auth0Handler.callback(request);
+
+    expect(response.status).toBe(503);
+    expect(sessionWrites).toHaveLength(0);
+  });
+
   test('does not expose the Auth0 token response body', async () => {
     globalThis.fetch = async () => new Response('sensitive Auth0 provider detail', { status: 401 });
     console.error = () => {};
