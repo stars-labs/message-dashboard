@@ -509,25 +509,66 @@ describe('POST /api/keywords', () => {
     expect(keywordRows(db)).toMatchObject([{ color: '#3B82F6' }, { color: '#3B82F6' }]);
   });
 
-  test('a priority that is not a number is stored as 0, and a numeric string as that number', async () => {
+  test('a null priority is stored as 0', async () => {
     const db = database();
 
-    await create(db, JSON.stringify({ keyword: 'a1', tag: 'T', priority: 'x' }));
-    await create(db, JSON.stringify({ keyword: 'a2', tag: 'T', priority: '7' }));
+    await create(db, JSON.stringify({ keyword: 'a1', tag: 'T', priority: null }));
 
-    expect(keywordRows(db)).toMatchObject([{ priority: 0 }, { priority: 7 }]);
+    expect(keywordRows(db)).toMatchObject([{ priority: 0 }]);
   });
 
-  test('case_sensitive and whole_word are true for any truthy value', async () => {
+  test('case_sensitive and whole_word are stored as given', async () => {
     const db = database();
 
     await create(
       db,
-      JSON.stringify({ keyword: 'a1', tag: 'T', case_sensitive: 'yes', whole_word: 0 }),
+      JSON.stringify({ keyword: 'a1', tag: 'T', case_sensitive: true, whole_word: false }),
     );
 
     expect(keywordRows(db)).toMatchObject([{ case_sensitive: 1, whole_word: 0 }]);
   });
+
+  const malformed: [string, unknown, string][] = [
+    [
+      'a priority that is a numeric string',
+      { keyword: 'a1', tag: 'T', priority: '7' },
+      'priority must be an integer',
+    ],
+    [
+      'a priority that is not a number',
+      { keyword: 'a1', tag: 'T', priority: 'x' },
+      'priority must be an integer',
+    ],
+    [
+      'a priority that is not whole',
+      { keyword: 'a1', tag: 'T', priority: 1.5 },
+      'priority must be an integer',
+    ],
+    [
+      'a case_sensitive that is not a boolean',
+      { keyword: 'a1', tag: 'T', case_sensitive: 'yes' },
+      'case_sensitive must be true or false',
+    ],
+    [
+      'a whole_word that is not a boolean',
+      { keyword: 'a1', tag: 'T', whole_word: 1 },
+      'whole_word must be true or false',
+    ],
+    ['a body that is null', null, 'Body must be a JSON object'],
+    ['a body that is a number', 5, 'Body must be a JSON object'],
+  ];
+
+  for (const [name, body, message] of malformed) {
+    test(`answers 400 to ${name} and writes nothing`, async () => {
+      const db = database();
+
+      const response = await create(db, JSON.stringify(body));
+
+      expect(response.status).toBe(400);
+      expect(await bodyOf(response)).toEqual({ error: message });
+      expect(keywordRows(db)).toEqual([]);
+    });
+  }
 
   test('a keyword that only an inactive keyword uses can be created again', async () => {
     const db = database();
@@ -595,13 +636,14 @@ describe('POST /api/keywords', () => {
     expect(await bodyOf(response)).toEqual({ error: 'Keyword already exists' });
   });
 
-  test('answers 500 with the details when the body is not JSON', async () => {
-    const response = await create(database(), 'not json');
-    const body = await bodyOf(response);
+  test('answers 400 when the body is not JSON', async () => {
+    const db = database();
 
-    expect(response.status).toBe(500);
-    expect(body['error']).toBe('Failed to create keyword');
-    expect(typeof body['details']).toBe('string');
+    const response = await create(db, 'not json');
+
+    expect(response.status).toBe(400);
+    expect(await bodyOf(response)).toEqual({ error: 'Body must be JSON' });
+    expect(keywordRows(db)).toEqual([]);
   });
 
   test('answers 500 with the details when the write fails', async () => {
@@ -670,21 +712,57 @@ describe('PUT /api/keywords/:id', () => {
     ]);
   });
 
-  test('is_active is true for any truthy value', async () => {
+  test('is_active turns a keyword on', async () => {
     const db = seeded({ keyword: 'code', is_active: 0 });
 
-    await update(db, JSON.stringify({ is_active: 'yes' }));
+    await update(db, JSON.stringify({ is_active: true }));
 
     expect(keywordRows(db)).toMatchObject([{ is_active: 1 }]);
   });
 
-  test('a priority that is a numeric string is stored as that number', async () => {
+  test('a null priority is stored as 0', async () => {
+    const db = seeded({ keyword: 'code', priority: 4 });
+
+    await update(db, JSON.stringify({ priority: null }));
+
+    expect(keywordRows(db)).toMatchObject([{ priority: 0 }]);
+  });
+
+  test('a null tag keeps the stored one', async () => {
     const db = seeded();
 
-    await update(db, JSON.stringify({ priority: '6' }));
+    await update(db, JSON.stringify({ tag: null }));
 
-    expect(keywordRows(db)).toMatchObject([{ priority: 6 }]);
+    expect(keywordRows(db)).toMatchObject([{ tag: 'OTP' }]);
   });
+
+  const malformed: [string, unknown, string][] = [
+    ['an is_active that is not a boolean', { is_active: 'yes' }, 'is_active must be true or false'],
+    ['a priority that is a numeric string', { priority: '6' }, 'priority must be an integer'],
+    ['a priority that is not whole', { priority: 1.5 }, 'priority must be an integer'],
+    ['a tag that is not text', { tag: 5 }, 'tag must be a string'],
+    [
+      'a case_sensitive that is not a boolean',
+      { case_sensitive: 1 },
+      'case_sensitive must be true or false',
+    ],
+    ['a whole_word that is not a boolean', { whole_word: 0 }, 'whole_word must be true or false'],
+    ['a keyword that is not text', { keyword: 5 }, 'keyword must be a string'],
+    ['a body that is null', null, 'Body must be a JSON object'],
+    ['a body that is a number', 5, 'Body must be a JSON object'],
+  ];
+
+  for (const [name, body, message] of malformed) {
+    test(`answers 400 to ${name} and changes nothing`, async () => {
+      const db = seeded({ keyword: 'code', priority: 4, is_active: 0 });
+
+      const response = await update(db, JSON.stringify(body));
+
+      expect(response.status).toBe(400);
+      expect(await bodyOf(response)).toEqual({ error: message });
+      expect(keywordRows(db)).toMatchObject([{ tag: 'OTP', priority: 4, is_active: 0 }]);
+    });
+  }
 
   test('an omitted, empty or null colour keeps the stored one', async () => {
     const db = seeded({ keyword: 'code', color: '#112233' });
@@ -779,11 +857,18 @@ describe('PUT /api/keywords/:id', () => {
     expect(await bodyOf(response)).toEqual({ error: 'Keyword not found' });
   });
 
-  test('answers 500 when the body is not JSON', async () => {
+  test('answers 400 when the body is not JSON', async () => {
     const response = await update(seeded(), 'not json');
 
-    expect(response.status).toBe(500);
-    expect(await bodyOf(response)).toEqual({ error: 'Failed to update keyword' });
+    expect(response.status).toBe(400);
+    expect(await bodyOf(response)).toEqual({ error: 'Body must be JSON' });
+  });
+
+  test('answers 404 to an unknown keyword before it reads the body', async () => {
+    const response = await update(database(), 'not json', '9');
+
+    expect(response.status).toBe(404);
+    expect(await bodyOf(response)).toEqual({ error: 'Keyword not found' });
   });
 
   test('answers 500 when the write fails', async () => {
@@ -918,20 +1003,31 @@ describe('POST /api/messages/batch-tags', () => {
     expect(Object.keys(data)).toEqual(['m-first']);
   });
 
-  const empty: [string, unknown][] = [
-    ['no ids', { messageIds: [] }],
-    ['ids that are not a list', { messageIds: 'm-1' }],
-    ['a missing list', {}],
+  test('answers an empty result to no ids without reading', async () => {
+    const db = database();
+
+    const response = await batch(db, JSON.stringify({ messageIds: [] }));
+
+    expect(response.status).toBe(200);
+    expect(await bodyOf(response)).toEqual({ success: true, data: {} });
+    expect(db.statements).toEqual([]);
+  });
+
+  const malformed: [string, unknown, string][] = [
+    ['ids that are not a list', { messageIds: 'm-1' }, 'messageIds must be an array of strings'],
+    ['ids that are not text', { messageIds: [1] }, 'messageIds must be an array of strings'],
+    ['a missing list', {}, 'messageIds must be an array of strings'],
+    ['a body that is null', null, 'Body must be a JSON object'],
   ];
 
-  for (const [name, body] of empty) {
-    test(`answers an empty result to ${name} without reading`, async () => {
+  for (const [name, body, message] of malformed) {
+    test(`answers 400 to ${name} without reading`, async () => {
       const db = database();
 
       const response = await batch(db, JSON.stringify(body));
 
-      expect(response.status).toBe(200);
-      expect(await bodyOf(response)).toEqual({ success: true, data: {} });
+      expect(response.status).toBe(400);
+      expect(await bodyOf(response)).toEqual({ error: message });
       expect(db.statements).toEqual([]);
     });
   }
@@ -946,15 +1042,13 @@ describe('POST /api/messages/batch-tags', () => {
     expect(await bodyOf(response)).toEqual({ error: 'Failed to fetch message tags' });
   });
 
-  test('rejects when the body is not JSON', async () => {
+  test('answers 400 when the body is not JSON', async () => {
     const db = database();
 
-    const outcome = await batch(db, 'not json').then(
-      () => 'answered',
-      (error: unknown) => error,
-    );
+    const response = await batch(db, 'not json');
 
-    expect(outcome).toBeInstanceOf(Error);
+    expect(response.status).toBe(400);
+    expect(await bodyOf(response)).toEqual({ error: 'Body must be JSON' });
   });
 });
 
@@ -1062,7 +1156,11 @@ describe('POST /api/keywords/:id/history', () => {
 
   const badRanges: [string, unknown][] = [
     ['a missing range', {}],
+    ['a missing end', { since: range.since }],
     ['a range that is not dates', { since: 'yesterday', until: 'today' }],
+    ['a range that is null', { since: null, until: null }],
+    ['a range that is boolean', { since: true, until: false }],
+    ['a range that is an array', { since: [2026], until: [2027] }],
     ['a range that ends before it starts', { since: range.until, until: range.since }],
   ];
 
@@ -1083,6 +1181,7 @@ describe('POST /api/keywords/:id/history', () => {
     ['a cursor without an id', { created_at: '2026-01-01 00:00:00' }],
     ['a cursor without a created_at', { id: 'a' }],
     ['a cursor that is not an object', 5],
+    ['a cursor with an id that is not text', { created_at: '2026-01-01 00:00:00', id: 5 }],
   ];
 
   for (const [name, cursor] of badCursors) {
@@ -1097,14 +1196,33 @@ describe('POST /api/keywords/:id/history', () => {
     });
   }
 
-  test('answers 500 when the body is not JSON', async () => {
+  test('answers 400 when the body is not JSON', async () => {
     const db = database();
     addKeyword(db, { keyword: 'code' });
 
     const response = await history(db, 'not json');
 
-    expect(response.status).toBe(500);
-    expect(await bodyOf(response)).toEqual({ error: 'Failed to process keyword history' });
+    expect(response.status).toBe(400);
+    expect(await bodyOf(response)).toEqual({ error: 'Body must be JSON' });
+  });
+
+  test('answers 400 when the body is not an object', async () => {
+    const db = database();
+    addKeyword(db, { keyword: 'code' });
+
+    const response = await history(db, 'null');
+
+    expect(response.status).toBe(400);
+    expect(await bodyOf(response)).toEqual({ error: 'Body must be a JSON object' });
+  });
+
+  test('accepts a null cursor as the first page', async () => {
+    const db = database();
+    addKeyword(db, { keyword: 'code' });
+
+    const response = await history(db, JSON.stringify({ ...range, cursor: null }));
+
+    expect(response.status).toBe(200);
   });
 });
 

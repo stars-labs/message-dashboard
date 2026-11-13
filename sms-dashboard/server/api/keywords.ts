@@ -79,36 +79,118 @@ const MessageTagRow = v.object({
   color: v.nullable(v.string()),
 });
 
-const CreateBody = v.object({
-  keyword: v.optional(v.unknown()),
-  tag: v.optional(v.unknown()),
-  color: v.optional(v.unknown()),
-  priority: v.optional(v.unknown()),
-  case_sensitive: v.optional(v.unknown()),
-  whole_word: v.optional(v.unknown()),
-});
+const NOT_JSON_MESSAGE = 'Body must be JSON';
+const BODY_MESSAGE = 'Body must be a JSON object';
+const REQUIRED_MESSAGE = 'Keyword and tag are required';
+const KEYWORD_MESSAGE = 'keyword must be a string';
+const TAG_MESSAGE = 'tag must be a string';
+const PRIORITY_MESSAGE = 'priority must be an integer';
+const CASE_SENSITIVE_MESSAGE = 'case_sensitive must be true or false';
+const WHOLE_WORD_MESSAGE = 'whole_word must be true or false';
+const ACTIVE_MESSAGE = 'is_active must be true or false';
+const IMMUTABLE_MESSAGE =
+  'Keyword and matching options are immutable; create a new keyword instead';
+const MESSAGE_IDS_MESSAGE = 'messageIds must be an array of strings';
+const RANGE_MESSAGE = 'A valid history time range is required';
+const CURSOR_MESSAGE = 'Invalid history cursor';
 
-const UpdateBody = v.object({
-  keyword: v.optional(v.unknown()),
-  tag: v.optional(v.unknown()),
-  color: v.optional(v.unknown()),
-  priority: v.optional(v.unknown()),
-  case_sensitive: v.optional(v.unknown()),
-  whole_word: v.optional(v.unknown()),
-  is_active: v.optional(v.unknown()),
-});
+const Required = v.pipe(v.string(REQUIRED_MESSAGE), v.nonEmpty(REQUIRED_MESSAGE));
 
-const BatchBody = v.object({
-  messageIds: v.fallback(v.optional(v.array(v.unknown()), []), []),
-});
+const Priority = v.pipe(v.number(PRIORITY_MESSAGE), v.integer(PRIORITY_MESSAGE));
 
-const HistoryBody = v.object({
-  since: v.optional(v.union([v.string(), v.number()])),
-  until: v.optional(v.union([v.string(), v.number()])),
-  cursor: v.optional(v.unknown()),
-});
+/**
+ * A colour is applied to a CSS custom property in every operator's browser, so
+ * a supplied one must be a hex literal. null and '' mean "not supplied" and
+ * resolve to `blank`.
+ */
+function colour<Blank>(blank: Blank) {
+  return v.pipe(
+    v.unknown(),
+    v.rawTransform(({ dataset, addIssue, NEVER }) => {
+      if (dataset.value === null || dataset.value === '') return blank;
+      const check = normalizeKeywordColor(dataset.value);
+      if (check.ok) return check.value;
+      addIssue({ message: `Invalid color: ${check.reason}` });
+      return NEVER;
+    }),
+  );
+}
 
-const HistoryCursorBody = v.object({ created_at: v.string(), id: v.string() });
+const CreateBody = v.object(
+  {
+    keyword: Required,
+    tag: Required,
+    color: v.optional(colour(DEFAULT_KEYWORD_COLOR), DEFAULT_KEYWORD_COLOR),
+    priority: v.nullish(Priority, 0),
+    case_sensitive: v.optional(v.boolean(CASE_SENSITIVE_MESSAGE), false),
+    whole_word: v.optional(v.boolean(WHOLE_WORD_MESSAGE), false),
+  },
+  BODY_MESSAGE,
+);
+
+const UpdateBody = v.object(
+  {
+    keyword: v.optional(v.string(KEYWORD_MESSAGE)),
+    tag: v.nullish(v.string(TAG_MESSAGE)),
+    color: v.optional(colour(undefined)),
+    priority: v.optional(v.nullable(Priority, 0)),
+    case_sensitive: v.optional(v.boolean(CASE_SENSITIVE_MESSAGE)),
+    whole_word: v.optional(v.boolean(WHOLE_WORD_MESSAGE)),
+    is_active: v.optional(v.boolean(ACTIVE_MESSAGE)),
+  },
+  BODY_MESSAGE,
+);
+
+const BatchBody = v.object(
+  { messageIds: v.array(v.string(MESSAGE_IDS_MESSAGE), MESSAGE_IDS_MESSAGE) },
+  BODY_MESSAGE,
+);
+
+const Instant = v.pipe(
+  v.union([v.string(RANGE_MESSAGE), v.number(RANGE_MESSAGE)], RANGE_MESSAGE),
+  v.transform((value) => new Date(value)),
+  v.check((date) => !Number.isNaN(date.getTime()), RANGE_MESSAGE),
+);
+
+const HistoryCursorBody = v.object(
+  {
+    created_at: v.pipe(
+      v.string(CURSOR_MESSAGE),
+      v.check((value) => !Number.isNaN(new Date(`${value}Z`).getTime()), CURSOR_MESSAGE),
+    ),
+    id: v.string(CURSOR_MESSAGE),
+  },
+  CURSOR_MESSAGE,
+);
+
+const HistoryBody = v.object(
+  { since: Instant, until: Instant, cursor: v.nullish(HistoryCursorBody) },
+  BODY_MESSAGE,
+);
+
+/**
+ * Valibot reports a missing key with the object's message, so a field that needs
+ * its own message when absent is listed here. Typed against the schemas, so a
+ * field added without one fails to compile.
+ */
+const CREATE_MISSING_KEY_MESSAGES = {
+  keyword: REQUIRED_MESSAGE,
+  tag: REQUIRED_MESSAGE,
+  color: 'Invalid color',
+  priority: PRIORITY_MESSAGE,
+  case_sensitive: CASE_SENSITIVE_MESSAGE,
+  whole_word: WHOLE_WORD_MESSAGE,
+} as const satisfies Record<keyof typeof CreateBody.entries, string>;
+
+const BATCH_MISSING_KEY_MESSAGES = {
+  messageIds: MESSAGE_IDS_MESSAGE,
+} as const satisfies Record<keyof typeof BatchBody.entries, string>;
+
+const HISTORY_MISSING_KEY_MESSAGES = {
+  since: RANGE_MESSAGE,
+  until: RANGE_MESSAGE,
+  cursor: CURSOR_MESSAGE,
+} as const satisfies Record<keyof typeof HistoryBody.entries, string>;
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -127,14 +209,27 @@ async function gate(request: KeywordRequest, permission: Permission): Promise<Re
   return null;
 }
 
-async function readBody<T>(request: KeywordRequest, schema: Schema<T>): Promise<T> {
-  const parsed = await readJson(request, schema);
-  if (!parsed.ok) throw new Error(parsed.error);
-  return parsed.value;
+type BodyResult<T> = { body: T } | { response: Response };
+
+function bodyMessage(
+  issue: v.BaseIssue<unknown>,
+  missingKeyMessages: Readonly<Record<string, string>>,
+): string {
+  const key = issue.type === 'object' && issue.path?.length === 1 ? issue.path[0].key : undefined;
+  const missing = typeof key === 'string' ? missingKeyMessages[key] : undefined;
+  return missing ?? issue.message;
 }
 
-function toDate(value: string | number | undefined): Date {
-  return new Date(value ?? Number.NaN);
+async function readBody<T>(
+  request: KeywordRequest,
+  schema: Schema<T>,
+  missingKeyMessages: Readonly<Record<string, string>> = {},
+): Promise<BodyResult<T>> {
+  const raw = await readJson(request, v.unknown());
+  if (!raw.ok) return { response: json({ error: NOT_JSON_MESSAGE }, 400) };
+  const parsed = v.safeParse(schema, raw.value);
+  if (parsed.success) return { body: parsed.output };
+  return { response: json({ error: bodyMessage(parsed.issues[0], missingKeyMessages) }, 400) };
 }
 
 export function setupKeywordRoutes(router: Router): void {
@@ -205,23 +300,9 @@ export function setupKeywordRoutes(router: Router): void {
     const user = request.user;
 
     try {
-      const { keyword, tag, color, priority, case_sensitive, whole_word } = await readBody(
-        request,
-        CreateBody,
-      );
-
-      if (typeof keyword !== 'string' || !keyword || typeof tag !== 'string' || !tag) {
-        return json({ error: 'Keyword and tag are required' }, 400);
-      }
-
-      // The colour is applied to a CSS custom property in every operator's
-      // browser, so it is only ever a hex literal.
-      // See docs/SECURITY-REVIEW.md finding 2.
-      const colorCheck = normalizeKeywordColor(color);
-
-      if (!colorCheck.ok) {
-        return json({ error: `Invalid color: ${colorCheck.reason}` }, 400);
-      }
+      const parsed = await readBody(request, CreateBody, CREATE_MISSING_KEY_MESSAGES);
+      if ('response' in parsed) return parsed.response;
+      const { keyword, tag, color, priority, case_sensitive, whole_word } = parsed.body;
 
       const existing = await queryFirst(
         request.env.DB.prepare(
@@ -241,15 +322,7 @@ export function setupKeywordRoutes(router: Router): void {
                 ) VALUES (?, ?, ?, ?, ?, ?, ?)
             `,
       )
-        .bind(
-          keyword,
-          tag,
-          colorCheck.value,
-          Number(priority) || 0,
-          Boolean(case_sensitive),
-          Boolean(whole_word),
-          user?.id ?? null,
-        )
+        .bind(keyword, tag, color, priority, case_sensitive, whole_word, user?.id ?? null)
         .run();
 
       const newKeyword = await queryFirst(
@@ -279,9 +352,6 @@ export function setupKeywordRoutes(router: Router): void {
     const id = request.params?.['id'];
 
     try {
-      const { keyword, tag, color, priority, case_sensitive, whole_word, is_active } =
-        await readBody(request, UpdateBody);
-
       const existing = await queryFirst(
         request.env.DB.prepare(`SELECT ${KEYWORD_COLUMNS} FROM keyword_tags WHERE id = ?`).bind(id),
         KeywordRow,
@@ -291,44 +361,30 @@ export function setupKeywordRoutes(router: Router): void {
         return json({ error: 'Keyword not found' }, 404);
       }
 
+      const parsed = await readBody(request, UpdateBody);
+      if ('response' in parsed) return parsed.response;
+      const { keyword, tag, color, priority, case_sensitive, whole_word, is_active } = parsed.body;
+
       if (
         (keyword !== undefined && keyword !== existing.keyword) ||
-        (case_sensitive !== undefined &&
-          Boolean(case_sensitive) !== Boolean(existing.case_sensitive)) ||
-        (whole_word !== undefined && Boolean(whole_word) !== Boolean(existing.whole_word))
+        (case_sensitive !== undefined && case_sensitive !== Boolean(existing.case_sensitive)) ||
+        (whole_word !== undefined && whole_word !== Boolean(existing.whole_word))
       ) {
-        return json(
-          {
-            error: 'Keyword and matching options are immutable; create a new keyword instead',
-          },
-          400,
-        );
+        return json({ error: IMMUTABLE_MESSAGE }, 400);
       }
 
-      // A supplied colour must be a hex literal (400 otherwise, so the client
-      // gets told). An omitted colour keeps the stored one — but a row written
-      // before this validation existed may hold a payload, so that value is run
+      // An omitted colour keeps the stored one — but a row written before the
+      // colour validation existed may hold a payload, so that value is run
       // through the same check and falls back to the default instead of 400ing.
       // Rejecting it would make such a row impossible to edit via the API.
       // See docs/SECURITY-REVIEW.md finding 2.
-      const colorSupplied = !(color === undefined || color === null || color === '');
-      let resolvedColor: string;
-
-      if (colorSupplied) {
-        const colorCheck = normalizeKeywordColor(color);
-
-        if (!colorCheck.ok) {
-          return json({ error: `Invalid color: ${colorCheck.reason}` }, 400);
-        }
-
-        resolvedColor = colorCheck.value;
-      } else {
+      let resolvedColor = color;
+      if (resolvedColor === undefined) {
         const storedCheck = normalizeKeywordColor(existing.color);
         resolvedColor = storedCheck.ok ? storedCheck.value : DEFAULT_KEYWORD_COLOR;
       }
 
-      let nextTag: unknown = existing.tag;
-      if (tag) nextTag = tag;
+      const nextTag = tag === undefined || tag === null || tag === '' ? existing.tag : tag;
 
       const updated = await queryFirst(
         request.env.DB.prepare(
@@ -342,8 +398,8 @@ export function setupKeywordRoutes(router: Router): void {
         ).bind(
           nextTag,
           resolvedColor,
-          priority !== undefined ? Number(priority) : existing.priority,
-          is_active !== undefined ? Boolean(is_active) : existing.is_active,
+          priority ?? existing.priority,
+          is_active ?? existing.is_active,
           id,
         ),
         KeywordRow,
@@ -396,7 +452,9 @@ export function setupKeywordRoutes(router: Router): void {
     const blocked = await gate(request, 'messages.read');
     if (blocked) return blocked;
 
-    const { messageIds } = await readBody(request, BatchBody);
+    const parsed = await readBody(request, BatchBody, BATCH_MISSING_KEY_MESSAGES);
+    if ('response' in parsed) return parsed.response;
+    const { messageIds } = parsed.body;
 
     if (messageIds.length === 0) {
       return json({ success: true, data: {} });
@@ -478,21 +536,10 @@ export function setupKeywordRoutes(router: Router): void {
         return json({ error: 'Activate the keyword before applying it to history' }, 409);
       }
 
-      const body = await readBody(request, HistoryBody);
-      const since = toDate(body.since);
-      const until = toDate(body.until);
-      if (Number.isNaN(since.getTime()) || Number.isNaN(until.getTime()) || since > until) {
-        return json({ error: 'A valid history time range is required' }, 400);
-      }
-      const rawCursor = body.cursor ?? null;
-      let cursor: v.InferOutput<typeof HistoryCursorBody> | null = null;
-      if (rawCursor !== null) {
-        const parsed = v.safeParse(HistoryCursorBody, rawCursor);
-        if (!parsed.success || Number.isNaN(new Date(`${parsed.output.created_at}Z`).getTime())) {
-          return json({ error: 'Invalid history cursor' }, 400);
-        }
-        cursor = parsed.output;
-      }
+      const parsed = await readBody(request, HistoryBody, HISTORY_MISSING_KEY_MESSAGES);
+      if ('response' in parsed) return parsed.response;
+      const { since, until, cursor } = parsed.body;
+      if (since > until) return json({ error: RANGE_MESSAGE }, 400);
 
       const result = await processKeywordHistoryPage(
         request.env.DB,
@@ -505,7 +552,7 @@ export function setupKeywordRoutes(router: Router): void {
         {
           since: since.toISOString(),
           until: until.toISOString(),
-          cursor,
+          cursor: cursor ?? null,
         },
       );
 
