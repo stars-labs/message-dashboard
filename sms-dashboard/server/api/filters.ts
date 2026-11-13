@@ -292,14 +292,11 @@ export function setupFilterRoutes(router: Router): void {
         cursor = { created_at: c.created_at, id: c.id };
       }
 
-      // processRuleHistoryPage is still JS, and its destructured `cursor = null`
-// default makes tsc infer `null | undefined` for the parameter. The cursor
-// shape above is the real contract.
       const result = await processRuleHistoryPage(env.DB, rule, {
         since: since.toISOString(),
         until: until.toISOString(),
         cursor,
-      } as unknown as Parameters<typeof processRuleHistoryPage>[2]);
+      });
       return json(result);
     } catch (error) {
       console.error('[filters] history processing failed:', error);
