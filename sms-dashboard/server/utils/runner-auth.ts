@@ -2,7 +2,7 @@ import * as v from 'valibot';
 import { auth0Handler } from '../handlers/auth0.js';
 import { secretMatches } from '../lib/secret.js';
 
-interface RunnerRequest {
+export interface RunnerRequest {
   headers: { get(name: string): string | null };
   env: {
     API_KEY?: string;
