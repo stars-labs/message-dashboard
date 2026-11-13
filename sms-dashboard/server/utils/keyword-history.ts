@@ -1,8 +1,37 @@
 import { findKeywordMatches } from './keyword-match.js';
+import type { D1Database } from '../../shared/cf-bindings.js';
+import type { HistoryCursor } from './filter-history.js';
 
 export const KEYWORD_HISTORY_PAGE_SIZE = 200;
 
-function cursorFor(row) {
+/** A keyword_tags row as history application reads it. */
+export interface HistoryKeyword {
+  id: number;
+  keyword: string;
+  case_sensitive: number | boolean;
+  whole_word: number | boolean;
+}
+
+/** One message row the page scans. */
+interface KeywordHistoryRow {
+  id: string;
+  type?: string | null;
+  content: string | null;
+  filter_status: string | null;
+  verification_code: string | null;
+  created_at: string;
+}
+
+export interface KeywordHistoryPage {
+  processed: number;
+  eligible: number;
+  matched_messages: number;
+  inserted: number;
+  has_more: boolean;
+  next_cursor: HistoryCursor | null;
+}
+
+function cursorFor(row: KeywordHistoryRow): HistoryCursor {
   return { created_at: row.created_at, id: row.id };
 }
 
@@ -12,16 +41,21 @@ function cursorFor(row) {
  * number of D1 rows. Eligibility and matching happen in memory after the read.
  */
 export async function processKeywordHistoryPage(
-  db,
-  keyword,
-  { since, until, cursor = null, pageSize = KEYWORD_HISTORY_PAGE_SIZE }
-) {
+  db: D1Database,
+  keyword: HistoryKeyword,
+  { since, until, cursor = null, pageSize = KEYWORD_HISTORY_PAGE_SIZE }: {
+    since: string;
+    until: string;
+    cursor?: HistoryCursor | null;
+    pageSize?: unknown;
+  },
+): Promise<KeywordHistoryPage> {
   const conditions = [
-    'purpose = \'user\'',
-    'created_at >= datetime(?)',
-    'created_at <= datetime(?)',
+    `purpose = 'user'`,
+    `created_at >= datetime(?)`,
+    `created_at <= datetime(?)`,
   ];
-  const params = [since, until];
+  const params: unknown[] = [since, until];
 
   if (cursor) {
     conditions.push('(created_at > ? OR (created_at = ? AND id > ?))');
@@ -30,15 +64,15 @@ export async function processKeywordHistoryPage(
 
   const limit = Math.max(
     1,
-    Math.min(Number(pageSize) || KEYWORD_HISTORY_PAGE_SIZE, KEYWORD_HISTORY_PAGE_SIZE)
+    Math.min(Number(pageSize) || KEYWORD_HISTORY_PAGE_SIZE, KEYWORD_HISTORY_PAGE_SIZE),
   );
-  const { results = [] } = await db.prepare(
+  const { results } = await db.prepare(
     `SELECT id, type, content, filter_status, verification_code, created_at
      FROM messages
      WHERE ${conditions.join('\n       AND ')}
      ORDER BY created_at, id
-     LIMIT ?`
-  ).bind(...params, limit + 1).all();
+     LIMIT ?`,
+  ).bind(...params, limit + 1).all<KeywordHistoryRow>();
 
   const hasMore = results.length > limit;
   const page = results.slice(0, limit);
@@ -58,7 +92,7 @@ export async function processKeywordHistoryPage(
       message.content,
       keyword.keyword,
       Boolean(keyword.case_sensitive),
-      Boolean(keyword.whole_word)
+      Boolean(keyword.whole_word),
     );
     if (matches.length > 0) matchedMessages++;
 
@@ -66,23 +100,24 @@ export async function processKeywordHistoryPage(
       statements.push(db.prepare(
         `INSERT OR IGNORE INTO message_tags
            (message_id, keyword_tag_id, matched_text, position)
-         VALUES (?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?)`,
       ).bind(message.id, keyword.id, match.text, match.position));
     }
   }
 
-  const resultsForWrites = statements.length > 0 ? await db.batch(statements) : [];
+  const resultsForWrites = statements.length > 0 ? await db.batch<{ meta?: { changes?: number } }>(statements) : [];
   const inserted = resultsForWrites.reduce(
     (total, result) => total + Number(result?.meta?.changes || 0),
-    0
+    0,
   );
 
+  const last = page.at(-1);
   return {
     processed: page.length,
     eligible,
     matched_messages: matchedMessages,
     inserted,
     has_more: hasMore,
-    next_cursor: hasMore && page.length > 0 ? cursorFor(page.at(-1)) : null,
+    next_cursor: hasMore && last ? cursorFor(last) : null,
   };
 }

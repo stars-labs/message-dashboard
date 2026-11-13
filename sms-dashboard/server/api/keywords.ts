@@ -372,7 +372,7 @@ export function setupKeywordRoutes(router: Router): void {
         try {
             const keyword = await env.DB.prepare(
                 'SELECT * FROM keyword_tags WHERE id = ?'
-            ).bind(id).first();
+            ).bind(id).first<KeywordRow>();
             
             if (!keyword) {
                 return json({ error: 'Keyword not found' }, 404);
@@ -399,7 +399,12 @@ export function setupKeywordRoutes(router: Router): void {
                 cursor = { created_at: c.created_at, id: c.id };
             }
 
-            const result = await processKeywordHistoryPage(env.DB, keyword, {
+            const result = await processKeywordHistoryPage(env.DB, {
+                id: keyword.id,
+                keyword: keyword.keyword,
+                case_sensitive: keyword.case_sensitive,
+                whole_word: keyword.whole_word,
+            }, {
                 since: since.toISOString(),
                 until: until.toISOString(),
                 cursor,
