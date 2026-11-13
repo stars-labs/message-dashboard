@@ -1,4 +1,3 @@
-// Run with: bun test server/utils/keyword-color.test.js
 import { describe, expect, test } from 'bun:test';
 import { DEFAULT_KEYWORD_COLOR, normalizeKeywordColor } from './keyword-color.js';
 
@@ -96,6 +95,8 @@ describe('normalizeKeywordColor — malformed', () => {
   });
 
   test('gives a reason on rejection', () => {
-    expect(normalizeKeywordColor('red').reason).toBeTruthy();
+    const result = normalizeKeywordColor('red');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBeTruthy();
   });
 });
