@@ -10,7 +10,24 @@
  * Injected environment rather than reaching for globals, so the ordering and the
  * failure handling are testable without a browser.
  */
-export async function resetServiceWorker(env = globalThis) {
+/** The globals this uses, injectable so the ordering is testable. */
+export interface SwResetEnv {
+  navigator?: {
+    serviceWorker?: { getRegistrations(): Promise<Array<{ unregister(): Promise<boolean> }>> };
+  };
+  caches?: {
+    keys(): Promise<string[]>;
+    delete(key: string): Promise<boolean>;
+  };
+}
+
+export interface SwResetResult {
+  ok: boolean;
+  unregistered: number;
+  cachesDeleted: number;
+}
+
+export async function resetServiceWorker(env: SwResetEnv | typeof globalThis = globalThis): Promise<SwResetResult> {
   const { navigator, caches } = env;
   let ok = true;
   let unregistered = 0;
@@ -50,7 +67,10 @@ export async function resetServiceWorker(env = globalThis) {
  * Clear both persistent message data (IndexedDB) and offline application caches.
  * The operations are independent so one failure never prevents the other cleanup.
  */
-export async function resetDashboardCache({ clearMessageCache, resetOfflineCache }) {
+export async function resetDashboardCache({ clearMessageCache, resetOfflineCache }: {
+  clearMessageCache: () => Promise<unknown>;
+  resetOfflineCache: () => Promise<SwResetResult>;
+}): Promise<SwResetResult> {
   const [messageResult, offlineResult] = await Promise.allSettled([
     clearMessageCache(),
     resetOfflineCache(),

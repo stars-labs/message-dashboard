@@ -1,5 +1,5 @@
 /** Convert API/D1 timestamps to epoch milliseconds. */
-export function toEpochMilliseconds(value) {
+export function toEpochMilliseconds(value: unknown): number | null {
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
   if (typeof value !== 'string' || !value.trim()) return null;
 
@@ -15,7 +15,7 @@ export function toEpochMilliseconds(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-export function formatTimeAgo(value, now = Date.now()) {
+export function formatTimeAgo(value: unknown, now: number = Date.now()): string {
   const timestamp = toEpochMilliseconds(value);
   if (timestamp === null) return value ? '未知' : '从未';
 
@@ -33,7 +33,7 @@ export function formatTimeAgo(value, now = Date.now()) {
  * OTP to the second — and they cost column width on a phone; the year was noise
  * too, and it appeared in one balance tab but not its neighbour.
  */
-export function formatClock(value, now = Date.now()) {
+export function formatClock(value: unknown, now: number = Date.now()): string {
   const timestamp = toEpochMilliseconds(value);
   if (timestamp === null) return '';
   const zone = { timeZone: 'Asia/Shanghai' };
@@ -47,7 +47,7 @@ export function formatClock(value, now = Date.now()) {
 }
 
 /** The same instant with its year, for detail views where the date matters. */
-export function formatFullTime(value) {
+export function formatFullTime(value: unknown): string {
   const timestamp = toEpochMilliseconds(value);
   if (timestamp === null) return '—';
   return new Date(timestamp).toLocaleString('zh-CN', {

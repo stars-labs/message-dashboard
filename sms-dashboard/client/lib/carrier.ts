@@ -1,4 +1,20 @@
-const CARRIER_GROUPS = [
+export interface CarrierRecord {
+  carrier?: string | null;
+  country?: string | null;
+}
+
+export interface CarrierOption {
+  key: string;
+  label: string;
+}
+
+interface CarrierGroup {
+  key: string;
+  label: string;
+  aliases: string[];
+}
+
+const CARRIER_GROUPS: CarrierGroup[] = [
   { key: 'china-mobile', label: '移动', aliases: ['china mobile', 'cmcc', '中国移动', '移动'] },
   { key: 'china-telecom', label: '电信', aliases: ['china telecom', 'telecom', 'ctcc', '中国电信', '电信'] },
   { key: 'china-unicom', label: '联通', aliases: ['china unicom', 'unicom', '中国联通', '联通'] },
@@ -8,15 +24,15 @@ const CARRIER_GROUPS = [
   { key: 'starhub', label: 'StarHub', aliases: ['starhub'] },
 ];
 
-function normalized(value) {
+function normalized(value: unknown): string {
   return String(value || '').trim().toLocaleLowerCase();
 }
 
-function isHongKong(country) {
+function isHongKong(country: unknown): boolean {
   return ['hk', 'hkg', 'hong kong', '香港'].includes(normalized(country));
 }
 
-export function carrierKey({ carrier, country } = {}) {
+export function carrierKey({ carrier, country }: CarrierRecord = {}): string {
   const candidate = normalized(carrier);
   if (!candidate) return '';
   const group = CARRIER_GROUPS.find((item) => item.aliases.includes(candidate));
@@ -24,13 +40,13 @@ export function carrierKey({ carrier, country } = {}) {
   return group?.key || candidate;
 }
 
-export function carrierLabel(record) {
-  const key = carrierKey(record);
+export function carrierLabel(record: CarrierRecord | null | undefined): string {
+  const key = carrierKey(record ?? {});
   return CARRIER_GROUPS.find((group) => group.key === key)?.label || String(record?.carrier || '').trim();
 }
 
-export function buildCarrierOptions(records) {
-  const options = new Map();
+export function buildCarrierOptions(records: CarrierRecord[]): CarrierOption[] {
+  const options = new Map<string, string>();
   for (const record of records) {
     const key = carrierKey(record);
     if (key && !options.has(key)) options.set(key, carrierLabel(record));

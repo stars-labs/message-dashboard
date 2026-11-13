@@ -10,14 +10,32 @@ const BEEP_HZ = 880;
 const BEEP_MS = 220;
 const PATTERN_MS = 2400;
 
-export function createRingtone(AudioContextCtor) {
-  let context = null;
-  let timer = null;
+/** The subset of AudioContext this uses, so tests can pass a stub. */
+export interface AudioContextLike {
+  currentTime: number;
+  destination: AudioNode;
+  resume?(): Promise<void> | void;
+  close?(): Promise<void> | void;
+  createOscillator(): OscillatorNode;
+  createGain(): GainNode;
+}
 
-  function beep(at) {
+export type AudioContextCtor = new () => AudioContextLike;
+
+export interface Ringtone {
+  start(): boolean;
+  stop(): void;
+  readonly ringing: boolean;
+}
+
+export function createRingtone(AudioContextCtor?: AudioContextCtor | null): Ringtone {
+  let context: AudioContextLike | null = null;
+  let timer: ReturnType<typeof setInterval> | null = null;
+
+  function beep(at: number) {
     try {
-      const oscillator = context.createOscillator();
-      const gain = context.createGain();
+      const oscillator = context!.createOscillator();
+      const gain = context!.createGain();
       oscillator.type = 'sine';
       oscillator.frequency.value = BEEP_HZ;
       // Ramped rather than switched, so the beep does not click.
@@ -25,7 +43,7 @@ export function createRingtone(AudioContextCtor) {
       gain.gain.exponentialRampToValueAtTime(0.12, at + 0.02);
       gain.gain.exponentialRampToValueAtTime(0.0001, at + BEEP_MS / 1000);
       oscillator.connect(gain);
-      gain.connect(context.destination);
+      gain.connect(context!.destination);
       oscillator.start(at);
       oscillator.stop(at + BEEP_MS / 1000 + 0.02);
     } catch {

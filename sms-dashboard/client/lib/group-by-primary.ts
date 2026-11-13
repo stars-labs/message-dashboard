@@ -16,9 +16,23 @@
 // a top-level row at depth 0 rather than hidden, so a carrier filter that
 // excludes the primary never makes a secondary vanish.
 
-export function groupByPrimary(items, resolve = (x) => x) {
+/** The fields grouping reads, whichever object carries them. */
+export interface GroupableRow {
+  iccid?: string | null;
+  sim_role?: string | null;
+  primary_iccid?: string | null;
+  sim_index?: number | null;
+}
+
+/** The input item plus the two keys this adds for rendering. */
+export type GroupedItem<T> = T & { __depth: 0 | 1; __isSecondary: boolean };
+
+export function groupByPrimary<T>(
+  items: T[],
+  resolve: (item: T) => GroupableRow | null | undefined = (x) => x as unknown as GroupableRow,
+): Array<GroupedItem<T>> {
   const keyed = (items || []).map((item) => {
-    const p = resolve(item) || {};
+    const p: GroupableRow = resolve(item) || {};
     return {
       item,
       iccid: p.iccid,
@@ -33,7 +47,7 @@ export function groupByPrimary(items, resolve = (x) => x) {
 
   const presentIccids = new Set(keyed.map((k) => k.iccid));
 
-  const secondariesByPrimary = new Map();
+  const secondariesByPrimary = new Map<string, typeof keyed>();
   for (const k of keyed) {
     // Only bucket a secondary under a primary that is actually in the set;
     // an orphan (primary filtered out) falls through to render at depth 0.
@@ -44,16 +58,16 @@ export function groupByPrimary(items, resolve = (x) => x) {
     }
   }
 
-  const out = [];
+  const out: Array<GroupedItem<T>> = [];
   for (const k of keyed) {
     // A secondary that was bucketed under a present primary is re-inserted
     // under that primary below; an orphan (primary not in the set) falls
     // through and renders as a top-level row.
-    if (secondariesByPrimary.get(k.primary_iccid)?.some((c) => c.iccid === k.iccid)) {
+    if (k.primary_iccid && secondariesByPrimary.get(k.primary_iccid)?.some((c) => c.iccid === k.iccid)) {
       continue;
     }
     out.push({ ...k.item, __depth: 0, __isSecondary: false });
-    const children = secondariesByPrimary.get(k.iccid);
+    const children = k.iccid ? secondariesByPrimary.get(k.iccid) : undefined;
     if (children) {
       for (const c of children) {
         out.push({ ...c.item, __depth: 1, __isSecondary: true });

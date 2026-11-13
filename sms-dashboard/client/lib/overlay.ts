@@ -12,15 +12,17 @@
 // worse than landing on the container, and a screen reader reads the dialog's
 // label from the container anyway.
 
-/**
- * @param {HTMLElement} node
- * @param {{ onClose?: () => void, autofocus?: boolean }} [options]
- */
-export function overlay(node, options = {}) {
-  let { onClose = null, autofocus = true } = options;
+export interface OverlayOptions {
+  onClose?: (() => void) | null;
+  autofocus?: boolean;
+}
+
+export function overlay(node: HTMLElement, options: OverlayOptions = {}) {
+  let onClose: (() => void) | null = options.onClose ?? null;
+  let autofocus = options.autofocus ?? true;
   const previouslyFocused = document.activeElement;
 
-  function onKeydown(event) {
+  function onKeydown(event: KeyboardEvent) {
     if (event.key !== 'Escape' || event.defaultPrevented) return;
     event.stopPropagation();
     onClose?.();
@@ -36,7 +38,7 @@ export function overlay(node, options = {}) {
   document.addEventListener('keydown', onKeydown);
 
   return {
-    update(next = {}) {
+    update(next: OverlayOptions = {}) {
       onClose = next.onClose ?? null;
       autofocus = next.autofocus ?? true;
     },

@@ -18,11 +18,14 @@ const IGNORABLE_MESSAGES = [
   /^Script error\.?$/i,
 ];
 
-/**
- * @param {{filename?: string, stack?: string, message?: string}} source
- * @returns {boolean} true when the error did not come from application code
- */
-export function isForeignError(source) {
+export interface ErrorSource {
+  filename?: string;
+  stack?: string;
+  message?: string;
+}
+
+/** True when the error did not come from application code. */
+export function isForeignError(source: ErrorSource | null | undefined): boolean {
   if (!source) return false;
 
   const message = typeof source.message === 'string' ? source.message : '';
@@ -44,25 +47,26 @@ export function isForeignError(source) {
  * object and destroyed its stack — that is where the mangled "i: Failed to connect to
  * MetaMask" text came from, `i` being the minified class name.
  */
-export function toError(reason) {
+export function toError(reason: unknown): Error {
   if (reason instanceof Error) return reason;
 
   if (typeof reason === 'string') return new Error(reason);
 
   if (reason && typeof reason === 'object') {
+    const candidate = reason as { message?: unknown };
     const message =
-      typeof reason.message === 'string' && reason.message
-        ? reason.message
+      typeof candidate.message === 'string' && candidate.message
+        ? candidate.message
         : safeStringify(reason);
     const error = new Error(message);
-    if (typeof reason.stack === 'string') error.stack = reason.stack;
+    if (typeof (reason as { stack?: unknown }).stack === 'string') error.stack = (reason as { stack: string }).stack;
     return error;
   }
 
   return new Error('Unhandled promise rejection');
 }
 
-function safeStringify(value) {
+function safeStringify(value: unknown): string {
   try {
     return JSON.stringify(value) ?? 'Unhandled promise rejection';
   } catch {
