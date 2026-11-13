@@ -571,17 +571,16 @@ export const auth0Handler = {
     env: VerifyEnv,
     audience: string | undefined = nonEmpty(env.AUTH0_AUDIENCE) ?? env.AUTH0_CLIENT_ID,
   ): Promise<Record<string, unknown> | null> {
-    if (!env.AUTH0_DOMAIN) return null;
+    // jose checks `aud` only when given an audience, so without one any token the
+    // tenant signed would pass. Fail closed instead.
+    const expectedAudience = nonEmpty(audience) ?? nonEmpty(env.AUTH0_CLIENT_ID);
+    if (!env.AUTH0_DOMAIN || expectedAudience === undefined) return null;
 
     try {
       const JWKS = createRemoteJWKSet(new URL(`https://${env.AUTH0_DOMAIN}/.well-known/jwks.json`));
-
-      // Calling with no audience would make jose reject on `aud`; fall back to the
-      // client id so the call is always well-defined.
-      const expectedAudience = audience ?? env.AUTH0_CLIENT_ID;
       const { payload } = await jwtVerify(token, JWKS, {
         issuer: `https://${env.AUTH0_DOMAIN}/`,
-        ...(expectedAudience === undefined ? {} : { audience: expectedAudience }),
+        audience: expectedAudience,
       });
 
       return payload;

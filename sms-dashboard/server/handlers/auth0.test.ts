@@ -505,6 +505,19 @@ describe('Auth0 verifyToken', () => {
       await auth0Handler.verifyToken('garbage', { AUTH0_DOMAIN: 'tenant.example' }),
     ).toBeNull();
   });
+
+  test('rejects every token when no audience is configured, instead of skipping the audience check', async () => {
+    mockFetch(() => Response.json({ keys: [] }));
+    const segment = (value: object) => Buffer.from(JSON.stringify(value)).toString('base64url');
+    const token = [
+      segment({ alg: 'RS256', kid: 'k1' }),
+      segment({ sub: 'auth0|1', aud: 'another-api', iss: 'https://tenant.example/' }),
+      'signature',
+    ].join('.');
+
+    expect(await auth0Handler.verifyToken(token, { AUTH0_DOMAIN: 'tenant.example' })).toBeNull();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
 });
 
 describe('Auth0 login role reconciliation', () => {
