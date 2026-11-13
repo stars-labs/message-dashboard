@@ -1,13 +1,18 @@
-import { auth0Handler } from '../handlers/auth0';
+import * as v from 'valibot';
+import { auth0Handler, StoredSession } from '../handlers/auth0';
+import { readKvJson } from '../lib/kv.js';
 import { createRoleConfig, rolesFromToken } from '../../config/auth0-roles.js';
 import { extractSessionToken } from '../utils/session-token.js';
-import type { AppRequest, Handler, RequestUser } from '../worker-context.js';
+import type { AppRequest, Handler } from '../worker-context.js';
 
-/** The session payload KV holds under the auth_token value. */
-interface StoredSession {
-  expires_at: number;
-  user: RequestUser;
-}
+/** The standard claims read from a verified Auth0 JWT; roles come from the configured claim. */
+const JwtClaims = v.object({
+  sub: v.string(),
+  email: v.optional(v.string()),
+  name: v.optional(v.string()),
+  nickname: v.optional(v.string()),
+  picture: v.optional(v.string()),
+});
 
 // Auth0 authentication middleware
 export const handleAuth0: Handler = async (request: AppRequest) => {
@@ -44,10 +49,16 @@ export const handleAuth0: Handler = async (request: AppRequest) => {
 
   try {
     // First check if it's a session token in KV store
-    const sessionData = await env.SESSIONS.get(token);
+    const stored = await readKvJson(env.SESSIONS, token, StoredSession);
 
-    if (sessionData) {
-      const session = JSON.parse(sessionData) as StoredSession;
+    if (stored) {
+      if (!stored.ok) {
+        return new Response(JSON.stringify({ error: 'Authentication failed' }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      const session = stored.value;
 
       // Check if session is expired
       if (session.expires_at < Date.now()) {
@@ -65,8 +76,9 @@ export const handleAuth0: Handler = async (request: AppRequest) => {
 
     // If not a session token, try to verify as Auth0 JWT
     const jwtPayload = await auth0Handler.verifyToken(token, env);
+    const claims = v.safeParse(JwtClaims, jwtPayload);
 
-    if (!jwtPayload) {
+    if (!jwtPayload || !claims.success) {
       return new Response(JSON.stringify({ error: 'Invalid token' }), {
         status: 401,
         headers: { 'Content-Type': 'application/json' },
@@ -75,10 +87,10 @@ export const handleAuth0: Handler = async (request: AppRequest) => {
 
     // Create user object from JWT payload
     request.user = {
-      id: String(jwtPayload.sub),
-      email: jwtPayload.email as string | undefined,
-      name: (jwtPayload.name ?? jwtPayload.nickname) as string | undefined,
-      picture: jwtPayload.picture as string | undefined,
+      id: claims.output.sub,
+      email: claims.output.email,
+      name: claims.output.name ?? claims.output.nickname,
+      picture: claims.output.picture,
       // Namespaced claim only — see config/auth0-roles.ts and
       // docs/SECURITY-REVIEW.md finding 5.
       roles: rolesFromToken(jwtPayload, createRoleConfig(env)),

@@ -29,7 +29,7 @@ function sessionStub() {
       return key === SESSION_TOKEN
         ? JSON.stringify({
             expires_at: Date.now() + 60_000,
-            user: { sub: 'auth0|op', roles: ['admin'] },
+            user: { id: 'auth0|op', roles: ['admin'] },
           })
         : null;
     },

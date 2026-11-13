@@ -89,7 +89,7 @@ describe('filter rule list D1 reads', () => {
         async get() {
           return JSON.stringify({
             expires_at: Date.now() + 60_000,
-            user: { sub: 'auth0|admin', roles: ['admin'] },
+            user: { id: 'auth0|admin', roles: ['admin'] },
           });
         },
       },
@@ -147,7 +147,7 @@ describe('filter rule list D1 reads', () => {
         async get() {
           return JSON.stringify({
             expires_at: Date.now() + 60_000,
-            user: { sub: 'auth0|admin', roles: ['admin'] },
+            user: { id: 'auth0|admin', roles: ['admin'] },
           });
         },
       },
