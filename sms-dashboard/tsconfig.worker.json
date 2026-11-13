@@ -42,7 +42,8 @@
     "server/utils/carrier-billing.ts",
     "server/utils/carrier-billing-backfill.ts",
     "server/frontend-handler.ts",
-    "server/utils/verification-backfill.ts"
+    "server/utils/verification-backfill.ts",
+    "server/utils/spam-backfill.ts"
   ],
   "exclude": ["**/*.test.ts"],
   "references": [{ "path": "./tsconfig.shared.json" }]

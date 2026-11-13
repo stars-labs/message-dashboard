@@ -10,9 +10,9 @@
 // that selects too little would silently leave messages misjudged, so the
 // pre-filters below deliberately err toward over-selecting.
 
+import * as v from 'valibot';
+import { queryAll, queryFirst, type D1, type D1Batch } from '../lib/d1.js';
 import { classifyMessage, loadActiveRules, FILTER_STATUS } from './spam-filter.js';
-import type { ClassifiableMessage } from './spam-filter.js';
-import type { D1Database } from '../cf-bindings.js';
 
 /** Rows fetched and updated per iteration. Also the D1 batch size. */
 const PAGE_SIZE = 200;
@@ -21,16 +21,23 @@ const PAGE_SIZE = 200;
 const DEFAULT_BUDGET_MS = 20_000;
 
 /** The message columns the sweep judges. */
-interface PendingRow extends ClassifiableMessage {
-  id: string;
-}
+const PendingRow = v.object({
+  id: v.string(),
+  type: v.nullable(v.string()),
+  content: v.string(),
+  phone_number: v.nullable(v.string()),
+});
+
+const PendingCount = v.object({ n: v.number() });
 
 /** How many messages are still waiting to be judged. */
-export async function countPending(db: D1Database): Promise<number> {
-  const row = await db
-    .prepare(`SELECT COUNT(*) AS n FROM messages WHERE filter_status = ?`)
-    .bind(FILTER_STATUS.PENDING)
-    .first<{ n: number }>();
+export async function countPending(db: D1<'first'>): Promise<number> {
+  const row = await queryFirst(
+    db
+      .prepare(`SELECT COUNT(*) AS n FROM messages WHERE filter_status = ?`)
+      .bind(FILTER_STATUS.PENDING),
+    PendingCount,
+  );
   return row?.n ?? 0;
 }
 
@@ -38,7 +45,7 @@ export async function countPending(db: D1Database): Promise<number> {
  * Judge messages currently marked 'pending', in bounded pages.
  */
 export async function sweepPending(
-  db: D1Database,
+  db: D1<'all' | 'first' | 'run'> & D1Batch<'all' | 'first' | 'run'>,
   {
     pageSize = PAGE_SIZE,
     budgetMs = DEFAULT_BUDGET_MS,
@@ -49,16 +56,18 @@ export async function sweepPending(
   let processed = 0;
 
   while (Date.now() - startedAt < budgetMs) {
-    const { results } = await db
-      .prepare(
-        `SELECT id, type, content, phone_number
+    const results = await queryAll(
+      db
+        .prepare(
+          `SELECT id, type, content, phone_number
          FROM messages
          WHERE filter_status = ?
          ORDER BY rowid
          LIMIT ?`,
-      )
-      .bind(FILTER_STATUS.PENDING, pageSize)
-      .all<PendingRow>();
+        )
+        .bind(FILTER_STATUS.PENDING, pageSize),
+      PendingRow,
+    );
 
     if (results.length === 0) break;
 
