@@ -1,15 +1,18 @@
 const ROW_READ_LIMIT = "exceeded D1's free tier daily row read limit";
 const ROW_WRITE_LIMIT = "exceeded D1's free tier daily row write limit";
 
-/** The bits of a thrown value this module reads. `cause` is ES2022 chaining. */
-interface ErrorLike {
-  message?: unknown;
-  cause?: { message?: unknown };
+function messageOf(value: unknown): unknown {
+  return typeof value === 'object' && value !== null && 'message' in value
+    ? value.message
+    : undefined;
+}
+
+function causeOf(value: unknown): unknown {
+  return typeof value === 'object' && value !== null && 'cause' in value ? value.cause : undefined;
 }
 
 export function errorText(error: unknown): string {
-  const e = error as ErrorLike | null | undefined;
-  const messages = [e?.message, e?.cause?.message]
+  const messages = [messageOf(error), messageOf(causeOf(error))]
     .filter((value): value is string => typeof value === 'string' && value.length > 0)
     .join(' ');
   return messages || String(error);
