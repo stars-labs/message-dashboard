@@ -442,6 +442,15 @@ export const auth0Handler = {
     }
 
     const url = new URL(request.url);
+    if (!env.AUTH0_DOMAIN) {
+      return new Response('Auth0 configuration missing. Please configure AUTH0_DOMAIN.', {
+        status: 500,
+        headers: {
+          'Content-Type': 'text/plain',
+          'Set-Cookie': 'auth_token=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0',
+        },
+      });
+    }
     const logoutUrl = new URL(`https://${env.AUTH0_DOMAIN}/v2/logout`);
     logoutUrl.searchParams.set('client_id', env.AUTH0_CLIENT_ID ?? '');
     logoutUrl.searchParams.set('returnTo', url.origin);

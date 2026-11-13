@@ -267,6 +267,52 @@ describe('Auth0 login role token selection', () => {
   });
 });
 
+describe('Auth0 logout', () => {
+  function logoutRequest(envOverrides = {}) {
+    const deleted = [];
+    return {
+      deleted,
+      request: {
+        url: 'https://sexy.itoken.world/logout',
+        headers: new Headers({ Cookie: 'auth_token=session-1' }),
+        env: {
+          AUTH0_DOMAIN: 'tenant.example',
+          AUTH0_CLIENT_ID: 'dashboard-client',
+          SESSIONS: {
+            get: async () => null,
+            put: async () => {},
+            delete: async (key) => {
+              deleted.push(key);
+            },
+          },
+          ...envOverrides,
+        },
+      },
+    };
+  }
+
+  test('ends the session and redirects to the Auth0 logout endpoint', async () => {
+    const { request, deleted } = logoutRequest();
+
+    const response = await auth0Handler.logout(request);
+
+    expect(response.status).toBe(302);
+    const location = new URL(response.headers.get('location'));
+    expect(location.origin + location.pathname).toBe('https://tenant.example/v2/logout');
+    expect(location.searchParams.get('returnTo')).toBe('https://sexy.itoken.world');
+    expect(deleted).toEqual(['session-1']);
+  });
+
+  test('ends the session but answers 500 when AUTH0_DOMAIN is not configured', async () => {
+    const { request, deleted } = logoutRequest({ AUTH0_DOMAIN: undefined });
+
+    const response = await auth0Handler.logout(request);
+
+    expect(response.status).toBe(500);
+    expect(deleted).toEqual(['session-1']);
+  });
+});
+
 describe('Auth0 login role reconciliation', () => {
   const roleEnv = {
     AUTH0_ADMIN_ROLE: 'sms-admin',
