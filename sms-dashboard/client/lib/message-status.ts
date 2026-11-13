@@ -1,4 +1,10 @@
-const OUTBOUND_STATUS = {
+export interface OutboundStatusMeta {
+  label: string;
+  className: string;
+  title: string;
+}
+
+const OUTBOUND_STATUS: Record<string, { label: string; className: string }> = {
   sending: {
     label: '等待发送',
     className: 'border-stone-200 bg-stone-50 text-stone-600',
@@ -21,8 +27,11 @@ const OUTBOUND_STATUS = {
   },
 };
 
-export function getOutboundStatusMeta(status, errorMessage = null) {
-  const meta = OUTBOUND_STATUS[status] || {
+export function getOutboundStatusMeta(
+  status: string | null | undefined,
+  errorMessage: string | null = null,
+): OutboundStatusMeta {
+  const meta = (status && OUTBOUND_STATUS[status]) || {
     label: status ? `状态：${status}` : '状态未知',
     className: 'border-stone-200 bg-stone-50 text-stone-600',
   };

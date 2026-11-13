@@ -1,21 +1,28 @@
-export const SIM_SERVICE_TYPES = [
+export interface LabelledOption<T extends string> {
+  value: T;
+  label: string;
+}
+
+export const SIM_SERVICE_TYPES: LabelledOption<'unknown' | 'prepaid' | 'postpaid' | 'balance_managed'>[] = [
   { value: 'unknown', label: '待确认' },
   { value: 'prepaid', label: '预付费' },
   { value: 'postpaid', label: '后付费' },
   { value: 'balance_managed', label: '按余额管理' },
 ];
 
-export const SIM_SERVICE_TYPE_SOURCES = [
+export const SIM_SERVICE_TYPE_SOURCES: LabelledOption<
+  'carrier_account' | 'carrier_support' | 'contract_or_bill' | 'carrier_message'
+>[] = [
   { value: 'carrier_account', label: '运营商 App / 门户' },
   { value: 'carrier_support', label: '运营商客服' },
   { value: 'contract_or_bill', label: '合同 / 账单' },
   { value: 'carrier_message', label: '明确的运营商服务短信' },
 ];
 
-export function getSimServiceTypeLabel(value) {
+export function getSimServiceTypeLabel(value: string | null | undefined): string {
   return SIM_SERVICE_TYPES.find((option) => option.value === value)?.label || '待确认';
 }
 
-export function getSimServiceTypeSourceLabel(value) {
+export function getSimServiceTypeSourceLabel(value: string | null | undefined): string {
   return SIM_SERVICE_TYPE_SOURCES.find((option) => option.value === value)?.label || '—';
 }

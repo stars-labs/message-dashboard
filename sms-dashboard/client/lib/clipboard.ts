@@ -9,11 +9,8 @@
  * Copy `text` to the clipboard.
  * Returns true on success, false if the Clipboard API is unavailable or the
  * user denies permission (e.g. inside an iframe without clipboard-write).
- *
- * @param {string} text
- * @returns {Promise<boolean>}
  */
-export async function copyCode(text) {
+export async function copyCode(text: string): Promise<boolean> {
   if (!navigator?.clipboard?.writeText) return false;
   try {
     await navigator.clipboard.writeText(text);

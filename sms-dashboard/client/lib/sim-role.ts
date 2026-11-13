@@ -2,12 +2,19 @@
 // one or more supplementary cards; only the primary is balance-queried.
 // See migrations/059_add_sim_primary_secondary.sql.
 
-export const SIM_ROLES = [
+export type SimRole = 'standalone' | 'primary' | 'secondary';
+
+export interface SimRoleOption {
+  value: SimRole;
+  label: string;
+}
+
+export const SIM_ROLES: SimRoleOption[] = [
   { value: 'standalone', label: '独立' },
   { value: 'primary', label: '主卡' },
   { value: 'secondary', label: '副卡' },
 ];
 
-export function getSimRoleLabel(value) {
+export function getSimRoleLabel(value: string | null | undefined): string {
   return SIM_ROLES.find((option) => option.value === value)?.label || '独立';
 }

@@ -23,7 +23,9 @@
     "shared/**/*.ts",
     "config/**/*.ts",
     "server/index.ts",
-    "server/middleware/**/*.ts"
+    "server/middleware/**/*.ts",
+    "client/lib/**/*.ts",
+    "client/*.ts"
   ],
   "exclude": ["node_modules", "dist", "balance-agent/dist", "balance-agent/release"]
 }
