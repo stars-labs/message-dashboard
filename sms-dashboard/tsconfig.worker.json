@@ -21,7 +21,8 @@
     "server/asset-cache-control.ts",
     "server/utils/keyword-match.ts",
     "server/utils/keyword-color.ts",
-    "server/utils/recipient.ts"
+    "server/utils/recipient.ts",
+    "server/utils/session-token.ts"
   ],
   "exclude": ["**/*.test.ts"],
   "references": [{ "path": "./tsconfig.shared.json" }]

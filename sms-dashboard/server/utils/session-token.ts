@@ -44,7 +44,7 @@ export function extractSessionToken(
  * matched exactly so `xauth_token` or `auth_token_backup` cannot satisfy a lookup for
  * `auth_token`.
  */
-export function readCookie(cookieHeader: string | null, name: string): string | null {
+export function readCookie(cookieHeader: string | null | undefined, name: string): string | null {
   if (typeof cookieHeader !== 'string' || !cookieHeader) return null;
 
   for (const part of cookieHeader.split(';')) {

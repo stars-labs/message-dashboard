@@ -1,4 +1,3 @@
-// Run with: bun test server/utils/session-token.test.js
 import { describe, expect, test } from 'bun:test';
 import { extractSessionToken, readCookie } from './session-token.js';
 
@@ -73,6 +72,9 @@ describe('extractSessionToken', () => {
   });
 
   test('trims the bearer token', () => {
-    expect(extractSessionToken('Bearer  padded  ', null).token).toBe('padded');
+    expect(extractSessionToken('Bearer  padded  ', null)).toEqual({
+      token: 'padded',
+      source: 'header',
+    });
   });
 });
