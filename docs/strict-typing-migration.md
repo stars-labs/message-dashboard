@@ -83,9 +83,13 @@ Every value from outside the process is `unknown` until a valibot schema parses
 it: request bodies, query/params, D1 rows, KV values, `fetch` responses
 (Auth0, carrier sites, AI), `postMessage`/IPC, IndexedDB, `localStorage`.
 
-- Bodies and JSON text: `readJson(body, schema)` / `parseJson(text, schema)`
+- JSON text and upstream responses: `readJson(body, schema)` / `parseJson(text, schema)`
   from `shared/parse-json.ts`. They return `{ ok, value } | { ok: false, error }`;
   the handler answers the bad input itself.
+- Request bodies: `readBody(request, Schema, MISSING_KEY_MESSAGES)` from
+  `server/lib/request-body.ts`. The schema declares every 400 message; the
+  missing-key table is typed to list exactly the required keys. A body that is
+  not JSON answers `NOT_JSON_MESSAGE`; a JSON array is never an object body.
 - D1: `queryAll` / `queryFirst` from `server/lib/d1.ts`. No `.first<T>()` /
   `.all<T>()` type arguments. ESLint enforces both rules.
 - Row schemas live next to the query that produces them and list exactly the
@@ -105,8 +109,11 @@ it: request bodies, query/params, D1 rows, KV values, `fetch` responses
 - Tests pass plain objects that implement exactly those members. No `as`, no
   `eslint-disable`, no "test double" helper that casts.
 - Code whose behaviour is SQL is tested against real SQLite through
-  `test/sqlite-d1.ts`, not against canned rows. Pin the old behaviour first:
-  the test passes before the refactor and after it.
+  `test/sqlite-d1.ts`, not against canned rows, on tables built by running the
+  real migration files (`test/sims-schema.ts`, `test/runner-schema.ts`). Pin the
+  old behaviour first: the test passes before the refactor and after it.
+- Server tests run on native Bun; only `client/` tests load happy-dom
+  (`bunfig.client.toml`). Build requests as real `Request` objects.
 - A value read from settings or config with a closed set of values (e.g. the AI
   protocol) is a valibot `picklist`; code takes the union and switches over it
   exhaustively. Never widen a union to `string` to keep a branch testable.
