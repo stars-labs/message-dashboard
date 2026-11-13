@@ -1,12 +1,21 @@
 import { FRONTEND_ASSETS } from './frontend-assets.js';
 import { cacheControlFor } from './asset-cache-control.js';
+import type { AppRequest } from '../shared/worker-context.js';
 
-export function serveFrontend(request) {
+/** One inlined asset, as scripts/build-unified.js emits it. */
+interface FrontendAsset {
+  content: string;
+  type: string;
+  encoding?: 'base64';
+}
+
+/** The generated map. Declared here so this module does not need the generated file typed. */
+type FrontendAssetMap = Record<string, FrontendAsset>;
+
+export function serveFrontend(request: AppRequest): Response {
   const url = new URL(request.url);
   let pathname = url.pathname;
   
-  console.log(`[Frontend Handler] Request URL: ${url.href}`);
-  console.log(`[Frontend Handler] Original pathname: ${pathname}`);
   
   // Remove trailing slash
   if (pathname.endsWith('/') && pathname !== '/') {
@@ -18,32 +27,28 @@ export function serveFrontend(request) {
     pathname = '/index.html';
   }
   
-  console.log(`[Frontend Handler] Normalized pathname: ${pathname}`);
   
   // Remove leading slash for asset lookup
   const assetKey = pathname.startsWith('/') ? pathname.slice(1) : pathname;
   
-  console.log(`[Frontend Handler] Asset key: ${assetKey}`);
   
   // Try to find the exact file
-  let asset = FRONTEND_ASSETS[assetKey];
+  let asset = (FRONTEND_ASSETS as FrontendAssetMap)[assetKey];
   
   console.log(`[Frontend Handler] Asset found: ${asset ? 'YES' : 'NO'}`);
   
   // If not found and no extension, try index.html (for SPA routing)
   if (!asset && !pathname.includes('.')) {
-    console.log(`[Frontend Handler] No extension found, falling back to index.html`);
-    asset = FRONTEND_ASSETS['index.html'];
+    asset = (FRONTEND_ASSETS as FrontendAssetMap)['index.html'];
   }
   
   // If still not found, return 404
   if (!asset) {
-    console.log(`[Frontend Handler] Asset not found, returning 404`);
     return new Response('Not Found', { status: 404 });
   }
   
   // Prepare response body
-  let body;
+  let body: Uint8Array | string;
   if (asset.encoding === 'base64') {
     // Decode base64 for binary files
     const binaryString = atob(asset.content);
@@ -57,7 +62,7 @@ export function serveFrontend(request) {
   }
   
   // Return the asset with appropriate headers
-  const headers = {
+  const headers: Record<string, string> = {
     'Content-Type': asset.type,
     'Cache-Control': cacheControlFor(pathname),
     'Access-Control-Allow-Origin': '*',
@@ -69,9 +74,7 @@ export function serveFrontend(request) {
     headers['X-Frame-Options'] = 'DENY';
   }
   
-  const response = new Response(body, { headers });
+  const response = new Response(body as BodyInit, { headers });
   
-  console.log(`[Frontend Handler] Returning ${pathname} with Content-Type: ${asset.type}`);
-  console.log(`[Frontend Handler] Response body length: ${body.length || body.byteLength || 0}`);
   return response;
 }

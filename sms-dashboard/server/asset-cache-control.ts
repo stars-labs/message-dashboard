@@ -17,6 +17,6 @@ const IMMUTABLE = 'public, max-age=31536000, immutable';
 const REVALIDATE = 'no-cache';
 
 /** Cache-Control header value for a request pathname (leading slash included). */
-export function cacheControlFor(pathname) {
+export function cacheControlFor(pathname: string): string {
   return pathname.startsWith('/assets/') ? IMMUTABLE : REVALIDATE;
 }
