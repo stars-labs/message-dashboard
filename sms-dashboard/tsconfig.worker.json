@@ -53,7 +53,8 @@
     "server/handlers/health.ts",
     "server/handlers/messages.ts",
     "server/api/verification.ts",
-    "server/handlers/iccid-mappings.ts"
+    "server/handlers/iccid-mappings.ts",
+    "server/handlers/carrier-bills.ts"
   ],
   "exclude": ["**/*.test.ts"],
   "references": [{ "path": "./tsconfig.shared.json" }]
