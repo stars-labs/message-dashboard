@@ -60,7 +60,8 @@
     "server/api/filters.ts",
     "server/api/keywords.ts",
     "server/handlers/balance-runners.ts",
-    "server/handlers/carrier-web-balance.ts"
+    "server/handlers/carrier-web-balance.ts",
+    "server/api/calls.ts"
   ],
   "exclude": ["**/*.test.ts"],
   "references": [{ "path": "./tsconfig.shared.json" }]

@@ -18,50 +18,40 @@
 // X-API-Key.
 
 import * as v from 'valibot';
-import { parseJson, type Parsed } from '../../shared/parse-json.js';
+import { parseJson, readJson, type Parsed } from '../../shared/parse-json.js';
+import { queryAll, queryFirst, type D1 } from '../lib/d1.js';
 import { OBJECT_MESSAGE, readBody, type MissingKeyMessages } from '../lib/request-body.js';
-import { handleAuth0 } from '../middleware/auth0.js';
+import { handleAuth0, type AuthRequest } from '../middleware/auth0.js';
 import { requirePermission, enrichUserPermissions } from '../middleware/rbac.js';
-import type { AppRequest, Env, Handler } from '../worker-context.js';
-import type { ExecutionContext, D1Database } from '../cf-bindings.js';
-import type { Permission } from '../../config/auth0-roles.js';
 
-/** The router shape setupCallRoutes needs. */
-interface Router {
-  get(path: string, ...handlers: Handler[]): void;
-  post(path: string, ...handlers: Handler[]): void;
-}
+const DIRECTIONS = ['inbound', 'outbound'] as const;
+const CALL_STATES = ['ringing', 'connecting', 'bridging', 'active', 'ending', 'ended'] as const;
+const ENDED_OUTCOMES = ['answered', 'missed', 'rejected', 'cancelled', 'failed'] as const;
+
+type Direction = (typeof DIRECTIONS)[number];
 
 /** The live call record the fleet Durable Object holds. */
-interface LiveCall {
-  id: string;
-  direction: 'inbound' | 'outbound';
-  state: 'ringing' | 'connecting' | 'bridging' | 'active' | 'ending' | 'ended';
-  iccid?: string;
-  number?: string | null;
-  started_at?: string;
-  requested_by?: string | null;
-  answered_at?: string;
-  answered_by?: string | null;
-  session_id?: string;
-  modem_session_id?: string;
-  bridge_started?: boolean;
-  ended_at?: string;
-  adapters?: { up?: string; down?: string };
-  [field: string]: unknown;
-}
+const LiveCall = v.object({
+  id: v.string(),
+  direction: v.picklist(DIRECTIONS),
+  state: v.picklist(CALL_STATES),
+  iccid: v.string(),
+  number: v.nullable(v.string()),
+  started_at: v.string(),
+  requested_by: v.optional(v.nullable(v.string())),
+  answered_at: v.optional(v.string()),
+  answered_by: v.optional(v.nullable(v.string())),
+  session_id: v.optional(v.string()),
+  modem_session_id: v.optional(v.string()),
+  bridge_started: v.optional(v.literal(true)),
+  ended_at: v.optional(v.string()),
+  adapters: v.optional(v.object({ up: v.optional(v.string()), down: v.optional(v.string()) })),
+});
 
-/** The call-state snapshot the Durable Object returns. */
-interface CallSnapshot {
-  call: LiveCall;
-  revision: number;
-}
+type LiveCall = v.InferOutput<typeof LiveCall>;
 
-/** WebRTC session description, as the SFU and the browser exchange it. */
-interface SessionDescription {
-  type: string;
-  sdp: string;
-}
+/** What the Durable Object answers to a read: the call and the revision it is at. */
+const CallSnapshot = v.nullable(v.object({ call: LiveCall, revision: v.string() }));
 
 /** The fields of a Realtime SFU response the bridge reads; an error is reported in a 200 too. */
 const SfuBody = v.object({
@@ -82,11 +72,14 @@ const SfuBody = v.object({
   errorCode: v.nullish(v.string()),
 });
 
+type SfuBody = v.InferOutput<typeof SfuBody>;
+type SessionDescription = NonNullable<SfuBody['sessionDescription']>;
+
 /** `detail` is what the SFU sent, passed to the browser when a step fails. */
 interface SfuResult {
   ok: boolean;
   status: number;
-  body: v.InferOutput<typeof SfuBody>;
+  body: SfuBody;
   detail: unknown;
 }
 
@@ -99,6 +92,46 @@ const IceServers = v.object({
     }),
   ),
 });
+
+const Configured = v.pipe(v.string(), v.minLength(1));
+
+/** The settings every SFU-facing route needs. */
+const CallConfig = v.object({
+  REALTIME_APP_ID: Configured,
+  REALTIME_APP_SECRET: Configured,
+  TURN_KEY_ID: Configured,
+  TURN_API_TOKEN: Configured,
+  VOICE_BRIDGE_HOST: Configured,
+  API_KEY: Configured,
+});
+
+type CallConfig = v.InferOutput<typeof CallConfig>;
+
+interface CallEnv {
+  CALL_STATE: {
+    getByName(name: string): { fetch(input: string, init?: RequestInit): Promise<Response> };
+  };
+  DB: D1<'all' | 'first' | 'run'>;
+  REALTIME_APP_ID?: string;
+  REALTIME_APP_SECRET?: string;
+  TURN_KEY_ID?: string;
+  TURN_API_TOKEN?: string;
+  VOICE_BRIDGE_HOST?: string;
+  API_KEY?: string;
+}
+
+interface CallRequest extends AuthRequest {
+  env: AuthRequest['env'] & CallEnv;
+  body: ReadableStream | null;
+  text(): Promise<string>;
+}
+
+type CallHandler = (request: CallRequest) => Promise<Response>;
+
+interface Router {
+  get(path: string, handler: CallHandler): void;
+  post(path: string, handler: CallHandler): void;
+}
 
 /** Safety net: a wedged call disappears on its own rather than blocking the fleet. */
 const CALL_TTL_SECONDS = 3600;
@@ -126,85 +159,89 @@ function json(body: unknown, status = 200): Response {
 }
 
 /** Auth0 + RBAC gate. Returns a Response to short-circuit, or null to proceed. */
-async function gate(
-  request: AppRequest,
-  env: Env,
-  ctx: ExecutionContext,
-  permission: Permission = 'messages.read',
-): Promise<Response | null> {
+async function gate(request: CallRequest): Promise<Response | null> {
   const authResponse = await handleAuth0(request);
   if (authResponse) return authResponse;
-  await enrichUserPermissions(request);
-  const permResponse = await requirePermission(permission)(request);
+  enrichUserPermissions(request);
+  const permResponse = requirePermission('messages.read')(request);
   if (permResponse) return permResponse;
   return null;
 }
 
-export function missingConfig(env: Env): string[] {
-  const needed = [
-    'REALTIME_APP_ID',
-    'REALTIME_APP_SECRET',
-    'TURN_KEY_ID',
-    'TURN_API_TOKEN',
-    'VOICE_BRIDGE_HOST',
-    'API_KEY',
-  ];
-  return needed.filter((k) => !env[k as keyof Env]);
+export function missingConfig(env: object): string[] {
+  const result = v.safeParse(CallConfig, env);
+  if (result.success) return [];
+  return result.issues.flatMap((issue) => {
+    const key = v.getDotPath(issue);
+    return key === null ? [] : [key];
+  });
 }
 
-function notConfigured(env: Env): Response | null {
-  const missing = missingConfig(env);
-  if (!missing.length) return null;
+/** The SFU settings, or the 503 that names the missing ones. */
+function callConfig(env: CallEnv): CallConfig | Response {
+  const result = v.safeParse(CallConfig, env);
+  if (result.success) return result.output;
   return json(
-    { error: 'Voice calling is not configured', detail: `missing ${missing.join(', ')}` },
+    {
+      error: 'Voice calling is not configured',
+      detail: `missing ${missingConfig(env).join(', ')}`,
+    },
     503,
   );
 }
 
-const revisions = new WeakMap<LiveCall, number>();
+const revisions = new WeakMap<LiveCall, string>();
 const stateUrl = 'https://call-state/';
 
-async function readCall(env: Env): Promise<LiveCall | null> {
+async function readCall(env: CallEnv): Promise<LiveCall | null> {
   const response = await env.CALL_STATE.getByName('fleet').fetch(stateUrl);
   if (!response.ok) throw new Error('Could not read live call state');
-  const snapshot = (await response.json()) as CallSnapshot | null;
-  if (!snapshot) return null;
-  revisions.set(snapshot.call, snapshot.revision);
-  return snapshot.call;
+  const snapshot = await readJson(response, CallSnapshot);
+  if (!snapshot.ok) throw new Error(`Live call state is unreadable: ${snapshot.error}`);
+  if (snapshot.value === null) return null;
+  revisions.set(snapshot.value.call, snapshot.value.revision);
+  return snapshot.value.call;
 }
 
 async function changeCall(
-  env: Env,
+  env: CallEnv,
   expected: LiveCall | null,
   call: LiveCall | null,
   // Ignored by the Durable Object when `call` is null (a clear has no TTL).
   ttl: number = CALL_TTL_SECONDS,
 ): Promise<boolean> {
+  const expectedRevision = expected === null ? null : revisions.get(expected);
+  // A call this isolate never read has no known revision, so it cannot match.
+  if (expectedRevision === undefined) return false;
   const response = await env.CALL_STATE.getByName('fleet').fetch(stateUrl, {
     method: 'POST',
-    body: JSON.stringify({ expected: expected ? revisions.get(expected) : null, call, ttl }),
+    body: JSON.stringify({ expected: expectedRevision, call, ttl }),
   });
   if (response.status === 409) return false;
   if (!response.ok) throw new Error('Could not change live call state');
-  if (call) revisions.set(call, (await response.json()) as number);
+  if (call) {
+    const revision = await readJson(response, v.string());
+    if (!revision.ok) throw new Error(`Live call revision is unreadable: ${revision.error}`);
+    revisions.set(call, revision.value);
+  }
   return true;
 }
 
 function writeCall(
-  env: Env,
+  env: CallEnv,
   call: LiveCall,
   ttl: number = CALL_TTL_SECONDS,
   expected: LiveCall | null = call,
 ): Promise<boolean> {
-  return changeCall(env, expected && revisions.has(expected) ? expected : null, call, ttl);
+  return changeCall(env, expected !== null && revisions.has(expected) ? expected : null, call, ttl);
 }
 
-function clearCall(env: Env, call: LiveCall): Promise<boolean> {
+function clearCall(env: CallEnv, call: LiveCall): Promise<boolean> {
   return changeCall(env, call, null);
 }
 
 async function beginEnding(
-  env: Env,
+  env: CallEnv,
   matches: (call: LiveCall) => boolean,
 ): Promise<LiveCall | null> {
   let call = await readCall(env);
@@ -237,7 +274,7 @@ export function validNumber(value: unknown): boolean {
   return v.is(PhoneNumber, value);
 }
 
-function sessionDescriptionBody(type: 'offer' | 'answer', message: string) {
+function sessionDescriptionBody<Type extends 'offer' | 'answer'>(type: Type, message: string) {
   return v.object(
     {
       type: v.literal(type, message),
@@ -317,14 +354,15 @@ const EndedBody = v.pipe(
   ),
 );
 
-function validDescription(value: unknown, type: string): value is SessionDescription {
-  const description = value as { type?: unknown; sdp?: unknown } | null | undefined;
-  return Boolean(
-    description &&
-    description.type === type &&
-    typeof description.sdp === 'string' &&
-    description.sdp,
-  );
+function present(value: string | null | undefined): value is string {
+  return value !== undefined && value !== null && value !== '';
+}
+
+function isDescription(
+  value: SessionDescription | undefined,
+  type: SessionDescription['type'],
+): value is SessionDescription {
+  return value?.type === type && value.sdp !== '';
 }
 
 function toHex(buffer: ArrayBuffer): string {
@@ -340,7 +378,7 @@ function toHex(buffer: ArrayBuffer): string {
  * test vector lives in the daemon's tests; change both together.
  */
 export async function adapterEndpoint(
-  env: Env,
+  config: Pick<CallConfig, 'API_KEY' | 'VOICE_BRIDGE_HOST'>,
   {
     callId,
     leg,
@@ -350,32 +388,39 @@ export async function adapterEndpoint(
     exp,
   }: {
     callId: string;
-    leg: string;
+    leg: 'up' | 'down';
     action: 'dial' | 'answer';
     iccid: string;
-    number: string | null | undefined;
+    number: string | null;
     exp: number;
   },
 ): Promise<string> {
-  const numberSegment = action === 'answer' ? '-' : number;
+  const numberSegment = action === 'answer' ? '-' : (number ?? '');
   const message = [callId, leg, action, iccid, numberSegment, String(exp)].join('\n');
   const key = await crypto.subtle.importKey(
     'raw',
-    new TextEncoder().encode(env.API_KEY ?? ''),
+    new TextEncoder().encode(config.API_KEY),
     { name: 'HMAC', hash: 'SHA-256' },
     false,
     ['sign'],
   );
   const sig = toHex(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(message)));
-  const segments = [callId, leg, action, iccid, numberSegment ?? '', String(exp), sig].map(
+  const segments = [callId, leg, action, iccid, numberSegment, String(exp), sig].map(
     encodeURIComponent,
   );
-  return `wss://${env.VOICE_BRIDGE_HOST}/voice/${segments.join('/')}`;
+  return `wss://${config.VOICE_BRIDGE_HOST}/voice/${segments.join('/')}`;
 }
 
 /** SFU REST call. `body === undefined` sends no body at all, which sessions/new requires. */
-async function sfu(env: Env, method: string, path: string, body?: unknown): Promise<SfuResult> {
-  const headers: Record<string, string> = { Authorization: `Bearer ${env.REALTIME_APP_SECRET}` };
+async function sfu(
+  config: Pick<CallConfig, 'REALTIME_APP_ID' | 'REALTIME_APP_SECRET'>,
+  method: string,
+  path: string,
+  body?: unknown,
+): Promise<SfuResult> {
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${config.REALTIME_APP_SECRET}`,
+  };
   const init: RequestInit = {
     method,
     headers,
@@ -388,7 +433,7 @@ async function sfu(env: Env, method: string, path: string, body?: unknown): Prom
   let response;
   let text;
   try {
-    response = await fetch(`${SFU_BASE}/apps/${env.REALTIME_APP_ID}${path}`, init);
+    response = await fetch(`${SFU_BASE}/apps/${config.REALTIME_APP_ID}${path}`, init);
     text = await response.text();
   } catch {
     return { ok: false, status: 502, body: {}, detail: { error: 'SFU connection failed' } };
@@ -404,8 +449,8 @@ async function sfu(env: Env, method: string, path: string, body?: unknown): Prom
     };
   }
   const reply = parsed.output;
-  const trackError = reply.tracks?.some((track) => track.errorCode);
-  const ok = response.ok && !reply.errorCode && !trackError;
+  const trackError = reply.tracks?.some((track) => present(track.errorCode)) ?? false;
+  const ok = response.ok && !present(reply.errorCode) && !trackError;
   return { ok, status: response.status, body: reply, detail: raw.value };
 }
 
@@ -413,54 +458,49 @@ function sfuError(message: string, result: SfuResult): Response {
   return json({ error: message, detail: result.detail }, 502);
 }
 
-function validId(value: unknown): value is string {
-  return typeof value === 'string' && value.length > 0;
-}
-
 /** Creates the browser session and publishes its mic. Returns { sessionId, answer } or { error }. */
 async function publishMic(
-  env: Env,
-  offer: SessionDescription,
+  config: CallConfig,
+  offer: { type: 'offer'; sdp: string },
   mid: string,
 ): Promise<{ sessionId: string; answer: SessionDescription } | { error: Response }> {
-  const session = await sfu(env, 'POST', '/sessions/new');
-  if (!session.ok || !validId(session.body.sessionId)) {
+  const session = await sfu(config, 'POST', '/sessions/new');
+  const sessionId = session.body.sessionId;
+  if (!session.ok || !present(sessionId)) {
     return { error: sfuError('Could not create an SFU session', session) };
   }
-  const sessionId = session.body.sessionId;
 
-  const tracks = await sfu(env, 'POST', `/sessions/${sessionId}/tracks/new`, {
+  const tracks = await sfu(config, 'POST', `/sessions/${sessionId}/tracks/new`, {
     sessionDescription: offer,
     tracks: [{ location: 'local', mid, trackName: TRACK_MIC }],
   });
-  if (!tracks.ok || !validDescription(tracks.body.sessionDescription, 'answer')) {
+  const answer = tracks.body.sessionDescription;
+  if (!tracks.ok || !isDescription(answer, 'answer')) {
     return { error: sfuError('Could not publish the microphone', tracks) };
   }
-  return { sessionId, answer: tracks.body.sessionDescription };
+  return { sessionId, answer };
 }
 
-async function closeAdapters(env: Env, call: LiveCall | null): Promise<void> {
-  const ids = [call?.adapters?.up, call?.adapters?.down].filter((id): id is string => Boolean(id));
-  if (!ids.length) return;
-  try {
-    await sfu(env, 'POST', '/adapters/websocket/close', {
-      tracks: ids.map((adapterId) => ({ adapterId })),
-    });
-  } catch {
-    // Best effort: the daemon also hangs up when its WebSocket drops or the call TTL ends.
-  }
+/** Best effort, and only possible with SFU credentials: the daemon also hangs up when its WebSocket drops or the call TTL ends. */
+async function closeAdapters(env: CallEnv, call: LiveCall): Promise<void> {
+  const ids = [call.adapters?.up, call.adapters?.down].filter(present);
+  const config = v.safeParse(CallConfig, env);
+  if (ids.length === 0 || !config.success) return;
+  await sfu(config.output, 'POST', '/adapters/websocket/close', {
+    tracks: ids.map((adapterId) => ({ adapterId })),
+  });
 }
 
-async function failMedia(env: Env, call: LiveCall, response: Response): Promise<Response> {
+async function failMedia(env: CallEnv, call: LiveCall, response: Response): Promise<Response> {
   await closeAdapters(env, call);
   if (await clearCall(env, call)) {
-    await logCallEnded(env, call, { reason: 'sfu_error', endedBy: 'worker' });
+    await logCallEnded(env.DB, call, { reason: 'sfu_error', endedBy: 'worker' });
   }
   return response;
 }
 
 /** A route whose body is optional reads a request without one as `{}`. */
-function readCallIdBody(request: AppRequest): Promise<Parsed<v.InferOutput<typeof CallIdBody>>> {
+function readCallIdBody(request: CallRequest): Promise<Parsed<v.InferOutput<typeof CallIdBody>>> {
   return request.body === null
     ? Promise.resolve({ ok: true, value: {} })
     : readBody(request, CallIdBody, {});
@@ -486,9 +526,44 @@ const D1_MAX_BOUND_PARAMETERS = 100;
 const HISTORY_COLUMNS = `id, direction, iccid, remote_number, outcome, end_reason,
          started_at, answered_at, ended_at, duration_seconds, requested_by, answered_by`;
 
-async function history(env: Env, write: (db: D1Database) => Promise<unknown>): Promise<void> {
+/** A finished call; the history query never selects one still in progress. */
+const CallHistoryRow = v.object({
+  id: v.string(),
+  direction: v.picklist(DIRECTIONS),
+  iccid: v.string(),
+  remote_number: v.nullable(v.string()),
+  outcome: v.picklist(ENDED_OUTCOMES),
+  end_reason: v.nullable(v.string()),
+  started_at: v.string(),
+  answered_at: v.nullable(v.string()),
+  ended_at: v.nullable(v.string()),
+  duration_seconds: v.number(),
+  requested_by: v.nullable(v.string()),
+  answered_by: v.nullable(v.string()),
+});
+
+type CallHistoryRow = v.InferOutput<typeof CallHistoryRow>;
+
+const OpenRingRow = v.object({
+  id: v.string(),
+  started_at: v.string(),
+  remote_number: v.nullable(v.string()),
+});
+
+type OpenRingRow = v.InferOutput<typeof OpenRingRow>;
+
+const SimRow = v.object({
+  iccid: v.string(),
+  number: v.string(),
+  carrier: v.nullable(v.string()),
+  sim_index: v.number(),
+});
+
+type SimRow = v.InferOutput<typeof SimRow>;
+
+async function history(db: D1<'run'>, write: (db: D1<'run'>) => Promise<unknown>): Promise<void> {
   try {
-    await write(env.DB);
+    await write(db);
   } catch (error) {
     console.error('call history write failed', error);
   }
@@ -499,7 +574,7 @@ async function history(env: Env, write: (db: D1Database) => Promise<unknown>): P
  * than a connected call: it can only have been missed, and while it stays open
  * it both hides from the log and holds this SIM's open-ring slot.
  */
-function sweepStaleCalls(db: D1Database, now: string): Promise<unknown> {
+function sweepStaleCalls(db: D1<'run'>, now: string): Promise<unknown> {
   return db
     .prepare(
       `UPDATE calls
@@ -526,31 +601,34 @@ function sweepStaleCalls(db: D1Database, now: string): Promise<unknown> {
  * D1 is unavailable.
  */
 async function claimRing(
-  env: Env,
+  db: D1<'first' | 'run'>,
   iccid: string,
   from: string | null,
-): Promise<{ id: string; started_at: string; remote_number: string | null } | null> {
+): Promise<OpenRingRow | null> {
   try {
     const now = new Date().toISOString();
-    await sweepStaleCalls(env.DB, now);
-    await env.DB.prepare(
-      `INSERT OR IGNORE INTO calls (id, direction, iccid, remote_number, outcome, started_at)
+    await sweepStaleCalls(db, now);
+    await db
+      .prepare(
+        `INSERT OR IGNORE INTO calls (id, direction, iccid, remote_number, outcome, started_at)
        VALUES (?, 'inbound', ?, ?, 'in_progress', ?)`,
-    )
+      )
       .bind(crypto.randomUUID(), iccid, from, now)
       .run();
 
-    const row = await env.DB.prepare(
-      `SELECT id, started_at, remote_number
+    return await queryFirst(
+      db
+        .prepare(
+          `SELECT id, started_at, remote_number
          FROM calls
         WHERE iccid = ? AND direction = 'inbound' AND outcome = 'in_progress'
           AND answered_at IS NULL
         ORDER BY started_at DESC
         LIMIT 1`,
-    )
-      .bind(iccid)
-      .first<{ id: string; started_at: string; remote_number: string | null }>();
-    return row ?? null;
+        )
+        .bind(iccid),
+      OpenRingRow,
+    );
   } catch (error) {
     console.error('call history ring claim failed', error);
     return null;
@@ -558,13 +636,13 @@ async function claimRing(
 }
 
 /** Open the row for a call that just started. Repeat reports must not duplicate it. */
-function logCallStarted(env: Env, call: LiveCall): Promise<void> {
-  return history(env, async (db) => {
+function logCallStarted(db: D1<'run'>, call: LiveCall): Promise<void> {
+  return history(db, async (log) => {
     // Sweep first: a ring whose TTL expired with no end report would otherwise
     // sit in progress forever and read as a call that never finished.
-    await sweepStaleCalls(db, new Date().toISOString());
+    await sweepStaleCalls(log, new Date().toISOString());
 
-    await db
+    await log
       .prepare(
         `INSERT INTO calls (id, direction, iccid, remote_number, outcome, started_at, requested_by)
        VALUES (?, ?, ?, ?, 'in_progress', ?, ?)
@@ -574,7 +652,7 @@ function logCallStarted(env: Env, call: LiveCall): Promise<void> {
         call.id,
         call.direction,
         call.iccid,
-        call.number ?? null,
+        call.number,
         call.started_at,
         call.requested_by ?? null,
       )
@@ -583,9 +661,9 @@ function logCallStarted(env: Env, call: LiveCall): Promise<void> {
 }
 
 /** A caller id that only arrived with a later RING. */
-function logCallerId(env: Env, callId: string, number: string): Promise<void> {
-  return history(env, (db) =>
-    db
+function logCallerId(db: D1<'run'>, callId: string, number: string): Promise<void> {
+  return history(db, (log) =>
+    log
       .prepare(`UPDATE calls SET remote_number = ? WHERE id = ? AND remote_number IS NULL`)
       .bind(number, callId)
       .run(),
@@ -594,12 +672,12 @@ function logCallerId(env: Env, callId: string, number: string): Promise<void> {
 
 /** Answer time, and for an inbound call whoever pressed answer. */
 function logCallAnswered(
-  env: Env,
+  db: D1<'run'>,
   callId: string,
   { at, by = null }: { at: string; by?: string | null },
 ): Promise<void> {
-  return history(env, (db) =>
-    db
+  return history(db, (log) =>
+    log
       .prepare(
         `UPDATE calls
         SET answered_at = COALESCE(answered_at, ?), answered_by = COALESCE(answered_by, ?)
@@ -610,13 +688,15 @@ function logCallAnswered(
   );
 }
 
+type EndedBy = 'dashboard' | 'daemon' | 'worker';
+
 /**
  * What to call a call that never carried audio, once it is known who ended it.
  * `dashboard` is the operator, `daemon` the Pi, `worker` a setup failure here.
  */
 export function unansweredOutcome(
-  direction: string | undefined,
-  endedBy: string,
+  direction: Direction,
+  endedBy: EndedBy,
   reason: string,
 ): 'failed' | 'rejected' | 'cancelled' | 'missed' {
   if (endedBy === 'worker' || reason === 'setup_failed' || reason === 'adapter_missing') {
@@ -633,13 +713,13 @@ export function unansweredOutcome(
  * right even if the live state of the call was already gone.
  */
 function logCallEnded(
-  env: Env,
+  db: D1<'run'>,
   call: LiveCall,
-  { reason, endedBy }: { reason: string; endedBy: 'dashboard' | 'daemon' | 'worker' },
+  { reason, endedBy }: { reason: string; endedBy: EndedBy },
 ): Promise<void> {
-  return history(env, (db) => {
+  return history(db, (log) => {
     const endedAt = new Date().toISOString();
-    return db
+    return log
       .prepare(
         `UPDATE calls
           SET ended_at = ?,
@@ -657,38 +737,26 @@ function logCallEnded(
 }
 
 /** Attach each call's SIM identity, when that SIM is still in inventory. */
-async function enrichCallPage(db: D1Database, calls: Array<Record<string, unknown>>) {
-  const iccids = [
-    ...new Set(
-      calls
-        .map((call) => call.iccid)
-        .filter((iccid): iccid is string => typeof iccid === 'string' && !!iccid),
-    ),
-  ];
-  const sims = new Map<
-    string,
-    { iccid: string; number: string | null; carrier: string | null; sim_index: number | null }
-  >();
+async function enrichCallPage(db: D1<'all'>, calls: CallHistoryRow[]) {
+  const iccids = [...new Set(calls.map((call) => call.iccid).filter(present))];
+  const sims = new Map<string, SimRow>();
 
   for (let start = 0; start < iccids.length; start += D1_MAX_BOUND_PARAMETERS) {
     const chunk = iccids.slice(start, start + D1_MAX_BOUND_PARAMETERS);
     const placeholders = chunk.map(() => '?').join(', ');
-    const result = await db
-      .prepare(
-        `SELECT iccid, number, carrier, sim_index FROM device_view WHERE iccid IN (${placeholders})`,
-      )
-      .bind(...chunk)
-      .all<{
-        iccid: string;
-        number: string | null;
-        carrier: string | null;
-        sim_index: number | null;
-      }>();
-    for (const sim of result.results) sims.set(sim.iccid, sim);
+    const rows = await queryAll(
+      db
+        .prepare(
+          `SELECT iccid, number, carrier, sim_index FROM device_view WHERE iccid IN (${placeholders})`,
+        )
+        .bind(...chunk),
+      SimRow,
+    );
+    for (const sim of rows) sims.set(sim.iccid, sim);
   }
 
   return calls.map((call) => {
-    const sim = typeof call.iccid === 'string' ? sims.get(call.iccid) : undefined;
+    const sim = sims.get(call.iccid);
     return {
       ...call,
       sim_index: sim?.sim_index ?? null,
@@ -706,17 +774,18 @@ function boundedInt(raw: string | null, fallback: number, min: number, max: numb
 
 export function setupCallRoutes(router: Router): void {
   // Current call state, for the dashboard to poll.
-  router.get('/api/calls/state', async (request, env: Env, ctx: ExecutionContext) => {
-    const blocked = await gate(request, env, ctx);
+  router.get('/api/calls/state', async (request) => {
+    const blocked = await gate(request);
     if (blocked) return blocked;
-    return json({ call: await readCall(env) });
+    return json({ call: await readCall(request.env) });
   });
 
   // The call log. Read only when someone opens the history — never on the
   // polling path — so it cannot eat the D1 row-read quota.
-  router.get('/api/calls/history', async (request, env: Env, ctx: ExecutionContext) => {
-    const blocked = await gate(request, env, ctx);
+  router.get('/api/calls/history', async (request) => {
+    const blocked = await gate(request);
     if (blocked) return blocked;
+    const { DB } = request.env;
 
     const url = new URL(request.url);
     const limit = boundedInt(url.searchParams.get('limit'), 30, 1, 100);
@@ -727,35 +796,35 @@ export function setupCallRoutes(router: Router): void {
     // A call still in progress is excluded: the dashboard shows the live call
     // from the KV lock, and listing it here too would show it twice.
     const binds = iccid ? [iccid, limit + 1, offset] : [limit + 1, offset];
-    const { results } = await env.DB.prepare(
-      `SELECT ${HISTORY_COLUMNS}
+    const rows = await queryAll(
+      DB.prepare(
+        `SELECT ${HISTORY_COLUMNS}
          FROM calls
         WHERE outcome != 'in_progress'${iccid ? ' AND iccid = ?' : ''}
         ORDER BY started_at DESC, id DESC
         LIMIT ? OFFSET ?`,
-    )
-      .bind(...binds)
-      .all<Record<string, unknown>>();
+      ).bind(...binds),
+      CallHistoryRow,
+    );
 
-    const rows = results;
     const page = rows.slice(0, limit);
-    return json({ calls: await enrichCallPage(env.DB, page), has_more: rows.length > limit });
+    return json({ calls: await enrichCallPage(DB, page), has_more: rows.length > limit });
   });
 
   // Short-lived ICE servers for the browser's PeerConnection. The TURN token
   // itself stays in the Worker; the browser only ever sees a 10-minute credential.
-  router.get('/api/calls/ice', async (request, env: Env, ctx: ExecutionContext) => {
-    const blocked = await gate(request, env, ctx);
+  router.get('/api/calls/ice', async (request) => {
+    const blocked = await gate(request);
     if (blocked) return blocked;
-    const unconfigured = notConfigured(env);
-    if (unconfigured) return unconfigured;
+    const config = callConfig(request.env);
+    if (config instanceof Response) return config;
 
     const response = await fetch(
-      `${TURN_BASE}/${env.TURN_KEY_ID}/credentials/generate-ice-servers`,
+      `${TURN_BASE}/${config.TURN_KEY_ID}/credentials/generate-ice-servers`,
       {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${env.TURN_API_TOKEN}`,
+          Authorization: `Bearer ${config.TURN_API_TOKEN}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ ttl: 600 }),
@@ -770,11 +839,12 @@ export function setupCallRoutes(router: Router): void {
   });
 
   // Place an outbound call: take the lock, then publish the browser mic.
-  router.post('/api/calls/dial', async (request, env: Env, ctx: ExecutionContext) => {
-    const blocked = await gate(request, env, ctx);
+  router.post('/api/calls/dial', async (request) => {
+    const blocked = await gate(request);
     if (blocked) return blocked;
-    const unconfigured = notConfigured(env);
-    if (unconfigured) return unconfigured;
+    const { env } = request;
+    const config = callConfig(env);
+    if (config instanceof Response) return config;
 
     const parsed = await readBody(request, DialBody, DIAL_MISSING_KEY_MESSAGES);
     if (!parsed.ok) return json({ error: parsed.error }, 400);
@@ -794,9 +864,9 @@ export function setupCallRoutes(router: Router): void {
     };
     if (!(await writeCall(env, call)))
       return json({ error: 'Another call is already active' }, 409);
-    await logCallStarted(env, call);
+    await logCallStarted(env.DB, call);
 
-    const media = await publishMic(env, offer, mid);
+    const media = await publishMic(config, offer, mid);
     if ('error' in media) return failMedia(env, call, media.error);
     call.session_id = media.sessionId;
     if (!(await writeCall(env, call))) return callChanged();
@@ -804,11 +874,12 @@ export function setupCallRoutes(router: Router): void {
   });
 
   // Answer the call the daemon reported as ringing.
-  router.post('/api/calls/answer', async (request, env: Env, ctx: ExecutionContext) => {
-    const blocked = await gate(request, env, ctx);
+  router.post('/api/calls/answer', async (request) => {
+    const blocked = await gate(request);
     if (blocked) return blocked;
-    const unconfigured = notConfigured(env);
-    if (unconfigured) return unconfigured;
+    const { env } = request;
+    const config = callConfig(env);
+    if (config instanceof Response) return config;
 
     const parsed = await readBody(request, AnswerBody, ANSWER_MISSING_KEY_MESSAGES);
     if (!parsed.ok) return json({ error: parsed.error }, 400);
@@ -821,13 +892,15 @@ export function setupCallRoutes(router: Router): void {
     }
 
     // Take the call out of `ringing` first so a RING report cannot shorten its TTL.
+    const answeredAt = new Date().toISOString();
+    const answeredBy = request.user?.id ?? null;
     call.state = 'connecting';
-    call.answered_at = new Date().toISOString();
-    call.answered_by = request.user?.id ?? null;
+    call.answered_at = answeredAt;
+    call.answered_by = answeredBy;
     if (!(await writeCall(env, call))) return callChanged();
-    await logCallAnswered(env, call.id, { at: call.answered_at, by: call.answered_by });
+    await logCallAnswered(env.DB, call.id, { at: answeredAt, by: answeredBy });
 
-    const media = await publishMic(env, offer, mid);
+    const media = await publishMic(config, offer, mid);
     if ('error' in media) return failMedia(env, call, media.error);
     call.session_id = media.sessionId;
     if (!(await writeCall(env, call))) return callChanged();
@@ -835,11 +908,12 @@ export function setupCallRoutes(router: Router): void {
   });
 
   // Bridge the browser session to the Pi. Called once the PeerConnection is up.
-  router.post('/api/calls/connect', async (request, env: Env, ctx: ExecutionContext) => {
-    const blocked = await gate(request, env, ctx);
+  router.post('/api/calls/connect', async (request) => {
+    const blocked = await gate(request);
     if (blocked) return blocked;
-    const unconfigured = notConfigured(env);
-    if (unconfigured) return unconfigured;
+    const { env } = request;
+    const config = callConfig(env);
+    if (config instanceof Response) return config;
 
     const parsed = await readCallIdBody(request);
     if (!parsed.ok) return json({ error: parsed.error }, 400);
@@ -848,7 +922,8 @@ export function setupCallRoutes(router: Router): void {
     if (!call || (callId !== undefined && callId !== call.id)) {
       return json({ error: 'No active call' }, 404);
     }
-    if (call.state !== 'connecting' || !call.session_id || call.bridge_started) {
+    const sessionId = call.session_id;
+    if (call.state !== 'connecting' || !present(sessionId) || call.bridge_started) {
       return json({ error: 'Call is not ready to connect', call }, 409);
     }
     call.bridge_started = true;
@@ -856,22 +931,22 @@ export function setupCallRoutes(router: Router): void {
 
     const action = call.direction === 'outbound' ? 'dial' : 'answer';
     const exp = Math.floor(Date.now() / 1000) + ENDPOINT_TTL_SECONDS;
-    const endpointFor = (leg: string) =>
-      adapterEndpoint(env, {
+    const endpointFor = (leg: 'up' | 'down') =>
+      adapterEndpoint(config, {
         callId: call.id,
         leg,
         action,
-        iccid: call.iccid ?? '',
+        iccid: call.iccid,
         number: call.number,
         exp,
       });
 
     // Browser mic -> Pi. Its response carries no sessionId: it reads an existing track.
-    const down = await sfu(env, 'POST', '/adapters/websocket/new', {
+    const down = await sfu(config, 'POST', '/adapters/websocket/new', {
       tracks: [
         {
           location: 'remote',
-          sessionId: call.session_id,
+          sessionId,
           trackName: TRACK_MIC,
           endpoint: await endpointFor('down'),
           outputCodec: 'pcm',
@@ -880,8 +955,8 @@ export function setupCallRoutes(router: Router): void {
       ],
     });
     const downId = down.body.tracks?.[0]?.adapterId;
-    if (validId(downId)) call.adapters = { down: downId };
-    if (!down.ok || !validId(downId)) {
+    if (present(downId)) call.adapters = { down: downId };
+    if (!down.ok || !present(downId)) {
       return failMedia(env, call, sfuError('Could not create the outgoing audio adapter', down));
     }
     if (!(await writeCall(env, call))) {
@@ -890,7 +965,7 @@ export function setupCallRoutes(router: Router): void {
     }
 
     // Pi modem audio -> SFU, published as a new track in the adapter's own session.
-    const up = await sfu(env, 'POST', '/adapters/websocket/new', {
+    const up = await sfu(config, 'POST', '/adapters/websocket/new', {
       tracks: [
         {
           location: 'local',
@@ -902,49 +977,49 @@ export function setupCallRoutes(router: Router): void {
       ],
     });
     const upTrack = up.body.tracks?.[0];
-    if (validId(upTrack?.adapterId)) call.adapters = { ...call.adapters, up: upTrack.adapterId };
-    if (!up.ok || !validId(upTrack?.adapterId) || !validId(upTrack?.sessionId)) {
+    const upId = upTrack?.adapterId;
+    const modemSessionId = upTrack?.sessionId;
+    if (present(upId)) call.adapters = { ...call.adapters, up: upId };
+    if (!up.ok || !present(upId) || !present(modemSessionId)) {
       return failMedia(env, call, sfuError('Could not create the incoming audio adapter', up));
     }
-    call.modem_session_id = upTrack.sessionId;
+    call.modem_session_id = modemSessionId;
     if (!(await writeCall(env, call))) {
       await closeAdapters(env, call);
       return callChanged();
     }
 
-    const pull = await sfu(env, 'POST', `/sessions/${call.session_id}/tracks/new`, {
-      tracks: [{ location: 'remote', sessionId: call.modem_session_id, trackName: TRACK_MODEM }],
+    const pull = await sfu(config, 'POST', `/sessions/${sessionId}/tracks/new`, {
+      tracks: [{ location: 'remote', sessionId: modemSessionId, trackName: TRACK_MODEM }],
     });
-    if (
-      !pull.ok ||
-      (pull.body.requiresImmediateRenegotiation &&
-        !validDescription(pull.body.sessionDescription, 'offer'))
-    ) {
+    const renegotiate = pull.body.requiresImmediateRenegotiation === true;
+    const offer = renegotiate ? pull.body.sessionDescription : undefined;
+    if (!pull.ok || (renegotiate && !isDescription(offer, 'offer'))) {
       return failMedia(env, call, sfuError('Could not subscribe to the call audio', pull));
     }
 
-    const offer = pull.body.requiresImmediateRenegotiation ? pull.body.sessionDescription : null;
     delete call.bridge_started;
-    call.state = offer ? 'bridging' : 'active';
+    call.state = renegotiate ? 'bridging' : 'active';
     if (!(await writeCall(env, call))) {
       await closeAdapters(env, call);
       return callChanged();
     }
-    if (!offer) {
+    if (!renegotiate) {
       // Audio is up: that is the answer moment for an outbound call. An inbound
       // call already recorded when the operator pressed answer, and COALESCE
       // keeps that earlier, truer timestamp.
-      await logCallAnswered(env, call.id, { at: new Date().toISOString() });
+      await logCallAnswered(env.DB, call.id, { at: new Date().toISOString() });
     }
-    return json({ call, offer });
+    return json({ call, offer: offer ?? null });
   });
 
   // Apply the browser's answer to the pull offer from /connect.
-  router.post('/api/calls/renegotiate', async (request, env: Env, ctx: ExecutionContext) => {
-    const blocked = await gate(request, env, ctx);
+  router.post('/api/calls/renegotiate', async (request) => {
+    const blocked = await gate(request);
     if (blocked) return blocked;
-    const unconfigured = notConfigured(env);
-    if (unconfigured) return unconfigured;
+    const { env } = request;
+    const config = callConfig(env);
+    if (config instanceof Response) return config;
 
     const parsed = await readBody(request, RenegotiateBody, RENEGOTIATE_MISSING_KEY_MESSAGES);
     if (!parsed.ok) return json({ error: parsed.error }, 400);
@@ -954,25 +1029,29 @@ export function setupCallRoutes(router: Router): void {
     if (!call || (callId !== undefined && callId !== call.id)) {
       return json({ error: 'No active call' }, 404);
     }
-    if (call.state !== 'bridging')
+    const sessionId = call.session_id;
+    if (call.state !== 'bridging' || !present(sessionId)) {
       return json({ error: 'Call is not waiting for renegotiation', call }, 409);
+    }
 
-    const result = await sfu(env, 'PUT', `/sessions/${call.session_id}/renegotiate`, {
+    const result = await sfu(config, 'PUT', `/sessions/${sessionId}/renegotiate`, {
       sessionDescription: answer,
     });
-    if (!result.ok)
+    if (!result.ok) {
       return failMedia(env, call, sfuError('Could not renegotiate the session', result));
+    }
 
     call.state = 'active';
     if (!(await writeCall(env, call))) return callChanged();
-    await logCallAnswered(env, call.id, { at: new Date().toISOString() });
+    await logCallAnswered(env.DB, call.id, { at: new Date().toISOString() });
     return json({ call });
   });
 
   // Close the adapters for the requested call. Older clients omit the ID.
-  router.post('/api/calls/hangup', async (request, env: Env, ctx: ExecutionContext) => {
-    const blocked = await gate(request, env, ctx);
+  router.post('/api/calls/hangup', async (request) => {
+    const blocked = await gate(request);
     if (blocked) return blocked;
+    const { env } = request;
 
     const parsed = await readCallIdBody(request);
     if (!parsed.ok) return json({ error: parsed.error }, 400);
@@ -983,7 +1062,7 @@ export function setupCallRoutes(router: Router): void {
     }
     await closeAdapters(env, call);
     await clearCall(env, call);
-    await logCallEnded(env, call, { reason: 'hangup', endedBy: 'dashboard' });
+    await logCallEnded(env.DB, call, { reason: 'hangup', endedBy: 'dashboard' });
 
     call.state = 'ended';
     call.ended_at = new Date().toISOString();
@@ -991,34 +1070,36 @@ export function setupCallRoutes(router: Router): void {
   });
 
   // Daemon-reported incoming call, repeated on every RING to keep it alive.
-  router.post('/api/control/calls/incoming', async (request, env: Env) => {
+  router.post('/api/control/calls/incoming', async (request) => {
     const authResponse = await handleAuth0(request);
     if (authResponse) return authResponse;
+    const { env } = request;
 
     const parsed = await readBody(request, IncomingBody, INCOMING_MISSING_KEY_MESSAGES);
     if (!parsed.ok) return json({ error: parsed.error }, 400);
     const { iccid } = parsed.value;
-    const from = parsed.value.from || null;
+    const from = present(parsed.value.from) ? parsed.value.from : null;
 
     let existing = await readCall(env);
-    const open = existing ? null : await claimRing(env, iccid, from);
+    const open = existing ? null : await claimRing(env.DB, iccid, from);
     for (;;) {
       if (existing && (existing.state !== 'ringing' || existing.iccid !== iccid)) {
         return json({ ok: false, reason: 'another call is active' }, 409);
       }
+      const knownNumber = [existing?.number, open?.remote_number].find(present) ?? null;
       const call: LiveCall = {
         id: existing?.id ?? open?.id ?? crypto.randomUUID(),
         direction: 'inbound',
         state: 'ringing',
         iccid,
-        number: from || existing?.number || open?.remote_number || null,
+        number: from ?? knownNumber,
         started_at: existing?.started_at ?? open?.started_at ?? new Date().toISOString(),
       };
       if (await writeCall(env, call, RING_TTL_SECONDS, existing)) {
         if (!existing && !open) {
-          await logCallStarted(env, call);
-        } else if (from && !(existing?.number ?? open?.remote_number)) {
-          await logCallerId(env, call.id, from);
+          await logCallStarted(env.DB, call);
+        } else if (from !== null && !present(existing?.number ?? open?.remote_number)) {
+          await logCallerId(env.DB, call.id, from);
         }
         return json({ ok: true, call });
       }
@@ -1029,23 +1110,26 @@ export function setupCallRoutes(router: Router): void {
   });
 
   // Daemon-reported end: remote hangup, modem failure, or a ring that stopped.
-  router.post('/api/control/calls/ended', async (request, env: Env) => {
+  router.post('/api/control/calls/ended', async (request) => {
     const authResponse = await handleAuth0(request);
     if (authResponse) return authResponse;
+    const { env } = request;
 
     const parsed = await readBody(request, EndedBody, {});
     if (!parsed.ok) return json({ error: parsed.error }, 400);
     const { call_id: callId, iccid, reason } = parsed.value;
 
     const call = await beginEnding(env, (current) =>
-      callId ? current.id === callId : current.iccid === iccid && current.state === 'ringing',
+      present(callId)
+        ? current.id === callId
+        : current.iccid === iccid && current.state === 'ringing',
     );
     if (!call) return json({ ok: true, ignored: true });
 
     await closeAdapters(env, call);
     await clearCall(env, call);
-    await logCallEnded(env, call, {
-      reason: reason ? reason.slice(0, 40) : 'ended',
+    await logCallEnded(env.DB, call, {
+      reason: present(reason) ? reason.slice(0, 40) : 'ended',
       endedBy: 'daemon',
     });
     return json({ ok: true, call_id: call.id });
