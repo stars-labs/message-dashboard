@@ -11,7 +11,23 @@ const ACTIVATION_SLOP = 8;
 const HORIZONTAL_RATIO = 1.2;
 const SETTLE_MS = 180;
 
-export function createSwipeDismissState() {
+/** Which way the current gesture was decided. Null until the slop is passed. */
+export type SwipeAxis = 'horizontal' | 'vertical' | null;
+
+/** Gesture state carried between the touch handlers. */
+export interface SwipeDismissState {
+  active: boolean;
+  axis: SwipeAxis;
+  startX: number;
+  startY: number;
+  distance: number;
+}
+
+export interface SwipeDismissOptions {
+  onDismiss?: () => void;
+}
+
+export function createSwipeDismissState(): SwipeDismissState {
   return {
     active: false,
     axis: null,
@@ -21,7 +37,7 @@ export function createSwipeDismissState() {
   };
 }
 
-export function onSwipeStart(state, x, y) {
+export function onSwipeStart(state: SwipeDismissState, x: number, y: number): void {
   state.active = x >= 0 && x <= EDGE_WIDTH;
   state.axis = null;
   state.startX = x;
@@ -29,7 +45,7 @@ export function onSwipeStart(state, x, y) {
   state.distance = 0;
 }
 
-export function onSwipeMove(state, x, y) {
+export function onSwipeMove(state: SwipeDismissState, x: number, y: number): number {
   if (!state.active) return 0;
 
   const dx = x - state.startX;
@@ -51,7 +67,7 @@ export function onSwipeMove(state, x, y) {
   return state.distance;
 }
 
-export function onSwipeEnd(state) {
+export function onSwipeEnd(state: SwipeDismissState): 'dismiss' | 'cancel' {
   const result = state.active
     && state.axis === 'horizontal'
     && state.distance >= DISMISS_DISTANCE
@@ -64,7 +80,7 @@ export function onSwipeEnd(state) {
   return result;
 }
 
-export function onSwipeCancel(state) {
+export function onSwipeCancel(state: SwipeDismissState): void {
   state.active = false;
   state.axis = null;
   state.distance = 0;
@@ -76,16 +92,16 @@ export function onSwipeCancel(state) {
  * The non-passive move listener exists only while an edge gesture is armed. This
  * avoids turning the full drawer into a permanent touch-blocking region in WebKit.
  */
-export function swipeDismiss(node, options = {}) {
+export function swipeDismiss(node: HTMLElement, options: SwipeDismissOptions = {}) {
   const state = createSwipeDismissState();
-  const passive = { passive: true };
-  const nonPassive = { passive: false };
+  const passive: AddEventListenerOptions = { passive: true };
+  const nonPassive: AddEventListenerOptions = { passive: false };
   let onDismiss = options.onDismiss;
   let moveListening = false;
-  let settleTimer = null;
+  let settleTimer: ReturnType<typeof setTimeout> | null = null;
   let dismissed = false;
 
-  function setPosition(distance, animated = false) {
+  function setPosition(distance: number, animated = false) {
     node.style.transition = animated
       ? `transform ${SETTLE_MS}ms cubic-bezier(.22,.8,.3,1)`
       : 'none';
@@ -105,11 +121,11 @@ export function swipeDismiss(node, options = {}) {
     onDismiss?.();
   }
 
-  function handleTransitionEnd(event) {
+  function handleTransitionEnd(event: TransitionEvent) {
     if (event.target === node && dismissed === false) finishDismiss();
   }
 
-  function handleTouchStart(event) {
+  function handleTouchStart(event: TouchEvent) {
     if (event.touches.length !== 1) return;
     const touch = event.touches[0];
     onSwipeStart(state, touch.clientX, touch.clientY);
@@ -118,7 +134,7 @@ export function swipeDismiss(node, options = {}) {
     moveListening = true;
   }
 
-  function handleTouchMove(event) {
+  function handleTouchMove(event: TouchEvent) {
     if (event.touches.length !== 1) return;
     const touch = event.touches[0];
     const distance = onSwipeMove(state, touch.clientX, touch.clientY);
@@ -148,7 +164,7 @@ export function swipeDismiss(node, options = {}) {
   node.addEventListener('touchcancel', handleTouchCancel, passive);
 
   return {
-    update(next = {}) {
+    update(next: SwipeDismissOptions = {}) {
       onDismiss = next.onDismiss;
     },
     destroy() {

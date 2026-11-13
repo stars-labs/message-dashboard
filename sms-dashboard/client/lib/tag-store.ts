@@ -2,6 +2,34 @@
 import { writable, derived, get } from 'svelte/store';
 import { api } from './api.js';
 
+/** A keyword row as /api/keywords returns it. */
+export interface KeywordTagRow {
+  id: number;
+  keyword: string;
+  tag: string;
+  color: string | null;
+  priority: number;
+  case_sensitive?: boolean | number | null;
+  whole_word?: boolean | number | null;
+  is_active?: boolean | number | null;
+}
+
+/** A tag as the client renders it: one per tag name, with a match count. */
+export interface ClientTag {
+  tag: string;
+  color: string;
+  count: number;
+}
+
+/** A matched occurrence inside a message body. */
+export interface TagMatch {
+  text: string;
+  position: number;
+}
+
+/** One message's tags. */
+export type MessageTagList = ClientTag[];
+
 /**
  * Single Responsibility: Tag State Management
  * Open/Closed: Extensible for different tag sources
@@ -11,8 +39,8 @@ import { api } from './api.js';
  */
 
 // Private stores - encapsulated state
-const _messageTags = writable(new Map());
-const _keywords = writable([]);
+const _messageTags = writable<Map<string, MessageTagList>>(new Map());
+const _keywords = writable<KeywordTagRow[]>([]);
 const _loadingStates = writable({
   keywords: false,
   tags: false
@@ -36,15 +64,15 @@ export const tagStats = derived(_messageTags, ($messageTags) => {
  */
 class TagService {
   // Single source of truth for keywords
-  async loadKeywords() {
+  async loadKeywords(): Promise<KeywordTagRow[]> {
     const current = get(_loadingStates);
-    if (current.keywords) return; // Prevent concurrent loads
+    if (current.keywords) return []; // Prevent concurrent loads
     
     _loadingStates.update(state => ({ ...state, keywords: true }));
     
     try {
       const response = await api.get('/api/keywords');
-      const activeKeywords = (response.keywords || [])
+      const activeKeywords = ((response.keywords || []) as KeywordTagRow[])
         .filter(k => k.is_active)
         .sort((a, b) => (b.priority || 0) - (a.priority || 0));
       
@@ -60,7 +88,7 @@ class TagService {
   }
 
   // Batch tag loading with deduplication
-  async batchLoadTags(messageIds) {
+  async batchLoadTags(messageIds: string[]): Promise<void> {
     if (!messageIds || messageIds.length === 0) return;
     
     const current = get(_loadingStates);
@@ -75,7 +103,7 @@ class TagService {
         // Atomic update - all or nothing
         _messageTags.update(currentMap => {
           const newMap = new Map(currentMap);
-          for (const [messageId, tags] of Object.entries(response.data)) {
+          for (const [messageId, tags] of Object.entries(response.data as Record<string, MessageTagList>)) {
             newMap.set(messageId, tags);
           }
           return newMap;
@@ -90,7 +118,7 @@ class TagService {
   }
 
   // Client-side tag extraction (fallback)
-  extractClientTags(messageId, content, keywordList) {
+  extractClientTags(messageId: string, content: string | null | undefined, keywordList: KeywordTagRow[]): MessageTagList {
     if (!content || !keywordList.length) return [];
     
     const extractedTags = this._performKeywordMatching(content, keywordList);
@@ -108,19 +136,19 @@ class TagService {
   }
 
   // Get tags for a specific message
-  getMessageTags(messageId) {
+  getMessageTags(messageId: string): MessageTagList {
     const currentTags = get(_messageTags);
     return currentTags.get(messageId) || [];
   }
 
   // Clear all cached tags (for refresh scenarios)
-  clearTagCache() {
+  clearTagCache(): void {
     _messageTags.set(new Map());
   }
 
   // Private method for keyword matching
-  _performKeywordMatching(content, keywordList) {
-    const uniqueTags = new Map();
+  _performKeywordMatching(content: string, keywordList: KeywordTagRow[]): MessageTagList {
+    const uniqueTags = new Map<string, ClientTag>();
 
     for (const keyword of keywordList) {
       // One entry per match: the count is how many times the tag fired.
@@ -132,7 +160,8 @@ class TagService {
             count: 1
           });
         } else {
-          uniqueTags.get(keyword.tag).count++;
+          const existing = uniqueTags.get(keyword.tag);
+          if (existing) existing.count++;
         }
       }
     }
@@ -140,10 +169,10 @@ class TagService {
     return Array.from(uniqueTags.values());
   }
 
-  _findMatches(text, keyword) {
+  _findMatches(text: string, keyword: KeywordTagRow): TagMatch[] {
     // Implementation similar to existing findMatches function
     // Moved here for single responsibility
-    const matches = [];
+    const matches: TagMatch[] = [];
     if (!text || !keyword.keyword) return matches;
     
     let searchText = keyword.case_sensitive ? text : text.toLowerCase();
@@ -170,7 +199,7 @@ class TagService {
     return matches;
   }
 
-  _escapeRegex(str) {
+  _escapeRegex(str: string): string {
     return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 }
@@ -181,8 +210,8 @@ export const tagService = new TagService();
 // Export convenient action functions
 export const tagActions = {
   loadKeywords: () => tagService.loadKeywords(),
-  batchLoadTags: (messageIds) => tagService.batchLoadTags(messageIds),
-  extractClientTags: (messageId, content, keywordList) => tagService.extractClientTags(messageId, content, keywordList),
-  getMessageTags: (messageId) => tagService.getMessageTags(messageId),
+  batchLoadTags: (messageIds: string[]) => tagService.batchLoadTags(messageIds),
+  extractClientTags: (messageId: string, content: string | null | undefined, keywordList: KeywordTagRow[]) => tagService.extractClientTags(messageId, content, keywordList),
+  getMessageTags: (messageId: string) => tagService.getMessageTags(messageId),
   clearCache: () => tagService.clearTagCache()
 };
