@@ -33,7 +33,7 @@ export async function handleAuth0(request: AuthRequest): Promise<Response | unde
   const { env } = request;
 
   // Check for API key for control endpoints
-  if (request.url.includes('/api/control/')) {
+  if (new URL(request.url).pathname.startsWith('/api/control/')) {
     if (!(await secretMatches(request.headers.get('X-API-Key'), env.API_KEY))) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
         status: 401,

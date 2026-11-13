@@ -82,6 +82,27 @@ describe('handleAuth0 control endpoints', () => {
     const response = await handleAuth0(request);
     expect(response?.status).toBe(401);
   });
+
+  test('decides by the path, so a query string naming a control path does not change the scheme', async () => {
+    const { request } = makeRequest({
+      url: 'https://sexy.itoken.world/api/phones?next=/api/control/pending',
+      headers: { Cookie: 'auth_token=tok-1' },
+      sessions: { 'tok-1': session() },
+    });
+    expect(await handleAuth0(request)).toBeUndefined();
+    expect(request.user?.id).toBe('auth0|u1');
+  });
+
+  test('accepts no session in place of the API key on a control path', async () => {
+    const { request } = makeRequest({
+      url: 'https://sexy.itoken.world/api/control/pending',
+      headers: { Cookie: 'auth_token=tok-1' },
+      sessions: { 'tok-1': session() },
+    });
+    const response = await handleAuth0(request);
+    expect(response?.status).toBe(401);
+    expect(request.user).toBeUndefined();
+  });
 });
 
 describe('handleAuth0 sessions', () => {
