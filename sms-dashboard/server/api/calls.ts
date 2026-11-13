@@ -381,7 +381,6 @@ const HISTORY_COLUMNS = `id, direction, iccid, remote_number, outcome, end_reaso
          started_at, answered_at, ended_at, duration_seconds, requested_by, answered_by`;
 
 async function history(env: Env, write: (db: D1Database) => Promise<unknown>): Promise<void> {
-  if (!env.DB) return;
   try {
     await write(env.DB);
   } catch (error) {
@@ -425,7 +424,6 @@ async function claimRing(
   iccid: string,
   from: unknown,
 ): Promise<{ id: string; started_at: string; remote_number: string | null } | null> {
-  if (!env.DB) return null;
   try {
     const now = new Date().toISOString();
     await sweepStaleCalls(env.DB, now);
@@ -613,7 +611,6 @@ export function setupCallRoutes(router: Router): void {
   router.get('/api/calls/history', async (request, env: Env, ctx: ExecutionContext) => {
     const blocked = await gate(request, env, ctx);
     if (blocked) return blocked;
-    if (!env.DB) return json({ calls: [], has_more: false });
 
     const url = new URL(request.url);
     const limit = boundedInt(url.searchParams.get('limit'), 30, 1, 100);

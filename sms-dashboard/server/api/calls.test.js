@@ -77,6 +77,7 @@ function envStub(overrides = {}) {
     TURN_API_TOKEN: 'token',
     VOICE_BRIDGE_HOST: 'voice-bridge.example.test',
     API_KEY: 'daemon-key',
+    DB: d1Stub(),
     ...overrides,
   };
 }
@@ -1041,20 +1042,6 @@ describe('call history logging', () => {
 
     expect(response.status).toBe(200);
     expect(env.CALL_STATE.call()).toBeNull();
-  });
-
-  test('history writes are skipped entirely when D1 is not bound', async () => {
-    const { router, env } = setup();
-
-    const response = await invoke(
-      router,
-      'POST',
-      '/api/control/calls/incoming',
-      { iccid: ICCID },
-      env,
-    );
-
-    expect(response.status).toBe(200);
   });
 });
 
