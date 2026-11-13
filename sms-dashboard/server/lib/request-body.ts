@@ -40,7 +40,9 @@ export async function readBody<Schema extends v.GenericSchema>(
 ): Promise<Parsed<v.InferOutput<Schema>>> {
   const raw = await readJson(request, v.unknown());
   if (!raw.ok) return { ok: false, error: NOT_JSON_MESSAGE };
-  const parsed = v.safeParse(schema, raw.value);
+  // Valibot's object schemas accept arrays. An array body is parsed as null
+  // instead, so the schema answers with its own not-an-object message.
+  const parsed = v.safeParse(schema, Array.isArray(raw.value) ? null : raw.value);
   return parsed.success
     ? { ok: true, value: parsed.output }
     : { ok: false, error: messageOf(parsed.issues[0], missingKeyMessages) };

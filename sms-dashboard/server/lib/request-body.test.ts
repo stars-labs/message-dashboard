@@ -41,10 +41,15 @@ describe('readBody', () => {
     }
   });
 
-  test('reads an array as an object without the required fields, as valibot does', async () => {
+  test('answers the object message for a JSON array, even when every field is optional', async () => {
     expect(await readBody(bodyOf('[]'), Body, options)).toEqual({
       ok: false,
-      error: 'name is required',
+      error: 'Body must be a JSON object',
+    });
+    const Optional = v.object({ note: v.optional(v.string()) }, 'Body must be a JSON object');
+    expect(await readBody(bodyOf('[{"note":"x"}]'), Optional, {})).toEqual({
+      ok: false,
+      error: 'Body must be a JSON object',
     });
   });
 
