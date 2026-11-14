@@ -10,11 +10,8 @@ import type { ActiveWebJobStatus } from '../../shared/balance-status.js';
 import { parseJson, readJson } from '../../shared/parse-json.js';
 import { textOr } from '../../shared/text.js';
 import { SuccessResponse } from '../../shared/api/success.js';
-import {
-  extractUnicomWebBalance,
-  UNICOM_BALANCE_FIELD,
-} from '../../server/utils/unicom-web-balance.js';
-import { extractM1WebBalance } from '../../server/utils/m1-web-balance.js';
+import { extractUnicomWebBalance, UNICOM_BALANCE_FIELD } from '../../shared/unicom-web-balance.js';
+import { extractM1WebBalance } from '../../shared/m1-web-balance.js';
 import type { ControlClient } from '../control-client.js';
 import { errorText } from '../../shared/error-text.js';
 import type { CapabilityPresence } from '../presence.js';

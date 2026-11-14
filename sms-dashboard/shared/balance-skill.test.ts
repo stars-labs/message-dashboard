@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import * as v from 'valibot';
-import { parseJson } from '../../shared/parse-json.js';
+import { parseJson } from './parse-json.js';
 import {
   buildBalanceSkillPrompt,
   buildExplicitBalanceFollowUp,

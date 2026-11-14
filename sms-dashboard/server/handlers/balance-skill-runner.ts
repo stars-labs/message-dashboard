@@ -11,7 +11,7 @@ import {
   validateBalanceSkillDecision,
   type BalanceDecision,
   type BalanceSkill,
-} from '../utils/balance-skill.js';
+} from '../../shared/balance-skill.js';
 import { CHECK_STATUSES, SKILL_JOB_STATUSES } from '../../shared/balance-status.js';
 import { errorText } from '../../shared/error-text.js';
 import {

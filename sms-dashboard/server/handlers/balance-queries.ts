@@ -13,7 +13,7 @@ import {
 } from '../lib/d1.js';
 import { NOT_JSON_MESSAGE, readBody, type MissingKeyMessages } from '../lib/request-body.js';
 import { secretMatches } from '../lib/secret.js';
-import { parseBalanceSkillConfig } from '../utils/balance-skill.js';
+import { parseBalanceSkillConfig } from '../../shared/balance-skill.js';
 import {
   CHECK_STATUSES,
   SKILL_JOB_STATUSES,

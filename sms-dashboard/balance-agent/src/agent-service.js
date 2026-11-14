@@ -8,7 +8,7 @@ import { runSerialCapability } from '../../runner-core/serial-runner.js';
 import { createSmsAiCapability } from '../../runner-core/capabilities/sms-ai.js';
 import { createCarrierBrowserCapability } from '../../runner-core/capabilities/carrier-browser.js';
 import { createCarrierBrowserJobProcessor } from '../../runner-core/capabilities/carrier-browser-workflow.js';
-import { callCompanyAI, companyAIReachable } from '../../server/utils/company-ai.js';
+import { callCompanyAI, companyAIReachable } from '../../runner-core/company-ai.js';
 import { testAIConnection } from './ai-connection.js';
 
 function requiredSettings(settings) {

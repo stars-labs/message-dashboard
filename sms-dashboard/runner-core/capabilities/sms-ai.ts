@@ -6,8 +6,8 @@ import {
   buildBalanceSkillPrompt,
   buildExplicitBalanceFollowUp,
   validateBalanceSkillDecision,
-} from '../../server/utils/balance-skill.js';
-import type { CompanyAIProtocol } from '../../server/utils/company-ai.js';
+} from '../../shared/balance-skill.js';
+import type { CompanyAIProtocol } from '../company-ai.js';
 import type { ControlClient } from '../control-client.js';
 import { errorText } from '../../shared/error-text.js';
 import type { CapabilityPresence } from '../presence.js';

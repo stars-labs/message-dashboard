@@ -1,5 +1,5 @@
 import * as v from 'valibot';
-import { parseJson } from '../../shared/parse-json.js';
+import { parseJson } from './parse-json.js';
 
 const MENU_OPTION_PATTERN = /(?:^|\n)\s*([0-9]{1,5})(?:\s*[.、:：]\s*|\s+)([^\r\n]+)/g;
 const DIRECTED_SMS_PATTERN = /(?:请)?发送\s*([0-9]{1,5})\s*至\s*[0-9]{3,5}/g;

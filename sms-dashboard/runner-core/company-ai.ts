@@ -1,5 +1,5 @@
 import * as v from 'valibot';
-import { parseJson, readJson } from '../../shared/parse-json.js';
+import { parseJson, readJson } from '../shared/parse-json.js';
 
 /** The two-part prompt every call sends. */
 interface CompanyAIPrompt {

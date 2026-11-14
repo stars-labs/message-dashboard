@@ -1,4 +1,4 @@
-import { callCompanyAI } from '../../server/utils/company-ai.js';
+import { callCompanyAI } from '../../runner-core/company-ai.js';
 
 function required(input) {
   return ['aiBaseUrl', 'aiModel', 'aiProtocol', 'aiToken'].filter((key) => !input[key]);
