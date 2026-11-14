@@ -10,7 +10,6 @@
     canAnswer,
     canDial,
     canHangup,
-    canReject,
     formatDuration,
     isValidE164,
     matchesPhoneQuery,

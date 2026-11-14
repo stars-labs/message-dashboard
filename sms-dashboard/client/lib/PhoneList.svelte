@@ -1,6 +1,6 @@
 <script>
   import SignalStrength from './SignalStrength.svelte';
-  import { COUNTRY_FILTER_TABS, inferCountryFromNumber } from './countries.js';
+  import { inferCountryFromNumber } from './countries.js';
   import { getStatusMeta, isAnomalous } from './device-status.js';
   import { formatCardNumber } from './card-number.js';
 

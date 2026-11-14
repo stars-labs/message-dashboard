@@ -43,13 +43,6 @@ export const COUNTRIES: readonly Country[] = [
   { code: 'MX', name: '墨西哥', flag: '🇲🇽' },
 ];
 
-export const COUNTRY_FILTER_TABS: readonly Country[] = [
-  { code: 'all', name: '全部', flag: '🌍' },
-  { code: 'CN', name: '中国', flag: '🇨🇳' },
-  { code: 'HK', name: '香港', flag: '🇭🇰' },
-  { code: 'SG', name: '新加坡', flag: '🇸🇬' },
-];
-
 const COUNTRY_BY_CODE = new Map(COUNTRIES.map((country) => [country.code, country]));
 
 export function getCountryFlag(code: string | null | undefined): string {

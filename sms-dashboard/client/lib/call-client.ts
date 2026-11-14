@@ -185,11 +185,6 @@ export function callPollDelay({
   return call || panelOpen ? CALL_POLL_ACTIVE_MS : CALL_POLL_IDLE_MS;
 }
 
-/** Rejecting an inbound call is a hang-up, but it deserves its own label. */
-export function canReject(call: CallStage | null | undefined): boolean {
-  return canAnswer(call);
-}
-
 const STATE_LABELS = {
   ringing: '来电',
   connecting: '正在连接',
