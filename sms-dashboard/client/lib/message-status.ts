@@ -1,4 +1,4 @@
-export interface OutboundStatusMeta {
+interface OutboundStatusMeta {
   label: string;
   className: string;
   title: string;

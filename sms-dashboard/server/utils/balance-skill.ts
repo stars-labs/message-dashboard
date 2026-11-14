@@ -42,7 +42,7 @@ const BalanceSkillSchema = v.pipe(
 export type BalanceSkill = v.InferOutput<typeof BalanceSkillSchema>;
 
 /** One numbered option found in a carrier reply. */
-export interface MenuOption {
+interface MenuOption {
   value: string;
   label: string;
 }
@@ -282,7 +282,7 @@ export function validateBalanceSkillDecision({
 }
 
 /** The job fields buildBalanceSkillPrompt reads. */
-export interface SkillPromptJob {
+interface SkillPromptJob {
   skill: BalanceSkill;
   step_index: number;
   menu_options: MenuOption[];

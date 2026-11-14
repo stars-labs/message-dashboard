@@ -1,4 +1,4 @@
-export const PREPAID_STALE_DAYS = 35;
+const PREPAID_STALE_DAYS = 35;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -27,22 +27,22 @@ export type SummaryStatus = (typeof SUMMARY_PRIORITY)[number] | 'healthy' | 'not
  * Reasons a health rule can fire. `automation_unsupported` is deliberately not
  * in SUMMARY_PRIORITY: it is evidence for the UI, never a headline status.
  */
-export type HealthReason = (typeof SUMMARY_PRIORITY)[number] | 'automation_unsupported';
+type HealthReason = (typeof SUMMARY_PRIORITY)[number] | 'automation_unsupported';
 
-export interface Money {
+interface Money {
   value: number | string;
   currency?: string | null;
 }
 
-export interface CashBalance extends Money {
+interface CashBalance extends Money {
   observedAt?: string | null;
 }
 
-export interface AccountExpiry {
+interface AccountExpiry {
   date?: string | null;
 }
 
-export interface PrepaidHealthInput {
+interface PrepaidHealthInput {
   serviceType?: string;
   /** ISO country code from D1, unvalidated. Unknown values fall back to UTC. */
   country?: string | null;
@@ -56,7 +56,7 @@ export interface PrepaidHealthInput {
   verificationPending?: boolean;
 }
 
-export interface PrepaidHealthResult {
+interface PrepaidHealthResult {
   summaryStatus: SummaryStatus;
   reasons: HealthReason[];
 }

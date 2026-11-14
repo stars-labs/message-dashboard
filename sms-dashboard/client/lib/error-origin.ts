@@ -18,7 +18,7 @@ const IGNORABLE_MESSAGES = [
   /^Script error\.?$/i,
 ];
 
-export interface ErrorSource {
+interface ErrorSource {
   filename?: string;
   stack?: string;
   message?: string;

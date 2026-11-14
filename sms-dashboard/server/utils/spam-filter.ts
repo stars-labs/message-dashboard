@@ -22,7 +22,7 @@ export const FILTER_STATUS = {
   FILTERED: 'filtered',
 } as const;
 
-export type FilterStatus = (typeof FILTER_STATUS)[keyof typeof FILTER_STATUS];
+type FilterStatus = (typeof FILTER_STATUS)[keyof typeof FILTER_STATUS];
 
 /**
  * Statuses the default message list shows.
@@ -55,7 +55,7 @@ const SpamRuleRow = v.object({
 export type SpamRule = v.InferOutput<typeof SpamRuleRow>;
 
 /** The verdict written to a messages row. */
-export interface Classification {
+interface Classification {
   filter_status: FilterStatus;
   filter_rule_id: number | null;
 }

@@ -10,7 +10,7 @@
 // Authentication state is therefore whether /api/auth/me answers, not whether a string
 // exists on the client.
 /** The user object the server returns from /api/auth/me. */
-export interface AuthUser {
+interface AuthUser {
   id: string;
   email?: string | null;
   name?: string | null;

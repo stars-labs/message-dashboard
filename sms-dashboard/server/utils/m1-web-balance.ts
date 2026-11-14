@@ -1,5 +1,5 @@
 /** What the M1 portal yields, once its selectors have been read. */
-export interface M1WebBalance {
+interface M1WebBalance {
   balance: number;
   currency: 'SGD';
   account_number: string;
@@ -10,7 +10,7 @@ export interface M1WebBalance {
 }
 
 /** The text the workflow scraped from the three selectors. */
-export interface M1WebBalanceInput {
+interface M1WebBalanceInput {
   accountText?: unknown;
   balanceText?: unknown;
   validityText?: unknown;

@@ -1,5 +1,5 @@
 /** One occurrence of a configured keyword in a message body. */
-export interface KeywordMatch {
+interface KeywordMatch {
   text: string;
   position: number;
 }

@@ -35,7 +35,7 @@ const BATCH_METHODS = ['direct_sms', 'sms_ai', 'browser'] as const;
 
 /** The three send outcomes the daemon reports for an outbound SMS. */
 export type SmsOutcome = 'confirmed' | 'submitted_unconfirmed' | 'failed';
-export type BatchMethod = (typeof BATCH_METHODS)[number];
+type BatchMethod = (typeof BATCH_METHODS)[number];
 type IneligibleReason =
   'secondary' | 'offline' | 'unsupported' | 'unverified' | 'service_type' | 'cooldown';
 
@@ -96,7 +96,7 @@ type RecentCheck = v.InferOutput<typeof RecentCheckRow>;
 type ParsedCheck = v.InferOutput<typeof ParsedCheckRow>;
 
 /** One SIM's balance-query eligibility. An eligible SIM always has a profile. */
-export type PlanItem =
+type PlanItem =
   | {
       phone: PlanPhone;
       profile: BalanceProfile;
@@ -115,14 +115,14 @@ export type PlanItem =
 type EligiblePlanItem = Extract<PlanItem, { eligible: true }>;
 
 /** The category a profile falls into, and the runner capability it needs. */
-export interface BalanceMethod {
+interface BalanceMethod {
   category: BatchMethod | 'unsupported';
   capability: 'carrier_browser' | 'sms_ai' | null;
   interactive: boolean;
 }
 
 /** A parsed balance metric. */
-export interface BalanceMetric {
+interface BalanceMetric {
   metric_type: string;
   value: number | null;
   unit: string | null;
@@ -131,14 +131,14 @@ export interface BalanceMetric {
 }
 
 /** A message handed to the balancer: what was received, from whom. */
-export interface BalanceMessage {
+interface BalanceMessage {
   id: string;
   phone_number: string | null;
   content: string;
 }
 
 /** The fields of a balance check a follow-up SMS is queued from. */
-export interface FollowUpCheck {
+interface FollowUpCheck {
   id: string;
   sim_number: string | null;
   destination: string | null;

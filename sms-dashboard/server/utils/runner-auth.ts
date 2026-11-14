@@ -18,7 +18,7 @@ export const RUNNER_SCOPES = Object.freeze({
   carrierBrowser: 'balance:browser:run',
 } as const);
 
-export type RunnerScope = (typeof RUNNER_SCOPES)[keyof typeof RUNNER_SCOPES];
+type RunnerScope = (typeof RUNNER_SCOPES)[keyof typeof RUNNER_SCOPES];
 
 /**
  * The result of a runner authorization check. `authorized` is the discriminant, so

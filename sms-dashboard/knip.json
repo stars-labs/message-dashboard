@@ -1,0 +1,13 @@
+{
+  "$schema": "https://unpkg.com/knip@5.88.1/schema.json",
+  "entry": [
+    "scripts/*.js",
+    "test/setup.js",
+    "server/*.d.ts",
+    "client/vite-env.d.ts",
+    "worker-configuration.d.ts",
+    "worker-runtime.d.ts"
+  ],
+  "project": ["**/*.{js,ts,svelte}"],
+  "ignore": ["balance-agent/**"]
+}

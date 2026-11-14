@@ -20,7 +20,7 @@ const MESSAGES_STORE = 'messages';
 const META_STORE = 'meta';
 
 /** The message shape IndexedDB stores: whatever the server returned, by id. */
-export interface CachedMessage {
+interface CachedMessage {
   id: string;
   phone_iccid?: string | null;
   timestamp: string;

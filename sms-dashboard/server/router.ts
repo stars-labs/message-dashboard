@@ -3,14 +3,14 @@ const METHODS = ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'] as const;
 type Method = (typeof METHODS)[number];
 
 /** What the router reads from a request, and the parameters it writes back. */
-export interface RoutedRequest {
+interface RoutedRequest {
   url: string;
   method: string;
   params?: Record<string, string>;
 }
 
 /** A route handler. Returning a Response short-circuits; null/undefined continues. */
-export type RouteHandler<Request> = (
+type RouteHandler<Request> = (
   request: Request,
 ) => Promise<Response | null | undefined> | Response | null | undefined;
 

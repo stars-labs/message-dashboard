@@ -7,7 +7,7 @@ export interface PagedMessage {
   [column: string]: unknown;
 }
 
-export interface MessagePagination {
+interface MessagePagination {
   has_more?: boolean;
   [column: string]: unknown;
 }

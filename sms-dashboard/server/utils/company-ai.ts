@@ -2,7 +2,7 @@ import * as v from 'valibot';
 import { parseJson, readJson } from '../../shared/parse-json.js';
 
 /** The two-part prompt every call sends. */
-export interface CompanyAIPrompt {
+interface CompanyAIPrompt {
   system: string;
   user: string;
 }
@@ -30,7 +30,7 @@ export type CompanyAIProbeFetch = (
 export const CompanyAIProtocol = v.picklist(['anthropic', 'openai']);
 export type CompanyAIProtocol = v.InferOutput<typeof CompanyAIProtocol>;
 
-export interface CompanyAICall {
+interface CompanyAICall {
   baseUrl: string;
   token: string;
   model: string;

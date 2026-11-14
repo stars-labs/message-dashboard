@@ -16,7 +16,7 @@ const HEX_COLOR = /^#(?:[0-9A-Fa-f]{3,4}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/;
  * Anything that is not a plain hex literal becomes the default.
  */
 /** A keyword as stored, as the highlighter reads it. */
-export interface HighlightKeyword {
+interface HighlightKeyword {
   keyword?: string | null;
   color?: string | null;
   tag?: string | null;
@@ -25,7 +25,7 @@ export interface HighlightKeyword {
 }
 
 /** One rendered slice: plain text, or a keyword match with its style. */
-export interface HighlightSegment {
+interface HighlightSegment {
   text: string;
   match: { color: string; tag: string | null } | null;
 }

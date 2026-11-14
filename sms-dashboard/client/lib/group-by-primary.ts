@@ -17,7 +17,7 @@
 // excludes the primary never makes a secondary vanish.
 
 /** The fields grouping reads, whichever object carries them. */
-export interface GroupableRow {
+interface GroupableRow {
   iccid?: string | null;
   sim_role?: string | null;
   primary_iccid?: string | null;
@@ -25,7 +25,7 @@ export interface GroupableRow {
 }
 
 /** The input item plus the two keys this adds for rendering. */
-export type GroupedItem<T> = T & { __depth: 0 | 1; __isSecondary: boolean };
+type GroupedItem<T> = T & { __depth: 0 | 1; __isSecondary: boolean };
 
 export function groupByPrimary<T>(
   items: T[],

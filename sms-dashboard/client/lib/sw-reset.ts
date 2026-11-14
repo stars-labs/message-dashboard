@@ -11,7 +11,7 @@
  * failure handling are testable without a browser.
  */
 /** The globals this uses, injectable so the ordering is testable. */
-export interface SwResetEnv {
+interface SwResetEnv {
   navigator?: {
     serviceWorker?: { getRegistrations(): Promise<Array<{ unregister(): Promise<boolean> }>> };
   };
@@ -21,7 +21,7 @@ export interface SwResetEnv {
   };
 }
 
-export interface SwResetResult {
+interface SwResetResult {
   ok: boolean;
   unregistered: number;
   cachesDeleted: number;

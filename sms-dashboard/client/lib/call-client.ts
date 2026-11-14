@@ -7,7 +7,7 @@ import { formatCardNumber } from './card-number.js';
 import { formatClock, toEpochMilliseconds } from './time.js';
 
 /** The live call as the Worker reports it. */
-export interface CallLike {
+interface CallLike {
   id: string;
   direction: 'inbound' | 'outbound' | string;
   state: string;
@@ -19,7 +19,7 @@ export interface CallLike {
 }
 
 /** A finished call in the history log. */
-export interface CallLogEntry {
+interface CallLogEntry {
   id: string;
   direction: string;
   outcome?: string | null;
@@ -28,7 +28,7 @@ export interface CallLogEntry {
 }
 
 /** The SIM fields these selectors read. */
-export interface CallPhone {
+interface CallPhone {
   iccid: string;
   number?: string | null;
   carrier?: string | null;
@@ -37,14 +37,14 @@ export interface CallPhone {
 }
 
 /** One ICE server entry, as the TURN credentials endpoint issues it. */
-export interface IceServer {
+interface IceServer {
   urls: string | string[];
   username?: string;
   credential?: string;
 }
 
 /** The call state label vocabulary. */
-export type CallTone = 'idle' | 'ringing' | 'pending' | 'active';
+type CallTone = 'idle' | 'ringing' | 'pending' | 'active';
 
 export async function fetchCallState(): Promise<CallLike | null> {
   const { call } = await fetchWithAuth('/api/calls/state');
@@ -292,13 +292,13 @@ export async function fetchCallHistory({
 }
 
 /** The browser's SDP offer and its mid, as /dial and /answer take them. */
-export interface MediaOffer {
+interface MediaOffer {
   offer: unknown;
   mid: string;
 }
 
 /** /dial additionally names the SIM and destination. */
-export interface DialParams extends MediaOffer {
+interface DialParams extends MediaOffer {
   iccid: string;
   number: string;
 }

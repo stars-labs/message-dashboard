@@ -8,7 +8,7 @@
 // Every browser API is injected so the sequence is testable without WebRTC.
 
 /** A PeerConnection that has not connected in this long will not connect. */
-export const CONNECT_TIMEOUT_MS = 15_000;
+const CONNECT_TIMEOUT_MS = 15_000;
 
 /** The PeerConnection surface this drives. */
 interface ConnectionLike {
@@ -26,7 +26,7 @@ interface ConnectionLike {
 }
 
 /** The call API call-session drives, matching callApi in call-client.ts. */
-export interface CallSessionApi {
+interface CallSessionApi {
   dial(params: {
     iccid: string;
     number: string;
@@ -42,7 +42,7 @@ export interface CallSessionApi {
   hangup(callId?: string): Promise<unknown>;
 }
 
-export interface CallSessionDeps {
+interface CallSessionDeps {
   fetchIce: () => Promise<RTCIceServer[]>;
   api: CallSessionApi;
   RTCPeerConnection: new (config: {

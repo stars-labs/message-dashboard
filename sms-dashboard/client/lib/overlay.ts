@@ -12,7 +12,7 @@
 // worse than landing on the container, and a screen reader reads the dialog's
 // label from the container anyway.
 
-export interface OverlayOptions {
+interface OverlayOptions {
   onClose?: (() => void) | null;
   autofocus?: boolean;
 }

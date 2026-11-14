@@ -11,7 +11,7 @@ const BEEP_MS = 220;
 const PATTERN_MS = 2400;
 
 /** The subset of AudioContext this uses, so tests can pass a stub. */
-export interface AudioContextLike {
+interface AudioContextLike {
   currentTime: number;
   destination: AudioNode;
   resume?(): Promise<void> | void;
@@ -20,9 +20,9 @@ export interface AudioContextLike {
   createGain(): GainNode;
 }
 
-export type AudioContextCtor = new () => AudioContextLike;
+type AudioContextCtor = new () => AudioContextLike;
 
-export interface Ringtone {
+interface Ringtone {
   start(): boolean;
   stop(): void;
   readonly ringing: boolean;

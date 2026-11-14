@@ -1,9 +1,9 @@
 // Centralized tag state management following SOLID principles
-import { writable, derived, get } from 'svelte/store';
+import { writable, get } from 'svelte/store';
 import { api } from './api.js';
 
 /** A keyword row as /api/keywords returns it. */
-export interface KeywordTagRow {
+interface KeywordTagRow {
   id: number;
   keyword: string;
   tag: string;
@@ -15,20 +15,20 @@ export interface KeywordTagRow {
 }
 
 /** A tag as the client renders it: one per tag name, with a match count. */
-export interface ClientTag {
+interface ClientTag {
   tag: string;
   color: string;
   count: number;
 }
 
 /** A matched occurrence inside a message body. */
-export interface TagMatch {
+interface TagMatch {
   text: string;
   position: number;
 }
 
 /** One message's tags. */
-export type MessageTagList = ClientTag[];
+type MessageTagList = ClientTag[];
 
 /**
  * Single Responsibility: Tag State Management
@@ -47,16 +47,7 @@ const _loadingStates = writable({
 });
 
 // Public readonly stores
-export const messageTags = { subscribe: _messageTags.subscribe };
 export const keywords = { subscribe: _keywords.subscribe };
-export const isLoading = { subscribe: _loadingStates.subscribe };
-
-// Derived computed values
-export const tagStats = derived(_messageTags, ($messageTags) => {
-  const totalMessages = $messageTags.size;
-  const taggedMessages = Array.from($messageTags.values()).filter((tags) => tags.length > 0).length;
-  return { totalMessages, taggedMessages };
-});
 
 /**
  * Tag Service Interface - Dependency Inversion Principle

@@ -11,7 +11,7 @@ interface AccountCandidate {
 }
 
 /** What a Unicom web balance query proves. */
-export interface UnicomWebBalance {
+interface UnicomWebBalance {
   balance: number;
   currency: 'CNY';
   account_number: string;

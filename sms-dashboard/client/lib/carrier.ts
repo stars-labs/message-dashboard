@@ -1,9 +1,9 @@
-export interface CarrierRecord {
+interface CarrierRecord {
   carrier?: string | null;
   country?: string | null;
 }
 
-export interface CarrierOption {
+interface CarrierOption {
   key: string;
   label: string;
 }

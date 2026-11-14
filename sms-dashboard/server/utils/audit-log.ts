@@ -2,7 +2,7 @@ import { boundedErrorText, classifyD1Error } from './d1-error.js';
 import type { D1, D1RunResult } from '../lib/d1.js';
 
 /** One audit_logs row. `details` is serialized; callers choose its shape. */
-export interface AuditEvent {
+interface AuditEvent {
   action: string;
   resourceType?: string;
   resourceId: string | null;

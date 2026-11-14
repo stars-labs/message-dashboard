@@ -13,7 +13,7 @@ interface ApiErrorBody {
 }
 
 /** A message row as the API returns it. */
-export interface ApiMessage extends PagedMessage {
+interface ApiMessage extends PagedMessage {
   timestamp: string;
   type?: string | null;
   content?: string | null;
@@ -23,7 +23,7 @@ export interface ApiMessage extends PagedMessage {
 }
 
 /** The paging envelope /api/messages returns. */
-export interface ApiMessagePagination {
+interface ApiMessagePagination {
   has_more?: boolean;
   next_cursor?: { created_at?: string; id?: string } | null;
   limit?: number;
@@ -31,7 +31,7 @@ export interface ApiMessagePagination {
   [column: string]: unknown;
 }
 
-export interface ApiMessageSync {
+interface ApiMessageSync {
   server_time?: string;
   is_incremental?: boolean;
   from_cache?: number;
@@ -41,7 +41,7 @@ export interface ApiMessageSync {
 }
 
 /** The /api/messages response, before and after the client merges cache. */
-export interface ApiMessagePage {
+interface ApiMessagePage {
   success?: boolean;
   data?: ApiMessage[];
   pagination?: ApiMessagePagination;
@@ -51,7 +51,7 @@ export interface ApiMessagePage {
 }
 
 /** Parameters /api/messages accepts. */
-export interface GetMessagesParams {
+interface GetMessagesParams {
   phone_iccid?: string | null;
   limit?: number;
   include_filtered?: boolean | number | string;
@@ -66,7 +66,7 @@ export interface GetMessagesParams {
 }
 
 /** A balance check row as /api/balance-checks returns it. */
-export interface ApiBalanceCheck {
+interface ApiBalanceCheck {
   id: string;
   [column: string]: unknown;
 }

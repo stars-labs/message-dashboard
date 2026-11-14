@@ -3,7 +3,7 @@ import { queryAll, type D1, type D1Batch, type D1Statement } from '../lib/d1.js'
 import { findKeywordMatches } from './keyword-match.js';
 import type { HistoryCursor } from './filter-history.js';
 
-export const KEYWORD_HISTORY_PAGE_SIZE = 200;
+const KEYWORD_HISTORY_PAGE_SIZE = 200;
 
 /** A keyword_tags row as history application reads it. */
 export interface HistoryKeyword {
@@ -25,7 +25,7 @@ const KeywordHistoryRow = v.object({
 
 type KeywordHistoryRow = v.InferOutput<typeof KeywordHistoryRow>;
 
-export interface KeywordHistoryPage {
+interface KeywordHistoryPage {
   processed: number;
   eligible: number;
   matched_messages: number;

@@ -9,13 +9,13 @@
  */
 
 /** The prompt state the component renders from. */
-export interface UpdateState {
+interface UpdateState {
   available: boolean;
   applying: boolean;
 }
 
 /** The subset of ServiceWorkerRegistration this uses. */
-export interface RegistrationLike {
+interface RegistrationLike {
   waiting: unknown;
   update(): Promise<unknown>;
 }

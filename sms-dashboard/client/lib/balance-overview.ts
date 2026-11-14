@@ -4,7 +4,7 @@ import type { SummaryStatus } from '../../shared/prepaid-health.js';
 import type { BalanceCheckLike, BalanceMetricRow } from './balance-query.js';
 
 /** The phone fields the balance overview reads. */
-export interface BalancePhone {
+interface BalancePhone {
   iccid: string;
   country?: string | null;
   carrier?: string | null;
@@ -18,20 +18,20 @@ export interface BalancePhone {
 }
 
 /** A check as the overview reads it, including the derived fields it relies on. */
-export interface OverviewCheck extends BalanceCheckLike {
+interface OverviewCheck extends BalanceCheckLike {
   error?: string | null;
   status?: string | null;
   profile_outputs?: string[];
 }
 
-export interface BalanceHealthMeta {
+interface BalanceHealthMeta {
   label: string;
   className: string;
   dotClass: string;
 }
 
 /** One rendered balance row. */
-export interface BalanceRow {
+interface BalanceRow {
   phone: BalancePhone;
   checks: OverviewCheck[];
   latestCheck: OverviewCheck | null;

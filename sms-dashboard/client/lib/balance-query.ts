@@ -1,5 +1,5 @@
 /** The display metadata for one balance-check status (server or derived). */
-export interface BalanceStatusMeta {
+interface BalanceStatusMeta {
   label: string;
   className: string;
 }

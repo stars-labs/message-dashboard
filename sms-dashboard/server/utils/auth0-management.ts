@@ -48,7 +48,7 @@ const Auth0UserSchema = v.object({
   logins_count: v.nullish(v.number()),
 });
 
-export type Auth0User = v.InferOutput<typeof Auth0UserSchema>;
+type Auth0User = v.InferOutput<typeof Auth0UserSchema>;
 
 /** A role as the Management API returns it. */
 const Auth0RoleSchema = v.object({ id: v.string(), name: v.string() });

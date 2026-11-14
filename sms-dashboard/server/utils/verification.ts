@@ -8,7 +8,7 @@ const EN_CODE_LABEL =
 const JA_LABEL = '認証コード|確認コード|ワンタイムパスワード|ワンタイムコード|セキュリティコード';
 
 /** The evidence label attached to a detected code. Used by tests and audit trails. */
-export type VerificationReason =
+type VerificationReason =
   | 'zh_label_before'
   | 'zh_label_after'
   | 'ja_label_before'
@@ -34,7 +34,7 @@ interface CodePattern {
   pattern: RegExp;
 }
 
-export interface DetectedCode {
+interface DetectedCode {
   code: string;
   reason: VerificationReason;
 }
@@ -43,7 +43,7 @@ export interface DetectedCode {
  * Ordered from the most explicit forms to contextual forms. Each expression has
  * exactly one capture group: the code shown in the UI.
  */
-export const VERIFICATION_CODE_PATTERNS: CodePattern[] = [
+const VERIFICATION_CODE_PATTERNS: CodePattern[] = [
   {
     reason: 'zh_label_before',
     pattern: new RegExp(`(?:${ZH_LABEL})\\s*(?:是|为|為)?\\s*[:：]?\\s*(\\d{4,8})`),

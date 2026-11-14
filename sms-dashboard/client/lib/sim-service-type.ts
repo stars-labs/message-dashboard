@@ -1,4 +1,4 @@
-export interface LabelledOption<T extends string> {
+interface LabelledOption<T extends string> {
   value: T;
   label: string;
 }

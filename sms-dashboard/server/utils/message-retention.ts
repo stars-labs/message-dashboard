@@ -11,7 +11,7 @@ const CountRow = v.object({ n: v.number() });
 const IdRow = v.object({ id: v.string() });
 
 /** SQLite date modifier defining the retention window. */
-export const RETENTION_MODIFIER = '-12 months';
+const RETENTION_MODIFIER = '-12 months';
 
 /**
  * Timestamps are stored as ISO-8601 with a T separator and a Z suffix (migration

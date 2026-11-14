@@ -9,7 +9,7 @@
 // If no host is mounted — a component rendered alone in a unit test — this falls
 // back to the native dialog rather than hanging on a promise nobody can resolve.
 
-export interface ConfirmOptions {
+interface ConfirmOptions {
   message: string;
   title?: string;
   confirmLabel?: string;

@@ -3,7 +3,7 @@ import { queryAll, type D1, type D1Batch, type D1Statement } from '../lib/d1.js'
 import { classifyMessage, FILTER_STATUS, loadActiveRules, RULE_TYPE } from './spam-filter.js';
 import type { SpamRule } from './spam-filter.js';
 
-export const FILTER_HISTORY_PAGE_SIZE = 200;
+const FILTER_HISTORY_PAGE_SIZE = 200;
 
 /** Keyset cursor for the next page. */
 export interface HistoryCursor {
@@ -29,7 +29,7 @@ const HistoryRow = v.object({
 
 type HistoryRow = v.InferOutput<typeof HistoryRow>;
 
-export interface RuleHistoryPage {
+interface RuleHistoryPage {
   mode: 'apply' | 'release';
   processed: number;
   changed: number;

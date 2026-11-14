@@ -12,7 +12,7 @@ const ACTIVE_QUERY_STATUSES = new Set([
 ]);
 
 /** The fields polling decisions read off a balance check. */
-export interface PollableCheck {
+interface PollableCheck {
   id: string;
   display_status?: string | null;
   status?: string | null;

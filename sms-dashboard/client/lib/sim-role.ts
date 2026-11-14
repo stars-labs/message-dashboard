@@ -2,9 +2,9 @@
 // one or more supplementary cards; only the primary is balance-queried.
 // See migrations/059_add_sim_primary_secondary.sql.
 
-export type SimRole = 'standalone' | 'primary' | 'secondary';
+type SimRole = 'standalone' | 'primary' | 'secondary';
 
-export interface SimRoleOption {
+interface SimRoleOption {
   value: SimRole;
   label: string;
 }

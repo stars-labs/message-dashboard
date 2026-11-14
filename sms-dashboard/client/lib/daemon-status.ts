@@ -1,4 +1,4 @@
-export interface DaemonStatusMeta {
+interface DaemonStatusMeta {
   label: string;
   dotClass: string;
   textClass: string;
@@ -12,7 +12,7 @@ const STATUS_META: Record<string, DaemonStatusMeta> = {
   unknown: { label: '检测中', dotClass: 'bg-stone-400', textClass: 'text-stone-600' },
 };
 
-export type DaemonStatus = 'healthy' | 'degraded' | 'offline' | 'error' | 'unknown';
+type DaemonStatus = 'healthy' | 'degraded' | 'offline' | 'error' | 'unknown';
 
 export function normalizeDaemonStatus(status: string | null | undefined): DaemonStatus {
   if (status === 'online') return 'healthy';

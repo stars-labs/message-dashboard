@@ -1,4 +1,4 @@
-export type MobileTab = 'dashboard' | 'iccid-mappings' | 'balances' | 'send' | 'more';
+type MobileTab = 'dashboard' | 'iccid-mappings' | 'balances' | 'send' | 'more';
 
 const ADMIN_TABS: readonly MobileTab[] = Object.freeze([
   'dashboard',
@@ -11,7 +11,7 @@ const VIEWER_TABS: readonly MobileTab[] = Object.freeze(['dashboard', 'balances'
 const MORE_VIEWS = new Set<string>(['keywords', 'filters', 'users']);
 
 /** Geometry every tab calculation shares. */
-export interface TabGeometry {
+interface TabGeometry {
   clientX: number;
   left: number;
   width: number;

@@ -18,7 +18,7 @@ export const DEFAULT_KEYWORD_COLOR = '#3B82F6';
 // that emits #RRGGBB, so anything else is either a mistake or an attempt.
 const HEX_COLOR = /^#(?:[0-9A-Fa-f]{3,4}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/;
 
-export type KeywordColorCheck = { ok: true; value: string } | { ok: false; reason: string };
+type KeywordColorCheck = { ok: true; value: string } | { ok: false; reason: string };
 
 /**
  * Validate a keyword colour.

@@ -50,7 +50,7 @@ export type Permission = (typeof ROLE_PERMISSIONS)[CanonicalRole][number];
 /** Every permission the system recognises. Anything else denies. */
 export const ALL_PERMISSIONS: Permission[] = [...new Set(Object.values(ROLE_PERMISSIONS).flat())];
 
-export interface RoleConfig {
+interface RoleConfig {
   ADMIN_ROLE: string;
   VIEWER_ROLE: string;
   /** Full claim URI the roles array is read from. */
@@ -140,14 +140,14 @@ export function getKnownRoles(config: RoleConfig): string[] {
   return [config.ADMIN_ROLE, config.VIEWER_ROLE];
 }
 
-export interface EmailAllowedResult {
+interface EmailAllowedResult {
   allowed: boolean;
   reason: string | null;
   domain: string | null;
 }
 
 /** The profile fields isEmailAllowed reads. */
-export interface Profile {
+interface Profile {
   email?: unknown;
   email_verified?: unknown;
 }

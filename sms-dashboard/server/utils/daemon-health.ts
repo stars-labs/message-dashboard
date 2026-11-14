@@ -24,9 +24,9 @@ export interface HealthSnapshot {
   queue: HealthQueue;
 }
 
-export type DaemonHealthStatus = 'unknown' | 'offline' | 'degraded' | 'healthy';
+type DaemonHealthStatus = 'unknown' | 'offline' | 'degraded' | 'healthy';
 
-export interface DaemonHealth {
+interface DaemonHealth {
   status: DaemonHealthStatus;
   label: string;
   reasons: string[];
@@ -34,7 +34,7 @@ export interface DaemonHealth {
 }
 
 /** The daemon_health row columns this module reads. */
-export interface DaemonHealthRow {
+interface DaemonHealthRow {
   daemon_id?: string;
   last_heartbeat?: string | null;
   seconds_since_heartbeat?: unknown;
@@ -111,7 +111,7 @@ const StoredSnapshot: Schema<HealthSnapshot> = v.object({
   }),
 });
 
-export function parseHealthSnapshot(metadata: unknown): HealthSnapshot | null {
+function parseHealthSnapshot(metadata: unknown): HealthSnapshot | null {
   if (typeof metadata === 'string') {
     const parsed = parseJson(metadata, StoredSnapshot);
     return parsed.ok ? parsed.value : null;

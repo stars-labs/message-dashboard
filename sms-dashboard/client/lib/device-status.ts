@@ -10,7 +10,7 @@
 // classes by scanning source text, so a template like `bg-${c}-500` would
 // produce nothing in the output bundle.
 
-export interface DeviceStatusMeta {
+interface DeviceStatusMeta {
   label: string;
   dotClass: string;
   badgeClass: string;

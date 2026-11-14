@@ -22,7 +22,7 @@ const ScanRow = v.object({
   verification_code: v.nullable(v.string()),
 });
 
-export interface VerificationPage {
+interface VerificationPage {
   processed: number;
   changed: number;
   removed: number;

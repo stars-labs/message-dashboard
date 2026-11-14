@@ -81,5 +81,3 @@ export function createKeychainStore({
     },
   });
 }
-
-export { DEFAULT_SERVICE };

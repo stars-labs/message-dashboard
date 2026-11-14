@@ -28,7 +28,7 @@ const BillCandidate = v.object({
   type: v.literal('received'),
 });
 
-export type BillCandidateMessage = v.InferOutput<typeof BillCandidate>;
+type BillCandidateMessage = v.InferOutput<typeof BillCandidate>;
 
 const ReceivingSimRow = v.object({ iccid: v.string(), sim_index: v.nullable(v.number()) });
 

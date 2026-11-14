@@ -12,10 +12,10 @@ const HORIZONTAL_RATIO = 1.2;
 const SETTLE_MS = 180;
 
 /** Which way the current gesture was decided. Null until the slop is passed. */
-export type SwipeAxis = 'horizontal' | 'vertical' | null;
+type SwipeAxis = 'horizontal' | 'vertical' | null;
 
 /** Gesture state carried between the touch handlers. */
-export interface SwipeDismissState {
+interface SwipeDismissState {
   active: boolean;
   axis: SwipeAxis;
   startX: number;
@@ -23,7 +23,7 @@ export interface SwipeDismissState {
   distance: number;
 }
 
-export interface SwipeDismissOptions {
+interface SwipeDismissOptions {
   onDismiss?: () => void;
 }
 

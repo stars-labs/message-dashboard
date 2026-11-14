@@ -10,7 +10,7 @@
 // The daemon validates independently; this is the trust boundary, so a bad value never
 // reaches the database or the pending-send queue in the first place.
 
-export type RecipientCheck = { ok: true; value: string } | { ok: false; reason: string };
+type RecipientCheck = { ok: true; value: string } | { ok: false; reason: string };
 
 const E164 = /^\+?[0-9]{6,15}$/;
 const SHORT_CODE = /^[0-9]{3,5}$/;

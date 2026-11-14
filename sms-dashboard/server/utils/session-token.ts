@@ -12,7 +12,7 @@
 const COOKIE_NAME = 'auth_token';
 
 /** Where the credential came from. The cookie is the trusted browser path. */
-export interface SessionCredential {
+interface SessionCredential {
   token: string;
   source: 'cookie' | 'header';
 }

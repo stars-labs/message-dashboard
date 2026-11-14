@@ -1,11 +1,11 @@
-export interface Country {
+interface Country {
   code: string;
   name: string;
   flag: string;
 }
 
 /** A phone row or a raw number, either accepted by the inference helper. */
-export type PhoneLike =
+type PhoneLike =
   | string
   | {
       number?: string | null;

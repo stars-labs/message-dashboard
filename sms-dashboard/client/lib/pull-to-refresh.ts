@@ -22,7 +22,7 @@ const HORIZONTAL_RATIO = 1;
 const ACTIVATION_SLOP = 8;
 
 /** The gesture state carried between touch handlers. */
-export interface PullState {
+interface PullState {
   startY: number;
   startX: number;
   pull: number;
