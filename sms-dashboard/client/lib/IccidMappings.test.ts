@@ -209,3 +209,44 @@ describe('Device & Card sorting', () => {
     expect(rows[0]?.textContent).not.toContain('S02');
   });
 });
+
+describe('Device & Card editing', () => {
+  test('a cleared balance threshold is saved as none, not as zero', async () => {
+    const row = mapping({
+      iccid: '8986001',
+      phone_number: '+8613800000001',
+      sim_index: 1,
+      balance_threshold: 50,
+    });
+    const puts: unknown[] = [];
+    fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(
+      Object.assign(
+        (_input: string | URL | Request, init?: RequestInit) => {
+          if (init?.method === 'PUT' && typeof init.body === 'string') {
+            const body: unknown = JSON.parse(init.body);
+            puts.push(body);
+            const { balance_threshold: _threshold, ...detail } = row;
+            return Promise.resolve(Response.json({ success: true, data: detail }));
+          }
+          return Promise.resolve(Response.json(mappingsResponse([row])));
+        },
+        { preconnect: () => undefined },
+      ),
+    );
+
+    const view = render(IccidMappings);
+    await waitFor(() => {
+      expect(view.getAllByRole('button', { name: '编辑' }).length).toBeGreaterThan(0);
+    });
+    const [edit] = view.getAllByRole('button', { name: '编辑' });
+    if (edit === undefined) throw new Error('no edit button rendered');
+    await fireEvent.click(edit);
+    await fireEvent.input(view.getByLabelText('余额阈值'), { target: { value: '' } });
+    await fireEvent.click(view.getByRole('button', { name: '保存' }));
+
+    await waitFor(() => {
+      expect(puts).toHaveLength(1);
+    });
+    expect(puts[0]).toMatchObject({ balance_threshold: null });
+  });
+});

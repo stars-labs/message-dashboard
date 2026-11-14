@@ -46,7 +46,7 @@
     service_type_source: string;
     sim_role: string;
     primary_iccid: string;
-    balance_threshold: number | '' | null;
+    balance_threshold: number | null;
   }
 
   type Panel =
@@ -100,7 +100,7 @@
       service_type_source: '',
       sim_role: 'standalone',
       primary_iccid: '',
-      balance_threshold: '',
+      balance_threshold: null,
     };
   }
 
@@ -124,7 +124,7 @@
         service_type_source: textOr(mapping.service_type_source, ''),
         sim_role: textOr(mapping.sim_role, 'standalone'),
         primary_iccid: textOr(mapping.primary_iccid, ''),
-        balance_threshold: mapping.balance_threshold ?? '',
+        balance_threshold: mapping.balance_threshold,
       },
     };
   }
@@ -324,7 +324,7 @@
         service_type_source: fd.service_type === 'unknown' ? null : fd.service_type_source,
         sim_role: fd.sim_role,
         primary_iccid: fd.sim_role === 'secondary' ? fd.primary_iccid : null,
-        balance_threshold: fd.balance_threshold === '' ? null : Number(fd.balance_threshold),
+        balance_threshold: fd.balance_threshold,
       };
       if (current.mode === 'add') await api.iccidMappings.create(payload);
       else await api.iccidMappings.update(current.mapping.id, payload);
