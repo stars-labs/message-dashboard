@@ -14,6 +14,7 @@
 import { json } from '../lib/response.js';
 import * as v from 'valibot';
 import { createRoleConfig, getKnownRoles } from '../../config/auth0-roles.js';
+import type { SetRoleResponse, UsersResponse } from '../../shared/api/users.js';
 import { readJson } from '../../shared/parse-json.js';
 import type { D1 } from '../lib/d1.js';
 import type { KV } from '../lib/kv.js';
@@ -90,7 +91,7 @@ export const usersHandler = {
         known_roles: getKnownRoles(roleConfig),
         admin_role: roleConfig.ADMIN_ROLE,
         viewer_role: roleConfig.VIEWER_ROLE,
-      });
+      } satisfies UsersResponse);
     } catch (error) {
       return managementFailure(error);
     }
@@ -158,7 +159,7 @@ export const usersHandler = {
         role,
         previous_roles: previousRoles,
         sessions_revoked: revoked,
-      });
+      } satisfies SetRoleResponse);
     } catch (error) {
       return managementFailure(error);
     }
