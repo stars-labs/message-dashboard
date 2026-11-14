@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   import { formatClock } from './time.js';
   import { formatCardNumber } from './card-number.js';
   import { getCountryFlag } from './countries.js';
@@ -6,23 +6,41 @@
     getBalanceStatusMeta,
     getBalanceTimestamp,
     getLatestBalanceReply,
-    normalizeUtcTimestamp,
   } from './balance-query.js';
+  import type { BalanceCheck } from '../../shared/api/balance-checks.js';
+  import type { Phone } from '../../shared/api/phones.js';
+  import { textOr } from '../../shared/text.js';
 
-  let { check, selectedPhone = null, striped = false, onOpen = null } = $props();
+  interface SelectedPhone extends Pick<Phone, 'sim_index' | 'number'> {
+    flag: string;
+  }
 
-  let statusMeta = $derived(getBalanceStatusMeta(check?.display_status || check?.status));
-  let receiverIndex = $derived(check?.sim_index ?? selectedPhone?.sim_index);
+  interface Props {
+    check: BalanceCheck;
+    selectedPhone?: SelectedPhone | null;
+    striped?: boolean;
+    onOpen?: ((check: BalanceCheck) => void) | null;
+  }
+
+  let { check, selectedPhone = null, striped = false, onOpen = null }: Props = $props();
+
+  let statusMeta = $derived(getBalanceStatusMeta(check.display_status));
+  let receiverIndex = $derived(check.sim_index ?? selectedPhone?.sim_index);
   let receiverNumber = $derived(
-    check?.sim_number || selectedPhone?.number || check?.sim_iccid || '—',
+    textOr(check.sim_number, textOr(selectedPhone?.number, textOr(check.sim_iccid, '—'))),
   );
+  let simCountry = $derived(textOr(check.sim_country, null));
   let receiverFlag = $derived(
-    check?.sim_country ? getCountryFlag(check.sim_country) : selectedPhone?.flag || '',
+    simCountry === null ? textOr(selectedPhone?.flag, '') : getCountryFlag(simCountry),
   );
   let summary = $derived(
-    getLatestBalanceReply(check)?.content ||
-      check?.error ||
-      `发送 ${check?.outbound_content || check?.command || '—'} 至 ${check?.outbound_recipient || check?.destination || '—'}`,
+    textOr(
+      getLatestBalanceReply(check)?.content,
+      textOr(
+        check.error,
+        `发送 ${textOr(check.outbound_content, textOr(check.command, '—'))} 至 ${textOr(check.outbound_recipient, textOr(check.destination, '—'))}`,
+      ),
+    ),
   );
 </script>
 

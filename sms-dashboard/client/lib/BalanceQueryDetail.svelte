@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   import { onMount } from 'svelte';
   import { formatCardNumber } from './card-number.js';
   import { swipeDismiss } from './swipe-dismiss.js';
@@ -11,14 +11,22 @@
     getCashBalance,
     normalizeUtcTimestamp,
   } from './balance-query.js';
+  import type { BalanceCheck, BalanceCheckDetail } from '../../shared/api/balance-checks.js';
+  import { textOr } from '../../shared/text.js';
 
-  let { check, detail = null, onClose = null } = $props();
-  let statusMeta = $derived(getBalanceStatusMeta(check?.display_status || check?.status));
+  interface Props {
+    check: BalanceCheck;
+    detail?: BalanceCheckDetail | null;
+    onClose?: (() => void) | null;
+  }
+
+  let { check, detail = null, onClose = null }: Props = $props();
+  let statusMeta = $derived(getBalanceStatusMeta(check.display_status));
   let cashBalance = $derived(getCashBalance(check));
   let conversation = $derived(getBalanceConversation(check, detail));
 
-  function formatDate(value) {
-    if (!value) return '—';
+  function formatDate(value: string | null): string {
+    if (value === null || value === '') return '—';
     const date = new Date(normalizeUtcTimestamp(value));
     if (Number.isNaN(date.getTime())) return '—';
     return date.toLocaleString('zh-CN', {
@@ -33,11 +41,13 @@
   }
 
   onMount(() => {
-    const closeOnEscape = (event) => {
+    const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose?.();
     };
     window.addEventListener('keydown', closeOnEscape);
-    return () => window.removeEventListener('keydown', closeOnEscape);
+    return () => {
+      window.removeEventListener('keydown', closeOnEscape);
+    };
   });
 </script>
 
@@ -54,7 +64,7 @@
 
     <section
       aria-label="余额查询详情"
-      use:swipeDismiss={{ onDismiss: onClose }}
+      use:swipeDismiss={onClose === null ? {} : { onDismiss: onClose }}
       class="relative w-full h-full lg:w-[480px] bg-white lg:border-l lg:border-stone-200
         flex flex-col will-change-transform"
       style="box-shadow: -16px 0 40px rgba(28,25,23,.16);"
@@ -72,7 +82,7 @@
             </span>
           </div>
           <p class="mt-0.5 text-xs text-stone-400 font-mono truncate">
-            {formatCardNumber(check.sim_index)} · {check.sim_number || check.sim_iccid}
+            {formatCardNumber(check.sim_index)} · {textOr(check.sim_number, check.sim_iccid)}
           </p>
         </div>
         <button
@@ -120,7 +130,7 @@
           </h3>
           {#if check.method === 'browser' && conversation.length === 0}
             <p class="mt-3 text-sm text-stone-500">
-              {check.web_human_reason || statusMeta.label}
+              {textOr(check.web_human_reason, statusMeta.label)}
             </p>
           {/if}
           <div
@@ -137,8 +147,8 @@
                 <div class="flex items-baseline justify-between gap-3">
                   <p class="text-xs font-semibold text-stone-700">
                     {message.type === 'sent'
-                      ? `发送至 ${message.recipient || check.destination || '—'}`
-                      : `${message.phone_number || check.response_sender || '运营商'} 回复`}
+                      ? `发送至 ${textOr(message.recipient, textOr(check.destination, '—'))}`
+                      : `${textOr(message.phone_number, textOr(check.response_sender, '运营商'))} 回复`}
                   </p>
                   <time class="text-[11px] text-stone-400 font-mono shrink-0"
                     >{formatDate(message.timestamp)}</time
@@ -147,7 +157,7 @@
                 <p
                   class="mt-1.5 text-sm leading-relaxed text-stone-700 whitespace-pre-wrap break-words"
                 >
-                  {message.content || '—'}
+                  {textOr(message.content, '—')}
                 </p>
               </div>
             {/each}
@@ -164,11 +174,11 @@
           </div>
         </section>
 
-        {#if check.metrics?.length}
+        {#if check.metrics.length > 0}
           <section class="px-4 lg:px-5 py-5 border-b border-stone-100">
             <h3 class="text-xs font-semibold text-stone-500">解析结果</h3>
             <dl class="mt-3 divide-y divide-stone-100">
-              {#each check.metrics as metric}
+              {#each check.metrics as metric (metric)}
                 <div class="py-2.5 flex items-center justify-between gap-4">
                   <dt class="text-sm text-stone-500">
                     {getBalanceMetricLabel(metric.metric_type)}
@@ -188,11 +198,13 @@
             <dt class="text-stone-400">查询编号</dt>
             <dd class="font-mono text-stone-600 break-all">{check.id}</dd>
             <dt class="text-stone-400">运营商</dt>
-            <dd class="text-stone-600">{check.profile_carrier || check.sim_carrier || '—'}</dd>
+            <dd class="text-stone-600">
+              {textOr(check.profile_carrier, textOr(check.sim_carrier, '—'))}
+            </dd>
             <dt class="text-stone-400">查询方式</dt>
-            <dd class="text-stone-600 uppercase">{check.method || '—'}</dd>
+            <dd class="text-stone-600 uppercase">{check.method}</dd>
             <dt class="text-stone-400">解析版本</dt>
-            <dd class="font-mono text-stone-600 break-all">{check.parser_version || '—'}</dd>
+            <dd class="font-mono text-stone-600 break-all">{textOr(check.parser_version, '—')}</dd>
             <dt class="text-stone-400">发起时间</dt>
             <dd class="text-stone-600 tabular-nums">{formatDate(check.requested_at)}</dd>
           </dl>

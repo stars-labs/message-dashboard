@@ -14,6 +14,8 @@
     "outDir": "./node_modules/.tmp/client-declarations"
   },
   "include": [
+    "client/lib/BalanceConversationRow.svelte",
+    "client/lib/BalanceQueryDetail.svelte",
     "client/lib/ConfirmHost.svelte",
     "client/lib/DaemonHealthPanel.svelte",
     "client/lib/ErrorBoundary.svelte",
@@ -21,6 +23,7 @@
     "client/lib/KeywordConfig.svelte",
     "client/lib/MessageDetail.svelte",
     "client/lib/MessageHighlight.svelte",
+    "client/lib/PhoneDetails.svelte",
     "client/lib/PullToRefresh.svelte",
     "client/lib/SignalStrength.svelte",
     "client/lib/SwUpdatePrompt.svelte",

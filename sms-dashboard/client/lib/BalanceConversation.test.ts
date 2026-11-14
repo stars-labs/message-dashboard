@@ -1,9 +1,14 @@
 import { cleanup, fireEvent, render } from '@testing-library/svelte';
 import { afterEach, describe, expect, test } from 'bun:test';
+import type {
+  BalanceCheck,
+  BalanceCheckDetail,
+  BalanceConversationMessage,
+} from '../../shared/api/balance-checks.js';
 import BalanceConversationRow from './BalanceConversationRow.svelte';
 import BalanceQueryDetail from './BalanceQueryDetail.svelte';
 
-function balanceCheck(overrides = {}) {
+function balanceCheck(overrides: Partial<BalanceCheck> = {}): BalanceCheck {
   return {
     id: 'bal-1',
     sim_iccid: '898600520121F0517883',
@@ -44,7 +49,7 @@ function balanceCheck(overrides = {}) {
   };
 }
 
-function message(overrides = {}) {
+function message(overrides: Partial<BalanceConversationMessage> = {}): BalanceConversationMessage {
   return {
     id: 'msg-1',
     type: 'sent',
@@ -57,7 +62,7 @@ function message(overrides = {}) {
   };
 }
 
-const check = balanceCheck({
+const check: BalanceCheck = balanceCheck({
   id: 'bal-test-1',
   sim_iccid: '898600520121F0517883',
   sim_index: 2,
@@ -81,7 +86,7 @@ const check = balanceCheck({
   ],
 });
 
-const detail = {
+const detail: BalanceCheckDetail = {
   id: check.id,
   conversation: [
     message({
@@ -120,12 +125,12 @@ afterEach(cleanup);
 
 describe('balance query conversation', () => {
   test('renders one grouped row and opens its details', async () => {
-    let opened = null;
-    const { getAllByRole, getAllByText } = render(BalanceConversationRow, {
+    const opened: BalanceCheck[] = [];
+    const { container, getAllByRole, getAllByText } = render(BalanceConversationRow, {
       props: {
         check,
-        onOpen: (value) => {
-          opened = value;
+        onOpen: (value: BalanceCheck) => {
+          opened.push(value);
         },
       },
     });
@@ -133,13 +138,14 @@ describe('balance query conversation', () => {
     expect(getAllByText('余额查询').length).toBe(2);
     expect(getAllByText('已解析').length).toBe(2);
     expect(getAllByText('S02').length).toBe(2);
-    await fireEvent.click(getAllByRole('button')[0]);
-    expect(opened).toBe(check);
+    await fireEvent.click(getAllByRole('button').at(0) ?? container);
+    expect(opened).toHaveLength(1);
+    expect(opened[0]).toBe(check);
   });
 
   test('shows the request, reply and parsed result in a mobile-safe detail layer', async () => {
     let closed = false;
-    const { container, getByText, getAllByRole, getAllByText } = render(BalanceQueryDetail, {
+    const { container, getByRole, getByText, getAllByText } = render(BalanceQueryDetail, {
       props: {
         check,
         detail,
@@ -155,7 +161,7 @@ describe('balance query conversation', () => {
     expect(getByText('账户余额')).toBeTruthy();
     expect(container.querySelector('.bottom-\\[var\\(--mobile-tab-bar-height\\)\\]')).toBeTruthy();
 
-    await fireEvent.click(getAllByRole('button', { name: '关闭' })[0]);
+    await fireEvent.click(getByRole('button', { name: '关闭' }));
     expect(closed).toBe(true);
   });
 });
