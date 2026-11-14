@@ -110,16 +110,6 @@ describe('request', () => {
   });
 });
 
-describe('the generic methods', () => {
-  test('send JSON bodies and hand back the answer unparsed', async () => {
-    const requests = answer(() => Response.json({ anything: [1, 2] }));
-
-    expect(await api.post('/api/x', { a: 1 })).toEqual({ anything: [1, 2] });
-    expect(requests[0]?.method).toBe('POST');
-    expect(await requests[0]?.json()).toEqual({ a: 1 });
-  });
-});
-
 describe('getBalanceChecks', () => {
   test('leaves unset parameters out of the query and falls back to none on failure', async () => {
     const requests = answer(() => Response.json({ error: 'down' }, { status: 503 }));

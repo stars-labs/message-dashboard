@@ -124,11 +124,6 @@ export async function request<T>(
   return parsed.value;
 }
 
-/** A request whose answer the caller has not described yet: it gets `unknown`. */
-async function fetchWithAuth(endpoint: string, options: RequestInit = {}): Promise<unknown> {
-  return await request(endpoint, v.unknown(), options);
-}
-
 function withQuery(path: string, params: Readonly<Record<string, QueryValue | undefined>>): string {
   const entries = Object.entries(params).flatMap(([key, value]) =>
     value === undefined ? [] : [[key, String(value)]],
@@ -168,23 +163,6 @@ export const api = {
     async clear() {
       await messageCache.clearCache();
     },
-  },
-
-  // Generic HTTP methods for callers that parse the answer themselves.
-  async get(url: string, options: RequestInit = {}): Promise<unknown> {
-    return await fetchWithAuth(url, { ...options, method: 'GET' });
-  },
-
-  async post(url: string, data: unknown = {}, options: RequestInit = {}): Promise<unknown> {
-    return await fetchWithAuth(url, { ...options, ...jsonBody('POST', data) });
-  },
-
-  async put(url: string, data: unknown = {}, options: RequestInit = {}): Promise<unknown> {
-    return await fetchWithAuth(url, { ...options, ...jsonBody('PUT', data) });
-  },
-
-  async delete(url: string, options: RequestInit = {}): Promise<unknown> {
-    return await fetchWithAuth(url, { ...options, method: 'DELETE' });
   },
 
   // No getAuthToken(): the session is an HttpOnly cookie that JavaScript cannot read,
