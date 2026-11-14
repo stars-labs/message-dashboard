@@ -26,6 +26,45 @@ describe('overlay dismiss behaviour', () => {
     handle.destroy();
   });
 
+  test('Escape closes only the overlay opened last, then the one beneath it', () => {
+    const closed = [];
+    const outer = overlay(node(), { onClose: () => closed.push('outer') });
+    const inner = overlay(node(), { onClose: () => closed.push('inner') });
+
+    pressEscape();
+    expect(closed).toEqual(['inner']);
+
+    inner.destroy();
+    pressEscape();
+    expect(closed).toEqual(['inner', 'outer']);
+    outer.destroy();
+  });
+
+  test('closing a lower overlay first leaves the top one in charge of Escape', () => {
+    const closed = [];
+    const outer = overlay(node(), { onClose: () => closed.push('outer') });
+    const inner = overlay(node(), { onClose: () => closed.push('inner') });
+
+    outer.destroy();
+    pressEscape();
+
+    expect(closed).toEqual(['inner']);
+    inner.destroy();
+  });
+
+  test('destroying an overlay twice leaves the others in charge of Escape', () => {
+    const closed = [];
+    const outer = overlay(node(), { onClose: () => closed.push('outer') });
+    const inner = overlay(node(), { onClose: () => closed.push('inner') });
+
+    outer.destroy();
+    outer.destroy();
+    pressEscape();
+
+    expect(closed).toEqual(['inner']);
+    inner.destroy();
+  });
+
   test('other keys do nothing', () => {
     const closed = [];
     const handle = overlay(node(), { onClose: () => closed.push(true) });
