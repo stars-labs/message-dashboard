@@ -1,30 +1,15 @@
 import * as v from 'valibot';
-import { parseJson, type Schema } from '../../shared/parse-json.js';
+import { parseJson } from '../../shared/parse-json.js';
+import {
+  DAEMON_HEALTH_STATUSES,
+  HEALTH_SCHEMA_VERSION,
+  HealthSnapshot,
+} from '../../shared/api/daemon-status.js';
 
-export const HEALTH_SCHEMA_VERSION = 3;
-
-/** Ages in seconds. `null` means "never happened"; the daemon omits them on first boot. */
+/** Ages in seconds. `null` means "never happened". */
 type Age = number | null;
 
-export interface HealthQueue {
-  pending: number;
-  in_flight: number;
-  dead_letter: number;
-  oldest_unacknowledged_age_seconds: Age;
-}
-
-/** The normalized snapshot the daemon uploads, stored as JSON in daemon_health.metadata. */
-export interface HealthSnapshot {
-  schema_version: typeof HEALTH_SCHEMA_VERSION;
-  session_id: string;
-  version: string;
-  uptime_seconds: number;
-  last_message_read_success_age_seconds: Age;
-  last_upload_success_age_seconds: Age;
-  queue: HealthQueue;
-}
-
-type DaemonHealthStatus = 'unknown' | 'offline' | 'degraded' | 'healthy';
+type DaemonHealthStatus = (typeof DAEMON_HEALTH_STATUSES)[number];
 
 interface DaemonHealth {
   status: DaemonHealthStatus;
@@ -94,29 +79,12 @@ export function normalizeHealthSnapshot(raw: unknown): HealthSnapshot {
   };
 }
 
-const StoredAge = v.nullable(v.number());
-
-const StoredSnapshot: Schema<HealthSnapshot> = v.object({
-  schema_version: v.literal(HEALTH_SCHEMA_VERSION),
-  session_id: v.string(),
-  version: v.string(),
-  uptime_seconds: v.number(),
-  last_message_read_success_age_seconds: StoredAge,
-  last_upload_success_age_seconds: StoredAge,
-  queue: v.object({
-    pending: v.number(),
-    in_flight: v.number(),
-    dead_letter: v.number(),
-    oldest_unacknowledged_age_seconds: StoredAge,
-  }),
-});
-
 function parseHealthSnapshot(metadata: unknown): HealthSnapshot | null {
   if (typeof metadata === 'string') {
-    const parsed = parseJson(metadata, StoredSnapshot);
+    const parsed = parseJson(metadata, HealthSnapshot);
     return parsed.ok ? parsed.value : null;
   }
-  const result = v.safeParse(StoredSnapshot, metadata);
+  const result = v.safeParse(HealthSnapshot, metadata);
   return result.success ? result.output : null;
 }
 

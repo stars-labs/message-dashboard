@@ -1,6 +1,7 @@
 import * as v from 'valibot';
 import { queryFirst, type D1 } from '../lib/d1.js';
 import { json } from '../lib/response.js';
+import type { DaemonStatusResponse } from '../../shared/api/daemon-status.js';
 import { deriveDaemonHealth } from '../utils/daemon-health.js';
 import { classifyD1Error, logD1Error } from '../utils/d1-error.js';
 import type { D1ErrorClassification } from '../utils/d1-error.js';
@@ -110,7 +111,7 @@ export const healthHandler = {
           reasons: derived.reasons,
           snapshot: null,
           timestamp: new Date().toISOString(),
-        });
+        } satisfies DaemonStatusResponse);
       }
 
       const derived = deriveDaemonHealth(daemonHealth);
@@ -126,7 +127,7 @@ export const healthHandler = {
         reasons: derived.reasons,
         snapshot,
         timestamp: new Date().toISOString(),
-      });
+      } satisfies DaemonStatusResponse);
     } catch (error) {
       const classification = classifyD1Error(error);
       logD1Error('daemon_status', error, classification);
