@@ -761,8 +761,8 @@ impl AtModemManager {
                 || line.starts_with("+CCID:")
                 || line.starts_with("+ICCID:")
             {
-                if let Some(pos) = line.find(':') {
-                    let iccid = line[pos + 1..].trim().trim_matches('"');
+                if let Some((_, rest)) = line.split_once(':') {
+                    let iccid = rest.trim().trim_matches('"');
                     if iccid.len() >= 18 && iccid.chars().all(|c| c.is_ascii_hexdigit()) {
                         return Some(Self::normalize_iccid(iccid));
                     }
@@ -844,8 +844,8 @@ impl AtModemManager {
         // Parse "+CSQ: 20,99" -> rssi=20 (0-31 scale)
         for line in response.lines() {
             if line.contains("+CSQ:") {
-                if let Some(pos) = line.find(':') {
-                    let parts: Vec<&str> = line[pos + 1..].trim().split(',').collect();
+                if let Some((_, rest)) = line.split_once(':') {
+                    let parts: Vec<&str> = rest.trim().split(',').collect();
                     if let Some(rssi_str) = parts.first() {
                         if let Ok(rssi) = rssi_str.trim().parse::<u32>() {
                             if rssi <= 31 {
@@ -951,8 +951,8 @@ impl AtModemManager {
 
         for line in response.lines() {
             if line.contains("+QCFG: \"ims\"") {
-                if let Some(pos) = line.find(',') {
-                    let val = line[pos + 1..].trim().trim_matches('"');
+                if let Some((_, rest)) = line.split_once(',') {
+                    let val = rest.trim().trim_matches('"');
                     ims_enabled = val == "1";
                 }
             }
@@ -980,8 +980,8 @@ impl AtModemManager {
 
         for line in response.lines() {
             if line.contains("+CSCA:") {
-                if let Some(pos) = line.find(':') {
-                    let csca = line[pos + 1..].trim().trim_matches('"');
+                if let Some((_, rest)) = line.split_once(':') {
+                    let csca = rest.trim().trim_matches('"');
                     if !csca.is_empty() {
                         return Ok(Some(csca.to_string()));
                     }
@@ -997,8 +997,8 @@ impl AtModemManager {
         let mut mode = SmsMode::Unknown;
         for line in mode_response.lines() {
             if line.contains("+CMGF:") {
-                if let Some(pos) = line.find(':') {
-                    let val = line[pos + 1..].trim();
+                if let Some((_, rest)) = line.split_once(':') {
+                    let val = rest.trim();
                     if val == "0" {
                         mode = SmsMode::Pdu;
                     } else if val == "1" {
@@ -1162,14 +1162,14 @@ impl AtModemManager {
         let Some(line) = response.lines().find(|line| line.contains("+CPMS:")) else {
             return Vec::new();
         };
-        let Some(start) = line.find('(') else {
-            return Vec::new();
-        };
-        let Some(end_offset) = line[start + 1..].find(')') else {
+        let Some((inside, _)) = line
+            .split_once('(')
+            .and_then(|(_, after)| after.split_once(')'))
+        else {
             return Vec::new();
         };
 
-        Self::parse_quoted_values(&line[start + 1..start + 1 + end_offset])
+        Self::parse_quoted_values(inside)
     }
 
     fn parse_quoted_values(value: &str) -> Vec<String> {

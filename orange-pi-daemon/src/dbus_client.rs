@@ -455,12 +455,9 @@ impl DBusClient {
 fn extract_modem_id_from_path(line: &str) -> Option<String> {
     if line.contains("/org/freedesktop/ModemManager1/Modem/") {
         // Extract the modem ID from the path
-        if let Some(start) = line.find("/Modem/") {
-            let id_start = start + 7;
-            let remaining = &line[id_start..];
-            // Find the end (space or quote)
-            let end = remaining.find([' ', '"']).unwrap_or(remaining.len());
-            let modem_id = &remaining[..end];
+        if let Some((_, remaining)) = line.split_once("/Modem/") {
+            // The ID runs to the next space or quote
+            let modem_id = remaining.split([' ', '"']).next().unwrap_or_default();
             if !modem_id.is_empty() {
                 return Some(modem_id.to_string());
             }
