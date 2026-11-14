@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import * as v from 'valibot';
+import { ErrorResponse } from '../../shared/api/error.js';
 import { parseJson, readJson, type Schema } from '../../shared/parse-json.js';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
 import type { D1 } from '../lib/d1.js';
@@ -467,6 +468,19 @@ describe('outbound media setup', () => {
 
     expect(response.status).toBe(502);
     expect(env.CALL_STATE.call()).toBeNull();
+  });
+
+  test('an SFU failure answers the error body the client reads, with what the SFU said', async () => {
+    const { post } = setup();
+    stubSfu(() => [500, { errorCode: 'boom', errorDescription: 'no capacity' }]);
+
+    const response = await post('/api/calls/dial', dial);
+    const body = await readJson(response, ErrorResponse);
+
+    expect(body.ok).toBe(true);
+    if (!body.ok) return;
+    expect(body.value.error).toBe('Could not create an SFU session');
+    expect(body.value.detail).toContain('no capacity');
   });
 
   test('a second dial is refused while any call exists', async () => {

@@ -17,6 +17,7 @@
 // Daemon routes live under /api/control/, which the auth0 middleware gates with
 // X-API-Key.
 
+import type { ErrorResponse } from '../../shared/api/error.js';
 import { json } from '../lib/response.js';
 import * as v from 'valibot';
 import { parseJson, readJson, type Parsed } from '../../shared/parse-json.js';
@@ -60,7 +61,7 @@ const SfuBody = v.object({
 
 type SfuBody = v.InferOutput<typeof SfuBody>;
 
-/** `detail` is what the SFU sent, passed to the browser when a step fails. */
+/** `detail` is what the SFU sent, passed to the browser as text when a step fails. */
 interface SfuResult {
   ok: boolean;
   status: number;
@@ -413,7 +414,8 @@ async function sfu(
 }
 
 function sfuError(message: string, result: SfuResult): Response {
-  return json({ error: message, detail: result.detail }, 502);
+  const detail = typeof result.detail === 'string' ? result.detail : JSON.stringify(result.detail);
+  return json({ error: message, detail } satisfies ErrorResponse, 502);
 }
 
 /** Creates the browser session and publishes its mic. Returns { sessionId, answer } or { error }. */
