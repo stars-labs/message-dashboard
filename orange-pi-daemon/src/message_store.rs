@@ -469,14 +469,14 @@ impl MessageStore {
             usize,
             usize,
             usize,
-            Option<i64>,
+            Option<u64>,
         ) = conn.query_row(
             "SELECT
                 COUNT(CASE WHEN status = 'pending' THEN 1 END),
                 COUNT(CASE WHEN status = 'dead_letter' THEN 1 END),
                 COUNT(CASE WHEN status = 'in_flight' THEN 1 END),
-                MIN(CASE WHEN status IN ('pending', 'in_flight')
-                  THEN CAST((julianday('now') - julianday(created_at)) * 86400 AS INTEGER) END)
+                MAX(CASE WHEN status IN ('pending', 'in_flight')
+                  THEN MAX(0, CAST((julianday('now') - julianday(created_at)) * 86400 AS INTEGER)) END)
              FROM messages",
             [],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
@@ -486,8 +486,7 @@ impl MessageStore {
             pending,
             dead_letter,
             in_flight,
-            oldest_unacknowledged_age_seconds: oldest_unacknowledged_age_seconds
-                .map(i64::cast_unsigned),
+            oldest_unacknowledged_age_seconds,
         })
     }
 
@@ -675,6 +674,50 @@ mod queue_monitoring_tests {
         assert_eq!(stats.pending, 2);
         assert_eq!(stats.dead_letter, 2);
         assert_eq!(stats.in_flight, 1);
+    }
+
+    fn insert_pending(store: &MessageStore, created_at: &str, index: usize) {
+        let conn = store.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO messages (
+                phone_iccid, phone_number, content, timestamp, direction,
+                modem_id, sms_path, status, created_at
+             ) VALUES ('iccid', '10010', ?2, CURRENT_TIMESTAMP, 'received',
+                       'modem', ?3, 'pending', datetime('now', ?1))",
+            params![
+                created_at,
+                format!("content-{index}"),
+                format!("path-{index}")
+            ],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn reports_the_age_of_the_oldest_unacknowledged_message() {
+        let store = MessageStore::new(":memory:").unwrap();
+        insert_pending(&store, "-2 hours", 0);
+        insert_pending(&store, "-5 minutes", 1);
+
+        let age = store
+            .get_queue_stats()
+            .unwrap()
+            .oldest_unacknowledged_age_seconds;
+
+        assert!(age.is_some_and(|seconds| (7190..=7210).contains(&seconds)));
+    }
+
+    #[test]
+    fn a_message_stamped_in_the_future_has_waited_no_time() {
+        let store = MessageStore::new(":memory:").unwrap();
+        insert_pending(&store, "+1 hour", 0);
+
+        let age = store
+            .get_queue_stats()
+            .unwrap()
+            .oldest_unacknowledged_age_seconds;
+
+        assert_eq!(age, Some(0));
     }
 }
 
