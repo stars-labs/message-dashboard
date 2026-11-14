@@ -49,7 +49,7 @@ export function applyUpdate(
   if (!state.available || state.applying) return;
   state.available = false;
   state.applying = true;
-  updateSW?.(true);
+  void updateSW?.(true);
 }
 
 /**
@@ -71,7 +71,7 @@ export function createUpdateChecker(state: UpdateState) {
 
   return {
     setRegistration(nextRegistration?: RegistrationLike | null): void {
-      registration = nextRegistration || null;
+      registration = nextRegistration ?? null;
       if (registration?.waiting) needRefresh(state);
     },
 

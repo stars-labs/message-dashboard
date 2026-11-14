@@ -7,14 +7,22 @@ function fakeEnv({
   cacheKeys = ['workbox-precache-v2'],
   unregister,
   deleteCache,
+}: {
+  registrations?: number;
+  cacheKeys?: string[];
+  unregister?: () => Promise<boolean>;
+  deleteCache?: (key: string) => Promise<boolean>;
 } = {}) {
   const regs = Array.from({ length: registrations }, () => ({
-    unregister: unregister ?? mock(async () => true),
+    unregister: unregister ?? mock(() => Promise.resolve(true)),
   }));
   return {
     regs,
-    navigator: { serviceWorker: { getRegistrations: async () => regs } },
-    caches: { keys: async () => cacheKeys, delete: deleteCache ?? mock(async () => true) },
+    navigator: { serviceWorker: { getRegistrations: () => Promise.resolve(regs) } },
+    caches: {
+      keys: () => Promise.resolve(cacheKeys),
+      delete: deleteCache ?? mock(() => Promise.resolve(true)),
+    },
   };
 }
 
@@ -40,9 +48,7 @@ describe('resetServiceWorker', () => {
     // recoverable, a dead worker with a stale cache is not. Caches must be cleared
     // even if unregister fails.
     const env = fakeEnv({
-      unregister: mock(async () => {
-        throw new Error('boom');
-      }),
+      unregister: mock(() => Promise.reject(new Error('boom'))),
       cacheKeys: ['stale'],
     });
     const result = await resetServiceWorker(env);
@@ -53,24 +59,22 @@ describe('resetServiceWorker', () => {
 
   it('reports failure when cache deletion throws', async () => {
     const env = fakeEnv({
-      deleteCache: mock(async () => {
-        throw new Error('nope');
-      }),
+      deleteCache: mock(() => Promise.reject(new Error('nope'))),
     });
     const result = await resetServiceWorker(env);
     expect(result.ok).toBe(false);
   });
 
   it('degrades cleanly where service workers are unsupported', async () => {
-    const result = await resetServiceWorker({ navigator: {}, caches: undefined });
+    const result = await resetServiceWorker({ navigator: {} });
     expect(result).toEqual({ ok: true, unregistered: 0, cachesDeleted: 0 });
   });
 
   it('clears caches even when serviceWorker is missing but caches exist', async () => {
-    const del = mock(async () => true);
+    const del = mock(() => Promise.resolve(true));
     const result = await resetServiceWorker({
       navigator: {},
-      caches: { keys: async () => ['x'], delete: del },
+      caches: { keys: () => Promise.resolve(['x']), delete: del },
     });
     expect(del).toHaveBeenCalledWith('x');
     expect(result.cachesDeleted).toBe(1);
@@ -79,8 +83,10 @@ describe('resetServiceWorker', () => {
 
 describe('resetDashboardCache', () => {
   it('clears the IndexedDB message cache as well as offline caches', async () => {
-    const clearMessageCache = mock(async () => {});
-    const resetOfflineCache = mock(async () => ({ ok: true, unregistered: 1, cachesDeleted: 2 }));
+    const clearMessageCache = mock(() => Promise.resolve());
+    const resetOfflineCache = mock(() =>
+      Promise.resolve({ ok: true, unregistered: 1, cachesDeleted: 2 }),
+    );
 
     const result = await resetDashboardCache({ clearMessageCache, resetOfflineCache });
 
@@ -90,10 +96,10 @@ describe('resetDashboardCache', () => {
   });
 
   it('reports failure but still attempts both independent cache clears', async () => {
-    const clearMessageCache = mock(async () => {
-      throw new Error('IndexedDB blocked');
-    });
-    const resetOfflineCache = mock(async () => ({ ok: true, unregistered: 0, cachesDeleted: 1 }));
+    const clearMessageCache = mock(() => Promise.reject(new Error('IndexedDB blocked')));
+    const resetOfflineCache = mock(() =>
+      Promise.resolve({ ok: true, unregistered: 0, cachesDeleted: 1 }),
+    );
 
     const result = await resetDashboardCache({ clearMessageCache, resetOfflineCache });
 

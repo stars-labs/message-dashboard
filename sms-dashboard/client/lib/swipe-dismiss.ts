@@ -121,12 +121,13 @@ export function swipeDismiss(node: HTMLElement, options: SwipeDismissOptions = {
   }
 
   function handleTransitionEnd(event: TransitionEvent) {
-    if (event.target === node && dismissed === false) finishDismiss();
+    if (event.target === node && !dismissed) finishDismiss();
   }
 
   function handleTouchStart(event: TouchEvent) {
     if (event.touches.length !== 1) return;
     const touch = event.touches[0];
+    if (touch === undefined) return;
     onSwipeStart(state, touch.clientX, touch.clientY);
     if (!state.active || moveListening) return;
     node.addEventListener('touchmove', handleTouchMove, nonPassive);
@@ -136,6 +137,7 @@ export function swipeDismiss(node: HTMLElement, options: SwipeDismissOptions = {
   function handleTouchMove(event: TouchEvent) {
     if (event.touches.length !== 1) return;
     const touch = event.touches[0];
+    if (touch === undefined) return;
     const distance = onSwipeMove(state, touch.clientX, touch.clientY);
     if (state.axis === 'horizontal' && event.cancelable) event.preventDefault();
     setPosition(distance);

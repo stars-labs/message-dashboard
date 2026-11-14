@@ -13,7 +13,7 @@
 /** The globals this uses, injectable so the ordering is testable. */
 interface SwResetEnv {
   navigator?: {
-    serviceWorker?: { getRegistrations(): Promise<Array<{ unregister(): Promise<boolean> }>> };
+    serviceWorker?: { getRegistrations(): Promise<{ unregister(): Promise<boolean> }[]> };
   };
   caches?: {
     keys(): Promise<string[]>;

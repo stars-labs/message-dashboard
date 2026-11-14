@@ -35,7 +35,7 @@ describe('needRefresh', () => {
     // mid-reload would flash a prompt the user already acted on.
     const s = createUpdateState();
     needRefresh(s);
-    applyUpdate(s, () => {});
+    applyUpdate(s, () => Promise.resolve());
     needRefresh(s);
     expect(s.available).toBe(false);
   });
@@ -62,7 +62,7 @@ describe('dismiss', () => {
 describe('applyUpdate', () => {
   it('reloads via the supplied updater', () => {
     const s = createUpdateState();
-    const updateSW = mock(() => {});
+    const updateSW = mock(() => Promise.resolve());
     needRefresh(s);
     applyUpdate(s, updateSW);
     expect(updateSW).toHaveBeenCalledTimes(1);
@@ -73,14 +73,14 @@ describe('applyUpdate', () => {
   it('hides the prompt and marks itself applying', () => {
     const s = createUpdateState();
     needRefresh(s);
-    applyUpdate(s, () => {});
+    applyUpdate(s, () => Promise.resolve());
     expect(s.available).toBe(false);
     expect(s.applying).toBe(true);
   });
 
   it('ignores a double tap — reload must not fire twice', () => {
     const s = createUpdateState();
-    const updateSW = mock(() => {});
+    const updateSW = mock(() => Promise.resolve());
     needRefresh(s);
     applyUpdate(s, updateSW);
     applyUpdate(s, updateSW);
@@ -89,7 +89,7 @@ describe('applyUpdate', () => {
 
   it('does nothing when no update is available', () => {
     const s = createUpdateState();
-    const updateSW = mock(() => {});
+    const updateSW = mock(() => Promise.resolve());
     applyUpdate(s, updateSW);
     expect(updateSW).not.toHaveBeenCalled();
     expect(s.applying).toBe(false);
@@ -98,7 +98,9 @@ describe('applyUpdate', () => {
   it('tolerates a missing updater rather than throwing mid-click', () => {
     const s = createUpdateState();
     needRefresh(s);
-    expect(() => applyUpdate(s, null)).not.toThrow();
+    expect(() => {
+      applyUpdate(s, null);
+    }).not.toThrow();
     expect(s.available).toBe(false);
   });
 });
@@ -115,10 +117,11 @@ describe('registerError', () => {
 describe('createUpdateChecker', () => {
   it('checks the registered worker and surfaces a newly waiting version', async () => {
     const state = createUpdateState();
-    const registration = {
+    const registration: { waiting: unknown; update: () => Promise<void> } = {
       waiting: null,
-      update: mock(async () => {
+      update: mock(() => {
         registration.waiting = {};
+        return Promise.resolve();
       }),
     };
     const checker = createUpdateChecker(state);
@@ -132,7 +135,7 @@ describe('createUpdateChecker', () => {
 
   it('reopens a dismissed prompt when the worker is already waiting', async () => {
     const state = createUpdateState();
-    const registration = { waiting: {}, update: mock(async () => {}) };
+    const registration = { waiting: {}, update: mock(() => Promise.resolve()) };
     const checker = createUpdateChecker(state);
     checker.setRegistration(registration);
     dismiss(state);
@@ -147,7 +150,7 @@ describe('createUpdateChecker', () => {
     const state = createUpdateState();
     const checker = createUpdateChecker(state);
 
-    await expect(checker.check()).resolves.toBe(false);
+    expect(await checker.check()).toBe(false);
     expect(state.available).toBe(false);
   });
 });

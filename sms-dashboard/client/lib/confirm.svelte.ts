@@ -53,7 +53,7 @@ export function confirmAction(options: ConfirmOptions): Promise<boolean> {
     danger = false,
   } = options;
   if (!hosted) {
-    return Promise.resolve(globalThis.confirm?.(message) ?? false);
+    return Promise.resolve('confirm' in globalThis ? globalThis.confirm(message) : false);
   }
   // A second request while one is open answers the first with "no": two
   // destructive prompts stacked on each other is never what the operator meant.

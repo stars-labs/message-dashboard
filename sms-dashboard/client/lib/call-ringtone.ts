@@ -10,17 +10,30 @@ const BEEP_HZ = 880;
 const BEEP_MS = 220;
 const PATTERN_MS = 2400;
 
-/** The subset of AudioContext this uses, so tests can pass a stub. */
-interface AudioContextLike {
+/**
+ * The subset of AudioContext this uses, so tests can pass a stub. `Node` is
+ * the audio node type: AudioNode for a real AudioContext.
+ */
+interface AudioContextLike<Node> {
   currentTime: number;
-  destination: AudioNode;
+  destination: Node;
   resume?(): Promise<void> | void;
   close?(): Promise<void> | void;
-  createOscillator(): OscillatorNode;
-  createGain(): GainNode;
+  createOscillator(): {
+    type: OscillatorType;
+    frequency: { value: number };
+    connect(destination: Node): unknown;
+    start(when: number): void;
+    stop(when: number): void;
+  };
+  createGain(): Node & {
+    gain: {
+      setValueAtTime(value: number, startTime: number): unknown;
+      exponentialRampToValueAtTime(value: number, endTime: number): unknown;
+    };
+    connect(destination: Node): unknown;
+  };
 }
-
-type AudioContextCtor = new () => AudioContextLike;
 
 interface Ringtone {
   start(): boolean;
@@ -28,14 +41,16 @@ interface Ringtone {
   readonly ringing: boolean;
 }
 
-export function createRingtone(AudioContextCtor?: AudioContextCtor | null): Ringtone {
-  let context: AudioContextLike | null = null;
+export function createRingtone<Node>(
+  AudioContextCtor?: (new () => AudioContextLike<Node>) | null,
+): Ringtone {
+  let context: AudioContextLike<Node> | null = null;
   let timer: ReturnType<typeof setInterval> | null = null;
 
-  function beep(at: number) {
+  function beep(audio: AudioContextLike<Node>, at: number) {
     try {
-      const oscillator = context!.createOscillator();
-      const gain = context!.createGain();
+      const oscillator = audio.createOscillator();
+      const gain = audio.createGain();
       oscillator.type = 'sine';
       oscillator.frequency.value = BEEP_HZ;
       // Ramped rather than switched, so the beep does not click.
@@ -43,7 +58,7 @@ export function createRingtone(AudioContextCtor?: AudioContextCtor | null): Ring
       gain.gain.exponentialRampToValueAtTime(0.12, at + 0.02);
       gain.gain.exponentialRampToValueAtTime(0.0001, at + BEEP_MS / 1000);
       oscillator.connect(gain);
-      gain.connect(context!.destination);
+      gain.connect(audio.destination);
       oscillator.start(at);
       oscillator.stop(at + BEEP_MS / 1000 + 0.02);
     } catch {
@@ -53,8 +68,8 @@ export function createRingtone(AudioContextCtor?: AudioContextCtor | null): Ring
 
   function ring() {
     if (!context) return;
-    beep(context.currentTime);
-    beep(context.currentTime + 0.35);
+    beep(context, context.currentTime);
+    beep(context, context.currentTime + 0.35);
   }
 
   return {
@@ -62,7 +77,7 @@ export function createRingtone(AudioContextCtor?: AudioContextCtor | null): Ring
       if (timer || !AudioContextCtor) return false;
       try {
         context = context ?? new AudioContextCtor();
-        context.resume?.();
+        void context.resume?.();
       } catch {
         context = null;
         return false;
@@ -77,7 +92,7 @@ export function createRingtone(AudioContextCtor?: AudioContextCtor | null): Ring
         timer = null;
       }
       try {
-        context?.close?.();
+        void context?.close?.();
       } catch {
         // Closing twice, or after the page froze, is not an error worth raising.
       }

@@ -28,12 +28,12 @@ describe('shared confirmation dialog', () => {
     const second = confirmAction({ message: '第二个' });
 
     expect(await first).toBe(false);
-    second.then(() => {});
+    void second;
   });
 
   test('without a host it falls back to the native dialog', async () => {
     const original = globalThis.confirm;
-    const asked = [];
+    const asked: (string | undefined)[] = [];
     globalThis.confirm = (message) => {
       asked.push(message);
       return true;
