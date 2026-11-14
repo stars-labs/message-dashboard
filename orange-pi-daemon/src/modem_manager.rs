@@ -670,7 +670,10 @@ impl ModemManager {
 
         // Store new parts to database
         for part in parts {
-            let concat_info = part.concat_info.as_ref().unwrap();
+            let Some(concat_info) = part.concat_info.as_ref() else {
+                warn!("Skipping segment without concatenation info");
+                continue;
+            };
             if let Err(e) = message_store.store_segment(&Segment {
                 iccid,
                 sender,
@@ -690,7 +693,7 @@ impl ModemManager {
         let message =
             match message_store.get_segments_with_storage(iccid, sender, ref_id, total_parts) {
                 Ok(segments) if segments.len() == usize::from(total_parts) => {
-                    Self::complete_message(group, segments)
+                    Self::complete_message(group, segments)?
                 }
                 Ok(segments)
                     if partial_sms::is_orphaned(
@@ -731,7 +734,7 @@ impl ModemManager {
     fn complete_message(
         group: &MultipartGroup<'_>,
         mut all_parts: Vec<(u8, String, String, String, u32)>,
-    ) -> MessageWithPath {
+    ) -> Option<MessageWithPath> {
         all_parts.sort_by_key(|(part_num, _, _, _, _)| *part_num);
 
         let combined_text = all_parts
@@ -739,7 +742,7 @@ impl ModemManager {
             .map(|(_, content, _, _, _)| content.as_str())
             .collect::<Vec<_>>()
             .join("");
-        let timestamp = all_parts[0].2.clone();
+        let timestamp = all_parts.first()?.2.clone();
         let all_locations: Vec<(String, u32)> = all_parts
             .iter()
             .map(|(_, _, _, storage, index)| (storage.clone(), *index))
@@ -753,7 +756,7 @@ impl ModemManager {
             group.sender
         );
 
-        MessageWithPath {
+        Some(MessageWithPath {
             message: Message {
                 phone_iccid: group.iccid.to_string(),
                 phone_number: group.sender.to_string(),
@@ -763,7 +766,7 @@ impl ModemManager {
             },
             modem_id: group.modem_id.to_string(),
             sms_path: Self::format_at_sms_path(&all_locations),
-        }
+        })
     }
 
     /// The missing parts are not coming. Deliver what did arrive, marked

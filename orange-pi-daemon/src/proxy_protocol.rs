@@ -32,15 +32,18 @@ pub enum ParseError {
 
 /// Parse the header at the start of `buf`.
 pub fn parse_v1(buf: &[u8]) -> Result<ProxyHeader, ParseError> {
-    let limit = buf.len().min(MAX_HEADER_LEN);
-    let Some(end) = buf[..limit].windows(2).position(|w| w == b"\r\n") else {
+    let head = buf.get(..MAX_HEADER_LEN).unwrap_or(buf);
+    let Some(end) = head.windows(2).position(|w| w == b"\r\n") else {
         return if buf.len() >= MAX_HEADER_LEN {
             Err(ParseError::Malformed("no CRLF within 107 bytes"))
         } else {
             Err(ParseError::Incomplete)
         };
     };
-    let line = std::str::from_utf8(&buf[..end]).map_err(|_| ParseError::Malformed("not ASCII"))?;
+    let line = head
+        .get(..end)
+        .and_then(|line| std::str::from_utf8(line).ok())
+        .ok_or(ParseError::Malformed("not ASCII"))?;
     let len = end + 2;
 
     let mut fields = line.split(' ');

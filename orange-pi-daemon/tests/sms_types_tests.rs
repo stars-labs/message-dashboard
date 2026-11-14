@@ -1,3 +1,4 @@
+use anyhow::Context;
 use orange_pi_daemon_rust::types::Config;
 use orange_pi_daemon_rust::types::{PendingSms, SmsSubmission};
 use orange_pi_daemon_rust::{
@@ -32,30 +33,34 @@ where
     F: FnOnce(ApiClient) -> Fut,
     Fut: Future<Output = anyhow::Result<Vec<PendingSms>>>,
 {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = listener.local_addr().unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let address = listener.local_addr()?;
     let client = ApiClient::new(Config {
         api_url: format!("http://{address}"),
         api_key: "fixture-api-key".into(),
         check_interval_secs: 1,
-    });
+    })?;
     let serve = async {
-        let (mut stream, _) = listener.accept().await.unwrap();
+        let (mut stream, _) = listener.accept().await?;
         let mut request = Vec::new();
         while !request.ends_with(b"\r\n\r\n") {
             let mut chunk = [0; 1024];
-            let count = stream.read(&mut chunk).await.unwrap();
+            let count = stream.read(&mut chunk).await?;
             assert!(
                 count > 0,
                 "connection closed before request headers arrived"
             );
-            request.extend_from_slice(&chunk[..count]);
+            request.extend_from_slice(
+                chunk
+                    .get(..count)
+                    .context("read more bytes than the buffer holds")?,
+            );
             assert!(
                 request.len() <= 8192,
                 "request headers exceeded fixture limit"
             );
         }
-        let request = String::from_utf8(request).unwrap().to_ascii_lowercase();
+        let request = String::from_utf8(request)?.to_ascii_lowercase();
         assert!(request.starts_with("get /api/control/pending-sms http/1.1\r\n"));
         assert!(request.contains("x-api-key: fixture-api-key\r\n"));
         match expected_session {
@@ -69,13 +74,15 @@ where
             "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
             body.len()
         );
-        stream.write_all(response.as_bytes()).await.unwrap();
+        stream.write_all(response.as_bytes()).await?;
+        anyhow::Ok(())
     };
-    let ((), result) = tokio::time::timeout(Duration::from_secs(3), async {
+    let (served, result) = tokio::time::timeout(Duration::from_secs(3), async {
         tokio::join!(serve, fetch(client))
     })
     .await
-    .expect("fixture HTTP exchange timed out");
+    .context("fixture HTTP exchange timed out")?;
+    served?;
     result
 }
 

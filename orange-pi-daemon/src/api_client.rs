@@ -27,14 +27,12 @@ pub struct ApiClient {
 }
 
 impl ApiClient {
-    pub fn new(config: Config) -> Self {
-        Self {
-            client: Client::builder()
-                .timeout(std::time::Duration::from_secs(30)) // Increased to 30s for large uploads
-                .build()
-                .expect("Failed to create HTTP client"),
-            config,
-        }
+    pub fn new(config: Config) -> Result<Self> {
+        let client = Client::builder()
+            .timeout(std::time::Duration::from_secs(30)) // Increased to 30s for large uploads
+            .build()
+            .context("Failed to create HTTP client")?;
+        Ok(Self { client, config })
     }
 
     /// Send an independent, versioned process and task health report.

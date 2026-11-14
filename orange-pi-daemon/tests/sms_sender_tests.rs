@@ -7,17 +7,21 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 // Helper function to create test SMS sender (async version)
-async fn create_test_sender() -> SmsSender {
+async fn create_test_sender() -> anyhow::Result<SmsSender> {
     let config = Config {
         api_url: "http://localhost:8787".to_string(),
         api_key: "test_key".to_string(),
         check_interval_secs: 1,
     };
 
-    let api_client = ApiClient::new(config);
+    let api_client = ApiClient::new(config)?;
     let modem_manager = Arc::new(ModemManager::new().await);
 
-    SmsSender::new(api_client, modem_manager, "test-session".to_string())
+    Ok(SmsSender::new(
+        api_client,
+        modem_manager,
+        "test-session".to_string(),
+    ))
 }
 
 // Helper function to create test pending SMS
@@ -38,7 +42,7 @@ fn create_test_sms(id: &str, iccid: &str, recipient: &str, content: &str) -> Pen
 
 #[tokio::test]
 async fn test_sms_sender_new() {
-    let mut sender = create_test_sender().await;
+    let mut sender = create_test_sender().await.unwrap();
     sender.update_modem_cache(HashMap::from([("iccid".into(), "modem".into())]));
     assert_eq!(
         sender.find_modem_for_iccid("iccid").await.as_deref(),
@@ -52,7 +56,7 @@ async fn test_sms_sender_new() {
 
 #[tokio::test]
 async fn test_update_modem_cache() {
-    let mut sender = create_test_sender().await;
+    let mut sender = create_test_sender().await.unwrap();
 
     let mut cache = HashMap::new();
     cache.insert("iccid_001".to_string(), "modem_0".to_string());
@@ -72,7 +76,7 @@ async fn test_update_modem_cache() {
 
 #[tokio::test]
 async fn test_update_modem_cache_empty() {
-    let mut sender = create_test_sender().await;
+    let mut sender = create_test_sender().await.unwrap();
 
     sender.update_modem_cache(HashMap::from([("iccid".into(), "modem".into())]));
     assert_eq!(
@@ -85,7 +89,7 @@ async fn test_update_modem_cache_empty() {
 
 #[tokio::test]
 async fn test_update_modem_cache_multiple_times() {
-    let mut sender = create_test_sender().await;
+    let mut sender = create_test_sender().await.unwrap();
 
     // First update
     let mut cache1 = HashMap::new();
@@ -110,7 +114,7 @@ async fn test_update_modem_cache_multiple_times() {
 
 #[tokio::test]
 async fn test_find_modem_for_iccid_from_cache() {
-    let mut sender = create_test_sender().await;
+    let mut sender = create_test_sender().await.unwrap();
 
     // Populate cache
     let mut cache = HashMap::new();
@@ -126,7 +130,7 @@ async fn test_find_modem_for_iccid_from_cache() {
 
 #[tokio::test]
 async fn test_find_modem_for_iccid_not_in_cache() {
-    let sender = create_test_sender().await;
+    let sender = create_test_sender().await.unwrap();
 
     // Try to find modem not in cache (will search via modem manager)
     let result = sender.find_modem_for_iccid("nonexistent_iccid").await;
@@ -137,7 +141,7 @@ async fn test_find_modem_for_iccid_not_in_cache() {
 
 #[tokio::test]
 async fn test_find_modem_for_iccid_cache_hit_vs_miss() {
-    let mut sender = create_test_sender().await;
+    let mut sender = create_test_sender().await.unwrap();
 
     // Populate cache with one ICCID
     let mut cache = HashMap::new();
@@ -196,7 +200,7 @@ fn test_pending_sms_debug() {
 
 #[tokio::test]
 async fn test_send_sms_signature() {
-    let sender = create_test_sender().await;
+    let sender = create_test_sender().await.unwrap();
     let sms = create_test_sms("msg_001", "iccid_001", "+1234567890", "Test");
 
     // Try to send (will fail without real hardware, but tests signature)
@@ -208,7 +212,7 @@ async fn test_send_sms_signature() {
 
 #[tokio::test]
 async fn test_send_sms_with_cached_modem() {
-    let mut sender = create_test_sender().await;
+    let mut sender = create_test_sender().await.unwrap();
 
     // Populate cache with modem
     let mut cache = HashMap::new();
@@ -270,7 +274,7 @@ fn test_pending_sms_with_international_number() {
 
 #[tokio::test]
 async fn test_modem_cache_large_scale() {
-    let mut sender = create_test_sender().await;
+    let mut sender = create_test_sender().await.unwrap();
 
     // Create cache with 100+ modems (simulating production)
     let mut cache = HashMap::new();
@@ -290,7 +294,7 @@ async fn test_modem_cache_large_scale() {
 
 #[tokio::test]
 async fn test_find_modem_multiple_lookups() {
-    let mut sender = create_test_sender().await;
+    let mut sender = create_test_sender().await.unwrap();
 
     let mut cache = HashMap::new();
     cache.insert("iccid_001".to_string(), "modem_0".to_string());

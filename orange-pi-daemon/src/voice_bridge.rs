@@ -29,7 +29,7 @@ use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, PoisonError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::io::unix::AsyncFd;
 use tokio::net::{TcpListener, TcpStream};
@@ -159,7 +159,10 @@ async fn read_proxy_source(tcp: &mut TcpStream) -> Result<Option<SocketAddr>> {
         if n == 0 {
             bail!("connection closed before the proxy header");
         }
-        match proxy_protocol::parse_v1(&buf[..n]) {
+        let Some(peeked) = buf.get(..n) else {
+            bail!("peeked {n} bytes into a {}-byte buffer", buf.len());
+        };
+        match proxy_protocol::parse_v1(peeked) {
             Ok(header) => break header,
             Err(proxy_protocol::ParseError::Incomplete) if n < buf.len() => {
                 tokio::time::sleep(Duration::from_millis(10)).await;
@@ -314,7 +317,7 @@ impl VoiceBridge {
             let path = request.uri().path();
             match voice_auth::parse_path(path) {
                 Some(req) if voice_auth::verify(&api_key, &req, now_unix()) => {
-                    *admitted_slot.lock().unwrap() = Some(req);
+                    *admitted_slot.lock().unwrap_or_else(PoisonError::into_inner) = Some(req);
                     Ok(response)
                 }
                 _ => {
@@ -331,7 +334,7 @@ impl VoiceBridge {
         .await??;
         let request = admitted
             .lock()
-            .unwrap()
+            .unwrap_or_else(PoisonError::into_inner)
             .take()
             .ok_or_else(|| anyhow!("upgrade accepted without an admitted request"))?;
 
@@ -692,7 +695,11 @@ impl VoiceBridge {
                     return;
                 }
             };
-            for &byte in &buf[..n] {
+            let Some(chunk) = buf.get(..n) else {
+                warn!(modem_id = %modem_id, "📞 URC port {} read {} bytes into a {}-byte buffer", port, n, buf.len());
+                return;
+            };
+            for &byte in chunk {
                 if byte != b'\n' && byte != b'\r' {
                     line.push(byte);
                     continue;
@@ -803,7 +810,14 @@ async fn write_all(fd: &AsyncFd<File>, mut data: &[u8]) -> std::io::Result<()> {
                     "serial port accepted no data",
                 ))
             }
-            Ok(Ok(n)) => data = &data[n..],
+            Ok(Ok(n)) => {
+                data = data.get(n..).ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "serial port wrote more bytes than were offered",
+                    )
+                })?;
+            }
             Ok(Err(e)) => return Err(e),
             Err(_would_block) => {}
         }
@@ -842,7 +856,11 @@ async fn pump_nmea(
                         return "nmea_error";
                     }
                 };
-                pending.extend_from_slice(&buf[..n]);
+                let Some(chunk) = buf.get(..n) else {
+                    warn!("📞 NMEA read {} bytes into a {}-byte buffer", n, buf.len());
+                    return "nmea_error";
+                };
+                pending.extend_from_slice(chunk);
                 while pending.len() >= MODEM_FRAME {
                     let frame: Vec<u8> = pending.drain(..MODEM_FRAME).collect();
                     let payload = modem_to_adapter(&frame, &mut last_sample);

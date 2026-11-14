@@ -342,11 +342,13 @@ impl DBusClient {
 
         // Parse signal quality from busctl output
         // Format: ub 75 true (percent, recent)
-        let parts: Vec<&str> = stdout.split_whitespace().collect();
+        let mut parts = stdout.split_whitespace();
 
-        if parts.len() >= 3 && parts[0] == "ub" {
-            let percent = parts[1].parse::<u32>().unwrap_or(0);
-            let recent = parts[2] == "true";
+        if let (Some("ub"), Some(percent), Some(recent)) =
+            (parts.next(), parts.next(), parts.next())
+        {
+            let percent = percent.parse::<u32>().unwrap_or(0);
+            let recent = recent == "true";
             Ok((percent, recent))
         } else {
             Err(anyhow!("Failed to parse signal quality"))

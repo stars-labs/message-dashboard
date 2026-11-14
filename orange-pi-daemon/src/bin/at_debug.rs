@@ -1,8 +1,8 @@
 //! Debug tool to test AT commands directly
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use nix::sys::termios::{self, BaudRate, SetArg};
-use orange_pi_daemon_rust::at_modem::control_char_slot;
+use orange_pi_daemon_rust::at_modem::set_control_char;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::time::{Duration, Instant};
@@ -32,8 +32,8 @@ fn open_serial(port: &str) -> Result<File> {
         | termios::InputFlags::INLCR);
     term.output_flags &= !termios::OutputFlags::OPOST;
 
-    term.control_chars[control_char_slot(termios::SpecialCharacterIndices::VMIN)] = 0;
-    term.control_chars[control_char_slot(termios::SpecialCharacterIndices::VTIME)] = 1;
+    set_control_char(&mut term, termios::SpecialCharacterIndices::VMIN, 0)?;
+    set_control_char(&mut term, termios::SpecialCharacterIndices::VTIME, 1)?;
 
     termios::tcsetattr(&file, SetArg::TCSANOW, &term)?;
     termios::tcflush(&file, termios::FlushArg::TCIOFLUSH)?;
@@ -65,7 +65,11 @@ fn send_at(port: &str, cmd: &str, timeout_ms: u64) -> Result<String> {
                 std::thread::sleep(Duration::from_millis(10));
             }
             Ok(n) => {
-                response.extend_from_slice(&buf[..n]);
+                response.extend_from_slice(
+                    buf.get(..n).ok_or_else(|| {
+                        anyhow!("read {n} bytes into a {}-byte buffer", buf.len())
+                    })?,
+                );
                 let text = String::from_utf8_lossy(&response);
                 if text.contains("OK\r") || text.contains("ERROR") {
                     break;
@@ -84,28 +88,20 @@ fn send_at(port: &str, cmd: &str, timeout_ms: u64) -> Result<String> {
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
 
-    if args.len() < 2 {
+    let Some(port) = args.get(1) else {
+        let program = args.first().map_or("at_debug", String::as_str);
         println!("AT Command Debug Tool");
         println!();
-        println!("Usage: {} <port> [command]", args[0]);
+        println!("Usage: {program} <port> [command]");
         println!();
         println!("Examples:");
-        println!(
-            "  {} /dev/ttyUSB2           # Test common commands",
-            args[0]
-        );
-        println!(
-            "  {} /dev/ttyUSB2 AT+QCCID  # Test specific command",
-            args[0]
-        );
+        println!("  {program} /dev/ttyUSB2           # Test common commands");
+        println!("  {program} /dev/ttyUSB2 AT+QCCID  # Test specific command");
         return Ok(());
-    }
+    };
 
-    let port = &args[1];
-
-    if args.len() > 2 {
+    if let Some(cmd) = args.get(2) {
         // Single command mode
-        let cmd = &args[2];
         println!("Port: {port}");
         println!("Command: {cmd}");
         println!("---");

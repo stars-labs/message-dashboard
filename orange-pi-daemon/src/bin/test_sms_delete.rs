@@ -49,7 +49,9 @@ async fn main() -> Result<()> {
     log_first_messages(&messages);
 
     // Try to delete first message
-    let first_msg = &messages[0];
+    let Some(first_msg) = messages.first() else {
+        return Ok(());
+    };
     info!("\n🗑️  Attempting to delete message...");
     info!("   Modem ID: {}", modem_id);
     info!("   SMS Path: {}", first_msg.sms_path);
@@ -102,7 +104,7 @@ async fn find_modem_with_sim(modem_manager: &ModemManager) -> Result<Option<(Str
     }
 
     // Take first modem with a SIM card
-    for modem_id in &modems[..5.min(modems.len())] {
+    for modem_id in modems.iter().take(5) {
         // Check first 5 modems
         if let Ok(Some(iccid)) = modem_manager.get_iccid(modem_id).await {
             info!("📱 Modem {} has SIM with ICCID: {}", modem_id, iccid);

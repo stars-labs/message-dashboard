@@ -187,7 +187,14 @@ impl WorkerPool {
 
                 join_set.spawn(async move {
                     // Acquire semaphore permit for rate limiting
-                    let _permit = semaphore.acquire().await.unwrap();
+                    let _permit = match semaphore.acquire().await {
+                        Ok(permit) => permit,
+                        Err(e) => {
+                            error!("Worker semaphore closed for modem {}: {}", modem_id, e);
+                            let _ = tx.send(ModemResult::failed(modem_id, e.to_string())).await;
+                            return;
+                        }
+                    };
 
                     let modem_result = Self::process_with_timeout(
                         modem_id,

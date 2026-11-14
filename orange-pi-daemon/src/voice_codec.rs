@@ -60,8 +60,7 @@ fn saturate_i16(v: i32) -> i16 {
 fn read_varint(buf: &[u8], pos: &mut usize) -> Option<u64> {
     let mut result: u64 = 0;
     let mut shift = 0;
-    while *pos < buf.len() {
-        let byte = buf[*pos];
+    while let Some(&byte) = buf.get(*pos) {
         *pos += 1;
         result |= u64::from(byte & 0x7f) << shift;
         if byte & 0x80 == 0 {
@@ -116,10 +115,7 @@ impl Packet {
                 (5, 2) => {
                     let len = usize::try_from(read_varint(buf, &mut pos)?).ok()?;
                     let end = pos.checked_add(len)?;
-                    if end > buf.len() {
-                        return None;
-                    }
-                    pkt.payload = buf[pos..end].to_vec();
+                    pkt.payload = buf.get(pos..end)?.to_vec();
                     pos = end;
                 }
                 // Unknown fields must be skipped, not treated as errors.

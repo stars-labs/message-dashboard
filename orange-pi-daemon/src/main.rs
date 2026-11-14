@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -821,8 +821,10 @@ async fn check_modem_manager(modem_manager: &ModemManager) -> Result<()> {
 /// `--db-path`, else `MESSAGE_DB_PATH`, else the production default
 fn resolve_db_path(args: &[String]) -> String {
     args.windows(2)
-        .find(|w| w[0] == "--db-path")
-        .map(|w| w[1].clone())
+        .find_map(|w| match w {
+            [flag, value] if flag == "--db-path" => Some(value.clone()),
+            _ => None,
+        })
         .or_else(|| std::env::var("MESSAGE_DB_PATH").ok())
         .unwrap_or_else(|| "/var/lib/sms-daemon/messages.db".to_string())
 }
@@ -873,7 +875,7 @@ async fn main() -> Result<()> {
 
     // Check for --help
     if args.iter().any(|a| a == "--help" || a == "-h") {
-        print_help(&args[0]);
+        print_help(args.first().map_or("orange-pi-daemon", String::as_str));
         return Ok(());
     }
 
@@ -905,7 +907,7 @@ async fn main() -> Result<()> {
         api_key: api_key.clone(),
         check_interval_secs: 1, // Fast 1-second check interval for dual-loop
     };
-    let api_client = Arc::new(ApiClient::new(config));
+    let api_client = Arc::new(ApiClient::new(config)?);
 
     check_modem_manager(&modem_manager).await?;
 
@@ -991,7 +993,7 @@ async fn main() -> Result<()> {
     // heartbeats stopped while the process stayed alive and Restart=always never
     // fired. The first watchdog was a task on that same runtime and was starved
     // with everything else; this one needs nothing from it.
-    stall_watchdog::spawn(reader_heartbeat);
+    stall_watchdog::spawn(reader_heartbeat).context("failed to start the stall watchdog thread")?;
     info!(
         "🐕 Stall watchdog thread started - restarting if no read cycle completes for {}s",
         STALL_AFTER.as_secs()

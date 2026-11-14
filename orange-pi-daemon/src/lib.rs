@@ -288,7 +288,7 @@ mod tests {
             api_key: "test_key".to_string(),
             check_interval_secs: 30,
         };
-        let _client = ApiClient::new(config);
+        let _client = ApiClient::new(config).unwrap();
         // Should create without panicking
     }
 
@@ -305,7 +305,7 @@ mod tests {
             api_key: "test_key".to_string(),
             check_interval_secs: 30,
         };
-        let api_client = ApiClient::new(config);
+        let api_client = ApiClient::new(config).unwrap();
         let modem_manager = Arc::new(ModemManager::new().await);
         let mut sender = SmsSender::new(api_client, modem_manager, "test-session".to_string());
 

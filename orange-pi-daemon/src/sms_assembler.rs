@@ -140,7 +140,7 @@ impl SmsAssembler {
             .join("");
 
         // Use first part's timestamp as canonical
-        let timestamp = sorted_parts[0].timestamp.clone();
+        let timestamp = sorted_parts.first()?.timestamp.clone();
         let sender = key.sender.clone();
         let sms_indices: Vec<u32> = sorted_parts.iter().map(|p| p.index).collect();
 
@@ -166,7 +166,9 @@ impl SmsAssembler {
         let mut expired = Vec::new();
 
         self.buffer.retain(|key, parts| {
-            let oldest = parts.iter().map(|p| p.received_at).min().unwrap();
+            let Some(oldest) = parts.iter().map(|p| p.received_at).min() else {
+                return false;
+            };
             if now.duration_since(oldest) > self.timeout {
                 // Timeout - convert parts to individual messages
                 warn!(

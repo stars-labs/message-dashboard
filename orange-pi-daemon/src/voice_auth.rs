@@ -97,17 +97,15 @@ fn is_call_id(id: &str) -> bool {
 /// Decode `%XX` escapes. The Worker runs every segment through
 /// `encodeURIComponent`, so the `+` of an E.164 number arrives as `%2B`.
 fn percent_decode(segment: &str) -> Option<String> {
-    let bytes = segment.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%' {
-            let hex = std::str::from_utf8(bytes.get(i + 1..i + 3)?).ok()?;
+    let mut bytes = segment.as_bytes().iter().copied();
+    let mut out = Vec::with_capacity(segment.len());
+    while let Some(byte) = bytes.next() {
+        if byte == b'%' {
+            let hex = [bytes.next()?, bytes.next()?];
+            let hex = std::str::from_utf8(&hex).ok()?;
             out.push(u8::from_str_radix(hex, 16).ok()?);
-            i += 3;
         } else {
-            out.push(bytes[i]);
-            i += 1;
+            out.push(byte);
         }
     }
     String::from_utf8(out).ok()

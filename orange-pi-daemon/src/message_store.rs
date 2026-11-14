@@ -10,7 +10,7 @@ use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use tracing::{debug, info, warn};
 
 #[derive(Debug, Clone)]
@@ -260,19 +260,23 @@ impl MessageStore {
         })
     }
 
+    fn conn(&self) -> MutexGuard<'_, Connection> {
+        self.conn.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     /// Store a message from SIM card (returns true if new, false if duplicate)
     /// Fold the write-ahead log back into the database and truncate it.
     ///
     /// `TRUNCATE` rather than the passive default: a passive checkpoint gives up
     /// when a reader is active, and under constant writes that meant never.
     pub fn checkpoint_wal(&self) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn();
         conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
         Ok(())
     }
 
     pub fn store_message(&self, message: &Message, modem_id: &str, sms_path: &str) -> Result<bool> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn();
 
         // Check for duplicate first (same logic as server - within 10 seconds)
         let existing: Option<i64> = conn
@@ -331,7 +335,7 @@ impl MessageStore {
     /// Atomically lease due work. A crashed uploader becomes eligible again when
     /// its lease expires; attempts are diagnostic only and never exhaust retries.
     pub fn claim_messages(&self, limit: usize, lease_seconds: u64) -> Result<Vec<StoredMessage>> {
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.conn();
         let tx = conn.transaction()?;
         let lease_token = uuid::Uuid::new_v4().to_string();
         let lease_interval = format!("+{lease_seconds} seconds");
@@ -386,7 +390,7 @@ impl MessageStore {
         status: &str,
         error: Option<&str>,
     ) -> Result<()> {
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.conn();
         let tx = conn.transaction()?;
         for message in messages {
             tx.execute(
@@ -401,7 +405,7 @@ impl MessageStore {
     }
 
     pub fn return_to_pending(&self, messages: &[StoredMessage], error: &str) -> Result<()> {
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.conn();
         let tx = conn.transaction()?;
         for message in messages {
             let delay = (2_i64.pow(message.attempts.min(8))).min(300);
@@ -418,7 +422,7 @@ impl MessageStore {
 
     /// Get SMS paths to delete from SIM (only uploaded messages)
     pub fn get_deletable_sms(&self) -> Result<Vec<(String, String)>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn();
 
         let mut stmt = conn.prepare(
             "SELECT DISTINCT modem_id, sms_path
@@ -437,7 +441,7 @@ impl MessageStore {
 
     /// Mark SMS as deleted from SIM
     pub fn mark_sms_deleted(&self, modem_id: &str, sms_path: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn();
 
         conn.execute(
             "UPDATE messages
@@ -464,7 +468,7 @@ impl MessageStore {
     /// Queue states that require different operator actions. Covers the complete
     /// durable local queue, with no age window.
     pub fn get_queue_stats(&self) -> Result<QueueStats> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn();
         let (pending, dead_letter, in_flight, oldest_unacknowledged_age_seconds): (
             usize,
             usize,
@@ -492,7 +496,7 @@ impl MessageStore {
 
     /// Check if database has many messages for any SIM (NOT actual SIM card storage)
     pub fn check_sim_storage(&self) -> Result<Vec<String>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn();
 
         // This checks DATABASE message count, NOT physical SIM card!
         let mut stmt = conn.prepare(
@@ -517,7 +521,7 @@ impl MessageStore {
 
     /// Clean up old uploaded and deleted messages (>7 days)
     pub fn cleanup_old_messages(&self) -> Result<usize> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn();
 
         let deleted = conn.execute(
             "DELETE FROM messages
@@ -537,7 +541,7 @@ impl MessageStore {
     /// Mark old uploaded messages as having been deleted (to stop deletion attempts)
     /// This is for messages that were uploaded before the immediate deletion fix
     pub fn mark_old_uploaded_as_deleted(&self) -> Result<usize> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn();
 
         // Mark messages uploaded >1 hour ago as deleted (they have stale paths)
         let updated = conn.execute(
@@ -732,7 +736,7 @@ pub struct QueueStats {
 impl MessageStore {
     /// Get uploaded messages grouped by modem
     pub fn get_uploaded_messages_by_modem(&self) -> Result<HashMap<String, Vec<Message>>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn();
 
         let mut stmt = conn.prepare(
             "SELECT DISTINCT modem_id, phone_iccid, phone_number, content, timestamp, direction
@@ -767,7 +771,7 @@ impl MessageStore {
 
     /// Mark message as deleted by content match
     pub fn mark_message_deleted_by_content(&self, iccid: &str, content: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn();
 
         conn.execute(
             "UPDATE messages
@@ -784,7 +788,7 @@ impl MessageStore {
 
     /// Clean up messages with empty content that have failed multiple times
     pub fn cleanup_empty_messages(&self) -> Result<usize> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn();
 
         // Delete messages with empty content that have failed 3+ times
         let deleted = conn.execute(
@@ -818,7 +822,7 @@ impl MessageStore {
             sms_storage,
             sms_index,
         } = *segment;
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn();
 
         // Look before writing. A part whose siblings never arrive stays on the SIM
         // and is re-read on every scan; `INSERT OR REPLACE` deleted and re-inserted
@@ -914,7 +918,7 @@ impl MessageStore {
         ref_id: u8,
         total_parts: u8,
     ) -> Result<Vec<StoredSegment>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn();
 
         let mut stmt = conn.prepare(
             "SELECT part_number, content, timestamp, sms_storage, sms_index
@@ -946,7 +950,7 @@ impl MessageStore {
 
     /// Delete segments after successful assembly
     pub fn delete_segments(&self, iccid: &str, ref_id: u8) -> Result<usize> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn();
 
         let deleted = conn.execute(
             "DELETE FROM multipart_segments
@@ -968,7 +972,7 @@ impl MessageStore {
     /// Get all incomplete segments (for recovery on startup)
     /// Returns buffered segment metadata including CPMS storage and index.
     pub fn get_all_segments(&self) -> Result<Vec<RecoverySegment>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn();
 
         let mut stmt = conn.prepare(
             "SELECT phone_iccid, sender, ref_id, total_parts, part_number, content, timestamp, sms_storage, sms_index
@@ -998,7 +1002,7 @@ impl MessageStore {
     /// Cleanup segments older than `timeout_secs`
     /// Returns count of segments deleted
     pub fn cleanup_old_segments(&self, timeout_secs: i64) -> Result<usize> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn();
 
         let deleted = conn.execute(
             "DELETE FROM multipart_segments

@@ -223,12 +223,10 @@ fn print_connection_failure(port: &str, error: &anyhow::Error) {
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
 
-    if args.len() < 2 {
-        print_usage(&args[0]);
+    let Some(target) = args.get(1) else {
+        print_usage(args.first().map_or("modem_health", String::as_str));
         return Ok(());
-    }
-
-    let target = &args[1];
+    };
     let port = if target.starts_with("/dev/") {
         target.clone()
     } else {

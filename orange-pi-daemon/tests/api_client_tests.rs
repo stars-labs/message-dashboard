@@ -80,7 +80,7 @@ fn create_test_sim(iccid: &str) -> Sim {
 #[test]
 fn test_api_client_new() {
     let config = create_test_config();
-    let client = ApiClient::new(config.clone());
+    let client = ApiClient::new(config.clone()).unwrap();
 
     // Verify config is stored
     assert_eq!(client.config.api_url, config.api_url);
@@ -90,7 +90,7 @@ fn test_api_client_new() {
 #[test]
 fn test_api_client_clone() {
     let config = create_test_config();
-    let client = ApiClient::new(config);
+    let client = ApiClient::new(config).unwrap();
 
     // ApiClient implements Clone
     let cloned = client.clone();
@@ -101,7 +101,7 @@ fn test_api_client_clone() {
 
 #[tokio::test]
 async fn test_empty_incremental_device_delta_is_a_noop() {
-    let client = ApiClient::new(create_test_config());
+    let client = ApiClient::new(create_test_config()).unwrap();
     let reports: Vec<ModemReport> = Vec::new();
     let removed: Vec<String> = Vec::new();
 
@@ -114,7 +114,7 @@ async fn test_empty_incremental_device_delta_is_a_noop() {
 
 #[tokio::test]
 async fn test_empty_full_device_snapshot_reaches_the_reconciliation_endpoint() {
-    let client = ApiClient::new(create_test_config());
+    let client = ApiClient::new(create_test_config()).unwrap();
     let reports: Vec<ModemReport> = Vec::new();
     let removed: Vec<String> = Vec::new();
 
@@ -132,7 +132,7 @@ async fn test_empty_full_device_snapshot_reaches_the_reconciliation_endpoint() {
 #[tokio::test]
 async fn test_upload_messages_empty() {
     let config = create_test_config();
-    let client = ApiClient::new(config);
+    let client = ApiClient::new(config).unwrap();
 
     let messages: Vec<StoredMessage> = vec![];
 
@@ -145,7 +145,7 @@ async fn test_upload_messages_empty() {
 #[tokio::test]
 async fn test_upload_messages_single() {
     let config = create_test_config();
-    let client = ApiClient::new(config);
+    let client = ApiClient::new(config).unwrap();
 
     let messages = vec![create_stored_test_message("iccid_001", "Test message")];
 
@@ -158,7 +158,7 @@ async fn test_upload_messages_single() {
 #[tokio::test]
 async fn test_upload_messages_batch_size() {
     let config = create_test_config();
-    let client = ApiClient::new(config);
+    let client = ApiClient::new(config).unwrap();
 
     // Create 150 messages (should be split into 3 batches of 50)
     let mut messages = Vec::new();
@@ -183,7 +183,7 @@ async fn test_upload_messages_batch_size() {
 #[tokio::test]
 async fn test_get_pending_sms_signature() {
     let config = create_test_config();
-    let client = ApiClient::new(config);
+    let client = ApiClient::new(config).unwrap();
 
     // Will fail without real API server
     let result = client.get_pending_sms().await;
@@ -286,7 +286,7 @@ fn test_config_with_custom_url() {
         check_interval_secs: 60,
     };
 
-    let client = ApiClient::new(config);
+    let client = ApiClient::new(config).unwrap();
     assert!(client.config.api_url.contains("8443"));
 }
 
@@ -299,6 +299,6 @@ fn test_config_with_long_api_key() {
         check_interval_secs: 1,
     };
 
-    let client = ApiClient::new(config);
+    let client = ApiClient::new(config).unwrap();
     assert_eq!(client.config.api_key.len(), 256);
 }

@@ -81,7 +81,7 @@ fn unix_now() -> u64 {
 /// stall it existed to catch was every runtime worker spinning, which starved
 /// the watchdog along with everything else. A supervisor must not depend on
 /// the thing it supervises, so this one needs nothing from the runtime.
-pub fn spawn(heartbeat: Heartbeat) {
+pub fn spawn(heartbeat: Heartbeat) -> std::io::Result<()> {
     let started = Instant::now();
     std::thread::Builder::new()
         .name("stall-watchdog".into())
@@ -98,7 +98,7 @@ pub fn spawn(heartbeat: Heartbeat) {
                 std::process::exit(1);
             }
         })
-        .expect("failed to start the stall watchdog thread");
+        .map(|_| ())
 }
 
 #[cfg(test)]
