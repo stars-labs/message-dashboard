@@ -1,7 +1,7 @@
 // Auth0 Role Configuration
 // Single source of truth for the role -> permission mapping and for where the roles
 // claim is read from. The JWT middleware, the login callback and the page gate in
-// index.js all go through here so they cannot drift apart.
+// frontend-gate.ts all go through here so they cannot drift apart.
 
 /**
  * AUTH0_ROLE_NAMESPACE is the FULL claim URI, e.g. "https://sexy.itoken.world/roles".

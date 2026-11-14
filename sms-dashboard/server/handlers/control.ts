@@ -239,7 +239,7 @@ export const controlHandler = {
 
     try {
       console.log(
-        `[control.js] Received ${String(reports.length)} modem_reports (mode: ${sync_mode}, session: ${String(session_id)})`,
+        `[control] Received ${String(reports.length)} modem_reports (mode: ${sync_mode}, session: ${String(session_id)})`,
       );
 
       const acceptedReports = reports.filter((report) => {
@@ -407,7 +407,7 @@ export const controlHandler = {
         },
       });
     } catch (error) {
-      console.error('[control.js] Database error in updateDevices:', error);
+      console.error('[control] Database error in updateDevices:', error);
       return json({ success: false, error: 'Failed to update devices' }, 500);
     }
   },
@@ -536,7 +536,7 @@ export const controlHandler = {
           // transient errors; permanent input errors become dead_letter locally.
           const retryable = !(err instanceof TypeError);
           console.error(
-            `[control.js] Message ${messageId} failed (retryable=${String(retryable)}):`,
+            `[control] Message ${messageId} failed (retryable=${String(retryable)}):`,
             err,
           );
           results.push({ id: messageId, status: 'rejected', retryable });
@@ -568,7 +568,7 @@ export const controlHandler = {
         message: `Successfully uploaded ${String(processed)} messages`,
       });
     } catch (error) {
-      console.error('[control.js] Upload messages error:', error);
+      console.error('[control] Upload messages error:', error);
       return json({ success: false, error: `Failed to upload messages: ${errorText(error)}` }, 500);
     }
   },
@@ -775,7 +775,7 @@ export const controlHandler = {
       const result = await env.DB.prepare('DELETE FROM messages').run();
       return json({ success: true, message: `Cleared ${String(result.meta.changes)} messages` });
     } catch (error) {
-      console.error('[control.js] Clear messages error:', error);
+      console.error('[control] Clear messages error:', error);
       return json({ success: false, error: `Failed to clear messages: ${errorText(error)}` }, 500);
     }
   },
@@ -830,7 +830,7 @@ export const controlHandler = {
         .run();
 
       console.log(
-        `[control.js] Health snapshot received: session=${snapshot.session_id}, version=${snapshot.version}`,
+        `[control] Health snapshot received: session=${snapshot.session_id}, version=${snapshot.version}`,
       );
 
       return json({
@@ -839,7 +839,7 @@ export const controlHandler = {
         received_at: new Date().toISOString(),
       });
     } catch (error) {
-      console.error('[control.js] Heartbeat error:', error);
+      console.error('[control] Heartbeat error:', error);
       return json(
         { success: false, error: `Failed to process heartbeat: ${errorText(error)}` },
         500,
@@ -890,10 +890,10 @@ async function processMessageKeywords(
         .run();
 
       console.log(
-        `[control.js] Processed ${String(matches.length)} keyword matches for message ${message.id}`,
+        `[control] Processed ${String(matches.length)} keyword matches for message ${message.id}`,
       );
     }
   } catch (error) {
-    console.error(`[control.js] Keyword processing error for message ${message.id}:`, error);
+    console.error(`[control] Keyword processing error for message ${message.id}:`, error);
   }
 }

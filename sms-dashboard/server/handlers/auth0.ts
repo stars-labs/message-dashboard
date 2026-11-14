@@ -391,7 +391,7 @@ export const auth0Handler = {
       // Email policy: verified address, on an allowed domain. Runs unconditionally —
       // the old version only ran when ALLOWED_EMAIL_DOMAINS was set, so an unset list
       // meant no email check at all, and it read the domain from the first '@' with a
-      // case-sensitive compare. See config/auth0-roles.js.
+      // case-sensitive compare. See config/auth0-roles.ts.
       const emailCheck = isEmailAllowed(userInfo, env);
 
       if (!emailCheck.allowed) {

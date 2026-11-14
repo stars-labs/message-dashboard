@@ -7,7 +7,7 @@ import { hasVerificationCode } from './verification.js';
 const SHORT_CODE_COUNTRY_PREFIXES = ['86', '852'];
 
 // This module is the ONLY place that decides whether a message is spam.
-// Callers (ingest in handlers/control.js, backfill in api/filters.js) may use SQL
+// Callers (ingest in handlers/control.ts, backfill in api/filters.ts) may use SQL
 // to narrow down which rows are worth looking at, but the verdict always comes
 // from classifyMessage() here. A SQL pre-filter that over-selects gets corrected;
 // one that decides on its own would be a second, drifting definition.
@@ -94,7 +94,7 @@ function senderCandidates(digits: string): string[] {
  * supporting exact case-insensitive alphanumeric sender IDs such as "M1 Limited".
  *
  * This is the strict form, used to decide whether an inbound SMS is a trustworthy
- * balance reply (handlers/balance-queries.js, handlers/carrier-web-balance.js).
+ * balance reply (handlers/balance-queries.ts, handlers/carrier-web-balance.ts).
  * Balance correlation must not accept 10086100 for a '10086' profile: a
  * campaign-suffixed sender is a different origin, and reading a balance out of it
  * would attribute one carrier's marketing text to a real account. Spam rules want

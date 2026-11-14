@@ -1,6 +1,6 @@
 // Cache-Control policy for the frontend assets inlined into the Worker.
 //
-// Split out of frontend-handler.js so it can be unit tested: that module imports
+// Split out of frontend-handler.ts so it can be unit tested: that module imports
 // the generated (and gitignored) frontend-assets.js, so importing it from a test
 // works locally and fails in a clean checkout.
 //

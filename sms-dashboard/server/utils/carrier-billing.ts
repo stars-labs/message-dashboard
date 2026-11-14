@@ -8,7 +8,7 @@ const SINGTEL_BILL_PREFIX = '<Singtel>Dear customer, your latest bill for Singte
 
 /**
  * What happened to one candidate message. These are also the summary keys in
- * handlers/carrier-billing-backfill.js, which counts each outcome.
+ * handlers/carrier-billing-backfill.ts, which counts each outcome.
  */
 export type BillOutcome =
   'detected' | 'duplicate_detected' | 'parse_conflict' | 'already_processed' | 'ignored' | 'failed';
