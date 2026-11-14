@@ -24,6 +24,7 @@
     "shared/**",
     "config/**",
     "test/**",
+    "runner-core/**",
     "migrations/**",
     "eslint.config.ts",
     "vite.config.ts",

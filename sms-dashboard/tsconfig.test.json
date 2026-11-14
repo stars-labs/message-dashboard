@@ -14,9 +14,16 @@
     "shared/**/*.test.ts",
     "config/**/*.test.ts",
     "server/**/*.test.ts",
+    "runner-core/**/*.test.ts",
+    "scripts/**/*.test.ts",
     "test/*.ts",
     "migrations/**/*.test.ts"
   ],
   "exclude": ["test/setup.ts"],
-  "references": [{ "path": "./tsconfig.shared.json" }, { "path": "./tsconfig.worker.json" }]
+  "references": [
+    { "path": "./tsconfig.shared.json" },
+    { "path": "./tsconfig.worker.json" },
+    { "path": "./tsconfig.runner-core.json" },
+    { "path": "./tsconfig.tooling.json" }
+  ]
 }

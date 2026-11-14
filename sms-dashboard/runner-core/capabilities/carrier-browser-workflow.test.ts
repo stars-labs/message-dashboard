@@ -8,17 +8,34 @@ import {
   validateUnicomBrowserJob,
   waitForFirstVisible,
 } from './carrier-browser-workflow.js';
+import type { CarrierWebBalanceJob } from '../../shared/api/carrier-web-balance.js';
 
-function validJob() {
+function webJob(
+  skill: CarrierWebBalanceJob['skill'],
+  loginUrl: string,
+  id = 'job-1',
+): CarrierWebBalanceJob {
   return {
-    id: 'job-1',
-    login_url: 'https://imgxx.client.10010.com/shengyuhuafeiwt2024/index.html#/',
-    skill: {
+    id,
+    check_id: 'check-1',
+    sim_iccid: '8986000000000000001',
+    sim_number: null,
+    sim_index: 36,
+    login_url: loginUrl,
+    otp_requested_at: null,
+    skill,
+  };
+}
+
+function validJob(): CarrierWebBalanceJob {
+  return webJob(
+    {
       id: 'unicom-web-balance',
       query_origin: 'https://imgxx.client.10010.com',
       query_endpoint: 'https://www.10010.com/mall/service/query/userinfoquery',
     },
-  };
+    'https://imgxx.client.10010.com/shengyuhuafeiwt2024/index.html#/',
+  );
 }
 
 describe('carrier browser workflow', () => {
@@ -44,14 +61,14 @@ describe('carrier browser workflow', () => {
   });
 
   test('accepts only the official M1 prepaid login and balance origins', () => {
-    const job = {
-      id: 'm1-job',
-      login_url: 'https://mcardaccount.m1.com.sg/login',
-      skill: {
+    const job = webJob(
+      {
         id: 'm1-prepaid-web-balance',
         balance_url: 'https://mcardaccount.m1.com.sg/balance',
       },
-    };
+      'https://mcardaccount.m1.com.sg/login',
+      'm1-job',
+    );
     expect(() => validateCarrierBrowserJob(job)).not.toThrow();
     job.skill.balance_url = 'https://mcardaccount.m1.com.sg.evil.example/balance';
     expect(() => validateCarrierBrowserJob(job)).toThrow('approved carrier origin');
@@ -59,19 +76,27 @@ describe('carrier browser workflow', () => {
 
   test('waits for React-rendered M1 controls instead of checking only once', async () => {
     let attempts = 0;
-    const candidate = { isVisible: async () => true };
+    const candidate = {
+      isVisible: () => Promise.resolve(true),
+      innerText: () => Promise.resolve(''),
+    };
     const locator = {
-      count: async () => {
+      count: () => {
         attempts += 1;
-        return attempts >= 3 ? 1 : 0;
+        return Promise.resolve(attempts >= 3 ? 1 : 0);
       },
       nth: () => candidate,
     };
-    const waits = [];
+    const waits: number[] = [];
 
     const found = await waitForFirstVisible(
       [locator],
-      { waitForTimeout: async (milliseconds) => waits.push(milliseconds) },
+      {
+        waitForTimeout: (milliseconds) => {
+          waits.push(milliseconds);
+          return Promise.resolve();
+        },
+      },
       { timeoutMs: 1_000, pollMs: 0 },
     );
 
@@ -83,17 +108,17 @@ describe('carrier browser workflow', () => {
   test('waits for M1 validity placeholder text to become a real date', async () => {
     let attempts = 0;
     const candidate = {
-      isVisible: async () => true,
-      innerText: async () => {
+      isVisible: () => Promise.resolve(true),
+      innerText: () => {
         attempts += 1;
-        return attempts >= 3 ? 'Valid Till 22 Sep 2026' : 'Valid Till NA';
+        return Promise.resolve(attempts >= 3 ? 'Valid Till 22 Sep 2026' : 'Valid Till NA');
       },
     };
-    const locator = { count: async () => 1, nth: () => candidate };
+    const locator = { count: () => Promise.resolve(1), nth: () => candidate };
 
     const found = await waitForFirstVisible(
       [locator],
-      { waitForTimeout: async () => {} },
+      { waitForTimeout: () => Promise.resolve() },
       {
         timeoutMs: 1_000,
         pollMs: 0,
@@ -108,13 +133,13 @@ describe('carrier browser workflow', () => {
   test('cancels before opening a browser when the agent is stopping', async () => {
     let launched = false;
     const processor = createCarrierBrowserJobProcessor({
-      controlClient: { request: async () => new Response(null, { status: 204 }) },
-      presence: { set: async () => {} },
+      controlClient: { request: () => Promise.resolve(new Response(null, { status: 204 })) },
+      presence: { set: () => Promise.resolve() },
       runnerId: 'runner-1',
       browser: {
-        launchPersistentContext: async () => {
+        launchPersistentContext: () => {
           launched = true;
-          throw new Error('must not launch');
+          return Promise.reject(new Error('must not launch'));
         },
       },
       executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
@@ -122,9 +147,11 @@ describe('carrier browser workflow', () => {
     const controller = new AbortController();
     controller.abort();
 
-    await expect(processor.processJob(validJob(), { signal: controller.signal })).rejects.toThrow(
-      'cancelled',
+    const outcome = await processor.processJob(validJob(), { signal: controller.signal }).then(
+      () => 'resolved',
+      (error: unknown) => error,
     );
+    expect(outcome).toEqual(new Error('Browser query cancelled'));
     expect(launched).toBe(false);
   });
 
@@ -147,13 +174,11 @@ describe('carrier browser workflow', () => {
 
   test('reports that there is no verification window before a job starts', async () => {
     const processor = createCarrierBrowserJobProcessor({
-      controlClient: { request: async () => new Response(null, { status: 204 }) },
-      presence: { set: async () => {} },
+      controlClient: { request: () => Promise.resolve(new Response(null, { status: 204 })) },
+      presence: { set: () => Promise.resolve() },
       runnerId: 'runner-1',
       browser: {
-        launchPersistentContext: async () => {
-          throw new Error('must not launch');
-        },
+        launchPersistentContext: () => Promise.reject(new Error('must not launch')),
       },
       executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
     });

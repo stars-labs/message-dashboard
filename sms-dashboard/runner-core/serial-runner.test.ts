@@ -10,7 +10,7 @@ describe('serial capability runner', () => {
 
     await runSerialCapability({
       signal: controller.signal,
-      sleep: async () => {},
+      sleep: () => Promise.resolve(),
       runOne: async () => {
         active += 1;
         maximumActive = Math.max(maximumActive, active);
@@ -27,14 +27,14 @@ describe('serial capability runner', () => {
   });
 
   test('once mode propagates a job error', async () => {
-    await expect(
-      runSerialCapability({
-        once: true,
-        runOne: async () => {
-          throw new Error('job failed');
-        },
-        onError: () => {},
-      }),
-    ).rejects.toThrow('job failed');
+    const outcome = await runSerialCapability({
+      once: true,
+      runOne: () => Promise.reject(new Error('job failed')),
+      onError: () => undefined,
+    }).then(
+      () => 'resolved',
+      (error: unknown) => error,
+    );
+    expect(outcome).toEqual(new Error('job failed'));
   });
 });

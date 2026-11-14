@@ -1,4 +1,13 @@
-export function abortableSleep(ms, signal) {
+import { errorMessage } from './error-message.js';
+
+export interface RunOutcome {
+  handled?: boolean;
+  retryDelay?: number;
+}
+
+type Sleep = (ms: number, signal?: AbortSignal | null) => Promise<void>;
+
+export function abortableSleep(ms: number, signal?: AbortSignal | null): Promise<void> {
   if (!ms || signal?.aborted) return Promise.resolve();
   return new Promise((resolve) => {
     const timer = setTimeout(finish, ms);
@@ -16,15 +25,24 @@ export async function runSerialCapability({
   once = false,
   signal = null,
   errorDelay = 15_000,
-  onError = (error) => console.error(error.message),
+  onError = (error) => {
+    console.error(errorMessage(error));
+  },
   sleep = abortableSleep,
-}) {
+}: {
+  runOne: (context: { signal: AbortSignal | null }) => Promise<RunOutcome>;
+  once?: boolean;
+  signal?: AbortSignal | null;
+  errorDelay?: number;
+  onError?: (error: unknown) => void;
+  sleep?: Sleep;
+}): Promise<void> {
   do {
     if (signal?.aborted) break;
     try {
       const result = await runOne({ signal });
       if (once) break;
-      if (result?.retryDelay) await sleep(result.retryDelay, signal);
+      if (result.retryDelay) await sleep(result.retryDelay, signal);
     } catch (error) {
       onError(error);
       if (once) throw error;

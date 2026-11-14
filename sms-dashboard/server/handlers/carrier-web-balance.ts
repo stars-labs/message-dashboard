@@ -12,6 +12,10 @@ import {
 } from '../lib/d1.js';
 import { NOT_JSON_MESSAGE, readBody, type MissingKeyMessages } from '../lib/request-body.js';
 import { textOr } from '../../shared/text.js';
+import type {
+  CarrierWebBalanceJob,
+  CarrierWebBalanceOtpResponse,
+} from '../../shared/api/carrier-web-balance.js';
 import {
   authorizeRunnerControl,
   runnerCanAccessOwner,
@@ -447,7 +451,7 @@ export const carrierWebBalanceHandler = {
       login_url: job.login_url,
       otp_requested_at: job.otp_requested_at,
       skill: skill.value,
-    });
+    } satisfies CarrierWebBalanceJob);
   },
 
   async otpRequested(request: BodyRequest): Promise<Response> {
@@ -538,7 +542,7 @@ export const carrierWebBalanceHandler = {
           created_at: last.created_at,
           source_message_id: last.id,
         },
-      });
+      } satisfies CarrierWebBalanceOtpResponse);
     }
 
     await request.env.DB.batch([
@@ -552,7 +556,7 @@ export const carrierWebBalanceHandler = {
       ).bind(message.id, NORMAL_LEASE_SECONDS, job.id, runnerId),
       eventStatement(request.env.DB, job.id, 'otp_matched', { message_id: message.id }),
     ]);
-    return json({ code: message.verification_code });
+    return json({ code: message.verification_code } satisfies CarrierWebBalanceOtpResponse);
   },
 
   async heartbeat(request: BodyRequest): Promise<Response> {

@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { createAuthSession } from './auth-session.js';
+import { createAuthSession, type SecureStore } from './auth-session.js';
 import { REQUIRED_RUNNER_SCOPES } from './access-token.js';
 
-function token(audience = 'dashboard-api') {
+function token(audience = 'dashboard-api'): string {
   const payload = {
     aud: audience,
     permissions: REQUIRED_RUNNER_SCOPES,
@@ -10,18 +10,22 @@ function token(audience = 'dashboard-api') {
   return `header.${Buffer.from(JSON.stringify(payload)).toString('base64url')}.signature`;
 }
 
-function memoryStore(initial = {}) {
-  const values = { ...initial };
-  return {
+function memoryStore(initial: Record<'auth0RefreshToken', string> | null = null) {
+  const values = new Map<string, string>(initial ? Object.entries(initial) : []);
+  const store: SecureStore & { values: Map<string, string> } = {
     values,
-    async get(key) {
-      return values[key] || null;
-    },
-    async set(key, value) {
-      if (value == null) delete values[key];
-      else values[key] = value;
+    get: (key) => Promise.resolve(values.get(key) ?? null),
+    set: (key, value) => {
+      if (value === null) values.delete(key);
+      else values.set(key, value);
+      return Promise.resolve();
     },
   };
+  return store;
+}
+
+function failed(): Response {
+  return new Response(null, { status: 500 });
 }
 
 const configuration = {
@@ -37,9 +41,9 @@ describe('runner authentication session', () => {
     const session = createAuthSession({
       getConfiguration: () => configuration,
       secureStore,
-      fetchImpl: async () => {
+      fetchImpl: () => {
         requests += 1;
-        return Response.json({ access_token: token(), expires_in: 3600 });
+        return Promise.resolve(Response.json({ access_token: token(), expires_in: 3600 }));
       },
     });
 
@@ -64,12 +68,12 @@ describe('runner authentication session', () => {
         expires_in: 3600,
       }),
     ];
-    let displayed;
+    let displayed: unknown;
     const session = createAuthSession({
       getConfiguration: () => configuration,
       secureStore,
-      fetchImpl: async () => responses.shift(),
-      sleep: async () => {},
+      fetchImpl: () => Promise.resolve(responses.shift() ?? failed()),
+      sleep: () => Promise.resolve(),
     });
 
     await session.signIn({
@@ -83,7 +87,7 @@ describe('runner authentication session', () => {
       verificationUri: 'https://tenant.example/activate',
       verificationUriComplete: undefined,
     });
-    expect(secureStore.values).toEqual({ auth0RefreshToken: 'refresh-2' });
+    expect(Object.fromEntries(secureStore.values)).toEqual({ auth0RefreshToken: 'refresh-2' });
   });
 
   test('clears local authentication on sign out', async () => {

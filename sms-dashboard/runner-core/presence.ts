@@ -1,4 +1,27 @@
+import type { BalanceRunnerCapability } from '../shared/api/balance-runners.js';
+import type { ControlClient } from './control-client.js';
+import { errorMessage } from './error-message.js';
+
 const HEARTBEAT_INTERVAL_MS = 30_000;
+
+type RunnerCapabilityName = BalanceRunnerCapability['capability'];
+
+type CapabilityState = Pick<
+  BalanceRunnerCapability,
+  'capability' | 'state' | 'current_job_id' | 'concurrency' | 'detail_code'
+>;
+
+export interface CapabilityPresence {
+  set(
+    state: CapabilityState['state'],
+    jobId?: string | null,
+    detailCode?: string | null,
+  ): Promise<void>;
+}
+
+interface Logger {
+  error(message: string): void;
+}
 
 export function createRunnerPresence({
   controlClient,
@@ -12,8 +35,23 @@ export function createRunnerPresence({
   setIntervalFn = setInterval,
   clearIntervalFn = clearInterval,
   logger = console,
+}: {
+  controlClient: ControlClient;
+  runnerId: string;
+  sessionId: string;
+  displayName: string;
+  capabilities: readonly RunnerCapabilityName[];
+  version?: string;
+  platform: string;
+  heartbeatInterval?: number;
+  setIntervalFn?: (
+    callback: () => Promise<void>,
+    interval: number,
+  ) => ReturnType<typeof setInterval>;
+  clearIntervalFn?: (timer: ReturnType<typeof setInterval>) => void;
+  logger?: Logger;
 }) {
-  const states = new Map(
+  const states = new Map<RunnerCapabilityName, CapabilityState>(
     capabilities.map((capability) => [
       capability,
       {
@@ -25,15 +63,18 @@ export function createRunnerPresence({
       },
     ]),
   );
-  let timer = null;
-  let pending = Promise.resolve();
-  let lastError = null;
+  let timer: ReturnType<typeof setInterval> | null = null;
+  let pending: Promise<void> = Promise.resolve();
+  let lastError: string | null = null;
 
-  function snapshots(selected = states.keys()) {
-    return [...selected].map((capability) => ({ ...states.get(capability) }));
+  function snapshots(selected: Iterable<RunnerCapabilityName>): CapabilityState[] {
+    return [...selected].flatMap((capability) => {
+      const current = states.get(capability);
+      return current ? [{ ...current }] : [];
+    });
   }
 
-  function send(selected = []) {
+  function send(selected: Iterable<RunnerCapabilityName> = []): Promise<void> {
     const capabilitySnapshots = snapshots(selected);
     pending = pending
       .then(async () => {
@@ -51,22 +92,28 @@ export function createRunnerPresence({
         if (!response.ok) throw new Error(`heartbeat rejected (${response.status})`);
         lastError = null;
       })
-      .catch((error) => {
-        if (error.message !== lastError) {
-          logger.error(`Runner presence unavailable: ${error.message}`);
-          lastError = error.message;
+      .catch((error: unknown) => {
+        const message = errorMessage(error);
+        if (message !== lastError) {
+          logger.error(`Runner presence unavailable: ${message}`);
+          lastError = message;
         }
       });
     return pending;
   }
 
   return Object.freeze({
-    async start() {
+    async start(): Promise<void> {
       await send(states.keys());
       timer = setIntervalFn(() => send(), heartbeatInterval);
-      timer.unref?.();
+      timer.unref();
     },
-    async set(capability, nextState, jobId = null, nextDetailCode = null) {
+    async set(
+      capability: RunnerCapabilityName,
+      nextState: CapabilityState['state'],
+      jobId: string | null = null,
+      nextDetailCode: string | null = null,
+    ): Promise<void> {
       const current = states.get(capability);
       if (!current) throw new Error(`Unknown runner capability: ${capability}`);
       if (
@@ -83,7 +130,7 @@ export function createRunnerPresence({
       });
       await send([capability]);
     },
-    async stop() {
+    async stop(): Promise<void> {
       if (timer) clearIntervalFn(timer);
       timer = null;
       for (const [capability, current] of states) {

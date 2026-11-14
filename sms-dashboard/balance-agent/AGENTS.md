@@ -33,7 +33,9 @@ bun run cli -- --help # CLI from source
 ## Shared code
 
 `runner-core/` and `server/utils/` are shared with the dashboard. Use relative
-imports (`../../runner-core/...`). Do not copy these files.
+imports (`../../runner-core/...`). `runner-core/` is TypeScript; the `.js`
+specifiers resolve to the `.ts` sources under Bun, which also bundles the
+Electron main process. Do not copy these files.
 
 ## Release
 

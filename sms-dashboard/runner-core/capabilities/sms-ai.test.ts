@@ -1,7 +1,11 @@
 import { describe, expect, test } from 'bun:test';
+import * as v from 'valibot';
+import { parseJson } from '../../shared/parse-json.js';
 import { createSmsAiCapability } from './sms-ai.js';
 
 const skill = {
+  id: 'cash-balance',
+  version: '1',
   objective: 'Obtain cash balance',
   confidence_threshold: 0.85,
   max_turns: 4,
@@ -9,20 +13,30 @@ const skill = {
   forbidden_intents: ['充值', '办理'],
 };
 
+interface RecordedRequest {
+  path: string;
+  options: { body?: string | undefined };
+}
+
+type CallAI = Parameters<typeof createSmsAiCapability>[0]['callAI'];
+
 function createHarness({
   content,
-  callAI = async () => {
-    throw new Error('AI must not run');
-  },
+  callAI = () => Promise.reject(new Error('AI must not run')),
+}: {
+  content: string;
+  callAI?: CallAI;
 }) {
-  const requests = [];
-  const states = [];
-  const errors = [];
+  const requests: RecordedRequest[] = [];
+  const states: unknown[][] = [];
+  const errors: string[] = [];
   const responses = [
     new Response(
       JSON.stringify({
         id: 'job-1',
         check_id: 'check-1',
+        step_index: 1,
+        attempts: 1,
         response_content: content,
         menu_options: [
           { value: '0', label: '业务查询与退订' },
@@ -35,20 +49,25 @@ function createHarness({
   ];
   const capability = createSmsAiCapability({
     controlClient: {
-      request: async (path, options = {}) => {
+      request: (path, options = {}) => {
         requests.push({ path, options });
-        return responses.shift();
+        return Promise.resolve(responses.shift() ?? new Response(null, { status: 500 }));
       },
     },
-    presence: { set: async (...state) => states.push(state) },
+    presence: {
+      set: (...state) => {
+        states.push(state);
+        return Promise.resolve();
+      },
+    },
     runnerId: 'session-1',
     aiBaseUrl: 'https://ai.example',
     aiToken: 'not-observed',
     aiModel: 'model',
     callAI,
-    isAIReachable: async () => true,
+    isAIReachable: () => Promise.resolve(true),
     logger: {
-      log() {},
+      log: () => undefined,
       error(message) {
         errors.push(message);
       },
@@ -57,13 +76,27 @@ function createHarness({
   return { capability, requests, states, errors };
 }
 
+const SubmittedDecision = v.object({
+  decision: v.object({ action: v.string(), selected_option: v.nullable(v.string()) }),
+});
+
+function submittedBody(
+  request: RecordedRequest | undefined,
+): v.InferOutput<typeof SubmittedDecision> {
+  const parsed = parseJson(request?.options.body ?? '', SubmittedDecision);
+  if (!parsed.ok) throw new Error(parsed.error);
+  return parsed.value;
+}
+
+const PromptBody = v.object({ menu_options: v.array(v.unknown()) });
+
 describe('SMS AI capability', () => {
   test('uses an explicit safe balance instruction without calling AI', async () => {
     const harness = createHarness({ content: '查询余额请发送 102 至 10001。' });
     const result = await harness.capability.runOne();
 
     expect(result).toEqual({ handled: true, retryDelay: 0 });
-    const submitted = JSON.parse(harness.requests[1].options.body);
+    const submitted = submittedBody(harness.requests[1]);
     expect(submitted.decision.action).toBe('reply');
     expect(submitted.decision.selected_option).toBe('102');
     expect(harness.states).toEqual([['busy', 'job-1'], ['ready']]);
@@ -73,10 +106,11 @@ describe('SMS AI capability', () => {
     let prompts = 0;
     const harness = createHarness({
       content: '请回复数字：\n0.业务查询与退订\n1.话费与AI豆',
-      callAI: async ({ prompt }) => {
+      callAI: ({ prompt }) => {
         prompts += 1;
-        expect(JSON.parse(prompt.user).menu_options.length).toBe(2);
-        return {
+        const prompted = parseJson(prompt.user, PromptBody);
+        expect(prompted.ok && prompted.value.menu_options.length).toBe(2);
+        return Promise.resolve({
           action: 'reply',
           selected_option: '1',
           balance: null,
@@ -84,7 +118,7 @@ describe('SMS AI capability', () => {
           confidence: 0.96,
           reason: '话费查询',
           evidence: '1.话费与AI豆',
-        };
+        });
       },
     });
 
@@ -92,6 +126,6 @@ describe('SMS AI capability', () => {
     expect(prompts).toBe(1);
     const decisionRequest = harness.requests.find(({ path }) => path.endsWith('/decision'));
     expect(harness.errors).toEqual([]);
-    expect(JSON.parse(decisionRequest.options.body).decision.selected_option).toBe('1');
+    expect(submittedBody(decisionRequest).decision.selected_option).toBe('1');
   });
 });

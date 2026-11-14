@@ -1,12 +1,25 @@
 import { tmpdir } from 'node:os';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import * as v from 'valibot';
+import {
+  CarrierWebBalanceOtpResponse,
+  type CarrierWebBalanceJob,
+} from '../../shared/api/carrier-web-balance.js';
+import type { ActiveWebJobStatus } from '../../shared/balance-status.js';
+import { parseJson, readJson } from '../../shared/parse-json.js';
+import { textOr } from '../../shared/text.js';
+import { SuccessResponse } from '../../shared/api/success.js';
 import {
   extractUnicomWebBalance,
   UNICOM_BALANCE_FIELD,
 } from '../../server/utils/unicom-web-balance.js';
 import { extractM1WebBalance } from '../../server/utils/m1-web-balance.js';
-import { abortableSleep } from '../serial-runner.js';
+import type { ControlClient } from '../control-client.js';
+import { errorMessage } from '../error-message.js';
+import type { CapabilityPresence } from '../presence.js';
+import { numberOr } from '../number-or.js';
+import { abortableSleep, type RunOutcome } from '../serial-runner.js';
 
 const LOGIN_ORIGIN = 'https://imgxx.client.10010.com';
 const QUERY_ORIGIN = 'https://www.10010.com';
@@ -15,6 +28,124 @@ const QUERY_ORIGIN = 'https://www.10010.com';
 // validates; both are carrier-controlled and only ever receive the balance request.
 const BALANCE_API_ORIGINS = Object.freeze([QUERY_ORIGIN, 'https://mxx.client.10010.com']);
 const M1_ORIGIN = 'https://mcardaccount.m1.com.sg';
+
+interface Candidate {
+  isVisible(): Promise<boolean>;
+  innerText(): Promise<string>;
+}
+
+interface CandidateList<C extends Candidate> {
+  count(): Promise<number>;
+  nth(index: number): C;
+}
+
+interface Locator extends Candidate, CandidateList<Locator> {
+  click(): Promise<void>;
+  fill(text: string): Promise<void>;
+  check(): Promise<void>;
+  isChecked(): Promise<boolean>;
+}
+
+interface Waiter {
+  waitForTimeout(milliseconds: number): Promise<void>;
+}
+
+interface Surface extends Waiter {
+  locator(selector: string): Locator;
+  getByText(text: string | RegExp, options?: { exact?: boolean }): Locator;
+  getByRole(role: 'button' | 'link', options: { name: RegExp }): Locator;
+}
+
+interface Frame extends Surface {
+  name(): string;
+  url(): string;
+}
+
+interface ApiResponse {
+  status(): number;
+  text(): Promise<string>;
+}
+
+interface PageResponse extends ApiResponse {
+  url(): string;
+  ok(): boolean;
+  request(): { method(): string };
+}
+
+interface Page extends Surface {
+  goto(url: string, options: { waitUntil: 'domcontentloaded'; timeout: number }): Promise<unknown>;
+  url(): string;
+  title(): Promise<string>;
+  frames(): Frame[];
+  mainFrame(): Frame;
+  screenshot(options: { path: string; fullPage: boolean }): Promise<unknown>;
+  waitForResponse(
+    predicate: (response: PageResponse) => Promise<boolean>,
+    options: { timeout: number },
+  ): Promise<PageResponse>;
+  isClosed(): boolean;
+  bringToFront(): Promise<void>;
+}
+
+interface BrowserContext {
+  pages(): Page[];
+  newPage(): Promise<Page>;
+  close(): Promise<void>;
+  request: {
+    post(url: string, options: { headers: UnicomRequestHeaders }): Promise<ApiResponse>;
+  };
+}
+
+interface UnicomRequestHeaders {
+  accept: string;
+  'content-type': string;
+  origin: string;
+  referer: string;
+}
+
+interface BrowserLaunchOptions {
+  executablePath: string;
+  headless: false;
+  viewport: { width: number; height: number };
+  args: readonly string[];
+}
+
+interface BrowserLauncher {
+  launchPersistentContext(
+    userDataDir: string,
+    options: BrowserLaunchOptions,
+  ): Promise<BrowserContext>;
+}
+
+interface Logger {
+  log(message: string): void;
+  error(message: string): void;
+}
+
+interface LoginPanel {
+  context: Surface;
+  locator: Locator;
+}
+
+type CarrierBalance =
+  ReturnType<typeof extractM1WebBalance> | ReturnType<typeof extractUnicomWebBalance>;
+
+type CarrierTarget =
+  | { provider: 'unicom'; queryOrigin: string; queryEndpoint: string }
+  | { provider: 'm1'; balanceUrl: string };
+
+const AuthenticatedBalanceBody = v.looseObject({
+  [UNICOM_BALANCE_FIELD]: v.nonNullish(v.unknown()),
+});
+
+const CheckLoginBody = v.looseObject({
+  isLogin: v.optional(v.unknown()),
+  userInfo: v.optional(
+    v.looseObject({ usernumber: v.optional(v.union([v.string(), v.number()])) }),
+  ),
+});
+
+const JsonObject = v.looseObject({});
 
 export function createTemporaryChromePreferences() {
   return {
@@ -38,10 +169,22 @@ export const TEMPORARY_CHROME_ARGS = Object.freeze([
   '--disable-features=PasswordManagerOnboarding,PasswordManagerRedesign,PasswordGeneration',
 ]);
 
-function assertOfficialUrlIn(value, allowedOrigins, label) {
-  let url;
+function textOf(value: unknown): string {
+  return typeof value === 'string' ? value : '';
+}
+
+function simLabel(job: CarrierWebBalanceJob): string {
+  return `S${String(job.sim_index).padStart(2, '0')}`;
+}
+
+function humanVerificationSeconds(job: CarrierWebBalanceJob): number {
+  return numberOr(job.skill.human_verification_timeout_seconds, 900);
+}
+
+function assertOfficialUrlIn(value: unknown, allowedOrigins: readonly string[], label: string) {
+  let url: URL;
   try {
-    url = new URL(value);
+    url = new URL(textOf(value));
   } catch {
     throw new Error(`${label} is not a valid URL`);
   }
@@ -51,33 +194,39 @@ function assertOfficialUrlIn(value, allowedOrigins, label) {
   return url.toString();
 }
 
-function assertOfficialUrl(value, expectedOrigin, label) {
+function assertOfficialUrl(value: unknown, expectedOrigin: string, label: string) {
   return assertOfficialUrlIn(value, [expectedOrigin], label);
 }
 
-export function validateUnicomBrowserJob(job) {
-  if (!job || typeof job !== 'object' || !job.skill) {
-    throw new Error('China Unicom browser job is incomplete');
-  }
+export function validateUnicomBrowserJob(job: CarrierWebBalanceJob): CarrierTarget {
   assertOfficialUrl(job.login_url, LOGIN_ORIGIN, 'Login URL');
   assertOfficialUrl(job.skill.query_origin, LOGIN_ORIGIN, 'Query page origin');
   assertOfficialUrlIn(job.skill.query_endpoint, BALANCE_API_ORIGINS, 'Balance endpoint');
+  return {
+    provider: 'unicom',
+    queryOrigin: textOf(job.skill.query_origin),
+    queryEndpoint: textOf(job.skill.query_endpoint),
+  };
 }
 
-export function validateCarrierBrowserJob(job) {
-  if (job?.skill?.id === 'unicom-web-balance') return validateUnicomBrowserJob(job);
-  if (job?.skill?.id !== 'm1-prepaid-web-balance') {
+export function validateCarrierBrowserJob(job: CarrierWebBalanceJob): CarrierTarget {
+  if (job.skill.id === 'unicom-web-balance') return validateUnicomBrowserJob(job);
+  if (job.skill.id !== 'm1-prepaid-web-balance') {
     throw new Error('Carrier browser job uses an unsupported skill');
   }
   assertOfficialUrl(job.login_url, M1_ORIGIN, 'Login URL');
   assertOfficialUrl(job.skill.balance_url, M1_ORIGIN, 'Balance URL');
+  return { provider: 'm1', balanceUrl: textOf(job.skill.balance_url) };
 }
 
-export function isUnicomErrorPage(url) {
-  return /[#/]errorpage/i.test(String(url || ''));
+export function isUnicomErrorPage(url: string | null): boolean {
+  return /[#/]errorpage/i.test(url ?? '');
 }
 
-async function firstVisible(candidates, textPattern = null) {
+async function firstVisible<C extends Candidate>(
+  candidates: readonly CandidateList<C>[],
+  textPattern: RegExp | null = null,
+): Promise<C | null> {
   for (const locator of candidates) {
     const count = await locator.count().catch(() => 0);
     for (let index = 0; index < count; index += 1) {
@@ -92,13 +241,17 @@ async function firstVisible(candidates, textPattern = null) {
   return null;
 }
 
-export async function waitForFirstVisible(
-  candidates,
-  page,
-  { timeoutMs = 30_000, pollMs = 250, textPattern = null } = {},
-) {
+export async function waitForFirstVisible<C extends Candidate>(
+  candidates: readonly CandidateList<C>[],
+  page: Waiter,
+  {
+    timeoutMs = 30_000,
+    pollMs = 250,
+    textPattern = null,
+  }: { timeoutMs?: number; pollMs?: number; textPattern?: RegExp | null } = {},
+): Promise<C | null> {
   const deadline = Date.now() + timeoutMs;
-  while (true) {
+  for (;;) {
     const candidate = await firstVisible(candidates, textPattern);
     if (candidate) return candidate;
     const remaining = deadline - Date.now();
@@ -115,21 +268,26 @@ export function createCarrierBrowserJobProcessor({
   executablePath,
   diagnosticsDirectory = join(tmpdir(), 'message-dashboard-browser-diagnostics'),
   logger = console,
+}: {
+  controlClient: ControlClient;
+  presence?: CapabilityPresence | null;
+  runnerId: string;
+  browser: BrowserLauncher;
+  executablePath: string;
+  diagnosticsDirectory?: string;
+  logger?: Logger;
 }) {
-  if (!browser?.launchPersistentContext) {
-    throw new Error('A Playwright-compatible browser launcher is required');
-  }
-  let activePage = null;
+  let activePage: Page | null = null;
   // The authenticated account the portal reported for the current task. Set by
   // the checklogin interception, read by queryBalance.
-  let sessionIdentity = null;
+  let sessionIdentity: string | null = null;
 
-  async function workerRequest(path, options = {}) {
-    return controlClient.request(path, options);
-  }
-
-  async function postJob(job, action, body = {}) {
-    const response = await workerRequest(
+  async function postJob(
+    job: CarrierWebBalanceJob,
+    action: 'otp-requested' | 'heartbeat' | 'complete' | 'fail' | 'release',
+    body: object = {},
+  ): Promise<void> {
+    const response = await controlClient.request(
       `/api/control/carrier-web-balance/jobs/${encodeURIComponent(job.id)}/${action}`,
       {
         method: 'POST',
@@ -141,11 +299,15 @@ export function createCarrierBrowserJobProcessor({
         `Worker rejected ${action} (${response.status}): ${(await response.text()).slice(0, 300)}`,
       );
     }
-    return response.json();
+    const answer = await readJson(response, SuccessResponse);
+    if (!answer.ok) throw new Error(`Worker returned an unreadable ${action} answer`);
   }
 
-  async function findRandomPasswordTab(page) {
-    const contexts = [page, ...page.frames().filter((frame) => frame !== page.mainFrame())];
+  async function findRandomPasswordTab(page: Page): Promise<LoginPanel | null> {
+    const contexts: Surface[] = [
+      page,
+      ...page.frames().filter((frame) => frame !== page.mainFrame()),
+    ];
     for (const context of contexts) {
       const locator = await firstVisible([
         context.locator('#randomPwdTips'),
@@ -157,7 +319,7 @@ export function createCarrierBrowserJobProcessor({
     return null;
   }
 
-  async function openLoginPanel(job, page) {
+  async function openLoginPanel(job: CarrierWebBalanceJob, page: Page): Promise<LoginPanel | null> {
     let loginPanel = await findRandomPasswordTab(page);
     if (loginPanel) return loginPanel;
 
@@ -180,11 +342,8 @@ export function createCarrierBrowserJobProcessor({
       '联通登录遮罩已打开，但登录组件未加载；等待本机人工处理',
     );
     await presence?.set('busy', job.id, 'human_verification_required');
-    logger.log(
-      `S${String(job.sim_index).padStart(2, '0')} login panel needs attention in the open browser.`,
-    );
-    const humanDeadline =
-      Date.now() + Number(job.skill.human_verification_timeout_seconds || 900) * 1000;
+    logger.log(`${simLabel(job)} login panel needs attention in the open browser.`);
+    const humanDeadline = Date.now() + humanVerificationSeconds(job) * 1000;
     let lastHeartbeat = Date.now();
     while (Date.now() < humanDeadline) {
       loginPanel = await findRandomPasswordTab(page);
@@ -202,19 +361,22 @@ export function createCarrierBrowserJobProcessor({
     return null;
   }
 
-  async function activateRandomPasswordMode(loginPanel) {
+  async function activateRandomPasswordMode(loginPanel: LoginPanel): Promise<boolean> {
     const { context, locator } = loginPanel;
     const requestControl = context.locator('#randomCode');
     const deadline = Date.now() + 15_000;
     while (Date.now() < deadline) {
-      await locator.click().catch(() => {});
+      await locator.click().catch(() => undefined);
       if (await requestControl.isVisible().catch(() => false)) return true;
       await context.waitForTimeout(500);
     }
     return false;
   }
 
-  async function captureDiagnostics(job, page) {
+  async function captureDiagnostics(
+    job: CarrierWebBalanceJob,
+    page: Page | undefined,
+  ): Promise<string | null> {
     if (!page) return null;
     await mkdir(diagnosticsDirectory, { recursive: true });
     const base = join(diagnosticsDirectory, job.id.replace(/[^a-zA-Z0-9_-]/g, '_'));
@@ -237,7 +399,7 @@ export function createCarrierBrowserJobProcessor({
     return base;
   }
 
-  async function hasHumanChallenge(page) {
+  async function hasHumanChallenge(page: Page): Promise<boolean> {
     const selectors = [
       '[class*="geetest"]',
       '[class*="captcha"]',
@@ -249,7 +411,7 @@ export function createCarrierBrowserJobProcessor({
       if (
         await page
           .locator(selector)
-          .first()
+          .nth(0)
           .isVisible()
           .catch(() => false)
       )
@@ -257,25 +419,28 @@ export function createCarrierBrowserJobProcessor({
     }
     return page
       .getByText(/(?:请完成验证|安全验证|拖动滑块|点击图片)/)
-      .first()
+      .nth(0)
       .isVisible()
       .catch(() => false);
   }
 
-  async function heartbeat(job, status, reason = null) {
-    return postJob(job, 'heartbeat', { status, ...(reason ? { reason } : {}) });
+  async function heartbeat(
+    job: CarrierWebBalanceJob,
+    status: ActiveWebJobStatus,
+    reason: string | null = null,
+  ): Promise<void> {
+    await postJob(job, 'heartbeat', { status, ...(reason ? { reason } : {}) });
   }
 
-  function carrierLabel(job) {
-    return job?.skill?.id === 'm1-prepaid-web-balance' ? 'M1' : '联通';
+  function carrierLabel(job: CarrierWebBalanceJob): string {
+    return job.skill.id === 'm1-prepaid-web-balance' ? 'M1' : '联通';
   }
 
-  async function waitForOtp(job, page) {
-    const deadline =
-      Date.now() + Number(job.skill.human_verification_timeout_seconds || 900) * 1000;
+  async function waitForOtp(job: CarrierWebBalanceJob, page: Page): Promise<string> {
+    const deadline = Date.now() + humanVerificationSeconds(job) * 1000;
     let humanReported = false;
     let lastHeartbeat = 0;
-    let cursor = null;
+    let cursor: { created_at: string; source_message_id: string } | null = null;
     while (Date.now() < deadline) {
       if (await hasHumanChallenge(page)) {
         if (!humanReported || Date.now() - lastHeartbeat > 30_000) {
@@ -287,9 +452,7 @@ export function createCarrierBrowserJobProcessor({
           await presence?.set('busy', job.id, 'human_verification_required');
           humanReported = true;
           lastHeartbeat = Date.now();
-          logger.log(
-            `S${String(job.sim_index).padStart(2, '0')} needs human verification in the open browser.`,
-          );
+          logger.log(`${simLabel(job)} needs human verification in the open browser.`);
         }
       } else if (Date.now() - lastHeartbeat > 30_000) {
         await heartbeat(job, 'awaiting_otp');
@@ -303,8 +466,8 @@ export function createCarrierBrowserJobProcessor({
         query.set('after_created_at', cursor.created_at);
         query.set('after_source_message_id', cursor.source_message_id);
       }
-      const response = await workerRequest(
-        `/api/control/carrier-web-balance/jobs/${encodeURIComponent(job.id)}/otp?${query}`,
+      const response = await controlClient.request(
+        `/api/control/carrier-web-balance/jobs/${encodeURIComponent(job.id)}/otp?${query.toString()}`,
       );
       if (response.status === 204) {
         await abortableSleep(2_000);
@@ -315,9 +478,11 @@ export function createCarrierBrowserJobProcessor({
           `Could not poll login code (${response.status}): ${(await response.text()).slice(0, 300)}`,
         );
       }
-      const payload = await response.json();
-      if (!payload?.code) {
-        if (payload?.cursor?.created_at && payload?.cursor?.source_message_id) {
+      const answer = await readJson(response, CarrierWebBalanceOtpResponse);
+      if (!answer.ok) throw new Error(`Could not read the carrier login code: ${answer.error}`);
+      const payload = answer.value;
+      if (!payload.code) {
+        if (payload.cursor?.created_at && payload.cursor.source_message_id) {
           cursor = payload.cursor;
           await abortableSleep(2_000);
           continue;
@@ -329,14 +494,14 @@ export function createCarrierBrowserJobProcessor({
     throw new Error('Timed out waiting for carrier login code or human verification');
   }
 
-  async function loginM1(job, page) {
+  async function loginM1(job: CarrierWebBalanceJob, page: Page): Promise<void> {
     await page.goto(job.login_url, { waitUntil: 'domcontentloaded', timeout: 60_000 });
     const phoneInput = await waitForFirstVisible(
       [page.locator('#msisdnContainer .typeContactNum'), page.locator('input.typeContactNum')],
       page,
     );
     if (!phoneInput) throw new Error('Could not find the M1 prepaid phone input');
-    const localPhone = String(job.sim_number || '')
+    const localPhone = textOr(job.sim_number, '')
       .replace(/\D/g, '')
       .replace(/^65(?=\d{8}$)/, '');
     if (!/^\d{8}$/.test(localPhone))
@@ -355,9 +520,7 @@ export function createCarrierBrowserJobProcessor({
       await postJob(job, 'otp-requested');
       await requestButton.click();
     } else {
-      logger.log(
-        `Reusing the existing login code request for S${String(job.sim_index).padStart(2, '0')}.`,
-      );
+      logger.log(`Reusing the existing login code request for ${simLabel(job)}.`);
     }
 
     const code = await waitForOtp(job, page);
@@ -369,7 +532,7 @@ export function createCarrierBrowserJobProcessor({
     }
     if ((await inputs.count().catch(() => 0)) < 6)
       throw new Error('Could not find the six M1 OTP inputs');
-    for (let index = 0; index < 6; index += 1) await inputs.nth(index).fill(code[index]);
+    for (let index = 0; index < 6; index += 1) await inputs.nth(index).fill(code.charAt(index));
 
     await heartbeat(job, 'authenticating');
     const loginButton = await firstVisible([
@@ -379,7 +542,7 @@ export function createCarrierBrowserJobProcessor({
     if (!loginButton) throw new Error('Could not find the M1 login confirmation button');
     await loginButton.click();
     const accountDeadline = Date.now() + 60_000;
-    let account = null;
+    let account: Locator | null = null;
     while (Date.now() < accountDeadline) {
       account = await firstVisible([page.locator('.numberTxt')]);
       if (account) break;
@@ -389,9 +552,13 @@ export function createCarrierBrowserJobProcessor({
     await waitForChallengeCompletion(job, page);
   }
 
-  async function queryM1Balance(job, page) {
+  async function queryM1Balance(
+    job: CarrierWebBalanceJob,
+    balanceUrl: string,
+    page: Page,
+  ): Promise<CarrierBalance> {
     await heartbeat(job, 'querying');
-    await page.goto(job.skill.balance_url, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+    await page.goto(balanceUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 });
     const account = await waitForFirstVisible([page.locator('.numberTxt')], page, {
       timeoutMs: 60_000,
     });
@@ -427,15 +594,12 @@ export function createCarrierBrowserJobProcessor({
     );
   }
 
-  async function waitForChallengeCompletion(job, page) {
+  async function waitForChallengeCompletion(job: CarrierWebBalanceJob, page: Page): Promise<void> {
     if (!(await hasHumanChallenge(page))) return;
     await heartbeat(job, 'human_verification_required', `${carrierLabel(job)}登录要求人工验证`);
     await presence?.set('busy', job.id, 'human_verification_required');
-    logger.log(
-      `S${String(job.sim_index).padStart(2, '0')} needs human verification in the open browser.`,
-    );
-    const deadline =
-      Date.now() + Number(job.skill.human_verification_timeout_seconds || 900) * 1000;
+    logger.log(`${simLabel(job)} needs human verification in the open browser.`);
+    const deadline = Date.now() + humanVerificationSeconds(job) * 1000;
     while (Date.now() < deadline) {
       if (!(await hasHumanChallenge(page))) return;
       await heartbeat(
@@ -448,7 +612,7 @@ export function createCarrierBrowserJobProcessor({
     throw new Error('Human verification timed out');
   }
 
-  async function login(job, page) {
+  async function login(job: CarrierWebBalanceJob, page: Page): Promise<void> {
     await page.goto(job.login_url, { waitUntil: 'domcontentloaded', timeout: 60_000 });
     await page.waitForTimeout(1_500);
 
@@ -465,7 +629,7 @@ export function createCarrierBrowserJobProcessor({
       loginContext.locator('input[type="tel"]'),
     ]);
     if (!phoneInput) throw new Error('Could not find the China Unicom phone input');
-    const localPhone = String(job.sim_number || '')
+    const localPhone = textOr(job.sim_number, '')
       .replace(/\D/g, '')
       .replace(/^86(?=1\d{10}$)/, '');
     if (!/^1\d{10}$/.test(localPhone))
@@ -484,9 +648,7 @@ export function createCarrierBrowserJobProcessor({
       await postJob(job, 'otp-requested');
       await requestButton.click();
     } else {
-      logger.log(
-        `Reusing the existing login code request for S${String(job.sim_index).padStart(2, '0')}.`,
-      );
+      logger.log(`Reusing the existing login code request for ${simLabel(job)}.`);
     }
     const code = await waitForOtp(job, page);
 
@@ -519,7 +681,13 @@ export function createCarrierBrowserJobProcessor({
     await waitForChallengeCompletion(job, page);
   }
 
-  async function queryBalance(job, context, nativeResponsePromise, sessionIdentityPromise) {
+  async function queryBalance(
+    job: CarrierWebBalanceJob,
+    target: Extract<CarrierTarget, { provider: 'unicom' }>,
+    context: BrowserContext,
+    nativeResponsePromise: Promise<PageResponse | null>,
+    sessionIdentityPromise: Promise<PageResponse | null>,
+  ): Promise<CarrierBalance> {
     await heartbeat(job, 'querying');
     const nativeResponse = await nativeResponsePromise;
     await sessionIdentityPromise;
@@ -536,13 +704,13 @@ export function createCarrierBrowserJobProcessor({
     }
 
     const response =
-      nativeResponse ||
-      (await context.request.post(`${job.skill.query_endpoint}?_=${Date.now()}`, {
+      nativeResponse ??
+      (await context.request.post(`${target.queryEndpoint}?_=${Date.now()}`, {
         headers: {
           accept: 'application/json, text/plain, */*',
           'content-type': 'application/x-www-form-urlencoded',
-          origin: job.skill.query_origin,
-          referer: `${job.skill.query_origin}/`,
+          origin: target.queryOrigin,
+          referer: `${target.queryOrigin}/`,
         },
       }));
     const result = {
@@ -553,17 +721,20 @@ export function createCarrierBrowserJobProcessor({
     if (result.status < 200 || result.status >= 300) {
       throw new Error(`China Unicom balance endpoint returned HTTP ${result.status}`);
     }
-    let payload;
-    try {
-      payload = JSON.parse(result.text);
-    } catch {
+    const parsedPayload = parseJson(result.text, v.unknown());
+    if (!parsedPayload.ok) {
       throw new Error('China Unicom balance endpoint did not return JSON');
     }
+    const payload = parsedPayload.value;
     // The balance payload carries no account number, so the session identity is
     // merged in. The extractor still matches it against the SIM; this supplies the
     // proof, it does not bypass the check.
+    const payloadObject = v.safeParse(JsonObject, payload);
     const payloadWithIdentity = sessionIdentity
-      ? { ...payload, userInfo: { usernumber: sessionIdentity } }
+      ? {
+          ...(payloadObject.success ? payloadObject.output : {}),
+          userInfo: { usernumber: sessionIdentity },
+        }
       : payload;
     try {
       return extractUnicomWebBalance(payloadWithIdentity, job.sim_number);
@@ -574,28 +745,33 @@ export function createCarrierBrowserJobProcessor({
         `${job.id.replace(/[^a-zA-Z0-9_-]/g, '_')}.response.json`,
       );
       await writeFile(responsePath, `${JSON.stringify(payload, null, 2)}\n`);
-      throw new Error(`${error.message}; response saved to ${responsePath}`, { cause: error });
+      throw new Error(`${errorMessage(error)}; response saved to ${responsePath}`, {
+        cause: error,
+      });
     }
   }
 
-  async function release(job, error) {
+  async function release(job: CarrierWebBalanceJob, error: unknown): Promise<void> {
     try {
-      await postJob(job, 'release', { error: error.message || String(error) });
+      await postJob(job, 'release', { error: errorMessage(error) });
     } catch (releaseError) {
-      logger.error(`Could not release web balance job ${job.id}: ${releaseError.message}`);
+      logger.error(`Could not release web balance job ${job.id}: ${errorMessage(releaseError)}`);
     }
   }
 
-  async function fail(job, error) {
+  async function fail(job: CarrierWebBalanceJob, error: unknown): Promise<void> {
     try {
-      await postJob(job, 'fail', { error: error.message || String(error) });
+      await postJob(job, 'fail', { error: errorMessage(error) });
     } catch (failError) {
-      logger.error(`Could not fail web balance job ${job.id}: ${failError.message}`);
+      logger.error(`Could not fail web balance job ${job.id}: ${errorMessage(failError)}`);
     }
   }
 
-  async function processJob(job, { signal } = {}) {
-    validateCarrierBrowserJob(job);
+  async function processJob(
+    job: CarrierWebBalanceJob,
+    { signal }: { signal?: AbortSignal | null } = {},
+  ): Promise<RunOutcome> {
+    const target = validateCarrierBrowserJob(job);
     if (signal?.aborted) throw new Error('Browser query cancelled');
     const profileDir = await mkdtemp(join(tmpdir(), 'carrier-balance-'));
     const defaultProfileDir = join(profileDir, 'Default');
@@ -604,9 +780,11 @@ export function createCarrierBrowserJobProcessor({
       join(defaultProfileDir, 'Preferences'),
       JSON.stringify(createTemporaryChromePreferences()),
     );
-    let context;
-    let page;
-    const closeOnAbort = () => context?.close().catch(() => {});
+    let context: BrowserContext | undefined;
+    let page: Page | undefined;
+    const closeOnAbort = () => {
+      void context?.close().catch(() => undefined);
+    };
     signal?.addEventListener('abort', closeOnAbort, { once: true });
     try {
       context = await browser.launchPersistentContext(profileDir, {
@@ -616,26 +794,22 @@ export function createCarrierBrowserJobProcessor({
         args: TEMPORARY_CHROME_ARGS,
       });
       if (signal?.aborted) throw new Error('Browser query cancelled');
-      page = context.pages()[0] || (await context.newPage());
+      page = context.pages()[0] ?? (await context.newPage());
       activePage = page;
       sessionIdentity = null;
-      let parsed;
-      if (job.skill.id === 'unicom-web-balance') {
+      let parsed: CarrierBalance;
+      if (target.provider === 'unicom') {
         // The portal calls this endpoint before login (answered with a logged-out
         // payload) and again after. Wait for the authenticated one.
         const nativeResponsePromise = page
           .waitForResponse(
             async (response) => {
-              if (!response.url().startsWith(job.skill.query_endpoint)) return false;
+              if (!response.url().startsWith(target.queryEndpoint)) return false;
               if (response.request().method() !== 'POST') return false;
               if (!response.ok()) return false;
               const body = await response.text().catch(() => '');
-              try {
-                // Only the authenticated response carries the balance.
-                return JSON.parse(body)?.[UNICOM_BALANCE_FIELD] != null;
-              } catch {
-                return false;
-              }
+              // Only the authenticated response carries the balance.
+              return parseJson(body, AuthenticatedBalanceBody).ok;
             },
             { timeout: 120_000 },
           )
@@ -645,54 +819,58 @@ export function createCarrierBrowserJobProcessor({
         const sessionIdentityPromise = page
           .waitForResponse(
             async (response) => {
-              if (!/\/mall\/service\/check\/checklogin/.test(response.url())) return false;
+              if (!response.url().includes('/mall/service/check/checklogin')) return false;
               if (!response.ok()) return false;
               const body = await response.text().catch(() => '');
-              try {
-                const parsedBody = JSON.parse(body);
-                if (!parsedBody?.isLogin || !parsedBody?.userInfo?.usernumber) return false;
-                sessionIdentity = String(parsedBody.userInfo.usernumber);
-                return true;
-              } catch {
-                return false;
-              }
+              const parsedBody = parseJson(body, CheckLoginBody);
+              if (!parsedBody.ok) return false;
+              const usernumber = parsedBody.value.userInfo?.usernumber;
+              if (!parsedBody.value.isLogin || !usernumber) return false;
+              sessionIdentity = String(usernumber);
+              return true;
             },
             { timeout: 120_000 },
           )
           .catch(() => null);
         await login(job, page);
-        parsed = await queryBalance(job, context, nativeResponsePromise, sessionIdentityPromise);
+        parsed = await queryBalance(
+          job,
+          target,
+          context,
+          nativeResponsePromise,
+          sessionIdentityPromise,
+        );
       } else {
         await loginM1(job, page);
-        parsed = await queryM1Balance(job, page);
+        parsed = await queryM1Balance(job, target.balanceUrl, page);
       }
       await postJob(job, 'complete', parsed);
-      logger.log(`Stored carrier balance for S${String(job.sim_index).padStart(2, '0')}.`);
+      logger.log(`Stored carrier balance for ${simLabel(job)}.`);
       return { handled: true, retryDelay: 0 };
     } catch (error) {
       const diagnosticBase = await captureDiagnostics(job, page).catch(() => null);
       const terminal =
         /(?:timed out|does not prove|multiple candidate|recognized available-balance|exact SGD balance|validity date|HTTP|did not return JSON)/i.test(
-          error.message,
+          errorMessage(error),
         );
       if (terminal) await fail(job, error);
       else await release(job, error);
-      logger.error(`Carrier web balance job ${job.id} failed: ${error.message}`);
+      logger.error(`Carrier web balance job ${job.id} failed: ${errorMessage(error)}`);
       if (diagnosticBase)
         logger.error(`Diagnostics saved to ${diagnosticBase}.json and ${diagnosticBase}.png`);
-      const retryDelay = Math.max(10, Number(job.skill.cooldown_seconds || 10)) * 1_000;
+      const retryDelay = Math.max(10, numberOr(job.skill.cooldown_seconds, 10)) * 1_000;
       return { handled: true, retryDelay };
     } finally {
       signal?.removeEventListener('abort', closeOnAbort);
       activePage = null;
-      await context?.close().catch(() => {});
+      await context?.close().catch(() => undefined);
       await rm(profileDir, { recursive: true, force: true });
     }
   }
 
   return Object.freeze({
     processJob,
-    async showActiveBrowser() {
+    async showActiveBrowser(): Promise<boolean> {
       if (!activePage || activePage.isClosed()) return false;
       await activePage.bringToFront();
       return true;

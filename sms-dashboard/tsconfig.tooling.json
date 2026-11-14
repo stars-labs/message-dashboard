@@ -19,5 +19,6 @@
     "tailwindcss-forms.d.ts",
     "scripts/**/*.ts"
   ],
-  "references": [{ "path": "./tsconfig.shared.json" }]
+  "exclude": ["**/*.test.ts"],
+  "references": [{ "path": "./tsconfig.shared.json" }, { "path": "./tsconfig.runner-core.json" }]
 }
