@@ -10,6 +10,7 @@ import {
   type D1Statement,
 } from '../lib/d1.js';
 import { NOT_JSON_MESSAGE, readBody, type MissingKeyMessages } from '../lib/request-body.js';
+import { textOr } from '../lib/text.js';
 import {
   authorizeRunnerControl,
   runnerCanAccessOwner,
@@ -168,10 +169,6 @@ type Lease = { ok: true; job: WebJob; runnerId: string } | { ok: false; response
 
 function json(data: unknown, status = 200): Response {
   return Response.json(data, { status });
-}
-
-function textOr(value: string | null | undefined, fallback: string): string {
-  return value === undefined || value === null || value === '' ? fallback : value;
 }
 
 function normalizePhone(value: string, provider: WebProvider): string {
