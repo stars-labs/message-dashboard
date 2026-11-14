@@ -1,4 +1,4 @@
-use rusqlite::types::{FromSql, FromSqlResult, ToSql, ToSqlOutput, ValueRef};
+use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, ValueRef};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -107,6 +107,63 @@ open_string_enum! {
         Stored = "stored",
         AlreadyStored = "already_stored",
         Rejected = "rejected",
+    }
+}
+
+/// The CPMS mem1 storage an SMS is read from or deleted in. Parsing ignores
+/// ASCII case; the canonical text is upper case.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SmsStorage {
+    Me,
+    Sm,
+    Mt,
+}
+
+impl SmsStorage {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Me => "ME",
+            Self::Sm => "SM",
+            Self::Mt => "MT",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("unknown SMS storage: {0}")]
+pub struct UnknownSmsStorage(pub String);
+
+impl std::str::FromStr for SmsStorage {
+    type Err = UnknownSmsStorage;
+
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        match text.to_ascii_uppercase().as_str() {
+            "ME" => Ok(Self::Me),
+            "SM" => Ok(Self::Sm),
+            "MT" => Ok(Self::Mt),
+            _ => Err(UnknownSmsStorage(text.to_string())),
+        }
+    }
+}
+
+impl fmt::Display for SmsStorage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl ToSql for SmsStorage {
+    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+        Ok(self.as_str().into())
+    }
+}
+
+impl FromSql for SmsStorage {
+    fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
+        value
+            .as_str()?
+            .parse()
+            .map_err(|error: UnknownSmsStorage| FromSqlError::Other(error.into()))
     }
 }
 
@@ -462,6 +519,61 @@ mod tests {
             .query_row("SELECT direction FROM t", [], |row| row.get(0))
             .unwrap();
         assert_eq!(read, Direction::Received);
+    }
+
+    #[test]
+    fn sms_storage_text_is_unchanged() {
+        for (storage, text) in [
+            (SmsStorage::Me, "ME"),
+            (SmsStorage::Sm, "SM"),
+            (SmsStorage::Mt, "MT"),
+        ] {
+            assert_eq!(storage.as_str(), text);
+            assert_eq!(storage.to_string(), text);
+            assert_eq!(text.parse::<SmsStorage>().unwrap(), storage);
+            assert_eq!(
+                text.to_ascii_lowercase().parse::<SmsStorage>().unwrap(),
+                storage
+            );
+        }
+        for text in ["", "SR", "BM", "M E", "ME ", "MÉ"] {
+            assert_eq!(
+                text.parse::<SmsStorage>(),
+                Err(UnknownSmsStorage(text.to_string()))
+            );
+        }
+    }
+
+    #[test]
+    fn sms_storage_is_stored_as_the_same_text() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute("CREATE TABLE t (storage TEXT NOT NULL)", [])
+            .unwrap();
+        for storage in [SmsStorage::Me, SmsStorage::Sm, SmsStorage::Mt] {
+            conn.execute("DELETE FROM t", []).unwrap();
+            conn.execute("INSERT INTO t VALUES (?1)", [&storage])
+                .unwrap();
+            let text: String = conn
+                .query_row("SELECT storage FROM t", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(text, storage.as_str());
+            let read: SmsStorage = conn
+                .query_row("SELECT storage FROM t", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(read, storage);
+        }
+        conn.execute("DELETE FROM t", []).unwrap();
+        conn.execute("INSERT INTO t VALUES ('sm')", []).unwrap();
+        let read: SmsStorage = conn
+            .query_row("SELECT storage FROM t", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(read, SmsStorage::Sm);
+        conn.execute("DELETE FROM t", []).unwrap();
+        conn.execute("INSERT INTO t VALUES ('SR')", []).unwrap();
+        assert!(conn
+            .query_row("SELECT storage FROM t", [], |row| row
+                .get::<_, SmsStorage>(0))
+            .is_err());
     }
 
     #[test]

@@ -1,6 +1,6 @@
 // Integration tests for MessageStore - SQLite persistence layer
 use orange_pi_daemon_rust::message_store::{MessageStore, Segment};
-use orange_pi_daemon_rust::types::{Direction, Message};
+use orange_pi_daemon_rust::types::{Direction, Message, SmsStorage};
 
 // Helper function to create test message
 fn create_test_message(iccid: &str, content: &str, timestamp: &str) -> Message {
@@ -276,7 +276,7 @@ fn test_store_single_segment() {
         part_number: 1,
         content: "Part 1 content",
         timestamp: "2024-01-01T12:00:00.000Z",
-        sms_storage: "ME",
+        sms_storage: SmsStorage::Me,
         sms_index: 1,
     });
 
@@ -296,7 +296,7 @@ fn test_store_segment_preserves_sms_storage() {
             part_number: 1,
             content: "Part 1",
             timestamp: "2024-01-01T12:00:00.000Z",
-            sms_storage: "SM",
+            sms_storage: SmsStorage::Sm,
             sms_index: 7,
         })
         .unwrap();
@@ -304,7 +304,7 @@ fn test_store_segment_preserves_sms_storage() {
     let segments = store
         .get_segments_with_storage("iccid_001", "+1234567890", 42, 2)
         .unwrap();
-    assert_eq!(segments[0].3, "SM");
+    assert_eq!(segments[0].3, SmsStorage::Sm);
     assert_eq!(segments[0].4, 7);
 }
 
@@ -321,7 +321,7 @@ fn test_incomplete_multipart_keeps_each_physical_location() {
             part_number: 1,
             content: "Part 1",
             timestamp: "2024-01-01T12:00:00.000Z",
-            sms_storage: "ME",
+            sms_storage: SmsStorage::Me,
             sms_index: 7,
         })
         .unwrap();
@@ -334,7 +334,7 @@ fn test_incomplete_multipart_keeps_each_physical_location() {
             part_number: 2,
             content: "Part 2",
             timestamp: "2024-01-01T12:00:01.000Z",
-            sms_storage: "SM",
+            sms_storage: SmsStorage::Sm,
             sms_index: 9,
         })
         .unwrap();
@@ -343,8 +343,8 @@ fn test_incomplete_multipart_keeps_each_physical_location() {
         .get_segments_with_storage("iccid_001", "+1234567890", 42, 3)
         .unwrap();
     assert_eq!(segments.len(), 2);
-    assert_eq!((segments[0].3.as_str(), segments[0].4), ("ME", 7));
-    assert_eq!((segments[1].3.as_str(), segments[1].4), ("SM", 9));
+    assert_eq!((segments[0].3, segments[0].4), (SmsStorage::Me, 7));
+    assert_eq!((segments[1].3, segments[1].4), (SmsStorage::Sm, 9));
 }
 
 #[test]
@@ -361,7 +361,7 @@ fn test_get_segments_incomplete() {
             part_number: 1,
             content: "Part 1",
             timestamp: "2024-01-01T12:00:00.000Z",
-            sms_storage: "ME",
+            sms_storage: SmsStorage::Me,
             sms_index: 1,
         })
         .unwrap();
@@ -374,7 +374,7 @@ fn test_get_segments_incomplete() {
             part_number: 2,
             content: "Part 2",
             timestamp: "2024-01-01T12:00:00.000Z",
-            sms_storage: "ME",
+            sms_storage: SmsStorage::Me,
             sms_index: 2,
         })
         .unwrap();
@@ -399,7 +399,7 @@ fn test_get_segments_complete() {
             part_number: 1,
             content: "Part 1",
             timestamp: "2024-01-01T12:00:00.000Z",
-            sms_storage: "ME",
+            sms_storage: SmsStorage::Me,
             sms_index: 1,
         })
         .unwrap();
@@ -412,7 +412,7 @@ fn test_get_segments_complete() {
             part_number: 2,
             content: "Part 2",
             timestamp: "2024-01-01T12:00:00.000Z",
-            sms_storage: "ME",
+            sms_storage: SmsStorage::Me,
             sms_index: 2,
         })
         .unwrap();
@@ -425,7 +425,7 @@ fn test_get_segments_complete() {
             part_number: 3,
             content: "Part 3",
             timestamp: "2024-01-01T12:00:00.000Z",
-            sms_storage: "ME",
+            sms_storage: SmsStorage::Me,
             sms_index: 3,
         })
         .unwrap();
@@ -455,7 +455,7 @@ fn test_segment_content_assembly() {
             part_number: 3,
             content: "World!",
             timestamp: "2024-01-01T12:00:00.000Z",
-            sms_storage: "ME",
+            sms_storage: SmsStorage::Me,
             sms_index: 3,
         })
         .unwrap();
@@ -468,7 +468,7 @@ fn test_segment_content_assembly() {
             part_number: 1,
             content: "Hello ",
             timestamp: "2024-01-01T12:00:00.000Z",
-            sms_storage: "ME",
+            sms_storage: SmsStorage::Me,
             sms_index: 1,
         })
         .unwrap();
@@ -481,7 +481,7 @@ fn test_segment_content_assembly() {
             part_number: 2,
             content: "Rust ",
             timestamp: "2024-01-01T12:00:00.000Z",
-            sms_storage: "ME",
+            sms_storage: SmsStorage::Me,
             sms_index: 2,
         })
         .unwrap();
@@ -512,7 +512,7 @@ fn test_delete_segments_after_assembly() {
             part_number: 1,
             content: "Part 1",
             timestamp: "2024-01-01T12:00:00.000Z",
-            sms_storage: "ME",
+            sms_storage: SmsStorage::Me,
             sms_index: 1,
         })
         .unwrap();
@@ -525,7 +525,7 @@ fn test_delete_segments_after_assembly() {
             part_number: 2,
             content: "Part 2",
             timestamp: "2024-01-01T12:00:00.000Z",
-            sms_storage: "ME",
+            sms_storage: SmsStorage::Me,
             sms_index: 2,
         })
         .unwrap();
@@ -555,7 +555,7 @@ fn test_multiple_multipart_messages_same_sender() {
             part_number: 1,
             content: "Msg1 Part1",
             timestamp: "2024-01-01T12:00:00.000Z",
-            sms_storage: "ME",
+            sms_storage: SmsStorage::Me,
             sms_index: 1,
         })
         .unwrap();
@@ -568,7 +568,7 @@ fn test_multiple_multipart_messages_same_sender() {
             part_number: 2,
             content: "Msg1 Part2",
             timestamp: "2024-01-01T12:00:00.000Z",
-            sms_storage: "ME",
+            sms_storage: SmsStorage::Me,
             sms_index: 2,
         })
         .unwrap();
@@ -583,7 +583,7 @@ fn test_multiple_multipart_messages_same_sender() {
             part_number: 1,
             content: "Msg2 Part1",
             timestamp: "2024-01-01T12:01:00.000Z",
-            sms_storage: "ME",
+            sms_storage: SmsStorage::Me,
             sms_index: 3,
         })
         .unwrap();
@@ -596,7 +596,7 @@ fn test_multiple_multipart_messages_same_sender() {
             part_number: 2,
             content: "Msg2 Part2",
             timestamp: "2024-01-01T12:01:00.000Z",
-            sms_storage: "ME",
+            sms_storage: SmsStorage::Me,
             sms_index: 4,
         })
         .unwrap();
@@ -633,7 +633,7 @@ fn test_cleanup_old_segments() {
             part_number: 1,
             content: "Part 1",
             timestamp: "2024-01-01T12:00:00.000Z",
-            sms_storage: "ME",
+            sms_storage: SmsStorage::Me,
             sms_index: 1,
         })
         .unwrap();

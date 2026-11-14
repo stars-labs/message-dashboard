@@ -4,10 +4,10 @@
 //! Set `USE_DBUS=1` to use legacy D-Bus mode (requires `ModemManager` service).
 
 use crate::at_modem::AtModemManager;
-use crate::message_store::Segment;
+use crate::message_store::{Segment, StoredSegment};
 use crate::partial_sms;
 use crate::signal_cache::SignalCache;
-use crate::types::{Direction, Message, MessageWithPath, SignalData, SmsSubmission};
+use crate::types::{Direction, Message, MessageWithPath, SignalData, SmsStorage, SmsSubmission};
 use anyhow::{anyhow, Result};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -61,6 +61,7 @@ impl CachedPort {
 #[cfg(test)]
 mod tests {
     use super::{retain_present_cached_modems, signal_from_percent, CachedPort, ModemManager};
+    use crate::types::SmsStorage;
     use std::collections::{BTreeMap, HashMap};
 
     #[test]
@@ -74,16 +75,49 @@ mod tests {
 
     #[test]
     fn test_format_storage_aware_at_sms_path() {
-        let path =
-            ModemManager::format_at_sms_path(&[("ME".to_string(), 5), ("SM".to_string(), 7)]);
+        let path = ModemManager::format_at_sms_path(&[(SmsStorage::Me, 5), (SmsStorage::Sm, 7)]);
         assert_eq!(path, "at:ME:5,SM:7");
+        assert_eq!(
+            ModemManager::format_at_sms_path(&[(SmsStorage::Mt, 0)]),
+            "at:MT:0"
+        );
     }
 
     #[test]
     fn test_parse_storage_aware_at_sms_path() {
         assert_eq!(
             ModemManager::parse_at_sms_path("at:ME:5,sm:7").unwrap(),
-            vec![(Some("ME".to_string()), 5), (Some("SM".to_string()), 7)]
+            vec![(Some(SmsStorage::Me), 5), (Some(SmsStorage::Sm), 7)]
+        );
+        assert_eq!(
+            ModemManager::parse_at_sms_path("at:MT:1").unwrap(),
+            vec![(Some(SmsStorage::Mt), 1)]
+        );
+    }
+
+    #[test]
+    fn test_parse_mixed_storage_and_legacy_at_sms_path() {
+        assert_eq!(
+            ModemManager::parse_at_sms_path("at:ME:5,7").unwrap(),
+            vec![(Some(SmsStorage::Me), 5), (None, 7)]
+        );
+    }
+
+    #[test]
+    fn test_at_sms_path_round_trips() {
+        let locations = [
+            (SmsStorage::Me, 5),
+            (SmsStorage::Sm, 7),
+            (SmsStorage::Mt, 9),
+        ];
+        let parsed =
+            ModemManager::parse_at_sms_path(&ModemManager::format_at_sms_path(&locations)).unwrap();
+        assert_eq!(
+            parsed,
+            locations
+                .iter()
+                .map(|(storage, index)| (Some(*storage), *index))
+                .collect::<Vec<_>>()
         );
     }
 
@@ -100,6 +134,23 @@ mod tests {
         assert!(ModemManager::parse_at_sms_path("at:SR:5").is_err());
         assert!(ModemManager::parse_at_sms_path("at:ME:not-a-number").is_err());
         assert!(ModemManager::parse_at_sms_path("at:").is_err());
+    }
+
+    #[test]
+    fn test_parse_at_sms_path_rejects_malformed_paths_with_the_same_errors() {
+        let message = |path: &str| {
+            ModemManager::parse_at_sms_path(path)
+                .unwrap_err()
+                .to_string()
+        };
+        assert_eq!(message("at:sr:5"), "Invalid SMS storage in path: SR");
+        assert_eq!(message("at::5"), "Invalid SMS storage in path: ");
+        assert_eq!(message("at:ME:5,XX:7"), "Invalid SMS storage in path: XX");
+        assert_eq!(message("at:ME:x"), "Invalid SMS index: x");
+        assert_eq!(message("at:5,y"), "Invalid SMS index: y");
+        assert_eq!(message("sms:ME:5"), "Invalid AT SMS path: sms:ME:5");
+        assert!(ModemManager::parse_at_sms_path("at:ME:5,").is_err());
+        assert!(ModemManager::parse_at_sms_path("at:ME:5:6").is_err());
     }
 
     fn cached(port: &str, device: &str) -> CachedPort {
@@ -614,6 +665,10 @@ impl ModemManager {
                 );
                 multipart_groups.entry(key).or_default().push(sms);
             } else {
+                let Some(storage) = sms.storage else {
+                    warn!("Skipping SMS {} without a recorded storage", sms.index);
+                    continue;
+                };
                 // Single-part message - convert immediately
                 complete_messages.push(MessageWithPath {
                     message: Message {
@@ -624,7 +679,7 @@ impl ModemManager {
                         direction: Direction::Received,
                     },
                     modem_id: modem_id.to_string(),
-                    sms_path: Self::format_at_sms_path(&[(sms.storage, sms.index)]),
+                    sms_path: Self::format_at_sms_path(&[(storage, sms.index)]),
                 });
             }
         }
@@ -674,6 +729,10 @@ impl ModemManager {
                 warn!("Skipping segment without concatenation info");
                 continue;
             };
+            let Some(storage) = part.storage else {
+                warn!("Skipping segment without a recorded storage");
+                continue;
+            };
             if let Err(e) = message_store.store_segment(&Segment {
                 iccid,
                 sender,
@@ -682,7 +741,7 @@ impl ModemManager {
                 part_number: concat_info.part_number,
                 content: &part.text,
                 timestamp: &part.timestamp,
-                sms_storage: &part.storage,
+                sms_storage: storage,
                 sms_index: part.index,
             }) {
                 warn!("Failed to store segment: {}", e);
@@ -733,7 +792,7 @@ impl ModemManager {
     /// All parts present - assemble!
     fn complete_message(
         group: &MultipartGroup<'_>,
-        mut all_parts: Vec<(u8, String, String, String, u32)>,
+        mut all_parts: Vec<StoredSegment>,
     ) -> Option<MessageWithPath> {
         all_parts.sort_by_key(|(part_num, _, _, _, _)| *part_num);
 
@@ -743,9 +802,9 @@ impl ModemManager {
             .collect::<Vec<_>>()
             .join("");
         let timestamp = all_parts.first()?.2.clone();
-        let all_locations: Vec<(String, u32)> = all_parts
+        let all_locations: Vec<(SmsStorage, u32)> = all_parts
             .iter()
-            .map(|(_, _, _, storage, index)| (storage.clone(), *index))
+            .map(|(_, _, _, storage, index)| (*storage, *index))
             .collect();
 
         info!(
@@ -771,10 +830,7 @@ impl ModemManager {
 
     /// The missing parts are not coming. Deliver what did arrive, marked
     /// incomplete, so the usual store-then-delete path frees the SIM slots.
-    fn orphaned_message(
-        group: &MultipartGroup<'_>,
-        segments: &[(u8, String, String, String, u32)],
-    ) -> MessageWithPath {
+    fn orphaned_message(group: &MultipartGroup<'_>, segments: &[StoredSegment]) -> MessageWithPath {
         let numbered: Vec<(u8, String)> = segments
             .iter()
             .map(|(number, content, _, _, _)| (*number, content.clone()))
@@ -784,9 +840,9 @@ impl ModemManager {
             .map(|(_, _, timestamp, _, _)| timestamp.clone())
             .min()
             .unwrap_or_default();
-        let locations: Vec<(String, u32)> = segments
+        let locations: Vec<(SmsStorage, u32)> = segments
             .iter()
-            .map(|(_, _, _, storage, index)| (storage.clone(), *index))
+            .map(|(_, _, _, storage, index)| (*storage, *index))
             .collect();
 
         info!(
@@ -861,7 +917,7 @@ impl ModemManager {
                 for (storage, index) in locations {
                     if let Some(storage) = storage {
                         self.at_modem
-                            .delete_sms_from_storage(&port, &storage, index)
+                            .delete_sms_from_storage(&port, storage, index)
                             .await?;
                         debug!("Deleted SMS {}:{} via AT from {}", storage, index, modem_id);
                     } else {
@@ -888,17 +944,17 @@ impl ModemManager {
         }
     }
 
-    fn format_at_sms_path(locations: &[(String, u32)]) -> String {
+    fn format_at_sms_path(locations: &[(SmsStorage, u32)]) -> String {
         let encoded = locations
             .iter()
-            .map(|(storage, index)| format!("{}:{}", storage.to_ascii_uppercase(), index))
+            .map(|(storage, index)| format!("{storage}:{index}"))
             .collect::<Vec<_>>()
             .join(",");
         format!("at:{encoded}")
     }
 
     /// Parse both storage-aware `at:ME:5,SM:7` paths and legacy `at:5,7` paths.
-    fn parse_at_sms_path(sms_path: &str) -> Result<Vec<(Option<String>, u32)>> {
+    fn parse_at_sms_path(sms_path: &str) -> Result<Vec<(Option<SmsStorage>, u32)>> {
         let encoded = sms_path
             .strip_prefix("at:")
             .ok_or_else(|| anyhow!("Invalid AT SMS path: {sms_path}"))?;
@@ -910,10 +966,12 @@ impl ModemManager {
             .split(',')
             .map(|location| {
                 if let Some((storage, index)) = location.split_once(':') {
-                    let storage = storage.to_ascii_uppercase();
-                    if !matches!(storage.as_str(), "ME" | "SM" | "MT") {
-                        return Err(anyhow!("Invalid SMS storage in path: {storage}"));
-                    }
+                    let storage = storage.parse::<SmsStorage>().map_err(|_| {
+                        anyhow!(
+                            "Invalid SMS storage in path: {}",
+                            storage.to_ascii_uppercase()
+                        )
+                    })?;
                     let index = index
                         .parse::<u32>()
                         .map_err(|_| anyhow!("Invalid SMS index: {index}"))?;

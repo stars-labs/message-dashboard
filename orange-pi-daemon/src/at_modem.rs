@@ -6,7 +6,7 @@
 //! - ttyUSB2: AT commands (this is what we use)
 //! - ttyUSB3: PPP/Modem
 
-use crate::types::SmsSubmission;
+use crate::types::{SmsStorage, SmsSubmission};
 use anyhow::{anyhow, Result};
 use nix::sys::termios::{self, BaudRate, SetArg};
 use std::collections::{BTreeMap, HashMap};
@@ -31,8 +31,8 @@ const SMS_PROMPT_RETRY_DELAY: Duration = Duration::from_secs(1);
 /// SMS message from AT command interface
 #[derive(Debug, Clone)]
 pub struct AtSms {
-    /// CPMS mem1 storage containing this message (for example `ME` or `SM`).
-    pub storage: String,
+    /// CPMS mem1 storage containing this message; unset until the scan that found it records it.
+    pub storage: Option<SmsStorage>,
     pub index: u32,
     /// All SIM indices that belong to this logical message (concatenated parts)
     pub part_indices: Vec<u32>,
@@ -1046,7 +1046,7 @@ impl AtModemManager {
         let mut failures = Vec::new();
 
         for storage in stores {
-            if let Err(e) = self.select_sms_storage(port, &storage).await {
+            if let Err(e) = self.select_sms_storage(port, storage).await {
                 warn!(
                     "Failed to select SMS storage {} on {}: {}; trying next storage",
                     storage, port, e
@@ -1058,7 +1058,7 @@ impl AtModemManager {
             match self.list_sms_from_selected_storage(port).await {
                 Ok(mut stored_messages) => {
                     for message in &mut stored_messages {
-                        message.storage.clone_from(&storage);
+                        message.storage = Some(storage);
                     }
                     debug!(
                         "SMS storage {}: got {} messages from {}",
@@ -1121,7 +1121,7 @@ impl AtModemManager {
 
     /// Discover stores to scan. EC20 is scanned as ME then SM; MT is only a fallback
     /// for modem families that advertise neither concrete storage.
-    async fn sms_read_stores(&self, port: &str) -> Vec<String> {
+    async fn sms_read_stores(&self, port: &str) -> Vec<SmsStorage> {
         match self.send_at_command(port, "AT+CPMS=?", self.timeout).await {
             Ok(response) => {
                 let supported = Self::parse_cpms_read_stores(&response);
@@ -1131,7 +1131,7 @@ impl AtModemManager {
                         "Modem {} advertised no usable SMS read storage; trying ME and SM",
                         port
                     );
-                    vec!["ME".to_string(), "SM".to_string()]
+                    vec![SmsStorage::Me, SmsStorage::Sm]
                 } else {
                     stores
                 }
@@ -1141,20 +1141,19 @@ impl AtModemManager {
                     "Failed to query SMS storage capabilities on {}: {}; trying ME and SM",
                     port, e
                 );
-                vec!["ME".to_string(), "SM".to_string()]
+                vec![SmsStorage::Me, SmsStorage::Sm]
             }
         }
     }
 
-    async fn select_sms_storage(&self, port: &str, storage: &str) -> Result<()> {
-        let storage = storage.to_ascii_uppercase();
-        if !matches!(storage.as_str(), "ME" | "SM" | "MT") {
-            return Err(anyhow!("Unsupported SMS read storage: {storage}"));
-        }
-
-        let command = format!("AT+CPMS=\"{storage}\"");
+    async fn select_sms_storage(&self, port: &str, storage: SmsStorage) -> Result<()> {
+        let command = Self::select_sms_storage_command(storage);
         self.send_at_command(port, &command, self.timeout).await?;
         Ok(())
+    }
+
+    fn select_sms_storage_command(storage: SmsStorage) -> String {
+        format!("AT+CPMS=\"{storage}\"")
     }
 
     /// Parse mem1 capabilities from `+CPMS: ("ME","MT",...),(...),(...)`.
@@ -1182,15 +1181,18 @@ impl AtModemManager {
             .collect()
     }
 
-    fn sms_read_store_candidates(supported: &[String]) -> Vec<String> {
-        let mut stores: Vec<String> = ["ME", "SM"]
+    fn sms_read_store_candidates(supported: &[String]) -> Vec<SmsStorage> {
+        let mut stores: Vec<SmsStorage> = [SmsStorage::Me, SmsStorage::Sm]
             .into_iter()
-            .filter(|candidate| supported.iter().any(|store| store == candidate))
-            .map(str::to_string)
+            .filter(|candidate| supported.iter().any(|store| store == candidate.as_str()))
             .collect();
 
-        if stores.is_empty() && supported.iter().any(|store| store == "MT") {
-            stores.push("MT".to_string());
+        if stores.is_empty()
+            && supported
+                .iter()
+                .any(|store| store == SmsStorage::Mt.as_str())
+        {
+            stores.push(SmsStorage::Mt);
         }
         stores
     }
@@ -1236,7 +1238,7 @@ impl AtModemManager {
                             // Decode UCS2 hex if it looks like hex-encoded text
                             let text = Self::decode_sms_content(raw_text);
                             messages.push(AtSms {
-                                storage: String::new(),
+                                storage: None,
                                 index: sms.0,
                                 part_indices: vec![sms.0],
                                 sender: sms.1,
@@ -1433,7 +1435,7 @@ impl AtModemManager {
         };
 
         Ok(AtSms {
-            storage: String::new(),
+            storage: None,
             index,
             part_indices: vec![index],
             sender,
@@ -1926,7 +1928,7 @@ impl AtModemManager {
     pub async fn delete_sms_from_storage(
         &self,
         port: &str,
-        storage: &str,
+        storage: SmsStorage,
         index: u32,
     ) -> Result<()> {
         self.select_sms_storage(port, storage).await?;
@@ -2613,12 +2615,28 @@ mod tests {
     }
 
     #[test]
+    fn test_select_sms_storage_command_text_is_unchanged() {
+        assert_eq!(
+            AtModemManager::select_sms_storage_command(SmsStorage::Me),
+            "AT+CPMS=\"ME\""
+        );
+        assert_eq!(
+            AtModemManager::select_sms_storage_command(SmsStorage::Sm),
+            "AT+CPMS=\"SM\""
+        );
+        assert_eq!(
+            AtModemManager::select_sms_storage_command(SmsStorage::Mt),
+            "AT+CPMS=\"MT\""
+        );
+    }
+
+    #[test]
     fn test_sms_read_store_candidates_scan_me_then_sm() {
         let supported = vec!["SM".into(), "ME".into(), "MT".into(), "SR".into()];
 
         assert_eq!(
             AtModemManager::sms_read_store_candidates(&supported),
-            vec!["ME", "SM"]
+            vec![SmsStorage::Me, SmsStorage::Sm]
         );
     }
 
@@ -2628,7 +2646,7 @@ mod tests {
 
         assert_eq!(
             AtModemManager::sms_read_store_candidates(&supported),
-            vec!["MT"]
+            vec![SmsStorage::Mt]
         );
     }
 

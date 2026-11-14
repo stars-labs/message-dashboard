@@ -5,7 +5,7 @@
 // 3. Deduplicated to prevent re-uploads
 // 4. Deleted from SIM only after successful processing
 
-use crate::types::Message;
+use crate::types::{Message, SmsStorage};
 use anyhow::{Context, Result};
 use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, ValueRef};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -76,15 +76,15 @@ pub struct Segment<'a> {
     pub part_number: u8,
     pub content: &'a str,
     pub timestamp: &'a str,
-    pub sms_storage: &'a str,
+    pub sms_storage: SmsStorage,
     pub sms_index: u32,
 }
 
 /// Part number, content, timestamp, CPMS storage, and SMS index.
-pub type StoredSegment = (u8, String, String, String, u32);
+pub type StoredSegment = (u8, String, String, SmsStorage, u32);
 /// ICCID, sender, reference, total parts, part number, content, timestamp,
 /// CPMS storage, and SMS index, as returned for startup recovery.
-pub type RecoverySegment = (String, String, u8, u8, u8, String, String, String, u32);
+pub type RecoverySegment = (String, String, u8, u8, u8, String, String, SmsStorage, u32);
 
 pub struct MessageStore {
     conn: Arc<Mutex<Connection>>,
@@ -681,7 +681,7 @@ mod segment_write_tests {
                 part_number: 1,
                 content,
                 timestamp: "2025-10-09T01:47:57.000Z",
-                sms_storage: "SM",
+                sms_storage: SmsStorage::Sm,
                 sms_index: index,
             })
             .unwrap();
