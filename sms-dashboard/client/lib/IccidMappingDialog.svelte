@@ -56,7 +56,7 @@
     if (!phone) return;
     phoneNumber = phone.number;
     carrier = textOr(phone.carrier, '');
-    country = textOr(phone.country, '');
+    country = textOr(phone.country, textOr(inferCountryFromNumber(phone.number), ''));
     notes = textOr(phone.notes, '');
     imei = textOr(phone.imei, '');
     status = textOr(phone.status, 'inactive');
@@ -64,9 +64,6 @@
     serviceTypeSource = textOr(phone.service_type_source, '');
     simRole = textOr(phone.sim_role, 'standalone');
     primaryIccid = textOr(phone.primary_iccid, '');
-    if (!country && phoneNumber) {
-      country = inferCountryFromNumber(phoneNumber) ?? '';
-    }
     simIndex = String(phone.sim_index);
   });
 

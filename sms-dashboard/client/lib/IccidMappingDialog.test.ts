@@ -5,7 +5,7 @@ import type { Phone } from '../../shared/api/phones.js';
 import { auth } from './auth.js';
 import IccidMappingDialog from './IccidMappingDialog.svelte';
 
-type SavedMapping = NonNullable<CreateIccidMappingResponse['data']>;
+type SavedMapping = CreateIccidMappingResponse['data'];
 
 const originalBaseUrl = auth.baseUrl;
 let fetchSpy: ReturnType<typeof spyOn<typeof globalThis, 'fetch'>> | undefined;
@@ -146,11 +146,31 @@ describe('IccidMappingDialog form', () => {
     expect(view.getByText('✓ 活动')).toBeTruthy();
   });
 
-  test('starts an unmapped card with an empty number and no country', () => {
+  test('starts an unmapped card with an empty number', () => {
     const { view } = open({ phone: phone({ country: 'CN', number: '' }) });
 
     expect(field(view.getByLabelText(/电话号码/), HTMLInputElement).value).toBe('');
     expect(field(view.getByLabelText('国家'), HTMLSelectElement).value).toBe('CN');
+  });
+
+  test('keeps the number typed for a card with no number and no country', async () => {
+    const { view } = open({ phone: phone({ country: null, number: '' }) });
+
+    await fireEvent.input(view.getByLabelText(/电话号码/), { target: { value: '+6591234567' } });
+
+    expect(field(view.getByLabelText(/电话号码/), HTMLInputElement).value).toBe('+6591234567');
+  });
+
+  test('saves the country inferred from the number of a card with no country', async () => {
+    stubFetch(() => Response.json({ success: true, data: saved({ country_code: 'SG' }) }));
+    const { view, closeCount } = open({ phone: phone({ country: null, number: '+6591234567' }) });
+
+    await fireEvent.click(view.getByText('保存'));
+
+    await waitFor(() => {
+      expect(closeCount()).toBe(1);
+    });
+    expect(sentBody()).toMatchObject({ phone_number: '+6591234567', country_code: 'SG' });
   });
 
   test('shows an inactive status for a card that is not active', () => {
