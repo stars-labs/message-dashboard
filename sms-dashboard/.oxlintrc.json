@@ -27,6 +27,7 @@
     "runner-core/**",
     "migrations/**",
     "eslint.config.ts",
+    "svelte.config.ts",
     "vite.config.ts",
     "tailwind.config.ts",
     "postcss.config.ts",

@@ -31,8 +31,6 @@ export default defineConfig([
     // Areas that have not joined the strict gate. oxlint covers them instead;
     // each phase removes its own line here as that area joins.
     'balance-agent/',
-    // @sveltejs/vite-plugin-svelte only loads svelte.config.js, .cjs or .mjs.
-    'svelte.config.js',
     'worker-configuration.d.ts',
     'worker-runtime.d.ts',
   ]),

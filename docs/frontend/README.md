@@ -560,7 +560,7 @@ export const authManager = new AuthManager();
 
 ### Bundle Optimization
 
-#### Vite Configuration (`vite.config.js`)
+#### Vite Configuration (`vite.config.ts`)
 ```javascript
 import { defineConfig } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
