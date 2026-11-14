@@ -249,6 +249,7 @@ export function setupFilterRoutes(router: Router): void {
         ).bind(validated.rule_type, validated.pattern, validated.note, isActive, id),
         FilterRuleRow,
       );
+      if (!updated) return json({ error: 'Filter rule not found' }, 404);
 
       return json({ filter: updated });
     } catch (error) {

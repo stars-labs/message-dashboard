@@ -602,6 +602,26 @@ describe('PUT /api/filters/:id', () => {
     expect(await bodyOf(response)).toEqual({ error: 'Filter rule not found' });
   });
 
+  test('answers 404 when the rule is deleted before the update lands', async () => {
+    const db = database();
+    addRule(db, { rule_type: 'sender', pattern: '10086' });
+    const racing: TestDb = {
+      ...db,
+      d1: {
+        ...db.d1,
+        prepare: (sql: string) => {
+          if (sql.trimStart().startsWith('UPDATE')) db.db.run('DELETE FROM filter_rules');
+          return db.d1.prepare(sql);
+        },
+      },
+    };
+
+    const response = await update(racing, '1', JSON.stringify({ note: 'x' }));
+
+    expect(response.status).toBe(404);
+    expect(await bodyOf(response)).toEqual({ error: 'Filter rule not found' });
+  });
+
   test('answers 404 to an id that is not a number', async () => {
     const db = database();
     addRule(db, { rule_type: 'sender', pattern: '10086' });
