@@ -122,17 +122,10 @@ const httpEndpoints = {
   getMessages: { url: '/api/messages', method: 'GET' },
   getBalanceChecks: { url: '/api/balance-checks', method: 'GET' },
   sendMessage: { url: '/api/messages/send', method: 'POST' },
-  getUser: { url: '/api/auth/me', method: 'GET' },
   listIccidMappings: { url: '/api/iccid-mappings', method: 'GET' },
-  getIccidMapping: { url: (params) => `/api/iccid-mappings/${params.id}`, method: 'GET' },
-  getIccidMappingByIccid: {
-    url: (params) => `/api/iccid-mappings/by-iccid/${params.iccid}`,
-    method: 'GET',
-  },
   createIccidMapping: { url: '/api/iccid-mappings', method: 'POST' },
   updateIccidMapping: { url: (params) => `/api/iccid-mappings/${params.id}`, method: 'PUT' },
   deleteIccidMapping: { url: (params) => `/api/iccid-mappings/${params.id}`, method: 'DELETE' },
-  bulkImportIccidMappings: { url: '/api/iccid-mappings/bulk', method: 'POST' },
 } satisfies Record<string, Endpoint>;
 
 /** A method name the endpoint table actually contains. */
@@ -168,14 +161,8 @@ async function apiRequest(method: ApiMethod, data: EndpointParams = {}): Promise
 export const api = {
   // Cache management
   cache: {
-    async getStats() {
-      return await messageCache.getCacheStats();
-    },
     async clear() {
       return await messageCache.clearCache();
-    },
-    async prune(maxPerPhone = 200) {
-      return await messageCache.pruneCache(maxPerPhone);
     },
   },
 
@@ -202,20 +189,6 @@ export const api = {
 
   async delete(url: string, options: RequestInit = {}) {
     return await fetchWithAuth(url, { ...options, method: 'DELETE' });
-  },
-
-  // Auth
-  async getUser() {
-    try {
-      return await apiRequest('getUser');
-    } catch {
-      // Fallback to HTTP for auth (needed for initial login)
-      return await fetchWithAuth('/api/auth/me');
-    }
-  },
-
-  async logout() {
-    auth.logout();
   },
 
   // No getAuthToken(): the session is an HttpOnly cookie that JavaScript cannot read,
@@ -467,24 +440,6 @@ export const api = {
       }
     },
 
-    async get(id: string) {
-      try {
-        return await apiRequest('getIccidMapping', { id });
-      } catch (error) {
-        console.warn('Failed to get ICCID mapping :', error);
-        return await fetchWithAuth(`/api/iccid-mappings/${id}`);
-      }
-    },
-
-    async getByIccid(iccid: string) {
-      try {
-        return await apiRequest('getIccidMappingByIccid', { iccid });
-      } catch (error) {
-        console.warn('Failed to get ICCID mapping by ICCID :', error);
-        return await fetchWithAuth(`/api/iccid-mappings/by-iccid/${iccid}`);
-      }
-    },
-
     async create(data: unknown) {
       try {
         return await apiRequest('createIccidMapping', data as EndpointParams);
@@ -516,18 +471,6 @@ export const api = {
         console.warn('Failed to delete ICCID mapping :', error);
         return await fetchWithAuth(`/api/iccid-mappings/${id}`, {
           method: 'DELETE',
-        });
-      }
-    },
-
-    async bulkImport(data: unknown) {
-      try {
-        return await apiRequest('bulkImportIccidMappings', data as EndpointParams);
-      } catch (error) {
-        console.warn('Failed to bulk import ICCID mappings :', error);
-        return await fetchWithAuth('/api/iccid-mappings/bulk', {
-          method: 'POST',
-          body: JSON.stringify(data),
         });
       }
     },

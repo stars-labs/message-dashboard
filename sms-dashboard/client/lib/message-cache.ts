@@ -225,35 +225,6 @@ async function cacheMessages(messages: CachedMessage[]): Promise<void> {
 }
 
 /**
- * Get cache statistics
- */
-async function getCacheStats(): Promise<{ messageCount: number; dbName: string }> {
-  try {
-    await initDB();
-
-    return new Promise((resolve) => {
-      const transaction = db!.transaction([MESSAGES_STORE], 'readonly');
-      const store = transaction.objectStore(MESSAGES_STORE);
-      const countRequest = store.count();
-
-      countRequest.onsuccess = () => {
-        resolve({
-          messageCount: countRequest.result,
-          dbName: DB_NAME,
-        });
-      };
-
-      countRequest.onerror = () => {
-        resolve({ messageCount: 0, dbName: DB_NAME });
-      };
-    });
-  } catch (err) {
-    console.warn('[MessageCache] getCacheStats error:', err);
-    return { messageCount: 0, dbName: DB_NAME };
-  }
-}
-
-/**
  * Clear all cached data
  */
 async function clearCache(): Promise<void> {
@@ -339,12 +310,10 @@ async function pruneCache(maxMessagesPerPhone = 200): Promise<number> {
 }
 
 export const messageCache = {
-  initDB,
   getLastSyncTime,
   setLastSyncTime,
   getCachedMessages,
   cacheMessages,
-  getCacheStats,
   clearCache,
   pruneCache,
 };
