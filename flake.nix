@@ -298,6 +298,8 @@
             text = ''
               version="''${1:?usage: release-balance-agent <version>}"
               repo_root="$(git rev-parse --show-toplevel)"
+              # balance-agent is a workspace of sms-dashboard, whose lockfile pins it.
+              (cd "$repo_root/sms-dashboard" && bun install --frozen-lockfile)
               cd "$repo_root/sms-dashboard/balance-agent"
 
               echo "==> Building Balance Agent v''${version}"

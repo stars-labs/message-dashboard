@@ -1,5 +1,8 @@
 {
   "name": "sms-dashboard",
+  "workspaces": [
+    "balance-agent"
+  ],
   "version": "1.0.0",
   "description": "SMS Dashboard with Cloudflare Workers",
   "type": "module",

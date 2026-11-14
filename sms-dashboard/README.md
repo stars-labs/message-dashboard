@@ -117,8 +117,9 @@ workflow after deployment.
 Development commands:
 
 ```bash
+# balance-agent is a workspace of sms-dashboard: install from there.
+(cd sms-dashboard && bun install)
 cd sms-dashboard/balance-agent
-bun install
 bun run test
 bun run build
 bun run start
