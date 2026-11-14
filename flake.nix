@@ -172,11 +172,36 @@
           # Alias for backward compatibility
           orange-pi-daemon-rust = sms-daemon;
 
+          # The daemon-Worker wire types are generated into
+          # sms-dashboard/shared/daemon-wire by ts-rs during `cargo test`. Wipe the
+          # directory, regenerate, and fail on any difference from what is checked in
+          # (changed, deleted, or untracked files).
+          check-daemon-wire = pkgs.writeShellApplication {
+            name = "check-daemon-wire";
+            runtimeInputs = with pkgs; [
+              cargo
+              git
+            ];
+            text = ''
+              root="$(git rev-parse --show-toplevel)"
+              wire="sms-dashboard/shared/daemon-wire"
+              rm -f "$root/$wire"/*.ts
+              (cd "$root/orange-pi-daemon" && cargo test --locked --lib export_bindings)
+              if [ -n "$(git -C "$root" status --porcelain --untracked-files=all -- "$wire")" ]; then
+                git -C "$root" status --short --untracked-files=all -- "$wire"
+                git -C "$root" --no-pager diff -- "$wire"
+                echo "daemon wire bindings are out of date: commit the regenerated $wire" >&2
+                exit 1
+              fi
+            '';
+          };
+
           # One local entry point for the same Rust validation required by Nix.
           check-daemon = pkgs.writeShellApplication {
             name = "check-daemon";
             runtimeInputs = with pkgs; [
               cargo
+              check-daemon-wire
               clippy
               git
               rustfmt
@@ -186,6 +211,7 @@
               cargo fmt --all --check
               cargo clippy --locked --all-targets --all-features -- -D warnings
               cargo test --locked
+              check-daemon-wire
             '';
           };
 

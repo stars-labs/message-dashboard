@@ -12,7 +12,7 @@
 - `modems.detected_iccid` is the live field. `modems.current_iccid` is dead legacy —
   never read or write it.
 - Daemon health and SIM state are separate domains — do not infer one from the other.
-- `types::PendingSms` and `PendingSmsResponse` define the shared pending-SMS
+- `wire::PendingSms` and `PendingSmsResponse` define the shared pending-SMS
   payload. A missing `purpose` retains the established `user` default.
 - Outbound polling in `SmsSender` sends its daemon session ID. Preserve its
   per-poll HTTP client, 10-second timeout, and HTTP error response details.

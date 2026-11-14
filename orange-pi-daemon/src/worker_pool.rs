@@ -8,7 +8,8 @@ use tracing::{debug, error, info, warn};
 
 use crate::identifiers::Iccid;
 use crate::modem_manager::ModemManager;
-use crate::types::{Message, MessageWithPath, ModemReport, ModemStatus};
+use crate::types::{Message, MessageWithPath};
+use crate::wire::{ModemReport, ModemStatus};
 
 /// Configuration for the worker pool
 #[derive(Debug, Clone)]

@@ -1,4 +1,6 @@
 import * as v from 'valibot';
+import type { HealthSnapshot as WireHealthSnapshot } from '../daemon-wire/HealthSnapshot.js';
+import { acceptsWire } from '../wire-schema.js';
 
 export const HEALTH_SCHEMA_VERSION = 3;
 
@@ -6,20 +8,22 @@ export const HEALTH_SCHEMA_VERSION = 3;
 const Age = v.nullable(v.number());
 
 /** The normalized snapshot the daemon uploads, stored as JSON in daemon_health.metadata. */
-export const HealthSnapshot = v.object({
-  schema_version: v.literal(HEALTH_SCHEMA_VERSION),
-  session_id: v.string(),
-  version: v.string(),
-  uptime_seconds: v.number(),
-  last_message_read_success_age_seconds: Age,
-  last_upload_success_age_seconds: Age,
-  queue: v.object({
-    pending: v.number(),
-    in_flight: v.number(),
-    dead_letter: v.number(),
-    oldest_unacknowledged_age_seconds: Age,
+export const HealthSnapshot = acceptsWire<WireHealthSnapshot>()(
+  v.object({
+    schema_version: v.literal(HEALTH_SCHEMA_VERSION),
+    session_id: v.string(),
+    version: v.string(),
+    uptime_seconds: v.number(),
+    last_message_read_success_age_seconds: Age,
+    last_upload_success_age_seconds: Age,
+    queue: v.object({
+      pending: v.number(),
+      in_flight: v.number(),
+      dead_letter: v.number(),
+      oldest_unacknowledged_age_seconds: Age,
+    }),
   }),
-});
+) satisfies v.GenericSchema<unknown, WireHealthSnapshot>;
 
 export type HealthSnapshot = v.InferOutput<typeof HealthSnapshot>;
 

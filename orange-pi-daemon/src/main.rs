@@ -6,7 +6,7 @@ use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
 // Import from the library crate
-use orange_pi_daemon_rust::api_client::{ApiClient, UploadResult};
+use orange_pi_daemon_rust::api_client::ApiClient;
 use orange_pi_daemon_rust::benchmark::PerformanceBenchmark;
 use orange_pi_daemon_rust::health::{HealthTask, HealthTracker};
 use orange_pi_daemon_rust::identifiers::Iccid;
@@ -16,11 +16,12 @@ use orange_pi_daemon_rust::modem_manager::ModemManager;
 use orange_pi_daemon_rust::sms_sender::SmsSender;
 use orange_pi_daemon_rust::stall_watchdog::{self, Heartbeat, STALL_AFTER};
 use orange_pi_daemon_rust::sync_manager::{
-    device_delta, merge_device_reports, DeviceDelta, SyncManager, SyncMode,
+    device_delta, merge_device_reports, DeviceDelta, SyncManager,
 };
 use orange_pi_daemon_rust::timeout_tracker::TimeoutTracker;
-use orange_pi_daemon_rust::types::{Config, MessageWithPath, ModemReport, UploadStatus};
+use orange_pi_daemon_rust::types::{Config, MessageWithPath};
 use orange_pi_daemon_rust::voice_bridge::{VoiceBridge, VoiceBridgeConfig};
+use orange_pi_daemon_rust::wire::{ModemReport, SyncMode, UploadResult, UploadStatus};
 use orange_pi_daemon_rust::worker_pool::{ModemResult, WorkerPool, WorkerPoolConfig};
 
 type SharedHealth = Arc<RwLock<HealthTracker>>;
@@ -1008,7 +1009,8 @@ mod tests {
     use super::*;
     use orange_pi_daemon_rust::identifiers::SmsAddress;
     use orange_pi_daemon_rust::message_store::MessageStatus;
-    use orange_pi_daemon_rust::types::{Direction, Message};
+    use orange_pi_daemon_rust::types::Message;
+    use orange_pi_daemon_rust::wire::Direction;
 
     fn stored(source_message_id: &str) -> StoredMessage {
         StoredMessage {

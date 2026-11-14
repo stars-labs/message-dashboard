@@ -1,6 +1,7 @@
 use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, ValueRef};
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use ts_rs::TS;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("invalid {kind}: {value:?}")]
@@ -10,10 +11,11 @@ pub struct InvalidIdentifier {
 }
 
 macro_rules! identifier {
-    ($(#[$meta:meta])* $name:ident, $kind:literal, $is_valid:path) => {
+    ($(#[$meta:meta])* $name:ident, $kind:literal, $is_valid:path, $ts:literal) => {
         $(#[$meta])*
-        #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+        #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
         #[serde(try_from = "String", into = "String")]
+        #[ts(export, type = $ts)]
         pub struct $name(String);
 
         impl $name {
@@ -103,24 +105,24 @@ identifier! {
     /// (`898600520121F0517883`); the modem's trailing `F` padding is stripped
     /// before one is built. Length is checked where an ICCID is read (the AT
     /// reply needs 18 or more, the voice path allows at most 22), not here.
-    Iccid, "ICCID", is_iccid
+    Iccid, "ICCID", is_iccid, "string & import('valibot').Brand<'Iccid'>"
 }
 
 identifier! {
     /// A modem's IMEI: exactly 15 ASCII digits, as `AT+CGSN` returns it. No
     /// Luhn check.
-    Imei, "IMEI", is_imei
+    Imei, "IMEI", is_imei, "string & import('valibot').Brand<'Imei'>"
 }
 
 identifier! {
     /// A number the daemon dials: `+`, then 7 to 15 digits, the first not `0`.
-    PhoneNumber, "E.164 phone number", is_e164
+    PhoneNumber, "E.164 phone number", is_e164, "string & import('valibot').Brand<'PhoneNumber'>"
 }
 
 identifier! {
     /// The SIM's own number as `AT+CNUM` or `ModemManager` reports it: any
     /// non-empty text. It is not necessarily E.164 (`6591234567` occurs).
-    SimNumber, "SIM number", is_non_empty
+    SimNumber, "SIM number", is_non_empty, "string & import('valibot').Brand<'SimNumber'>"
 }
 
 /// The address of an SMS: a sender or a recipient. Any text, including an
@@ -128,8 +130,9 @@ identifier! {
 /// sender ID (`Singtel`, `DBS`), possibly decoded from UCS2. It is a type of
 /// its own so an address cannot be passed where an ICCID or a SIM number is
 /// expected; it validates nothing.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
 #[serde(from = "String", into = "String")]
+#[ts(export, type = "string & import('valibot').Brand<'SmsAddress'>")]
 pub struct SmsAddress(String);
 
 impl SmsAddress {

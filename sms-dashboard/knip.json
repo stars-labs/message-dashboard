@@ -12,7 +12,8 @@
         "worker-configuration.d.ts",
         "worker-runtime.d.ts"
       ],
-      "project": ["**/*.{js,ts,svelte}"]
+      "project": ["**/*.{js,ts,svelte}"],
+      "ignore": ["shared/daemon-wire/**"]
     },
     "balance-agent": {
       "entry": [

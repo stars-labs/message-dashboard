@@ -24,6 +24,7 @@ pub mod voice_bridge;
 pub mod voice_call;
 pub mod voice_codec;
 pub mod voice_pacer;
+pub mod wire;
 pub mod worker_pool;
 
 #[cfg(test)]
@@ -31,8 +32,9 @@ mod tests {
     use crate::identifiers::{Iccid, Imei, SimNumber, SmsAddress};
     use crate::retry_manager::RetryManager;
     use crate::signal_cache::SignalCache;
-    use crate::sync_manager::{SyncManager, SyncMode};
+    use crate::sync_manager::SyncManager;
     use crate::types::*;
+    use crate::wire::{Direction, ModemReport, ModemStatus, SyncMode};
     use std::time::Duration;
     use tokio::time::sleep;
 

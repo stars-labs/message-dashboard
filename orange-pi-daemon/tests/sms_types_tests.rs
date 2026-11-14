@@ -1,6 +1,7 @@
 use anyhow::Context;
 use orange_pi_daemon_rust::types::Config;
-use orange_pi_daemon_rust::types::{PendingSms, Purpose, SmsSubmission};
+use orange_pi_daemon_rust::types::SmsSubmission;
+use orange_pi_daemon_rust::wire::{PendingSms, Purpose};
 use orange_pi_daemon_rust::{
     api_client::ApiClient, modem_manager::ModemManager, sms_sender::SmsSender,
 };

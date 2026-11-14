@@ -22,6 +22,9 @@ import { json } from '../lib/response.js';
 import * as v from 'valibot';
 import { parseJson, readJson, type Parsed } from '../../shared/parse-json.js';
 import { D1_MAX_BOUND_PARAMETERS, queryAll, queryFirst, type D1 } from '../lib/d1.js';
+import type { EndedCallRequest } from '../../shared/daemon-wire/EndedCallRequest.js';
+import type { IncomingCallRequest } from '../../shared/daemon-wire/IncomingCallRequest.js';
+import { acceptsWire } from '../../shared/wire-schema.js';
 import { OBJECT_MESSAGE, readBody, type MissingKeyMessages } from '../lib/request-body.js';
 import { handleAuth0, type AuthRequest } from '../middleware/auth0.js';
 import { authorize } from '../middleware/authorize.js';
@@ -285,12 +288,14 @@ const RENEGOTIATE_MISSING_KEY_MESSAGES = {
 } as const satisfies MissingKeyMessages<typeof RenegotiateBody>;
 
 /** The daemon's RING report: `from` is null until the network sends a caller id. */
-const IncomingBody = v.object(
-  {
-    iccid: v.pipe(v.string(ICCID_MESSAGE), v.minLength(1, ICCID_MESSAGE)),
-    from: v.nullish(v.string('from must be a string')),
-  },
-  OBJECT_MESSAGE,
+const IncomingBody = acceptsWire<IncomingCallRequest>()(
+  v.object(
+    {
+      iccid: v.pipe(v.string(ICCID_MESSAGE), v.minLength(1, ICCID_MESSAGE)),
+      from: v.nullish(v.string('from must be a string')),
+    },
+    OBJECT_MESSAGE,
+  ),
 );
 
 const INCOMING_MISSING_KEY_MESSAGES = {
@@ -298,18 +303,20 @@ const INCOMING_MISSING_KEY_MESSAGES = {
 } as const satisfies MissingKeyMessages<typeof IncomingBody>;
 
 /** The daemon's end report: `call_id` is null for a ring that stopped unanswered. */
-const EndedBody = v.pipe(
-  v.object(
-    {
-      call_id: v.nullish(v.string(CALL_ID_MESSAGE)),
-      iccid: v.nullish(v.string('iccid must be a string')),
-      reason: v.nullish(v.string('reason must be a string')),
-    },
-    OBJECT_MESSAGE,
-  ),
-  v.check(
-    ({ call_id, iccid }) => (call_id ?? '') !== '' || (iccid ?? '') !== '',
-    'call_id or iccid is required',
+const EndedBody = acceptsWire<EndedCallRequest>()(
+  v.pipe(
+    v.object(
+      {
+        call_id: v.nullish(v.string(CALL_ID_MESSAGE)),
+        iccid: v.nullish(v.string('iccid must be a string')),
+        reason: v.nullish(v.string('reason must be a string')),
+      },
+      OBJECT_MESSAGE,
+    ),
+    v.check(
+      ({ call_id, iccid }) => (call_id ?? '') !== '' || (iccid ?? '') !== '',
+      'call_id or iccid is required',
+    ),
   ),
 );
 

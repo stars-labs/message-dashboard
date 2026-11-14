@@ -1,7 +1,5 @@
-use serde::Serialize;
+use crate::wire::{HealthSnapshot, QueueHealthSnapshot, HEALTH_SCHEMA_VERSION};
 use std::time::Instant;
-
-pub const HEALTH_SCHEMA_VERSION: u8 = 3;
 
 #[derive(Debug, Clone, Copy)]
 pub enum HealthTask {
@@ -14,25 +12,6 @@ pub enum HealthTask {
 #[derive(Debug, Clone, Default)]
 struct TaskState {
     last_success: Option<Instant>,
-}
-
-#[derive(Debug, Clone, Serialize, Default)]
-pub struct QueueHealthSnapshot {
-    pub pending: usize,
-    pub in_flight: usize,
-    pub dead_letter: usize,
-    pub oldest_unacknowledged_age_seconds: Option<u64>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct HealthSnapshot {
-    pub schema_version: u8,
-    pub session_id: String,
-    pub version: String,
-    pub uptime_seconds: u64,
-    pub last_message_read_success_age_seconds: Option<u64>,
-    pub last_upload_success_age_seconds: Option<u64>,
-    pub queue: QueueHealthSnapshot,
 }
 
 pub struct HealthTracker {

@@ -1,51 +1,15 @@
-use crate::health::HealthSnapshot;
-use crate::identifiers::{Iccid, Imei, SmsAddress};
+use crate::identifiers::{Iccid, Imei};
 use crate::message_store::StoredMessage;
-use crate::sync_manager::SyncMode;
-use crate::types::{
-    CallEndReason, Config, Direction, ModemReport, PendingSms, PendingSmsResponse, UploadStatus,
+use crate::types::Config;
+use crate::wire::{
+    CallEndReason, EndedCallRequest, HealthSnapshot, IncomingCallRequest, MessageBatchRequest,
+    ModemReport, ModemReportsRequest, PendingSms, PendingSmsResponse, SyncMode, UploadResponse,
+    UploadResult, UploadedMessage,
 };
 use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::Serialize;
 use tracing::info;
-
-#[derive(Debug, serde::Deserialize)]
-pub struct UploadResult {
-    pub id: String,
-    pub status: UploadStatus,
-    #[serde(default)]
-    pub retryable: bool,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct UploadResponse {
-    results: Vec<UploadResult>,
-}
-
-#[derive(Serialize)]
-struct ModemReportsRequest<'a> {
-    modem_reports: &'a [ModemReport],
-    removed_equipment_ids: &'a [Imei],
-    session_id: &'a str,
-    sync_mode: SyncMode,
-    timestamp: &'a str,
-}
-
-#[derive(Serialize)]
-struct UploadedMessage<'a> {
-    content: &'a str,
-    direction: &'a Direction,
-    id: &'a str,
-    phone_iccid: &'a Iccid,
-    phone_number: &'a SmsAddress,
-    timestamp: &'a str,
-}
-
-#[derive(Serialize)]
-struct MessageBatchRequest<'a> {
-    messages: Vec<UploadedMessage<'a>>,
-}
 
 impl<'a> From<&'a StoredMessage> for UploadedMessage<'a> {
     fn from(stored: &'a StoredMessage) -> Self {
@@ -58,19 +22,6 @@ impl<'a> From<&'a StoredMessage> for UploadedMessage<'a> {
             timestamp: &stored.message.timestamp,
         }
     }
-}
-
-#[derive(Serialize)]
-struct IncomingCallRequest<'a> {
-    from: Option<&'a str>,
-    iccid: &'a Iccid,
-}
-
-#[derive(Serialize)]
-struct EndedCallRequest<'a> {
-    call_id: Option<&'a str>,
-    iccid: &'a Iccid,
-    reason: CallEndReason,
 }
 
 #[derive(Clone)]
@@ -304,154 +255,5 @@ impl ApiClient {
             anyhow::bail!("calls/{event} returned {status}: {body}");
         }
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::types::{Message, ModemStatus};
-
-    const ICCID: &str = "898600000000000000f1";
-
-    fn iccid() -> Iccid {
-        Iccid::try_from(ICCID).unwrap()
-    }
-    use serde_json::json;
-
-    fn text<T: Serialize>(value: &T) -> String {
-        serde_json::to_string(value).unwrap()
-    }
-
-    fn report() -> ModemReport {
-        ModemReport {
-            equipment_id: Imei::try_from("860000000000001").unwrap(),
-            manufacturer: Some("Quectel".to_string()),
-            model: None,
-            firmware_revision: None,
-            hardware_revision: None,
-            status: ModemStatus::Active,
-            detected_iccid: Some(iccid()),
-            detected_phone_number: None,
-            detected_operator: None,
-            signal_percent: Some(80),
-            rssi: Some(-70),
-            modem_index: Some(3),
-            usb_port: None,
-            usb_path: Some("1-1.4".to_string()),
-        }
-    }
-
-    #[test]
-    fn modem_reports_request_matches_the_old_json_body() {
-        let reports = [report()];
-        let removed = [Imei::try_from("860000000000002").unwrap()];
-        let timestamp = "2026-01-02T03:04:05.678Z";
-        let new = ModemReportsRequest {
-            modem_reports: &reports,
-            removed_equipment_ids: &removed,
-            session_id: "session-1",
-            sync_mode: SyncMode::Incremental,
-            timestamp,
-        };
-        let old = json!({
-            "sync_mode": SyncMode::Incremental.as_str(),
-            "session_id": "session-1",
-            "timestamp": timestamp,
-            "modem_reports": reports,
-            "removed_equipment_ids": removed,
-        });
-        assert_eq!(text(&new), text(&old));
-        assert_eq!(serde_json::to_value(&new).unwrap(), old);
-    }
-
-    #[test]
-    fn message_batch_request_matches_the_old_json_body() {
-        let stored = StoredMessage {
-            id: 7,
-            source_message_id: "source-1".to_string(),
-            message: Message {
-                phone_iccid: iccid(),
-                phone_number: SmsAddress::from("+1234567890"),
-                content: "code 123456".to_string(),
-                timestamp: "2026-01-02T03:04:05.678Z".to_string(),
-                direction: Direction::Received,
-            },
-            modem_id: "3".to_string(),
-            sms_path: "at:ME:1".to_string(),
-            status: crate::message_store::MessageStatus::InFlight,
-            attempts: 1,
-            lease_token: "lease".to_string(),
-        };
-        let chunk = [stored];
-        let new = MessageBatchRequest {
-            messages: chunk.iter().map(UploadedMessage::from).collect(),
-        };
-        let old = json!({ "messages": chunk.iter().map(|stored| json!({
-            "id": stored.source_message_id,
-            "phone_iccid": stored.message.phone_iccid,
-            "phone_number": stored.message.phone_number,
-            "content": stored.message.content,
-            "timestamp": stored.message.timestamp,
-            "direction": stored.message.direction,
-        })).collect::<Vec<_>>() });
-        assert_eq!(text(&new), text(&old));
-    }
-
-    #[test]
-    fn call_requests_match_the_old_json_bodies() {
-        for from in [Some("+8613800138000"), None] {
-            let new = IncomingCallRequest {
-                from,
-                iccid: &iccid(),
-            };
-            let old = json!({ "iccid": ICCID, "from": from });
-            assert_eq!(text(&new), text(&old));
-        }
-        for call_id in [Some("call-1"), None] {
-            let new = EndedCallRequest {
-                call_id,
-                iccid: &iccid(),
-                reason: CallEndReason::RemoteHangup,
-            };
-            let old = json!({
-                "call_id": call_id,
-                "iccid": ICCID,
-                "reason": "remote_hangup",
-            });
-            assert_eq!(text(&new), text(&old));
-        }
-        assert_eq!(
-            text(&IncomingCallRequest {
-                from: None,
-                iccid: &Iccid::try_from("a").unwrap()
-            }),
-            r#"{"from":null,"iccid":"a"}"#
-        );
-    }
-
-    #[test]
-    fn upload_results_accept_every_status_and_default_retryable() {
-        let response: UploadResponse = serde_json::from_value(json!({
-            "results": [
-                {"id": "a", "status": "stored"},
-                {"id": "b", "status": "already_stored"},
-                {"id": "c", "status": "rejected", "retryable": true},
-                {"id": "d", "status": "something-new"},
-            ]
-        }))
-        .unwrap();
-        let statuses: Vec<_> = response.results.iter().map(|r| r.status.clone()).collect();
-        assert_eq!(
-            statuses,
-            vec![
-                UploadStatus::Stored,
-                UploadStatus::AlreadyStored,
-                UploadStatus::Rejected,
-                UploadStatus::Unknown("something-new".to_string()),
-            ]
-        );
-        assert!(!response.results[0].retryable);
-        assert!(response.results[2].retryable);
     }
 }

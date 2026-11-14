@@ -5,6 +5,12 @@ import { queryAll, type D1, type D1Batch } from '../lib/d1.js';
 import { NOT_JSON_MESSAGE, readBody, type MissingKeyMessages } from '../lib/request-body.js';
 import { secretMatches } from '../lib/secret.js';
 import { textOr } from '../../shared/text.js';
+import type { ModemReportsRequest } from '../../shared/daemon-wire/ModemReportsRequest.js';
+import type { MessageBatchRequest } from '../../shared/daemon-wire/MessageBatchRequest.js';
+import type { PendingSms } from '../../shared/daemon-wire/PendingSms.js';
+import type { SmsResult } from '../../shared/daemon-wire/SmsResult.js';
+import type { UploadResult } from '../../shared/daemon-wire/UploadResult.js';
+import { acceptsWire } from '../../shared/wire-schema.js';
 import { processCarrierBillMessages } from '../utils/carrier-billing.js';
 import { errorText } from '../../shared/error-text.js';
 import { normalizeHealthSnapshot } from '../utils/daemon-health.js';
@@ -76,14 +82,16 @@ const ModemReportSchema = v.object(
   INVALID_REPORT,
 );
 
-const DevicesBodySchema = v.object(
-  {
-    modem_reports: v.array(ModemReportSchema, ARRAYS_REQUIRED),
-    removed_equipment_ids: v.array(v.string(INVALID_REMOVED), ARRAYS_REQUIRED),
-    sync_mode: v.nullish(v.picklist(['incremental', 'full'], INVALID_SYNC), 'incremental'),
-    session_id: v.nullish(v.string(INVALID_SYNC), null),
-  },
-  ARRAYS_REQUIRED,
+const DevicesBodySchema = acceptsWire<ModemReportsRequest, 'timestamp'>()(
+  v.object(
+    {
+      modem_reports: v.array(ModemReportSchema, ARRAYS_REQUIRED),
+      removed_equipment_ids: v.array(v.string(INVALID_REMOVED), ARRAYS_REQUIRED),
+      sync_mode: v.nullish(v.picklist(['incremental', 'full'], INVALID_SYNC), 'incremental'),
+      session_id: v.nullish(v.string(INVALID_SYNC), null),
+    },
+    ARRAYS_REQUIRED,
+  ),
 );
 
 const DEVICES_MISSING_KEY_MESSAGES = {
@@ -91,37 +99,41 @@ const DEVICES_MISSING_KEY_MESSAGES = {
   removed_equipment_ids: ARRAYS_REQUIRED,
 } as const satisfies MissingKeyMessages<typeof DevicesBodySchema>;
 
-const UploadBodySchema = v.object(
-  {
-    messages: v.array(
-      v.object(
-        {
-          id: requiredText(MESSAGE_ID_REQUIRED),
-          phone_iccid: requiredText(MESSAGE_FIELDS_REQUIRED),
-          content: requiredText(MESSAGE_FIELDS_REQUIRED),
-          phone_number: v.nullish(v.string(MESSAGE_FIELDS_NOT_TEXT)),
-          timestamp: v.nullish(v.string(MESSAGE_FIELDS_NOT_TEXT)),
-        },
-        MESSAGE_ID_REQUIRED,
+const UploadBodySchema = acceptsWire<MessageBatchRequest, 'direction'>()(
+  v.object(
+    {
+      messages: v.array(
+        v.object(
+          {
+            id: requiredText(MESSAGE_ID_REQUIRED),
+            phone_iccid: requiredText(MESSAGE_FIELDS_REQUIRED),
+            content: requiredText(MESSAGE_FIELDS_REQUIRED),
+            phone_number: v.nullish(v.string(MESSAGE_FIELDS_NOT_TEXT)),
+            timestamp: v.nullish(v.string(MESSAGE_FIELDS_NOT_TEXT)),
+          },
+          MESSAGE_ID_REQUIRED,
+        ),
+        MESSAGES_REQUIRED,
       ),
-      MESSAGES_REQUIRED,
-    ),
-  },
-  MESSAGES_REQUIRED,
+    },
+    MESSAGES_REQUIRED,
+  ),
 );
 
 const UPLOAD_MISSING_KEY_MESSAGES = {
   messages: MESSAGES_REQUIRED,
 } as const satisfies MissingKeyMessages<typeof UploadBodySchema>;
 
-const SmsResultBodySchema = v.object(
-  {
-    message_id: requiredText(MESSAGE_ID_MISSING),
-    outcome: v.picklist(['confirmed', 'submitted_unconfirmed', 'failed'], INVALID_OUTCOME),
-    error_message: v.nullish(v.string('error_message must be text')),
-    sms_id: v.nullish(v.string('sms_id must be text')),
-  },
-  MESSAGE_ID_MISSING,
+const SmsResultBodySchema = acceptsWire<SmsResult>()(
+  v.object(
+    {
+      message_id: requiredText(MESSAGE_ID_MISSING),
+      outcome: v.picklist(['confirmed', 'submitted_unconfirmed', 'failed'], INVALID_OUTCOME),
+      error_message: v.nullish(v.string('error_message must be text')),
+      sms_id: v.nullish(v.string('sms_id must be text')),
+    },
+    MESSAGE_ID_MISSING,
+  ),
 );
 
 const SMS_RESULT_MISSING_KEY_MESSAGES = {
@@ -149,7 +161,7 @@ const PendingMessageRow = v.object({
   phone_iccid: v.nullable(v.string()),
   phone_number: v.nullable(v.string()),
   content: v.string(),
-  recipient: v.nullable(v.string()),
+  recipient: v.nullable(v.pipe(v.string(), v.brand('SmsAddress'))),
   purpose: v.picklist(['user', 'balance_maintenance']),
   created_at: v.nullable(v.string()),
 });
@@ -160,6 +172,9 @@ const KeywordRow = v.object({
   case_sensitive: v.nullable(v.number()),
   whole_word: v.nullable(v.number()),
 });
+
+/** The columns `messages` declares nullable, where the daemon's Rust type requires a value. */
+type NullableColumns<Wire> = { [Key in keyof Wire]: Wire[Key] | null };
 
 const SMS_STATUS_FOR_OUTCOME: Readonly<Record<SmsOutcome, string>> = {
   confirmed: 'sent',
@@ -426,7 +441,7 @@ export const controlHandler = {
 
     try {
       let processed = 0;
-      const results: { id: string; status: string; retryable?: boolean }[] = [];
+      const results: UploadResult[] = [];
       const newMessages: StoredMessage[] = [];
 
       const insertStmt = env.DB.prepare(`
@@ -717,7 +732,8 @@ export const controlHandler = {
         PendingMessageRow,
       );
 
-      return json({ success: true, pending_messages: messages });
+      const pendingMessages = messages satisfies NullableColumns<PendingSms>[];
+      return json({ success: true, pending_messages: pendingMessages });
     } catch (error) {
       console.error('Get pending SMS error:', error);
       return json({ success: false, error: 'Failed to get pending SMS' }, 500);

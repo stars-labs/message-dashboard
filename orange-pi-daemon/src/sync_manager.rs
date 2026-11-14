@@ -1,19 +1,8 @@
 use crate::identifiers::Imei;
-use crate::types::ModemReport;
-use serde::Serialize;
+use crate::wire::{ModemReport, SyncMode};
 use std::collections::{HashMap, HashSet};
 use std::hash::BuildHasher;
 use tracing::{info, warn};
-
-/// Sync mode for state reconciliation
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SyncMode {
-    /// Full state sync - reconcile all devices with server
-    Full,
-    /// Incremental update - only send changed data
-    Incremental,
-}
 
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct DeviceDelta {
@@ -95,15 +84,6 @@ pub fn device_delta(previous: &[ModemReport], current: &[ModemReport]) -> Device
     DeviceDelta {
         reports,
         removed_equipment_ids,
-    }
-}
-
-impl SyncMode {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            SyncMode::Full => "full",
-            SyncMode::Incremental => "incremental",
-        }
     }
 }
 
@@ -198,7 +178,7 @@ impl SyncManager {
 mod tests {
     use super::*;
     use crate::identifiers::Iccid;
-    use crate::types::ModemStatus;
+    use crate::wire::ModemStatus;
     use std::collections::HashMap;
 
     fn tag_number(tag: &str) -> u32 {
@@ -328,21 +308,5 @@ mod tests {
         assert_eq!(snapshot.len(), 1);
         assert_eq!(snapshot["port-a"].equipment_id, imei("a"));
         assert!(!snapshot.contains_key("port-b"));
-    }
-}
-
-#[cfg(test)]
-mod wire_tests {
-    use super::SyncMode;
-
-    #[test]
-    fn sync_mode_wire_form_matches_its_log_text() {
-        for (mode, text) in [
-            (SyncMode::Full, "full"),
-            (SyncMode::Incremental, "incremental"),
-        ] {
-            assert_eq!(serde_json::to_value(mode).unwrap(), serde_json::json!(text));
-            assert_eq!(mode.as_str(), text);
-        }
     }
 }

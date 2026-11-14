@@ -651,7 +651,7 @@ impl MessageStore {
 #[cfg(test)]
 mod duplicate_log_tests {
     use super::*;
-    use crate::types::Direction;
+    use crate::wire::Direction;
 
     #[test]
     fn logging_a_duplicate_with_multibyte_text_does_not_panic() {
@@ -1221,7 +1221,7 @@ mod status_tests {
             phone_number: SmsAddress::from("10010"),
             content: "content".to_string(),
             timestamp: "2026-01-01T00:00:00.000Z".to_string(),
-            direction: crate::types::Direction::Received,
+            direction: crate::wire::Direction::Received,
         };
         assert!(store.store_message(&message, "1", "at:ME:1").unwrap());
         let claimed = store.claim_messages(10, 60).unwrap();
@@ -1229,7 +1229,7 @@ mod status_tests {
         assert_eq!(claimed[0].status, MessageStatus::InFlight);
         assert_eq!(
             claimed[0].message.direction,
-            crate::types::Direction::Received
+            crate::wire::Direction::Received
         );
         let stored: String = store
             .conn()

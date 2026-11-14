@@ -1,44 +1,10 @@
 use crate::identifiers::{Iccid, SmsAddress};
-use crate::types::{PendingSms, PendingSmsResponse, SmsSubmission};
+use crate::types::SmsSubmission;
+use crate::wire::{PendingSms, PendingSmsResponse, SmsReportOutcome, SmsResult};
 use anyhow::{anyhow, Result};
-use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
-
-// The transport includes failures, while successful modem submissions cannot.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "snake_case")]
-enum SmsReportOutcome {
-    Confirmed,
-    SubmittedUnconfirmed,
-    Failed,
-}
-
-#[derive(Debug, Serialize)]
-struct SmsResult<'a> {
-    message_id: &'a str,
-    outcome: SmsReportOutcome,
-    error_message: Option<&'a str>,
-}
-
-impl<'a> SmsResult<'a> {
-    fn new(message_id: &'a str, submission: Result<SmsSubmission, &'a str>) -> Self {
-        let (outcome, error_message) = match submission {
-            Ok(SmsSubmission::Confirmed) => (SmsReportOutcome::Confirmed, None),
-            Ok(SmsSubmission::SubmittedUnconfirmed) => (
-                SmsReportOutcome::SubmittedUnconfirmed,
-                Some("SMS body submitted; modem did not return a final confirmation"),
-            ),
-            Err(error) => (SmsReportOutcome::Failed, Some(error)),
-        };
-        Self {
-            message_id,
-            outcome,
-            error_message,
-        }
-    }
-}
 
 pub struct SmsSender {
     api_client: crate::api_client::ApiClient,
@@ -293,45 +259,8 @@ fn is_short_code(recipient: &SmsAddress) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_short_code, SmsResult};
+    use super::is_short_code;
     use crate::identifiers::SmsAddress;
-    use crate::types::SmsSubmission;
-    use serde_json::json;
-
-    #[test]
-    fn serializes_confirmed_submission_without_an_error() {
-        let result = SmsResult::new("message-1", Ok(SmsSubmission::Confirmed));
-        assert_eq!(
-            serde_json::to_value(result).unwrap(),
-            json!({"message_id": "message-1", "outcome": "confirmed", "error_message": null})
-        );
-    }
-
-    #[test]
-    fn serializes_unconfirmed_submission_with_its_delivery_warning() {
-        let result = SmsResult::new("message-1", Ok(SmsSubmission::SubmittedUnconfirmed));
-        assert_eq!(
-            serde_json::to_value(result).unwrap(),
-            json!({
-                "message_id": "message-1",
-                "outcome": "submitted_unconfirmed",
-                "error_message": "SMS body submitted; modem did not return a final confirmation"
-            })
-        );
-    }
-
-    #[test]
-    fn serializes_failed_submission_with_its_error() {
-        let result = SmsResult::new("message-1", Err("Modem not found"));
-        assert_eq!(
-            serde_json::to_value(result).unwrap(),
-            json!({
-                "message_id": "message-1",
-                "outcome": "failed",
-                "error_message": "Modem not found"
-            })
-        );
-    }
 
     #[test]
     fn recognizes_only_plain_ascii_short_codes() {

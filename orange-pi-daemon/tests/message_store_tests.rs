@@ -1,7 +1,8 @@
 // Integration tests for MessageStore - SQLite persistence layer
 use orange_pi_daemon_rust::identifiers::{Iccid, SmsAddress};
 use orange_pi_daemon_rust::message_store::{MessageStore, Segment};
-use orange_pi_daemon_rust::types::{Direction, Message, SmsStorage};
+use orange_pi_daemon_rust::types::{Message, SmsStorage};
+use orange_pi_daemon_rust::wire::Direction;
 
 // Helper function to create test message
 #[allow(

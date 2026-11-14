@@ -2,10 +2,8 @@
 use orange_pi_daemon_rust::api_client::ApiClient;
 use orange_pi_daemon_rust::identifiers::{Iccid, Imei, SimNumber, SmsAddress};
 use orange_pi_daemon_rust::message_store::{MessageStatus, StoredMessage};
-use orange_pi_daemon_rust::sync_manager::SyncMode;
-use orange_pi_daemon_rust::types::{
-    Config, Direction, Message, Modem, ModemReport, ModemStatus, Sim, SimReadStatus, SimStatus,
-};
+use orange_pi_daemon_rust::types::{Config, Message, Modem, Sim, SimReadStatus, SimStatus};
+use orange_pi_daemon_rust::wire::{Direction, ModemReport, ModemStatus, SyncMode};
 
 // Helper function to create test config
 fn create_test_config() -> Config {

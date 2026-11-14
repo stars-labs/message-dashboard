@@ -29,6 +29,7 @@ export default defineConfig([
     'balance-agent/release/',
     'worker-configuration.d.ts',
     'worker-runtime.d.ts',
+    'shared/daemon-wire/',
   ]),
   {
     linterOptions: {
