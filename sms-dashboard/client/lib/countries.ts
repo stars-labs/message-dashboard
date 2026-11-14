@@ -48,15 +48,14 @@ export const COUNTRY_FILTER_TABS: Country[] = [
   { code: 'SG', name: '新加坡', flag: '🇸🇬' },
 ];
 
-const FLAG_MAP = Object.fromEntries(COUNTRIES.map((c) => [c.code, c.flag]));
-const NAME_MAP = Object.fromEntries(COUNTRIES.map((c) => [c.code, c.name]));
+const COUNTRY_BY_CODE = new Map(COUNTRIES.map((country) => [country.code, country]));
 
 export function getCountryFlag(code: string | null | undefined): string {
-  return (code && FLAG_MAP[code]) || '🌍';
+  return (code ? COUNTRY_BY_CODE.get(code)?.flag : undefined) ?? '🌍';
 }
 
 export function getCountryName(code: string | null | undefined): string {
-  return (code && NAME_MAP[code]) || code || '';
+  return (code ? COUNTRY_BY_CODE.get(code)?.name : undefined) ?? code ?? '';
 }
 
 export function inferCountryFromNumber(numberOrPhone: PhoneLike): string | null {
