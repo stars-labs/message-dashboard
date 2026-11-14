@@ -278,3 +278,24 @@ export const BalanceQueryBatchResponse = v.object({
 });
 
 export type BalanceQueryBatchResponse = v.InferOutput<typeof BalanceQueryBatchResponse>;
+
+/** The check that put a SIM in its query cooldown. */
+export const RecentBalanceCheck = v.object({
+  sim_iccid: v.string(),
+  profile_id: v.string(),
+  id: v.string(),
+  status: v.picklist(CHECK_STATUSES),
+  requested_at: v.string(),
+});
+
+export type RecentBalanceCheck = v.InferOutput<typeof RecentBalanceCheck>;
+
+/** POST /api/balance-checks/query, 409 or 429: why the SIM cannot be queried now. */
+export const BalanceQueryRefusal = v.object({
+  success: v.literal(false),
+  error: v.string(),
+  reason: v.picklist(INELIGIBLE_REASONS),
+  previous_check: v.nullable(RecentBalanceCheck),
+});
+
+export type BalanceQueryRefusal = v.InferOutput<typeof BalanceQueryRefusal>;

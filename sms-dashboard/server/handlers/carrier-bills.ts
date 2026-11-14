@@ -1,4 +1,5 @@
 import { json } from '../lib/response.js';
+import type { ErrorResponse } from '../../shared/api/error.js';
 import * as v from 'valibot';
 import { parseJson, readJson } from '../../shared/parse-json.js';
 import { queryAll, queryFirst, type D1, type D1Batch } from '../lib/d1.js';
@@ -11,6 +12,7 @@ import {
   CarrierBill,
   CarrierBillEvent,
   CarrierBillSourceMessage,
+  type CarrierBillConflict,
   type CarrierBillMutationResponse,
   type CarrierBillResponse,
   type CarrierBillsResponse,
@@ -335,7 +337,7 @@ async function mutateBill(request: MutationRequest, action: BillAction): Promise
         error: 'Bill version conflict',
         current_version: current.version,
         bill: presentBill(current, singaporeDate()),
-      },
+      } satisfies CarrierBillConflict,
       409,
     );
   }
@@ -406,12 +408,13 @@ async function mutateBill(request: MutationRequest, action: BillAction): Promise
 
     if (results[0]?.meta.changes !== 1) {
       const latest = await findBill(db, billId);
+      if (!latest) return json({ error: 'Bill not found' } satisfies ErrorResponse, 404);
       return json(
         {
           error: 'Bill version conflict',
-          current_version: latest?.version ?? null,
-          bill: latest ? presentBill(latest, singaporeDate()) : null,
-        },
+          current_version: latest.version,
+          bill: presentBill(latest, singaporeDate()),
+        } satisfies CarrierBillConflict,
         409,
       );
     }

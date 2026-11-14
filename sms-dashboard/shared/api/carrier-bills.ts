@@ -102,3 +102,12 @@ export const CarrierBillMutationResponse = v.object({
 });
 
 export type CarrierBillMutationResponse = v.InferOutput<typeof CarrierBillMutationResponse>;
+
+/** POST /api/carrier-bills/:id/<action>, 409: the bill changed; it is answered as it now stands. */
+export const CarrierBillConflict = v.object({
+  error: v.string(),
+  current_version: v.number(),
+  bill: CarrierBill,
+});
+
+export type CarrierBillConflict = v.InferOutput<typeof CarrierBillConflict>;

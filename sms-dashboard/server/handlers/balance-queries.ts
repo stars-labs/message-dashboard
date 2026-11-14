@@ -36,7 +36,9 @@ import {
   type BalanceQueryPreflightResponse,
   type BalanceQueryPreviewResponse,
   type BalanceQueryResponse,
+  RecentBalanceCheck,
   type BalanceCheck,
+  type BalanceQueryRefusal,
   type QueuedBalanceCheck,
   type BalanceCheckDetailResponse,
   type BalanceCheckStatusResponse,
@@ -98,17 +100,9 @@ const QueryProfileRow = v.object({ ...profileColumns, method: v.picklist(QUERY_M
 
 export type BalanceProfile = v.InferOutput<typeof QueryProfileRow>;
 
-const RecentCheckRow = v.object({
-  sim_iccid: v.string(),
-  profile_id: v.string(),
-  id: v.string(),
-  status: v.picklist(CHECK_STATUSES),
-  requested_at: v.string(),
-});
-
 const ParsedCheckRow = v.object({ sim_iccid: v.string(), profile_id: v.string() });
 
-type RecentCheck = v.InferOutput<typeof RecentCheckRow>;
+type RecentCheck = RecentBalanceCheck;
 type ParsedCheck = v.InferOutput<typeof ParsedCheckRow>;
 
 /** One SIM's balance-query eligibility. An eligible SIM always has a profile. */
@@ -656,7 +650,7 @@ async function loadBalanceQueryPlan(
       ORDER BY datetime(requested_at) DESC
     `,
       ),
-      RecentCheckRow,
+      RecentBalanceCheck,
     ),
     queryAll(
       db.prepare(
@@ -1502,7 +1496,7 @@ export const balanceQueriesHandler = {
           error: INELIGIBLE_ERRORS[item.reason],
           reason: item.reason,
           previous_check: item.recentCheck,
-        },
+        } satisfies BalanceQueryRefusal,
         item.reason === 'cooldown' ? 429 : 409,
       );
     }
