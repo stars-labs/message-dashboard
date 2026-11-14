@@ -50,3 +50,13 @@ export async function queryFirst<T>(
   const result = await statement.first();
   return result === null ? null : v.parse(row, result);
 }
+
+/** For a statement that always yields a row, such as INSERT ... RETURNING; no row throws. */
+export async function queryOne<T>(
+  statement: Pick<StatementOperations, 'first'>,
+  row: Schema<T>,
+): Promise<T> {
+  const result = await queryFirst(statement, row);
+  if (result === null) throw new Error('Statement returned no row');
+  return result;
+}

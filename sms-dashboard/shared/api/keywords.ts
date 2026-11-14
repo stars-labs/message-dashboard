@@ -24,3 +24,8 @@ export const KeywordWithUsage = v.object({ ...Keyword.entries, usage_count: v.nu
 export const KeywordsResponse = v.object({ keywords: v.array(KeywordWithUsage) });
 
 export type KeywordsResponse = v.InferOutput<typeof KeywordsResponse>;
+
+/** POST /api/keywords and PUT /api/keywords/:id. */
+export const KeywordResponse = v.object({ keyword: Keyword });
+
+export type KeywordResponse = v.InferOutput<typeof KeywordResponse>;

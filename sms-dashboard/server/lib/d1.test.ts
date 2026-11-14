@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import * as v from 'valibot';
-import { queryAll, queryFirst } from './d1.js';
+import { queryAll, queryFirst, queryOne } from './d1.js';
 
 const Row = v.object({ iccid: v.string(), sim_index: v.nullable(v.number()) });
 
@@ -52,5 +52,24 @@ describe('queryFirst', () => {
       thrown = error;
     }
     expect(thrown).toBeInstanceOf(v.ValiError);
+  });
+});
+
+describe('queryOne', () => {
+  test('returns the row parsed by the row schema', async () => {
+    expect(await queryOne(statement([{ iccid: 'A', sim_index: null }]), Row)).toEqual({
+      iccid: 'A',
+      sim_index: null,
+    });
+  });
+
+  test('throws when there is no row', async () => {
+    let thrown: unknown;
+    try {
+      await queryOne(statement([]), Row);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(Error);
   });
 });

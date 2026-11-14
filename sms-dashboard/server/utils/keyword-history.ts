@@ -1,7 +1,7 @@
 import * as v from 'valibot';
 import { queryAll, type D1, type D1Batch, type D1Statement } from '../lib/d1.js';
 import { findKeywordMatches } from './keyword-match.js';
-import type { HistoryCursor } from './filter-history.js';
+import type { HistoryCursor, KeywordHistoryPage } from '../../shared/api/history.js';
 
 const KEYWORD_HISTORY_PAGE_SIZE = 200;
 
@@ -24,15 +24,6 @@ const KeywordHistoryRow = v.object({
 });
 
 type KeywordHistoryRow = v.InferOutput<typeof KeywordHistoryRow>;
-
-interface KeywordHistoryPage {
-  processed: number;
-  eligible: number;
-  matched_messages: number;
-  inserted: number;
-  has_more: boolean;
-  next_cursor: HistoryCursor | null;
-}
 
 function cursorFor(row: KeywordHistoryRow): HistoryCursor {
   return { created_at: row.created_at, id: row.id };

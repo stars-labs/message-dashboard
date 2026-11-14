@@ -1,6 +1,6 @@
 import * as v from 'valibot';
 import { OBJECT_MESSAGE, type MissingKeyMessages } from '../lib/request-body.js';
-import type { HistoryCursor } from './filter-history.js';
+import type { HistoryCursor } from '../../shared/api/history.js';
 
 const RANGE_MESSAGE = 'A valid history time range is required';
 const CURSOR_MESSAGE = 'Invalid history cursor';

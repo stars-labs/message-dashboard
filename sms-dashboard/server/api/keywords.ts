@@ -1,7 +1,12 @@
 import { json } from '../lib/response.js';
 import * as v from 'valibot';
-import { Keyword, KeywordWithUsage, type KeywordsResponse } from '../../shared/api/keywords.js';
-import { queryAll, queryFirst, type D1, type D1Batch } from '../lib/d1.js';
+import {
+  Keyword,
+  KeywordWithUsage,
+  type KeywordResponse,
+  type KeywordsResponse,
+} from '../../shared/api/keywords.js';
+import { queryAll, queryFirst, queryOne, type D1, type D1Batch } from '../lib/d1.js';
 import { OBJECT_MESSAGE, readBody, type MissingKeyMessages } from '../lib/request-body.js';
 import { HISTORY_MISSING_KEY_MESSAGES, HistoryRequestBody } from '../utils/history-request.js';
 import type { AuthRequest } from '../middleware/auth0.js';
@@ -189,7 +194,7 @@ export function setupKeywordRoutes(router: Router): void {
         return json({ error: 'Keyword not found' }, 404);
       }
 
-      return json({ keyword });
+      return json({ keyword } satisfies KeywordResponse);
     } catch (error) {
       console.error('Error fetching keyword:', error);
       return json({ error: 'Failed to fetch keyword' }, 500);
@@ -228,14 +233,14 @@ export function setupKeywordRoutes(router: Router): void {
         .bind(keyword, tag, color, priority, case_sensitive, whole_word, user?.id ?? null)
         .run();
 
-      const newKeyword = await queryFirst(
+      const newKeyword = await queryOne(
         request.env.DB.prepare(`SELECT ${KEYWORD_COLUMNS} FROM keyword_tags WHERE id = ?`).bind(
           result.meta.last_row_id,
         ),
         Keyword,
       );
 
-      return json({ keyword: newKeyword }, 201);
+      return json({ keyword: newKeyword } satisfies KeywordResponse, 201);
     } catch (error) {
       console.error('Error creating keyword:', error);
       return json(
@@ -309,7 +314,7 @@ export function setupKeywordRoutes(router: Router): void {
       );
       if (!updated) return json({ error: 'Keyword not found' }, 404);
 
-      return json({ keyword: updated });
+      return json({ keyword: updated } satisfies KeywordResponse);
     } catch (error) {
       console.error('Error updating keyword:', error);
       return json({ error: 'Failed to update keyword' }, 500);

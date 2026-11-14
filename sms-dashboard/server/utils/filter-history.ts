@@ -1,15 +1,11 @@
 import * as v from 'valibot';
 import { queryAll, type D1, type D1Batch, type D1Statement } from '../lib/d1.js';
-import { classifyMessage, FILTER_STATUS, loadActiveRules, RULE_TYPE } from './spam-filter.js';
+import { RULE_TYPE } from '../../shared/api/filters.js';
+import type { HistoryCursor, RuleHistoryPage } from '../../shared/api/history.js';
+import { classifyMessage, FILTER_STATUS, loadActiveRules } from './spam-filter.js';
 import type { SpamRule } from './spam-filter.js';
 
 const FILTER_HISTORY_PAGE_SIZE = 200;
-
-/** Keyset cursor for the next page. */
-export interface HistoryCursor {
-  created_at: string;
-  id: string;
-}
 
 /** A rule as processRuleHistoryPage reads it. */
 export interface HistoryRule extends SpamRule {
@@ -28,14 +24,6 @@ const HistoryRow = v.object({
 });
 
 type HistoryRow = v.InferOutput<typeof HistoryRow>;
-
-interface RuleHistoryPage {
-  mode: 'apply' | 'release';
-  processed: number;
-  changed: number;
-  has_more: boolean;
-  next_cursor: HistoryCursor | null;
-}
 
 function historyCursor(row: HistoryRow): HistoryCursor {
   return { created_at: row.created_at, id: row.id };

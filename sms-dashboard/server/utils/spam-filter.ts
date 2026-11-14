@@ -1,6 +1,7 @@
 // Spam/marketing SMS classification.
 //
 import * as v from 'valibot';
+import { RULE_TYPE } from '../../shared/api/filters.js';
 import { queryAll, type D1 } from '../lib/d1.js';
 import { hasVerificationCode } from './verification.js';
 
@@ -34,16 +35,6 @@ type FilterStatus = (typeof FILTER_STATUS)[keyof typeof FILTER_STATUS];
  * that later turns out to be spam is the harmless direction.
  */
 export const VISIBLE_FILTER_STATUSES: FilterStatus[] = [FILTER_STATUS.CLEAN, FILTER_STATUS.PENDING];
-
-/** Rule kinds allowed in filter_rules.rule_type. */
-export const RULE_TYPE = {
-  /** Substring match against the message body. */
-  BODY_KEYWORD: 'body_keyword',
-  /** Exact match against the sender's number. */
-  SENDER: 'sender',
-} as const;
-
-export type RuleType = (typeof RULE_TYPE)[keyof typeof RULE_TYPE];
 
 /** One active row from filter_rules, whose rule_type the table restricts to the known kinds. */
 const SpamRuleRow = v.object({

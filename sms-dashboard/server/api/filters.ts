@@ -6,13 +6,19 @@
 
 import { json } from '../lib/response.js';
 import * as v from 'valibot';
-import { queryAll, queryFirst, type D1, type D1Batch } from '../lib/d1.js';
+import {
+  FilterRule,
+  RULE_TYPE,
+  type FilterResponse,
+  type FiltersResponse,
+  type RuleType,
+} from '../../shared/api/filters.js';
+import { queryAll, queryFirst, queryOne, type D1, type D1Batch } from '../lib/d1.js';
 import { OBJECT_MESSAGE, readBody, type MissingKeyMessages } from '../lib/request-body.js';
 import { HISTORY_MISSING_KEY_MESSAGES, HistoryRequestBody } from '../utils/history-request.js';
 import type { AuthRequest } from '../middleware/auth0.js';
 import { authorize } from '../middleware/authorize.js';
-import { RULE_TYPE, normalizeSender } from '../utils/spam-filter.js';
-import type { RuleType } from '../utils/spam-filter.js';
+import { normalizeSender } from '../utils/spam-filter.js';
 import { processRuleHistoryPage } from '../utils/filter-history.js';
 import { errorText } from '../utils/d1-error.js';
 
@@ -41,19 +47,6 @@ interface Router {
 
 const FILTER_COLUMNS =
   'id, rule_type, pattern, note, is_active, created_by, created_at, updated_at';
-
-const FilterRuleRow = v.object({
-  id: v.number(),
-  rule_type: v.picklist(Object.values(RULE_TYPE)),
-  pattern: v.string(),
-  note: v.nullable(v.string()),
-  is_active: v.number(),
-  created_by: v.nullable(v.string()),
-  created_at: v.nullable(v.string()),
-  updated_at: v.nullable(v.string()),
-});
-
-type FilterRuleRow = v.InferOutput<typeof FilterRuleRow>;
 
 const ReferencedRow = v.object({ referenced: v.number() });
 
@@ -139,14 +132,14 @@ function isUniqueViolation(error: unknown): boolean {
   return /UNIQUE constraint failed/i.test(errorText(error));
 }
 
-export async function listFilterRules(db: D1<'all'>): Promise<{ filters: FilterRuleRow[] }> {
+export async function listFilterRules(db: D1<'all'>): Promise<FiltersResponse> {
   const filters = await queryAll(
     db.prepare(
       `SELECT ${FILTER_COLUMNS}
      FROM filter_rules
      ORDER BY rule_type, id`,
     ),
-    FilterRuleRow,
+    FilterRule,
   );
 
   return { filters };
@@ -183,7 +176,7 @@ export function setupFilterRoutes(router: Router): void {
       });
       if ('error' in validated) return json({ error: validated.error }, 400);
 
-      const inserted = await queryFirst(
+      const inserted = await queryOne(
         request.env.DB.prepare(
           `INSERT INTO filter_rules (rule_type, pattern, note, created_by)
          VALUES (?, ?, ?, ?)
@@ -196,10 +189,10 @@ export function setupFilterRoutes(router: Router): void {
           // request.user.sub silently stored null for every rule.
           request.user?.id ?? null,
         ),
-        FilterRuleRow,
+        FilterRule,
       );
 
-      return json({ filter: inserted }, 201);
+      return json({ filter: inserted } satisfies FilterResponse, 201);
     } catch (error) {
       if (isUniqueViolation(error)) {
         return json({ error: 'That rule already exists' }, 409);
@@ -218,7 +211,7 @@ export function setupFilterRoutes(router: Router): void {
     try {
       const existing = await queryFirst(
         request.env.DB.prepare(`SELECT ${FILTER_COLUMNS} FROM filter_rules WHERE id = ?`).bind(id),
-        FilterRuleRow,
+        FilterRule,
       );
       if (!existing) return json({ error: 'Filter rule not found' }, 404);
 
@@ -247,11 +240,11 @@ export function setupFilterRoutes(router: Router): void {
          WHERE id = ?
          RETURNING ${FILTER_COLUMNS}`,
         ).bind(validated.rule_type, validated.pattern, validated.note, isActive, id),
-        FilterRuleRow,
+        FilterRule,
       );
       if (!updated) return json({ error: 'Filter rule not found' }, 404);
 
-      return json({ filter: updated });
+      return json({ filter: updated } satisfies FilterResponse);
     } catch (error) {
       if (isUniqueViolation(error)) {
         return json({ error: 'That rule already exists' }, 409);
@@ -299,7 +292,7 @@ export function setupFilterRoutes(router: Router): void {
     try {
       const rule = await queryFirst(
         request.env.DB.prepare(`SELECT ${FILTER_COLUMNS} FROM filter_rules WHERE id = ?`).bind(id),
-        FilterRuleRow,
+        FilterRule,
       );
       if (!rule) return json({ error: 'Filter rule not found' }, 404);
 
