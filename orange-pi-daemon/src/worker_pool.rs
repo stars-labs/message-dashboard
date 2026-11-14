@@ -7,7 +7,7 @@ use tokio::task::JoinSet;
 use tracing::{debug, error, info, warn};
 
 use crate::modem_manager::ModemManager;
-use crate::types::*;
+use crate::types::{Message, MessageWithPath, ModemReport};
 
 /// Configuration for the worker pool
 #[derive(Debug, Clone)]
@@ -61,6 +61,28 @@ pub struct ModemResult {
     pub error: Option<String>,
 }
 
+impl ModemResult {
+    fn failed(modem_id: String, error: String) -> Self {
+        Self {
+            modem_id,
+            iccid: None,
+            report: None,
+            messages: vec![],
+            messages_with_paths: vec![],
+            error: Some(error),
+        }
+    }
+}
+
+/// Resets the processing flag when a cycle ends, however it ends
+struct ProcessingGuard(Arc<AtomicBool>);
+
+impl Drop for ProcessingGuard {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
+
 /// Worker pool for parallel modem processing
 pub struct WorkerPool {
     config: WorkerPoolConfig,
@@ -107,14 +129,6 @@ impl WorkerPool {
             debug!("⏭️  Skipping modem processing - previous cycle still running");
             return Ok(vec![]);
         }
-
-        // Helper struct to reset flag on drop
-        struct ProcessingGuard(Arc<AtomicBool>);
-        impl Drop for ProcessingGuard {
-            fn drop(&mut self) {
-                self.0.store(false, Ordering::SeqCst);
-            }
-        }
         let _guard = ProcessingGuard(self.processing.clone());
 
         let start_time = Instant::now();
@@ -125,19 +139,36 @@ impl WorkerPool {
             total_modems, self.config.num_workers
         );
 
-        // Reset stats
-        {
-            let mut stats = self.stats.write().await;
-            *stats = WorkerPoolStats {
-                total_modems,
-                ..Default::default()
-            };
+        *self.stats.write().await = WorkerPoolStats {
+            total_modems,
+            ..Default::default()
+        };
+
+        let (tx, mut rx) = mpsc::channel::<ModemResult>(total_modems);
+        let mut join_set = self.spawn_workers(&modem_ids, &tx);
+
+        // Drop original sender to close channel when done
+        drop(tx);
+
+        let mut results = Vec::with_capacity(total_modems);
+        while let Some(result) = rx.recv().await {
+            results.push(result);
         }
 
-        // Create result channel
-        let (tx, mut rx) = mpsc::channel::<ModemResult>(total_modems);
+        while let Some(res) = join_set.join_next().await {
+            if let Err(e) = res {
+                error!("Worker task panicked: {}", e);
+            }
+        }
 
-        // Process modems in batches
+        self.record_final_stats(start_time).await;
+        self.log_summary().await;
+
+        Ok(results)
+    }
+
+    /// Spawn one rate-limited worker task per modem, in batches
+    fn spawn_workers(&self, modem_ids: &[String], tx: &mpsc::Sender<ModemResult>) -> JoinSet<()> {
         let mut join_set = JoinSet::new();
 
         for batch in modem_ids.chunks(self.config.batch_size) {
@@ -150,83 +181,70 @@ impl WorkerPool {
                 let timeout = self.config.modem_timeout;
                 let stats = self.stats.clone();
 
-                // Spawn worker task
                 join_set.spawn(async move {
                     // Acquire semaphore permit for rate limiting
                     let _permit = semaphore.acquire().await.unwrap();
 
-                    let result = tokio::time::timeout(
+                    let modem_result = Self::process_with_timeout(
+                        modem_id,
+                        modem_manager,
+                        message_store,
                         timeout,
-                        Self::process_single_modem(modem_id.clone(), modem_manager, message_store),
+                        &stats,
                     )
                     .await;
-
-                    let modem_result = match result {
-                        Ok(Ok(result)) => {
-                            let mut stats = stats.write().await;
-                            stats.successful += 1;
-                            result
-                        }
-                        Ok(Err(e)) => {
-                            let mut stats = stats.write().await;
-                            stats.failed += 1;
-
-                            warn!("⚠️  Failed to process modem {}: {}", modem_id, e);
-                            ModemResult {
-                                modem_id,
-                                iccid: None,
-                                report: None,
-                                messages: vec![],
-                                messages_with_paths: vec![],
-                                error: Some(e.to_string()),
-                            }
-                        }
-                        Err(_) => {
-                            let mut stats = stats.write().await;
-                            stats.timeouts += 1;
-
-                            warn!("⏱️  Timeout processing modem {}", modem_id);
-                            ModemResult {
-                                modem_id,
-                                iccid: None,
-                                report: None,
-                                messages: vec![],
-                                messages_with_paths: vec![],
-                                error: Some("Timeout".to_string()),
-                            }
-                        }
-                    };
 
                     let _ = tx.send(modem_result).await;
                 });
             }
         }
 
-        // Drop original sender to close channel when done
-        drop(tx);
+        join_set
+    }
 
-        // Collect results
-        let mut results = Vec::with_capacity(total_modems);
-        while let Some(result) = rx.recv().await {
-            results.push(result);
-        }
+    /// Process one modem under a timeout and count the outcome in the stats
+    async fn process_with_timeout(
+        modem_id: String,
+        modem_manager: Arc<ModemManager>,
+        message_store: Arc<crate::message_store::MessageStore>,
+        timeout: Duration,
+        stats: &RwLock<WorkerPoolStats>,
+    ) -> ModemResult {
+        let result = tokio::time::timeout(
+            timeout,
+            Self::process_single_modem(modem_id.clone(), modem_manager, message_store),
+        )
+        .await;
 
-        // Wait for all tasks to complete
-        while let Some(res) = join_set.join_next().await {
-            if let Err(e) = res {
-                error!("Worker task panicked: {}", e);
+        match result {
+            Ok(Ok(result)) => {
+                stats.write().await.successful += 1;
+                result
+            }
+            Ok(Err(e)) => {
+                stats.write().await.failed += 1;
+
+                warn!("⚠️  Failed to process modem {}: {}", modem_id, e);
+                ModemResult::failed(modem_id, e.to_string())
+            }
+            Err(_) => {
+                stats.write().await.timeouts += 1;
+
+                warn!("⏱️  Timeout processing modem {}", modem_id);
+                ModemResult::failed(modem_id, "Timeout".to_string())
             }
         }
+    }
 
-        // Update final stats
-        {
-            let mut stats = self.stats.write().await;
-            stats.processing_time = start_time.elapsed();
-            if stats.successful > 0 {
-                stats.avg_time_per_modem = stats.processing_time / stats.successful as u32;
-            }
+    async fn record_final_stats(&self, start_time: Instant) {
+        let mut stats = self.stats.write().await;
+        stats.processing_time = start_time.elapsed();
+        if stats.successful > 0 {
+            stats.avg_time_per_modem = stats.processing_time / stats.successful as u32;
         }
+    }
 
+    async fn log_summary(&self) {
         let stats = self.stats.read().await;
         info!(
             "✅ Worker pool completed: {} modems in {:.2}s ({} successful, {} failed, {} timeouts, {:.1}% success rate)",
@@ -237,8 +255,6 @@ impl WorkerPool {
             stats.timeouts,
             stats.success_rate()
         );
-
-        Ok(results)
     }
 
     /// Process a single modem (internal helper)
@@ -258,19 +274,9 @@ impl WorkerPool {
             .await
             .context("Failed to get device details")?;
 
-        let (equipment_id, manufacturer, model, firmware, hardware) = match device_details {
-            Some(details) => details,
-            None => {
-                debug!("Modem {} has no valid IMEI, skipping", modem_id);
-                return Ok(ModemResult {
-                    modem_id,
-                    iccid: None,
-                    report: None,
-                    messages: vec![],
-                    messages_with_paths: vec![],
-                    error: Some("No valid IMEI".to_string()),
-                });
-            }
+        let Some((equipment_id, manufacturer, model, firmware, hardware)) = device_details else {
+            debug!("Modem {} has no valid IMEI, skipping", modem_id);
+            return Ok(ModemResult::failed(modem_id, "No valid IMEI".to_string()));
         };
 
         // Get signal quality (cached) — always, even without ICCID
@@ -347,8 +353,8 @@ impl WorkerPool {
     }
 
     /// Check if using native D-Bus
-    pub async fn is_using_native_dbus(&self) -> bool {
-        self.modem_manager.is_using_native_dbus().await
+    pub fn is_using_native_dbus(&self) -> bool {
+        self.modem_manager.is_using_native_dbus()
     }
 
     /// Update configuration
@@ -415,12 +421,12 @@ mod tests {
             ..WorkerPoolStats::default()
         };
 
-        assert_eq!(stats.success_rate(), 95.0);
+        assert!((stats.success_rate() - 95.0).abs() < 1e-9);
     }
 
     #[test]
     fn test_worker_pool_stats_empty() {
         let stats = WorkerPoolStats::default();
-        assert_eq!(stats.success_rate(), 0.0);
+        assert!(stats.success_rate().abs() < 1e-9);
     }
 }

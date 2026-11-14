@@ -83,8 +83,7 @@ impl VoiceBridgeConfig {
                 .and_then(|p| p.parse().ok())
                 .unwrap_or(443),
             acme_dir: std::env::var("VOICE_BRIDGE_ACME_DIR")
-                .map(PathBuf::from)
-                .unwrap_or_else(|_| PathBuf::from("/var/lib/sms-daemon/acme")),
+                .map_or_else(|_| PathBuf::from("/var/lib/sms-daemon/acme"), PathBuf::from),
             acme_production: std::env::var("VOICE_BRIDGE_ACME_STAGING").as_deref() != Ok("1"),
         })
     }
@@ -151,7 +150,7 @@ async fn finish_modem_call(
 /// Consume the PROXY protocol header and return the source it names.
 ///
 /// The header is peeked until its CRLF arrives, then read off the stream for
-/// exactly its own length, so the TLS ClientHello that follows is untouched.
+/// exactly its own length, so the TLS `ClientHello` that follows is untouched.
 async fn read_proxy_source(tcp: &mut TcpStream) -> Result<Option<SocketAddr>> {
     use tokio::io::AsyncReadExt;
     let mut buf = [0u8; proxy_protocol::MAX_HEADER_LEN];
@@ -165,7 +164,7 @@ async fn read_proxy_source(tcp: &mut TcpStream) -> Result<Option<SocketAddr>> {
             Err(proxy_protocol::ParseError::Incomplete) if n < buf.len() => {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
-            Err(e) => bail!("{:?}", e),
+            Err(e) => bail!("{e:?}"),
         }
     };
     let mut discard = vec![0u8; header.len];
@@ -176,8 +175,7 @@ async fn read_proxy_source(tcp: &mut TcpStream) -> Result<Option<SocketAddr>> {
 fn now_unix() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
+        .map_or(0, |d| d.as_secs())
 }
 
 impl VoiceBridge {
@@ -286,7 +284,7 @@ impl VoiceBridge {
     ) -> Result<()> {
         let start = tokio::time::timeout(
             Duration::from_secs(10),
-            LazyConfigAcceptor::new(Default::default(), tcp),
+            LazyConfigAcceptor::new(tokio_rustls::rustls::server::Acceptor::default(), tcp),
         )
         .await??;
 
@@ -487,12 +485,11 @@ impl VoiceBridge {
             return match AtModemManager::voice_ports_for_at_port(&at_port)? {
                 Some(ports) => Ok((modem_id, ports)),
                 None => Err(anyhow!(
-                    "modem {} has no NMEA port and cannot carry voice",
-                    modem_id
+                    "modem {modem_id} has no NMEA port and cannot carry voice"
                 )),
             };
         }
-        bail!("no modem currently holds SIM {}", iccid)
+        bail!("no modem currently holds SIM {iccid}")
     }
 
     async fn at(&self, modem_id: &str, command: &str, timeout: Duration) -> Result<String> {
@@ -503,7 +500,7 @@ impl VoiceBridge {
         if let CallAction::Answer = action {
             let clcc = self.at(modem_id, "AT+CLCC", Duration::from_secs(3)).await?;
             if !is_ringing(&parse_clcc(&clcc)) {
-                bail!("modem {} is not ringing", modem_id);
+                bail!("modem {modem_id} is not ringing");
             }
         }
 
@@ -521,13 +518,13 @@ impl VoiceBridge {
                         modem_id,
                         "📞 AT+QPCMV=1,0 refused while ringing: {}",
                         pcm.trim()
-                    )
+                    );
                 }
             }
         }
 
         let (command, timeout) = match action {
-            CallAction::Dial(number) => (format!("ATD{};", number), Duration::from_secs(10)),
+            CallAction::Dial(number) => (format!("ATD{number};"), Duration::from_secs(10)),
             CallAction::Answer => ("ATA".to_string(), Duration::from_secs(15)),
         };
         let response = self.at(modem_id, &command, timeout).await;
@@ -535,7 +532,7 @@ impl VoiceBridge {
             Ok(text) if text.contains("OK") => Ok(()),
             other => {
                 self.release_modem(modem_id).await;
-                Err(anyhow!("{} failed: {:?}", command, other))
+                Err(anyhow!("{command} failed: {other:?}"))
             }
         }
     }
@@ -555,7 +552,7 @@ impl VoiceBridge {
         loop {
             tokio::select! {
                 _ = stop.changed() => return,
-                _ = tokio::time::sleep(WATCHDOG_INTERVAL) => {}
+                () = tokio::time::sleep(WATCHDOG_INTERVAL) => {}
             }
             let reason = match self.at(&modem_id, "AT+CLCC", Duration::from_secs(3)).await {
                 Ok(clcc) if parse_clcc(&clcc).is_empty() => Some("remote_hangup"),
@@ -581,7 +578,7 @@ impl VoiceBridge {
     /// Idempotent: only the first caller for a call id does the teardown.
     async fn end_call(&self, call_id: &str, reason: &str) {
         let active = finish_modem_call(&self.state, call_id, async |modem| {
-            self.release_modem(modem).await
+            self.release_modem(modem).await;
         })
         .await;
         let Some(active) = active else {
@@ -790,7 +787,7 @@ async fn read_some(fd: &AsyncFd<File>, buf: &mut [u8]) -> std::io::Result<usize>
                 tokio::time::sleep(EMPTY_READ_PAUSE).await;
             }
             Ok(result) => return result,
-            Err(_would_block) => continue,
+            Err(_would_block) => {}
         }
     }
 }
@@ -808,7 +805,7 @@ async fn write_all(fd: &AsyncFd<File>, mut data: &[u8]) -> std::io::Result<()> {
             }
             Ok(Ok(n)) => data = &data[n..],
             Ok(Err(e)) => return Err(e),
-            Err(_would_block) => continue,
+            Err(_would_block) => {}
         }
     }
     Ok(())
@@ -913,7 +910,7 @@ where
                 Err(broadcast::error::RecvError::Closed) => return "stopped",
             },
             incoming = ws.next() => match incoming {
-                Some(Ok(Message::Close(_))) | None | Some(Err(_)) => return "adapter_closed",
+                Some(Ok(Message::Close(_)) | Err(_)) | None => return "adapter_closed",
                 Some(Ok(_)) => {}
             },
         }
@@ -945,7 +942,7 @@ where
                     // add latency to a live call.
                     let _ = to_modem.try_send(pcm);
                 }
-                Some(Ok(Message::Close(_))) | None | Some(Err(_)) => return "adapter_closed",
+                Some(Ok(Message::Close(_)) | Err(_)) | None => return "adapter_closed",
                 Some(Ok(_)) => {}
             },
         }
@@ -1000,14 +997,14 @@ mod tests {
         assert!(state.active.is_none());
         assert_eq!(state.ended.front().map(String::as_str), Some("old"));
     }
-    use std::os::fd::{FromRawFd, IntoRawFd};
+    use std::os::fd::OwnedFd;
     use std::os::unix::net::UnixStream;
 
     /// A non-blocking fd whose peer can be dropped to simulate a hang-up.
     fn pair() -> (AsyncFd<File>, UnixStream) {
         let (ours, theirs) = UnixStream::pair().unwrap();
         ours.set_nonblocking(true).unwrap();
-        let file = unsafe { File::from_raw_fd(ours.into_raw_fd()) };
+        let file = File::from(OwnedFd::from(ours));
         (AsyncFd::new(file).unwrap(), theirs)
     }
 

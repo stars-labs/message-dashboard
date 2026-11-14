@@ -184,7 +184,7 @@ fn test_pending_sms_debug() {
     let sms = create_test_sms("msg_001", "iccid_001", "+1234567890", "Test");
 
     // PendingSms implements Debug
-    let debug_str = format!("{:?}", sms);
+    let debug_str = format!("{sms:?}");
 
     assert!(debug_str.contains("msg_001"));
     assert!(debug_str.contains("iccid_001"));
@@ -275,7 +275,7 @@ async fn test_modem_cache_large_scale() {
     // Create cache with 100+ modems (simulating production)
     let mut cache = HashMap::new();
     for i in 0..100 {
-        cache.insert(format!("iccid_{:03}", i), format!("modem_{}", i));
+        cache.insert(format!("iccid_{i:03}"), format!("modem_{i}"));
     }
 
     sender.update_modem_cache(cache);

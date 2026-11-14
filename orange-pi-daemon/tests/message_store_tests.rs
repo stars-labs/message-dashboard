@@ -99,12 +99,12 @@ fn test_claim_pending_messages_with_limit() {
 
     for i in 0..5 {
         let msg = create_test_message(
-            &format!("iccid_{:03}", i),
-            &format!("Message {}", i),
-            &format!("2024-01-01T12:00:{:02}.000Z", i),
+            &format!("iccid_{i:03}"),
+            &format!("Message {i}"),
+            &format!("2024-01-01T12:00:{i:02}.000Z"),
         );
         store
-            .store_message(&msg, "modem_0", &format!("at:{}", i))
+            .store_message(&msg, "modem_0", &format!("at:{i}"))
             .unwrap();
     }
 
@@ -268,7 +268,7 @@ fn test_transient_failures_never_exhaust_retries() {
 fn test_store_single_segment() {
     let store = MessageStore::new(":memory:").unwrap();
 
-    let result = store.store_segment(Segment {
+    let result = store.store_segment(&Segment {
         iccid: "iccid_001",
         sender: "+1234567890",
         ref_id: 42,
@@ -288,7 +288,7 @@ fn test_store_segment_preserves_sms_storage() {
     let store = MessageStore::new(":memory:").unwrap();
 
     store
-        .store_segment(Segment {
+        .store_segment(&Segment {
             iccid: "iccid_001",
             sender: "+1234567890",
             ref_id: 42,
@@ -313,7 +313,7 @@ fn test_incomplete_multipart_keeps_each_physical_location() {
     let store = MessageStore::new(":memory:").unwrap();
 
     store
-        .store_segment(Segment {
+        .store_segment(&Segment {
             iccid: "iccid_001",
             sender: "+1234567890",
             ref_id: 42,
@@ -326,7 +326,7 @@ fn test_incomplete_multipart_keeps_each_physical_location() {
         })
         .unwrap();
     store
-        .store_segment(Segment {
+        .store_segment(&Segment {
             iccid: "iccid_001",
             sender: "+1234567890",
             ref_id: 42,
@@ -353,7 +353,7 @@ fn test_get_segments_incomplete() {
 
     // Store parts 1 and 2 (out of 3)
     store
-        .store_segment(Segment {
+        .store_segment(&Segment {
             iccid: "iccid_001",
             sender: "+1234567890",
             ref_id: 42,
@@ -366,7 +366,7 @@ fn test_get_segments_incomplete() {
         })
         .unwrap();
     store
-        .store_segment(Segment {
+        .store_segment(&Segment {
             iccid: "iccid_001",
             sender: "+1234567890",
             ref_id: 42,
@@ -391,7 +391,7 @@ fn test_get_segments_complete() {
 
     // Store all 3 parts
     store
-        .store_segment(Segment {
+        .store_segment(&Segment {
             iccid: "iccid_001",
             sender: "+1234567890",
             ref_id: 42,
@@ -404,7 +404,7 @@ fn test_get_segments_complete() {
         })
         .unwrap();
     store
-        .store_segment(Segment {
+        .store_segment(&Segment {
             iccid: "iccid_001",
             sender: "+1234567890",
             ref_id: 42,
@@ -417,7 +417,7 @@ fn test_get_segments_complete() {
         })
         .unwrap();
     store
-        .store_segment(Segment {
+        .store_segment(&Segment {
             iccid: "iccid_001",
             sender: "+1234567890",
             ref_id: 42,
@@ -447,7 +447,7 @@ fn test_segment_content_assembly() {
 
     // Store parts out of order
     store
-        .store_segment(Segment {
+        .store_segment(&Segment {
             iccid: "iccid_001",
             sender: "+1234567890",
             ref_id: 42,
@@ -460,7 +460,7 @@ fn test_segment_content_assembly() {
         })
         .unwrap();
     store
-        .store_segment(Segment {
+        .store_segment(&Segment {
             iccid: "iccid_001",
             sender: "+1234567890",
             ref_id: 42,
@@ -473,7 +473,7 @@ fn test_segment_content_assembly() {
         })
         .unwrap();
     store
-        .store_segment(Segment {
+        .store_segment(&Segment {
             iccid: "iccid_001",
             sender: "+1234567890",
             ref_id: 42,
@@ -504,7 +504,7 @@ fn test_delete_segments_after_assembly() {
 
     // Store segments
     store
-        .store_segment(Segment {
+        .store_segment(&Segment {
             iccid: "iccid_001",
             sender: "+1234567890",
             ref_id: 42,
@@ -517,7 +517,7 @@ fn test_delete_segments_after_assembly() {
         })
         .unwrap();
     store
-        .store_segment(Segment {
+        .store_segment(&Segment {
             iccid: "iccid_001",
             sender: "+1234567890",
             ref_id: 42,
@@ -547,7 +547,7 @@ fn test_multiple_multipart_messages_same_sender() {
 
     // Message 1 (ref_id=10)
     store
-        .store_segment(Segment {
+        .store_segment(&Segment {
             iccid: "iccid_001",
             sender: "+1234567890",
             ref_id: 10,
@@ -560,7 +560,7 @@ fn test_multiple_multipart_messages_same_sender() {
         })
         .unwrap();
     store
-        .store_segment(Segment {
+        .store_segment(&Segment {
             iccid: "iccid_001",
             sender: "+1234567890",
             ref_id: 10,
@@ -575,7 +575,7 @@ fn test_multiple_multipart_messages_same_sender() {
 
     // Message 2 (ref_id=20)
     store
-        .store_segment(Segment {
+        .store_segment(&Segment {
             iccid: "iccid_001",
             sender: "+1234567890",
             ref_id: 20,
@@ -588,7 +588,7 @@ fn test_multiple_multipart_messages_same_sender() {
         })
         .unwrap();
     store
-        .store_segment(Segment {
+        .store_segment(&Segment {
             iccid: "iccid_001",
             sender: "+1234567890",
             ref_id: 20,
@@ -625,7 +625,7 @@ fn test_cleanup_old_segments() {
 
     // Store some segments
     store
-        .store_segment(Segment {
+        .store_segment(&Segment {
             iccid: "iccid_001",
             sender: "+1234567890",
             ref_id: 42,
@@ -781,12 +781,12 @@ fn test_checkpoint_truncates_the_wal_on_disk() {
             .store_message(&msg, "modem_0", &format!("at:{i}"))
             .unwrap();
     }
-    let before = std::fs::metadata(&wal_path).map(|m| m.len()).unwrap_or(0);
+    let before = std::fs::metadata(&wal_path).map_or(0, |m| m.len());
     assert!(before > 0, "writes should have grown the WAL");
 
     store.checkpoint_wal().unwrap();
 
-    let after = std::fs::metadata(&wal_path).map(|m| m.len()).unwrap_or(0);
+    let after = std::fs::metadata(&wal_path).map_or(0, |m| m.len());
     assert_eq!(after, 0, "TRUNCATE checkpoint leaves an empty WAL");
 
     drop(store);

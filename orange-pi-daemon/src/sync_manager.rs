@@ -1,5 +1,6 @@
 use crate::types::ModemReport;
 use std::collections::{HashMap, HashSet};
+use std::hash::BuildHasher;
 use tracing::{info, warn};
 
 /// Sync mode for state reconciliation
@@ -19,8 +20,8 @@ pub struct DeviceDelta {
 
 /// Merge successful reads into the last known report snapshot while using USB
 /// discovery, not AT-command success, as the authority for physical removal.
-pub fn merge_device_reports<I>(
-    previous: &HashMap<String, ModemReport>,
+pub fn merge_device_reports<I, S: BuildHasher>(
+    previous: &HashMap<String, ModemReport, S>,
     discovered_modem_ids: &[String],
     successful_reports: I,
 ) -> HashMap<String, ModemReport>

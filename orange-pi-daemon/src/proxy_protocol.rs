@@ -1,7 +1,7 @@
 //! PROXY protocol v1, as sent by nginx `stream { proxy_protocol on; }`.
 //!
 //! The voice bridge now sits behind an nginx SNI router that shares port 443
-//! with NetBird. A plain TCP proxy would make every connection look like it came
+//! with `NetBird`. A plain TCP proxy would make every connection look like it came
 //! from 127.0.0.1, which defeats the Cloudflare allowlist. With the PROXY
 //! protocol nginx prefixes each connection with one text line naming the real
 //! source, and the bridge reads that line before the TLS handshake begins.
@@ -49,7 +49,7 @@ pub fn parse_v1(buf: &[u8]) -> Result<ProxyHeader, ParseError> {
     }
     match fields.next() {
         Some("UNKNOWN") => return Ok(ProxyHeader { source: None, len }),
-        Some("TCP4") | Some("TCP6") => {}
+        Some("TCP4" | "TCP6") => {}
         _ => return Err(ParseError::Malformed("unknown protocol family")),
     }
     let src_ip: IpAddr = fields

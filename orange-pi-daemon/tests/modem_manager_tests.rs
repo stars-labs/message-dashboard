@@ -23,9 +23,9 @@ async fn test_modem_manager_new_default_mode() {
     let manager = ModemManager::new().await;
 
     // Should default to AT command mode
-    assert_eq!(manager.get_backend_mode().await, BackendMode::AtCommand);
-    assert!(manager.is_using_at_commands().await);
-    assert!(!manager.is_using_native_dbus().await);
+    assert_eq!(manager.get_backend_mode(), BackendMode::AtCommand);
+    assert!(manager.is_using_at_commands());
+    assert!(!manager.is_using_native_dbus());
 }
 
 #[tokio::test]
@@ -35,8 +35,8 @@ async fn test_modem_manager_at_command_mode() {
 
     let manager = ModemManager::new().await;
 
-    assert_eq!(manager.get_backend_mode().await, BackendMode::AtCommand);
-    assert!(manager.is_using_at_commands().await);
+    assert_eq!(manager.get_backend_mode(), BackendMode::AtCommand);
+    assert!(manager.is_using_at_commands());
 }
 
 #[tokio::test]
@@ -47,9 +47,9 @@ async fn test_modem_manager_dbus_mode_request() {
     let manager = ModemManager::new().await;
 
     // Mode will be DBus (even if D-Bus not actually available on test system)
-    assert_eq!(manager.get_backend_mode().await, BackendMode::DBus);
-    assert!(manager.is_using_native_dbus().await);
-    assert!(!manager.is_using_at_commands().await);
+    assert_eq!(manager.get_backend_mode(), BackendMode::DBus);
+    assert!(manager.is_using_native_dbus());
+    assert!(!manager.is_using_at_commands());
 
     // Clean up
     std::env::remove_var("USE_DBUS");
@@ -87,7 +87,7 @@ fn test_backend_mode_clone() {
 #[test]
 fn test_backend_mode_debug() {
     let mode = BackendMode::AtCommand;
-    let debug_str = format!("{:?}", mode);
+    let debug_str = format!("{mode:?}");
     assert!(debug_str.contains("AtCommand"));
 }
 
@@ -159,10 +159,9 @@ async fn test_get_device_details_signature() {
     let result = manager.get_device_details("invalid_modem").await;
 
     // Should return Ok(None) or Err
+    // Ok(None) and Err are expected; Ok(Some(_)) is unlikely without real hardware
     match result {
-        Ok(None) => {}    // Expected
-        Ok(Some(_)) => {} // Unlikely without real hardware
-        Err(_) => {}      // Also expected
+        Ok(None | Some(_)) | Err(_) => {}
     }
 }
 
@@ -175,9 +174,7 @@ async fn test_get_phone_number_signature() {
     let result = manager.get_phone_number("invalid_modem").await;
 
     match result {
-        Ok(None) => {}
-        Ok(Some(_)) => {}
-        Err(_) => {}
+        Ok(None | Some(_)) | Err(_) => {}
     }
 }
 
@@ -190,9 +187,7 @@ async fn test_get_operator_signature() {
     let result = manager.get_operator("invalid_modem").await;
 
     match result {
-        Ok(None) => {}
-        Ok(Some(_)) => {}
-        Err(_) => {}
+        Ok(None | Some(_)) | Err(_) => {}
     }
 }
 
@@ -210,10 +205,10 @@ async fn test_health_check_signature() {
     let result = manager.health_check("invalid_modem").await;
 
     // Should return Ok(Some(health)) or Err
+    // AT mode returns health, D-Bus mode doesn't support the check, and
+    // hardware-less runs are expected to error
     match result {
-        Ok(Some(_health)) => {} // AT mode returns health
-        Ok(None) => {}          // D-Bus mode doesn't support health check
-        Err(_) => {}            // Expected error without hardware
+        Ok(Some(_) | None) | Err(_) => {}
     }
 }
 
@@ -223,12 +218,13 @@ async fn test_health_check_signature() {
 
 #[tokio::test]
 async fn test_get_new_messages_signature() {
+    use orange_pi_daemon_rust::message_store::MessageStore;
+
     let _env = lock_env().await;
     std::env::remove_var("USE_DBUS");
     let manager = ModemManager::new().await;
 
     // Create a dummy message store for testing
-    use orange_pi_daemon_rust::message_store::MessageStore;
     let store = MessageStore::new(":memory:").unwrap();
 
     // Test with invalid modem
@@ -241,11 +237,12 @@ async fn test_get_new_messages_signature() {
 
 #[tokio::test]
 async fn test_get_new_messages_with_paths_signature() {
+    use orange_pi_daemon_rust::message_store::MessageStore;
+
     let _env = lock_env().await;
     std::env::remove_var("USE_DBUS");
     let manager = ModemManager::new().await;
 
-    use orange_pi_daemon_rust::message_store::MessageStore;
     let store = MessageStore::new(":memory:").unwrap();
 
     let result = manager
@@ -294,13 +291,10 @@ async fn test_modem_manager_clone() {
     let manager = ModemManager::new().await;
 
     // ModemManager implements Clone
-    let _cloned = manager.clone();
+    let cloned = manager.clone();
 
     // Both should have same mode
-    assert_eq!(
-        manager.get_backend_mode().await,
-        _cloned.get_backend_mode().await
-    );
+    assert_eq!(manager.get_backend_mode(), cloned.get_backend_mode());
 }
 
 // ============================================================================
@@ -315,9 +309,9 @@ async fn test_concurrent_mode_access() {
     let manager_clone = manager.clone();
 
     // Access mode from multiple tasks concurrently
-    let handle1 = tokio::spawn(async move { manager_clone.get_backend_mode().await });
+    let handle1 = tokio::spawn(async move { manager_clone.get_backend_mode() });
 
-    let handle2 = tokio::spawn(async move { manager.get_backend_mode().await });
+    let handle2 = tokio::spawn(async move { manager.get_backend_mode() });
 
     let mode1 = handle1.await.unwrap();
     let mode2 = handle2.await.unwrap();
@@ -337,22 +331,22 @@ async fn test_use_dbus_env_various_values() {
     // Test "0" explicitly
     std::env::set_var("USE_DBUS", "0");
     let manager = ModemManager::new().await;
-    assert_eq!(manager.get_backend_mode().await, BackendMode::AtCommand);
+    assert_eq!(manager.get_backend_mode(), BackendMode::AtCommand);
 
     // Test empty string
     std::env::set_var("USE_DBUS", "");
     let manager = ModemManager::new().await;
-    assert_eq!(manager.get_backend_mode().await, BackendMode::AtCommand);
+    assert_eq!(manager.get_backend_mode(), BackendMode::AtCommand);
 
     // Test "1" explicitly
     std::env::set_var("USE_DBUS", "1");
     let manager = ModemManager::new().await;
-    assert_eq!(manager.get_backend_mode().await, BackendMode::DBus);
+    assert_eq!(manager.get_backend_mode(), BackendMode::DBus);
 
     // Test other values (should default to AT mode)
     std::env::set_var("USE_DBUS", "yes");
     let manager = ModemManager::new().await;
-    assert_eq!(manager.get_backend_mode().await, BackendMode::AtCommand);
+    assert_eq!(manager.get_backend_mode(), BackendMode::AtCommand);
 
     // Clean up
     std::env::remove_var("USE_DBUS");

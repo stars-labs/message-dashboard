@@ -1,7 +1,7 @@
 use crate::health::HealthSnapshot;
 use crate::message_store::StoredMessage;
 use crate::sync_manager::SyncMode;
-use crate::types::*;
+use crate::types::{Config, ModemReport, PendingSms, PendingSmsResponse};
 use anyhow::{Context, Result};
 use reqwest::Client;
 use serde_json::json;
@@ -53,7 +53,7 @@ impl ApiClient {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            anyhow::bail!("Health endpoint returned {}: {}", status, body);
+            anyhow::bail!("Health endpoint returned {status}: {body}");
         }
 
         Ok(())
@@ -111,7 +111,7 @@ impl ApiClient {
                 .text()
                 .await
                 .unwrap_or_else(|_| String::from("(no body)"));
-            anyhow::bail!("API returned error: {} - {}", status, body);
+            anyhow::bail!("API returned error: {status} - {body}");
         }
 
         info!(
@@ -123,11 +123,12 @@ impl ApiClient {
 
     /// Upload messages with proper batching to avoid overwhelming the API
     pub async fn upload_messages(&self, messages: &[StoredMessage]) -> Result<Vec<UploadResult>> {
+        const BATCH_SIZE: usize = 50; // Match the server's internal batch size
+
         if messages.is_empty() {
             return Ok(vec![]);
         }
 
-        const BATCH_SIZE: usize = 50; // Match the server's internal batch size
         let url = format!("{}/api/control/messages", self.config.api_url);
 
         // Process messages in batches to avoid overwhelming the API
@@ -245,12 +246,12 @@ impl ApiClient {
             .json(&body)
             .send()
             .await
-            .with_context(|| format!("Failed to report call {}", event))?;
+            .with_context(|| format!("Failed to report call {event}"))?;
         let status = response.status();
         // 409: another call holds the single-call lock, which is expected.
         if !status.is_success() && status != reqwest::StatusCode::CONFLICT {
             let body = response.text().await.unwrap_or_default();
-            anyhow::bail!("calls/{} returned {}: {}", event, status, body);
+            anyhow::bail!("calls/{event} returned {status}: {body}");
         }
         Ok(())
     }

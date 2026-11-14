@@ -58,7 +58,7 @@ impl HealthTracker {
         match task {
             HealthTask::ModemReader => self.modem_reader.last_success = Some(Instant::now()),
             HealthTask::MessageUploader => {
-                self.message_uploader.last_success = Some(Instant::now())
+                self.message_uploader.last_success = Some(Instant::now());
             }
             HealthTask::DeviceSync | HealthTask::OutboundPoll => {}
         }

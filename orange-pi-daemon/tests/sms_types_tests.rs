@@ -60,7 +60,7 @@ where
         assert!(request.contains("x-api-key: fixture-api-key\r\n"));
         match expected_session {
             Some(session) => {
-                assert!(request.contains(&format!("x-daemon-session-id: {session}\r\n")))
+                assert!(request.contains(&format!("x-daemon-session-id: {session}\r\n")));
             }
             None => assert!(!request.contains("x-daemon-session-id:")),
         }
@@ -71,7 +71,7 @@ where
         );
         stream.write_all(response.as_bytes()).await.unwrap();
     };
-    let (_, result) = tokio::time::timeout(Duration::from_secs(3), async {
+    let ((), result) = tokio::time::timeout(Duration::from_secs(3), async {
         tokio::join!(serve, fetch(client))
     })
     .await

@@ -49,13 +49,12 @@ impl SignalCache {
                 );
 
                 return Some(entry.signal.clone());
-            } else {
-                trace!(
-                    "📊 Signal cache expired for modem {} (age: {:?})",
-                    modem_id,
-                    entry.timestamp.elapsed()
-                );
             }
+            trace!(
+                "📊 Signal cache expired for modem {} (age: {:?})",
+                modem_id,
+                entry.timestamp.elapsed()
+            );
         }
 
         let mut misses = self.miss_count.write().await;

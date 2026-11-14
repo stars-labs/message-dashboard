@@ -51,7 +51,9 @@ from the reviewing session first — ask, don't improvise.
 **Daemon (`orange-pi-daemon/`)**
 
 - `Cargo.toml` `[lints]`:
-  - `rust`: `unsafe_code = "forbid"`
+  - `rust`: `unsafe_code = "deny"`. Not `forbid`: the USB reset is the
+    `USBDEVFS_RESET` ioctl, which has no safe wrapper, so that one function carries
+    `#[allow(unsafe_code, reason = "...")]`; `forbid` cannot be allowed locally.
   - `clippy`: `pedantic = { level = "warn", priority = -1 }`, and `warn` for
     `unwrap_used`, `expect_used`, `indexing_slicing`, `panic`, `as_conversions`
   - `allow`: `missing_errors_doc`, `missing_panics_doc`, `must_use_candidate`,

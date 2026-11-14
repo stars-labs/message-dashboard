@@ -20,14 +20,13 @@ impl DBusClient {
         let has_native = native_client.is_available();
 
         // Check if busctl is available as fallback
-        let busctl_enabled = if !has_native {
+        let busctl_enabled = if has_native {
+            false
+        } else {
             std::process::Command::new("which")
                 .arg("busctl")
                 .status()
-                .map(|s| s.success())
-                .unwrap_or(false)
-        } else {
-            false
+                .is_ok_and(|s| s.success())
         };
 
         if has_native {
@@ -164,7 +163,7 @@ impl DBusClient {
     }
 
     /// Get operator name using D-Bus
-    pub async fn get_operator(&self, _modem_id: &str) -> Result<Option<String>> {
+    pub fn get_operator(&self, _modem_id: &str) -> Result<Option<String>> {
         // This can be retrieved from the SIM or modem status
         // For now, return None or implement if needed
         Ok(None)
@@ -225,7 +224,7 @@ impl DBusClient {
 
     /// Get modem state using busctl
     async fn get_modem_state_busctl(&self, modem_id: &str) -> Result<String> {
-        let path = format!("/org/freedesktop/ModemManager1/Modem/{}", modem_id);
+        let path = format!("/org/freedesktop/ModemManager1/Modem/{modem_id}");
 
         let output = Command::new("busctl")
             .arg("get-property")
@@ -250,9 +249,7 @@ impl DBusClient {
             .ok_or_else(|| anyhow!("Failed to parse modem state"))?;
 
         let state = match state_code {
-            -1 => "unknown",
             0 => "failed",
-            1 => "unknown",
             2 => "locked",
             3 => "disabled",
             4 => "disabling",
@@ -272,7 +269,7 @@ impl DBusClient {
     /// Get SIM ICCID using busctl
     async fn get_sim_iccid_busctl(&self, modem_id: &str) -> Result<Option<String>> {
         // First get SIM path
-        let modem_path = format!("/org/freedesktop/ModemManager1/Modem/{}", modem_id);
+        let modem_path = format!("/org/freedesktop/ModemManager1/Modem/{modem_id}");
 
         let output = Command::new("busctl")
             .arg("get-property")
@@ -326,7 +323,7 @@ impl DBusClient {
 
     /// Get signal quality using busctl
     async fn get_signal_quality_busctl(&self, modem_id: &str) -> Result<(u32, bool)> {
-        let path = format!("/org/freedesktop/ModemManager1/Modem/{}", modem_id);
+        let path = format!("/org/freedesktop/ModemManager1/Modem/{modem_id}");
 
         let output = Command::new("busctl")
             .arg("call")
@@ -358,7 +355,7 @@ impl DBusClient {
 
     /// Get device details using busctl
     async fn get_device_details_busctl(&self, modem_id: &str) -> Result<DeviceDetails> {
-        let path = format!("/org/freedesktop/ModemManager1/Modem/{}", modem_id);
+        let path = format!("/org/freedesktop/ModemManager1/Modem/{modem_id}");
 
         let mut imei = String::new();
         let mut manufacturer = None;

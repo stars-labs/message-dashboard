@@ -49,7 +49,7 @@ fn read_varint(buf: &[u8], pos: &mut usize) -> Option<u64> {
     while *pos < buf.len() {
         let byte = buf[*pos];
         *pos += 1;
-        result |= ((byte & 0x7f) as u64) << shift;
+        result |= u64::from(byte & 0x7f) << shift;
         if byte & 0x80 == 0 {
             return Some(result);
         }
@@ -67,11 +67,11 @@ impl Packet {
         let mut out = Vec::with_capacity(self.payload.len() + 16);
         if self.sequence_number != 0 {
             out.push(0x08); // field 1, varint
-            put_varint(&mut out, self.sequence_number as u64);
+            put_varint(&mut out, u64::from(self.sequence_number));
         }
         if self.timestamp != 0 {
             out.push(0x10); // field 2, varint
-            put_varint(&mut out, self.timestamp as u64);
+            put_varint(&mut out, u64::from(self.timestamp));
         }
         if !self.payload.is_empty() {
             out.push(0x2a); // field 5, length-delimited
@@ -151,8 +151,8 @@ pub fn modem_to_adapter(pcm8k_mono: &[u8], last: &mut i16) -> Vec<u8> {
     let input = to_i16(pcm8k_mono);
     let mut out = Vec::with_capacity(input.len() * RATIO * 2);
     for &sample in &input {
-        let prev = *last as i32;
-        let cur = sample as i32;
+        let prev = i32::from(*last);
+        let cur = i32::from(sample);
         for step in 0..RATIO {
             let interpolated = prev + (cur - prev) * step as i32 / RATIO as i32;
             let v = interpolated as i16;
@@ -175,7 +175,7 @@ pub fn adapter_to_modem(pcm48k_stereo: &[u8]) -> Vec<u8> {
         .as_chunks::<2>()
         .0
         .iter()
-        .map(|lr| (lr[0] as i32 + lr[1] as i32) / 2)
+        .map(|lr| i32::midpoint(i32::from(lr[0]), i32::from(lr[1])))
         .collect();
     let out: Vec<i16> = mono
         .as_chunks::<RATIO>()

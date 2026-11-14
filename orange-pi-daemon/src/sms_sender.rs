@@ -84,11 +84,7 @@ impl SmsSender {
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
-            return Err(anyhow!(
-                "Failed to fetch pending SMS: {} - {}",
-                status,
-                text
-            ));
+            return Err(anyhow!("Failed to fetch pending SMS: {status} - {text}"));
         }
 
         let api_response: PendingSmsResponse = response.json().await?;
@@ -160,18 +156,15 @@ impl SmsSender {
         None
     }
 
-    /// Send an SMS message using ModemManager (AT commands or D-Bus)
+    /// Send an SMS message using `ModemManager` (AT commands or D-Bus)
     pub async fn send_sms(&self, sms: &PendingSms) -> Result<SmsSubmission> {
         // Find the modem for this ICCID
-        let modem_id = match self.find_modem_for_iccid(&sms.phone_iccid).await {
-            Some(id) => id,
-            None => {
-                error!("No modem found for ICCID: {}", sms.phone_iccid);
-                let _ = self
-                    .report_sms_result(&sms.id, Err("No modem found for ICCID"))
-                    .await;
-                return Err(anyhow!("ModemNotFound"));
-            }
+        let Some(modem_id) = self.find_modem_for_iccid(&sms.phone_iccid).await else {
+            error!("No modem found for ICCID: {}", sms.phone_iccid);
+            let _ = self
+                .report_sms_result(&sms.id, Err("No modem found for ICCID"))
+                .await;
+            return Err(anyhow!("ModemNotFound"));
         };
 
         info!(
@@ -205,7 +198,7 @@ impl SmsSender {
                 Ok(outcome)
             }
             Err(e) => {
-                let error_msg = format!("Failed to send SMS: {}", e);
+                let error_msg = format!("Failed to send SMS: {e}");
                 error!("{}", error_msg);
                 self.report_sms_result(&sms.id, Err(&error_msg)).await?;
                 Err(anyhow!(error_msg))
@@ -242,11 +235,7 @@ impl SmsSender {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
             warn!("Failed to report SMS result: {} - {}", status, text);
-            return Err(anyhow!(
-                "Failed to report SMS result: {} - {}",
-                status,
-                text
-            ));
+            return Err(anyhow!("Failed to report SMS result: {status} - {text}"));
         }
 
         match result.outcome {
@@ -255,7 +244,7 @@ impl SmsSender {
                 debug!(
                     "⚠️ Marked SMS {} as submitted without confirmation",
                     message_id
-                )
+                );
             }
             SmsReportOutcome::Failed => debug!("⚠️ Marked SMS {} as failed", message_id),
         }

@@ -72,8 +72,7 @@ impl Heartbeat {
 fn unix_now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
+        .map_or(0, |d| d.as_secs())
 }
 
 /// Run the watchdog on its own OS thread.
@@ -120,7 +119,7 @@ mod tests {
         assert!(should_restart(MINUTE * 60, Some(STALL_AFTER)));
         assert!(!should_restart(
             MINUTE * 60,
-            Some(STALL_AFTER - Duration::from_secs(1))
+            Some(STALL_AFTER.checked_sub(Duration::from_secs(1)).unwrap())
         ));
     }
 
@@ -128,7 +127,7 @@ mod tests {
     fn startup_is_given_time_to_enumerate() {
         assert!(!should_restart(MINUTE, None));
         assert!(!should_restart(
-            STARTUP_GRACE - Duration::from_secs(1),
+            STARTUP_GRACE.checked_sub(Duration::from_secs(1)).unwrap(),
             None
         ));
         assert!(should_restart(STARTUP_GRACE, None));

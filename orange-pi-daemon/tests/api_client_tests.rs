@@ -164,8 +164,8 @@ async fn test_upload_messages_batch_size() {
     let mut messages = Vec::new();
     for i in 0..150 {
         messages.push(create_stored_test_message(
-            &format!("iccid_{:03}", i),
-            &format!("Message {}", i),
+            &format!("iccid_{i:03}"),
+            &format!("Message {i}"),
         ));
     }
 

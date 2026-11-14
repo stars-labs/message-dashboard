@@ -58,23 +58,20 @@ impl SmsAssembler {
 
     /// Add a message part to the buffer
     /// Returns Some(AssembledMessage) if all parts are now complete, or if it's a single-part message
-    pub fn add_part(&mut self, sms: AtSms, iccid: String) -> Option<AssembledMessage> {
+    pub fn add_part(&mut self, sms: AtSms, iccid: &str) -> Option<AssembledMessage> {
         // If no concat info, return as single message immediately
-        let concat_info = match &sms.concat_info {
-            Some(info) => info,
-            None => {
-                // Single-part message - return immediately
-                return Some(AssembledMessage {
-                    content: sms.text,
-                    sender: sms.sender,
-                    timestamp: sms.timestamp,
-                    sms_indices: vec![sms.index],
-                });
-            }
+        let Some(concat_info) = &sms.concat_info else {
+            // Single-part message - return immediately
+            return Some(AssembledMessage {
+                content: sms.text,
+                sender: sms.sender,
+                timestamp: sms.timestamp,
+                sms_indices: vec![sms.index],
+            });
         };
 
         let key = MessageGroupKey {
-            iccid: iccid.clone(),
+            iccid: iccid.to_owned(),
             sender: sms.sender.clone(),
             ref_id: concat_info.ref_id,
             total_parts: concat_info.total_parts,
@@ -204,7 +201,7 @@ impl SmsAssembler {
 
     /// Get count of buffered parts
     pub fn pending_parts_count(&self) -> usize {
-        self.buffer.values().map(|v| v.len()).sum()
+        self.buffer.values().map(std::vec::Vec::len).sum()
     }
 }
 
@@ -242,7 +239,7 @@ mod tests {
             concat_info: None,
         };
 
-        let result = assembler.add_part(sms, "test_iccid".to_string());
+        let result = assembler.add_part(sms, "test_iccid");
         assert!(result.is_some());
         let msg = result.unwrap();
         assert_eq!(msg.content, "Hello");
@@ -252,11 +249,11 @@ mod tests {
     #[test]
     fn test_two_part_message_in_order() {
         let mut assembler = SmsAssembler::new();
-        let iccid = "test_iccid".to_string();
+        let iccid = "test_iccid";
 
         // Part 1
         let sms1 = make_test_sms(1, 1, 2, 42, "Hello ");
-        let result1 = assembler.add_part(sms1, iccid.clone());
+        let result1 = assembler.add_part(sms1, iccid);
         assert!(result1.is_none()); // Not complete yet
 
         // Part 2
@@ -272,11 +269,11 @@ mod tests {
     #[test]
     fn test_two_part_message_out_of_order() {
         let mut assembler = SmsAssembler::new();
-        let iccid = "test_iccid".to_string();
+        let iccid = "test_iccid";
 
         // Part 2 arrives first
         let sms2 = make_test_sms(2, 2, 2, 42, "World");
-        let result2 = assembler.add_part(sms2, iccid.clone());
+        let result2 = assembler.add_part(sms2, iccid);
         assert!(result2.is_none()); // Not complete yet
 
         // Part 1 arrives second
@@ -292,16 +289,16 @@ mod tests {
     #[test]
     fn test_duplicate_part_ignored() {
         let mut assembler = SmsAssembler::new();
-        let iccid = "test_iccid".to_string();
+        let iccid = "test_iccid";
 
         // Part 1
         let sms1 = make_test_sms(1, 1, 2, 42, "Hello");
-        let result1 = assembler.add_part(sms1, iccid.clone());
+        let result1 = assembler.add_part(sms1, iccid);
         assert!(result1.is_none());
 
         // Part 1 again (duplicate)
         let sms1_dup = make_test_sms(1, 1, 2, 42, "Hello");
-        let result_dup = assembler.add_part(sms1_dup, iccid.clone());
+        let result_dup = assembler.add_part(sms1_dup, iccid);
         assert!(result_dup.is_none());
 
         // Still waiting for part 2

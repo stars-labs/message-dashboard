@@ -78,7 +78,7 @@ impl PerformanceBenchmark {
         }
 
         let elapsed = start.elapsed();
-        let avg_ms = elapsed.as_millis() as f64 / iterations as f64;
+        let avg_ms = elapsed.as_millis() as f64 / f64::from(iterations);
 
         Ok(avg_ms)
     }
@@ -121,7 +121,7 @@ impl PerformanceBenchmark {
         }
 
         let elapsed = start.elapsed();
-        let avg_ms = elapsed.as_millis() as f64 / iterations as f64;
+        let avg_ms = elapsed.as_millis() as f64 / f64::from(iterations);
 
         Ok(avg_ms)
     }
@@ -150,7 +150,7 @@ impl PerformanceBenchmark {
         }
 
         let elapsed = start.elapsed();
-        let avg_ms = elapsed.as_millis() as f64 / iterations as f64;
+        let avg_ms = elapsed.as_millis() as f64 / f64::from(iterations);
 
         Ok(avg_ms)
     }
@@ -175,7 +175,7 @@ impl PerformanceBenchmark {
         }
 
         let elapsed = start.elapsed().as_secs_f64();
-        let ops_per_sec = operations as f64 / elapsed;
+        let ops_per_sec = f64::from(operations) / elapsed;
 
         info!("✅ Completed {} operations in {:.2}s", operations, elapsed);
         info!("📊 Throughput: {:.1} operations/second", ops_per_sec);

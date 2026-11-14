@@ -26,7 +26,7 @@ fn test_port_conversion_boundary_cases() {
     // Round-trips across the full range, including offset-0 (slimmed) ports.
     for n in ["0", "1", "2", "6", "25", "102", "240"] {
         let port = AtModemManager::modem_id_to_port(n);
-        assert_eq!(port, format!("/dev/ttyUSB{}", n));
+        assert_eq!(port, format!("/dev/ttyUSB{n}"));
         assert_eq!(AtModemManager::port_to_modem_id(&port), n);
     }
 }

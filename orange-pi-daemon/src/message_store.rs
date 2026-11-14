@@ -65,6 +65,176 @@ fn has_column(conn: &Connection, table: &str, column: &str) -> Result<bool> {
     Ok(columns.iter().any(|name| name == column))
 }
 
+fn configure_connection(conn: &Connection) -> Result<()> {
+    // Enable WAL mode for better concurrency
+    conn.execute_batch(
+        "PRAGMA journal_mode = WAL;
+         PRAGMA synchronous = NORMAL;
+         PRAGMA cache_size = 10000;
+         PRAGMA temp_store = MEMORY;",
+    )?;
+    Ok(())
+}
+
+fn create_messages_table(conn: &Connection) -> Result<()> {
+    // Create tables
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            phone_iccid TEXT NOT NULL,
+            phone_number TEXT NOT NULL,
+            content TEXT NOT NULL,
+            timestamp TEXT NOT NULL,
+            direction TEXT NOT NULL,
+            modem_id TEXT NOT NULL,
+            sms_path TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            attempts INTEGER DEFAULT 0,
+            source_message_id TEXT UNIQUE,
+            next_attempt_at TIMESTAMP,
+            lease_token TEXT,
+            lease_expires_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            uploaded_at TIMESTAMP,
+            deleted_at TIMESTAMP,
+            error TEXT,
+            UNIQUE(phone_iccid, timestamp, content)
+        )",
+        [],
+    )?;
+    Ok(())
+}
+
+fn upgrade_messages_table(conn: &Connection) -> Result<()> {
+    // Existing databases are upgraded in place. The server never creates an
+    // ID for these rows: each local row receives its durable identity here.
+    for (column, definition) in [
+        ("source_message_id", "TEXT"),
+        ("next_attempt_at", "TIMESTAMP"),
+        ("lease_token", "TEXT"),
+        ("lease_expires_at", "TIMESTAMP"),
+    ] {
+        if !has_column(conn, "messages", column)? {
+            conn.execute(
+                &format!("ALTER TABLE messages ADD COLUMN {column} {definition}"),
+                [],
+            )?;
+        }
+    }
+    let missing_ids = {
+        let mut stmt = conn.prepare("SELECT id FROM messages WHERE source_message_id IS NULL")?;
+        let ids = stmt
+            .query_map([], |row| row.get::<_, i64>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        ids
+    };
+    for id in missing_ids {
+        conn.execute(
+            "UPDATE messages SET source_message_id = ?1 WHERE id = ?2",
+            params![uuid::Uuid::new_v4().to_string(), id],
+        )?;
+    }
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_source_message_id ON messages(source_message_id)",
+        [],
+    )?;
+    Ok(())
+}
+
+fn recover_message_statuses(conn: &Connection) -> Result<()> {
+    conn.execute(
+        "UPDATE messages SET status = 'pending' WHERE status = 'failed'",
+        [],
+    )?;
+    conn.execute(
+        "UPDATE messages SET status = 'in_flight' WHERE status = 'uploading'",
+        [],
+    )?;
+    // `uploading` predates leases. Such rows have no lease expiry, so they
+    // would otherwise never satisfy the in-flight recovery predicate.
+    conn.execute(
+        "UPDATE messages
+         SET status = 'pending', lease_token = NULL, lease_expires_at = NULL
+         WHERE status = 'in_flight' AND lease_expires_at IS NULL",
+        [],
+    )?;
+    Ok(())
+}
+
+fn create_message_indexes(conn: &Connection) -> Result<()> {
+    // Create indexes
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_status ON messages(status)",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_modem_sms ON messages(modem_id, sms_path)",
+        [],
+    )?;
+    Ok(())
+}
+
+fn create_sim_storage_table(conn: &Connection) -> Result<()> {
+    // Create SIM storage tracking table
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS sim_storage (
+            iccid TEXT PRIMARY KEY,
+            total_messages INTEGER DEFAULT 0,
+            deleted_messages INTEGER DEFAULT 0,
+            last_check TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            is_full BOOLEAN DEFAULT 0
+        )",
+        [],
+    )?;
+    Ok(())
+}
+
+fn create_multipart_segments_table(conn: &Connection) -> Result<()> {
+    // Create multipart SMS segments table for buffering incomplete messages
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS multipart_segments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            phone_iccid TEXT NOT NULL,
+            sender TEXT NOT NULL,
+            ref_id INTEGER NOT NULL,
+            total_parts INTEGER NOT NULL,
+            part_number INTEGER NOT NULL,
+            content TEXT NOT NULL,
+            timestamp TEXT NOT NULL,
+            sms_storage TEXT NOT NULL DEFAULT 'ME',
+            sms_index INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(phone_iccid, ref_id, part_number)
+        )",
+        [],
+    )?;
+
+    // Existing databases predate storage-aware ME/SM polling. Their buffered
+    // segments came from EC20's MT view, which is an alias for ME.
+    let has_sms_storage = {
+        let mut stmt = conn.prepare("PRAGMA table_info(multipart_segments)")?;
+        let columns = stmt
+            .query_map([], |row| row.get::<_, String>(1))?
+            .collect::<Result<Vec<_>, _>>()?;
+        columns.iter().any(|column| column == "sms_storage")
+    };
+    if !has_sms_storage {
+        conn.execute(
+            "ALTER TABLE multipart_segments
+             ADD COLUMN sms_storage TEXT NOT NULL DEFAULT 'ME'",
+            [],
+        )?;
+    }
+
+    // Create index for querying message groups
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_multipart_group
+         ON multipart_segments(phone_iccid, sender, ref_id, total_parts)",
+        [],
+    )?;
+    Ok(())
+}
+
 impl MessageStore {
     /// Create a new message store with SQLite backend
     pub fn new(db_path: &str) -> Result<Self> {
@@ -75,154 +245,13 @@ impl MessageStore {
 
         let conn = Connection::open(db_path).context("Failed to open SQLite database")?;
 
-        // Enable WAL mode for better concurrency
-        conn.execute_batch(
-            "PRAGMA journal_mode = WAL;
-             PRAGMA synchronous = NORMAL;
-             PRAGMA cache_size = 10000;
-             PRAGMA temp_store = MEMORY;",
-        )?;
-
-        // Create tables
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS messages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                phone_iccid TEXT NOT NULL,
-                phone_number TEXT NOT NULL,
-                content TEXT NOT NULL,
-                timestamp TEXT NOT NULL,
-                direction TEXT NOT NULL,
-                modem_id TEXT NOT NULL,
-                sms_path TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'pending',
-                attempts INTEGER DEFAULT 0,
-                source_message_id TEXT UNIQUE,
-                next_attempt_at TIMESTAMP,
-                lease_token TEXT,
-                lease_expires_at TIMESTAMP,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                uploaded_at TIMESTAMP,
-                deleted_at TIMESTAMP,
-                error TEXT,
-                UNIQUE(phone_iccid, timestamp, content)
-            )",
-            [],
-        )?;
-
-        // Existing databases are upgraded in place. The server never creates an
-        // ID for these rows: each local row receives its durable identity here.
-        for (column, definition) in [
-            ("source_message_id", "TEXT"),
-            ("next_attempt_at", "TIMESTAMP"),
-            ("lease_token", "TEXT"),
-            ("lease_expires_at", "TIMESTAMP"),
-        ] {
-            if !has_column(&conn, "messages", column)? {
-                conn.execute(
-                    &format!("ALTER TABLE messages ADD COLUMN {column} {definition}"),
-                    [],
-                )?;
-            }
-        }
-        let missing_ids = {
-            let mut stmt =
-                conn.prepare("SELECT id FROM messages WHERE source_message_id IS NULL")?;
-            let ids = stmt
-                .query_map([], |row| row.get::<_, i64>(0))?
-                .collect::<Result<Vec<_>, _>>()?;
-            ids
-        };
-        for id in missing_ids {
-            conn.execute(
-                "UPDATE messages SET source_message_id = ?1 WHERE id = ?2",
-                params![uuid::Uuid::new_v4().to_string(), id],
-            )?;
-        }
-        conn.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_source_message_id ON messages(source_message_id)",
-            [],
-        )?;
-        conn.execute(
-            "UPDATE messages SET status = 'pending' WHERE status = 'failed'",
-            [],
-        )?;
-        conn.execute(
-            "UPDATE messages SET status = 'in_flight' WHERE status = 'uploading'",
-            [],
-        )?;
-        // `uploading` predates leases. Such rows have no lease expiry, so they
-        // would otherwise never satisfy the in-flight recovery predicate.
-        conn.execute(
-            "UPDATE messages
-             SET status = 'pending', lease_token = NULL, lease_expires_at = NULL
-             WHERE status = 'in_flight' AND lease_expires_at IS NULL",
-            [],
-        )?;
-
-        // Create indexes
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_status ON messages(status)",
-            [],
-        )?;
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_modem_sms ON messages(modem_id, sms_path)",
-            [],
-        )?;
-
-        // Create SIM storage tracking table
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS sim_storage (
-                iccid TEXT PRIMARY KEY,
-                total_messages INTEGER DEFAULT 0,
-                deleted_messages INTEGER DEFAULT 0,
-                last_check TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                is_full BOOLEAN DEFAULT 0
-            )",
-            [],
-        )?;
-
-        // Create multipart SMS segments table for buffering incomplete messages
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS multipart_segments (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                phone_iccid TEXT NOT NULL,
-                sender TEXT NOT NULL,
-                ref_id INTEGER NOT NULL,
-                total_parts INTEGER NOT NULL,
-                part_number INTEGER NOT NULL,
-                content TEXT NOT NULL,
-                timestamp TEXT NOT NULL,
-                sms_storage TEXT NOT NULL DEFAULT 'ME',
-                sms_index INTEGER NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(phone_iccid, ref_id, part_number)
-            )",
-            [],
-        )?;
-
-        // Existing databases predate storage-aware ME/SM polling. Their buffered
-        // segments came from EC20's MT view, which is an alias for ME.
-        let has_sms_storage = {
-            let mut stmt = conn.prepare("PRAGMA table_info(multipart_segments)")?;
-            let columns = stmt
-                .query_map([], |row| row.get::<_, String>(1))?
-                .collect::<Result<Vec<_>, _>>()?;
-            columns.iter().any(|column| column == "sms_storage")
-        };
-        if !has_sms_storage {
-            conn.execute(
-                "ALTER TABLE multipart_segments
-                 ADD COLUMN sms_storage TEXT NOT NULL DEFAULT 'ME'",
-                [],
-            )?;
-        }
-
-        // Create index for querying message groups
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_multipart_group
-             ON multipart_segments(phone_iccid, sender, ref_id, total_parts)",
-            [],
-        )?;
+        configure_connection(&conn)?;
+        create_messages_table(&conn)?;
+        upgrade_messages_table(&conn)?;
+        recover_message_statuses(&conn)?;
+        create_message_indexes(&conn)?;
+        create_sim_storage_table(&conn)?;
+        create_multipart_segments_table(&conn)?;
 
         info!("📊 Message store initialized at: {}", db_path);
 
@@ -305,7 +334,7 @@ impl MessageStore {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction()?;
         let lease_token = uuid::Uuid::new_v4().to_string();
-        let lease_interval = format!("+{} seconds", lease_seconds);
+        let lease_interval = format!("+{lease_seconds} seconds");
         let ids = {
             let mut stmt = tx.prepare(
                 "SELECT id FROM messages
@@ -543,7 +572,7 @@ mod segment_write_tests {
     }
 
     /// The AUTOINCREMENT counter. `total_changes()` does not count writes to
-    /// sqlite_sequence, which is how a first fix passed its test while the daemon
+    /// `sqlite_sequence`, which is how a first fix passed its test while the daemon
     /// was still writing 2.6 GB an hour.
     fn sequence(store: &MessageStore) -> i64 {
         let conn = store.conn.lock().unwrap();
@@ -557,7 +586,7 @@ mod segment_write_tests {
 
     fn store_part(store: &MessageStore, content: &str, index: u32) {
         store
-            .store_segment(Segment {
+            .store_segment(&Segment {
                 iccid: "iccid",
                 sender: "10010",
                 ref_id: 84,
@@ -734,7 +763,7 @@ impl MessageStore {
     // ============================================================================
 
     /// Store an incomplete message part together with its CPMS location.
-    pub fn store_segment(&self, segment: Segment<'_>) -> Result<()> {
+    pub fn store_segment(&self, segment: &Segment<'_>) -> Result<()> {
         let Segment {
             iccid,
             sender,
@@ -745,7 +774,7 @@ impl MessageStore {
             timestamp,
             sms_storage,
             sms_index,
-        } = segment;
+        } = *segment;
         let conn = self.conn.lock().unwrap();
 
         // Look before writing. A part whose siblings never arrive stays on the SIM
@@ -769,13 +798,13 @@ impl MessageStore {
                 params![
                     iccid,
                     sender,
-                    ref_id as i64,
-                    total_parts as i64,
-                    part_number as i64,
+                    i64::from(ref_id),
+                    i64::from(total_parts),
+                    i64::from(part_number),
                     content,
                     timestamp,
                     sms_storage,
-                    sms_index as i64,
+                    i64::from(sms_index),
                 ],
                 |_| Ok(()),
             )
@@ -800,13 +829,13 @@ impl MessageStore {
             params![
                 iccid,
                 sender,
-                ref_id as i64,
-                total_parts as i64,
-                part_number as i64,
+                i64::from(ref_id),
+                i64::from(total_parts),
+                i64::from(part_number),
                 content,
                 timestamp,
                 sms_storage,
-                sms_index as i64,
+                i64::from(sms_index),
             ],
         )?;
 
@@ -819,7 +848,7 @@ impl MessageStore {
     }
 
     /// Get all parts for a message group
-    /// Returns: Vec<(part_number, content, timestamp, sms_index)>
+    /// Returns: Vec<(`part_number`, content, timestamp, `sms_index`)>
     pub fn get_segments(
         &self,
         iccid: &str,
@@ -856,7 +885,7 @@ impl MessageStore {
 
         let segments = stmt
             .query_map(
-                params![iccid, sender, ref_id as i64, total_parts as i64],
+                params![iccid, sender, i64::from(ref_id), i64::from(total_parts)],
                 |row| {
                     Ok((
                         row.get::<_, i64>(0)? as u8,
@@ -880,7 +909,7 @@ impl MessageStore {
             "DELETE FROM multipart_segments
              WHERE phone_iccid = ?1
                AND ref_id = ?2",
-            params![iccid, ref_id as i64],
+            params![iccid, i64::from(ref_id)],
         )?;
 
         if deleted > 0 {
@@ -923,7 +952,7 @@ impl MessageStore {
         Ok(segments)
     }
 
-    /// Cleanup segments older than timeout_secs
+    /// Cleanup segments older than `timeout_secs`
     /// Returns count of segments deleted
     pub fn cleanup_old_segments(&self, timeout_secs: i64) -> Result<usize> {
         let conn = self.conn.lock().unwrap();
