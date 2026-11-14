@@ -2,7 +2,6 @@ import * as v from 'valibot';
 import { readJson } from '../../../shared/parse-json.js';
 import { textOr } from '../../../shared/text.js';
 import type { FetchImpl } from './control-client.js';
-import { numberOr } from './number-or.js';
 
 const RUNNER_SCOPES = [
   'openid',
@@ -21,8 +20,8 @@ const AuthAnswer = v.object({
   user_code: OptionalText,
   verification_uri: OptionalText,
   verification_uri_complete: OptionalText,
-  interval: v.optional(v.unknown()),
-  expires_in: v.optional(v.unknown()),
+  interval: v.optional(v.number()),
+  expires_in: v.optional(v.number()),
   access_token: OptionalText,
   refresh_token: OptionalText,
 });
@@ -36,20 +35,20 @@ interface DeviceAuthorization {
   user_code: string;
   verification_uri: string | undefined;
   verification_uri_complete: string | undefined;
-  interval: unknown;
-  expires_in: unknown;
+  interval: number | undefined;
+  expires_in: number | undefined;
 }
 
 export interface Tokens {
   access_token: string;
   refresh_token: string | undefined;
-  expires_in: unknown;
+  expires_in: number | undefined;
 }
 
 interface PollableDevice {
   device_code: string;
-  interval?: unknown;
-  expires_in?: unknown;
+  interval?: number | undefined;
+  expires_in?: number | undefined;
 }
 
 type Sleep = (ms: number, signal?: AbortSignal) => Promise<void>;
@@ -151,8 +150,8 @@ export function createAuth0DeviceClient({
       device: PollableDevice,
       { signal, onPending }: { signal?: AbortSignal; onPending?: () => void } = {},
     ): Promise<Tokens> {
-      let interval = Math.max(1, Number(device.interval) || 5);
-      const deadline = Date.now() + numberOr(device.expires_in, 900) * 1000;
+      let interval = Math.max(1, device.interval ?? 5);
+      const deadline = Date.now() + (device.expires_in ?? 900) * 1000;
       while (!signal?.aborted && Date.now() < deadline) {
         await sleep(interval * 1000, signal);
         if (signal?.aborted) break;

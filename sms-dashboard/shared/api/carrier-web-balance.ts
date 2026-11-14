@@ -6,8 +6,8 @@ const CarrierWebBalanceSkill = v.looseObject({
   query_origin: v.optional(v.unknown()),
   query_endpoint: v.optional(v.unknown()),
   balance_url: v.optional(v.unknown()),
-  human_verification_timeout_seconds: v.optional(v.unknown()),
-  cooldown_seconds: v.optional(v.unknown()),
+  human_verification_timeout_seconds: v.optional(v.number()),
+  cooldown_seconds: v.optional(v.number()),
 });
 
 /** GET /api/control/carrier-web-balance/jobs/claim, when a job was leased. */

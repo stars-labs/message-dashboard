@@ -2,7 +2,6 @@ import * as v from 'valibot';
 import { assertRunnerAccessToken } from './access-token.js';
 import { createAuth0DeviceClient, type Tokens } from './auth0-device.js';
 import type { FetchImpl } from './control-client.js';
-import { numberOr } from './number-or.js';
 
 const Text = v.fallback(v.optional(v.pipe(v.string(), v.trim()), ''), '');
 
@@ -60,7 +59,7 @@ export function createAuthSession({
   async function rememberTokens(payload: Tokens): Promise<void> {
     assertRunnerAccessToken(payload.access_token, configuration().auth0Audience);
     accessToken = payload.access_token;
-    accessTokenExpiresAt = Date.now() + Math.max(0, numberOr(payload.expires_in, 0) - 60) * 1000;
+    accessTokenExpiresAt = Date.now() + Math.max(0, (payload.expires_in ?? 0) - 60) * 1000;
     if (payload.refresh_token) await secureStore.set('auth0RefreshToken', payload.refresh_token);
   }
 

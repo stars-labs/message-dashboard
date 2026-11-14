@@ -25,7 +25,6 @@ import { extractM1WebBalance } from '../../../../shared/m1-web-balance.js';
 import type { ControlClient } from '../control-client.js';
 import { errorText } from '../../../../shared/error-text.js';
 import type { CapabilityPresence } from '../presence.js';
-import { numberOr } from '../number-or.js';
 import { abortableSleep, type RunOutcome } from '../serial-runner.js';
 
 const LOGIN_ORIGIN = 'https://imgxx.client.10010.com';
@@ -162,7 +161,7 @@ function simLabel(job: CarrierWebBalanceJob): string {
 }
 
 function humanVerificationSeconds(job: CarrierWebBalanceJob): number {
-  return numberOr(job.skill.human_verification_timeout_seconds, 900);
+  return job.skill.human_verification_timeout_seconds ?? 900;
 }
 
 function assertOfficialUrlIn(value: unknown, allowedOrigins: readonly string[], label: string) {
@@ -842,7 +841,7 @@ export function createCarrierBrowserJobProcessor({
       logger.error(`Carrier web balance job ${job.id} failed: ${errorText(error)}`);
       if (diagnosticBase)
         logger.error(`Diagnostics saved to ${diagnosticBase}.json and ${diagnosticBase}.png`);
-      const retryDelay = Math.max(10, numberOr(job.skill.cooldown_seconds, 10)) * 1_000;
+      const retryDelay = Math.max(10, job.skill.cooldown_seconds ?? 10) * 1_000;
       return { handled: true, retryDelay };
     } finally {
       signal?.removeEventListener('abort', closeOnAbort);
