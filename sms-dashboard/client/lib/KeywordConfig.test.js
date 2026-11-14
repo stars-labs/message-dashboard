@@ -53,6 +53,23 @@ describe('KeywordConfig', () => {
     expect(view.getAllByRole('button', { name: '继续历史处理' }).length).toBeGreaterThan(0);
   });
 
+  test('never renders a keyword or its colour as markup', async () => {
+    const hostile = {
+      ...keyword(),
+      keyword: '<img src=x onerror=alert(1)>',
+      color: 'red" onmouseover="alert(1)',
+    };
+    globalThis.fetch = async () => Response.json({ keywords: [hostile] });
+
+    const view = render(KeywordConfig);
+    await waitFor(() => expect(view.getAllByText(/验证码|您的/).length).toBeGreaterThan(0));
+    await fireEvent.click(view.getAllByRole('button', { name: '编辑关键词' })[0]);
+
+    expect(view.container.querySelector('img')).toBeNull();
+    expect(view.container.querySelector('[onmouseover]')).toBeNull();
+    expect(document.body.querySelector('img')).toBeNull();
+  });
+
   test('keeps matching identity read-only while editing metadata', async () => {
     globalThis.fetch = async () => Response.json({ keywords: [keyword()] });
 

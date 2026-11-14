@@ -2,6 +2,8 @@
   import { confirmAction } from './confirm.svelte.js';
   import { onMount } from 'svelte';
   import { api } from './api.js';
+  import MessageHighlight from './MessageHighlight.svelte';
+  import { safeColor } from './message-highlight.js';
 
   let keywords = $state([]);
   let loading = $state(false);
@@ -33,17 +35,9 @@
   });
 
   // Live preview of the highlight effect — updates as the form changes.
-  let previewHtml = $derived(() => {
-    if (!formData.keyword || !formData.color) return '验证码：123456';
-    const safe = formData.keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const text = `您的验证码是 ${formData.keyword}839204`;
-    const flags = formData.case_sensitive ? 'g' : 'gi';
-    const marked = text.replace(
-      new RegExp(`(${safe})`, flags),
-      `<mark style="background:${formData.color}20;border-bottom:2px solid ${formData.color};color:inherit;padding:0 2px;border-radius:2px;font-weight:600">$1</mark>`,
-    );
-    return marked;
-  });
+  let previewText = $derived(
+    formData.keyword ? `您的验证码是 ${formData.keyword}839204` : '验证码：123456',
+  );
 
   onMount(loadKeywords);
 
@@ -309,6 +303,7 @@
         </thead>
         <tbody>
           {#each keywords as kw}
+            {@const color = safeColor(kw.color)}
             <tr
               class="border-b border-stone-100 hover:bg-stone-50 transition-colors {kw.is_active
                 ? ''
@@ -316,14 +311,16 @@
             >
               <!-- 效果预览: shows a real highlighted sample instead of a raw hex value -->
               <td class="px-4 py-2.5 font-mono text-xs max-w-[210px]">
-                <!-- eslint-disable-next-line svelte/no-at-html-tags -->
-                {@html `您的<mark style="background:${kw.color}20;border-bottom:2px solid ${kw.color};color:inherit;padding:0 1px;border-radius:2px;font-weight:600">${kw.keyword}</mark>是 839204`}
+                <MessageHighlight
+                  content={`您的${kw.keyword}是 839204`}
+                  keywords={[{ keyword: kw.keyword, color: kw.color, tag: kw.tag }]}
+                />
               </td>
               <!-- 标签 -->
               <td class="px-4 py-2.5">
                 <span
                   class="inline-flex px-2 py-0.5 rounded text-xs font-medium"
-                  style="background:{kw.color}20;color:{kw.color};border:1px solid {kw.color}50"
+                  style="background:{color}20;color:{color};border:1px solid {color}50"
                 >
                   {kw.tag}
                 </span>
@@ -404,17 +401,20 @@
 
     <div class="sm:hidden border-b border-stone-200 divide-y divide-stone-100">
       {#each keywords as kw}
+        {@const color = safeColor(kw.color)}
         <div class="px-4 py-3 {kw.is_active ? '' : 'opacity-55'}">
           <div class="flex items-start gap-3">
             <div class="min-w-0 flex-1">
               <p class="font-mono text-sm text-stone-700 leading-relaxed">
-                <!-- eslint-disable-next-line svelte/no-at-html-tags -->
-                {@html `您的<mark style="background:${kw.color}20;border-bottom:2px solid ${kw.color};color:inherit;padding:0 1px;border-radius:2px;font-weight:600">${kw.keyword}</mark>是 839204`}
+                <MessageHighlight
+                  content={`您的${kw.keyword}是 839204`}
+                  keywords={[{ keyword: kw.keyword, color: kw.color, tag: kw.tag }]}
+                />
               </p>
               <div class="flex flex-wrap items-center gap-2 mt-2 text-xs text-stone-400">
                 <span
                   class="inline-flex px-2 py-0.5 rounded font-medium"
-                  style="background:{kw.color}20;color:{kw.color};border:1px solid {kw.color}50"
+                  style="background:{color}20;color:{color};border:1px solid {color}50"
                   >{kw.tag}</span
                 >
                 <span>{matchLabel(kw)}</span>
@@ -512,8 +512,7 @@
           效果预览
         </p>
         <p class="text-sm font-mono text-stone-700 leading-relaxed">
-          <!-- eslint-disable-next-line svelte/no-at-html-tags -->
-          {@html previewHtml}
+          <MessageHighlight content={previewText} keywords={[formData]} />
         </p>
       </div>
 
