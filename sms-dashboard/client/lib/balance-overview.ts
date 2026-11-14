@@ -113,7 +113,7 @@ export const BALANCE_HEALTH_META = {
 
 const SUMMARY_STATUSES = Object.keys(BALANCE_HEALTH_META).filter(isSummaryStatus);
 
-function isSummaryStatus(status: string): status is SummaryStatus {
+export function isSummaryStatus(status: string): status is SummaryStatus {
   return Object.hasOwn(BALANCE_HEALTH_META, status);
 }
 

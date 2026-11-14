@@ -15,6 +15,7 @@
   },
   "include": [
     "client/lib/BalanceConversationRow.svelte",
+    "client/lib/BalanceManagement.svelte",
     "client/lib/BalanceQueryDetail.svelte",
     "client/lib/CallPanel.svelte",
     "client/lib/ConfirmHost.svelte",

@@ -1,23 +1,107 @@
-<script>
+<script lang="ts">
   import { confirmAction } from './confirm.svelte.js';
   import { formatClock } from './time.js';
   import { overlay } from './overlay.js';
   import { onMount } from 'svelte';
+  import { SvelteMap } from 'svelte/reactivity';
   import { formatCardNumber } from './card-number.js';
   import { buildCarrierOptions, carrierKey } from './carrier.js';
   import { getCountryFlag } from './countries.js';
-  import { api } from './api.js';
+  import { errorMessage, request } from './api.js';
   import { getSimServiceTypeLabel } from './sim-service-type.js';
-  import { getSimRoleLabel } from './sim-role.js';
   import { groupByPrimary } from './group-by-primary.js';
   import {
     formatBalanceMetric,
     getBalanceStatusMeta,
     getBalanceTimestamp,
+    getCashBalance,
     normalizeUtcTimestamp,
   } from './balance-query.js';
-  import { BALANCE_HEALTH_META, buildBalanceRows, countBalanceHealth } from './balance-overview.js';
+  import {
+    BALANCE_HEALTH_META,
+    buildBalanceRows,
+    countBalanceHealth,
+    isSummaryStatus,
+  } from './balance-overview.js';
   import { activeBalanceCheckIds, balancePollDelay } from './balance-polling.js';
+  import {
+    BalanceQueryBatchResponse,
+    BalanceQueryPreflightResponse,
+    BalanceQueryPreviewResponse,
+    BalanceQueryResponse,
+    BATCH_METHODS,
+    type BalanceCheck,
+    type BalanceMetric,
+  } from '../../shared/api/balance-checks.js';
+  import {
+    BalanceRunnersResponse,
+    RUNNER_CAPABILITIES,
+    type BalanceRunnerCapabilitySummary,
+  } from '../../shared/api/balance-runners.js';
+  import { CarrierBillingAccountsResponse } from '../../shared/api/carrier-billing.js';
+  import {
+    CarrierBillMutationResponse,
+    CarrierBillResponse,
+    CarrierBillsResponse,
+    type CarrierBill,
+  } from '../../shared/api/carrier-bills.js';
+  import type { Phone } from '../../shared/api/phones.js';
+  import type { SummaryStatus } from '../../shared/prepaid-health.js';
+  import { textOr } from '../../shared/text.js';
+
+  interface BalancePhone extends Pick<
+    Phone,
+    | 'iccid'
+    | 'sim_index'
+    | 'number'
+    | 'carrier'
+    | 'country'
+    | 'service_type'
+    | 'sim_role'
+    | 'primary_iccid'
+    | 'balance_threshold'
+  > {
+    flag: string;
+  }
+
+  interface QueriesChange {
+    queuedChecks?: BalanceCheck[];
+    activeIds?: string[];
+  }
+
+  interface Props {
+    phoneNumbers?: readonly BalancePhone[];
+    balanceChecks?: readonly BalanceCheck[];
+    onOpenBalance?: ((check: BalanceCheck) => void) | null;
+    canQueryBalances?: boolean;
+    canWriteBills?: boolean;
+    onQueriesChanged?: ((change: QueriesChange) => Promise<void>) | null;
+  }
+
+  type BillAccount = CarrierBillingAccountsResponse['accounts'][number];
+  type BillDetail = CarrierBillResponse['bill'];
+  type BillAction = 'payment-planned' | 'mark-paid' | 'waive' | 'reopen';
+  type BatchMethod = (typeof BATCH_METHODS)[number];
+  type StatusFilter = 'all' | 'payment' | 'expiry' | 'missing' | SummaryStatus;
+  type OverviewSortKey =
+    | 'sim'
+    | 'carrier'
+    | 'sim_role'
+    | 'service_type'
+    | 'balance'
+    | 'expiry'
+    | 'health'
+    | 'threshold'
+    | 'updated'
+    | 'query';
+  type HistorySortKey = 'time' | 'sim' | 'carrier' | 'method' | 'status' | 'balance';
+  type SortDirection = 'asc' | 'desc';
+  type SortValue = string | number | null | undefined;
+
+  interface Notice {
+    type: 'success' | 'error';
+    message: string;
+  }
 
   let {
     phoneNumbers = [],
@@ -26,51 +110,60 @@
     canQueryBalances = false,
     canWriteBills = false,
     onQueriesChanged = null,
-  } = $props();
+  }: Props = $props();
 
-  let activeTab = $state('overview');
-  let statusFilter = $state('all');
+  let activeTab: 'overview' | 'bills' | 'history' = $state('overview');
+  let statusFilter: StatusFilter = $state('all');
   let carrierFilter = $state('all');
   let searchQuery = $state('');
-  let overviewSortKey = $state(null);
-  let overviewSortDirection = $state('asc');
-  let historySortKey = $state('time');
-  let historySortDirection = $state('desc');
-  let queryingIccid = $state(null);
+  let overviewSortKey: OverviewSortKey | null = $state(null);
+  let overviewSortDirection: SortDirection = $state('asc');
+  let historySortKey: HistorySortKey = $state('time');
+  let historySortDirection: SortDirection = $state('desc');
+  let queryingIccid: string | null = $state(null);
   let loadingPreview = $state(false);
   let batchSubmitting = $state(false);
-  let batchPreview = $state(null);
-  let batchMethods = $state({ direct_sms: true, sms_ai: false, browser: false });
-  let batchScope = $state(null);
-  let selectedIccids = $state([]);
-  let singlePreview = $state(null);
-  let notice = $state(null);
-  let runnerStatus = $state(null);
+  let batchPreview: BalanceQueryPreviewResponse | null = $state(null);
+  let batchMethods: Record<BatchMethod, boolean> = $state({
+    direct_sms: true,
+    sms_ai: false,
+    browser: false,
+  });
+  let batchScope: { phoneIccids: string[]; label: string } | null = $state(null);
+  let selectedIccids: string[] = $state([]);
+  let singlePreview: { row: BalanceRow; preflight: BalanceQueryPreflightResponse } | null =
+    $state(null);
+  let notice: Notice | null = $state(null);
+  let runnerStatus: BalanceRunnersResponse | null = $state(null);
   let runnerStatusLoading = $state(true);
-  let billAccounts = $state([]);
+  let billAccounts: BillAccount[] = $state([]);
   /** Set when the account list failed to load; then unpaid bills cannot be trusted. */
-  let billAccountsError = $state(null);
-  let bills = $state([]);
+  let billAccountsError: string | null = $state(null);
+  let bills: CarrierBill[] = $state([]);
   let billsLoaded = $state(false);
   let billsLoading = $state(false);
-  let billError = $state(null);
-  let selectedBill = $state(null);
+  let billError: string | null = $state(null);
+  let selectedBill: BillDetail | null = $state(null);
   let billDetailLoading = $state(false);
   let billActionBusy = $state(false);
-  let activePollTimer = null;
+  let activePollTimer: ReturnType<typeof setTimeout> | undefined;
   let fastPollingUntil = Date.now() + 15_000;
 
   let rows = $derived(buildBalanceRows(phoneNumbers, balanceChecks));
+  type BalanceRow = (typeof rows)[number];
+  function checkCarrier(check: BalanceCheck) {
+    return {
+      carrier: textOr(check.profile_carrier, check.sim_carrier),
+      country: textOr(check.sim_country, check.country_code),
+    };
+  }
   let carrierOptions = $derived.by(() =>
     buildCarrierOptions([
       ...rows.map((row) => ({
         carrier: row.phone.carrier,
         country: row.phone.country,
       })),
-      ...(balanceChecks || []).map((check) => ({
-        carrier: check.profile_carrier || check.sim_carrier,
-        country: check.sim_country || check.country_code,
-      })),
+      ...balanceChecks.map(checkCarrier),
     ]),
   );
   let carrierRows = $derived(
@@ -81,45 +174,48 @@
     ),
   );
   let billingAccountBySim = $derived.by(() => {
-    const map = new Map();
+    const map = new SvelteMap<string, BillAccount>();
     for (const account of billAccounts) {
-      for (const sim of account.linked_sims || []) map.set(sim.iccid, account);
+      for (const sim of account.linked_sims) map.set(sim.iccid, account);
     }
     return map;
   });
   let paymentDueAccountBySim = $derived.by(() => {
-    const map = new Map();
+    const map = new SvelteMap<string, BillAccount>();
     for (const account of billAccounts) {
-      if (Number(account.payment_due_count || 0) > 0 && account.notification_sim?.iccid) {
+      if (account.payment_due_count > 0 && account.notification_sim.iccid !== '') {
         map.set(account.notification_sim.iccid, account);
       }
     }
     return map;
   });
-  function requiresPayment(row) {
+  function requiresPayment(row: BalanceRow): boolean {
     return (
       ['zero_or_negative_balance', 'low_balance'].includes(row.health) ||
       paymentDueAccountBySim.has(row.phone.iccid)
     );
   }
-  function postpaidPaymentCount(row) {
-    return Number(paymentDueAccountBySim.get(row.phone.iccid)?.payment_due_count || 0);
+  function postpaidPaymentCount(row: BalanceRow): number {
+    return paymentDueAccountBySim.get(row.phone.iccid)?.payment_due_count ?? 0;
   }
   let counts = $derived(countBalanceHealth(carrierRows));
+  function healthCount(status: SummaryStatus): number {
+    return counts.get(status) ?? 0;
+  }
   // Counts live on the filter tabs (device-page pattern) instead of a separate summary bar.
-  let filterTabs = $derived([
+  let filterTabs: (readonly [StatusFilter, string, number])[] = $derived([
     ['all', '全部', carrierRows.length],
-    ['healthy', '正常', counts.get('healthy')],
+    ['healthy', '正常', healthCount('healthy')],
     ['payment', '需付款', carrierRows.filter(requiresPayment).length],
-    ['expiry', '到期处理', counts.get('expired') + counts.get('expiring_soon')],
-    ['verification_pending', '待验证', counts.get('verification_pending')],
-    ['stale', '数据过期', counts.get('stale')],
-    ['query_failed', '查询失败', counts.get('query_failed')],
-    ['missing', '未取得', counts.get('never_observed') + counts.get('expiry_unknown')],
-    ['not_applicable', '后付费', counts.get('not_applicable')],
+    ['expiry', '到期处理', healthCount('expired') + healthCount('expiring_soon')],
+    ['verification_pending', '待验证', healthCount('verification_pending')],
+    ['stale', '数据过期', healthCount('stale')],
+    ['query_failed', '查询失败', healthCount('query_failed')],
+    ['missing', '未取得', healthCount('never_observed') + healthCount('expiry_unknown')],
+    ['not_applicable', '后付费', healthCount('not_applicable')],
   ]);
 
-  function matchesStatusFilter(row) {
+  function matchesStatusFilter(row: BalanceRow): boolean {
     if (statusFilter === 'all') return true;
     if (statusFilter === 'payment') return requiresPayment(row);
     if (statusFilter === 'expiry') return ['expired', 'expiring_soon'].includes(row.health);
@@ -138,15 +234,10 @@
         return [
           formatCardNumber(phone.sim_index),
           phone.number,
-          phone.phone_number,
           phone.iccid,
           phone.carrier,
           getSimServiceTypeLabel(phone.service_type),
-        ].some((value) =>
-          String(value || '')
-            .toLowerCase()
-            .includes(query),
-        );
+        ].some((value) => textOr(value, '').toLowerCase().includes(query));
       })
       .sort(compareOverviewRows);
   });
@@ -160,18 +251,21 @@
   // found even though grouping re-orders rows. Absent when the primary has
   // been filtered out (orphan secondary).
   let primaryRowByIccid = $derived.by(() => {
-    const map = new Map();
+    const map = new SvelteMap<string, BalanceRow>();
     for (const row of filteredRows) {
       if (row.phone.sim_role === 'primary') map.set(row.phone.iccid, row);
     }
     return map;
   });
   // Resolve the primary row for a secondary; null if orphaned.
-  function primaryOf(row) {
+  function primaryOf(row: BalanceRow): BalanceRow | null {
     const iccid = row.phone.primary_iccid;
-    return iccid ? (primaryRowByIccid.get(iccid) ?? null) : null;
+    return iccid === null ? null : (primaryRowByIccid.get(iccid) ?? null);
   }
-  function isBalanceQueryableRow(row) {
+  function extraHealthReasons(row: BalanceRow): SummaryStatus[] {
+    return row.healthReasons.filter(isSummaryStatus).filter((reason) => reason !== row.health);
+  }
+  function isBalanceQueryableRow(row: BalanceRow): boolean {
     return row.phone.sim_role !== 'secondary' && row.phone.service_type !== 'postpaid';
   }
   let selectedIccidSet = $derived(new Set(selectedIccids));
@@ -183,26 +277,14 @@
   );
   let someFilteredSelected = $derived(filteredIccids.some((iccid) => selectedIccidSet.has(iccid)));
   let sortedChecks = $derived(
-    (balanceChecks || [])
+    balanceChecks
       .filter(
-        (check) =>
-          carrierFilter === 'all' ||
-          carrierKey({
-            carrier: check.profile_carrier || check.sim_carrier,
-            country: check.sim_country || check.country_code,
-          }) === carrierFilter,
+        (check) => carrierFilter === 'all' || carrierKey(checkCarrier(check)) === carrierFilter,
       )
       .slice()
       .sort(compareHistoryChecks),
   );
-  let latestUpdate = $derived(
-    rows
-      .map((row) => row.balanceTimestamp)
-      .filter(Boolean)
-      .sort((a, b) => new Date(normalizeUtcTimestamp(b)) - new Date(normalizeUtcTimestamp(a)))[0] ||
-      null,
-  );
-  const overviewColumns = [
+  const overviewColumns: readonly { key: OverviewSortKey | null; label: string }[] = [
     { key: 'sim', label: '卡号' },
     { key: 'carrier', label: '运营商' },
     { key: 'sim_role', label: '主副卡' },
@@ -216,7 +298,7 @@
     { key: null, label: '操作' },
   ];
 
-  const historyColumns = [
+  const historyColumns: readonly { key: HistorySortKey | null; label: string }[] = [
     { key: 'time', label: '时间' },
     { key: 'sim', label: '卡号' },
     { key: 'carrier', label: '运营商' },
@@ -229,9 +311,9 @@
   const capabilityLabels = {
     sms_ai: 'AI 短信',
     carrier_browser: '浏览器查询',
-  };
+  } satisfies Record<(typeof RUNNER_CAPABILITIES)[number], string>;
 
-  function capabilityPresentation(capability) {
+  function capabilityPresentation(capability: BalanceRunnerCapabilitySummary | undefined) {
     if (runnerStatusLoading)
       return { label: '检测中', dot: 'bg-stone-300', text: 'text-stone-400' };
     if (!capability || capability.state === 'offline') {
@@ -263,7 +345,7 @@
 
   async function loadRunnerStatus() {
     try {
-      runnerStatus = await api.get('/api/balance-runners');
+      runnerStatus = await request('/api/balance-runners', BalanceRunnersResponse);
     } catch {
       runnerStatus = null;
     } finally {
@@ -272,9 +354,11 @@
   }
 
   onMount(() => {
-    loadRunnerStatus();
-    loadBillingAccounts();
-    const interval = setInterval(loadRunnerStatus, 30_000);
+    void loadRunnerStatus();
+    void loadBillingAccounts();
+    const interval = setInterval(() => {
+      void loadRunnerStatus();
+    }, 30_000);
     async function pollActiveQueries() {
       try {
         const activeIds = activeBalanceCheckIds(balanceChecks);
@@ -285,10 +369,14 @@
         console.warn('Failed to refresh active balance queries:', error);
       } finally {
         const delay = balancePollDelay(Date.now(), fastPollingUntil);
-        activePollTimer = setTimeout(pollActiveQueries, delay);
+        activePollTimer = setTimeout(() => {
+          void pollActiveQueries();
+        }, delay);
       }
     }
-    activePollTimer = setTimeout(pollActiveQueries, 2_000);
+    activePollTimer = setTimeout(() => {
+      void pollActiveQueries();
+    }, 2_000);
     return () => {
       clearInterval(interval);
       clearTimeout(activePollTimer);
@@ -297,14 +385,14 @@
 
   async function loadBillingAccounts() {
     try {
-      const result = await api.get('/api/carrier-billing/accounts');
-      billAccounts = result.accounts || [];
+      const result = await request('/api/carrier-billing/accounts', CarrierBillingAccountsResponse);
+      billAccounts = result.accounts;
       billAccountsError = null;
     } catch (error) {
       // Swallowing this made a failed fetch render as "nothing owed": postpaid
       // rows silently fell back to 等待账单短信 and the 查看账单 button vanished.
       billAccounts = [];
-      billAccountsError = error?.message || '账单账户加载失败';
+      billAccountsError = errorMessage(error, '账单账户加载失败');
     }
   }
 
@@ -314,14 +402,14 @@
     billError = null;
     try {
       const [billResult, accountResult] = await Promise.all([
-        api.get('/api/carrier-bills'),
-        api.get('/api/carrier-billing/accounts'),
+        request('/api/carrier-bills', CarrierBillsResponse),
+        request('/api/carrier-billing/accounts', CarrierBillingAccountsResponse),
       ]);
-      bills = billResult.bills || [];
-      billAccounts = accountResult.accounts || [];
+      bills = billResult.bills;
+      billAccounts = accountResult.accounts;
       billsLoaded = true;
     } catch (error) {
-      billError = error.message || '账单加载失败';
+      billError = errorMessage(error, '账单加载失败');
     } finally {
       billsLoading = false;
     }
@@ -329,42 +417,46 @@
 
   function openBillsTab() {
     activeTab = 'bills';
-    loadBills();
+    void loadBills();
   }
 
-  async function openBillFromOverview(row) {
+  async function openBillFromOverview(row: BalanceRow) {
     const account = billingAccountBySim.get(row.phone.iccid);
     if (!account) return;
     try {
-      const result = await api.get(
+      const result = await request(
         `/api/carrier-bills?account_id=${encodeURIComponent(account.id)}`,
+        CarrierBillsResponse,
       );
-      const accountBills = result.bills || [];
+      const accountBills = result.bills;
       const bill =
         accountBills.find((candidate) =>
           ['unpaid', 'payment_planned', 'needs_review'].includes(candidate.action_status),
-        ) ||
+        ) ??
         accountBills.slice().sort((left, right) => right.due_date.localeCompare(left.due_date))[0];
       if (bill) await openBill(bill);
       else openBillsTab();
     } catch (error) {
-      notice = { type: 'error', message: error.message || '账单加载失败' };
+      notice = { type: 'error', message: errorMessage(error, '账单加载失败') };
     }
   }
 
-  async function openBill(bill) {
+  async function openBill(bill: CarrierBill) {
     billDetailLoading = true;
     try {
-      const result = await api.get(`/api/carrier-bills/${encodeURIComponent(bill.id)}`);
+      const result = await request(
+        `/api/carrier-bills/${encodeURIComponent(bill.id)}`,
+        CarrierBillResponse,
+      );
       selectedBill = result.bill;
     } catch (error) {
-      notice = { type: 'error', message: error.message || '账单详情加载失败' };
+      notice = { type: 'error', message: errorMessage(error, '账单详情加载失败') };
     } finally {
       billDetailLoading = false;
     }
   }
 
-  async function recordBillAction(action, label) {
+  async function recordBillAction(action: BillAction, label: string) {
     if (!selectedBill || billActionBusy || !canWriteBills) return;
     if (
       !(await confirmAction({
@@ -375,77 +467,75 @@
       return;
     billActionBusy = true;
     try {
-      const result = await api.post(
+      const result = await request(
         `/api/carrier-bills/${encodeURIComponent(selectedBill.id)}/${action}`,
-        { expected_version: selectedBill.version },
-        { headers: { 'Idempotency-Key': crypto.randomUUID() } },
+        CarrierBillMutationResponse,
+        {
+          method: 'POST',
+          body: JSON.stringify({ expected_version: selectedBill.version }),
+          headers: { 'Idempotency-Key': crypto.randomUUID() },
+        },
       );
       selectedBill = result.bill;
       bills = bills.map((bill) => (bill.id === result.bill.id ? result.bill : bill));
       notice = { type: 'success', message: `账单已${label}` };
     } catch (error) {
-      notice = { type: 'error', message: error.message || '账单状态更新失败' };
+      notice = { type: 'error', message: errorMessage(error, '账单状态更新失败') };
     } finally {
       billActionBusy = false;
     }
   }
 
-  function formatBillAmount(bill) {
-    return `${bill.currency} ${(Number(bill.amount_minor || 0) / 100).toFixed(2)}`;
+  function formatBillAmount(bill: Pick<CarrierBill, 'currency' | 'amount_minor'>): string {
+    return `${bill.currency} ${(bill.amount_minor / 100).toFixed(2)}`;
   }
 
-  function billUrgencyMeta(bill) {
-    return (
-      {
-        needs_review: { label: '需要复核', className: 'bg-red-50 text-red-700 border-red-200' },
-        overdue: {
-          label: `逾期 ${Math.abs(bill.days_remaining)} 天`,
-          className: 'bg-red-50 text-red-700 border-red-200',
-        },
-        due_soon: {
-          label: bill.days_remaining === 0 ? '今天到期' : `${bill.days_remaining} 天后到期`,
-          className: 'bg-amber-50 text-amber-700 border-amber-200',
-        },
-        open: {
-          label: `${bill.days_remaining} 天后到期`,
-          className: 'bg-stone-50 text-stone-600 border-stone-200',
-        },
-        paid: { label: '已付款', className: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
-        waived: { label: '已豁免', className: 'bg-stone-50 text-stone-500 border-stone-200' },
-      }[bill.urgency] || {
-        label: bill.action_status || '待处理',
+  function billUrgencyMeta(bill: Pick<CarrierBill, 'urgency' | 'days_remaining'>) {
+    const meta = {
+      needs_review: { label: '需要复核', className: 'bg-red-50 text-red-700 border-red-200' },
+      overdue: {
+        label: `逾期 ${Math.abs(bill.days_remaining)} 天`,
+        className: 'bg-red-50 text-red-700 border-red-200',
+      },
+      due_soon: {
+        label: bill.days_remaining === 0 ? '今天到期' : `${bill.days_remaining} 天后到期`,
+        className: 'bg-amber-50 text-amber-700 border-amber-200',
+      },
+      open: {
+        label: `${bill.days_remaining} 天后到期`,
         className: 'bg-stone-50 text-stone-600 border-stone-200',
-      }
-    );
+      },
+      paid: { label: '已付款', className: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+      waived: { label: '已豁免', className: 'bg-stone-50 text-stone-500 border-stone-200' },
+    } satisfies Record<CarrierBill['urgency'], { label: string; className: string }>;
+    return meta[bill.urgency];
   }
 
-  function billActionLabel(status) {
-    return (
-      {
-        unpaid: '待付款',
-        payment_planned: '已计划付款',
-        paid: '已付款',
-        waived: '已豁免',
-        needs_review: '需要复核',
-      }[status] || status
-    );
+  function billActionLabel(status: CarrierBill['action_status']): string {
+    return {
+      unpaid: '待付款',
+      payment_planned: '已计划付款',
+      paid: '已付款',
+      waived: '已豁免',
+      needs_review: '需要复核',
+    }[status];
   }
 
-  function billEventLabel(type) {
-    return (
-      {
-        detected: '检测到账单',
-        duplicate_detected: '检测到重复通知',
-        parse_conflict: '金额冲突',
-        payment_planned: '计划付款',
-        paid: '标记已付款',
-        waived: '标记豁免',
-        reopened: '重新打开',
-      }[type] || type
-    );
+  const BILL_EVENT_LABELS = new Map([
+    ['detected', '检测到账单'],
+    ['duplicate_detected', '检测到重复通知'],
+    ['parse_conflict', '金额冲突'],
+    ['payment_planned', '计划付款'],
+    ['paid', '标记已付款'],
+    ['waived', '标记豁免'],
+    ['reopened', '重新打开'],
+  ]);
+
+  function billEventLabel(type: string): string {
+    return BILL_EVENT_LABELS.get(type) ?? type;
   }
 
-  function compareValues(left, right) {
+  function compareValues(left: SortValue, right: SortValue): number {
     const leftMissing = left == null || left === '' || Number.isNaN(left);
     const rightMissing = right == null || right === '' || Number.isNaN(right);
     if (leftMissing || rightMissing) {
@@ -459,33 +549,39 @@
     });
   }
 
-  function compareMoney(leftMetric, rightMetric) {
+  function compareMoney(
+    leftMetric: BalanceMetric | null | undefined,
+    rightMetric: BalanceMetric | null | undefined,
+  ): number {
     const currency = compareValues(leftMetric?.currency, rightMetric?.currency);
     return currency || compareValues(Number(leftMetric?.value), Number(rightMetric?.value));
   }
 
-  function overviewValue(row, key) {
-    if (key === 'sim') return Number(row.phone.sim_index);
-    if (key === 'carrier') return row.phone.carrier || '';
+  function overviewValue(row: BalanceRow, key: OverviewSortKey): SortValue {
+    if (key === 'sim') return row.phone.sim_index;
+    if (key === 'carrier') return textOr(row.phone.carrier, '');
     if (key === 'service_type') return getSimServiceTypeLabel(row.phone.service_type);
     if (key === 'health') return healthOrder(row.health);
-    if (key === 'expiry') return row.expiryDate || null;
+    if (key === 'expiry') return row.expiryDate;
     if (key === 'updated')
       return row.balanceTimestamp
         ? new Date(normalizeUtcTimestamp(row.balanceTimestamp)).getTime()
         : null;
-    if (key === 'query') return row.latestCheck?.status || '';
+    if (key === 'query') return row.latestCheck?.status ?? '';
     return null;
   }
 
-  function compareOverviewRows(left, right) {
+  function simOrder(row: BalanceRow): number {
+    return row.phone.sim_index === 0 ? 999 : row.phone.sim_index;
+  }
+
+  function compareOverviewRows(left: BalanceRow, right: BalanceRow): number {
     if (!overviewSortKey) {
       return (
-        healthOrder(left.health) - healthOrder(right.health) ||
-        Number(left.phone.sim_index || 999) - Number(right.phone.sim_index || 999)
+        healthOrder(left.health) - healthOrder(right.health) || simOrder(left) - simOrder(right)
       );
     }
-    let comparison;
+    let comparison: number;
     if (overviewSortKey === 'balance')
       comparison = compareMoney(left.balanceMetric, right.balanceMetric);
     else if (overviewSortKey === 'threshold') {
@@ -497,55 +593,49 @@
         overviewValue(left, overviewSortKey),
         overviewValue(right, overviewSortKey),
       );
-    if (comparison === 0)
-      comparison = Number(left.phone.sim_index || 999) - Number(right.phone.sim_index || 999);
+    if (comparison === 0) comparison = simOrder(left) - simOrder(right);
     return overviewSortDirection === 'asc' ? comparison : -comparison;
   }
 
-  function healthOrder(status) {
-    return (
-      {
-        expired: 0,
-        zero_or_negative_balance: 1,
-        query_failed: 2,
-        verification_pending: 3,
-        stale: 4,
-        low_balance: 5,
-        expiring_soon: 6,
-        never_observed: 7,
-        expiry_unknown: 8,
-        not_applicable: 9,
-        healthy: 10,
-      }[status] ?? 99
-    );
+  function healthOrder(status: SummaryStatus): number {
+    return {
+      expired: 0,
+      zero_or_negative_balance: 1,
+      query_failed: 2,
+      verification_pending: 3,
+      stale: 4,
+      low_balance: 5,
+      expiring_soon: 6,
+      never_observed: 7,
+      expiry_unknown: 8,
+      not_applicable: 9,
+      healthy: 10,
+    }[status];
   }
 
-  function historyValue(check, key) {
+  function historyValue(check: BalanceCheck, key: HistorySortKey): SortValue {
     if (key === 'time') return timestampValue(check);
     if (key === 'sim') return Number(check.sim_index);
-    if (key === 'carrier') return check.profile_carrier || check.sim_carrier || '';
-    if (key === 'method') return check.method || '';
-    if (key === 'status') return check.status || '';
+    if (key === 'carrier') return textOr(check.profile_carrier, textOr(check.sim_carrier, ''));
+    if (key === 'method') return check.method;
+    if (key === 'status') return check.status;
     return null;
   }
 
-  function compareHistoryChecks(left, right) {
-    let comparison;
+  function compareHistoryChecks(left: BalanceCheck, right: BalanceCheck): number {
+    let comparison: number;
     if (historySortKey === 'balance') {
-      comparison = compareMoney(
-        left.metrics?.find((metric) => metric.metric_type === 'cash_balance'),
-        right.metrics?.find((metric) => metric.metric_type === 'cash_balance'),
-      );
+      comparison = compareMoney(getCashBalance(left), getCashBalance(right));
     } else
       comparison = compareValues(
         historyValue(left, historySortKey),
         historyValue(right, historySortKey),
       );
-    if (comparison === 0) comparison = String(left.id).localeCompare(String(right.id));
+    if (comparison === 0) comparison = left.id.localeCompare(right.id);
     return historySortDirection === 'asc' ? comparison : -comparison;
   }
 
-  function toggleOverviewSort(key) {
+  function toggleOverviewSort(key: OverviewSortKey) {
     if (overviewSortKey === key)
       overviewSortDirection = overviewSortDirection === 'asc' ? 'desc' : 'asc';
     else {
@@ -554,7 +644,7 @@
     }
   }
 
-  function toggleHistorySort(key) {
+  function toggleHistorySort(key: HistorySortKey) {
     if (historySortKey === key)
       historySortDirection = historySortDirection === 'asc' ? 'desc' : 'asc';
     else {
@@ -563,7 +653,7 @@
     }
   }
 
-  function timestampValue(check) {
+  function timestampValue(check: BalanceCheck): number {
     const value = getBalanceTimestamp(check);
     const time = value ? new Date(normalizeUtcTimestamp(value)).getTime() : 0;
     return Number.isFinite(time) ? time : 0;
@@ -571,62 +661,69 @@
 
   // One absolute format across both tabs: 查询记录 used to print the year while
   // its neighbour 余额概览 did not, one tab click apart.
-  function formatTime(value) {
+  function formatTime(value: string | null | undefined): string {
     if (!value) return '—';
     return formatClock(normalizeUtcTimestamp(value)) || '—';
   }
 
-  function formatThreshold(threshold) {
+  function formatThreshold(threshold: BalanceRow['threshold']): string {
     if (!threshold) return '—';
-    return `${threshold.value} ${threshold.currency}`;
+    return `${threshold.value} ${String(threshold.currency)}`;
   }
 
-  function openRow(row) {
-    const check = row.latestCheck || row.balanceCheck;
+  function openRow(row: BalanceRow) {
+    const check = row.latestCheck ?? row.balanceCheck;
     if (check) onOpenBalance?.(check);
   }
 
-  async function queryPhone(row, event = null) {
+  async function queryPhone(row: BalanceRow, event: Event | null = null) {
     event?.stopPropagation();
     if (!canQueryBalances || queryingIccid || !isBalanceQueryableRow(row)) return;
     queryingIccid = row.phone.iccid;
     notice = null;
     try {
-      const preflight = await api.get(
+      const preflight = await request(
         `/api/balance-checks/query-preflight?phone_iccid=${encodeURIComponent(row.phone.iccid)}`,
+        BalanceQueryPreflightResponse,
       );
-      if (!preflight.eligible) throw new Error(preflight.reason || '当前 SIM 暂时不能查询');
+      if (!preflight.eligible) throw new Error(textOr(preflight.reason, '当前 SIM 暂时不能查询'));
       if (
-        (preflight.runner?.required && !preflight.runner.available) ||
-        preflight.method?.interactive
+        (preflight.runner.required && !preflight.runner.available) ||
+        preflight.method.interactive
       ) {
         singlePreview = { row, preflight };
       } else {
         await submitSingle(row, false);
       }
     } catch (error) {
-      notice = { type: 'error', message: error.message || '余额查询创建失败' };
+      notice = { type: 'error', message: errorMessage(error, '余额查询创建失败') };
     } finally {
       queryingIccid = null;
     }
   }
 
-  async function submitSingle(row = singlePreview?.row, manageLoading = true) {
+  async function submitSingle(
+    row: BalanceRow | undefined = singlePreview?.row,
+    manageLoading = true,
+  ) {
     if (!row || (manageLoading && queryingIccid)) return;
     if (manageLoading) queryingIccid = row.phone.iccid;
     notice = null;
     try {
-      const result = await api.post('/api/balance-checks/query', { phone_iccid: row.phone.iccid });
+      const result = await request('/api/balance-checks/query', BalanceQueryResponse, {
+        method: 'POST',
+        body: JSON.stringify({ phone_iccid: row.phone.iccid }),
+      });
       singlePreview = null;
       notice = {
         type: 'success',
         message: `${formatCardNumber(row.phone.sim_index)} 已加入余额查询队列`,
       };
       fastPollingUntil = Date.now() + 15_000;
-      await onQueriesChanged?.({ queuedChecks: result.check ? [result.check] : [] });
+      await onQueriesChanged?.({ queuedChecks: [result.check] });
       await loadRunnerStatus();
     } catch (error) {
-      notice = { type: 'error', message: error.message || '余额查询创建失败' };
+      notice = { type: 'error', message: errorMessage(error, '余额查询创建失败') };
     } finally {
       if (manageLoading) queryingIccid = null;
     }
@@ -652,84 +749,94 @@
           ? `手动选择 ${selectedRows.length} 张卡`
           : currentFilterLabel(scopeRows.length),
       };
-      batchPreview = await api.post('/api/balance-checks/query-preview', {
-        phone_iccids: phoneIccids,
-      });
+      const preview = await request(
+        '/api/balance-checks/query-preview',
+        BalanceQueryPreviewResponse,
+        {
+          method: 'POST',
+          body: JSON.stringify({ phone_iccids: phoneIccids }),
+        },
+      );
+      batchPreview = preview;
       batchMethods = {
         direct_sms: true,
-        sms_ai: Boolean(batchPreview.runner_capabilities?.sms_ai?.available),
+        sms_ai: preview.runner_capabilities.sms_ai.available,
         browser: false,
       };
     } catch (error) {
       batchScope = null;
-      notice = { type: 'error', message: error.message || '无法生成批量查询预览' };
+      notice = { type: 'error', message: errorMessage(error, '无法生成批量查询预览') };
     } finally {
       loadingPreview = false;
     }
   }
 
+  function selectedBatchMethods(): BatchMethod[] {
+    return BATCH_METHODS.filter((method) => batchMethods[method]);
+  }
+
   async function submitBatch() {
-    const methods = Object.entries(batchMethods)
-      .filter(([, selected]) => selected)
-      .map(([method]) => method);
+    const methods = selectedBatchMethods();
     if (
       !canQueryBalances ||
       batchSubmitting ||
       !batchPreview ||
-      !batchScope?.phoneIccids?.length ||
+      !batchScope?.phoneIccids.length ||
       methods.length === 0
     )
       return;
     batchSubmitting = true;
     try {
-      const result = await api.post('/api/balance-checks/query-batch', {
-        methods,
-        phone_iccids: batchScope.phoneIccids,
+      const result = await request('/api/balance-checks/query-batch', BalanceQueryBatchResponse, {
+        method: 'POST',
+        body: JSON.stringify({
+          methods,
+          phone_iccids: batchScope.phoneIccids,
+        }),
       });
       batchPreview = null;
       batchScope = null;
       selectedIccids = [];
       notice = {
-        type: result.summary?.failed_to_queue ? 'error' : 'success',
-        message: `已加入 ${result.summary?.queued || 0} 张卡${result.summary?.failed_to_queue ? `，${result.summary.failed_to_queue} 张失败` : ''}`,
+        type: result.summary.failed_to_queue ? 'error' : 'success',
+        message: `已加入 ${result.summary.queued} 张卡${result.summary.failed_to_queue ? `，${result.summary.failed_to_queue} 张失败` : ''}`,
       };
       fastPollingUntil = Date.now() + 15_000;
-      await onQueriesChanged?.({ queuedChecks: result.checks || [] });
+      await onQueriesChanged?.({ queuedChecks: result.checks });
       await loadRunnerStatus();
     } catch (error) {
-      notice = { type: 'error', message: error.message || '批量查询创建失败' };
+      notice = { type: 'error', message: errorMessage(error, '批量查询创建失败') };
     } finally {
       batchSubmitting = false;
     }
   }
 
-  function selectedBatchCount() {
-    if (!batchPreview?.method_summary) return 0;
-    return Object.entries(batchMethods)
-      .filter(([, selected]) => selected)
-      .reduce((total, [method]) => total + Number(batchPreview.method_summary[method] || 0), 0);
+  function selectedBatchCount(): number {
+    if (!batchPreview) return 0;
+    const summary = batchPreview.method_summary;
+    return selectedBatchMethods().reduce((total, method) => total + summary[method], 0);
   }
 
-  function currentFilterLabel(count) {
-    const parts = [];
+  function currentFilterLabel(count: number): string {
+    const parts: string[] = [];
     if (carrierFilter !== 'all') {
       parts.push(
-        carrierOptions.find((carrier) => carrier.key === carrierFilter)?.label || '当前运营商',
+        carrierOptions.find((carrier) => carrier.key === carrierFilter)?.label ?? '当前运营商',
       );
     }
     if (statusFilter !== 'all') {
-      parts.push(filterTabs.find(([value]) => value === statusFilter)?.[1] || '当前状态');
+      parts.push(filterTabs.find(([value]) => value === statusFilter)?.[1] ?? '当前状态');
     }
     if (searchQuery.trim()) parts.push(`搜索「${searchQuery.trim()}」`);
     return `${parts.length ? `当前筛选：${parts.join(' · ')}` : '当前全部卡片'}（${count} 张）`;
   }
 
-  function toggleCardSelection(iccid, checked) {
+  function toggleCardSelection(iccid: string, checked: boolean) {
     if (checked) selectedIccids = [...new Set([...selectedIccids, iccid])];
     else selectedIccids = selectedIccids.filter((value) => value !== iccid);
   }
 
-  function toggleFilteredSelection(checked) {
+  function toggleFilteredSelection(checked: boolean) {
     if (checked) selectedIccids = [...new Set([...selectedIccids, ...filteredIccids])];
     else {
       const visible = new Set(filteredIccids);
@@ -816,12 +923,13 @@
         aria-label="余额查询助手状态"
       >
         <span class="text-xs font-semibold text-stone-700">查询助手</span>
-        {#each Object.entries(capabilityLabels) as [name, label]}
-          {@const capability = runnerStatus?.capabilities?.[name]}
+        {#each RUNNER_CAPABILITIES as name (name)}
+          {@const label = capabilityLabels[name]}
+          {@const capability = runnerStatus?.capabilities[name]}
           {@const presentation = capabilityPresentation(capability)}
           <span
             class="inline-flex items-center gap-1.5 text-xs {presentation.text}"
-            title={capability?.detail_code || ''}
+            title={textOr(capability?.detail_code, '')}
           >
             <span class="w-1.5 h-1.5 rounded-full {presentation.dot}" aria-hidden="true"></span>
             <span class="text-stone-500">{label}</span>
@@ -899,7 +1007,7 @@
         </div>
         <div class="flex items-center gap-2 min-w-0 flex-1 overflow-x-auto">
           <!-- filter tabs; count follows the label, same as the device page -->
-          {#each filterTabs as [value, label, count]}
+          {#each filterTabs as [value, label, count] (value)}
             <button
               type="button"
               onclick={() => {
@@ -927,7 +1035,7 @@
               focus:outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
           >
             <option value="all">全部运营商</option>
-            {#each carrierOptions as carrier}
+            {#each carrierOptions as carrier (carrier.key)}
               <option value={carrier.key}>{carrier.label}</option>
             {/each}
           </select>
@@ -980,12 +1088,14 @@
                         ? 'mixed'
                         : allFilteredSelected}
                       aria-label="选择当前筛选结果"
-                      onchange={(event) => toggleFilteredSelection(event.currentTarget.checked)}
+                      onchange={(event) => {
+                        toggleFilteredSelection(event.currentTarget.checked);
+                      }}
                       class="rounded border-stone-300 text-orange-500 focus:ring-orange-400"
                     />
                   </th>
                 {/if}
-                {#each overviewColumns as column, index}
+                {#each overviewColumns as column, index (column.label)}
                   <th
                     class="px-4 py-2.5 text-left text-[11px] font-semibold text-stone-400 tracking-widest uppercase {index ===
                     overviewColumns.length - 1
@@ -993,9 +1103,12 @@
                       : ''}"
                   >
                     {#if column.key}
+                      {@const sortKey = column.key}
                       <button
                         type="button"
-                        onclick={() => toggleOverviewSort(column.key)}
+                        onclick={() => {
+                          toggleOverviewSort(sortKey);
+                        }}
                         class="inline-flex items-center gap-1 hover:text-stone-700 transition-colors"
                         aria-label={`按${column.label}${overviewSortKey === column.key && overviewSortDirection === 'asc' ? '降序' : '升序'}排列`}
                       >
@@ -1019,7 +1132,7 @@
               </tr>
             </thead>
             <tbody class="divide-y divide-stone-50">
-              {#each groupedRows as row}
+              {#each groupedRows as row (row.phone.iccid)}
                 <tr
                   class="hover:bg-stone-50 transition-colors {row.__isSecondary
                     ? 'bg-stone-50/60'
@@ -1033,8 +1146,9 @@
                         disabled={row.phone.sim_role === 'secondary' ||
                           row.phone.service_type === 'postpaid'}
                         aria-label={`选择 ${formatCardNumber(row.phone.sim_index)}`}
-                        onchange={(event) =>
-                          toggleCardSelection(row.phone.iccid, event.currentTarget.checked)}
+                        onchange={(event) => {
+                          toggleCardSelection(row.phone.iccid, event.currentTarget.checked);
+                        }}
                         class="rounded border-stone-300 text-orange-500 focus:ring-orange-400 disabled:opacity-40"
                       />
                     </td>
@@ -1045,14 +1159,15 @@
                         >{formatCardNumber(row.phone.sim_index)}</span
                       >
                       <span class="font-mono text-xs text-stone-600"
-                        >{row.phone.number || row.phone.phone_number || '未设置号码'}</span
+                        >{textOr(row.phone.number, '未设置号码')}</span
                       >
                     </div>
                     <div class="mt-0.5 font-mono text-[10px] text-stone-400">{row.phone.iccid}</div>
                   </td>
                   <td class="px-4 py-3 whitespace-nowrap text-stone-600">
-                    <span class="mr-1">{row.phone.flag || getCountryFlag(row.phone.country)}</span
-                    >{row.phone.carrier || '—'}
+                    <span class="mr-1"
+                      >{textOr(row.phone.flag, getCountryFlag(row.phone.country))}</span
+                    >{textOr(row.phone.carrier, '—')}
                   </td>
                   <!-- 主副卡 -->
                   <td class="px-4 py-3 whitespace-nowrap">
@@ -1120,7 +1235,7 @@
                     {/if}
                   </td>
                   <td class="px-4 py-3 whitespace-nowrap font-mono text-xs text-stone-500">
-                    {row.__isSecondary ? '—' : row.expiryDate || '—'}
+                    {row.__isSecondary ? '—' : textOr(row.expiryDate, '—')}
                   </td>
                   <td class="px-4 py-3 whitespace-nowrap">
                     {#if row.__isSecondary}
@@ -1131,7 +1246,7 @@
                           class="inline-flex px-2 py-0.5 rounded-md border text-[11px] font-medium {row
                             .healthMeta.className}">{row.healthMeta.label}</span
                         >
-                        {#each row.healthReasons.filter((reason) => reason !== row.health && BALANCE_HEALTH_META[reason]) as reason}
+                        {#each extraHealthReasons(row) as reason (reason)}
                           <span
                             class="inline-flex px-1.5 py-0.5 rounded border text-[10px] font-medium {BALANCE_HEALTH_META[
                               reason
@@ -1151,12 +1266,10 @@
                     {#if row.__isSecondary}
                       <span class="text-stone-300">—</span>
                     {:else if row.latestCheck}
-                      {@const queryMeta = getBalanceStatusMeta(
-                        row.latestCheck.display_status || row.latestCheck.status,
-                      )}
+                      {@const queryMeta = getBalanceStatusMeta(row.latestCheck.display_status)}
                       <span class="text-xs text-stone-600">{queryMeta.label}</span>
                       <span class="ml-1 text-[10px] uppercase text-stone-400"
-                        >{row.latestCheck.method || ''}</span
+                        >{row.latestCheck.method}</span
                       >
                     {:else}
                       <span class="text-stone-300">—</span>
@@ -1171,10 +1284,12 @@
                           class="text-xs font-semibold text-action-text hover:underline"
                           >查看账单</button
                         >
-                      {:else if row.latestCheck || row.balanceCheck}
+                      {:else if row.latestCheck ?? row.balanceCheck}
                         <button
                           type="button"
-                          onclick={() => openRow(row)}
+                          onclick={() => {
+                            openRow(row);
+                          }}
                           class="text-xs font-medium text-stone-500 hover:text-stone-800"
                           >查看</button
                         >
@@ -1201,7 +1316,7 @@
         </div>
 
         <div class="lg:hidden divide-y divide-stone-100" data-mobile-balance-list>
-          {#each groupedRows as row}
+          {#each groupedRows as row (row.phone.iccid)}
             <div
               class="w-full px-4 py-2.5 text-left bg-white {row.__isSecondary
                 ? 'bg-stone-50/60'
@@ -1217,14 +1332,17 @@
                     disabled={row.phone.sim_role === 'secondary' ||
                       row.phone.service_type === 'postpaid'}
                     aria-label={`选择 ${formatCardNumber(row.phone.sim_index)}（移动端）`}
-                    onchange={(event) =>
-                      toggleCardSelection(row.phone.iccid, event.currentTarget.checked)}
+                    onchange={(event) => {
+                      toggleCardSelection(row.phone.iccid, event.currentTarget.checked);
+                    }}
                     class="rounded border-stone-300 text-orange-500 focus:ring-orange-400 shrink-0 disabled:opacity-40"
                   />
                 {/if}
                 <button
                   type="button"
-                  onclick={() => openRow(row)}
+                  onclick={() => {
+                    openRow(row);
+                  }}
                   disabled={!row.latestCheck && !row.balanceCheck}
                   class="flex items-center gap-2 min-w-0 text-left disabled:cursor-default"
                 >
@@ -1232,7 +1350,7 @@
                     >{formatCardNumber(row.phone.sim_index)}</span
                   >
                   <span class="font-mono text-xs text-stone-600 truncate"
-                    >{row.phone.number || row.phone.phone_number || '未设置号码'}</span
+                    >{textOr(row.phone.number, '未设置号码')}</span
                   >
                 </button>
                 {#if row.__isSecondary}
@@ -1246,7 +1364,7 @@
                       class="inline-flex px-2 py-0.5 rounded-md border text-[10px] font-medium {row
                         .healthMeta.className}">{row.healthMeta.label}</span
                     >
-                    {#each row.healthReasons.filter((reason) => reason !== row.health && BALANCE_HEALTH_META[reason]) as reason}
+                    {#each extraHealthReasons(row) as reason (reason)}
                       <span
                         class="inline-flex px-1.5 py-0.5 rounded border text-[9px] font-medium {BALANCE_HEALTH_META[
                           reason
@@ -1297,8 +1415,8 @@
                       >
                     {/if}
                     <span class="text-[11px] text-stone-400 truncate shrink"
-                      >{row.phone.flag || getCountryFlag(row.phone.country)}
-                      {row.phone.carrier || '—'}</span
+                      >{textOr(row.phone.flag, getCountryFlag(row.phone.country))}
+                      {textOr(row.phone.carrier, '—')}</span
                     >
                     <span class="text-[10px] text-stone-400 shrink-0"
                       >· {getSimServiceTypeLabel(row.phone.service_type)}</span
@@ -1391,12 +1509,12 @@
               </tr>
             </thead>
             <tbody class="divide-y divide-stone-50">
-              {#each bills as bill}
+              {#each bills as bill (bill.id)}
                 {@const urgency = billUrgencyMeta(bill)}
                 <tr class="hover:bg-stone-50">
                   <td class="px-4 py-3">
                     <strong class="block font-mono text-stone-800"
-                      >{formatCardNumber(bill.notification_sim?.sim_index)}</strong
+                      >{formatCardNumber(bill.notification_sim.sim_index)}</strong
                     >
                     <span class="text-[11px] text-stone-400">账单短信接收卡</span>
                   </td>
@@ -1430,7 +1548,7 @@
           </table>
         </div>
         <div class="lg:hidden divide-y divide-stone-100" data-mobile-bill-list>
-          {#each bills as bill}
+          {#each bills as bill (bill.id)}
             {@const urgency = billUrgencyMeta(bill)}
             <button
               type="button"
@@ -1441,7 +1559,7 @@
               <span class="flex items-start gap-3">
                 <span class="min-w-0 flex-1">
                   <strong class="block font-mono text-sm text-stone-900"
-                    >{formatCardNumber(bill.notification_sim?.sim_index)}</strong
+                    >{formatCardNumber(bill.notification_sim.sim_index)}</strong
                   >
                   <span class="mt-0.5 block text-xs text-stone-400 truncate"
                     >{bill.carrier} · 账单短信接收卡</span
@@ -1476,7 +1594,7 @@
             focus:outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
         >
           <option value="all">全部运营商</option>
-          {#each carrierOptions as carrier}
+          {#each carrierOptions as carrier (carrier.key)}
             <option value={carrier.key}>{carrier.label}</option>
           {/each}
         </select>
@@ -1491,7 +1609,7 @@
           <table class="w-full text-sm">
             <thead class="sticky top-0 z-10 bg-stone-50"
               ><tr class="bg-stone-50 border-b border-stone-200">
-                {#each historyColumns as column, index}
+                {#each historyColumns as column, index (column.label)}
                   <th
                     class="px-4 py-2.5 text-left text-[11px] font-semibold text-stone-400 tracking-widest uppercase {index ===
                     historyColumns.length - 1
@@ -1499,9 +1617,12 @@
                       : ''}"
                   >
                     {#if column.key}
+                      {@const sortKey = column.key}
                       <button
                         type="button"
-                        onclick={() => toggleHistorySort(column.key)}
+                        onclick={() => {
+                          toggleHistorySort(sortKey);
+                        }}
                         class="inline-flex items-center gap-1 hover:text-stone-700 transition-colors"
                         aria-label={`按${column.label}${historySortKey === column.key && historySortDirection === 'asc' ? '降序' : '升序'}排列`}
                       >
@@ -1525,8 +1646,8 @@
               </tr></thead
             >
             <tbody class="divide-y divide-stone-50">
-              {#each sortedChecks as check}
-                {@const queryMeta = getBalanceStatusMeta(check.display_status || check.status)}
+              {#each sortedChecks as check (check.id)}
+                {@const queryMeta = getBalanceStatusMeta(check.display_status)}
                 <tr class="hover:bg-stone-50">
                   <td class="px-4 py-3 font-mono text-xs text-stone-500 whitespace-nowrap"
                     >{formatTime(getBalanceTimestamp(check))}</td
@@ -1534,13 +1655,13 @@
                   <td class="px-4 py-3 font-mono font-semibold text-stone-800 whitespace-nowrap"
                     >{formatCardNumber(check.sim_index)}
                     <span class="ml-1 text-xs font-normal text-stone-500"
-                      >{check.sim_number || check.sim_iccid}</span
+                      >{textOr(check.sim_number, check.sim_iccid)}</span
                     ></td
                   >
                   <td class="px-4 py-3 text-stone-600 whitespace-nowrap"
-                    >{check.profile_carrier || check.sim_carrier || '—'}</td
+                    >{textOr(check.profile_carrier, textOr(check.sim_carrier, '—'))}</td
                   >
-                  <td class="px-4 py-3 text-xs uppercase text-stone-500">{check.method || '—'}</td>
+                  <td class="px-4 py-3 text-xs uppercase text-stone-500">{check.method}</td>
                   <td class="px-4 py-3"
                     ><span
                       class="inline-flex px-2 py-0.5 rounded-md border text-[11px] font-medium {queryMeta.className}"
@@ -1548,9 +1669,7 @@
                     ></td
                   >
                   <td class="px-4 py-3 font-semibold tabular-nums text-stone-800"
-                    >{formatBalanceMetric(
-                      check.metrics?.find((metric) => metric.metric_type === 'cash_balance'),
-                    )}</td
+                    >{formatBalanceMetric(getCashBalance(check))}</td
                   >
                   <td class="px-4 py-3 text-right"
                     ><button
@@ -1565,8 +1684,8 @@
           </table>
         </div>
         <div class="lg:hidden divide-y divide-stone-100" data-mobile-balance-history>
-          {#each sortedChecks as check}
-            {@const queryMeta = getBalanceStatusMeta(check.display_status || check.status)}
+          {#each sortedChecks as check (check.id)}
+            {@const queryMeta = getBalanceStatusMeta(check.display_status)}
             <button
               type="button"
               onclick={() => onOpenBalance?.(check)}
@@ -1577,7 +1696,7 @@
                   >{formatCardNumber(check.sim_index)}</span
                 >
                 <span class="font-mono text-xs text-stone-500 truncate"
-                  >{check.sim_number || check.sim_iccid}</span
+                  >{textOr(check.sim_number, check.sim_iccid)}</span
                 >
                 <span
                   class="ml-auto inline-flex px-2 py-0.5 rounded-md border text-[10px] font-medium {queryMeta.className}"
@@ -1586,13 +1705,11 @@
               </span>
               <span class="mt-1.5 flex items-center gap-2 text-xs text-stone-500">
                 <strong class="text-sm text-stone-800 tabular-nums"
-                  >{formatBalanceMetric(
-                    check.metrics?.find((metric) => metric.metric_type === 'cash_balance'),
-                  )}</strong
+                  >{formatBalanceMetric(getCashBalance(check))}</strong
                 >
-                <span>{check.profile_carrier || check.sim_carrier || '—'}</span>
+                <span>{textOr(check.profile_carrier, textOr(check.sim_carrier, '—'))}</span>
                 <span class="ml-auto font-mono text-[10px] text-stone-400"
-                  >{formatTime(getBalanceTimestamp(check), true)}</span
+                  >{formatTime(getBalanceTimestamp(check))}</span
                 >
               </span>
             </button>
@@ -1623,7 +1740,7 @@
         <div>
           <h3 class="font-mono font-semibold text-stone-900">
             {formatCardNumber(
-              selectedBill.notification_sim?.sim_index ?? selectedBill.linked_sims?.[0]?.sim_index,
+              selectedBill.notification_sim.sim_index ?? selectedBill.linked_sims[0]?.sim_index,
             )}
           </h3>
           <p class="mt-0.5 text-xs text-stone-400">
@@ -1671,7 +1788,7 @@
           <h4 class="text-xs font-semibold text-stone-700">账单短信接收卡</h4>
           <p class="mt-2 text-sm font-mono text-stone-600">
             {formatCardNumber(
-              selectedBill.notification_sim?.sim_index ?? selectedBill.linked_sims?.[0]?.sim_index,
+              selectedBill.notification_sim.sim_index ?? selectedBill.linked_sims[0]?.sim_index,
             )}
           </p>
         </section>
@@ -1679,7 +1796,7 @@
           <h4 class="text-xs font-semibold text-stone-700">账单短信证据</h4>
           {#if selectedBill.source_message}
             <p class="mt-2 text-[11px] text-stone-400">
-              来自 {selectedBill.source_message.sender || '运营商'}
+              来自 {textOr(selectedBill.source_message.sender, '运营商')}
             </p>
             <blockquote
               class="mt-2 p-3 bg-stone-50 border border-stone-100 rounded-lg text-sm leading-6 text-stone-600 whitespace-pre-wrap break-words"
@@ -1695,7 +1812,7 @@
         <section class="px-5 py-4" aria-label="账单审计记录">
           <h4 class="text-xs font-semibold text-stone-700">审计记录</h4>
           <ol class="mt-2 space-y-2">
-            {#each selectedBill.events || [] as event}
+            {#each selectedBill.events as event (event.id)}
               <li class="flex items-start gap-3 text-xs">
                 <span class="mt-1.5 w-1.5 h-1.5 rounded-full bg-stone-300 shrink-0"></span>
                 <span class="flex-1 text-stone-600">{billEventLabel(event.event_type)}</span>
@@ -1748,7 +1865,7 @@
 
 {#if singlePreview}
   {@const preflight = singlePreview.preflight}
-  {@const runnerUnavailable = preflight.runner?.required && !preflight.runner.available}
+  {@const runnerUnavailable = preflight.runner.required && !preflight.runner.available}
   <div
     class="fixed inset-0 z-50 bg-stone-900/35 flex items-end sm:items-center justify-center sm:p-4"
   >
@@ -1770,8 +1887,7 @@
           </h3>
           <p class="mt-1 text-xs text-stone-400">
             {formatCardNumber(singlePreview.row.phone.sim_index)}
-            <span class="mx-1">·</span>{singlePreview.row.phone.number ||
-              singlePreview.row.phone.phone_number}
+            <span class="mx-1">·</span>{singlePreview.row.phone.number}
           </p>
         </div>
         <button
@@ -1786,8 +1902,9 @@
       <div class="px-5 py-5 text-sm text-stone-600 leading-6">
         {#if runnerUnavailable}
           <p>
-            此查询需要 {capabilityLabels[preflight.method.capability] ||
-              '查询助手'}，当前没有可用实例。
+            此查询需要 {preflight.method.capability === null
+              ? '查询助手'
+              : capabilityLabels[preflight.method.capability]}，当前没有可用实例。
           </p>
           <p class="mt-2 text-xs text-stone-400">
             在电脑上启动并登录查询助手（Balance Agent）后再查询，可立即处理任务。
@@ -1890,7 +2007,7 @@
             />
             <span class="flex-1 text-stone-600">直接短信</span>
             <strong class="font-mono tabular-nums text-stone-800"
-              >{batchPreview.method_summary.direct_sms || 0}</strong
+              >{batchPreview.method_summary.direct_sms}</strong
             >
           </label>
           <label class="px-4 py-3 flex items-center gap-3 text-sm">
@@ -1898,17 +2015,17 @@
               type="checkbox"
               bind:checked={batchMethods.sms_ai}
               disabled={!batchPreview.method_summary.sms_ai ||
-                !batchPreview.runner_capabilities?.sms_ai?.available}
+                !batchPreview.runner_capabilities.sms_ai.available}
               class="rounded border-stone-300 text-orange-500 focus:ring-orange-400"
             />
             <span class="flex-1 text-stone-600">
               AI 短信
-              {#if batchPreview.method_summary.sms_ai && !batchPreview.runner_capabilities?.sms_ai?.available}
+              {#if batchPreview.method_summary.sms_ai && !batchPreview.runner_capabilities.sms_ai.available}
                 <small class="ml-1 text-amber-600">助手未就绪</small>
               {/if}
             </span>
             <strong class="font-mono tabular-nums text-stone-800"
-              >{batchPreview.method_summary.sms_ai || 0}</strong
+              >{batchPreview.method_summary.sms_ai}</strong
             >
           </label>
           <label class="px-4 py-3 flex items-center gap-3 text-sm">
@@ -1916,17 +2033,17 @@
               type="checkbox"
               bind:checked={batchMethods.browser}
               disabled={!batchPreview.method_summary.browser ||
-                !batchPreview.runner_capabilities?.carrier_browser?.available}
+                !batchPreview.runner_capabilities.carrier_browser.available}
               class="rounded border-stone-300 text-orange-500 focus:ring-orange-400"
             />
             <span class="flex-1 text-stone-600">
               浏览器登录（逐张处理）
-              {#if batchPreview.method_summary.browser && !batchPreview.runner_capabilities?.carrier_browser?.available}
+              {#if batchPreview.method_summary.browser && !batchPreview.runner_capabilities.carrier_browser.available}
                 <small class="ml-1 text-amber-600">助手未就绪</small>
               {/if}
             </span>
             <strong class="font-mono tabular-nums text-stone-800"
-              >{batchPreview.method_summary.browser || 0}</strong
+              >{batchPreview.method_summary.browser}</strong
             >
           </label>
           {#if batchMethods.browser}
@@ -1934,7 +2051,7 @@
               <p>
                 浏览器任务串行执行，每张卡都可能需要人工验证，并按运营商 profile 的限流间隔处理。
               </p>
-              {#if (batchPreview.method_summary.browser || 0) > 5}
+              {#if batchPreview.method_summary.browser > 5}
                 <p class="font-medium text-red-600">
                   ⚠️ 当前选中 {batchPreview.method_summary.browser} 张浏览器查询卡，运营商登录接口可能限流，建议分批处理。
                 </p>
