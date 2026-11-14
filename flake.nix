@@ -550,8 +550,6 @@
                 # Frontend development
                 bun
                 oxlint
-                typescript-language-server
-                svelte-language-server
 
                 # Rust development
                 cargo
