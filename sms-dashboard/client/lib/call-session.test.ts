@@ -14,7 +14,7 @@ interface FakeStream {
 }
 
 interface Sdp {
-  type: string;
+  type: RTCSdpType;
   sdp: string;
 }
 
@@ -38,11 +38,11 @@ function fakePeerFactory(log: LogEntry[], { connect = true } = {}) {
     }
 
     createOffer() {
-      return Promise.resolve({ type: 'offer', sdp: 'local-offer' });
+      return Promise.resolve({ type: 'offer', sdp: 'local-offer' } as const);
     }
 
     createAnswer() {
-      return Promise.resolve({ type: 'answer', sdp: 'local-answer' });
+      return Promise.resolve({ type: 'answer', sdp: 'local-answer' } as const);
     }
 
     setLocalDescription(desc: Sdp) {

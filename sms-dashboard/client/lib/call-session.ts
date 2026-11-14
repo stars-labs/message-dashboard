@@ -22,19 +22,31 @@ interface MicLike<Track> {
   getAudioTracks(): Track[];
 }
 
+/** What a track event carries that this reads. `TrackEvent` is RTCTrackEvent in a browser. */
+interface TrackEventLike<Track, Stream> {
+  streams: readonly Stream[];
+  track: Track;
+}
+
+/** An SDP offer or answer as the PeerConnection holds it: RTCSessionDescriptionInit in a browser. */
+interface SdpLike {
+  type: RTCSdpType;
+  sdp?: string;
+}
+
 /**
- * The PeerConnection surface this drives. `Track` and `Stream` are
- * MediaStreamTrack and MediaStream in a browser.
+ * The PeerConnection surface this drives. `Track`, `Stream` and `TrackEvent`
+ * are MediaStreamTrack, MediaProvider and RTCTrackEvent in a browser.
  */
-interface ConnectionLike<Track, Stream> {
+interface ConnectionLike<Track, Stream, TrackEvent extends TrackEventLike<Track, Stream>> {
   connectionState: string;
-  localDescription: { type: string; sdp: string } | null;
-  ontrack: ((event: { streams: readonly Stream[]; track: Track }) => void) | null;
+  localDescription: SdpLike | null;
+  ontrack: ((event: TrackEvent) => void) | null;
   addTransceiver(track: Track, init: { direction: 'sendrecv' }): { mid: string | null };
-  createOffer(): Promise<{ type: string; sdp: string }>;
-  createAnswer(): Promise<{ type: string; sdp: string }>;
-  setLocalDescription(description: { type: string; sdp: string }): Promise<void>;
-  setRemoteDescription(description: { type: string; sdp: string }): Promise<void>;
+  createOffer(): Promise<SdpLike>;
+  createAnswer(): Promise<SdpLike>;
+  setLocalDescription(description: SdpLike): Promise<void>;
+  setRemoteDescription(description: SdpLike): Promise<void>;
   addEventListener(type: 'connectionstatechange', listener: () => void): void;
   removeEventListener(type: 'connectionstatechange', listener: () => void): void;
   close(): void;
@@ -63,13 +75,17 @@ interface CallSessionApi {
   hangup(callId?: string): Promise<unknown>;
 }
 
-interface CallSessionDeps<Track extends TrackLike, Stream> {
+interface CallSessionDeps<
+  Track extends TrackLike,
+  Stream,
+  TrackEvent extends TrackEventLike<Track, Stream>,
+> {
   fetchIce: () => Promise<RTCIceServer[]>;
   api: CallSessionApi;
   RTCPeerConnection: new (config: {
     iceServers: RTCIceServer[];
     bundlePolicy: 'max-bundle';
-  }) => ConnectionLike<Track, Stream>;
+  }) => ConnectionLike<Track, Stream, TrackEvent>;
   getUserMedia: (constraints: { audio: true; video: false }) => Promise<MicLike<Track>>;
   /** Wraps a far-end track that arrived without a stream: `new MediaStream([track])`. */
   streamOf: (track: Track) => Stream;
@@ -77,8 +93,8 @@ interface CallSessionDeps<Track extends TrackLike, Stream> {
   connectTimeoutMs?: number;
 }
 
-function waitForConnected<Track, Stream>(
-  pc: ConnectionLike<Track, Stream>,
+function waitForConnected<Track, Stream, TrackEvent extends TrackEventLike<Track, Stream>>(
+  pc: ConnectionLike<Track, Stream, TrackEvent>,
   timeoutMs: number,
 ): Promise<void> {
   if (pc.connectionState === 'connected') return Promise.resolve();
@@ -104,13 +120,15 @@ function waitForConnected<Track, Stream>(
   });
 }
 
-export function createCallSession<Track extends TrackLike, Stream>(
-  deps: CallSessionDeps<Track, Stream>,
-) {
+export function createCallSession<
+  Track extends TrackLike,
+  Stream,
+  TrackEvent extends TrackEventLike<Track, Stream>,
+>(deps: CallSessionDeps<Track, Stream, TrackEvent>) {
   const { fetchIce, api, RTCPeerConnection, getUserMedia, streamOf, audioElement } = deps;
   const connectTimeoutMs = deps.connectTimeoutMs ?? CONNECT_TIMEOUT_MS;
 
-  let pc: ConnectionLike<Track, Stream> | null = null;
+  let pc: ConnectionLike<Track, Stream, TrackEvent> | null = null;
   let mic: MicLike<Track> | null = null;
   let closed = false;
   let callId: string | null = null;
