@@ -1,7 +1,7 @@
 import * as v from 'valibot';
 
 /** A tenant user with the one app role they hold, if any. */
-const ManagedUser = v.object({
+export const ManagedUser = v.object({
   id: v.string(),
   email: v.nullable(v.string()),
   name: v.nullable(v.string()),
@@ -10,6 +10,8 @@ const ManagedUser = v.object({
   roles: v.array(v.string()),
   role: v.nullable(v.string()),
 });
+
+export type ManagedUser = v.InferOutput<typeof ManagedUser>;
 
 /** GET /api/users. Role names are deployment config, so the server names which is which. */
 export const UsersResponse = v.object({

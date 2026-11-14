@@ -1,8 +1,9 @@
-// Run with: bun run test client/lib/MessageDetail.test.js
+// Run with: bun run test client/lib/MessageDetail.test.ts
 // (bun run, not bare `bun test` — package.json adds --conditions=browser, without
 // which Svelte resolves its server build and every render() throws.)
 import { cleanup, fireEvent, render } from '@testing-library/svelte';
 import { afterEach, describe, expect, test } from 'bun:test';
+import type { ApiMessage } from '../../shared/api/messages.js';
 import MessageDetail from './MessageDetail.svelte';
 
 // A body long enough to exercise the reason this drawer exists. Production's
@@ -12,7 +13,7 @@ const LONG_BODY =
   '【心级服务 让爱连接】尊敬的客户，感谢您长期以来的支持，' +
   '中国移动特开展“请您评价”调研活动，邀请您参与2道问题调研，期待您的10分满意！'.repeat(8);
 
-const received = (fields = {}) => ({
+const received = (fields: Partial<ApiMessage> = {}): ApiMessage => ({
   id: 'msg-1',
   type: 'received',
   content: '【抖音】您的验证码是38291，请在15分钟内使用。',
@@ -26,6 +27,17 @@ const received = (fields = {}) => ({
   filter_status: 'clean',
   filter_rule_id: null,
   timestamp: '2026-08-26 04:01:20',
+  status: null,
+  recipient: null,
+  created_at: null,
+  updated_at: null,
+  error_message: null,
+  sms_id: null,
+  purpose: 'user',
+  balance_check_id: null,
+  processing_session_id: null,
+  phone_status: null,
+  mapped_number: null,
   ...fields,
 });
 
@@ -79,7 +91,9 @@ describe('MessageDetail', () => {
         },
       },
     });
-    await fireEvent.click(getAllByRole('button', { name: '关闭' })[0]);
+    const [closeButton] = getAllByRole('button', { name: '关闭' });
+    if (!closeButton) throw new Error('no close button rendered');
+    await fireEvent.click(closeButton);
     expect(closed).toBe(true);
   });
 
@@ -186,12 +200,12 @@ describe('MessageDetail', () => {
     const { container } = render(MessageDetail, {
       props: {
         message: received({ content: '您的抖音验证码是38291' }),
-        keywords: [{ keyword: '抖音', tag: '抖音', color: '#3B82F6', is_active: true }],
+        keywords: [{ keyword: '抖音', tag: '抖音', color: '#3B82F6' }],
       },
     });
     const marks = container.querySelectorAll('mark');
     expect(marks.length).toBeGreaterThan(0);
-    expect(marks[0].textContent).toBe('抖音');
+    expect(marks[0]?.textContent).toBe('抖音');
   });
 
   // SMS content is fully attacker-controlled: anyone knowing a SIM's number can

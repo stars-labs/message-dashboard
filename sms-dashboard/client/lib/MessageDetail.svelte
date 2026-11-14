@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   import { formatFullTime } from './time.js';
   // Full SMS body, unabridged.
   //
@@ -19,22 +19,41 @@
   import { getOutboundStatusMeta } from './message-status.js';
   import { copyCode } from './clipboard.js';
   import { swipeDismiss } from './swipe-dismiss.js';
+  import type { HighlightKeyword } from './message-highlight.js';
+  import type { ApiMessage } from '../../shared/api/messages.js';
+  import type { Phone } from '../../shared/api/phones.js';
+  import type { FilterRule } from '../../shared/api/filters.js';
+  import { textOr } from '../../shared/text.js';
+
+  interface SelectedPhone extends Pick<Phone, 'sim_index' | 'number'> {
+    flag: string;
+  }
+
+  interface Props {
+    message: ApiMessage | null;
+    selectedPhone?: SelectedPhone | null;
+    keywords?: readonly HighlightKeyword[];
+    /** Filter rules, so a hidden message can name the rule that hid it. */
+    filterRules?: readonly Pick<FilterRule, 'id' | 'pattern' | 'note'>[];
+    onClose?: (() => void) | null;
+  }
 
   let {
     message,
     selectedPhone = null,
     keywords = [],
-    /** Filter rules, so a hidden message can name the rule that hid it. */
     filterRules = [],
     onClose = null,
-  } = $props();
+  }: Props = $props();
 
   let isSent = $derived(message?.type === 'sent');
   let isFiltered = $derived(message?.filter_status === 'filtered');
   let hasCode = $derived(!!message?.verification_code);
 
   let counterpartyNumber = $derived(
-    isSent ? message?.recipient || message?.phone_number || '—' : message?.phone_number || '—',
+    isSent
+      ? textOr(message?.recipient, textOr(message?.phone_number, '—'))
+      : textOr(message?.phone_number, '—'),
   );
 
   let sendStatus = $derived(
@@ -43,28 +62,30 @@
 
   let cardIndex = $derived(message?.phone_sim_index ?? selectedPhone?.sim_index);
   let cardNumber = $derived(
-    message?.display_phone_number ||
-      selectedPhone?.number ||
-      message?.phone_iccid?.slice(-8) ||
-      '—',
+    textOr(
+      message?.display_phone_number,
+      textOr(selectedPhone?.number, textOr(message?.phone_iccid?.slice(-8), '—')),
+    ),
   );
   let cardFlag = $derived(
-    message?.phone_country ? getCountryFlag(message.phone_country) : selectedPhone?.flag || '',
+    message?.phone_country
+      ? getCountryFlag(message.phone_country)
+      : textOr(selectedPhone?.flag, ''),
   );
 
   // Which rule hid this message, by name where one is available.
   let ruleLabel = $derived.by(() => {
     if (!isFiltered) return null;
-    const rule = (filterRules || []).find((r) => r.id === message?.filter_rule_id);
-    return rule ? rule.note || rule.pattern : null;
+    const rule = filterRules.find((r) => r.id === message?.filter_rule_id);
+    return rule ? textOr(rule.note, rule.pattern) : null;
   });
 
   // Copy feedback, shared by the code chip and the copy-whole-body button.
   // Mirrors SimpleMessageView's 2-second pattern so the interaction feels identical.
-  let copied = $state(null);
-  let copyTimer = null;
+  let copied = $state<'code' | 'body' | null>(null);
+  let copyTimer: ReturnType<typeof setTimeout> | null = null;
 
-  async function copyText(text, kind) {
+  async function copyText(text: string | null, kind: 'code' | 'body') {
     if (!text) return;
     const ok = await copyCode(text);
     if (!ok) return;
@@ -76,7 +97,7 @@
   }
 
   onMount(() => {
-    const closeOnEscape = (event) => {
+    const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose?.();
     };
     window.addEventListener('keydown', closeOnEscape);
@@ -100,7 +121,7 @@
 
     <section
       aria-label="短信详情"
-      use:swipeDismiss={{ onDismiss: onClose }}
+      use:swipeDismiss={onClose === null ? {} : { onDismiss: onClose }}
       class="relative w-full h-full lg:w-[480px] bg-white lg:border-l lg:border-stone-200
         flex flex-col will-change-transform"
       style="box-shadow: -16px 0 40px rgba(28,25,23,.16);"
@@ -141,7 +162,7 @@
         <div class="min-w-0 flex-1">
           <div class="flex items-center gap-2 min-w-0">
             <h2 class="text-base font-semibold text-stone-900 shrink-0">短信详情</h2>
-            {#if isSent}
+            {#if sendStatus}
               <span
                 class="inline-flex items-center px-2 py-0.5 rounded-md border text-xs font-medium shrink-0 {sendStatus.className}"
               >
@@ -243,11 +264,11 @@
           {/if}
 
           <p class="mt-3 text-sm leading-relaxed text-stone-700 whitespace-pre-wrap break-words">
-            <MessageHighlight content={message.content || ''} {keywords} />
+            <MessageHighlight content={message.content} {keywords} />
           </p>
 
           <p class="mt-3 text-[11px] text-stone-400 tabular-nums">
-            {(message.content || '').length} 字符
+            {message.content.length} 字符
           </p>
         </section>
 
@@ -266,9 +287,9 @@
             <dt class="text-stone-400">消息编号</dt>
             <dd class="font-mono text-stone-600 break-all">{message.id}</dd>
             <dt class="text-stone-400">ICCID</dt>
-            <dd class="font-mono text-stone-600 break-all">{message.phone_iccid || '—'}</dd>
+            <dd class="font-mono text-stone-600 break-all">{textOr(message.phone_iccid, '—')}</dd>
             <dt class="text-stone-400">运营商</dt>
-            <dd class="text-stone-600">{message.phone_carrier || '—'}</dd>
+            <dd class="text-stone-600">{textOr(message.phone_carrier, '—')}</dd>
           </dl>
         </section>
       </div>

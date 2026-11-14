@@ -1,25 +1,31 @@
-<script>
+<script lang="ts">
   import { confirmAction } from './confirm.svelte.js';
   // Admin-only user/role administration. Reached only when the caller holds
   // `users.read`; the server enforces that independently on both endpoints.
-  import { api } from './api.js';
+  import { errorMessage, request } from './api.js';
+  import { SetRoleResponse, UsersResponse, type ManagedUser } from '../../shared/api/users.js';
+  import { textOr } from '../../shared/text.js';
 
   // The signed-in admin's own id, so we can disable their own row — the server refuses
   // a self-role-change (see server/handlers/users.js) and the UI should not offer it.
-  let { currentUserId = null } = $props();
+  interface Props {
+    currentUserId?: string | null;
+  }
 
-  let users = $state([]);
+  let { currentUserId = null }: Props = $props();
+
+  let users = $state<ManagedUser[]>([]);
   // Role NAMES are deployment config (currently sms-admin / sms-viewer), so nothing here
   // may compare against a hardcoded "admin". The server tells us which name is which.
-  let knownRoles = $state([]);
-  let adminRole = $state(null);
-  let viewerRole = $state(null);
+  let knownRoles = $state<string[]>([]);
+  let adminRole = $state<string | null>(null);
+  let viewerRole = $state<string | null>(null);
   let loading = $state(true);
-  let error = $state(null);
-  let savingId = $state(null);
-  let notice = $state(null);
+  let error = $state<string | null>(null);
+  let savingId = $state<string | null>(null);
+  let notice = $state<string | null>(null);
 
-  const roleLabel = (role) =>
+  const roleLabel = (role: string) =>
     role === adminRole ? '管理员' : role === viewerRole ? '查看者' : role;
 
   // Sort: roleless users first (they need action), then alphabetical by email.
@@ -28,7 +34,7 @@
       const aHasRole = !!a.role;
       const bHasRole = !!b.role;
       if (aHasRole !== bHasRole) return aHasRole ? 1 : -1; // roleless first
-      return (a.email || '').localeCompare(b.email || '');
+      return textOr(a.email, '').localeCompare(textOr(b.email, ''));
     }),
   );
 
@@ -36,24 +42,24 @@
     loading = true;
     error = null;
     try {
-      const r = await api.get('/api/users');
-      users = r.users || [];
-      knownRoles = r.known_roles || [];
-      adminRole = r.admin_role ?? null;
-      viewerRole = r.viewer_role ?? null;
+      const r = await request('/api/users', UsersResponse);
+      users = r.users;
+      knownRoles = r.known_roles;
+      adminRole = r.admin_role;
+      viewerRole = r.viewer_role;
     } catch (e) {
-      error = e?.message || '加载用户失败';
+      error = errorMessage(e, '加载用户失败');
     } finally {
       loading = false;
     }
   }
 
-  async function changeRole(user, role) {
+  async function changeRole(user: ManagedUser, role: string) {
     if (role === user.role) return;
     const verb = role === adminRole ? '提升为管理员' : '降级为查看者';
     if (
       !(await confirmAction({
-        message: `确定要将 ${user.email || user.id} ${verb}吗？\n\n该操作会立即注销该用户的所有会话，需要重新登录。`,
+        message: `确定要将 ${textOr(user.email, user.id)} ${verb}吗？\n\n该操作会立即注销该用户的所有会话，需要重新登录。`,
         confirmLabel: '确认',
         danger: true,
       }))
@@ -64,24 +70,31 @@
     error = null;
     notice = null;
     try {
-      const result = await api.put(`/api/users/${encodeURIComponent(user.id)}/role`, { role });
-      notice = `${user.email || user.id} → ${roleLabel(role)}（已注销 ${result.sessions_revoked ?? 0} 个会话）`;
+      const result = await request(
+        `/api/users/${encodeURIComponent(user.id)}/role`,
+        SetRoleResponse,
+        {
+          method: 'PUT',
+          body: JSON.stringify({ role }),
+        },
+      );
+      notice = `${textOr(user.email, user.id)} → ${roleLabel(role)}（已注销 ${result.sessions_revoked} 个会话）`;
       await load();
     } catch (e) {
-      error = e?.message || '操作失败';
+      error = errorMessage(e, '操作失败');
     } finally {
       savingId = null;
     }
   }
 
   // Outcome label: says what clicking does, not what the role is.
-  function actionLabel(user, role) {
+  function actionLabel(user: ManagedUser, role: string) {
     if (role === adminRole) return '提升为管理员';
     if (role === viewerRole) return user.role === adminRole ? '降级为查看者' : '设为查看者';
     return `设为${roleLabel(role)}`;
   }
 
-  load();
+  void load();
 </script>
 
 <div class="bg-white border-0 rounded-none p-0 lg:border lg:border-stone-200 lg:rounded-xl lg:p-6">
@@ -167,11 +180,11 @@
                     class="w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-sm font-bold
                     {hasNoRole ? 'bg-red-100 text-red-600' : 'bg-stone-100 text-stone-600'}"
                   >
-                    {hasNoRole ? '?' : (u.name || u.email || '?')[0].toUpperCase()}
+                    {hasNoRole ? '?' : textOr(u.name, textOr(u.email, '?')).charAt(0).toUpperCase()}
                   </div>
                   <div>
-                    <div class="font-medium text-stone-800">{u.name || '—'}</div>
-                    <div class="text-xs font-mono text-stone-400">{u.email || '—'}</div>
+                    <div class="font-medium text-stone-800">{textOr(u.name, '—')}</div>
+                    <div class="text-xs font-mono text-stone-400">{textOr(u.email, '—')}</div>
                   </div>
                 </div>
               </td>
@@ -200,7 +213,7 @@
                   <!-- Only show the button for the role the user doesn't currently have.
                        Showing both (one always disabled) wastes space. -->
                   <div class="inline-flex flex-col gap-1 items-end">
-                    {#each knownRoles.filter((r) => r !== u.role) as role}
+                    {#each knownRoles.filter((r) => r !== u.role) as role (role)}
                       <button
                         onclick={() => changeRole(u, role)}
                         disabled={savingId === u.id}
@@ -230,11 +243,11 @@
               class="w-9 h-9 rounded-full flex items-center justify-center shrink-0 text-sm font-bold
               {hasNoRole ? 'bg-red-100 text-red-600' : 'bg-stone-100 text-stone-600'}"
             >
-              {hasNoRole ? '?' : (u.name || u.email || '?')[0].toUpperCase()}
+              {hasNoRole ? '?' : textOr(u.name, textOr(u.email, '?')).charAt(0).toUpperCase()}
             </div>
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-2">
-                <p class="font-medium text-stone-800 truncate">{u.name || '—'}</p>
+                <p class="font-medium text-stone-800 truncate">{textOr(u.name, '—')}</p>
                 <span
                   class="shrink-0 px-2 py-0.5 rounded text-[11px] font-medium
                   {u.role === adminRole
@@ -246,7 +259,7 @@
                   {u.role ? roleLabel(u.role) : '无角色'}
                 </span>
               </div>
-              <p class="text-xs font-mono text-stone-400 truncate mt-0.5">{u.email || '—'}</p>
+              <p class="text-xs font-mono text-stone-400 truncate mt-0.5">{textOr(u.email, '—')}</p>
               <p class="text-[11px] text-stone-400 mt-1">
                 最近登录：{u.last_login ? new Date(u.last_login).toLocaleString('zh-CN') : '从未'}
               </p>
@@ -257,7 +270,7 @@
               <span class="text-xs text-stone-400 py-2">当前登录用户</span>
             {:else}
               <div class="flex flex-wrap justify-end gap-2">
-                {#each knownRoles.filter((r) => r !== u.role) as role}
+                {#each knownRoles.filter((r) => r !== u.role) as role (role)}
                   <button
                     onclick={() => changeRole(u, role)}
                     disabled={savingId === u.id}
