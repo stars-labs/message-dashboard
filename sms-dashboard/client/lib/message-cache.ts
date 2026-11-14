@@ -158,9 +158,14 @@ async function getCachedMessages(
       const store = transaction.objectStore(MESSAGES_STORE);
 
       const messages: ApiMessage[] = [];
-      // Newest first: for one phone by its index, for all by the timestamp index.
+      // Newest first, through an index ordered by time. The phone_iccid index
+      // orders one phone's rows by id, which is random, so a limited read of
+      // it returned an arbitrary subset. [iccid] .. [iccid, []] spans every
+      // timestamp of the phone: in key order an array sorts after any string.
       const request = phoneIccid
-        ? store.index('phone_iccid').openCursor(IDBKeyRange.only(phoneIccid), 'prev')
+        ? store
+            .index('phone_timestamp')
+            .openCursor(IDBKeyRange.bound([phoneIccid], [phoneIccid, []]), 'prev')
         : store.index('timestamp').openCursor(null, 'prev');
 
       request.onsuccess = () => {

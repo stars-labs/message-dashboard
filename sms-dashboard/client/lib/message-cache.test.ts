@@ -74,6 +74,19 @@ describe('message cache', () => {
     expect(newest.map((m) => m.id)).toEqual(['other', 'new']);
   });
 
+  test('returns a phone’s newest messages when it has more than the limit', async () => {
+    // Ids are random in production, so their order says nothing about age.
+    await messageCache.cacheMessages([
+      message('z-oldest', 'sim-a', '2026-09-01T00:00:00.000Z'),
+      message('a-newest', 'sim-a', '2026-09-03T00:00:00.000Z'),
+      message('m-middle', 'sim-a', '2026-09-02T00:00:00.000Z'),
+    ]);
+
+    const newest = await messageCache.getCachedMessages('sim-a', 2);
+
+    expect(newest.map((m) => m.id)).toEqual(['a-newest', 'm-middle']);
+  });
+
   test('returns only the requested phone’s messages', async () => {
     await messageCache.cacheMessages([
       message('a', 'sim-a', '2026-09-01T00:00:00.000Z'),
