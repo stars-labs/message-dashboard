@@ -230,6 +230,7 @@
               coreutils
               sops
               git
+              nodejs_22
             ];
             text = ''
               repo_root="$(git rev-parse --show-toplevel)"
@@ -259,7 +260,9 @@
                   echo "dev-api: missing secrets:$missing" >&2
                   exit 1
                 fi
-                CLOUDFLARE_INCLUDE_PROCESS_ENV=true exec bunx wrangler dev --port 8787
+                # Wrangler supports Node only; under Bun the local server
+                # reports Ready and then never answers a request.
+                CLOUDFLARE_INCLUDE_PROCESS_ENV=true exec node node_modules/wrangler/bin/wrangler.js dev --port 8787
               '
             '';
           };
