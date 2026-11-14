@@ -1,21 +1,20 @@
-import { json } from '../lib/response.js';
 // Spam/marketing filter rule management.
 //
 // Rule mutations affect new ingestion only. Historical changes are a separate,
 // explicitly requested, one-page-at-a-time operation. Nothing here decides what
 // spam is — see utils/spam-filter.ts.
 
+import { json } from '../lib/response.js';
 import * as v from 'valibot';
 import { queryAll, queryFirst, type D1, type D1Batch } from '../lib/d1.js';
 import { OBJECT_MESSAGE, readBody, type MissingKeyMessages } from '../lib/request-body.js';
 import { HISTORY_MISSING_KEY_MESSAGES, HistoryRequestBody } from '../utils/history-request.js';
-import { handleAuth0, type AuthRequest } from '../middleware/auth0.js';
-import { requirePermission, enrichUserPermissions } from '../middleware/rbac.js';
+import type { AuthRequest } from '../middleware/auth0.js';
+import { authorize } from '../middleware/authorize.js';
 import { RULE_TYPE, normalizeSender } from '../utils/spam-filter.js';
 import type { RuleType } from '../utils/spam-filter.js';
 import { processRuleHistoryPage } from '../utils/filter-history.js';
 import { errorText } from '../utils/d1-error.js';
-import type { Permission } from '../../config/auth0-roles.js';
 
 /** Shortest allowed body keyword. A single character would hide almost everything. */
 const MIN_KEYWORD_LENGTH = 2;
@@ -96,16 +95,6 @@ interface ValidatedRule {
 
 type ValidationResult = ValidatedRule | { error: string };
 
-/** Auth0 + RBAC gate. Returns a Response to short-circuit, or null to proceed. */
-async function gate(request: FilterRequest, permission: Permission): Promise<Response | null> {
-  const authResponse = await handleAuth0(request);
-  if (authResponse) return authResponse;
-  enrichUserPermissions(request);
-  const permResponse = requirePermission(permission)(request);
-  if (permResponse) return permResponse;
-  return null;
-}
-
 /** Validate and normalise a rule payload. */
 function validateRule({
   rule_type,
@@ -167,7 +156,7 @@ export function setupFilterRoutes(router: Router): void {
   // List rule metadata only. Historical hit counts require reading every matched
   // message and are not part of the dashboard's operational rule contract.
   router.get('/api/filters', async (request) => {
-    const blocked = await gate(request, 'filters.read');
+    const blocked = await authorize(request, 'filters.read');
     if (blocked) return blocked;
 
     try {
@@ -180,7 +169,7 @@ export function setupFilterRoutes(router: Router): void {
 
   // Create a prospective rule. Existing messages remain historical facts.
   router.post('/api/filters', async (request) => {
-    const blocked = await gate(request, 'filters.write');
+    const blocked = await authorize(request, 'filters.write');
     if (blocked) return blocked;
 
     try {
@@ -222,7 +211,7 @@ export function setupFilterRoutes(router: Router): void {
 
   // Matching identity is immutable. Notes and prospective active state may change.
   router.put('/api/filters/:id', async (request) => {
-    const blocked = await gate(request, 'filters.write');
+    const blocked = await authorize(request, 'filters.write');
     if (blocked) return blocked;
 
     const id = Number(request.params?.['id']);
@@ -273,7 +262,7 @@ export function setupFilterRoutes(router: Router): void {
 
   // A referenced rule is historical provenance and cannot be physically deleted.
   router.delete('/api/filters/:id', async (request) => {
-    const blocked = await gate(request, 'filters.delete');
+    const blocked = await authorize(request, 'filters.delete');
     if (blocked) return blocked;
 
     const id = Number(request.params?.['id']);
@@ -302,7 +291,7 @@ export function setupFilterRoutes(router: Router): void {
 
   // Historical changes are explicit, bounded, and one page per operator action.
   router.post('/api/filters/:id/history', async (request) => {
-    const blocked = await gate(request, 'filters.write');
+    const blocked = await authorize(request, 'filters.write');
     if (blocked) return blocked;
 
     const id = Number(request.params?.['id']);

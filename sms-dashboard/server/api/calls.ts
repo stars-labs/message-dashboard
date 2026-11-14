@@ -1,4 +1,3 @@
-import { json } from '../lib/response.js';
 // Voice calls: browser <-> Cloudflare Realtime SFU <-> voice bridge on the Orange Pi.
 //
 // A single Durable Object owns the fleet's live call state. D1 holds the call log, written
@@ -18,12 +17,13 @@ import { json } from '../lib/response.js';
 // Daemon routes live under /api/control/, which the auth0 middleware gates with
 // X-API-Key.
 
+import { json } from '../lib/response.js';
 import * as v from 'valibot';
 import { parseJson, readJson, type Parsed } from '../../shared/parse-json.js';
 import { D1_MAX_BOUND_PARAMETERS, queryAll, queryFirst, type D1 } from '../lib/d1.js';
 import { OBJECT_MESSAGE, readBody, type MissingKeyMessages } from '../lib/request-body.js';
 import { handleAuth0, type AuthRequest } from '../middleware/auth0.js';
-import { requirePermission, enrichUserPermissions } from '../middleware/rbac.js';
+import { authorize } from '../middleware/authorize.js';
 
 const DIRECTIONS = ['inbound', 'outbound'] as const;
 const CALL_STATES = ['ringing', 'connecting', 'bridging', 'active', 'ending', 'ended'] as const;
@@ -151,16 +151,6 @@ const TRACK_MODEM = 'modem';
 const SFU_BASE = 'https://rtc.live.cloudflare.com/v1';
 const SFU_REQUEST_TIMEOUT_MS = 15_000;
 const TURN_BASE = 'https://rtc.live.cloudflare.com/v1/turn/keys';
-
-/** Auth0 + RBAC gate. Returns a Response to short-circuit, or null to proceed. */
-async function gate(request: CallRequest): Promise<Response | null> {
-  const authResponse = await handleAuth0(request);
-  if (authResponse) return authResponse;
-  enrichUserPermissions(request);
-  const permResponse = requirePermission('messages.read')(request);
-  if (permResponse) return permResponse;
-  return null;
-}
 
 export function missingConfig(env: object): string[] {
   const result = v.safeParse(CallConfig, env);
@@ -766,7 +756,7 @@ function boundedInt(raw: string | null, fallback: number, min: number, max: numb
 export function setupCallRoutes(router: Router): void {
   // Current call state, for the dashboard to poll.
   router.get('/api/calls/state', async (request) => {
-    const blocked = await gate(request);
+    const blocked = await authorize(request, 'messages.read');
     if (blocked) return blocked;
     return json({ call: await readCall(request.env) });
   });
@@ -774,7 +764,7 @@ export function setupCallRoutes(router: Router): void {
   // The call log. Read only when someone opens the history — never on the
   // polling path — so it cannot eat the D1 row-read quota.
   router.get('/api/calls/history', async (request) => {
-    const blocked = await gate(request);
+    const blocked = await authorize(request, 'messages.read');
     if (blocked) return blocked;
     const { DB } = request.env;
 
@@ -805,7 +795,7 @@ export function setupCallRoutes(router: Router): void {
   // Short-lived ICE servers for the browser's PeerConnection. The TURN token
   // itself stays in the Worker; the browser only ever sees a 10-minute credential.
   router.get('/api/calls/ice', async (request) => {
-    const blocked = await gate(request);
+    const blocked = await authorize(request, 'messages.read');
     if (blocked) return blocked;
     const config = callConfig(request.env);
     if (config instanceof Response) return config;
@@ -831,7 +821,7 @@ export function setupCallRoutes(router: Router): void {
 
   // Place an outbound call: take the lock, then publish the browser mic.
   router.post('/api/calls/dial', async (request) => {
-    const blocked = await gate(request);
+    const blocked = await authorize(request, 'messages.read');
     if (blocked) return blocked;
     const { env } = request;
     const config = callConfig(env);
@@ -866,7 +856,7 @@ export function setupCallRoutes(router: Router): void {
 
   // Answer the call the daemon reported as ringing.
   router.post('/api/calls/answer', async (request) => {
-    const blocked = await gate(request);
+    const blocked = await authorize(request, 'messages.read');
     if (blocked) return blocked;
     const { env } = request;
     const config = callConfig(env);
@@ -900,7 +890,7 @@ export function setupCallRoutes(router: Router): void {
 
   // Bridge the browser session to the Pi. Called once the PeerConnection is up.
   router.post('/api/calls/connect', async (request) => {
-    const blocked = await gate(request);
+    const blocked = await authorize(request, 'messages.read');
     if (blocked) return blocked;
     const { env } = request;
     const config = callConfig(env);
@@ -1006,7 +996,7 @@ export function setupCallRoutes(router: Router): void {
 
   // Apply the browser's answer to the pull offer from /connect.
   router.post('/api/calls/renegotiate', async (request) => {
-    const blocked = await gate(request);
+    const blocked = await authorize(request, 'messages.read');
     if (blocked) return blocked;
     const { env } = request;
     const config = callConfig(env);
@@ -1040,7 +1030,7 @@ export function setupCallRoutes(router: Router): void {
 
   // Close the adapters for the requested call. Older clients omit the ID.
   router.post('/api/calls/hangup', async (request) => {
-    const blocked = await gate(request);
+    const blocked = await authorize(request, 'messages.read');
     if (blocked) return blocked;
     const { env } = request;
 

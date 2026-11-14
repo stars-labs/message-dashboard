@@ -1,14 +1,15 @@
-// Working version with frontend restored
-import { handleCORS, corsPreflight } from './middleware/cors';
-import { handleAuth0 } from './middleware/auth0';
-import { requirePermission, enrichUserPermissions } from './middleware/rbac';
-import { controlHandler } from './handlers/control';
-import { auth0Handler } from './handlers/auth0';
-import { phonesHandler } from './handlers/phones';
-import { messagesHandler } from './handlers/messages';
-import { iccidMappingsHandler } from './handlers/iccid-mappings';
-import { healthHandler } from './handlers/health';
-import { usersHandler } from './handlers/users';
+import type { Permission } from '../config/auth0-roles.js';
+import { handleCORS, corsPreflight } from './middleware/cors.js';
+import { handleAuth0 } from './middleware/auth0.js';
+import { authorize } from './middleware/authorize.js';
+import { enrichUserPermissions } from './middleware/rbac.js';
+import { controlHandler } from './handlers/control.js';
+import { auth0Handler } from './handlers/auth0.js';
+import { phonesHandler } from './handlers/phones.js';
+import { messagesHandler } from './handlers/messages.js';
+import { iccidMappingsHandler } from './handlers/iccid-mappings.js';
+import { healthHandler } from './handlers/health.js';
+import { usersHandler } from './handlers/users.js';
 import { balanceQueriesHandler, expireStaleBalanceChecks } from './handlers/balance-queries.js';
 import { balanceSkillRunnerHandler } from './handlers/balance-skill-runner.js';
 import {
@@ -18,7 +19,7 @@ import {
 import { balanceRunnersHandler } from './handlers/balance-runners.js';
 import { carrierBillsHandler } from './handlers/carrier-bills.js';
 import { carrierBillingBackfillHandler } from './handlers/carrier-billing-backfill.js';
-import { serveFrontend } from './frontend-handler';
+import { serveFrontend } from './frontend-handler.js';
 import { appShellRedirect } from './frontend-gate.js';
 import { setupKeywordRoutes } from './api/keywords.js';
 import { setupFilterRoutes } from './api/filters.js';
@@ -34,7 +35,21 @@ import { json } from './lib/response.js';
 
 const router = new Router<AppRequest>();
 
-// CORS preflight
+function gate(permission: Permission) {
+  return (request: AppRequest) => authorize(request, permission);
+}
+
+/** Answers a daemon route's unexpected failure with its error text. */
+function reportingErrors(handler: (request: AppRequest) => Promise<Response>) {
+  return async (request: AppRequest) => {
+    try {
+      return await handler(request);
+    } catch (error) {
+      return json({ error: errorText(error) }, 500);
+    }
+  };
+}
+
 router.options('*', corsPreflight);
 
 // Public API routes
@@ -48,12 +63,10 @@ router.get('/favicon.ico', (request) =>
   Response.redirect(new URL('/favicon-32.png', request.url).toString(), 301),
 );
 
-// Auth routes
 router.get('/login', (request) => auth0Handler.login(request));
 router.get('/callback', auth0Handler.callback);
 router.get('/logout', auth0Handler.logout);
 
-// Auth API endpoint
 router.get('/api/auth/me', async (request) => {
   const authResponse = await handleAuth0(request);
   if (authResponse) return authResponse;
@@ -64,87 +77,37 @@ router.get('/api/auth/me', async (request) => {
   return auth0Handler.me(request);
 });
 
-// Protected routes - Web UI
-router.get('/api/phones', async (request) => {
-  const authResponse = await handleAuth0(request);
-  if (authResponse) return authResponse;
-  enrichUserPermissions(request);
-  const permResponse = requirePermission('phones.read')(request);
-  if (permResponse) return permResponse;
-  return phonesHandler.list(request);
-});
+router.get('/api/phones', gate('phones.read'), (request) => phonesHandler.list(request));
 
-router.get('/api/messages', async (request) => {
-  const authResponse = await handleAuth0(request);
-  if (authResponse) return authResponse;
-  enrichUserPermissions(request);
-  const permResponse = requirePermission('messages.read')(request);
-  if (permResponse) return permResponse;
-  return messagesHandler.list(request);
-});
+router.get('/api/messages', gate('messages.read'), (request) => messagesHandler.list(request));
 
-router.get('/api/balance-checks', async (request) => {
-  const authResponse = await handleAuth0(request);
-  if (authResponse) return authResponse;
-  enrichUserPermissions(request);
-  const permResponse = requirePermission('messages.read')(request);
-  if (permResponse) return permResponse;
-  return balanceQueriesHandler.list(request);
-});
+router.get('/api/balance-checks', gate('messages.read'), (request) =>
+  balanceQueriesHandler.list(request),
+);
 
-router.get('/api/balance-checks/status', async (request) => {
-  const authResponse = await handleAuth0(request);
-  if (authResponse) return authResponse;
-  enrichUserPermissions(request);
-  const permResponse = requirePermission('messages.read')(request);
-  if (permResponse) return permResponse;
-  return balanceQueriesHandler.status(request);
-});
+router.get('/api/balance-checks/status', gate('messages.read'), (request) =>
+  balanceQueriesHandler.status(request),
+);
 
-router.get('/api/carrier-billing/accounts', async (request) => {
-  const authResponse = await handleAuth0(request);
-  if (authResponse) return authResponse;
-  enrichUserPermissions(request);
-  const permResponse = requirePermission('bills.read')(request);
-  if (permResponse) return permResponse;
-  return carrierBillsHandler.listAccounts(request);
-});
+router.get('/api/carrier-billing/accounts', gate('bills.read'), (request) =>
+  carrierBillsHandler.listAccounts(request),
+);
 
-router.post('/api/carrier-billing/backfill/preview', async (request) => {
-  const authResponse = await handleAuth0(request);
-  if (authResponse) return authResponse;
-  enrichUserPermissions(request);
-  const permResponse = requirePermission('bills.write')(request);
-  if (permResponse) return permResponse;
-  return carrierBillingBackfillHandler.preview(request);
-});
+router.post('/api/carrier-billing/backfill/preview', gate('bills.write'), (request) =>
+  carrierBillingBackfillHandler.preview(request),
+);
 
-router.post('/api/carrier-billing/backfill/execute', async (request) => {
-  const authResponse = await handleAuth0(request);
-  if (authResponse) return authResponse;
-  enrichUserPermissions(request);
-  const permResponse = requirePermission('bills.write')(request);
-  if (permResponse) return permResponse;
-  return carrierBillingBackfillHandler.execute(request);
-});
+router.post('/api/carrier-billing/backfill/execute', gate('bills.write'), (request) =>
+  carrierBillingBackfillHandler.execute(request),
+);
 
-router.get('/api/carrier-bills', async (request) => {
-  const authResponse = await handleAuth0(request);
-  if (authResponse) return authResponse;
-  enrichUserPermissions(request);
-  const permResponse = requirePermission('bills.read')(request);
-  if (permResponse) return permResponse;
-  return carrierBillsHandler.list(request);
-});
+router.get('/api/carrier-bills', gate('bills.read'), (request) =>
+  carrierBillsHandler.list(request),
+);
 
-router.get('/api/carrier-bills/:id', async (request) => {
-  const authResponse = await handleAuth0(request);
-  if (authResponse) return authResponse;
-  enrichUserPermissions(request);
-  const permResponse = requirePermission('bills.read')(request);
-  if (permResponse) return permResponse;
-  return carrierBillsHandler.get(request);
-});
+router.get('/api/carrier-bills/:id', gate('bills.read'), (request) =>
+  carrierBillsHandler.get(request),
+);
 
 for (const [path, action] of [
   ['/api/carrier-bills/:id/payment-planned', 'paymentPlanned'],
@@ -152,336 +115,173 @@ for (const [path, action] of [
   ['/api/carrier-bills/:id/waive', 'waive'],
   ['/api/carrier-bills/:id/reopen', 'reopen'],
 ] as const) {
-  router.post(path, async (request) => {
-    const authResponse = await handleAuth0(request);
-    if (authResponse) return authResponse;
-    enrichUserPermissions(request);
-    const permResponse = requirePermission('bills.write')(request);
-    if (permResponse) return permResponse;
-    return carrierBillsHandler[action](request);
-  });
+  router.post(path, gate('bills.write'), (request) => carrierBillsHandler[action](request));
 }
 
-router.get('/api/balance-checks/query-preview', async (request) => {
-  const authResponse = await handleAuth0(request);
-  if (authResponse) return authResponse;
-  enrichUserPermissions(request);
-  const permResponse = requirePermission('balances.query')(request);
-  if (permResponse) return permResponse;
-  return balanceQueriesHandler.preview(request);
-});
+router.get('/api/balance-checks/query-preview', gate('balances.query'), (request) =>
+  balanceQueriesHandler.preview(request),
+);
 
-router.post('/api/balance-checks/query-preview', async (request) => {
-  const authResponse = await handleAuth0(request);
-  if (authResponse) return authResponse;
-  enrichUserPermissions(request);
-  const permResponse = requirePermission('balances.query')(request);
-  if (permResponse) return permResponse;
-  return balanceQueriesHandler.preview(request);
-});
+router.post('/api/balance-checks/query-preview', gate('balances.query'), (request) =>
+  balanceQueriesHandler.preview(request),
+);
 
-router.get('/api/balance-checks/query-preflight', async (request) => {
-  const authResponse = await handleAuth0(request);
-  if (authResponse) return authResponse;
-  enrichUserPermissions(request);
-  const permResponse = requirePermission('balances.query')(request);
-  if (permResponse) return permResponse;
-  return balanceQueriesHandler.preflight(request);
-});
+router.get('/api/balance-checks/query-preflight', gate('balances.query'), (request) =>
+  balanceQueriesHandler.preflight(request),
+);
 
-router.get('/api/balance-runners', async (request) => {
-  const authResponse = await handleAuth0(request);
-  if (authResponse) return authResponse;
-  enrichUserPermissions(request);
-  const permResponse = requirePermission('messages.read')(request);
-  if (permResponse) return permResponse;
-  return balanceRunnersHandler.status(request);
-});
+router.get('/api/balance-runners', gate('messages.read'), (request) =>
+  balanceRunnersHandler.status(request),
+);
 
-router.post('/api/balance-checks/query', async (request) => {
-  const authResponse = await handleAuth0(request);
-  if (authResponse) return authResponse;
-  enrichUserPermissions(request);
-  const permResponse = requirePermission('balances.query')(request);
-  if (permResponse) return permResponse;
-  return balanceQueriesHandler.query(request);
-});
+router.post('/api/balance-checks/query', gate('balances.query'), (request) =>
+  balanceQueriesHandler.query(request),
+);
 
-router.post('/api/balance-checks/query-batch', async (request) => {
-  const authResponse = await handleAuth0(request);
-  if (authResponse) return authResponse;
-  enrichUserPermissions(request);
-  const permResponse = requirePermission('balances.query')(request);
-  if (permResponse) return permResponse;
-  return balanceQueriesHandler.queryBatch(request);
-});
+router.post('/api/balance-checks/query-batch', gate('balances.query'), (request) =>
+  balanceQueriesHandler.queryBatch(request),
+);
 
-router.get('/api/balance-checks/:id', async (request) => {
-  const authResponse = await handleAuth0(request);
-  if (authResponse) return authResponse;
-  enrichUserPermissions(request);
-  const permResponse = requirePermission('messages.read')(request);
-  if (permResponse) return permResponse;
-  return balanceQueriesHandler.detail(request);
-});
+router.get('/api/balance-checks/:id', gate('messages.read'), (request) =>
+  balanceQueriesHandler.detail(request),
+);
 
-router.post('/api/messages/send', async (request) => {
-  const authResponse = await handleAuth0(request);
-  if (authResponse) return authResponse;
-  enrichUserPermissions(request);
-  const permResponse = requirePermission('messages.send')(request);
-  if (permResponse) return permResponse;
-  return messagesHandler.send(request);
-});
+router.post('/api/messages/send', gate('messages.send'), (request) =>
+  messagesHandler.send(request),
+);
 
 // User + role administration. Admin-only: `users.read`/`users.write` appear solely in
 // the admin role's permission set. PUT is a privilege-escalation primitive — see
-// server/handlers/users.js for the guards it carries.
-router.get('/api/users', async (request) => {
-  const authResponse = await handleAuth0(request);
-  if (authResponse) return authResponse;
-  enrichUserPermissions(request);
-  const permResponse = requirePermission('users.read')(request);
-  if (permResponse) return permResponse;
-  return usersHandler.list(request);
-});
+// server/handlers/users.ts for the guards it carries.
+router.get('/api/users', gate('users.read'), (request) => usersHandler.list(request));
 
-router.put('/api/users/:id/role', async (request) => {
-  const authResponse = await handleAuth0(request);
-  if (authResponse) return authResponse;
-  enrichUserPermissions(request);
-  const permResponse = requirePermission('users.write')(request);
-  if (permResponse) return permResponse;
-  return usersHandler.setRole(request);
-});
+router.put('/api/users/:id/role', gate('users.write'), (request) => usersHandler.setRole(request));
 
 // ICCID Mappings routes
-router.get('/api/iccid-mappings', async (request) => {
-  const authResponse = await handleAuth0(request);
-  if (authResponse) return authResponse;
-  enrichUserPermissions(request);
-  const permResponse = requirePermission('phones.read')(request);
-  if (permResponse) return permResponse;
-  return iccidMappingsHandler.list(request);
-});
+router.get('/api/iccid-mappings', gate('phones.read'), (request) =>
+  iccidMappingsHandler.list(request),
+);
 
-router.get('/api/iccid-mappings/:id', async (request) => {
-  const authResponse = await handleAuth0(request);
-  if (authResponse) return authResponse;
-  enrichUserPermissions(request);
-  const permResponse = requirePermission('phones.read')(request);
-  if (permResponse) return permResponse;
-  return iccidMappingsHandler.get(request);
-});
+router.get('/api/iccid-mappings/:id', gate('phones.read'), (request) =>
+  iccidMappingsHandler.get(request),
+);
 
-router.get('/api/iccid-mappings/by-iccid/:iccid', async (request) => {
-  const authResponse = await handleAuth0(request);
-  if (authResponse) return authResponse;
-  enrichUserPermissions(request);
-  const permResponse = requirePermission('phones.read')(request);
-  if (permResponse) return permResponse;
-  return iccidMappingsHandler.getByIccid(request);
-});
+router.get('/api/iccid-mappings/by-iccid/:iccid', gate('phones.read'), (request) =>
+  iccidMappingsHandler.getByIccid(request),
+);
 
-router.post('/api/iccid-mappings', async (request) => {
-  const authResponse = await handleAuth0(request);
-  if (authResponse) return authResponse;
-  enrichUserPermissions(request);
-  const permResponse = requirePermission('phones.write')(request);
-  if (permResponse) return permResponse;
-  return iccidMappingsHandler.create(request);
-});
+router.post('/api/iccid-mappings', gate('phones.write'), (request) =>
+  iccidMappingsHandler.create(request),
+);
 
-router.put('/api/iccid-mappings/:id', async (request) => {
-  const authResponse = await handleAuth0(request);
-  if (authResponse) return authResponse;
-  enrichUserPermissions(request);
-  const permResponse = requirePermission('phones.write')(request);
-  if (permResponse) return permResponse;
-  return iccidMappingsHandler.update(request);
-});
+router.put('/api/iccid-mappings/:id', gate('phones.write'), (request) =>
+  iccidMappingsHandler.update(request),
+);
 
-router.delete('/api/iccid-mappings/:id', async (request) => {
-  const authResponse = await handleAuth0(request);
-  if (authResponse) return authResponse;
-  enrichUserPermissions(request);
-  const permResponse = requirePermission('phones.write')(request);
-  if (permResponse) return permResponse;
-  return iccidMappingsHandler.delete(request);
-});
+router.delete('/api/iccid-mappings/:id', gate('phones.write'), (request) =>
+  iccidMappingsHandler.delete(request),
+);
 
-router.post('/api/iccid-mappings/bulk', async (request) => {
-  const authResponse = await handleAuth0(request);
-  if (authResponse) return authResponse;
-  enrichUserPermissions(request);
-  const permResponse = requirePermission('phones.write')(request);
-  if (permResponse) return permResponse;
-  return iccidMappingsHandler.bulkImport(request);
-});
+router.post('/api/iccid-mappings/bulk', gate('phones.write'), (request) =>
+  iccidMappingsHandler.bulkImport(request),
+);
 
-// User Overrides routes removed - obsolete with new schema (user-authoritative sims table)
-// All SIM management now goes through /api/iccid-mappings endpoints
+// Daemon and runner routes: each handler authenticates its caller itself, by API key
+// or runner token.
+router.post(
+  '/api/control/messages',
+  reportingErrors((request) => controlHandler.uploadMessages(request)),
+);
+router.post(
+  '/api/control/devices',
+  reportingErrors((request) => controlHandler.updateDevices(request)),
+);
+router.delete(
+  '/api/control/messages',
+  reportingErrors((request) => controlHandler.clearMessages(request)),
+);
+router.post(
+  '/api/control/cleanup-test-data',
+  reportingErrors((request) => controlHandler.cleanupTestData(request)),
+);
+router.get(
+  '/api/control/pending-sms',
+  reportingErrors((request) => controlHandler.getPendingSMS(request)),
+);
+router.post(
+  '/api/control/sms-result',
+  reportingErrors((request) => controlHandler.updateSMSResult(request)),
+);
+router.post(
+  '/api/control/heartbeat',
+  reportingErrors((request) => controlHandler.heartbeat(request)),
+);
 
-// Control server routes - API Key auth
-router.post('/api/control/messages', async (request) => {
-  // Control messages endpoint hit
-  try {
-    return await controlHandler.uploadMessages(request);
-  } catch (error) {
-    // Control messages error
-    return json({ error: errorText(error) }, 500);
-  }
-});
+router.post('/api/control/balance-checks', (request) => balanceQueriesHandler.create(request));
 
-// Device synchronization endpoint (modems and SIMs separated)
-router.post('/api/control/devices', async (request) => {
-  // Control devices endpoint hit
-  try {
-    return await controlHandler.updateDevices(request);
-  } catch (error) {
-    // Control devices error
-    return json({ error: errorText(error) }, 500);
-  }
-});
+router.post('/api/control/balance-checks/continue', (request) =>
+  balanceQueriesHandler.continue(request),
+);
 
-router.delete('/api/control/messages', async (request) => {
-  // Clear all messages endpoint
-  try {
-    return await controlHandler.clearMessages(request);
-  } catch (error) {
-    return json({ error: errorText(error) }, 500);
-  }
-});
+router.post('/api/control/balance-checks/retry', (request) => balanceQueriesHandler.retry(request));
 
-router.post('/api/control/cleanup-test-data', async (request) => {
-  // Cleanup test data endpoint
-  try {
-    return await controlHandler.cleanupTestData(request);
-  } catch (error) {
-    // Cleanup error
-    return json({ error: errorText(error) }, 500);
-  }
-});
+router.post('/api/control/balance-checks/stop', (request) => balanceQueriesHandler.stop(request));
 
-router.get('/api/control/pending-sms', async (request) => {
-  // Poll and claim pending SMS; liveness is reported through /api/control/heartbeat.
-  try {
-    return await controlHandler.getPendingSMS(request);
-  } catch (error) {
-    // Pending SMS error
-    return json({ error: errorText(error) }, 500);
-  }
-});
+router.post('/api/control/balance-runners/heartbeat', (request) =>
+  balanceRunnersHandler.heartbeat(request),
+);
 
-router.post('/api/control/sms-result', async (request) => {
-  // Update SMS send result from daemon
-  try {
-    return await controlHandler.updateSMSResult(request);
-  } catch (error) {
-    // SMS result error
-    return json({ error: errorText(error) }, 500);
-  }
-});
+router.get('/api/control/balance-runners/check', (request) => balanceRunnersHandler.check(request));
 
-router.post('/api/control/balance-checks', async (request) => {
-  return balanceQueriesHandler.create(request);
-});
+router.get('/api/control/balance-skills/jobs/claim', (request) =>
+  balanceSkillRunnerHandler.claim(request),
+);
 
-router.post('/api/control/balance-checks/continue', async (request) => {
-  return balanceQueriesHandler.continue(request);
-});
+router.post('/api/control/balance-skills/jobs/:id/decision', (request) =>
+  balanceSkillRunnerHandler.decide(request),
+);
 
-router.post('/api/control/balance-checks/retry', async (request) => {
-  return balanceQueriesHandler.retry(request);
-});
+router.post('/api/control/balance-skills/jobs/:id/release', (request) =>
+  balanceSkillRunnerHandler.release(request),
+);
 
-router.post('/api/control/balance-checks/stop', async (request) => {
-  return balanceQueriesHandler.stop(request);
-});
+router.get('/api/control/carrier-web-balance/jobs/claim', (request) =>
+  carrierWebBalanceHandler.claim(request),
+);
 
-router.post('/api/control/balance-runners/heartbeat', async (request) => {
-  return balanceRunnersHandler.heartbeat(request);
-});
+router.post('/api/control/carrier-web-balance/jobs/:id/otp-requested', (request) =>
+  carrierWebBalanceHandler.otpRequested(request),
+);
 
-router.get('/api/control/balance-runners/check', async (request) => {
-  return balanceRunnersHandler.check(request);
-});
+router.get('/api/control/carrier-web-balance/jobs/:id/otp', (request) =>
+  carrierWebBalanceHandler.otp(request),
+);
 
-router.get('/api/control/balance-skills/jobs/claim', async (request) => {
-  return balanceSkillRunnerHandler.claim(request);
-});
+router.post('/api/control/carrier-web-balance/jobs/:id/heartbeat', (request) =>
+  carrierWebBalanceHandler.heartbeat(request),
+);
 
-router.post('/api/control/balance-skills/jobs/:id/decision', async (request) => {
-  return balanceSkillRunnerHandler.decide(request);
-});
+router.post('/api/control/carrier-web-balance/jobs/:id/complete', (request) =>
+  carrierWebBalanceHandler.complete(request),
+);
 
-router.post('/api/control/balance-skills/jobs/:id/release', async (request) => {
-  return balanceSkillRunnerHandler.release(request);
-});
+router.post('/api/control/carrier-web-balance/jobs/:id/fail', (request) =>
+  carrierWebBalanceHandler.fail(request),
+);
 
-router.get('/api/control/carrier-web-balance/jobs/claim', async (request) => {
-  return carrierWebBalanceHandler.claim(request);
-});
+router.post('/api/control/carrier-web-balance/jobs/:id/release', (request) =>
+  carrierWebBalanceHandler.release(request),
+);
 
-router.post('/api/control/carrier-web-balance/jobs/:id/otp-requested', async (request) => {
-  return carrierWebBalanceHandler.otpRequested(request);
-});
-
-router.get('/api/control/carrier-web-balance/jobs/:id/otp', async (request) => {
-  return carrierWebBalanceHandler.otp(request);
-});
-
-router.post('/api/control/carrier-web-balance/jobs/:id/heartbeat', async (request) => {
-  return carrierWebBalanceHandler.heartbeat(request);
-});
-
-router.post('/api/control/carrier-web-balance/jobs/:id/complete', async (request) => {
-  return carrierWebBalanceHandler.complete(request);
-});
-
-router.post('/api/control/carrier-web-balance/jobs/:id/fail', async (request) => {
-  return carrierWebBalanceHandler.fail(request);
-});
-
-router.post('/api/control/carrier-web-balance/jobs/:id/release', async (request) => {
-  return carrierWebBalanceHandler.release(request);
-});
-
-router.post('/api/control/heartbeat', async (request) => {
-  // Daemon heartbeat endpoint
-  try {
-    return await controlHandler.heartbeat(request);
-  } catch (error) {
-    // Heartbeat error
-    return json({ error: errorText(error) }, 500);
-  }
-});
-
-// Setup keyword routes
 setupKeywordRoutes(router);
-
-// Setup spam/marketing filter rule routes
 setupFilterRoutes(router);
-
-// High-confidence verification-code backfill (admin only)
 setupVerificationRoutes(router);
 setupCallRoutes(router);
 
-// Login page route - removed duplicate, using auth0Handler.login above
-
-// Serve frontend for all other routes - check authentication
-router.get('*', async (request) => {
-  const url = new URL(request.url);
-
-  // Routes that bypass the session gate. Empty today: everything except the
-  // explicit /login, /callback and /api paths below goes through auth.
-  const publicRoutes: string[] = [];
-  if (publicRoutes.includes(url.pathname)) {
-    return serveFrontend(request);
-  }
-
-  return (await appShellRedirect(request, request.env)) ?? serveFrontend(request);
-});
+router.get(
+  '*',
+  async (request) => (await appShellRedirect(request, request.env)) ?? serveFrontend(request),
+);
 
 export default {
   async fetch(incoming: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -490,7 +290,6 @@ export default {
     console.log(`[Worker] Received request: ${request.method} ${request.url}`);
 
     try {
-      // Handle regular routes
       const response = await router.handle(request);
 
       if (!response) {
@@ -500,16 +299,13 @@ export default {
         }
 
         console.log(`[Worker] No route matched, serving frontend`);
-        // No route matched, serve frontend (includes assets)
         return serveFrontend(request);
       }
 
       console.log(`[Worker] Route matched, returning response`);
-      // Add CORS headers to API responses
       return handleCORS(response);
     } catch (error) {
       console.error(`[Worker] Error:`, error);
-      // Worker error
       return json({ error: 'Internal Server Error' }, 500);
     }
   },

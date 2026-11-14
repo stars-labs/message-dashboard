@@ -1,4 +1,3 @@
-import { json } from '../lib/response.js';
 // User + role administration.
 //
 // `PUT /api/users/:id/role` is the most security-sensitive endpoint in this codebase: it
@@ -12,6 +11,7 @@ import { json } from '../lib/response.js';
 //   * the target's live sessions are revoked, or a demotion would not take effect for up
 //     to 24 hours (roles are snapshotted into the session at login)
 
+import { json } from '../lib/response.js';
 import * as v from 'valibot';
 import { createRoleConfig, getKnownRoles } from '../../config/auth0-roles.js';
 import { readJson } from '../../shared/parse-json.js';

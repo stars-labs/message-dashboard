@@ -1,7 +1,7 @@
 import { json } from '../lib/response.js';
 import type { D1, D1Batch } from '../lib/d1.js';
-import { handleAuth0, type AuthRequest } from '../middleware/auth0.js';
-import { enrichUserPermissions, requirePermission } from '../middleware/rbac.js';
+import type { AuthRequest } from '../middleware/auth0.js';
+import { authorize } from '../middleware/authorize.js';
 import { reprocessVerificationPage } from '../utils/verification-backfill.js';
 import { sweepPending } from '../utils/spam-backfill.js';
 
@@ -16,16 +16,9 @@ interface Router {
   post(path: string, handler: (request: VerificationRequest) => Promise<Response>): void;
 }
 
-async function gate(request: VerificationRequest): Promise<Response | null> {
-  const authResponse = await handleAuth0(request);
-  if (authResponse) return authResponse;
-  enrichUserPermissions(request);
-  return requirePermission('filters.write')(request) ?? null;
-}
-
 export function setupVerificationRoutes(router: Router): void {
   router.post('/api/verification/reprocess', async (request) => {
-    const blocked = await gate(request);
+    const blocked = await authorize(request, 'filters.write');
     if (blocked) return blocked;
 
     try {

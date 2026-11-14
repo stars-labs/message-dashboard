@@ -3,12 +3,11 @@ import * as v from 'valibot';
 import { queryAll, queryFirst, type D1, type D1Batch } from '../lib/d1.js';
 import { OBJECT_MESSAGE, readBody, type MissingKeyMessages } from '../lib/request-body.js';
 import { HISTORY_MISSING_KEY_MESSAGES, HistoryRequestBody } from '../utils/history-request.js';
-import { handleAuth0, type AuthRequest } from '../middleware/auth0.js';
-import { requirePermission, enrichUserPermissions } from '../middleware/rbac.js';
+import type { AuthRequest } from '../middleware/auth0.js';
+import { authorize } from '../middleware/authorize.js';
 import { errorText } from '../utils/d1-error.js';
 import { DEFAULT_KEYWORD_COLOR, normalizeKeywordColor } from '../utils/keyword-color.js';
 import { processKeywordHistoryPage } from '../utils/keyword-history.js';
-import type { Permission } from '../../config/auth0-roles.js';
 
 const MAX_BATCH_MESSAGES = 100;
 
@@ -153,19 +152,9 @@ const BATCH_MISSING_KEY_MESSAGES = {
   messageIds: MESSAGE_IDS_MESSAGE,
 } as const satisfies MissingKeyMessages<typeof BatchBody>;
 
-/** Auth0 + RBAC gate, at the head of every route here. Returns a Response to short-circuit, or null to proceed. */
-async function gate(request: KeywordRequest, permission: Permission): Promise<Response | null> {
-  const authResponse = await handleAuth0(request);
-  if (authResponse) return authResponse;
-  enrichUserPermissions(request);
-  const permResponse = requirePermission(permission)(request);
-  if (permResponse) return permResponse;
-  return null;
-}
-
 export function setupKeywordRoutes(router: Router): void {
   router.get('/api/keywords', async (request) => {
-    const blocked = await gate(request, 'keywords.read');
+    const blocked = await authorize(request, 'keywords.read');
     if (blocked) return blocked;
 
     try {
@@ -192,7 +181,7 @@ export function setupKeywordRoutes(router: Router): void {
   });
 
   router.get('/api/keywords/:id', async (request) => {
-    const blocked = await gate(request, 'keywords.read');
+    const blocked = await authorize(request, 'keywords.read');
     if (blocked) return blocked;
 
     const id = request.params?.['id'];
@@ -225,7 +214,7 @@ export function setupKeywordRoutes(router: Router): void {
   });
 
   router.post('/api/keywords', async (request) => {
-    const blocked = await gate(request, 'keywords.write');
+    const blocked = await authorize(request, 'keywords.write');
     if (blocked) return blocked;
 
     const user = request.user;
@@ -277,7 +266,7 @@ export function setupKeywordRoutes(router: Router): void {
   });
 
   router.put('/api/keywords/:id', async (request) => {
-    const blocked = await gate(request, 'keywords.write');
+    const blocked = await authorize(request, 'keywords.write');
     if (blocked) return blocked;
 
     const id = request.params?.['id'];
@@ -344,7 +333,7 @@ export function setupKeywordRoutes(router: Router): void {
   });
 
   router.delete('/api/keywords/:id', async (request) => {
-    const blocked = await gate(request, 'keywords.delete');
+    const blocked = await authorize(request, 'keywords.delete');
     if (blocked) return blocked;
 
     const id = request.params?.['id'];
@@ -380,7 +369,7 @@ export function setupKeywordRoutes(router: Router): void {
 
   // Batch get tags for multiple messages - to reduce XHR requests
   router.post('/api/messages/batch-tags', async (request) => {
-    const blocked = await gate(request, 'messages.read');
+    const blocked = await authorize(request, 'messages.read');
     if (blocked) return blocked;
 
     const parsed = await readBody(request, BatchBody, BATCH_MISSING_KEY_MESSAGES);
@@ -449,7 +438,7 @@ export function setupKeywordRoutes(router: Router): void {
 
   // Historical tagging is explicit, bounded, and one page per operator action.
   router.post('/api/keywords/:id/history', async (request) => {
-    const blocked = await gate(request, 'keywords.write');
+    const blocked = await authorize(request, 'keywords.write');
     if (blocked) return blocked;
 
     const id = request.params?.['id'];
@@ -494,7 +483,7 @@ export function setupKeywordRoutes(router: Router): void {
   });
 
   router.get('/api/messages/:id/tags', async (request) => {
-    const blocked = await gate(request, 'messages.read');
+    const blocked = await authorize(request, 'messages.read');
     if (blocked) return blocked;
 
     const id = request.params?.['id'];
