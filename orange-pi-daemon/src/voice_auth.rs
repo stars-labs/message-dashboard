@@ -159,9 +159,14 @@ fn decode_hex(hex: &str) -> Option<Vec<u8>> {
     if !hex.len().is_multiple_of(2) {
         return None;
     }
-    (0..hex.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).ok())
+    let (pairs, _) = hex.as_bytes().as_chunks::<2>();
+    pairs
+        .iter()
+        .map(|pair| {
+            std::str::from_utf8(pair)
+                .ok()
+                .and_then(|digits| u8::from_str_radix(digits, 16).ok())
+        })
         .collect()
 }
 
@@ -281,6 +286,14 @@ mod tests {
     fn rejects_after_expiry() {
         let request = parse_path(VECTOR_PATH).unwrap();
         assert!(!verify("test-key", &request, 1_800_000_001));
+    }
+
+    #[test]
+    fn rejects_a_signature_with_a_multibyte_character_without_panicking() {
+        let path = "/voice/11111111-1111-4111-8111-111111111111/down/answer/8965012306052373985/-/1800000000/a%C3%A9".to_string()
+            + &"a".repeat(61);
+        let request = parse_path(&path).unwrap();
+        assert!(!verify("test-key", &request, 1_700_000_000));
     }
 
     #[test]
