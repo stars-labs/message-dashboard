@@ -1,3 +1,4 @@
+import { json } from '../lib/response.js';
 import * as v from 'valibot';
 import { readJson } from '../../shared/parse-json.js';
 import { queryAll, type D1, type D1Batch } from '../lib/d1.js';
@@ -177,13 +178,6 @@ interface BodyRequest<Db> extends DaemonRequest<Db> {
 
 interface UploadRequest extends BodyRequest<D1 & D1Batch<'run'>> {
   ctx: { waitUntil(promise: Promise<unknown>): void };
-}
-
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  });
 }
 
 /**

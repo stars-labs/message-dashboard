@@ -1,6 +1,7 @@
 import * as v from 'valibot';
 import { auth0Handler, StoredSession, type SessionUser } from '../handlers/auth0.js';
 import { readKvJson, type KV } from '../lib/kv.js';
+import { json } from '../lib/response.js';
 import { secretMatches } from '../lib/secret.js';
 import { createRoleConfig, rolesFromToken, type RoleEnv } from '../../config/auth0-roles.js';
 import { extractSessionToken } from '../utils/session-token.js';
@@ -35,10 +36,7 @@ export async function handleAuth0(request: AuthRequest): Promise<Response | unde
   // Check for API key for control endpoints
   if (new URL(request.url).pathname.startsWith('/api/control/')) {
     if (!(await secretMatches(request.headers.get('X-API-Key'), env.API_KEY))) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-        status: 401,
-        headers: { 'Content-Type': 'application/json' },
-      });
+      return json({ error: 'Unauthorized' }, 401);
     }
     return; // Continue to handler
   }
@@ -52,10 +50,7 @@ export async function handleAuth0(request: AuthRequest): Promise<Response | unde
   );
 
   if (!credential) {
-    return new Response(JSON.stringify({ error: 'No token provided' }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return json({ error: 'No token provided' }, 401);
   }
 
   const token = credential.token;
@@ -66,20 +61,14 @@ export async function handleAuth0(request: AuthRequest): Promise<Response | unde
 
     if (stored) {
       if (!stored.ok) {
-        return new Response(JSON.stringify({ error: 'Authentication failed' }), {
-          status: 401,
-          headers: { 'Content-Type': 'application/json' },
-        });
+        return json({ error: 'Authentication failed' }, 401);
       }
       const session = stored.value;
 
       // Check if session is expired
       if (session.expires_at < Date.now()) {
         await env.SESSIONS.delete(token);
-        return new Response(JSON.stringify({ error: 'Session expired' }), {
-          status: 401,
-          headers: { 'Content-Type': 'application/json' },
-        });
+        return json({ error: 'Session expired' }, 401);
       }
 
       // Add user to request
@@ -92,10 +81,7 @@ export async function handleAuth0(request: AuthRequest): Promise<Response | unde
     const claims = v.safeParse(JwtClaims, jwtPayload);
 
     if (!jwtPayload || !claims.success) {
-      return new Response(JSON.stringify({ error: 'Invalid token' }), {
-        status: 401,
-        headers: { 'Content-Type': 'application/json' },
-      });
+      return json({ error: 'Invalid token' }, 401);
     }
 
     // Create user object from JWT payload
@@ -113,10 +99,7 @@ export async function handleAuth0(request: AuthRequest): Promise<Response | unde
     request.auth0Token = jwtPayload;
   } catch {
     // Auth0 middleware error
-    return new Response(JSON.stringify({ error: 'Authentication failed' }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return json({ error: 'Authentication failed' }, 401);
   }
 
   return undefined;

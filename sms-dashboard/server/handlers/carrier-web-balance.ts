@@ -1,3 +1,4 @@
+import { json } from '../lib/response.js';
 import { nanoid } from 'nanoid';
 import * as v from 'valibot';
 import { parseJson } from '../../shared/parse-json.js';
@@ -166,10 +167,6 @@ type QueryRequest<Op extends D1Operation> = JobRequest<Op> & { url: string };
 type BodyRequest = JobRequest<'first'> & { text(): Promise<string> };
 
 type Lease = { ok: true; job: WebJob; runnerId: string } | { ok: false; response: Response };
-
-function json(data: unknown, status = 200): Response {
-  return Response.json(data, { status });
-}
 
 function normalizePhone(value: string, provider: WebProvider): string {
   const digits = value.replace(/\D/g, '');

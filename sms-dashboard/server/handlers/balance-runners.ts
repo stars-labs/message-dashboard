@@ -1,3 +1,4 @@
+import { json } from '../lib/response.js';
 import * as v from 'valibot';
 import { queryAll, queryFirst, type D1, type D1Batch } from '../lib/d1.js';
 import { readBody, type MissingKeyMessages } from '../lib/request-body.js';
@@ -125,10 +126,6 @@ interface HeartbeatRequest extends RunnerRequest {
 interface StatusRequest {
   env: { DB: D1<'all'> };
   user?: { id: string };
-}
-
-function json(data: unknown, status = 200): Response {
-  return Response.json(data, { status });
 }
 
 function isOnline(row: { seconds_since_heartbeat: number }): boolean {

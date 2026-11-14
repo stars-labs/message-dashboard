@@ -1,3 +1,4 @@
+import { json } from '../lib/response.js';
 import * as v from 'valibot';
 import { queryAll, queryFirst, type D1, type D1Batch } from '../lib/d1.js';
 import { OBJECT_MESSAGE, readBody, type MissingKeyMessages } from '../lib/request-body.js';
@@ -151,13 +152,6 @@ const CREATE_MISSING_KEY_MESSAGES = {
 const BATCH_MISSING_KEY_MESSAGES = {
   messageIds: MESSAGE_IDS_MESSAGE,
 } as const satisfies MissingKeyMessages<typeof BatchBody>;
-
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  });
-}
 
 /** Auth0 + RBAC gate, at the head of every route here. Returns a Response to short-circuit, or null to proceed. */
 async function gate(request: KeywordRequest, permission: Permission): Promise<Response | null> {

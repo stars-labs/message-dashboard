@@ -1,3 +1,4 @@
+import { json } from '../lib/response.js';
 import * as v from 'valibot';
 import { queryAll, type D1 } from '../lib/d1.js';
 
@@ -60,13 +61,6 @@ const DEVICE_COLUMNS = `
           dv.notes,
           dv.created_at,
           dv.updated_at`;
-
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  });
-}
 
 export const phonesHandler = {
   // List all phones

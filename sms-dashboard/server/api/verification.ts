@@ -1,3 +1,4 @@
+import { json } from '../lib/response.js';
 import type { D1, D1Batch } from '../lib/d1.js';
 import { handleAuth0, type AuthRequest } from '../middleware/auth0.js';
 import { enrichUserPermissions, requirePermission } from '../middleware/rbac.js';
@@ -13,13 +14,6 @@ interface VerificationRequest extends AuthRequest {
 /** The router shape this module needs. */
 interface Router {
   post(path: string, handler: (request: VerificationRequest) => Promise<Response>): void;
-}
-
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  });
 }
 
 async function gate(request: VerificationRequest): Promise<Response | null> {

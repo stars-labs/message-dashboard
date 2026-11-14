@@ -112,7 +112,26 @@ describe('Worker health monitoring', () => {
     });
     expect(body).not.toHaveProperty('error');
     expect(response.headers.get('Retry-After')).toBe(retryAt.toUTCString());
+    expect(response.headers.get('Cache-Control')).toBe('no-store');
     expect(retryAt.getUTCHours()).toBe(0);
+  });
+
+  test('every health answer forbids caching', async () => {
+    const { db } = dbStub({ row: healthRow() });
+
+    const answers = [
+      healthHandler.live(),
+      await healthHandler.check(request(db)),
+      await healthHandler.daemonStatus(request(db)),
+      await healthHandler.daemonStatus(request(dbStub({ error: new Error('boom') }).db)),
+    ];
+
+    expect(answers.map((response) => response.headers.get('Cache-Control'))).toEqual([
+      'no-store',
+      'no-store',
+      'no-store',
+      'no-store',
+    ]);
   });
 
   test('readiness classifies other D1 failures without exposing raw errors', async () => {

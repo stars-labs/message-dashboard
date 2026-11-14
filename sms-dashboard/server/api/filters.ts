@@ -1,3 +1,4 @@
+import { json } from '../lib/response.js';
 // Spam/marketing filter rule management.
 //
 // Rule mutations affect new ingestion only. Historical changes are a separate,
@@ -94,13 +95,6 @@ interface ValidatedRule {
 }
 
 type ValidationResult = ValidatedRule | { error: string };
-
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  });
-}
 
 /** Auth0 + RBAC gate. Returns a Response to short-circuit, or null to proceed. */
 async function gate(request: FilterRequest, permission: Permission): Promise<Response | null> {

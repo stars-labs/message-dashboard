@@ -11,6 +11,7 @@
 
 import { createRoleConfig, getKnownRoles, permissionsForRoles } from '../../config/auth0-roles.js';
 import type { Permission, RoleEnv } from '../../config/auth0-roles.js';
+import { json } from '../lib/response.js';
 
 export interface PermissionRequest {
   user?: { roles?: unknown; permissions?: string[] };
@@ -18,10 +19,7 @@ export interface PermissionRequest {
 }
 
 function forbidden(message: string): Response {
-  return new Response(JSON.stringify({ error: 'Forbidden', message }), {
-    status: 403,
-    headers: { 'Content-Type': 'application/json' },
-  });
+  return json({ error: 'Forbidden', message }, 403);
 }
 
 /**
@@ -36,10 +34,7 @@ export function requirePermission(
     const { user, env } = request;
 
     if (!user) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-        status: 401,
-        headers: { 'Content-Type': 'application/json' },
-      });
+      return json({ error: 'Unauthorized' }, 401);
     }
 
     const roleConfig = createRoleConfig(env);

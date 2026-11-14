@@ -1,3 +1,4 @@
+import { json } from '../lib/response.js';
 import * as v from 'valibot';
 import { parseJson } from '../../shared/parse-json.js';
 import { queryFirst, type D1 } from '../lib/d1.js';
@@ -65,13 +66,6 @@ interface ExecuteRequest {
   user?: { id: string };
   headers: { get(name: string): string | null };
   text(): Promise<string>;
-}
-
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  });
 }
 
 function publicPreview(preview: BackfillPreview) {

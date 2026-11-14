@@ -1,5 +1,6 @@
 import * as v from 'valibot';
 import { queryFirst, type D1 } from '../lib/d1.js';
+import { json } from '../lib/response.js';
 import { deriveDaemonHealth } from '../utils/daemon-health.js';
 import { classifyD1Error, logD1Error } from '../utils/d1-error.js';
 import type { D1ErrorClassification } from '../utils/d1-error.js';
@@ -23,15 +24,8 @@ const DaemonHealthRow = v.object({
   seconds_since_heartbeat: v.nullable(v.number()),
 });
 
-function json(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: {
-      'Content-Type': 'application/json',
-      'Cache-Control': 'no-store',
-      ...headers,
-    },
-  });
+function uncached(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
+  return json(body, status, { 'Cache-Control': 'no-store', ...headers });
 }
 
 function unavailableBody(classification: D1ErrorClassification, timestamp: string) {
@@ -61,7 +55,7 @@ function unavailableHeaders(classification: D1ErrorClassification): Record<strin
 
 export const healthHandler = {
   live(): Response {
-    return json({
+    return uncached({
       status: 'alive',
       timestamp: new Date().toISOString(),
     });
@@ -76,7 +70,7 @@ export const healthHandler = {
       // daemon state. A constant SELECT 1 can succeed after table reads are blocked.
       const daemonHealth = await queryFirst(env.DB.prepare(DAEMON_HEALTH_SELECT), DaemonHealthRow);
       const derived = deriveDaemonHealth(daemonHealth);
-      return json(
+      return uncached(
         {
           status: derived.status,
           database: { status: 'connected' },
@@ -93,7 +87,7 @@ export const healthHandler = {
     } catch (error) {
       const classification = classifyD1Error(error);
       logD1Error('health_readiness', error, classification);
-      return json(
+      return uncached(
         unavailableBody(classification, timestamp),
         503,
         unavailableHeaders(classification),
@@ -109,7 +103,7 @@ export const healthHandler = {
 
       if (!daemonHealth) {
         const derived = deriveDaemonHealth(null);
-        return json({
+        return uncached({
           status: derived.status,
           label: derived.label,
           message: derived.reasons[0],
@@ -122,7 +116,7 @@ export const healthHandler = {
       const derived = deriveDaemonHealth(daemonHealth);
       const snapshot = derived.snapshot;
 
-      return json({
+      return uncached({
         daemon_id: daemonHealth.daemon_id,
         status: derived.status,
         label: derived.label,
@@ -136,7 +130,7 @@ export const healthHandler = {
     } catch (error) {
       const classification = classifyD1Error(error);
       logD1Error('daemon_status', error, classification);
-      return json(
+      return uncached(
         {
           status: 'error',
           code: classification.code,

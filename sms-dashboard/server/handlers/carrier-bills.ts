@@ -1,3 +1,4 @@
+import { json } from '../lib/response.js';
 import * as v from 'valibot';
 import { parseJson, readJson } from '../../shared/parse-json.js';
 import { queryAll, queryFirst, type D1, type D1Batch } from '../lib/d1.js';
@@ -151,13 +152,6 @@ interface MutationRequest {
   params?: Record<string, string>;
   headers: { get(name: string): string | null };
   text(): Promise<string>;
-}
-
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  });
 }
 
 function singaporeDate(now: Date = new Date()): string {

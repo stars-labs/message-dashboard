@@ -11,6 +11,7 @@ import {
 } from '../../config/auth0-roles.js';
 import type { D1 } from '../lib/d1.js';
 import { readKvJson, type KV } from '../lib/kv.js';
+import { json } from '../lib/response.js';
 import { extractSessionToken } from '../utils/session-token.js';
 import { getUserRoles, setUserRole, type Auth0ManagementEnv } from '../utils/auth0-management.js';
 import { indexSession, unindexSession } from '../utils/user-sessions.js';
@@ -547,22 +548,17 @@ export const auth0Handler = {
   me(request: MeRequest): Response {
     const { user } = request;
 
-    return new Response(
-      JSON.stringify({
-        success: true,
-        user: {
-          ...user,
-          // Explicit rather than relying on enrichUserPermissions having run: if this
-          // route is ever wired without it, the client sees "no permissions" and hides
-          // everything, instead of `undefined` which `.includes()` would throw on.
-          roles: user?.roles ?? [],
-          permissions: user?.permissions ?? [],
-        },
-      }),
-      {
-        headers: { 'Content-Type': 'application/json' },
+    return json({
+      success: true,
+      user: {
+        ...user,
+        // Explicit rather than relying on enrichUserPermissions having run: if this
+        // route is ever wired without it, the client sees "no permissions" and hides
+        // everything, instead of `undefined` which `.includes()` would throw on.
+        roles: user?.roles ?? [],
+        permissions: user?.permissions ?? [],
       },
-    );
+    });
   },
 
   // Verify JWT token (for API calls)

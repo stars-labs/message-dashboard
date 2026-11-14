@@ -1,3 +1,4 @@
+import { json } from '../lib/response.js';
 import * as v from 'valibot';
 import type { Parsed } from '../../shared/parse-json.js';
 import { queryFirst, type D1, type D1Batch, type D1Statement } from '../lib/d1.js';
@@ -93,10 +94,6 @@ interface JobRequest extends RunnerRequest {
   params?: Record<string, string>;
   env: RunnerRequest['env'] & { DB: D1<'first' | 'run'> & D1Batch<'run'> };
   text(): Promise<string>;
-}
-
-function json(data: unknown, status = 200): Response {
-  return Response.json(data, { status });
 }
 
 /** readBody, answering a body that is not JSON with the route's missing-field message. */

@@ -1,3 +1,4 @@
+import { json } from '../lib/response.js';
 import { nanoid } from 'nanoid';
 import * as v from 'valibot';
 import { readJson } from '../../shared/parse-json.js';
@@ -175,13 +176,6 @@ async function enrichMessagePage(db: D1<'all'>, messages: MessageRow[]) {
       phone_country: device?.country ?? null,
       mapped_number: null,
     };
-  });
-}
-
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
   });
 }
 

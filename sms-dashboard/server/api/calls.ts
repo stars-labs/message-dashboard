@@ -1,3 +1,4 @@
+import { json } from '../lib/response.js';
 // Voice calls: browser <-> Cloudflare Realtime SFU <-> voice bridge on the Orange Pi.
 //
 // A single Durable Object owns the fleet's live call state. D1 holds the call log, written
@@ -150,13 +151,6 @@ const TRACK_MODEM = 'modem';
 const SFU_BASE = 'https://rtc.live.cloudflare.com/v1';
 const SFU_REQUEST_TIMEOUT_MS = 15_000;
 const TURN_BASE = 'https://rtc.live.cloudflare.com/v1/turn/keys';
-
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  });
-}
 
 /** Auth0 + RBAC gate. Returns a Response to short-circuit, or null to proceed. */
 async function gate(request: CallRequest): Promise<Response | null> {

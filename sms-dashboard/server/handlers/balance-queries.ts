@@ -1,3 +1,4 @@
+import { json } from '../lib/response.js';
 import { nanoid } from 'nanoid';
 import * as v from 'valibot';
 import { parseJson, type Parsed, type Schema } from '../../shared/parse-json.js';
@@ -434,10 +435,6 @@ interface ControlRequest {
   headers: { get(name: string): string | null };
   env: { API_KEY?: string; DB: D1<'first' | 'run'> & D1Batch<'run'> };
   text(): Promise<string>;
-}
-
-function json(data: unknown, status = 200): Response {
-  return Response.json(data, { status });
 }
 
 function badRequest(error: string): Response {

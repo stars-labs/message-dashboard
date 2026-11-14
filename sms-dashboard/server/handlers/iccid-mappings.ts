@@ -1,3 +1,4 @@
+import { json } from '../lib/response.js';
 import * as v from 'valibot';
 import { readJson } from '../../shared/parse-json.js';
 import { queryAll, queryFirst, type D1 } from '../lib/d1.js';
@@ -172,13 +173,6 @@ interface UpdateRequest extends WriteRequest {
 interface DeleteRequest {
   env: { DB: D1<'run'> };
   params?: Record<string, string>;
-}
-
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  });
 }
 
 function badRequest(error: string): Response {

@@ -30,6 +30,7 @@ import { reconcileCarrierBillMessages } from './utils/carrier-billing.js';
 import { Router } from './router.js';
 import type { AppRequest } from './worker-context.js';
 import { errorText } from './utils/d1-error.js';
+import { json } from './lib/response.js';
 
 const router = new Router<AppRequest>();
 
@@ -328,10 +329,7 @@ router.post('/api/control/messages', async (request) => {
     return await controlHandler.uploadMessages(request);
   } catch (error) {
     // Control messages error
-    return new Response(JSON.stringify({ error: errorText(error) }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return json({ error: errorText(error) }, 500);
   }
 });
 
@@ -342,10 +340,7 @@ router.post('/api/control/devices', async (request) => {
     return await controlHandler.updateDevices(request);
   } catch (error) {
     // Control devices error
-    return new Response(JSON.stringify({ error: errorText(error) }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return json({ error: errorText(error) }, 500);
   }
 });
 
@@ -354,10 +349,7 @@ router.delete('/api/control/messages', async (request) => {
   try {
     return await controlHandler.clearMessages(request);
   } catch (error) {
-    return new Response(JSON.stringify({ error: errorText(error) }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return json({ error: errorText(error) }, 500);
   }
 });
 
@@ -367,10 +359,7 @@ router.post('/api/control/cleanup-test-data', async (request) => {
     return await controlHandler.cleanupTestData(request);
   } catch (error) {
     // Cleanup error
-    return new Response(JSON.stringify({ error: errorText(error) }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return json({ error: errorText(error) }, 500);
   }
 });
 
@@ -380,10 +369,7 @@ router.get('/api/control/pending-sms', async (request) => {
     return await controlHandler.getPendingSMS(request);
   } catch (error) {
     // Pending SMS error
-    return new Response(JSON.stringify({ error: errorText(error) }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return json({ error: errorText(error) }, 500);
   }
 });
 
@@ -393,10 +379,7 @@ router.post('/api/control/sms-result', async (request) => {
     return await controlHandler.updateSMSResult(request);
   } catch (error) {
     // SMS result error
-    return new Response(JSON.stringify({ error: errorText(error) }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return json({ error: errorText(error) }, 500);
   }
 });
 
@@ -470,10 +453,7 @@ router.post('/api/control/heartbeat', async (request) => {
     return await controlHandler.heartbeat(request);
   } catch (error) {
     // Heartbeat error
-    return new Response(JSON.stringify({ error: errorText(error) }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return json({ error: errorText(error) }, 500);
   }
 });
 
@@ -516,12 +496,7 @@ export default {
       if (!response) {
         const pathname = new URL(request.url).pathname;
         if (pathname === '/api' || pathname.startsWith('/api/')) {
-          return handleCORS(
-            new Response(JSON.stringify({ error: 'Not Found' }), {
-              status: 404,
-              headers: { 'Content-Type': 'application/json' },
-            }),
-          );
+          return handleCORS(json({ error: 'Not Found' }, 404));
         }
 
         console.log(`[Worker] No route matched, serving frontend`);
@@ -535,10 +510,7 @@ export default {
     } catch (error) {
       console.error(`[Worker] Error:`, error);
       // Worker error
-      return new Response(JSON.stringify({ error: 'Internal Server Error' }), {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' },
-      });
+      return json({ error: 'Internal Server Error' }, 500);
     }
   },
 

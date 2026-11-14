@@ -1,3 +1,4 @@
+import { json } from '../lib/response.js';
 // User + role administration.
 //
 // `PUT /api/users/:id/role` is the most security-sensitive endpoint in this codebase: it
@@ -35,13 +36,6 @@ interface SetRoleRequest {
   params?: Record<string, string>;
   user?: { id: string; email?: string | undefined };
   text(): Promise<string>;
-}
-
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  });
 }
 
 /** Map an Auth0ManagementError to a response without leaking its body to the client. */
