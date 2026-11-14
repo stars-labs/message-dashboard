@@ -63,7 +63,8 @@
     "server/utils/balance-status.ts",
     "server/handlers/carrier-web-balance.ts",
     "server/api/calls.ts",
-    "server/handlers/balance-queries.ts"
+    "server/handlers/balance-queries.ts",
+    "server/handlers/balance-skill-runner.ts"
   ],
   "exclude": ["**/*.test.ts"],
   "references": [{ "path": "./tsconfig.shared.json" }]
