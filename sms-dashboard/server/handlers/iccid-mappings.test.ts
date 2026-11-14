@@ -600,7 +600,7 @@ describe('ICCID mapping reads', () => {
     database.close();
   });
 
-  test('list answers 500 with the error details when the database fails', async () => {
+  test('list answers 500 with the error detail when the database fails', async () => {
     const response = await iccidMappingsHandler.list({
       env: { DB: failingDb() },
       url: 'https://example.com/api/iccid-mappings',
@@ -610,7 +610,7 @@ describe('ICCID mapping reads', () => {
     expect(await response.json()).toEqual({
       success: false,
       error: 'Failed to fetch ICCID mappings',
-      details: 'D1 is down',
+      detail: 'D1 is down',
     });
   });
 
@@ -828,7 +828,7 @@ describe('ICCID mapping writes', () => {
     database.close();
   });
 
-  test('create answers 500 with the error details when the database fails', async () => {
+  test('create answers 500 with the error detail when the database fails', async () => {
     const response = await iccidMappingsHandler.create({
       env: { DB: failingDb() },
       user,
@@ -839,7 +839,7 @@ describe('ICCID mapping writes', () => {
     expect(await response.json()).toEqual({
       success: false,
       error: 'Failed to create ICCID mapping',
-      details: 'D1 is down',
+      detail: 'D1 is down',
     });
   });
 

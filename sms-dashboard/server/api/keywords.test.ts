@@ -646,7 +646,7 @@ describe('POST /api/keywords', () => {
     expect(keywordRows(db)).toEqual([]);
   });
 
-  test('answers 500 with the details when the write fails', async () => {
+  test('answers 500 with the detail when the write fails', async () => {
     const db = database();
     db.db.run('DROP TABLE keyword_tags');
 
@@ -655,7 +655,7 @@ describe('POST /api/keywords', () => {
 
     expect(response.status).toBe(500);
     expect(body['error']).toBe('Failed to create keyword');
-    expect(body['details']).toBe('no such table: keyword_tags');
+    expect(body['detail']).toBe('no such table: keyword_tags');
   });
 });
 

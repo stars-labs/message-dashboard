@@ -1,4 +1,5 @@
 import { json } from '../lib/response.js';
+import type { ErrorResponse } from '../../shared/api/error.js';
 import * as v from 'valibot';
 import { readJson } from '../../shared/parse-json.js';
 import { queryAll, queryFirst, queryOne, type D1 } from '../lib/d1.js';
@@ -329,8 +330,8 @@ export const iccidMappingsHandler = {
         {
           success: false,
           error: 'Failed to fetch ICCID mappings',
-          details: errorText(error),
-        },
+          detail: errorText(error),
+        } satisfies ErrorResponse,
         500,
       );
     }
@@ -383,8 +384,8 @@ export const iccidMappingsHandler = {
         {
           success: false,
           error: 'ICCID, phone number, and sim_index are required',
-          details: parsed.error,
-        },
+          detail: parsed.error,
+        } satisfies ErrorResponse,
         400,
       );
     }
@@ -502,8 +503,8 @@ export const iccidMappingsHandler = {
         {
           success: false,
           error: 'Failed to create ICCID mapping',
-          details: errorText(error),
-        },
+          detail: errorText(error),
+        } satisfies ErrorResponse,
         500,
       );
     }
@@ -515,7 +516,11 @@ export const iccidMappingsHandler = {
     const parsed = await readJson(request, UpdateBody);
     if (!parsed.ok) {
       return json(
-        { success: false, error: 'phone_number and sim_index are required', details: parsed.error },
+        {
+          success: false,
+          error: 'phone_number and sim_index are required',
+          detail: parsed.error,
+        } satisfies ErrorResponse,
         400,
       );
     }
@@ -772,8 +777,8 @@ export const iccidMappingsHandler = {
         {
           success: false,
           error: 'Failed to import ICCID mappings',
-          details: errorText(error),
-        },
+          detail: errorText(error),
+        } satisfies ErrorResponse,
         500,
       );
     }

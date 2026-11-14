@@ -1,4 +1,5 @@
 import { json } from '../lib/response.js';
+import type { ErrorResponse } from '../../shared/api/error.js';
 import * as v from 'valibot';
 import {
   Keyword,
@@ -247,8 +248,8 @@ export function setupKeywordRoutes(router: Router): void {
       return json(
         {
           error: 'Failed to create keyword',
-          details: errorText(error),
-        },
+          detail: errorText(error),
+        } satisfies ErrorResponse,
         500,
       );
     }

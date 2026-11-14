@@ -1,6 +1,7 @@
 import * as v from 'valibot';
 import { parseJson, readJson, type Schema } from '../../shared/parse-json.js';
 import { textOr } from '../../shared/text.js';
+import { ErrorResponse } from '../../shared/api/error.js';
 import { BalanceChecksResponse, type BalanceCheck } from '../../shared/api/balance-checks.js';
 import {
   CreateIccidMappingResponse,
@@ -17,11 +18,8 @@ import { messageCache } from './message-cache.js';
 // current view deliberately avoids persistent caching (for example spam audit).
 const volatileMessageCursors = new Map<string, string>();
 
-/** The server's error body. `detail` is present for upstream failures. */
-const ErrorBody = v.object({
-  error: v.optional(v.string()),
-  detail: v.optional(v.string()),
-});
+/** The error body, read leniently: a proxy or crash can answer without one. */
+const ErrorBody = v.partial(ErrorResponse);
 
 /** A request the server refused or answered in a shape this client does not know. */
 export class ApiError extends Error {
