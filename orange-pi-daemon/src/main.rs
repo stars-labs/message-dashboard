@@ -18,7 +18,7 @@ use orange_pi_daemon_rust::sync_manager::{
     device_delta, merge_device_reports, DeviceDelta, SyncManager, SyncMode,
 };
 use orange_pi_daemon_rust::timeout_tracker::TimeoutTracker;
-use orange_pi_daemon_rust::types::{Config, MessageWithPath, ModemReport};
+use orange_pi_daemon_rust::types::{Config, MessageWithPath, ModemReport, UploadStatus};
 use orange_pi_daemon_rust::voice_bridge::{VoiceBridge, VoiceBridgeConfig};
 use orange_pi_daemon_rust::worker_pool::{ModemResult, WorkerPool, WorkerPoolConfig};
 
@@ -326,15 +326,16 @@ fn classify_upload_results(
     let mut classification = UploadClassification::default();
     for result in results {
         if let Some(message) = pending.iter().find(|m| m.source_message_id == result.id) {
-            match result.status.as_str() {
-                "stored" | "already_stored" => {
+            match result.status {
+                UploadStatus::Stored | UploadStatus::AlreadyStored => {
                     classification.acknowledged.push(message.clone());
                 }
-                "rejected" if !result.retryable => {
+                UploadStatus::Rejected if !result.retryable => {
                     classification.dead_letter.push(message.clone());
                 }
-                // retryable rejection or unrecognised status
-                _ => classification.retryable.push(message.clone()),
+                UploadStatus::Rejected | UploadStatus::Unknown(_) => {
+                    classification.retryable.push(message.clone());
+                }
             }
         } else {
             classification.unknown_ids.push(result.id.clone());
@@ -1004,5 +1005,75 @@ async fn main() -> Result<()> {
     loop {
         tokio::time::sleep(Duration::from_secs(300)).await;
         info!("💓 Heartbeat - daemon is healthy");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use orange_pi_daemon_rust::message_store::MessageStatus;
+    use orange_pi_daemon_rust::types::{Direction, Message};
+
+    fn stored(source_message_id: &str) -> StoredMessage {
+        StoredMessage {
+            id: 1,
+            source_message_id: source_message_id.to_string(),
+            message: Message {
+                phone_iccid: "iccid".to_string(),
+                phone_number: "10010".to_string(),
+                content: "content".to_string(),
+                timestamp: "2026-01-01T00:00:00.000Z".to_string(),
+                direction: Direction::Received,
+            },
+            modem_id: "1".to_string(),
+            sms_path: "at:ME:1".to_string(),
+            status: MessageStatus::InFlight,
+            attempts: 1,
+            lease_token: "lease".to_string(),
+        }
+    }
+
+    fn result(id: &str, status: UploadStatus, retryable: bool) -> UploadResult {
+        UploadResult {
+            id: id.to_string(),
+            status,
+            retryable,
+        }
+    }
+
+    #[test]
+    fn upload_results_are_sorted_by_status_and_retryability() {
+        let pending = [
+            stored("stored"),
+            stored("already"),
+            stored("dead"),
+            stored("retry"),
+            stored("unknown"),
+        ];
+        let classification = classify_upload_results(
+            &pending,
+            &[
+                result("stored", UploadStatus::Stored, false),
+                result("already", UploadStatus::AlreadyStored, false),
+                result("dead", UploadStatus::Rejected, false),
+                result("retry", UploadStatus::Rejected, true),
+                result(
+                    "unknown",
+                    UploadStatus::Unknown("throttled".to_string()),
+                    false,
+                ),
+                result("missing", UploadStatus::Stored, false),
+            ],
+        );
+        let ids = |messages: &[StoredMessage]| -> Vec<String> {
+            messages
+                .iter()
+                .map(|m| m.source_message_id.clone())
+                .collect()
+        };
+        assert_eq!(ids(&classification.acknowledged), ["stored", "already"]);
+        assert_eq!(ids(&classification.dead_letter), ["dead"]);
+        assert_eq!(ids(&classification.retryable), ["retry", "unknown"]);
+        assert_eq!(classification.unknown_ids, ["missing"]);
     }
 }

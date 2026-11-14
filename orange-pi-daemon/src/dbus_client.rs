@@ -5,6 +5,7 @@ use tracing::{debug, info, warn};
 // Re-export DeviceDetails so it's accessible from modem_manager
 pub use crate::native_dbus::DeviceDetails;
 use crate::native_dbus::NativeDBusClient;
+use crate::types::ModemState;
 
 /// D-Bus client with native implementation for zero-overhead communication
 /// Falls back to busctl CLI if native D-Bus is unavailable
@@ -87,7 +88,7 @@ impl DBusClient {
     }
 
     /// Get modem state using D-Bus (native first, then busctl)
-    pub async fn get_modem_state(&self, modem_id: &str) -> Result<String> {
+    pub async fn get_modem_state(&self, modem_id: &str) -> Result<ModemState> {
         // Try native D-Bus first
         if let Some(native) = &self.native_client {
             match native.get_modem_state(modem_id).await {
@@ -223,7 +224,7 @@ impl DBusClient {
     }
 
     /// Get modem state using busctl
-    async fn get_modem_state_busctl(&self, modem_id: &str) -> Result<String> {
+    async fn get_modem_state_busctl(&self, modem_id: &str) -> Result<ModemState> {
         let path = format!("/org/freedesktop/ModemManager1/Modem/{modem_id}");
 
         let output = Command::new("busctl")
@@ -248,22 +249,7 @@ impl DBusClient {
             .and_then(|s| s.parse::<i32>().ok())
             .ok_or_else(|| anyhow!("Failed to parse modem state"))?;
 
-        let state = match state_code {
-            0 => "failed",
-            2 => "locked",
-            3 => "disabled",
-            4 => "disabling",
-            5 => "enabling",
-            6 => "enabled",
-            7 => "searching",
-            8 => "registered",
-            9 => "disconnecting",
-            10 => "connecting",
-            11 => "connected",
-            _ => "unknown",
-        };
-
-        Ok(state.to_string())
+        Ok(ModemState::from_code(state_code))
     }
 
     /// Get SIM ICCID using busctl

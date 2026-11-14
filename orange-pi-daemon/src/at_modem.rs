@@ -79,10 +79,29 @@ pub struct ImsStatus {
     pub registration: String,
 }
 
+/// `AT+CMGF` message format.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SmsMode {
+    #[default]
+    Unknown,
+    Pdu,
+    Text,
+}
+
+impl std::fmt::Display for SmsMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Unknown => "Unknown",
+            Self::Pdu => "PDU",
+            Self::Text => "Text",
+        })
+    }
+}
+
 /// SMS configuration
 #[derive(Debug, Clone, Default)]
 pub struct SmsConfig {
-    pub mode: String,
+    pub mode: SmsMode,
     pub storage: String,
 }
 
@@ -975,15 +994,15 @@ impl AtModemManager {
     /// Diagnostic: Get SMS mode and storage
     pub async fn get_sms_config(&self, port: &str) -> Result<SmsConfig> {
         let mode_response = self.send_at_command(port, "AT+CMGF?", self.timeout).await?;
-        let mut mode = "Unknown";
+        let mut mode = SmsMode::Unknown;
         for line in mode_response.lines() {
             if line.contains("+CMGF:") {
                 if let Some(pos) = line.find(':') {
                     let val = line[pos + 1..].trim();
                     if val == "0" {
-                        mode = "PDU";
+                        mode = SmsMode::Pdu;
                     } else if val == "1" {
-                        mode = "Text";
+                        mode = SmsMode::Text;
                     }
                 }
             }
@@ -996,10 +1015,7 @@ impl AtModemManager {
             .map(std::string::ToString::to_string)
             .unwrap_or_default();
 
-        Ok(SmsConfig {
-            mode: mode.to_string(),
-            storage,
-        })
+        Ok(SmsConfig { mode, storage })
     }
 
     /// Diagnostic: Full health check for a modem

@@ -115,7 +115,7 @@ mod tests {
             timestamp: chrono::Utc::now()
                 .format("%Y-%m-%dT%H:%M:%S%.3fZ")
                 .to_string(),
-            direction: "received".to_string(),
+            direction: Direction::Received,
         };
 
         assert_eq!(message.phone_iccid.len(), 20);
@@ -132,7 +132,7 @@ mod tests {
             model: Some("EC20".to_string()),
             firmware_revision: Some("1.0.0".to_string()),
             hardware_revision: None,
-            status: "connected".to_string(),
+            status: ModemStatus::Connected,
             signal: Some(75),
             rssi: Some(-65),
             rsrq: None,
@@ -143,10 +143,10 @@ mod tests {
             connection_status: Some("active".to_string()),
             network_type: Some("LTE".to_string()),
             access_tech: Some("4G".to_string()),
-            sim_read_status: Some("ok".to_string()),
+            sim_read_status: Some(SimReadStatus::Ok),
         };
 
-        assert_eq!(modem.status, "connected");
+        assert_eq!(modem.status, ModemStatus::Connected);
         assert_eq!(modem.signal, Some(75));
         assert_eq!(modem.manufacturer, Some("Quectel".to_string()));
     }
@@ -159,7 +159,7 @@ mod tests {
             model: Some("EC20".to_string()),
             firmware_revision: Some("1.0.0".to_string()),
             hardware_revision: None,
-            status: "active".to_string(),
+            status: ModemStatus::Active,
             detected_iccid: Some("89860121750097854321".to_string()),
             detected_phone_number: Some("+1234567890".to_string()),
             detected_operator: Some("Test Operator".to_string()),
@@ -171,7 +171,7 @@ mod tests {
         };
 
         assert_eq!(report.equipment_id, "IMEI123456789");
-        assert_eq!(report.status, "active");
+        assert_eq!(report.status, ModemStatus::Active);
         assert_eq!(report.signal_percent, Some(75));
         assert_eq!(
             report.detected_iccid,
@@ -206,12 +206,12 @@ mod tests {
             current_modem_id: Some("IMEI123".to_string()),
             operator_name: Some("Test Operator".to_string()),
             operator_id: Some("12345".to_string()),
-            status: "active".to_string(),
+            status: SimStatus::Active,
             sim_index: Some(0),
         };
 
         assert_eq!(sim.iccid.len(), 20);
-        assert_eq!(sim.status, "active");
+        assert_eq!(sim.status, SimStatus::Active);
         assert_eq!(sim.operator_name, Some("Test Operator".to_string()));
     }
 
@@ -223,7 +223,7 @@ mod tests {
             current_modem_id: Some("IMEI456".to_string()),
             operator_name: Some("Carrier".to_string()),
             operator_id: None,
-            status: "active".to_string(),
+            status: SimStatus::Active,
             sim_index: Some(1),
         };
 
@@ -252,7 +252,7 @@ mod tests {
             phone_number: "test".to_string(),
             content: "test".to_string(),
             timestamp: formatted.clone(),
-            direction: "test".to_string(),
+            direction: Direction::Unknown("test".to_string()),
         };
 
         assert_eq!(message.timestamp, formatted);

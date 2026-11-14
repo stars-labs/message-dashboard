@@ -1,6 +1,6 @@
 // Integration tests for MessageStore - SQLite persistence layer
 use orange_pi_daemon_rust::message_store::{MessageStore, Segment};
-use orange_pi_daemon_rust::types::Message;
+use orange_pi_daemon_rust::types::{Direction, Message};
 
 // Helper function to create test message
 fn create_test_message(iccid: &str, content: &str, timestamp: &str) -> Message {
@@ -9,7 +9,7 @@ fn create_test_message(iccid: &str, content: &str, timestamp: &str) -> Message {
         phone_number: "+1234567890".to_string(),
         content: content.to_string(),
         timestamp: timestamp.to_string(),
-        direction: "received".to_string(),
+        direction: Direction::Received,
     }
 }
 

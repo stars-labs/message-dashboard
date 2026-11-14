@@ -13,7 +13,7 @@ use crate::api_client::ApiClient;
 use crate::at_modem::{AtModemManager, VoicePorts};
 use crate::modem_manager::ModemManager;
 use crate::proxy_protocol;
-use crate::types::ModemReport;
+use crate::types::{CallEndReason, ModemReport};
 use crate::urc_reader::{parse_urc_line, UrcEvent};
 use crate::voice_auth::{self, CallAction, Leg, VoiceRequest};
 use crate::voice_call::{is_ringing, parse_clcc, RingReport, RingTracker};
@@ -412,7 +412,7 @@ impl VoiceBridge {
                 let (call_id, iccid) = (request.call_id.clone(), request.iccid.clone());
                 tokio::spawn(async move {
                     if let Err(e) = api
-                        .report_call_ended(Some(&call_id), &iccid, "setup_failed")
+                        .report_call_ended(Some(&call_id), &iccid, CallEndReason::SetupFailed)
                         .await
                     {
                         warn!(call_id = %call_id, "📞 Failed to report call setup failure: {}", e);
@@ -558,7 +558,7 @@ impl VoiceBridge {
                 () = tokio::time::sleep(WATCHDOG_INTERVAL) => {}
             }
             let reason = match self.at(&modem_id, "AT+CLCC", Duration::from_secs(3)).await {
-                Ok(clcc) if parse_clcc(&clcc).is_empty() => Some("remote_hangup"),
+                Ok(clcc) if parse_clcc(&clcc).is_empty() => Some(CallEndReason::RemoteHangup),
                 Ok(_) => None,
                 Err(e) => {
                     warn!(modem_id = %modem_id, "📞 CLCC failed during call: {}", e);
@@ -569,8 +569,8 @@ impl VoiceBridge {
                 && !(handles.up_seen.load(Ordering::Relaxed)
                     && handles.down_seen.load(Ordering::Relaxed));
             let reason = reason
-                .or(legs_missing.then_some("adapter_missing"))
-                .or((started.elapsed() > MAX_CALL).then_some("max_duration"));
+                .or(legs_missing.then_some(CallEndReason::AdapterMissing))
+                .or((started.elapsed() > MAX_CALL).then_some(CallEndReason::MaxDuration));
             if let Some(reason) = reason {
                 self.end_call(&handles.call_id, reason).await;
                 return;
@@ -579,7 +579,7 @@ impl VoiceBridge {
     }
 
     /// Idempotent: only the first caller for a call id does the teardown.
-    async fn end_call(&self, call_id: &str, reason: &str) {
+    async fn end_call(&self, call_id: &str, reason: CallEndReason) {
         let active = finish_modem_call(&self.state, call_id, async |modem| {
             self.release_modem(modem).await;
         })
@@ -588,7 +588,7 @@ impl VoiceBridge {
             return;
         };
 
-        info!(call_id, modem_id = %active.modem_id, reason, "📞 Call ended");
+        info!(call_id, modem_id = %active.modem_id, reason = reason.as_str(), "📞 Call ended");
         if let Err(e) = self
             .api
             .report_call_ended(Some(call_id), &active.iccid, reason)
@@ -617,7 +617,7 @@ impl VoiceBridge {
                 .map(|a| a.handles.call_id.clone())
         };
         if let Some(call_id) = call_id {
-            self.end_call(&call_id, "remote_hangup").await;
+            self.end_call(&call_id, CallEndReason::RemoteHangup).await;
         }
     }
 
@@ -730,7 +730,10 @@ impl VoiceBridge {
                         let api = self.api.clone();
                         let iccid = iccid.clone();
                         tokio::spawn(async move {
-                            if let Err(e) = api.report_call_ended(None, &iccid, "missed").await {
+                            if let Err(e) = api
+                                .report_call_ended(None, &iccid, CallEndReason::Missed)
+                                .await
+                            {
                                 warn!("📞 Failed to report missed call: {}", e);
                             }
                         });
@@ -837,7 +840,7 @@ async fn pump_nmea(
     mut from_browser: mpsc::Receiver<Vec<u8>>,
     mut pcm_ready: watch::Receiver<bool>,
     mut stop: watch::Receiver<bool>,
-) -> &'static str {
+) -> CallEndReason {
     let mut pending = Vec::with_capacity(MODEM_FRAME * 4);
     let mut buf = [0u8; 4096];
     let mut last_sample = 0i16;
@@ -847,18 +850,18 @@ async fn pump_nmea(
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         tokio::select! {
-            _ = stop.changed() => return "stopped",
+            _ = stop.changed() => return CallEndReason::Stopped,
             read = read_some(&fd, &mut buf) => {
                 let n = match read {
                     Ok(n) => n,
                     Err(e) => {
                         warn!("📞 NMEA read failed: {}", e);
-                        return "nmea_error";
+                        return CallEndReason::NmeaError;
                     }
                 };
                 let Some(chunk) = buf.get(..n) else {
                     warn!("📞 NMEA read {} bytes into a {}-byte buffer", n, buf.len());
-                    return "nmea_error";
+                    return CallEndReason::NmeaError;
                 };
                 pending.extend_from_slice(chunk);
                 while pending.len() >= MODEM_FRAME {
@@ -875,7 +878,7 @@ async fn pump_nmea(
             changed = pcm_ready.changed() => {
                 // The sender lives in the call state and goes away on teardown.
                 if changed.is_err() {
-                    return "stopped";
+                    return CallEndReason::Stopped;
                 }
                 let ready = *pcm_ready.borrow_and_update();
                 pacer.set_ready(ready);
@@ -889,7 +892,7 @@ async fn pump_nmea(
                 if let Some(frame) = pacer.next_frame() {
                     if let Err(e) = write_all(&fd, &frame).await {
                         warn!("📞 NMEA write failed: {}", e);
-                        return "nmea_error";
+                        return CallEndReason::NmeaError;
                     }
                 }
                 let dropped = pacer.take_dropped();
@@ -906,7 +909,7 @@ async fn pump_up<S>(
     mut ws: tokio_tungstenite::WebSocketStream<S>,
     mut audio: broadcast::Receiver<Arc<Vec<u8>>>,
     mut stop: watch::Receiver<bool>,
-) -> &'static str
+) -> CallEndReason
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
@@ -914,21 +917,21 @@ where
         tokio::select! {
             _ = stop.changed() => {
                 let _ = ws.close(None).await;
-                return "stopped";
+                return CallEndReason::Stopped;
             }
             frame = audio.recv() => match frame {
                 Ok(bytes) => {
                     if ws.send(Message::Binary(bytes.as_ref().clone())).await.is_err() {
-                        return "adapter_closed";
+                        return CallEndReason::AdapterClosed;
                     }
                 }
                 Err(broadcast::error::RecvError::Lagged(skipped)) => {
                     debug!("📞 up leg dropped {} frames", skipped);
                 }
-                Err(broadcast::error::RecvError::Closed) => return "stopped",
+                Err(broadcast::error::RecvError::Closed) => return CallEndReason::Stopped,
             },
             incoming = ws.next() => match incoming {
-                Some(Ok(Message::Close(_)) | Err(_)) | None => return "adapter_closed",
+                Some(Ok(Message::Close(_)) | Err(_)) | None => return CallEndReason::AdapterClosed,
                 Some(Ok(_)) => {}
             },
         }
@@ -940,7 +943,7 @@ async fn pump_down<S>(
     mut ws: tokio_tungstenite::WebSocketStream<S>,
     to_modem: mpsc::Sender<Vec<u8>>,
     mut stop: watch::Receiver<bool>,
-) -> &'static str
+) -> CallEndReason
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
@@ -948,7 +951,7 @@ where
         tokio::select! {
             _ = stop.changed() => {
                 let _ = ws.close(None).await;
-                return "stopped";
+                return CallEndReason::Stopped;
             }
             incoming = ws.next() => match incoming {
                 Some(Ok(Message::Binary(bytes))) => {
@@ -960,7 +963,7 @@ where
                     // add latency to a live call.
                     let _ = to_modem.try_send(pcm);
                 }
-                Some(Ok(Message::Close(_)) | Err(_)) | None => return "adapter_closed",
+                Some(Ok(Message::Close(_)) | Err(_)) | None => return CallEndReason::AdapterClosed,
                 Some(Ok(_)) => {}
             },
         }

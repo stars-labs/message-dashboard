@@ -1,3 +1,4 @@
+use crate::types::ModemState;
 use anyhow::{anyhow, Context, Result};
 use std::collections::HashMap;
 use tracing::{debug, info, warn};
@@ -202,7 +203,7 @@ impl NativeDBusClient {
     }
 
     /// Get modem state using native D-Bus
-    pub async fn get_modem_state(&self, modem_id: &str) -> Result<String> {
+    pub async fn get_modem_state(&self, modem_id: &str) -> Result<ModemState> {
         let conn = self
             .connection
             .as_ref()
@@ -217,22 +218,7 @@ impl NativeDBusClient {
 
         let state_code = proxy.state().await.context("Failed to get modem state")?;
 
-        let state = match state_code {
-            0 => "failed",
-            2 => "locked",
-            3 => "disabled",
-            4 => "disabling",
-            5 => "enabling",
-            6 => "enabled",
-            7 => "searching",
-            8 => "registered",
-            9 => "disconnecting",
-            10 => "connecting",
-            11 => "connected",
-            _ => "unknown",
-        };
-
-        Ok(state.to_string())
+        Ok(ModemState::from_code(state_code))
     }
 
     /// Get SIM ICCID using native D-Bus

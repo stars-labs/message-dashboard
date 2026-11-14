@@ -7,7 +7,7 @@ use crate::at_modem::AtModemManager;
 use crate::message_store::Segment;
 use crate::partial_sms;
 use crate::signal_cache::SignalCache;
-use crate::types::{Message, MessageWithPath, SignalData, SmsSubmission};
+use crate::types::{Direction, Message, MessageWithPath, SignalData, SmsSubmission};
 use anyhow::{anyhow, Result};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -621,7 +621,7 @@ impl ModemManager {
                         phone_number: sms.sender,
                         content: sms.text,
                         timestamp: sms.timestamp,
-                        direction: "received".to_string(),
+                        direction: Direction::Received,
                     },
                     modem_id: modem_id.to_string(),
                     sms_path: Self::format_at_sms_path(&[(sms.storage, sms.index)]),
@@ -762,7 +762,7 @@ impl ModemManager {
                 phone_number: group.sender.to_string(),
                 content: combined_text,
                 timestamp,
-                direction: "received".to_string(),
+                direction: Direction::Received,
             },
             modem_id: group.modem_id.to_string(),
             sms_path: Self::format_at_sms_path(&all_locations),
@@ -803,7 +803,7 @@ impl ModemManager {
                 phone_number: group.sender.to_string(),
                 content: partial_sms::assemble_partial(group.total_parts, &numbered),
                 timestamp,
-                direction: "received".to_string(),
+                direction: Direction::Received,
             },
             modem_id: group.modem_id.to_string(),
             sms_path: Self::format_at_sms_path(&locations),
@@ -828,7 +828,7 @@ impl ModemManager {
                     phone_number: sms.number,
                     content: sms.text,
                     timestamp: Self::normalize_timestamp(&sms.timestamp),
-                    direction: "received".to_string(),
+                    direction: Direction::Received,
                 },
                 modem_id: modem_id.to_string(),
                 sms_path: sms.path,

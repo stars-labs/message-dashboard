@@ -1,10 +1,12 @@
 use crate::types::ModemReport;
+use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::hash::BuildHasher;
 use tracing::{info, warn};
 
 /// Sync mode for state reconciliation
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SyncMode {
     /// Full state sync - reconcile all devices with server
     Full,
@@ -197,6 +199,7 @@ impl SyncManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::ModemStatus;
     use std::collections::HashMap;
 
     fn report(equipment_id: &str, signal_percent: i32) -> ModemReport {
@@ -206,7 +209,7 @@ mod tests {
             model: Some("EC20".to_string()),
             firmware_revision: Some("1".to_string()),
             hardware_revision: Some("1".to_string()),
-            status: "active".to_string(),
+            status: ModemStatus::Active,
             detected_iccid: Some(format!("iccid-{equipment_id}")),
             detected_phone_number: None,
             detected_operator: Some("carrier".to_string()),
@@ -263,7 +266,7 @@ mod tests {
         let mut signal_changed = report("a", 49);
         signal_changed.rssi = Some(-92);
         let mut state_changed = report("b", 60);
-        state_changed.status = "error".to_string();
+        state_changed.status = ModemStatus::Disconnected;
 
         let delta = device_delta(&previous, &[signal_changed.clone(), state_changed.clone()]);
 
@@ -316,5 +319,21 @@ mod tests {
         assert_eq!(snapshot.len(), 1);
         assert_eq!(snapshot["port-a"].equipment_id, "a");
         assert!(!snapshot.contains_key("port-b"));
+    }
+}
+
+#[cfg(test)]
+mod wire_tests {
+    use super::SyncMode;
+
+    #[test]
+    fn sync_mode_wire_form_matches_its_log_text() {
+        for (mode, text) in [
+            (SyncMode::Full, "full"),
+            (SyncMode::Incremental, "incremental"),
+        ] {
+            assert_eq!(serde_json::to_value(mode).unwrap(), serde_json::json!(text));
+            assert_eq!(mode.as_str(), text);
+        }
     }
 }

@@ -1,6 +1,6 @@
 use anyhow::Context;
 use orange_pi_daemon_rust::types::Config;
-use orange_pi_daemon_rust::types::{PendingSms, SmsSubmission};
+use orange_pi_daemon_rust::types::{PendingSms, Purpose, SmsSubmission};
 use orange_pi_daemon_rust::{
     api_client::ApiClient, modem_manager::ModemManager, sms_sender::SmsSender,
 };
@@ -168,7 +168,7 @@ fn pending_sms_accepts_the_workers_string_id_and_content_fields() {
     assert_eq!(sms.recipient, "10010");
     assert_eq!(sms.id, "09d64494-669b-47ee-9bd3-d2ea5de0f157");
     assert_eq!(sms.content, "CXLL");
-    assert_eq!(sms.purpose, "balance_maintenance");
+    assert_eq!(sms.purpose, Purpose::BalanceMaintenance);
 }
 
 #[test]
@@ -188,7 +188,7 @@ fn missing_purpose_keeps_the_original_user_default() {
     let mut payload = pending_payload();
     payload.as_object_mut().unwrap().remove("purpose");
     let sms: PendingSms = serde_json::from_value(payload.clone()).unwrap();
-    assert_eq!(sms.purpose, "user");
+    assert_eq!(sms.purpose, Purpose::User);
     payload["purpose"] = json!("user");
     assert_eq!(serde_json::to_value(sms).unwrap(), payload);
 }
@@ -226,10 +226,10 @@ async fn sender_keeps_the_entire_claimed_batch_when_one_purpose_is_missing() {
 
     assert_eq!(messages.len(), 2);
     assert_eq!(messages[0].id, "ordinary-message");
-    assert_eq!(messages[0].purpose, "user");
+    assert_eq!(messages[0].purpose, Purpose::User);
     assert_eq!(messages[0].recipient, "+8613800138000");
     assert_eq!(messages[0].content, "Hello");
-    assert_eq!(messages[1].purpose, "balance_maintenance");
+    assert_eq!(messages[1].purpose, Purpose::BalanceMaintenance);
     assert_eq!(messages[1].recipient, "10010");
     assert_eq!(messages[1].content, "CXLL");
 }

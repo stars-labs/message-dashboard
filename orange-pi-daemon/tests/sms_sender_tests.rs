@@ -2,7 +2,7 @@
 use orange_pi_daemon_rust::api_client::ApiClient;
 use orange_pi_daemon_rust::modem_manager::ModemManager;
 use orange_pi_daemon_rust::sms_sender::SmsSender;
-use orange_pi_daemon_rust::types::{Config, PendingSms};
+use orange_pi_daemon_rust::types::{Config, PendingSms, Purpose};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -31,7 +31,7 @@ fn create_test_sms(id: &str, iccid: &str, recipient: &str, content: &str) -> Pen
         recipient: recipient.to_string(),
         phone_iccid: iccid.to_string(),
         content: content.to_string(),
-        purpose: "user".to_string(),
+        purpose: Purpose::User,
         created_at: "2024-01-01T12:00:00.000Z".to_string(),
     }
 }

@@ -2,7 +2,9 @@
 use orange_pi_daemon_rust::api_client::ApiClient;
 use orange_pi_daemon_rust::message_store::{MessageStatus, StoredMessage};
 use orange_pi_daemon_rust::sync_manager::SyncMode;
-use orange_pi_daemon_rust::types::{Config, Message, Modem, ModemReport, Sim};
+use orange_pi_daemon_rust::types::{
+    Config, Direction, Message, Modem, ModemReport, ModemStatus, Sim, SimReadStatus, SimStatus,
+};
 
 // Helper function to create test config
 fn create_test_config() -> Config {
@@ -20,7 +22,7 @@ fn create_test_message(iccid: &str, content: &str) -> Message {
         phone_number: "+1234567890".to_string(),
         content: content.to_string(),
         timestamp: "2024-01-01T12:00:00.000Z".to_string(),
-        direction: "received".to_string(),
+        direction: Direction::Received,
     }
 }
 
@@ -45,7 +47,7 @@ fn create_test_modem(equipment_id: &str) -> Modem {
         model: Some("EC20".to_string()),
         firmware_revision: Some("EC20CEFAG".to_string()),
         hardware_revision: None,
-        status: "active".to_string(),
+        status: ModemStatus::Active,
         signal: Some(75),
         rssi: Some(-60),
         rsrq: None,
@@ -56,7 +58,7 @@ fn create_test_modem(equipment_id: &str) -> Modem {
         connection_status: Some("connected".to_string()),
         network_type: Some("LTE".to_string()),
         access_tech: Some("LTE".to_string()),
-        sim_read_status: Some("ok".to_string()),
+        sim_read_status: Some(SimReadStatus::Ok),
     }
 }
 
@@ -68,7 +70,7 @@ fn create_test_sim(iccid: &str) -> Sim {
         current_modem_id: Some("123456789012345".to_string()),
         operator_name: Some("TestOp".to_string()),
         operator_id: None,
-        status: "active".to_string(),
+        status: SimStatus::Active,
         sim_index: None,
     }
 }
@@ -214,7 +216,7 @@ fn test_message_structure() {
 
     assert_eq!(msg.phone_iccid, "iccid_001");
     assert_eq!(msg.content, "Hello");
-    assert_eq!(msg.direction, "received");
+    assert_eq!(msg.direction, Direction::Received);
 }
 
 #[test]
@@ -222,7 +224,7 @@ fn test_modem_structure() {
     let modem = create_test_modem("12345");
 
     assert_eq!(modem.equipment_id, "12345");
-    assert_eq!(modem.status, "active");
+    assert_eq!(modem.status, ModemStatus::Active);
     assert_eq!(modem.signal, Some(75));
 }
 
@@ -231,7 +233,7 @@ fn test_sim_structure() {
     let sim = create_test_sim("89860121750097854321");
 
     assert_eq!(sim.iccid, "89860121750097854321");
-    assert_eq!(sim.status, "active");
+    assert_eq!(sim.status, SimStatus::Active);
 }
 
 // ============================================================================

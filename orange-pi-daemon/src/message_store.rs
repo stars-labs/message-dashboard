@@ -7,6 +7,7 @@
 
 use crate::types::Message;
 use anyhow::{Context, Result};
+use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, ValueRef};
 use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::HashMap;
 use std::path::Path;
@@ -25,13 +26,45 @@ pub struct StoredMessage {
     pub lease_token: String,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+/// Position of a local message in the upload queue; the stored text is the
+/// `messages.status` column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MessageStatus {
-    Pending,   // Waiting to be uploaded
-    Uploading, // Currently being uploaded
-    Uploaded,  // Successfully uploaded to API
-    Failed,    // Upload failed (will retry)
-    Deleted,   // Deleted from SIM card
+    Pending,
+    InFlight,
+    Uploaded,
+    DeadLetter,
+}
+
+impl MessageStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::InFlight => "in_flight",
+            Self::Uploaded => "uploaded",
+            Self::DeadLetter => "dead_letter",
+        }
+    }
+}
+
+impl ToSql for MessageStatus {
+    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+        Ok(self.as_str().into())
+    }
+}
+
+impl FromSql for MessageStatus {
+    fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
+        match value.as_str()? {
+            "pending" => Ok(Self::Pending),
+            "in_flight" => Ok(Self::InFlight),
+            "uploaded" => Ok(Self::Uploaded),
+            "dead_letter" => Ok(Self::DeadLetter),
+            other => Err(FromSqlError::Other(
+                format!("unknown message status: {other}").into(),
+            )),
+        }
+    }
 }
 
 /// A multipart SMS fragment and its physical location on the modem.
@@ -143,20 +176,20 @@ fn upgrade_messages_table(conn: &Connection) -> Result<()> {
 
 fn recover_message_statuses(conn: &Connection) -> Result<()> {
     conn.execute(
-        "UPDATE messages SET status = 'pending' WHERE status = 'failed'",
-        [],
+        "UPDATE messages SET status = ?1 WHERE status = 'failed'",
+        params![MessageStatus::Pending],
     )?;
     conn.execute(
-        "UPDATE messages SET status = 'in_flight' WHERE status = 'uploading'",
-        [],
+        "UPDATE messages SET status = ?1 WHERE status = 'uploading'",
+        params![MessageStatus::InFlight],
     )?;
     // `uploading` predates leases. Such rows have no lease expiry, so they
     // would otherwise never satisfy the in-flight recovery predicate.
     conn.execute(
         "UPDATE messages
-         SET status = 'pending', lease_token = NULL, lease_expires_at = NULL
-         WHERE status = 'in_flight' AND lease_expires_at IS NULL",
-        [],
+         SET status = ?1, lease_token = NULL, lease_expires_at = NULL
+         WHERE status = ?2 AND lease_expires_at IS NULL",
+        params![MessageStatus::Pending, MessageStatus::InFlight],
     )?;
     Ok(())
 }
@@ -304,7 +337,7 @@ impl MessageStore {
         conn.execute(
             "INSERT INTO messages
              (source_message_id, phone_iccid, phone_number, content, timestamp, direction, modem_id, sms_path, status)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending')",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 uuid::Uuid::new_v4().to_string(),
                 &message.phone_iccid,
@@ -314,6 +347,7 @@ impl MessageStore {
                 &message.direction,
                 modem_id,
                 sms_path,
+                MessageStatus::Pending,
             ],
         )?;
 
@@ -343,22 +377,25 @@ impl MessageStore {
             let mut stmt = tx.prepare(
                 "SELECT id FROM messages
                  WHERE content IS NOT NULL AND content != ''
-                   AND ((status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= CURRENT_TIMESTAMP))
-                     OR (status = 'in_flight' AND lease_expires_at <= CURRENT_TIMESTAMP))
+                   AND ((status = ?2 AND (next_attempt_at IS NULL OR next_attempt_at <= CURRENT_TIMESTAMP))
+                     OR (status = ?3 AND lease_expires_at <= CURRENT_TIMESTAMP))
                  ORDER BY created_at ASC LIMIT ?1",
             )?;
             let ids = stmt
-                .query_map(params![limit], |row| row.get::<_, i64>(0))?
+                .query_map(
+                    params![limit, MessageStatus::Pending, MessageStatus::InFlight],
+                    |row| row.get::<_, i64>(0),
+                )?
                 .collect::<Result<Vec<_>, _>>()?;
             ids
         };
         let mut claimed = Vec::with_capacity(ids.len());
         for id in ids {
             tx.execute(
-                "UPDATE messages SET status = 'in_flight', attempts = attempts + 1,
+                "UPDATE messages SET status = ?4, attempts = attempts + 1,
                  lease_token = ?1, lease_expires_at = datetime('now', ?2), next_attempt_at = NULL
                  WHERE id = ?3",
-                params![lease_token, lease_interval, id],
+                params![lease_token, lease_interval, id, MessageStatus::InFlight],
             )?;
             claimed.push(tx.query_row(
                 "SELECT id, source_message_id, phone_iccid, phone_number, content, timestamp, direction, modem_id, sms_path, attempts, lease_token
@@ -367,7 +404,7 @@ impl MessageStore {
                 |row| Ok(StoredMessage {
                     id: row.get(0)?, source_message_id: row.get(1)?,
                     message: Message { phone_iccid: row.get(2)?, phone_number: row.get(3)?, content: row.get(4)?, timestamp: row.get(5)?, direction: row.get(6)? },
-                    modem_id: row.get(7)?, sms_path: row.get(8)?, status: MessageStatus::Uploading,
+                    modem_id: row.get(7)?, sms_path: row.get(8)?, status: MessageStatus::InFlight,
                     attempts: row.get(9)?, lease_token: row.get(10)?,
                 }),
             )?);
@@ -377,27 +414,34 @@ impl MessageStore {
     }
 
     pub fn acknowledge_uploaded(&self, messages: &[StoredMessage]) -> Result<()> {
-        self.finish_leases(messages, "uploaded", None)
+        self.finish_leases(messages, MessageStatus::Uploaded, None)
     }
 
     pub fn reject_messages(&self, messages: &[StoredMessage], error: &str) -> Result<()> {
-        self.finish_leases(messages, "dead_letter", Some(error))
+        self.finish_leases(messages, MessageStatus::DeadLetter, Some(error))
     }
 
     fn finish_leases(
         &self,
         messages: &[StoredMessage],
-        status: &str,
+        status: MessageStatus,
         error: Option<&str>,
     ) -> Result<()> {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
         for message in messages {
             tx.execute(
-                "UPDATE messages SET status = ?1, uploaded_at = CASE WHEN ?1 = 'uploaded' THEN CURRENT_TIMESTAMP ELSE uploaded_at END,
+                "UPDATE messages SET status = ?1, uploaded_at = CASE WHEN ?1 = ?5 THEN CURRENT_TIMESTAMP ELSE uploaded_at END,
                  error = ?2, lease_token = NULL, lease_expires_at = NULL
-                 WHERE source_message_id = ?3 AND lease_token = ?4 AND status = 'in_flight'",
-                params![status, error, message.source_message_id, message.lease_token],
+                 WHERE source_message_id = ?3 AND lease_token = ?4 AND status = ?6",
+                params![
+                    status,
+                    error,
+                    message.source_message_id,
+                    message.lease_token,
+                    MessageStatus::Uploaded,
+                    MessageStatus::InFlight
+                ],
             )?;
         }
         tx.commit()?;
@@ -410,10 +454,17 @@ impl MessageStore {
         for message in messages {
             let delay = (2_i64.pow(message.attempts.min(8))).min(300);
             tx.execute(
-                "UPDATE messages SET status = 'pending', error = ?1, lease_token = NULL, lease_expires_at = NULL,
+                "UPDATE messages SET status = ?5, error = ?1, lease_token = NULL, lease_expires_at = NULL,
                  next_attempt_at = datetime('now', ?2)
-                 WHERE source_message_id = ?3 AND lease_token = ?4 AND status = 'in_flight'",
-                params![error, format!("+{delay} seconds"), message.source_message_id, message.lease_token],
+                 WHERE source_message_id = ?3 AND lease_token = ?4 AND status = ?6",
+                params![
+                    error,
+                    format!("+{delay} seconds"),
+                    message.source_message_id,
+                    message.lease_token,
+                    MessageStatus::Pending,
+                    MessageStatus::InFlight
+                ],
             )?;
         }
         tx.commit()?;
@@ -427,13 +478,15 @@ impl MessageStore {
         let mut stmt = conn.prepare(
             "SELECT DISTINCT modem_id, sms_path
              FROM messages
-             WHERE status = 'uploaded'
+             WHERE status = ?1
                AND deleted_at IS NULL
              LIMIT 100",
         )?;
 
         let paths = stmt
-            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .query_map(params![MessageStatus::Uploaded], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })?
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(paths)
@@ -476,13 +529,17 @@ impl MessageStore {
             Option<u64>,
         ) = conn.query_row(
             "SELECT
-                COUNT(CASE WHEN status = 'pending' THEN 1 END),
-                COUNT(CASE WHEN status = 'dead_letter' THEN 1 END),
-                COUNT(CASE WHEN status = 'in_flight' THEN 1 END),
-                MAX(CASE WHEN status IN ('pending', 'in_flight')
+                COUNT(CASE WHEN status = ?1 THEN 1 END),
+                COUNT(CASE WHEN status = ?2 THEN 1 END),
+                COUNT(CASE WHEN status = ?3 THEN 1 END),
+                MAX(CASE WHEN status IN (?1, ?3)
                   THEN MAX(0, CAST((julianday('now') - julianday(created_at)) * 86400 AS INTEGER)) END)
              FROM messages",
-            [],
+            params![
+                MessageStatus::Pending,
+                MessageStatus::DeadLetter,
+                MessageStatus::InFlight
+            ],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         )?;
 
@@ -525,10 +582,10 @@ impl MessageStore {
 
         let deleted = conn.execute(
             "DELETE FROM messages
-             WHERE status = 'uploaded'
+             WHERE status = ?1
                AND deleted_at IS NOT NULL
                AND created_at < datetime('now', '-7 days')",
-            [],
+            params![MessageStatus::Uploaded],
         )?;
 
         if deleted > 0 {
@@ -547,10 +604,10 @@ impl MessageStore {
         let updated = conn.execute(
             "UPDATE messages
              SET deleted_at = CURRENT_TIMESTAMP
-             WHERE status = 'uploaded'
+             WHERE status = ?1
                AND deleted_at IS NULL
                AND uploaded_at < datetime('now', '-1 hour')",
-            [],
+            params![MessageStatus::Uploaded],
         )?;
 
         if updated > 0 {
@@ -741,7 +798,7 @@ impl MessageStore {
         let mut stmt = conn.prepare(
             "SELECT DISTINCT modem_id, phone_iccid, phone_number, content, timestamp, direction
              FROM messages
-             WHERE status = 'uploaded'
+             WHERE status = ?1
                AND deleted_at IS NULL
              ORDER BY modem_id, created_at DESC
              LIMIT 500",
@@ -749,7 +806,7 @@ impl MessageStore {
 
         let mut result: HashMap<String, Vec<Message>> = HashMap::new();
 
-        let messages = stmt.query_map([], |row| {
+        let messages = stmt.query_map(params![MessageStatus::Uploaded], |row| {
             let modem_id: String = row.get(0)?;
             let message = Message {
                 phone_iccid: row.get(1)?,
@@ -778,9 +835,9 @@ impl MessageStore {
              SET deleted_at = CURRENT_TIMESTAMP
              WHERE phone_iccid = ?1
                AND content = ?2
-               AND status = 'uploaded'
+               AND status = ?3
                AND deleted_at IS NULL",
-            params![iccid, content],
+            params![iccid, content, MessageStatus::Uploaded],
         )?;
 
         Ok(())
@@ -1018,5 +1075,69 @@ impl MessageStore {
         }
 
         Ok(deleted)
+    }
+}
+
+#[cfg(test)]
+mod status_tests {
+    use super::*;
+
+    #[test]
+    fn statuses_are_stored_as_the_queue_text() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute("CREATE TABLE t (status TEXT NOT NULL)", [])
+            .unwrap();
+        for (status, text) in [
+            (MessageStatus::Pending, "pending"),
+            (MessageStatus::InFlight, "in_flight"),
+            (MessageStatus::Uploaded, "uploaded"),
+            (MessageStatus::DeadLetter, "dead_letter"),
+        ] {
+            conn.execute("DELETE FROM t", []).unwrap();
+            conn.execute("INSERT INTO t VALUES (?1)", [status]).unwrap();
+            let stored: String = conn
+                .query_row("SELECT status FROM t", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(stored, text);
+            let read: MessageStatus = conn
+                .query_row("SELECT status FROM t", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(read, status);
+        }
+    }
+
+    #[test]
+    fn unrecognised_stored_status_is_an_error_not_a_guess() {
+        let conn = Connection::open_in_memory().unwrap();
+        for text in ["uploading", "failed", ""] {
+            let read: rusqlite::Result<MessageStatus> =
+                conn.query_row("SELECT ?1", [text], |row| row.get(0));
+            assert!(read.is_err(), "{text:?}");
+        }
+    }
+
+    #[test]
+    fn claimed_messages_are_in_flight_and_keep_their_direction() {
+        let store = MessageStore::new(":memory:").unwrap();
+        let message = Message {
+            phone_iccid: "iccid".to_string(),
+            phone_number: "10010".to_string(),
+            content: "content".to_string(),
+            timestamp: "2026-01-01T00:00:00.000Z".to_string(),
+            direction: crate::types::Direction::Received,
+        };
+        assert!(store.store_message(&message, "1", "at:ME:1").unwrap());
+        let claimed = store.claim_messages(10, 60).unwrap();
+        assert_eq!(claimed.len(), 1);
+        assert_eq!(claimed[0].status, MessageStatus::InFlight);
+        assert_eq!(
+            claimed[0].message.direction,
+            crate::types::Direction::Received
+        );
+        let stored: String = store
+            .conn()
+            .query_row("SELECT status FROM messages", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(stored, "in_flight");
     }
 }

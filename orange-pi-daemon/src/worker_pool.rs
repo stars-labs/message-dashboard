@@ -7,7 +7,7 @@ use tokio::task::JoinSet;
 use tracing::{debug, error, info, warn};
 
 use crate::modem_manager::ModemManager;
-use crate::types::{Message, MessageWithPath, ModemReport};
+use crate::types::{Message, MessageWithPath, ModemReport, ModemStatus};
 
 /// Configuration for the worker pool
 #[derive(Debug, Clone)]
@@ -338,7 +338,7 @@ impl WorkerPool {
             model,
             firmware_revision: firmware,
             hardware_revision: hardware,
-            status: "active".to_string(),
+            status: ModemStatus::Active,
             detected_iccid: iccid.clone(),
             detected_phone_number: phone_number,
             detected_operator: operator,
