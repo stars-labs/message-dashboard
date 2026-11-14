@@ -703,7 +703,10 @@ describe('balance management', () => {
       await fireEvent.click(view.getByRole('button', { name: '批量查询' }));
 
       await waitFor(() => expect(previewScope).toEqual([unicomPhone.iccid]));
-      expect(view.getByText(/查询范围：/).parentElement.textContent).toContain('联通');
+      // The scope renders once the preview answers, after the request is sent.
+      await waitFor(() =>
+        expect(view.getByText(/查询范围：/).parentElement.textContent).toContain('联通'),
+      );
       expect(view.getByText('范围内卡数')).toBeTruthy();
     } finally {
       globalThis.fetch = originalFetch;
@@ -756,7 +759,7 @@ describe('balance management', () => {
       await fireEvent.click(view.getByRole('button', { name: '批量查询' }));
 
       await waitFor(() => expect(previewScope).toEqual([phone.iccid]));
-      expect(view.getByText(/手动选择 1 张卡/)).toBeTruthy();
+      await waitFor(() => expect(view.getByText(/手动选择 1 张卡/)).toBeTruthy());
     } finally {
       globalThis.fetch = originalFetch;
     }
