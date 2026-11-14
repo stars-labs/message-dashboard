@@ -1,7 +1,6 @@
-// Lint rules for the areas that have joined the strict gate. TypeScript files
-// are linted with type information, so the rules see the same types tsc does.
-// Run with `bun run lint`, which also runs oxlint over the areas that have not
-// joined yet; `bun run check` includes both.
+// Lint rules for the whole dashboard and balance-agent. TypeScript files are
+// linted with type information, so the rules see the same types tsc does.
+// Run with `bun run lint`; `bun run check` includes it.
 import js from '@eslint/js';
 import comments from '@eslint-community/eslint-plugin-eslint-comments/configs';
 import { defineConfig, globalIgnores } from 'eslint/config';

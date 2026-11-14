@@ -551,7 +551,6 @@
 
                 # Frontend development
                 bun
-                oxlint
 
                 # Rust development
                 cargo

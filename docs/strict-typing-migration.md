@@ -161,8 +161,9 @@ the strict gate one at a time:
 - An area moves from legacy to strict in the same commit that makes it clean
   under the strict config. `tsconfig.legacy.json` only ever included
   `client/**/*.ts`, so it was deleted when the client finished joining (end of
-  Phase 3). The commit that moves the last area deletes oxlint (package,
-  config, flake entry) and `docs/web-lint-audit.md`.
+  Phase 3). The commit that moved the last area (balance-agent, Phase 4)
+  deleted oxlint (package, config, flake entry), and `check:no-js` now fails
+  on any JavaScript source file.
 - `bun run check` runs both gates while both exist; every commit passes it.
 
 Worker-only declarations live in `server/`, not `shared/`: `worker-context.ts`

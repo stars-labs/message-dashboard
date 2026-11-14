@@ -1,5 +1,4 @@
-// The strict gate: every project that has joined it. The areas Phase 4 has
-// not converted yet are linted by oxlint until they join.
+// The strict gate for the dashboard; balance-agent has its own, run by `check`.
 {
   "files": [],
   "references": [
