@@ -28,6 +28,8 @@ import { purgeExpiredMessages } from './utils/message-retention.js';
 import { sweepPending } from './utils/spam-backfill.js';
 import { reconcileCarrierBillMessages } from './utils/carrier-billing.js';
 import { readCookie } from './utils/session-token.js';
+import { readKvJson } from './lib/kv.js';
+import { StoredSession } from './handlers/auth0.js';
 import type { Handler, AppRequest, Env } from './worker-context.js';
 import type { ExecutionContext } from './cf-bindings.js';
 import { errorText } from './utils/d1-error.js';
@@ -648,14 +650,14 @@ router.get('*', async (request, env) => {
       return Response.redirect(new URL('/login', request.url).toString(), 302);
     }
 
-    // Verify session
-    const sessionData = await env.SESSIONS.get(token);
-    if (!sessionData) {
-      // Invalid session - redirect to login
+    // Verify session. A stored value that is not a session is treated as no
+    // session, as the API middleware treats it.
+    const stored = await readKvJson(env.SESSIONS, token, StoredSession);
+    if (!stored?.ok) {
       return Response.redirect(new URL('/login', request.url).toString(), 302);
     }
 
-    const session = JSON.parse(sessionData);
+    const session = stored.value;
     if (session.expires_at < Date.now()) {
       // Session expired - redirect to login
       await env.SESSIONS.delete(token);
@@ -664,10 +666,8 @@ router.get('*', async (request, env) => {
 
     // Check if user has SMS role
     const roleConfig = createRoleConfig(env);
-    const user = session.user;
-    const userRoles = user.roles || [];
 
-    if (!hasAnyRole(userRoles, roleConfig)) {
+    if (!hasAnyRole(session.user.roles, roleConfig)) {
       // User doesn't have SMS role - redirect to login with error
       return Response.redirect(new URL('/login?error=no_role', request.url).toString(), 302);
     }
