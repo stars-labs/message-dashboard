@@ -67,3 +67,57 @@ export const BalanceChecksResponse = v.object({
 });
 
 export type BalanceChecksResponse = v.InferOutput<typeof BalanceChecksResponse>;
+
+/** Where a balance check stands, as GET /api/balance-checks/status reports it for polling. */
+const BalanceCheckStatus = v.object({
+  id: v.string(),
+  status: v.picklist(CHECK_STATUSES),
+  updated_at: v.string(),
+  completed_at: v.nullable(v.string()),
+  skill_job_status: v.nullable(v.picklist(SKILL_JOB_STATUSES)),
+  web_job_status: v.nullable(v.picklist(WEB_JOB_STATUSES)),
+  web_human_reason: v.nullable(v.string()),
+  display_status: v.picklist(DISPLAY_STATUSES),
+});
+
+export const BalanceCheckStatusResponse = v.object({
+  success: v.literal(true),
+  data: v.array(BalanceCheckStatus),
+});
+
+export type BalanceCheckStatusResponse = v.InferOutput<typeof BalanceCheckStatusResponse>;
+
+/** One message a balance check sent or received. */
+export const BalanceConversationMessage = v.object({
+  id: v.string(),
+  type: v.nullable(v.picklist(['sent', 'received'])),
+  content: v.string(),
+  timestamp: v.nullable(v.string()),
+  status: v.nullable(v.string()),
+  phone_number: v.nullable(v.string()),
+  recipient: v.nullable(v.string()),
+});
+
+export type BalanceConversationMessage = v.InferOutput<typeof BalanceConversationMessage>;
+
+/** One step the Balance Agent reported while it worked a carrier website. */
+export const BalanceWebEvent = v.object({
+  id: v.number(),
+  event_type: v.string(),
+  detail_json: v.string(),
+  created_at: v.string(),
+});
+
+/** GET /api/balance-checks/:id: the messages and web events of one check. */
+const BalanceCheckDetail = v.object({
+  id: v.string(),
+  conversation: v.array(BalanceConversationMessage),
+  web_events: v.array(BalanceWebEvent),
+});
+
+export const BalanceCheckDetailResponse = v.object({
+  success: v.literal(true),
+  data: BalanceCheckDetail,
+});
+
+export type BalanceCheckDetailResponse = v.InferOutput<typeof BalanceCheckDetailResponse>;

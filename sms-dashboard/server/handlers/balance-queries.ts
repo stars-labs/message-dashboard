@@ -23,8 +23,12 @@ import {
   type WebJobStatus,
 } from '../../shared/balance-status.js';
 import {
+  BalanceConversationMessage,
   BalanceMetric,
+  BalanceWebEvent,
   PROFILE_METHODS,
+  type BalanceCheckDetailResponse,
+  type BalanceCheckStatusResponse,
   type BalanceChecksResponse,
 } from '../../shared/api/balance-checks.js';
 import { errorText } from '../utils/d1-error.js';
@@ -337,23 +341,6 @@ const StatusRow = v.object({
 });
 
 const IdRow = v.object({ id: v.string() });
-
-const ConversationRow = v.object({
-  id: v.string(),
-  type: v.nullable(v.picklist(['sent', 'received'])),
-  content: v.string(),
-  timestamp: v.nullable(v.string()),
-  status: v.nullable(v.string()),
-  phone_number: v.nullable(v.string()),
-  recipient: v.nullable(v.string()),
-});
-
-const WebEventRow = v.object({
-  id: v.number(),
-  event_type: v.string(),
-  detail_json: v.string(),
-  created_at: v.string(),
-});
 
 const CheckPhoneRow = v.object({
   iccid: v.string(),
@@ -1334,7 +1321,7 @@ export const balanceQueriesHandler = {
         ...record,
         display_status: displayBalanceStatus(record),
       })),
-    });
+    } satisfies BalanceCheckStatusResponse);
   },
 
   async detail(request: DetailRequest): Promise<Response> {
@@ -1359,7 +1346,7 @@ export const balanceQueriesHandler = {
         ORDER BY timestamp, id
       `,
         ).bind(id),
-        ConversationRow,
+        BalanceConversationMessage,
       ),
       queryAll(
         request.env.DB.prepare(
@@ -1371,13 +1358,13 @@ export const balanceQueriesHandler = {
         ORDER BY e.created_at, e.id
       `,
         ).bind(id),
-        WebEventRow,
+        BalanceWebEvent,
       ),
     ]);
     return json({
       success: true,
       data: { id, conversation, web_events: webEvents },
-    });
+    } satisfies BalanceCheckDetailResponse);
   },
 
   async preview(request: PlanRequest): Promise<Response> {
