@@ -10,6 +10,12 @@ describe('outbound message status presentation', () => {
     expect(getOutboundStatusMeta('unknown').label).toBe('结果未知');
   });
 
+  test('names a status the table does not list, even one Object.prototype has', () => {
+    expect(getOutboundStatusMeta('constructor').label).toBe('状态：constructor');
+    expect(getOutboundStatusMeta('toString').label).toBe('状态：toString');
+    expect(getOutboundStatusMeta(null).label).toBe('状态未知');
+  });
+
   test('exposes the stored failure as the status tooltip', () => {
     expect(getOutboundStatusMeta('failed', '+CMS ERROR: 350').title).toBe('+CMS ERROR: 350');
   });
