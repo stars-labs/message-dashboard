@@ -4,7 +4,7 @@ import { readJson } from '../../shared/parse-json.js';
 import { queryAll, type D1, type D1Batch } from '../lib/d1.js';
 import { NOT_JSON_MESSAGE, readBody, type MissingKeyMessages } from '../lib/request-body.js';
 import { secretMatches } from '../lib/secret.js';
-import { textOr } from '../lib/text.js';
+import { textOr } from '../../shared/text.js';
 import { processCarrierBillMessages } from '../utils/carrier-billing.js';
 import { errorText } from '../utils/d1-error.js';
 import { normalizeHealthSnapshot, type HealthSnapshot } from '../utils/daemon-health.js';

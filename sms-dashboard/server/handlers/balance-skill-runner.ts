@@ -3,7 +3,7 @@ import * as v from 'valibot';
 import type { Parsed } from '../../shared/parse-json.js';
 import { queryFirst, type D1, type D1Batch, type D1Statement } from '../lib/d1.js';
 import { NOT_JSON_MESSAGE, readBody, type MissingKeyMessages } from '../lib/request-body.js';
-import { textOr } from '../lib/text.js';
+import { textOr } from '../../shared/text.js';
 import {
   extractBalanceMenuOptions,
   parseBalanceSkillConfig,
