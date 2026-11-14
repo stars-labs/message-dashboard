@@ -306,17 +306,17 @@ process-global configuration:
 desktop/
   main/                 Electron lifecycle, tray, updates, protocol and keychain
   renderer/             Settings, status, task list and diagnostics
-runner-core/
-  control-client.js     Authenticated heartbeat, claim and lease protocol
-  presence.js           Capability lifecycle heartbeat
-  serial-runner.js      Cancellable concurrency-one execution loop
-  capabilities/
-    sms-ai.js
-    carrier-browser.js
-    carrier-browser-workflow.js
 balance-agent/
+  src/runner/
+    control-client.ts   Authenticated heartbeat, claim and lease protocol
+    presence.ts         Capability lifecycle heartbeat
+    serial-runner.ts    Cancellable concurrency-one execution loop
+    capabilities/
+      sms-ai.ts
+      carrier-browser.ts
+      carrier-browser-workflow.ts
   src/                  Electron main, CLI, isolated preload, Auth0 and renderer
-  scripts/build.mjs     Bundles shared core into the desktop application
+  scripts/build.ts      Bundles the runner into the desktop application
 ```
 
 Use one structured, redacted logging API. Every log field is allowlisted; arbitrary

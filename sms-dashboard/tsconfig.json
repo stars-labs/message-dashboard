@@ -5,7 +5,6 @@
   "references": [
     { "path": "./tsconfig.shared.json" },
     { "path": "./tsconfig.worker.json" },
-    { "path": "./tsconfig.runner-core.json" },
     { "path": "./tsconfig.test.json" },
     { "path": "./tsconfig.client.json" },
     { "path": "./tsconfig.client-test.json" },

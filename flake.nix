@@ -277,7 +277,7 @@
             runtimeInputs = with pkgs; [ git ];
             text = ''
               repo_root="$(git rev-parse --show-toplevel)"
-              exec bun "$repo_root/sms-dashboard/balance-agent/src/cli.js" "$@"
+              exec bun "$repo_root/sms-dashboard/balance-agent/src/cli.ts" "$@"
             '';
           };
 

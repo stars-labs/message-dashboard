@@ -11,11 +11,13 @@
     "playwright-core": "1.62.1"
   },
   "scripts": {
-    "build": "bun scripts/build.mjs",
+    "build": "bun scripts/build.ts",
     "browser:install": "PLAYWRIGHT_BROWSERS_PATH=0 playwright-core install chromium --no-shell",
     "start": "bun run build && electron .",
-    "cli": "bun src/cli.js",
+    "cli": "bun src/cli.ts",
     "test": "bun test src",
+    "typecheck": "tsc -b",
+    "check": "bun run typecheck && bun run test && bun run build",
     "pack:mac": "bun run browser:install && bun run build && electron-builder --mac dir"
   },
   "devDependencies": {
