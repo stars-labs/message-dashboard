@@ -172,27 +172,51 @@
           # Alias for backward compatibility
           orange-pi-daemon-rust = sms-daemon;
 
+          # The daemon-Worker wire types are generated into
+          # sms-dashboard/shared/daemon-wire by ts-rs during `cargo test`. Wipe the
+          # directory, regenerate, and fail on any difference from what is checked in
+          # (changed, deleted, or untracked files).
+          check-daemon-wire = pkgs.writeShellApplication {
+            name = "check-daemon-wire";
+            runtimeInputs = with pkgs; [
+              cargo
+              git
+            ];
+            text = ''
+              root="$(git rev-parse --show-toplevel)"
+              wire="sms-dashboard/shared/daemon-wire"
+              rm -f "$root/$wire"/*.ts
+              (cd "$root/orange-pi-daemon" && cargo test --locked --lib export_bindings)
+              if [ -n "$(git -C "$root" status --porcelain --untracked-files=all -- "$wire")" ]; then
+                git -C "$root" status --short --untracked-files=all -- "$wire"
+                git -C "$root" --no-pager diff -- "$wire"
+                echo "daemon wire bindings are out of date: commit the regenerated $wire" >&2
+                exit 1
+              fi
+            '';
+          };
+
           # One local entry point for the same Rust validation required by Nix.
           check-daemon = pkgs.writeShellApplication {
             name = "check-daemon";
             runtimeInputs = with pkgs; [
               cargo
+              check-daemon-wire
+              clippy
               git
               rustfmt
             ];
             text = ''
               cd "$(git rev-parse --show-toplevel)/orange-pi-daemon"
               cargo fmt --all --check
-              cargo test
+              cargo clippy --locked --all-targets --all-features -- -D warnings
+              cargo test --locked
+              check-daemon-wire
             '';
           };
 
           # Dev convenience commands. These land on $PATH inside the devShell (via
           # direnv `use flake`), so they work from anywhere in the repo tree.
-          #
-          # `bun` deliberately is NOT declared here: it already comes from the
-          # nix-darwin/NixOS system config, and declaring a second one would mean two
-          # answers to "which bun does this project use".
 
           # Runs the Cloudflare Worker locally with Auth0 secrets injected.
           #
@@ -279,7 +303,7 @@
             runtimeInputs = with pkgs; [ git ];
             text = ''
               repo_root="$(git rev-parse --show-toplevel)"
-              exec bun "$repo_root/sms-dashboard/balance-agent/src/cli.js" "$@"
+              exec bun "$repo_root/sms-dashboard/balance-agent/src/cli.ts" "$@"
             '';
           };
 
@@ -300,6 +324,8 @@
             text = ''
               version="''${1:?usage: release-balance-agent <version>}"
               repo_root="$(git rev-parse --show-toplevel)"
+              # balance-agent is a workspace of sms-dashboard, whose lockfile pins it.
+              (cd "$repo_root/sms-dashboard" && bun install --frozen-lockfile)
               cd "$repo_root/sms-dashboard/balance-agent"
 
               echo "==> Building Balance Agent v''${version}"
@@ -550,7 +576,7 @@
                 age
 
                 # Frontend development
-                oxlint
+                bun
 
                 # Rust development
                 cargo
@@ -578,7 +604,7 @@
                 echo "  • dev-api       — Wrangler + Auth0 secrets via SOPS on :8787"
                 echo "  • dev-server    — restart/stop/status the unique :8080 + :8787 pair"
                 echo "  • balance-agent — authenticated CLI for SMS AI and browser balance work"
-                echo "  • check-daemon  — required Rust format check + full test suite"
+                echo "  • check-daemon  — required Rust format check + strict Clippy + full test suite"
                 echo "  • pi-route      — route Pi subnet past the VPN (sudo; run when on VPN)"
                 echo ""
 

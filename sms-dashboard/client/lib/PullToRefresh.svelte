@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   /**
    * Mobile pull-to-refresh wrapper.
    *
@@ -12,7 +12,7 @@
    * makes WebKit arbitrate touches between the page and browser chrome, so this
    * implementation is restricted to installed/standalone web apps.
    */
-  import { onMount } from 'svelte';
+  import { onMount, type Snippet } from 'svelte';
   import {
     THRESHOLD,
     createPullState,
@@ -22,22 +22,27 @@
     onStart,
   } from './pull-to-refresh.js';
 
-  let { onRefresh = null, disabled = false, children } = $props();
+  interface Props {
+    onRefresh?: (() => Promise<void> | void) | null;
+    disabled?: boolean;
+    children?: Snippet;
+  }
 
-  let container = $state(null);
+  let { onRefresh = null, disabled = false, children }: Props = $props();
+
+  let container = $state<HTMLDivElement | null>(null);
   let pull = $state(0);
   let refreshing = $state(false);
 
   const gesture = createPullState();
-  const passive = { passive: true };
-  const nonPassive = { passive: false };
+  const passive: AddEventListenerOptions = { passive: true };
+  const nonPassive: AddEventListenerOptions = { passive: false };
   let moveListening = false;
 
   // Matches the app's `lg:` breakpoint: desktop has real browser chrome and its own
   // refresh affordances, so no listeners are attached there at all.
   const isDesktop = () =>
-    typeof window !== 'undefined'
-      && window.matchMedia('(min-width: 1024px)').matches;
+    typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches;
 
   function isStandalone() {
     if (typeof window === 'undefined' || typeof navigator === 'undefined') return false;
@@ -58,8 +63,8 @@
    * real scroller instead. Walking up from the touch target handles either without
    * guessing, and falls back to the document scroll position.
    */
-  function scrollTopAt(target) {
-    let node = target;
+  function scrollTopAt(target: EventTarget | null): number {
+    let node = target instanceof Element ? target : null;
     while (node && node !== document.body && node !== document.documentElement) {
       if (node.scrollHeight > node.clientHeight) {
         const overflowY = getComputedStyle(node).overflowY;
@@ -67,19 +72,21 @@
       }
       node = node.parentElement;
     }
-    return window.scrollY || document.documentElement.scrollTop || 0;
+    return window.scrollY > 0 ? window.scrollY : document.documentElement.scrollTop;
   }
 
-  function handleTouchStart(event) {
+  function handleTouchStart(event: TouchEvent) {
     if (disabled || refreshing || event.touches.length !== 1) return;
     const touch = event.touches[0];
+    if (touch === undefined) return;
     onStart(gesture, touch.clientY, scrollTopAt(event.target), touch.clientX);
     if (gesture.active) addMoveListener();
   }
 
-  function handleTouchMove(event) {
+  function handleTouchMove(event: TouchEvent) {
     if (!gesture.active || event.touches.length !== 1) return;
     const touch = event.touches[0];
+    if (touch === undefined) return;
     const next = onMove(gesture, touch.clientY, touch.clientX);
 
     // Only take over the gesture once it is genuinely ours, so ordinary scrolling
@@ -113,6 +120,10 @@
     }
   }
 
+  function onTouchEnd() {
+    void handleTouchEnd();
+  }
+
   function handleTouchCancel() {
     removeMoveListener();
     onCancel(gesture);
@@ -132,25 +143,24 @@
   }
 
   onMount(() => {
-    if (isDesktop() || !isStandalone() || !container) return;
+    const host = container;
+    if (isDesktop() || !isStandalone() || !host) return;
 
     // Keep the large content region out of WebKit's permanent non-passive touch
     // region. The move listener exists only for a gesture that started at the top.
-    container.addEventListener('touchstart', handleTouchStart, passive);
-    container.addEventListener('touchend', handleTouchEnd, passive);
-    container.addEventListener('touchcancel', handleTouchCancel, passive);
+    host.addEventListener('touchstart', handleTouchStart, passive);
+    host.addEventListener('touchend', onTouchEnd, passive);
+    host.addEventListener('touchcancel', handleTouchCancel, passive);
 
     return () => {
       removeMoveListener();
-      container.removeEventListener('touchstart', handleTouchStart, passive);
-      container.removeEventListener('touchend', handleTouchEnd, passive);
-      container.removeEventListener('touchcancel', handleTouchCancel, passive);
+      host.removeEventListener('touchstart', handleTouchStart, passive);
+      host.removeEventListener('touchend', onTouchEnd, passive);
+      host.removeEventListener('touchcancel', handleTouchCancel, passive);
     };
   });
 
-  const label = $derived(
-    refreshing ? '正在刷新' : pull >= THRESHOLD ? '松手刷新' : '下拉刷新',
-  );
+  const label = $derived(refreshing ? '正在刷新' : pull >= THRESHOLD ? '松手刷新' : '下拉刷新');
 
   // Arrow rotates through 180° as the pull approaches the trigger point.
   const rotation = $derived(Math.min(pull / THRESHOLD, 1) * 180);
@@ -172,13 +182,27 @@
   >
     {#if refreshing}
       <svg class="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2.5"
-          stroke-linecap="round" stroke-dasharray="42" stroke-dashoffset="14" />
+        <circle
+          cx="12"
+          cy="12"
+          r="9"
+          stroke="currentColor"
+          stroke-width="2.5"
+          stroke-linecap="round"
+          stroke-dasharray="42"
+          stroke-dashoffset="14"
+        />
       </svg>
     {:else}
-      <svg class="w-4 h-4" viewBox="0 0 24 24"
-        fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"
-        style="transform: rotate({rotation}deg);">
+      <svg
+        class="w-4 h-4"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2.5"
+        aria-hidden="true"
+        style="transform: rotate({rotation}deg);"
+      >
         <path stroke-linecap="round" stroke-linejoin="round" d="M12 5v14M5 12l7 7 7-7" />
       </svg>
     {/if}

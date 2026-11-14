@@ -20,7 +20,6 @@ Orange Pi + EC20 modems -> Rust daemon -> Cloudflare Worker -> Svelte dashboard
 | `sms-dashboard/client/` | Svelte 5 + Tailwind + Bun SPA | [AGENTS.md](sms-dashboard/AGENTS.md) |
 | `sms-dashboard/server/` | Cloudflare Worker API + Auth0 | [AGENTS.md](sms-dashboard/AGENTS.md) |
 | `sms-dashboard/migrations/` | Append-only D1 SQL migrations | [AGENTS.md](sms-dashboard/AGENTS.md) |
-| `sms-dashboard/runner-core/` | Shared authenticated runner logic | [AGENTS.md](sms-dashboard/AGENTS.md) |
 | `sms-dashboard/balance-agent/` | Electron app + CLI, balance queries | [AGENTS.md](sms-dashboard/balance-agent/AGENTS.md) |
 | `nixos-config/` | Orange Pi NixOS config + SOPS secrets | — |
 | `flake.nix` | Dev shell, build, and release commands | — |

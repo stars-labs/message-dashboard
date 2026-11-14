@@ -1,36 +1,15 @@
-use crate::types::SmsSubmitOutcome;
+use crate::identifiers::{Iccid, SmsAddress};
+use crate::types::SmsSubmission;
+use crate::wire::{PendingSms, PendingSmsResponse, SmsReportOutcome, SmsResult};
 use anyhow::{anyhow, Result};
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PendingSms {
-    pub id: String,
-    pub recipient: String,
-    pub phone_iccid: String,
-    pub content: String,
-    #[serde(default = "default_sms_purpose")]
-    pub purpose: String,
-    pub created_at: String,
-}
-
-fn default_sms_purpose() -> String {
-    "user".to_string()
-}
-
-#[derive(Debug, Serialize)]
-struct SmsResult {
-    message_id: String,
-    outcome: SmsSubmitOutcome,
-    error_message: Option<String>,
-}
-
 pub struct SmsSender {
     api_client: crate::api_client::ApiClient,
     modem_manager: Arc<crate::modem_manager::ModemManager>,
-    modem_cache: HashMap<String, String>, // ICCID -> modem_id mapping
+    modem_cache: HashMap<Iccid, String>, // ICCID -> modem_id mapping
     session_id: String,
 }
 
@@ -49,7 +28,7 @@ impl SmsSender {
     }
 
     /// Update the modem cache with current ICCID mappings
-    pub fn update_modem_cache(&mut self, cache: HashMap<String, String>) {
+    pub fn update_modem_cache(&mut self, cache: HashMap<Iccid, String>) {
         self.modem_cache = cache;
     }
 
@@ -72,19 +51,10 @@ impl SmsSender {
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
-            return Err(anyhow!(
-                "Failed to fetch pending SMS: {} - {}",
-                status,
-                text
-            ));
+            return Err(anyhow!("Failed to fetch pending SMS: {status} - {text}"));
         }
 
-        #[derive(Deserialize)]
-        struct ApiResponse {
-            pending_messages: Vec<PendingSms>,
-        }
-
-        let api_response: ApiResponse = response.json().await?;
+        let api_response: PendingSmsResponse = response.json().await?;
 
         if !api_response.pending_messages.is_empty() {
             info!(
@@ -97,7 +67,7 @@ impl SmsSender {
     }
 
     /// Find modem ID for a given ICCID using cache or D-Bus
-    pub async fn find_modem_for_iccid(&self, target_iccid: &str) -> Option<String> {
+    pub async fn find_modem_for_iccid(&self, target_iccid: &Iccid) -> Option<String> {
         debug!("🔍 Searching for modem with ICCID: {}", target_iccid);
 
         // First check our cache
@@ -135,7 +105,7 @@ impl SmsSender {
                         modem_id, iccid, target_iccid
                     );
 
-                    if iccid == target_iccid {
+                    if &iccid == target_iccid {
                         info!("✅ Found modem {} for ICCID {}", modem_id, target_iccid);
                         return Some(modem_id);
                     }
@@ -153,22 +123,19 @@ impl SmsSender {
         None
     }
 
-    /// Send an SMS message using ModemManager (AT commands or D-Bus)
-    pub async fn send_sms(&self, sms: &PendingSms) -> Result<SmsSubmitOutcome> {
+    /// Send an SMS message using `ModemManager` (AT commands or D-Bus)
+    pub async fn send_sms(&self, sms: &PendingSms) -> Result<SmsSubmission> {
         // Find the modem for this ICCID
-        let modem_id = match self.find_modem_for_iccid(&sms.phone_iccid).await {
-            Some(id) => id,
-            None => {
-                error!("No modem found for ICCID: {}", sms.phone_iccid);
-                let _ = self
-                    .report_sms_result(
-                        &sms.id,
-                        SmsSubmitOutcome::Failed,
-                        Some("No modem found for ICCID"),
-                    )
-                    .await;
-                return Err(anyhow!("ModemNotFound"));
-            }
+        let modem_id = match Iccid::try_from(sms.phone_iccid.as_str()) {
+            Ok(iccid) => self.find_modem_for_iccid(&iccid).await,
+            Err(_) => None,
+        };
+        let Some(modem_id) = modem_id else {
+            error!("No modem found for ICCID: {}", sms.phone_iccid);
+            let _ = self
+                .report_sms_result(&sms.id, Err("No modem found for ICCID"))
+                .await;
+            return Err(anyhow!("ModemNotFound"));
         };
 
         info!(
@@ -188,31 +155,23 @@ impl SmsSender {
             .await
         {
             Ok(outcome) => {
-                let detail = match outcome {
-                    SmsSubmitOutcome::SubmittedUnconfirmed => {
-                        Some("SMS body submitted; modem did not return a final confirmation")
-                    }
-                    _ => None,
-                };
-                self.report_sms_result(&sms.id, outcome, detail).await?;
+                self.report_sms_result(&sms.id, Ok(outcome)).await?;
                 match outcome {
-                    SmsSubmitOutcome::Confirmed => info!(
+                    SmsSubmission::Confirmed => info!(
                         "✅ SMS submission confirmed for {} (Message ID: {})",
                         sms.recipient, sms.id
                     ),
-                    SmsSubmitOutcome::SubmittedUnconfirmed => warn!(
+                    SmsSubmission::SubmittedUnconfirmed => warn!(
                         "⚠️ SMS submitted without final modem confirmation for {} (Message ID: {})",
                         sms.recipient, sms.id
                     ),
-                    SmsSubmitOutcome::Failed => unreachable!("failed submissions are errors"),
                 }
                 Ok(outcome)
             }
             Err(e) => {
-                let error_msg = format!("Failed to send SMS: {}", e);
+                let error_msg = format!("Failed to send SMS: {e}");
                 error!("{}", error_msg);
-                self.report_sms_result(&sms.id, SmsSubmitOutcome::Failed, Some(&error_msg))
-                    .await?;
+                self.report_sms_result(&sms.id, Err(&error_msg)).await?;
                 Err(anyhow!(error_msg))
             }
         }
@@ -222,20 +181,15 @@ impl SmsSender {
     pub async fn report_sms_result(
         &self,
         message_id: &str,
-        outcome: SmsSubmitOutcome,
-        error_message: Option<&str>,
+        submission: Result<SmsSubmission, &str>,
     ) -> Result<()> {
         let url = format!("{}/api/control/sms-result", self.api_client.config.api_url);
 
-        let result = SmsResult {
-            message_id: message_id.to_string(),
-            outcome,
-            error_message: error_message.map(|s| s.to_string()),
-        };
+        let result = SmsResult::new(message_id, submission);
 
         debug!(
             "📤 Reporting SMS result for {}: outcome={:?}",
-            message_id, outcome
+            message_id, result.outcome
         );
 
         let client = reqwest::Client::new();
@@ -252,22 +206,18 @@ impl SmsSender {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
             warn!("Failed to report SMS result: {} - {}", status, text);
-            return Err(anyhow!(
-                "Failed to report SMS result: {} - {}",
-                status,
-                text
-            ));
+            return Err(anyhow!("Failed to report SMS result: {status} - {text}"));
         }
 
-        match outcome {
-            SmsSubmitOutcome::Confirmed => debug!("✅ Marked SMS {} as sent", message_id),
-            SmsSubmitOutcome::SubmittedUnconfirmed => {
+        match result.outcome {
+            SmsReportOutcome::Confirmed => debug!("✅ Marked SMS {} as sent", message_id),
+            SmsReportOutcome::SubmittedUnconfirmed => {
                 debug!(
                     "⚠️ Marked SMS {} as submitted without confirmation",
                     message_id
-                )
+                );
             }
-            SmsSubmitOutcome::Failed => debug!("⚠️ Marked SMS {} as failed", message_id),
+            SmsReportOutcome::Failed => debug!("⚠️ Marked SMS {} as failed", message_id),
         }
 
         Ok(())
@@ -302,21 +252,23 @@ impl SmsSender {
     }
 }
 
-fn is_short_code(recipient: &str) -> bool {
+fn is_short_code(recipient: &SmsAddress) -> bool {
+    let recipient = recipient.as_str();
     (3..=5).contains(&recipient.len()) && recipient.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 #[cfg(test)]
 mod tests {
     use super::is_short_code;
+    use crate::identifiers::SmsAddress;
 
     #[test]
     fn recognizes_only_plain_ascii_short_codes() {
-        assert!(is_short_code("100"));
-        assert!(is_short_code("10010"));
-        assert!(!is_short_code("12"));
-        assert!(!is_short_code("+10010"));
-        assert!(!is_short_code("1001A"));
-        assert!(!is_short_code("6512345678"));
+        assert!(is_short_code(&SmsAddress::from("100")));
+        assert!(is_short_code(&SmsAddress::from("10010")));
+        assert!(!is_short_code(&SmsAddress::from("12")));
+        assert!(!is_short_code(&SmsAddress::from("+10010")));
+        assert!(!is_short_code(&SmsAddress::from("1001A")));
+        assert!(!is_short_code(&SmsAddress::from("6512345678")));
     }
 }

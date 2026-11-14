@@ -1,0 +1,208 @@
+// Auth0 Role Configuration
+// Single source of truth for the role -> permission mapping and for where the roles
+// claim is read from. The JWT middleware, the login callback and the page gate in
+// frontend-gate.ts all go through here so they cannot drift apart.
+
+/**
+ * AUTH0_ROLE_NAMESPACE is the FULL claim URI, e.g. "https://sexy.itoken.world/roles".
+ * Auth0 requires custom claims to be namespaced; unnamespaced claims are stripped
+ * from minted tokens, which is exactly the property that makes them trustworthy.
+ */
+const DEFAULT_ROLE_CLAIM = 'https://sexy.itoken.world/roles';
+
+const ADMIN = 'admin';
+const VIEWER = 'viewer';
+
+/** The two canonical roles. Auth0 role names map onto these via the env config. */
+type CanonicalRole = typeof ADMIN | typeof VIEWER;
+
+/**
+ * Every permission the system recognises. Anything else denies.
+ *
+ * `viewer` deliberately includes `messages.send` — a viewer can originate SMS from any
+ * SIM. That was an explicit product decision, not an oversight; see
+ * docs/SECURITY-REVIEW.md.
+ */
+export const ROLE_PERMISSIONS = {
+  [VIEWER]: ['bills.read', 'messages.read', 'messages.send', 'phones.read'],
+  [ADMIN]: [
+    'bills.read',
+    'bills.write',
+    'messages.read',
+    'messages.send',
+    'balances.query',
+    'phones.read',
+    'phones.write',
+    'keywords.read',
+    'keywords.write',
+    'keywords.delete',
+    'filters.read',
+    'filters.write',
+    'filters.delete',
+    'users.read',
+    'users.write',
+  ],
+} as const satisfies Record<CanonicalRole, readonly string[]>;
+
+/** A single permission string, derived from the table so a typo is a compile error. */
+export type Permission = (typeof ROLE_PERMISSIONS)[CanonicalRole][number];
+
+/** Every permission the system recognises. Anything else denies. */
+export const ALL_PERMISSIONS: Permission[] = [...new Set(Object.values(ROLE_PERMISSIONS).flat())];
+
+interface RoleConfig {
+  ADMIN_ROLE: string;
+  VIEWER_ROLE: string;
+  /** Full claim URI the roles array is read from. */
+  ROLE_CLAIM: string;
+}
+
+/** The env values createRoleConfig reads. Everything else is ignored. */
+export interface RoleEnv {
+  AUTH0_ADMIN_ROLE?: string;
+  AUTH0_VIEWER_ROLE?: string;
+  AUTH0_ROLE_NAMESPACE?: string;
+}
+
+/** An env var set to the empty string counts as unset. */
+function configured(value: string | undefined, fallback: string): string {
+  return value === undefined || value === '' ? fallback : value;
+}
+
+export function createRoleConfig(env: RoleEnv = {}): RoleConfig {
+  return {
+    ADMIN_ROLE: configured(env.AUTH0_ADMIN_ROLE, ADMIN),
+    VIEWER_ROLE: configured(env.AUTH0_VIEWER_ROLE, VIEWER),
+    ROLE_CLAIM: configured(env.AUTH0_ROLE_NAMESPACE, DEFAULT_ROLE_CLAIM),
+  };
+}
+
+/**
+ * Map the configured role names back to the canonical keys of ROLE_PERMISSIONS, so the
+ * permission table stays fixed even when the Auth0 role names are renamed via env.
+ */
+function canonicalRole(role: string, config: RoleConfig): CanonicalRole | null {
+  if (role === config.ADMIN_ROLE) return ADMIN;
+  if (role === config.VIEWER_ROLE) return VIEWER;
+  return null;
+}
+
+/**
+ * The permissions granted by a set of Auth0 role names.
+ *
+ * Returns [] for anything unrecognised — including the retired `sms` role, so sessions
+ * minted before the admin/viewer split grant nothing and their holders re-authenticate.
+ */
+export function permissionsForRoles(roles: unknown, config: RoleConfig): Permission[] {
+  if (!Array.isArray(roles)) return [];
+
+  const granted = new Set<Permission>();
+
+  for (const role of roles) {
+    const key = typeof role === 'string' ? canonicalRole(role, config) : null;
+    if (!key) continue;
+    for (const permission of ROLE_PERMISSIONS[key]) granted.add(permission);
+  }
+
+  return [...granted];
+}
+
+/**
+ * Whether these roles grant any access at all — used by the login gate and the page
+ * gate, where the question is "may this person in", not "may they do X".
+ *
+ * There is deliberately no "allow users without roles" escape hatch: the previous
+ * AUTH0_ALLOW_NO_ROLES flag turned the entire gate off from an env var.
+ */
+export function hasAnyRole(roles: unknown, config: RoleConfig): boolean {
+  return permissionsForRoles(roles, config).length > 0;
+}
+
+/**
+ * Read the roles array out of a verified JWT payload.
+ *
+ * Reads ONLY the namespaced claim. An earlier version preferred a top-level
+ * `payload.roles` and fell back to the namespaced one, which put an
+ * attacker-influenceable claim ahead of the trustworthy one — see
+ * docs/SECURITY-REVIEW.md finding 5.
+ */
+export function rolesFromToken(
+  payload: Record<string, unknown> | null | undefined,
+  config: RoleConfig,
+): string[] {
+  if (!payload) return [];
+  const claim = payload[config.ROLE_CLAIM];
+  return Array.isArray(claim) ? claim.filter((r): r is string => typeof r === 'string') : [];
+}
+
+/** The role names that grant access, for error messages and the admin UI. */
+export function getKnownRoles(config: RoleConfig): string[] {
+  return [config.ADMIN_ROLE, config.VIEWER_ROLE];
+}
+
+interface EmailAllowedResult {
+  allowed: boolean;
+  reason: string | null;
+  domain: string | null;
+}
+
+/** The profile fields isEmailAllowed reads. */
+interface Profile {
+  email?: unknown;
+  email_verified?: unknown;
+}
+
+/**
+ * Whether this Auth0 profile may complete login, per the ALLOWED_EMAIL_DOMAINS policy.
+ *
+ * Returns { allowed, reason, domain } so the caller can write a useful audit_logs row
+ * and so a lockout can be diagnosed from the reason rather than guessed at.
+ *
+ * Two properties matter beyond the domain list itself:
+ *  - The address must be email_verified. A domain allowlist is only as good as the
+ *    claim it reads: Auth0 database connections set email_verified=false until the
+ *    user confirms, so without this check anyone could sign up as x@poloniex.com and
+ *    inherit the domain's access.
+ *  - The domain is taken after the FINAL '@' and compared case-insensitively against
+ *    whole domains — never a substring/suffix match, which "poloniex.com.evil.io"
+ *    and "evil-poloniex.com" would both defeat.
+ */
+export function isEmailAllowed(
+  profile: Profile | null | undefined,
+  env: { ALLOWED_EMAIL_DOMAINS?: string } = {},
+): EmailAllowedResult {
+  const email = typeof profile?.email === 'string' ? profile.email : '';
+
+  if (!email) {
+    return { allowed: false, reason: 'No email address on profile', domain: null };
+  }
+
+  if (profile?.email_verified !== true) {
+    return { allowed: false, reason: 'Email address is not verified', domain: null };
+  }
+
+  const domain = email
+    .slice(email.lastIndexOf('@') + 1)
+    .trim()
+    .toLowerCase();
+
+  if (!domain || !email.includes('@')) {
+    return { allowed: false, reason: 'Malformed email address', domain: null };
+  }
+
+  const allowedDomains = (env.ALLOWED_EMAIL_DOMAINS ?? '')
+    .split(',')
+    .map((d) => d.trim().toLowerCase())
+    .filter(Boolean);
+
+  // No list configured means no domain restriction; the role check remains the gate.
+  if (allowedDomains.length === 0) {
+    return { allowed: true, reason: null, domain };
+  }
+
+  if (!allowedDomains.includes(domain)) {
+    return { allowed: false, reason: 'Email domain not allowed', domain };
+  }
+
+  return { allowed: true, reason: null, domain };
+}

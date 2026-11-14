@@ -1,53 +1,81 @@
-<script>
+<script lang="ts">
   import SignalStrength from './SignalStrength.svelte';
   import { formatCardNumber } from './card-number.js';
   import { getModemPosition } from './modem-position.js';
   import { getEffectiveDeviceStatus, getStatusMeta } from './device-status.js';
-  import {
-    formatBalanceMetric,
-    getBalanceStatusMeta,
-    getCashBalance,
-  } from './balance-query.js';
+  import { formatBalanceMetric, getBalanceStatusMeta, getCashBalance } from './balance-query.js';
   import { getSimServiceTypeLabel } from './sim-service-type.js';
   import { getSimRoleLabel } from './sim-role.js';
+  import type { DaemonView } from './daemon-status.js';
+  import type { BalanceCheck } from '../../shared/api/balance-checks.js';
+  import type { Phone } from '../../shared/api/phones.js';
+  import { textOr } from '../../shared/text.js';
+
+  interface SelectedPhone extends Pick<
+    Phone,
+    | 'sim_index'
+    | 'number'
+    | 'iccid'
+    | 'imei'
+    | 'status'
+    | 'signal'
+    | 'carrier'
+    | 'operator'
+    | 'manufacturer'
+    | 'model'
+    | 'usb_path'
+    | 'last_usb_path'
+    | 'updated_at'
+    | 'service_type'
+    | 'sim_role'
+    | 'primary_iccid'
+    | 'notes'
+  > {
+    flag: string;
+  }
+
+  interface Props {
+    phone?: SelectedPhone | null;
+    mobile?: boolean;
+    daemonStatus?: Pick<DaemonView, 'connected'>;
+    balanceCheck?: BalanceCheck | null;
+    onOpenBalance?: ((check: BalanceCheck) => void) | null;
+    phones?: readonly Pick<Phone, 'iccid' | 'sim_index'>[];
+  }
 
   let {
     phone = null,
     mobile = false,
-    daemonStatus = { connected: false, lastDataUpdate: null },
+    daemonStatus = { connected: false },
     balanceCheck = null,
     onOpenBalance = null,
     phones = [],
-  } = $props();
+  }: Props = $props();
 
-  let effectiveStatus = $derived(
-    getEffectiveDeviceStatus(phone?.status, daemonStatus.connected)
-  );
+  let effectiveStatus = $derived(getEffectiveDeviceStatus(phone?.status, daemonStatus.connected));
   let statusMeta = $derived(getStatusMeta(effectiveStatus));
   let signal = $derived(Number(phone?.signal) || 0);
-  let balanceStatusMeta = $derived(getBalanceStatusMeta(balanceCheck?.display_status || balanceCheck?.status));
   let cashBalance = $derived(getCashBalance(balanceCheck));
   // carrier = user-maintained home label (sims table, never daemon-written)
   // operator = daemon-detected serving network (AT+COPS?, live, may differ when roaming)
-  let carrier = $derived(phone?.carrier || '—');
+  let carrier = $derived(textOr(phone?.carrier, '—'));
   let operator = $derived(phone?.operator);
   // For a secondary SIM, the primary it belongs to (looked up from the full
   // phone list so we can show a human label, not just the raw ICCID).
+  let primaryIccid = $derived(textOr(phone?.primary_iccid, null));
   let primarySim = $derived(
-    phone?.sim_role === 'secondary' && phone?.primary_iccid
-      ? phones.find((p) => p.iccid === phone.primary_iccid)
-      : null
+    phone?.sim_role === 'secondary' && primaryIccid !== null
+      ? phones.find((p) => p.iccid === primaryIccid)
+      : null,
   );
   let moduleName = $derived(
-    [phone?.manufacturer, phone?.model].filter(Boolean).join(' ') || '—'
+    textOr([phone?.manufacturer, phone?.model].filter(Boolean).join(' '), '—'),
   );
-  let location = $derived(getModemPosition(phone) || { path: null, isLastKnown: false });
+  let location = $derived(getModemPosition(phone) ?? { path: null, isLastKnown: false });
 
-  function formatUpdatedAt(value) {
-    if (!value) return '—';
-    const normalized = typeof value === 'string' && !value.endsWith('Z')
-      ? `${value}Z`
-      : value;
+  function formatUpdatedAt(value: string | null): string {
+    if (value === null || value === '') return '—';
+    const normalized = value.endsWith('Z') ? value : `${value}Z`;
     const date = new Date(normalized);
     if (Number.isNaN(date.getTime())) return '—';
     // Pinned to Shanghai like every other timestamp in the app: without it a
@@ -66,10 +94,14 @@
 {#if phone}
   <section
     aria-label="所选卡片信息"
-    class="bg-white border border-stone-200/80 rounded-xl flex flex-col h-full min-h-0 overflow-hidden {mobile ? 'mx-4 mb-4' : ''}"
+    class="bg-white border border-stone-200/80 rounded-xl flex flex-col h-full min-h-0 overflow-hidden {mobile
+      ? 'mx-4 mb-4'
+      : ''}"
     style="box-shadow: 0 1px 3px rgba(28,25,23,0.06);"
   >
-    <header class="h-[52px] px-4 border-b border-stone-200 flex items-center justify-between gap-4 shrink-0">
+    <header
+      class="h-[52px] px-4 border-b border-stone-200 flex items-center justify-between gap-4 shrink-0"
+    >
       <div class="min-w-0 flex items-center gap-3">
         <span class="w-1 h-7 rounded-sm bg-orange-500 shrink-0"></span>
         <div class="min-w-0 flex items-baseline gap-2">
@@ -77,14 +109,16 @@
           <span class="font-mono text-xs font-semibold text-stone-600 whitespace-nowrap">
             {formatCardNumber(phone.sim_index)}
           </span>
-          <span class="text-xs text-stone-400 truncate" title={phone.number || '未设置号码'}>
-            {phone.flag || ''} {phone.number || '未设置号码'}
+          <span class="text-xs text-stone-400 truncate" title={textOr(phone.number, '未设置号码')}>
+            {textOr(phone.flag, '')}
+            {textOr(phone.number, '未设置号码')}
           </span>
         </div>
       </div>
 
       <div class="flex items-center gap-3 shrink-0">
         {#if balanceCheck}
+          {@const balanceStatusMeta = getBalanceStatusMeta(balanceCheck.display_status)}
           <button
             type="button"
             onclick={() => onOpenBalance?.(balanceCheck)}
@@ -94,21 +128,29 @@
           >
             <span>
               <span class="block text-[10px] leading-none text-stone-400">余额</span>
-              <span class="block mt-1 text-xs leading-none font-semibold text-stone-800 tabular-nums">
+              <span
+                class="block mt-1 text-xs leading-none font-semibold text-stone-800 tabular-nums"
+              >
                 {formatBalanceMetric(cashBalance)}
               </span>
             </span>
             <span class="w-px h-6 bg-stone-200"></span>
-            <span class="text-[11px] font-medium {balanceStatusMeta.className.includes('red') ? 'text-red-700' : 'text-stone-500'}">
+            <span
+              class="text-[11px] font-medium {balanceStatusMeta.className.includes('red')
+                ? 'text-red-700'
+                : 'text-stone-500'}"
+            >
               {balanceStatusMeta.label}
             </span>
           </button>
         {/if}
         <div class="hidden sm:flex items-center gap-2 text-xs text-stone-500">
-          <SignalStrength signal={signal} status={effectiveStatus} compact={true} />
+          <SignalStrength {signal} status={effectiveStatus} compact={true} />
           <span class="font-mono tabular-nums">{signal}%</span>
         </div>
-        <span class="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium {statusMeta.badgeClass}">
+        <span
+          class="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium {statusMeta.badgeClass}"
+        >
           <span class="w-1.5 h-1.5 rounded-full {statusMeta.dotClass}"></span>
           {statusMeta.label}
         </span>
@@ -119,11 +161,15 @@
       <dl class="grid grid-cols-1 xl:grid-cols-2 gap-x-8 gap-y-3 px-4 py-3 text-xs">
         <div class="grid grid-cols-[88px_minmax(0,1fr)] items-baseline gap-3 min-w-0">
           <dt class="text-stone-400">ICCID</dt>
-          <dd class="font-mono text-stone-700 truncate" title={phone.iccid || '—'}>{phone.iccid || '—'}</dd>
+          <dd class="font-mono text-stone-700 truncate" title={textOr(phone.iccid, '—')}>
+            {textOr(phone.iccid, '—')}
+          </dd>
         </div>
         <div class="grid grid-cols-[88px_minmax(0,1fr)] items-baseline gap-3 min-w-0">
           <dt class="text-stone-400">IMEI</dt>
-          <dd class="font-mono text-stone-700 truncate" title={phone.imei || '—'}>{phone.imei || '—'}</dd>
+          <dd class="font-mono text-stone-700 truncate" title={textOr(phone.imei, '—')}>
+            {textOr(phone.imei, '—')}
+          </dd>
         </div>
         <div class="grid grid-cols-[88px_minmax(0,1fr)] items-baseline gap-3 min-w-0">
           <dt class="text-stone-400">运营商</dt>
@@ -131,7 +177,9 @@
         </div>
         <div class="grid grid-cols-[88px_minmax(0,1fr)] items-baseline gap-3 min-w-0">
           <dt class="text-stone-400">最后更新</dt>
-          <dd class="text-stone-700 tabular-nums">{formatUpdatedAt(phone.updated_at || phone.lastActive)}</dd>
+          <dd class="text-stone-700 tabular-nums">
+            {formatUpdatedAt(phone.updated_at)}
+          </dd>
         </div>
         <div class="grid grid-cols-[88px_minmax(0,1fr)] items-baseline gap-3 min-w-0">
           <dt class="text-stone-400">模块</dt>
@@ -139,7 +187,7 @@
         </div>
         <div class="grid grid-cols-[88px_minmax(0,1fr)] items-baseline gap-3 min-w-0">
           <dt class="text-stone-400">位置</dt>
-          <dd class="text-stone-700 truncate" title={location.path || ''}>
+          <dd class="text-stone-700 truncate" title={textOr(location.path, '')}>
             {#if location.path}
               {location.path}
               {#if location.isLastKnown}
@@ -152,8 +200,8 @@
         </div>
         <div class="grid grid-cols-[88px_minmax(0,1fr)] items-baseline gap-3 min-w-0">
           <dt class="text-stone-400">网络</dt>
-          <dd class="text-stone-700 truncate" title={phone.access_tech || operator}>
-            {phone.access_tech || operator}
+          <dd class="text-stone-700 truncate" title={operator}>
+            {operator}
           </dd>
         </div>
         <div class="grid grid-cols-[88px_minmax(0,1fr)] items-baseline gap-3 min-w-0">
@@ -174,7 +222,9 @@
           </dd>
         </div>
         {#if phone.notes}
-          <div class="xl:col-span-2 grid grid-cols-[88px_minmax(0,1fr)] items-baseline gap-3 min-w-0 pt-1 border-t border-stone-100">
+          <div
+            class="xl:col-span-2 grid grid-cols-[88px_minmax(0,1fr)] items-baseline gap-3 min-w-0 pt-1 border-t border-stone-100"
+          >
             <dt class="text-stone-400">备注</dt>
             <dd class="text-stone-700 truncate" title={phone.notes}>{phone.notes}</dd>
           </div>

@@ -5,12 +5,45 @@
 use crate::urc_reader::UrcEvent;
 use std::time::{Duration, Instant};
 
+/// The `<dir>` field of `AT+CLCC`: `1` is mobile terminated, anything else is
+/// treated as mobile originated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CallDirection {
+    Outgoing,
+    Incoming,
+}
+
+/// The `<stat>` field of `AT+CLCC`. Codes outside the standard set are kept.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CallState {
+    Active,
+    Held,
+    Dialing,
+    Alerting,
+    Incoming,
+    Waiting,
+    Other(u8),
+}
+
+impl CallState {
+    fn from_code(code: u8) -> Self {
+        match code {
+            0 => Self::Active,
+            1 => Self::Held,
+            2 => Self::Dialing,
+            3 => Self::Alerting,
+            4 => Self::Incoming,
+            5 => Self::Waiting,
+            other => Self::Other(other),
+        }
+    }
+}
+
 /// One voice entry from `AT+CLCC`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VoiceCall {
-    pub incoming: bool,
-    /// 0 active, 1 held, 2 dialing, 3 alerting, 4 incoming, 5 waiting.
-    pub stat: u8,
+    pub direction: CallDirection,
+    pub state: CallState,
 }
 
 /// Voice calls listed by `AT+CLCC`.
@@ -25,18 +58,24 @@ pub fn parse_clcc(response: &str) -> Vec<VoiceCall> {
         .filter_map(|rest| {
             let fields: Vec<&str> = rest.trim().split(',').collect();
             let dir = fields.get(1)?.trim();
-            let stat = fields.get(2)?.trim().parse().ok()?;
+            let state = CallState::from_code(fields.get(2)?.trim().parse().ok()?);
             let mode = fields.get(3)?.trim();
             (mode == "0").then_some(VoiceCall {
-                incoming: dir == "1",
-                stat,
+                direction: if dir == "1" {
+                    CallDirection::Incoming
+                } else {
+                    CallDirection::Outgoing
+                },
+                state,
             })
         })
         .collect()
 }
 
 pub fn is_ringing(calls: &[VoiceCall]) -> bool {
-    calls.iter().any(|c| c.incoming && c.stat == 4)
+    calls
+        .iter()
+        .any(|c| c.direction == CallDirection::Incoming && c.state == CallState::Incoming)
 }
 
 /// What the URC reader should tell the Worker.
@@ -99,8 +138,8 @@ mod tests {
         assert_eq!(
             parse_clcc(response),
             vec![VoiceCall {
-                incoming: true,
-                stat: 4
+                direction: CallDirection::Incoming,
+                state: CallState::Incoming
             }]
         );
         assert!(is_ringing(&parse_clcc(response)));
@@ -119,8 +158,8 @@ mod tests {
         assert_eq!(
             calls,
             vec![VoiceCall {
-                incoming: false,
-                stat: 0
+                direction: CallDirection::Outgoing,
+                state: CallState::Active
             }]
         );
         assert!(!is_ringing(&calls));
@@ -182,5 +221,34 @@ mod tests {
             t.on_event(&UrcEvent::NoCarrier, t0 + Duration::from_secs(60)),
             None
         );
+    }
+
+    #[test]
+    fn clcc_codes_map_to_named_states_and_keep_unknown_codes() {
+        for (code, state) in [
+            (0, CallState::Active),
+            (1, CallState::Held),
+            (2, CallState::Dialing),
+            (3, CallState::Alerting),
+            (4, CallState::Incoming),
+            (5, CallState::Waiting),
+            (6, CallState::Other(6)),
+        ] {
+            let calls = parse_clcc(&format!("+CLCC: 1,1,{code},0,0,\"1\",129\r\nOK"));
+            assert_eq!(calls.len(), 1);
+            assert_eq!(calls[0].state, state);
+        }
+    }
+
+    #[test]
+    fn clcc_direction_one_is_incoming_and_everything_else_outgoing() {
+        let direction = |dir: &str| {
+            parse_clcc(&format!("+CLCC: 1,{dir},4,0,0,\"1\",129"))
+                .first()
+                .map(|call| call.direction)
+        };
+        assert_eq!(direction("1"), Some(CallDirection::Incoming));
+        assert_eq!(direction("0"), Some(CallDirection::Outgoing));
+        assert_eq!(direction("9"), Some(CallDirection::Outgoing));
     }
 }

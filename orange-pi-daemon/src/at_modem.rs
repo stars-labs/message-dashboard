@@ -1,4 +1,4 @@
-//! Direct AT command modem interface - bypasses ModemManager for better performance
+//! Direct AT command modem interface - bypasses `ModemManager` for better performance
 //!
 //! For Quectel EC20 modems, each modem exposes 4 ttyUSB ports:
 //! - ttyUSB0: DM port
@@ -6,7 +6,8 @@
 //! - ttyUSB2: AT commands (this is what we use)
 //! - ttyUSB3: PPP/Modem
 
-use crate::types::SmsSubmitOutcome;
+use crate::identifiers::{Iccid, Imei, SimNumber, SmsAddress};
+use crate::types::{SmsStorage, SmsSubmission};
 use anyhow::{anyhow, Result};
 use nix::sys::termios::{self, BaudRate, SetArg};
 use std::collections::{BTreeMap, HashMap};
@@ -31,12 +32,12 @@ const SMS_PROMPT_RETRY_DELAY: Duration = Duration::from_secs(1);
 /// SMS message from AT command interface
 #[derive(Debug, Clone)]
 pub struct AtSms {
-    /// CPMS mem1 storage containing this message (for example `ME` or `SM`).
-    pub storage: String,
+    /// CPMS mem1 storage containing this message; unset until the scan that found it records it.
+    pub storage: Option<SmsStorage>,
     pub index: u32,
     /// All SIM indices that belong to this logical message (concatenated parts)
     pub part_indices: Vec<u32>,
-    pub sender: String,
+    pub sender: SmsAddress,
     pub timestamp: String,
     pub text: String,
     /// Concatenation info for multipart messages (from UDH)
@@ -55,13 +56,13 @@ pub struct ConcatInfo {
 #[derive(Debug, Clone, Default)]
 pub struct AtModemInfo {
     pub port: String,
-    pub iccid: Option<String>,
-    pub imei: Option<String>,
+    pub iccid: Option<Iccid>,
+    pub imei: Option<Imei>,
     pub manufacturer: Option<String>,
     pub model: Option<String>,
     pub revision: Option<String>,
     pub signal_percent: Option<u32>,
-    pub phone_number: Option<String>,
+    pub phone_number: Option<SimNumber>,
     pub operator: Option<String>,
 }
 
@@ -79,10 +80,29 @@ pub struct ImsStatus {
     pub registration: String,
 }
 
+/// `AT+CMGF` message format.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SmsMode {
+    #[default]
+    Unknown,
+    Pdu,
+    Text,
+}
+
+impl std::fmt::Display for SmsMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Unknown => "Unknown",
+            Self::Pdu => "PDU",
+            Self::Text => "Text",
+        })
+    }
+}
+
 /// SMS configuration
 #[derive(Debug, Clone, Default)]
 pub struct SmsConfig {
-    pub mode: String,
+    pub mode: SmsMode,
     pub storage: String,
 }
 
@@ -90,8 +110,8 @@ pub struct SmsConfig {
 #[derive(Debug, Clone, Default)]
 pub struct ModemHealth {
     pub port: String,
-    pub iccid: Option<String>,
-    pub imei: Option<String>,
+    pub iccid: Option<Iccid>,
+    pub imei: Option<Imei>,
     pub signal_percent: Option<u32>,
     pub operator: Option<String>,
     pub network_reg: Option<NetworkRegStatus>,
@@ -118,6 +138,38 @@ pub struct AtModemManager {
     port_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     /// Timeout for AT commands
     timeout: Duration,
+}
+
+#[allow(
+    clippy::as_conversions,
+    reason = "nix declares SpecialCharacterIndices as a repr(usize) enum with no conversion to usize, and termios::control_chars is indexed by usize"
+)]
+pub fn control_char_slot(index: termios::SpecialCharacterIndices) -> usize {
+    index as usize
+}
+
+fn read_chunk(buf: &[u8], n: usize) -> Result<&[u8]> {
+    buf.get(..n)
+        .ok_or_else(|| anyhow!("read reported {n} bytes into a {}-byte buffer", buf.len()))
+}
+
+pub fn set_control_char(
+    term: &mut termios::Termios,
+    index: termios::SpecialCharacterIndices,
+    value: u8,
+) -> Result<()> {
+    let slot = term
+        .control_chars
+        .get_mut(control_char_slot(index))
+        .ok_or_else(|| anyhow!("termios control character slot is out of range"))?;
+    *slot = value;
+    Ok(())
+}
+
+impl Default for AtModemManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl AtModemManager {
@@ -149,8 +201,8 @@ impl AtModemManager {
     pub fn ttyusb_by_usb_device() -> Result<BTreeMap<String, Vec<String>>> {
         let mut groups: BTreeMap<String, Vec<u32>> = BTreeMap::new();
         let entries = fs::read_dir("/sys/class/tty")
-            .map_err(|e| anyhow!("Failed to read /sys/class/tty: {}", e))?;
-        for entry in entries.filter_map(|e| e.ok()) {
+            .map_err(|e| anyhow!("Failed to read /sys/class/tty: {e}"))?;
+        for entry in entries.filter_map(std::result::Result::ok) {
             let name = entry.file_name();
             let name = name.to_string_lossy();
             if !name.starts_with("ttyUSB") {
@@ -163,7 +215,7 @@ impl AtModemManager {
             // USB interface dir (e.g. .../3-1.2.2:1.2/ttyUSB2). The physical modem is the
             // ancestor USB *device* dir — the first one that carries an idVendor file
             // (interfaces and the tty dir do not). Walk up to it and group by its name.
-            let link = format!("/sys/class/tty/{}/device", name);
+            let link = format!("/sys/class/tty/{name}/device");
             let Ok(canon) = fs::canonicalize(&link) else {
                 continue;
             };
@@ -189,7 +241,7 @@ impl AtModemManager {
                 (
                     dev,
                     nums.into_iter()
-                        .map(|n| format!("/dev/ttyUSB{}", n))
+                        .map(|n| format!("/dev/ttyUSB{n}"))
                         .collect(),
                 )
             })
@@ -205,7 +257,7 @@ impl AtModemManager {
     /// ancestor carrying an `idVendor` file (the USB *device* dir) and return its name.
     pub fn usb_topology_for_port(port: &str) -> Option<String> {
         let name = port.trim_start_matches("/dev/");
-        let link = format!("/sys/class/tty/{}/device", name);
+        let link = format!("/sys/class/tty/{name}/device");
         let canon = fs::canonicalize(&link).ok()?;
         let mut dir = canon.as_path();
         loop {
@@ -228,11 +280,11 @@ impl AtModemManager {
     /// otherwise we may cache the PPP port and time out on real reads.
     pub fn at_probe_order(ports: &[String]) -> Vec<String> {
         let mut order: Vec<String> = Vec::with_capacity(ports.len());
-        if ports.len() >= 3 {
-            order.push(ports[2].clone()); // default 4-port: AT is index 2
+        if let Some(at_slot) = ports.get(2) {
+            order.push(at_slot.clone()); // default 4-port: AT is index 2
         }
         for (i, p) in ports.iter().enumerate() {
-            if !(ports.len() >= 3 && i == 2) {
+            if i != 2 {
                 order.push(p.clone()); // index 0 first for slimmed, then the rest
             }
         }
@@ -247,7 +299,7 @@ impl AtModemManager {
         let device_count = groups.len();
         let mut ports = Vec::new();
 
-        for (_dev, dev_ports) in &groups {
+        for dev_ports in groups.values() {
             for port_path in Self::at_probe_order(dev_ports) {
                 match self.probe_port_with_error(&port_path).await {
                     Ok(true) => {
@@ -329,7 +381,11 @@ impl AtModemManager {
         Ok(false)
     }
 
-    /// Issue the USBDEVFS_RESET ioctl on a usbfs node (blocking).
+    /// Issue the `USBDEVFS_RESET` ioctl on a usbfs node (blocking).
+    #[allow(
+        unsafe_code,
+        reason = "USBDEVFS_RESET is an ioctl with no safe wrapper in nix or std"
+    )]
     fn reset_usb_sync(node: &Path) -> Result<()> {
         let file = OpenOptions::new()
             .read(true)
@@ -349,10 +405,10 @@ impl AtModemManager {
     fn usbfs_node_for_port(port: &str) -> Result<PathBuf> {
         let dev_name = port
             .strip_prefix("/dev/")
-            .ok_or_else(|| anyhow!("Unexpected port path: {}", port))?;
-        let device_link = format!("/sys/class/tty/{}/device", dev_name);
+            .ok_or_else(|| anyhow!("Unexpected port path: {port}"))?;
+        let device_link = format!("/sys/class/tty/{dev_name}/device");
         let mut dir = fs::canonicalize(&device_link)
-            .map_err(|e| anyhow!("Cannot resolve sysfs device for {}: {}", port, e))?;
+            .map_err(|e| anyhow!("Cannot resolve sysfs device for {port}: {e}"))?;
 
         // The tty hangs off a USB *interface* (e.g. 3-1.3.2.6:1.2). Walk up until we
         // reach the USB *device* dir, which carries busnum/devnum.
@@ -366,19 +422,14 @@ impl AtModemManager {
                 Some(parent) if parent.starts_with("/sys") && parent != dir => {
                     dir = parent.to_path_buf();
                 }
-                _ => {
-                    return Err(anyhow!(
-                        "No USB device (busnum/devnum) found above {}",
-                        port
-                    ))
-                }
+                _ => return Err(anyhow!("No USB device (busnum/devnum) found above {port}")),
             }
         }
     }
 
     /// Format the usbfs node path for a given bus/device number.
     fn usbfs_node_path(busnum: u8, devnum: u8) -> String {
-        format!("/dev/bus/usb/{:03}/{:03}", busnum, devnum)
+        format!("/dev/bus/usb/{busnum:03}/{devnum:03}")
     }
 
     fn read_sysfs_u8(path: &Path) -> Result<u8> {
@@ -419,7 +470,7 @@ impl AtModemManager {
             }
             Ok(response) => {
                 warn!("Failed to set URC port on {}: {}", port, response);
-                return Err(anyhow!("Failed to set URC port: {}", response));
+                return Err(anyhow!("Failed to set URC port: {response}"));
             }
             Err(e) => {
                 warn!("Error setting URC port on {}: {}", port, e);
@@ -451,12 +502,15 @@ impl AtModemManager {
         let ports = groups
             .values()
             .find(|ports| ports.iter().any(|p| p == at_port))?;
-        if ports.len() < 4 || ports[2] != at_port {
+        let [_, nmea, at, modem, ..] = ports.as_slice() else {
+            return None;
+        };
+        if at != at_port {
             return None;
         }
         Some(VoicePorts {
-            nmea: ports[1].clone(),
-            modem: ports[3].clone(),
+            nmea: nmea.clone(),
+            modem: modem.clone(),
         })
     }
 
@@ -483,7 +537,7 @@ impl AtModemManager {
             }
             Ok(response) => {
                 warn!("Failed to enable IMS on {}: {}", port, response);
-                return Err(anyhow!("Failed to enable IMS: {}", response));
+                return Err(anyhow!("Failed to enable IMS: {response}"));
             }
             Err(e) => {
                 warn!("Error enabling IMS on {}: {}", port, e);
@@ -522,10 +576,7 @@ impl AtModemManager {
             tokio::task::spawn_blocking(move || Self::send_at_sync(&port_path, &cmd, timeout));
         match tokio::time::timeout(timeout + Duration::from_secs(2), handle).await {
             Ok(joined) => joined?,
-            Err(_) => Err(anyhow!(
-                "AT command timed out (port may be wedged): {}",
-                port
-            )),
+            Err(_) => Err(anyhow!("AT command timed out (port may be wedged): {port}")),
         }
     }
 
@@ -558,8 +609,7 @@ impl AtModemManager {
         match tokio::time::timeout(timeout + Duration::from_secs(2), handle).await {
             Ok(joined) => joined?,
             Err(_) => Err(anyhow!(
-                "SMS input recovery timed out (port may be wedged): {}",
-                port
+                "SMS input recovery timed out (port may be wedged): {port}"
             )),
         }
     }
@@ -578,16 +628,16 @@ impl AtModemManager {
             .write(true)
             .custom_flags(nix::libc::O_NONBLOCK | nix::libc::O_NOCTTY)
             .open(port)
-            .map_err(|e| anyhow!("Failed to open {}: {}", port, e))?;
+            .map_err(|e| anyhow!("Failed to open {port}: {e}"))?;
 
         // Configure termios using the file reference
-        let mut term = termios::tcgetattr(&file).map_err(|e| anyhow!("tcgetattr failed: {}", e))?;
+        let mut term = termios::tcgetattr(&file).map_err(|e| anyhow!("tcgetattr failed: {e}"))?;
 
         // Set baud rate 115200
         termios::cfsetispeed(&mut term, BaudRate::B115200)
-            .map_err(|e| anyhow!("cfsetispeed failed: {}", e))?;
+            .map_err(|e| anyhow!("cfsetispeed failed: {e}"))?;
         termios::cfsetospeed(&mut term, BaudRate::B115200)
-            .map_err(|e| anyhow!("cfsetospeed failed: {}", e))?;
+            .map_err(|e| anyhow!("cfsetospeed failed: {e}"))?;
 
         // Raw mode: 8N1, no flow control
         term.control_flags &= !(termios::ControlFlags::CSIZE | termios::ControlFlags::PARENB);
@@ -613,11 +663,11 @@ impl AtModemManager {
         term.output_flags &= !termios::OutputFlags::OPOST;
 
         // Set read timeout: VMIN=0, VTIME=1 (0.1s timeout per read)
-        term.control_chars[termios::SpecialCharacterIndices::VMIN as usize] = 0;
-        term.control_chars[termios::SpecialCharacterIndices::VTIME as usize] = 1;
+        set_control_char(&mut term, termios::SpecialCharacterIndices::VMIN, 0)?;
+        set_control_char(&mut term, termios::SpecialCharacterIndices::VTIME, 1)?;
 
         termios::tcsetattr(&file, SetArg::TCSANOW, &term)
-            .map_err(|e| anyhow!("tcsetattr failed: {}", e))?;
+            .map_err(|e| anyhow!("tcsetattr failed: {e}"))?;
 
         // Flush buffers
         termios::tcflush(&file, termios::FlushArg::TCIOFLUSH)
@@ -627,7 +677,7 @@ impl AtModemManager {
     }
 
     /// Synchronous AT command send (runs in blocking thread).
-    /// The fd is non-blocking, so writes/reads return WouldBlock rather than hanging on
+    /// The fd is non-blocking, so writes/reads return `WouldBlock` rather than hanging on
     /// a wedged modem; we poll both with the same hard timeout.
     fn send_at_sync(port: &str, command: &str, timeout: Duration) -> Result<String> {
         let mut file = Self::open_serial(port)?;
@@ -635,19 +685,23 @@ impl AtModemManager {
 
         // Send command with CR. Non-blocking write may report WouldBlock; retry until
         // the buffer accepts it or we hit the timeout.
-        let cmd = format!("{}\r", command);
+        let cmd = format!("{command}\r");
         let mut written = 0;
-        while written < cmd.len() {
+        while let Some(unwritten) = cmd
+            .as_bytes()
+            .get(written..)
+            .filter(|rest| !rest.is_empty())
+        {
             if start.elapsed() > timeout {
-                return Err(anyhow!("Write timeout on {}", port));
+                return Err(anyhow!("Write timeout on {port}"));
             }
-            match file.write(&cmd.as_bytes()[written..]) {
+            match file.write(unwritten) {
                 Ok(0) => std::thread::sleep(Duration::from_millis(10)),
                 Ok(n) => written += n,
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    std::thread::sleep(Duration::from_millis(10))
+                    std::thread::sleep(Duration::from_millis(10));
                 }
-                Err(e) => return Err(anyhow!("Write failed: {}", e)),
+                Err(e) => return Err(anyhow!("Write failed: {e}")),
             }
         }
         let _ = file.flush();
@@ -664,10 +718,9 @@ impl AtModemManager {
             match file.read(&mut buf) {
                 Ok(0) => {
                     std::thread::sleep(Duration::from_millis(10));
-                    continue;
                 }
                 Ok(n) => {
-                    response.extend_from_slice(&buf[..n]);
+                    response.extend_from_slice(read_chunk(&buf, n)?);
 
                     // Check if we got a complete response
                     let text = String::from_utf8_lossy(&response);
@@ -680,9 +733,8 @@ impl AtModemManager {
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                     std::thread::sleep(Duration::from_millis(10));
-                    continue;
                 }
-                Err(e) => return Err(anyhow!("Read error: {}", e)),
+                Err(e) => return Err(anyhow!("Read error: {e}")),
             }
         }
 
@@ -691,7 +743,7 @@ impl AtModemManager {
     }
 
     /// Get ICCID from SIM card
-    pub async fn get_iccid(&self, port: &str) -> Result<Option<String>> {
+    pub async fn get_iccid(&self, port: &str) -> Result<Option<Iccid>> {
         // Try different ICCID commands (varies by modem)
         for cmd in &["AT+QCCID", "AT+CCID", "AT+ICCID"] {
             if let Ok(response) = self.send_at_command(port, cmd, self.timeout).await {
@@ -703,45 +755,44 @@ impl AtModemManager {
         Ok(None)
     }
 
-    fn parse_iccid(response: &str) -> Option<String> {
+    fn parse_iccid(response: &str) -> Option<Iccid> {
         for line in response.lines() {
             let line = line.trim();
             if line.starts_with("+QCCID:")
                 || line.starts_with("+CCID:")
                 || line.starts_with("+ICCID:")
             {
-                if let Some(pos) = line.find(':') {
-                    let iccid = line[pos + 1..].trim().trim_matches('"');
+                if let Some((_, rest)) = line.split_once(':') {
+                    let iccid = rest.trim().trim_matches('"');
                     if iccid.len() >= 18 && iccid.chars().all(|c| c.is_ascii_hexdigit()) {
-                        return Some(Self::normalize_iccid(iccid));
+                        return Self::normalize_iccid(iccid);
                     }
                 }
             } else if line.len() >= 18
                 && line.len() <= 22
                 && line.chars().all(|c| c.is_ascii_hexdigit())
             {
-                return Some(Self::normalize_iccid(line));
+                return Self::normalize_iccid(line);
             }
         }
         None
     }
 
     /// Strip trailing 'F' padding from ICCID (BCD filler per ITU-T E.118)
-    fn normalize_iccid(iccid: &str) -> String {
-        iccid.trim_end_matches('F').to_string()
+    fn normalize_iccid(iccid: &str) -> Option<Iccid> {
+        Iccid::try_from(iccid.trim_end_matches('F')).ok()
     }
 
     /// Get IMEI
-    pub async fn get_imei(&self, port: &str) -> Result<Option<String>> {
+    pub async fn get_imei(&self, port: &str) -> Result<Option<Imei>> {
         let response = self.send_at_command(port, "AT+CGSN", self.timeout).await?;
+        Ok(Self::parse_imei(&response))
+    }
 
-        for line in response.lines() {
-            let line = line.trim();
-            if line.len() == 15 && line.chars().all(|c| c.is_ascii_digit()) {
-                return Ok(Some(line.to_string()));
-            }
-        }
-        Ok(None)
+    fn parse_imei(response: &str) -> Option<Imei> {
+        response
+            .lines()
+            .find_map(|line| Imei::try_from(line.trim()).ok())
     }
 
     /// Get manufacturer
@@ -750,7 +801,7 @@ impl AtModemManager {
 
         for line in response.lines() {
             let line = line.trim();
-            if !line.is_empty() && line != "OK" && !line.starts_with("+") && !line.starts_with("AT")
+            if !line.is_empty() && line != "OK" && !line.starts_with('+') && !line.starts_with("AT")
             {
                 return Ok(Some(line.to_string()));
             }
@@ -764,7 +815,7 @@ impl AtModemManager {
 
         for line in response.lines() {
             let line = line.trim();
-            if !line.is_empty() && line != "OK" && !line.starts_with("+") && !line.starts_with("AT")
+            if !line.is_empty() && line != "OK" && !line.starts_with('+') && !line.starts_with("AT")
             {
                 return Ok(Some(line.to_string()));
             }
@@ -778,7 +829,7 @@ impl AtModemManager {
 
         for line in response.lines() {
             let line = line.trim();
-            if !line.is_empty() && line != "OK" && !line.starts_with("+") && !line.starts_with("AT")
+            if !line.is_empty() && line != "OK" && !line.starts_with('+') && !line.starts_with("AT")
             {
                 return Ok(Some(line.to_string()));
             }
@@ -793,8 +844,8 @@ impl AtModemManager {
         // Parse "+CSQ: 20,99" -> rssi=20 (0-31 scale)
         for line in response.lines() {
             if line.contains("+CSQ:") {
-                if let Some(pos) = line.find(':') {
-                    let parts: Vec<&str> = line[pos + 1..].trim().split(',').collect();
+                if let Some((_, rest)) = line.split_once(':') {
+                    let parts: Vec<&str> = rest.trim().split(',').collect();
                     if let Some(rssi_str) = parts.first() {
                         if let Ok(rssi) = rssi_str.trim().parse::<u32>() {
                             if rssi <= 31 {
@@ -809,22 +860,24 @@ impl AtModemManager {
     }
 
     /// Get phone number from SIM
-    pub async fn get_phone_number(&self, port: &str) -> Result<Option<String>> {
+    pub async fn get_phone_number(&self, port: &str) -> Result<Option<SimNumber>> {
         let response = self.send_at_command(port, "AT+CNUM", self.timeout).await?;
+        Ok(Self::parse_cnum(&response))
+    }
 
-        // Parse "+CNUM: "","+1234567890",129"
+    // Parse "+CNUM: "","+1234567890",129"
+    fn parse_cnum(response: &str) -> Option<SimNumber> {
         for line in response.lines() {
             if line.contains("+CNUM:") {
                 let parts: Vec<&str> = line.split('"').collect();
-                if parts.len() >= 4 {
-                    let number = parts[3].trim();
-                    if !number.is_empty() {
-                        return Ok(Some(number.to_string()));
+                if let Some(number) = parts.get(3).map(|part| part.trim()) {
+                    if let Ok(number) = SimNumber::try_from(number) {
+                        return Some(number);
                     }
                 }
             }
         }
-        Ok(None)
+        None
     }
 
     /// Get operator name
@@ -835,8 +888,7 @@ impl AtModemManager {
         for line in response.lines() {
             if line.contains("+COPS:") {
                 let parts: Vec<&str> = line.split('"').collect();
-                if parts.len() >= 2 {
-                    let operator = parts[1].trim();
+                if let Some(operator) = parts.get(1).map(|part| part.trim()) {
                     if !operator.is_empty() {
                         return Ok(Some(operator.to_string()));
                     }
@@ -848,25 +900,25 @@ impl AtModemManager {
 
     /// Diagnostic: Get network registration status
     pub async fn get_network_registration(&self, port: &str) -> Result<NetworkRegStatus> {
-        let creg = self.send_at_command(port, "AT+CREG?", self.timeout).await?;
-        let creg = Self::parse_creg(&creg);
-
-        let cgreg = self
+        let circuit_reply = self.send_at_command(port, "AT+CREG?", self.timeout).await?;
+        let packet_reply = self
             .send_at_command(port, "AT+CGREG?", self.timeout)
             .await?;
-        let gregs = Self::parse_cgreg(&cgreg);
 
-        Ok(NetworkRegStatus { creg, cgreg: gregs })
+        Ok(NetworkRegStatus {
+            creg: Self::parse_creg(&circuit_reply),
+            cgreg: Self::parse_cgreg(&packet_reply),
+        })
     }
 
     fn parse_creg(response: &str) -> (u32, u32) {
         for line in response.lines() {
             if line.contains("+CREG:") {
-                if let Some(pos) = line.find(':') {
-                    let parts: Vec<&str> = line[pos + 1..].trim().split(',').collect();
-                    if parts.len() >= 2 {
-                        let n = parts[0].trim().parse::<u32>().unwrap_or(0);
-                        let stat = parts[1].trim().parse::<u32>().unwrap_or(0);
+                if let Some((_, fields)) = line.split_once(':') {
+                    let mut parts = fields.trim().split(',');
+                    if let (Some(n), Some(stat)) = (parts.next(), parts.next()) {
+                        let n = n.trim().parse::<u32>().unwrap_or(0);
+                        let stat = stat.trim().parse::<u32>().unwrap_or(0);
                         return (n, stat);
                     }
                 }
@@ -878,11 +930,11 @@ impl AtModemManager {
     fn parse_cgreg(response: &str) -> (u32, u32) {
         for line in response.lines() {
             if line.contains("+CGREG:") {
-                if let Some(pos) = line.find(':') {
-                    let parts: Vec<&str> = line[pos + 1..].trim().split(',').collect();
-                    if parts.len() >= 2 {
-                        let n = parts[0].trim().parse::<u32>().unwrap_or(0);
-                        let stat = parts[1].trim().parse::<u32>().unwrap_or(0);
+                if let Some((_, fields)) = line.split_once(':') {
+                    let mut parts = fields.trim().split(',');
+                    if let (Some(n), Some(stat)) = (parts.next(), parts.next()) {
+                        let n = n.trim().parse::<u32>().unwrap_or(0);
+                        let stat = stat.trim().parse::<u32>().unwrap_or(0);
                         return (n, stat);
                     }
                 }
@@ -902,8 +954,8 @@ impl AtModemManager {
 
         for line in response.lines() {
             if line.contains("+QCFG: \"ims\"") {
-                if let Some(pos) = line.find(',') {
-                    let val = line[pos + 1..].trim().trim_matches('"');
+                if let Some((_, rest)) = line.split_once(',') {
+                    let val = rest.trim().trim_matches('"');
                     ims_enabled = val == "1";
                 }
             }
@@ -931,8 +983,8 @@ impl AtModemManager {
 
         for line in response.lines() {
             if line.contains("+CSCA:") {
-                if let Some(pos) = line.find(':') {
-                    let csca = line[pos + 1..].trim().trim_matches('"');
+                if let Some((_, rest)) = line.split_once(':') {
+                    let csca = rest.trim().trim_matches('"');
                     if !csca.is_empty() {
                         return Ok(Some(csca.to_string()));
                     }
@@ -945,15 +997,15 @@ impl AtModemManager {
     /// Diagnostic: Get SMS mode and storage
     pub async fn get_sms_config(&self, port: &str) -> Result<SmsConfig> {
         let mode_response = self.send_at_command(port, "AT+CMGF?", self.timeout).await?;
-        let mut mode = "Unknown";
+        let mut mode = SmsMode::Unknown;
         for line in mode_response.lines() {
             if line.contains("+CMGF:") {
-                if let Some(pos) = line.find(':') {
-                    let val = line[pos + 1..].trim();
+                if let Some((_, rest)) = line.split_once(':') {
+                    let val = rest.trim();
                     if val == "0" {
-                        mode = "PDU";
+                        mode = SmsMode::Pdu;
                     } else if val == "1" {
-                        mode = "Text";
+                        mode = SmsMode::Text;
                     }
                 }
             }
@@ -963,13 +1015,10 @@ impl AtModemManager {
         let storage = storage_response
             .lines()
             .find(|l| l.contains("+CPMS:"))
-            .map(|s| s.to_string())
+            .map(std::string::ToString::to_string)
             .unwrap_or_default();
 
-        Ok(SmsConfig {
-            mode: mode.to_string(),
-            storage,
-        })
+        Ok(SmsConfig { mode, storage })
     }
 
     /// Diagnostic: Full health check for a modem
@@ -1000,19 +1049,19 @@ impl AtModemManager {
         let mut failures = Vec::new();
 
         for storage in stores {
-            if let Err(e) = self.select_sms_storage(port, &storage).await {
+            if let Err(e) = self.select_sms_storage(port, storage).await {
                 warn!(
                     "Failed to select SMS storage {} on {}: {}; trying next storage",
                     storage, port, e
                 );
-                failures.push(format!("{} selection: {}", storage, e));
+                failures.push(format!("{storage} selection: {e}"));
                 continue;
             }
 
             match self.list_sms_from_selected_storage(port).await {
                 Ok(mut stored_messages) => {
                     for message in &mut stored_messages {
-                        message.storage = storage.clone();
+                        message.storage = Some(storage);
                     }
                     debug!(
                         "SMS storage {}: got {} messages from {}",
@@ -1028,7 +1077,7 @@ impl AtModemManager {
                         "Failed to scan SMS storage {} on {}: {}; trying next storage",
                         storage, port, e
                     );
-                    failures.push(format!("{} scan: {}", storage, e));
+                    failures.push(format!("{storage} scan: {e}"));
                 }
             }
         }
@@ -1075,7 +1124,7 @@ impl AtModemManager {
 
     /// Discover stores to scan. EC20 is scanned as ME then SM; MT is only a fallback
     /// for modem families that advertise neither concrete storage.
-    async fn sms_read_stores(&self, port: &str) -> Vec<String> {
+    async fn sms_read_stores(&self, port: &str) -> Vec<SmsStorage> {
         match self.send_at_command(port, "AT+CPMS=?", self.timeout).await {
             Ok(response) => {
                 let supported = Self::parse_cpms_read_stores(&response);
@@ -1085,7 +1134,7 @@ impl AtModemManager {
                         "Modem {} advertised no usable SMS read storage; trying ME and SM",
                         port
                     );
-                    vec!["ME".to_string(), "SM".to_string()]
+                    vec![SmsStorage::Me, SmsStorage::Sm]
                 } else {
                     stores
                 }
@@ -1095,20 +1144,19 @@ impl AtModemManager {
                     "Failed to query SMS storage capabilities on {}: {}; trying ME and SM",
                     port, e
                 );
-                vec!["ME".to_string(), "SM".to_string()]
+                vec![SmsStorage::Me, SmsStorage::Sm]
             }
         }
     }
 
-    async fn select_sms_storage(&self, port: &str, storage: &str) -> Result<()> {
-        let storage = storage.to_ascii_uppercase();
-        if !matches!(storage.as_str(), "ME" | "SM" | "MT") {
-            return Err(anyhow!("Unsupported SMS read storage: {}", storage));
-        }
-
-        let command = format!("AT+CPMS=\"{}\"", storage);
+    async fn select_sms_storage(&self, port: &str, storage: SmsStorage) -> Result<()> {
+        let command = Self::select_sms_storage_command(storage);
         self.send_at_command(port, &command, self.timeout).await?;
         Ok(())
+    }
+
+    fn select_sms_storage_command(storage: SmsStorage) -> String {
+        format!("AT+CPMS=\"{storage}\"")
     }
 
     /// Parse mem1 capabilities from `+CPMS: ("ME","MT",...),(...),(...)`.
@@ -1116,14 +1164,14 @@ impl AtModemManager {
         let Some(line) = response.lines().find(|line| line.contains("+CPMS:")) else {
             return Vec::new();
         };
-        let Some(start) = line.find('(') else {
-            return Vec::new();
-        };
-        let Some(end_offset) = line[start + 1..].find(')') else {
+        let Some((inside, _)) = line
+            .split_once('(')
+            .and_then(|(_, after)| after.split_once(')'))
+        else {
             return Vec::new();
         };
 
-        Self::parse_quoted_values(&line[start + 1..start + 1 + end_offset])
+        Self::parse_quoted_values(inside)
     }
 
     fn parse_quoted_values(value: &str) -> Vec<String> {
@@ -1136,15 +1184,18 @@ impl AtModemManager {
             .collect()
     }
 
-    fn sms_read_store_candidates(supported: &[String]) -> Vec<String> {
-        let mut stores: Vec<String> = ["ME", "SM"]
+    fn sms_read_store_candidates(supported: &[String]) -> Vec<SmsStorage> {
+        let mut stores: Vec<SmsStorage> = [SmsStorage::Me, SmsStorage::Sm]
             .into_iter()
-            .filter(|candidate| supported.iter().any(|store| store == candidate))
-            .map(str::to_string)
+            .filter(|candidate| supported.iter().any(|store| store == candidate.as_str()))
             .collect();
 
-        if stores.is_empty() && supported.iter().any(|store| store == "MT") {
-            stores.push("MT".to_string());
+        if stores.is_empty()
+            && supported
+                .iter()
+                .any(|store| store == SmsStorage::Mt.as_str())
+        {
+            stores.push(SmsStorage::Mt);
         }
         stores
     }
@@ -1178,24 +1229,19 @@ impl AtModemManager {
             .await?;
 
         let mut messages = Vec::new();
-        let lines: Vec<&str> = response.lines().collect();
-        let mut i = 0;
+        let mut lines = response.lines().map(str::trim);
 
-        while i < lines.len() {
-            let line = lines[i].trim();
-
+        while let Some(line) = lines.next() {
             // Parse "+CMGL: 1,"REC READ","+1234567890","","24/01/15,10:30:45+32"
             if line.contains("+CMGL:") {
-                if let Some(sms) = self.parse_cmgl_header(line) {
-                    i += 1;
-                    if i < lines.len() {
-                        let raw_text = lines[i].trim();
+                if let Some(sms) = Self::parse_cmgl_header(line) {
+                    if let Some(raw_text) = lines.next() {
                         if !raw_text.is_empty() && raw_text != "OK" && !raw_text.contains("+CMGL:")
                         {
                             // Decode UCS2 hex if it looks like hex-encoded text
                             let text = Self::decode_sms_content(raw_text);
                             messages.push(AtSms {
-                                storage: String::new(),
+                                storage: None,
                                 index: sms.0,
                                 part_indices: vec![sms.0],
                                 sender: sms.1,
@@ -1207,7 +1253,6 @@ impl AtModemManager {
                     }
                 }
             }
-            i += 1;
         }
 
         Ok(messages)
@@ -1225,18 +1270,13 @@ impl AtModemManager {
             .await?;
 
         let mut messages = Vec::new();
-        let lines: Vec<&str> = response.lines().collect();
-        let mut i = 0;
+        let mut lines = response.lines().map(str::trim);
 
-        while i < lines.len() {
-            let line = lines[i].trim();
-
+        while let Some(line) = lines.next() {
             // Parse "+CMGL: 0,1,,23" (index, status, alpha, length)
             if line.contains("+CMGL:") {
                 if let Some(index) = Self::parse_cmgl_pdu_header(line) {
-                    i += 1;
-                    if i < lines.len() {
-                        let pdu_hex = lines[i].trim();
+                    if let Some(pdu_hex) = lines.next() {
                         if !pdu_hex.is_empty() && pdu_hex != "OK" && !pdu_hex.contains("+CMGL:") {
                             // Parse the PDU and extract message
                             if let Ok(sms) = Self::parse_pdu_sms(index, pdu_hex) {
@@ -1246,7 +1286,6 @@ impl AtModemManager {
                     }
                 }
             }
-            i += 1;
         }
 
         Ok(messages)
@@ -1255,13 +1294,10 @@ impl AtModemManager {
     /// Parse PDU CMGL header to extract message index
     fn parse_cmgl_pdu_header(line: &str) -> Option<u32> {
         // +CMGL: 0,1,,23
-        let parts: Vec<&str> = line.split(',').collect();
-        if parts.is_empty() {
-            return None;
-        }
+        let first_field = line.split(',').next()?;
 
         // Extract index from "+CMGL: 0"
-        let index_part = parts[0].split(':').last()?.trim();
+        let index_part = first_field.split(':').next_back()?.trim();
         index_part.parse::<u32>().ok()
     }
 
@@ -1270,7 +1306,10 @@ impl AtModemManager {
         // Decode hex string to bytes
         let pdu_bytes: Vec<u8> = (0..pdu_hex.len())
             .step_by(2)
-            .filter_map(|i| u8::from_str_radix(&pdu_hex[i..(i + 2).min(pdu_hex.len())], 16).ok())
+            .filter_map(|i| {
+                let pair = pdu_hex.get(i..(i + 2).min(pdu_hex.len()))?;
+                u8::from_str_radix(pair, 16).ok()
+            })
             .collect();
 
         if pdu_bytes.len() < 10 {
@@ -1280,76 +1319,74 @@ impl AtModemManager {
         let mut pos = 0;
 
         // SMSC length (skip SMSC address)
-        let smsc_len = pdu_bytes[pos] as usize;
+        let smsc_len = usize::from(*pdu_bytes.first().ok_or_else(|| anyhow!("PDU too short"))?);
         pos += 1 + smsc_len;
 
-        if pos >= pdu_bytes.len() {
-            return Err(anyhow!("PDU truncated after SMSC"));
-        }
-
         // PDU type
-        let pdu_type = pdu_bytes[pos];
+        let pdu_type = *pdu_bytes
+            .get(pos)
+            .ok_or_else(|| anyhow!("PDU truncated after SMSC"))?;
         pos += 1;
 
         // Sender address length (in digits)
-        if pos >= pdu_bytes.len() {
-            return Err(anyhow!("PDU truncated at sender length"));
-        }
-        let sender_len = pdu_bytes[pos] as usize;
+        let sender_len = usize::from(
+            *pdu_bytes
+                .get(pos)
+                .ok_or_else(|| anyhow!("PDU truncated at sender length"))?,
+        );
         pos += 1;
 
         // Sender type of address
-        if pos >= pdu_bytes.len() {
-            return Err(anyhow!("PDU truncated at sender type"));
-        }
-        let sender_toa = pdu_bytes[pos];
+        let sender_toa = *pdu_bytes
+            .get(pos)
+            .ok_or_else(|| anyhow!("PDU truncated at sender type"))?;
         pos += 1;
 
         // Type-of-number (bits 6-4): 0x05 = alphanumeric (GSM 7-bit encoded)
-        let sender_ton = (sender_toa >> 4) & 0x07;
+        let sender_number_type = (sender_toa >> 4) & 0x07;
 
         // Sender address bytes: for BCD it's (digits+1)/2, for alphanumeric sender_len
         // is the number of useful semi-octets (which maps to the same byte count formula)
-        let sender_bytes = (sender_len + 1) / 2;
-        if pos + sender_bytes > pdu_bytes.len() {
-            return Err(anyhow!("PDU truncated at sender address"));
-        }
-        let sender = if sender_ton == 0x05 {
+        let sender_bytes = sender_len.div_ceil(2);
+        let sender_address = pdu_bytes
+            .get(pos..pos + sender_bytes)
+            .ok_or_else(|| anyhow!("PDU truncated at sender address"))?;
+        let sender = if sender_number_type == 0x05 {
             // Alphanumeric sender: bytes are GSM 7-bit packed
             // sender_len is in "digits" but for alphanumeric it means usable semi-octets,
             // the number of septets (chars) = sender_len * 4 / 7
             let num_septets = (sender_len * 4) / 7;
-            Self::decode_pdu_7bit(&pdu_bytes[pos..pos + sender_bytes], num_septets, 0)
+            Self::decode_pdu_7bit(sender_address, num_septets, 0)
         } else {
-            Self::decode_bcd_phone(&pdu_bytes[pos..pos + sender_bytes], sender_len)
+            Self::decode_bcd_phone(sender_address, sender_len)
         };
         pos += sender_bytes;
 
         // PID (Protocol Identifier)
-        if pos >= pdu_bytes.len() {
+        if pdu_bytes.get(pos).is_none() {
             return Err(anyhow!("PDU truncated at PID"));
         }
         pos += 1;
 
         // DCS (Data Coding Scheme)
-        if pos >= pdu_bytes.len() {
-            return Err(anyhow!("PDU truncated at DCS"));
-        }
-        let dcs = pdu_bytes[pos];
+        let dcs = *pdu_bytes
+            .get(pos)
+            .ok_or_else(|| anyhow!("PDU truncated at DCS"))?;
         pos += 1;
 
         // Timestamp (7 bytes in semi-octets)
-        if pos + 7 > pdu_bytes.len() {
-            return Err(anyhow!("PDU truncated at timestamp"));
-        }
-        let timestamp = Self::decode_pdu_timestamp(&pdu_bytes[pos..pos + 7]);
+        let timestamp_bytes = pdu_bytes
+            .get(pos..pos + 7)
+            .ok_or_else(|| anyhow!("PDU truncated at timestamp"))?;
+        let timestamp = Self::decode_pdu_timestamp(timestamp_bytes);
         pos += 7;
 
         // User Data Length
-        if pos >= pdu_bytes.len() {
-            return Err(anyhow!("PDU truncated at UDL"));
-        }
-        let udl = pdu_bytes[pos] as usize;
+        let user_data_len = usize::from(
+            *pdu_bytes
+                .get(pos)
+                .ok_or_else(|| anyhow!("PDU truncated at UDL"))?,
+        );
         pos += 1;
 
         // Check for UDH (User Data Header)
@@ -1357,14 +1394,18 @@ impl AtModemManager {
         let mut concat_info = None;
         let mut text_start = pos;
         let udhl = if has_udh {
-            if pos >= pdu_bytes.len() {
-                return Err(anyhow!("PDU truncated at UDHL"));
-            }
-            let udhl = pdu_bytes[pos] as usize;
+            let udhl = usize::from(
+                *pdu_bytes
+                    .get(pos)
+                    .ok_or_else(|| anyhow!("PDU truncated at UDHL"))?,
+            );
             pos += 1;
 
             // Extract concatenation info from UDH
-            concat_info = Self::extract_udh_concat(&pdu_bytes[pos..pos + udhl]);
+            let udh = pdu_bytes
+                .get(pos..pos + udhl)
+                .ok_or_else(|| anyhow!("PDU truncated at UDH"))?;
+            concat_info = Self::extract_udh_concat(udh);
             pos += udhl;
             text_start = pos;
             udhl
@@ -1378,26 +1419,29 @@ impl AtModemManager {
         // 0x04 = 8-bit data
         // 0x08 = UCS-2 (UTF-16BE) - common for Chinese
         // 0x0C = 8-bit + reserved
+        let text_bytes = pdu_bytes
+            .get(text_start..)
+            .ok_or_else(|| anyhow!("PDU truncated before text"))?;
         let text = if (dcs & 0x08) != 0 {
             // Bit 3 set = UCS-2 encoding (Chinese/Unicode)
             debug!("PDU encoding detected: UCS-2 (DCS: 0x{:02X})", dcs);
-            Self::decode_pdu_ucs2(&pdu_bytes[text_start..], udl)
+            Self::decode_pdu_ucs2(text_bytes, user_data_len)
         } else if (dcs & 0x04) != 0 {
             // Bit 2 set (but not bit 3) = 8-bit data encoding
             debug!("PDU encoding detected: 8-bit data (DCS: 0x{:02X})", dcs);
             // UDH already skipped, text_start points to actual text
-            Self::decode_pdu_8bit(&pdu_bytes[text_start..])
+            Self::decode_pdu_8bit(text_bytes)
         } else {
             // Default 7-bit GSM alphabet (English/ASCII)
             debug!("PDU encoding detected: 7-bit GSM (DCS: 0x{:02X})", dcs);
-            Self::decode_pdu_7bit(&pdu_bytes[text_start..], udl, udhl)
+            Self::decode_pdu_7bit(text_bytes, user_data_len, udhl)
         };
 
         Ok(AtSms {
-            storage: String::new(),
+            storage: None,
             index,
             part_indices: vec![index],
-            sender,
+            sender: SmsAddress::from(sender),
             timestamp,
             text,
             concat_info,
@@ -1427,51 +1471,39 @@ impl AtModemManager {
 
     fn extract_http_url(bytes: &[u8]) -> Option<String> {
         let start = (0..bytes.len()).find(|&index| {
-            bytes[index..].starts_with(b"https://") || bytes[index..].starts_with(b"http://")
+            bytes
+                .get(index..)
+                .is_some_and(|rest| rest.starts_with(b"https://") || rest.starts_with(b"http://"))
         })?;
-        let end = bytes[start..]
+        let end = bytes
+            .get(start..)?
             .iter()
             .position(|byte| !byte.is_ascii_graphic())
-            .map(|length| start + length)
-            .unwrap_or(bytes.len());
-        std::str::from_utf8(&bytes[start..end])
+            .map_or(bytes.len(), |length| start + length);
+        std::str::from_utf8(bytes.get(start..end)?)
             .ok()
             .map(str::to_owned)
     }
 
     /// Extract concatenation info from UDH
     fn extract_udh_concat(udh_bytes: &[u8]) -> Option<ConcatInfo> {
-        let mut pos = 0;
-        while pos < udh_bytes.len() {
-            let iei = udh_bytes[pos];
-            pos += 1;
-
-            if pos >= udh_bytes.len() {
+        let mut rest = udh_bytes;
+        while let [iei, iedl, tail @ ..] = rest {
+            let Some((element, next)) = tail.split_at_checked(usize::from(*iedl)) else {
                 break;
-            }
-            let iedl = udh_bytes[pos] as usize;
-            pos += 1;
-
-            if pos + iedl > udh_bytes.len() {
-                break;
-            }
+            };
 
             // IEI 0x00: Concatenated short message, 8-bit reference
             // IEI 0x08: Concatenated short message, 16-bit reference
-            if iei == 0x00 && iedl == 3 {
-                let ref_id = udh_bytes[pos];
-                let total_parts = udh_bytes[pos + 1];
-                let part_number = udh_bytes[pos + 2];
-                return Some(ConcatInfo {
-                    ref_id,
-                    total_parts,
-                    part_number,
-                });
-            } else if iei == 0x08 && iedl == 4 {
-                // Use only lower byte of 16-bit reference for simplicity
-                let ref_id = udh_bytes[pos + 1];
-                let total_parts = udh_bytes[pos + 2];
-                let part_number = udh_bytes[pos + 3];
+            // The 16-bit form keeps only the lower byte of its reference.
+            let ids = match (*iei, element) {
+                (0x00, &[ref_id, total_parts, part_number])
+                | (0x08, &[_, ref_id, total_parts, part_number]) => {
+                    Some((ref_id, total_parts, part_number))
+                }
+                _ => None,
+            };
+            if let Some((ref_id, total_parts, part_number)) = ids {
                 return Some(ConcatInfo {
                     ref_id,
                     total_parts,
@@ -1479,7 +1511,7 @@ impl AtModemManager {
                 });
             }
 
-            pos += iedl;
+            rest = next;
         }
         None
     }
@@ -1487,13 +1519,12 @@ impl AtModemManager {
     /// Map a BCD nibble (0x0-0xF) to its character per GSM 03.40 Section 9.1.2.3
     fn bcd_nibble_to_char(nibble: u8) -> Option<char> {
         match nibble {
-            0x0..=0x9 => Some((b'0' + nibble) as char),
+            0x0..=0x9 => Some(char::from(b'0' + nibble)),
             0xA => Some('*'),
             0xB => Some('#'),
             0xC => Some('a'),
             0xD => Some('b'),
-            0xE | 0xF => None, // reserved / filler
-            _ => None,
+            _ => None, // 0xE and 0xF are reserved filler
         }
     }
 
@@ -1520,33 +1551,32 @@ impl AtModemManager {
 
     /// Decode PDU timestamp to ISO 8601 format
     fn decode_pdu_timestamp(bytes: &[u8]) -> String {
-        if bytes.len() < 7 {
+        let &[year, month, day, hour, minute, second, tz_byte, ..] = bytes else {
             return chrono::Utc::now()
                 .format("%Y-%m-%dT%H:%M:%S%.3fZ")
                 .to_string();
-        }
+        };
 
         // Semi-octet BCD decoding: each byte has nibbles swapped (low nibble first)
         // After swapping, decode as BCD: (high_nibble * 10) + low_nibble
-        let decode_bcd = |b: u8| -> u32 {
+        let decode_bcd = |b: u8| -> u8 {
             let swapped = ((b & 0x0F) << 4) | ((b >> 4) & 0x0F);
             let high = (swapped >> 4) & 0x0F;
             let low = swapped & 0x0F;
-            (high * 10 + low) as u32
+            high * 10 + low
         };
 
-        let year = decode_bcd(bytes[0]) as i32 + 2000;
-        let month = decode_bcd(bytes[1]);
-        let day = decode_bcd(bytes[2]);
-        let hour = decode_bcd(bytes[3]);
-        let minute = decode_bcd(bytes[4]);
-        let second = decode_bcd(bytes[5]);
+        let year = i32::from(decode_bcd(year)) + 2000;
+        let month = u32::from(decode_bcd(month));
+        let day = u32::from(decode_bcd(day));
+        let hour = u32::from(decode_bcd(hour));
+        let minute = u32::from(decode_bcd(minute));
+        let second = u32::from(decode_bcd(second));
 
         // Timezone (in quarter hours, also BCD encoded)
         // Bit 7 of original byte = sign (0=positive, 1=negative)
-        let tz_byte = bytes[6];
         let tz_sign = if (tz_byte & 0x80) != 0 { -1 } else { 1 };
-        let tz_quarters = decode_bcd(tz_byte & 0x7F) as i32; // Mask out sign bit before BCD decode
+        let tz_quarters = i32::from(decode_bcd(tz_byte & 0x7F)); // Mask out sign bit before BCD decode
         let tz_offset_minutes = tz_sign * tz_quarters * 15;
 
         // Convert to UTC
@@ -1555,7 +1585,7 @@ impl AtModemManager {
             .unwrap_or_else(|| chrono::Utc::now().naive_utc());
 
         let dt = chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(
-            naive - chrono::Duration::minutes(tz_offset_minutes as i64),
+            naive - chrono::Duration::minutes(i64::from(tz_offset_minutes)),
             chrono::Utc,
         );
 
@@ -1603,9 +1633,9 @@ impl AtModemManager {
 
     /// Decode 7-bit GSM encoded text
     /// bytes: text data (UDH already removed by caller)
-    /// udl: User Data Length in septets (characters)
-    /// udhl: UDH length in bytes (0 if no UDH) - needed to calculate fill bits
-    fn decode_pdu_7bit(bytes: &[u8], udl: usize, udhl: usize) -> String {
+    /// `septet_count`: User Data Length in septets (characters)
+    /// `udhl`: UDH length in bytes (0 if no UDH) - needed to calculate fill bits
+    fn decode_pdu_7bit(bytes: &[u8], septet_count: usize, udhl: usize) -> String {
         // For 7-bit encoding with UDH, calculate fill bits to align to septet boundary
         // Fill bits = (7 - ((udhl + 1) * 8) % 7) % 7
         let fill_bits = if udhl > 0 {
@@ -1618,17 +1648,18 @@ impl AtModemManager {
         let mut bit_pos = fill_bits;
         let mut escape_next = false;
 
-        for _ in 0..udl {
+        for _ in 0..septet_count {
             let byte_pos = bit_pos / 8;
             let shift = bit_pos % 8;
 
-            if byte_pos >= bytes.len() {
+            let Some(&low_byte) = bytes.get(byte_pos) else {
                 break;
-            }
-
-            let mut char_val = (bytes[byte_pos] >> shift) & 0x7F;
-            if shift > 1 && byte_pos + 1 < bytes.len() {
-                char_val |= (bytes[byte_pos + 1] << (8 - shift)) & 0x7F;
+            };
+            let mut char_val = (low_byte >> shift) & 0x7F;
+            if shift > 1 {
+                if let Some(&high_byte) = bytes.get(byte_pos + 1) {
+                    char_val |= (high_byte << (8 - shift)) & 0x7F;
+                }
             }
 
             if escape_next {
@@ -1643,7 +1674,12 @@ impl AtModemManager {
                 // ESC: next septet is extension character
                 escape_next = true;
             } else {
-                result.push(Self::GSM_DEFAULT_ALPHABET[char_val as usize]);
+                result.push(
+                    Self::GSM_DEFAULT_ALPHABET
+                        .get(usize::from(char_val))
+                        .copied()
+                        .unwrap_or(' '),
+                );
             }
 
             bit_pos += 7;
@@ -1660,9 +1696,12 @@ impl AtModemManager {
             return String::new();
         }
 
-        let u16_count = bytes.len() / 2;
-        let u16_values: Vec<u16> = (0..u16_count)
-            .map(|i| u16::from_be_bytes([bytes[i * 2], bytes[i * 2 + 1]]))
+        let u16_values: Vec<u16> = bytes
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .copied()
+            .map(u16::from_be_bytes)
             .collect();
 
         String::from_utf16(&u16_values).unwrap_or_else(|_| String::from("?"))
@@ -1671,8 +1710,9 @@ impl AtModemManager {
     /// Decode SMS content - handles UCS2 hex encoding for Chinese/Unicode
     fn decode_sms_content(raw: &str) -> String {
         // Check if it looks like UCS2 hex (all hex chars, even length, typical length)
-        let is_hex =
-            raw.len() >= 4 && raw.len() % 4 == 0 && raw.chars().all(|c| c.is_ascii_hexdigit());
+        let is_hex = raw.len() >= 4
+            && raw.len().is_multiple_of(4)
+            && raw.chars().all(|c| c.is_ascii_hexdigit());
 
         if is_hex {
             // Try to decode as UCS2 (UTF-16BE) hex string
@@ -1708,8 +1748,7 @@ impl AtModemManager {
             if raw.len() <= 36 {
                 let mut candidates = Vec::new();
                 Self::decode_decimal_ascii_candidates(raw, 0, String::new(), &mut candidates);
-                if candidates.len() == 1 {
-                    let candidate = &candidates[0];
+                if let [candidate] = candidates.as_slice() {
                     if candidate
                         .chars()
                         .any(|character| character.is_ascii_alphabetic())
@@ -1746,7 +1785,7 @@ impl AtModemManager {
             if end > raw.len() {
                 continue;
             }
-            let Ok(code_point) = raw[offset..end].parse::<u8>() else {
+            let Some(Ok(code_point)) = raw.get(offset..end).map(str::parse::<u8>) else {
                 continue;
             };
             if !(32..=126).contains(&code_point) {
@@ -1754,7 +1793,7 @@ impl AtModemManager {
             }
 
             let mut next = decoded.clone();
-            next.push(code_point as char);
+            next.push(char::from(code_point));
             Self::decode_decimal_ascii_candidates(raw, end, next, candidates);
         }
     }
@@ -1764,16 +1803,17 @@ impl AtModemManager {
     /// Output: "你好"
     fn decode_ucs2_hex(hex: &str) -> Option<String> {
         // Must be even length (2 hex chars per byte)
-        if hex.len() % 2 != 0 {
+        if !hex.len().is_multiple_of(2) {
             return None;
         }
 
-        let bytes: Result<Vec<u8>, _> = (0..hex.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&hex[i..i + 2], 16))
-            .collect();
-
-        let bytes = bytes.ok()?;
+        let bytes = hex
+            .as_bytes()
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).ok()?, 16).ok())
+            .collect::<Option<Vec<u8>>>()?;
 
         // Decode as UTF-16BE (need even number of bytes)
         if bytes.len() % 2 != 0 {
@@ -1781,44 +1821,41 @@ impl AtModemManager {
         }
 
         let u16_values: Vec<u16> = bytes
-            .chunks(2)
-            .map(|chunk| u16::from_be_bytes([chunk[0], chunk[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .copied()
+            .map(u16::from_be_bytes)
             .collect();
 
         String::from_utf16(&u16_values).ok()
     }
 
     /// Parse CMGL header line
-    fn parse_cmgl_header(&self, line: &str) -> Option<(u32, String, String)> {
+    fn parse_cmgl_header(line: &str) -> Option<(u32, SmsAddress, String)> {
         // +CMGL: 1,"REC READ","+1234567890","","24/01/15,10:30:45+32"
         // With UCS2: phone number may be hex encoded like "002B0036003500..."
         let parts: Vec<&str> = line.split(',').collect();
-        if parts.len() < 3 {
+        let [first_field, _, sender_field, ..] = parts.as_slice() else {
             return None;
-        }
+        };
 
         // Extract index from "+CMGL: 1"
-        let index_part = parts[0].split(':').last()?.trim();
+        let index_part = first_field.split(':').next_back()?.trim();
         let index = index_part.parse::<u32>().ok()?;
 
         // Extract sender (third part, quoted) - may be UCS2 encoded
-        let raw_sender = parts.get(2)?.trim().trim_matches('"');
-        let sender = Self::decode_sms_sender(raw_sender);
+        let raw_sender = sender_field.trim().trim_matches('"');
+        let sender = SmsAddress::from(Self::decode_sms_sender(raw_sender));
 
         // Extract timestamp (4th and 5th parts) - may also be UCS2 encoded
         let timestamp = if parts.len() >= 5 {
-            let raw_date = parts
-                .get(4)
-                .map(|s| s.trim().trim_matches('"'))
-                .unwrap_or("");
-            let raw_time = parts
-                .get(5)
-                .map(|s| s.trim().trim_matches('"'))
-                .unwrap_or("");
+            let raw_date = parts.get(4).map_or("", |s| s.trim().trim_matches('"'));
+            let raw_time = parts.get(5).map_or("", |s| s.trim().trim_matches('"'));
             // Decode date/time if UCS2 encoded
             let date = Self::decode_sms_content(raw_date);
             let time = Self::decode_sms_content(raw_time);
-            self.normalize_sms_timestamp(&date, &time)
+            Self::normalize_sms_timestamp(&date, &time)
         } else {
             chrono::Utc::now()
                 .format("%Y-%m-%dT%H:%M:%S%.3fZ")
@@ -1828,37 +1865,39 @@ impl AtModemManager {
         Some((index, sender, timestamp))
     }
 
+    /// Split a trailing `-NN` offset off `time`, ignoring a leading sign character.
+    fn split_negative_offset(time: &str) -> Option<(&str, &str)> {
+        let pos = time.get(1..)?.rfind('-')? + 1;
+        let (clock, tail) = time.split_at_checked(pos)?;
+        Some((clock, tail.strip_prefix('-')?))
+    }
+
     /// Convert SMS timestamp to RFC3339 UTC
-    fn normalize_sms_timestamp(&self, date: &str, time: &str) -> String {
+    fn normalize_sms_timestamp(date: &str, time: &str) -> String {
         // Input: "24/01/15" and "10:30:45+32" (YY/MM/DD and HH:MM:SS+TZ)
         // TZ offset is in quarter-hours from UTC (e.g. +32 = 32*15min = 8h = UTC+8)
         let date_parts: Vec<&str> = date.split('/').collect();
 
         // Parse time and timezone offset (quarter-hours)
-        let (time_clean, offset_minutes) = if let Some(pos) = time.rfind('+') {
-            let t = &time[..pos];
-            let tz_quarters: i32 = time[pos + 1..].parse().unwrap_or(0);
+        let (time_clean, offset_minutes) = if let Some((t, tz)) = time.rsplit_once('+') {
+            let tz_quarters: i32 = tz.parse().unwrap_or(0);
             (t, tz_quarters * 15)
-        } else if let Some(pos) = time[1..].rfind('-') {
-            let pos = pos + 1;
-            let t = &time[..pos];
-            let tz_quarters: i32 = time[pos + 1..].parse().unwrap_or(0);
+        } else if let Some((t, tz)) = Self::split_negative_offset(time) {
+            let tz_quarters: i32 = tz.parse().unwrap_or(0);
             (t, -(tz_quarters * 15))
         } else {
             (time, 0i32)
         };
 
-        if date_parts.len() >= 3 {
-            let year = format!("20{}", date_parts[0]);
-            let month = date_parts[1];
-            let day = date_parts[2];
+        if let [year, month, day, ..] = date_parts.as_slice() {
+            let year = format!("20{year}");
 
             // Parse local time and convert to UTC using chrono
-            let local_str = format!("{}-{}-{}T{}", year, month, day, time_clean);
+            let local_str = format!("{year}-{month}-{day}T{time_clean}");
             if let Ok(naive) =
                 chrono::NaiveDateTime::parse_from_str(&local_str, "%Y-%m-%dT%H:%M:%S")
             {
-                let utc = naive - chrono::Duration::minutes(offset_minutes as i64);
+                let utc = naive - chrono::Duration::minutes(i64::from(offset_minutes));
                 return format!("{}Z", utc.format("%Y-%m-%dT%H:%M:%S%.3f"));
             }
 
@@ -1866,10 +1905,7 @@ impl AtModemManager {
             let tz_hours = offset_minutes.abs() / 60;
             let tz_mins = offset_minutes.abs() % 60;
             let sign = if offset_minutes >= 0 { '+' } else { '-' };
-            return format!(
-                "{}-{}-{}T{}{}{:02}:{:02}",
-                year, month, day, time_clean, sign, tz_hours, tz_mins
-            );
+            return format!("{year}-{month}-{day}T{time_clean}{sign}{tz_hours:02}:{tz_mins:02}");
         }
 
         chrono::Utc::now()
@@ -1879,14 +1915,14 @@ impl AtModemManager {
 
     /// Delete SMS by index
     pub async fn delete_sms(&self, port: &str, index: u32) -> Result<()> {
-        let cmd = format!("AT+CMGD={}", index);
+        let cmd = format!("AT+CMGD={index}");
         let response = self.send_at_command(port, &cmd, self.timeout).await?;
 
         if response.contains("OK") {
             debug!("Deleted SMS {} from {}", index, port);
             Ok(())
         } else {
-            Err(anyhow!("Failed to delete SMS {}: {}", index, response))
+            Err(anyhow!("Failed to delete SMS {index}: {response}"))
         }
     }
 
@@ -1895,7 +1931,7 @@ impl AtModemManager {
     pub async fn delete_sms_from_storage(
         &self,
         port: &str,
-        storage: &str,
+        storage: SmsStorage,
         index: u32,
     ) -> Result<()> {
         self.select_sms_storage(port, storage).await?;
@@ -1913,18 +1949,22 @@ impl AtModemManager {
             info!("Deleted all SMS from {}", port);
             Ok(())
         } else {
-            Err(anyhow!("Failed to delete all SMS: {}", response))
+            Err(anyhow!("Failed to delete all SMS: {response}"))
         }
     }
 
     /// Encode string to UCS2 hex format (UTF-16BE)
     fn encode_ucs2_hex(text: &str) -> String {
-        text.encode_utf16().map(|u| format!("{:04X}", u)).collect()
+        use std::fmt::Write as _;
+        text.encode_utf16().fold(String::new(), |mut hex, unit| {
+            let _ = write!(hex, "{unit:04X}");
+            hex
+        })
     }
 
     /// Check if text contains non-ASCII characters
     fn needs_ucs2(text: &str) -> bool {
-        text.chars().any(|c| !c.is_ascii())
+        !text.is_ascii()
     }
 
     /// Validate an SMS recipient before it is interpolated into an AT command.
@@ -1985,7 +2025,7 @@ impl AtModemManager {
         {
             return Err(anyhow!(
                 "Invalid SMS body: contains control character U+{:04X}",
-                c as u32
+                u32::from(c)
             ));
         }
 
@@ -1996,10 +2036,10 @@ impl AtModemManager {
     pub async fn send_sms(
         &self,
         port: &str,
-        recipient: &str,
+        recipient: &SmsAddress,
         message: &str,
-    ) -> Result<SmsSubmitOutcome> {
-        Self::validate_recipient(recipient)?;
+    ) -> Result<SmsSubmission> {
+        Self::validate_recipient(recipient.as_str())?;
         self.send_sms_with_short_code(port, recipient, message, false)
             .await
     }
@@ -2007,77 +2047,89 @@ impl AtModemManager {
     pub async fn send_sms_with_short_code(
         &self,
         port: &str,
-        recipient: &str,
+        recipient: &SmsAddress,
         message: &str,
         allow_short_code: bool,
-    ) -> Result<SmsSubmitOutcome> {
+    ) -> Result<SmsSubmission> {
         // Validate before touching the modem: both values are interpolated into AT
         // command strings below, and both originate from an API request body.
-        Self::validate_recipient_with_short_code(recipient, allow_short_code)?;
+        Self::validate_recipient_with_short_code(recipient.as_str(), allow_short_code)?;
         Self::validate_message_body(message)?;
 
         let use_ucs2 = Self::needs_ucs2(message);
         let port_lock = self.port_lock(port).await;
         let _guard = port_lock.lock().await;
 
-        for attempt in 1..=2 {
-            let recovery_response = self.recover_sms_input_unlocked(port).await?;
-            Self::require_recovered_at_channel(&recovery_response)?;
-            self.configure_sms_unlocked(port, use_ucs2).await?;
+        match self
+            .submit_sms_unlocked(port, recipient, message, use_ucs2, allow_short_code)
+            .await
+        {
+            Err(error) if Self::is_prompt_timeout(&error) => {
+                warn!(
+                    "SMS prompt timed out on {}; recovering and retrying once",
+                    port
+                );
+                tokio::time::sleep(SMS_PROMPT_RETRY_DELAY).await;
+                self.submit_sms_unlocked(port, recipient, message, use_ucs2, allow_short_code)
+                    .await
+            }
+            result => result,
+        }
+    }
 
-            let port_path = port.to_string();
-            let recipient = recipient.to_string();
-            let msg = message.to_string();
-            let timeout = self.timeout;
-            let result = tokio::task::spawn_blocking(move || {
-                Self::send_sms_sync(
-                    &port_path,
-                    &recipient,
-                    &msg,
-                    timeout,
-                    use_ucs2,
-                    allow_short_code,
-                )
-            })
-            .await?;
+    /// One SMS submission on a port whose lock the caller holds: recover the AT
+    /// channel, configure, submit, and recover again if the modem did not confirm.
+    async fn submit_sms_unlocked(
+        &self,
+        port: &str,
+        recipient: &SmsAddress,
+        message: &str,
+        use_ucs2: bool,
+        allow_short_code: bool,
+    ) -> Result<SmsSubmission> {
+        let recovery_response = self.recover_sms_input_unlocked(port).await?;
+        Self::require_recovered_at_channel(&recovery_response)?;
+        self.configure_sms_unlocked(port, use_ucs2).await?;
 
-            match result {
-                Ok(outcome) => {
-                    if Self::should_recover_after_submit(outcome) {
+        let port_path = port.to_string();
+        let recipient = recipient.as_str().to_owned();
+        let msg = message.to_string();
+        let timeout = self.timeout;
+        let result = tokio::task::spawn_blocking(move || {
+            Self::send_sms_sync(
+                &port_path,
+                &recipient,
+                &msg,
+                timeout,
+                use_ucs2,
+                allow_short_code,
+            )
+        })
+        .await?;
+
+        let outcome = result?;
+        if Self::should_recover_after_submit(outcome) {
+            warn!(
+                "SMS submission was not confirmed on {}; recovering AT channel",
+                port
+            );
+            match self.recover_sms_input_unlocked(port).await {
+                Ok(response) => {
+                    Self::classify_post_submit_recovery_response(&response)?;
+                    if let Err(error) = Self::require_recovered_at_channel(&response) {
                         warn!(
-                            "SMS submission was not confirmed on {}; recovering AT channel",
-                            port
+                            "Failed to recover AT channel after unconfirmed SMS submission on {}: {}",
+                            port, error
                         );
-                        match self.recover_sms_input_unlocked(port).await {
-                            Ok(response) => {
-                                Self::classify_post_submit_recovery_response(&response)?;
-                                if let Err(error) = Self::require_recovered_at_channel(&response) {
-                                    warn!(
-                                        "Failed to recover AT channel after unconfirmed SMS submission on {}: {}",
-                                        port, error
-                                    );
-                                }
-                            }
-                            Err(error) => warn!(
-                                "Failed to recover AT channel after unconfirmed SMS submission on {}: {}",
-                                port, error
-                            ),
-                        }
                     }
-                    return Ok(outcome);
                 }
-                Err(error) if attempt == 1 && Self::is_prompt_timeout(&error) => {
-                    warn!(
-                        "SMS prompt timed out on {}; recovering and retrying once",
-                        port
-                    );
-                    tokio::time::sleep(SMS_PROMPT_RETRY_DELAY).await;
-                }
-                Err(error) => return Err(error),
+                Err(error) => warn!(
+                    "Failed to recover AT channel after unconfirmed SMS submission on {}: {}",
+                    port, error
+                ),
             }
         }
-
-        unreachable!("SMS send loop always returns on its second attempt")
+        Ok(outcome)
     }
 
     async fn configure_sms_unlocked(&self, port: &str, use_ucs2: bool) -> Result<()> {
@@ -2108,13 +2160,13 @@ impl AtModemManager {
         error.to_string() == SMS_PROMPT_TIMEOUT_ERROR
     }
 
-    fn should_recover_after_submit(outcome: SmsSubmitOutcome) -> bool {
-        matches!(outcome, SmsSubmitOutcome::SubmittedUnconfirmed)
+    fn should_recover_after_submit(outcome: SmsSubmission) -> bool {
+        matches!(outcome, SmsSubmission::SubmittedUnconfirmed)
     }
 
     fn classify_post_submit_recovery_response(response: &str) -> Result<()> {
         if let Some(error) = Self::sms_submit_error_line(response) {
-            return Err(anyhow!("Send SMS failed after submission: {}", error));
+            return Err(anyhow!("Send SMS failed after submission: {error}"));
         }
         Ok(())
     }
@@ -2126,7 +2178,7 @@ impl AtModemManager {
         timeout: Duration,
         use_ucs2: bool,
         allow_short_code: bool,
-    ) -> Result<SmsSubmitOutcome> {
+    ) -> Result<SmsSubmission> {
         // Re-checked at the sink rather than trusting send_sms: this is the function
         // that actually writes to the serial port, so the invariant belongs here too.
         Self::validate_recipient_with_short_code(recipient, allow_short_code)?;
@@ -2145,7 +2197,7 @@ impl AtModemManager {
         };
 
         // Send CMGS command
-        let cmd = format!("AT+CMGS=\"{}\"\r", encoded_recipient);
+        let cmd = format!("AT+CMGS=\"{encoded_recipient}\"\r");
         file.write_all(cmd.as_bytes())?;
         file.flush()?;
 
@@ -2159,24 +2211,22 @@ impl AtModemManager {
             match file.read(&mut buf) {
                 Ok(0) => {
                     std::thread::sleep(Duration::from_millis(50));
-                    continue;
                 }
                 Ok(n) => {
-                    prompt_buf.extend_from_slice(&buf[..n]);
+                    prompt_buf.extend_from_slice(read_chunk(&buf, n)?);
                     let text = String::from_utf8_lossy(&prompt_buf);
                     if text.contains('>') {
                         got_prompt = true;
                         break;
                     }
                     if text.contains("ERROR") {
-                        return Err(anyhow!("CMGS command failed: {}", text));
+                        return Err(anyhow!("CMGS command failed: {text}"));
                     }
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                     std::thread::sleep(Duration::from_millis(50));
-                    continue;
                 }
-                Err(e) => return Err(anyhow!("Read error waiting for prompt: {}", e)),
+                Err(e) => return Err(anyhow!("Read error waiting for prompt: {e}")),
             }
         }
 
@@ -2188,7 +2238,7 @@ impl AtModemManager {
         std::thread::sleep(Duration::from_millis(100));
 
         // Send message with Ctrl-Z (0x1A)
-        let msg_with_end = format!("{}\x1A", encoded_message);
+        let msg_with_end = format!("{encoded_message}\x1A");
         file.write_all(msg_with_end.as_bytes())?;
         file.flush()?;
 
@@ -2205,10 +2255,9 @@ impl AtModemManager {
             match file.read(&mut buf) {
                 Ok(0) => {
                     std::thread::sleep(Duration::from_millis(50));
-                    continue;
                 }
                 Ok(n) => {
-                    response.extend_from_slice(&buf[..n]);
+                    response.extend_from_slice(read_chunk(&buf, n)?);
                     let text = String::from_utf8_lossy(&response);
                     if Self::has_sms_submit_final_code(&text) {
                         break false;
@@ -2216,9 +2265,8 @@ impl AtModemManager {
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                     std::thread::sleep(Duration::from_millis(50));
-                    continue;
                 }
-                Err(e) => return Err(anyhow!("Read error: {}", e)),
+                Err(e) => return Err(anyhow!("Read error: {e}")),
             }
         };
 
@@ -2226,24 +2274,24 @@ impl AtModemManager {
         Self::classify_sms_submit_response(&response_str, timed_out)
     }
 
-    fn classify_sms_submit_response(response: &str, timed_out: bool) -> Result<SmsSubmitOutcome> {
+    fn classify_sms_submit_response(response: &str, timed_out: bool) -> Result<SmsSubmission> {
         let lines = response
             .lines()
             .map(str::trim)
             .filter(|line| !line.is_empty());
         if Self::sms_submit_error_line(response).is_some() {
-            return Err(anyhow!("Send SMS failed: {}", response));
+            return Err(anyhow!("Send SMS failed: {response}"));
         }
         if lines
             .clone()
             .any(|line| line == "OK" || line.starts_with("+CMGS:"))
         {
-            return Ok(SmsSubmitOutcome::Confirmed);
+            return Ok(SmsSubmission::Confirmed);
         }
         if timed_out {
-            return Ok(SmsSubmitOutcome::SubmittedUnconfirmed);
+            return Ok(SmsSubmission::SubmittedUnconfirmed);
         }
-        Err(anyhow!("Send SMS failed: {}", response))
+        Err(anyhow!("Send SMS failed: {response}"))
     }
 
     fn has_sms_submit_final_code(response: &str) -> bool {
@@ -2288,17 +2336,16 @@ impl AtModemManager {
     /// The modem ID is simply the AT port's ttyUSB index ("/dev/ttyUSB6" -> "6").
     /// This is independent of USB composition (no fixed 4-ports-per-modem assumption),
     /// so it works for both default and slimmed modems. The ID is an internal handle;
-    /// the stable cross-system key is the modem's IMEI (equipment_id).
+    /// the stable cross-system key is the modem's IMEI (`equipment_id`).
     pub fn port_to_modem_id(port: &str) -> String {
         port.strip_prefix("/dev/ttyUSB")
-            .map(|n| n.to_string())
-            .unwrap_or_else(|| port.to_string())
+            .map_or_else(|| port.to_string(), std::string::ToString::to_string)
     }
 
     /// Convert modem ID back to its AT port path ("6" -> "/dev/ttyUSB6").
     pub fn modem_id_to_port(id: &str) -> String {
         if id.parse::<u32>().is_ok() {
-            return format!("/dev/ttyUSB{}", id);
+            return format!("/dev/ttyUSB{id}");
         }
         id.to_string()
     }
@@ -2307,6 +2354,31 @@ impl AtModemManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pdu_whose_udhl_overruns_the_pdu_is_an_error() {
+        let pdu = "0040008100000000000000000005FF01";
+        assert!(AtModemManager::parse_pdu_sms(0, pdu).is_err());
+    }
+
+    #[test]
+    fn pdu_line_with_multibyte_character_is_an_error() {
+        let pdu = "0\u{e9}400081000000000000000000";
+        assert!(AtModemManager::parse_pdu_sms(0, pdu).is_err());
+    }
+
+    #[test]
+    fn cmgl_header_without_a_time_field_does_not_panic() {
+        let header = r#"+CMGL: 1,"REC READ","+123","","24/01/15""#;
+        let (index, sender, _) = AtModemManager::parse_cmgl_header(header).unwrap();
+        assert_eq!((index, sender.as_str()), (1, "+123"));
+    }
+
+    #[test]
+    fn timestamp_with_a_multibyte_first_character_does_not_panic() {
+        let stamp = AtModemManager::normalize_sms_timestamp("24/01/15", "\u{4f60}0:30:45");
+        assert!(stamp.starts_with("2024-01-15"));
+    }
 
     #[tokio::test]
     async fn reuses_one_serial_lock_per_port() {
@@ -2334,20 +2406,17 @@ mod tests {
     fn treats_post_submit_timeout_without_modem_error_as_unconfirmed_submission() {
         assert_eq!(
             AtModemManager::classify_sms_submit_response("0", true).unwrap(),
-            SmsSubmitOutcome::SubmittedUnconfirmed,
+            SmsSubmission::SubmittedUnconfirmed,
         );
     }
 
     #[test]
     fn recovers_the_at_channel_only_after_an_unconfirmed_submission() {
         assert!(AtModemManager::should_recover_after_submit(
-            SmsSubmitOutcome::SubmittedUnconfirmed
+            SmsSubmission::SubmittedUnconfirmed
         ));
         assert!(!AtModemManager::should_recover_after_submit(
-            SmsSubmitOutcome::Confirmed
-        ));
-        assert!(!AtModemManager::should_recover_after_submit(
-            SmsSubmitOutcome::Failed
+            SmsSubmission::Confirmed
         ));
     }
 
@@ -2373,11 +2442,11 @@ mod tests {
     fn does_not_treat_words_in_the_echo_as_final_result_codes() {
         assert_eq!(
             AtModemManager::classify_sms_submit_response("BOOK", true).unwrap(),
-            SmsSubmitOutcome::SubmittedUnconfirmed,
+            SmsSubmission::SubmittedUnconfirmed,
         );
         assert_eq!(
             AtModemManager::classify_sms_submit_response("NO ERROR", true).unwrap(),
-            SmsSubmitOutcome::SubmittedUnconfirmed,
+            SmsSubmission::SubmittedUnconfirmed,
         );
     }
 
@@ -2522,21 +2591,80 @@ mod tests {
         // Standard numeric ICCID
         assert_eq!(
             AtModemManager::parse_iccid("+QCCID: 89860121750097854321"),
-            Some("89860121750097854321".to_string())
+            Iccid::try_from("89860121750097854321").ok()
         );
         assert_eq!(
             AtModemManager::parse_iccid("89860121750097854321\nOK"),
-            Some("89860121750097854321".to_string())
+            Iccid::try_from("89860121750097854321").ok()
         );
         // ICCID with hex padding (F is stripped as BCD filler)
         assert_eq!(
             AtModemManager::parse_iccid("+QCCID: 8965012306052989707F"),
-            Some("8965012306052989707".to_string())
+            Iccid::try_from("8965012306052989707").ok()
         );
         assert_eq!(
             AtModemManager::parse_iccid("AT+QCCID\r\n+QCCID: 8965012306052989681F\r\n\r\nOK\r\n"),
-            Some("8965012306052989681".to_string())
+            Iccid::try_from("8965012306052989681").ok()
         );
+    }
+
+    #[test]
+    fn parse_iccid_accepts_exactly_what_it_accepted_before_it_was_typed() {
+        for (response, expected) in [
+            ("+CCID: 898600520121F0517883", Some("898600520121F0517883")),
+            (
+                "+ICCID: \"89860121750097854321\"",
+                Some("89860121750097854321"),
+            ),
+            ("+QCCID: 89860121750097854a", Some("89860121750097854a")),
+            ("+QCCID: 898601217500978543", Some("898601217500978543")),
+            ("+QCCID: 89860121750097854", None),
+            ("+QCCID: 8986012175009785432G", None),
+            ("+QCCID: ", None),
+            ("8986012175009785432123\nOK", Some("8986012175009785432123")),
+            ("89860121750097854321234\nOK", None),
+            ("OK", None),
+            ("", None),
+        ] {
+            assert_eq!(
+                AtModemManager::parse_iccid(response),
+                expected.map(|text| Iccid::try_from(text).unwrap()),
+                "{response:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn parse_imei_needs_a_line_of_exactly_fifteen_digits() {
+        let imei = |text: &str| Imei::try_from(text).ok();
+        assert_eq!(
+            AtModemManager::parse_imei("AT+CGSN\r\n860123456789012\r\n\r\nOK\r\n"),
+            imei("860123456789012")
+        );
+        assert_eq!(
+            AtModemManager::parse_imei("  860123456789012  \nOK"),
+            imei("860123456789012")
+        );
+        assert_eq!(AtModemManager::parse_imei("86012345678901\nOK"), None);
+        assert_eq!(AtModemManager::parse_imei("8601234567890123\nOK"), None);
+        assert_eq!(AtModemManager::parse_imei("86012345678901a\nOK"), None);
+        assert_eq!(AtModemManager::parse_imei("ERROR"), None);
+    }
+
+    #[test]
+    fn parse_cnum_keeps_any_non_empty_number() {
+        let number = |text: &str| SimNumber::try_from(text).ok();
+        assert_eq!(
+            AtModemManager::parse_cnum("+CNUM: \"\",\"+6591234567\",145\nOK"),
+            number("+6591234567")
+        );
+        assert_eq!(
+            AtModemManager::parse_cnum("+CNUM: \"\",\" 6591234567 \",129"),
+            number("6591234567")
+        );
+        assert_eq!(AtModemManager::parse_cnum("+CNUM: \"\",\"\",129"), None);
+        assert_eq!(AtModemManager::parse_cnum("+CNUM: \"\",\"   \",129"), None);
+        assert_eq!(AtModemManager::parse_cnum("OK"), None);
     }
 
     #[test]
@@ -2561,12 +2689,28 @@ mod tests {
     }
 
     #[test]
+    fn test_select_sms_storage_command_text_is_unchanged() {
+        assert_eq!(
+            AtModemManager::select_sms_storage_command(SmsStorage::Me),
+            "AT+CPMS=\"ME\""
+        );
+        assert_eq!(
+            AtModemManager::select_sms_storage_command(SmsStorage::Sm),
+            "AT+CPMS=\"SM\""
+        );
+        assert_eq!(
+            AtModemManager::select_sms_storage_command(SmsStorage::Mt),
+            "AT+CPMS=\"MT\""
+        );
+    }
+
+    #[test]
     fn test_sms_read_store_candidates_scan_me_then_sm() {
         let supported = vec!["SM".into(), "ME".into(), "MT".into(), "SR".into()];
 
         assert_eq!(
             AtModemManager::sms_read_store_candidates(&supported),
-            vec!["ME", "SM"]
+            vec![SmsStorage::Me, SmsStorage::Sm]
         );
     }
 
@@ -2576,7 +2720,7 @@ mod tests {
 
         assert_eq!(
             AtModemManager::sms_read_store_candidates(&supported),
-            vec!["MT"]
+            vec![SmsStorage::Mt]
         );
     }
 
@@ -2604,7 +2748,7 @@ mod tests {
         );
 
         // Empty returns empty string, invalid returns None
-        assert_eq!(AtModemManager::decode_ucs2_hex(""), Some("".to_string()));
+        assert_eq!(AtModemManager::decode_ucs2_hex(""), Some(String::new()));
         assert_eq!(AtModemManager::decode_ucs2_hex("4F6"), None); // Odd length (3 chars)
     }
 
@@ -2788,8 +2932,8 @@ mod tests {
         let bytes = vec![0x62, 0x30, 0x11, 0x41, 0x03, 0x00, 0x00];
         let result = AtModemManager::decode_pdu_timestamp(&bytes);
         // Should produce valid ISO 8601 format
-        assert!(result.contains("T"));
-        assert!(result.ends_with("Z"));
+        assert!(result.contains('T'));
+        assert!(result.ends_with('Z'));
         assert!(result.len() > 20); // ISO format is ~24 chars
     }
 
@@ -2799,8 +2943,8 @@ mod tests {
         let bytes = vec![0x62, 0x10, 0x51, 0x21, 0x00, 0x00, 0x23];
         let result = AtModemManager::decode_pdu_timestamp(&bytes);
         // Should produce valid ISO 8601 format with timezone conversion
-        assert!(result.contains("T"));
-        assert!(result.ends_with("Z"));
+        assert!(result.contains('T'));
+        assert!(result.ends_with('Z'));
     }
 
     #[test]
@@ -2809,8 +2953,8 @@ mod tests {
         let bytes = vec![0x99, 0x99, 0x99]; // Invalid but should not crash
         let result = AtModemManager::decode_pdu_timestamp(&bytes);
         // Should return fallback timestamp (current time)
-        assert!(result.contains("T"));
-        assert!(result.ends_with("Z"));
+        assert!(result.contains('T'));
+        assert!(result.ends_with('Z'));
     }
 
     #[test]
@@ -2868,7 +3012,7 @@ mod tests {
         // UDHL: 05, UDH: 00 03 42 02 01 (8-bit concat: ref=0x42, total=2, part=1)
         // Text: A8 (1 septet after UDH)
         let pdu = "00440B912143658709F00000423011410300230A0500034202 01A8";
-        let result = AtModemManager::parse_pdu_sms(3, &pdu.replace(" ", ""));
+        let result = AtModemManager::parse_pdu_sms(3, &pdu.replace(' ', ""));
         assert!(result.is_ok());
         let sms = result.unwrap();
         assert_eq!(sms.index, 3);
@@ -3025,7 +3169,7 @@ mod tests {
 
     #[test]
     fn test_at_probe_order() {
-        let p4: Vec<String> = (0..4).map(|n| format!("/dev/ttyUSB{}", n)).collect();
+        let p4: Vec<String> = (0..4).map(|n| format!("/dev/ttyUSB{n}")).collect();
         // 4-port: AT slot (index 2) tried first, then 0,1,3
         assert_eq!(
             AtModemManager::at_probe_order(&p4),
@@ -3218,7 +3362,7 @@ mod tests {
         let result = AtModemManager::parse_pdu_sms(1, pdu);
         assert!(result.is_ok());
         let sms = result.unwrap();
-        assert_eq!(sms.sender, "Google");
+        assert_eq!(sms.sender.as_str(), "Google");
         assert_eq!(sms.text, "Hello");
     }
 }

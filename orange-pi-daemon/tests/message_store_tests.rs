@@ -1,15 +1,21 @@
 // Integration tests for MessageStore - SQLite persistence layer
-use orange_pi_daemon_rust::message_store::MessageStore;
-use orange_pi_daemon_rust::types::Message;
+use orange_pi_daemon_rust::identifiers::{Iccid, SmsAddress};
+use orange_pi_daemon_rust::message_store::{MessageStore, Segment};
+use orange_pi_daemon_rust::types::{Message, SmsStorage};
+use orange_pi_daemon_rust::wire::Direction;
 
 // Helper function to create test message
+#[allow(
+    clippy::unwrap_used,
+    reason = "test helper: clippy.toml allow-unwrap-in-tests covers only #[test] items"
+)]
 fn create_test_message(iccid: &str, content: &str, timestamp: &str) -> Message {
     Message {
-        phone_iccid: iccid.to_string(),
-        phone_number: "+1234567890".to_string(),
+        phone_iccid: Iccid::try_from(iccid).unwrap(),
+        phone_number: SmsAddress::from("+1234567890"),
         content: content.to_string(),
         timestamp: timestamp.to_string(),
-        direction: "received".to_string(),
+        direction: Direction::Received,
     }
 }
 
@@ -20,18 +26,22 @@ fn create_test_message(iccid: &str, content: &str, timestamp: &str) -> Message {
 #[test]
 fn test_store_new_message() {
     let store = MessageStore::new(":memory:").unwrap();
-    let msg = create_test_message("iccid_001", "Hello World", "2024-01-01T12:00:00.000Z");
+    let msg = create_test_message(
+        "89860000000000000001",
+        "Hello World",
+        "2024-01-01T12:00:00.000Z",
+    );
 
     // First store should succeed
     let result = store.store_message(&msg, "modem_0", "at:1");
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), true); // New message
+    assert!(result.unwrap()); // New message
 }
 
 #[test]
 fn test_store_duplicate_message_same_timestamp() {
     let store = MessageStore::new(":memory:").unwrap();
-    let msg = create_test_message("iccid_001", "Hello", "2024-01-01T12:00:00.000Z");
+    let msg = create_test_message("89860000000000000001", "Hello", "2024-01-01T12:00:00.000Z");
 
     // Store same message twice
     assert!(store.store_message(&msg, "modem_0", "at:1").unwrap());
@@ -42,9 +52,9 @@ fn test_store_duplicate_message_same_timestamp() {
 fn test_store_duplicate_within_10_seconds() {
     let store = MessageStore::new(":memory:").unwrap();
 
-    let msg1 = create_test_message("iccid_001", "Test", "2024-01-01T12:00:00.000Z");
-    let msg2 = create_test_message("iccid_001", "Test", "2024-01-01T12:00:05.000Z"); // 5 seconds later
-    let msg3 = create_test_message("iccid_001", "Test", "2024-01-01T12:00:15.000Z"); // 15 seconds later
+    let msg1 = create_test_message("89860000000000000001", "Test", "2024-01-01T12:00:00.000Z");
+    let msg2 = create_test_message("89860000000000000001", "Test", "2024-01-01T12:00:05.000Z"); // 5 seconds later
+    let msg3 = create_test_message("89860000000000000001", "Test", "2024-01-01T12:00:15.000Z"); // 15 seconds later
 
     assert!(store.store_message(&msg1, "modem_0", "at:1").unwrap());
     assert!(!store.store_message(&msg2, "modem_0", "at:2").unwrap()); // Within 10s - duplicate
@@ -55,8 +65,16 @@ fn test_store_duplicate_within_10_seconds() {
 fn test_store_different_content_same_iccid() {
     let store = MessageStore::new(":memory:").unwrap();
 
-    let msg1 = create_test_message("iccid_001", "Message 1", "2024-01-01T12:00:00.000Z");
-    let msg2 = create_test_message("iccid_001", "Message 2", "2024-01-01T12:00:00.000Z");
+    let msg1 = create_test_message(
+        "89860000000000000001",
+        "Message 1",
+        "2024-01-01T12:00:00.000Z",
+    );
+    let msg2 = create_test_message(
+        "89860000000000000001",
+        "Message 2",
+        "2024-01-01T12:00:00.000Z",
+    );
 
     assert!(store.store_message(&msg1, "modem_0", "at:1").unwrap());
     assert!(store.store_message(&msg2, "modem_0", "at:2").unwrap()); // Different content
@@ -66,8 +84,16 @@ fn test_store_different_content_same_iccid() {
 fn test_store_same_content_different_iccid() {
     let store = MessageStore::new(":memory:").unwrap();
 
-    let msg1 = create_test_message("iccid_001", "Same message", "2024-01-01T12:00:00.000Z");
-    let msg2 = create_test_message("iccid_002", "Same message", "2024-01-01T12:00:00.000Z");
+    let msg1 = create_test_message(
+        "89860000000000000001",
+        "Same message",
+        "2024-01-01T12:00:00.000Z",
+    );
+    let msg2 = create_test_message(
+        "89860000000000000002",
+        "Same message",
+        "2024-01-01T12:00:00.000Z",
+    );
 
     assert!(store.store_message(&msg1, "modem_0", "at:1").unwrap());
     assert!(store.store_message(&msg2, "modem_1", "at:1").unwrap()); // Different ICCID
@@ -81,9 +107,9 @@ fn test_store_same_content_different_iccid() {
 fn test_claim_pending_messages() {
     let store = MessageStore::new(":memory:").unwrap();
 
-    let msg1 = create_test_message("iccid_001", "Msg 1", "2024-01-01T12:00:00.000Z");
-    let msg2 = create_test_message("iccid_002", "Msg 2", "2024-01-01T12:01:00.000Z");
-    let msg3 = create_test_message("iccid_003", "Msg 3", "2024-01-01T12:02:00.000Z");
+    let msg1 = create_test_message("89860000000000000001", "Msg 1", "2024-01-01T12:00:00.000Z");
+    let msg2 = create_test_message("89860000000000000002", "Msg 2", "2024-01-01T12:01:00.000Z");
+    let msg3 = create_test_message("89860000000000000003", "Msg 3", "2024-01-01T12:02:00.000Z");
 
     store.store_message(&msg1, "modem_0", "at:1").unwrap();
     store.store_message(&msg2, "modem_0", "at:2").unwrap();
@@ -99,12 +125,12 @@ fn test_claim_pending_messages_with_limit() {
 
     for i in 0..5 {
         let msg = create_test_message(
-            &format!("iccid_{:03}", i),
-            &format!("Message {}", i),
-            &format!("2024-01-01T12:00:{:02}.000Z", i),
+            &format!("8986000000000000{i:04}"),
+            &format!("Message {i}"),
+            &format!("2024-01-01T12:00:{i:02}.000Z"),
         );
         store
-            .store_message(&msg, "modem_0", &format!("at:{}", i))
+            .store_message(&msg, "modem_0", &format!("at:{i}"))
             .unwrap();
     }
 
@@ -115,7 +141,11 @@ fn test_claim_pending_messages_with_limit() {
 #[test]
 fn test_claimed_message_keeps_its_stable_cloud_id_across_an_expired_lease() {
     let store = MessageStore::new(":memory:").unwrap();
-    let msg = create_test_message("iccid_001", "Durable", "2024-01-01T12:00:00.000Z");
+    let msg = create_test_message(
+        "89860000000000000001",
+        "Durable",
+        "2024-01-01T12:00:00.000Z",
+    );
     store.store_message(&msg, "modem_0", "at:1").unwrap();
 
     let first = store.claim_messages(1, 0).unwrap();
@@ -140,7 +170,11 @@ fn test_legacy_uploading_message_is_requeued_after_restart() {
 
     {
         let store = MessageStore::new(&db_path).unwrap();
-        let msg = create_test_message("iccid_001", "Legacy upload", "2024-01-01T12:00:00.000Z");
+        let msg = create_test_message(
+            "89860000000000000001",
+            "Legacy upload",
+            "2024-01-01T12:00:00.000Z",
+        );
         store.store_message(&msg, "modem_0", "at:1").unwrap();
         // Claim with a 0s lease so it appears as an expired in_flight on restart.
         store.claim_messages(1, 0).unwrap();
@@ -157,7 +191,7 @@ fn test_legacy_uploading_message_is_requeued_after_restart() {
 fn test_claimed_message_not_reclaimable_before_lease_expires() {
     let store = MessageStore::new(":memory:").unwrap();
 
-    let msg = create_test_message("iccid_001", "Test", "2024-01-01T12:00:00.000Z");
+    let msg = create_test_message("89860000000000000001", "Test", "2024-01-01T12:00:00.000Z");
     store.store_message(&msg, "modem_0", "at:1").unwrap();
 
     // Claim with a 90s lease
@@ -173,7 +207,7 @@ fn test_claimed_message_not_reclaimable_before_lease_expires() {
 fn test_acknowledge_uploaded_removes_from_queue() {
     let store = MessageStore::new(":memory:").unwrap();
 
-    let msg = create_test_message("iccid_001", "Test", "2024-01-01T12:00:00.000Z");
+    let msg = create_test_message("89860000000000000001", "Test", "2024-01-01T12:00:00.000Z");
     store.store_message(&msg, "modem_0", "at:1").unwrap();
 
     let claimed = store.claim_messages(10, 90).unwrap();
@@ -187,7 +221,7 @@ fn test_acknowledge_uploaded_removes_from_queue() {
 #[test]
 fn test_physical_path_becomes_deletable_only_after_upload() {
     let store = MessageStore::new(":memory:").unwrap();
-    let msg = create_test_message("iccid_001", "Test", "2024-01-01T12:00:00.000Z");
+    let msg = create_test_message("89860000000000000001", "Test", "2024-01-01T12:00:00.000Z");
 
     store.store_message(&msg, "modem_0", "at:ME:17").unwrap();
     assert!(store.get_deletable_sms().unwrap().is_empty());
@@ -205,7 +239,7 @@ fn test_physical_path_becomes_deletable_only_after_upload() {
 #[test]
 fn test_duplicate_preserves_first_physical_path() {
     let store = MessageStore::new(":memory:").unwrap();
-    let msg = create_test_message("iccid_001", "Test", "2024-01-01T12:00:00.000Z");
+    let msg = create_test_message("89860000000000000001", "Test", "2024-01-01T12:00:00.000Z");
 
     assert!(store.store_message(&msg, "modem_0", "at:ME:17").unwrap());
     assert!(!store.store_message(&msg, "modem_0", "at:SM:23").unwrap());
@@ -223,7 +257,7 @@ fn test_duplicate_preserves_first_physical_path() {
 fn test_return_to_pending_and_retry() {
     let store = MessageStore::new(":memory:").unwrap();
 
-    let msg = create_test_message("iccid_001", "Test", "2024-01-01T12:00:00.000Z");
+    let msg = create_test_message("89860000000000000001", "Test", "2024-01-01T12:00:00.000Z");
     store.store_message(&msg, "modem_0", "at:1").unwrap();
 
     let claimed = store.claim_messages(10, 90).unwrap();
@@ -241,7 +275,7 @@ fn test_return_to_pending_and_retry() {
 fn test_transient_failures_never_exhaust_retries() {
     let store = MessageStore::new(":memory:").unwrap();
 
-    let msg = create_test_message("iccid_001", "Test", "2024-01-01T12:00:00.000Z");
+    let msg = create_test_message("89860000000000000001", "Test", "2024-01-01T12:00:00.000Z");
     store.store_message(&msg, "modem_0", "at:1").unwrap();
 
     // Simulate 10 transient failures via return_to_pending — message must
@@ -268,16 +302,17 @@ fn test_transient_failures_never_exhaust_retries() {
 fn test_store_single_segment() {
     let store = MessageStore::new(":memory:").unwrap();
 
-    let result = store.store_segment(
-        "iccid_001",
-        "+1234567890",
-        42, // ref_id
-        3,  // total_parts
-        1,  // part_number
-        "Part 1 content",
-        "2024-01-01T12:00:00.000Z",
-        1, // sms_index
-    );
+    let result = store.store_segment(&Segment {
+        iccid: &Iccid::try_from("89860000000000000001").unwrap(),
+        sender: &SmsAddress::from("+1234567890"),
+        ref_id: 42,
+        total_parts: 3,
+        part_number: 1,
+        content: "Part 1 content",
+        timestamp: "2024-01-01T12:00:00.000Z",
+        sms_storage: SmsStorage::Me,
+        sms_index: 1,
+    });
 
     assert!(result.is_ok());
 }
@@ -287,23 +322,28 @@ fn test_store_segment_preserves_sms_storage() {
     let store = MessageStore::new(":memory:").unwrap();
 
     store
-        .store_segment_in_storage(
-            "iccid_001",
-            "+1234567890",
-            42,
-            2,
-            1,
-            "Part 1",
-            "2024-01-01T12:00:00.000Z",
-            "SM",
-            7,
-        )
+        .store_segment(&Segment {
+            iccid: &Iccid::try_from("89860000000000000001").unwrap(),
+            sender: &SmsAddress::from("+1234567890"),
+            ref_id: 42,
+            total_parts: 2,
+            part_number: 1,
+            content: "Part 1",
+            timestamp: "2024-01-01T12:00:00.000Z",
+            sms_storage: SmsStorage::Sm,
+            sms_index: 7,
+        })
         .unwrap();
 
     let segments = store
-        .get_segments_with_storage("iccid_001", "+1234567890", 42, 2)
+        .get_segments_with_storage(
+            &Iccid::try_from("89860000000000000001").unwrap(),
+            &SmsAddress::from("+1234567890"),
+            42,
+            2,
+        )
         .unwrap();
-    assert_eq!(segments[0].3, "SM");
+    assert_eq!(segments[0].3, SmsStorage::Sm);
     assert_eq!(segments[0].4, 7);
 }
 
@@ -312,38 +352,43 @@ fn test_incomplete_multipart_keeps_each_physical_location() {
     let store = MessageStore::new(":memory:").unwrap();
 
     store
-        .store_segment_in_storage(
-            "iccid_001",
-            "+1234567890",
-            42,
-            3,
-            1,
-            "Part 1",
-            "2024-01-01T12:00:00.000Z",
-            "ME",
-            7,
-        )
+        .store_segment(&Segment {
+            iccid: &Iccid::try_from("89860000000000000001").unwrap(),
+            sender: &SmsAddress::from("+1234567890"),
+            ref_id: 42,
+            total_parts: 3,
+            part_number: 1,
+            content: "Part 1",
+            timestamp: "2024-01-01T12:00:00.000Z",
+            sms_storage: SmsStorage::Me,
+            sms_index: 7,
+        })
         .unwrap();
     store
-        .store_segment_in_storage(
-            "iccid_001",
-            "+1234567890",
-            42,
-            3,
-            2,
-            "Part 2",
-            "2024-01-01T12:00:01.000Z",
-            "SM",
-            9,
-        )
+        .store_segment(&Segment {
+            iccid: &Iccid::try_from("89860000000000000001").unwrap(),
+            sender: &SmsAddress::from("+1234567890"),
+            ref_id: 42,
+            total_parts: 3,
+            part_number: 2,
+            content: "Part 2",
+            timestamp: "2024-01-01T12:00:01.000Z",
+            sms_storage: SmsStorage::Sm,
+            sms_index: 9,
+        })
         .unwrap();
 
     let segments = store
-        .get_segments_with_storage("iccid_001", "+1234567890", 42, 3)
+        .get_segments_with_storage(
+            &Iccid::try_from("89860000000000000001").unwrap(),
+            &SmsAddress::from("+1234567890"),
+            42,
+            3,
+        )
         .unwrap();
     assert_eq!(segments.len(), 2);
-    assert_eq!((segments[0].3.as_str(), segments[0].4), ("ME", 7));
-    assert_eq!((segments[1].3.as_str(), segments[1].4), ("SM", 9));
+    assert_eq!((segments[0].3, segments[0].4), (SmsStorage::Me, 7));
+    assert_eq!((segments[1].3, segments[1].4), (SmsStorage::Sm, 9));
 }
 
 #[test]
@@ -352,32 +397,39 @@ fn test_get_segments_incomplete() {
 
     // Store parts 1 and 2 (out of 3)
     store
-        .store_segment(
-            "iccid_001",
-            "+1234567890",
-            42,
-            3,
-            1,
-            "Part 1",
-            "2024-01-01T12:00:00.000Z",
-            1,
-        )
+        .store_segment(&Segment {
+            iccid: &Iccid::try_from("89860000000000000001").unwrap(),
+            sender: &SmsAddress::from("+1234567890"),
+            ref_id: 42,
+            total_parts: 3,
+            part_number: 1,
+            content: "Part 1",
+            timestamp: "2024-01-01T12:00:00.000Z",
+            sms_storage: SmsStorage::Me,
+            sms_index: 1,
+        })
         .unwrap();
     store
-        .store_segment(
-            "iccid_001",
-            "+1234567890",
-            42,
-            3,
-            2,
-            "Part 2",
-            "2024-01-01T12:00:00.000Z",
-            2,
-        )
+        .store_segment(&Segment {
+            iccid: &Iccid::try_from("89860000000000000001").unwrap(),
+            sender: &SmsAddress::from("+1234567890"),
+            ref_id: 42,
+            total_parts: 3,
+            part_number: 2,
+            content: "Part 2",
+            timestamp: "2024-01-01T12:00:00.000Z",
+            sms_storage: SmsStorage::Me,
+            sms_index: 2,
+        })
         .unwrap();
 
     let segments = store
-        .get_segments("iccid_001", "+1234567890", 42, 3)
+        .get_segments(
+            &Iccid::try_from("89860000000000000001").unwrap(),
+            &SmsAddress::from("+1234567890"),
+            42,
+            3,
+        )
         .unwrap();
     assert_eq!(segments.len(), 2); // Still incomplete
 }
@@ -388,44 +440,52 @@ fn test_get_segments_complete() {
 
     // Store all 3 parts
     store
-        .store_segment(
-            "iccid_001",
-            "+1234567890",
-            42,
-            3,
-            1,
-            "Part 1",
-            "2024-01-01T12:00:00.000Z",
-            1,
-        )
+        .store_segment(&Segment {
+            iccid: &Iccid::try_from("89860000000000000001").unwrap(),
+            sender: &SmsAddress::from("+1234567890"),
+            ref_id: 42,
+            total_parts: 3,
+            part_number: 1,
+            content: "Part 1",
+            timestamp: "2024-01-01T12:00:00.000Z",
+            sms_storage: SmsStorage::Me,
+            sms_index: 1,
+        })
         .unwrap();
     store
-        .store_segment(
-            "iccid_001",
-            "+1234567890",
-            42,
-            3,
-            2,
-            "Part 2",
-            "2024-01-01T12:00:00.000Z",
-            2,
-        )
+        .store_segment(&Segment {
+            iccid: &Iccid::try_from("89860000000000000001").unwrap(),
+            sender: &SmsAddress::from("+1234567890"),
+            ref_id: 42,
+            total_parts: 3,
+            part_number: 2,
+            content: "Part 2",
+            timestamp: "2024-01-01T12:00:00.000Z",
+            sms_storage: SmsStorage::Me,
+            sms_index: 2,
+        })
         .unwrap();
     store
-        .store_segment(
-            "iccid_001",
-            "+1234567890",
-            42,
-            3,
-            3,
-            "Part 3",
-            "2024-01-01T12:00:00.000Z",
-            3,
-        )
+        .store_segment(&Segment {
+            iccid: &Iccid::try_from("89860000000000000001").unwrap(),
+            sender: &SmsAddress::from("+1234567890"),
+            ref_id: 42,
+            total_parts: 3,
+            part_number: 3,
+            content: "Part 3",
+            timestamp: "2024-01-01T12:00:00.000Z",
+            sms_storage: SmsStorage::Me,
+            sms_index: 3,
+        })
         .unwrap();
 
     let segments = store
-        .get_segments("iccid_001", "+1234567890", 42, 3)
+        .get_segments(
+            &Iccid::try_from("89860000000000000001").unwrap(),
+            &SmsAddress::from("+1234567890"),
+            42,
+            3,
+        )
         .unwrap();
     assert_eq!(segments.len(), 3); // Complete
 
@@ -441,44 +501,52 @@ fn test_segment_content_assembly() {
 
     // Store parts out of order
     store
-        .store_segment(
-            "iccid_001",
-            "+1234567890",
-            42,
-            3,
-            3,
-            "World!",
-            "2024-01-01T12:00:00.000Z",
-            3,
-        )
+        .store_segment(&Segment {
+            iccid: &Iccid::try_from("89860000000000000001").unwrap(),
+            sender: &SmsAddress::from("+1234567890"),
+            ref_id: 42,
+            total_parts: 3,
+            part_number: 3,
+            content: "World!",
+            timestamp: "2024-01-01T12:00:00.000Z",
+            sms_storage: SmsStorage::Me,
+            sms_index: 3,
+        })
         .unwrap();
     store
-        .store_segment(
-            "iccid_001",
-            "+1234567890",
-            42,
-            3,
-            1,
-            "Hello ",
-            "2024-01-01T12:00:00.000Z",
-            1,
-        )
+        .store_segment(&Segment {
+            iccid: &Iccid::try_from("89860000000000000001").unwrap(),
+            sender: &SmsAddress::from("+1234567890"),
+            ref_id: 42,
+            total_parts: 3,
+            part_number: 1,
+            content: "Hello ",
+            timestamp: "2024-01-01T12:00:00.000Z",
+            sms_storage: SmsStorage::Me,
+            sms_index: 1,
+        })
         .unwrap();
     store
-        .store_segment(
-            "iccid_001",
-            "+1234567890",
-            42,
-            3,
-            2,
-            "Rust ",
-            "2024-01-01T12:00:00.000Z",
-            2,
-        )
+        .store_segment(&Segment {
+            iccid: &Iccid::try_from("89860000000000000001").unwrap(),
+            sender: &SmsAddress::from("+1234567890"),
+            ref_id: 42,
+            total_parts: 3,
+            part_number: 2,
+            content: "Rust ",
+            timestamp: "2024-01-01T12:00:00.000Z",
+            sms_storage: SmsStorage::Me,
+            sms_index: 2,
+        })
         .unwrap();
 
     let mut segments = store
-        .get_segments("iccid_001", "+1234567890", 42, 3)
+        .get_segments(
+            &Iccid::try_from("89860000000000000001").unwrap(),
+            &SmsAddress::from("+1234567890"),
+            42,
+            3,
+        )
         .unwrap();
     segments.sort_by_key(|(part_num, _, _, _)| *part_num);
 
@@ -495,37 +563,46 @@ fn test_delete_segments_after_assembly() {
 
     // Store segments
     store
-        .store_segment(
-            "iccid_001",
-            "+1234567890",
-            42,
-            2,
-            1,
-            "Part 1",
-            "2024-01-01T12:00:00.000Z",
-            1,
-        )
+        .store_segment(&Segment {
+            iccid: &Iccid::try_from("89860000000000000001").unwrap(),
+            sender: &SmsAddress::from("+1234567890"),
+            ref_id: 42,
+            total_parts: 2,
+            part_number: 1,
+            content: "Part 1",
+            timestamp: "2024-01-01T12:00:00.000Z",
+            sms_storage: SmsStorage::Me,
+            sms_index: 1,
+        })
         .unwrap();
     store
-        .store_segment(
-            "iccid_001",
-            "+1234567890",
-            42,
-            2,
-            2,
-            "Part 2",
-            "2024-01-01T12:00:00.000Z",
-            2,
-        )
+        .store_segment(&Segment {
+            iccid: &Iccid::try_from("89860000000000000001").unwrap(),
+            sender: &SmsAddress::from("+1234567890"),
+            ref_id: 42,
+            total_parts: 2,
+            part_number: 2,
+            content: "Part 2",
+            timestamp: "2024-01-01T12:00:00.000Z",
+            sms_storage: SmsStorage::Me,
+            sms_index: 2,
+        })
         .unwrap();
 
     // Delete segments
-    let deleted = store.delete_segments("iccid_001", 42).unwrap();
+    let deleted = store
+        .delete_segments(&Iccid::try_from("89860000000000000001").unwrap(), 42)
+        .unwrap();
     assert_eq!(deleted, 2);
 
     // Verify deleted
     let segments = store
-        .get_segments("iccid_001", "+1234567890", 42, 2)
+        .get_segments(
+            &Iccid::try_from("89860000000000000001").unwrap(),
+            &SmsAddress::from("+1234567890"),
+            42,
+            2,
+        )
         .unwrap();
     assert_eq!(segments.len(), 0);
 }
@@ -536,62 +613,76 @@ fn test_multiple_multipart_messages_same_sender() {
 
     // Message 1 (ref_id=10)
     store
-        .store_segment(
-            "iccid_001",
-            "+1234567890",
-            10,
-            2,
-            1,
-            "Msg1 Part1",
-            "2024-01-01T12:00:00.000Z",
-            1,
-        )
+        .store_segment(&Segment {
+            iccid: &Iccid::try_from("89860000000000000001").unwrap(),
+            sender: &SmsAddress::from("+1234567890"),
+            ref_id: 10,
+            total_parts: 2,
+            part_number: 1,
+            content: "Msg1 Part1",
+            timestamp: "2024-01-01T12:00:00.000Z",
+            sms_storage: SmsStorage::Me,
+            sms_index: 1,
+        })
         .unwrap();
     store
-        .store_segment(
-            "iccid_001",
-            "+1234567890",
-            10,
-            2,
-            2,
-            "Msg1 Part2",
-            "2024-01-01T12:00:00.000Z",
-            2,
-        )
+        .store_segment(&Segment {
+            iccid: &Iccid::try_from("89860000000000000001").unwrap(),
+            sender: &SmsAddress::from("+1234567890"),
+            ref_id: 10,
+            total_parts: 2,
+            part_number: 2,
+            content: "Msg1 Part2",
+            timestamp: "2024-01-01T12:00:00.000Z",
+            sms_storage: SmsStorage::Me,
+            sms_index: 2,
+        })
         .unwrap();
 
     // Message 2 (ref_id=20)
     store
-        .store_segment(
-            "iccid_001",
-            "+1234567890",
-            20,
-            2,
-            1,
-            "Msg2 Part1",
-            "2024-01-01T12:01:00.000Z",
-            3,
-        )
+        .store_segment(&Segment {
+            iccid: &Iccid::try_from("89860000000000000001").unwrap(),
+            sender: &SmsAddress::from("+1234567890"),
+            ref_id: 20,
+            total_parts: 2,
+            part_number: 1,
+            content: "Msg2 Part1",
+            timestamp: "2024-01-01T12:01:00.000Z",
+            sms_storage: SmsStorage::Me,
+            sms_index: 3,
+        })
         .unwrap();
     store
-        .store_segment(
-            "iccid_001",
-            "+1234567890",
-            20,
-            2,
-            2,
-            "Msg2 Part2",
-            "2024-01-01T12:01:00.000Z",
-            4,
-        )
+        .store_segment(&Segment {
+            iccid: &Iccid::try_from("89860000000000000001").unwrap(),
+            sender: &SmsAddress::from("+1234567890"),
+            ref_id: 20,
+            total_parts: 2,
+            part_number: 2,
+            content: "Msg2 Part2",
+            timestamp: "2024-01-01T12:01:00.000Z",
+            sms_storage: SmsStorage::Me,
+            sms_index: 4,
+        })
         .unwrap();
 
     // Retrieve separately
     let msg1 = store
-        .get_segments("iccid_001", "+1234567890", 10, 2)
+        .get_segments(
+            &Iccid::try_from("89860000000000000001").unwrap(),
+            &SmsAddress::from("+1234567890"),
+            10,
+            2,
+        )
         .unwrap();
     let msg2 = store
-        .get_segments("iccid_001", "+1234567890", 20, 2)
+        .get_segments(
+            &Iccid::try_from("89860000000000000001").unwrap(),
+            &SmsAddress::from("+1234567890"),
+            20,
+            2,
+        )
         .unwrap();
 
     assert_eq!(msg1.len(), 2);
@@ -610,16 +701,17 @@ fn test_cleanup_old_segments() {
 
     // Store some segments
     store
-        .store_segment(
-            "iccid_001",
-            "+1234567890",
-            42,
-            2,
-            1,
-            "Part 1",
-            "2024-01-01T12:00:00.000Z",
-            1,
-        )
+        .store_segment(&Segment {
+            iccid: &Iccid::try_from("89860000000000000001").unwrap(),
+            sender: &SmsAddress::from("+1234567890"),
+            ref_id: 42,
+            total_parts: 2,
+            part_number: 1,
+            content: "Part 1",
+            timestamp: "2024-01-01T12:00:00.000Z",
+            sms_storage: SmsStorage::Me,
+            sms_index: 1,
+        })
         .unwrap();
 
     // Clean up segments older than 0 seconds (all of them)
@@ -631,7 +723,11 @@ fn test_cleanup_old_segments() {
 fn test_unacknowledged_messages_survive_retention() {
     let store = MessageStore::new(":memory:").unwrap();
 
-    let msg = create_test_message("iccid_001", "Old message", "2024-01-01T12:00:00.000Z");
+    let msg = create_test_message(
+        "89860000000000000001",
+        "Old message",
+        "2024-01-01T12:00:00.000Z",
+    );
     store.store_message(&msg, "modem_0", "at:1").unwrap();
 
     assert_eq!(store.cleanup_old_messages().unwrap(), 0);
@@ -642,7 +738,7 @@ fn test_unacknowledged_messages_survive_retention() {
 fn test_mark_old_uploaded_as_deleted() {
     let store = MessageStore::new(":memory:").unwrap();
 
-    let msg = create_test_message("iccid_001", "Test", "2024-01-01T12:00:00.000Z");
+    let msg = create_test_message("89860000000000000001", "Test", "2024-01-01T12:00:00.000Z");
     store.store_message(&msg, "modem_0", "at:1").unwrap();
 
     let claimed = store.claim_messages(10, 90).unwrap();
@@ -661,8 +757,8 @@ fn test_stored_messages_count_as_pending() {
     let store = MessageStore::new(":memory:").unwrap();
 
     // Store some messages
-    let msg1 = create_test_message("iccid_001", "Msg 1", "2024-01-01T12:00:00.000Z");
-    let msg2 = create_test_message("iccid_002", "Msg 2", "2024-01-01T12:01:00.000Z");
+    let msg1 = create_test_message("89860000000000000001", "Msg 1", "2024-01-01T12:00:00.000Z");
+    let msg2 = create_test_message("89860000000000000002", "Msg 2", "2024-01-01T12:01:00.000Z");
 
     store.store_message(&msg1, "modem_0", "at:1").unwrap();
     store.store_message(&msg2, "modem_0", "at:2").unwrap();
@@ -677,7 +773,7 @@ fn test_stored_messages_count_as_pending() {
 fn test_queue_drains_once_upload_is_acknowledged() {
     let store = MessageStore::new(":memory:").unwrap();
 
-    let msg = create_test_message("iccid_001", "Test", "2024-01-01T12:00:00.000Z");
+    let msg = create_test_message("89860000000000000001", "Test", "2024-01-01T12:00:00.000Z");
     store.store_message(&msg, "modem_0", "at:1").unwrap();
 
     let claimed = store.claim_messages(10, 90).unwrap();
@@ -703,7 +799,7 @@ fn test_queue_drains_once_upload_is_acknowledged() {
 fn test_empty_content_handling() {
     let store = MessageStore::new(":memory:").unwrap();
 
-    let msg = create_test_message("iccid_001", "", "2024-01-01T12:00:00.000Z");
+    let msg = create_test_message("89860000000000000001", "", "2024-01-01T12:00:00.000Z");
     let result = store.store_message(&msg, "modem_0", "at:1");
 
     // Should handle empty content gracefully
@@ -715,7 +811,11 @@ fn test_long_content() {
     let store = MessageStore::new(":memory:").unwrap();
 
     let long_content = "x".repeat(1000);
-    let msg = create_test_message("iccid_001", &long_content, "2024-01-01T12:00:00.000Z");
+    let msg = create_test_message(
+        "89860000000000000001",
+        &long_content,
+        "2024-01-01T12:00:00.000Z",
+    );
 
     assert!(store.store_message(&msg, "modem_0", "at:1").is_ok());
 
@@ -729,7 +829,7 @@ fn test_special_characters_in_content() {
     let store = MessageStore::new(":memory:").unwrap();
 
     let msg = create_test_message(
-        "iccid_001",
+        "89860000000000000001",
         "你好世界 Hello 🌍 'quotes\" <tags>",
         "2024-01-01T12:00:00.000Z",
     );
@@ -757,7 +857,7 @@ fn test_checkpoint_truncates_the_wal_on_disk() {
     let store = MessageStore::new(db_path.to_str().unwrap()).unwrap();
     for i in 0..200 {
         let msg = create_test_message(
-            "iccid_wal",
+            "898600000000000000a1",
             &format!("message number {i} with some padding to fill pages"),
             &format!("2024-01-01T12:{:02}:{:02}.000Z", i / 60, i % 60),
         );
@@ -765,12 +865,12 @@ fn test_checkpoint_truncates_the_wal_on_disk() {
             .store_message(&msg, "modem_0", &format!("at:{i}"))
             .unwrap();
     }
-    let before = std::fs::metadata(&wal_path).map(|m| m.len()).unwrap_or(0);
+    let before = std::fs::metadata(&wal_path).map_or(0, |m| m.len());
     assert!(before > 0, "writes should have grown the WAL");
 
     store.checkpoint_wal().unwrap();
 
-    let after = std::fs::metadata(&wal_path).map(|m| m.len()).unwrap_or(0);
+    let after = std::fs::metadata(&wal_path).map_or(0, |m| m.len());
     assert_eq!(after, 0, "TRUNCATE checkpoint leaves an empty WAL");
 
     drop(store);
@@ -788,8 +888,55 @@ fn test_a_message_already_stored_reports_as_a_duplicate() {
     // The reader deletes the SIM copy for both outcomes; this pins the contract
     // it relies on: `false` means "safely held already", never "lost".
     let store = MessageStore::new(":memory:").unwrap();
-    let msg = create_test_message("iccid_dup", "OTP 123456", "2024-01-01T12:00:00.000Z");
+    let msg = create_test_message(
+        "898600000000000000d0",
+        "OTP 123456",
+        "2024-01-01T12:00:00.000Z",
+    );
 
     assert!(store.store_message(&msg, "modem_0", "at:1").unwrap());
     assert!(!store.store_message(&msg, "modem_0", "at:1").unwrap());
+}
+
+#[test]
+fn iccid_with_hex_letters_and_alphanumeric_sender_survive_the_queue_unchanged() {
+    let store = MessageStore::new(":memory:").unwrap();
+    for (iccid, sender) in [
+        ("898600520121F0517883", "Singtel"),
+        ("896501230605CF73985", "10086"),
+        ("89860121750097854321", "+6591234567"),
+        ("89860121750097854a", ""),
+    ] {
+        let msg = Message {
+            phone_iccid: Iccid::try_from(iccid).unwrap(),
+            phone_number: SmsAddress::from(sender),
+            content: format!("from {sender:?}"),
+            timestamp: "2024-01-01T12:00:00.000Z".to_string(),
+            direction: Direction::Received,
+        };
+        assert!(store.store_message(&msg, "modem_0", "at:1").unwrap());
+    }
+
+    let claimed = store.claim_messages(10, 60).unwrap();
+    let mut pairs: Vec<(String, String)> = claimed
+        .iter()
+        .map(|stored| {
+            (
+                stored.message.phone_iccid.to_string(),
+                stored.message.phone_number.to_string(),
+            )
+        })
+        .collect();
+    pairs.sort();
+    let mut expected: Vec<(String, String)> = [
+        ("898600520121F0517883", "Singtel"),
+        ("896501230605CF73985", "10086"),
+        ("89860121750097854321", "+6591234567"),
+        ("89860121750097854a", ""),
+    ]
+    .iter()
+    .map(|(iccid, sender)| ((*iccid).to_string(), (*sender).to_string()))
+    .collect();
+    expected.sort();
+    assert_eq!(pairs, expected);
 }

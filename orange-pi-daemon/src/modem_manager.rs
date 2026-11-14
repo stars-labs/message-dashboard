@@ -1,12 +1,15 @@
 //! Modem Manager - Direct AT commands for 100+ modems
 //!
 //! Uses direct AT commands via serial ports. No ModemManager/D-Bus needed.
-//! Set USE_DBUS=1 to use legacy D-Bus mode (requires ModemManager service).
+//! Set `USE_DBUS=1` to use legacy D-Bus mode (requires `ModemManager` service).
 
 use crate::at_modem::AtModemManager;
+use crate::identifiers::{Iccid, Imei, SimNumber, SmsAddress};
+use crate::message_store::{Segment, StoredSegment};
 use crate::partial_sms;
 use crate::signal_cache::SignalCache;
-use crate::types::{Message, MessageWithPath, SignalData, SmsSubmitOutcome};
+use crate::types::{Message, MessageWithPath, SignalData, SmsStorage, SmsSubmission};
+use crate::wire::Direction;
 use anyhow::{anyhow, Result};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -18,7 +21,7 @@ use tracing::{debug, info, warn};
 pub enum BackendMode {
     /// Direct AT commands via serial port (default, fastest)
     AtCommand,
-    /// D-Bus via ModemManager (legacy, requires ModemManager service)
+    /// D-Bus via `ModemManager` (legacy, requires `ModemManager` service)
     DBus,
 }
 
@@ -59,21 +62,64 @@ impl CachedPort {
 
 #[cfg(test)]
 mod tests {
-    use super::{retain_present_cached_modems, CachedPort, ModemManager};
+    use super::{retain_present_cached_modems, signal_from_percent, CachedPort, ModemManager};
+    use crate::types::SmsStorage;
     use std::collections::{BTreeMap, HashMap};
 
     #[test]
+    fn test_signal_from_percent_maps_the_range_ends_and_rejects_overflow() {
+        let low = signal_from_percent(0).unwrap();
+        assert_eq!((low.percent, low.rssi), (0, -110));
+        let high = signal_from_percent(100).unwrap();
+        assert_eq!((high.percent, high.rssi), (100, 10));
+        assert!(signal_from_percent(u32::MAX).is_err());
+    }
+
+    #[test]
     fn test_format_storage_aware_at_sms_path() {
-        let path =
-            ModemManager::format_at_sms_path(&[("ME".to_string(), 5), ("SM".to_string(), 7)]);
+        let path = ModemManager::format_at_sms_path(&[(SmsStorage::Me, 5), (SmsStorage::Sm, 7)]);
         assert_eq!(path, "at:ME:5,SM:7");
+        assert_eq!(
+            ModemManager::format_at_sms_path(&[(SmsStorage::Mt, 0)]),
+            "at:MT:0"
+        );
     }
 
     #[test]
     fn test_parse_storage_aware_at_sms_path() {
         assert_eq!(
             ModemManager::parse_at_sms_path("at:ME:5,sm:7").unwrap(),
-            vec![(Some("ME".to_string()), 5), (Some("SM".to_string()), 7)]
+            vec![(Some(SmsStorage::Me), 5), (Some(SmsStorage::Sm), 7)]
+        );
+        assert_eq!(
+            ModemManager::parse_at_sms_path("at:MT:1").unwrap(),
+            vec![(Some(SmsStorage::Mt), 1)]
+        );
+    }
+
+    #[test]
+    fn test_parse_mixed_storage_and_legacy_at_sms_path() {
+        assert_eq!(
+            ModemManager::parse_at_sms_path("at:ME:5,7").unwrap(),
+            vec![(Some(SmsStorage::Me), 5), (None, 7)]
+        );
+    }
+
+    #[test]
+    fn test_at_sms_path_round_trips() {
+        let locations = [
+            (SmsStorage::Me, 5),
+            (SmsStorage::Sm, 7),
+            (SmsStorage::Mt, 9),
+        ];
+        let parsed =
+            ModemManager::parse_at_sms_path(&ModemManager::format_at_sms_path(&locations)).unwrap();
+        assert_eq!(
+            parsed,
+            locations
+                .iter()
+                .map(|(storage, index)| (Some(*storage), *index))
+                .collect::<Vec<_>>()
         );
     }
 
@@ -90,6 +136,23 @@ mod tests {
         assert!(ModemManager::parse_at_sms_path("at:SR:5").is_err());
         assert!(ModemManager::parse_at_sms_path("at:ME:not-a-number").is_err());
         assert!(ModemManager::parse_at_sms_path("at:").is_err());
+    }
+
+    #[test]
+    fn test_parse_at_sms_path_rejects_malformed_paths_with_the_same_errors() {
+        let message = |path: &str| {
+            ModemManager::parse_at_sms_path(path)
+                .unwrap_err()
+                .to_string()
+        };
+        assert_eq!(message("at:sr:5"), "Invalid SMS storage in path: SR");
+        assert_eq!(message("at::5"), "Invalid SMS storage in path: ");
+        assert_eq!(message("at:ME:5,XX:7"), "Invalid SMS storage in path: XX");
+        assert_eq!(message("at:ME:x"), "Invalid SMS index: x");
+        assert_eq!(message("at:5,y"), "Invalid SMS index: y");
+        assert_eq!(message("sms:ME:5"), "Invalid AT SMS path: sms:ME:5");
+        assert!(ModemManager::parse_at_sms_path("at:ME:5,").is_err());
+        assert!(ModemManager::parse_at_sms_path("at:ME:5:6").is_err());
     }
 
     fn cached(port: &str, device: &str) -> CachedPort {
@@ -135,20 +198,38 @@ mod tests {
 pub struct ModemManager {
     /// AT command backend
     at_modem: Arc<AtModemManager>,
-    /// D-Bus client (only loaded in DBus mode)
+    /// D-Bus client (only loaded in `DBus` mode)
     dbus_client: Option<Arc<crate::dbus_client::DBusClient>>,
     /// Signal quality cache
     signal_cache: Arc<SignalCache>,
-    /// modem_id -> AT port path, populated at discovery
+    /// `modem_id` -> AT port path, populated at discovery
     port_cache: Arc<RwLock<HashMap<String, CachedPort>>>,
     /// Backend mode
     mode: BackendMode,
 }
 
+#[derive(Clone, Copy)]
+struct MultipartGroup<'a> {
+    iccid: &'a Iccid,
+    modem_id: &'a str,
+    sender: &'a SmsAddress,
+    ref_id: u8,
+    total_parts: u8,
+}
+
+fn signal_from_percent(percent: u32) -> Result<SignalData> {
+    let percent =
+        i32::try_from(percent).map_err(|_| anyhow!("signal quality {percent}% out of range"))?;
+    Ok(SignalData {
+        percent,
+        rssi: (percent * 120 / 100) - 110,
+    })
+}
+
 impl ModemManager {
     pub async fn new() -> Self {
         // Check mode from environment
-        let use_dbus = std::env::var("USE_DBUS").map(|v| v == "1").unwrap_or(false);
+        let use_dbus = std::env::var("USE_DBUS").is_ok_and(|v| v == "1");
 
         let mode = if use_dbus {
             info!("Using D-Bus/ModemManager backend (USE_DBUS=1)");
@@ -182,26 +263,22 @@ impl ModemManager {
     pub fn is_available(&self) -> bool {
         match self.mode {
             BackendMode::AtCommand => true, // AT commands always available if ports exist
-            BackendMode::DBus => self
-                .dbus_client
-                .as_ref()
-                .map(|c| c.is_available())
-                .unwrap_or(false),
+            BackendMode::DBus => self.dbus_client.as_ref().is_some_and(|c| c.is_available()),
         }
     }
 
     /// Check if using native D-Bus
-    pub async fn is_using_native_dbus(&self) -> bool {
+    pub fn is_using_native_dbus(&self) -> bool {
         self.mode == BackendMode::DBus
     }
 
     /// Check if using AT commands
-    pub async fn is_using_at_commands(&self) -> bool {
+    pub fn is_using_at_commands(&self) -> bool {
         self.mode == BackendMode::AtCommand
     }
 
     /// Get current backend mode
-    pub async fn get_backend_mode(&self) -> BackendMode {
+    pub fn get_backend_mode(&self) -> BackendMode {
         self.mode
     }
 
@@ -237,14 +314,14 @@ impl ModemManager {
 
     /// Find modems that are NOT already active and bring them online, merging them into
     /// the port cache. For a candidate AT port that is silent, attempt one USB reset +
-    /// re-probe (recovers modems wedged at the USB level). Returns the modem_ids added.
+    /// re-probe (recovers modems wedged at the USB level). Returns the `modem_ids` added.
     ///
     /// Deliberately skips modems already in `known` or the cache: re-probing a healthy,
     /// busy modem could collide with the reader loop on the serial port and trigger a
     /// needless reset. The serial probes/resets run WITHOUT holding the cache lock so
     /// the reader's `get_port` is never blocked; the lock is taken only to insert.
     ///
-    /// AT-command mode only; in D-Bus mode ModemManager handles its own hotplug.
+    /// AT-command mode only; in D-Bus mode `ModemManager` handles its own hotplug.
     pub async fn rediscover_and_merge(
         &self,
         known: &std::collections::HashSet<String>,
@@ -401,7 +478,7 @@ impl ModemManager {
     }
 
     /// Get ICCID
-    pub async fn get_iccid(&self, modem_id: &str) -> Result<Option<String>> {
+    pub async fn get_iccid(&self, modem_id: &str) -> Result<Option<Iccid>> {
         match self.mode {
             BackendMode::AtCommand => {
                 let port = self.get_port(modem_id).await;
@@ -428,10 +505,7 @@ impl ModemManager {
             BackendMode::AtCommand => {
                 let port = self.get_port(modem_id).await;
                 let percent = self.at_modem.get_signal(&port).await?;
-                SignalData {
-                    percent: percent as i32,
-                    rssi: (percent as i32 * 120 / 100) - 110,
-                }
+                signal_from_percent(percent)?
             }
             BackendMode::DBus => {
                 let client = self
@@ -439,10 +513,7 @@ impl ModemManager {
                     .as_ref()
                     .ok_or_else(|| anyhow!("D-Bus not initialized"))?;
                 let (percent, _) = client.get_signal_quality(modem_id).await?;
-                SignalData {
-                    percent: percent as i32,
-                    rssi: (percent as i32 * 120 / 100) - 110,
-                }
+                signal_from_percent(percent)?
             }
         };
 
@@ -458,7 +529,7 @@ impl ModemManager {
         modem_id: &str,
     ) -> Result<
         Option<(
-            String,
+            Imei,
             Option<String>,
             Option<String>,
             Option<String>,
@@ -471,15 +542,13 @@ impl ModemManager {
                 let info = self.at_modem.get_modem_info(&port).await?;
 
                 if let Some(imei) = info.imei {
-                    if !imei.is_empty() {
-                        return Ok(Some((
-                            imei,
-                            info.manufacturer,
-                            info.model,
-                            info.revision,
-                            None,
-                        )));
-                    }
+                    return Ok(Some((
+                        imei,
+                        info.manufacturer,
+                        info.model,
+                        info.revision,
+                        None,
+                    )));
                 }
                 debug!("Modem {} has no valid IMEI", modem_id);
                 Ok(None)
@@ -491,11 +560,11 @@ impl ModemManager {
                     .ok_or_else(|| anyhow!("D-Bus not initialized"))?;
                 let details = client.get_device_details(modem_id).await?;
 
-                if details.imei.is_empty() {
+                let Some(imei) = details.imei else {
                     return Ok(None);
-                }
+                };
                 Ok(Some((
-                    details.imei,
+                    imei,
                     details.manufacturer,
                     details.model,
                     details.firmware_version,
@@ -506,7 +575,7 @@ impl ModemManager {
     }
 
     /// Get phone number
-    pub async fn get_phone_number(&self, modem_id: &str) -> Result<Option<String>> {
+    pub async fn get_phone_number(&self, modem_id: &str) -> Result<Option<SimNumber>> {
         match self.mode {
             BackendMode::AtCommand => {
                 let port = self.get_port(modem_id).await;
@@ -534,7 +603,7 @@ impl ModemManager {
                     .dbus_client
                     .as_ref()
                     .ok_or_else(|| anyhow!("D-Bus not initialized"))?;
-                client.get_operator(modem_id).await
+                client.get_operator(modem_id)
             }
         }
     }
@@ -562,221 +631,278 @@ impl ModemManager {
     pub async fn get_new_messages_with_paths(
         &self,
         modem_id: &str,
-        iccid: &str,
+        iccid: &Iccid,
         message_store: &crate::message_store::MessageStore,
     ) -> Result<Vec<MessageWithPath>> {
         match self.mode {
-            BackendMode::AtCommand => {
-                let port = self.get_port(modem_id).await;
-                let sms_list = self.at_modem.list_sms(&port).await?;
+            BackendMode::AtCommand => self.get_at_messages(modem_id, iccid, message_store).await,
+            BackendMode::DBus => self.get_dbus_messages(modem_id, iccid).await,
+        }
+    }
 
-                // Group multipart messages by (sender, ref_id, total_parts)
-                // Messages with concat_info are buffered, messages without are returned immediately
-                let mut multipart_groups: HashMap<(String, u8, u8), Vec<crate::at_modem::AtSms>> =
-                    HashMap::new();
-                let mut complete_messages: Vec<MessageWithPath> = Vec::new();
+    async fn get_at_messages(
+        &self,
+        modem_id: &str,
+        iccid: &Iccid,
+        message_store: &crate::message_store::MessageStore,
+    ) -> Result<Vec<MessageWithPath>> {
+        let port = self.get_port(modem_id).await;
+        let sms_list = self.at_modem.list_sms(&port).await?;
 
-                for sms in sms_list {
-                    if let Some(ref concat_info) = sms.concat_info {
-                        // This is part of a multipart message - buffer it
-                        let key = (
-                            sms.sender.clone(),
-                            concat_info.ref_id,
-                            concat_info.total_parts,
-                        );
-                        multipart_groups
-                            .entry(key)
-                            .or_insert_with(Vec::new)
-                            .push(sms);
-                    } else {
-                        // Single-part message - convert immediately
-                        complete_messages.push(MessageWithPath {
-                            message: Message {
-                                phone_iccid: iccid.to_string(),
-                                phone_number: sms.sender,
-                                content: sms.text,
-                                timestamp: sms.timestamp,
-                                direction: "received".to_string(),
-                            },
-                            modem_id: modem_id.to_string(),
-                            sms_path: Self::format_at_sms_path(&[(sms.storage, sms.index)]),
-                        });
-                    }
-                }
+        // Group multipart messages by (sender, ref_id, total_parts)
+        // Messages with concat_info are buffered, messages without are returned immediately
+        let mut multipart_groups: HashMap<(SmsAddress, u8, u8), Vec<crate::at_modem::AtSms>> =
+            HashMap::new();
+        let mut complete_messages: Vec<MessageWithPath> = Vec::new();
 
-                // Process multipart groups with persistent buffering
-                for ((sender, ref_id, total_parts), parts) in multipart_groups {
-                    // Store new parts to database
-                    for part in &parts {
-                        let concat_info = part.concat_info.as_ref().unwrap();
-                        if let Err(e) = message_store.store_segment_in_storage(
-                            iccid,
-                            &sender,
-                            ref_id,
-                            total_parts,
-                            concat_info.part_number,
-                            &part.text,
-                            &part.timestamp,
-                            &part.storage,
-                            part.index,
-                        ) {
-                            warn!("Failed to store segment: {}", e);
-                        }
-                    }
-
-                    // Check if all parts are now available (including previously buffered ones)
-                    match message_store.get_segments_with_storage(
-                        iccid,
-                        &sender,
-                        ref_id,
-                        total_parts,
-                    ) {
-                        Ok(segments) if segments.len() == total_parts as usize => {
-                            // All parts present - assemble!
-                            let mut all_parts: Vec<(u8, String, String, String, u32)> = segments;
-                            all_parts.sort_by_key(|(part_num, _, _, _, _)| *part_num);
-
-                            let combined_text = all_parts
-                                .iter()
-                                .map(|(_, content, _, _, _)| content.as_str())
-                                .collect::<Vec<_>>()
-                                .join("");
-                            let timestamp = all_parts[0].2.clone();
-                            let all_locations: Vec<(String, u32)> = all_parts
-                                .iter()
-                                .map(|(_, _, _, storage, index)| (storage.clone(), *index))
-                                .collect();
-
-                            info!(
-                                "✅ Assembled multipart message: {} parts, {} chars, ref_id={} from {}",
-                                all_parts.len(), combined_text.len(), ref_id, sender
-                            );
-
-                            complete_messages.push(MessageWithPath {
-                                message: Message {
-                                    phone_iccid: iccid.to_string(),
-                                    phone_number: sender.clone(),
-                                    content: combined_text,
-                                    timestamp,
-                                    direction: "received".to_string(),
-                                },
-                                modem_id: modem_id.to_string(),
-                                sms_path: Self::format_at_sms_path(&all_locations),
-                            });
-
-                            // Delete assembled segments from buffer
-                            if let Err(e) = message_store.delete_segments(iccid, ref_id) {
-                                warn!("Failed to delete segments: {}", e);
-                            }
-                        }
-                        Ok(segments)
-                            if partial_sms::is_orphaned(
-                                &segments
-                                    .iter()
-                                    .map(|(_, _, timestamp, _, _)| timestamp.as_str())
-                                    .collect::<Vec<_>>(),
-                                chrono::Utc::now(),
-                            ) =>
-                        {
-                            // The missing parts are not coming. Deliver what did
-                            // arrive, marked incomplete, so the usual
-                            // store-then-delete path frees the SIM slots.
-                            let numbered: Vec<(u8, String)> = segments
-                                .iter()
-                                .map(|(number, content, _, _, _)| (*number, content.clone()))
-                                .collect();
-                            let timestamp = segments
-                                .iter()
-                                .map(|(_, _, timestamp, _, _)| timestamp.clone())
-                                .min()
-                                .unwrap_or_default();
-                            let locations: Vec<(String, u32)> = segments
-                                .iter()
-                                .map(|(_, _, _, storage, index)| (storage.clone(), *index))
-                                .collect();
-
-                            info!(
-                                "📨 Delivering incomplete multipart message: {}/{} parts, ref_id={} from {}",
-                                segments.len(),
-                                total_parts,
-                                ref_id,
-                                sender
-                            );
-
-                            complete_messages.push(MessageWithPath {
-                                message: Message {
-                                    phone_iccid: iccid.to_string(),
-                                    phone_number: sender.clone(),
-                                    content: partial_sms::assemble_partial(total_parts, &numbered),
-                                    timestamp,
-                                    direction: "received".to_string(),
-                                },
-                                modem_id: modem_id.to_string(),
-                                sms_path: Self::format_at_sms_path(&locations),
-                            });
-
-                            if let Err(e) = message_store.delete_segments(iccid, ref_id) {
-                                warn!("Failed to delete segments: {}", e);
-                            }
-                        }
-                        Ok(segments) => {
-                            // Still incomplete - parts buffered in database
-                            debug!(
-                                "Buffering multipart message: {}/{} parts for ref_id={} from {}",
-                                segments.len(),
-                                total_parts,
-                                ref_id,
-                                sender
-                            );
-                        }
-                        Err(e) => {
-                            warn!("Failed to check buffered segments: {}", e);
-                        }
-                    }
-                }
-
-                debug!(
-                    "Got {} messages via AT from {} (after multipart assembly)",
-                    complete_messages.len(),
-                    modem_id
+        for sms in sms_list {
+            if let Some(ref concat_info) = sms.concat_info {
+                // This is part of a multipart message - buffer it
+                let key = (
+                    sms.sender.clone(),
+                    concat_info.ref_id,
+                    concat_info.total_parts,
                 );
-                Ok(complete_messages)
-            }
-            BackendMode::DBus => {
-                let client = self
-                    .dbus_client
-                    .as_ref()
-                    .ok_or_else(|| anyhow!("D-Bus not initialized"))?;
-                let native = client
-                    .native_client()
-                    .ok_or_else(|| anyhow!("Native D-Bus not available"))?;
-                let sms_messages = native.list_sms(modem_id).await?;
-
-                let messages: Vec<MessageWithPath> = sms_messages
-                    .into_iter()
-                    .map(|sms| MessageWithPath {
-                        message: Message {
-                            phone_iccid: iccid.to_string(),
-                            phone_number: sms.number,
-                            content: sms.text,
-                            timestamp: self.normalize_timestamp(&sms.timestamp),
-                            direction: "received".to_string(),
-                        },
-                        modem_id: modem_id.to_string(),
-                        sms_path: sms.path,
-                    })
-                    .collect();
-
-                Ok(messages)
+                multipart_groups.entry(key).or_default().push(sms);
+            } else {
+                let Some(storage) = sms.storage else {
+                    warn!("Skipping SMS {} without a recorded storage", sms.index);
+                    continue;
+                };
+                // Single-part message - convert immediately
+                complete_messages.push(MessageWithPath {
+                    message: Message {
+                        phone_iccid: iccid.clone(),
+                        phone_number: sms.sender,
+                        content: sms.text,
+                        timestamp: sms.timestamp,
+                        direction: Direction::Received,
+                    },
+                    modem_id: modem_id.to_string(),
+                    sms_path: Self::format_at_sms_path(&[(storage, sms.index)]),
+                });
             }
         }
+
+        // Process multipart groups with persistent buffering
+        for ((sender, ref_id, total_parts), parts) in multipart_groups {
+            let group = MultipartGroup {
+                iccid,
+                modem_id,
+                sender: &sender,
+                ref_id,
+                total_parts,
+            };
+            complete_messages.extend(Self::assemble_multipart_group(
+                message_store,
+                &group,
+                &parts,
+            ));
+        }
+
+        debug!(
+            "Got {} messages via AT from {} (after multipart assembly)",
+            complete_messages.len(),
+            modem_id
+        );
+        Ok(complete_messages)
+    }
+
+    /// Buffer the group's parts, then deliver the message once it is complete
+    /// or its missing parts are not coming.
+    fn assemble_multipart_group(
+        message_store: &crate::message_store::MessageStore,
+        group: &MultipartGroup<'_>,
+        parts: &[crate::at_modem::AtSms],
+    ) -> Option<MessageWithPath> {
+        let MultipartGroup {
+            iccid,
+            sender,
+            ref_id,
+            total_parts,
+            ..
+        } = *group;
+
+        // Store new parts to database
+        for part in parts {
+            let Some(concat_info) = part.concat_info.as_ref() else {
+                warn!("Skipping segment without concatenation info");
+                continue;
+            };
+            let Some(storage) = part.storage else {
+                warn!("Skipping segment without a recorded storage");
+                continue;
+            };
+            if let Err(e) = message_store.store_segment(&Segment {
+                iccid,
+                sender,
+                ref_id,
+                total_parts,
+                part_number: concat_info.part_number,
+                content: &part.text,
+                timestamp: &part.timestamp,
+                sms_storage: storage,
+                sms_index: part.index,
+            }) {
+                warn!("Failed to store segment: {}", e);
+            }
+        }
+
+        // Check if all parts are now available (including previously buffered ones)
+        let message =
+            match message_store.get_segments_with_storage(iccid, sender, ref_id, total_parts) {
+                Ok(segments) if segments.len() == usize::from(total_parts) => {
+                    Self::complete_message(group, segments)?
+                }
+                Ok(segments)
+                    if partial_sms::is_orphaned(
+                        &segments
+                            .iter()
+                            .map(|(_, _, timestamp, _, _)| timestamp.as_str())
+                            .collect::<Vec<_>>(),
+                        chrono::Utc::now(),
+                    ) =>
+                {
+                    Self::orphaned_message(group, &segments)
+                }
+                Ok(segments) => {
+                    // Still incomplete - parts buffered in database
+                    debug!(
+                        "Buffering multipart message: {}/{} parts for ref_id={} from {}",
+                        segments.len(),
+                        total_parts,
+                        ref_id,
+                        sender
+                    );
+                    return None;
+                }
+                Err(e) => {
+                    warn!("Failed to check buffered segments: {}", e);
+                    return None;
+                }
+            };
+
+        // Delete assembled segments from buffer
+        if let Err(e) = message_store.delete_segments(iccid, ref_id) {
+            warn!("Failed to delete segments: {}", e);
+        }
+        Some(message)
+    }
+
+    /// All parts present - assemble!
+    fn complete_message(
+        group: &MultipartGroup<'_>,
+        mut all_parts: Vec<StoredSegment>,
+    ) -> Option<MessageWithPath> {
+        all_parts.sort_by_key(|(part_num, _, _, _, _)| *part_num);
+
+        let combined_text = all_parts
+            .iter()
+            .map(|(_, content, _, _, _)| content.as_str())
+            .collect::<Vec<_>>()
+            .join("");
+        let timestamp = all_parts.first()?.2.clone();
+        let all_locations: Vec<(SmsStorage, u32)> = all_parts
+            .iter()
+            .map(|(_, _, _, storage, index)| (*storage, *index))
+            .collect();
+
+        info!(
+            "✅ Assembled multipart message: {} parts, {} chars, ref_id={} from {}",
+            all_parts.len(),
+            combined_text.len(),
+            group.ref_id,
+            group.sender
+        );
+
+        Some(MessageWithPath {
+            message: Message {
+                phone_iccid: group.iccid.clone(),
+                phone_number: group.sender.clone(),
+                content: combined_text,
+                timestamp,
+                direction: Direction::Received,
+            },
+            modem_id: group.modem_id.to_string(),
+            sms_path: Self::format_at_sms_path(&all_locations),
+        })
+    }
+
+    /// The missing parts are not coming. Deliver what did arrive, marked
+    /// incomplete, so the usual store-then-delete path frees the SIM slots.
+    fn orphaned_message(group: &MultipartGroup<'_>, segments: &[StoredSegment]) -> MessageWithPath {
+        let numbered: Vec<(u8, String)> = segments
+            .iter()
+            .map(|(number, content, _, _, _)| (*number, content.clone()))
+            .collect();
+        let timestamp = segments
+            .iter()
+            .map(|(_, _, timestamp, _, _)| timestamp.clone())
+            .min()
+            .unwrap_or_default();
+        let locations: Vec<(SmsStorage, u32)> = segments
+            .iter()
+            .map(|(_, _, _, storage, index)| (*storage, *index))
+            .collect();
+
+        info!(
+            "📨 Delivering incomplete multipart message: {}/{} parts, ref_id={} from {}",
+            segments.len(),
+            group.total_parts,
+            group.ref_id,
+            group.sender
+        );
+
+        MessageWithPath {
+            message: Message {
+                phone_iccid: group.iccid.clone(),
+                phone_number: group.sender.clone(),
+                content: partial_sms::assemble_partial(group.total_parts, &numbered),
+                timestamp,
+                direction: Direction::Received,
+            },
+            modem_id: group.modem_id.to_string(),
+            sms_path: Self::format_at_sms_path(&locations),
+        }
+    }
+
+    async fn get_dbus_messages(
+        &self,
+        modem_id: &str,
+        iccid: &Iccid,
+    ) -> Result<Vec<MessageWithPath>> {
+        let client = self
+            .dbus_client
+            .as_ref()
+            .ok_or_else(|| anyhow!("D-Bus not initialized"))?;
+        let native = client
+            .native_client()
+            .ok_or_else(|| anyhow!("Native D-Bus not available"))?;
+        let sms_messages = native.list_sms(modem_id).await?;
+
+        let messages: Vec<MessageWithPath> = sms_messages
+            .into_iter()
+            .map(|sms| MessageWithPath {
+                message: Message {
+                    phone_iccid: iccid.clone(),
+                    phone_number: sms.number,
+                    content: sms.text,
+                    timestamp: Self::normalize_timestamp(&sms.timestamp),
+                    direction: Direction::Received,
+                },
+                modem_id: modem_id.to_string(),
+                sms_path: sms.path,
+            })
+            .collect();
+
+        Ok(messages)
     }
 
     /// Get new SMS messages (deprecated)
     pub async fn get_new_messages(
         &self,
         modem_id: &str,
-        iccid: &str,
+        iccid: &Iccid,
         message_store: &crate::message_store::MessageStore,
     ) -> Result<Vec<Message>> {
         let messages_with_paths = self
@@ -795,7 +921,7 @@ impl ModemManager {
                 for (storage, index) in locations {
                     if let Some(storage) = storage {
                         self.at_modem
-                            .delete_sms_from_storage(&port, &storage, index)
+                            .delete_sms_from_storage(&port, storage, index)
                             .await?;
                         debug!("Deleted SMS {}:{} via AT from {}", storage, index, modem_id);
                     } else {
@@ -822,40 +948,42 @@ impl ModemManager {
         }
     }
 
-    fn format_at_sms_path(locations: &[(String, u32)]) -> String {
+    fn format_at_sms_path(locations: &[(SmsStorage, u32)]) -> String {
         let encoded = locations
             .iter()
-            .map(|(storage, index)| format!("{}:{}", storage.to_ascii_uppercase(), index))
+            .map(|(storage, index)| format!("{storage}:{index}"))
             .collect::<Vec<_>>()
             .join(",");
-        format!("at:{}", encoded)
+        format!("at:{encoded}")
     }
 
     /// Parse both storage-aware `at:ME:5,SM:7` paths and legacy `at:5,7` paths.
-    fn parse_at_sms_path(sms_path: &str) -> Result<Vec<(Option<String>, u32)>> {
+    fn parse_at_sms_path(sms_path: &str) -> Result<Vec<(Option<SmsStorage>, u32)>> {
         let encoded = sms_path
             .strip_prefix("at:")
-            .ok_or_else(|| anyhow!("Invalid AT SMS path: {}", sms_path))?;
+            .ok_or_else(|| anyhow!("Invalid AT SMS path: {sms_path}"))?;
         if encoded.is_empty() {
-            return Err(anyhow!("AT SMS path contains no locations: {}", sms_path));
+            return Err(anyhow!("AT SMS path contains no locations: {sms_path}"));
         }
 
         encoded
             .split(',')
             .map(|location| {
                 if let Some((storage, index)) = location.split_once(':') {
-                    let storage = storage.to_ascii_uppercase();
-                    if !matches!(storage.as_str(), "ME" | "SM" | "MT") {
-                        return Err(anyhow!("Invalid SMS storage in path: {}", storage));
-                    }
+                    let storage = storage.parse::<SmsStorage>().map_err(|_| {
+                        anyhow!(
+                            "Invalid SMS storage in path: {}",
+                            storage.to_ascii_uppercase()
+                        )
+                    })?;
                     let index = index
                         .parse::<u32>()
-                        .map_err(|_| anyhow!("Invalid SMS index: {}", index))?;
+                        .map_err(|_| anyhow!("Invalid SMS index: {index}"))?;
                     Ok((Some(storage), index))
                 } else {
                     let index = location
                         .parse::<u32>()
-                        .map_err(|_| anyhow!("Invalid SMS index: {}", location))?;
+                        .map_err(|_| anyhow!("Invalid SMS index: {location}"))?;
                     Ok((None, index))
                 }
             })
@@ -866,9 +994,9 @@ impl ModemManager {
     pub async fn send_sms(
         &self,
         modem_id: &str,
-        recipient: &str,
+        recipient: &SmsAddress,
         content: &str,
-    ) -> Result<SmsSubmitOutcome> {
+    ) -> Result<SmsSubmission> {
         self.send_sms_with_short_code(modem_id, recipient, content, false)
             .await
     }
@@ -877,16 +1005,16 @@ impl ModemManager {
     pub async fn send_sms_with_short_code(
         &self,
         modem_id: &str,
-        recipient: &str,
+        recipient: &SmsAddress,
         content: &str,
         allow_short_code: bool,
-    ) -> Result<SmsSubmitOutcome> {
+    ) -> Result<SmsSubmission> {
         // Single choke point for outbound sends, so both backends get the same
         // guarantee. The AT backend interpolates these into serial command strings
         // where a CR is an injection (docs/SECURITY-REVIEW.md finding 3); the D-Bus
         // backend passes them as typed arguments and is not injectable, but there is no
         // reason to accept a malformed number on either path.
-        AtModemManager::validate_recipient_with_short_code(recipient, allow_short_code)?;
+        AtModemManager::validate_recipient_with_short_code(recipient.as_str(), allow_short_code)?;
         AtModemManager::validate_message_body(content)?;
 
         match self.mode {
@@ -910,7 +1038,7 @@ impl ModemManager {
                         "Sent SMS via D-Bus from modem {} to {}",
                         modem_id, recipient
                     );
-                    Ok(SmsSubmitOutcome::Confirmed)
+                    Ok(SmsSubmission::Confirmed)
                 } else {
                     Err(anyhow!("Native D-Bus not available for sending SMS"))
                 }
@@ -919,7 +1047,7 @@ impl ModemManager {
     }
 
     /// Normalize timestamp
-    fn normalize_timestamp(&self, raw: &str) -> String {
+    fn normalize_timestamp(raw: &str) -> String {
         if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(raw) {
             return dt
                 .with_timezone(&chrono::Utc)

@@ -1,0 +1,82 @@
+// Test harness for Svelte components under `bun test`.
+//
+// Two things have to happen before a `.svelte` import works here:
+//
+//  1. A DOM must exist. Bun's runtime is server-side, so `happy-dom` installs
+//     window/document/etc. onto globalThis.
+//  2. Bun must know how to load `.svelte` files. Bun has no built-in Svelte
+//     loader, so we register a plugin that runs the Svelte compiler on demand.
+//
+// Preloaded for client tests only, by bunfig.client.toml (`bun run test:client`).
+
+import { GlobalRegistrator } from '@happy-dom/global-registrator';
+import { plugin } from 'bun';
+import { compile, compileModule } from 'svelte/compiler';
+import { readFileSync } from 'node:fs';
+
+GlobalRegistrator.register();
+
+const noop = (): undefined => undefined;
+
+// Svelte's transition directives call element.animate() unconditionally, and
+// these tests assert on DOM state, never on animation progress, so a no-op
+// Animation replaces whatever the DOM offers. happy-dom gained a real
+// implementation in 21.x whose `finished` promise rejects with AbortError when
+// Svelte cancels a transition on unmount; nothing awaits that promise, so bun
+// reported it as an unhandled error between tests. Older happy-dom had no
+// animate() at all and printed "element.animate is not a function" instead.
+if (typeof globalThis.Element !== 'undefined') {
+  Object.defineProperty(globalThis.Element.prototype, 'animate', {
+    value: function animate() {
+      return {
+        cancel: noop,
+        finish: noop,
+        play: noop,
+        pause: noop,
+        reverse: noop,
+        currentTime: 0,
+        playState: 'finished',
+        finished: Promise.resolve(),
+        onfinish: null,
+        oncancel: null,
+      };
+    },
+    writable: true,
+    configurable: true,
+  });
+}
+
+const jsTranspiler = new Bun.Transpiler({ loader: 'ts' });
+
+plugin({
+  name: 'svelte',
+  setup(build) {
+    // `generate: 'client'` produces browser-targeted code, which is what we want
+    // because happy-dom gives us a real DOM to mount into.
+    build.onLoad({ filter: /\.svelte$/ }, ({ path }) => {
+      const source = readFileSync(path, 'utf8');
+      const { js } = compile(source, { filename: path, generate: 'client' });
+      return { contents: js.code, loader: 'js' };
+    });
+
+    // `.svelte.js` modules may use runes at the top level, which requires the
+    // compiler's module transform rather than plain JS evaluation. @testing-library
+    // ships one of these itself (props.svelte.js), so this branch is load-bearing
+    // even before any of our own code uses the extension.
+    build.onLoad({ filter: /\.svelte\.js$/ }, ({ path }) => {
+      const source = readFileSync(path, 'utf8');
+      const { js } = compileModule(source, { filename: path, generate: 'client' });
+      return { contents: js.code, loader: 'js' };
+    });
+
+    // `.svelte.ts` modules: the Svelte compiler parses JavaScript, so the types
+    // have to be stripped first. `compileModule` cannot do it itself, and Bun's
+    // own TS handling does not apply inside this plugin's onLoad.
+    build.onLoad({ filter: /\.svelte\.ts$/ }, ({ path }) => {
+      const source = readFileSync(path, 'utf8');
+      const code = jsTranspiler.transformSync(source);
+      const { js } = compileModule(code, { filename: path, generate: 'client' });
+      return { contents: js.code, loader: 'js' };
+    });
+  },
+});

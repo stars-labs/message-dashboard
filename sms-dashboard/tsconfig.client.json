@@ -1,0 +1,18 @@
+// The Svelte 5 SPA. DOM only: nothing in client/ runs under Node. tsc reads
+// the .ts files and skips the .svelte ones, which svelte-check reads.
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "tsBuildInfoFile": "./node_modules/.tmp/client.tsbuildinfo",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["vite/client", "svelte"],
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "declaration": true,
+    "outDir": "./node_modules/.tmp/client-declarations"
+  },
+  "include": ["client/**/*.ts", "client/**/*.svelte"],
+  "exclude": ["client/**/*.test.ts"],
+  "references": [{ "path": "./tsconfig.shared.json" }]
+}

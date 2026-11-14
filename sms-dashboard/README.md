@@ -27,8 +27,7 @@ client/             Svelte application and component tests
 server/             Worker handlers, middleware, utilities, and tests
 migrations/         Sequential D1 SQL migrations
 config/             Auth0 role and permission configuration
-runner-core/        Shared authenticated Balance Agent capabilities
-balance-agent/      Electron menu-bar application
+balance-agent/      Electron menu-bar application, CLI and the runner capabilities they share
 scripts/            Build, maintenance, and developer runner adapters
 wrangler.toml       Production Worker and binding configuration
 ```
@@ -117,8 +116,9 @@ workflow after deployment.
 Development commands:
 
 ```bash
+# balance-agent is a workspace of sms-dashboard: install from there.
+(cd sms-dashboard && bun install)
 cd sms-dashboard/balance-agent
-bun install
 bun run test
 bun run build
 bun run start

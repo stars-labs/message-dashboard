@@ -11,14 +11,15 @@
 
 use crate::api_client::ApiClient;
 use crate::at_modem::{AtModemManager, VoicePorts};
+use crate::identifiers::Iccid;
 use crate::modem_manager::ModemManager;
 use crate::proxy_protocol;
-use crate::types::ModemReport;
 use crate::urc_reader::{parse_urc_line, UrcEvent};
 use crate::voice_auth::{self, CallAction, Leg, VoiceRequest};
 use crate::voice_call::{is_ringing, parse_clcc, RingReport, RingTracker};
 use crate::voice_codec::{adapter_to_modem, modem_to_adapter, Packet};
 use crate::voice_pacer::{Pacer, HOST_FRAME_INTERVAL};
+use crate::wire::{CallEndReason, ModemReport};
 use anyhow::{anyhow, bail, Result};
 use futures_util::{SinkExt, StreamExt};
 use rustls_acme::caches::DirCache;
@@ -29,7 +30,7 @@ use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, PoisonError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::io::unix::AsyncFd;
 use tokio::net::{TcpListener, TcpStream};
@@ -83,8 +84,7 @@ impl VoiceBridgeConfig {
                 .and_then(|p| p.parse().ok())
                 .unwrap_or(443),
             acme_dir: std::env::var("VOICE_BRIDGE_ACME_DIR")
-                .map(PathBuf::from)
-                .unwrap_or_else(|_| PathBuf::from("/var/lib/sms-daemon/acme")),
+                .map_or_else(|_| PathBuf::from("/var/lib/sms-daemon/acme"), PathBuf::from),
             acme_production: std::env::var("VOICE_BRIDGE_ACME_STAGING").as_deref() != Ok("1"),
         })
     }
@@ -106,7 +106,7 @@ struct ActiveCall {
     stop: watch::Sender<bool>,
     /// `+QPCMV` flow control from the URC reader to the NMEA pump.
     pcm_ready: watch::Sender<bool>,
-    iccid: String,
+    iccid: Iccid,
     modem_id: String,
 }
 
@@ -151,7 +151,7 @@ async fn finish_modem_call(
 /// Consume the PROXY protocol header and return the source it names.
 ///
 /// The header is peeked until its CRLF arrives, then read off the stream for
-/// exactly its own length, so the TLS ClientHello that follows is untouched.
+/// exactly its own length, so the TLS `ClientHello` that follows is untouched.
 async fn read_proxy_source(tcp: &mut TcpStream) -> Result<Option<SocketAddr>> {
     use tokio::io::AsyncReadExt;
     let mut buf = [0u8; proxy_protocol::MAX_HEADER_LEN];
@@ -160,12 +160,15 @@ async fn read_proxy_source(tcp: &mut TcpStream) -> Result<Option<SocketAddr>> {
         if n == 0 {
             bail!("connection closed before the proxy header");
         }
-        match proxy_protocol::parse_v1(&buf[..n]) {
+        let Some(peeked) = buf.get(..n) else {
+            bail!("peeked {n} bytes into a {}-byte buffer", buf.len());
+        };
+        match proxy_protocol::parse_v1(peeked) {
             Ok(header) => break header,
             Err(proxy_protocol::ParseError::Incomplete) if n < buf.len() => {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
-            Err(e) => bail!("{:?}", e),
+            Err(e) => bail!("{e:?}"),
         }
     };
     let mut discard = vec![0u8; header.len];
@@ -176,8 +179,7 @@ async fn read_proxy_source(tcp: &mut TcpStream) -> Result<Option<SocketAddr>> {
 fn now_unix() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
+        .map_or(0, |d| d.as_secs())
 }
 
 impl VoiceBridge {
@@ -286,7 +288,7 @@ impl VoiceBridge {
     ) -> Result<()> {
         let start = tokio::time::timeout(
             Duration::from_secs(10),
-            LazyConfigAcceptor::new(Default::default(), tcp),
+            LazyConfigAcceptor::new(tokio_rustls::rustls::server::Acceptor::default(), tcp),
         )
         .await??;
 
@@ -308,11 +310,15 @@ impl VoiceBridge {
         let api_key = self.api_key.clone();
         let admitted = Arc::new(std::sync::Mutex::new(None));
         let admitted_slot = admitted.clone();
+        #[expect(
+            clippy::result_large_err,
+            reason = "Tungstenite requires an unboxed ErrorResponse in its handshake callback"
+        )]
         let callback = move |request: &Request, response: Response| {
             let path = request.uri().path();
             match voice_auth::parse_path(path) {
                 Some(req) if voice_auth::verify(&api_key, &req, now_unix()) => {
-                    *admitted_slot.lock().unwrap() = Some(req);
+                    *admitted_slot.lock().unwrap_or_else(PoisonError::into_inner) = Some(req);
                     Ok(response)
                 }
                 _ => {
@@ -329,7 +335,7 @@ impl VoiceBridge {
         .await??;
         let request = admitted
             .lock()
-            .unwrap()
+            .unwrap_or_else(PoisonError::into_inner)
             .take()
             .ok_or_else(|| anyhow!("upgrade accepted without an admitted request"))?;
 
@@ -407,7 +413,7 @@ impl VoiceBridge {
                 let (call_id, iccid) = (request.call_id.clone(), request.iccid.clone());
                 tokio::spawn(async move {
                     if let Err(e) = api
-                        .report_call_ended(Some(&call_id), &iccid, "setup_failed")
+                        .report_call_ended(Some(&call_id), &iccid, CallEndReason::SetupFailed)
                         .await
                     {
                         warn!(call_id = %call_id, "📞 Failed to report call setup failure: {}", e);
@@ -458,13 +464,13 @@ impl VoiceBridge {
 
     /// The live modem holding `iccid`, confirmed on the SIM itself because the
     /// device snapshot can be up to a scan cycle old.
-    async fn resolve_modem(&self, iccid: &str) -> Result<(String, VoicePorts)> {
+    async fn resolve_modem(&self, iccid: &Iccid) -> Result<(String, VoicePorts)> {
         let candidates: Vec<String> = self
             .devices
             .read()
             .await
             .iter()
-            .filter(|(_, report)| report.detected_iccid.as_deref() == Some(iccid))
+            .filter(|(_, report)| report.detected_iccid.as_ref() == Some(iccid))
             .map(|(modem_id, _)| modem_id.clone())
             .collect();
         for modem_id in candidates {
@@ -474,7 +480,7 @@ impl VoiceBridge {
                 .await
                 .ok()
                 .flatten()
-                .as_deref()
+                .as_ref()
                 != Some(iccid)
             {
                 continue;
@@ -483,12 +489,11 @@ impl VoiceBridge {
             return match AtModemManager::voice_ports_for_at_port(&at_port)? {
                 Some(ports) => Ok((modem_id, ports)),
                 None => Err(anyhow!(
-                    "modem {} has no NMEA port and cannot carry voice",
-                    modem_id
+                    "modem {modem_id} has no NMEA port and cannot carry voice"
                 )),
             };
         }
-        bail!("no modem currently holds SIM {}", iccid)
+        bail!("no modem currently holds SIM {iccid}")
     }
 
     async fn at(&self, modem_id: &str, command: &str, timeout: Duration) -> Result<String> {
@@ -499,7 +504,7 @@ impl VoiceBridge {
         if let CallAction::Answer = action {
             let clcc = self.at(modem_id, "AT+CLCC", Duration::from_secs(3)).await?;
             if !is_ringing(&parse_clcc(&clcc)) {
-                bail!("modem {} is not ringing", modem_id);
+                bail!("modem {modem_id} is not ringing");
             }
         }
 
@@ -517,13 +522,13 @@ impl VoiceBridge {
                         modem_id,
                         "📞 AT+QPCMV=1,0 refused while ringing: {}",
                         pcm.trim()
-                    )
+                    );
                 }
             }
         }
 
         let (command, timeout) = match action {
-            CallAction::Dial(number) => (format!("ATD{};", number), Duration::from_secs(10)),
+            CallAction::Dial(number) => (format!("ATD{number};"), Duration::from_secs(10)),
             CallAction::Answer => ("ATA".to_string(), Duration::from_secs(15)),
         };
         let response = self.at(modem_id, &command, timeout).await;
@@ -531,7 +536,7 @@ impl VoiceBridge {
             Ok(text) if text.contains("OK") => Ok(()),
             other => {
                 self.release_modem(modem_id).await;
-                Err(anyhow!("{} failed: {:?}", command, other))
+                Err(anyhow!("{command} failed: {other:?}"))
             }
         }
     }
@@ -551,10 +556,10 @@ impl VoiceBridge {
         loop {
             tokio::select! {
                 _ = stop.changed() => return,
-                _ = tokio::time::sleep(WATCHDOG_INTERVAL) => {}
+                () = tokio::time::sleep(WATCHDOG_INTERVAL) => {}
             }
             let reason = match self.at(&modem_id, "AT+CLCC", Duration::from_secs(3)).await {
-                Ok(clcc) if parse_clcc(&clcc).is_empty() => Some("remote_hangup"),
+                Ok(clcc) if parse_clcc(&clcc).is_empty() => Some(CallEndReason::RemoteHangup),
                 Ok(_) => None,
                 Err(e) => {
                     warn!(modem_id = %modem_id, "📞 CLCC failed during call: {}", e);
@@ -565,8 +570,8 @@ impl VoiceBridge {
                 && !(handles.up_seen.load(Ordering::Relaxed)
                     && handles.down_seen.load(Ordering::Relaxed));
             let reason = reason
-                .or(legs_missing.then_some("adapter_missing"))
-                .or((started.elapsed() > MAX_CALL).then_some("max_duration"));
+                .or(legs_missing.then_some(CallEndReason::AdapterMissing))
+                .or((started.elapsed() > MAX_CALL).then_some(CallEndReason::MaxDuration));
             if let Some(reason) = reason {
                 self.end_call(&handles.call_id, reason).await;
                 return;
@@ -575,16 +580,16 @@ impl VoiceBridge {
     }
 
     /// Idempotent: only the first caller for a call id does the teardown.
-    async fn end_call(&self, call_id: &str, reason: &str) {
+    async fn end_call(&self, call_id: &str, reason: CallEndReason) {
         let active = finish_modem_call(&self.state, call_id, async |modem| {
-            self.release_modem(modem).await
+            self.release_modem(modem).await;
         })
         .await;
         let Some(active) = active else {
             return;
         };
 
-        info!(call_id, modem_id = %active.modem_id, reason, "📞 Call ended");
+        info!(call_id, modem_id = %active.modem_id, reason = reason.as_str(), "📞 Call ended");
         if let Err(e) = self
             .api
             .report_call_ended(Some(call_id), &active.iccid, reason)
@@ -613,7 +618,7 @@ impl VoiceBridge {
                 .map(|a| a.handles.call_id.clone())
         };
         if let Some(call_id) = call_id {
-            self.end_call(&call_id, "remote_hangup").await;
+            self.end_call(&call_id, CallEndReason::RemoteHangup).await;
         }
     }
 
@@ -623,10 +628,10 @@ impl VoiceBridge {
 
     /// Keep one URC reader per voice-capable modem with a known SIM.
     pub async fn run_urc_readers(self: Arc<Self>) {
-        let mut readers: HashMap<String, (String, tokio::task::JoinHandle<()>)> = HashMap::new();
+        let mut readers: HashMap<String, (Iccid, tokio::task::JoinHandle<()>)> = HashMap::new();
         info!("📞 URC reader supervisor started");
         loop {
-            let snapshot: Vec<(String, String)> = self
+            let snapshot: Vec<(String, Iccid)> = self
                 .devices
                 .read()
                 .await
@@ -672,7 +677,7 @@ impl VoiceBridge {
         }
     }
 
-    async fn read_urcs(self: Arc<Self>, modem_id: String, iccid: String, port: String) {
+    async fn read_urcs(self: Arc<Self>, modem_id: String, iccid: Iccid, port: String) {
         let fd = match AtModemManager::open_serial(&port).and_then(|f| Ok(AsyncFd::new(f)?)) {
             Ok(fd) => fd,
             Err(e) => {
@@ -691,7 +696,11 @@ impl VoiceBridge {
                     return;
                 }
             };
-            for &byte in &buf[..n] {
+            let Some(chunk) = buf.get(..n) else {
+                warn!(modem_id = %modem_id, "📞 URC port {} read {} bytes into a {}-byte buffer", port, n, buf.len());
+                return;
+            };
+            for &byte in chunk {
                 if byte != b'\n' && byte != b'\r' {
                     line.push(byte);
                     continue;
@@ -722,7 +731,10 @@ impl VoiceBridge {
                         let api = self.api.clone();
                         let iccid = iccid.clone();
                         tokio::spawn(async move {
-                            if let Err(e) = api.report_call_ended(None, &iccid, "missed").await {
+                            if let Err(e) = api
+                                .report_call_ended(None, &iccid, CallEndReason::Missed)
+                                .await
+                            {
                                 warn!("📞 Failed to report missed call: {}", e);
                             }
                         });
@@ -786,7 +798,7 @@ async fn read_some(fd: &AsyncFd<File>, buf: &mut [u8]) -> std::io::Result<usize>
                 tokio::time::sleep(EMPTY_READ_PAUSE).await;
             }
             Ok(result) => return result,
-            Err(_would_block) => continue,
+            Err(_would_block) => {}
         }
     }
 }
@@ -802,9 +814,16 @@ async fn write_all(fd: &AsyncFd<File>, mut data: &[u8]) -> std::io::Result<()> {
                     "serial port accepted no data",
                 ))
             }
-            Ok(Ok(n)) => data = &data[n..],
+            Ok(Ok(n)) => {
+                data = data.get(n..).ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "serial port wrote more bytes than were offered",
+                    )
+                })?;
+            }
             Ok(Err(e)) => return Err(e),
-            Err(_would_block) => continue,
+            Err(_would_block) => {}
         }
     }
     Ok(())
@@ -822,7 +841,7 @@ async fn pump_nmea(
     mut from_browser: mpsc::Receiver<Vec<u8>>,
     mut pcm_ready: watch::Receiver<bool>,
     mut stop: watch::Receiver<bool>,
-) -> &'static str {
+) -> CallEndReason {
     let mut pending = Vec::with_capacity(MODEM_FRAME * 4);
     let mut buf = [0u8; 4096];
     let mut last_sample = 0i16;
@@ -832,20 +851,24 @@ async fn pump_nmea(
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         tokio::select! {
-            _ = stop.changed() => return "stopped",
+            _ = stop.changed() => return CallEndReason::Stopped,
             read = read_some(&fd, &mut buf) => {
                 let n = match read {
                     Ok(n) => n,
                     Err(e) => {
                         warn!("📞 NMEA read failed: {}", e);
-                        return "nmea_error";
+                        return CallEndReason::NmeaError;
                     }
                 };
-                pending.extend_from_slice(&buf[..n]);
+                let Some(chunk) = buf.get(..n) else {
+                    warn!("📞 NMEA read {} bytes into a {}-byte buffer", n, buf.len());
+                    return CallEndReason::NmeaError;
+                };
+                pending.extend_from_slice(chunk);
                 while pending.len() >= MODEM_FRAME {
                     let frame: Vec<u8> = pending.drain(..MODEM_FRAME).collect();
                     let payload = modem_to_adapter(&frame, &mut last_sample);
-                    let samples = (payload.len() / 4) as u32;
+                    let samples = u32::try_from(payload.len() / 4).unwrap_or(u32::MAX);
                     let packet = Packet { sequence_number: sequence, timestamp: sequence.wrapping_mul(samples), payload };
                     sequence = sequence.wrapping_add(1);
                     // No subscriber yet just means the up leg has not connected.
@@ -856,7 +879,7 @@ async fn pump_nmea(
             changed = pcm_ready.changed() => {
                 // The sender lives in the call state and goes away on teardown.
                 if changed.is_err() {
-                    return "stopped";
+                    return CallEndReason::Stopped;
                 }
                 let ready = *pcm_ready.borrow_and_update();
                 pacer.set_ready(ready);
@@ -870,7 +893,7 @@ async fn pump_nmea(
                 if let Some(frame) = pacer.next_frame() {
                     if let Err(e) = write_all(&fd, &frame).await {
                         warn!("📞 NMEA write failed: {}", e);
-                        return "nmea_error";
+                        return CallEndReason::NmeaError;
                     }
                 }
                 let dropped = pacer.take_dropped();
@@ -887,7 +910,7 @@ async fn pump_up<S>(
     mut ws: tokio_tungstenite::WebSocketStream<S>,
     mut audio: broadcast::Receiver<Arc<Vec<u8>>>,
     mut stop: watch::Receiver<bool>,
-) -> &'static str
+) -> CallEndReason
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
@@ -895,21 +918,21 @@ where
         tokio::select! {
             _ = stop.changed() => {
                 let _ = ws.close(None).await;
-                return "stopped";
+                return CallEndReason::Stopped;
             }
             frame = audio.recv() => match frame {
                 Ok(bytes) => {
                     if ws.send(Message::Binary(bytes.as_ref().clone())).await.is_err() {
-                        return "adapter_closed";
+                        return CallEndReason::AdapterClosed;
                     }
                 }
                 Err(broadcast::error::RecvError::Lagged(skipped)) => {
                     debug!("📞 up leg dropped {} frames", skipped);
                 }
-                Err(broadcast::error::RecvError::Closed) => return "stopped",
+                Err(broadcast::error::RecvError::Closed) => return CallEndReason::Stopped,
             },
             incoming = ws.next() => match incoming {
-                Some(Ok(Message::Close(_))) | None | Some(Err(_)) => return "adapter_closed",
+                Some(Ok(Message::Close(_)) | Err(_)) | None => return CallEndReason::AdapterClosed,
                 Some(Ok(_)) => {}
             },
         }
@@ -921,7 +944,7 @@ async fn pump_down<S>(
     mut ws: tokio_tungstenite::WebSocketStream<S>,
     to_modem: mpsc::Sender<Vec<u8>>,
     mut stop: watch::Receiver<bool>,
-) -> &'static str
+) -> CallEndReason
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
@@ -929,7 +952,7 @@ where
         tokio::select! {
             _ = stop.changed() => {
                 let _ = ws.close(None).await;
-                return "stopped";
+                return CallEndReason::Stopped;
             }
             incoming = ws.next() => match incoming {
                 Some(Ok(Message::Binary(bytes))) => {
@@ -941,7 +964,7 @@ where
                     // add latency to a live call.
                     let _ = to_modem.try_send(pcm);
                 }
-                Some(Ok(Message::Close(_))) | None | Some(Err(_)) => return "adapter_closed",
+                Some(Ok(Message::Close(_)) | Err(_)) | None => return CallEndReason::AdapterClosed,
                 Some(Ok(_)) => {}
             },
         }
@@ -970,7 +993,7 @@ mod tests {
                 },
                 stop,
                 pcm_ready,
-                iccid: "test-sim".into(),
+                iccid: Iccid::try_from("89860000000000000042").unwrap(),
                 modem_id: "modem".into(),
             }),
             ..Default::default()
@@ -996,14 +1019,14 @@ mod tests {
         assert!(state.active.is_none());
         assert_eq!(state.ended.front().map(String::as_str), Some("old"));
     }
-    use std::os::fd::{FromRawFd, IntoRawFd};
+    use std::os::fd::OwnedFd;
     use std::os::unix::net::UnixStream;
 
     /// A non-blocking fd whose peer can be dropped to simulate a hang-up.
     fn pair() -> (AsyncFd<File>, UnixStream) {
         let (ours, theirs) = UnixStream::pair().unwrap();
         ours.set_nonblocking(true).unwrap();
-        let file = unsafe { File::from_raw_fd(ours.into_raw_fd()) };
+        let file = File::from(OwnedFd::from(ours));
         (AsyncFd::new(file).unwrap(), theirs)
     }
 

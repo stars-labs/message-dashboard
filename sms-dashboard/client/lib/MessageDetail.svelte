@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   import { formatFullTime } from './time.js';
   // Full SMS body, unabridged.
   //
@@ -19,60 +19,85 @@
   import { getOutboundStatusMeta } from './message-status.js';
   import { copyCode } from './clipboard.js';
   import { swipeDismiss } from './swipe-dismiss.js';
+  import type { HighlightKeyword } from './message-highlight.js';
+  import type { ApiMessage } from '../../shared/api/messages.js';
+  import type { Phone } from '../../shared/api/phones.js';
+  import type { FilterRule } from '../../shared/api/filters.js';
+  import { textOr } from '../../shared/text.js';
+
+  interface SelectedPhone extends Pick<Phone, 'sim_index' | 'number'> {
+    flag: string;
+  }
+
+  interface Props {
+    message: ApiMessage | null;
+    selectedPhone?: SelectedPhone | null;
+    keywords?: readonly HighlightKeyword[];
+    /** Filter rules, so a hidden message can name the rule that hid it. */
+    filterRules?: readonly Pick<FilterRule, 'id' | 'pattern' | 'note'>[];
+    onClose?: (() => void) | null;
+  }
 
   let {
     message,
     selectedPhone = null,
     keywords = [],
-    /** Filter rules, so a hidden message can name the rule that hid it. */
     filterRules = [],
     onClose = null,
-  } = $props();
+  }: Props = $props();
 
   let isSent = $derived(message?.type === 'sent');
   let isFiltered = $derived(message?.filter_status === 'filtered');
   let hasCode = $derived(!!message?.verification_code);
 
-  let counterpartyNumber = $derived(isSent
-    ? message?.recipient || message?.phone_number || '—'
-    : message?.phone_number || '—');
+  let counterpartyNumber = $derived(
+    isSent
+      ? textOr(message?.recipient, textOr(message?.phone_number, '—'))
+      : textOr(message?.phone_number, '—'),
+  );
 
-  let sendStatus = $derived(isSent
-    ? getOutboundStatusMeta(message?.status, message?.error_message)
-    : null);
+  let sendStatus = $derived(
+    isSent ? getOutboundStatusMeta(message?.status, message?.error_message) : null,
+  );
 
   let cardIndex = $derived(message?.phone_sim_index ?? selectedPhone?.sim_index);
   let cardNumber = $derived(
-    message?.display_phone_number || selectedPhone?.number || message?.phone_iccid?.slice(-8) || '—'
+    textOr(
+      message?.display_phone_number,
+      textOr(selectedPhone?.number, textOr(message?.phone_iccid?.slice(-8), '—')),
+    ),
   );
-  let cardFlag = $derived(message?.phone_country
-    ? getCountryFlag(message.phone_country)
-    : selectedPhone?.flag || '');
+  let cardFlag = $derived(
+    message?.phone_country
+      ? getCountryFlag(message.phone_country)
+      : textOr(selectedPhone?.flag, ''),
+  );
 
   // Which rule hid this message, by name where one is available.
   let ruleLabel = $derived.by(() => {
     if (!isFiltered) return null;
-    const rule = (filterRules || []).find((r) => r.id === message?.filter_rule_id);
-    return rule ? rule.note || rule.pattern : null;
+    const rule = filterRules.find((r) => r.id === message?.filter_rule_id);
+    return rule ? textOr(rule.note, rule.pattern) : null;
   });
 
   // Copy feedback, shared by the code chip and the copy-whole-body button.
   // Mirrors SimpleMessageView's 2-second pattern so the interaction feels identical.
-  let copied = $state(null);
-  let copyTimer = null;
+  let copied = $state<'code' | 'body' | null>(null);
+  let copyTimer: ReturnType<typeof setTimeout> | null = null;
 
-  async function copyText(text, kind) {
+  async function copyText(text: string | null, kind: 'code' | 'body') {
     if (!text) return;
     const ok = await copyCode(text);
     if (!ok) return;
     if (copyTimer) clearTimeout(copyTimer);
     copied = kind;
-    copyTimer = setTimeout(() => { copied = null; }, 2000);
+    copyTimer = setTimeout(() => {
+      copied = null;
+    }, 2000);
   }
 
-
   onMount(() => {
-    const closeOnEscape = (event) => {
+    const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose?.();
     };
     window.addEventListener('keydown', closeOnEscape);
@@ -84,7 +109,9 @@
 </script>
 
 {#if message}
-  <div class="fixed inset-x-0 top-0 bottom-[var(--mobile-tab-bar-height)] lg:inset-0 z-50 lg:flex lg:justify-end">
+  <div
+    class="fixed inset-x-0 top-0 bottom-[var(--mobile-tab-bar-height)] lg:inset-0 z-50 lg:flex lg:justify-end"
+  >
     <button
       type="button"
       onclick={() => onClose?.()}
@@ -94,13 +121,16 @@
 
     <section
       aria-label="短信详情"
-      use:swipeDismiss={{ onDismiss: onClose }}
+      use:swipeDismiss={onClose === null ? {} : { onDismiss: onClose }}
       class="relative w-full h-full lg:w-[480px] bg-white lg:border-l lg:border-stone-200
         flex flex-col will-change-transform"
       style="box-shadow: -16px 0 40px rgba(28,25,23,.16);"
     >
       <!-- Copy confirmation. Outside the scroll area so it is always visible. -->
-      <div class="absolute top-[70px] left-1/2 -translate-x-1/2 z-10 pointer-events-none" aria-live="polite">
+      <div
+        class="absolute top-[70px] left-1/2 -translate-x-1/2 z-10 pointer-events-none"
+        aria-live="polite"
+      >
         {#if copied}
           <div
             role="status"
@@ -108,9 +138,17 @@
             class="flex items-center gap-2 min-w-max px-3 py-2 rounded-md border border-stone-700
               bg-stone-900 text-white shadow-lg"
           >
-            <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-emerald-500 shrink-0">
+            <span
+              class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-emerald-500 shrink-0"
+            >
               <svg class="w-3 h-3" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                <path d="M2.25 6.1 4.8 8.5 9.8 3.6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+                <path
+                  d="M2.25 6.1 4.8 8.5 9.8 3.6"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
               </svg>
             </span>
             <span class="text-xs font-medium">{copied === 'body' ? '已复制全文' : '已复制'}</span>
@@ -118,22 +156,29 @@
         {/if}
       </div>
 
-      <header class="h-[64px] px-4 lg:px-5 border-b border-stone-200 flex items-center gap-3 shrink-0">
+      <header
+        class="h-[64px] px-4 lg:px-5 border-b border-stone-200 flex items-center gap-3 shrink-0"
+      >
         <div class="min-w-0 flex-1">
           <div class="flex items-center gap-2 min-w-0">
             <h2 class="text-base font-semibold text-stone-900 shrink-0">短信详情</h2>
-            {#if isSent}
-              <span class="inline-flex items-center px-2 py-0.5 rounded-md border text-xs font-medium shrink-0 {sendStatus.className}">
+            {#if sendStatus}
+              <span
+                class="inline-flex items-center px-2 py-0.5 rounded-md border text-xs font-medium shrink-0 {sendStatus.className}"
+              >
                 {sendStatus.label}
               </span>
             {:else}
-              <span class="inline-flex items-center px-2 py-0.5 rounded-md border border-sky-200 bg-sky-50 text-sky-700 text-xs font-medium shrink-0">
+              <span
+                class="inline-flex items-center px-2 py-0.5 rounded-md border border-sky-200 bg-sky-50 text-sky-700 text-xs font-medium shrink-0"
+              >
                 接收
               </span>
             {/if}
           </div>
           <p class="mt-0.5 text-xs text-stone-400 font-mono truncate">
-            {isSent ? '发送至' : '来自'} {counterpartyNumber}
+            {isSent ? '发送至' : '来自'}
+            {counterpartyNumber}
           </p>
         </div>
         <button
@@ -142,8 +187,19 @@
           class="w-9 h-9 flex items-center justify-center rounded-lg text-stone-400 hover:bg-stone-100 hover:text-stone-700 shrink-0"
           aria-label="关闭"
         >
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+          <svg
+            class="w-5 h-5"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M6 18L18 6M6 6l12 12"
+            />
           </svg>
         </button>
       </header>
@@ -154,7 +210,9 @@
           <div class="px-4 py-3 border-r border-stone-100 min-w-0">
             <p class="text-[11px] text-stone-400">接收卡</p>
             <p class="mt-1 text-sm font-medium text-stone-800 font-mono truncate">
-              {#if cardIndex != null}{formatCardNumber(cardIndex)} · {/if}{cardFlag} {cardNumber}
+              {#if cardIndex != null}{formatCardNumber(cardIndex)} ·
+              {/if}{cardFlag}
+              {cardNumber}
             </p>
           </div>
           <div class="px-4 py-3 min-w-0">
@@ -175,8 +233,8 @@
               class="mt-3 inline-flex items-center px-3 py-1.5 rounded-lg border font-mono
                 text-2xl font-semibold tracking-widest tabular-nums transition-colors duration-200
                 {copied === 'code'
-                  ? 'bg-emerald-50 border-emerald-300 text-emerald-700'
-                  : 'bg-[#fff7ed] border-[#fed7aa] text-stone-900 hover:border-orange-300 hover:bg-orange-50'}"
+                ? 'bg-emerald-50 border-emerald-300 text-emerald-700'
+                : 'bg-[#fff7ed] border-[#fed7aa] text-stone-900 hover:border-orange-300 hover:bg-orange-50'}"
               title="点击复制"
             >
               {message.verification_code}
@@ -191,24 +249,26 @@
             <button
               type="button"
               onclick={() => copyText(message.content, 'body')}
-              class="text-xs font-medium text-action-text hover:underline shrink-0"
-            >复制全文</button>
+              class="text-xs font-medium text-action-text hover:underline shrink-0">复制全文</button
+            >
           </div>
 
           {#if isFiltered}
             <p class="mt-3">
-              <span class="inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded bg-stone-100 text-stone-500 font-medium">
+              <span
+                class="inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded bg-stone-100 text-stone-500 font-medium"
+              >
                 已过滤{ruleLabel ? `: ${ruleLabel}` : ''}
               </span>
             </p>
           {/if}
 
           <p class="mt-3 text-sm leading-relaxed text-stone-700 whitespace-pre-wrap break-words">
-            <MessageHighlight content={message.content || ''} {keywords} />
+            <MessageHighlight content={message.content} {keywords} />
           </p>
 
           <p class="mt-3 text-[11px] text-stone-400 tabular-nums">
-            {(message.content || '').length} 字符
+            {message.content.length} 字符
           </p>
         </section>
 
@@ -227,9 +287,9 @@
             <dt class="text-stone-400">消息编号</dt>
             <dd class="font-mono text-stone-600 break-all">{message.id}</dd>
             <dt class="text-stone-400">ICCID</dt>
-            <dd class="font-mono text-stone-600 break-all">{message.phone_iccid || '—'}</dd>
+            <dd class="font-mono text-stone-600 break-all">{textOr(message.phone_iccid, '—')}</dd>
             <dt class="text-stone-400">运营商</dt>
-            <dd class="text-stone-600">{message.phone_carrier || '—'}</dd>
+            <dd class="text-stone-600">{textOr(message.phone_carrier, '—')}</dd>
           </dl>
         </section>
       </div>

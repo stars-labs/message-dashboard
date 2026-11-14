@@ -3,8 +3,10 @@ use tokio::process::Command;
 use tracing::{debug, info, warn};
 
 // Re-export DeviceDetails so it's accessible from modem_manager
+use crate::identifiers::{Iccid, Imei, SimNumber};
 pub use crate::native_dbus::DeviceDetails;
 use crate::native_dbus::NativeDBusClient;
+use crate::types::ModemState;
 
 /// D-Bus client with native implementation for zero-overhead communication
 /// Falls back to busctl CLI if native D-Bus is unavailable
@@ -20,14 +22,13 @@ impl DBusClient {
         let has_native = native_client.is_available();
 
         // Check if busctl is available as fallback
-        let busctl_enabled = if !has_native {
+        let busctl_enabled = if has_native {
+            false
+        } else {
             std::process::Command::new("which")
                 .arg("busctl")
                 .status()
-                .map(|s| s.success())
-                .unwrap_or(false)
-        } else {
-            false
+                .is_ok_and(|s| s.success())
         };
 
         if has_native {
@@ -88,7 +89,7 @@ impl DBusClient {
     }
 
     /// Get modem state using D-Bus (native first, then busctl)
-    pub async fn get_modem_state(&self, modem_id: &str) -> Result<String> {
+    pub async fn get_modem_state(&self, modem_id: &str) -> Result<ModemState> {
         // Try native D-Bus first
         if let Some(native) = &self.native_client {
             match native.get_modem_state(modem_id).await {
@@ -108,7 +109,7 @@ impl DBusClient {
     }
 
     /// Get SIM ICCID using D-Bus (native first, then busctl)
-    pub async fn get_sim_iccid(&self, modem_id: &str) -> Result<Option<String>> {
+    pub async fn get_sim_iccid(&self, modem_id: &str) -> Result<Option<Iccid>> {
         // Try native D-Bus first
         if let Some(native) = &self.native_client {
             match native.get_sim_iccid(modem_id).await {
@@ -148,7 +149,7 @@ impl DBusClient {
     }
 
     /// Get phone number using D-Bus (native first, then busctl)
-    pub async fn get_phone_number(&self, modem_id: &str) -> Result<Option<String>> {
+    pub async fn get_phone_number(&self, modem_id: &str) -> Result<Option<SimNumber>> {
         // Try native D-Bus first
         if let Some(native) = &self.native_client {
             match native.get_phone_number(modem_id).await {
@@ -164,7 +165,7 @@ impl DBusClient {
     }
 
     /// Get operator name using D-Bus
-    pub async fn get_operator(&self, _modem_id: &str) -> Result<Option<String>> {
+    pub fn get_operator(&self, _modem_id: &str) -> Result<Option<String>> {
         // This can be retrieved from the SIM or modem status
         // For now, return None or implement if needed
         Ok(None)
@@ -224,8 +225,8 @@ impl DBusClient {
     }
 
     /// Get modem state using busctl
-    async fn get_modem_state_busctl(&self, modem_id: &str) -> Result<String> {
-        let path = format!("/org/freedesktop/ModemManager1/Modem/{}", modem_id);
+    async fn get_modem_state_busctl(&self, modem_id: &str) -> Result<ModemState> {
+        let path = format!("/org/freedesktop/ModemManager1/Modem/{modem_id}");
 
         let output = Command::new("busctl")
             .arg("get-property")
@@ -249,30 +250,13 @@ impl DBusClient {
             .and_then(|s| s.parse::<i32>().ok())
             .ok_or_else(|| anyhow!("Failed to parse modem state"))?;
 
-        let state = match state_code {
-            -1 => "unknown",
-            0 => "failed",
-            1 => "unknown",
-            2 => "locked",
-            3 => "disabled",
-            4 => "disabling",
-            5 => "enabling",
-            6 => "enabled",
-            7 => "searching",
-            8 => "registered",
-            9 => "disconnecting",
-            10 => "connecting",
-            11 => "connected",
-            _ => "unknown",
-        };
-
-        Ok(state.to_string())
+        Ok(ModemState::from_code(state_code))
     }
 
     /// Get SIM ICCID using busctl
-    async fn get_sim_iccid_busctl(&self, modem_id: &str) -> Result<Option<String>> {
+    async fn get_sim_iccid_busctl(&self, modem_id: &str) -> Result<Option<Iccid>> {
         // First get SIM path
-        let modem_path = format!("/org/freedesktop/ModemManager1/Modem/{}", modem_id);
+        let modem_path = format!("/org/freedesktop/ModemManager1/Modem/{modem_id}");
 
         let output = Command::new("busctl")
             .arg("get-property")
@@ -319,14 +303,15 @@ impl DBusClient {
         let iccid = stdout
             .split('"')
             .nth(1)
-            .map(|s| s.trim_end_matches('F').to_string());
+            .map(|s| Iccid::try_from(s.trim_end_matches('F')))
+            .transpose()?;
 
         Ok(iccid)
     }
 
     /// Get signal quality using busctl
     async fn get_signal_quality_busctl(&self, modem_id: &str) -> Result<(u32, bool)> {
-        let path = format!("/org/freedesktop/ModemManager1/Modem/{}", modem_id);
+        let path = format!("/org/freedesktop/ModemManager1/Modem/{modem_id}");
 
         let output = Command::new("busctl")
             .arg("call")
@@ -345,11 +330,13 @@ impl DBusClient {
 
         // Parse signal quality from busctl output
         // Format: ub 75 true (percent, recent)
-        let parts: Vec<&str> = stdout.split_whitespace().collect();
+        let mut parts = stdout.split_whitespace();
 
-        if parts.len() >= 3 && parts[0] == "ub" {
-            let percent = parts[1].parse::<u32>().unwrap_or(0);
-            let recent = parts[2] == "true";
+        if let (Some("ub"), Some(percent), Some(recent)) =
+            (parts.next(), parts.next(), parts.next())
+        {
+            let percent = percent.parse::<u32>().unwrap_or(0);
+            let recent = recent == "true";
             Ok((percent, recent))
         } else {
             Err(anyhow!("Failed to parse signal quality"))
@@ -358,9 +345,9 @@ impl DBusClient {
 
     /// Get device details using busctl
     async fn get_device_details_busctl(&self, modem_id: &str) -> Result<DeviceDetails> {
-        let path = format!("/org/freedesktop/ModemManager1/Modem/{}", modem_id);
+        let path = format!("/org/freedesktop/ModemManager1/Modem/{modem_id}");
 
-        let mut imei = String::new();
+        let mut imei = None;
         let mut manufacturer = None;
         let mut model = None;
         let mut firmware = None;
@@ -379,7 +366,7 @@ impl DBusClient {
             if output.status.success() {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 if let Some(value) = stdout.split('"').nth(1) {
-                    imei = value.to_string();
+                    imei = Imei::try_from(value).ok();
                 }
             }
         }
@@ -470,14 +457,9 @@ impl DBusClient {
 fn extract_modem_id_from_path(line: &str) -> Option<String> {
     if line.contains("/org/freedesktop/ModemManager1/Modem/") {
         // Extract the modem ID from the path
-        if let Some(start) = line.find("/Modem/") {
-            let id_start = start + 7;
-            let remaining = &line[id_start..];
-            // Find the end (space or quote)
-            let end = remaining
-                .find(|c: char| c == ' ' || c == '"')
-                .unwrap_or(remaining.len());
-            let modem_id = &remaining[..end];
+        if let Some((_, remaining)) = line.split_once("/Modem/") {
+            // The ID runs to the next space or quote
+            let modem_id = remaining.split([' ', '"']).next().unwrap_or_default();
             if !modem_id.is_empty() {
                 return Some(modem_id.to_string());
             }
