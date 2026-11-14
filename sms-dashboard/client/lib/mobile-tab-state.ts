@@ -33,7 +33,7 @@ export function getMobileTabState({
 }): { count: number; index: number } {
   const tabs = getMobileTabs(canManagePhones);
   const selectedView = showMoreMenu || MORE_VIEWS.has(currentView) ? 'more' : currentView;
-  const index = (tabs as readonly string[]).indexOf(selectedView);
+  const index = tabs.findIndex((tab) => tab === selectedView);
 
   return {
     count: tabs.length,

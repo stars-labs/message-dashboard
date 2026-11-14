@@ -53,23 +53,25 @@ export function toError(reason: unknown): Error {
   if (typeof reason === 'string') return new Error(reason);
 
   if (reason && typeof reason === 'object') {
-    const candidate = reason as { message?: unknown };
     const message =
-      typeof candidate.message === 'string' && candidate.message
-        ? candidate.message
+      'message' in reason && typeof reason.message === 'string' && reason.message
+        ? reason.message
         : safeStringify(reason);
     const error = new Error(message);
-    if (typeof (reason as { stack?: unknown }).stack === 'string')
-      error.stack = (reason as { stack: string }).stack;
+    if ('stack' in reason && typeof reason.stack === 'string') error.stack = reason.stack;
     return error;
   }
 
   return new Error('Unhandled promise rejection');
 }
 
+// Typed as the runtime behaves: an object whose toJSON returns undefined
+// stringifies to undefined, which lib.d.ts does not admit.
+const stringify: (value: unknown) => string | undefined = JSON.stringify;
+
 function safeStringify(value: unknown): string {
   try {
-    return JSON.stringify(value) ?? 'Unhandled promise rejection';
+    return stringify(value) ?? 'Unhandled promise rejection';
   } catch {
     return 'Unhandled promise rejection';
   }

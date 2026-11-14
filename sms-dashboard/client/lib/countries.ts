@@ -1,3 +1,5 @@
+import { textOr } from '../../shared/text.js';
+
 interface Country {
   code: string;
   name: string;
@@ -15,7 +17,7 @@ type PhoneLike =
   | null
   | undefined;
 
-export const COUNTRIES: Country[] = [
+export const COUNTRIES: readonly Country[] = [
   { code: 'CN', name: '中国', flag: '🇨🇳' },
   { code: 'HK', name: '香港', flag: '🇭🇰' },
   { code: 'SG', name: '新加坡', flag: '🇸🇬' },
@@ -41,7 +43,7 @@ export const COUNTRIES: Country[] = [
   { code: 'MX', name: '墨西哥', flag: '🇲🇽' },
 ];
 
-export const COUNTRY_FILTER_TABS: Country[] = [
+export const COUNTRY_FILTER_TABS: readonly Country[] = [
   { code: 'all', name: '全部', flag: '🌍' },
   { code: 'CN', name: '中国', flag: '🇨🇳' },
   { code: 'HK', name: '香港', flag: '🇭🇰' },
@@ -61,14 +63,13 @@ export function getCountryName(code: string | null | undefined): string {
 export function inferCountryFromNumber(numberOrPhone: PhoneLike): string | null {
   // Accept either a phone object or a raw number string
   if (typeof numberOrPhone === 'object' && numberOrPhone !== null) {
-    if (numberOrPhone.country || numberOrPhone.mapped_country) {
-      return numberOrPhone.country || numberOrPhone.mapped_country || null;
-    }
+    const stated = textOr(numberOrPhone.country, textOr(numberOrPhone.mapped_country, null));
+    if (stated !== null) return stated;
     numberOrPhone = numberOrPhone.number;
   }
 
   if (!numberOrPhone) return null;
-  const num = numberOrPhone.toString();
+  const num = numberOrPhone;
 
   if (num.startsWith('86') || num.startsWith('+86') || (num.startsWith('1') && num.length === 11))
     return 'CN';

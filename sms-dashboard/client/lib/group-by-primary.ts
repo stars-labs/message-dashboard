@@ -3,9 +3,10 @@
 // Extracted from the inline grouping that used to live in IccidMappings.svelte.
 //
 // items:   any array whose elements expose iccid / sim_role / primary_iccid
-// resolve: optional accessor; defaults to the item itself. The balance page
-//          passes (row) => row.phone so it can group on the phone fields while
-//          preserving the balance row's checks/health payload.
+// resolve: accessor for the SIM fields; the item itself for a SIM row. The
+//          balance page passes (row) => row.phone so it can group on the
+//          phone fields while preserving the balance row's checks/health
+//          payload.
 //
 // Returns a flat array (so {#each} renders it directly) of spread items with
 // two added keys:
@@ -16,29 +17,29 @@
 // a top-level row at depth 0 rather than hidden, so a carrier filter that
 // excludes the primary never makes a secondary vanish.
 
+import { textOr } from '../../shared/text.js';
+
 /** The fields grouping reads, whichever object carries them. */
 interface GroupableRow {
   iccid?: string | null;
   sim_role?: string | null;
   primary_iccid?: string | null;
-  sim_index?: number | null;
 }
 
 /** The input item plus the two keys this adds for rendering. */
 type GroupedItem<T> = T & { __depth: 0 | 1; __isSecondary: boolean };
 
-export function groupByPrimary<T>(
-  items: T[],
-  resolve: (item: T) => GroupableRow | null | undefined = (x) => x as unknown as GroupableRow,
-): Array<GroupedItem<T>> {
-  const keyed = (items || []).map((item) => {
-    const p: GroupableRow = resolve(item) || {};
+export function groupByPrimary<T extends object>(
+  items: readonly T[] | null | undefined,
+  resolve: (item: T) => GroupableRow | null | undefined,
+): GroupedItem<T>[] {
+  const keyed = (items ?? []).map((item) => {
+    const p: GroupableRow = resolve(item) ?? {};
     return {
       item,
       iccid: p.iccid,
-      sim_role: p.sim_role || 'standalone',
-      primary_iccid: p.primary_iccid || null,
-      sim_index: p.sim_index ?? 999,
+      sim_role: textOr(p.sim_role, 'standalone'),
+      primary_iccid: textOr(p.primary_iccid, null),
     };
   });
 
@@ -58,7 +59,7 @@ export function groupByPrimary<T>(
     }
   }
 
-  const out: Array<GroupedItem<T>> = [];
+  const out: GroupedItem<T>[] = [];
   for (const k of keyed) {
     // A secondary that was bucketed under a present primary is re-inserted
     // under that primary below; an orphan (primary not in the set) falls

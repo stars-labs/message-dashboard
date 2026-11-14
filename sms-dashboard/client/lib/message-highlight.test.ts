@@ -1,4 +1,3 @@
-// Run with: bun test client/lib/message-highlight.test.js
 import { describe, expect, test } from 'bun:test';
 import { DEFAULT_KEYWORD_COLOR, getSegments, safeColor } from './message-highlight.js';
 
@@ -13,7 +12,7 @@ const kw = (over = {}) => ({
 
 // Concatenating segments must always reproduce the trimmed input. This is the property
 // that guarantees the rewrite away from {@html} did not garble displayed messages.
-const rebuild = (segments, original) =>
+const rebuild = (segments: ReturnType<typeof getSegments>, original: string) =>
   segments === null ? original.trim() : segments.map((s) => s.text).join('');
 
 describe('getSegments — text is preserved exactly', () => {
@@ -71,7 +70,7 @@ describe('getSegments — matching', () => {
 
   test('is case-insensitive by default and preserves original casing', () => {
     const segments = getSegments('Your CODE is 1234', [kw()]);
-    expect(segments[1]).toEqual({ text: 'CODE', match: { color: '#FF0000', tag: 'OTP' } });
+    expect(segments?.[1]).toEqual({ text: 'CODE', match: { color: '#FF0000', tag: 'OTP' } });
   });
 
   test('respects case_sensitive', () => {
@@ -80,7 +79,7 @@ describe('getSegments — matching', () => {
 
   test('respects whole_word', () => {
     expect(getSegments('encoded message', [kw({ whole_word: true })])).toBeNull();
-    expect(getSegments('the code here', [kw({ whole_word: true })])[1].text).toBe('code');
+    expect(getSegments('the code here', [kw({ whole_word: true })])?.[1]?.text).toBe('code');
   });
 
   test('does not hang on a regex-special keyword', () => {
@@ -99,7 +98,7 @@ describe('getSegments — matching', () => {
       kw({ keyword: 'code', tag: 'OTP' }),
     ]);
     expect(rebuild(segments, text)).toBe(text);
-    expect(segments.filter((s) => s.match).length).toBe(1);
+    expect(segments?.filter((s) => s.match).length).toBe(1);
   });
 });
 
@@ -140,6 +139,6 @@ describe('safeColor', () => {
     const segments = getSegments('your code is 1234', [
       kw({ color: 'red" onmouseover="fetch(\'//evil\')' }),
     ]);
-    expect(segments[1].match.color).toBe(DEFAULT_KEYWORD_COLOR);
+    expect(segments?.[1]?.match?.color).toBe(DEFAULT_KEYWORD_COLOR);
   });
 });

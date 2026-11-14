@@ -17,7 +17,7 @@ function pressEscape() {
 
 describe('overlay dismiss behaviour', () => {
   test('Escape closes the overlay', () => {
-    const closed = [];
+    const closed: unknown[] = [];
     const handle = overlay(node(), { onClose: () => closed.push(true) });
 
     pressEscape();
@@ -27,7 +27,7 @@ describe('overlay dismiss behaviour', () => {
   });
 
   test('Escape closes only the overlay opened last, then the one beneath it', () => {
-    const closed = [];
+    const closed: unknown[] = [];
     const outer = overlay(node(), { onClose: () => closed.push('outer') });
     const inner = overlay(node(), { onClose: () => closed.push('inner') });
 
@@ -41,7 +41,7 @@ describe('overlay dismiss behaviour', () => {
   });
 
   test('closing a lower overlay first leaves the top one in charge of Escape', () => {
-    const closed = [];
+    const closed: unknown[] = [];
     const outer = overlay(node(), { onClose: () => closed.push('outer') });
     const inner = overlay(node(), { onClose: () => closed.push('inner') });
 
@@ -53,7 +53,7 @@ describe('overlay dismiss behaviour', () => {
   });
 
   test('destroying an overlay twice leaves the others in charge of Escape', () => {
-    const closed = [];
+    const closed: unknown[] = [];
     const outer = overlay(node(), { onClose: () => closed.push('outer') });
     const inner = overlay(node(), { onClose: () => closed.push('inner') });
 
@@ -66,7 +66,7 @@ describe('overlay dismiss behaviour', () => {
   });
 
   test('other keys do nothing', () => {
-    const closed = [];
+    const closed: unknown[] = [];
     const handle = overlay(node(), { onClose: () => closed.push(true) });
 
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }));
@@ -76,7 +76,7 @@ describe('overlay dismiss behaviour', () => {
   });
 
   test('a destroyed overlay stops listening', () => {
-    const closed = [];
+    const closed: unknown[] = [];
     overlay(node(), { onClose: () => closed.push(true) }).destroy();
 
     pressEscape();
@@ -98,8 +98,8 @@ describe('overlay dismiss behaviour', () => {
   });
 
   test('an updated handler replaces the old one', () => {
-    const first = [];
-    const second = [];
+    const first: unknown[] = [];
+    const second: unknown[] = [];
     const element = node();
     const handle = overlay(element, { onClose: () => first.push(true) });
 

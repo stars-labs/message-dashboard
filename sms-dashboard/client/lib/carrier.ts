@@ -1,3 +1,5 @@
+import { textOr } from '../../shared/text.js';
+
 interface CarrierRecord {
   carrier?: string | null;
   country?: string | null;
@@ -14,7 +16,7 @@ interface CarrierGroup {
   aliases: string[];
 }
 
-const CARRIER_GROUPS: CarrierGroup[] = [
+const CARRIER_GROUPS: readonly CarrierGroup[] = [
   { key: 'china-mobile', label: '移动', aliases: ['china mobile', 'cmcc', '中国移动', '移动'] },
   {
     key: 'china-telecom',
@@ -32,13 +34,11 @@ const CARRIER_GROUPS: CarrierGroup[] = [
   { key: 'starhub', label: 'StarHub', aliases: ['starhub'] },
 ];
 
-function normalized(value: unknown): string {
-  return String(value || '')
-    .trim()
-    .toLocaleLowerCase();
+function normalized(value: string | null | undefined): string {
+  return textOr(value, '').trim().toLocaleLowerCase();
 }
 
-function isHongKong(country: unknown): boolean {
+function isHongKong(country: string | null | undefined): boolean {
   return ['hk', 'hkg', 'hong kong', '香港'].includes(normalized(country));
 }
 
@@ -47,17 +47,17 @@ export function carrierKey({ carrier, country }: CarrierRecord = {}): string {
   if (!candidate) return '';
   const group = CARRIER_GROUPS.find((item) => item.aliases.includes(candidate));
   if (group?.key === 'china-mobile' && isHongKong(country)) return 'cmhk';
-  return group?.key || candidate;
+  return group?.key ?? candidate;
 }
 
 export function carrierLabel(record: CarrierRecord | null | undefined): string {
   const key = carrierKey(record ?? {});
   return (
-    CARRIER_GROUPS.find((group) => group.key === key)?.label || String(record?.carrier || '').trim()
+    CARRIER_GROUPS.find((group) => group.key === key)?.label ?? textOr(record?.carrier, '').trim()
   );
 }
 
-export function buildCarrierOptions(records: CarrierRecord[]): CarrierOption[] {
+export function buildCarrierOptions(records: readonly CarrierRecord[]): CarrierOption[] {
   const options = new Map<string, string>();
   for (const record of records) {
     const key = carrierKey(record);

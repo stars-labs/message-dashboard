@@ -98,9 +98,13 @@ describe('toError', () => {
   });
 
   test('handles a circular object without throwing', () => {
-    const circular = { a: 1 };
+    const circular: { a: number; self?: unknown } = { a: 1 };
     circular.self = circular;
     expect(toError(circular).message).toBe('Unhandled promise rejection');
+  });
+
+  test('handles an object that serialises to nothing', () => {
+    expect(toError({ toJSON: () => undefined }).message).toBe('Unhandled promise rejection');
   });
 
   test('handles undefined and null', () => {

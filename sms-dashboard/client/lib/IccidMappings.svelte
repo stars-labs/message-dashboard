@@ -241,7 +241,7 @@
     // Group secondaries immediately after their primary (shared helper).
     // An orphan secondary (its primary filtered out) renders at depth 0
     // rather than being dropped — a fix over the prior inline logic.
-    mappings = groupByPrimary(sorted);
+    mappings = groupByPrimary(sorted, (row) => row);
   }
 
   $effect(() => {
