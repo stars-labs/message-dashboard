@@ -11,6 +11,7 @@ import {
   CarrierBill,
   CarrierBillEvent,
   CarrierBillSourceMessage,
+  type CarrierBillMutationResponse,
   type CarrierBillResponse,
   type CarrierBillsResponse,
 } from '../../shared/api/carrier-bills.js';
@@ -279,6 +280,13 @@ function emptyToNull(value: string | null | undefined): string | null {
   return value === undefined || value === '' ? null : value;
 }
 
+/** The detail of a bill a mutation just found or wrote; bills are never deleted. */
+async function storedBillDetail(db: D1<'all' | 'first'>, id: string) {
+  const bill = await billDetail(db, id, singaporeDate());
+  if (bill === null) throw new Error(`Bill ${id} is missing after it was found`);
+  return bill;
+}
+
 async function mutateBill(request: MutationRequest, action: BillAction): Promise<Response> {
   const db = request.env.DB;
   const billId = request.params?.['id'];
@@ -315,8 +323,8 @@ async function mutateBill(request: MutationRequest, action: BillAction): Promise
     return json({
       success: true,
       idempotent: true,
-      bill: await billDetail(db, billId, singaporeDate()),
-    });
+      bill: await storedBillDetail(db, billId),
+    } satisfies CarrierBillMutationResponse);
   }
 
   const current = await findBill(db, billId);
@@ -423,13 +431,16 @@ async function mutateBill(request: MutationRequest, action: BillAction): Promise
       return json({
         success: true,
         idempotent: true,
-        bill: await billDetail(db, billId, singaporeDate()),
-      });
+        bill: await storedBillDetail(db, billId),
+      } satisfies CarrierBillMutationResponse);
     }
     throw error;
   }
 
-  return json({ success: true, bill: await billDetail(db, billId, singaporeDate()) });
+  return json({
+    success: true,
+    bill: await storedBillDetail(db, billId),
+  } satisfies CarrierBillMutationResponse);
 }
 
 export const carrierBillsHandler = {

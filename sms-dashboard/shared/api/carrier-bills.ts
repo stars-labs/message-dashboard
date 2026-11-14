@@ -93,3 +93,12 @@ export const CarrierBillResponse = v.object({
 });
 
 export type CarrierBillResponse = v.InferOutput<typeof CarrierBillResponse>;
+
+/** POST /api/carrier-bills/:id/<action>; `idempotent` marks a replayed request. */
+export const CarrierBillMutationResponse = v.object({
+  success: v.literal(true),
+  idempotent: v.optional(v.literal(true)),
+  bill: CarrierBillDetail,
+});
+
+export type CarrierBillMutationResponse = v.InferOutput<typeof CarrierBillMutationResponse>;
