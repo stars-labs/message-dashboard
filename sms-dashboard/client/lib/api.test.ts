@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import * as v from 'valibot';
-import { ApiError, api, request } from './api.js';
+import { ApiError, api, errorMessage, request } from './api.js';
 import { auth } from './auth.js';
 
 const originalBaseUrl = auth.baseUrl;
@@ -126,5 +126,18 @@ describe('getBalanceChecks', () => {
 
     expect(await api.getBalanceChecks({ phone_iccid: undefined, limit: 1 })).toEqual([]);
     expect(requests[0]?.url).toBe('https://example.com/api/balance-checks?limit=1');
+  });
+});
+
+describe('errorMessage', () => {
+  test('is the message of an error', () => {
+    expect(errorMessage(new ApiError('Keyword already exists', 409), '保存失败')).toBe(
+      'Keyword already exists',
+    );
+  });
+
+  test('is the fallback for an error without a message, or a thrown non-error', () => {
+    expect(errorMessage(new Error(''), '保存失败')).toBe('保存失败');
+    expect(errorMessage('boom', '保存失败')).toBe('保存失败');
   });
 });

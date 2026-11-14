@@ -34,6 +34,11 @@ export class ApiError extends Error {
   }
 }
 
+/** What to show for a caught failure: its message, or `fallback` when it has none. */
+export function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? textOr(error.message, fallback) : fallback;
+}
+
 type QueryValue = string | number | boolean;
 
 /** Parameters /api/messages accepts, plus the two that steer the client cache. */

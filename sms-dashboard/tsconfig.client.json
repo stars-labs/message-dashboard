@@ -17,6 +17,8 @@
     "client/lib/ConfirmHost.svelte",
     "client/lib/DaemonHealthPanel.svelte",
     "client/lib/ErrorBoundary.svelte",
+    "client/lib/FilterRules.svelte",
+    "client/lib/KeywordConfig.svelte",
     "client/lib/MessageHighlight.svelte",
     "client/lib/PullToRefresh.svelte",
     "client/lib/SignalStrength.svelte",

@@ -1,19 +1,36 @@
-<script>
+<script lang="ts">
   import { confirmAction } from './confirm.svelte.js';
   import { onMount } from 'svelte';
-  import { api } from './api.js';
+  import { SvelteMap } from 'svelte/reactivity';
+  import { KeywordHistoryPage, type HistoryCursor } from '../../shared/api/history.js';
+  import {
+    KeywordResponse,
+    KeywordsResponse,
+    type KeywordWithUsage,
+  } from '../../shared/api/keywords.js';
+  import { textOr } from '../../shared/text.js';
+  import { SuccessResponse } from '../../shared/api/success.js';
+  import { errorMessage, request } from './api.js';
   import MessageHighlight from './MessageHighlight.svelte';
   import { safeColor } from './message-highlight.js';
 
-  let keywords = $state([]);
+  interface HistoryProgress {
+    since: string;
+    until: string;
+    cursor: HistoryCursor | null;
+    processed: number;
+    inserted: number;
+  }
+
+  let keywords = $state<KeywordWithUsage[]>([]);
   let loading = $state(false);
   let saving = $state(false);
-  let error = $state(null);
-  let notice = $state(null);
+  let error = $state<string | null>(null);
+  let notice = $state<string | null>(null);
   let showDialog = $state(false);
-  let editingKeyword = $state(null);
+  let editingKeyword = $state<KeywordWithUsage | null>(null);
   let historySince = $state(new Date(Date.now() - 7 * 86_400_000).toISOString().slice(0, 10));
-  let historyRuns = $state({});
+  const historyRuns = new SvelteMap<number, HistoryProgress>();
 
   // 5 preset colours matching the design. These must be complete literal strings
   // so Tailwind includes them in the bundle.
@@ -45,9 +62,9 @@
     loading = true;
     error = null;
     try {
-      const r = await api.get('/api/keywords');
-      if (r.keywords) keywords = r.keywords;
-    } catch (err) {
+      const r = await request('/api/keywords', KeywordsResponse);
+      keywords = r.keywords;
+    } catch {
       error = '关键词加载失败';
     } finally {
       loading = false;
@@ -67,14 +84,14 @@
     showDialog = true;
   }
 
-  function openEdit(kw) {
+  function openEdit(kw: KeywordWithUsage) {
     formData = {
       keyword: kw.keyword,
       tag: kw.tag,
-      color: kw.color || '#3B82F6',
-      priority: kw.priority || 0,
-      case_sensitive: kw.case_sensitive || false,
-      whole_word: kw.whole_word || false,
+      color: textOr(kw.color, '#3B82F6'),
+      priority: kw.priority ?? 0,
+      case_sensitive: Boolean(kw.case_sensitive),
+      whole_word: Boolean(kw.whole_word),
     };
     editingKeyword = kw;
     showDialog = true;
@@ -86,29 +103,35 @@
     saving = true;
     try {
       if (editingKeyword) {
-        await api.put(`/api/keywords/${editingKeyword.id}`, {
-          tag: formData.tag,
-          color: formData.color,
-          priority: formData.priority,
+        await request(`/api/keywords/${String(editingKeyword.id)}`, KeywordResponse, {
+          method: 'PUT',
+          body: JSON.stringify({
+            tag: formData.tag,
+            color: formData.color,
+            priority: formData.priority,
+          }),
         });
         notice = '关键词显示信息已更新。';
       } else {
-        await api.post('/api/keywords', formData);
+        await request('/api/keywords', KeywordResponse, {
+          method: 'POST',
+          body: JSON.stringify(formData),
+        });
         notice = '关键词已添加，将用于之后收到的新短信。';
       }
       showDialog = false;
       await loadKeywords();
     } catch (err) {
       error =
-        err.message === 'Keyword already exists'
+        err instanceof Error && err.message === 'Keyword already exists'
           ? '该关键词已存在，请换一个'
-          : err.message || '保存失败';
+          : errorMessage(err, '保存失败');
     } finally {
       saving = false;
     }
   }
 
-  async function remove(kw) {
+  async function remove(kw: KeywordWithUsage) {
     if (
       !(await confirmAction({
         message: `删除未使用的关键词「${kw.keyword}」？\n\n已有历史短信引用的关键词只能停用。`,
@@ -121,40 +144,43 @@
     error = null;
     notice = null;
     try {
-      await api.delete(`/api/keywords/${kw.id}`);
+      await request(`/api/keywords/${String(kw.id)}`, SuccessResponse, { method: 'DELETE' });
       notice = '未使用的关键词已删除。';
       await loadKeywords();
     } catch (err) {
-      error = err.message || '删除失败';
+      error = errorMessage(err, '删除失败');
     } finally {
       saving = false;
     }
   }
 
-  async function toggle(kw) {
+  async function toggle(kw: KeywordWithUsage) {
     saving = true;
     error = null;
     notice = null;
     try {
-      await api.put(`/api/keywords/${kw.id}`, { is_active: !kw.is_active });
-      historyRuns = { ...historyRuns, [kw.id]: null };
+      await request(`/api/keywords/${String(kw.id)}`, KeywordResponse, {
+        method: 'PUT',
+        body: JSON.stringify({ is_active: !kw.is_active }),
+      });
+      historyRuns.delete(kw.id);
       notice = kw.is_active
         ? '关键词已停用，已有历史标签保持不变但不再显示。'
         : '关键词已启用，将用于之后收到的新短信。';
       await loadKeywords();
     } catch (err) {
-      error = err.message || '操作失败';
+      error = errorMessage(err, '操作失败');
     } finally {
       saving = false;
     }
   }
 
-  async function processHistory(kw) {
+  async function processHistory(kw: KeywordWithUsage) {
     if (!historySince) {
       error = '请选择历史短信的起始日期';
       return;
     }
-    const previous = historyRuns[kw.id];
+    const previous = historyRuns.get(kw.id);
     if (
       !previous &&
       !(await confirmAction({
@@ -168,38 +194,41 @@
     error = null;
     notice = null;
     try {
-      const window = previous || {
+      const window: HistoryProgress = previous ?? {
         since: new Date(`${historySince}T00:00:00`).toISOString(),
         until: new Date().toISOString(),
         cursor: null,
         processed: 0,
         inserted: 0,
       };
-      const result = await api.post(`/api/keywords/${kw.id}/history`, {
-        since: window.since,
-        until: window.until,
-        cursor: window.cursor,
+      const result = await request(`/api/keywords/${String(kw.id)}/history`, KeywordHistoryPage, {
+        method: 'POST',
+        body: JSON.stringify({
+          since: window.since,
+          until: window.until,
+          cursor: window.cursor,
+        }),
       });
-      const progress = {
+      const progress: HistoryProgress = {
         ...window,
         cursor: result.next_cursor,
-        has_more: result.has_more,
         processed: window.processed + result.processed,
         inserted: window.inserted + result.inserted,
       };
-      historyRuns = { ...historyRuns, [kw.id]: result.has_more ? progress : null };
+      if (result.has_more) historyRuns.set(kw.id, progress);
+      else historyRuns.delete(kw.id);
       notice =
-        `累计检查 ${progress.processed} 条记录，新增 ${progress.inserted} 个标签。` +
+        `累计检查 ${String(progress.processed)} 条记录，新增 ${String(progress.inserted)} 个标签。` +
         (result.has_more ? '如需继续，请再次点击。' : '所选时间范围已处理完成。');
     } catch (err) {
-      error = err.message || '历史短信处理失败';
+      error = errorMessage(err, '历史短信处理失败');
     } finally {
       saving = false;
     }
   }
 
   // Human-readable match description.
-  function matchLabel(kw) {
+  function matchLabel(kw: KeywordWithUsage) {
     if (kw.whole_word && kw.case_sensitive) return '整词 · 区分大小写';
     if (kw.whole_word) return '整词';
     if (kw.case_sensitive) return '包含 · 区分大小写';
@@ -302,7 +331,7 @@
           </tr>
         </thead>
         <tbody>
-          {#each keywords as kw}
+          {#each keywords as kw (kw.id)}
             {@const color = safeColor(kw.color)}
             <tr
               class="border-b border-stone-100 hover:bg-stone-50 transition-colors {kw.is_active
@@ -355,14 +384,16 @@
                     <button
                       onclick={() => processHistory(kw)}
                       disabled={saving}
-                      aria-label={historyRuns[kw.id] ? '继续历史处理' : '应用到历史'}
+                      aria-label={historyRuns.has(kw.id) ? '继续历史处理' : '应用到历史'}
                       class="px-2 py-1 text-xs text-action-text hover:bg-stone-100 rounded-lg disabled:opacity-40"
                     >
-                      {historyRuns[kw.id] ? '继续历史处理' : '应用到历史'}
+                      {historyRuns.has(kw.id) ? '继续历史处理' : '应用到历史'}
                     </button>
                   {/if}
                   <button
-                    onclick={() => openEdit(kw)}
+                    onclick={() => {
+                      openEdit(kw);
+                    }}
                     title="编辑"
                     aria-label="编辑关键词"
                     class="p-1.5 text-stone-400 hover:text-stone-700 hover:bg-stone-100 rounded-lg transition-colors"
@@ -400,7 +431,7 @@
     </div>
 
     <div class="sm:hidden border-b border-stone-200 divide-y divide-stone-100">
-      {#each keywords as kw}
+      {#each keywords as kw (kw.id)}
         {@const color = safeColor(kw.color)}
         <div class="px-4 py-3 {kw.is_active ? '' : 'opacity-55'}">
           <div class="flex items-start gap-3">
@@ -442,14 +473,16 @@
               <button
                 onclick={() => processHistory(kw)}
                 disabled={saving}
-                aria-label={historyRuns[kw.id] ? '继续历史处理' : '应用到历史'}
+                aria-label={historyRuns.has(kw.id) ? '继续历史处理' : '应用到历史'}
                 class="min-h-9 px-3 text-xs text-action-text rounded-lg hover:bg-stone-100 disabled:opacity-40"
               >
-                {historyRuns[kw.id] ? '继续历史处理' : '应用到历史'}
+                {historyRuns.has(kw.id) ? '继续历史处理' : '应用到历史'}
               </button>
             {/if}
             <button
-              onclick={() => openEdit(kw)}
+              onclick={() => {
+                openEdit(kw);
+              }}
               aria-label="编辑关键词"
               class="min-h-9 px-3 text-xs text-stone-600 rounded-lg hover:bg-stone-100">编辑</button
             >
@@ -562,7 +595,7 @@
             颜色
           </p>
           <div class="flex items-center gap-2">
-            {#each PRESET_COLORS as p}
+            {#each PRESET_COLORS as p (p.hex)}
               <button
                 onclick={() => {
                   formData.color = p.hex;

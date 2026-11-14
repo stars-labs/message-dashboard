@@ -1,7 +1,25 @@
-<script>
+<script lang="ts">
   import { confirmAction } from './confirm.svelte.js';
   import { onMount } from 'svelte';
-  import { api } from './api.js';
+  import { SvelteMap } from 'svelte/reactivity';
+  import {
+    FilterResponse,
+    FiltersResponse,
+    type FilterRule,
+    type RuleType,
+  } from '../../shared/api/filters.js';
+  import { RuleHistoryPage, type HistoryCursor } from '../../shared/api/history.js';
+  import { textOr } from '../../shared/text.js';
+  import { SuccessResponse } from '../../shared/api/success.js';
+  import { errorMessage, request } from './api.js';
+
+  interface HistoryProgress {
+    since: string;
+    until: string;
+    cursor: HistoryCursor | null;
+    processed: number;
+    changed: number;
+  }
 
   const RULE_TYPES = [
     {
@@ -14,18 +32,22 @@
       label: '发送方号码',
       hint: '来自这个号码的短信一律隐藏，只填数字，例如 10086',
     },
-  ];
+  ] as const satisfies readonly { value: RuleType; label: string; hint: string }[];
 
-  let rules = $state([]);
+  let rules = $state<FilterRule[]>([]);
   let loading = $state(true);
   let saving = $state(false);
-  let error = $state(null);
-  let notice = $state(null);
+  let error = $state<string | null>(null);
+  let notice = $state<string | null>(null);
   let historySince = $state(new Date(Date.now() - 7 * 86_400_000).toISOString().slice(0, 10));
-  let historyRuns = $state({});
+  const historyRuns = new SvelteMap<number, HistoryProgress>();
 
-  let editingId = $state(null);
-  let form = $state({ rule_type: 'body_keyword', pattern: '', note: '' });
+  let editingId = $state<number | null>(null);
+  let form = $state<{ rule_type: RuleType; pattern: string; note: string }>({
+    rule_type: 'body_keyword',
+    pattern: '',
+    note: '',
+  });
 
   let grouped = $derived(
     RULE_TYPES.map((t) => ({
@@ -42,10 +64,10 @@
     loading = true;
     error = null;
     try {
-      const response = await api.get('/api/filters');
-      rules = response?.filters || [];
+      const response = await request('/api/filters', FiltersResponse);
+      rules = response.filters;
     } catch (err) {
-      error = err.message || '加载过滤规则失败';
+      error = errorMessage(err, '加载过滤规则失败');
     } finally {
       loading = false;
     }
@@ -56,9 +78,9 @@
     form = { rule_type: 'body_keyword', pattern: '', note: '' };
   }
 
-  function startEdit(rule) {
+  function startEdit(rule: FilterRule) {
     editingId = rule.id;
-    form = { rule_type: rule.rule_type, pattern: rule.pattern, note: rule.note || '' };
+    form = { rule_type: rule.rule_type, pattern: rule.pattern, note: rule.note ?? '' };
   }
 
   async function save() {
@@ -70,38 +92,44 @@
     error = null;
     notice = null;
     try {
-      await (editingId
-        ? api.put(`/api/filters/${editingId}`, { note: form.note })
-        : api.post('/api/filters', form));
-      notice = editingId ? '备注已更新。' : '规则已添加，将用于之后收到的新短信。';
+      await (editingId === null
+        ? request('/api/filters', FilterResponse, { method: 'POST', body: JSON.stringify(form) })
+        : request(`/api/filters/${String(editingId)}`, FilterResponse, {
+            method: 'PUT',
+            body: JSON.stringify({ note: form.note }),
+          }));
+      notice = editingId === null ? '规则已添加，将用于之后收到的新短信。' : '备注已更新。';
       resetForm();
       await loadRules();
     } catch (err) {
-      error = err.message || '保存失败';
+      error = errorMessage(err, '保存失败');
     } finally {
       saving = false;
     }
   }
 
-  async function toggleActive(rule) {
+  async function toggleActive(rule: FilterRule) {
     saving = true;
     error = null;
     notice = null;
     try {
-      await api.put(`/api/filters/${rule.id}`, { is_active: !rule.is_active });
-      historyRuns = { ...historyRuns, [rule.id]: null };
+      await request(`/api/filters/${String(rule.id)}`, FilterResponse, {
+        method: 'PUT',
+        body: JSON.stringify({ is_active: !rule.is_active }),
+      });
+      historyRuns.delete(rule.id);
       notice = rule.is_active
         ? '规则已停用，历史短信保持原判定。'
         : '规则已启用，将用于之后收到的新短信。';
       await loadRules();
     } catch (err) {
-      error = err.message || '操作失败';
+      error = errorMessage(err, '操作失败');
     } finally {
       saving = false;
     }
   }
 
-  async function remove(rule) {
+  async function remove(rule: FilterRule) {
     if (
       !(await confirmAction({
         message: `删除未使用的规则「${rule.pattern}」？\n\n已有历史短信引用的规则只能停用。`,
@@ -115,22 +143,22 @@
     error = null;
     notice = null;
     try {
-      await api.delete(`/api/filters/${rule.id}`);
+      await request(`/api/filters/${String(rule.id)}`, SuccessResponse, { method: 'DELETE' });
       notice = '未使用的规则已删除。';
       await loadRules();
     } catch (err) {
-      error = err.message || '删除失败';
+      error = errorMessage(err, '删除失败');
     } finally {
       saving = false;
     }
   }
 
-  async function processHistory(rule) {
+  async function processHistory(rule: FilterRule) {
     if (!historySince) {
       error = '请选择历史短信的起始日期';
       return;
     }
-    const previous = historyRuns[rule.id];
+    const previous = historyRuns.get(rule.id);
     if (
       !previous &&
       !(await confirmAction({
@@ -144,31 +172,34 @@
     error = null;
     notice = null;
     try {
-      const window = previous || {
+      const window: HistoryProgress = previous ?? {
         since: new Date(`${historySince}T00:00:00`).toISOString(),
         until: new Date().toISOString(),
         cursor: null,
         processed: 0,
         changed: 0,
       };
-      const result = await api.post(`/api/filters/${rule.id}/history`, {
-        since: window.since,
-        until: window.until,
-        cursor: window.cursor,
+      const result = await request(`/api/filters/${String(rule.id)}/history`, RuleHistoryPage, {
+        method: 'POST',
+        body: JSON.stringify({
+          since: window.since,
+          until: window.until,
+          cursor: window.cursor,
+        }),
       });
-      const progress = {
+      const progress: HistoryProgress = {
         ...window,
         cursor: result.next_cursor,
-        has_more: result.has_more,
         processed: window.processed + result.processed,
         changed: window.changed + result.changed,
       };
-      historyRuns = { ...historyRuns, [rule.id]: result.has_more ? progress : null };
+      if (result.has_more) historyRuns.set(rule.id, progress);
+      else historyRuns.delete(rule.id);
       notice =
-        `累计检查 ${progress.processed} 条候选记录，更新 ${progress.changed} 条。` +
+        `累计检查 ${String(progress.processed)} 条候选记录，更新 ${String(progress.changed)} 条。` +
         (result.has_more ? '如需继续，请再次点击。' : '所选时间范围已处理完成。');
     } catch (err) {
-      error = err.message || '历史短信处理失败';
+      error = errorMessage(err, '历史短信处理失败');
     } finally {
       saving = false;
     }
@@ -246,7 +277,7 @@
           disabled={editingId !== null}
           class="w-full px-3 py-2 border border-stone-300 rounded-lg text-sm"
         >
-          {#each RULE_TYPES as t}
+          {#each RULE_TYPES as t (t.value)}
             <option value={t.value}>{t.label}</option>
           {/each}
         </select>
@@ -300,7 +331,7 @@
       加载中…
     </div>
   {:else}
-    {#each grouped as group}
+    {#each grouped as group (group.value)}
       <div
         class="bg-white border-b border-stone-200 lg:border lg:rounded-xl lg:shadow-sm overflow-hidden"
       >
@@ -330,7 +361,7 @@
                     : 'opacity-50'}"
                 >
                   <td class="px-4 py-2 font-mono text-stone-800 break-all">{rule.pattern}</td>
-                  <td class="px-4 py-2 text-stone-500">{rule.note || '—'}</td>
+                  <td class="px-4 py-2 text-stone-500">{textOr(rule.note, '—')}</td>
                   <td class="px-4 py-2 text-center">
                     <button
                       onclick={() => toggleActive(rule)}
@@ -348,14 +379,16 @@
                       onclick={() => processHistory(rule)}
                       disabled={saving}
                       class="px-2 py-0.5 text-xs text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded disabled:opacity-50"
-                      >{historyRuns[rule.id]?.has_more
+                      >{historyRuns.has(rule.id)
                         ? '继续历史处理'
                         : rule.is_active
                           ? '应用到历史'
                           : '重新判定历史'}</button
                     >
                     <button
-                      onclick={() => startEdit(rule)}
+                      onclick={() => {
+                        startEdit(rule);
+                      }}
                       disabled={saving}
                       class="px-2 py-0.5 text-xs text-stone-500 hover:text-stone-800 hover:bg-stone-100 rounded disabled:opacity-50"
                     >
@@ -382,7 +415,7 @@
                     <p class="font-mono text-sm font-medium text-stone-800 break-all">
                       {rule.pattern}
                     </p>
-                    <p class="text-xs text-stone-400 mt-1">{rule.note || '无备注'}</p>
+                    <p class="text-xs text-stone-400 mt-1">{textOr(rule.note, '无备注')}</p>
                   </div>
                   <button
                     onclick={() => toggleActive(rule)}
@@ -399,14 +432,16 @@
                       onclick={() => processHistory(rule)}
                       disabled={saving}
                       class="min-h-9 px-3 text-xs text-blue-600 rounded-lg hover:bg-blue-50 disabled:opacity-50"
-                      >{historyRuns[rule.id]?.has_more
+                      >{historyRuns.has(rule.id)
                         ? '继续历史处理'
                         : rule.is_active
                           ? '应用到历史'
                           : '重新判定历史'}</button
                     >
                     <button
-                      onclick={() => startEdit(rule)}
+                      onclick={() => {
+                        startEdit(rule);
+                      }}
                       disabled={saving}
                       class="min-h-9 px-3 text-xs text-stone-600 rounded-lg hover:bg-stone-100 disabled:opacity-50"
                       >编辑</button

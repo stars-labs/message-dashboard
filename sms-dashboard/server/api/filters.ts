@@ -16,6 +16,7 @@ import {
 import { queryAll, queryFirst, queryOne, type D1, type D1Batch } from '../lib/d1.js';
 import { OBJECT_MESSAGE, readBody, type MissingKeyMessages } from '../lib/request-body.js';
 import { HISTORY_MISSING_KEY_MESSAGES, HistoryRequestBody } from '../utils/history-request.js';
+import type { SuccessResponse } from '../../shared/api/success.js';
 import type { AuthRequest } from '../middleware/auth0.js';
 import { authorize } from '../middleware/authorize.js';
 import { normalizeSender } from '../utils/spam-filter.js';
@@ -276,7 +277,7 @@ export function setupFilterRoutes(router: Router): void {
         .run();
       if (!result.meta.changes) return json({ error: 'Filter rule not found' }, 404);
 
-      return json({ success: true });
+      return json({ success: true } satisfies SuccessResponse);
     } catch (error) {
       console.error('[filters] delete failed:', error);
       return json({ error: 'Failed to delete filter rule' }, 500);

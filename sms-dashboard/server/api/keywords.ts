@@ -9,6 +9,7 @@ import {
 import { queryAll, queryFirst, queryOne, type D1, type D1Batch } from '../lib/d1.js';
 import { OBJECT_MESSAGE, readBody, type MissingKeyMessages } from '../lib/request-body.js';
 import { HISTORY_MISSING_KEY_MESSAGES, HistoryRequestBody } from '../utils/history-request.js';
+import type { SuccessResponse } from '../../shared/api/success.js';
 import type { AuthRequest } from '../middleware/auth0.js';
 import { authorize } from '../middleware/authorize.js';
 import { errorText } from '../utils/d1-error.js';
@@ -349,7 +350,7 @@ export function setupKeywordRoutes(router: Router): void {
 
       await request.env.DB.prepare('DELETE FROM keyword_tags WHERE id = ?').bind(id).run();
 
-      return json({ success: true });
+      return json({ success: true } satisfies SuccessResponse);
     } catch (error) {
       console.error('Error deleting keyword:', error);
       return json({ error: 'Failed to delete keyword' }, 500);

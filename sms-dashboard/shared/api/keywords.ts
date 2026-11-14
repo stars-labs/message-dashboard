@@ -20,6 +20,8 @@ export type Keyword = v.InferOutput<typeof Keyword>;
 /** A keyword with how many messages it has tagged. */
 export const KeywordWithUsage = v.object({ ...Keyword.entries, usage_count: v.number() });
 
+export type KeywordWithUsage = v.InferOutput<typeof KeywordWithUsage>;
+
 /** GET /api/keywords. */
 export const KeywordsResponse = v.object({ keywords: v.array(KeywordWithUsage) });
 
