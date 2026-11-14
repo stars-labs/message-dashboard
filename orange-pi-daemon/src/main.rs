@@ -9,6 +9,7 @@ use tracing::{debug, error, info, warn};
 use orange_pi_daemon_rust::api_client::{ApiClient, UploadResult};
 use orange_pi_daemon_rust::benchmark::PerformanceBenchmark;
 use orange_pi_daemon_rust::health::{HealthTask, HealthTracker};
+use orange_pi_daemon_rust::identifiers::Iccid;
 use orange_pi_daemon_rust::logging;
 use orange_pi_daemon_rust::message_store::{MessageStore, StoredMessage};
 use orange_pi_daemon_rust::modem_manager::ModemManager;
@@ -65,11 +66,9 @@ fn print_help(program: &str) {
 
 /// Probe every listed modem; a modem needs a valid IMEI to be cached, and its
 /// ICCID is optional.
-async fn build_modem_cache(
-    modem_manager: &ModemManager,
-) -> Result<HashMap<String, Option<String>>> {
+async fn build_modem_cache(modem_manager: &ModemManager) -> Result<HashMap<String, Option<Iccid>>> {
     info!("🔄 Building initial modem cache...");
-    let mut valid_modems: HashMap<String, Option<String>> = HashMap::new();
+    let mut valid_modems: HashMap<String, Option<Iccid>> = HashMap::new();
     match modem_manager.list_modems().await {
         Ok(modems) => {
             info!(
@@ -397,7 +396,7 @@ impl Uploader {
         // Calculate approximate payload size
         let payload_size: usize = pending
             .iter()
-            .map(|m| m.message.content.len() + m.message.phone_number.len() + 100) // +100 for JSON overhead
+            .map(|m| m.message.content.len() + m.message.phone_number.as_str().len() + 100) // +100 for JSON overhead
             .sum();
 
         // Adjust batch size for next iteration based on current payload
@@ -686,7 +685,7 @@ fn spawn_segment_cleanup(store: Arc<MessageStore>) {
 fn spawn_sms_sender(
     api_client: ApiClient,
     modem_manager: Arc<ModemManager>,
-    modem_cache: HashMap<String, String>,
+    modem_cache: HashMap<Iccid, String>,
     session_id: String,
 ) {
     tokio::spawn(async move {
@@ -1011,6 +1010,7 @@ async fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use orange_pi_daemon_rust::identifiers::SmsAddress;
     use orange_pi_daemon_rust::message_store::MessageStatus;
     use orange_pi_daemon_rust::types::{Direction, Message};
 
@@ -1019,8 +1019,8 @@ mod tests {
             id: 1,
             source_message_id: source_message_id.to_string(),
             message: Message {
-                phone_iccid: "iccid".to_string(),
-                phone_number: "10010".to_string(),
+                phone_iccid: Iccid::try_from("89860000000000000001").unwrap(),
+                phone_number: SmsAddress::from("10010"),
                 content: "content".to_string(),
                 timestamp: "2026-01-01T00:00:00.000Z".to_string(),
                 direction: Direction::Received,

@@ -1,5 +1,6 @@
 // Integration tests for ApiClient - HTTP communication layer
 use orange_pi_daemon_rust::api_client::ApiClient;
+use orange_pi_daemon_rust::identifiers::{Iccid, Imei, SimNumber, SmsAddress};
 use orange_pi_daemon_rust::message_store::{MessageStatus, StoredMessage};
 use orange_pi_daemon_rust::sync_manager::SyncMode;
 use orange_pi_daemon_rust::types::{
@@ -16,10 +17,14 @@ fn create_test_config() -> Config {
 }
 
 // Helper function to create test message
+#[allow(
+    clippy::unwrap_used,
+    reason = "test helper: clippy.toml allow-unwrap-in-tests covers only #[test] items"
+)]
 fn create_test_message(iccid: &str, content: &str) -> Message {
     Message {
-        phone_iccid: iccid.to_string(),
-        phone_number: "+1234567890".to_string(),
+        phone_iccid: Iccid::try_from(iccid).unwrap(),
+        phone_number: SmsAddress::from("+1234567890"),
         content: content.to_string(),
         timestamp: "2024-01-01T12:00:00.000Z".to_string(),
         direction: Direction::Received,
@@ -40,9 +45,13 @@ fn create_stored_test_message(iccid: &str, content: &str) -> StoredMessage {
 }
 
 // Helper function to create test modem
+#[allow(
+    clippy::unwrap_used,
+    reason = "test helper: clippy.toml allow-unwrap-in-tests covers only #[test] items"
+)]
 fn create_test_modem(equipment_id: &str) -> Modem {
     Modem {
-        equipment_id: equipment_id.to_string(),
+        equipment_id: Imei::try_from(equipment_id).unwrap(),
         manufacturer: Some("Quectel".to_string()),
         model: Some("EC20".to_string()),
         firmware_revision: Some("EC20CEFAG".to_string()),
@@ -63,11 +72,15 @@ fn create_test_modem(equipment_id: &str) -> Modem {
 }
 
 // Helper function to create test SIM
+#[allow(
+    clippy::unwrap_used,
+    reason = "test helper: clippy.toml allow-unwrap-in-tests covers only #[test] items"
+)]
 fn create_test_sim(iccid: &str) -> Sim {
     Sim {
-        iccid: iccid.to_string(),
-        phone_number: Some("+1234567890".to_string()),
-        current_modem_id: Some("123456789012345".to_string()),
+        iccid: Iccid::try_from(iccid).unwrap(),
+        phone_number: Some(SimNumber::try_from("+1234567890").unwrap()),
+        current_modem_id: Some(Imei::try_from("123456789012345").unwrap()),
         operator_name: Some("TestOp".to_string()),
         operator_id: None,
         status: SimStatus::Active,
@@ -105,7 +118,7 @@ fn test_api_client_clone() {
 async fn test_empty_incremental_device_delta_is_a_noop() {
     let client = ApiClient::new(create_test_config()).unwrap();
     let reports: Vec<ModemReport> = Vec::new();
-    let removed: Vec<String> = Vec::new();
+    let removed: Vec<Imei> = Vec::new();
 
     let result = client
         .upload_modem_reports(&reports, &removed, SyncMode::Incremental, "session")
@@ -118,7 +131,7 @@ async fn test_empty_incremental_device_delta_is_a_noop() {
 async fn test_empty_full_device_snapshot_reaches_the_reconciliation_endpoint() {
     let client = ApiClient::new(create_test_config()).unwrap();
     let reports: Vec<ModemReport> = Vec::new();
-    let removed: Vec<String> = Vec::new();
+    let removed: Vec<Imei> = Vec::new();
 
     let result = client
         .upload_modem_reports(&reports, &removed, SyncMode::Full, "session")
@@ -149,7 +162,10 @@ async fn test_upload_messages_single() {
     let config = create_test_config();
     let client = ApiClient::new(config).unwrap();
 
-    let messages = vec![create_stored_test_message("iccid_001", "Test message")];
+    let messages = vec![create_stored_test_message(
+        "89860000000000000001",
+        "Test message",
+    )];
 
     // Will fail without real API server
     let result = client.upload_messages(&messages).await;
@@ -166,7 +182,7 @@ async fn test_upload_messages_batch_size() {
     let mut messages = Vec::new();
     for i in 0..150 {
         messages.push(create_stored_test_message(
-            &format!("iccid_{i:03}"),
+            &format!("8986000000000000{i:04}"),
             &format!("Message {i}"),
         ));
     }
@@ -212,18 +228,18 @@ fn test_config_structure() {
 
 #[test]
 fn test_message_structure() {
-    let msg = create_test_message("iccid_001", "Hello");
+    let msg = create_test_message("89860000000000000001", "Hello");
 
-    assert_eq!(msg.phone_iccid, "iccid_001");
+    assert_eq!(msg.phone_iccid.as_str(), "89860000000000000001");
     assert_eq!(msg.content, "Hello");
     assert_eq!(msg.direction, Direction::Received);
 }
 
 #[test]
 fn test_modem_structure() {
-    let modem = create_test_modem("12345");
+    let modem = create_test_modem("123456789012345");
 
-    assert_eq!(modem.equipment_id, "12345");
+    assert_eq!(modem.equipment_id.as_str(), "123456789012345");
     assert_eq!(modem.status, ModemStatus::Active);
     assert_eq!(modem.signal, Some(75));
 }
@@ -232,7 +248,7 @@ fn test_modem_structure() {
 fn test_sim_structure() {
     let sim = create_test_sim("89860121750097854321");
 
-    assert_eq!(sim.iccid, "89860121750097854321");
+    assert_eq!(sim.iccid.as_str(), "89860121750097854321");
     assert_eq!(sim.status, SimStatus::Active);
 }
 
@@ -258,20 +274,20 @@ fn test_sync_mode_incremental() {
 
 #[test]
 fn test_message_with_empty_content() {
-    let msg = create_test_message("iccid_001", "");
+    let msg = create_test_message("89860000000000000001", "");
     assert_eq!(msg.content, "");
 }
 
 #[test]
 fn test_message_with_long_content() {
     let long_content = "x".repeat(1000);
-    let msg = create_test_message("iccid_001", &long_content);
+    let msg = create_test_message("89860000000000000001", &long_content);
     assert_eq!(msg.content.len(), 1000);
 }
 
 #[test]
 fn test_message_with_unicode() {
-    let msg = create_test_message("iccid_001", "你好世界 Hello 🌍");
+    let msg = create_test_message("89860000000000000001", "你好世界 Hello 🌍");
     assert!(msg.content.contains("你好"));
     assert!(msg.content.contains("🌍"));
 }

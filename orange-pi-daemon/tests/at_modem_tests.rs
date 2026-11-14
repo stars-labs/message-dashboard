@@ -1,6 +1,7 @@
 // Integration tests for public API of at_modem module
 // These tests verify the contract and behavior of public functions
 use orange_pi_daemon_rust::at_modem::{AtModemInfo, AtModemManager, ModemHealth};
+use orange_pi_daemon_rust::identifiers::{Iccid, Imei, SimNumber, SmsAddress};
 
 // ============================================================================
 // Static Helper Function Tests (No I/O)
@@ -90,7 +91,9 @@ async fn test_list_sms_signature() {
 #[tokio::test]
 async fn test_send_sms_signature() {
     let manager = AtModemManager::new();
-    let result = manager.send_sms("/dev/null", "+1234567890", "test").await;
+    let result = manager
+        .send_sms("/dev/null", &SmsAddress::from("+1234567890"), "test")
+        .await;
     assert!(result.is_err());
 }
 
@@ -126,19 +129,22 @@ fn test_at_modem_info_structure() {
     // Verify AtModemInfo can be constructed and has expected fields
     let info = AtModemInfo {
         port: "/dev/ttyUSB2".to_string(),
-        iccid: Some("89860121750097854321".to_string()),
-        imei: Some("123456789012345".to_string()),
+        iccid: Some(Iccid::try_from("89860121750097854321").unwrap()),
+        imei: Some(Imei::try_from("123456789012345").unwrap()),
         manufacturer: Some("Quectel".to_string()),
         model: Some("EC20".to_string()),
         revision: Some("EC20CEFAG".to_string()),
         signal_percent: Some(75),
-        phone_number: Some("+1234567890".to_string()),
+        phone_number: Some(SimNumber::try_from("+1234567890").unwrap()),
         operator: Some("China Mobile".to_string()),
     };
 
     assert_eq!(info.port, "/dev/ttyUSB2");
-    assert_eq!(info.iccid, Some("89860121750097854321".to_string()));
-    assert_eq!(info.imei, Some("123456789012345".to_string()));
+    assert_eq!(
+        info.iccid,
+        Some(Iccid::try_from("89860121750097854321").unwrap())
+    );
+    assert_eq!(info.imei, Some(Imei::try_from("123456789012345").unwrap()));
     assert_eq!(info.signal_percent, Some(75));
 }
 
@@ -147,8 +153,8 @@ fn test_modem_health_structure() {
     // Verify ModemHealth structure (actual fields from at_modem.rs)
     let health = ModemHealth {
         port: "/dev/ttyUSB2".to_string(),
-        iccid: Some("89860121750097854321".to_string()),
-        imei: Some("123456789012345".to_string()),
+        iccid: Some(Iccid::try_from("89860121750097854321").unwrap()),
+        imei: Some(Imei::try_from("123456789012345").unwrap()),
         signal_percent: Some(80),
         operator: Some("China Mobile".to_string()),
         network_reg: None,
@@ -158,7 +164,10 @@ fn test_modem_health_structure() {
     };
 
     assert_eq!(health.port, "/dev/ttyUSB2");
-    assert_eq!(health.iccid, Some("89860121750097854321".to_string()));
+    assert_eq!(
+        health.iccid,
+        Some(Iccid::try_from("89860121750097854321").unwrap())
+    );
     assert_eq!(health.signal_percent, Some(80));
     assert_eq!(health.operator, Some("China Mobile".to_string()));
 }

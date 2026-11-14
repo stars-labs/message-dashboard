@@ -1,3 +1,4 @@
+use crate::identifiers::Imei;
 use crate::types::ModemReport;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -17,7 +18,7 @@ pub enum SyncMode {
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct DeviceDelta {
     pub reports: Vec<ModemReport>,
-    pub removed_equipment_ids: Vec<String>,
+    pub removed_equipment_ids: Vec<Imei>,
 }
 
 /// Merge successful reads into the last known report snapshot while using USB
@@ -68,28 +69,25 @@ fn device_state_changed(previous: &ModemReport, current: &ModemReport) -> bool {
 /// Return only reports whose durable dashboard state changed, plus explicit removals.
 /// Raw signal and RSSI noise inside the same UI signal band is intentionally ignored.
 pub fn device_delta(previous: &[ModemReport], current: &[ModemReport]) -> DeviceDelta {
-    let previous_by_id: HashMap<&str, &ModemReport> = previous
+    let previous_by_id: HashMap<&Imei, &ModemReport> = previous
         .iter()
-        .map(|report| (report.equipment_id.as_str(), report))
+        .map(|report| (&report.equipment_id, report))
         .collect();
-    let current_ids: HashSet<&str> = current
-        .iter()
-        .map(|report| report.equipment_id.as_str())
-        .collect();
+    let current_ids: HashSet<&Imei> = current.iter().map(|report| &report.equipment_id).collect();
 
     let reports = current
         .iter()
         .filter(|report| {
             previous_by_id
-                .get(report.equipment_id.as_str())
+                .get(&report.equipment_id)
                 .is_none_or(|previous| device_state_changed(previous, report))
         })
         .cloned()
         .collect();
 
-    let mut removed_equipment_ids: Vec<String> = previous
+    let mut removed_equipment_ids: Vec<Imei> = previous
         .iter()
-        .filter(|report| !current_ids.contains(report.equipment_id.as_str()))
+        .filter(|report| !current_ids.contains(&report.equipment_id))
         .map(|report| report.equipment_id.clone())
         .collect();
     removed_equipment_ids.sort();
@@ -199,18 +197,29 @@ impl SyncManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::identifiers::Iccid;
     use crate::types::ModemStatus;
     use std::collections::HashMap;
 
+    fn tag_number(tag: &str) -> u32 {
+        tag.bytes().next().map_or(0, u32::from)
+    }
+
+    fn imei(tag: &str) -> Imei {
+        Imei::try_from(format!("86000000000{:04}", tag_number(tag))).unwrap()
+    }
+
     fn report(equipment_id: &str, signal_percent: i32) -> ModemReport {
         ModemReport {
-            equipment_id: equipment_id.to_string(),
+            equipment_id: imei(equipment_id),
             manufacturer: Some("Quectel".to_string()),
             model: Some("EC20".to_string()),
             firmware_revision: Some("1".to_string()),
             hardware_revision: Some("1".to_string()),
             status: ModemStatus::Active,
-            detected_iccid: Some(format!("iccid-{equipment_id}")),
+            detected_iccid: Some(
+                Iccid::try_from(format!("8986{:04}", tag_number(equipment_id))).unwrap(),
+            ),
             detected_phone_number: None,
             detected_operator: Some("carrier".to_string()),
             signal_percent: Some(signal_percent),
@@ -281,7 +290,7 @@ mod tests {
         let delta = device_delta(&previous, &[report("a", 80)]);
 
         assert!(delta.reports.is_empty());
-        assert_eq!(delta.removed_equipment_ids, vec!["b"]);
+        assert_eq!(delta.removed_equipment_ids, vec![imei("b")]);
     }
 
     #[test]
@@ -300,7 +309,7 @@ mod tests {
 
         assert_eq!(snapshot.len(), 2);
         assert_eq!(snapshot["port-a"].signal_percent, Some(49));
-        assert_eq!(snapshot["port-b"].equipment_id, "b");
+        assert_eq!(snapshot["port-b"].equipment_id, imei("b"));
     }
 
     #[test]
@@ -317,7 +326,7 @@ mod tests {
         );
 
         assert_eq!(snapshot.len(), 1);
-        assert_eq!(snapshot["port-a"].equipment_id, "a");
+        assert_eq!(snapshot["port-a"].equipment_id, imei("a"));
         assert!(!snapshot.contains_key("port-b"));
     }
 }

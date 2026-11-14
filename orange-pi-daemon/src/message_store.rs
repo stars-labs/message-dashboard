@@ -5,6 +5,7 @@
 // 3. Deduplicated to prevent re-uploads
 // 4. Deleted from SIM only after successful processing
 
+use crate::identifiers::{Iccid, SmsAddress};
 use crate::types::{Message, SmsStorage};
 use anyhow::{Context, Result};
 use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, ValueRef};
@@ -69,8 +70,8 @@ impl FromSql for MessageStatus {
 
 /// A multipart SMS fragment and its physical location on the modem.
 pub struct Segment<'a> {
-    pub iccid: &'a str,
-    pub sender: &'a str,
+    pub iccid: &'a Iccid,
+    pub sender: &'a SmsAddress,
     pub ref_id: u8,
     pub total_parts: u8,
     pub part_number: u8,
@@ -84,7 +85,17 @@ pub struct Segment<'a> {
 pub type StoredSegment = (u8, String, String, SmsStorage, u32);
 /// ICCID, sender, reference, total parts, part number, content, timestamp,
 /// CPMS storage, and SMS index, as returned for startup recovery.
-pub type RecoverySegment = (String, String, u8, u8, u8, String, String, SmsStorage, u32);
+pub type RecoverySegment = (
+    Iccid,
+    SmsAddress,
+    u8,
+    u8,
+    u8,
+    String,
+    String,
+    SmsStorage,
+    u32,
+);
 
 pub struct MessageStore {
     conn: Arc<Mutex<Connection>>,
@@ -397,15 +408,31 @@ impl MessageStore {
                  WHERE id = ?3",
                 params![lease_token, lease_interval, id, MessageStatus::InFlight],
             )?;
+            let raw_iccid: String = tx.query_row(
+                "SELECT phone_iccid FROM messages WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )?;
+            // One row that predates ICCID validation must not stop the queue:
+            // it is dead-lettered, where the queue alarm reports it.
+            let Ok(phone_iccid) = Iccid::try_from(raw_iccid.as_str()) else {
+                warn!("Dead-lettering message {id}: phone_iccid {raw_iccid:?} is not an ICCID");
+                tx.execute(
+                    "UPDATE messages SET status = ?1, error = ?2, lease_token = NULL, lease_expires_at = NULL
+                     WHERE id = ?3",
+                    params![MessageStatus::DeadLetter, "phone_iccid is not an ICCID", id],
+                )?;
+                continue;
+            };
             claimed.push(tx.query_row(
-                "SELECT id, source_message_id, phone_iccid, phone_number, content, timestamp, direction, modem_id, sms_path, attempts, lease_token
+                "SELECT id, source_message_id, phone_number, content, timestamp, direction, modem_id, sms_path, attempts, lease_token
                  FROM messages WHERE id = ?1",
                 params![id],
                 |row| Ok(StoredMessage {
                     id: row.get(0)?, source_message_id: row.get(1)?,
-                    message: Message { phone_iccid: row.get(2)?, phone_number: row.get(3)?, content: row.get(4)?, timestamp: row.get(5)?, direction: row.get(6)? },
-                    modem_id: row.get(7)?, sms_path: row.get(8)?, status: MessageStatus::InFlight,
-                    attempts: row.get(9)?, lease_token: row.get(10)?,
+                    message: Message { phone_iccid, phone_number: row.get(2)?, content: row.get(3)?, timestamp: row.get(4)?, direction: row.get(5)? },
+                    modem_id: row.get(6)?, sms_path: row.get(7)?, status: MessageStatus::InFlight,
+                    attempts: row.get(8)?, lease_token: row.get(9)?,
                 }),
             )?);
         }
@@ -552,7 +579,7 @@ impl MessageStore {
     }
 
     /// Check if database has many messages for any SIM (NOT actual SIM card storage)
-    pub fn check_sim_storage(&self) -> Result<Vec<String>> {
+    pub fn check_sim_storage(&self) -> Result<Vec<Iccid>> {
         let conn = self.conn();
 
         // This checks DATABASE message count, NOT physical SIM card!
@@ -564,12 +591,12 @@ impl MessageStore {
 
         let full_sims = stmt
             .query_map([], |row| row.get(0))?
-            .collect::<Result<Vec<String>, _>>()?;
+            .collect::<Result<Vec<Iccid>, _>>()?;
 
         if !full_sims.is_empty() {
             warn!(
                 "⚠️ Database has >200 old messages for SIMs (NOT on physical SIM cards): {:?}",
-                full_sims
+                full_sims.iter().map(Iccid::as_str).collect::<Vec<_>>()
             );
         }
 
@@ -630,8 +657,8 @@ mod duplicate_log_tests {
     fn logging_a_duplicate_with_multibyte_text_does_not_panic() {
         let store = MessageStore::new(":memory:").unwrap();
         let message = Message {
-            phone_iccid: "iccid".to_string(),
-            phone_number: "10086".to_string(),
+            phone_iccid: Iccid::try_from("89860000000000000001").unwrap(),
+            phone_number: SmsAddress::from("10086"),
             content: "您的登录验证码五分钟内有效请勿泄露".to_string(),
             timestamp: "2024-01-01T12:00:00.000Z".to_string(),
             direction: Direction::Received,
@@ -674,8 +701,8 @@ mod segment_write_tests {
     fn store_part(store: &MessageStore, content: &str, index: u32) {
         store
             .store_segment(&Segment {
-                iccid: "iccid",
-                sender: "10010",
+                iccid: &Iccid::try_from("89860000000000000001").unwrap(),
+                sender: &SmsAddress::from("10010"),
                 ref_id: 84,
                 total_parts: 9,
                 part_number: 1,
@@ -714,7 +741,12 @@ mod segment_write_tests {
 
         assert_eq!(changes(&store), before + 1);
         let segments = store
-            .get_segments_with_storage("iccid", "10010", 84, 9)
+            .get_segments_with_storage(
+                &Iccid::try_from("89860000000000000001").unwrap(),
+                &SmsAddress::from("10010"),
+                84,
+                9,
+            )
             .unwrap();
         assert_eq!(segments.len(), 1);
         assert_eq!(segments[0].4, 7);
@@ -779,6 +811,44 @@ mod queue_monitoring_tests {
             ],
         )
         .unwrap();
+    }
+
+    #[test]
+    fn a_row_whose_iccid_predates_validation_is_dead_lettered_not_blocking_the_claim() {
+        let store = MessageStore::new(":memory:").unwrap();
+        {
+            let conn = store.conn.lock().unwrap();
+            for (index, iccid) in ["iccid_001", "898600520121F0517883"]
+                .into_iter()
+                .enumerate()
+            {
+                conn.execute(
+                    "INSERT INTO messages (
+                        source_message_id, phone_iccid, phone_number, content, timestamp,
+                        direction, modem_id, sms_path, status, created_at
+                     ) VALUES (?5, ?1, '10010', ?2, CURRENT_TIMESTAMP, 'received',
+                               'modem', ?3, 'pending', datetime('now', ?4))",
+                    params![
+                        iccid,
+                        format!("content-{index}"),
+                        format!("path-{index}"),
+                        format!("-{} minutes", 10 - index),
+                        format!("source-{index}")
+                    ],
+                )
+                .unwrap();
+            }
+        }
+
+        let claimed = store.claim_messages(10, 90).unwrap();
+
+        assert_eq!(claimed.len(), 1);
+        assert_eq!(
+            claimed[0].message.phone_iccid.as_str(),
+            "898600520121F0517883"
+        );
+        let stats = store.get_queue_stats().unwrap();
+        assert_eq!((stats.dead_letter, stats.in_flight), (1, 1));
     }
 
     #[test]
@@ -854,7 +924,7 @@ impl MessageStore {
     }
 
     /// Mark message as deleted by content match
-    pub fn mark_message_deleted_by_content(&self, iccid: &str, content: &str) -> Result<()> {
+    pub fn mark_message_deleted_by_content(&self, iccid: &Iccid, content: &str) -> Result<()> {
         let conn = self.conn();
 
         conn.execute(
@@ -982,8 +1052,8 @@ impl MessageStore {
     /// Returns: Vec<(`part_number`, content, timestamp, `sms_index`)>
     pub fn get_segments(
         &self,
-        iccid: &str,
-        sender: &str,
+        iccid: &Iccid,
+        sender: &SmsAddress,
         ref_id: u8,
         total_parts: u8,
     ) -> Result<Vec<(u8, String, String, u32)>> {
@@ -997,8 +1067,8 @@ impl MessageStore {
     /// Get buffered parts including their CPMS storage and index.
     pub fn get_segments_with_storage(
         &self,
-        iccid: &str,
-        sender: &str,
+        iccid: &Iccid,
+        sender: &SmsAddress,
         ref_id: u8,
         total_parts: u8,
     ) -> Result<Vec<StoredSegment>> {
@@ -1033,7 +1103,7 @@ impl MessageStore {
     }
 
     /// Delete segments after successful assembly
-    pub fn delete_segments(&self, iccid: &str, ref_id: u8) -> Result<usize> {
+    pub fn delete_segments(&self, iccid: &Iccid, ref_id: u8) -> Result<usize> {
         let conn = self.conn();
 
         let deleted = conn.execute(
@@ -1147,8 +1217,8 @@ mod status_tests {
     fn claimed_messages_are_in_flight_and_keep_their_direction() {
         let store = MessageStore::new(":memory:").unwrap();
         let message = Message {
-            phone_iccid: "iccid".to_string(),
-            phone_number: "10010".to_string(),
+            phone_iccid: Iccid::try_from("89860000000000000001").unwrap(),
+            phone_number: SmsAddress::from("10010"),
             content: "content".to_string(),
             timestamp: "2026-01-01T00:00:00.000Z".to_string(),
             direction: crate::types::Direction::Received,

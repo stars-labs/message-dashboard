@@ -129,6 +129,19 @@ async fn sender_uses_the_shared_pending_sms_model_and_claiming_session() {
     );
 }
 
+#[test]
+fn pending_sms_recipient_and_iccid_keep_any_text_the_worker_sends() {
+    for recipient in ["10010", "+6591234567", "Singtel", "DBS", "", "你好"] {
+        let mut payload = pending_payload();
+        payload["recipient"] = json!(recipient);
+        payload["phone_iccid"] = json!("not-a-hex-iccid");
+        let sms: PendingSms = serde_json::from_value(payload.clone()).unwrap();
+        assert_eq!(sms.recipient.as_str(), recipient);
+        assert_eq!(sms.phone_iccid, "not-a-hex-iccid");
+        assert_eq!(serde_json::to_value(&sms).unwrap(), payload);
+    }
+}
+
 #[tokio::test]
 async fn pending_sms_client_rejects_obsolete_payloads_at_the_api_boundary() {
     let result = with_pending_response(
@@ -165,7 +178,7 @@ fn submission_success_has_only_two_states() {
 fn pending_sms_accepts_the_workers_string_id_and_content_fields() {
     let sms: PendingSms = serde_json::from_value(pending_payload()).unwrap();
 
-    assert_eq!(sms.recipient, "10010");
+    assert_eq!(sms.recipient.as_str(), "10010");
     assert_eq!(sms.id, "09d64494-669b-47ee-9bd3-d2ea5de0f157");
     assert_eq!(sms.content, "CXLL");
     assert_eq!(sms.purpose, Purpose::BalanceMaintenance);
@@ -227,10 +240,10 @@ async fn sender_keeps_the_entire_claimed_batch_when_one_purpose_is_missing() {
     assert_eq!(messages.len(), 2);
     assert_eq!(messages[0].id, "ordinary-message");
     assert_eq!(messages[0].purpose, Purpose::User);
-    assert_eq!(messages[0].recipient, "+8613800138000");
+    assert_eq!(messages[0].recipient.as_str(), "+8613800138000");
     assert_eq!(messages[0].content, "Hello");
     assert_eq!(messages[1].purpose, Purpose::BalanceMaintenance);
-    assert_eq!(messages[1].recipient, "10010");
+    assert_eq!(messages[1].recipient.as_str(), "10010");
     assert_eq!(messages[1].content, "CXLL");
 }
 

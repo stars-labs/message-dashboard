@@ -1,3 +1,4 @@
+use crate::identifiers::{Iccid, SmsAddress};
 use crate::types::{PendingSms, PendingSmsResponse, SmsSubmission};
 use anyhow::{anyhow, Result};
 use serde::Serialize;
@@ -42,7 +43,7 @@ impl<'a> SmsResult<'a> {
 pub struct SmsSender {
     api_client: crate::api_client::ApiClient,
     modem_manager: Arc<crate::modem_manager::ModemManager>,
-    modem_cache: HashMap<String, String>, // ICCID -> modem_id mapping
+    modem_cache: HashMap<Iccid, String>, // ICCID -> modem_id mapping
     session_id: String,
 }
 
@@ -61,7 +62,7 @@ impl SmsSender {
     }
 
     /// Update the modem cache with current ICCID mappings
-    pub fn update_modem_cache(&mut self, cache: HashMap<String, String>) {
+    pub fn update_modem_cache(&mut self, cache: HashMap<Iccid, String>) {
         self.modem_cache = cache;
     }
 
@@ -100,7 +101,7 @@ impl SmsSender {
     }
 
     /// Find modem ID for a given ICCID using cache or D-Bus
-    pub async fn find_modem_for_iccid(&self, target_iccid: &str) -> Option<String> {
+    pub async fn find_modem_for_iccid(&self, target_iccid: &Iccid) -> Option<String> {
         debug!("🔍 Searching for modem with ICCID: {}", target_iccid);
 
         // First check our cache
@@ -138,7 +139,7 @@ impl SmsSender {
                         modem_id, iccid, target_iccid
                     );
 
-                    if iccid == target_iccid {
+                    if &iccid == target_iccid {
                         info!("✅ Found modem {} for ICCID {}", modem_id, target_iccid);
                         return Some(modem_id);
                     }
@@ -159,7 +160,11 @@ impl SmsSender {
     /// Send an SMS message using `ModemManager` (AT commands or D-Bus)
     pub async fn send_sms(&self, sms: &PendingSms) -> Result<SmsSubmission> {
         // Find the modem for this ICCID
-        let Some(modem_id) = self.find_modem_for_iccid(&sms.phone_iccid).await else {
+        let modem_id = match Iccid::try_from(sms.phone_iccid.as_str()) {
+            Ok(iccid) => self.find_modem_for_iccid(&iccid).await,
+            Err(_) => None,
+        };
+        let Some(modem_id) = modem_id else {
             error!("No modem found for ICCID: {}", sms.phone_iccid);
             let _ = self
                 .report_sms_result(&sms.id, Err("No modem found for ICCID"))
@@ -281,13 +286,15 @@ impl SmsSender {
     }
 }
 
-fn is_short_code(recipient: &str) -> bool {
+fn is_short_code(recipient: &SmsAddress) -> bool {
+    let recipient = recipient.as_str();
     (3..=5).contains(&recipient.len()) && recipient.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 #[cfg(test)]
 mod tests {
     use super::{is_short_code, SmsResult};
+    use crate::identifiers::SmsAddress;
     use crate::types::SmsSubmission;
     use serde_json::json;
 
@@ -328,11 +335,11 @@ mod tests {
 
     #[test]
     fn recognizes_only_plain_ascii_short_codes() {
-        assert!(is_short_code("100"));
-        assert!(is_short_code("10010"));
-        assert!(!is_short_code("12"));
-        assert!(!is_short_code("+10010"));
-        assert!(!is_short_code("1001A"));
-        assert!(!is_short_code("6512345678"));
+        assert!(is_short_code(&SmsAddress::from("100")));
+        assert!(is_short_code(&SmsAddress::from("10010")));
+        assert!(!is_short_code(&SmsAddress::from("12")));
+        assert!(!is_short_code(&SmsAddress::from("+10010")));
+        assert!(!is_short_code(&SmsAddress::from("1001A")));
+        assert!(!is_short_code(&SmsAddress::from("6512345678")));
     }
 }

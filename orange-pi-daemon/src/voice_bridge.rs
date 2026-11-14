@@ -11,6 +11,7 @@
 
 use crate::api_client::ApiClient;
 use crate::at_modem::{AtModemManager, VoicePorts};
+use crate::identifiers::Iccid;
 use crate::modem_manager::ModemManager;
 use crate::proxy_protocol;
 use crate::types::{CallEndReason, ModemReport};
@@ -105,7 +106,7 @@ struct ActiveCall {
     stop: watch::Sender<bool>,
     /// `+QPCMV` flow control from the URC reader to the NMEA pump.
     pcm_ready: watch::Sender<bool>,
-    iccid: String,
+    iccid: Iccid,
     modem_id: String,
 }
 
@@ -463,13 +464,13 @@ impl VoiceBridge {
 
     /// The live modem holding `iccid`, confirmed on the SIM itself because the
     /// device snapshot can be up to a scan cycle old.
-    async fn resolve_modem(&self, iccid: &str) -> Result<(String, VoicePorts)> {
+    async fn resolve_modem(&self, iccid: &Iccid) -> Result<(String, VoicePorts)> {
         let candidates: Vec<String> = self
             .devices
             .read()
             .await
             .iter()
-            .filter(|(_, report)| report.detected_iccid.as_deref() == Some(iccid))
+            .filter(|(_, report)| report.detected_iccid.as_ref() == Some(iccid))
             .map(|(modem_id, _)| modem_id.clone())
             .collect();
         for modem_id in candidates {
@@ -479,7 +480,7 @@ impl VoiceBridge {
                 .await
                 .ok()
                 .flatten()
-                .as_deref()
+                .as_ref()
                 != Some(iccid)
             {
                 continue;
@@ -627,10 +628,10 @@ impl VoiceBridge {
 
     /// Keep one URC reader per voice-capable modem with a known SIM.
     pub async fn run_urc_readers(self: Arc<Self>) {
-        let mut readers: HashMap<String, (String, tokio::task::JoinHandle<()>)> = HashMap::new();
+        let mut readers: HashMap<String, (Iccid, tokio::task::JoinHandle<()>)> = HashMap::new();
         info!("📞 URC reader supervisor started");
         loop {
-            let snapshot: Vec<(String, String)> = self
+            let snapshot: Vec<(String, Iccid)> = self
                 .devices
                 .read()
                 .await
@@ -676,7 +677,7 @@ impl VoiceBridge {
         }
     }
 
-    async fn read_urcs(self: Arc<Self>, modem_id: String, iccid: String, port: String) {
+    async fn read_urcs(self: Arc<Self>, modem_id: String, iccid: Iccid, port: String) {
         let fd = match AtModemManager::open_serial(&port).and_then(|f| Ok(AsyncFd::new(f)?)) {
             Ok(fd) => fd,
             Err(e) => {
@@ -992,7 +993,7 @@ mod tests {
                 },
                 stop,
                 pcm_ready,
-                iccid: "test-sim".into(),
+                iccid: Iccid::try_from("89860000000000000042").unwrap(),
                 modem_id: "modem".into(),
             }),
             ..Default::default()

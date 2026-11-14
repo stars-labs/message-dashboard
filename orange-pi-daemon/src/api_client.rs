@@ -1,4 +1,5 @@
 use crate::health::HealthSnapshot;
+use crate::identifiers::{Iccid, Imei, SmsAddress};
 use crate::message_store::StoredMessage;
 use crate::sync_manager::SyncMode;
 use crate::types::{
@@ -25,7 +26,7 @@ struct UploadResponse {
 #[derive(Serialize)]
 struct ModemReportsRequest<'a> {
     modem_reports: &'a [ModemReport],
-    removed_equipment_ids: &'a [String],
+    removed_equipment_ids: &'a [Imei],
     session_id: &'a str,
     sync_mode: SyncMode,
     timestamp: &'a str,
@@ -36,8 +37,8 @@ struct UploadedMessage<'a> {
     content: &'a str,
     direction: &'a Direction,
     id: &'a str,
-    phone_iccid: &'a str,
-    phone_number: &'a str,
+    phone_iccid: &'a Iccid,
+    phone_number: &'a SmsAddress,
     timestamp: &'a str,
 }
 
@@ -62,13 +63,13 @@ impl<'a> From<&'a StoredMessage> for UploadedMessage<'a> {
 #[derive(Serialize)]
 struct IncomingCallRequest<'a> {
     from: Option<&'a str>,
-    iccid: &'a str,
+    iccid: &'a Iccid,
 }
 
 #[derive(Serialize)]
 struct EndedCallRequest<'a> {
     call_id: Option<&'a str>,
-    iccid: &'a str,
+    iccid: &'a Iccid,
     reason: CallEndReason,
 }
 
@@ -113,7 +114,7 @@ impl ApiClient {
     pub async fn upload_modem_reports(
         &self,
         reports: &[ModemReport],
-        removed_equipment_ids: &[String],
+        removed_equipment_ids: &[Imei],
         sync_mode: SyncMode,
         session_id: &str,
     ) -> Result<()> {
@@ -261,7 +262,7 @@ impl ApiClient {
 
     /// Report a ringing SIM. Repeated while it rings; the Worker refreshes a
     /// short-lived KV entry and answers 409 when another call is active.
-    pub async fn report_incoming_call(&self, iccid: &str, from: Option<&str>) -> Result<()> {
+    pub async fn report_incoming_call(&self, iccid: &Iccid, from: Option<&str>) -> Result<()> {
         self.post_call_event("incoming", &IncomingCallRequest { from, iccid })
             .await
     }
@@ -271,7 +272,7 @@ impl ApiClient {
     pub async fn report_call_ended(
         &self,
         call_id: Option<&str>,
-        iccid: &str,
+        iccid: &Iccid,
         reason: CallEndReason,
     ) -> Result<()> {
         self.post_call_event(
@@ -310,6 +311,12 @@ impl ApiClient {
 mod tests {
     use super::*;
     use crate::types::{Message, ModemStatus};
+
+    const ICCID: &str = "898600000000000000f1";
+
+    fn iccid() -> Iccid {
+        Iccid::try_from(ICCID).unwrap()
+    }
     use serde_json::json;
 
     fn text<T: Serialize>(value: &T) -> String {
@@ -318,13 +325,13 @@ mod tests {
 
     fn report() -> ModemReport {
         ModemReport {
-            equipment_id: "imei-1".to_string(),
+            equipment_id: Imei::try_from("860000000000001").unwrap(),
             manufacturer: Some("Quectel".to_string()),
             model: None,
             firmware_revision: None,
             hardware_revision: None,
             status: ModemStatus::Active,
-            detected_iccid: Some("iccid-1".to_string()),
+            detected_iccid: Some(iccid()),
             detected_phone_number: None,
             detected_operator: None,
             signal_percent: Some(80),
@@ -338,7 +345,7 @@ mod tests {
     #[test]
     fn modem_reports_request_matches_the_old_json_body() {
         let reports = [report()];
-        let removed = ["imei-2".to_string()];
+        let removed = [Imei::try_from("860000000000002").unwrap()];
         let timestamp = "2026-01-02T03:04:05.678Z";
         let new = ModemReportsRequest {
             modem_reports: &reports,
@@ -364,8 +371,8 @@ mod tests {
             id: 7,
             source_message_id: "source-1".to_string(),
             message: Message {
-                phone_iccid: "iccid-1".to_string(),
-                phone_number: "+1234567890".to_string(),
+                phone_iccid: iccid(),
+                phone_number: SmsAddress::from("+1234567890"),
                 content: "code 123456".to_string(),
                 timestamp: "2026-01-02T03:04:05.678Z".to_string(),
                 direction: Direction::Received,
@@ -396,20 +403,20 @@ mod tests {
         for from in [Some("+8613800138000"), None] {
             let new = IncomingCallRequest {
                 from,
-                iccid: "iccid-1",
+                iccid: &iccid(),
             };
-            let old = json!({ "iccid": "iccid-1", "from": from });
+            let old = json!({ "iccid": ICCID, "from": from });
             assert_eq!(text(&new), text(&old));
         }
         for call_id in [Some("call-1"), None] {
             let new = EndedCallRequest {
                 call_id,
-                iccid: "iccid-1",
+                iccid: &iccid(),
                 reason: CallEndReason::RemoteHangup,
             };
             let old = json!({
                 "call_id": call_id,
-                "iccid": "iccid-1",
+                "iccid": ICCID,
                 "reason": "remote_hangup",
             });
             assert_eq!(text(&new), text(&old));
@@ -417,9 +424,9 @@ mod tests {
         assert_eq!(
             text(&IncomingCallRequest {
                 from: None,
-                iccid: "i"
+                iccid: &Iccid::try_from("a").unwrap()
             }),
-            r#"{"from":null,"iccid":"i"}"#
+            r#"{"from":null,"iccid":"a"}"#
         );
     }
 

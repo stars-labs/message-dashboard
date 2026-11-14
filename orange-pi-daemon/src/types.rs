@@ -1,3 +1,4 @@
+use crate::identifiers::{Iccid, Imei, SimNumber, SmsAddress};
 use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, ValueRef};
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -300,8 +301,8 @@ pub struct Config {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
-    pub phone_iccid: String,
-    pub phone_number: String,
+    pub phone_iccid: Iccid,
+    pub phone_number: SmsAddress,
     pub content: String,
     pub timestamp: String,
     pub direction: Direction,
@@ -318,7 +319,7 @@ pub struct MessageWithPath {
 // Normalized modem data (hardware) - matches server schema
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Modem {
-    pub equipment_id: String, // IMEI (Primary Key)
+    pub equipment_id: Imei, // IMEI (Primary Key)
     pub manufacturer: Option<String>,
     pub model: Option<String>,
     pub firmware_revision: Option<String>,
@@ -353,11 +354,11 @@ pub struct Modem {
 // Normalized SIM data - matches server schema
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Sim {
-    pub iccid: String, // ICCID (Primary Key)
+    pub iccid: Iccid, // ICCID (Primary Key)
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub phone_number: Option<String>,
+    pub phone_number: Option<SimNumber>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub current_modem_id: Option<String>, // Foreign Key to Modem.equipment_id
+    pub current_modem_id: Option<Imei>, // Foreign Key to Modem.equipment_id
     #[serde(skip_serializing_if = "Option::is_none")]
     pub operator_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -370,8 +371,8 @@ pub struct Sim {
 // Phone structure matching API expectations
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Phone {
-    pub iccid: String,
-    pub number: Option<String>,
+    pub iccid: Iccid,
+    pub number: Option<SimNumber>,
     pub signal: Option<i32>,
     pub operator_name: Option<String>,
     pub status: PhoneStatus,
@@ -379,7 +380,7 @@ pub struct Phone {
     pub model: Option<String>,
     pub firmware_revision: Option<String>,
     pub hardware_revision: Option<String>,
-    pub imei: Option<String>,
+    pub imei: Option<Imei>,
     // Optional fields for compatibility
     pub country: Option<String>,
     pub flag: Option<String>,
@@ -402,12 +403,12 @@ pub struct Phone {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModemReport {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub detected_iccid: Option<String>,
+    pub detected_iccid: Option<Iccid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detected_operator: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub detected_phone_number: Option<String>,
-    pub equipment_id: String,
+    pub detected_phone_number: Option<SimNumber>,
+    pub equipment_id: Imei,
     pub firmware_revision: Option<String>,
     pub hardware_revision: Option<String>,
     pub manufacturer: Option<String>,
@@ -444,7 +445,7 @@ impl Default for SignalData {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PendingSms {
     pub id: String,
-    pub recipient: String,
+    pub recipient: SmsAddress,
     pub phone_iccid: String,
     pub content: String,
     #[serde(default)]

@@ -6,6 +6,7 @@ use tokio::sync::{mpsc, RwLock, Semaphore};
 use tokio::task::JoinSet;
 use tracing::{debug, error, info, warn};
 
+use crate::identifiers::Iccid;
 use crate::modem_manager::ModemManager;
 use crate::types::{Message, MessageWithPath, ModemReport, ModemStatus};
 
@@ -58,7 +59,7 @@ impl WorkerPoolStats {
 #[derive(Debug)]
 pub struct ModemResult {
     pub modem_id: String,
-    pub iccid: Option<String>,
+    pub iccid: Option<Iccid>,
     pub report: Option<ModemReport>,
     pub messages: Vec<Message>,
     pub messages_with_paths: Vec<MessageWithPath>, // Track SMS paths for deletion

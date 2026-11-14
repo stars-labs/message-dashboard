@@ -1,4 +1,5 @@
 // Integration tests for ModemManager - Modem interface layer
+use orange_pi_daemon_rust::identifiers::{Iccid, SmsAddress};
 use orange_pi_daemon_rust::modem_manager::{BackendMode, ModemManager};
 
 /// `USE_DBUS` is process-global, so the tests that mutate it must not run
@@ -229,7 +230,11 @@ async fn test_get_new_messages_signature() {
 
     // Test with invalid modem
     let result = manager
-        .get_new_messages("invalid_modem", "test_iccid", &store)
+        .get_new_messages(
+            "invalid_modem",
+            &Iccid::try_from("89860000000000000001").unwrap(),
+            &store,
+        )
         .await;
 
     assert!(result.is_err());
@@ -246,7 +251,11 @@ async fn test_get_new_messages_with_paths_signature() {
     let store = MessageStore::new(":memory:").unwrap();
 
     let result = manager
-        .get_new_messages_with_paths("invalid_modem", "test_iccid", &store)
+        .get_new_messages_with_paths(
+            "invalid_modem",
+            &Iccid::try_from("89860000000000000001").unwrap(),
+            &store,
+        )
         .await;
 
     assert!(result.is_err());
@@ -273,7 +282,11 @@ async fn test_send_sms_signature() {
 
     // Test with invalid modem
     let result = manager
-        .send_sms("invalid_modem", "+1234567890", "test message")
+        .send_sms(
+            "invalid_modem",
+            &SmsAddress::from("+1234567890"),
+            "test message",
+        )
         .await;
 
     // Should error without real hardware

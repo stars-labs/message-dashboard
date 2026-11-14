@@ -1,5 +1,6 @@
 // Test program to verify SMS deletion on SIM cards
 use anyhow::Result;
+use orange_pi_daemon_rust::identifiers::Iccid;
 use orange_pi_daemon_rust::message_store::MessageStore;
 use orange_pi_daemon_rust::modem_manager::ModemManager;
 use orange_pi_daemon_rust::types::MessageWithPath;
@@ -93,7 +94,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn find_modem_with_sim(modem_manager: &ModemManager) -> Result<Option<(String, String)>> {
+async fn find_modem_with_sim(modem_manager: &ModemManager) -> Result<Option<(String, Iccid)>> {
     info!("📱 Listing modems...");
     let modems = modem_manager.list_modems().await?;
     info!("Found {} modems", modems.len());

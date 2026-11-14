@@ -4,6 +4,7 @@
 //! Set `USE_DBUS=1` to use legacy D-Bus mode (requires `ModemManager` service).
 
 use crate::at_modem::AtModemManager;
+use crate::identifiers::{Iccid, Imei, SimNumber, SmsAddress};
 use crate::message_store::{Segment, StoredSegment};
 use crate::partial_sms;
 use crate::signal_cache::SignalCache;
@@ -208,9 +209,9 @@ pub struct ModemManager {
 
 #[derive(Clone, Copy)]
 struct MultipartGroup<'a> {
-    iccid: &'a str,
+    iccid: &'a Iccid,
     modem_id: &'a str,
-    sender: &'a str,
+    sender: &'a SmsAddress,
     ref_id: u8,
     total_parts: u8,
 }
@@ -476,7 +477,7 @@ impl ModemManager {
     }
 
     /// Get ICCID
-    pub async fn get_iccid(&self, modem_id: &str) -> Result<Option<String>> {
+    pub async fn get_iccid(&self, modem_id: &str) -> Result<Option<Iccid>> {
         match self.mode {
             BackendMode::AtCommand => {
                 let port = self.get_port(modem_id).await;
@@ -527,7 +528,7 @@ impl ModemManager {
         modem_id: &str,
     ) -> Result<
         Option<(
-            String,
+            Imei,
             Option<String>,
             Option<String>,
             Option<String>,
@@ -540,15 +541,13 @@ impl ModemManager {
                 let info = self.at_modem.get_modem_info(&port).await?;
 
                 if let Some(imei) = info.imei {
-                    if !imei.is_empty() {
-                        return Ok(Some((
-                            imei,
-                            info.manufacturer,
-                            info.model,
-                            info.revision,
-                            None,
-                        )));
-                    }
+                    return Ok(Some((
+                        imei,
+                        info.manufacturer,
+                        info.model,
+                        info.revision,
+                        None,
+                    )));
                 }
                 debug!("Modem {} has no valid IMEI", modem_id);
                 Ok(None)
@@ -560,11 +559,11 @@ impl ModemManager {
                     .ok_or_else(|| anyhow!("D-Bus not initialized"))?;
                 let details = client.get_device_details(modem_id).await?;
 
-                if details.imei.is_empty() {
+                let Some(imei) = details.imei else {
                     return Ok(None);
-                }
+                };
                 Ok(Some((
-                    details.imei,
+                    imei,
                     details.manufacturer,
                     details.model,
                     details.firmware_version,
@@ -575,7 +574,7 @@ impl ModemManager {
     }
 
     /// Get phone number
-    pub async fn get_phone_number(&self, modem_id: &str) -> Result<Option<String>> {
+    pub async fn get_phone_number(&self, modem_id: &str) -> Result<Option<SimNumber>> {
         match self.mode {
             BackendMode::AtCommand => {
                 let port = self.get_port(modem_id).await;
@@ -631,7 +630,7 @@ impl ModemManager {
     pub async fn get_new_messages_with_paths(
         &self,
         modem_id: &str,
-        iccid: &str,
+        iccid: &Iccid,
         message_store: &crate::message_store::MessageStore,
     ) -> Result<Vec<MessageWithPath>> {
         match self.mode {
@@ -643,7 +642,7 @@ impl ModemManager {
     async fn get_at_messages(
         &self,
         modem_id: &str,
-        iccid: &str,
+        iccid: &Iccid,
         message_store: &crate::message_store::MessageStore,
     ) -> Result<Vec<MessageWithPath>> {
         let port = self.get_port(modem_id).await;
@@ -651,7 +650,7 @@ impl ModemManager {
 
         // Group multipart messages by (sender, ref_id, total_parts)
         // Messages with concat_info are buffered, messages without are returned immediately
-        let mut multipart_groups: HashMap<(String, u8, u8), Vec<crate::at_modem::AtSms>> =
+        let mut multipart_groups: HashMap<(SmsAddress, u8, u8), Vec<crate::at_modem::AtSms>> =
             HashMap::new();
         let mut complete_messages: Vec<MessageWithPath> = Vec::new();
 
@@ -672,7 +671,7 @@ impl ModemManager {
                 // Single-part message - convert immediately
                 complete_messages.push(MessageWithPath {
                     message: Message {
-                        phone_iccid: iccid.to_string(),
+                        phone_iccid: iccid.clone(),
                         phone_number: sms.sender,
                         content: sms.text,
                         timestamp: sms.timestamp,
@@ -817,8 +816,8 @@ impl ModemManager {
 
         Some(MessageWithPath {
             message: Message {
-                phone_iccid: group.iccid.to_string(),
-                phone_number: group.sender.to_string(),
+                phone_iccid: group.iccid.clone(),
+                phone_number: group.sender.clone(),
                 content: combined_text,
                 timestamp,
                 direction: Direction::Received,
@@ -855,8 +854,8 @@ impl ModemManager {
 
         MessageWithPath {
             message: Message {
-                phone_iccid: group.iccid.to_string(),
-                phone_number: group.sender.to_string(),
+                phone_iccid: group.iccid.clone(),
+                phone_number: group.sender.clone(),
                 content: partial_sms::assemble_partial(group.total_parts, &numbered),
                 timestamp,
                 direction: Direction::Received,
@@ -866,7 +865,11 @@ impl ModemManager {
         }
     }
 
-    async fn get_dbus_messages(&self, modem_id: &str, iccid: &str) -> Result<Vec<MessageWithPath>> {
+    async fn get_dbus_messages(
+        &self,
+        modem_id: &str,
+        iccid: &Iccid,
+    ) -> Result<Vec<MessageWithPath>> {
         let client = self
             .dbus_client
             .as_ref()
@@ -880,7 +883,7 @@ impl ModemManager {
             .into_iter()
             .map(|sms| MessageWithPath {
                 message: Message {
-                    phone_iccid: iccid.to_string(),
+                    phone_iccid: iccid.clone(),
                     phone_number: sms.number,
                     content: sms.text,
                     timestamp: Self::normalize_timestamp(&sms.timestamp),
@@ -898,7 +901,7 @@ impl ModemManager {
     pub async fn get_new_messages(
         &self,
         modem_id: &str,
-        iccid: &str,
+        iccid: &Iccid,
         message_store: &crate::message_store::MessageStore,
     ) -> Result<Vec<Message>> {
         let messages_with_paths = self
@@ -990,7 +993,7 @@ impl ModemManager {
     pub async fn send_sms(
         &self,
         modem_id: &str,
-        recipient: &str,
+        recipient: &SmsAddress,
         content: &str,
     ) -> Result<SmsSubmission> {
         self.send_sms_with_short_code(modem_id, recipient, content, false)
@@ -1001,7 +1004,7 @@ impl ModemManager {
     pub async fn send_sms_with_short_code(
         &self,
         modem_id: &str,
-        recipient: &str,
+        recipient: &SmsAddress,
         content: &str,
         allow_short_code: bool,
     ) -> Result<SmsSubmission> {
@@ -1010,7 +1013,7 @@ impl ModemManager {
         // where a CR is an injection (docs/SECURITY-REVIEW.md finding 3); the D-Bus
         // backend passes them as typed arguments and is not injectable, but there is no
         // reason to accept a malformed number on either path.
-        AtModemManager::validate_recipient_with_short_code(recipient, allow_short_code)?;
+        AtModemManager::validate_recipient_with_short_code(recipient.as_str(), allow_short_code)?;
         AtModemManager::validate_message_body(content)?;
 
         match self.mode {

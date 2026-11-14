@@ -1,5 +1,6 @@
 // Integration tests for SmsSender - Outbound SMS handling
 use orange_pi_daemon_rust::api_client::ApiClient;
+use orange_pi_daemon_rust::identifiers::{Iccid, SmsAddress};
 use orange_pi_daemon_rust::modem_manager::ModemManager;
 use orange_pi_daemon_rust::sms_sender::SmsSender;
 use orange_pi_daemon_rust::types::{Config, PendingSms, Purpose};
@@ -24,11 +25,19 @@ async fn create_test_sender() -> anyhow::Result<SmsSender> {
     ))
 }
 
+#[allow(
+    clippy::unwrap_used,
+    reason = "test helper: clippy.toml allow-unwrap-in-tests covers only #[test] items"
+)]
+fn iccid(text: &str) -> Iccid {
+    Iccid::try_from(text).unwrap()
+}
+
 // Helper function to create test pending SMS
 fn create_test_sms(id: &str, iccid: &str, recipient: &str, content: &str) -> PendingSms {
     PendingSms {
         id: id.to_string(),
-        recipient: recipient.to_string(),
+        recipient: SmsAddress::from(recipient),
         phone_iccid: iccid.to_string(),
         content: content.to_string(),
         purpose: Purpose::User,
@@ -43,9 +52,15 @@ fn create_test_sms(id: &str, iccid: &str, recipient: &str, content: &str) -> Pen
 #[tokio::test]
 async fn test_sms_sender_new() {
     let mut sender = create_test_sender().await.unwrap();
-    sender.update_modem_cache(HashMap::from([("iccid".into(), "modem".into())]));
+    sender.update_modem_cache(HashMap::from([(
+        iccid("89860000000000000010"),
+        "modem".to_string(),
+    )]));
     assert_eq!(
-        sender.find_modem_for_iccid("iccid").await.as_deref(),
+        sender
+            .find_modem_for_iccid(&iccid("89860000000000000010"))
+            .await
+            .as_deref(),
         Some("modem")
     );
 }
@@ -59,17 +74,23 @@ async fn test_update_modem_cache() {
     let mut sender = create_test_sender().await.unwrap();
 
     let mut cache = HashMap::new();
-    cache.insert("iccid_001".to_string(), "modem_0".to_string());
-    cache.insert("iccid_002".to_string(), "modem_1".to_string());
+    cache.insert(iccid("89860000000000000001"), "modem_0".to_string());
+    cache.insert(iccid("89860000000000000002"), "modem_1".to_string());
 
     sender.update_modem_cache(cache);
 
     assert_eq!(
-        sender.find_modem_for_iccid("iccid_001").await.as_deref(),
+        sender
+            .find_modem_for_iccid(&iccid("89860000000000000001"))
+            .await
+            .as_deref(),
         Some("modem_0")
     );
     assert_eq!(
-        sender.find_modem_for_iccid("iccid_002").await.as_deref(),
+        sender
+            .find_modem_for_iccid(&iccid("89860000000000000002"))
+            .await
+            .as_deref(),
         Some("modem_1")
     );
 }
@@ -78,13 +99,24 @@ async fn test_update_modem_cache() {
 async fn test_update_modem_cache_empty() {
     let mut sender = create_test_sender().await.unwrap();
 
-    sender.update_modem_cache(HashMap::from([("iccid".into(), "modem".into())]));
+    sender.update_modem_cache(HashMap::from([(
+        iccid("89860000000000000010"),
+        "modem".to_string(),
+    )]));
     assert_eq!(
-        sender.find_modem_for_iccid("iccid").await.as_deref(),
+        sender
+            .find_modem_for_iccid(&iccid("89860000000000000010"))
+            .await
+            .as_deref(),
         Some("modem")
     );
     sender.update_modem_cache(HashMap::new());
-    assert_eq!(sender.find_modem_for_iccid("iccid").await, None);
+    assert_eq!(
+        sender
+            .find_modem_for_iccid(&iccid("89860000000000000010"))
+            .await,
+        None
+    );
 }
 
 #[tokio::test]
@@ -93,19 +125,27 @@ async fn test_update_modem_cache_multiple_times() {
 
     // First update
     let mut cache1 = HashMap::new();
-    cache1.insert("iccid_001".to_string(), "modem_0".to_string());
+    cache1.insert(iccid("89860000000000000001"), "modem_0".to_string());
     sender.update_modem_cache(cache1);
 
     // Second update (replaces first)
     let mut cache2 = HashMap::new();
-    cache2.insert("iccid_002".to_string(), "modem_1".to_string());
+    cache2.insert(iccid("89860000000000000002"), "modem_1".to_string());
     sender.update_modem_cache(cache2);
 
     assert_eq!(
-        sender.find_modem_for_iccid("iccid_002").await.as_deref(),
+        sender
+            .find_modem_for_iccid(&iccid("89860000000000000002"))
+            .await
+            .as_deref(),
         Some("modem_1")
     );
-    assert_eq!(sender.find_modem_for_iccid("iccid_001").await, None);
+    assert_eq!(
+        sender
+            .find_modem_for_iccid(&iccid("89860000000000000001"))
+            .await,
+        None
+    );
 }
 
 // ============================================================================
@@ -118,11 +158,13 @@ async fn test_find_modem_for_iccid_from_cache() {
 
     // Populate cache
     let mut cache = HashMap::new();
-    cache.insert("test_iccid".to_string(), "modem_0".to_string());
+    cache.insert(iccid("89860000000000000011"), "modem_0".to_string());
     sender.update_modem_cache(cache);
 
     // Find modem using cached ICCID
-    let result = sender.find_modem_for_iccid("test_iccid").await;
+    let result = sender
+        .find_modem_for_iccid(&iccid("89860000000000000011"))
+        .await;
 
     // Should find modem in cache
     assert_eq!(result, Some("modem_0".to_string()));
@@ -133,7 +175,9 @@ async fn test_find_modem_for_iccid_not_in_cache() {
     let sender = create_test_sender().await.unwrap();
 
     // Try to find modem not in cache (will search via modem manager)
-    let result = sender.find_modem_for_iccid("nonexistent_iccid").await;
+    let result = sender
+        .find_modem_for_iccid(&iccid("89860000000000000012"))
+        .await;
 
     // Should return None (no real hardware)
     assert_eq!(result, None);
@@ -145,15 +189,19 @@ async fn test_find_modem_for_iccid_cache_hit_vs_miss() {
 
     // Populate cache with one ICCID
     let mut cache = HashMap::new();
-    cache.insert("cached_iccid".to_string(), "modem_0".to_string());
+    cache.insert(iccid("89860000000000000013"), "modem_0".to_string());
     sender.update_modem_cache(cache);
 
     // Test cache hit
-    let cached_result = sender.find_modem_for_iccid("cached_iccid").await;
+    let cached_result = sender
+        .find_modem_for_iccid(&iccid("89860000000000000013"))
+        .await;
     assert_eq!(cached_result, Some("modem_0".to_string()));
 
     // Test cache miss
-    let uncached_result = sender.find_modem_for_iccid("uncached_iccid").await;
+    let uncached_result = sender
+        .find_modem_for_iccid(&iccid("89860000000000000014"))
+        .await;
     assert_eq!(uncached_result, None);
 }
 
@@ -163,17 +211,17 @@ async fn test_find_modem_for_iccid_cache_hit_vs_miss() {
 
 #[test]
 fn test_pending_sms_creation() {
-    let sms = create_test_sms("msg_001", "iccid_001", "+1234567890", "Hello");
+    let sms = create_test_sms("msg_001", "89860000000000000001", "+1234567890", "Hello");
 
     assert_eq!(sms.id, "msg_001");
-    assert_eq!(sms.phone_iccid, "iccid_001");
-    assert_eq!(sms.recipient, "+1234567890");
+    assert_eq!(sms.phone_iccid, "89860000000000000001");
+    assert_eq!(sms.recipient.as_str(), "+1234567890");
     assert_eq!(sms.content, "Hello");
 }
 
 #[test]
 fn test_pending_sms_clone() {
-    let sms = create_test_sms("msg_001", "iccid_001", "+1234567890", "Test");
+    let sms = create_test_sms("msg_001", "89860000000000000001", "+1234567890", "Test");
 
     // PendingSms implements Clone
     let cloned = sms.clone();
@@ -185,13 +233,13 @@ fn test_pending_sms_clone() {
 
 #[test]
 fn test_pending_sms_debug() {
-    let sms = create_test_sms("msg_001", "iccid_001", "+1234567890", "Test");
+    let sms = create_test_sms("msg_001", "89860000000000000001", "+1234567890", "Test");
 
     // PendingSms implements Debug
     let debug_str = format!("{sms:?}");
 
     assert!(debug_str.contains("msg_001"));
-    assert!(debug_str.contains("iccid_001"));
+    assert!(debug_str.contains("89860000000000000001"));
 }
 
 // ============================================================================
@@ -201,7 +249,7 @@ fn test_pending_sms_debug() {
 #[tokio::test]
 async fn test_send_sms_signature() {
     let sender = create_test_sender().await.unwrap();
-    let sms = create_test_sms("msg_001", "iccid_001", "+1234567890", "Test");
+    let sms = create_test_sms("msg_001", "89860000000000000001", "+1234567890", "Test");
 
     // Try to send (will fail without real hardware, but tests signature)
     let result = sender.send_sms(&sms).await;
@@ -211,21 +259,35 @@ async fn test_send_sms_signature() {
 }
 
 #[tokio::test]
+async fn test_send_sms_for_an_iccid_no_modem_can_hold_is_a_modem_not_found_error() {
+    let mut sender = create_test_sender().await.unwrap();
+    let mut cache = HashMap::new();
+    cache.insert(iccid("89860000000000000011"), "modem_0".to_string());
+    sender.update_modem_cache(cache);
+
+    for phone_iccid in ["fixture-iccid", "", "8986 0000", "89860000000000000011\n"] {
+        let sms = create_test_sms("msg_001", phone_iccid, "+1234567890", "Test");
+        let error = sender.send_sms(&sms).await.unwrap_err();
+        assert_eq!(error.to_string(), "ModemNotFound", "{phone_iccid:?}");
+    }
+}
+
+#[tokio::test]
 async fn test_send_sms_with_cached_modem() {
     let mut sender = create_test_sender().await.unwrap();
 
     // Populate cache with modem
     let mut cache = HashMap::new();
-    cache.insert("test_iccid".to_string(), "modem_0".to_string());
+    cache.insert(iccid("89860000000000000011"), "modem_0".to_string());
     sender.update_modem_cache(cache);
 
-    let sms = create_test_sms("msg_001", "test_iccid", "+1234567890", "Test");
+    let sms = create_test_sms("msg_001", "89860000000000000011", "+1234567890", "Test");
 
     // Try to send (will fail without real modem_0, but finds modem ID)
     let result = sender.send_sms(&sms).await;
 
     // Should error at send stage (not at modem lookup stage)
-    assert!(result.is_err());
+    assert_ne!(result.unwrap_err().to_string(), "ModemNotFound");
 }
 
 // ============================================================================
@@ -234,7 +296,7 @@ async fn test_send_sms_with_cached_modem() {
 
 #[test]
 fn test_pending_sms_with_empty_content() {
-    let sms = create_test_sms("msg_001", "iccid_001", "+1234567890", "");
+    let sms = create_test_sms("msg_001", "89860000000000000001", "+1234567890", "");
 
     assert_eq!(sms.content, "");
 }
@@ -242,7 +304,12 @@ fn test_pending_sms_with_empty_content() {
 #[test]
 fn test_pending_sms_with_long_content() {
     let long_content = "x".repeat(1000);
-    let sms = create_test_sms("msg_001", "iccid_001", "+1234567890", &long_content);
+    let sms = create_test_sms(
+        "msg_001",
+        "89860000000000000001",
+        "+1234567890",
+        &long_content,
+    );
 
     assert_eq!(sms.content.len(), 1000);
 }
@@ -251,7 +318,7 @@ fn test_pending_sms_with_long_content() {
 fn test_pending_sms_with_special_characters() {
     let sms = create_test_sms(
         "msg_001",
-        "iccid_001",
+        "89860000000000000001",
         "+1234567890",
         "你好 Hello 🌍 'quotes\" <tags>",
     );
@@ -262,9 +329,9 @@ fn test_pending_sms_with_special_characters() {
 
 #[test]
 fn test_pending_sms_with_international_number() {
-    let sms = create_test_sms("msg_001", "iccid_001", "+8613800138000", "测试");
+    let sms = create_test_sms("msg_001", "89860000000000000001", "+8613800138000", "测试");
 
-    assert_eq!(sms.recipient, "+8613800138000");
+    assert_eq!(sms.recipient.as_str(), "+8613800138000");
     assert_eq!(sms.content, "测试");
 }
 
@@ -279,14 +346,19 @@ async fn test_modem_cache_large_scale() {
     // Create cache with 100+ modems (simulating production)
     let mut cache = HashMap::new();
     for i in 0..100 {
-        cache.insert(format!("iccid_{i:03}"), format!("modem_{i}"));
+        cache.insert(
+            iccid(&format!("8986000000000000{i:04}")),
+            format!("modem_{i}"),
+        );
     }
 
     sender.update_modem_cache(cache);
 
     for i in 0..100 {
         assert_eq!(
-            sender.find_modem_for_iccid(&format!("iccid_{i:03}")).await,
+            sender
+                .find_modem_for_iccid(&iccid(&format!("8986000000000000{i:04}")))
+                .await,
             Some(format!("modem_{i}"))
         );
     }
@@ -297,23 +369,34 @@ async fn test_find_modem_multiple_lookups() {
     let mut sender = create_test_sender().await.unwrap();
 
     let mut cache = HashMap::new();
-    cache.insert("iccid_001".to_string(), "modem_0".to_string());
-    cache.insert("iccid_002".to_string(), "modem_1".to_string());
-    cache.insert("iccid_003".to_string(), "modem_2".to_string());
+    cache.insert(iccid("89860000000000000001"), "modem_0".to_string());
+    cache.insert(iccid("89860000000000000002"), "modem_1".to_string());
+    cache.insert(iccid("89860000000000000003"), "modem_2".to_string());
     sender.update_modem_cache(cache);
 
     // Perform multiple lookups
     assert_eq!(
-        sender.find_modem_for_iccid("iccid_001").await,
+        sender
+            .find_modem_for_iccid(&iccid("89860000000000000001"))
+            .await,
         Some("modem_0".to_string())
     );
     assert_eq!(
-        sender.find_modem_for_iccid("iccid_002").await,
+        sender
+            .find_modem_for_iccid(&iccid("89860000000000000002"))
+            .await,
         Some("modem_1".to_string())
     );
     assert_eq!(
-        sender.find_modem_for_iccid("iccid_003").await,
+        sender
+            .find_modem_for_iccid(&iccid("89860000000000000003"))
+            .await,
         Some("modem_2".to_string())
     );
-    assert_eq!(sender.find_modem_for_iccid("iccid_999").await, None);
+    assert_eq!(
+        sender
+            .find_modem_for_iccid(&iccid("89860000000000000999"))
+            .await,
+        None
+    );
 }

@@ -12,6 +12,7 @@
 //! Path shape, built by `sms-dashboard/server/api/calls.js`:
 //! `/voice/{callId}/{leg}/{action}/{iccid}/{number}/{exp}/{sig}`
 
+use crate::identifiers::{Iccid, PhoneNumber};
 use ring::hmac;
 use std::net::IpAddr;
 
@@ -37,7 +38,7 @@ impl Leg {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CallAction {
     /// Place an outbound call to this E.164 number.
-    Dial(String),
+    Dial(PhoneNumber),
     /// Answer the call ringing on the SIM.
     Answer,
 }
@@ -47,7 +48,7 @@ pub struct VoiceRequest {
     pub call_id: String,
     pub leg: Leg,
     pub action: CallAction,
-    pub iccid: String,
+    pub iccid: Iccid,
     pub exp: u64,
     sig: String,
 }
@@ -62,7 +63,7 @@ impl VoiceRequest {
 
     fn number_str(&self) -> &str {
         match &self.action {
-            CallAction::Dial(number) => number,
+            CallAction::Dial(number) => number.as_str(),
             CallAction::Answer => "-",
         }
     }
@@ -79,15 +80,6 @@ impl VoiceRequest {
             self.exp
         )
     }
-}
-
-fn is_e164(number: &str) -> bool {
-    let Some(digits) = number.strip_prefix('+') else {
-        return false;
-    };
-    (7..=15).contains(&digits.len())
-        && !digits.starts_with('0')
-        && digits.bytes().all(|b| b.is_ascii_digit())
 }
 
 fn is_call_id(id: &str) -> bool {
@@ -130,26 +122,22 @@ pub fn parse_path(path: &str) -> Option<VoiceRequest> {
         _ => return None,
     };
     let action = match (*action, *number) {
-        ("dial", n) if is_e164(n) => CallAction::Dial(n.to_string()),
+        ("dial", n) => CallAction::Dial(PhoneNumber::try_from(n).ok()?),
         ("answer", "-") => CallAction::Answer,
         _ => return None,
     };
     // Match the modem's ICCID alphabet. Keep the original spelling for HMAC
     // verification and live SIM lookup.
-    if !is_call_id(call_id)
-        || iccid.is_empty()
-        || iccid.len() > 22
-        || !iccid.bytes().all(|b| b.is_ascii_hexdigit())
-        || sig.len() != 64
-    {
+    if !is_call_id(call_id) || iccid.len() > 22 || sig.len() != 64 {
         return None;
     }
+    let iccid = Iccid::try_from(*iccid).ok()?;
 
     Some(VoiceRequest {
         call_id: call_id.to_string(),
         leg,
         action,
-        iccid: iccid.to_string(),
+        iccid,
         exp: exp.parse().ok()?,
         sig: sig.to_ascii_lowercase(),
     })
@@ -244,7 +232,10 @@ mod tests {
     fn accepts_the_worker_signed_vector() {
         let request = parse_path(VECTOR_PATH).expect("vector parses");
         assert_eq!(request.leg, Leg::Up);
-        assert_eq!(request.action, CallAction::Dial("+6592953543".into()));
+        assert_eq!(
+            request.action,
+            CallAction::Dial(PhoneNumber::try_from("+6592953543").unwrap())
+        );
         assert!(verify("test-key", &request, 1_700_000_000));
     }
 
@@ -252,7 +243,10 @@ mod tests {
     fn accepts_the_vector_as_the_worker_encodes_it() {
         let encoded = VECTOR_PATH.replace("/+", "/%2B");
         let request = parse_path(&encoded).expect("encoded vector parses");
-        assert_eq!(request.action, CallAction::Dial("+6592953543".into()));
+        assert_eq!(
+            request.action,
+            CallAction::Dial(PhoneNumber::try_from("+6592953543").unwrap())
+        );
         assert!(verify("test-key", &request, 1_700_000_000));
     }
 
@@ -314,7 +308,7 @@ mod tests {
         );
         let request = parse_path(path).unwrap();
         assert_eq!(request.action, CallAction::Answer);
-        assert_eq!(request.iccid, "896501230605CF73985");
+        assert_eq!(request.iccid.as_str(), "896501230605CF73985");
         assert!(verify("test-key", &request, 1_700_000_000));
 
         let tampered = parse_path(&path.replace("CF73985", "cF73985")).unwrap();
@@ -337,6 +331,27 @@ mod tests {
         ] {
             assert!(parse_path(&path).is_none(), "{path}");
         }
+    }
+
+    #[test]
+    fn rejects_numbers_and_sims_outside_the_accepted_alphabets() {
+        let sig = "0".repeat(64);
+        let id = "11111111-1111-4111-8111-111111111111";
+        for (iccid, number) in [
+            ("8965", "+0592953543"),
+            ("8965", "+123456"),
+            ("8965", "+1234567890123456"),
+            ("8965", "+65%2092953543"),
+            ("8965", "-"),
+            ("", "+6592953543"),
+            ("89650123060529739850123", "+6592953543"),
+        ] {
+            let path = format!("/voice/{id}/up/dial/{iccid}/{number}/1800000000/{sig}");
+            assert!(parse_path(&path).is_none(), "{path}");
+        }
+        let longest = "8965012306052973985012";
+        let path = format!("/voice/{id}/up/dial/{longest}/%2B6592953543/1800000000/{sig}");
+        assert_eq!(parse_path(&path).unwrap().iccid.as_str(), longest);
     }
 
     #[test]

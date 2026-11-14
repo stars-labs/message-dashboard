@@ -6,6 +6,7 @@
 //! - ttyUSB2: AT commands (this is what we use)
 //! - ttyUSB3: PPP/Modem
 
+use crate::identifiers::{Iccid, Imei, SimNumber, SmsAddress};
 use crate::types::{SmsStorage, SmsSubmission};
 use anyhow::{anyhow, Result};
 use nix::sys::termios::{self, BaudRate, SetArg};
@@ -36,7 +37,7 @@ pub struct AtSms {
     pub index: u32,
     /// All SIM indices that belong to this logical message (concatenated parts)
     pub part_indices: Vec<u32>,
-    pub sender: String,
+    pub sender: SmsAddress,
     pub timestamp: String,
     pub text: String,
     /// Concatenation info for multipart messages (from UDH)
@@ -55,13 +56,13 @@ pub struct ConcatInfo {
 #[derive(Debug, Clone, Default)]
 pub struct AtModemInfo {
     pub port: String,
-    pub iccid: Option<String>,
-    pub imei: Option<String>,
+    pub iccid: Option<Iccid>,
+    pub imei: Option<Imei>,
     pub manufacturer: Option<String>,
     pub model: Option<String>,
     pub revision: Option<String>,
     pub signal_percent: Option<u32>,
-    pub phone_number: Option<String>,
+    pub phone_number: Option<SimNumber>,
     pub operator: Option<String>,
 }
 
@@ -109,8 +110,8 @@ pub struct SmsConfig {
 #[derive(Debug, Clone, Default)]
 pub struct ModemHealth {
     pub port: String,
-    pub iccid: Option<String>,
-    pub imei: Option<String>,
+    pub iccid: Option<Iccid>,
+    pub imei: Option<Imei>,
     pub signal_percent: Option<u32>,
     pub operator: Option<String>,
     pub network_reg: Option<NetworkRegStatus>,
@@ -742,7 +743,7 @@ impl AtModemManager {
     }
 
     /// Get ICCID from SIM card
-    pub async fn get_iccid(&self, port: &str) -> Result<Option<String>> {
+    pub async fn get_iccid(&self, port: &str) -> Result<Option<Iccid>> {
         // Try different ICCID commands (varies by modem)
         for cmd in &["AT+QCCID", "AT+CCID", "AT+ICCID"] {
             if let Ok(response) = self.send_at_command(port, cmd, self.timeout).await {
@@ -754,7 +755,7 @@ impl AtModemManager {
         Ok(None)
     }
 
-    fn parse_iccid(response: &str) -> Option<String> {
+    fn parse_iccid(response: &str) -> Option<Iccid> {
         for line in response.lines() {
             let line = line.trim();
             if line.starts_with("+QCCID:")
@@ -764,35 +765,34 @@ impl AtModemManager {
                 if let Some((_, rest)) = line.split_once(':') {
                     let iccid = rest.trim().trim_matches('"');
                     if iccid.len() >= 18 && iccid.chars().all(|c| c.is_ascii_hexdigit()) {
-                        return Some(Self::normalize_iccid(iccid));
+                        return Self::normalize_iccid(iccid);
                     }
                 }
             } else if line.len() >= 18
                 && line.len() <= 22
                 && line.chars().all(|c| c.is_ascii_hexdigit())
             {
-                return Some(Self::normalize_iccid(line));
+                return Self::normalize_iccid(line);
             }
         }
         None
     }
 
     /// Strip trailing 'F' padding from ICCID (BCD filler per ITU-T E.118)
-    fn normalize_iccid(iccid: &str) -> String {
-        iccid.trim_end_matches('F').to_string()
+    fn normalize_iccid(iccid: &str) -> Option<Iccid> {
+        Iccid::try_from(iccid.trim_end_matches('F')).ok()
     }
 
     /// Get IMEI
-    pub async fn get_imei(&self, port: &str) -> Result<Option<String>> {
+    pub async fn get_imei(&self, port: &str) -> Result<Option<Imei>> {
         let response = self.send_at_command(port, "AT+CGSN", self.timeout).await?;
+        Ok(Self::parse_imei(&response))
+    }
 
-        for line in response.lines() {
-            let line = line.trim();
-            if line.len() == 15 && line.chars().all(|c| c.is_ascii_digit()) {
-                return Ok(Some(line.to_string()));
-            }
-        }
-        Ok(None)
+    fn parse_imei(response: &str) -> Option<Imei> {
+        response
+            .lines()
+            .find_map(|line| Imei::try_from(line.trim()).ok())
     }
 
     /// Get manufacturer
@@ -860,21 +860,24 @@ impl AtModemManager {
     }
 
     /// Get phone number from SIM
-    pub async fn get_phone_number(&self, port: &str) -> Result<Option<String>> {
+    pub async fn get_phone_number(&self, port: &str) -> Result<Option<SimNumber>> {
         let response = self.send_at_command(port, "AT+CNUM", self.timeout).await?;
+        Ok(Self::parse_cnum(&response))
+    }
 
-        // Parse "+CNUM: "","+1234567890",129"
+    // Parse "+CNUM: "","+1234567890",129"
+    fn parse_cnum(response: &str) -> Option<SimNumber> {
         for line in response.lines() {
             if line.contains("+CNUM:") {
                 let parts: Vec<&str> = line.split('"').collect();
                 if let Some(number) = parts.get(3).map(|part| part.trim()) {
-                    if !number.is_empty() {
-                        return Ok(Some(number.to_string()));
+                    if let Ok(number) = SimNumber::try_from(number) {
+                        return Some(number);
                     }
                 }
             }
         }
-        Ok(None)
+        None
     }
 
     /// Get operator name
@@ -1438,7 +1441,7 @@ impl AtModemManager {
             storage: None,
             index,
             part_indices: vec![index],
-            sender,
+            sender: SmsAddress::from(sender),
             timestamp,
             text,
             concat_info,
@@ -1829,7 +1832,7 @@ impl AtModemManager {
     }
 
     /// Parse CMGL header line
-    fn parse_cmgl_header(line: &str) -> Option<(u32, String, String)> {
+    fn parse_cmgl_header(line: &str) -> Option<(u32, SmsAddress, String)> {
         // +CMGL: 1,"REC READ","+1234567890","","24/01/15,10:30:45+32"
         // With UCS2: phone number may be hex encoded like "002B0036003500..."
         let parts: Vec<&str> = line.split(',').collect();
@@ -1843,7 +1846,7 @@ impl AtModemManager {
 
         // Extract sender (third part, quoted) - may be UCS2 encoded
         let raw_sender = sender_field.trim().trim_matches('"');
-        let sender = Self::decode_sms_sender(raw_sender);
+        let sender = SmsAddress::from(Self::decode_sms_sender(raw_sender));
 
         // Extract timestamp (4th and 5th parts) - may also be UCS2 encoded
         let timestamp = if parts.len() >= 5 {
@@ -2033,10 +2036,10 @@ impl AtModemManager {
     pub async fn send_sms(
         &self,
         port: &str,
-        recipient: &str,
+        recipient: &SmsAddress,
         message: &str,
     ) -> Result<SmsSubmission> {
-        Self::validate_recipient(recipient)?;
+        Self::validate_recipient(recipient.as_str())?;
         self.send_sms_with_short_code(port, recipient, message, false)
             .await
     }
@@ -2044,13 +2047,13 @@ impl AtModemManager {
     pub async fn send_sms_with_short_code(
         &self,
         port: &str,
-        recipient: &str,
+        recipient: &SmsAddress,
         message: &str,
         allow_short_code: bool,
     ) -> Result<SmsSubmission> {
         // Validate before touching the modem: both values are interpolated into AT
         // command strings below, and both originate from an API request body.
-        Self::validate_recipient_with_short_code(recipient, allow_short_code)?;
+        Self::validate_recipient_with_short_code(recipient.as_str(), allow_short_code)?;
         Self::validate_message_body(message)?;
 
         let use_ucs2 = Self::needs_ucs2(message);
@@ -2063,7 +2066,7 @@ impl AtModemManager {
             self.configure_sms_unlocked(port, use_ucs2).await?;
 
             let port_path = port.to_string();
-            let recipient = recipient.to_string();
+            let recipient = recipient.as_str().to_owned();
             let msg = message.to_string();
             let timeout = self.timeout;
             let result = tokio::task::spawn_blocking(move || {
@@ -2576,21 +2579,80 @@ mod tests {
         // Standard numeric ICCID
         assert_eq!(
             AtModemManager::parse_iccid("+QCCID: 89860121750097854321"),
-            Some("89860121750097854321".to_string())
+            Iccid::try_from("89860121750097854321").ok()
         );
         assert_eq!(
             AtModemManager::parse_iccid("89860121750097854321\nOK"),
-            Some("89860121750097854321".to_string())
+            Iccid::try_from("89860121750097854321").ok()
         );
         // ICCID with hex padding (F is stripped as BCD filler)
         assert_eq!(
             AtModemManager::parse_iccid("+QCCID: 8965012306052989707F"),
-            Some("8965012306052989707".to_string())
+            Iccid::try_from("8965012306052989707").ok()
         );
         assert_eq!(
             AtModemManager::parse_iccid("AT+QCCID\r\n+QCCID: 8965012306052989681F\r\n\r\nOK\r\n"),
-            Some("8965012306052989681".to_string())
+            Iccid::try_from("8965012306052989681").ok()
         );
+    }
+
+    #[test]
+    fn parse_iccid_accepts_exactly_what_it_accepted_before_it_was_typed() {
+        for (response, expected) in [
+            ("+CCID: 898600520121F0517883", Some("898600520121F0517883")),
+            (
+                "+ICCID: \"89860121750097854321\"",
+                Some("89860121750097854321"),
+            ),
+            ("+QCCID: 89860121750097854a", Some("89860121750097854a")),
+            ("+QCCID: 898601217500978543", Some("898601217500978543")),
+            ("+QCCID: 89860121750097854", None),
+            ("+QCCID: 8986012175009785432G", None),
+            ("+QCCID: ", None),
+            ("8986012175009785432123\nOK", Some("8986012175009785432123")),
+            ("89860121750097854321234\nOK", None),
+            ("OK", None),
+            ("", None),
+        ] {
+            assert_eq!(
+                AtModemManager::parse_iccid(response),
+                expected.map(|text| Iccid::try_from(text).unwrap()),
+                "{response:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn parse_imei_needs_a_line_of_exactly_fifteen_digits() {
+        let imei = |text: &str| Imei::try_from(text).ok();
+        assert_eq!(
+            AtModemManager::parse_imei("AT+CGSN\r\n860123456789012\r\n\r\nOK\r\n"),
+            imei("860123456789012")
+        );
+        assert_eq!(
+            AtModemManager::parse_imei("  860123456789012  \nOK"),
+            imei("860123456789012")
+        );
+        assert_eq!(AtModemManager::parse_imei("86012345678901\nOK"), None);
+        assert_eq!(AtModemManager::parse_imei("8601234567890123\nOK"), None);
+        assert_eq!(AtModemManager::parse_imei("86012345678901a\nOK"), None);
+        assert_eq!(AtModemManager::parse_imei("ERROR"), None);
+    }
+
+    #[test]
+    fn parse_cnum_keeps_any_non_empty_number() {
+        let number = |text: &str| SimNumber::try_from(text).ok();
+        assert_eq!(
+            AtModemManager::parse_cnum("+CNUM: \"\",\"+6591234567\",145\nOK"),
+            number("+6591234567")
+        );
+        assert_eq!(
+            AtModemManager::parse_cnum("+CNUM: \"\",\" 6591234567 \",129"),
+            number("6591234567")
+        );
+        assert_eq!(AtModemManager::parse_cnum("+CNUM: \"\",\"\",129"), None);
+        assert_eq!(AtModemManager::parse_cnum("+CNUM: \"\",\"   \",129"), None);
+        assert_eq!(AtModemManager::parse_cnum("OK"), None);
     }
 
     #[test]
@@ -3288,7 +3350,7 @@ mod tests {
         let result = AtModemManager::parse_pdu_sms(1, pdu);
         assert!(result.is_ok());
         let sms = result.unwrap();
-        assert_eq!(sms.sender, "Google");
+        assert_eq!(sms.sender.as_str(), "Google");
         assert_eq!(sms.text, "Hello");
     }
 }

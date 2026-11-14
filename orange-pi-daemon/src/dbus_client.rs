@@ -3,6 +3,7 @@ use tokio::process::Command;
 use tracing::{debug, info, warn};
 
 // Re-export DeviceDetails so it's accessible from modem_manager
+use crate::identifiers::{Iccid, Imei, SimNumber};
 pub use crate::native_dbus::DeviceDetails;
 use crate::native_dbus::NativeDBusClient;
 use crate::types::ModemState;
@@ -108,7 +109,7 @@ impl DBusClient {
     }
 
     /// Get SIM ICCID using D-Bus (native first, then busctl)
-    pub async fn get_sim_iccid(&self, modem_id: &str) -> Result<Option<String>> {
+    pub async fn get_sim_iccid(&self, modem_id: &str) -> Result<Option<Iccid>> {
         // Try native D-Bus first
         if let Some(native) = &self.native_client {
             match native.get_sim_iccid(modem_id).await {
@@ -148,7 +149,7 @@ impl DBusClient {
     }
 
     /// Get phone number using D-Bus (native first, then busctl)
-    pub async fn get_phone_number(&self, modem_id: &str) -> Result<Option<String>> {
+    pub async fn get_phone_number(&self, modem_id: &str) -> Result<Option<SimNumber>> {
         // Try native D-Bus first
         if let Some(native) = &self.native_client {
             match native.get_phone_number(modem_id).await {
@@ -253,7 +254,7 @@ impl DBusClient {
     }
 
     /// Get SIM ICCID using busctl
-    async fn get_sim_iccid_busctl(&self, modem_id: &str) -> Result<Option<String>> {
+    async fn get_sim_iccid_busctl(&self, modem_id: &str) -> Result<Option<Iccid>> {
         // First get SIM path
         let modem_path = format!("/org/freedesktop/ModemManager1/Modem/{modem_id}");
 
@@ -302,7 +303,8 @@ impl DBusClient {
         let iccid = stdout
             .split('"')
             .nth(1)
-            .map(|s| s.trim_end_matches('F').to_string());
+            .map(|s| Iccid::try_from(s.trim_end_matches('F')))
+            .transpose()?;
 
         Ok(iccid)
     }
@@ -345,7 +347,7 @@ impl DBusClient {
     async fn get_device_details_busctl(&self, modem_id: &str) -> Result<DeviceDetails> {
         let path = format!("/org/freedesktop/ModemManager1/Modem/{modem_id}");
 
-        let mut imei = String::new();
+        let mut imei = None;
         let mut manufacturer = None;
         let mut model = None;
         let mut firmware = None;
@@ -364,7 +366,7 @@ impl DBusClient {
             if output.status.success() {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 if let Some(value) = stdout.split('"').nth(1) {
-                    imei = value.to_string();
+                    imei = Imei::try_from(value).ok();
                 }
             }
         }
