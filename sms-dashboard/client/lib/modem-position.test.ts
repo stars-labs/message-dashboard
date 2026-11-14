@@ -21,12 +21,13 @@ describe('getModemPosition', () => {
   });
 
   test('never substitutes an IMEI suffix for a physical location', () => {
-    expect(
-      getModemPosition({
-        equipment_id: '865827078904976',
-        usb_path: null,
-        last_usb_path: null,
-      }),
-    ).toBeNull();
+    const modem = { equipment_id: '865827078904976', usb_path: null, last_usb_path: null };
+
+    expect(getModemPosition(modem)).toBeNull();
+  });
+
+  test('has no position without a modem row', () => {
+    expect(getModemPosition(null)).toBeNull();
+    expect(getModemPosition(undefined)).toBeNull();
   });
 });

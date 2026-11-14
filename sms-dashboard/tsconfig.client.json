@@ -1,4 +1,6 @@
-// The Svelte 5 SPA. DOM only: nothing in client/ runs under Node.
+// The Svelte 5 SPA. DOM only: nothing in client/ runs under Node. Client files
+// join this project one by one as each is made clean; eslint.config.ts reads
+// this include list, so it is the one record of what has joined.
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
@@ -11,6 +13,10 @@
     "declaration": true,
     "outDir": "./node_modules/.tmp/client-declarations"
   },
-  "include": ["client/**/*.ts", "client/**/*.d.ts"],
+  "include": [
+    "client/lib/card-number.ts",
+    "client/lib/modem-position.ts",
+    "client/lib/sim-role.ts"
+  ],
   "references": [{ "path": "./tsconfig.shared.json" }]
 }

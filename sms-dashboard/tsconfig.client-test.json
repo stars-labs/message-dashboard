@@ -1,0 +1,17 @@
+// Tests of the client files that have joined the strict gate. They run under
+// Bun with happy-dom installing the DOM (bunfig.client.toml), so they see both.
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "tsBuildInfoFile": "./node_modules/.tmp/client-test.tsbuildinfo",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["bun"],
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "declaration": true,
+    "outDir": "./node_modules/.tmp/client-test-declarations"
+  },
+  "include": ["client/**/*.test.ts"],
+  "references": [{ "path": "./tsconfig.client.json" }]
+}

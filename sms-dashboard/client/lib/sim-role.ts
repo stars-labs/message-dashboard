@@ -9,12 +9,12 @@ interface SimRoleOption {
   label: string;
 }
 
-export const SIM_ROLES: SimRoleOption[] = [
+export const SIM_ROLES: readonly SimRoleOption[] = [
   { value: 'standalone', label: '独立' },
   { value: 'primary', label: '主卡' },
   { value: 'secondary', label: '副卡' },
 ];
 
 export function getSimRoleLabel(value: string | null | undefined): string {
-  return SIM_ROLES.find((option) => option.value === value)?.label || '独立';
+  return SIM_ROLES.find((option) => option.value === value)?.label ?? '独立';
 }

@@ -1,4 +1,3 @@
-// Run with: bun test client/lib/card-number.test.js
 import { describe, expect, test } from 'bun:test';
 import { formatCardNumber } from './card-number.js';
 

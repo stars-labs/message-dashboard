@@ -8,7 +8,28 @@ import { defineConfig, globalIgnores } from 'eslint/config';
 import { includeIgnoreFile } from '@eslint/config-helpers';
 import prettier from 'eslint-config-prettier';
 import tseslint from 'typescript-eslint';
+import ts from 'typescript';
+import { relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+// The client files that have joined the strict gate, read from the client
+// project so the two cannot disagree.
+function joinedClientFiles(): string[] {
+  const project = ts.getParsedCommandLineOfConfigFile(
+    fileURLToPath(new URL('tsconfig.client.json', import.meta.url)),
+    {},
+    {
+      ...ts.sys,
+      onUnRecoverableConfigFileDiagnostic: (diagnostic) => {
+        throw new Error(ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n'));
+      },
+    },
+  );
+  if (!project) throw new Error('tsconfig.client.json could not be read');
+  return project.fileNames
+    .map((file) => relative(import.meta.dirname, file))
+    .filter((file) => file.startsWith('client/'));
+}
 
 // A leading underscore marks a parameter or caught error that is unused on
 // purpose; `{ dropped, ...kept }` is the idiom for omitting a field.
@@ -29,7 +50,10 @@ export default defineConfig([
     'balance-agent/release/',
     // Areas that have not joined the strict gate. oxlint covers them instead;
     // each phase removes its own line here as that area joins.
-    'client/',
+    // In client/, the files in tsconfig.client.json and the TypeScript tests have joined.
+    'client/**/*.{js,ts,svelte}',
+    ...joinedClientFiles().map((file) => `!${file}`),
+    '!client/**/*.test.ts',
     'test/*.js',
     'scripts/',
     'runner-core/',

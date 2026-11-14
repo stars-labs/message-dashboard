@@ -1,12 +1,13 @@
 // The strict gate. It lists only the areas that have joined; everything else is
-// still checked by tsconfig.legacy.json, so no area goes unchecked. Phase 1 adds
-// the server and client projects here as each is made clean.
+// still checked by tsconfig.legacy.json, so no area goes unchecked.
 {
   "files": [],
   "references": [
     { "path": "./tsconfig.shared.json" },
     { "path": "./tsconfig.worker.json" },
     { "path": "./tsconfig.test.json" },
+    { "path": "./tsconfig.client.json" },
+    { "path": "./tsconfig.client-test.json" },
     { "path": "./tsconfig.tooling.json" }
   ]
 }
