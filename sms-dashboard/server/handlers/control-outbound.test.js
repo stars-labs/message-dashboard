@@ -57,7 +57,7 @@ function resultRequest(db, body) {
   return {
     env: { API_KEY: 'secret', DB: db },
     headers: new Headers({ 'X-API-Key': 'secret' }),
-    json: async () => body,
+    text: async () => JSON.stringify(body),
   };
 }
 

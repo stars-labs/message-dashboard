@@ -1,3 +1,6 @@
+import * as v from 'valibot';
+import { readJson } from '../../shared/parse-json.js';
+import { NOT_JSON_MESSAGE, readBody, type MissingKeyMessages } from '../lib/request-body.js';
 import { extractVerificationCode } from '../utils/verification';
 import { findKeywordMatches } from '../utils/keyword-match.js';
 import { classifyMessage, loadActiveRules } from '../utils/spam-filter.js';
@@ -14,34 +17,6 @@ import type { BalanceCheckRow, SmsOutcome } from './balance-queries.js';
 
 import type { AppRequest, Env } from '../worker-context.js';
 import type { D1Database } from '../cf-bindings.js';
-
-/** One entry of the daemon's modem_reports array. Fields the worker reads or stores. */
-interface ModemReport {
-  equipment_id: string;
-  manufacturer?: string | null;
-  model?: string | null;
-  firmware_revision?: string | null;
-  hardware_revision?: string | null;
-  detected_iccid?: string | null;
-  detected_phone_number?: string | null;
-  detected_operator?: string | null;
-  signal_percent?: number | null;
-  rssi?: number | null;
-  modem_index?: number | null;
-  usb_port?: number | null;
-  usb_path?: string | null;
-  last_usb_path?: string | null;
-  status?: string | null;
-  [field: string]: unknown;
-}
-
-/** POST /api/control/devices body. */
-interface DevicesBody {
-  modem_reports?: unknown;
-  removed_equipment_ids?: unknown;
-  sync_mode?: unknown;
-  session_id?: unknown;
-}
 
 /** One SMS as uploaded by the daemon. */
 interface UploadedMessage {
@@ -64,6 +39,113 @@ interface StoredMessage {
   purpose: 'user' | 'balance_maintenance';
   balance_check_id: string | null;
 }
+
+const ARRAYS_REQUIRED = 'modem_reports and removed_equipment_ids must be arrays';
+const INVALID_REPORT = 'Invalid modem report';
+const INVALID_SYNC = 'Invalid sync mode or missing full-sync session ID';
+const INVALID_REMOVED = 'Invalid or conflicting removed equipment IDs';
+const MESSAGES_REQUIRED = 'Messages must be an array';
+const MESSAGE_ID_REQUIRED = 'Every message requires a daemon-assigned id';
+const MESSAGE_FIELDS_REQUIRED = 'Every message requires phone_iccid and content';
+const MESSAGE_FIELDS_NOT_TEXT = 'phone_number and timestamp must be text';
+const MESSAGE_ID_MISSING = 'message_id is required';
+const INVALID_OUTCOME = 'outcome must be confirmed, submitted_unconfirmed, or failed';
+const PHONE_IDS_REQUIRED = 'phoneIds must be an array';
+const PHONE_IDS_INVALID = 'phoneIds must be a non-empty array of ICCIDs';
+
+/** Required text whose absence answers the same message as a wrong type or an empty value. */
+function requiredText(message: string) {
+  return v.pipe(v.optional(v.string(message), ''), v.minLength(1, message));
+}
+
+const ReportText = v.nullish(v.string(INVALID_REPORT));
+const ReportInteger = v.nullish(v.pipe(v.number(INVALID_REPORT), v.integer(INVALID_REPORT)));
+
+const ModemReportSchema = v.object(
+  {
+    equipment_id: v.string(INVALID_REPORT),
+    manufacturer: ReportText,
+    model: ReportText,
+    firmware_revision: ReportText,
+    hardware_revision: ReportText,
+    detected_iccid: ReportText,
+    detected_phone_number: ReportText,
+    detected_operator: ReportText,
+    signal_percent: ReportInteger,
+    rssi: ReportInteger,
+    modem_index: ReportInteger,
+    usb_port: ReportInteger,
+    usb_path: ReportText,
+    status: ReportText,
+  },
+  INVALID_REPORT,
+);
+
+const DevicesBodySchema = v.object(
+  {
+    modem_reports: v.array(ModemReportSchema, ARRAYS_REQUIRED),
+    removed_equipment_ids: v.array(v.string(INVALID_REMOVED), ARRAYS_REQUIRED),
+    sync_mode: v.nullish(v.picklist(['incremental', 'full'], INVALID_SYNC), 'incremental'),
+    session_id: v.nullish(v.string(INVALID_SYNC), null),
+  },
+  ARRAYS_REQUIRED,
+);
+
+const DEVICES_MISSING_KEY_MESSAGES = {
+  modem_reports: ARRAYS_REQUIRED,
+  removed_equipment_ids: ARRAYS_REQUIRED,
+} as const satisfies MissingKeyMessages<typeof DevicesBodySchema>;
+
+const UploadBodySchema = v.object(
+  {
+    messages: v.array(
+      v.object(
+        {
+          id: requiredText(MESSAGE_ID_REQUIRED),
+          phone_iccid: requiredText(MESSAGE_FIELDS_REQUIRED),
+          content: requiredText(MESSAGE_FIELDS_REQUIRED),
+          phone_number: v.nullish(v.string(MESSAGE_FIELDS_NOT_TEXT)),
+          timestamp: v.nullish(v.string(MESSAGE_FIELDS_NOT_TEXT)),
+        },
+        MESSAGE_ID_REQUIRED,
+      ),
+      MESSAGES_REQUIRED,
+    ),
+  },
+  MESSAGES_REQUIRED,
+);
+
+const UPLOAD_MISSING_KEY_MESSAGES = {
+  messages: MESSAGES_REQUIRED,
+} as const satisfies MissingKeyMessages<typeof UploadBodySchema>;
+
+const SmsResultBodySchema = v.object(
+  {
+    message_id: requiredText(MESSAGE_ID_MISSING),
+    outcome: v.picklist(['confirmed', 'submitted_unconfirmed', 'failed'], INVALID_OUTCOME),
+    error_message: v.nullish(v.string('error_message must be text')),
+    sms_id: v.nullish(v.string('sms_id must be text')),
+  },
+  MESSAGE_ID_MISSING,
+);
+
+const SMS_RESULT_MISSING_KEY_MESSAGES = {
+  outcome: INVALID_OUTCOME,
+} as const satisfies MissingKeyMessages<typeof SmsResultBodySchema>;
+
+const CleanupBodySchema = v.object(
+  {
+    phoneIds: v.pipe(
+      v.array(requiredText(PHONE_IDS_INVALID), PHONE_IDS_REQUIRED),
+      v.minLength(1, PHONE_IDS_INVALID),
+    ),
+  },
+  PHONE_IDS_REQUIRED,
+);
+
+const CLEANUP_MISSING_KEY_MESSAGES = {
+  phoneIds: PHONE_IDS_REQUIRED,
+} as const satisfies MissingKeyMessages<typeof CleanupBodySchema>;
 
 const SMS_STATUS_FOR_OUTCOME: Record<SmsOutcome, string> = {
   confirmed: 'sent',
@@ -103,35 +185,17 @@ export const controlHandler = {
     const unauthorized = await requireApiKey(request, env);
     if (unauthorized) return unauthorized;
 
-    // Parse request body
-    const body = (await request.json()) as DevicesBody;
-    const reports = body.modem_reports;
-    const removedEquipmentIds = body.removed_equipment_ids;
-    const sync_mode = body.sync_mode ?? 'incremental';
-    const session_id = body.session_id ?? null;
-    if (!Array.isArray(reports) || !Array.isArray(removedEquipmentIds)) {
-      return new Response(
-        JSON.stringify({
-          error: 'modem_reports and removed_equipment_ids must be arrays',
-        }),
-        {
-          status: 400,
-          headers: { 'Content-Type': 'application/json' },
-        },
-      );
-    }
+    const body = await readBody(request, DevicesBodySchema, DEVICES_MISSING_KEY_MESSAGES);
+    if (!body.ok) return json({ error: body.error }, 400);
+    const {
+      modem_reports: reports,
+      removed_equipment_ids: removedEquipmentIds,
+      sync_mode,
+      session_id,
+    } = body.value;
 
-    if (
-      (sync_mode !== 'incremental' && sync_mode !== 'full') ||
-      (sync_mode === 'full' && !session_id)
-    ) {
-      return new Response(
-        JSON.stringify({ error: 'Invalid sync mode or missing full-sync session ID' }),
-        {
-          status: 400,
-          headers: { 'Content-Type': 'application/json' },
-        },
-      );
+    if (sync_mode === 'full' && !session_id) {
+      return json({ error: INVALID_SYNC }, 400);
     }
 
     try {
@@ -139,22 +203,16 @@ export const controlHandler = {
         `[control.js] Received ${reports.length} modem_reports (mode: ${sync_mode}, session: ${session_id})`,
       );
 
-      const acceptedReports = (reports as ModemReport[]).filter((report): report is ModemReport => {
-        if (!report?.equipment_id) return false;
+      const acceptedReports = reports.filter((report) => {
+        if (!report.equipment_id) return false;
         return !(report.equipment_id.startsWith('MODEM_') && !report.manufacturer && !report.model);
       });
-      const removedIds = [...new Set(removedEquipmentIds as string[])];
+      const removedIds = [...new Set(removedEquipmentIds)];
       if (
-        removedIds.some((id) => typeof id !== 'string' || !id) ||
+        removedIds.some((id) => !id) ||
         acceptedReports.some((report) => removedIds.includes(report.equipment_id))
       ) {
-        return new Response(
-          JSON.stringify({ error: 'Invalid or conflicting removed equipment IDs' }),
-          {
-            status: 400,
-            headers: { 'Content-Type': 'application/json' },
-          },
-        );
+        return json({ error: INVALID_REMOVED }, 400);
       }
       const verificationStatus = sync_mode === 'full' ? 'verified' : null;
       const lastVerifiedSession = sync_mode === 'full' ? session_id : null;
@@ -336,49 +394,11 @@ export const controlHandler = {
     const unauthorized = await requireApiKey(request, env);
     if (unauthorized) return unauthorized;
 
+    const body = await readBody(request, UploadBodySchema, UPLOAD_MISSING_KEY_MESSAGES);
+    if (!body.ok) return json({ success: false, error: body.error }, 400);
+    const { messages } = body.value;
+
     try {
-      const { messages } = (await request.json()) as { messages?: unknown };
-
-      if (!Array.isArray(messages)) {
-        return new Response(
-          JSON.stringify({
-            success: false,
-            error: 'Messages must be an array',
-          }),
-          {
-            status: 400,
-            headers: { 'Content-Type': 'application/json' },
-          },
-        );
-      }
-
-      for (const message of messages as UploadedMessage[]) {
-        if (!message?.id || typeof message.id !== 'string') {
-          return new Response(
-            JSON.stringify({
-              success: false,
-              error: 'Every message requires a daemon-assigned id',
-            }),
-            {
-              status: 400,
-              headers: { 'Content-Type': 'application/json' },
-            },
-          );
-        }
-        if (!message.phone_iccid || !message.content) {
-          return new Response(
-            JSON.stringify({
-              success: false,
-              error: 'Every message requires phone_iccid and content',
-            }),
-            {
-              status: 400,
-              headers: { 'Content-Type': 'application/json' },
-            },
-          );
-        }
-      }
-
       let processed = 0;
       const results: Array<{ id: string; status: string; retryable?: boolean }> = [];
       const newMessages: StoredMessage[] = [];
@@ -577,22 +597,11 @@ export const controlHandler = {
     const unauthorized = await requireApiKey(request, env);
     if (unauthorized) return unauthorized;
 
+    const body = await readBody(request, CleanupBodySchema, CLEANUP_MISSING_KEY_MESSAGES);
+    if (!body.ok) return json({ success: false, error: body.error }, 400);
+    const { phoneIds } = body.value;
+
     try {
-      const { phoneIds } = (await request.json()) as { phoneIds?: unknown };
-
-      if (!Array.isArray(phoneIds)) {
-        return new Response(
-          JSON.stringify({
-            success: false,
-            error: 'phoneIds must be an array',
-          }),
-          {
-            status: 400,
-            headers: { 'Content-Type': 'application/json' },
-          },
-        );
-      }
-
       // Delete test SIMs by ICCID
       const placeholders = (phoneIds as string[]).map(() => '?').join(',');
       const deleteStmt = env.DB.prepare(`DELETE FROM sims WHERE iccid IN (${placeholders})`);
@@ -779,40 +788,11 @@ export const controlHandler = {
     const unauthorized = await requireApiKey(request, env);
     if (unauthorized) return unauthorized;
 
+    const body = await readBody(request, SmsResultBodySchema, SMS_RESULT_MISSING_KEY_MESSAGES);
+    if (!body.ok) return json({ success: false, error: body.error }, 400);
+    const { message_id, outcome, error_message, sms_id } = body.value;
+
     try {
-      const { message_id, outcome, error_message, sms_id } = (await request.json()) as {
-        message_id?: unknown;
-        outcome?: unknown;
-        error_message?: unknown;
-        sms_id?: unknown;
-      };
-
-      if (!message_id) {
-        return new Response(
-          JSON.stringify({
-            success: false,
-            error: 'message_id is required',
-          }),
-          {
-            status: 400,
-            headers: { 'Content-Type': 'application/json' },
-          },
-        );
-      }
-
-      if (outcome !== 'confirmed' && outcome !== 'submitted_unconfirmed' && outcome !== 'failed') {
-        return new Response(
-          JSON.stringify({
-            success: false,
-            error: 'outcome must be confirmed, submitted_unconfirmed, or failed',
-          }),
-          {
-            status: 400,
-            headers: { 'Content-Type': 'application/json' },
-          },
-        );
-      }
-
       // Update message status
       const status = SMS_STATUS_FOR_OUTCOME[outcome as SmsOutcome];
       const stmt = env.DB.prepare(`
@@ -915,8 +895,11 @@ export const controlHandler = {
     const unauthorized = await requireApiKey(request, env);
     if (unauthorized) return unauthorized;
 
+    const parsed = await readJson(request, v.unknown());
+    if (!parsed.ok) return json({ success: false, error: NOT_JSON_MESSAGE }, 400);
+    const body = parsed.value;
+
     try {
-      const body = (await request.json()) as Record<string, unknown>;
       const clientIp =
         request.headers.get('CF-Connecting-IP') ||
         request.headers.get('X-Forwarded-For') ||

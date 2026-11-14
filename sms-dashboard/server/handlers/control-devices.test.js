@@ -42,7 +42,7 @@ function apiRequest(db, payload) {
   return {
     env: { API_KEY: 'secret', DB: db },
     headers: new Headers({ 'X-API-Key': 'secret' }),
-    json: async () => payload,
+    text: async () => JSON.stringify(payload),
     ctx: { waitUntil() {} },
   };
 }
@@ -363,5 +363,107 @@ describe('message upload idempotency', () => {
     const retry = await controlHandler.uploadMessages(apiRequest(db, { messages: [first] }));
     expect((await retry.json()).results).toEqual([{ id: first.id, status: 'already_stored' }]);
     expect(sqlite.query('SELECT COUNT(*) AS count FROM messages').get().count).toBe(2);
+  });
+});
+
+describe('daemon payload boundary', () => {
+  const untouchable = {
+    prepare() {
+      throw new Error('unexpected D1 access');
+    },
+    batch() {
+      throw new Error('unexpected D1 access');
+    },
+  };
+
+  function rawRequest(text) {
+    return {
+      env: { API_KEY: 'secret', DB: untouchable },
+      headers: new Headers({ 'X-API-Key': 'secret' }),
+      text: async () => text,
+      ctx: { waitUntil() {} },
+    };
+  }
+
+  async function errorOf(response) {
+    return (await response.json()).error;
+  }
+
+  test('answers 400 to a body that is not JSON', async () => {
+    for (const route of [
+      'updateDevices',
+      'uploadMessages',
+      'updateSMSResult',
+      'cleanupTestData',
+      'heartbeat',
+    ]) {
+      const response = await controlHandler[route](rawRequest('{'));
+      expect(response.status).toBe(400);
+      expect(await errorOf(response)).toBe('Body must be JSON');
+    }
+  });
+
+  test('rejects a modem report that is not the documented shape', async () => {
+    for (const bad of [
+      { equipment_id: 5 },
+      { manufacturer: 'Quectel' },
+      report({ signal_percent: '80' }),
+      report({ manufacturer: 1 }),
+      'modem-a',
+      null,
+    ]) {
+      const response = await controlHandler.updateDevices(
+        rawRequest(JSON.stringify(body('incremental', [bad]))),
+      );
+      expect(response.status).toBe(400);
+      expect(await errorOf(response)).toBe('Invalid modem report');
+    }
+  });
+
+  test('rejects a sync session id that is not text', async () => {
+    const response = await controlHandler.updateDevices(
+      rawRequest(JSON.stringify({ ...body('full'), session_id: 5 })),
+    );
+    expect(response.status).toBe(400);
+    expect(await errorOf(response)).toBe('Invalid sync mode or missing full-sync session ID');
+  });
+
+  test('rejects uploaded message fields that are not text', async () => {
+    const message = { id: 'm-1', phone_iccid: 'iccid-a', content: 'hello' };
+    for (const [bad, error] of [
+      [{ ...message, phone_iccid: 5 }, 'Every message requires phone_iccid and content'],
+      [{ ...message, content: ['hello'] }, 'Every message requires phone_iccid and content'],
+      [{ ...message, phone_number: 10086 }, 'phone_number and timestamp must be text'],
+      [{ ...message, timestamp: 1756857600 }, 'phone_number and timestamp must be text'],
+    ]) {
+      const response = await controlHandler.uploadMessages(
+        rawRequest(JSON.stringify({ messages: [bad] })),
+      );
+      expect(response.status).toBe(400);
+      expect(await errorOf(response)).toBe(error);
+    }
+  });
+
+  test('rejects an SMS result whose fields are not text', async () => {
+    const result = { message_id: 'msg-1', outcome: 'failed' };
+    for (const [bad, error] of [
+      [{ ...result, message_id: 5 }, 'message_id is required'],
+      [{ ...result, error_message: { code: 1 } }, 'error_message must be text'],
+      [{ ...result, sms_id: 7 }, 'sms_id must be text'],
+    ]) {
+      const response = await controlHandler.updateSMSResult(rawRequest(JSON.stringify(bad)));
+      expect(response.status).toBe(400);
+      expect(await errorOf(response)).toBe(error);
+    }
+  });
+
+  test('rejects an empty or non-text test-data cleanup list', async () => {
+    for (const phoneIds of [[], [5], ['']]) {
+      const response = await controlHandler.cleanupTestData(
+        rawRequest(JSON.stringify({ phoneIds })),
+      );
+      expect(response.status).toBe(400);
+      expect(await errorOf(response)).toBe('phoneIds must be a non-empty array of ICCIDs');
+    }
   });
 });
