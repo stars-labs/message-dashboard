@@ -12,6 +12,13 @@ describe('daemon status compatibility', () => {
     expect(normalizeDaemonStatus('warning')).toBe('degraded');
   });
 
+  test('reads an unlisted status as unknown, even one Object.prototype has', () => {
+    expect(normalizeDaemonStatus('constructor')).toBe('unknown');
+    expect(normalizeDaemonStatus('')).toBe('unknown');
+    expect(normalizeDaemonStatus(null)).toBe('unknown');
+    expect(getDaemonStatusMeta('toString').label).toBe('检测中');
+  });
+
   test('only healthy and degraded services count as connected', () => {
     expect(isDaemonConnected('healthy')).toBe(true);
     expect(isDaemonConnected('degraded')).toBe(true);
