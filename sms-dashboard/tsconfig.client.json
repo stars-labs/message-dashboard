@@ -14,9 +14,16 @@
     "outDir": "./node_modules/.tmp/client-declarations"
   },
   "include": [
+    "client/lib/balance-polling.ts",
     "client/lib/card-number.ts",
+    "client/lib/clipboard.ts",
+    "client/lib/daemon-status.ts",
+    "client/lib/message-page.ts",
+    "client/lib/message-status.ts",
     "client/lib/modem-position.ts",
-    "client/lib/sim-role.ts"
+    "client/lib/sim-role.ts",
+    "client/lib/sim-service-type.ts",
+    "client/lib/time.ts"
   ],
   "references": [{ "path": "./tsconfig.shared.json" }]
 }

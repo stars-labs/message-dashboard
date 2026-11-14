@@ -11,7 +11,9 @@
  * user denies permission (e.g. inside an iframe without clipboard-write).
  */
 export async function copyCode(text: string): Promise<boolean> {
-  if (!navigator?.clipboard?.writeText) return false;
+  // navigator.clipboard is exposed only in a secure context, though the DOM
+  // types declare it unconditionally.
+  if (!('clipboard' in navigator)) return false;
   try {
     await navigator.clipboard.writeText(text);
     return true;

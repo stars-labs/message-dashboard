@@ -1,3 +1,5 @@
+import { textOr } from '../../shared/text.js';
+
 const ACTIVE_QUERY_STATUSES = new Set([
   'queued',
   'awaiting_response',
@@ -16,15 +18,14 @@ interface PollableCheck {
   id: string;
   display_status?: string | null;
   status?: string | null;
-  [column: string]: unknown;
 }
 
-export function activeBalanceCheckIds(checks: PollableCheck[] = []): string[] {
+export function activeBalanceCheckIds(checks: readonly PollableCheck[] = []): string[] {
   return checks.filter(isActiveBalanceCheck).map((check) => check.id);
 }
 
 export function isActiveBalanceCheck(check: PollableCheck | null | undefined): boolean {
-  return ACTIVE_QUERY_STATUSES.has(String(check?.display_status || check?.status || ''));
+  return ACTIVE_QUERY_STATUSES.has(textOr(check?.display_status, textOr(check?.status, '')));
 }
 
 export function balancePollDelay(now: number, fastUntil: number): number {

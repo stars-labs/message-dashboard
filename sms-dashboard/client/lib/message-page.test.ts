@@ -6,7 +6,7 @@ import {
   nextMessageOffset,
 } from './message-page.js';
 
-const message = (id, timestamp) => ({ id, timestamp, content: id });
+const message = (id: string, timestamp: string | null = null) => ({ id, timestamp, content: id });
 
 describe('message pagination', () => {
   test('uses a bounded first page', () => {
@@ -35,11 +35,24 @@ describe('message pagination', () => {
     ]);
 
     expect(result.map(({ id }) => id)).toEqual(['three', 'two', 'one']);
-    expect(result.find(({ id }) => id === 'two').content).toBe('updated');
+    expect(result.find(({ id }) => id === 'two')?.content).toBe('updated');
   });
 
   test('uses the loaded unique count as the next offset', () => {
     expect(nextMessageOffset([message('a'), message('a'), message('b')])).toBe(2);
+  });
+
+  test('sorts a message without a readable timestamp last', () => {
+    const result = mergeMessagePage(
+      [],
+      [
+        message('undated'),
+        message('garbled', 'not a date'),
+        message('dated', '2026-08-21T00:00:00Z'),
+      ],
+    );
+
+    expect(result[0]?.id).toBe('dated');
   });
 
   test('reports whether the server has another page', () => {

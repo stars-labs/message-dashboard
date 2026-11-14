@@ -3,7 +3,7 @@ interface LabelledOption<T extends string> {
   label: string;
 }
 
-export const SIM_SERVICE_TYPES: LabelledOption<
+export const SIM_SERVICE_TYPES: readonly LabelledOption<
   'unknown' | 'prepaid' | 'postpaid' | 'balance_managed'
 >[] = [
   { value: 'unknown', label: '待确认' },
@@ -12,7 +12,7 @@ export const SIM_SERVICE_TYPES: LabelledOption<
   { value: 'balance_managed', label: '按余额管理' },
 ];
 
-export const SIM_SERVICE_TYPE_SOURCES: LabelledOption<
+export const SIM_SERVICE_TYPE_SOURCES: readonly LabelledOption<
   'carrier_account' | 'carrier_support' | 'contract_or_bill' | 'carrier_message'
 >[] = [
   { value: 'carrier_account', label: '运营商 App / 门户' },
@@ -22,9 +22,9 @@ export const SIM_SERVICE_TYPE_SOURCES: LabelledOption<
 ];
 
 export function getSimServiceTypeLabel(value: string | null | undefined): string {
-  return SIM_SERVICE_TYPES.find((option) => option.value === value)?.label || '待确认';
+  return SIM_SERVICE_TYPES.find((option) => option.value === value)?.label ?? '待确认';
 }
 
 export function getSimServiceTypeSourceLabel(value: string | null | undefined): string {
-  return SIM_SERVICE_TYPE_SOURCES.find((option) => option.value === value)?.label || '—';
+  return SIM_SERVICE_TYPE_SOURCES.find((option) => option.value === value)?.label ?? '—';
 }
