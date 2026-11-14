@@ -26,13 +26,6 @@
     "skipLibCheck": true,
     "types": []
   },
-  "include": ["server/**/*.ts", "client/**/*.ts"],
-  "exclude": [
-    "node_modules",
-    "dist",
-    "balance-agent/dist",
-    "balance-agent/release",
-    "server/lib",
-    "**/*.test.ts"
-  ]
+  "include": ["client/**/*.ts"],
+  "exclude": ["node_modules", "dist", "balance-agent/dist", "balance-agent/release", "**/*.test.ts"]
 }

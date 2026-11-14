@@ -1,9 +1,5 @@
-// The Cloudflare Worker. Server files join this project one by one as each is
-// made clean; eslint.config.ts reads this include list, so it is the one record
-// of what has joined. worker-runtime.d.ts holds the runtime globals.
-// worker-configuration.d.ts (the Env bindings) joins with the last file: it
-// types the Durable Object binding through server/index.ts, which imports
-// every route.
+// The Cloudflare Worker. worker-runtime.d.ts holds the runtime globals and
+// worker-configuration.d.ts the generated Env, which secrets-env.d.ts extends.
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
@@ -14,59 +10,7 @@
     "declaration": true,
     "outDir": "./node_modules/.tmp/worker-declarations"
   },
-  "include": [
-    "worker-runtime.d.ts",
-    "server/lib/**/*.ts",
-    "server/handlers/phones.ts",
-    "server/asset-cache-control.ts",
-    "server/utils/keyword-match.ts",
-    "server/utils/keyword-color.ts",
-    "server/utils/recipient.ts",
-    "server/utils/session-token.ts",
-    "server/utils/d1-error.ts",
-    "server/middleware/cors.ts",
-    "server/utils/user-sessions.ts",
-    "server/utils/singtel-postpaid-bill.ts",
-    "server/utils/m1-web-balance.ts",
-    "server/utils/unicom-web-balance.ts",
-    "server/utils/daemon-health.ts",
-    "server/utils/verification.ts",
-    "server/utils/company-ai.ts",
-    "server/utils/message-retention.ts",
-    "server/middleware/rbac.ts",
-    "server/api/call-state.ts",
-    "server/utils/audit-log.ts",
-    "server/utils/balance-skill.ts",
-    "server/utils/auth0-management.ts",
-    "server/utils/spam-filter.ts",
-    "server/utils/carrier-billing.ts",
-    "server/utils/carrier-billing-backfill.ts",
-    "server/frontend-handler.ts",
-    "server/utils/verification-backfill.ts",
-    "server/utils/spam-backfill.ts",
-    "server/utils/filter-history.ts",
-    "server/utils/keyword-history.ts",
-    "server/utils/history-request.ts",
-    "server/handlers/auth0.ts",
-    "server/middleware/auth0.ts",
-    "server/utils/runner-auth.ts",
-    "server/handlers/users.ts",
-    "server/handlers/health.ts",
-    "server/handlers/messages.ts",
-    "server/api/verification.ts",
-    "server/handlers/iccid-mappings.ts",
-    "server/handlers/carrier-bills.ts",
-    "server/handlers/carrier-billing-backfill.ts",
-    "server/api/filters.ts",
-    "server/api/keywords.ts",
-    "server/handlers/balance-runners.ts",
-    "server/utils/balance-status.ts",
-    "server/handlers/carrier-web-balance.ts",
-    "server/api/calls.ts",
-    "server/handlers/balance-queries.ts",
-    "server/handlers/balance-skill-runner.ts",
-    "server/handlers/control.ts"
-  ],
+  "include": ["worker-runtime.d.ts", "worker-configuration.d.ts", "server/**/*.ts"],
   "exclude": ["**/*.test.ts"],
   "references": [{ "path": "./tsconfig.shared.json" }]
 }

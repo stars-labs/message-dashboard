@@ -8,28 +8,7 @@ import { defineConfig, globalIgnores } from 'eslint/config';
 import { includeIgnoreFile } from '@eslint/config-helpers';
 import prettier from 'eslint-config-prettier';
 import tseslint from 'typescript-eslint';
-import ts from 'typescript';
-import { relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-
-// The server files that have joined the strict gate, read from the Worker
-// project so the two cannot disagree.
-function joinedServerFiles(): string[] {
-  const project = ts.getParsedCommandLineOfConfigFile(
-    fileURLToPath(new URL('tsconfig.worker.json', import.meta.url)),
-    {},
-    {
-      ...ts.sys,
-      onUnRecoverableConfigFileDiagnostic: (diagnostic) => {
-        throw new Error(ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n'));
-      },
-    },
-  );
-  if (!project) throw new Error('tsconfig.worker.json could not be read');
-  return project.fileNames
-    .map((file) => relative(import.meta.dirname, file))
-    .filter((file) => file.startsWith('server/'));
-}
 
 // A leading underscore marks a parameter or caught error that is unused on
 // purpose; `{ dropped, ...kept }` is the idiom for omitting a field.
@@ -49,12 +28,7 @@ export default defineConfig([
     'balance-agent/dist/',
     'balance-agent/release/',
     // Areas that have not joined the strict gate. oxlint covers them instead;
-    // each Phase 1 series removes its own line here as that area joins.
-    // In server/, the files in tsconfig.worker.json and the TypeScript tests have joined.
-    'server/**/*.js',
-    'server/**/*.ts',
-    ...joinedServerFiles().map((file) => `!${file}`),
-    '!server/**/*.test.ts',
+    // each phase removes its own line here as that area joins.
     'client/',
     'test/*.js',
     'scripts/',

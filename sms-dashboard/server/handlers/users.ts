@@ -33,7 +33,7 @@ interface ListRequest {
 interface SetRoleRequest {
   env: Auth0ManagementEnv & { SESSIONS: KV<'get' | 'put' | 'delete'>; DB: D1<'run'> };
   params?: Record<string, string>;
-  user?: { id: string; email?: string };
+  user?: { id: string; email?: string | undefined };
   text(): Promise<string>;
 }
 

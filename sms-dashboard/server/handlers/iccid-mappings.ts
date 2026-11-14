@@ -146,7 +146,7 @@ interface SimRoleInput {
 }
 
 interface Operator {
-  email?: string;
+  email?: string | undefined;
 }
 
 interface ListRequest {

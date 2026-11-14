@@ -1,79 +1,20 @@
-// Worker bindings and the request object the middleware hands to handlers.
+// The request object the router hands to route handlers. Env is the global
+// interface wrangler types generates (worker-configuration.d.ts), with the
+// secrets merged in by secrets-env.d.ts.
 //
-// Types-only module: every export is erased at runtime. Import it with
-// `import type { Env } from './worker-context.js'`.
+// Types-only module: every export is erased at runtime.
 
-import type {
-  D1Database,
-  KVNamespace,
-  DurableObjectNamespace,
-  ExecutionContext,
-} from './cf-bindings.js';
-
-export interface Env {
-  DB: D1Database;
-  SESSIONS: KVNamespace;
-  CALL_STATE: DurableObjectNamespace;
-
-  // Shared secret the Orange Pi daemon authenticates with. Never Auth0.
-  API_KEY?: string;
-
-  AUTH0_DOMAIN?: string;
-  AUTH0_CLIENT_ID?: string;
-  AUTH0_CLIENT_SECRET?: string;
-  AUTH0_AUDIENCE?: string;
-  AUTH0_LOGIN_AUDIENCE?: string;
-  AUTH0_M2M_CLIENT_ID?: string;
-  AUTH0_M2M_CLIENT_SECRET?: string;
-  AUTH0_ADMIN_ROLE?: string;
-  AUTH0_VIEWER_ROLE?: string;
-  AUTH0_ROLE_NAMESPACE?: string;
-
-  ENVIRONMENT?: string;
-  WORKER_URL?: string;
-  API_BASE_URL?: string;
-  ALLOWED_EMAIL_DOMAINS?: string;
-
-  // Cloudflare Realtime, used by voice calls (server/api/calls.js).
-  REALTIME_APP_ID?: string;
-  REALTIME_APP_SECRET?: string;
-  TURN_KEY_ID?: string;
-  TURN_API_TOKEN?: string;
-  VOICE_BRIDGE_HOST?: string;
-}
-
-/** The caller as the middleware builds it. `roles` is always present. */
-export interface RequestUser {
-  id: string;
-  /**
-   * The raw Auth0 subject. Present when the user came from a stored KV session
-   * (the session snapshots Auth0's own user object); the JWT path maps it to
-   * `id`. Audit fields accept either so a record is never attributed to nobody.
-   */
-  sub?: string;
-  email?: string;
-  name?: string;
-  picture?: string;
-  roles: string[];
-  permissions?: string[];
-}
-
-/** A route handler. Returning a Response short-circuits; null/undefined continues. */
-export type Handler = (
-  request: AppRequest,
-  env: Env,
-  ctx: ExecutionContext,
-) => Promise<Response | null | undefined> | Response | null | undefined;
+import type { SessionUser } from './handlers/auth0.js';
 
 /**
- * The Request handlers actually receive. `env` and `ctx` are also passed as
- * arguments; they are mirrored here because the router sets them before the
- * first handler runs, and audit-log.js reads request.ctx.
+ * The Request handlers receive: the Worker's request with the env and ctx the
+ * runtime passed alongside it, and the route parameters and caller the router
+ * and the auth middleware add.
  */
 export interface AppRequest extends Request {
   env: Env;
   ctx: ExecutionContext;
   params?: Record<string, string>;
-  user?: RequestUser;
+  user?: SessionUser & { permissions?: string[] };
   auth0Token?: Record<string, unknown>;
 }
