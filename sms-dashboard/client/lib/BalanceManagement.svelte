@@ -109,14 +109,14 @@
   // Counts live on the filter tabs (device-page pattern) instead of a separate summary bar.
   let filterTabs = $derived([
     ['all', '全部', carrierRows.length],
-    ['healthy', '正常', counts.healthy],
+    ['healthy', '正常', counts.get('healthy')],
     ['payment', '需付款', carrierRows.filter(requiresPayment).length],
-    ['expiry', '到期处理', counts.expired + counts.expiring_soon],
-    ['verification_pending', '待验证', counts.verification_pending],
-    ['stale', '数据过期', counts.stale],
-    ['query_failed', '查询失败', counts.query_failed],
-    ['missing', '未取得', counts.never_observed + counts.expiry_unknown],
-    ['not_applicable', '后付费', counts.not_applicable],
+    ['expiry', '到期处理', counts.get('expired') + counts.get('expiring_soon')],
+    ['verification_pending', '待验证', counts.get('verification_pending')],
+    ['stale', '数据过期', counts.get('stale')],
+    ['query_failed', '查询失败', counts.get('query_failed')],
+    ['missing', '未取得', counts.get('never_observed') + counts.get('expiry_unknown')],
+    ['not_applicable', '后付费', counts.get('not_applicable')],
   ]);
 
   function matchesStatusFilter(row) {

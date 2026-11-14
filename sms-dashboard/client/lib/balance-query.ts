@@ -1,55 +1,19 @@
-/** The display metadata for one balance-check status (server or derived). */
+import type {
+  BalanceCheck,
+  BalanceCheckDetail,
+  BalanceConversationMessage,
+  BalanceMetric,
+} from '../../shared/api/balance-checks.js';
+import type { DisplayStatus } from '../../shared/balance-status.js';
+import { textOr } from '../../shared/text.js';
+
+/** The display metadata for one balance-check status. */
 interface BalanceStatusMeta {
   label: string;
   className: string;
 }
 
-/** A conversation message, built from a check or read from its detail payload. */
-export interface BalanceConversationMessage {
-  id: string;
-  type: 'sent' | 'received';
-  content?: string | null;
-  recipient?: string | null;
-  phone_number?: string | null;
-  timestamp?: string | null;
-  status?: string | null;
-}
-
-/** A balance metric row as the API returns it. */
-export interface BalanceMetricRow {
-  metric_type: string;
-  value: number | string | null;
-  unit?: string | null;
-  currency?: string | null;
-  expires_at?: string | null;
-}
-
-/** The balance check fields these helpers read. */
-export interface BalanceCheckLike {
-  id: string;
-  status?: string | null;
-  conversation?: BalanceConversationMessage[];
-  outbound_message_id?: string | null;
-  outbound_content?: string | null;
-  command?: string | null;
-  outbound_recipient?: string | null;
-  destination?: string | null;
-  outbound_timestamp?: string | null;
-  sent_at?: string | null;
-  outbound_status?: string | null;
-  response_content?: string | null;
-  raw_response?: string | null;
-  response_message_id?: string | null;
-  response_phone_number?: string | null;
-  response_sender?: string | null;
-  response_timestamp?: string | null;
-  completed_at?: string | null;
-  requested_at?: string | null;
-  metrics?: BalanceMetricRow[];
-  [column: string]: unknown;
-}
-
-const STATUS_META: Record<string, BalanceStatusMeta> = {
+const STATUS_META = {
   queued: { label: '排队中', className: 'bg-stone-100 text-stone-600 border-stone-200' },
   awaiting_response: {
     label: '等待回复',
@@ -71,110 +35,110 @@ const STATUS_META: Record<string, BalanceStatusMeta> = {
   failed: { label: '失败', className: 'bg-red-50 text-red-700 border-red-200' },
   timed_out: { label: '已超时', className: 'bg-stone-100 text-stone-600 border-stone-200' },
   unparsed: { label: '待识别', className: 'bg-amber-50 text-amber-700 border-amber-200' },
-};
+} satisfies Record<DisplayStatus, BalanceStatusMeta>;
 
-const METRIC_LABELS: Record<string, string> = {
-  cash_balance: '账户余额',
-  current_charges: '本期费用',
-  arrears: '欠费金额',
-  account_expiry: '账户有效期',
-  data_remaining: '剩余流量',
-  sms_remaining: '剩余短信',
-  voice_remaining: '剩余通话',
-};
+const METRIC_LABELS = new Map([
+  ['cash_balance', '账户余额'],
+  ['current_charges', '本期费用'],
+  ['arrears', '欠费金额'],
+  ['account_expiry', '账户有效期'],
+  ['data_remaining', '剩余流量'],
+  ['sms_remaining', '剩余短信'],
+  ['voice_remaining', '剩余通话'],
+]);
 
-export function getBalanceStatusMeta(status: string | null | undefined): BalanceStatusMeta {
+export function getBalanceStatusMeta(status: DisplayStatus): BalanceStatusMeta {
+  return STATUS_META[status];
+}
+
+/** When the check last moved: its newest message, else the latest timestamp it carries. */
+export function getBalanceTimestamp(
+  check: BalanceCheck,
+  detail: BalanceCheckDetail | null = null,
+): string | null {
   return (
-    (status ? STATUS_META[status] : undefined) || {
-      label: status || '未知',
-      className: 'bg-stone-100 text-stone-600 border-stone-200',
-    }
+    getBalanceConversation(check, detail).at(-1)?.timestamp ??
+    check.response_timestamp ??
+    check.completed_at ??
+    check.sent_at ??
+    check.outbound_timestamp ??
+    check.requested_at
   );
 }
 
-export function getBalanceTimestamp(check: BalanceCheckLike | null | undefined): string | null {
-  const conversation = getBalanceConversation(check);
-  return (
-    conversation.at(-1)?.timestamp ||
-    check?.response_timestamp ||
-    check?.completed_at ||
-    check?.sent_at ||
-    check?.outbound_timestamp ||
-    check?.requested_at ||
-    null
-  );
-}
-
+/** The messages of a check: from its loaded detail, else the outbound and reply it carries. */
 export function getBalanceConversation(
-  check: BalanceCheckLike | null | undefined,
+  check: BalanceCheck,
+  detail: BalanceCheckDetail | null = null,
 ): BalanceConversationMessage[] {
-  if (Array.isArray(check?.conversation) && check.conversation.length) {
-    return check.conversation;
-  }
+  if (detail !== null && detail.conversation.length > 0) return detail.conversation;
 
   const messages: BalanceConversationMessage[] = [];
-  if (check?.outbound_content || check?.command) {
+  const sent = textOr(check.outbound_content, textOr(check.command, null));
+  if (sent !== null) {
     messages.push({
-      id: check.outbound_message_id || `${check.id}-outbound`,
+      id: `${check.id}-outbound`,
       type: 'sent',
-      content: check.outbound_content || check.command,
-      recipient: check.outbound_recipient || check.destination,
-      timestamp: check.outbound_timestamp || check.sent_at,
+      content: sent,
+      recipient: textOr(check.outbound_recipient, check.destination),
+      phone_number: null,
+      timestamp: check.outbound_timestamp ?? check.sent_at,
       status: check.outbound_status,
     });
   }
-  if (check?.response_content || check?.raw_response) {
+  const reply = textOr(check.response_content, textOr(check.raw_response, null));
+  if (reply !== null) {
     messages.push({
-      id: check.response_message_id || `${check.id}-response`,
+      id: `${check.id}-response`,
       type: 'received',
-      content: check.response_content || check.raw_response,
-      phone_number: check.response_phone_number || check.response_sender,
-      timestamp: check.response_timestamp || check.completed_at,
+      content: reply,
+      recipient: null,
+      phone_number: textOr(check.response_phone_number, check.response_sender),
+      timestamp: check.response_timestamp ?? check.completed_at,
+      status: null,
     });
   }
   return messages;
 }
 
 export function getLatestBalanceReply(
-  check: BalanceCheckLike | null | undefined,
+  check: BalanceCheck,
+  detail: BalanceCheckDetail | null = null,
 ): BalanceConversationMessage | null {
   return (
-    [...getBalanceConversation(check)].reverse().find((message) => message.type === 'received') ||
-    null
+    getBalanceConversation(check, detail).findLast((message) => message.type === 'received') ?? null
   );
 }
 
-export function getCashBalance(
-  check: BalanceCheckLike | null | undefined,
-): BalanceMetricRow | null {
-  return check?.metrics?.find((metric) => metric.metric_type === 'cash_balance') || null;
+export function getCashBalance(check: Pick<BalanceCheck, 'metrics'> | null): BalanceMetric | null {
+  return check?.metrics.find((metric) => metric.metric_type === 'cash_balance') ?? null;
 }
 
-export function getBalanceMetricLabel(metricType: string | null | undefined): string {
-  return (metricType ? METRIC_LABELS[metricType] : undefined) || metricType || '未知指标';
+export function getBalanceMetricLabel(metricType: string): string {
+  return METRIC_LABELS.get(metricType) ?? textOr(metricType, '未知指标');
 }
 
-export function formatBalanceMetric(metric: BalanceMetricRow | null | undefined): string {
-  if (!metric || metric.value == null) return '暂未取得';
-  const value = Number(metric.value);
-  if (!Number.isFinite(value)) return '暂未取得';
+export function formatBalanceMetric(metric: BalanceMetric | null): string {
+  if (metric?.value == null || !Number.isFinite(metric.value)) return '暂未取得';
+  const { value, currency, unit } = metric;
 
-  if (metric.currency) {
+  if (currency !== null && currency !== '') {
     try {
       return new Intl.NumberFormat('zh-CN', {
         style: 'currency',
-        currency: metric.currency,
+        currency,
         minimumFractionDigits: 2,
       }).format(value);
     } catch {
-      return `${value.toFixed(2)} ${metric.currency}`;
+      return `${value.toFixed(2)} ${currency}`;
     }
   }
 
-  return `${value}${metric.unit ? ` ${metric.unit}` : ''}`;
+  return `${String(value)}${unit !== null && unit !== '' ? ` ${unit}` : ''}`;
 }
 
+/** D1 stores UTC without a zone; mark it as UTC so the browser does not read local time. */
 export function normalizeUtcTimestamp<T extends string | null | undefined>(value: T): T | string {
-  if (!value || typeof value !== 'string') return value;
+  if (typeof value !== 'string' || value === '') return value;
   return /(?:Z|[+-]\d{2}:?\d{2})$/.test(value) ? value : `${value}Z`;
 }

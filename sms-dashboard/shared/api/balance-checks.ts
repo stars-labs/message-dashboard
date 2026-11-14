@@ -130,11 +130,13 @@ export const BalanceWebEvent = v.object({
 });
 
 /** GET /api/balance-checks/:id: the messages and web events of one check. */
-const BalanceCheckDetail = v.object({
+export const BalanceCheckDetail = v.object({
   id: v.string(),
   conversation: v.array(BalanceConversationMessage),
   web_events: v.array(BalanceWebEvent),
 });
+
+export type BalanceCheckDetail = v.InferOutput<typeof BalanceCheckDetail>;
 
 export const BalanceCheckDetailResponse = v.object({
   success: v.literal(true),

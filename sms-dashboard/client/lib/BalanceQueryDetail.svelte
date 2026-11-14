@@ -12,10 +12,10 @@
     normalizeUtcTimestamp,
   } from './balance-query.js';
 
-  let { check, onClose = null } = $props();
+  let { check, detail = null, onClose = null } = $props();
   let statusMeta = $derived(getBalanceStatusMeta(check?.display_status || check?.status));
   let cashBalance = $derived(getCashBalance(check));
-  let conversation = $derived(getBalanceConversation(check));
+  let conversation = $derived(getBalanceConversation(check, detail));
 
   function formatDate(value) {
     if (!value) return '—';
@@ -109,7 +109,7 @@
           <div class="px-4 py-3">
             <p class="text-[11px] text-stone-400">最近更新</p>
             <p class="mt-1 text-sm font-medium text-stone-700 tabular-nums">
-              {formatDate(getBalanceTimestamp(check))}
+              {formatDate(getBalanceTimestamp(check, detail))}
             </p>
           </div>
         </div>

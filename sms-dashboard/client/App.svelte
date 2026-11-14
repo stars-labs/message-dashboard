@@ -99,6 +99,7 @@
   let loadingOlderMessages = $state(false);
   let balanceChecks = $state([]);
   let balanceDetailCheck = $state(null);
+  let balanceDetail = $state(null);
   // The message whose full body is open in the detail drawer, or null.
   let messageDetail = $state(null);
   let latestSelectedBalanceCheck = $derived(
@@ -612,10 +613,11 @@
   async function openBalanceCheck(check) {
     if (!check?.id) return;
     balanceDetailCheck = check;
+    balanceDetail = null;
     try {
       const result = await api.get(`/api/balance-checks/${encodeURIComponent(check.id)}`);
       if (balanceDetailCheck?.id === check.id && result?.data) {
-        balanceDetailCheck = { ...check, ...result.data };
+        balanceDetail = result.data;
       }
     } catch (error) {
       console.warn('Failed to load balance query detail:', error);
@@ -1767,7 +1769,11 @@
     {/if}
 
     {#if balanceDetailCheck}
-      <BalanceQueryDetail check={balanceDetailCheck} onClose={() => (balanceDetailCheck = null)} />
+      <BalanceQueryDetail
+        check={balanceDetailCheck}
+        detail={balanceDetail}
+        onClose={() => (balanceDetailCheck = null)}
+      />
     {/if}
 
     {#if messageDetail}

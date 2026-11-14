@@ -9,18 +9,92 @@ function d1Timestamp(offsetMs) {
   return new Date(Date.now() + offsetMs).toISOString().slice(0, 19).replace('T', ' ');
 }
 
-const phone = {
-  iccid: '89860117811049221139',
-  sim_index: 2,
-  number: '+8613520607015',
-  country: 'CN',
-  carrier: 'China Mobile',
-  service_type: 'prepaid',
-  service_type_source: 'carrier_account',
-  flag: '🇨🇳',
-};
+function phoneRow(overrides = {}) {
+  return {
+    id: 'phone-1',
+    imei: null,
+    iccid: '89860117811049221139',
+    number: '+8613520607015',
+    country: 'CN',
+    carrier: 'China Mobile',
+    service_type: 'prepaid',
+    service_type_source: 'carrier_account',
+    service_type_verified_at: null,
+    sim_role: 'primary',
+    primary_iccid: null,
+    balance_threshold: null,
+    status: 'active',
+    signal: null,
+    operator: null,
+    manufacturer: null,
+    model: null,
+    usb_port: null,
+    usb_path: null,
+    last_usb_path: null,
+    modem_status: null,
+    sim_index: 2,
+    notes: null,
+    created_at: null,
+    updated_at: null,
+    ...overrides,
+  };
+}
 
-const check = {
+function balanceCheck(overrides = {}) {
+  return {
+    id: 'bal-1',
+    sim_iccid: '89860117811049221139',
+    profile_id: 'profile-1',
+    requested_at: '2026-08-14 04:00:00',
+    sent_at: null,
+    completed_at: null,
+    status: 'parsed',
+    step_index: 0,
+    response_sender: null,
+    raw_response: null,
+    error: null,
+    parser_version: 'v1',
+    country_code: 'CN',
+    profile_carrier: 'China Mobile',
+    method: 'sms',
+    command: '10086',
+    destination: null,
+    conversation_steps: '[]',
+    sim_index: 2,
+    sim_number: '+8613520607015',
+    sim_carrier: null,
+    sim_country: null,
+    outbound_content: null,
+    outbound_recipient: null,
+    outbound_timestamp: null,
+    outbound_status: null,
+    response_content: null,
+    response_phone_number: null,
+    response_timestamp: null,
+    skill_job_status: null,
+    web_job_status: null,
+    web_human_reason: null,
+    display_status: overrides.status ?? 'parsed',
+    profile_outputs: [],
+    metrics: [],
+    ...overrides,
+  };
+}
+
+function metric(overrides = {}) {
+  return {
+    metric_type: 'cash_balance',
+    value: null,
+    unit: null,
+    currency: null,
+    expires_at: null,
+    ...overrides,
+  };
+}
+
+const phone = phoneRow();
+
+const check = balanceCheck({
   id: 'bal-s02',
   sim_iccid: phone.iccid,
   sim_index: phone.sim_index,
@@ -33,8 +107,8 @@ const check = {
   // turned three tests red on 2026-09-18 with no code change at all.
   requested_at: d1Timestamp(-2 * DAY_MS - 7_000),
   completed_at: d1Timestamp(-2 * DAY_MS),
-  metrics: [{ metric_type: 'cash_balance', value: 264.33, currency: 'CNY' }],
-};
+  metrics: [metric({ value: 264.33, currency: 'CNY' })],
+});
 
 afterEach(cleanup);
 
@@ -319,8 +393,8 @@ describe('balance management', () => {
     const atRisk = {
       ...check,
       metrics: [
-        { metric_type: 'cash_balance', value: 4.5, currency: 'CNY' },
-        { metric_type: 'account_expiry', value: null, expires_at: expiringSoon },
+        metric({ value: 4.5, currency: 'CNY' }),
+        metric({ metric_type: 'account_expiry', expires_at: expiringSoon }),
       ],
     };
     const view = render(BalanceManagement, {
@@ -341,7 +415,7 @@ describe('balance management', () => {
       ...check,
       sim_iccid: prepaid.iccid,
       sim_index: prepaid.sim_index,
-      metrics: [{ metric_type: 'cash_balance', value: 4.5, currency: 'CNY' }],
+      metrics: [metric({ value: 4.5, currency: 'CNY' })],
     };
     globalThis.fetch = async (url) => {
       const value = String(url);
@@ -840,7 +914,6 @@ describe('balance management', () => {
       number: '+85260000000',
       country: 'HK',
       carrier: '移动',
-      flag: '🇭🇰',
     };
     const cmhkCheck = {
       ...check,
