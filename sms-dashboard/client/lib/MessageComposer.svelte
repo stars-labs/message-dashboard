@@ -1,6 +1,35 @@
-<script>
+<script lang="ts">
   import { onMount } from 'svelte';
+  import * as v from 'valibot';
   import { formatCardNumber } from './card-number.js';
+  import type { ApiMessage } from '../../shared/api/messages.js';
+  import type { Phone } from '../../shared/api/phones.js';
+  import { textOr } from '../../shared/text.js';
+
+  interface SenderPhone extends Pick<
+    Phone,
+    'iccid' | 'number' | 'status' | 'carrier' | 'operator' | 'sim_index'
+  > {
+    flag: string;
+  }
+
+  interface SentMessage {
+    phone_iccid: string;
+    phoneNumber: string;
+    recipient: string;
+    content: string;
+    timestamp: Date;
+    type: 'sent';
+    status: 'sending';
+  }
+
+  interface Props {
+    selectedPhone?: Pick<Phone, 'iccid'> | null;
+    phoneNumbers?: readonly SenderPhone[];
+    messages?: readonly Pick<ApiMessage, 'type' | 'recipient'>[];
+    mobilePage?: boolean;
+    onmessagesent?: ((message: SentMessage) => Promise<unknown>) | null;
+  }
 
   let {
     selectedPhone = null,
@@ -8,7 +37,20 @@
     messages = [],
     mobilePage = false,
     onmessagesent = null,
-  } = $props();
+  }: Props = $props();
+
+  const RecipientList = v.array(v.string());
+  const Draft = v.nullable(
+    v.partial(
+      v.object({
+        recipientNumber: v.string(),
+        recipientSIM: v.string(),
+        messageContent: v.string(),
+        selectedCountryCode: v.string(),
+        selectedSimDisplay: v.string(),
+      }),
+    ),
+  );
 
   const DRAFT_KEY = 'sms-dashboard:send-draft';
 
@@ -62,7 +104,7 @@
   let recipientHistory = $state(
     [
       ...new Set(
-        messages.filter((msg) => msg.type === 'sent' && msg.recipient).map((msg) => msg.recipient),
+        messages.flatMap((msg) => (msg.type === 'sent' && msg.recipient ? [msg.recipient] : [])),
       ),
     ].slice(0, 20),
   ); // Keep last 20 unique recipients
@@ -85,7 +127,7 @@
     ),
   );
 
-  function formatSimDisplay(phone) {
+  function formatSimDisplay(phone: SenderPhone) {
     const number =
       phone.number && phone.number !== 'null'
         ? phone.number
@@ -101,10 +143,7 @@
       if (!simSearch) return true;
       const searchLower = simSearch.toLowerCase();
       const phoneDisplay = formatSimDisplay(phone).toLowerCase();
-      return (
-        phoneDisplay.includes(searchLower) ||
-        (phone.iccid && phone.iccid.toLowerCase().includes(searchLower))
-      );
+      return phoneDisplay.includes(searchLower) || phone.iccid.toLowerCase().includes(searchLower);
     }),
   );
 
@@ -135,14 +174,17 @@
     const fullPhoneNumber = getFullPhoneNumber();
 
     // Store recipient in localStorage for persistence (store with country code)
-    const storedRecipients = JSON.parse(localStorage.getItem('recipientHistory') || '[]');
+    const storedRecipients = v.parse(
+      RecipientList,
+      JSON.parse(textOr(localStorage.getItem('recipientHistory'), '[]')),
+    );
     if (!storedRecipients.includes(fullPhoneNumber)) {
       storedRecipients.unshift(fullPhoneNumber);
       localStorage.setItem('recipientHistory', JSON.stringify(storedRecipients.slice(0, 50)));
     }
 
     // Send actual message via WebSocket
-    const sentMessage = {
+    const sentMessage: SentMessage = {
       phone_iccid: recipientSIM,
       phoneNumber: fullPhoneNumber,
       recipient: fullPhoneNumber,
@@ -168,20 +210,20 @@
     }, 2000);
   }
 
-  function selectRecipient(number) {
+  function selectRecipient(number: string) {
     recipientNumber = number;
     showRecipientHistory = false;
     recipientSearch = '';
   }
 
-  function selectSim(phone) {
+  function selectSim(phone: SenderPhone) {
     recipientSIM = phone.iccid;
     selectedSimDisplay = formatSimDisplay(phone);
     showSimDropdown = false;
     simSearch = '';
   }
 
-  function insertTemplate(template) {
+  function insertTemplate(template: string) {
     messageContent = template;
   }
 
@@ -196,7 +238,10 @@
   // complete before persisting so the initial empty state cannot overwrite it.
   onMount(() => {
     try {
-      const storedRecipients = JSON.parse(localStorage.getItem('recipientHistory') || '[]');
+      const storedRecipients = v.parse(
+        RecipientList,
+        JSON.parse(textOr(localStorage.getItem('recipientHistory'), '[]')),
+      );
       if (storedRecipients.length > 0) recipientHistory.push(...storedRecipients);
     } catch {
       localStorage.removeItem('recipientHistory');
@@ -205,16 +250,16 @@
     if (!mobilePage) return;
 
     try {
-      const draft = JSON.parse(sessionStorage.getItem(DRAFT_KEY) || 'null');
+      const draft = v.parse(Draft, JSON.parse(textOr(sessionStorage.getItem(DRAFT_KEY), 'null')));
       if (draft) {
-        recipientNumber = draft.recipientNumber || '';
-        recipientSIM = draft.recipientSIM || recipientSIM;
-        messageContent = draft.messageContent || '';
+        recipientNumber = textOr(draft.recipientNumber, '');
+        recipientSIM = textOr(draft.recipientSIM, recipientSIM);
+        messageContent = textOr(draft.messageContent, '');
         selectedCountryCode = draft.selectedCountryCode ?? '+65';
         const restoredSim = availablePhones.find((phone) => phone.iccid === recipientSIM);
         selectedSimDisplay = restoredSim
           ? formatSimDisplay(restoredSim)
-          : draft.selectedSimDisplay || selectedSimDisplay;
+          : textOr(draft.selectedSimDisplay, selectedSimDisplay);
       }
     } catch {
       sessionStorage.removeItem(DRAFT_KEY);
@@ -237,19 +282,21 @@
   });
 
   // Close dropdown when clicking outside
-  function handleClickOutside(event) {
-    if (!event.target.closest('.recipient-input-container')) {
+  function handleClickOutside(event: MouseEvent) {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    if (!target.closest('.recipient-input-container')) {
       showRecipientHistory = false;
     }
-    if (!event.target.closest('.sim-input-container')) {
+    if (!target.closest('.sim-input-container')) {
       showSimDropdown = false;
     }
-    if (!event.target.closest('.country-code-container')) {
+    if (!target.closest('.country-code-container')) {
       showCountryDropdown = false;
     }
   }
 
-  function selectCountryCode(code) {
+  function selectCountryCode(code: string) {
     selectedCountryCode = code;
     showCountryDropdown = false;
   }
@@ -281,8 +328,8 @@
         }}
         oninput={(e) => {
           showSimDropdown = true;
-          simSearch = e.target.value;
-          selectedSimDisplay = e.target.value;
+          simSearch = e.currentTarget.value;
+          selectedSimDisplay = e.currentTarget.value;
           recipientSIM = '';
         }}
         placeholder="卡号 / 号码 / 运营商 / ICCID"
@@ -298,9 +345,11 @@
             <div class="text-xs text-stone-400 px-2 py-1 border-b border-stone-200 mb-1">
               可用发送卡（{filteredSims.length}）
             </div>
-            {#each filteredSims as phone}
+            {#each filteredSims as phone (phone.iccid)}
               <button
-                onclick={() => selectSim(phone)}
+                onclick={() => {
+                  selectSim(phone);
+                }}
                 class="w-full text-left px-3 py-2 hover:bg-stone-200 rounded-md transition-colors text-sm flex items-center gap-2"
               >
                 <span class="w-8 shrink-0 font-mono font-semibold text-stone-600"
@@ -322,11 +371,6 @@
                     </div>
                   {/if}
                 </div>
-                {#if phone.signal_strength}
-                  <div class="text-xs text-stone-400">
-                    信号 {phone.signal_strength}%
-                  </div>
-                {/if}
               </button>
             {/each}
           </div>
@@ -367,9 +411,11 @@
               class="absolute top-full left-0 mt-1 tech-card border border-stone-200 rounded-lg shadow-xl shadow-gray-900 max-h-60 overflow-y-auto z-50 min-w-[200px]"
             >
               <div class="p-2">
-                {#each countryCodes as cc}
+                {#each countryCodes as cc (cc.code)}
                   <button
-                    onclick={() => selectCountryCode(cc.code)}
+                    onclick={() => {
+                      selectCountryCode(cc.code);
+                    }}
                     class="w-full text-left px-3 py-2 hover:bg-stone-200 rounded-md transition-colors text-sm flex items-center gap-2 {selectedCountryCode ===
                     cc.code
                       ? 'bg-stone-200'
@@ -391,7 +437,7 @@
           onfocus={() => (showRecipientHistory = true)}
           oninput={(e) => {
             showRecipientHistory = true;
-            recipientSearch = e.target.value;
+            recipientSearch = e.currentTarget.value;
           }}
           placeholder="输入手机号或短号…"
           class="flex-1 px-4 py-2 cyber-input"
@@ -407,9 +453,11 @@
             <div class="text-xs text-stone-400 px-2 py-1 border-b border-stone-200 mb-1">
               历史接收号码
             </div>
-            {#each filteredRecipients as recipient}
+            {#each filteredRecipients as recipient, index (index)}
               <button
-                onclick={() => selectRecipient(recipient)}
+                onclick={() => {
+                  selectRecipient(recipient);
+                }}
                 class="w-full text-left px-3 py-2 hover:bg-stone-200 rounded-md transition-colors text-sm flex items-center gap-2"
               >
                 <svg
@@ -437,9 +485,11 @@
     <div class="mb-4">
       <div id="template-label" class="block text-sm font-medium text-stone-600 mb-2">快速模板</div>
       <div class="flex flex-wrap gap-2" role="group" aria-labelledby="template-label">
-        {#each messageTemplates as template}
+        {#each messageTemplates as template (template.name)}
           <button
-            onclick={() => insertTemplate(template.content)}
+            onclick={() => {
+              insertTemplate(template.content);
+            }}
             class="px-3 py-1 text-xs bg-stone-100 text-stone-600 border border-stone-200 rounded-full hover:bg-stone-200 transition-colors"
           >
             {template.name}
@@ -531,8 +581,8 @@
           }}
           oninput={(e) => {
             showSimDropdown = true;
-            simSearch = e.target.value;
-            selectedSimDisplay = e.target.value;
+            simSearch = e.currentTarget.value;
+            selectedSimDisplay = e.currentTarget.value;
             recipientSIM = '';
           }}
           placeholder="卡号 / 号码 / 运营商 / ICCID"
@@ -548,9 +598,11 @@
               <div class="text-xs text-stone-400 px-2 py-1 border-b border-stone-200 mb-1">
                 可用发送卡（{filteredSims.length}）
               </div>
-              {#each filteredSims as phone}
+              {#each filteredSims as phone (phone.iccid)}
                 <button
-                  onclick={() => selectSim(phone)}
+                  onclick={() => {
+                    selectSim(phone);
+                  }}
                   class="w-full text-left px-3 py-2 hover:bg-stone-200 rounded-md transition-colors text-sm flex items-center gap-2"
                 >
                   <span class="w-8 shrink-0 font-mono font-semibold text-stone-600"
@@ -565,15 +617,7 @@
                           ? `ICCID: ${phone.iccid.slice(-6)}`
                           : 'Unknown'}
                     </div>
-                    {#if phone.operator_name}
-                      <div class="text-xs text-stone-400">{phone.operator_name}</div>
-                    {/if}
                   </div>
-                  {#if phone.signal_strength}
-                    <div class="text-xs text-stone-400">
-                      信号 {phone.signal_strength}%
-                    </div>
-                  {/if}
                 </button>
               {/each}
             </div>
@@ -614,9 +658,11 @@
                 class="absolute top-full left-0 mt-1 tech-card border border-stone-200 rounded-lg shadow-xl shadow-gray-900 max-h-60 overflow-y-auto z-50 min-w-[200px]"
               >
                 <div class="p-2">
-                  {#each countryCodes as cc}
+                  {#each countryCodes as cc (cc.code)}
                     <button
-                      onclick={() => selectCountryCode(cc.code)}
+                      onclick={() => {
+                        selectCountryCode(cc.code);
+                      }}
                       class="w-full text-left px-3 py-2 hover:bg-stone-200 rounded-md transition-colors text-sm flex items-center gap-2 {selectedCountryCode ===
                       cc.code
                         ? 'bg-stone-200'
@@ -638,7 +684,7 @@
             onfocus={() => (showRecipientHistory = true)}
             oninput={(e) => {
               showRecipientHistory = true;
-              recipientSearch = e.target.value;
+              recipientSearch = e.currentTarget.value;
             }}
             placeholder="输入手机号或短号…"
             class="flex-1 px-4 py-2 cyber-input"
@@ -654,9 +700,11 @@
               <div class="text-xs text-stone-400 px-2 py-1 border-b border-stone-200 mb-1">
                 历史接收号码
               </div>
-              {#each filteredRecipients as recipient}
+              {#each filteredRecipients as recipient, index (index)}
                 <button
-                  onclick={() => selectRecipient(recipient)}
+                  onclick={() => {
+                    selectRecipient(recipient);
+                  }}
                   class="w-full text-left px-3 py-2 hover:bg-stone-200 rounded-md transition-colors text-sm flex items-center gap-2"
                 >
                   <svg
@@ -686,9 +734,11 @@
           快速模板
         </div>
         <div class="flex flex-wrap gap-2" role="group" aria-labelledby="mobile-template-label">
-          {#each messageTemplates as template}
+          {#each messageTemplates as template (template.name)}
             <button
-              onclick={() => insertTemplate(template.content)}
+              onclick={() => {
+                insertTemplate(template.content);
+              }}
               class="px-3 py-1 text-xs bg-stone-100 text-stone-600 border border-stone-200 rounded-full hover:bg-stone-200 transition-colors"
             >
               {template.name}

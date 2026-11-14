@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   import { formatClock } from './time.js';
   import { onMount } from 'svelte';
   import { fly } from 'svelte/transition';
@@ -10,6 +10,49 @@
   import { getOutboundStatusMeta } from './message-status.js';
   import BalanceConversationRow from './BalanceConversationRow.svelte';
   import { getBalanceTimestamp, normalizeUtcTimestamp } from './balance-query.js';
+  import type { HighlightKeyword } from './message-highlight.js';
+  import type { BalanceCheck } from '../../shared/api/balance-checks.js';
+  import type { FilterRule } from '../../shared/api/filters.js';
+  import type { ApiMessage } from '../../shared/api/messages.js';
+  import type { Phone } from '../../shared/api/phones.js';
+  import { textOr } from '../../shared/text.js';
+
+  interface SelectedPhone extends Pick<Phone, 'iccid' | 'sim_index' | 'number'> {
+    flag: string;
+  }
+
+  type DisplayItem =
+    | { id: string; kind: 'message'; message: ApiMessage; timestamp: string | null }
+    | { id: string; kind: 'balance'; check: BalanceCheck; timestamp: string | null };
+
+  interface Props {
+    messages?: readonly ApiMessage[];
+    selectedPhone?: SelectedPhone | null;
+    isLoading?: boolean;
+    newMessageIds?: ReadonlySet<string>;
+    onClearPhone?: (() => void) | null;
+    /** Whether spam/marketing messages are currently being shown. */
+    showFiltered?: boolean;
+    /** Called when the user flips the toggle; the parent refetches. */
+    onToggleFiltered?: (() => void) | null;
+    /** Filter rules, used to name the rule that hid a message. */
+    filterRules?: readonly Pick<FilterRule, 'id' | 'pattern' | 'note'>[];
+    balanceChecks?: readonly BalanceCheck[];
+    onOpenBalance?: ((check: BalanceCheck) => void) | null;
+    /** Called with the message when a row is activated; opens the detail drawer. */
+    onOpenMessage?: ((message: ApiMessage) => void) | null;
+    /** Whether the server has an older page that is not in `messages` yet. */
+    hasMore?: boolean;
+    /** Loads the next server page after locally available rows are exhausted. */
+    onLoadMore?: (() => Promise<unknown>) | null;
+    loadingMore?: boolean;
+    /** Set when the last load failed: the list below is stale or empty. */
+    loadError?: string | null;
+    /** Set when the rows came from the local cache rather than the server. */
+    fromCache?: boolean;
+    /** Retry handler for a failed load. */
+    onRetry?: (() => void) | null;
+  }
 
   let {
     messages = [],
@@ -17,60 +60,51 @@
     isLoading = false,
     newMessageIds = new Set(),
     onClearPhone = null,
-    /** Whether spam/marketing messages are currently being shown. */
     showFiltered = false,
-    /** Called when the user flips the toggle; the parent refetches. */
     onToggleFiltered = null,
-    /** Filter rules, used to name the rule that hid a message. */
     filterRules = [],
     balanceChecks = [],
     onOpenBalance = null,
-    /** Called with the message when a row is activated; opens the detail drawer. */
     onOpenMessage = null,
-    /** Whether the server has an older page that is not in `messages` yet. */
     hasMore = false,
-    /** Loads the next server page after locally available rows are exhausted. */
     onLoadMore = null,
     loadingMore = false,
-    /** Set when the last load failed: the list below is stale or empty. */
     loadError = null,
-    /** Set when the rows came from the local cache rather than the server. */
     fromCache = false,
-    /** Retry handler for a failed load. */
     onRetry = null,
-  } = $props();
+  }: Props = $props();
 
   const RENDER_BATCH_SIZE = 60;
   let visibleCount = $state(RENDER_BATCH_SIZE);
   let loadingNextBatch = $state(false);
 
-  let activeKeywords = $state([]);
+  let activeKeywords = $state<readonly HighlightKeyword[]>([]);
 
   // id -> readable label, so a hidden message can say WHY it was hidden.
-  let ruleLabels = $derived(
-    Object.fromEntries((filterRules || []).map((r) => [r.id, r.note || r.pattern])),
-  );
+  let ruleLabels = $derived(new Map(filterRules.map((r) => [r.id, textOr(r.note, r.pattern)])));
 
   // Subscribe to keywords store
   const unsubscribe = keywordsStore.subscribe((value) => {
     activeKeywords = value;
   });
   onMount(() => {
-    tagActions.loadKeywords();
+    void tagActions.loadKeywords();
     return unsubscribe;
   });
 
   // Copy feedback: stores the message.id of the last-copied code for 2 s.
-  let copiedId = $state(null);
-  let copiedCode = $state(null);
-  let copyTimer = null;
+  let copiedId = $state<string | null>(null);
+  let copiedCode = $state<string | null>(null);
+  let copyTimer: ReturnType<typeof setTimeout> | null = null;
 
-  async function handleCopy(message) {
-    const ok = await copyCode(message.verification_code);
+  async function handleCopy(message: ApiMessage) {
+    const code = message.verification_code;
+    if (code === null) return;
+    const ok = await copyCode(code);
     if (!ok) return;
     if (copyTimer) clearTimeout(copyTimer);
     copiedId = message.id;
-    copiedCode = message.verification_code;
+    copiedCode = code;
     copyTimer = setTimeout(() => {
       copiedId = null;
       copiedCode = null;
@@ -80,11 +114,11 @@
   // Content filter: verification codes, grouped balance conversations, or both.
   // Default to 'all' so non-code messages (e.g. service notices, fee warnings)
   // are visible immediately without manual filter switching.
-  let contentFilter = $state('all');
+  let contentFilter = $state<'all' | 'code' | 'balance'>('all');
 
   // Messages shown in the list, after both dimensions of filtering.
   let displayMessages = $derived.by(() => {
-    let base = messages || [];
+    let base = messages;
     // Narrow to the selected card if one is chosen.
     if (selectedPhone) {
       base = base.filter((m) => m.phone_iccid === selectedPhone.iccid);
@@ -92,7 +126,7 @@
     if (contentFilter === 'balance') return [];
     // Content filter
     if (contentFilter === 'code') {
-      base = base.filter((m) => m.verification_code);
+      base = base.filter((m) => textOr(m.verification_code, null) !== null);
     }
     // Spam toggle — when showFiltered=false keep filtered messages hidden.
     if (!showFiltered) {
@@ -101,8 +135,12 @@
     return base;
   });
 
+  function epochOf(timestamp: string | null): number {
+    return timestamp === null ? 0 : new Date(normalizeUtcTimestamp(timestamp)).getTime() || 0;
+  }
+
   let displayItems = $derived.by(() => {
-    const items = displayMessages.map((message) => ({
+    const items = displayMessages.map((message): DisplayItem => ({
       id: message.id,
       kind: 'message',
       message,
@@ -111,10 +149,10 @@
 
     if (contentFilter === 'all' || contentFilter === 'balance') {
       const checks = selectedPhone
-        ? (balanceChecks || []).filter((check) => check.sim_iccid === selectedPhone.iccid)
-        : balanceChecks || [];
+        ? balanceChecks.filter((check) => check.sim_iccid === selectedPhone.iccid)
+        : balanceChecks;
       items.push(
-        ...checks.map((check) => ({
+        ...checks.map((check): DisplayItem => ({
           id: `balance-${check.id}`,
           kind: 'balance',
           check,
@@ -123,11 +161,7 @@
       );
     }
 
-    return items.sort((a, b) => {
-      const aTime = new Date(normalizeUtcTimestamp(a.timestamp)).getTime() || 0;
-      const bTime = new Date(normalizeUtcTimestamp(b.timestamp)).getTime() || 0;
-      return bTime - aTime;
-    });
+    return items.sort((a, b) => epochOf(b.timestamp) - epochOf(a.timestamp));
   });
 
   let visibleItems = $derived(displayItems.slice(0, visibleCount));
@@ -205,8 +239,8 @@
             {formatCardNumber(selectedPhone.sim_index)}
           </span>
           <span class="text-sm text-stone-500 font-mono truncate">
-            {selectedPhone.flag || ''}
-            {selectedPhone.number || selectedPhone.iccid}
+            {selectedPhone.flag}
+            {textOr(selectedPhone.number, selectedPhone.iccid)}
           </span>
           {#if onClearPhone}
             <button
@@ -334,7 +368,7 @@
   <div class="flex-1 min-h-0 overflow-y-auto">
     {#if isLoading}
       <!-- Loading skeleton: 4 rows with the same column layout -->
-      {#each Array(4) as _, i}
+      {#each [1, 2, 3, 4] as row (row)}
         <div
           class="px-3 py-3 border-b border-stone-50 animate-pulse
           hidden lg:grid items-center"
@@ -354,7 +388,7 @@
         </div>
       {/each}
       <!-- Mobile skeleton -->
-      {#each Array(4) as _}
+      {#each [1, 2, 3, 4] as row (row)}
         <div class="lg:hidden p-3 border-b border-stone-100 animate-pulse space-y-2">
           <div class="flex gap-2">
             <div class="h-6 bg-stone-100 rounded w-16"></div>
@@ -388,7 +422,9 @@
           </p>
           {#if onRetry}
             <button
-              onclick={() => onRetry?.()}
+              onclick={() => {
+                onRetry();
+              }}
               class="mt-3 px-3 py-1.5 text-xs font-medium rounded-md border border-stone-200
                 text-stone-700 hover:bg-stone-50">重试</button
             >
@@ -423,24 +459,27 @@
           {@const isNew = newMessageIds.has(message.id)}
           {@const isFiltered = message.filter_status === 'filtered'}
           {@const isCopied = copiedId === message.id}
-          {@const hasCode = !!message.verification_code}
+          {@const hasCode = textOr(message.verification_code, null) !== null}
           {@const isSent = message.type === 'sent'}
           {@const counterpartyNumber = isSent
-            ? message.recipient || message.phone_number || '—'
-            : message.phone_number || '—'}
+            ? textOr(message.recipient, textOr(message.phone_number, '—'))
+            : textOr(message.phone_number, '—')}
           {@const directionLabel = isSent ? '发送' : '接收'}
           {@const sendStatus = isSent
             ? getOutboundStatusMeta(message.status, message.error_message)
             : null}
           {@const cardIndex = message.phone_sim_index ?? selectedPhone?.sim_index}
-          {@const cardNumber =
-            message.display_phone_number ||
-            selectedPhone?.number ||
-            message.phone_iccid?.slice(-8) ||
-            '—'}
-          {@const cardFlag = message.phone_country
-            ? getCountryFlag(message.phone_country)
-            : selectedPhone?.flag || ''}
+          {@const cardNumber = textOr(
+            message.display_phone_number,
+            textOr(selectedPhone?.number, textOr(message.phone_iccid?.slice(-8), '—')),
+          )}
+          {@const phoneCountry = textOr(message.phone_country, null)}
+          {@const cardFlag =
+            phoneCountry === null ? textOr(selectedPhone?.flag, '') : getCountryFlag(phoneCountry)}
+          {@const ruleLabel = textOr(
+            message.filter_rule_id === null ? null : ruleLabels.get(message.filter_rule_id),
+            '',
+          )}
 
           <!-- One responsive row tree. CSS-only desktop/mobile copies doubled every
              message's DOM and keyword work even though one copy was hidden. -->
@@ -489,7 +528,7 @@
             </div>
 
             <div class="col-start-1 row-start-1 lg:col-start-3">
-              {#if isSent}
+              {#if sendStatus !== null}
                 <span
                   class="inline-flex w-fit items-center px-2 py-1 rounded-md border text-xs font-medium {sendStatus.className}"
                   title={sendStatus.title}
@@ -499,7 +538,7 @@
                 <button
                   onclick={(e) => {
                     e.stopPropagation();
-                    handleCopy(message);
+                    void handleCopy(message);
                   }}
                   class="inline-flex items-center justify-center min-h-[40px] lg:min-h-0 px-3 py-1.5
                   lg:px-2.5 lg:py-1 rounded-lg border
@@ -525,9 +564,7 @@
                 <span
                   class="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-stone-100 text-stone-500 mr-1.5 font-medium"
                 >
-                  已过滤{ruleLabels[message.filter_rule_id]
-                    ? `: ${ruleLabels[message.filter_rule_id]}`
-                    : ''}
+                  已过滤{ruleLabel === '' ? '' : `: ${ruleLabel}`}
                 </span>
               {/if}
               <MessageHighlight content={message.content} keywords={activeKeywords} />

@@ -1,10 +1,10 @@
-<script>
+<script lang="ts">
   import { confirmAction } from './confirm.svelte.js';
   import { overlay } from './overlay.js';
   import { onMount } from 'svelte';
   import { getModemPosition } from './modem-position.js';
-  import { api } from './api';
-  import { COUNTRIES, getCountryFlag, getCountryName, getCarrierColor } from './countries.js';
+  import { api, errorMessage } from './api';
+  import { COUNTRIES, getCountryFlag, getCarrierColor } from './countries.js';
   import { getStatusMeta, hasOperationalIssue, isAnomalous } from './device-status.js';
   import { formatCardNumber } from './card-number.js';
   import { buildCarrierOptions, carrierKey } from './carrier.js';
@@ -16,19 +16,59 @@
   import { SIM_ROLES, getSimRoleLabel } from './sim-role.js';
   import { groupByPrimary } from './group-by-primary.js';
   import { getBalanceThreshold } from './balance-overview.js';
+  import type { IccidMapping } from '../../shared/api/iccid-mappings.js';
+  import { textOr } from '../../shared/text.js';
 
-  let { initialStatusFilter = 'all' } = $props();
+  type StatusFilter = 'all' | 'active' | 'error' | 'inactive';
 
-  let allMappingsCache = $state([]);
-  let mappings = $state([]);
+  type SortKey =
+    | 'sim_index'
+    | 'phone_number'
+    | 'iccid'
+    | 'carrier'
+    | 'service_type'
+    | 'sim_role'
+    | 'position'
+    | 'signal_quality'
+    | 'is_active'
+    | 'balance_threshold'
+    | 'notes';
+
+  interface MappingForm {
+    iccid: string;
+    phone_number: string;
+    carrier: string;
+    country: string;
+    description: string;
+    sim_index: number | '' | null;
+    imei: string;
+    service_type: string;
+    service_type_source: string;
+    sim_role: string;
+    primary_iccid: string;
+    balance_threshold: number | '' | null;
+  }
+
+  type Panel =
+    | { mode: 'add'; formData: MappingForm }
+    | { mode: 'edit'; mapping: IccidMapping; formData: MappingForm };
+
+  interface Props {
+    initialStatusFilter?: StatusFilter;
+  }
+
+  let { initialStatusFilter = 'all' }: Props = $props();
+
+  let allMappingsCache = $state<IccidMapping[]>([]);
+  let mappings = $state<IccidMapping[]>([]);
   let loading = $state(false);
-  let error = $state(null);
+  let error = $state<string | null>(null);
   let searchQuery = $state('');
-  let statusFilter = $state(initialStatusFilter);
+  let statusFilter = $state<StatusFilter>(initialStatusFilter);
   let carrierFilter = $state('all');
-  let successMessage = $state(null);
-  let sortKey = $state(null);
-  let sortDirection = $state('asc');
+  let successMessage = $state<string | null>(null);
+  let sortKey = $state<SortKey | null>(null);
+  let sortDirection = $state<'asc' | 'desc'>('asc');
 
   // Apply a new deep-link filter once. The previous effect also depended on
   // statusFilter, so every manual chip click was immediately reset to "error".
@@ -44,10 +84,10 @@
   // Single state object for add / edit. mode = 'add' | 'edit'.
   // Previously this component had two completely separate form blocks with
   // create-* and edit-* ids — 7 fields each, same structure. Gone.
-  let panel = $state(null); // null = closed
+  let panel = $state<Panel | null>(null); // null = closed
   // { mode: 'add', formData } | { mode: 'edit', mapping, formData }
 
-  function emptyForm() {
+  function emptyForm(): MappingForm {
     return {
       iccid: '',
       phone_number: '',
@@ -68,25 +108,35 @@
     panel = { mode: 'add', formData: emptyForm() };
   }
 
-  function openEdit(mapping) {
+  function openEdit(mapping: IccidMapping) {
     panel = {
       mode: 'edit',
       mapping,
       formData: {
         iccid: mapping.iccid,
         phone_number: mapping.phone_number,
-        carrier: mapping.carrier || '',
-        country: mapping.country || '',
-        description: mapping.notes || mapping.description || '',
-        sim_index: mapping.sim_index || '',
-        imei: mapping.equipment_id || '',
-        service_type: mapping.service_type || 'unknown',
-        service_type_source: mapping.service_type_source || '',
-        sim_role: mapping.sim_role || 'standalone',
-        primary_iccid: mapping.primary_iccid || '',
+        carrier: textOr(mapping.carrier, ''),
+        country: textOr(mapping.country, ''),
+        description: textOr(mapping.notes, ''),
+        sim_index: mapping.sim_index === 0 ? '' : mapping.sim_index,
+        imei: textOr(mapping.equipment_id, ''),
+        service_type: textOr(mapping.service_type, 'unknown'),
+        service_type_source: textOr(mapping.service_type_source, ''),
+        sim_role: textOr(mapping.sim_role, 'standalone'),
+        primary_iccid: textOr(mapping.primary_iccid, ''),
         balance_threshold: mapping.balance_threshold ?? '',
       },
     };
+  }
+
+  function clearUnconfirmedSource() {
+    if (panel === null) return;
+    if (
+      panel.formData.service_type === 'unknown' ||
+      panel.formData.service_type === 'balance_managed'
+    ) {
+      panel.formData.service_type_source = '';
+    }
   }
 
   function closePanel() {
@@ -95,26 +145,30 @@
   }
 
   // Collision warning: is the entered sim_index already taken by a different card?
-  let simIndexConflict = $derived(
-    panel && panel.formData.sim_index
+  let simIndexConflict = $derived.by(() => {
+    const current = panel;
+    return current?.formData.sim_index
       ? allMappingsCache.find(
           (m) =>
-            String(m.sim_index) === String(panel.formData.sim_index) &&
-            m.iccid !== panel.formData.iccid,
+            String(m.sim_index) === String(current.formData.sim_index) &&
+            m.iccid !== current.formData.iccid,
         )
-      : null,
-  );
+      : null;
+  });
 
   // ── Stats (for filter chips) ───────────────────────────────────────────────
   let activeCount = $derived(allMappingsCache.filter((m) => m.is_active === 'active').length);
   let errorCount = $derived(
     allMappingsCache.filter((m) => hasOperationalIssue(m.is_active)).length,
   );
-  let inactiveCount = $derived(
-    allMappingsCache.filter((m) => ['no_modem', 'unassigned'].includes(m.is_active) || !m.is_active)
-      .length,
-  );
+  let inactiveCount = $derived(allMappingsCache.filter(isInactive).length);
   let totalCount = $derived(allMappingsCache.length);
+  let statusChips = $derived<{ value: StatusFilter; label: string; count: number }[]>([
+    { value: 'all', label: '全部', count: totalCount },
+    { value: 'active', label: '在线', count: activeCount },
+    { value: 'error', label: '异常', count: errorCount },
+    { value: 'inactive', label: '待映射', count: inactiveCount },
+  ]);
   let carrierOptions = $derived.by(() =>
     buildCarrierOptions(
       allMappingsCache.map((mapping) => ({
@@ -124,7 +178,11 @@
     ),
   );
 
-  const tableColumns = [
+  function isInactive(mapping: IccidMapping): boolean {
+    return ['no_modem', 'unassigned'].includes(mapping.is_active) || mapping.is_active === '';
+  }
+
+  const tableColumns: readonly { key: SortKey | null; label: string }[] = [
     { key: 'sim_index', label: '卡号' },
     { key: 'phone_number', label: '手机号' },
     { key: 'iccid', label: 'ICCID' },
@@ -139,8 +197,8 @@
     { key: null, label: '操作' },
   ];
 
-  function toggleSort(key) {
-    if (!key) return;
+  function toggleSort(key: SortKey | null) {
+    if (key === null) return;
     if (sortKey === key) sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
     else {
       sortKey = key;
@@ -148,19 +206,23 @@
     }
   }
 
-  function sortValue(mapping, key) {
+  function sortValue(mapping: IccidMapping, key: SortKey): string | number {
     if (key === 'sim_index' || key === 'signal_quality' || key === 'balance_threshold')
       return Number(mapping[key]);
-    if (key === 'position') return getModemPosition(mapping)?.path || '';
+    if (key === 'position') return getModemPosition(mapping)?.path ?? '';
     if (key === 'is_active') return getStatusMeta(mapping.is_active).sortOrder;
-    if (key === 'notes') return mapping.notes || mapping.description || '';
+    if (key === 'notes') return textOr(mapping.notes, '');
     if (key === 'service_type') return getSimServiceTypeLabel(mapping.service_type);
-    return mapping[key] || '';
+    return textOr(mapping[key], '');
   }
 
-  function compareValues(left, right) {
-    const leftMissing = left == null || left === '' || Number.isNaN(left);
-    const rightMissing = right == null || right === '' || Number.isNaN(right);
+  function isMissing(value: string | number): boolean {
+    return value === '' || (typeof value === 'number' && Number.isNaN(value));
+  }
+
+  function compareValues(left: string | number, right: string | number): number {
+    const leftMissing = isMissing(left);
+    const rightMissing = isMissing(right);
     if (leftMissing || rightMissing) {
       if (leftMissing && rightMissing) return 0;
       return leftMissing ? 1 : -1;
@@ -178,14 +240,10 @@
     error = null;
     try {
       const response = await api.iccidMappings.list({ page: 1, limit: 10000 });
-      if (response?.success) {
-        allMappingsCache = response.data?.results || response.data || [];
-        filterMappings();
-      } else {
-        error = response?.error || '加载映射失败';
-      }
+      allMappingsCache = response.data;
+      filterMappings();
     } catch (err) {
-      error = err.message || '加载映射失败';
+      error = errorMessage(err, '加载映射失败');
     } finally {
       loading = false;
     }
@@ -196,10 +254,7 @@
     if (statusFilter === 'active') filtered = filtered.filter((m) => m.is_active === 'active');
     else if (statusFilter === 'error')
       filtered = filtered.filter((m) => hasOperationalIssue(m.is_active));
-    else if (statusFilter === 'inactive')
-      filtered = filtered.filter(
-        (m) => ['no_modem', 'unassigned'].includes(m.is_active) || !m.is_active,
-      );
+    else if (statusFilter === 'inactive') filtered = filtered.filter(isInactive);
 
     if (carrierFilter !== 'all') {
       filtered = filtered.filter(
@@ -211,22 +266,22 @@
       );
     }
 
-    if (searchQuery.trim()) {
+    if (searchQuery.trim() !== '') {
       const q = searchQuery.trim().toLowerCase();
       filtered = filtered.filter(
         (m) =>
           formatCardNumber(m.sim_index).toLowerCase().includes(q) ||
-          (m.iccid || '').toLowerCase().includes(q) ||
-          (m.phone_number || '').toLowerCase().includes(q) ||
-          (m.carrier || '').toLowerCase().includes(q) ||
+          m.iccid.toLowerCase().includes(q) ||
+          m.phone_number.toLowerCase().includes(q) ||
+          textOr(m.carrier, '').toLowerCase().includes(q) ||
           getSimServiceTypeLabel(m.service_type).includes(q) ||
-          (m.equipment_id || '').toLowerCase().includes(q) ||
-          (m.notes || m.description || '').toLowerCase().includes(q),
+          textOr(m.equipment_id, '').toLowerCase().includes(q) ||
+          textOr(m.notes, '').toLowerCase().includes(q),
       );
     }
 
     const sorted = filtered.slice().sort((a, b) => {
-      if (sortKey) {
+      if (sortKey !== null) {
         const comparison = compareValues(sortValue(a, sortKey), sortValue(b, sortKey));
         if (comparison !== 0) return sortDirection === 'asc' ? comparison : -comparison;
       } else {
@@ -235,7 +290,7 @@
         const bo = getStatusMeta(b.is_active).sortOrder;
         if (ao !== bo) return ao - bo;
       }
-      return (a.sim_index ?? 999) - (b.sim_index ?? 999);
+      return a.sim_index - b.sim_index;
     });
 
     // Group secondaries immediately after their primary (shared helper).
@@ -245,11 +300,6 @@
   }
 
   $effect(() => {
-    searchQuery;
-    statusFilter;
-    carrierFilter;
-    sortKey;
-    sortDirection;
     filterMappings();
   });
 
@@ -257,10 +307,11 @@
 
   // ── Mutations ─────────────────────────────────────────────────────────────
   async function handleSave() {
-    if (!panel) return;
+    const current = panel;
+    if (current === null) return;
     error = null;
     try {
-      const fd = panel.formData;
+      const fd = current.formData;
       const payload = {
         iccid: fd.iccid,
         phone_number: fd.phone_number,
@@ -275,25 +326,16 @@
         primary_iccid: fd.sim_role === 'secondary' ? fd.primary_iccid : null,
         balance_threshold: fd.balance_threshold === '' ? null : Number(fd.balance_threshold),
       };
-      if (panel.mode === 'add') {
-        const r = await api.iccidMappings.create(payload);
-        if (r.success) {
-          closePanel();
-          await loadMappings();
-        } else error = r.error || '添加失败';
-      } else {
-        const r = await api.iccidMappings.update(panel.mapping.id, payload);
-        if (r.success) {
-          closePanel();
-          await loadMappings();
-        } else error = r.error || '保存失败';
-      }
+      if (current.mode === 'add') await api.iccidMappings.create(payload);
+      else await api.iccidMappings.update(current.mapping.id, payload);
+      closePanel();
+      await loadMappings();
     } catch (err) {
-      error = err.message;
+      error = errorMessage(err, '保存失败');
     }
   }
 
-  async function handleDelete(id) {
+  async function handleDelete(id: string) {
     if (
       !(await confirmAction({
         message:
@@ -304,13 +346,11 @@
     )
       return;
     try {
-      const r = await api.iccidMappings.delete(id);
-      if (r.success) {
-        closePanel();
-        await loadMappings();
-      } else error = r.error || '删除失败';
+      await api.iccidMappings.delete(id);
+      closePanel();
+      await loadMappings();
     } catch (err) {
-      error = err.message;
+      error = errorMessage(err, '删除失败');
     }
   }
 </script>
@@ -341,24 +381,24 @@
     <div class="flex flex-wrap gap-1.5">
       <!-- Same words as the device page and the status badge: 活动/未激活 named
            the same rows as 在线/待映射 and made the two screens look unrelated. -->
-      {#each [['all', '全部', totalCount], ['active', '在线', activeCount], ['error', '异常', errorCount], ['inactive', '待映射', inactiveCount]] as [v, label, count]}
+      {#each statusChips as chip (chip.value)}
         <button
           onclick={() => {
-            statusFilter = v;
+            statusFilter = chip.value;
           }}
           class="px-3 py-1.5 text-xs rounded-lg font-medium transition-colors tabular-nums
-            {statusFilter === v
-            ? v === 'error'
+            {statusFilter === chip.value
+            ? chip.value === 'error'
               ? 'bg-red-600 text-white'
-              : v === 'active'
+              : chip.value === 'active'
                 ? 'bg-emerald-600 text-white'
                 : 'bg-stone-800 text-white'
-            : v === 'error'
+            : chip.value === 'error'
               ? 'bg-red-50 text-red-700 border border-red-200'
               : 'bg-stone-100 text-stone-600 hover:bg-stone-200'}"
         >
-          {label}
-          {count}
+          {chip.label}
+          {chip.count}
         </button>
       {/each}
     </div>
@@ -375,7 +415,7 @@
           focus:outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
       >
         <option value="all">全部运营商</option>
-        {#each carrierOptions as carrier}
+        {#each carrierOptions as carrier (carrier.key)}
           <option value={carrier.key}>{carrier.label}</option>
         {/each}
       </select>
@@ -434,7 +474,7 @@
       <table class="w-full text-sm">
         <thead class="lg:sticky lg:top-0 lg:z-10 bg-stone-50">
           <tr class="bg-stone-50 border-b border-stone-200">
-            {#each tableColumns as column, i}
+            {#each tableColumns as column, i (column.label)}
               <th
                 class="px-3 py-2.5 text-left text-[11px] font-semibold text-stone-400 tracking-widest uppercase
                 {i === tableColumns.length - 1 ? 'text-right' : ''}"
@@ -442,7 +482,9 @@
                 {#if column.key}
                   <button
                     type="button"
-                    onclick={() => toggleSort(column.key)}
+                    onclick={() => {
+                      toggleSort(column.key);
+                    }}
                     class="inline-flex items-center gap-1 hover:text-stone-700 transition-colors"
                     aria-label={`按${column.label}${sortKey === column.key && sortDirection === 'asc' ? '降序' : '升序'}排列`}
                   >
@@ -464,14 +506,11 @@
           </tr>
         </thead>
         <tbody class="divide-y divide-stone-50">
-          {#each mappings as m}
+          {#each mappings as m (m.iccid)}
             {@const meta = getStatusMeta(m.is_active)}
             {@const anomalous = isAnomalous(m.is_active)}
             {@const pos = getModemPosition(m)}
             {@const isSecondary = m.sim_role === 'secondary'}
-            {@const primarySim = isSecondary
-              ? allMappingsCache.find((p) => p.iccid === m.primary_iccid)
-              : null}
             <tr
               class="hover:bg-stone-50 transition-colors {anomalous
                 ? meta.rowClass
@@ -499,7 +538,7 @@
               </td>
               <!-- ICCID -->
               <td class="px-3 py-2.5 font-mono text-xs text-stone-500 whitespace-nowrap">
-                {m.iccid || '—'}
+                {textOr(m.iccid, '—')}
               </td>
               <!-- 运营商 -->
               <td class="px-3 py-2.5">
@@ -545,7 +584,9 @@
                     : m.sim_role === 'secondary'
                       ? 'bg-violet-50 text-violet-700 border-violet-200'
                       : 'bg-stone-50 text-stone-400 border-stone-200'}"
-                  title={m.sim_role === 'secondary' ? `副卡 → ${m.primary_iccid || '主卡'}` : ''}
+                  title={m.sim_role === 'secondary'
+                    ? `副卡 → ${textOr(m.primary_iccid, '主卡')}`
+                    : ''}
                 >
                   {getSimRoleLabel(m.sim_role)}
                 </span>
@@ -607,24 +648,28 @@
               </td>
               <!-- 备注 — shows what's wrong for anomalous rows -->
               <td class="px-3 py-2.5 text-xs text-stone-500 max-w-[180px]">
-                {#if anomalous && !m.notes && !m.description}
+                {#if anomalous && textOr(m.notes, null) === null}
                   <span class="text-stone-400 italic">{meta.label}</span>
                 {:else}
-                  {m.notes || m.description || ''}
+                  {textOr(m.notes, '')}
                 {/if}
               </td>
               <!-- 操作 -->
               <td class="px-3 py-2.5 text-right whitespace-nowrap">
                 {#if m.is_active === 'unassigned' || !m.phone_number}
                   <button
-                    onclick={() => openEdit(m)}
+                    onclick={() => {
+                      openEdit(m);
+                    }}
                     class="text-xs font-semibold text-action-text hover:underline"
                   >
                     设置映射
                   </button>
                 {:else}
                   <button
-                    onclick={() => openEdit(m)}
+                    onclick={() => {
+                      openEdit(m);
+                    }}
                     class="text-xs text-stone-500 hover:text-stone-800 transition-colors"
                   >
                     编辑
@@ -639,7 +684,7 @@
 
     <!-- ── Mobile cards ────────────────────────────────────────────────── -->
     <div class="sm:hidden -mx-4 border-t border-stone-100">
-      {#each mappings as m}
+      {#each mappings as m (m.iccid)}
         {@const meta = getStatusMeta(m.is_active)}
         {@const anomalous = isAnomalous(m.is_active)}
         {@const pos = getModemPosition(m)}
@@ -656,11 +701,13 @@
               {formatCardNumber(m.sim_index)}
             </span>
             <span class="font-mono text-sm text-stone-900 truncate"
-              >{m.phone_number || '无号码'}</span
+              >{textOr(m.phone_number, '无号码')}</span
             >
             <div class="ml-auto flex items-center gap-0.5 shrink-0 -my-1">
               <button
-                onclick={() => openEdit(m)}
+                onclick={() => {
+                  openEdit(m);
+                }}
                 aria-label="编辑"
                 class="p-1.5 text-stone-400 hover:text-stone-700 hover:bg-stone-100 rounded-lg transition-colors"
               >
@@ -708,7 +755,9 @@
 {#if panel}
   <div
     class="fixed inset-0 bg-stone-900/40 flex items-center justify-center z-50 p-4"
-    onclick={(e) => e.target === e.currentTarget && closePanel()}
+    onclick={(e) => {
+      if (e.target === e.currentTarget) closePanel();
+    }}
     role="presentation"
   >
     <div
@@ -821,8 +870,10 @@
             />
             {#if simIndexConflict}
               <p class="mt-1 text-xs text-amber-700">
-                ⚠ 卡号 {formatCardNumber(panel.formData.sim_index)} 已被 {simIndexConflict.phone_number ||
-                  simIndexConflict.iccid} 占用
+                ⚠ 卡号 {formatCardNumber(simIndexConflict.sim_index)} 已被 {textOr(
+                  simIndexConflict.phone_number,
+                  simIndexConflict.iccid,
+                )} 占用
               </p>
             {/if}
           </div>
@@ -858,7 +909,7 @@
                 focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
             >
               <option value="">选择…</option>
-              {#each COUNTRIES as c}
+              {#each COUNTRIES as c (c.code)}
                 <option value={c.code}>{c.flag} {c.name}</option>
               {/each}
             </select>
@@ -891,18 +942,11 @@
             <select
               id="mapping-service-type"
               bind:value={panel.formData.service_type}
-              onchange={() => {
-                if (
-                  panel.formData.service_type === 'unknown' ||
-                  panel.formData.service_type === 'balance_managed'
-                ) {
-                  panel.formData.service_type_source = '';
-                }
-              }}
+              onchange={clearUnconfirmedSource}
               class="w-full px-3 py-2 text-sm border border-stone-300 rounded-lg bg-white
                 focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
             >
-              {#each SIM_SERVICE_TYPES as option}
+              {#each SIM_SERVICE_TYPES as option (option.value)}
                 <option value={option.value}>{option.label}</option>
               {/each}
             </select>
@@ -924,7 +968,7 @@
                 focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
             >
               <option value="">选择…</option>
-              {#each SIM_SERVICE_TYPE_SOURCES as option}
+              {#each SIM_SERVICE_TYPE_SOURCES as option (option.value)}
                 <option value={option.value}>{option.label}</option>
               {/each}
             </select>
@@ -965,7 +1009,7 @@
               class="w-full px-3 py-2 text-sm border border-stone-300 rounded-lg bg-white
                 focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
             >
-              {#each SIM_ROLES as option}
+              {#each SIM_ROLES as option (option.value)}
                 <option value={option.value}>{option.label}</option>
               {/each}
             </select>
@@ -986,9 +1030,12 @@
                   focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
               >
                 <option value="">选择主卡…</option>
-                {#each allMappingsCache.filter((m) => m.sim_role === 'primary') as primary}
+                {#each allMappingsCache.filter((m) => m.sim_role === 'primary') as primary (primary.iccid)}
                   <option value={primary.iccid}>
-                    {formatCardNumber(primary.sim_index)} · {primary.phone_number || primary.iccid}
+                    {formatCardNumber(primary.sim_index)} · {textOr(
+                      primary.phone_number,
+                      primary.iccid,
+                    )}
                     {primary.carrier ? `(${primary.carrier})` : ''}
                   </option>
                 {/each}
@@ -1068,12 +1115,13 @@
       <div class="px-6 py-4 border-t border-stone-100 flex-shrink-0">
         <!-- Edit mode: delete zone -->
         {#if panel.mode === 'edit'}
+          {@const mapping = panel.mapping}
           <div class="mb-4 pt-3 border-t border-stone-100">
             <p class="text-xs text-stone-400 mb-2">
               删除此映射后，卡还在槽里，但收到的短信将不再归属号码。已收到的历史短信保留。
             </p>
             <button
-              onclick={() => handleDelete(panel.mapping.id)}
+              onclick={() => handleDelete(mapping.id)}
               class="text-sm text-red-600 font-medium border border-red-200 rounded-lg px-3 py-1.5
                 hover:bg-red-50 transition-colors"
             >
