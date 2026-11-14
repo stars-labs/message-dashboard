@@ -74,13 +74,17 @@ from the reviewing session first — ask, don't improvise.
   crosses the daemon↔Worker boundary (`api_client.rs` uploads, health snapshot,
   call events, pending-SMS / control responses, `UploadResult`).
 - `#[derive(TS)]` (ts-rs) exports them to `sms-dashboard/shared/daemon-wire/`,
-  checked in. Newtypes export as branded types
-  (`string & { readonly __brand: 'Iccid' }`).
-- Gate: regenerate, then `git diff --exit-code sms-dashboard/shared/daemon-wire`.
-  Prove the gate fails by hand-editing one generated file once.
-- Worker parses those bodies with valibot schemas annotated
-  `v.GenericSchema<unknown, WireType>` so the compiler checks schema ↔ Rust type.
-  The Worker never re-declares a wire type by hand.
+  checked in. Newtypes export as valibot-branded strings
+  (`string & Brand<'Iccid'>`), so a Worker schema produces them with `v.brand`.
+- Gate: `check-daemon-wire` (run by `check-daemon`) regenerates the bindings and
+  fails on any changed, deleted or new file under `sms-dashboard/shared/daemon-wire`.
+- Worker schemas for daemon bodies are wrapped in `acceptsWire<WireType>()`
+  (`shared/wire-schema.ts`): `tsc` fails if a value Rust can send would be
+  rejected, or if Rust sends a field the schema never names. The schemas stay
+  as tolerant as they were, so this checks input, not output; a schema that
+  matches the wire type exactly also `satisfies v.GenericSchema<unknown, WireType>`.
+  Bodies the Worker sends to the daemon `satisfies` the wire type. The Worker
+  never re-declares a wire type by hand.
 
 ## Boundary rule (valibot)
 
