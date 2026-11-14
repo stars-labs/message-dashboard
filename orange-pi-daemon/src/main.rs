@@ -86,10 +86,10 @@ async fn build_modem_cache(modem_manager: &ModemManager) -> Result<HashMap<Strin
                     }
                 };
 
-                if imei.is_none() {
+                let Some(imei) = imei else {
                     warn!("⚠️  Modem {} has no valid IMEI, skipping", modem_id);
                     continue;
-                }
+                };
 
                 // Try ICCID — optional, modem is still valid without it
                 let iccid = match modem_manager.get_iccid(&modem_id).await {
@@ -103,20 +103,16 @@ async fn build_modem_cache(modem_manager: &ModemManager) -> Result<HashMap<Strin
 
                 valid_modems.insert(modem_id.clone(), iccid.clone());
 
-                match (&imei, &iccid) {
-                    (Some(imei), Some(iccid)) => {
-                        info!(
-                            "✅ Cached modem {} with ICCID {} (IMEI {})",
-                            modem_id, iccid, imei
-                        );
-                    }
-                    (Some(imei), None) => {
-                        warn!(
-                            "⚠️  Cached modem {} without ICCID (IMEI {}) — SIM read failed",
-                            modem_id, imei
-                        );
-                    }
-                    _ => unreachable!(),
+                if let Some(iccid) = &iccid {
+                    info!(
+                        "✅ Cached modem {} with ICCID {} (IMEI {})",
+                        modem_id, iccid, imei
+                    );
+                } else {
+                    warn!(
+                        "⚠️  Cached modem {} without ICCID (IMEI {}) — SIM read failed",
+                        modem_id, imei
+                    );
                 }
             }
         }

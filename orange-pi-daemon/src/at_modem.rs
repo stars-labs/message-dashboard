@@ -2060,64 +2060,76 @@ impl AtModemManager {
         let port_lock = self.port_lock(port).await;
         let _guard = port_lock.lock().await;
 
-        for attempt in 1..=2 {
-            let recovery_response = self.recover_sms_input_unlocked(port).await?;
-            Self::require_recovered_at_channel(&recovery_response)?;
-            self.configure_sms_unlocked(port, use_ucs2).await?;
+        match self
+            .submit_sms_unlocked(port, recipient, message, use_ucs2, allow_short_code)
+            .await
+        {
+            Err(error) if Self::is_prompt_timeout(&error) => {
+                warn!(
+                    "SMS prompt timed out on {}; recovering and retrying once",
+                    port
+                );
+                tokio::time::sleep(SMS_PROMPT_RETRY_DELAY).await;
+                self.submit_sms_unlocked(port, recipient, message, use_ucs2, allow_short_code)
+                    .await
+            }
+            result => result,
+        }
+    }
 
-            let port_path = port.to_string();
-            let recipient = recipient.as_str().to_owned();
-            let msg = message.to_string();
-            let timeout = self.timeout;
-            let result = tokio::task::spawn_blocking(move || {
-                Self::send_sms_sync(
-                    &port_path,
-                    &recipient,
-                    &msg,
-                    timeout,
-                    use_ucs2,
-                    allow_short_code,
-                )
-            })
-            .await?;
+    /// One SMS submission on a port whose lock the caller holds: recover the AT
+    /// channel, configure, submit, and recover again if the modem did not confirm.
+    async fn submit_sms_unlocked(
+        &self,
+        port: &str,
+        recipient: &SmsAddress,
+        message: &str,
+        use_ucs2: bool,
+        allow_short_code: bool,
+    ) -> Result<SmsSubmission> {
+        let recovery_response = self.recover_sms_input_unlocked(port).await?;
+        Self::require_recovered_at_channel(&recovery_response)?;
+        self.configure_sms_unlocked(port, use_ucs2).await?;
 
-            match result {
-                Ok(outcome) => {
-                    if Self::should_recover_after_submit(outcome) {
+        let port_path = port.to_string();
+        let recipient = recipient.as_str().to_owned();
+        let msg = message.to_string();
+        let timeout = self.timeout;
+        let result = tokio::task::spawn_blocking(move || {
+            Self::send_sms_sync(
+                &port_path,
+                &recipient,
+                &msg,
+                timeout,
+                use_ucs2,
+                allow_short_code,
+            )
+        })
+        .await?;
+
+        let outcome = result?;
+        if Self::should_recover_after_submit(outcome) {
+            warn!(
+                "SMS submission was not confirmed on {}; recovering AT channel",
+                port
+            );
+            match self.recover_sms_input_unlocked(port).await {
+                Ok(response) => {
+                    Self::classify_post_submit_recovery_response(&response)?;
+                    if let Err(error) = Self::require_recovered_at_channel(&response) {
                         warn!(
-                            "SMS submission was not confirmed on {}; recovering AT channel",
-                            port
+                            "Failed to recover AT channel after unconfirmed SMS submission on {}: {}",
+                            port, error
                         );
-                        match self.recover_sms_input_unlocked(port).await {
-                            Ok(response) => {
-                                Self::classify_post_submit_recovery_response(&response)?;
-                                if let Err(error) = Self::require_recovered_at_channel(&response) {
-                                    warn!(
-                                        "Failed to recover AT channel after unconfirmed SMS submission on {}: {}",
-                                        port, error
-                                    );
-                                }
-                            }
-                            Err(error) => warn!(
-                                "Failed to recover AT channel after unconfirmed SMS submission on {}: {}",
-                                port, error
-                            ),
-                        }
                     }
-                    return Ok(outcome);
                 }
-                Err(error) if attempt == 1 && Self::is_prompt_timeout(&error) => {
-                    warn!(
-                        "SMS prompt timed out on {}; recovering and retrying once",
-                        port
-                    );
-                    tokio::time::sleep(SMS_PROMPT_RETRY_DELAY).await;
-                }
-                Err(error) => return Err(error),
+                Err(error) => warn!(
+                    "Failed to recover AT channel after unconfirmed SMS submission on {}: {}",
+                    port, error
+                ),
             }
         }
-
-        unreachable!("SMS send loop always returns on its second attempt")
+        Ok(outcome)
     }
 
     async fn configure_sms_unlocked(&self, port: &str, use_ucs2: bool) -> Result<()> {
