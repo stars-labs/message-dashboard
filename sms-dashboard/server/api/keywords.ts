@@ -12,7 +12,7 @@ import { HISTORY_MISSING_KEY_MESSAGES, HistoryRequestBody } from '../utils/histo
 import type { SuccessResponse } from '../../shared/api/success.js';
 import type { AuthRequest } from '../middleware/auth0.js';
 import { authorize } from '../middleware/authorize.js';
-import { errorText } from '../utils/d1-error.js';
+import { errorText } from '../../shared/error-text.js';
 import { DEFAULT_KEYWORD_COLOR, normalizeKeywordColor } from '../utils/keyword-color.js';
 import { processKeywordHistoryPage } from '../utils/keyword-history.js';
 

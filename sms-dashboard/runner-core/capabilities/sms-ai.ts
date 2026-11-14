@@ -9,7 +9,7 @@ import {
 } from '../../server/utils/balance-skill.js';
 import type { CompanyAIProtocol } from '../../server/utils/company-ai.js';
 import type { ControlClient } from '../control-client.js';
-import { errorMessage } from '../error-message.js';
+import { errorText } from '../../shared/error-text.js';
 import type { CapabilityPresence } from '../presence.js';
 import type { RunOutcome } from '../serial-runner.js';
 
@@ -69,12 +69,12 @@ export function createSmsAiCapability({
           method: 'POST',
           body: JSON.stringify({
             runner_id: runnerId,
-            error: errorMessage(error),
+            error: errorText(error),
           }),
         },
       );
     } catch (releaseError) {
-      logger.error(`Could not release job ${job.id}: ${errorMessage(releaseError)}`);
+      logger.error(`Could not release job ${job.id}: ${errorText(releaseError)}`);
     }
   }
 
@@ -100,7 +100,7 @@ export function createSmsAiCapability({
 
     async runOne({ signal }: { signal?: AbortSignal | null } = {}): Promise<RunOutcome> {
       const reachable = await isAIReachable(aiBaseUrl, undefined, (error) => {
-        probeError = errorMessage(error);
+        probeError = errorText(error);
       });
       if (!reachable) {
         await presence.set('degraded', null, 'vpn_or_ai_unreachable');
@@ -152,7 +152,7 @@ export function createSmsAiCapability({
         return { handled: true, retryDelay: 0 };
       } catch (error) {
         await release(job, error);
-        logger.error(`Balance skill job ${job.id} failed: ${errorMessage(error)}`);
+        logger.error(`Balance skill job ${job.id} failed: ${errorText(error)}`);
         await presence.set('ready');
         return { handled: true, retryDelay: 30_000 };
       }

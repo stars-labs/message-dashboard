@@ -1,22 +1,7 @@
+import { errorText } from '../../shared/error-text.js';
+
 const ROW_READ_LIMIT = "exceeded D1's free tier daily row read limit";
 const ROW_WRITE_LIMIT = "exceeded D1's free tier daily row write limit";
-
-function messageOf(value: unknown): unknown {
-  return typeof value === 'object' && value !== null && 'message' in value
-    ? value.message
-    : undefined;
-}
-
-function causeOf(value: unknown): unknown {
-  return typeof value === 'object' && value !== null && 'cause' in value ? value.cause : undefined;
-}
-
-export function errorText(error: unknown): string {
-  const messages = [messageOf(error), messageOf(causeOf(error))]
-    .filter((value): value is string => typeof value === 'string' && value.length > 0)
-    .join(' ');
-  return messages || String(error);
-}
 
 export function boundedErrorText(error: unknown, maxLength = 1000): string {
   return errorText(error).slice(0, maxLength);

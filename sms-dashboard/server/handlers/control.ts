@@ -6,7 +6,7 @@ import { NOT_JSON_MESSAGE, readBody, type MissingKeyMessages } from '../lib/requ
 import { secretMatches } from '../lib/secret.js';
 import { textOr } from '../../shared/text.js';
 import { processCarrierBillMessages } from '../utils/carrier-billing.js';
-import { errorText } from '../utils/d1-error.js';
+import { errorText } from '../../shared/error-text.js';
 import { normalizeHealthSnapshot } from '../utils/daemon-health.js';
 import type { HealthSnapshot } from '../../shared/api/daemon-status.js';
 import { findKeywordMatches } from '../utils/keyword-match.js';

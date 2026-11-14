@@ -30,7 +30,7 @@ import { sweepPending } from './utils/spam-backfill.js';
 import { reconcileCarrierBillMessages } from './utils/carrier-billing.js';
 import { Router } from './router.js';
 import type { AppRequest } from './worker-context.js';
-import { errorText } from './utils/d1-error.js';
+import { errorText } from '../shared/error-text.js';
 import { json } from './lib/response.js';
 
 const router = new Router<AppRequest>();

@@ -42,7 +42,7 @@ import {
   type BalanceCheckStatusResponse,
   type BalanceChecksResponse,
 } from '../../shared/api/balance-checks.js';
-import { errorText } from '../utils/d1-error.js';
+import { errorText } from '../../shared/error-text.js';
 import { senderMatches } from '../utils/spam-filter.js';
 import { loadBalanceRunnerStatus } from './balance-runners.js';
 import {

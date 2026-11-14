@@ -12,6 +12,7 @@ import fs from 'fs';
 import path from 'path';
 import readline from 'readline';
 import * as v from 'valibot';
+import { errorText } from '../shared/error-text.js';
 import { parseJson, type Schema } from '../shared/parse-json.js';
 
 // Configuration
@@ -46,10 +47,6 @@ function readBackupFile<T>(file: string, schema: Schema<T>): T {
   const parsed = parseJson(fs.readFileSync(file, 'utf-8'), schema);
   if (!parsed.ok) throw new Error(`${file} is not a valid backup file: ${parsed.error}`);
   return parsed.value;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 function rowCountFrom(output: string): number {
@@ -112,7 +109,7 @@ function runWranglerCommand(sql: string, isLocal = false) {
     return result;
   } catch (error) {
     console.error(`Error executing SQL: ${sql.substring(0, 100)}...`);
-    console.error(errorMessage(error));
+    console.error(errorText(error));
     return null;
   }
 }
@@ -127,7 +124,7 @@ function runSQLFile(filePath: string, isLocal = false) {
     return result;
   } catch (error) {
     console.error(`Error executing SQL file: ${filePath}`);
-    console.error(errorMessage(error));
+    console.error(errorText(error));
     return null;
   }
 }

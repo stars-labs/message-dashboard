@@ -13,7 +13,7 @@ import {
   type BalanceSkill,
 } from '../utils/balance-skill.js';
 import { CHECK_STATUSES, SKILL_JOB_STATUSES } from '../../shared/balance-status.js';
-import { errorText } from '../utils/d1-error.js';
+import { errorText } from '../../shared/error-text.js';
 import {
   authorizeRunnerControl,
   runnerCanAccessOwner,

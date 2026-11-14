@@ -21,7 +21,7 @@ import type { AuthRequest } from '../middleware/auth0.js';
 import { authorize } from '../middleware/authorize.js';
 import { normalizeSender } from '../utils/spam-filter.js';
 import { processRuleHistoryPage } from '../utils/filter-history.js';
-import { errorText } from '../utils/d1-error.js';
+import { errorText } from '../../shared/error-text.js';
 
 /** Shortest allowed body keyword. A single character would hide almost everything. */
 const MIN_KEYWORD_LENGTH = 2;

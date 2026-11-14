@@ -16,7 +16,7 @@ import {
 } from '../../server/utils/unicom-web-balance.js';
 import { extractM1WebBalance } from '../../server/utils/m1-web-balance.js';
 import type { ControlClient } from '../control-client.js';
-import { errorMessage } from '../error-message.js';
+import { errorText } from '../../shared/error-text.js';
 import type { CapabilityPresence } from '../presence.js';
 import { numberOr } from '../number-or.js';
 import { abortableSleep, type RunOutcome } from '../serial-runner.js';
@@ -745,7 +745,7 @@ export function createCarrierBrowserJobProcessor({
         `${job.id.replace(/[^a-zA-Z0-9_-]/g, '_')}.response.json`,
       );
       await writeFile(responsePath, `${JSON.stringify(payload, null, 2)}\n`);
-      throw new Error(`${errorMessage(error)}; response saved to ${responsePath}`, {
+      throw new Error(`${errorText(error)}; response saved to ${responsePath}`, {
         cause: error,
       });
     }
@@ -753,17 +753,17 @@ export function createCarrierBrowserJobProcessor({
 
   async function release(job: CarrierWebBalanceJob, error: unknown): Promise<void> {
     try {
-      await postJob(job, 'release', { error: errorMessage(error) });
+      await postJob(job, 'release', { error: errorText(error) });
     } catch (releaseError) {
-      logger.error(`Could not release web balance job ${job.id}: ${errorMessage(releaseError)}`);
+      logger.error(`Could not release web balance job ${job.id}: ${errorText(releaseError)}`);
     }
   }
 
   async function fail(job: CarrierWebBalanceJob, error: unknown): Promise<void> {
     try {
-      await postJob(job, 'fail', { error: errorMessage(error) });
+      await postJob(job, 'fail', { error: errorText(error) });
     } catch (failError) {
-      logger.error(`Could not fail web balance job ${job.id}: ${errorMessage(failError)}`);
+      logger.error(`Could not fail web balance job ${job.id}: ${errorText(failError)}`);
     }
   }
 
@@ -851,11 +851,11 @@ export function createCarrierBrowserJobProcessor({
       const diagnosticBase = await captureDiagnostics(job, page).catch(() => null);
       const terminal =
         /(?:timed out|does not prove|multiple candidate|recognized available-balance|exact SGD balance|validity date|HTTP|did not return JSON)/i.test(
-          errorMessage(error),
+          errorText(error),
         );
       if (terminal) await fail(job, error);
       else await release(job, error);
-      logger.error(`Carrier web balance job ${job.id} failed: ${errorMessage(error)}`);
+      logger.error(`Carrier web balance job ${job.id} failed: ${errorText(error)}`);
       if (diagnosticBase)
         logger.error(`Diagnostics saved to ${diagnosticBase}.json and ${diagnosticBase}.png`);
       const retryDelay = Math.max(10, numberOr(job.skill.cooldown_seconds, 10)) * 1_000;

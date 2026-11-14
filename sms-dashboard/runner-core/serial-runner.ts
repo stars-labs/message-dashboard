@@ -1,4 +1,4 @@
-import { errorMessage } from './error-message.js';
+import { errorText } from '../shared/error-text.js';
 
 export interface RunOutcome {
   handled?: boolean;
@@ -26,7 +26,7 @@ export async function runSerialCapability({
   signal = null,
   errorDelay = 15_000,
   onError = (error) => {
-    console.error(errorMessage(error));
+    console.error(errorText(error));
   },
   sleep = abortableSleep,
 }: {

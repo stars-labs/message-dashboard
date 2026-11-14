@@ -2,7 +2,7 @@ import { json } from '../lib/response.js';
 import * as v from 'valibot';
 import { readJson } from '../../shared/parse-json.js';
 import { queryAll, queryFirst, queryOne, type D1 } from '../lib/d1.js';
-import { errorText } from '../utils/d1-error.js';
+import { errorText } from '../../shared/error-text.js';
 import {
   IccidMapping,
   IccidMappingDetail,

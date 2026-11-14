@@ -1,6 +1,6 @@
 import type { BalanceRunnerCapability } from '../shared/api/balance-runners.js';
 import type { ControlClient } from './control-client.js';
-import { errorMessage } from './error-message.js';
+import { errorText } from '../shared/error-text.js';
 
 const HEARTBEAT_INTERVAL_MS = 30_000;
 
@@ -93,7 +93,7 @@ export function createRunnerPresence({
         lastError = null;
       })
       .catch((error: unknown) => {
-        const message = errorMessage(error);
+        const message = errorText(error);
         if (message !== lastError) {
           logger.error(`Runner presence unavailable: ${message}`);
           lastError = message;
