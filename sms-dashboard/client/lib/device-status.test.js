@@ -34,6 +34,11 @@ describe('getStatusMeta', () => {
     expect(getStatusMeta(null).label).toBe('离线');
     expect(getStatusMeta(undefined).label).toBe('离线');
   });
+
+  test('a status Object.prototype names falls back like any unknown one', () => {
+    expect(getStatusMeta('constructor').label).toBe('离线');
+    expect(getStatusMeta('toString').sortOrder).toBe(1);
+  });
 });
 
 describe('isAnomalous', () => {
