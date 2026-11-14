@@ -7,28 +7,22 @@ import comments from '@eslint-community/eslint-plugin-eslint-comments/configs';
 import { defineConfig, globalIgnores } from 'eslint/config';
 import { includeIgnoreFile } from '@eslint/config-helpers';
 import prettier from 'eslint-config-prettier';
+import svelte from 'eslint-plugin-svelte';
 import tseslint from 'typescript-eslint';
 import ts from 'typescript';
-import { relative } from 'node:path';
+import * as v from 'valibot';
 import { fileURLToPath } from 'node:url';
 
-// The client files that have joined the strict gate, read from the client
-// project so the two cannot disagree.
+// The client files that have joined the strict gate: the client project's
+// include list, read as written so the two cannot disagree. It names .svelte
+// components too, which svelte-check reads and tsc skips.
 function joinedClientFiles(): string[] {
-  const project = ts.getParsedCommandLineOfConfigFile(
+  const read = ts.readConfigFile(
     fileURLToPath(new URL('tsconfig.client.json', import.meta.url)),
-    {},
-    {
-      ...ts.sys,
-      onUnRecoverableConfigFileDiagnostic: (diagnostic) => {
-        throw new Error(ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n'));
-      },
-    },
+    (path) => ts.sys.readFile(path),
   );
-  if (!project) throw new Error('tsconfig.client.json could not be read');
-  return project.fileNames
-    .map((file) => relative(import.meta.dirname, file))
-    .filter((file) => file.startsWith('client/'));
+  if (read.error) throw new Error(ts.flattenDiagnosticMessageText(read.error.messageText, '\n'));
+  return v.parse(v.object({ include: v.array(v.string()) }), read.config).include;
 }
 
 // A leading underscore marks a parameter or caught error that is unused on
@@ -84,10 +78,14 @@ export default defineConfig([
   },
   {
     name: 'TypeScript, linted with type information',
-    files: ['**/*.ts'],
+    files: ['**/*.ts', '**/*.svelte'],
     extends: [tseslint.configs.strictTypeChecked, tseslint.configs.stylisticTypeChecked],
     languageOptions: {
-      parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir: import.meta.dirname,
+        extraFileExtensions: ['.svelte'],
+      },
     },
     rules: {
       // A number has one string form; anything else is converted explicitly.
@@ -139,6 +137,17 @@ export default defineConfig([
     files: ['shared/**/*.ts', 'config/**/*.ts'],
     languageOptions: { sourceType: 'module' },
   },
+  // After the TypeScript block, so the Svelte parser owns .svelte files and
+  // hands their scripts to the TypeScript parser.
+  svelte.configs.recommended,
+  {
+    name: 'Svelte components: scripts parsed as TypeScript',
+    files: ['**/*.svelte', '**/*.svelte.ts'],
+    languageOptions: { parserOptions: { parser: tseslint.parser } },
+    // TypeScript resolves every name, as typescript-eslint has it do for .ts.
+    rules: { 'no-undef': 'off' },
+  },
   // Last: switches off every rule Prettier owns, so the two never disagree.
   prettier,
+  svelte.configs.prettier,
 ]);

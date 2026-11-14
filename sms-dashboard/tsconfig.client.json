@@ -23,6 +23,7 @@
     "client/lib/card-number.ts",
     "client/lib/carrier.ts",
     "client/lib/clipboard.ts",
+    "client/lib/ConfirmHost.svelte",
     "client/lib/confirm.svelte.ts",
     "client/lib/countries.ts",
     "client/lib/daemon-status.ts",
@@ -44,6 +45,7 @@
     "client/lib/swipe-dismiss.ts",
     "client/lib/tag-store.ts",
     "client/lib/time.ts",
+    "client/lib/Toast.svelte",
     "client/vite-env.d.ts"
   ],
   "references": [{ "path": "./tsconfig.shared.json" }]

@@ -1,7 +1,16 @@
-<script>
+<script lang="ts">
   import { onMount } from 'svelte';
 
-  let { message = '', type = 'info', duration = 4000, onClose = () => {} } = $props();
+  type ToastType = 'success' | 'error' | 'info';
+
+  interface Props {
+    message?: string;
+    type?: ToastType;
+    duration?: number;
+    onClose?: () => void;
+  }
+
+  let { message = '', type = 'info', duration = 4000, onClose = () => undefined }: Props = $props();
 
   let visible = $state(false);
 
@@ -11,9 +20,14 @@
       visible = true;
     });
     if (duration > 0) {
-      const timer = setTimeout(() => dismiss(), duration);
-      return () => clearTimeout(timer);
+      const timer = setTimeout(() => {
+        dismiss();
+      }, duration);
+      return () => {
+        clearTimeout(timer);
+      };
     }
+    return undefined;
   });
 
   function dismiss() {
@@ -25,13 +39,13 @@
     success: '✓',
     error: '✕',
     info: 'ℹ',
-  };
+  } as const satisfies Record<ToastType, string>;
 
   const colors = {
     success: 'bg-emerald-50 border-emerald-200 text-emerald-800',
     error: 'bg-red-50 border-red-200 text-red-800',
     info: 'bg-blue-50 border-blue-200 text-blue-800',
-  };
+  } as const satisfies Record<ToastType, string>;
 </script>
 
 <!-- Positioned by the parent's stack, not by itself: two self-positioned toasts
@@ -44,10 +58,9 @@
     : 'opacity-0 -translate-y-2'}"
 >
   <div
-    class="flex items-center gap-3 px-4 py-3 rounded-lg border shadow-lg {colors[type] ||
-      colors.info} max-w-sm"
+    class="flex items-center gap-3 px-4 py-3 rounded-lg border shadow-lg {colors[type]} max-w-sm"
   >
-    <span class="text-lg font-bold shrink-0">{icons[type] || icons.info}</span>
+    <span class="text-lg font-bold shrink-0">{icons[type]}</span>
     <span class="text-sm">{message}</span>
     <button
       onclick={dismiss}

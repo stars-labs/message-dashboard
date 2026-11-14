@@ -1,9 +1,5 @@
-// Run with: bun test client/lib/Toast.test.js
-//
-// Smoke coverage for Toast. These tests exist to catch regressions during the
-// Svelte 4 -> runes migration: they assert on rendered output and user-visible
-// behaviour, never on which reactivity primitive is used internally, so the
-// same tests must pass before and after the migration.
+// Smoke coverage for Toast: rendered output and user-visible behaviour, never
+// which reactivity primitive is used internally.
 import { describe, expect, test } from 'bun:test';
 import { render, cleanup } from '@testing-library/svelte';
 import Toast from './Toast.svelte';
@@ -16,20 +12,21 @@ describe('Toast', () => {
   });
 
   test('picks the icon and colours matching the type', () => {
-    const { container } = render(Toast, {
-      props: { message: 'saved', type: 'success' },
-    });
-    expect(container.textContent).toContain('✓');
-    expect(container.innerHTML).toContain('bg-emerald-50');
-    cleanup();
+    for (const [type, icon, colour] of [
+      ['success', '✓', 'bg-emerald-50'],
+      ['error', '✕', 'bg-red-50'],
+      ['info', 'ℹ', 'bg-blue-50'],
+    ] as const) {
+      const { container } = render(Toast, { props: { message: 'saved', type } });
+      expect(container.textContent).toContain(icon);
+      expect(container.innerHTML).toContain(colour);
+      cleanup();
+    }
   });
 
-  test('falls back to the info style for an unknown type', () => {
-    const { container } = render(Toast, {
-      props: { message: 'hm', type: 'not-a-real-type' },
-    });
+  test('is an info toast when no type is given', () => {
+    const { container } = render(Toast, { props: { message: 'hm' } });
     expect(container.textContent).toContain('ℹ');
-    expect(container.innerHTML).toContain('bg-blue-50');
     cleanup();
   });
 
@@ -37,7 +34,7 @@ describe('Toast', () => {
   // auto-dismiss timer so this asserts the click path alone.
   test('invokes onClose after the dismiss button is clicked', async () => {
     let closed = false;
-    const { container } = render(Toast, {
+    const { getByRole } = render(Toast, {
       props: {
         message: 'bye',
         duration: 0,
@@ -47,8 +44,26 @@ describe('Toast', () => {
       },
     });
 
-    container.querySelector('button').click();
+    getByRole('button').click();
     // dismiss() defers onClose by 200ms to let the exit animation run.
+    await new Promise((resolve) => setTimeout(resolve, 260));
+
+    expect(closed).toBe(true);
+    cleanup();
+  });
+
+  test('closes itself after its duration', async () => {
+    let closed = false;
+    render(Toast, {
+      props: {
+        message: 'bye',
+        duration: 20,
+        onClose: () => {
+          closed = true;
+        },
+      },
+    });
+
     await new Promise((resolve) => setTimeout(resolve, 260));
 
     expect(closed).toBe(true);
