@@ -69,7 +69,7 @@ export type IccidMappingsResponse = v.InferOutput<typeof IccidMappingsResponse>;
 
 export const CreateIccidMappingResponse = v.object({
   success: v.literal(true),
-  data: v.nullable(SavedIccidMapping),
+  data: SavedIccidMapping,
 });
 
 export type CreateIccidMappingResponse = v.InferOutput<typeof CreateIccidMappingResponse>;

@@ -1,7 +1,7 @@
 import { json } from '../lib/response.js';
 import * as v from 'valibot';
 import { readJson } from '../../shared/parse-json.js';
-import { queryAll, queryFirst, type D1 } from '../lib/d1.js';
+import { queryAll, queryFirst, queryOne, type D1 } from '../lib/d1.js';
 import { errorText } from '../utils/d1-error.js';
 import {
   IccidMapping,
@@ -475,7 +475,7 @@ export const iccidMappingsHandler = {
           .run();
       }
 
-      const mapping = await queryFirst(
+      const mapping = await queryOne(
         env.DB.prepare(
           `
         SELECT
