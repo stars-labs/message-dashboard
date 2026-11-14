@@ -10,19 +10,40 @@
 /** A PeerConnection that has not connected in this long will not connect. */
 const CONNECT_TIMEOUT_MS = 15_000;
 
-/** The PeerConnection surface this drives. */
-interface ConnectionLike {
+/** The audio track surface this drives: MediaStreamTrack in a browser. */
+interface TrackLike {
+  enabled: boolean;
+  stop(): void;
+}
+
+/** The microphone stream surface this drives: MediaStream in a browser. */
+interface MicLike<Track> {
+  getTracks(): Track[];
+  getAudioTracks(): Track[];
+}
+
+/**
+ * The PeerConnection surface this drives. `Track` and `Stream` are
+ * MediaStreamTrack and MediaStream in a browser.
+ */
+interface ConnectionLike<Track, Stream> {
   connectionState: string;
   localDescription: { type: string; sdp: string } | null;
-  ontrack: ((event: { streams?: MediaStream[]; track: MediaStreamTrack }) => void) | null;
-  addTransceiver(track: MediaStreamTrack, init: { direction: string }): { mid: string | null };
+  ontrack: ((event: { streams: readonly Stream[]; track: Track }) => void) | null;
+  addTransceiver(track: Track, init: { direction: 'sendrecv' }): { mid: string | null };
   createOffer(): Promise<{ type: string; sdp: string }>;
   createAnswer(): Promise<{ type: string; sdp: string }>;
-  setLocalDescription(description: unknown): Promise<void>;
-  setRemoteDescription(description: unknown): Promise<void>;
+  setLocalDescription(description: { type: string; sdp: string }): Promise<void>;
+  setRemoteDescription(description: { type: string; sdp: string }): Promise<void>;
   addEventListener(type: 'connectionstatechange', listener: () => void): void;
   removeEventListener(type: 'connectionstatechange', listener: () => void): void;
   close(): void;
+}
+
+/** An SDP offer or answer as the Worker returns it. */
+interface Description {
+  type: 'offer' | 'answer';
+  sdp: string;
 }
 
 /** The call API call-session drives, matching callApi in call-client.ts. */
@@ -32,29 +53,34 @@ interface CallSessionApi {
     number: string;
     offer: unknown;
     mid: string | null;
-  }): Promise<{ call: { id: string }; answer: unknown }>;
+  }): Promise<{ call: { id: string }; answer: Description }>;
   answer(params: {
     offer: unknown;
     mid: string | null;
-  }): Promise<{ call: { id: string }; answer: unknown }>;
-  connect(callId: string): Promise<{ offer?: unknown }>;
+  }): Promise<{ call: { id: string }; answer: Description }>;
+  connect(callId: string): Promise<{ offer: Description | null }>;
   renegotiate(params: { answer: unknown; callId: string }): Promise<unknown>;
   hangup(callId?: string): Promise<unknown>;
 }
 
-interface CallSessionDeps {
+interface CallSessionDeps<Track extends TrackLike, Stream> {
   fetchIce: () => Promise<RTCIceServer[]>;
   api: CallSessionApi;
   RTCPeerConnection: new (config: {
     iceServers: RTCIceServer[];
-    bundlePolicy: string;
-  }) => ConnectionLike;
-  getUserMedia: (constraints: MediaStreamConstraints) => Promise<MediaStream>;
-  audioElement: HTMLAudioElement | null;
+    bundlePolicy: 'max-bundle';
+  }) => ConnectionLike<Track, Stream>;
+  getUserMedia: (constraints: { audio: true; video: false }) => Promise<MicLike<Track>>;
+  /** Wraps a far-end track that arrived without a stream: `new MediaStream([track])`. */
+  streamOf: (track: Track) => Stream;
+  audioElement: { srcObject: Stream | null; play(): Promise<void> } | null;
   connectTimeoutMs?: number;
 }
 
-function waitForConnected(pc: ConnectionLike, timeoutMs: number): Promise<void> {
+function waitForConnected<Track, Stream>(
+  pc: ConnectionLike<Track, Stream>,
+  timeoutMs: number,
+): Promise<void> {
   if (pc.connectionState === 'connected') return Promise.resolve();
   return new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -78,27 +104,22 @@ function waitForConnected(pc: ConnectionLike, timeoutMs: number): Promise<void> 
   });
 }
 
-/**
- * @param {object} deps
- * @param {() => Promise<RTCIceServer[]>} deps.fetchIce
- * @param {{dial, answer, connect, renegotiate, hangup}} deps.api  see call-client.js callApi
- * @param {typeof RTCPeerConnection} deps.RTCPeerConnection
- * @param {(constraints: MediaStreamConstraints) => Promise<MediaStream>} deps.getUserMedia
- * @param {HTMLAudioElement} deps.audioElement  plays the far end
- * @param {number} [deps.connectTimeoutMs]
- */
-export function createCallSession(deps: CallSessionDeps) {
-  const { fetchIce, api, RTCPeerConnection, getUserMedia, audioElement } = deps;
+export function createCallSession<Track extends TrackLike, Stream>(
+  deps: CallSessionDeps<Track, Stream>,
+) {
+  const { fetchIce, api, RTCPeerConnection, getUserMedia, streamOf, audioElement } = deps;
   const connectTimeoutMs = deps.connectTimeoutMs ?? CONNECT_TIMEOUT_MS;
 
-  let pc: ConnectionLike | null = null;
-  let mic: MediaStream | null = null;
+  let pc: ConnectionLike<Track, Stream> | null = null;
+  let mic: MicLike<Track> | null = null;
   let closed = false;
   let callId: string | null = null;
 
   function release() {
     closed = true;
-    mic?.getTracks().forEach((track) => track.stop());
+    mic?.getTracks().forEach((track) => {
+      track.stop();
+    });
     mic = null;
     if (pc) {
       pc.ontrack = null;
@@ -117,10 +138,11 @@ export function createCallSession(deps: CallSessionDeps) {
     start: (offer: {
       offer: unknown;
       mid: string | null;
-    }) => Promise<{ call: { id: string }; answer: unknown }>,
+    }) => Promise<{ call: { id: string }; answer: Description }>,
   ) {
     try {
-      mic = await getUserMedia({ audio: true, video: false });
+      const stream = await getUserMedia({ audio: true, video: false });
+      mic = stream;
       assertOpen();
       const iceServers = await fetchIce();
       assertOpen();
@@ -128,14 +150,17 @@ export function createCallSession(deps: CallSessionDeps) {
       pc = new RTCPeerConnection({ iceServers, bundlePolicy: 'max-bundle' });
       pc.ontrack = (event) => {
         if (audioElement) {
-          audioElement.srcObject = event.streams?.[0] ?? new MediaStream([event.track]);
-          audioElement.play?.().catch(() => {});
+          audioElement.srcObject = event.streams[0] ?? streamOf(event.track);
+          audioElement.play().catch(() => undefined);
         }
       };
-      const transceiver = pc.addTransceiver(mic.getAudioTracks()[0], { direction: 'sendrecv' });
+      const [track] = stream.getAudioTracks();
+      if (!track) throw new Error('麦克风没有可用的音轨');
+      const transceiver = pc.addTransceiver(track, { direction: 'sendrecv' });
 
       await pc.setLocalDescription(await pc.createOffer());
-      const local = pc.localDescription!;
+      const local = pc.localDescription;
+      if (!local) throw new Error('没能生成本地音频描述');
       const offer = { type: local.type, sdp: local.sdp };
       const started = await start({ offer, mid: transceiver.mid });
       assertOpen();
@@ -150,14 +175,15 @@ export function createCallSession(deps: CallSessionDeps) {
       if (connected.offer) {
         await pc.setRemoteDescription(connected.offer);
         await pc.setLocalDescription(await pc.createAnswer());
-        const localAnswer = pc.localDescription!;
+        const localAnswer = pc.localDescription;
+        if (!localAnswer) throw new Error('没能生成本地音频应答');
         const answer = { type: localAnswer.type, sdp: localAnswer.sdp };
         await api.renegotiate({ answer, callId });
       }
     } catch (error) {
       const wasClosed = closed;
       release();
-      if (!wasClosed && callId) await api.hangup(callId).catch(() => {});
+      if (!wasClosed && callId) await api.hangup(callId).catch(() => undefined);
       throw error;
     }
   }
@@ -182,11 +208,11 @@ export function createCallSession(deps: CallSessionDeps) {
       mic?.getAudioTracks().forEach((track) => {
         track.enabled = !muted;
       });
-      return Boolean(muted);
+      return muted;
     },
     get muted(): boolean {
       const tracks = mic?.getAudioTracks() ?? [];
-      return tracks.length > 0 && tracks.every((track) => track.enabled === false);
+      return tracks.length > 0 && tracks.every((track) => !track.enabled);
     },
     get active(): boolean {
       return !closed && pc !== null;

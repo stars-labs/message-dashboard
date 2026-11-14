@@ -977,6 +977,7 @@
       api: callApi,
       RTCPeerConnection: window.RTCPeerConnection,
       getUserMedia: (constraints) => navigator.mediaDevices.getUserMedia(constraints),
+      streamOf: (track) => new MediaStream([track]),
       audioElement: callAudio,
     });
     return callSession;

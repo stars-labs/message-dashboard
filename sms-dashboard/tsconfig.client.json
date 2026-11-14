@@ -19,6 +19,7 @@
     "client/lib/balance-polling.ts",
     "client/lib/call-client.ts",
     "client/lib/call-ringtone.ts",
+    "client/lib/call-session.ts",
     "client/lib/card-number.ts",
     "client/lib/carrier.ts",
     "client/lib/clipboard.ts",
