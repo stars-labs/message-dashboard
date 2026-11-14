@@ -9,21 +9,7 @@ import { includeIgnoreFile } from '@eslint/config-helpers';
 import prettier from 'eslint-config-prettier';
 import svelte from 'eslint-plugin-svelte';
 import tseslint from 'typescript-eslint';
-import ts from 'typescript';
-import * as v from 'valibot';
 import { fileURLToPath } from 'node:url';
-
-// The client files that have joined the strict gate: the client project's
-// include list, read as written so the two cannot disagree. It names .svelte
-// components too, which svelte-check reads and tsc skips.
-function joinedClientFiles(): string[] {
-  const read = ts.readConfigFile(
-    fileURLToPath(new URL('tsconfig.client.json', import.meta.url)),
-    (path) => ts.sys.readFile(path),
-  );
-  if (read.error) throw new Error(ts.flattenDiagnosticMessageText(read.error.messageText, '\n'));
-  return v.parse(v.object({ include: v.array(v.string()) }), read.config).include;
-}
 
 // A leading underscore marks a parameter or caught error that is unused on
 // purpose; `{ dropped, ...kept }` is the idiom for omitting a field.
@@ -44,10 +30,6 @@ export default defineConfig([
     'balance-agent/release/',
     // Areas that have not joined the strict gate. oxlint covers them instead;
     // each phase removes its own line here as that area joins.
-    // In client/, the files in tsconfig.client.json and the TypeScript tests have joined.
-    'client/**/*.{js,ts,svelte}',
-    ...joinedClientFiles().map((file) => `!${file}`),
-    '!client/**/*.test.ts',
     'test/*.js',
     'scripts/',
     'runner-core/',

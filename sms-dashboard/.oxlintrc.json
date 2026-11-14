@@ -19,6 +19,7 @@
     "dist/**",
     "balance-agent/dist/**",
     "balance-agent/release/**",
+    "client/**",
     "server/**",
     "shared/**",
     "config/**",
@@ -26,13 +27,5 @@
     "worker-configuration.d.ts",
     "worker-runtime.d.ts",
     "tsconfig*.json"
-  ],
-  "overrides": [
-    {
-      "files": ["client/**/*.svelte"],
-      "rules": {
-        "eslint/no-unused-expressions": "off"
-      }
-    }
   ]
 }

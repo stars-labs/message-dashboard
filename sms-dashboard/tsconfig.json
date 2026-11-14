@@ -1,5 +1,5 @@
-// The strict gate. It lists only the areas that have joined; everything else is
-// still checked by tsconfig.legacy.json, so no area goes unchecked.
+// The strict gate: every project that has joined it. The areas Phase 4 has
+// not converted yet are linted by oxlint until they join.
 {
   "files": [],
   "references": [

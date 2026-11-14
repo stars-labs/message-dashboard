@@ -1,4 +1,4 @@
-// Tests of the client files that have joined the strict gate. They run under
+// Tests of the client. They run under
 // Bun with happy-dom installing the DOM (bunfig.client.toml), so they see both.
 {
   "extends": "./tsconfig.base.json",

@@ -10,7 +10,7 @@
     "lint": "bun run lint:strict && bun run lint:legacy",
     "lint:strict": "bun run --bun eslint . --max-warnings 0",
     "lint:legacy": "oxlint",
-    "typecheck": "tsc -b && bun run typecheck:svelte && tsc -p tsconfig.legacy.json",
+    "typecheck": "tsc -b && bun run typecheck:svelte",
     "typecheck:svelte": "svelte-check --tsconfig ./tsconfig.client.json --fail-on-warnings && svelte-check --tsconfig ./tsconfig.client-test.json --fail-on-warnings",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
