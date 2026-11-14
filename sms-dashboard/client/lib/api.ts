@@ -431,48 +431,19 @@ export const api = {
   // ICCID Mappings
   iccidMappings: {
     async list(params: EndpointParams = {}) {
-      try {
-        return await apiRequest('listIccidMappings', params);
-      } catch (error) {
-        console.warn('Failed to list ICCID mappings :', error);
-        const query = new URLSearchParams(params as Record<string, string>).toString();
-        return await fetchWithAuth(`/api/iccid-mappings?${query}`);
-      }
+      return await apiRequest('listIccidMappings', params);
     },
 
     async create(data: unknown) {
-      try {
-        return await apiRequest('createIccidMapping', data as EndpointParams);
-      } catch (error) {
-        console.warn('Failed to create ICCID mapping :', error);
-        return await fetchWithAuth('/api/iccid-mappings', {
-          method: 'POST',
-          body: JSON.stringify(data),
-        });
-      }
+      return await apiRequest('createIccidMapping', data as EndpointParams);
     },
 
     async update(id: string, data: Record<string, unknown>) {
-      try {
-        return await apiRequest('updateIccidMapping', { id, ...data } as EndpointParams);
-      } catch (error) {
-        console.warn('Failed to update ICCID mapping :', error);
-        return await fetchWithAuth(`/api/iccid-mappings/${id}`, {
-          method: 'PUT',
-          body: JSON.stringify(data),
-        });
-      }
+      return await apiRequest('updateIccidMapping', { id, ...data } as EndpointParams);
     },
 
     async delete(id: string) {
-      try {
-        return await apiRequest('deleteIccidMapping', { id });
-      } catch (error) {
-        console.warn('Failed to delete ICCID mapping :', error);
-        return await fetchWithAuth(`/api/iccid-mappings/${id}`, {
-          method: 'DELETE',
-        });
-      }
+      return await apiRequest('deleteIccidMapping', { id });
     },
   },
 };
