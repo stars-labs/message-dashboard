@@ -36,6 +36,9 @@ from the reviewing session first — ask, don't improvise.
 - **oxlint is removed**: package, `.oxlintrc.json`, `lint` script, `flake.nix`
   devshell entry, CI step. Delete `docs/web-lint-audit.md` (superseded by this file).
   Timing: see "Gate migration" below.
+- Dead code is gated by knip in `check`: unused files, exports, types and
+  dependencies. balance-agent joins its config in phase 4, once `bun install`
+  at the dashboard root installs it.
 - Formatting is Prettier's, with `prettier-plugin-svelte`. `eslint-config-prettier`
   is the last entry in the ESLint config so no lint rule fights the formatter.
   `.prettierrc` keeps this repo's existing style (semicolons, single quotes,
