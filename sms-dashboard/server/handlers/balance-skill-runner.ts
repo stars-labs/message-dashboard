@@ -11,7 +11,7 @@ import {
   type BalanceDecision,
   type BalanceSkill,
 } from '../utils/balance-skill.js';
-import { CHECK_STATUSES, SKILL_JOB_STATUSES } from '../utils/balance-status.js';
+import { CHECK_STATUSES, SKILL_JOB_STATUSES } from '../../shared/balance-status.js';
 import { errorText } from '../utils/d1-error.js';
 import {
   authorizeRunnerControl,

@@ -18,9 +18,10 @@ import {
   SKILL_JOB_STATUSES,
   WEB_JOB_STATUSES,
   type CheckStatus,
+  type DisplayStatus,
   type SkillJobStatus,
   type WebJobStatus,
-} from '../utils/balance-status.js';
+} from '../../shared/balance-status.js';
 import { errorText } from '../utils/d1-error.js';
 import { senderMatches } from '../utils/spam-filter.js';
 import { loadBalanceRunnerStatus } from './balance-runners.js';
@@ -484,17 +485,6 @@ function parseMetrics(metricsJson: string): BalanceMetric[] {
   const parsed = parseJson(metricsJson, v.array(MetricJson));
   return parsed.ok ? parsed.value : [];
 }
-
-type DisplayStatus =
-  | CheckStatus
-  | 'skill_pending'
-  | 'skill_processing'
-  | 'web_pending'
-  | 'web_processing'
-  | 'web_otp'
-  | 'web_authenticating'
-  | 'web_querying'
-  | 'web_human_required';
 
 function webDisplayStatus(status: WebJobStatus): DisplayStatus | null {
   switch (status) {

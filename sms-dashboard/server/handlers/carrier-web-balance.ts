@@ -25,7 +25,7 @@ import {
   CHECK_STATUSES,
   WEB_JOB_STATUSES,
   type ActiveWebJobStatus,
-} from '../utils/balance-status.js';
+} from '../../shared/balance-status.js';
 
 const WEB_PROVIDERS = ['china_unicom', 'm1_prepaid'] as const;
 
