@@ -1,31 +1,23 @@
 import * as v from 'valibot';
 import { readJson } from '../../shared/parse-json.js';
+import { queryAll, type D1, type D1Batch } from '../lib/d1.js';
 import { NOT_JSON_MESSAGE, readBody, type MissingKeyMessages } from '../lib/request-body.js';
-import { extractVerificationCode } from '../utils/verification';
+import { secretMatches } from '../lib/secret.js';
+import { textOr } from '../lib/text.js';
+import { processCarrierBillMessages } from '../utils/carrier-billing.js';
+import { errorText } from '../utils/d1-error.js';
+import { normalizeHealthSnapshot, type HealthSnapshot } from '../utils/daemon-health.js';
 import { findKeywordMatches } from '../utils/keyword-match.js';
 import { classifyMessage, loadActiveRules } from '../utils/spam-filter.js';
-import { normalizeHealthSnapshot } from '../utils/daemon-health.js';
+import { extractVerificationCode } from '../utils/verification.js';
 import {
   findPendingBalanceCheck,
   linkBalanceReply,
   mergeMultipartReplies,
   updateBalanceCheckForSmsResult,
+  type BalanceCheckRow,
+  type SmsOutcome,
 } from './balance-queries.js';
-import { processCarrierBillMessages } from '../utils/carrier-billing.js';
-import { secretMatches } from '../lib/secret.js';
-import type { BalanceCheckRow, SmsOutcome } from './balance-queries.js';
-
-import type { AppRequest, Env } from '../worker-context.js';
-import type { D1Database } from '../cf-bindings.js';
-
-/** One SMS as uploaded by the daemon. */
-interface UploadedMessage {
-  id?: unknown;
-  phone_iccid?: unknown;
-  phone_number?: unknown;
-  content?: unknown;
-  timestamp?: unknown;
-}
 
 /** A stored, normalized message, before classification side effects. */
 interface StoredMessage {
@@ -61,6 +53,7 @@ function requiredText(message: string) {
 const ReportText = v.nullish(v.string(INVALID_REPORT));
 const ReportInteger = v.nullish(v.pipe(v.number(INVALID_REPORT), v.integer(INVALID_REPORT)));
 
+/** One entry of the daemon's modem_reports array (orange-pi-daemon types.rs ModemReport). */
 const ModemReportSchema = v.object(
   {
     equipment_id: v.string(INVALID_REPORT),
@@ -147,11 +140,44 @@ const CLEANUP_MISSING_KEY_MESSAGES = {
   phoneIds: PHONE_IDS_REQUIRED,
 } as const satisfies MissingKeyMessages<typeof CleanupBodySchema>;
 
-const SMS_STATUS_FOR_OUTCOME: Record<SmsOutcome, string> = {
+const IdRow = v.object({ id: v.string() });
+
+const PendingMessageRow = v.object({
+  id: v.string(),
+  phone_iccid: v.nullable(v.string()),
+  phone_number: v.nullable(v.string()),
+  content: v.string(),
+  recipient: v.nullable(v.string()),
+  purpose: v.picklist(['user', 'balance_maintenance']),
+  created_at: v.nullable(v.string()),
+});
+
+const KeywordRow = v.object({
+  id: v.number(),
+  keyword: v.string(),
+  case_sensitive: v.nullable(v.number()),
+  whole_word: v.nullable(v.number()),
+});
+
+const SMS_STATUS_FOR_OUTCOME: Readonly<Record<SmsOutcome, string>> = {
   confirmed: 'sent',
   submitted_unconfirmed: 'unknown',
   failed: 'failed',
 };
+
+/** A daemon request: the shared API key, and the D1 operations the route uses. */
+interface DaemonRequest<Db> {
+  headers: { get(name: string): string | null };
+  env: { API_KEY?: string; DB: Db };
+}
+
+interface BodyRequest<Db> extends DaemonRequest<Db> {
+  text(): Promise<string>;
+}
+
+interface UploadRequest extends BodyRequest<D1 & D1Batch<'run'>> {
+  ctx: { waitUntil(promise: Promise<unknown>): void };
+}
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -164,8 +190,8 @@ function json(body: unknown, status = 200): Response {
  * Every control route authenticates with the daemon's shared API key, never
  * Auth0. Returns a Response when the key is wrong.
  */
-async function requireApiKey(request: AppRequest, env: Env): Promise<Response | null> {
-  if (!(await secretMatches(request.headers.get('X-API-Key'), env.API_KEY))) {
+async function requireApiKey(request: DaemonRequest<unknown>): Promise<Response | null> {
+  if (!(await secretMatches(request.headers.get('X-API-Key'), request.env.API_KEY))) {
     return json({ error: 'Unauthorized' }, 401);
   }
   return null;
@@ -177,12 +203,31 @@ export function normalizeDaemonSessionId(value: unknown): string | null {
   return typeof value === 'string' && DAEMON_SESSION_ID.test(value) ? value : null;
 }
 
+const SPACED_TIMESTAMP = /^(\d{4})-(\d{2})-(\d{2})[T\s]+(\d{1,2}):(\d{1,2}):(\d{1,2})(\.\d{3})?Z?$/;
+const ZONELESS_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?$/;
+
+/**
+ * The daemon's receive time as ISO 8601 UTC. Older daemons sent the date and
+ * time separated by a space, a URL-encoded '+', or unpadded fields.
+ */
+function normalizeTimestamp(value: string | null | undefined): string {
+  const timestamp = (value ?? new Date().toISOString()).replace(/\+/g, ' ');
+  const match = SPACED_TIMESTAMP.exec(timestamp);
+  if (match) {
+    const [, year = '', month = '', day = '', hours = '', minutes = '', seconds = '', millis] =
+      match;
+    return `${year}-${month}-${day}T${hours.padStart(2, '0')}:${minutes.padStart(2, '0')}:${seconds.padStart(2, '0')}${millis ?? '.000'}Z`;
+  }
+  const compact = timestamp.replace(/\s+/g, '');
+  return ZONELESS_TIMESTAMP.test(compact) ? `${compact}Z` : compact;
+}
+
 export const controlHandler = {
   // Synchronize the daemon's canonical modem reports without rewriting unchanged rows.
-  async updateDevices(request: AppRequest): Promise<Response> {
+  async updateDevices(request: BodyRequest<D1<'run'> & D1Batch<'run'>>): Promise<Response> {
     const { env } = request;
 
-    const unauthorized = await requireApiKey(request, env);
+    const unauthorized = await requireApiKey(request);
     if (unauthorized) return unauthorized;
 
     const body = await readBody(request, DevicesBodySchema, DEVICES_MISSING_KEY_MESSAGES);
@@ -200,7 +245,7 @@ export const controlHandler = {
 
     try {
       console.log(
-        `[control.js] Received ${reports.length} modem_reports (mode: ${sync_mode}, session: ${session_id})`,
+        `[control.js] Received ${String(reports.length)} modem_reports (mode: ${sync_mode}, session: ${String(session_id)})`,
       );
 
       const acceptedReports = reports.filter((report) => {
@@ -266,20 +311,20 @@ export const controlHandler = {
       `,
         ).bind(
           report.equipment_id,
-          report.manufacturer || null,
-          report.model || null,
-          report.firmware_revision || null,
-          report.hardware_revision || null,
-          report.detected_iccid || null,
-          report.detected_phone_number || null,
-          report.detected_operator || null,
+          textOr(report.manufacturer, null),
+          textOr(report.model, null),
+          textOr(report.firmware_revision, null),
+          textOr(report.hardware_revision, null),
+          textOr(report.detected_iccid, null),
+          textOr(report.detected_phone_number, null),
+          textOr(report.detected_operator, null),
           report.signal_percent ?? null,
           report.rssi ?? null,
           report.modem_index ?? null,
           report.usb_port ?? null,
           report.usb_path ?? null,
           report.usb_path ?? null,
-          report.status || 'active',
+          textOr(report.status, 'active'),
           verificationStatus,
           lastVerifiedSession,
         ),
@@ -358,40 +403,26 @@ export const controlHandler = {
         reconciledDisconnected = disconnectResult.meta.changes;
       }
 
-      return new Response(
-        JSON.stringify({
-          success: true,
-          sync_mode,
-          session_id,
-          processed: {
-            modem_reports: acceptedReports.length,
-            modems_disconnected: explicitlyDisconnected + reconciledDisconnected,
-          },
-        }),
-        {
-          headers: { 'Content-Type': 'application/json' },
+      return json({
+        success: true,
+        sync_mode,
+        session_id,
+        processed: {
+          modem_reports: acceptedReports.length,
+          modems_disconnected: explicitlyDisconnected + reconciledDisconnected,
         },
-      );
+      });
     } catch (error) {
       console.error('[control.js] Database error in updateDevices:', error);
-      return new Response(
-        JSON.stringify({
-          success: false,
-          error: 'Failed to update devices',
-        }),
-        {
-          status: 500,
-          headers: { 'Content-Type': 'application/json' },
-        },
-      );
+      return json({ success: false, error: 'Failed to update devices' }, 500);
     }
   },
 
   // Upload messages from Orange Pi
-  async uploadMessages(request: AppRequest): Promise<Response> {
+  async uploadMessages(request: UploadRequest): Promise<Response> {
     const { env } = request;
 
-    const unauthorized = await requireApiKey(request, env);
+    const unauthorized = await requireApiKey(request);
     if (unauthorized) return unauthorized;
 
     const body = await readBody(request, UploadBodySchema, UPLOAD_MISSING_KEY_MESSAGES);
@@ -400,7 +431,7 @@ export const controlHandler = {
 
     try {
       let processed = 0;
-      const results: Array<{ id: string; status: string; retryable?: boolean }> = [];
+      const results: { id: string; status: string; retryable?: boolean }[] = [];
       const newMessages: StoredMessage[] = [];
 
       const insertStmt = env.DB.prepare(`
@@ -424,54 +455,28 @@ export const controlHandler = {
       // Multi-part carrier replies arrive as separate messages sharing a sender and
       // timestamp, so group them before linking; otherwise the check closes on
       // whichever part is processed first.
-      const multipartReplies = mergeMultipartReplies(messages as UploadedMessage[]);
+      const multipartReplies = mergeMultipartReplies(messages);
       // Group key -> the check that claimed it, so later parts join that check.
       const claimedReplyGroups = new Map<string, BalanceCheckRow>();
 
-      for (const msg of messages as UploadedMessage[]) {
-        const messageId = String(msg.id);
+      for (const msg of messages) {
+        const messageId = msg.id;
         try {
-          const phone_iccid = String(msg.phone_iccid);
-          // Fix timestamp - handle various formatting issues
-          let timestamp =
-            typeof msg.timestamp === 'string' ? msg.timestamp : new Date().toISOString();
-
-          // First handle URL-encoded + signs (convert to space temporarily for processing)
-          timestamp = timestamp.replace(/\+/g, ' ');
-
-          // Try to match timestamp with spaces or T separator
-          const timeMatch = timestamp.match(
-            /^(\d{4})-(\d{2})-(\d{2})[T\s]+(\d{1,2}):(\d{1,2}):(\d{1,2})(\.\d{3})?Z?$/,
-          );
-          if (timeMatch) {
-            const [_, year, month, day, hours, minutes, seconds, millis] = timeMatch;
-            timestamp = `${year}-${month}-${day}T${hours.padStart(2, '0')}:${minutes.padStart(2, '0')}:${seconds.padStart(2, '0')}${millis || '.000'}Z`;
-          } else {
-            timestamp = timestamp.replace(/\s+/g, '');
-            if (
-              timestamp.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?$/) &&
-              !timestamp.endsWith('Z')
-            ) {
-              timestamp += 'Z';
-            }
-          }
-
-          const phoneNumber = typeof msg.phone_number === 'string' ? msg.phone_number : null;
+          const timestamp = normalizeTimestamp(msg.timestamp);
+          const phoneNumber = msg.phone_number ?? null;
           const reply = multipartReplies.get(messageId);
           // A later part reuses its group's check rather than re-running the
           // pending lookup, which would find the same check and could queue a
           // duplicate follow-up for it.
           const groupClaim = reply ? (claimedReplyGroups.get(reply.key) ?? null) : null;
-          // findPendingBalanceCheck returns null for a missing number anyway; pass ''
-          // so the parameter is a string rather than relying on an untyped guard.
-          const balanceCheck: BalanceCheckRow | null =
-            groupClaim ||
+          // findPendingBalanceCheck returns null for a missing number anyway.
+          const balanceCheck =
+            groupClaim ??
             (await findPendingBalanceCheck(env.DB, {
-              phone_iccid,
+              phone_iccid: msg.phone_iccid,
               phone_number: phoneNumber ?? '',
               message_timestamp: timestamp,
             }));
-          const responseSender: string | null = phoneNumber;
           if (reply && !groupClaim && balanceCheck) {
             claimedReplyGroups.set(reply.key, balanceCheck);
           }
@@ -479,14 +484,14 @@ export const controlHandler = {
 
           const record: StoredMessage = {
             id: messageId,
-            phone_iccid,
+            phone_iccid: msg.phone_iccid,
             phone_number: phoneNumber,
-            content: String(msg.content),
+            content: msg.content,
             timestamp,
             type: 'received',
             verification_code: verificationCode,
             purpose: balanceCheck ? 'balance_maintenance' : 'user',
-            balance_check_id: balanceCheck?.id || null,
+            balance_check_id: balanceCheck?.id ?? null,
           };
 
           // Spam/marketing verdict. phone_number carries the SENDER's number for
@@ -500,7 +505,7 @@ export const controlHandler = {
           const result = await insertStmt
             .bind(
               messageId,
-              phone_iccid,
+              msg.phone_iccid,
               phoneNumber,
               msg.content,
               timestamp,
@@ -527,7 +532,7 @@ export const controlHandler = {
               await linkBalanceReply(
                 env.DB,
                 balanceCheck,
-                { ...record, phone_number: responseSender },
+                record,
                 reply ? { mergedContent: reply.content } : {},
               );
             }
@@ -536,14 +541,16 @@ export const controlHandler = {
           // Per-message failure must not abort the batch. The daemon retries
           // transient errors; permanent input errors become dead_letter locally.
           const retryable = !(err instanceof TypeError);
-          console.error(`[control.js] Message ${messageId} failed (retryable=${retryable}):`, err);
+          console.error(
+            `[control.js] Message ${messageId} failed (retryable=${String(retryable)}):`,
+            err,
+          );
           results.push({ id: messageId, status: 'rejected', retryable });
         }
       }
 
       // Process new messages with AI and keywords (async, don't wait)
       if (newMessages.length > 0) {
-        // Process messages in the background
         request.ctx.waitUntil(
           Promise.all([
             Promise.all(
@@ -555,46 +562,28 @@ export const controlHandler = {
                 }
               }),
             ),
-            processCarrierBillMessages(
-              env.DB,
-              newMessages as unknown as Array<Partial<{ id: string }>>,
-            ),
+            processCarrierBillMessages(env.DB, newMessages),
           ]),
         );
       }
 
-      // Messages are now picked up by polling
-
-      return new Response(
-        JSON.stringify({
-          success: true,
-          processed,
-          results,
-          message: `Successfully uploaded ${processed} messages`,
-        }),
-        {
-          headers: { 'Content-Type': 'application/json' },
-        },
-      );
+      return json({
+        success: true,
+        processed,
+        results,
+        message: `Successfully uploaded ${String(processed)} messages`,
+      });
     } catch (error) {
       console.error('[control.js] Upload messages error:', error);
-      return new Response(
-        JSON.stringify({
-          success: false,
-          error: 'Failed to upload messages: ' + (error as Error).message,
-        }),
-        {
-          status: 500,
-          headers: { 'Content-Type': 'application/json' },
-        },
-      );
+      return json({ success: false, error: `Failed to upload messages: ${errorText(error)}` }, 500);
     }
   },
+
   // Cleanup test data
-  async cleanupTestData(request: AppRequest): Promise<Response> {
+  async cleanupTestData(request: BodyRequest<D1<'run'>>): Promise<Response> {
     const { env } = request;
 
-    const unauthorized = await requireApiKey(request, env);
+    const unauthorized = await requireApiKey(request);
     if (unauthorized) return unauthorized;
 
     const body = await readBody(request, CleanupBodySchema, CLEANUP_MISSING_KEY_MESSAGES);
@@ -603,39 +592,25 @@ export const controlHandler = {
 
     try {
       // Delete test SIMs by ICCID
-      const placeholders = (phoneIds as string[]).map(() => '?').join(',');
-      const deleteStmt = env.DB.prepare(`DELETE FROM sims WHERE iccid IN (${placeholders})`);
-
-      const result = await deleteStmt.bind(...(phoneIds as string[])).run();
+      const placeholders = phoneIds.map(() => '?').join(',');
+      const result = await env.DB.prepare(`DELETE FROM sims WHERE iccid IN (${placeholders})`)
+        .bind(...phoneIds)
+        .run();
 
       // Also delete any SIMs without ICCID
       const cleanupNullIccid = await env.DB.prepare(
         `DELETE FROM sims WHERE iccid IS NULL OR iccid = ''`,
       ).run();
 
-      return new Response(
-        JSON.stringify({
-          success: true,
-          deleted: result.meta.changes,
-          cleanedNullIccid: cleanupNullIccid.meta.changes,
-          message: `Deleted ${result.meta.changes} test SIMs and ${cleanupNullIccid.meta.changes} SIMs without ICCID`,
-        }),
-        {
-          headers: { 'Content-Type': 'application/json' },
-        },
-      );
+      return json({
+        success: true,
+        deleted: result.meta.changes,
+        cleanedNullIccid: cleanupNullIccid.meta.changes,
+        message: `Deleted ${String(result.meta.changes)} test SIMs and ${String(cleanupNullIccid.meta.changes)} SIMs without ICCID`,
+      });
     } catch (error) {
       console.error('Cleanup error:', error);
-      return new Response(
-        JSON.stringify({
-          success: false,
-          error: 'Failed to cleanup test data',
-        }),
-        {
-          status: 500,
-          headers: { 'Content-Type': 'application/json' },
-        },
-      );
+      return json({ success: false, error: 'Failed to cleanup test data' }, 500);
     }
   },
 
@@ -648,10 +623,10 @@ export const controlHandler = {
   //
   // The atomic transition to 'processing' prevents duplicate sends in the race condition
   // where daemon polls again before the SMS send completes and status is updated to 'sent'.
-  async getPendingSMS(request: AppRequest): Promise<Response> {
+  async getPendingSMS(request: DaemonRequest<D1<'all' | 'run'>>): Promise<Response> {
     const { env } = request;
 
-    const unauthorized = await requireApiKey(request, env);
+    const unauthorized = await requireApiKey(request);
     if (unauthorized) return unauthorized;
 
     try {
@@ -659,16 +634,7 @@ export const controlHandler = {
       const daemonSessionId = normalizeDaemonSessionId(rawDaemonSessionId);
 
       if (rawDaemonSessionId && !daemonSessionId) {
-        return new Response(
-          JSON.stringify({
-            success: false,
-            error: 'Invalid daemon session ID',
-          }),
-          {
-            status: 400,
-            headers: { 'Content-Type': 'application/json' },
-          },
-        );
+        return json({ success: false, error: 'Invalid daemon session ID' }, 400);
       }
 
       // A message claimed by a previous daemon process has an indeterminate
@@ -700,12 +666,11 @@ export const controlHandler = {
           .run();
       }
 
-      // Get pending SMS messages and atomically mark as 'processing' to prevent duplicate sends
-      // This prevents the race condition where daemon polls again before status update completes
-
-      // First, get IDs of pending messages
-      const pendingIds = await env.DB.prepare(
-        `
+      // Claim pending messages by marking them 'processing', so a poll that
+      // arrives before this batch is reported cannot send them twice.
+      const pending = await queryAll(
+        env.DB.prepare(
+          `
         SELECT id
         FROM (
           SELECT
@@ -722,17 +687,17 @@ export const controlHandler = {
                  id
         LIMIT 50
       `,
-      ).all<{ id: string }>();
+        ),
+        IdRow,
+      );
 
-      if (!pendingIds.results || pendingIds.results.length === 0) {
+      if (pending.length === 0) {
         return json({ success: true, pending_messages: [] });
       }
 
-      // Atomically update status to 'processing' and fetch message details
-      const ids = pendingIds.results.map((row) => row.id);
+      const ids = pending.map((row) => row.id);
       const placeholders = ids.map(() => '?').join(',');
 
-      // Update to 'processing' status
       await env.DB.prepare(
         `
         UPDATE messages
@@ -745,47 +710,30 @@ export const controlHandler = {
         .bind(daemonSessionId, ...ids)
         .run();
 
-      // Fetch the updated messages
-      const messages = await env.DB.prepare(
-        `
+      const messages = await queryAll(
+        env.DB.prepare(
+          `
         SELECT id, phone_iccid, phone_number, content, recipient, purpose, created_at
         FROM messages
         WHERE id IN (${placeholders})
         ORDER BY created_at ASC
       `,
-      )
-        .bind(...ids)
-        .all();
-
-      return new Response(
-        JSON.stringify({
-          success: true,
-          pending_messages: messages.results || [],
-        }),
-        {
-          headers: { 'Content-Type': 'application/json' },
-        },
+        ).bind(...ids),
+        PendingMessageRow,
       );
+
+      return json({ success: true, pending_messages: messages });
     } catch (error) {
       console.error('Get pending SMS error:', error);
-      return new Response(
-        JSON.stringify({
-          success: false,
-          error: 'Failed to get pending SMS',
-        }),
-        {
-          status: 500,
-          headers: { 'Content-Type': 'application/json' },
-        },
-      );
+      return json({ success: false, error: 'Failed to get pending SMS' }, 500);
     }
   },
 
   // Update SMS send result from daemon
-  async updateSMSResult(request: AppRequest): Promise<Response> {
+  async updateSMSResult(request: BodyRequest<D1<'run'>>): Promise<Response> {
     const { env } = request;
 
-    const unauthorized = await requireApiKey(request, env);
+    const unauthorized = await requireApiKey(request);
     if (unauthorized) return unauthorized;
 
     const body = await readBody(request, SmsResultBodySchema, SMS_RESULT_MISSING_KEY_MESSAGES);
@@ -793,119 +741,77 @@ export const controlHandler = {
     const { message_id, outcome, error_message, sms_id } = body.value;
 
     try {
-      // Update message status
-      const status = SMS_STATUS_FOR_OUTCOME[outcome as SmsOutcome];
-      const stmt = env.DB.prepare(`
-        UPDATE messages 
+      const result = await env.DB.prepare(
+        `
+        UPDATE messages
         SET status = ?, error_message = ?, sms_id = ?,
             processing_session_id = NULL, updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
-      `);
-
-      const result = await stmt
-        .bind(status, error_message || null, sms_id || null, message_id)
+      `,
+      )
+        .bind(
+          SMS_STATUS_FOR_OUTCOME[outcome],
+          textOr(error_message, null),
+          textOr(sms_id, null),
+          message_id,
+        )
         .run();
 
       if (result.meta.changes === 0) {
-        return new Response(
-          JSON.stringify({
-            success: false,
-            error: 'Message not found',
-          }),
-          {
-            status: 404,
-            headers: { 'Content-Type': 'application/json' },
-          },
-        );
+        return json({ success: false, error: 'Message not found' }, 404);
       }
 
-      // The helper is still JS, and its `errorMessage = null` default types the
-      // parameter as null | undefined. A string is valid at runtime.
-      await updateBalanceCheckForSmsResult(
-        env.DB,
-        String(message_id),
-        outcome,
-        typeof error_message === 'string' ? error_message : null,
-      );
+      await updateBalanceCheckForSmsResult(env.DB, message_id, outcome, error_message ?? null);
 
-      // Status updates are now picked up by polling
-
-      return new Response(
-        JSON.stringify({
-          success: true,
-          message: 'SMS result updated successfully',
-        }),
-        {
-          headers: { 'Content-Type': 'application/json' },
-        },
-      );
+      return json({ success: true, message: 'SMS result updated successfully' });
     } catch (error) {
       console.error('Update SMS result error:', error);
-      return new Response(
-        JSON.stringify({
-          success: false,
-          error: 'Failed to update SMS result',
-        }),
-        {
-          status: 500,
-          headers: { 'Content-Type': 'application/json' },
-        },
-      );
+      return json({ success: false, error: 'Failed to update SMS result' }, 500);
     }
   },
 
   // Clear all messages (admin endpoint)
-  async clearMessages(request: AppRequest): Promise<Response> {
+  async clearMessages(request: DaemonRequest<D1<'run'>>): Promise<Response> {
     const { env } = request;
 
-    const unauthorized = await requireApiKey(request, env);
+    const unauthorized = await requireApiKey(request);
     if (unauthorized) return unauthorized;
 
     try {
       const result = await env.DB.prepare('DELETE FROM messages').run();
-
-      return new Response(
-        JSON.stringify({
-          success: true,
-          message: `Cleared ${result.meta.changes} messages`,
-        }),
-        {
-          headers: { 'Content-Type': 'application/json' },
-        },
-      );
+      return json({ success: true, message: `Cleared ${String(result.meta.changes)} messages` });
     } catch (error) {
       console.error('[control.js] Clear messages error:', error);
-      return new Response(
-        JSON.stringify({
-          success: false,
-          error: 'Failed to clear messages: ' + (error as Error).message,
-        }),
-        {
-          status: 500,
-          headers: { 'Content-Type': 'application/json' },
-        },
-      );
+      return json({ success: false, error: `Failed to clear messages: ${errorText(error)}` }, 500);
     }
   },
 
   // Daemon heartbeat endpoint
-  async heartbeat(request: AppRequest): Promise<Response> {
+  async heartbeat(request: BodyRequest<D1<'run'>>): Promise<Response> {
     const { env } = request;
 
-    const unauthorized = await requireApiKey(request, env);
+    const unauthorized = await requireApiKey(request);
     if (unauthorized) return unauthorized;
 
-    const parsed = await readJson(request, v.unknown());
-    if (!parsed.ok) return json({ success: false, error: NOT_JSON_MESSAGE }, 400);
-    const body = parsed.value;
+    const body = await readJson(request, v.unknown());
+    if (!body.ok) return json({ success: false, error: NOT_JSON_MESSAGE }, 400);
+
+    // normalizeHealthSnapshot throws only for a snapshot the daemon must not send.
+    let snapshot: HealthSnapshot;
+    try {
+      snapshot = normalizeHealthSnapshot(body.value);
+    } catch (error) {
+      return json(
+        { success: false, error: `Failed to process heartbeat: ${errorText(error)}` },
+        400,
+      );
+    }
 
     try {
-      const clientIp =
-        request.headers.get('CF-Connecting-IP') ||
-        request.headers.get('X-Forwarded-For') ||
-        'unknown';
-
-      const snapshot = normalizeHealthSnapshot(body);
+      const clientIp = textOr(
+        request.headers.get('CF-Connecting-IP'),
+        textOr(request.headers.get('X-Forwarded-For'), 'unknown'),
+      );
       await env.DB.prepare(
         `
           INSERT INTO daemon_health (
@@ -933,88 +839,52 @@ export const controlHandler = {
         `[control.js] Health snapshot received: session=${snapshot.session_id}, version=${snapshot.version}`,
       );
 
-      return new Response(
-        JSON.stringify({
-          success: true,
-          message: 'Heartbeat received',
-          received_at: new Date().toISOString(),
-        }),
-        {
-          headers: { 'Content-Type': 'application/json' },
-        },
-      );
+      return json({
+        success: true,
+        message: 'Heartbeat received',
+        received_at: new Date().toISOString(),
+      });
     } catch (error) {
       console.error('[control.js] Heartbeat error:', error);
-      const message = (error as Error).message;
-      const status =
-        message?.startsWith('Unsupported health schema') || message?.includes('required')
-          ? 400
-          : 500;
-      return new Response(
-        JSON.stringify({
-          success: false,
-          error: `Failed to process heartbeat: ${(error as Error).message}`,
-        }),
-        {
-          status,
-          headers: { 'Content-Type': 'application/json' },
-        },
+      return json(
+        { success: false, error: `Failed to process heartbeat: ${errorText(error)}` },
+        500,
       );
     }
   },
 };
 
 // Process keywords for a message
-async function processMessageKeywords(db: D1Database, message: StoredMessage): Promise<void> {
+async function processMessageKeywords(
+  db: D1<'all' | 'run'>,
+  message: StoredMessage,
+): Promise<void> {
   try {
-    // Get active keywords
-    const { results: keywords } = await db
-      .prepare(
+    const keywords = await queryAll(
+      db.prepare(
         `
-      SELECT id, keyword, tag, color, priority, case_sensitive, whole_word
+      SELECT id, keyword, case_sensitive, whole_word
       FROM keyword_tags
       WHERE is_active = TRUE
       ORDER BY priority DESC
     `,
-      )
-      .all<{ id: number; keyword: string; case_sensitive: number; whole_word: number }>();
+      ),
+      KeywordRow,
+    );
 
     if (keywords.length === 0) return;
 
-    // Find matches for each keyword
-    const matches: Array<{
-      message_id: string;
-      keyword_tag_id: number;
-      matched_text: string;
-      position: number;
-    }> = [];
-    for (const keyword of keywords) {
-      const keywordMatches = findKeywordMatches(
+    const matches = keywords.flatMap((keyword) =>
+      findKeywordMatches(
         message.content,
         keyword.keyword,
         Boolean(keyword.case_sensitive),
         Boolean(keyword.whole_word),
-      );
-      for (const match of keywordMatches) {
-        matches.push({
-          message_id: message.id,
-          keyword_tag_id: keyword.id,
-          matched_text: match.text,
-          position: match.position,
-        });
-      }
-    }
+      ).map((match) => [message.id, keyword.id, match.text, match.position] as const),
+    );
 
-    // Insert matches in batch if any found
     if (matches.length > 0) {
       const placeholders = matches.map(() => '(?, ?, ?, ?)').join(',');
-      const values = matches.flatMap((m) => [
-        m.message_id,
-        m.keyword_tag_id,
-        m.matched_text,
-        m.position,
-      ]);
-
       await db
         .prepare(
           `
@@ -1022,11 +892,11 @@ async function processMessageKeywords(db: D1Database, message: StoredMessage): P
         VALUES ${placeholders}
       `,
         )
-        .bind(...values)
+        .bind(...matches.flat())
         .run();
 
       console.log(
-        `[control.js] Processed ${matches.length} keyword matches for message ${message.id}`,
+        `[control.js] Processed ${String(matches.length)} keyword matches for message ${message.id}`,
       );
     }
   } catch (error) {

@@ -12,4 +12,10 @@ describe('textOr', () => {
     expect(textOr(null, 'fallback')).toBe('fallback');
     expect(textOr('', 'fallback')).toBe('fallback');
   });
+
+  test('can fall back to null, so an empty column is stored as none', () => {
+    expect(textOr('', null)).toBeNull();
+    expect(textOr(undefined, null)).toBeNull();
+    expect(textOr('modem', null)).toBe('modem');
+  });
 });

@@ -11,8 +11,9 @@ const SIMS_MIGRATIONS = [
 ];
 
 /**
- * The sims and modems tables as they were before migration 058, then the
- * migrations that rebuilt sims and device_view, so tests read the real view.
+ * The sims table as it was before migration 058 and the production modems
+ * table (no listed migration changes it), then the migrations that rebuilt
+ * sims and device_view, so tests read the real view.
  */
 export async function createSimsSchema(database: Database): Promise<void> {
   database.run(`
@@ -33,14 +34,30 @@ export async function createSimsSchema(database: Database): Promise<void> {
       equipment_id TEXT PRIMARY KEY,
       manufacturer TEXT,
       model TEXT,
-      usb_port TEXT,
-      usb_path TEXT,
-      last_usb_path TEXT,
-      status TEXT,
+      firmware_revision TEXT,
+      hardware_revision TEXT,
+      device_path TEXT,
+      usb_port INTEGER,
+      modem_index INTEGER,
+      status TEXT DEFAULT 'disconnected',
+      last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      error_count INTEGER DEFAULT 0,
+      last_error TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      verification_status TEXT DEFAULT 'unverified',
+      last_verified_session TEXT,
+      current_iccid TEXT,
+      detected_phone_number TEXT,
+      operator TEXT,
+      sim_read_status TEXT DEFAULT NULL,
+      detected_iccid TEXT,
       detected_operator TEXT,
       signal_percent INTEGER,
-      detected_iccid TEXT,
-      detected_phone_number TEXT
+      rssi INTEGER,
+      usb_path TEXT,
+      last_usb_path TEXT
     );
   `);
   for (const name of SIMS_MIGRATIONS) {
