@@ -439,19 +439,26 @@
                 log_file="$3"
                 pid_file="$4"
                 for _ in $(seq 1 60); do
-                  if curl --fail --silent --output /dev/null "$url"; then
+                  # Any HTTP status means the server is answering; /api/health
+                  # is 503 whenever the daemon is offline, as it always is locally.
+                  # The time limit keeps a server that accepts but never answers
+                  # from blocking startup forever.
+                  status="$(curl --silent --output /dev/null --max-time 2 --write-out '%{http_code}' "$url" || true)"
+                  if [ "$status" != "000" ]; then
                     return 0
                   fi
                   pid="$(cat "$pid_file")"
                   if ! kill -0 "$pid" 2>/dev/null; then
                     echo "dev-server: $name exited during startup." >&2
                     tail -n 30 "$log_file" >&2
+                    stop_servers
                     return 1
                   fi
                   sleep 0.25
                 done
                 echo "dev-server: timed out waiting for $name at $url." >&2
                 tail -n 30 "$log_file" >&2
+                stop_servers
                 return 1
               }
 
