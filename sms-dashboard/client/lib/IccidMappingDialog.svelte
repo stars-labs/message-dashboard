@@ -1,11 +1,39 @@
-<script>
+<script lang="ts">
   import { overlay } from './overlay.js';
-  import { api } from './api';
+  import { api, errorMessage } from './api';
   import { COUNTRIES, inferCountryFromNumber } from './countries.js';
   import { SIM_SERVICE_TYPES, SIM_SERVICE_TYPE_SOURCES } from './sim-service-type.js';
   import { SIM_ROLES } from './sim-role.js';
+  import type { CreateIccidMappingResponse } from '../../shared/api/iccid-mappings.js';
+  import type { Phone } from '../../shared/api/phones.js';
+  import { textOr } from '../../shared/text.js';
 
-  let { phone = null, show = $bindable(false), onsuccess = null, onclose = null } = $props();
+  type MappablePhone = Pick<
+    Phone,
+    | 'iccid'
+    | 'number'
+    | 'carrier'
+    | 'country'
+    | 'notes'
+    | 'imei'
+    | 'status'
+    | 'service_type'
+    | 'service_type_source'
+    | 'sim_role'
+    | 'primary_iccid'
+    | 'sim_index'
+  >;
+
+  type SavedMapping = CreateIccidMappingResponse['data'] & { phone_iccid: string };
+
+  interface Props {
+    phone?: MappablePhone | null;
+    show?: boolean;
+    onsuccess?: ((saved: SavedMapping) => void) | null;
+    onclose?: (() => void) | null;
+  }
+
+  let { phone = null, show = $bindable(false), onsuccess = null, onclose = null }: Props = $props();
 
   let phoneNumber = $state('');
   let carrier = $state('');
@@ -19,31 +47,31 @@
   let simRole = $state('standalone');
   let primaryIccid = $state('');
   let saving = $state(false);
-  let error = $state(null);
+  let error = $state<string | null>(null);
 
   // Repopulate the form fields whenever a new phone is passed in. The legacy
   // version used a reactive `$: if (phone)` block; $effect tracks the same
   // dependency and runs after every change to `phone`.
   $effect(() => {
     if (!phone) return;
-    phoneNumber = phone.phone_number || phone.number || '';
-    carrier = phone.carrier || '';
-    country = phone.country || '';
-    notes = phone.notes || '';
-    imei = phone.equipment_id || phone.imei || '';
-    status = phone.is_active || phone.status || 'inactive';
-    serviceType = phone.service_type || 'unknown';
-    serviceTypeSource = phone.service_type_source || '';
-    simRole = phone.sim_role || 'standalone';
-    primaryIccid = phone.primary_iccid || '';
+    phoneNumber = phone.number;
+    carrier = textOr(phone.carrier, '');
+    country = textOr(phone.country, '');
+    notes = textOr(phone.notes, '');
+    imei = textOr(phone.imei, '');
+    status = textOr(phone.status, 'inactive');
+    serviceType = textOr(phone.service_type, 'unknown');
+    serviceTypeSource = textOr(phone.service_type_source, '');
+    simRole = textOr(phone.sim_role, 'standalone');
+    primaryIccid = textOr(phone.primary_iccid, '');
     if (!country && phoneNumber) {
-      country = inferCountryFromNumber(phoneNumber) || '';
+      country = inferCountryFromNumber(phoneNumber) ?? '';
     }
-    simIndex =
-      phone.sim_index !== null && phone.sim_index !== undefined ? String(phone.sim_index) : '';
+    simIndex = String(phone.sim_index);
   });
 
   async function handleSave() {
+    if (!phone) return;
     if (!phoneNumber.trim()) {
       error = '请输入电话号码';
       return;
@@ -67,10 +95,10 @@
         iccid: phone.iccid,
         phone_number: phoneNumber,
         sim_index: simIndex ? parseInt(simIndex) : null,
-        country_code: country || null,
-        carrier: carrier || null,
-        imei: imei || null,
-        notes: notes || null,
+        country_code: textOr(country, null),
+        carrier: textOr(carrier, null),
+        imei: textOr(imei, null),
+        notes: textOr(notes, null),
         service_type: serviceType,
         service_type_source: serviceType === 'unknown' ? null : serviceTypeSource,
         sim_role: simRole,
@@ -78,21 +106,13 @@
         // NO status field - computed dynamically by API
       });
 
-      if (response.success) {
-        // Spread the full updated phone so the caller's cache stays in sync —
-        // passing only phone_number left sim_role/primary_iccid stale, so the
-        // phone detail showed "standalone" after editing the role.
-        onsuccess?.({
-          phone_iccid: phone.iccid,
-          phone_number: phoneNumber,
-          ...response.data,
-        });
-        close();
-      } else {
-        error = response.error || '保存失败';
-      }
+      // Spread the full updated phone so the caller's cache stays in sync —
+      // passing only phone_number left sim_role/primary_iccid stale, so the
+      // phone detail showed "standalone" after editing the role.
+      onsuccess?.({ phone_iccid: phone.iccid, ...response.data });
+      close();
     } catch (err) {
-      error = err.message || '保存失败';
+      error = errorMessage(err, '保存失败');
     } finally {
       saving = false;
     }
@@ -160,7 +180,7 @@
           >
           <select id="dialog-country" bind:value={country} class="w-full px-3 py-2 cyber-input">
             <option value="">选择国家...</option>
-            {#each COUNTRIES as countryOption}
+            {#each COUNTRIES as countryOption (countryOption.code)}
               <option value={countryOption.code}>
                 {countryOption.flag}
                 {countryOption.name}
@@ -211,7 +231,7 @@
             }}
             class="w-full px-3 py-2 cyber-input"
           >
-            {#each SIM_SERVICE_TYPES as option}
+            {#each SIM_SERVICE_TYPES as option (option.value)}
               <option value={option.value}>{option.label}</option>
             {/each}
           </select>
@@ -229,7 +249,7 @@
             class="w-full px-3 py-2 cyber-input disabled:bg-stone-50 disabled:text-stone-300"
           >
             <option value="">选择确认来源...</option>
-            {#each SIM_SERVICE_TYPE_SOURCES as option}
+            {#each SIM_SERVICE_TYPE_SOURCES as option (option.value)}
               <option value={option.value}>{option.label}</option>
             {/each}
           </select>
@@ -243,7 +263,7 @@
             >主副卡</label
           >
           <select id="dialog-sim-role" bind:value={simRole} class="w-full px-3 py-2 cyber-input">
-            {#each SIM_ROLES as option}
+            {#each SIM_ROLES as option (option.value)}
               <option value={option.value}>{option.label}</option>
             {/each}
           </select>

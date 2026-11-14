@@ -1,28 +1,48 @@
-<script>
+<script lang="ts">
   import SignalStrength from './SignalStrength.svelte';
   import { inferCountryFromNumber } from './countries.js';
   import { getStatusMeta, isAnomalous } from './device-status.js';
   import { formatCardNumber } from './card-number.js';
+  import type { Phone } from '../../shared/api/phones.js';
+  import { textOr } from '../../shared/text.js';
+
+  interface ListedPhone extends Pick<
+    Phone,
+    'sim_index' | 'number' | 'iccid' | 'status' | 'signal' | 'carrier' | 'operator' | 'country'
+  > {
+    flag: string;
+  }
+
+  type StatusChip = 'all' | 'online' | 'offline' | 'error';
+
+  interface Props {
+    phoneNumbers?: readonly ListedPhone[];
+    selectedPhoneIccid?: string | null;
+    selectedCountry?: string;
+    searchTerm?: string;
+    onSelectPhone?: ((phone: ListedPhone | null) => void) | null;
+    mobile?: boolean;
+    onSetIccidMapping?: ((phone: ListedPhone) => void) | null;
+    isLoading?: boolean;
+  }
 
   let {
     phoneNumbers = [],
-    selectedPhone = null,
     selectedPhoneIccid = $bindable(null),
     selectedCountry = $bindable('all'),
     searchTerm = $bindable(''),
     onSelectPhone = null,
     mobile = false,
     onSetIccidMapping = null,
-    daemonStatus = { connected: false, lastDataUpdate: null },
     isLoading = false,
-  } = $props();
+  }: Props = $props();
 
   // Debounced local search: the parent bind:searchTerm is updated after 200 ms
   // so the full list re-filter only runs when the user pauses.
   let searchInput = $state(searchTerm);
-  let debounceTimer;
-  function handleSearchInput(e) {
-    searchInput = e.target.value;
+  let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+  function handleSearchInput(e: Event & { currentTarget: HTMLInputElement }) {
+    searchInput = e.currentTarget.value;
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
       searchTerm = searchInput;
@@ -30,7 +50,7 @@
   }
 
   // Status filter chips: all / online / offline / anomaly
-  let statusChip = $state('all'); // 'all' | 'online' | 'offline' | 'error'
+  let statusChip = $state<StatusChip>('all');
 
   let filteredPhones = $derived(
     phoneNumbers
@@ -42,10 +62,10 @@
         const matchesSearch =
           !q ||
           formatCardNumber(phone.sim_index).toLowerCase().includes(q) ||
-          (phone.number && phone.number.toLowerCase().includes(q)) ||
-          (phone.carrier && phone.carrier.toLowerCase().includes(q)) ||
-          (phone.iccid && phone.iccid.toLowerCase().includes(q)) ||
-          (phone.operator && phone.operator.toLowerCase().includes(q));
+          phone.number.toLowerCase().includes(q) ||
+          (phone.carrier ?? '').toLowerCase().includes(q) ||
+          phone.iccid.toLowerCase().includes(q) ||
+          (phone.operator ?? '').toLowerCase().includes(q);
 
         const matchesChip =
           statusChip === 'all' ||
@@ -60,7 +80,7 @@
         const ao = getStatusMeta(a.status).sortOrder;
         const bo = getStatusMeta(b.status).sortOrder;
         if (ao !== bo) return ao - bo;
-        return (a.sim_index ?? 999) - (b.sim_index ?? 999);
+        return a.sim_index - b.sim_index;
       }),
   );
 
@@ -70,7 +90,7 @@
   let offlineCount = $derived(phoneNumbers.filter((p) => p.status === 'offline').length);
   let errorCount = $derived(phoneNumbers.filter((p) => isAnomalous(p.status)).length);
 
-  function handlePhoneClick(phone) {
+  function handlePhoneClick(phone: ListedPhone) {
     if (!mobile && selectedPhoneIccid === phone.iccid) {
       selectedPhoneIccid = null;
       onSelectPhone?.(null);
@@ -165,7 +185,7 @@
   <!-- List -->
   <div class="flex-1 min-h-0 overflow-y-auto">
     {#if isLoading}
-      {#each [1, 2, 3, 4, 5] as _}
+      {#each [1, 2, 3, 4, 5] as row (row)}
         <div class="flex items-center gap-2 px-3 py-2.5 border-b border-stone-100 animate-pulse">
           <div class="w-1.5 h-1.5 rounded-full bg-stone-200 shrink-0"></div>
           <div class="w-6 h-3.5 bg-stone-200 rounded shrink-0"></div>
@@ -174,7 +194,7 @@
             <div class="h-2.5 bg-stone-200 rounded w-36"></div>
           </div>
           <div class="flex gap-0.5 items-end shrink-0">
-            {#each [1, 2, 3, 4] as bar}
+            {#each [1, 2, 3, 4] as bar (bar)}
               <div class="w-0.5 bg-stone-200 rounded-sm" style="height: {4 + bar * 3}px"></div>
             {/each}
           </div>
@@ -183,7 +203,9 @@
     {:else}
       {#if mobile}
         <button
-          onclick={() => onSelectPhone?.(null)}
+          onclick={() => {
+            onSelectPhone?.(null);
+          }}
           class="w-full min-h-[52px] flex items-center gap-3 px-4 border-b border-stone-100
             text-left transition-colors hover:bg-stone-50 active:bg-stone-100
             {selectedPhoneIccid === null
@@ -240,7 +262,7 @@
           {/if}
         </div>
       {:else}
-        {#each filteredPhones as phone}
+        {#each filteredPhones as phone (phone.iccid)}
           {@const meta = getStatusMeta(phone.status)}
           {@const selected = selectedPhoneIccid === phone.iccid}
           {@const q = searchTerm.trim().toLowerCase()}
@@ -252,8 +274,12 @@
           <div
             role="button"
             tabindex="0"
-            onclick={() => handlePhoneClick(phone)}
-            onkeydown={(e) => e.key === 'Enter' && handlePhoneClick(phone)}
+            onclick={() => {
+              handlePhoneClick(phone);
+            }}
+            onkeydown={(e) => {
+              if (e.key === 'Enter') handlePhoneClick(phone);
+            }}
             class="w-full flex items-center gap-2 border-b text-left cursor-pointer
             {mobile ? 'px-4 py-2.5 min-h-[58px]' : 'px-3 py-2.5'}
             transition-all duration-150
@@ -332,8 +358,8 @@
             <!-- Signal bars -->
             <div class="shrink-0">
               <SignalStrength
-                signal={phone.signal || 0}
-                status={phone.status || 'offline'}
+                signal={phone.signal ?? 0}
+                status={textOr(phone.status, 'offline')}
                 compact={true}
                 isInitialLoad={isLoading}
               />

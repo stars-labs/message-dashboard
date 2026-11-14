@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   import {
     callElapsedSeconds,
     callOutcomeLabel,
@@ -16,6 +16,45 @@
     normaliseNumber,
   } from './call-client.js';
   import { formatCardNumber } from './card-number.js';
+  import type { CallLogEntry, LiveCall } from '../../shared/api/calls.js';
+  import type { Phone } from '../../shared/api/phones.js';
+
+  interface DialablePhone extends Pick<Phone, 'iccid' | 'number' | 'sim_index' | 'carrier'> {
+    flag: string;
+  }
+
+  type PanelCall = Pick<
+    LiveCall,
+    'direction' | 'state' | 'iccid' | 'number' | 'started_at' | 'answered_at'
+  >;
+
+  type LoggedCall = Pick<
+    CallLogEntry,
+    | 'id'
+    | 'direction'
+    | 'outcome'
+    | 'iccid'
+    | 'remote_number'
+    | 'sim_index'
+    | 'started_at'
+    | 'duration_seconds'
+  >;
+
+  interface Props {
+    call?: PanelCall | null;
+    phones?: DialablePhone[];
+    busy?: boolean;
+    error?: string | null;
+    muted?: boolean;
+    daemonOnline?: boolean;
+    history?: readonly LoggedCall[];
+    historyLoading?: boolean;
+    onDial?: ((request: { iccid: string; number: string }) => void) | null;
+    onAnswer?: (() => void) | null;
+    onHangup?: (() => void) | null;
+    onToggleMute?: (() => void) | null;
+    onClose?: (() => void) | null;
+  }
 
   // Media (microphone, RTCPeerConnection) is owned by the parent and injected
   // through these callbacks, so this panel stays testable without a browser.
@@ -33,28 +72,32 @@
     onHangup = null,
     onToggleMute = null,
     onClose = null,
-  } = $props();
+  }: Props = $props();
 
   let number = $state('');
   let iccid = $state('');
   let simQuery = $state('');
   let simListOpen = $state(false);
-  let localError = $state(null);
+  let localError = $state<string | null>(null);
   let now = $state(Date.now());
 
   // The timer only ticks while a call is up, so an idle dashboard does no work.
   $effect(() => {
     if (!call || call.state === 'ringing') return;
-    const timer = setInterval(() => (now = Date.now()), 1000);
-    return () => clearInterval(timer);
+    const timer = setInterval(() => {
+      now = Date.now();
+    }, 1000);
+    return () => {
+      clearInterval(timer);
+    };
   });
 
   let tone = $derived(callTone(call));
-  let label = $derived(callStateLabel(call));
+  let label = $derived(callStateLabel(call) ?? '');
   let sim = $derived(callSim(call, phones));
   let elapsed = $derived(call && call.state !== 'ringing' ? callElapsedSeconds(call, now) : 0);
 
-  let callable = $derived(phones.filter((phone) => phone.iccid && phone.number));
+  let callable = $derived(phones.filter((phone) => phone.iccid !== '' && phone.number !== ''));
   let matches = $derived(
     callable.filter((phone) => matchesPhoneQuery(phone, simQuery)).slice(0, 40),
   );
@@ -63,7 +106,7 @@
   let numberReady = $derived(isValidE164(normalised));
   let dialReady = $derived(Boolean(selected) && numberReady && daemonOnline && !busy);
 
-  function pickSim(phone) {
+  function pickSim(phone: DialablePhone) {
     iccid = phone.iccid;
     simQuery = '';
     simListOpen = false;
@@ -71,13 +114,13 @@
   }
 
   /** Tapping a log row loads it back into the dialer, ready to call again. */
-  function reuse(entry) {
+  function reuse(entry: LoggedCall) {
     const matched = callable.find((phone) => phone.iccid === entry.iccid);
     if (matched) {
       iccid = matched.iccid;
       simListOpen = false;
     }
-    if (entry.remote_number) number = entry.remote_number;
+    if (entry.remote_number !== null && entry.remote_number !== '') number = entry.remote_number;
     localError = matched ? null : '这通电话用的卡现在不可用，请另选一张卡';
   }
 
@@ -100,7 +143,7 @@
     active: 'bg-emerald-500',
     pending: 'bg-amber-500 animate-pulse',
     idle: 'bg-stone-300',
-  };
+  } as const satisfies Record<ReturnType<typeof callTone>, string>;
 </script>
 
 <section
@@ -127,7 +170,9 @@
     {#if onClose}
       <button
         type="button"
-        onclick={() => onClose?.()}
+        onclick={() => {
+          onClose();
+        }}
         title="关闭"
         aria-label="关闭通话面板"
         class="w-8 h-8 flex items-center justify-center rounded-md text-stone-400 hover:bg-stone-100 hover:text-stone-700 shrink-0"
@@ -170,7 +215,9 @@
           <div class="grid grid-cols-2 gap-2">
             <button
               type="button"
-              onclick={() => onHangup?.()}
+              onclick={() => {
+                onHangup?.();
+              }}
               disabled={busy}
               class="h-11 rounded-md bg-red-600 text-white text-sm font-medium
                 hover:bg-red-700 disabled:opacity-50">拒接</button
@@ -198,7 +245,9 @@
             >
             <button
               type="button"
-              onclick={() => onHangup?.()}
+              onclick={() => {
+                onHangup?.();
+              }}
               disabled={busy}
               class="h-11 rounded-md bg-red-600 text-white text-sm font-medium hover:bg-red-700 disabled:opacity-50"
               >挂断</button
@@ -242,7 +291,9 @@
               {#each matches as phone (phone.iccid)}
                 <button
                   type="button"
-                  onclick={() => pickSim(phone)}
+                  onclick={() => {
+                    pickSim(phone);
+                  }}
                   class="w-full px-3 py-2.5 flex items-center gap-2 text-left hover:bg-stone-50
                     {phone.iccid === iccid ? 'bg-[#fff7ed]' : ''}"
                 >
@@ -267,7 +318,9 @@
           <span class="text-[11px] text-stone-500">对方号码</span>
           <input
             bind:value={number}
-            onkeydown={(event) => event.key === 'Enter' && dialReady && submitDial()}
+            onkeydown={(event) => {
+              if (event.key === 'Enter' && dialReady) submitDial();
+            }}
             aria-label="对方号码"
             inputmode="tel"
             autocomplete="tel"
@@ -312,7 +365,9 @@
               <li>
                 <button
                   type="button"
-                  onclick={() => reuse(entry)}
+                  onclick={() => {
+                    reuse(entry);
+                  }}
                   class="w-full px-4 py-2.5 flex items-center gap-2.5 text-left hover:bg-stone-50"
                 >
                   <!-- Inbound arrows point in, outbound point out; missed is red. -->
@@ -374,7 +429,7 @@
     {/if}
   </div>
 
-  {#if localError || error}
+  {#if localError ?? error}
     <p
       role="alert"
       class="px-4 py-2.5 text-xs text-rose-700 bg-rose-50 border-t border-rose-100 shrink-0"

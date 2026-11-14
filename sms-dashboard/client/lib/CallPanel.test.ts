@@ -1,30 +1,122 @@
 import { cleanup, fireEvent, render } from '@testing-library/svelte';
 import { afterEach, describe, expect, test } from 'bun:test';
+import type { CallLogEntry, LiveCall } from '../../shared/api/calls.js';
+import type { Phone } from '../../shared/api/phones.js';
 import CallPanel from './CallPanel.svelte';
+
+type DialablePhone = Phone & { flag: string };
+
+interface DialRequest {
+  iccid: string;
+  number: string;
+}
 
 afterEach(cleanup);
 
-// Field names match /api/phones (device_view): `number`, not `phone_number`.
-const phones = [
-  {
+function phone(overrides: Partial<DialablePhone> = {}): DialablePhone {
+  return {
+    id: 'phone-1',
+    imei: null,
     iccid: '8965012306052373985',
     number: '+6597817169',
-    sim_index: 86,
+    country: 'SG',
     carrier: 'Singtel',
+    service_type: 'postpaid',
+    service_type_source: null,
+    service_type_verified_at: null,
+    sim_role: 'standalone',
+    primary_iccid: null,
+    balance_threshold: null,
+    status: 'active',
+    signal: 71,
+    operator: null,
+    manufacturer: null,
+    model: null,
+    usb_port: null,
+    usb_path: null,
+    last_usb_path: null,
+    modem_status: null,
+    sim_index: 86,
+    notes: null,
+    created_at: null,
+    updated_at: null,
     flag: '🇸🇬',
-  },
-  { iccid: '8965030124051507919', number: '+6590421798', sim_index: 77, carrier: 'M1', flag: '🇸🇬' },
-  {
+    ...overrides,
+  };
+}
+
+function liveCall(overrides: Partial<LiveCall> = {}): LiveCall {
+  return {
+    id: 'call-1',
+    direction: 'inbound',
+    state: 'ringing',
+    iccid: '8965012306052373985',
+    number: '92953543',
+    started_at: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
+function loggedCall(overrides: Partial<CallLogEntry> = {}): CallLogEntry {
+  return {
+    id: 'c1',
+    direction: 'inbound',
+    iccid: '8965012306052373985',
+    remote_number: '+6592401051',
+    outcome: 'missed',
+    end_reason: null,
+    started_at: new Date().toISOString(),
+    answered_at: null,
+    ended_at: null,
+    duration_seconds: 0,
+    requested_by: null,
+    answered_by: null,
+    sim_index: 86,
+    sim_number: null,
+    sim_carrier: null,
+    ...overrides,
+  };
+}
+
+// Field names match /api/phones (device_view): `number`, not `phone_number`.
+const phones: DialablePhone[] = [
+  phone(),
+  phone({
+    id: 'phone-2',
+    iccid: '8965030124051507919',
+    number: '+6590421798',
+    sim_index: 77,
+    carrier: 'M1',
+  }),
+  phone({
+    id: 'phone-3',
     iccid: '8986011781104922113',
     number: '+8617600419127',
     sim_index: 1,
     carrier: '联通',
+    country: 'CN',
     flag: '🇨🇳',
-  },
+  }),
 ];
 
-function pickSim(view, cardNumber) {
+interface Texts {
+  getByText: (text: string) => HTMLElement;
+}
+
+function phoneAt(index: number): DialablePhone {
+  const found = phones[index];
+  if (!found) throw new Error(`no phone at ${index}`);
+  return found;
+}
+
+function pickSim(view: Texts, cardNumber: string) {
   return fireEvent.click(view.getByText(cardNumber));
+}
+
+function button(view: Texts, text: string): HTMLButtonElement {
+  const found = view.getByText(text);
+  if (!(found instanceof HTMLButtonElement)) throw new Error(`${text} is not a button`);
+  return found;
 }
 
 describe('CallPanel dialing', () => {
@@ -47,7 +139,7 @@ describe('CallPanel dialing', () => {
 
   test('dial stays disabled until a SIM and a valid number are both chosen', async () => {
     const view = render(CallPanel, { props: { phones } });
-    const dial = view.getByText('拨打');
+    const dial = button(view, '拨打');
 
     expect(dial.disabled).toBe(true);
 
@@ -61,8 +153,15 @@ describe('CallPanel dialing', () => {
   });
 
   test('dials with the chosen SIM and a normalised number', async () => {
-    const dialed = [];
-    const view = render(CallPanel, { props: { phones, onDial: (a) => dialed.push(a) } });
+    const dialed: DialRequest[] = [];
+    const view = render(CallPanel, {
+      props: {
+        phones,
+        onDial: (request: DialRequest) => {
+          dialed.push(request);
+        },
+      },
+    });
 
     await pickSim(view, 'S77');
     await fireEvent.input(view.getByLabelText('对方号码'), {
@@ -70,12 +169,12 @@ describe('CallPanel dialing', () => {
     });
     await fireEvent.click(view.getByText('拨打'));
 
-    expect(dialed).toEqual([{ iccid: phones[1].iccid, number: '+6591234567' }]);
+    expect(dialed).toEqual([{ iccid: phoneAt(1).iccid, number: '+6591234567' }]);
   });
 
   test('a SIM with no mapped number cannot be dialled from', () => {
     const view = render(CallPanel, {
-      props: { phones: [{ iccid: '8965000000000000000', sim_index: 12, number: null }] },
+      props: { phones: [phone({ iccid: '8965000000000000000', sim_index: 12, number: '' })] },
     });
 
     expect(view.getByText('没有匹配的卡')).toBeTruthy();
@@ -87,28 +186,27 @@ describe('CallPanel dialing', () => {
     await pickSim(view, 'S86');
     await fireEvent.input(view.getByLabelText('对方号码'), { target: { value: '+6591234567' } });
 
-    expect(view.getByText('拨打').disabled).toBe(true);
+    expect(button(view, '拨打').disabled).toBe(true);
     expect(view.container.textContent).toContain('采集服务离线');
   });
 });
 
 describe('CallPanel during a call', () => {
-  const inbound = {
-    direction: 'inbound',
-    state: 'ringing',
-    number: '92953543',
-    iccid: phones[0].iccid,
-  };
+  const inbound = liveCall({ iccid: phoneAt(0).iccid });
 
   test('a ringing inbound call shows the caller, its SIM, answer and reject', async () => {
-    const answered = [];
-    const hungUp = [];
+    const answered: boolean[] = [];
+    const hungUp: boolean[] = [];
     const view = render(CallPanel, {
       props: {
         phones,
         call: inbound,
-        onAnswer: () => answered.push(true),
-        onHangup: () => hungUp.push(true),
+        onAnswer: () => {
+          answered.push(true);
+        },
+        onHangup: () => {
+          hungUp.push(true);
+        },
       },
     });
 
@@ -125,18 +223,20 @@ describe('CallPanel during a call', () => {
   });
 
   test('an active call shows a duration and can be muted', async () => {
-    const muted = [];
+    const muted: boolean[] = [];
     const view = render(CallPanel, {
       props: {
         phones,
-        call: {
+        call: liveCall({
           direction: 'outbound',
           state: 'active',
           number: '+6591234567',
-          iccid: phones[0].iccid,
+          iccid: phoneAt(0).iccid,
           started_at: new Date(Date.now() - 65_000).toISOString(),
+        }),
+        onToggleMute: () => {
+          muted.push(true);
         },
-        onToggleMute: () => muted.push(true),
       },
     });
 
@@ -149,11 +249,11 @@ describe('CallPanel during a call', () => {
     const view = render(CallPanel, {
       props: {
         phones,
-        call: { direction: 'outbound', state: 'connecting', number: '+6591234567' },
+        call: liveCall({ direction: 'outbound', state: 'connecting', number: '+6591234567' }),
       },
     });
 
-    expect(view.getByText('静音').disabled).toBe(true);
+    expect(button(view, '静音').disabled).toBe(true);
     expect(view.queryByText('接听')).toBeNull();
     expect(view.getByText('挂断')).toBeTruthy();
   });
@@ -172,28 +272,20 @@ describe('CallPanel during a call', () => {
 });
 
 describe('CallPanel call log', () => {
-  const history = [
-    {
-      id: 'c1',
-      direction: 'inbound',
-      outcome: 'missed',
-      iccid: phones[0].iccid,
-      sim_index: 86,
-      remote_number: '+6592401051',
-      started_at: new Date().toISOString(),
-      duration_seconds: 0,
-    },
-    {
+  const missed = loggedCall({ iccid: phoneAt(0).iccid });
+  const history: CallLogEntry[] = [
+    missed,
+    loggedCall({
       id: 'c2',
       direction: 'outbound',
       outcome: 'answered',
-      iccid: phones[1].iccid,
+      iccid: phoneAt(1).iccid,
       sim_index: 77,
       remote_number: '+6591234567',
       started_at: new Date(Date.now() - 3_600_000).toISOString(),
       answered_at: new Date(Date.now() - 3_590_000).toISOString(),
       duration_seconds: 125,
-    },
+    }),
   ];
 
   test('shows missed calls, answered calls and their durations', () => {
@@ -210,20 +302,28 @@ describe('CallPanel call log', () => {
   });
 
   test('tapping a log row loads it back into the dialer', async () => {
-    const dialed = [];
-    const view = render(CallPanel, { props: { phones, history, onDial: (a) => dialed.push(a) } });
+    const dialed: DialRequest[] = [];
+    const view = render(CallPanel, {
+      props: {
+        phones,
+        history,
+        onDial: (request: DialRequest) => {
+          dialed.push(request);
+        },
+      },
+    });
 
     await fireEvent.click(view.getByText('+6592401051'));
     await fireEvent.click(view.getByText('拨打'));
 
-    expect(dialed).toEqual([{ iccid: phones[0].iccid, number: '+6592401051' }]);
+    expect(dialed).toEqual([{ iccid: phoneAt(0).iccid, number: '+6592401051' }]);
   });
 
   test('a log row whose SIM is gone explains why it cannot be redialled', async () => {
     const view = render(CallPanel, {
       props: {
         phones,
-        history: [{ ...history[0], iccid: '8965999999999999999', sim_index: 99 }],
+        history: [{ ...missed, iccid: '8965999999999999999', sim_index: 99 }],
       },
     });
 
@@ -236,7 +336,7 @@ describe('CallPanel call log', () => {
       props: {
         phones,
         history,
-        call: { direction: 'inbound', state: 'ringing', number: '92953543' },
+        call: liveCall(),
       },
     });
     expect(view.queryByText('通话记录')).toBeNull();
