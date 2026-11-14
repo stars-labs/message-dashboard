@@ -125,4 +125,4 @@ bun run build        # Production build
 bun run deploy       # Build + deploy to Cloudflare
 ```
 
-Frontend is built by Vite, then `scripts/build-unified.js` inlines the assets into `server/frontend-assets.js` so the Worker serves everything from a single bundle.
+Frontend is built by Vite, then `scripts/build-unified.ts` inlines the assets into `server/frontend-assets.js` so the Worker serves everything from a single bundle.

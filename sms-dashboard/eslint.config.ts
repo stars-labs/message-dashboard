@@ -30,14 +30,11 @@ export default defineConfig([
     'balance-agent/release/',
     // Areas that have not joined the strict gate. oxlint covers them instead;
     // each phase removes its own line here as that area joins.
-    'scripts/',
+    'scripts/*.js',
     'runner-core/',
     'balance-agent/',
-    // Config files that Phase 4 converts to TypeScript.
-    'vite.config.js',
+    // @sveltejs/vite-plugin-svelte only loads svelte.config.js, .cjs or .mjs.
     'svelte.config.js',
-    'tailwind.config.js',
-    'postcss.config.js',
     'worker-configuration.d.ts',
     'worker-runtime.d.ts',
   ]),

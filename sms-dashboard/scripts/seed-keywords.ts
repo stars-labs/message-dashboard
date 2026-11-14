@@ -1,7 +1,22 @@
 // Script to seed test keywords directly via control API
 
-const API_KEY = process.env.API_KEY || 'test-api-key';
-const API_URL = process.env.API_URL || 'https://sexy.itoken.world';
+import * as v from 'valibot';
+import { readJson } from '../shared/parse-json.js';
+
+function envOr(name: string, fallback: string): string {
+  const value = process.env[name];
+  return value === undefined || value === '' ? fallback : value;
+}
+
+const API_KEY = envOr('API_KEY', 'test-api-key');
+const API_URL = envOr('API_URL', 'https://sexy.itoken.world');
+
+const UploadResultSchema = v.object({
+  success: v.nullish(v.boolean()),
+  processed: v.nullish(v.number()),
+  duplicates: v.nullish(v.number()),
+  error: v.unknown(),
+});
 
 // Test keywords to seed
 const testKeywords = [
@@ -131,8 +146,8 @@ async function seedKeywords() {
     console.log(`   Tag: ${kw.tag}`);
     console.log(`   Color: ${kw.color}`);
     console.log(`   Priority: ${kw.priority}`);
-    console.log(`   Case Sensitive: ${kw.case_sensitive}`);
-    console.log(`   Whole Word: ${kw.whole_word}`);
+    console.log(`   Case Sensitive: ${String(kw.case_sensitive)}`);
+    console.log(`   Whole Word: ${String(kw.whole_word)}`);
     console.log('');
   });
 
@@ -177,12 +192,14 @@ async function seedKeywords() {
       body: JSON.stringify({ messages: testMessages }),
     });
 
-    const result = await response.json();
+    const parsed = await readJson(response, UploadResultSchema);
+    if (!parsed.ok) throw new Error(parsed.error);
+    const result = parsed.value;
 
     if (result.success) {
       console.log('✅ Test messages uploaded successfully!');
-      console.log(`   Processed: ${result.processed} messages`);
-      console.log(`   Duplicates: ${result.duplicates} messages`);
+      console.log(`   Processed: ${String(result.processed)} messages`);
+      console.log(`   Duplicates: ${String(result.duplicates)} messages`);
       console.log('\n🎉 Keywords should now be highlighted in these messages!');
     } else {
       console.error('❌ Failed to upload messages:', result.error);
@@ -193,4 +210,4 @@ async function seedKeywords() {
 }
 
 // Run the seeding
-seedKeywords();
+await seedKeywords();

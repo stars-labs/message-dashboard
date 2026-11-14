@@ -20,7 +20,7 @@
     "dev": "bunx vite",
     "dev:api": "bunx wrangler dev",
     "build": "bunx vite build",
-    "build:unified": "bun run build && bun scripts/build-unified.js",
+    "build:unified": "bun run build && bun scripts/build-unified.ts",
     "deploy": "bun run build:unified && bunx wrangler deploy",
     "preview": "bunx vite preview",
     "db:init": "bunx wrangler d1 execute sms-dashboard --local --file=./migrations/schema.sql",

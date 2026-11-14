@@ -1,8 +1,9 @@
 {
   "$schema": "https://unpkg.com/knip@5.88.1/schema.json",
   "entry": [
-    "scripts/*.js",
+    "scripts/*.{js,ts}",
     "test/setup.ts",
+    "tailwindcss-forms.d.ts",
     "server/*.d.ts",
     "client/vite-env.d.ts",
     "worker-configuration.d.ts",

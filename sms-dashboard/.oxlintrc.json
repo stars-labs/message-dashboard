@@ -26,8 +26,13 @@
     "test/**",
     "migrations/**",
     "eslint.config.ts",
+    "vite.config.ts",
+    "tailwind.config.ts",
+    "postcss.config.ts",
+    "tailwindcss-forms.d.ts",
     "worker-configuration.d.ts",
     "worker-runtime.d.ts",
+    "scripts/**/*.ts",
     "tsconfig*.json"
   ]
 }

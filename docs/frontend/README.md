@@ -72,7 +72,7 @@ The SMS Dashboard frontend is a cost-optimized Svelte 5 application designed to 
 - **JavaScript ES2022**: Modern JavaScript with optional chaining, nullish coalescing
 
 ### Build & Deployment
-- **Unified Bundle**: Single Workers deployment via `build-unified.js`
+- **Unified Bundle**: Single Workers deployment via `build-unified.ts`
 - **Static Assets**: Embedded directly in Workers bundle
 - **Code Splitting**: Manual optimization for critical/non-critical features
 - **Asset Optimization**: Minified CSS/JS, optimized images
@@ -587,7 +587,7 @@ export default defineConfig({
 });
 ```
 
-#### Unified Build Script (`build-unified.js`)
+#### Unified Build Script (`build-unified.ts`)
 ```javascript
 import { build } from 'vite';
 import fs from 'fs';

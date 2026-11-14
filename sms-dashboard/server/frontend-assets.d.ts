@@ -1,6 +1,6 @@
 // Types for the generated frontend-assets.js.
 //
-// The module is produced by scripts/build-unified.js and is gitignored, so it
+// The module is produced by scripts/build-unified.ts and is gitignored, so it
 // does not exist in a clean checkout. A `.d.ts` with the same basename as the
 // generated module is what TypeScript pairs it with, which is why the
 // declaration lives here rather than in a wildcard module.

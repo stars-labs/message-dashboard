@@ -8,9 +8,9 @@ const __dirname = path.dirname(__filename);
 // Read all files from dist directory
 function readDistFiles() {
   const distPath = path.join(__dirname, '../dist');
-  const files = {};
+  const files = new Map<string, Buffer>();
 
-  function readDir(dir, basePath = '') {
+  function readDir(dir: string, basePath = '') {
     const items = fs.readdirSync(dir);
 
     for (const item of items) {
@@ -23,7 +23,7 @@ function readDistFiles() {
       } else {
         const content = fs.readFileSync(fullPath);
         const key = relativePath.replace(/\\/g, '/');
-        files[key] = content;
+        files.set(key, content);
       }
     }
   }
@@ -42,7 +42,7 @@ function generateAssetsModule() {
   let code = '// Auto-generated frontend assets\n';
   code += 'export const FRONTEND_ASSETS = {\n';
 
-  for (const [assetPath, content] of Object.entries(files)) {
+  for (const [assetPath, content] of files) {
     const mimeType = getMimeType(assetPath);
     const isText =
       mimeType.startsWith('text/') || mimeType.includes('javascript') || mimeType.includes('json');
@@ -62,31 +62,31 @@ function generateAssetsModule() {
 
   // Write to file
   fs.writeFileSync(path.join(__dirname, '../server/frontend-assets.js'), code);
-  console.log('Generated frontend-assets.js with', Object.keys(files).length, 'files');
+  console.log('Generated frontend-assets.js with', files.size, 'files');
 }
 
-function getMimeType(filename) {
+function getMimeType(filename: string) {
   const ext = path.extname(filename).toLowerCase();
-  const mimeTypes = {
-    '.html': 'text/html',
-    '.js': 'application/javascript',
-    '.css': 'text/css',
-    '.json': 'application/json',
+  const mimeTypes = new Map([
+    ['.html', 'text/html'],
+    ['.js', 'application/javascript'],
+    ['.css', 'text/css'],
+    ['.json', 'application/json'],
     // Without this the manifest falls through to application/octet-stream, which
     // both stores it as base64 and serves a MIME type browsers reject.
-    '.webmanifest': 'application/manifest+json',
-    '.png': 'image/png',
-    '.jpg': 'image/jpeg',
-    '.jpeg': 'image/jpeg',
-    '.gif': 'image/gif',
-    '.svg': 'image/svg+xml',
-    '.ico': 'image/x-icon',
-    '.woff': 'font/woff',
-    '.woff2': 'font/woff2',
-    '.ttf': 'font/ttf',
-    '.otf': 'font/otf',
-  };
-  return mimeTypes[ext] || 'application/octet-stream';
+    ['.webmanifest', 'application/manifest+json'],
+    ['.png', 'image/png'],
+    ['.jpg', 'image/jpeg'],
+    ['.jpeg', 'image/jpeg'],
+    ['.gif', 'image/gif'],
+    ['.svg', 'image/svg+xml'],
+    ['.ico', 'image/x-icon'],
+    ['.woff', 'font/woff'],
+    ['.woff2', 'font/woff2'],
+    ['.ttf', 'font/ttf'],
+    ['.otf', 'font/otf'],
+  ]);
+  return mimeTypes.get(ext) ?? 'application/octet-stream';
 }
 
 // Run the build

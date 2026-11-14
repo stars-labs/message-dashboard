@@ -1,4 +1,6 @@
-/** @type {import('tailwindcss').Config} */
+import type { Config } from 'tailwindcss';
+import forms from '@tailwindcss/forms';
+
 export default {
   content: ['./index.html', './client/**/*.{svelte,js,ts,jsx,tsx}'],
   // Safelist only what Tailwind genuinely cannot find by scanning source text —
@@ -55,5 +57,5 @@ export default {
       },
     },
   },
-  plugins: [require('@tailwindcss/forms')],
-};
+  plugins: [forms],
+} satisfies Config;

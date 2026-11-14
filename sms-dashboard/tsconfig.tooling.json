@@ -11,5 +11,13 @@
     "declaration": true,
     "outDir": "./node_modules/.tmp/tooling-declarations"
   },
-  "include": ["eslint.config.ts"]
+  "include": [
+    "eslint.config.ts",
+    "vite.config.ts",
+    "tailwind.config.ts",
+    "postcss.config.ts",
+    "tailwindcss-forms.d.ts",
+    "scripts/**/*.ts"
+  ],
+  "references": [{ "path": "./tsconfig.shared.json" }]
 }

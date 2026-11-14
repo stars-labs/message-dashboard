@@ -4,20 +4,73 @@
  * Database Restore Script for Cloudflare D1
  *
  * This script restores D1 database from backup files
- * Usage: node scripts/restore-database.js [backup-folder]
+ * Usage: bun scripts/restore-database.ts [backup-folder]
  */
 
-const { execSync } = require('child_process');
-const fs = require('fs');
-const path = require('path');
-const readline = require('readline');
+import { execSync } from 'child_process';
+import fs from 'fs';
+import path from 'path';
+import readline from 'readline';
+import * as v from 'valibot';
+import { parseJson, type Schema } from '../shared/parse-json.js';
 
 // Configuration
 const DATABASE_NAME = 'sms-dashboard';
-const BACKUP_DIR = path.join(__dirname, '../backups');
+const BACKUP_DIR = path.join(import.meta.dirname, '../backups');
+
+const SqlValueSchema = v.union([v.string(), v.number(), v.boolean(), v.null()]);
+
+const MetadataSchema = v.object({
+  timestamp: v.string(),
+  database: v.string(),
+  tables: v.record(v.string(), v.object({ rowCount: v.number() })),
+});
+
+const CompleteBackupSchema = v.object({
+  metadata: v.object({
+    tables: v.record(v.string(), v.object({ rowCount: v.number() })),
+  }),
+  tables: v.record(
+    v.string(),
+    v.object({
+      schema: v.nullish(v.string()),
+      indexes: v.nullish(v.array(v.string())),
+      data: v.nullish(v.array(v.record(v.string(), SqlValueSchema))),
+    }),
+  ),
+});
+
+type CompleteBackup = v.InferOutput<typeof CompleteBackupSchema>;
+
+function readBackupFile<T>(file: string, schema: Schema<T>): T {
+  const parsed = parseJson(fs.readFileSync(file, 'utf-8'), schema);
+  if (!parsed.ok) throw new Error(`${file} is not a valid backup file: ${parsed.error}`);
+  return parsed.value;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function rowCountFrom(output: string): number {
+  const digits = /(\d+)/.exec(output)?.[1];
+  return digits === undefined ? 0 : parseInt(digits, 10);
+}
+
+function sqlValue(value: v.InferOutput<typeof SqlValueSchema> | undefined): string {
+  if (value === null || value === undefined) return 'NULL';
+  if (typeof value === 'string') {
+    return `'${value.replace(/'/g, "''")}'`;
+  }
+  if (typeof value === 'boolean') {
+    return value ? '1' : '0';
+  }
+  return String(value);
+}
 
 // Get backup folder from command line or use latest
-const backupFolder = process.argv[2] || getLatestBackup();
+const backupArg = process.argv[2];
+const backupFolder = backupArg === undefined || backupArg === '' ? getLatestBackup() : backupArg;
 
 function getLatestBackup() {
   if (!fs.existsSync(BACKUP_DIR)) {
@@ -31,12 +84,13 @@ function getLatestBackup() {
     .sort()
     .reverse();
 
-  if (backups.length === 0) {
+  const latest = backups[0];
+  if (latest === undefined) {
     console.error('❌ No backup folders found');
     process.exit(1);
   }
 
-  return backups[0];
+  return latest;
 }
 
 const BACKUP_PATH = path.join(BACKUP_DIR, backupFolder);
@@ -49,7 +103,7 @@ if (!fs.existsSync(BACKUP_PATH)) {
 console.log(`🔄 Restoring database from: ${BACKUP_PATH}`);
 
 // Function to execute wrangler command
-function runWranglerCommand(sql, isLocal = false) {
+function runWranglerCommand(sql: string, isLocal = false) {
   const location = isLocal ? '--local' : '--remote';
   const command = `npx wrangler d1 execute ${DATABASE_NAME} ${location} --command="${sql}"`;
 
@@ -58,13 +112,13 @@ function runWranglerCommand(sql, isLocal = false) {
     return result;
   } catch (error) {
     console.error(`Error executing SQL: ${sql.substring(0, 100)}...`);
-    console.error(error.message);
+    console.error(errorMessage(error));
     return null;
   }
 }
 
 // Function to execute SQL file
-function runSQLFile(filePath, isLocal = false) {
+function runSQLFile(filePath: string, isLocal = false) {
   const location = isLocal ? '--local' : '--remote';
   const command = `npx wrangler d1 execute ${DATABASE_NAME} ${location} --file="${filePath}"`;
 
@@ -73,13 +127,13 @@ function runSQLFile(filePath, isLocal = false) {
     return result;
   } catch (error) {
     console.error(`Error executing SQL file: ${filePath}`);
-    console.error(error.message);
+    console.error(errorMessage(error));
     return null;
   }
 }
 
 // Function to create tables from backup
-async function createTables(backup) {
+function createTables(backup: CompleteBackup) {
   console.log('\n📋 Creating tables...');
 
   for (const [tableName, tableData] of Object.entries(backup.tables)) {
@@ -109,7 +163,7 @@ async function createTables(backup) {
 }
 
 // Function to import data in batches
-async function importData(backup) {
+function importData(backup: CompleteBackup) {
   console.log('\n📊 Importing data...');
 
   for (const [tableName, tableData] of Object.entries(backup.tables)) {
@@ -129,21 +183,13 @@ async function importData(backup) {
       const batchData = tableData.data.slice(start, end);
 
       // Create INSERT statements
-      const columns = Object.keys(batchData[0]);
+      const [firstRow] = batchData;
+      if (firstRow === undefined) continue;
+      const columns = Object.keys(firstRow);
       let insertSQL = '';
 
       for (const row of batchData) {
-        const values = columns.map((col) => {
-          const value = row[col];
-          if (value === null || value === undefined) return 'NULL';
-          if (typeof value === 'string') {
-            return `'${value.replace(/'/g, "''")}'`;
-          }
-          if (typeof value === 'boolean') {
-            return value ? 1 : 0;
-          }
-          return value;
-        });
+        const values = columns.map((col) => sqlValue(row[col]));
 
         insertSQL += `INSERT INTO ${tableName} (${columns.join(', ')}) VALUES (${values.join(', ')});\n`;
       }
@@ -170,7 +216,7 @@ async function importData(backup) {
 }
 
 // Function to restore from SQL dump
-async function restoreFromSQL() {
+function restoreFromSQL() {
   const sqlFile = path.join(BACKUP_PATH, 'backup.sql');
 
   if (!fs.existsSync(sqlFile)) {
@@ -213,7 +259,7 @@ async function restoreFromSQL() {
 }
 
 // Function to verify restore
-async function verifyRestore(backup) {
+function verifyRestore(backup: CompleteBackup) {
   console.log('\n🔍 Verifying restore...');
 
   let allGood = true;
@@ -223,8 +269,7 @@ async function verifyRestore(backup) {
     const result = runWranglerCommand(countSQL);
 
     if (result) {
-      const match = result.match(/(\d+)/);
-      const count = match ? parseInt(match[1]) : 0;
+      const count = rowCountFrom(result);
 
       if (count === tableInfo.rowCount) {
         console.log(`  ✅ ${tableName}: ${count} rows (matches backup)`);
@@ -242,13 +287,13 @@ async function verifyRestore(backup) {
 }
 
 // Function to prompt user
-function prompt(question) {
+function prompt(question: string) {
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
   });
 
-  return new Promise((resolve) => {
+  return new Promise<string>((resolve) => {
     rl.question(question, (answer) => {
       rl.close();
       resolve(answer);
@@ -265,7 +310,7 @@ async function restoreDatabase() {
     process.exit(1);
   }
 
-  const metadata = JSON.parse(fs.readFileSync(metadataFile, 'utf-8'));
+  const metadata = readBackupFile(metadataFile, MetadataSchema);
 
   console.log('\n📋 Backup Information:');
   console.log(`  Timestamp: ${metadata.timestamp}`);
@@ -293,33 +338,35 @@ async function restoreDatabase() {
 
   if (sqlDumpExists) {
     console.log('\n📝 SQL dump found. Using fast restore method...');
-    const success = await restoreFromSQL();
+    const success = restoreFromSQL();
 
     if (success) {
       // Load complete backup for verification
       if (completeBackupExists) {
-        const backup = JSON.parse(
-          fs.readFileSync(path.join(BACKUP_PATH, 'complete-backup.json'), 'utf-8'),
+        const backup = readBackupFile(
+          path.join(BACKUP_PATH, 'complete-backup.json'),
+          CompleteBackupSchema,
         );
-        await verifyRestore(backup);
+        verifyRestore(backup);
       }
     }
   } else if (completeBackupExists) {
     console.log('\n📦 Using JSON backup...');
 
     // Load complete backup
-    const backup = JSON.parse(
-      fs.readFileSync(path.join(BACKUP_PATH, 'complete-backup.json'), 'utf-8'),
+    const backup = readBackupFile(
+      path.join(BACKUP_PATH, 'complete-backup.json'),
+      CompleteBackupSchema,
     );
 
     // Create tables
-    await createTables(backup);
+    createTables(backup);
 
     // Import data
-    await importData(backup);
+    importData(backup);
 
     // Verify
-    await verifyRestore(backup);
+    verifyRestore(backup);
   } else {
     console.error('❌ No suitable backup file found (backup.sql or complete-backup.json)');
     process.exit(1);
