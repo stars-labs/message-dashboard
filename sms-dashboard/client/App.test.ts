@@ -1,9 +1,15 @@
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/svelte';
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import postcss from 'postcss';
+import postcss, { Rule } from 'postcss';
 import selectorParser from 'postcss-selector-parser';
 import valueParser from 'postcss-value-parser';
+import type { MeResponse } from '../shared/api/auth.js';
+import type { BalanceChecksResponse } from '../shared/api/balance-checks.js';
+import type { DaemonStatusResponse } from '../shared/api/daemon-status.js';
+import type { KeywordsResponse } from '../shared/api/keywords.js';
+import type { ApiMessage, MessagePage } from '../shared/api/messages.js';
+import type { Phone, PhonesResponse } from '../shared/api/phones.js';
 import App from './App.svelte';
 import { auth } from './lib/auth.js';
 
@@ -14,7 +20,7 @@ import { auth } from './lib/auth.js';
  */
 const stylesheet = postcss.parse(readFileSync(new URL('./app.css', import.meta.url), 'utf8'));
 
-function cssValue(text) {
+function cssValue(text: string): string {
   const parsed = valueParser(text);
   parsed.walk((node) => {
     if (node.type === 'function') {
@@ -28,7 +34,7 @@ function cssValue(text) {
     if (node.type === 'space') node.value = ' ';
     if (node.type === 'string') node.quote = '"';
   });
-  return parsed.toString().trim();
+  return valueParser.stringify(parsed.nodes).trim();
 }
 
 const canonicalSelector = selectorParser((root) => {
@@ -37,138 +43,170 @@ const canonicalSelector = selectorParser((root) => {
   });
 });
 
-function cssSelector(text) {
+function cssSelector(text: string): string {
   return canonicalSelector.processSync(text, { lossless: false });
 }
 
-function declarations(property) {
-  const found = [];
+function declarations(property: string): { selector: string; value: string }[] {
+  const found: { selector: string; value: string }[] = [];
   stylesheet.walkDecls(property, (decl) => {
+    if (!(decl.parent instanceof Rule)) return;
     found.push({ selector: cssSelector(decl.parent.selector), value: cssValue(decl.value) });
   });
   return found;
 }
 
-function declarationValue(selector, property) {
+function declarationValue(selector: string, property: string): string {
   const match = declarations(property).find((decl) => decl.selector === cssSelector(selector));
   if (!match) throw new Error(`${selector} does not declare ${property}`);
   return match.value;
 }
 
-function declaresUnder(property, selector) {
+function declaresUnder(property: string, selector: string): boolean {
   return declarations(property).some((decl) => decl.selector === cssSelector(selector));
 }
 
-const originalFetch = globalThis.fetch;
 const originalBaseUrl = auth.baseUrl;
+let fetchSpy: ReturnType<typeof spyOn<typeof globalThis, 'fetch'>> | undefined;
 
 afterEach(() => {
   cleanup();
-  globalThis.fetch = originalFetch;
+  fetchSpy?.mockRestore();
+  fetchSpy = undefined;
   auth.user = null;
   auth.baseUrl = originalBaseUrl;
   window.location.hash = '';
   document.documentElement.classList.remove('is-ios', 'is-standalone');
 });
 
-function responseFor(url) {
-  const path = new URL(String(url), 'http://localhost').pathname;
-  if (path === '/api/auth/me') {
-    return Response.json({
-      success: true,
-      user: {
-        id: 'test-user',
-        roles: ['viewer'],
-        permissions: ['messages.read', 'messages.send', 'phones.write'],
-      },
-    });
+const me: MeResponse = {
+  success: true,
+  user: {
+    id: 'test-user',
+    roles: ['viewer'],
+    permissions: ['messages.read', 'messages.send', 'phones.write'],
+  },
+};
+
+const phone: Phone = {
+  id: '8986000000000000001',
+  imei: null,
+  iccid: '8986000000000000001',
+  number: '+8613800000000',
+  country: 'CN',
+  carrier: null,
+  service_type: 'unknown',
+  service_type_source: null,
+  service_type_verified_at: null,
+  sim_role: 'standalone',
+  primary_iccid: null,
+  balance_threshold: null,
+  status: 'active',
+  signal: null,
+  operator: null,
+  manufacturer: null,
+  model: null,
+  usb_port: null,
+  usb_path: null,
+  last_usb_path: null,
+  modem_status: null,
+  sim_index: 1,
+  notes: null,
+  created_at: null,
+  updated_at: new Date().toISOString(),
+};
+
+const message: ApiMessage = {
+  id: 'message-1',
+  phone_iccid: '8986000000000000001',
+  phone_number: '10086',
+  content: '用于测试导航关闭详情的短信',
+  timestamp: '2026-08-26T12:00:00.000Z',
+  type: 'received',
+  status: null,
+  recipient: null,
+  verification_code: null,
+  created_at: null,
+  updated_at: null,
+  error_message: null,
+  sms_id: null,
+  filter_status: 'clean',
+  filter_rule_id: null,
+  purpose: 'user',
+  balance_check_id: null,
+  processing_session_id: null,
+  display_phone_number: '10086',
+  phone_carrier: null,
+  phone_status: 'active',
+  phone_sim_index: 1,
+  phone_country: 'CN',
+  mapped_number: null,
+};
+
+const phones: PhonesResponse = { success: true, data: [phone] };
+
+const messagePage: MessagePage = {
+  success: true,
+  data: [message],
+  pagination: {
+    include_filtered: false,
+    limit: 100,
+    offset: 0,
+    has_more: false,
+    next_offset: null,
+    next_cursor: null,
+  },
+  sync: { server_time: '2026-08-26T12:00:00.000Z', is_incremental: false, status_refreshed: 0 },
+};
+
+const balanceChecks: BalanceChecksResponse = { success: true, data: [] };
+
+const daemonStatus: DaemonStatusResponse = {
+  status: 'healthy',
+  label: '正常',
+  reasons: [],
+  snapshot: null,
+  timestamp: '2026-08-26T12:00:00.000Z',
+};
+
+const keywords: KeywordsResponse = { keywords: [] };
+
+function pathOf(input: Parameters<typeof fetch>[0]): string {
+  const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+  return new URL(url, 'http://localhost').pathname;
+}
+
+function responseFor(input: Parameters<typeof fetch>[0]): Response {
+  switch (pathOf(input)) {
+    case '/api/auth/me':
+      return Response.json(me);
+    case '/api/phones':
+      return Response.json(phones);
+    case '/api/messages':
+      return Response.json(messagePage);
+    case '/api/balance-checks':
+      return Response.json(balanceChecks);
+    case '/api/daemon/status':
+      return Response.json(daemonStatus);
+    case '/api/keywords':
+      return Response.json(keywords);
+    default:
+      return Response.json({ success: true, data: [] });
   }
-  if (path === '/api/phones') {
-    return Response.json({
-      success: true,
-      data: [
-        {
-          id: '8986000000000000001',
-          imei: null,
-          iccid: '8986000000000000001',
-          number: '+8613800000000',
-          country: 'CN',
-          carrier: null,
-          service_type: 'unknown',
-          service_type_source: null,
-          service_type_verified_at: null,
-          sim_role: 'standalone',
-          primary_iccid: null,
-          balance_threshold: null,
-          status: 'active',
-          signal: null,
-          operator: null,
-          manufacturer: null,
-          model: null,
-          usb_port: null,
-          usb_path: null,
-          last_usb_path: null,
-          modem_status: null,
-          sim_index: 1,
-          notes: null,
-          created_at: null,
-          updated_at: new Date().toISOString(),
-        },
-      ],
-    });
-  }
-  if (path === '/api/messages') {
-    return Response.json({
-      success: true,
-      data: [
-        {
-          id: 'message-1',
-          phone_iccid: '8986000000000000001',
-          phone_number: '10086',
-          content: '用于测试导航关闭详情的短信',
-          timestamp: '2026-08-26T12:00:00.000Z',
-          type: 'received',
-          status: null,
-          recipient: null,
-          verification_code: null,
-          created_at: null,
-          updated_at: null,
-          error_message: null,
-          sms_id: null,
-          filter_status: 'clean',
-          filter_rule_id: null,
-          purpose: 'user',
-          balance_check_id: null,
-          processing_session_id: null,
-          display_phone_number: '10086',
-          phone_carrier: null,
-          phone_status: 'active',
-          phone_sim_index: 1,
-          phone_country: 'CN',
-          mapped_number: null,
-        },
-      ],
-      pagination: {
-        include_filtered: false,
-        limit: 100,
-        offset: 0,
-        has_more: false,
-        next_offset: null,
-        next_cursor: null,
-      },
-      sync: { server_time: '2026-08-26T12:00:00.000Z', is_incremental: false, status_refreshed: 0 },
-    });
-  }
-  if (path === '/api/balance-checks') {
-    return Response.json({ success: true, data: [] });
-  }
-  if (path === '/api/daemon/status') {
-    return Response.json({ status: 'healthy' });
-  }
-  if (path === '/api/keywords') {
-    return Response.json({ keywords: [] });
-  }
-  return Response.json({ success: true, data: [] });
+}
+
+function stubApi(): void {
+  auth.baseUrl = '';
+  fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(
+    Object.assign((input: Parameters<typeof fetch>[0]) => Promise.resolve(responseFor(input)), {
+      preconnect: () => undefined,
+    }),
+  );
+}
+
+function elementOf(found: Element | null, description: string): HTMLElement {
+  if (!(found instanceof HTMLElement)) throw new Error(`no ${description} rendered`);
+  return found;
 }
 
 describe('mobile detail navigation', () => {
@@ -209,19 +247,16 @@ describe('mobile detail navigation', () => {
   });
 
   test('bottom navigation closes an open message detail before changing views', async () => {
-    auth.baseUrl = '';
-    globalThis.fetch = async (url) => responseFor(url);
+    stubApi();
     const view = render(App);
 
-    const messageRow = await waitFor(() => {
-      const row = view.container.querySelector('[data-message-row]');
-      expect(row).toBeTruthy();
-      return row;
-    });
+    const messageRow = await waitFor(() =>
+      elementOf(view.container.querySelector('[data-message-row]'), 'message row'),
+    );
     await fireEvent.click(messageRow);
     expect(view.getByRole('region', { name: '短信详情' })).toBeTruthy();
 
-    const mobileNav = view.container.querySelector('nav.lg\\:hidden');
+    const mobileNav = elementOf(view.container.querySelector('nav.lg\\:hidden'), 'mobile nav');
     const selection = mobileNav.querySelector('[data-mobile-tab-selection]');
     expect(selection).toBeTruthy();
     expect(mobileNav.style.getPropertyValue('--mobile-tab-selection-width')).toBe('20%');
@@ -236,6 +271,7 @@ describe('mobile detail navigation', () => {
     const balances = [...mobileNav.querySelectorAll('button')].find((button) =>
       button.textContent.includes('余额'),
     );
+    if (!balances) throw new Error('no balances tab rendered');
     await fireEvent.click(balances);
 
     expect(view.queryByRole('region', { name: '短信详情' })).toBeNull();
@@ -271,22 +307,25 @@ describe('mobile detail navigation', () => {
       'blur(22px) saturate(165%)',
     );
 
-    const mediaQueries = [];
-    stylesheet.walkAtRules('media', (rule) => mediaQueries.push(rule.params));
+    const mediaQueries: string[] = [];
+    stylesheet.walkAtRules('media', (rule) => {
+      mediaQueries.push(rule.params);
+    });
     expect(mediaQueries).toContain('(prefers-reduced-motion: reduce)');
   });
 
   test('the floating tab pill follows a touch pointer and navigates on release', async () => {
     document.documentElement.classList.add('is-ios', 'is-standalone');
-    auth.baseUrl = '';
-    globalThis.fetch = async (url) => responseFor(url);
+    stubApi();
     const view = render(App);
-    await waitFor(() => expect(view.container.querySelector('[data-message-row]')).toBeTruthy());
+    await waitFor(() => {
+      expect(view.container.querySelector('[data-message-row]')).toBeTruthy();
+    });
 
-    const mobileNav = view.container.querySelector('.mobile-tab-bar');
-    mobileNav.getBoundingClientRect = () => ({ left: 0, width: 500 });
-    mobileNav.setPointerCapture = () => {};
-    mobileNav.releasePointerCapture = () => {};
+    const mobileNav = elementOf(view.container.querySelector('.mobile-tab-bar'), 'mobile tab bar');
+    mobileNav.getBoundingClientRect = () => new DOMRect(0, 0, 500, 60);
+    mobileNav.setPointerCapture = () => undefined;
+    mobileNav.releasePointerCapture = () => undefined;
 
     await fireEvent.pointerDown(mobileNav, {
       pointerId: 1,
@@ -301,7 +340,7 @@ describe('mobile detail navigation', () => {
     });
 
     expect(window.location.hash).toBe('');
-    expect(mobileNav.dataset.mobileTabDragging).toBe('true');
+    expect(mobileNav.getAttribute('data-mobile-tab-dragging')).toBe('true');
     expect(mobileNav.style.getPropertyValue('--mobile-tab-selection-x')).toBe('230px');
     expect(mobileNav.style.getPropertyValue('--mobile-tab-glow-x')).toBe('280px');
     expect(mobileNav.style.getPropertyValue('--mobile-tab-icon-shift-x')).toBe('1.2px');
@@ -316,7 +355,7 @@ describe('mobile detail navigation', () => {
     });
 
     expect(window.location.hash).toBe('#balances');
-    expect(mobileNav.dataset.mobileTabDragging).toBe('false');
+    expect(mobileNav.getAttribute('data-mobile-tab-dragging')).toBe('false');
     expect(mobileNav.style.getPropertyValue('--mobile-tab-glow-x')).toBe('50%');
     expect(mobileNav.style.getPropertyValue('--mobile-tab-icon-shift-x')).toBe('0px');
   });

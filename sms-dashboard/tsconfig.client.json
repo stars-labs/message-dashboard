@@ -14,6 +14,7 @@
     "outDir": "./node_modules/.tmp/client-declarations"
   },
   "include": [
+    "client/App.svelte",
     "client/lib/BalanceConversationRow.svelte",
     "client/lib/BalanceManagement.svelte",
     "client/lib/BalanceQueryDetail.svelte",
@@ -68,6 +69,7 @@
     "client/lib/swipe-dismiss.ts",
     "client/lib/tag-store.ts",
     "client/lib/time.ts",
+    "client/main.ts",
     "client/vite-env.d.ts"
   ],
   "references": [{ "path": "./tsconfig.shared.json" }]

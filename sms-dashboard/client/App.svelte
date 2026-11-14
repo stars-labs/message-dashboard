@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import PhoneList from './lib/PhoneList.svelte';
   import SimpleMessageView from './lib/SimpleMessageView.svelte';
@@ -36,14 +36,14 @@
   import BalanceManagement from './lib/BalanceManagement.svelte';
   import PullToRefresh from './lib/PullToRefresh.svelte';
   import { keywords as keywordsStore } from './lib/tag-store.js';
-  import { api } from './lib/api.js';
+  import { ApiError, api, errorMessage, request } from './lib/api.js';
   import { getPhoneFlag } from './lib/countries.js';
   import { auth } from './lib/auth.js';
-  import { getStatusMeta, isAnomalous } from './lib/device-status.js';
+  import { getStatusMeta } from './lib/device-status.js';
   import { formatCardNumber } from './lib/card-number.js';
   import { formatTimeAgo } from './lib/time.js';
   import { isActiveBalanceCheck } from './lib/balance-polling.js';
-  import { getDaemonStatusMeta, isDaemonConnected } from './lib/daemon-status.js';
+  import { getDaemonStatusMeta, isDaemonConnected, type DaemonView } from './lib/daemon-status.js';
   import {
     getMobileTabDragX,
     getMobileTabIndexAtPoint,
@@ -57,22 +57,63 @@
     mergeMessagePage,
     nextMessageOffset,
   } from './lib/message-page.js';
+  import type { MeResponse } from '../shared/api/auth.js';
+  import {
+    BalanceCheckDetailResponse,
+    BalanceCheckStatusResponse,
+    type BalanceCheck,
+    type BalanceCheckDetail,
+  } from '../shared/api/balance-checks.js';
+  import type { CallLogEntry, LiveCall } from '../shared/api/calls.js';
+  import { DaemonStatusResponse } from '../shared/api/daemon-status.js';
+  import { FiltersResponse, type FilterRule } from '../shared/api/filters.js';
+  import type { CreateIccidMappingResponse } from '../shared/api/iccid-mappings.js';
+  import type { ApiMessage } from '../shared/api/messages.js';
+  import type { Phone } from '../shared/api/phones.js';
+  import { textOr } from '../shared/text.js';
 
-  let selectedPhoneIccid = $state(null);
-  let selectedPhone = $state(null);
+  type View =
+    'dashboard' | 'send' | 'iccid-mappings' | 'balances' | 'keywords' | 'filters' | 'users';
+
+  type ViewPhone = Phone & { flag: string };
+
+  type SavedMapping = CreateIccidMappingResponse['data'] & { phone_iccid: string };
+
+  type MobileTabId = ReturnType<typeof getMobileTabs>[number];
+
+  type TabPointerEvent = PointerEvent & { currentTarget: HTMLElement };
+
+  type CallSession = ReturnType<
+    typeof createCallSession<MediaStreamTrack, MediaProvider, RTCTrackEvent>
+  >;
+
+  interface ToastItem {
+    id: number;
+    message: string;
+    type: 'success' | 'error' | 'info';
+    duration: number;
+  }
+
+  interface QueriesChange {
+    queuedChecks?: BalanceCheck[];
+    activeIds?: string[];
+  }
+
+  let selectedPhoneIccid = $state<string | null>(null);
+  let selectedPhone = $state<ViewPhone | null>(null);
 
   // Manual function to update selected phone
   function updateSelectedPhone() {
     selectedPhone = selectedPhoneIccid
-      ? phoneNumbers.find((p) => p.iccid === selectedPhoneIccid)
+      ? (phoneNumbers.find((p) => p.iccid === selectedPhoneIccid) ?? null)
       : null;
   }
 
   // Manual function to handle phone selection changes
   function handlePhoneSelection() {
     updateSelectedPhone();
-    loadMessagesForPhone(selectedPhoneIccid);
-    refreshBalanceChecksForView();
+    void loadMessagesForPhone(selectedPhoneIccid);
+    void refreshBalanceChecksForView();
   }
 
   // Centralized function to calculate online devices.
@@ -80,69 +121,68 @@
   // not by per-device updated_at. Device sync is incremental — updated_at only
   // changes when modem state changes, so a time-window filter would exclude
   // stable online devices. sim_status='active' is the sole online signal.
-  function calculateOnlineDevices(phones) {
-    if (!phones || phones.length === 0) return 0;
-    return phones.filter((p) => p?.status === 'active').length;
+  function calculateOnlineDevices(phones: readonly ViewPhone[]) {
+    return phones.filter((p) => p.status === 'active').length;
   }
 
   // Device counts come from the already-loaded phone list. Keeping a second D1
   // aggregate for the same facts made the dashboard poll the whole message table.
   function updateStatsFromPhones() {
     stats.onlineDevices = calculateOnlineDevices(phoneNumbers);
-    stats.totalDevices = phoneNumbers?.length || 0;
+    stats.totalDevices = phoneNumbers.length;
   }
   let selectedCountry = $state('all');
   let searchTerm = $state('');
   let showPhoneList = $state(false);
-  let messages = $state([]);
+  let messages = $state<ApiMessage[]>([]);
   let hasMoreMessagePages = $state(false);
   let loadingOlderMessages = $state(false);
-  let balanceChecks = $state([]);
-  let balanceDetailCheck = $state(null);
-  let balanceDetail = $state(null);
+  let balanceChecks = $state<BalanceCheck[]>([]);
+  let balanceDetailCheck = $state<BalanceCheck | null>(null);
+  let balanceDetail = $state<BalanceCheckDetail | null>(null);
   // The message whose full body is open in the detail drawer, or null.
-  let messageDetail = $state(null);
+  let messageDetail = $state<ApiMessage | null>(null);
   let latestSelectedBalanceCheck = $derived(
     selectedPhoneIccid
-      ? balanceChecks.find((check) => check.sim_iccid === selectedPhoneIccid) || null
+      ? (balanceChecks.find((check) => check.sim_iccid === selectedPhoneIccid) ?? null)
       : null,
   );
-  let phoneNumbers = $state([]);
-  let user = $state(null);
+  let phoneNumbers = $state<ViewPhone[]>([]);
+  let user = $state<MeResponse['user'] | null>(null);
   let loading = $state(true);
   let dataLoading = $state(true); // Track data loading separately
-  let currentView = $state('dashboard');
-  let iccidMappingsFilter = $state('all');
+  let currentView = $state<View>('dashboard');
+  let iccidMappingsFilter = $state<'all' | 'error'>('all');
   let showIccidMappingDialog = $state(false);
   let showMoreMenu = $state(false); // iOS bottom tab: 更多 sheet
   let showSendDrawer = $state(false); // desktop: send drawer (<1600px)
-  let toasts = $state([]);
+  let toasts = $state<ToastItem[]>([]);
   let messageRequestId = 0; // Prevents stale message responses from overwriting newer ones
-  let pollInterval = null;
+  let pollInterval: ReturnType<typeof setInterval> | null = null;
   let pollInFlight = false;
   const POLL_INTERVAL_MS = 60000;
   const DAEMON_POLL_INTERVAL_MS = 300000;
   let lastDaemonPollAt = 0;
-  let newMessageIds = $state(new Set()); // Track newly arrived message IDs for "新" badge
+  let newMessageIds = $state<Set<string>>(new Set()); // Track newly arrived message IDs for "新" badge
 
   // Spam/marketing filtering. Exact totals require scanning message history, so the
   // control exposes the filtered view without maintaining an expensive count.
   let showFiltered = $state(false);
-  let filterRules = $state([]); // Loaded lazily, only to name the rule that hid a message
+  let filterRules = $state<FilterRule[]>([]); // Loaded lazily, only to name the rule that hid a message
 
   async function toggleFiltered() {
     showFiltered = !showFiltered;
     if (showFiltered && filterRules.length === 0) {
       try {
-        const response = await api.get('/api/filters');
-        filterRules = response?.filters || [];
+        const response = await request('/api/filters', FiltersResponse);
+        filterRules = response.filters;
       } catch (error) {
         console.warn('[App] Could not load filter rules for labels:', error);
       }
     }
     await loadMessagesForPhone(selectedPhoneIccid, { resetSync: true });
   }
-  let lastKnownTimestamp = $state(null); // Only flag messages newer than this as "新"
+  let lastKnownTimestamp = $state<string | null>(null); // Only flag messages newer than this as "新"
   let daemonRefreshing = $state(false);
   let showDaemonDetails = $state(false);
 
@@ -150,27 +190,27 @@
   // is polled while the tab is visible; `callSession` owns this tab's microphone
   // and PeerConnection and is plain (non-reactive) because it holds browser objects.
   let showCallPanel = $state(false);
-  let activeCall = $state(null);
+  let activeCall = $state<LiveCall | null>(null);
   let callBusy = $state(false);
-  let callError = $state(null);
-  let callAudio = $state(null);
+  let callError = $state<string | null>(null);
+  let callAudio = $state<HTMLAudioElement | null>(null);
   let callMuted = $state(false);
-  let callHistory = $state([]);
+  let callHistory = $state<CallLogEntry[]>([]);
   let callHistoryLoading = $state(false);
   // Last time the call panel was opened, so the badge counts only new misses.
   let callsSeenAt = $state(readCallsSeenAt());
   let callClock = $state(Date.now());
-  let callSession = null;
-  let callPollInterval = null;
+  let callSession: CallSession | null = null;
+  let callPollInterval: ReturnType<typeof setTimeout> | null = null;
   let callPollInFlight = false;
-  let lastRingingCallId = null;
-  let ringtone = null;
-  let titleBeforeRing = null;
-  let activeCallId = null;
-  let swUpdatePrompt = $state(null);
+  let lastRingingCallId: string | null = null;
+  let ringtone: ReturnType<typeof createRingtone> | null = null;
+  let titleBeforeRing: string | null = null;
+  let activeCallId: string | null = null;
+  let swUpdatePrompt = $state<{ checkForUpdate(): Promise<unknown> } | null>(null);
   // The dashboard must never present a failed fetch as a healthy, quiet fleet.
-  let authError = $state(null);
-  let dataError = $state(null);
+  let authError = $state<string | null>(null);
+  let dataError = $state<string | null>(null);
   let messagesFromCache = $state(false);
 
   // Pull-to-refresh reuses loadData() rather than reloading the page: it refetches
@@ -208,7 +248,7 @@
     if (pullRefreshing) return;
     pullRefreshing = true;
     try {
-      await Promise.all([loadData(), swUpdatePrompt?.checkForUpdate?.()]);
+      await Promise.all([loadData(), swUpdatePrompt?.checkForUpdate()]);
     } finally {
       pullRefreshing = false;
     }
@@ -217,19 +257,18 @@
   // A counter, not Date.now(): two toasts raised in the same millisecond shared
   // an id, so keyed rendering dropped one of them.
   let toastSeq = 0;
-  function showToast(message, type = 'info', duration = 4000) {
+  function showToast(message: string, type: ToastItem['type'] = 'info', duration = 4000) {
     toastSeq += 1;
     toasts.push({ id: toastSeq, message, type, duration });
   }
 
-  function removeToast(id) {
+  function removeToast(id: number) {
     toasts = toasts.filter((t) => t.id !== id);
   }
-  let phoneToMap = $state(null);
-  let daemonStatus = $state({
+  let phoneToMap = $state<ViewPhone | null>(null);
+  let daemonStatus = $state<DaemonView>({
     status: 'unknown',
     message: '正在检查采集服务状态…',
-    last_heartbeat: null,
     snapshot: null,
     connected: false,
   });
@@ -245,14 +284,13 @@
   let anomalySimError = $derived(phoneNumbers.filter((p) => p.status === 'sim_error').length);
   let anomalyMismatch = $derived(phoneNumbers.filter((p) => p.status === 'iccid_mismatch').length);
   let anomalyOffline = $derived(phoneNumbers.filter((p) => p.status === 'offline').length);
-  let anomalyTotal = $derived(phoneNumbers.filter((p) => isAnomalous(p.status)).length);
   let daemonMeta = $derived(getDaemonStatusMeta(daemonStatus.status));
   // Permission gate. `user.permissions` comes from /api/auth/me, which derives it from
   // the caller's Auth0 roles. This is UX only — the server enforces the same rules on
   // every endpoint, so hiding a control is a convenience, never a security boundary.
   // Reading `user` inside the function body is enough for runes to re-track it.
-  function can(permission) {
-    return user?.permissions?.includes(permission) ?? false;
+  function can(permission: string) {
+    return user?.permissions.includes(permission) ?? false;
   }
 
   let canManagePhones = $derived(can('phones.write'));
@@ -264,10 +302,10 @@
       canManagePhones,
     }),
   );
-  let mobileTabPointerId = $state(null);
-  let mobileTabDragIndex = $state(null);
-  let mobileTabDragX = $state(null);
-  let mobileTabGlowX = $state(null);
+  let mobileTabPointerId = $state<number | null>(null);
+  let mobileTabDragIndex = $state<number | null>(null);
+  let mobileTabDragX = $state<number | null>(null);
+  let mobileTabGlowX = $state<number | null>(null);
   let mobileTabIconShiftX = $state(0);
   let suppressMobileTabClickUntil = 0;
   let mobileTabVisualIndex = $derived(mobileTabDragIndex ?? mobileTabState.index);
@@ -282,7 +320,7 @@
   );
   let mobileTabGlowPosition = $derived(mobileTabGlowX === null ? '50%' : `${mobileTabGlowX}px`);
 
-  function activateMobileTab(target) {
+  function activateMobileTab(target: MobileTabId) {
     if (target === 'more') {
       showMoreMenu = !showMoreMenu;
       return;
@@ -290,12 +328,12 @@
     navigate(target);
   }
 
-  function handleMobileTabClick(target) {
+  function handleMobileTabClick(target: MobileTabId) {
     if (Date.now() < suppressMobileTabClickUntil) return;
     activateMobileTab(target);
   }
 
-  function updateMobileTabDrag(event) {
+  function updateMobileTabDrag(event: TabPointerEvent) {
     const rect = event.currentTarget.getBoundingClientRect();
     const geometry = {
       clientX: event.clientX,
@@ -303,14 +341,16 @@
       width: rect.width,
       count: mobileTabs.length,
     };
-    mobileTabDragIndex = getMobileTabIndexAtPoint(geometry);
+    const index = getMobileTabIndexAtPoint(geometry);
+    mobileTabDragIndex = index;
     mobileTabDragX = getMobileTabDragX(geometry);
     const optics = getMobileTabOptics(geometry);
     mobileTabGlowX = optics.glowX;
     mobileTabIconShiftX = optics.iconShiftX;
+    return index;
   }
 
-  function handleMobileTabPointerDown(event) {
+  function handleMobileTabPointerDown(event: TabPointerEvent) {
     const root = document.documentElement;
     if (
       event.pointerType !== 'touch' ||
@@ -322,22 +362,21 @@
 
     event.preventDefault();
     mobileTabPointerId = event.pointerId;
-    event.currentTarget.setPointerCapture?.(event.pointerId);
+    event.currentTarget.setPointerCapture(event.pointerId);
     updateMobileTabDrag(event);
   }
 
-  function handleMobileTabPointerMove(event) {
+  function handleMobileTabPointerMove(event: TabPointerEvent) {
     if (event.pointerId !== mobileTabPointerId) return;
     event.preventDefault();
     updateMobileTabDrag(event);
   }
 
-  function finishMobileTabPointer(event, shouldActivate) {
+  function finishMobileTabPointer(event: TabPointerEvent, shouldActivate: boolean) {
     if (event.pointerId !== mobileTabPointerId) return;
     event.preventDefault();
-    updateMobileTabDrag(event);
-    const target = mobileTabs[mobileTabDragIndex];
-    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    const target = mobileTabs[updateMobileTabDrag(event)];
+    event.currentTarget.releasePointerCapture(event.pointerId);
     mobileTabPointerId = null;
     mobileTabDragIndex = null;
     mobileTabDragX = null;
@@ -360,9 +399,13 @@
     keywords: 'keywords.read',
     filters: 'filters.read',
     users: 'users.read',
-  };
+  } as const satisfies Record<View, string>;
 
-  function navigate(view) {
+  function isView(name: string): name is View {
+    return Object.hasOwn(VIEW_PERMISSION, name);
+  }
+
+  function navigate(view: View) {
     // Route changes own the whole visible surface. A detail drawer left mounted
     // above the new route makes a successful tab click look broken.
     messageDetail = null;
@@ -372,7 +415,7 @@
     showSendDrawer = false;
     currentView = view;
     window.location.hash = view;
-    if (view === 'balances') refreshBalanceChecksForView();
+    if (view === 'balances') void refreshBalanceChecksForView();
   }
 
   // Hash routing handler
@@ -380,7 +423,7 @@
     const hash = window.location.hash.slice(1);
     const requested = hash === '' ? 'dashboard' : hash;
 
-    if (!(requested in VIEW_PERMISSION)) return;
+    if (!isView(requested)) return;
 
     // A viewer typing #keywords would otherwise land on a page whose every API call
     // 403s, which looks like a broken app rather than a permission boundary.
@@ -398,6 +441,11 @@
   $effect(() => {
     if (user) handleHashChange();
   });
+
+  function messageTime(message: ApiMessage) {
+    const stamp = textOr(message.timestamp, null);
+    return stamp === null ? 0 : new Date(stamp).getTime();
+  }
 
   // Load the bounded dashboard data. Message reads go through the IndexedDB-backed
   // API helper so repeat visits use an ingestion-time cursor instead of re-reading
@@ -418,55 +466,34 @@
         balanceRequest,
       ]);
 
-      // Handle different response formats
-      if (phonesResponse && phonesResponse.data && Array.isArray(phonesResponse.data)) {
-        phoneNumbers = phonesResponse.data.map((phone) => ({
-          ...phone,
-          flag: getPhoneFlag(phone),
-        }));
-        updateStatsFromPhones();
-        updateSelectedPhone();
-      } else if (Array.isArray(phonesResponse)) {
-        phoneNumbers = phonesResponse.map((phone) => ({
-          ...phone,
-          flag: getPhoneFlag(phone),
-        }));
-        updateStatsFromPhones();
-        updateSelectedPhone();
-      } else {
-        phoneNumbers = [];
-        updateStatsFromPhones();
-        updateSelectedPhone();
-      }
+      phoneNumbers = phonesResponse.map((phone) => ({
+        ...phone,
+        flag: getPhoneFlag(phone),
+      }));
+      updateStatsFromPhones();
+      updateSelectedPhone();
 
       dataError = null;
-      if (messagesResponse && messagesResponse.success && Array.isArray(messagesResponse.data)) {
+      if (!('failed' in messagesResponse)) {
         messages = mergeMessagePage([], messagesResponse.data, { replace: true });
         hasMoreMessagePages = hasMoreMessages(messagesResponse.pagination);
         // Set high-water mark so polls only flag messages newer than what we loaded
         const newest = messages.reduce((max, m) => {
-          const t = m.timestamp ? new Date(m.timestamp).getTime() : 0;
+          const t = messageTime(m);
           return t > max ? t : max;
         }, 0);
         if (newest > 0) lastKnownTimestamp = new Date(newest).toISOString();
       } else {
-        console.error('[App] Messages API failed:', messagesResponse?.error);
-
-        // If this is an auth error, try to re-authenticate
-        if (messagesResponse?.error && messagesResponse.error.includes('HTTP 401')) {
-          console.error('[App] Authentication error detected, forcing logout');
-          auth.logout();
-          return;
-        }
-
+        console.error('[App] Messages API failed');
         messages = [];
         hasMoreMessagePages = false;
         dataError = '短信列表加载失败';
       }
       // Rows served from the local cache are not live; the inbox says so.
-      messagesFromCache = Boolean(messagesResponse?.sync?.is_offline);
+      messagesFromCache =
+        !('failed' in messagesResponse) && messagesResponse.sync.is_offline === true;
 
-      balanceChecks = Array.isArray(nextBalanceChecks) ? nextBalanceChecks : [];
+      balanceChecks = nextBalanceChecks;
       await checkDaemonStatus();
 
       // Mark data as loaded
@@ -475,7 +502,7 @@
       console.warn('Failed to load data:', error);
       // Keep whatever was on screen. Zeroing the counters here read as "the
       // whole fleet is offline" when all that happened was a failed request.
-      dataError = error?.message || '数据加载失败';
+      dataError = errorMessage(error, '数据加载失败');
       dataLoading = false;
     }
   }
@@ -493,7 +520,7 @@
     } catch (error) {
       // The identity service failing is not the same as being signed out: the
       // login button would just bounce. Say the server is unreachable instead.
-      authError = error?.message || '无法连接服务器';
+      authError = errorMessage(error, '无法连接服务器');
     }
 
     loading = false;
@@ -504,9 +531,9 @@
           dataLoading = false;
           startPolling();
           startCallPolling();
-          loadCallHistory();
+          void loadCallHistory();
         })
-        .catch((error) => {
+        .catch((error: unknown) => {
           console.error('Failed to load data:', error);
         });
     } else {
@@ -519,19 +546,22 @@
     window.removeEventListener('hashchange', handleHashChange);
   });
 
-  function selectPhone(phone) {
+  function selectPhone(phone: Pick<Phone, 'iccid'> | null) {
     balanceDetailCheck = null;
     // Switching cards makes an open message from the previous card irrelevant.
     messageDetail = null;
     messages = [];
     hasMoreMessagePages = false;
-    selectedPhoneIccid = phone?.iccid || null;
+    selectedPhoneIccid = textOr(phone?.iccid, null);
     handlePhoneSelection();
     showPhoneList = false;
   }
 
   // Load messages for a specific phone (race-condition safe)
-  async function loadMessagesForPhone(phoneIccid, { replace = true, resetSync = false } = {}) {
+  async function loadMessagesForPhone(
+    phoneIccid: string | null,
+    { replace = true, resetSync = false }: { replace?: boolean; resetSync?: boolean } = {},
+  ) {
     if (!user) return;
 
     const requestId = ++messageRequestId;
@@ -547,59 +577,55 @@
       // Discard if user switched phones while we were loading
       if (requestId !== messageRequestId) return;
 
-      if (response && response.data) {
-        if (replace || response.pagination?.has_more) {
-          hasMoreMessagePages = hasMoreMessages(response.pagination);
-        }
-        // Detect genuinely new messages: must have a timestamp newer than anything we've seen
-        if (lastKnownTimestamp && messages.length > 0) {
-          const cutoff = new Date(lastKnownTimestamp).getTime();
-          console.log(
-            '[New Message Detection] lastKnownTimestamp:',
-            lastKnownTimestamp,
-            'cutoff:',
-            new Date(cutoff),
-          );
-          const freshIds = response.data
-            .filter((m) => m.timestamp && new Date(m.timestamp).getTime() > cutoff)
-            .map((m) => m.id);
-          console.log('[New Message Detection] Found', freshIds.length, 'new messages:', freshIds);
-          if (freshIds.length > 0) {
-            freshIds.forEach((id) => newMessageIds.add(id));
-            console.log(
-              '[New Message Detection] Added new message IDs, newMessageIds size:',
-              newMessageIds.size,
-            );
-            // Auto-clear "新" badges after 10 seconds (design: highlight fades to a normal row)
-            setTimeout(() => {
-              freshIds.forEach((id) => newMessageIds.delete(id));
-              console.log('[New Message Detection] Auto-cleared badges after 10s');
-            }, 10000);
-          }
-        } else {
-          console.log(
-            '[New Message Detection] Skipped - lastKnownTimestamp:',
-            lastKnownTimestamp,
-            'messages.length:',
-            messages.length,
-          );
-        }
-        // Update the high-water mark to the newest timestamp in this batch
-        const newest = response.data.reduce(
-          (max, m) => {
-            const t = m.timestamp ? new Date(m.timestamp).getTime() : 0;
-            return t > max ? t : max;
-          },
-          lastKnownTimestamp ? new Date(lastKnownTimestamp).getTime() : 0,
+      if (replace || hasMoreMessages(response.pagination)) {
+        hasMoreMessagePages = hasMoreMessages(response.pagination);
+      }
+      // Detect genuinely new messages: must have a timestamp newer than anything we've seen
+      if (lastKnownTimestamp && messages.length > 0) {
+        const cutoff = new Date(lastKnownTimestamp).getTime();
+        console.log(
+          '[New Message Detection] lastKnownTimestamp:',
+          lastKnownTimestamp,
+          'cutoff:',
+          new Date(cutoff),
         );
-        if (newest > 0) lastKnownTimestamp = new Date(newest).toISOString();
-        // Polls merge into loaded history and preserve it on an empty incremental
-        // response. Scope/filter changes replace the list, including with empty.
-        if (response.data.length > 0) {
-          messages = mergeMessagePage(messages, response.data, { replace });
-        } else if (replace) {
-          messages = [];
+        const freshIds = response.data.filter((m) => messageTime(m) > cutoff).map((m) => m.id);
+        console.log('[New Message Detection] Found', freshIds.length, 'new messages:', freshIds);
+        if (freshIds.length > 0) {
+          freshIds.forEach((id) => newMessageIds.add(id));
+          console.log(
+            '[New Message Detection] Added new message IDs, newMessageIds size:',
+            newMessageIds.size,
+          );
+          // Auto-clear "新" badges after 10 seconds (design: highlight fades to a normal row)
+          setTimeout(() => {
+            freshIds.forEach((id) => newMessageIds.delete(id));
+            console.log('[New Message Detection] Auto-cleared badges after 10s');
+          }, 10000);
         }
+      } else {
+        console.log(
+          '[New Message Detection] Skipped - lastKnownTimestamp:',
+          lastKnownTimestamp,
+          'messages.length:',
+          messages.length,
+        );
+      }
+      // Update the high-water mark to the newest timestamp in this batch
+      const newest = response.data.reduce(
+        (max, m) => {
+          const t = messageTime(m);
+          return t > max ? t : max;
+        },
+        lastKnownTimestamp ? new Date(lastKnownTimestamp).getTime() : 0,
+      );
+      if (newest > 0) lastKnownTimestamp = new Date(newest).toISOString();
+      // Polls merge into loaded history and preserve it on an empty incremental
+      // response. Scope/filter changes replace the list, including with empty.
+      if (response.data.length > 0) {
+        messages = mergeMessagePage(messages, response.data, { replace });
+      } else if (replace) {
+        messages = [];
       }
     } catch (error) {
       if (requestId !== messageRequestId) return;
@@ -610,13 +636,20 @@
     }
   }
 
-  async function openBalanceCheck(check) {
-    if (!check?.id) return;
+  function isBalanceDetailOpen(id: string) {
+    return balanceDetailCheck?.id === id;
+  }
+
+  async function openBalanceCheck(check: BalanceCheck) {
+    if (check.id === '') return;
     balanceDetailCheck = check;
     balanceDetail = null;
     try {
-      const result = await api.get(`/api/balance-checks/${encodeURIComponent(check.id)}`);
-      if (balanceDetailCheck?.id === check.id && result?.data) {
+      const result = await request(
+        `/api/balance-checks/${encodeURIComponent(check.id)}`,
+        BalanceCheckDetailResponse,
+      );
+      if (isBalanceDetailOpen(check.id)) {
         balanceDetail = result.data;
       }
     } catch (error) {
@@ -624,33 +657,36 @@
     }
   }
 
-  async function refreshBalanceChecksForView(options = {}) {
+  async function refreshBalanceChecksForView(options: QueriesChange = {}) {
     if (!user) return;
 
-    if (Array.isArray(options.queuedChecks) && options.queuedChecks.length) {
-      const queuedIds = new Set(options.queuedChecks.map(({ id }) => id));
-      balanceChecks = [
-        ...options.queuedChecks,
-        ...balanceChecks.filter(({ id }) => !queuedIds.has(id)),
-      ];
+    const queuedChecks = options.queuedChecks ?? [];
+    if (queuedChecks.length > 0) {
+      const queuedIds = new Set(queuedChecks.map(({ id }) => id));
+      balanceChecks = [...queuedChecks, ...balanceChecks.filter(({ id }) => !queuedIds.has(id))];
       return;
     }
 
-    if (Array.isArray(options.activeIds) && options.activeIds.length) {
-      const result = await api.get(
-        `/api/balance-checks/status?ids=${encodeURIComponent(options.activeIds.join(','))}`,
+    const activeIds = options.activeIds ?? [];
+    if (activeIds.length > 0) {
+      const result = await request(
+        `/api/balance-checks/status?ids=${encodeURIComponent(activeIds.join(','))}`,
+        BalanceCheckStatusResponse,
       );
-      const updates = new Map((result.data || []).map((status) => [status.id, status]));
-      const reachedTerminal = options.activeIds.some((id) => {
-        if (!updates.has(id)) return true;
+      const updates = new Map(
+        result.data.map((status): [string, typeof status] => [status.id, status]),
+      );
+      const reachedTerminal = activeIds.some((id) => {
+        const update = updates.get(id);
+        if (update === undefined) return true;
         const check = balanceChecks.find((candidate) => candidate.id === id);
         if (!check) return false;
-        const update = updates.get(check.id);
-        return update && isActiveBalanceCheck(check) && !isActiveBalanceCheck(update);
+        return isActiveBalanceCheck(check) && !isActiveBalanceCheck(update);
       });
-      balanceChecks = balanceChecks.map((check) =>
-        updates.has(check.id) ? { ...check, ...updates.get(check.id) } : check,
-      );
+      balanceChecks = balanceChecks.map((check) => {
+        const update = updates.get(check.id);
+        return update ? { ...check, ...update } : check;
+      });
       if (!reachedTerminal) return;
     }
 
@@ -684,10 +720,10 @@
         force_refresh: true,
       });
 
-      if (response?.data?.length) {
+      if (response.data.length > 0) {
         messages = mergeMessagePage(messages, response.data);
       }
-      hasMoreMessagePages = hasMoreMessages(response?.pagination);
+      hasMoreMessagePages = hasMoreMessages(response.pagination);
     } catch (error) {
       console.error('[App] Failed to load older messages:', error);
     } finally {
@@ -695,21 +731,24 @@
     }
   }
 
-  function handleSetIccidMapping(phone) {
-    phoneToMap = phone;
+  function handleSetIccidMapping(phone: Pick<Phone, 'iccid'>) {
+    const listed = phoneNumbers.find((p) => p.iccid === phone.iccid);
+    if (!listed) return;
+    phoneToMap = listed;
     showIccidMappingDialog = true;
   }
 
-  async function handleIccidMappingSuccess(updated) {
+  function handleIccidMappingSuccess(updated: SavedMapping) {
     const { phone_iccid, phone_number, ...rest } = updated;
 
     // Update the phone in our local list. Spread the full response so
     // sim_role / primary_iccid / carrier / etc. stay in sync after an edit —
     // not just phone_number.
     const phoneIndex = phoneNumbers.findIndex((p) => p.iccid === phone_iccid);
-    if (phoneIndex !== -1) {
+    const current = phoneNumbers[phoneIndex];
+    if (current) {
       phoneNumbers[phoneIndex] = {
-        ...phoneNumbers[phoneIndex],
+        ...current,
         ...rest,
         number: phone_number,
       };
@@ -718,7 +757,11 @@
     }
   }
 
-  async function handleMessageSent(newMessage) {
+  async function handleMessageSent(newMessage: {
+    phone_iccid: string;
+    recipient: string;
+    content: string;
+  }) {
     try {
       // Send message via HTTP API
       const response = await api.sendMessage({
@@ -727,30 +770,43 @@
         content: newMessage.content,
       });
 
-      if (response.success) {
-        // Find the sender's phone number from the selected SIM's ICCID
-        const senderPhone = phoneNumbers.find((p) => p.iccid === newMessage.phone_iccid);
-        const senderNumber = senderPhone?.number || newMessage.phone_iccid;
+      // Find the sender's phone number from the selected SIM's ICCID
+      const senderPhone = phoneNumbers.find((p) => p.iccid === newMessage.phone_iccid);
+      const senderNumber = textOr(senderPhone?.number, newMessage.phone_iccid);
 
-        // Add to local messages immediately with sending status using backend ID
-        const sentMessage = {
-          id: response.messageId, // Use the actual message ID from backend
-          phone_iccid: newMessage.phone_iccid,
-          phone_number: senderNumber, // CORRECT: Sender's number (发送卡号)
-          recipient: newMessage.recipient, // CORRECT: Recipient's number (接收号码)
-          content: newMessage.content,
-          timestamp: new Date().toISOString(),
-          type: 'sent',
-          status: 'sending',
-        };
+      // Add to local messages immediately with sending status using backend ID
+      const sentMessage: ApiMessage = {
+        id: response.messageId, // Use the actual message ID from backend
+        phone_iccid: newMessage.phone_iccid,
+        phone_number: senderNumber, // CORRECT: Sender's number (发送卡号)
+        recipient: newMessage.recipient, // CORRECT: Recipient's number (接收号码)
+        content: newMessage.content,
+        timestamp: new Date().toISOString(),
+        type: 'sent',
+        status: 'sending',
+        verification_code: null,
+        created_at: null,
+        updated_at: null,
+        error_message: null,
+        sms_id: null,
+        filter_status: 'clean',
+        filter_rule_id: null,
+        purpose: 'user',
+        balance_check_id: null,
+        processing_session_id: null,
+        display_phone_number: null,
+        phone_carrier: null,
+        phone_status: null,
+        phone_sim_index: null,
+        phone_country: null,
+        mapped_number: null,
+      };
 
-        messages = [sentMessage, ...messages];
-        return response;
-      }
-      throw new Error(response.error || '发送请求未被接受');
+      messages = [sentMessage, ...messages];
+      return response;
     } catch (error) {
       console.error('Failed to send message:', error);
-      showToast('发送失败: ' + error.message, 'error');
+      showToast('发送失败: ' + errorMessage(error, '未知错误'), 'error');
       throw error;
     }
   }
@@ -758,23 +814,25 @@
   async function checkDaemonStatus() {
     lastDaemonPollAt = Date.now();
     try {
-      const response = await fetch('/api/daemon/status');
-      if (response.ok) {
-        const data = await response.json();
-        const connected = isDaemonConnected(data.status);
-        daemonStatus = {
-          ...data,
-          connected,
-        };
-      } else {
+      const data = await request('/api/daemon/status', DaemonStatusResponse);
+      daemonStatus = {
+        status: data.status,
+        reasons: data.reasons,
+        snapshot: data.snapshot,
+        connected: isDaemonConnected(data.status),
+        ...(data.message === undefined ? {} : { message: data.message }),
+        ...('last_heartbeat' in data ? { last_heartbeat: data.last_heartbeat } : {}),
+      };
+    } catch (error) {
+      if (error instanceof ApiError) {
         daemonStatus = {
           ...daemonStatus,
           status: 'error',
           message: '采集服务状态检查失败',
           connected: false,
         };
+        return;
       }
-    } catch (error) {
       console.error('Failed to check daemon status:', error);
       daemonStatus = {
         ...daemonStatus,
@@ -819,7 +877,7 @@
         if (now - lastDaemonPollAt >= DAEMON_POLL_INTERVAL_MS) {
           await checkDaemonStatus();
         }
-      } catch (e) {
+      } catch {
         // Silently ignore polling errors
       } finally {
         pollInFlight = false;
@@ -847,18 +905,18 @@
     const tick = async () => {
       if (document.visibilityState === 'visible') await refreshCallState();
       callPollInterval = setTimeout(
-        tick,
+        () => void tick(),
         callPollDelay({ call: activeCall, panelOpen: showCallPanel }),
       );
     };
-    callPollInterval = setTimeout(tick, 0);
+    callPollInterval = setTimeout(() => void tick(), 0);
     document.addEventListener('visibilitychange', pollWhenVisible);
   }
 
   // A ring that started while the tab was hidden should show the moment the
   // operator comes back, not up to ten seconds later.
   function pollWhenVisible() {
-    if (document.visibilityState === 'visible') refreshCallState();
+    if (document.visibilityState === 'visible') void refreshCallState();
   }
 
   function stopCallPolling() {
@@ -874,14 +932,14 @@
     callPollInFlight = true;
     try {
       applyCallState(await fetchCallState());
-    } catch (e) {
+    } catch {
       // A failed poll keeps the last known state; the next tick retries.
     } finally {
       callPollInFlight = false;
     }
   }
 
-  function applyCallState(call) {
+  function applyCallState(call: LiveCall | null) {
     activeCall = call;
     // The call ended elsewhere (far end hung up, daemon, another tab): drop media.
     if (!call && callSession && !callBusy) {
@@ -890,7 +948,7 @@
       callMuted = false;
     }
     // A call just disappeared: its row is now final, so refresh the log.
-    if (!call && activeCallId) loadCallHistory();
+    if (!call && activeCallId) void loadCallHistory();
     activeCallId = call?.id ?? null;
     // Surface a new incoming call once, without reopening a panel the user closed.
     if (
@@ -907,7 +965,9 @@
   $effect(() => {
     if (!activeCall || activeCall.state === 'ringing') return;
     const timer = setInterval(() => (callClock = Date.now()), 1000);
-    return () => clearInterval(timer);
+    return () => {
+      clearInterval(timer);
+    };
   });
 
   let callDuration = $derived(
@@ -919,7 +979,8 @@
   // An inbound call must be noticeable from another tab: it rings and takes over
   // the tab title until it is answered, rejected, or gone.
   $effect(() => {
-    const ringing = activeCall?.direction === 'inbound' && activeCall.state === 'ringing';
+    const call = activeCall;
+    const ringing = call?.direction === 'inbound' && call.state === 'ringing';
     if (!ringing) {
       ringtone?.stop();
       if (titleBeforeRing !== null) {
@@ -928,10 +989,10 @@
       }
       return;
     }
-    ringtone = ringtone ?? createRingtone(window.AudioContext ?? window.webkitAudioContext);
+    ringtone = ringtone ?? createRingtone<AudioNode>(window.AudioContext);
     ringtone.start();
     titleBeforeRing = titleBeforeRing ?? document.title;
-    document.title = `☎ 来电 ${activeCall.number ?? ''}`.trim();
+    document.title = `☎ 来电 ${call.number ?? ''}`.trim();
   });
 
   // Per-viewer convenience only: which misses this browser has already shown.
@@ -951,7 +1012,7 @@
     try {
       const { calls } = await fetchCallHistory({ limit: 30 });
       callHistory = calls;
-    } catch (error) {
+    } catch {
       // The log is a convenience; a failed load must not disturb call control.
     } finally {
       callHistoryLoading = false;
@@ -960,7 +1021,7 @@
 
   function openCallPanel() {
     showCallPanel = true;
-    refreshCallState();
+    void refreshCallState();
     const seenAt = new Date().toISOString();
     callsSeenAt = seenAt;
     try {
@@ -968,14 +1029,23 @@
     } catch {
       // Private windows refuse storage; the badge then just returns next reload.
     }
-    loadCallHistory();
+    void loadCallHistory();
+  }
+
+  async function fetchRtcIceServers(): Promise<RTCIceServer[]> {
+    const servers = await fetchIceServers();
+    return servers.map(({ urls, username, credential }) => ({
+      urls,
+      ...(username === undefined ? {} : { username }),
+      ...(credential === undefined ? {} : { credential }),
+    }));
   }
 
   function newCallSession() {
     callSession?.release();
     callMuted = false;
-    callSession = createCallSession({
-      fetchIce: fetchIceServers,
+    callSession = createCallSession<MediaStreamTrack, MediaProvider, RTCTrackEvent>({
+      fetchIce: fetchRtcIceServers,
       api: callApi,
       RTCPeerConnection: window.RTCPeerConnection,
       getUserMedia: (constraints) => navigator.mediaDevices.getUserMedia(constraints),
@@ -985,13 +1055,13 @@
     return callSession;
   }
 
-  async function runCallAction(action) {
+  async function runCallAction(action: () => Promise<unknown>) {
     callBusy = true;
     callError = null;
     try {
       await action();
     } catch (error) {
-      callError = describeCallError(error) || '通话操作失败';
+      callError = textOr(describeCallError(error), '通话操作失败');
       callSession = null;
     } finally {
       callBusy = false;
@@ -999,7 +1069,7 @@
     }
   }
 
-  function handleDial({ iccid, number }) {
+  function handleDial({ iccid, number }: { iccid: string; number: string }) {
     return runCallAction(() => newCallSession().dial({ iccid, number }));
   }
 
@@ -1045,7 +1115,9 @@
           <span class="text-stone-400 text-xs font-mono">{authError}</span>
         </p>
         <button
-          onclick={() => location.reload()}
+          onclick={() => {
+            location.reload();
+          }}
           class="w-full px-6 py-3 bg-orange-500 hover:bg-orange-600 text-white font-medium rounded-xl
             transition-colors shadow-focus"
         >
@@ -1068,7 +1140,9 @@
           需要公司邮箱和 sms 角色。<br />首次登录后默认为查看者。
         </p>
         <button
-          onclick={() => auth.login()}
+          onclick={() => {
+            auth.login();
+          }}
           class="w-full px-6 py-3 bg-orange-500 hover:bg-orange-600 text-white font-medium rounded-xl
             transition-colors shadow-focus"
         >
@@ -1097,7 +1171,9 @@
         <!-- Nav — 4 items per design (desktop only) -->
         <nav class="hidden lg:flex items-center gap-0.5 flex-1">
           <button
-            onclick={() => navigate('dashboard')}
+            onclick={() => {
+              navigate('dashboard');
+            }}
             class="text-sm px-3 py-1.5 rounded-[7px] transition-all
               {currentView === 'dashboard'
               ? 'bg-stone-100 font-semibold text-stone-900'
@@ -1120,7 +1196,9 @@
             </button>
           {/if}
           <button
-            onclick={() => navigate('balances')}
+            onclick={() => {
+              navigate('balances');
+            }}
             class="text-sm px-3 py-1.5 rounded-[7px] transition-all
               {currentView === 'balances'
               ? 'bg-stone-100 font-semibold text-stone-900'
@@ -1130,7 +1208,9 @@
           </button>
           {#if can('keywords.read') || can('filters.read')}
             <button
-              onclick={() => navigate(can('filters.read') ? 'filters' : 'keywords')}
+              onclick={() => {
+                navigate(can('filters.read') ? 'filters' : 'keywords');
+              }}
               class="text-sm px-3 py-1.5 rounded-[7px] transition-all
                 {currentView === 'keywords' || currentView === 'filters'
                 ? 'bg-stone-100 font-semibold text-stone-900'
@@ -1141,7 +1221,9 @@
           {/if}
           {#if can('users.read')}
             <button
-              onclick={() => navigate('users')}
+              onclick={() => {
+                navigate('users');
+              }}
               class="text-sm px-3 py-1.5 rounded-[7px] transition-all
                 {currentView === 'users'
                 ? 'bg-stone-100 font-semibold text-stone-900'
@@ -1156,7 +1238,13 @@
         <div class="hidden lg:flex items-center gap-3 ml-auto shrink-0">
           {#if can('messages.read')}
             <button
-              onclick={() => (showCallPanel ? (showCallPanel = false) : openCallPanel())}
+              onclick={() => {
+                if (showCallPanel) {
+                  showCallPanel = false;
+                } else {
+                  openCallPanel();
+                }
+              }}
               aria-haspopup="dialog"
               aria-expanded={showCallPanel}
               class="flex items-center gap-1.5 px-2.5 py-[5px] border rounded-[7px] text-xs transition-colors
@@ -1255,9 +1343,11 @@
 
           <!-- Avatar -->
           {#if user}
-            {@const initials = (user.name || user.email || '?')[0].toUpperCase()}
+            {@const initials = textOr(user.name, textOr(user.email, '?')).charAt(0).toUpperCase()}
             <button
-              onclick={() => auth.logout()}
+              onclick={() => {
+                auth.logout();
+              }}
               title="退出登录"
               class="w-[26px] h-[26px] rounded-full bg-stone-200 hover:bg-stone-300 flex items-center
                 justify-center text-[11px] font-semibold text-stone-700 transition-colors shrink-0"
@@ -1345,13 +1435,15 @@
                     最后一次心跳是 <strong>{formatTimeAgo(daemonStatus.last_heartbeat)}</strong>。
                     下面显示的是那时的数据，新短信不会进来。
                   {:else}
-                    {daemonStatus.message || '设备数据可能不是最新的。历史消息仍可查看。'}
+                    {textOr(daemonStatus.message, '设备数据可能不是最新的。历史消息仍可查看。')}
                   {/if}
                 </p>
                 <p class="text-xs text-red-500 mt-1">通常是 Orange Pi 掉线或 USB 集线器断电。</p>
               </div>
               <button
-                onclick={() => window.location.reload()}
+                onclick={() => {
+                  window.location.reload();
+                }}
                 class="shrink-0 px-3 py-1.5 text-xs font-medium text-red-700 border border-red-300
               rounded-lg hover:bg-red-100 transition-colors"
               >
@@ -1557,14 +1649,12 @@
                       <div class="flex-1 min-h-0">
                         <PhoneList
                           {phoneNumbers}
-                          {selectedPhone}
                           bind:selectedPhoneIccid
                           bind:selectedCountry
                           bind:searchTerm
                           onSelectPhone={selectPhone}
                           onSetIccidMapping={handleSetIccidMapping}
                           mobile={true}
-                          {daemonStatus}
                           isLoading={dataLoading}
                         />
                       </div>
@@ -1576,13 +1666,11 @@
                 <div class="hidden lg:flex lg:flex-col h-full min-h-0">
                   <PhoneList
                     {phoneNumbers}
-                    {selectedPhone}
                     bind:selectedPhoneIccid
                     bind:selectedCountry
                     bind:searchTerm
                     onSelectPhone={selectPhone}
                     onSetIccidMapping={handleSetIccidMapping}
-                    {daemonStatus}
                     isLoading={dataLoading}
                   />
                 </div>
@@ -1599,13 +1687,17 @@
                       {selectedPhone}
                       isLoading={dataLoading}
                       {newMessageIds}
-                      onClearPhone={() => selectPhone(null)}
+                      onClearPhone={() => {
+                        selectPhone(null);
+                      }}
                       {showFiltered}
                       {filterRules}
                       onToggleFiltered={toggleFiltered}
                       {balanceChecks}
                       onOpenBalance={openBalanceCheck}
-                      onOpenMessage={(message) => (messageDetail = message)}
+                      onOpenMessage={(message: ApiMessage) => {
+                        messageDetail = message;
+                      }}
                       hasMore={hasMoreMessagePages}
                       onLoadMore={loadOlderMessages}
                       loadingMore={loadingOlderMessages}
@@ -1613,7 +1705,9 @@
                       fromCache={messagesFromCache}
                       onRetry={() => {
                         dataLoading = true;
-                        loadData().finally(() => (dataLoading = false));
+                        void loadData().finally(() => {
+                          dataLoading = false;
+                        });
                       }}
                     />
                   </div>
@@ -1689,14 +1783,18 @@
                 aria-label="规则类型"
               >
                 <button
-                  onclick={() => navigate('filters')}
+                  onclick={() => {
+                    navigate('filters');
+                  }}
                   class="flex-1 lg:flex-none px-3 py-1.5 rounded-md text-sm transition-colors
                 {currentView === 'filters'
                     ? 'bg-white text-stone-900 font-semibold shadow-sm'
                     : 'text-stone-500 hover:text-stone-800'}">垃圾过滤</button
                 >
                 <button
-                  onclick={() => navigate('keywords')}
+                  onclick={() => {
+                    navigate('keywords');
+                  }}
                   class="flex-1 lg:flex-none px-3 py-1.5 rounded-md text-sm transition-colors
                 {currentView === 'keywords'
                     ? 'bg-white text-stone-900 font-semibold shadow-sm'
@@ -1715,10 +1813,10 @@
               </ErrorBoundary>
             {/if}
           </div>
-        {:else if currentView === 'users'}
+        {:else}
           <ErrorBoundary componentName="UserManagement">
             <div class="px-0 py-0 lg:px-8 lg:py-6 lg:flex-1 lg:min-h-0 lg:overflow-auto">
-              <UserManagement currentUserId={user?.id ?? null} />
+              <UserManagement currentUserId={user.id} />
             </div>
           </ErrorBoundary>
         {/if}
@@ -1797,14 +1895,20 @@
       data-mobile-tab-dragging={mobileTabPointerId !== null}
       onpointerdown={handleMobileTabPointerDown}
       onpointermove={handleMobileTabPointerMove}
-      onpointerup={(event) => finishMobileTabPointer(event, true)}
-      onpointercancel={(event) => finishMobileTabPointer(event, false)}
+      onpointerup={(event) => {
+        finishMobileTabPointer(event, true);
+      }}
+      onpointercancel={(event) => {
+        finishMobileTabPointer(event, false);
+      }}
     >
       <span class="mobile-tab-selection" data-mobile-tab-selection aria-hidden="true"></span>
 
       <!-- 验证码 tab -->
       <button
-        onclick={() => handleMobileTabClick('dashboard')}
+        onclick={() => {
+          handleMobileTabClick('dashboard');
+        }}
         data-mobile-tab-active={mobileTabVisualId === 'dashboard'}
         class="mobile-tab-button relative z-[1] flex-1 flex flex-col items-center justify-center gap-0.5 min-h-[var(--mobile-tab-content-height)]
           touch-manipulation active:bg-stone-100 transition-colors
@@ -1823,7 +1927,9 @@
       <!-- 设备 tab — links to iccid-mappings; gated to phones.write -->
       {#if canManagePhones}
         <button
-          onclick={() => handleMobileTabClick('iccid-mappings')}
+          onclick={() => {
+            handleMobileTabClick('iccid-mappings');
+          }}
           data-mobile-tab-active={mobileTabVisualId === 'iccid-mappings'}
           class="mobile-tab-button relative z-[1] flex-1 flex flex-col items-center justify-center gap-0.5 min-h-[var(--mobile-tab-content-height)]
             touch-manipulation active:bg-stone-100 transition-colors
@@ -1847,7 +1953,9 @@
 
       <!-- 余额 tab -->
       <button
-        onclick={() => handleMobileTabClick('balances')}
+        onclick={() => {
+          handleMobileTabClick('balances');
+        }}
         data-mobile-tab-active={mobileTabVisualId === 'balances'}
         class="mobile-tab-button relative z-[1] flex-1 flex flex-col items-center justify-center gap-0.5 min-h-[var(--mobile-tab-content-height)]
           touch-manipulation active:bg-stone-100 transition-colors
@@ -1877,7 +1985,9 @@
 
       <!-- 发送 tab — a first-class route, like the other primary tabs. -->
       <button
-        onclick={() => handleMobileTabClick('send')}
+        onclick={() => {
+          handleMobileTabClick('send');
+        }}
         data-mobile-tab-active={mobileTabVisualId === 'send'}
         class="mobile-tab-button relative z-[1] flex-1 flex flex-col items-center justify-center gap-0.5 min-h-[var(--mobile-tab-content-height)]
           touch-manipulation active:bg-stone-100 transition-colors
@@ -1903,7 +2013,9 @@
 
       <!-- 更多 tab — reveals a sheet with 规则 + 用户管理 -->
       <button
-        onclick={() => handleMobileTabClick('more')}
+        onclick={() => {
+          handleMobileTabClick('more');
+        }}
         data-mobile-tab-active={mobileTabVisualId === 'more'}
         class="mobile-tab-button relative z-[1] flex-1 flex flex-col items-center justify-center gap-0.5 min-h-[var(--mobile-tab-content-height)]
           touch-manipulation active:bg-stone-100 transition-colors
@@ -1938,7 +2050,7 @@
           <button
             onclick={() => {
               showMoreMenu = false;
-              openDaemonDetails();
+              void openDaemonDetails();
             }}
             class="w-full flex items-center justify-between px-3 py-3 rounded-lg hover:bg-stone-50 transition-colors text-left"
           >
@@ -2011,7 +2123,9 @@
 
           {#if can('filters.read')}
             <button
-              onclick={() => navigate('filters')}
+              onclick={() => {
+                navigate('filters');
+              }}
               class="w-full flex items-center justify-between px-3 py-3 rounded-xl hover:bg-stone-50 transition-colors text-left"
             >
               <div>
@@ -2036,7 +2150,9 @@
 
           {#if can('keywords.read')}
             <button
-              onclick={() => navigate('keywords')}
+              onclick={() => {
+                navigate('keywords');
+              }}
               class="w-full flex items-center justify-between px-3 py-3 rounded-xl hover:bg-stone-50 transition-colors text-left"
             >
               <div>
@@ -2065,7 +2181,9 @@
               管理
             </p>
             <button
-              onclick={() => navigate('users')}
+              onclick={() => {
+                navigate('users');
+              }}
               class="w-full flex items-center justify-between px-3 py-3 rounded-xl hover:bg-stone-50 transition-colors text-left"
             >
               <div>
@@ -2116,7 +2234,9 @@
             </svg>
           </button>
           <button
-            onclick={() => auth.logout()}
+            onclick={() => {
+              auth.logout();
+            }}
             class="w-full flex items-center justify-between px-3 py-3 rounded-xl hover:bg-stone-50 transition-colors text-left"
           >
             <div class="text-sm font-medium text-stone-700">退出登录</div>
@@ -2203,7 +2323,9 @@
         message={toast.message}
         type={toast.type}
         duration={toast.duration}
-        onClose={() => removeToast(toast.id)}
+        onClose={() => {
+          removeToast(toast.id);
+        }}
       />
     {/each}
   </div>
