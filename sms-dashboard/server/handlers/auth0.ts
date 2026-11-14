@@ -547,6 +547,7 @@ export const auth0Handler = {
   // Get current user
   me(request: MeRequest): Response {
     const { user } = request;
+    if (!user) return json({ error: 'Unauthorized' }, 401);
 
     return json({
       success: true,
@@ -555,8 +556,7 @@ export const auth0Handler = {
         // Explicit rather than relying on enrichUserPermissions having run: if this
         // route is ever wired without it, the client sees "no permissions" and hides
         // everything, instead of `undefined` which `.includes()` would throw on.
-        roles: user?.roles ?? [],
-        permissions: user?.permissions ?? [],
+        permissions: user.permissions ?? [],
       },
     });
   },

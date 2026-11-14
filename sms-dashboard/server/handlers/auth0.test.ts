@@ -506,13 +506,11 @@ describe('Auth0 current user', () => {
     });
   });
 
-  test('reports no roles and no permissions without a user', async () => {
+  test('answers 401 without a signed-in user', async () => {
     const response = auth0Handler.me({});
 
-    expect(await response.json()).toEqual({
-      success: true,
-      user: { roles: [], permissions: [] },
-    });
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: 'Unauthorized' });
   });
 });
 
