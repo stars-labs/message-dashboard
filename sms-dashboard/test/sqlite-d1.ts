@@ -1,4 +1,5 @@
 import { Database, type SQLQueryBindings } from 'bun:sqlite';
+import * as v from 'valibot';
 import type { D1, D1Batch, D1RunResult, D1Statement } from '../server/lib/d1.js';
 
 function binding(value: unknown): SQLQueryBindings {
@@ -19,14 +20,23 @@ function binding(value: unknown): SQLQueryBindings {
  * SQL. Statements bind like D1's: every bind returns a new statement.
  */
 export function sqliteD1(db: Database = new Database(':memory:')): D1 & D1Batch & { db: Database } {
+  // Bun's run().changes also counts rows written by triggers; D1 reports
+  // SQLite's changes(), the rows the statement itself changed.
+  function statementChanges(): number {
+    return v.parse(v.object({ changes: v.number() }), db.query('SELECT changes() AS changes').get())
+      .changes;
+  }
+
   function statement(sql: string, params: SQLQueryBindings[]): D1Statement {
     return {
       bind: (...values) => statement(sql, values.map(binding)),
       all: () => Promise.resolve({ results: db.query(sql).all(...params) }),
       first: () => Promise.resolve(db.query(sql).get(...params)),
       run: () => {
-        const { changes, lastInsertRowid } = db.query(sql).run(...params);
-        return Promise.resolve({ meta: { changes, last_row_id: Number(lastInsertRowid) } });
+        const { lastInsertRowid } = db.query(sql).run(...params);
+        return Promise.resolve({
+          meta: { changes: statementChanges(), last_row_id: Number(lastInsertRowid) },
+        });
       },
     };
   }
