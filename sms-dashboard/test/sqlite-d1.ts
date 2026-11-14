@@ -1,6 +1,12 @@
 import { Database, type SQLQueryBindings } from 'bun:sqlite';
 import * as v from 'valibot';
-import type { D1, D1Batch, D1RunResult, D1Statement } from '../server/lib/d1.js';
+import {
+  D1_MAX_BOUND_PARAMETERS,
+  type D1,
+  type D1Batch,
+  type D1RunResult,
+  type D1Statement,
+} from '../server/lib/d1.js';
 
 function binding(value: unknown): SQLQueryBindings {
   if (
@@ -17,7 +23,8 @@ function binding(value: unknown): SQLQueryBindings {
 
 /**
  * The D1 port backed by an in-memory SQLite database, so tests run the real
- * SQL. Statements bind like D1's: every bind returns a new statement.
+ * SQL. Statements bind like D1's: every bind returns a new statement, and one
+ * that binds more parameters than D1 allows fails as it would on D1.
  */
 export function sqliteD1(db: Database = new Database(':memory:')): D1 & D1Batch & { db: Database } {
   // Bun's run().changes also counts rows written by triggers; D1 reports
@@ -29,7 +36,14 @@ export function sqliteD1(db: Database = new Database(':memory:')): D1 & D1Batch 
 
   function statement(sql: string, params: SQLQueryBindings[]): D1Statement {
     return {
-      bind: (...values) => statement(sql, values.map(binding)),
+      bind: (...values) => {
+        if (values.length > D1_MAX_BOUND_PARAMETERS) {
+          throw new Error(
+            `too many SQL variables: D1 binds at most ${String(D1_MAX_BOUND_PARAMETERS)}, got ${String(values.length)}`,
+          );
+        }
+        return statement(sql, values.map(binding));
+      },
       all: () => Promise.resolve({ results: db.query(sql).all(...params) }),
       first: () => Promise.resolve(db.query(sql).get(...params)),
       run: () => {

@@ -3,6 +3,7 @@ import { nanoid } from 'nanoid';
 import * as v from 'valibot';
 import { parseJson, type Parsed, type Schema } from '../../shared/parse-json.js';
 import {
+  D1_MAX_BOUND_PARAMETERS,
   queryAll,
   queryFirst,
   type D1,
@@ -608,18 +609,32 @@ export function filterBalancePlanByMethods(
   );
 }
 
+/** The SIMs in scope, by index; a scope larger than D1 binds is read in chunks. */
+async function loadPlanPhones(
+  db: D1<'all'>,
+  scope: readonly string[] | null,
+): Promise<PlanPhone[]> {
+  const select = `
+    SELECT iccid, number, carrier, country, sim_status, sim_index, sim_role, service_type
+    FROM device_view`;
+  if (scope === null) {
+    return queryAll(db.prepare(`${select} ORDER BY sim_index`), PlanPhoneRow);
+  }
+  const phones: PlanPhone[] = [];
+  for (let start = 0; start < scope.length; start += D1_MAX_BOUND_PARAMETERS) {
+    const chunk = scope.slice(start, start + D1_MAX_BOUND_PARAMETERS);
+    const where = `WHERE iccid IN (${chunk.map(() => '?').join(', ')})`;
+    phones.push(...(await queryAll(db.prepare(`${select} ${where}`).bind(...chunk), PlanPhoneRow)));
+  }
+  return phones.sort((a, b) => a.sim_index - b.sim_index);
+}
+
 async function loadBalanceQueryPlan(
   db: D1<'all'>,
   { scope, allowDiscovery = false }: { scope: readonly string[] | null; allowDiscovery?: boolean },
 ): Promise<PlanItem[]> {
-  const phoneWhere = scope ? `WHERE iccid IN (${scope.map(() => '?').join(', ')})` : '';
-  const phoneStatement = db.prepare(`
-    SELECT iccid, number, carrier, country, sim_status, sim_index, sim_role, service_type
-    FROM device_view ${phoneWhere}
-    ORDER BY sim_index
-  `);
   const [phones, profiles, recentChecks, successfulChecks] = await Promise.all([
-    queryAll(scope ? phoneStatement.bind(...scope) : phoneStatement, PlanPhoneRow),
+    loadPlanPhones(db, scope),
     queryAll(
       db.prepare(
         `

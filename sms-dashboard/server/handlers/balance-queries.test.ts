@@ -1012,6 +1012,26 @@ describe('POST /api/balance-checks/query-batch', () => {
     }
   });
 
+  test('plans and queues a batch larger than one D1 statement can bind', async () => {
+    enableDirectMobileProfile();
+    const iccids = Array.from({ length: 120 }, (_, index) => `sim-${String(index + 1)}`);
+    iccids.forEach((iccid, index) => {
+      insertSim({ iccid, index: index + 1 });
+    });
+
+    const response = await balanceQueriesHandler.queryBatch(
+      dashboardRequest({
+        method: 'POST',
+        body: { methods: ['direct_sms'], phone_iccids: iccids },
+      }),
+    );
+    const body = await read(response, BatchBody);
+
+    expect(response.status).toBe(202);
+    expect(body.summary).toMatchObject({ total: 120, eligible: 120, queued: 120 });
+    expect(body.checks.map((check) => check.sim_iccid)).toEqual(iccids);
+  });
+
   test('queues every eligible SIM of the selected methods, and reports one that fails', async () => {
     enableDirectMobileProfile();
     insertSim({ iccid: 'sim-1', index: 1 });
