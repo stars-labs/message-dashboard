@@ -750,6 +750,25 @@ describe('GET /api/control/pending-sms', () => {
     expect(outboundState('msg-sent').status).toBe('sent');
   });
 
+  test('never sends a message without a recipient or SIM, and marks it failed', async () => {
+    insertOutbound('msg-ok', { createdAt: '2026-09-03 00:00:01' });
+    insertOutbound('msg-no-recipient', { createdAt: '2026-09-03 00:00:02' });
+    insertOutbound('msg-no-sim', { createdAt: '2026-09-03 00:00:03' });
+    sqlite.run(`UPDATE messages SET recipient = NULL WHERE id = 'msg-no-recipient'`);
+    sqlite.run(`UPDATE messages SET phone_iccid = NULL WHERE id = 'msg-no-sim'`);
+
+    const { pending_messages } = await read(await poll(), PendingBody);
+
+    expect(pending_messages.map((message) => message['id'])).toEqual(['msg-ok']);
+    for (const id of ['msg-no-recipient', 'msg-no-sim']) {
+      expect(outboundState(id)).toEqual({
+        status: 'failed',
+        processing_session_id: null,
+        error_message: 'Message has no recipient or SIM to send from',
+      });
+    }
+  });
+
   test('sends user messages first and at most five maintenance messages per poll', async () => {
     for (let index = 0; index < 7; index++) {
       insertOutbound(`bal-${String(index)}`, {

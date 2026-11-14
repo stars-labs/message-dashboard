@@ -158,12 +158,12 @@ const IdRow = v.object({ id: v.string() });
 
 const PendingMessageRow = v.object({
   id: v.string(),
-  phone_iccid: v.nullable(v.string()),
+  phone_iccid: v.string(),
   phone_number: v.nullable(v.string()),
   content: v.string(),
-  recipient: v.nullable(v.pipe(v.string(), v.brand('SmsAddress'))),
+  recipient: v.pipe(v.string(), v.brand('SmsAddress')),
   purpose: v.picklist(['user', 'balance_maintenance']),
-  created_at: v.nullable(v.string()),
+  created_at: v.string(),
 });
 
 const KeywordRow = v.object({
@@ -172,9 +172,6 @@ const KeywordRow = v.object({
   case_sensitive: v.nullable(v.number()),
   whole_word: v.nullable(v.number()),
 });
-
-/** The columns `messages` declares nullable, where the daemon's Rust type requires a value. */
-type NullableColumns<Wire> = { [Key in keyof Wire]: Wire[Key] | null };
 
 const SMS_STATUS_FOR_OUTCOME: Readonly<Record<SmsOutcome, string>> = {
   confirmed: 'sent',
@@ -676,6 +673,19 @@ export const controlHandler = {
           .run();
       }
 
+      // A message with nothing to send to or from can never be sent, and the
+      // daemon's PendingSms requires both: fail it rather than put it on the wire.
+      await env.DB.prepare(
+        `
+        UPDATE messages
+        SET status = 'failed',
+            error_message = 'Message has no recipient or SIM to send from',
+            updated_at = CURRENT_TIMESTAMP
+        WHERE type = 'sent' AND status = 'sending'
+          AND (recipient IS NULL OR phone_iccid IS NULL OR created_at IS NULL)
+      `,
+      ).run();
+
       // Claim pending messages by marking them 'processing', so a poll that
       // arrives before this batch is reported cannot send them twice.
       const pending = await queryAll(
@@ -732,7 +742,7 @@ export const controlHandler = {
         PendingMessageRow,
       );
 
-      const pendingMessages = messages satisfies NullableColumns<PendingSms>[];
+      const pendingMessages = messages satisfies PendingSms[];
       return json({ success: true, pending_messages: pendingMessages });
     } catch (error) {
       console.error('Get pending SMS error:', error);
