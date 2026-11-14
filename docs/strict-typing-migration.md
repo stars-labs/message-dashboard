@@ -159,9 +159,10 @@ the strict gate one at a time:
   plus oxlint, both scoped to the areas that have not joined yet. No area is ever
   unchecked.
 - An area moves from legacy to strict in the same commit that makes it clean
-  under the strict config. The commit that moves the last area deletes
-  `tsconfig.legacy.json`, oxlint (package, config, flake entry) and
-  `docs/web-lint-audit.md`.
+  under the strict config. `tsconfig.legacy.json` only ever included
+  `client/**/*.ts`, so it was deleted when the client finished joining (end of
+  Phase 3). The commit that moves the last area deletes oxlint (package,
+  config, flake entry) and `docs/web-lint-audit.md`.
 - `bun run check` runs both gates while both exist; every commit passes it.
 
 Worker-only declarations live in `server/`, not `shared/`: `worker-context.ts`
