@@ -694,6 +694,25 @@ describe('PUT /api/keywords/:id', () => {
     });
   });
 
+  test('answers 404 when the keyword is deleted before the update lands', async () => {
+    const db = seeded();
+    const racing: TestDb = {
+      ...db,
+      d1: {
+        ...db.d1,
+        prepare: (sql: string) => {
+          if (sql.trimStart().startsWith('UPDATE')) db.db.run('DELETE FROM keyword_tags');
+          return db.d1.prepare(sql);
+        },
+      },
+    };
+
+    const response = await update(racing, JSON.stringify({ tag: 'Login' }));
+
+    expect(response.status).toBe(404);
+    expect(await bodyOf(response)).toMatchObject({ error: 'Keyword not found' });
+  });
+
   test('an empty tag keeps the stored one', async () => {
     const db = seeded();
 

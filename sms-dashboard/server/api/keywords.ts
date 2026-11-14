@@ -307,6 +307,7 @@ export function setupKeywordRoutes(router: Router): void {
         ),
         Keyword,
       );
+      if (!updated) return json({ error: 'Keyword not found' }, 404);
 
       return json({ keyword: updated });
     } catch (error) {
