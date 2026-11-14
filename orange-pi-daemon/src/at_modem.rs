@@ -1277,7 +1277,11 @@ impl AtModemManager {
         // Decode hex string to bytes
         let pdu_bytes: Vec<u8> = (0..pdu_hex.len())
             .step_by(2)
-            .filter_map(|i| u8::from_str_radix(&pdu_hex[i..(i + 2).min(pdu_hex.len())], 16).ok())
+            .filter_map(|i| {
+                pdu_hex
+                    .get(i..(i + 2).min(pdu_hex.len()))
+                    .and_then(|pair| u8::from_str_radix(pair, 16).ok())
+            })
             .collect();
 
         if pdu_bytes.len() < 10 {
@@ -1371,7 +1375,10 @@ impl AtModemManager {
             pos += 1;
 
             // Extract concatenation info from UDH
-            concat_info = Self::extract_udh_concat(&pdu_bytes[pos..pos + udhl]);
+            let udh = pdu_bytes
+                .get(pos..pos + udhl)
+                .ok_or_else(|| anyhow!("PDU truncated at UDH"))?;
+            concat_info = Self::extract_udh_concat(udh);
             pos += udhl;
             text_start = pos;
             udhl
@@ -1839,7 +1846,7 @@ impl AtModemManager {
             let t = &time[..pos];
             let tz_quarters: i32 = time[pos + 1..].parse().unwrap_or(0);
             (t, tz_quarters * 15)
-        } else if let Some(pos) = time[1..].rfind('-') {
+        } else if let Some(pos) = time.get(1..).and_then(|rest| rest.rfind('-')) {
             let pos = pos + 1;
             let t = &time[..pos];
             let tz_quarters: i32 = time[pos + 1..].parse().unwrap_or(0);
@@ -2303,6 +2310,31 @@ impl AtModemManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pdu_whose_udhl_overruns_the_pdu_is_an_error() {
+        let pdu = "0040008100000000000000000005FF01";
+        assert!(AtModemManager::parse_pdu_sms(0, pdu).is_err());
+    }
+
+    #[test]
+    fn pdu_line_with_multibyte_character_is_an_error() {
+        let pdu = "0\u{e9}400081000000000000000000";
+        assert!(AtModemManager::parse_pdu_sms(0, pdu).is_err());
+    }
+
+    #[test]
+    fn cmgl_header_without_a_time_field_does_not_panic() {
+        let header = r#"+CMGL: 1,"REC READ","+123","","24/01/15""#;
+        let (index, sender, _) = AtModemManager::parse_cmgl_header(header).unwrap();
+        assert_eq!((index, sender.as_str()), (1, "+123"));
+    }
+
+    #[test]
+    fn timestamp_with_a_multibyte_first_character_does_not_panic() {
+        let stamp = AtModemManager::normalize_sms_timestamp("24/01/15", "\u{4f60}0:30:45");
+        assert!(stamp.starts_with("2024-01-15"));
+    }
 
     #[tokio::test]
     async fn reuses_one_serial_lock_per_port() {
