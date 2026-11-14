@@ -226,6 +226,30 @@ describe('balance skill runner D1 flow', () => {
     ).toEqual({ status: 'leased', last_error: null });
   });
 
+  test('treats a lease without an expiry as inactive', async () => {
+    seedJob('11.账务查询\n12.客户服务');
+    const job = await claim();
+    sqlite.exec("UPDATE sim_balance_skill_jobs SET lease_expires_at = NULL WHERE id = 'job-1'");
+
+    const response = await balanceSkillRunnerHandler.decide(
+      workerRequest(db, {
+        id: job.id,
+        body: {
+          runner_id: 'runner-1',
+          decision: { action: 'reply', selected_option: '11', confidence: 0.98 },
+        },
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: 'Skill job lease is not active for this runner',
+    });
+    expect(sqlite.query("SELECT COUNT(*) AS count FROM messages WHERE type='sent'").get()).toEqual({
+      count: 0,
+    });
+  });
+
   test('terminalizes a safely stopped unresolved reply as unparsed', async () => {
     seedJob('请前往运营商APP查询余额。');
     const job = await claim();

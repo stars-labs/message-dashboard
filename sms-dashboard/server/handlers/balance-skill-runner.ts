@@ -204,6 +204,7 @@ export const balanceSkillRunnerHandler = {
     if (
       job.status !== 'leased' ||
       job.lease_owner !== body.runner_id ||
+      job.lease_expires_at === null ||
       new Date(`${job.lease_expires_at}Z`) <= new Date()
     ) {
       return json({ error: 'Skill job lease is not active for this runner' }, 409);
