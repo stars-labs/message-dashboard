@@ -71,9 +71,7 @@
   import type { ApiMessage } from '../shared/api/messages.js';
   import type { Phone } from '../shared/api/phones.js';
   import { textOr } from '../shared/text.js';
-
-  type View =
-    'dashboard' | 'send' | 'iccid-mappings' | 'balances' | 'keywords' | 'filters' | 'users';
+  import { isView, VIEW_PERMISSION, type View } from '../shared/views.js';
 
   type ViewPhone = Phone & { flag: string };
 
@@ -387,22 +385,6 @@
       suppressMobileTabClickUntil = Date.now() + 500;
       activateMobileTab(target);
     }
-  }
-
-  // Which permission each view requires. Used both for nav visibility and for the hash
-  // guard below, so the two cannot disagree.
-  const VIEW_PERMISSION = {
-    dashboard: 'messages.read',
-    send: 'messages.send',
-    'iccid-mappings': 'phones.write',
-    balances: 'messages.read',
-    keywords: 'keywords.read',
-    filters: 'filters.read',
-    users: 'users.read',
-  } as const satisfies Record<View, string>;
-
-  function isView(name: string): name is View {
-    return Object.hasOwn(VIEW_PERMISSION, name);
   }
 
   function navigate(view: View) {
