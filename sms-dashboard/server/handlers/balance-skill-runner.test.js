@@ -199,6 +199,33 @@ describe('balance skill runner D1 flow', () => {
     ).toEqual({ value: 82.36, currency: 'CNY' });
   });
 
+  test('rejects a model or release error that is not text', async () => {
+    seedJob('11.账务查询\n12.客户服务');
+    const job = await claim();
+
+    const decided = await balanceSkillRunnerHandler.decide(
+      workerRequest(db, {
+        id: job.id,
+        body: {
+          runner_id: 'runner-1',
+          model: { name: 'company-model' },
+          decision: { action: 'reply', selected_option: '11', confidence: 0.98 },
+        },
+      }),
+    );
+    expect(decided.status).toBe(400);
+    expect(await decided.json()).toEqual({ error: 'model must be text' });
+
+    const released = await balanceSkillRunnerHandler.release(
+      workerRequest(db, { id: job.id, body: { runner_id: 'runner-1', error: 5 } }),
+    );
+    expect(released.status).toBe(400);
+    expect(await released.json()).toEqual({ error: 'error must be text' });
+    expect(
+      sqlite.query("SELECT status, last_error FROM sim_balance_skill_jobs WHERE id='job-1'").get(),
+    ).toEqual({ status: 'leased', last_error: null });
+  });
+
   test('terminalizes a safely stopped unresolved reply as unparsed', async () => {
     seedJob('请前往运营商APP查询余额。');
     const job = await claim();

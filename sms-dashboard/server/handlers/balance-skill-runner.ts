@@ -191,6 +191,9 @@ export const balanceSkillRunnerHandler = {
     if (!body || typeof body.runner_id !== 'string' || !body.decision) {
       return json({ error: 'runner_id and decision are required' }, 400);
     }
+    if (body.model != null && typeof body.model !== 'string') {
+      return json({ error: 'model must be text' }, 400);
+    }
 
     const db = request.env.DB;
     const job = await loadJob(db, request.params?.id);
@@ -343,6 +346,9 @@ export const balanceSkillRunnerHandler = {
     const body = (await readJson(request)) as DecisionBody | null;
     if (!body || typeof body.runner_id !== 'string') {
       return json({ error: 'runner_id is required' }, 400);
+    }
+    if (body.error != null && typeof body.error !== 'string') {
+      return json({ error: 'error must be text' }, 400);
     }
     const job = await loadJob(request.env.DB, request.params?.id);
     if (!job) return json({ error: 'Skill job not found' }, 404);
