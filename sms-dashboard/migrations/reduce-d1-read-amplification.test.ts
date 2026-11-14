@@ -1,10 +1,11 @@
 import { Database } from 'bun:sqlite';
 import { describe, expect, test } from 'bun:test';
+import { planDetails } from '../test/query-plan.js';
 
 describe('D1 read-amplification migration', () => {
   test('bounds outbound polling, recovery, and recent balance history reads', async () => {
     const database = new Database(':memory:');
-    database.exec(`
+    database.run(`
       CREATE TABLE messages (
         id TEXT PRIMARY KEY,
         type TEXT NOT NULL,
@@ -23,47 +24,49 @@ describe('D1 read-amplification migration', () => {
     const migration = await Bun.file(
       new URL('./072_reduce_d1_read_amplification.sql', import.meta.url),
     ).text();
-    database.exec(migration);
+    database.run(migration);
 
-    const pendingPlan = database
-      .query(
-        `
+    const pendingPlan = planDetails(
+      database
+        .query(
+          `
       EXPLAIN QUERY PLAN
       SELECT id, purpose, created_at
       FROM messages
       WHERE type = 'sent' AND status = 'sending'
       ORDER BY purpose, created_at, id
     `,
-      )
-      .all()
-      .map((row) => row.detail)
-      .join('\n');
-    const recoveryPlan = database
-      .query(
-        `
+        )
+        .all(),
+    ).join('\n');
+
+    const recoveryPlan = planDetails(
+      database
+        .query(
+          `
       EXPLAIN QUERY PLAN
       SELECT id
       FROM messages
       WHERE type = 'sent' AND status = 'processing'
         AND processing_session_id <> 'current-session'
     `,
-      )
-      .all()
-      .map((row) => row.detail)
-      .join('\n');
-    const balancePlan = database
-      .query(
-        `
+        )
+        .all(),
+    ).join('\n');
+
+    const balancePlan = planDetails(
+      database
+        .query(
+          `
       EXPLAIN QUERY PLAN
       SELECT id
       FROM sim_balance_checks
       ORDER BY requested_at DESC
       LIMIT 100
     `,
-      )
-      .all()
-      .map((row) => row.detail)
-      .join('\n');
+        )
+        .all(),
+    ).join('\n');
 
     expect(pendingPlan).toContain('idx_messages_pending_outbound');
     expect(recoveryPlan).toContain('idx_messages_processing_outbound');

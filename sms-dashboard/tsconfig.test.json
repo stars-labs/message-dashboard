@@ -10,6 +10,13 @@
     "declaration": true,
     "outDir": "./node_modules/.tmp/test-declarations"
   },
-  "include": ["shared/**/*.test.ts", "config/**/*.test.ts", "server/**/*.test.ts", "test/*.ts"],
+  "include": [
+    "shared/**/*.test.ts",
+    "config/**/*.test.ts",
+    "server/**/*.test.ts",
+    "test/*.ts",
+    "migrations/**/*.test.ts"
+  ],
+  "exclude": ["test/setup.ts"],
   "references": [{ "path": "./tsconfig.shared.json" }, { "path": "./tsconfig.worker.json" }]
 }

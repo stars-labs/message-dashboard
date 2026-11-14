@@ -1,4 +1,4 @@
-// Run with: bun test config/auth0-roles.test.js
+// Run with: bun test config/auth0-roles.test.ts
 import { describe, expect, test } from 'bun:test';
 import {
   ALL_PERMISSIONS,
@@ -8,6 +8,7 @@ import {
   isEmailAllowed,
   permissionsForRoles,
   rolesFromToken,
+  type Permission,
 } from './auth0-roles.js';
 
 const CLAIM = 'https://sexy.itoken.world/roles';
@@ -66,9 +67,8 @@ describe('rolesFromToken', () => {
 
 describe('permissionsForRoles', () => {
   test('viewer gets read messages, phones, and bills plus message sending', () => {
-    expect(permissionsForRoles(['viewer'], config).sort()).toEqual(
-      ['bills.read', 'messages.read', 'messages.send', 'phones.read'].sort(),
-    );
+    const expected: Permission[] = ['bills.read', 'messages.read', 'messages.send', 'phones.read'];
+    expect(permissionsForRoles(['viewer'], config).sort()).toEqual(expected.sort());
   });
 
   test('admin gets every permission', () => {
@@ -104,7 +104,7 @@ describe('permissionsForRoles', () => {
 // so it silently fell through the includes() wrapper. It must be a known permission,
 // admin-only.
 describe('permission coverage', () => {
-  const USED_BY_ROUTES = [
+  const USED_BY_ROUTES: Permission[] = [
     'phones.read',
     'phones.write',
     'messages.read',
@@ -186,7 +186,8 @@ describe('hasAnyRole', () => {
 // The domain allowlist is a real gate, so it has to resist the obvious dodges.
 describe('isEmailAllowed', () => {
   const env = { ALLOWED_EMAIL_DOMAINS: 'poloniex.com,bitgc.io,tron.network,htx-inc.com' };
-  const ok = (email, verified = true) => isEmailAllowed({ email, email_verified: verified }, env);
+  const ok = (email: string, verified = true) =>
+    isEmailAllowed({ email, email_verified: verified }, env);
 
   test('allows a verified address on each configured domain', () => {
     for (const d of ['poloniex.com', 'bitgc.io', 'tron.network', 'htx-inc.com']) {

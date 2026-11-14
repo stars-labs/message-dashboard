@@ -3,4 +3,4 @@
 # loader, so `.svelte` imports work. Everything else runs on Bun's own fetch,
 # Request and Response, which match the Worker runtime; happy-dom's versions
 # hide Set-Cookie and would let cookie assertions pass vacuously.
-preload = ["./test/setup.js"]
+preload = ["./test/setup.ts"]

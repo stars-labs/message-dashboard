@@ -16,6 +16,8 @@ import { readFileSync } from 'node:fs';
 
 GlobalRegistrator.register();
 
+const noop = (): undefined => undefined;
+
 // Svelte's transition directives call element.animate() unconditionally, and
 // these tests assert on DOM state, never on animation progress, so a no-op
 // Animation replaces whatever the DOM offers. happy-dom gained a real
@@ -24,20 +26,24 @@ GlobalRegistrator.register();
 // reported it as an unhandled error between tests. Older happy-dom had no
 // animate() at all and printed "element.animate is not a function" instead.
 if (typeof globalThis.Element !== 'undefined') {
-  globalThis.Element.prototype.animate = function animate() {
-    return {
-      cancel() {},
-      finish() {},
-      play() {},
-      pause() {},
-      reverse() {},
-      currentTime: 0,
-      playState: 'finished',
-      finished: Promise.resolve(),
-      onfinish: null,
-      oncancel: null,
-    };
-  };
+  Object.defineProperty(globalThis.Element.prototype, 'animate', {
+    value: function animate() {
+      return {
+        cancel: noop,
+        finish: noop,
+        play: noop,
+        pause: noop,
+        reverse: noop,
+        currentTime: 0,
+        playState: 'finished',
+        finished: Promise.resolve(),
+        onfinish: null,
+        oncancel: null,
+      };
+    },
+    writable: true,
+    configurable: true,
+  });
 }
 
 const jsTranspiler = new Bun.Transpiler({ loader: 'ts' });

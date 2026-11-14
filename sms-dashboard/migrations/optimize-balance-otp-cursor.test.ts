@@ -1,5 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { describe, expect, test } from 'bun:test';
+import { planDetails } from '../test/query-plan.js';
 
 describe('balance OTP cursor migration', () => {
   test('indexes the SIM, ingestion time, and daemon source message id', async () => {
@@ -12,25 +13,27 @@ describe('balance OTP cursor migration', () => {
 
     const db = new Database(':memory:');
     try {
-      db.exec(`
+      db.run(`
         CREATE TABLE messages (
           id TEXT PRIMARY KEY, phone_iccid TEXT, type TEXT,
           verification_code TEXT, created_at TIMESTAMP
         );
       `);
-      db.exec(sql);
-      const plan = db
-        .query(
-          `
+      db.run(sql);
+      const plan = planDetails(
+        db
+          .query(
+            `
         EXPLAIN QUERY PLAN
         SELECT id FROM messages
         WHERE phone_iccid = ? AND type = 'received'
           AND verification_code IS NOT NULL AND created_at >= ?
         ORDER BY created_at, id LIMIT 20
       `,
-        )
-        .all('iccid', '2026-09-04 10:00:00');
-      expect(plan.some(({ detail }) => detail.includes('idx_messages_otp_cursor'))).toBe(true);
+          )
+          .all('iccid', '2026-09-04 10:00:00'),
+      );
+      expect(plan.some((detail) => detail.includes('idx_messages_otp_cursor'))).toBe(true);
     } finally {
       db.close();
     }

@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
 
-let database;
+let database: Database;
 
 beforeEach(async () => {
   database = new Database(':memory:');
-  database.exec(`
+  database.run(`
     PRAGMA foreign_keys = ON;
     CREATE TABLE sims (
       iccid TEXT PRIMARY KEY,
@@ -26,7 +26,7 @@ beforeEach(async () => {
   const migration = await Bun.file(
     new URL('./066_add_carrier_billing.sql', import.meta.url),
   ).text();
-  database.exec(migration);
+  database.run(migration);
   database
     .query(
       `
@@ -42,7 +42,7 @@ beforeEach(async () => {
   const streamMigration = await Bun.file(
     new URL('./069_unique_active_billing_stream_per_sim.sql', import.meta.url),
   ).text();
-  database.exec(streamMigration);
+  database.run(streamMigration);
 });
 
 describe('carrier billing migration', () => {
@@ -193,7 +193,7 @@ describe('carrier billing migration', () => {
   });
 
   test('preserves normalized history when retained source messages are deleted', () => {
-    database.exec(`
+    database.run(`
       INSERT INTO carrier_bills (
         id, billing_account_id, source_message_id, amount_minor, currency,
         due_date, received_at, parser_version
@@ -230,7 +230,7 @@ describe('carrier billing migration', () => {
   });
 
   test('makes bill events append-only while allowing source retention cleanup', () => {
-    database.exec(`
+    database.run(`
       INSERT INTO carrier_bills (
         id, billing_account_id, amount_minor, currency, due_date,
         received_at, parser_version

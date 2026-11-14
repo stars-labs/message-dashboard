@@ -1,10 +1,11 @@
 import { Database } from 'bun:sqlite';
 import { describe, expect, test } from 'bun:test';
+import { planDetails } from '../test/query-plan.js';
 
 describe('message inbox read migration', () => {
   test('uses bounded ingestion indexes for global and per-card polling', async () => {
     const database = new Database(':memory:');
-    database.exec(`
+    database.run(`
       CREATE TABLE messages (
         id TEXT PRIMARY KEY,
         phone_iccid TEXT,
@@ -17,11 +18,12 @@ describe('message inbox read migration', () => {
     const migration = await Bun.file(
       new URL('./074_optimize_message_inbox_reads.sql', import.meta.url),
     ).text();
-    database.exec(migration);
+    database.run(migration);
 
-    const globalPlan = database
-      .query(
-        `
+    const globalPlan = planDetails(
+      database
+        .query(
+          `
       EXPLAIN QUERY PLAN
       SELECT * FROM messages
       WHERE purpose = 'user'
@@ -30,13 +32,14 @@ describe('message inbox read migration', () => {
       ORDER BY created_at DESC, id DESC
       LIMIT 101
     `,
-      )
-      .all()
-      .map((row) => row.detail)
-      .join('\n');
-    const cardPlan = database
-      .query(
-        `
+        )
+        .all(),
+    ).join('\n');
+
+    const cardPlan = planDetails(
+      database
+        .query(
+          `
       EXPLAIN QUERY PLAN
       SELECT * FROM messages
       WHERE purpose = 'user' AND phone_iccid = 'iccid-1'
@@ -45,10 +48,9 @@ describe('message inbox read migration', () => {
       ORDER BY created_at DESC, id DESC
       LIMIT 101
     `,
-      )
-      .all()
-      .map((row) => row.detail)
-      .join('\n');
+        )
+        .all(),
+    ).join('\n');
 
     expect(globalPlan).toContain('idx_messages_user_created');
     expect(cardPlan).toContain('idx_messages_iccid_user_created');

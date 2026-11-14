@@ -4,7 +4,7 @@ import { describe, expect, test } from 'bun:test';
 describe('D1 write-amplification migration', () => {
   test('removes the duplicate modem update trigger and unused heartbeat index', async () => {
     const database = new Database(':memory:');
-    database.exec(`
+    database.run(`
       CREATE TABLE modems (equipment_id TEXT PRIMARY KEY, updated_at TEXT);
       CREATE TRIGGER update_modems_timestamp
       AFTER UPDATE ON modems
@@ -18,7 +18,7 @@ describe('D1 write-amplification migration', () => {
     const migration = await Bun.file(
       new URL('./071_reduce_d1_write_amplification.sql', import.meta.url),
     ).text();
-    database.exec(migration);
+    database.run(migration);
 
     expect(
       database

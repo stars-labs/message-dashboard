@@ -23,6 +23,8 @@
     "server/**",
     "shared/**",
     "config/**",
+    "test/**",
+    "migrations/**",
     "eslint.config.ts",
     "worker-configuration.d.ts",
     "worker-runtime.d.ts",

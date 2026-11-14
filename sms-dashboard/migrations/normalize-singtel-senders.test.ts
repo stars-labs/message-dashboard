@@ -4,7 +4,7 @@ import { Database } from 'bun:sqlite';
 describe('historical Singtel sender normalization', () => {
   test('rewrites only the two confirmed decimal ASCII sender values', async () => {
     const database = new Database(':memory:');
-    database.exec(`
+    database.run(`
       CREATE TABLE messages (
         id TEXT PRIMARY KEY,
         type TEXT NOT NULL,
@@ -20,7 +20,7 @@ describe('historical Singtel sender normalization', () => {
     const migration = await Bun.file(
       new URL('./068_normalize_singtel_senders.sql', import.meta.url),
     ).text();
-    database.exec(migration);
+    database.run(migration);
 
     expect(database.query(`SELECT id, phone_number FROM messages ORDER BY id`).all()).toEqual([
       { id: 'ordinary-number', phone_number: '831051101031161011080' },

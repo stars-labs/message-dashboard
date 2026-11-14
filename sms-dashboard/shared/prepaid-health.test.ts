@@ -3,7 +3,9 @@ import { evaluatePrepaidHealth } from './prepaid-health.js';
 
 const now = new Date('2026-08-24T04:00:00Z');
 
-function evaluate(overrides = {}) {
+type HealthInput = NonNullable<Parameters<typeof evaluatePrepaidHealth>[0]>;
+
+function evaluate(overrides: HealthInput = {}) {
   return evaluatePrepaidHealth({
     serviceType: 'prepaid',
     country: 'SG',
@@ -51,9 +53,8 @@ describe('prepaid health policy', () => {
     });
 
     expect(result.summaryStatus).toBe('zero_or_negative_balance');
-    expect(result.reasons).toEqual(
-      expect.arrayContaining(['zero_or_negative_balance', 'low_balance']),
-    );
+    expect(result.reasons).toContain('zero_or_negative_balance');
+    expect(result.reasons).toContain('low_balance');
   });
 
   test('preserves simultaneous low-balance and expiry reasons', () => {
@@ -65,12 +66,12 @@ describe('prepaid health policy', () => {
       },
       accountExpiry: {
         date: '2026-09-03',
-        observedAt: '2026-08-24T03:00:00Z',
       },
     });
 
     expect(result.summaryStatus).toBe('low_balance');
-    expect(result.reasons).toEqual(expect.arrayContaining(['low_balance', 'expiring_soon']));
+    expect(result.reasons).toContain('low_balance');
+    expect(result.reasons).toContain('expiring_soon');
   });
 
   test('marks old observations stale while retaining their low-balance evidence', () => {
@@ -83,7 +84,8 @@ describe('prepaid health policy', () => {
     });
 
     expect(result.summaryStatus).toBe('stale');
-    expect(result.reasons).toEqual(expect.arrayContaining(['stale', 'low_balance']));
+    expect(result.reasons).toContain('stale');
+    expect(result.reasons).toContain('low_balance');
   });
 
   test('uses regional calendar dates for expired and 30-day expiry boundaries', () => {

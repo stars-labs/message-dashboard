@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
 
-let database;
+let database: Database;
 
 beforeEach(async () => {
   database = new Database(':memory:');
-  database.exec(`
+  database.run(`
     PRAGMA foreign_keys = ON;
     CREATE TABLE sims (iccid TEXT PRIMARY KEY);
     CREATE TABLE messages (id TEXT PRIMARY KEY);
@@ -15,9 +15,9 @@ beforeEach(async () => {
     '066_add_carrier_billing.sql',
     '067_add_carrier_billing_account_events.sql',
   ]) {
-    database.exec(await Bun.file(new URL(`./${name}`, import.meta.url)).text());
+    database.run(await Bun.file(new URL(`./${name}`, import.meta.url)).text());
   }
-  database.exec(`
+  database.run(`
     INSERT INTO carrier_billing_accounts (
       id, country_code, carrier, currency, display_name,
       notification_sim_iccid, account_ref_digest, account_ref_last4,

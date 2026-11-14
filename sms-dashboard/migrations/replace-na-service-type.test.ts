@@ -4,7 +4,7 @@ import { Database } from 'bun:sqlite';
 describe('balance-managed service type migration', () => {
   test('replaces n/a data and rejects the old enum value', async () => {
     const database = new Database(':memory:');
-    database.exec(`
+    database.run(`
       PRAGMA foreign_keys = ON;
       CREATE TABLE modems (
         equipment_id TEXT PRIMARY KEY,
@@ -67,8 +67,8 @@ describe('balance-managed service type migration', () => {
     const recreateView = await Bun.file(
       new URL('./064_recreate_device_view.sql', import.meta.url),
     ).text();
-    database.exec(replaceEnum);
-    database.exec(recreateView);
+    database.run(replaceEnum);
+    database.run(recreateView);
 
     expect(
       database

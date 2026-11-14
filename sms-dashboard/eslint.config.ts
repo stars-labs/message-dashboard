@@ -30,11 +30,9 @@ export default defineConfig([
     'balance-agent/release/',
     // Areas that have not joined the strict gate. oxlint covers them instead;
     // each phase removes its own line here as that area joins.
-    'test/*.js',
     'scripts/',
     'runner-core/',
     'balance-agent/',
-    'migrations/',
     // Config files that Phase 4 converts to TypeScript.
     'vite.config.js',
     'svelte.config.js',

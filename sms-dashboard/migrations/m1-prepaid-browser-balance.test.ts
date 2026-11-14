@@ -1,12 +1,15 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
+import * as v from 'valibot';
+
+const SkillConfigRow = v.object({ skill_config: v.pipe(v.string(), v.parseJson()) });
 
 describe('M1 prepaid browser balance migration', () => {
-  let db;
+  let db: Database;
 
   beforeEach(async () => {
     db = new Database(':memory:');
-    db.exec(`
+    db.run(`
       PRAGMA foreign_keys = ON;
       CREATE TABLE sims (iccid TEXT PRIMARY KEY, number TEXT, sim_index INTEGER);
       CREATE VIEW device_view AS SELECT iccid, number, sim_index FROM sims;
@@ -21,9 +24,9 @@ describe('M1 prepaid browser balance migration', () => {
       );
       CREATE TABLE sim_balance_checks (id TEXT PRIMARY KEY);
     `);
-    db.exec(await Bun.file('migrations/054_add_unicom_web_balance_skill.sql').text());
-    db.exec(await Bun.file('migrations/055_add_balance_runner_control_plane.sql').text());
-    db.exec(`
+    db.run(await Bun.file('migrations/054_add_unicom_web_balance_skill.sql').text());
+    db.run(await Bun.file('migrations/055_add_balance_runner_control_plane.sql').text());
+    db.run(`
       INSERT INTO balance_runner_installations (
         id, display_name, auth_mode, platform, version
       ) VALUES ('runner-1', 'Runner', 'legacy_api_key', 'darwin', '1');
@@ -36,10 +39,12 @@ describe('M1 prepaid browser balance migration', () => {
       INSERT INTO sim_balance_web_events (job_id, event_type)
       VALUES ('job-1', 'queued');
     `);
-    db.exec(await Bun.file('migrations/065_add_m1_prepaid_browser_balance.sql').text());
+    db.run(await Bun.file('migrations/065_add_m1_prepaid_browser_balance.sql').text());
   });
 
-  afterEach(() => db.close());
+  afterEach(() => {
+    db.close();
+  });
 
   test('renames the shared browser capability and preserves existing jobs', () => {
     expect(
@@ -91,7 +96,7 @@ describe('M1 prepaid browser balance migration', () => {
       discovery_enabled: 1,
       enabled: 0,
     });
-    expect(JSON.parse(profile.skill_config)).toMatchObject({
+    expect(v.parse(SkillConfigRow, profile).skill_config).toMatchObject({
       id: 'm1-prepaid-web-balance',
       required_service_type: 'prepaid',
       outputs: ['cash_balance', 'account_expiry'],
@@ -99,15 +104,15 @@ describe('M1 prepaid browser balance migration', () => {
   });
 
   test('accepts M1 jobs and rejects the retired capability name', () => {
-    db.exec("INSERT INTO sim_balance_checks VALUES ('check-2')");
+    db.run("INSERT INTO sim_balance_checks VALUES ('check-2')");
     expect(() =>
-      db.exec(`
+      db.run(`
       INSERT INTO sim_balance_web_jobs (id, check_id, provider)
       VALUES ('job-2', 'check-2', 'm1_prepaid')
     `),
     ).not.toThrow();
     expect(() =>
-      db.exec(`
+      db.run(`
       INSERT INTO balance_runner_capabilities (
         runner_id, capability, state, session_id
       ) VALUES ('runner-1', 'unicom_browser', 'ready', 'old-session')
