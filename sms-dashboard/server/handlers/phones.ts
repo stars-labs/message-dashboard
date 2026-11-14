@@ -1,39 +1,10 @@
 import { json } from '../lib/response.js';
-import * as v from 'valibot';
+import { Phone, type PhonesResponse } from '../../shared/api/phones.js';
 import { queryAll, type D1 } from '../lib/d1.js';
 
 interface ListRequest {
   env: { DB: D1<'all'> };
 }
-
-/** One row of device_view, aliased to the names the client consumes. */
-const DeviceRow = v.object({
-  id: v.string(),
-  imei: v.nullable(v.string()),
-  iccid: v.string(),
-  number: v.string(),
-  country: v.nullable(v.string()),
-  carrier: v.nullable(v.string()),
-  service_type: v.string(),
-  service_type_source: v.nullable(v.string()),
-  service_type_verified_at: v.nullable(v.string()),
-  sim_role: v.string(),
-  primary_iccid: v.nullable(v.string()),
-  balance_threshold: v.nullable(v.number()),
-  status: v.string(),
-  signal: v.nullable(v.number()),
-  operator: v.nullable(v.string()),
-  manufacturer: v.nullable(v.string()),
-  model: v.nullable(v.string()),
-  usb_port: v.nullable(v.number()),
-  usb_path: v.nullable(v.string()),
-  last_usb_path: v.nullable(v.string()),
-  modem_status: v.nullable(v.string()),
-  sim_index: v.number(),
-  notes: v.nullable(v.string()),
-  created_at: v.nullable(v.string()),
-  updated_at: v.nullable(v.string()),
-});
 
 const DEVICE_COLUMNS = `
           dv.id,
@@ -76,10 +47,10 @@ export const phonesHandler = {
         ORDER BY dv.primary_port, dv.iccid
       `,
         ),
-        DeviceRow,
+        Phone,
       );
 
-      return json({ success: true, data: results });
+      return json({ success: true, data: results } satisfies PhonesResponse);
     } catch (error) {
       // Log error details server-side for debugging
       console.error(

@@ -4,6 +4,7 @@ import * as v from 'valibot';
 import { readJson } from '../../shared/parse-json.js';
 import { VISIBLE_FILTER_STATUSES } from '../utils/spam-filter.js';
 import { normalizeRecipient } from '../utils/recipient.js';
+import type { MessagePage, SendMessageResponse } from '../../shared/api/messages.js';
 import { D1_MAX_BOUND_PARAMETERS, queryAll, queryFirst, type D1 } from '../lib/d1.js';
 
 /**
@@ -317,7 +318,7 @@ export const messagesHandler = {
           // Rows already known to the client whose status changed.
           status_refreshed: extraRows.length,
         },
-      });
+      } satisfies MessagePage);
     } catch {
       // Error handling - list messages
       return json({ success: false, error: 'Failed to fetch messages' }, 500);
@@ -448,7 +449,7 @@ export const messagesHandler = {
           type: 'sent',
           status: 'pending',
         },
-      });
+      } satisfies SendMessageResponse);
     } catch {
       // Error handling - send message
       return json({ success: false, error: 'Failed to send message' }, 500);

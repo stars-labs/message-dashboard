@@ -3,6 +3,15 @@ import * as v from 'valibot';
 import { readJson } from '../../shared/parse-json.js';
 import { queryAll, queryFirst, type D1 } from '../lib/d1.js';
 import { errorText } from '../utils/d1-error.js';
+import {
+  IccidMapping,
+  IccidMappingDetail,
+  SavedIccidMapping,
+  type CreateIccidMappingResponse,
+  type DeleteIccidMappingResponse,
+  type IccidMappingsResponse,
+  type UpdateIccidMappingResponse,
+} from '../../shared/api/iccid-mappings.js';
 
 const SIM_SERVICE_TYPES = ['unknown', 'prepaid', 'postpaid', 'balance_managed'] as const;
 const SIM_SERVICE_TYPE_SOURCES = [
@@ -32,55 +41,6 @@ const ExistingSimRow = v.object({
 type ExistingSim = v.InferOutput<typeof ExistingSimRow>;
 
 const PrimaryTargetRow = v.object({ sim_role: v.string() });
-
-const MappingListRow = v.object({
-  id: v.string(),
-  iccid: v.string(),
-  sim_index: v.number(),
-  phone_number: v.string(),
-  country: v.nullable(v.string()),
-  carrier: v.nullable(v.string()),
-  service_type: v.string(),
-  service_type_source: v.nullable(v.string()),
-  service_type_verified_at: v.nullable(v.string()),
-  sim_role: v.string(),
-  primary_iccid: v.nullable(v.string()),
-  balance_threshold: v.nullable(v.number()),
-  equipment_id: v.nullable(v.string()),
-  notes: v.nullable(v.string()),
-  is_active: v.string(),
-  signal_quality: v.nullable(v.number()),
-  modem_status: v.nullable(v.string()),
-  detected_iccid: v.nullable(v.string()),
-  operator: v.nullable(v.string()),
-  usb_path: v.nullable(v.string()),
-  last_usb_path: v.nullable(v.string()),
-  created_at: v.nullable(v.string()),
-  updated_at: v.nullable(v.string()),
-});
-
-const MappingDetailRow = v.omit(MappingListRow, ['balance_threshold']);
-
-const SavedMappingRow = v.object({
-  iccid: v.string(),
-  sim_index: v.number(),
-  phone_number: v.string(),
-  country_code: v.nullable(v.string()),
-  carrier: v.nullable(v.string()),
-  imei: v.nullable(v.string()),
-  notes: v.nullable(v.string()),
-  service_type: v.string(),
-  service_type_source: v.nullable(v.string()),
-  service_type_verified_at: v.nullable(v.string()),
-  sim_role: v.string(),
-  primary_iccid: v.nullable(v.string()),
-  balance_threshold: v.nullable(v.number()),
-  status: v.string(),
-  usb_path: v.nullable(v.string()),
-  last_usb_path: v.nullable(v.string()),
-  created_at: v.nullable(v.string()),
-  updated_at: v.nullable(v.string()),
-});
 
 const TotalRow = v.object({ total: v.number() });
 
@@ -336,7 +296,7 @@ export const iccidMappingsHandler = {
       query += ` ORDER BY sim_index ASC LIMIT ? OFFSET ?`;
       params.push(limit, offset);
 
-      const mappings = await queryAll(env.DB.prepare(query).bind(...params), MappingListRow);
+      const mappings = await queryAll(env.DB.prepare(query).bind(...params), IccidMapping);
 
       let countQuery = `SELECT COUNT(*) as total FROM device_view WHERE 1=1`;
       const countParams: unknown[] = [];
@@ -362,7 +322,7 @@ export const iccidMappingsHandler = {
           total,
           totalPages: Math.ceil(total / limit),
         },
-      });
+      } satisfies IccidMappingsResponse);
     } catch (error) {
       console.error('[iccid-mappings] Error listing ICCID mappings:', error);
       return json(
@@ -381,7 +341,7 @@ export const iccidMappingsHandler = {
     const id = request.params?.['id'];
 
     try {
-      const mapping = await queryFirst(env.DB.prepare(DETAIL_SELECT).bind(id), MappingDetailRow);
+      const mapping = await queryFirst(env.DB.prepare(DETAIL_SELECT).bind(id), IccidMappingDetail);
 
       if (!mapping) {
         return json({ success: false, error: 'ICCID mapping not found' }, 404);
@@ -399,7 +359,10 @@ export const iccidMappingsHandler = {
     const iccid = request.params?.['iccid'];
 
     try {
-      const mapping = await queryFirst(env.DB.prepare(DETAIL_SELECT).bind(iccid), MappingDetailRow);
+      const mapping = await queryFirst(
+        env.DB.prepare(DETAIL_SELECT).bind(iccid),
+        IccidMappingDetail,
+      );
 
       if (!mapping) {
         return json({ success: false, error: 'ICCID not found' }, 404);
@@ -526,10 +489,13 @@ export const iccidMappingsHandler = {
         WHERE iccid = ?
       `,
         ).bind(iccid),
-        SavedMappingRow,
+        SavedIccidMapping,
       );
 
-      return json({ success: true, data: mapping }, simExists ? 200 : 201);
+      return json(
+        { success: true, data: mapping } satisfies CreateIccidMappingResponse,
+        simExists ? 200 : 201,
+      );
     } catch (error) {
       console.error('[iccid-mappings] Error creating ICCID mapping:', error);
       return json(
@@ -616,13 +582,13 @@ export const iccidMappingsHandler = {
         )
         .run();
 
-      const mapping = await queryFirst(env.DB.prepare(DETAIL_SELECT).bind(id), MappingDetailRow);
+      const mapping = await queryFirst(env.DB.prepare(DETAIL_SELECT).bind(id), IccidMappingDetail);
 
       if (!mapping) {
         return json({ success: false, error: 'ICCID mapping not found' }, 404);
       }
 
-      return json({ success: true, data: mapping });
+      return json({ success: true, data: mapping } satisfies UpdateIccidMappingResponse);
     } catch (error) {
       console.error('[iccid-mappings] Error updating ICCID mapping:', error);
       return json({ success: false, error: 'Failed to update ICCID mapping' }, 500);
@@ -646,7 +612,7 @@ export const iccidMappingsHandler = {
       return json({
         success: true,
         message: 'ICCID mapping deleted successfully',
-      });
+      } satisfies DeleteIccidMappingResponse);
     } catch (error) {
       if (/FOREIGN KEY constraint failed/i.test(errorText(error))) {
         return json(

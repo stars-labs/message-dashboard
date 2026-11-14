@@ -1,5 +1,6 @@
 import { json } from '../lib/response.js';
 import * as v from 'valibot';
+import { Keyword, KeywordWithUsage, type KeywordsResponse } from '../../shared/api/keywords.js';
 import { queryAll, queryFirst, type D1, type D1Batch } from '../lib/d1.js';
 import { OBJECT_MESSAGE, readBody, type MissingKeyMessages } from '../lib/request-body.js';
 import { HISTORY_MISSING_KEY_MESSAGES, HistoryRequestBody } from '../utils/history-request.js';
@@ -34,24 +35,6 @@ const KEYWORD_COLUMNS =
 const KEYWORD_COLUMNS_OF_KT = KEYWORD_COLUMNS.split(', ')
   .map((column) => `kt.${column}`)
   .join(', ');
-
-const KeywordRow = v.object({
-  id: v.number(),
-  keyword: v.string(),
-  tag: v.string(),
-  color: v.nullable(v.string()),
-  priority: v.nullable(v.number()),
-  is_active: v.nullable(v.number()),
-  case_sensitive: v.nullable(v.number()),
-  whole_word: v.nullable(v.number()),
-  created_by: v.nullable(v.string()),
-  created_at: v.nullable(v.string()),
-  updated_at: v.nullable(v.string()),
-});
-
-type KeywordRow = v.InferOutput<typeof KeywordRow>;
-
-const KeywordUsageRow = v.object({ ...KeywordRow.entries, usage_count: v.number() });
 
 const IdRow = v.object({ id: v.number() });
 
@@ -170,10 +153,10 @@ export function setupKeywordRoutes(router: Router): void {
                 ORDER BY kt.priority DESC, kt.keyword ASC
             `,
         ),
-        KeywordUsageRow,
+        KeywordWithUsage,
       );
 
-      return json({ keywords });
+      return json({ keywords } satisfies KeywordsResponse);
     } catch (error) {
       console.error('Error fetching keywords:', error);
       return json({ error: 'Failed to fetch keywords' }, 500);
@@ -199,7 +182,7 @@ export function setupKeywordRoutes(router: Router): void {
                 GROUP BY kt.id
             `,
         ).bind(id),
-        KeywordUsageRow,
+        KeywordWithUsage,
       );
 
       if (!keyword) {
@@ -249,7 +232,7 @@ export function setupKeywordRoutes(router: Router): void {
         request.env.DB.prepare(`SELECT ${KEYWORD_COLUMNS} FROM keyword_tags WHERE id = ?`).bind(
           result.meta.last_row_id,
         ),
-        KeywordRow,
+        Keyword,
       );
 
       return json({ keyword: newKeyword }, 201);
@@ -274,7 +257,7 @@ export function setupKeywordRoutes(router: Router): void {
     try {
       const existing = await queryFirst(
         request.env.DB.prepare(`SELECT ${KEYWORD_COLUMNS} FROM keyword_tags WHERE id = ?`).bind(id),
-        KeywordRow,
+        Keyword,
       );
 
       if (!existing) {
@@ -322,7 +305,7 @@ export function setupKeywordRoutes(router: Router): void {
           is_active ?? existing.is_active,
           id,
         ),
-        KeywordRow,
+        Keyword,
       );
 
       return json({ keyword: updated });
@@ -446,7 +429,7 @@ export function setupKeywordRoutes(router: Router): void {
     try {
       const keyword = await queryFirst(
         request.env.DB.prepare(`SELECT ${KEYWORD_COLUMNS} FROM keyword_tags WHERE id = ?`).bind(id),
-        KeywordRow,
+        Keyword,
       );
 
       if (!keyword) {

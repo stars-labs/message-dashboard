@@ -22,6 +22,11 @@ import {
   type SkillJobStatus,
   type WebJobStatus,
 } from '../../shared/balance-status.js';
+import {
+  BalanceMetric,
+  PROFILE_METHODS,
+  type BalanceChecksResponse,
+} from '../../shared/api/balance-checks.js';
 import { errorText } from '../utils/d1-error.js';
 import { senderMatches } from '../utils/spam-filter.js';
 import { loadBalanceRunnerStatus } from './balance-runners.js';
@@ -30,7 +35,6 @@ import {
   newCarrierWebBalanceIds,
 } from './carrier-web-balance.js';
 
-const PROFILE_METHODS = ['sms', 'ussd', 'api', 'browser'] as const;
 const QUERY_METHODS = ['sms', 'browser'] as const;
 const BATCH_METHODS = ['direct_sms', 'sms_ai', 'browser'] as const;
 
@@ -122,15 +126,6 @@ interface BalanceMethod {
   interactive: boolean;
 }
 
-/** A parsed balance metric. */
-interface BalanceMetric {
-  metric_type: string;
-  value: number | null;
-  unit: string | null;
-  currency: string | null;
-  expires_at: string | null;
-}
-
 /** A message handed to the balancer: what was received, from whom. */
 interface BalanceMessage {
   id: string;
@@ -171,14 +166,6 @@ const ConversationStep = v.object({ command: v.string(), response_contains: v.st
 const AttemptedStep = v.object({ command: v.string() });
 const SkillOutputs = v.object({ outputs: v.array(v.unknown()) });
 const RequiredServiceType = v.object({ required_service_type: v.pipe(v.string(), v.nonEmpty()) });
-
-const MetricJson = v.object({
-  metric_type: v.string(),
-  value: v.nullable(v.number()),
-  unit: v.nullable(v.string()),
-  currency: v.nullable(v.string()),
-  expires_at: v.nullable(v.string()),
-});
 
 const CHINA_MOBILE_NAMES = ['china mobile', 'cmcc', '中国移动', '移动'];
 const CHINA_UNICOM_NAMES = ['china unicom', 'unicom', '中国联通', '联通'];
@@ -482,7 +469,7 @@ function profileOutputs(skillConfig: string): string[] {
 }
 
 function parseMetrics(metricsJson: string): BalanceMetric[] {
-  const parsed = parseJson(metricsJson, v.array(MetricJson));
+  const parsed = parseJson(metricsJson, v.array(BalanceMetric));
   return parsed.ok ? parsed.value : [];
 }
 
@@ -1309,7 +1296,7 @@ export const balanceQueriesHandler = {
       metrics: parseMetrics(metrics_json),
     }));
 
-    return json({ success: true, data: checks });
+    return json({ success: true, data: checks } satisfies BalanceChecksResponse);
   },
 
   async status(request: ListRequest): Promise<Response> {

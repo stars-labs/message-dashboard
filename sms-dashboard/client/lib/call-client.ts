@@ -2,30 +2,23 @@
 // panel uses to decide what it may show. The rules live here, not in the
 // component, so they can be tested without a DOM or a microphone.
 
-import { fetchWithAuth } from './api.js';
+import {
+  CallConnectResponse,
+  CallHangupResponse,
+  CallHistoryResponse,
+  CallMediaResponse,
+  CallRenegotiateResponse,
+  CallStateResponse,
+  IceServersResponse,
+  type CallLogEntry,
+  type ENDED_OUTCOMES,
+  type LiveCall,
+} from '../../shared/api/calls.js';
+import type { Schema } from '../../shared/parse-json.js';
+import { request } from './api.js';
 import { formatCardNumber } from './card-number.js';
+import { toError } from './error-origin.js';
 import { formatClock, toEpochMilliseconds } from './time.js';
-
-/** The live call as the Worker reports it. */
-interface CallLike {
-  id: string;
-  direction: 'inbound' | 'outbound' | string;
-  state: string;
-  iccid?: string | null;
-  number?: string | null;
-  answered_at?: string | null;
-  started_at?: string | null;
-  [field: string]: unknown;
-}
-
-/** A finished call in the history log. */
-interface CallLogEntry {
-  id: string;
-  direction: string;
-  outcome?: string | null;
-  started_at?: string | null;
-  [field: string]: unknown;
-}
 
 /** The SIM fields these selectors read. */
 interface CallPhone {
@@ -33,26 +26,25 @@ interface CallPhone {
   number?: string | null;
   carrier?: string | null;
   sim_index?: number | null;
-  [field: string]: unknown;
 }
 
-/** One ICE server entry, as the TURN credentials endpoint issues it. */
-interface IceServer {
-  urls: string | string[];
-  username?: string;
-  credential?: string;
-}
+type IceServer = IceServersResponse['iceServers'][number];
+
+/** The fields that say where a call is in its life. */
+type CallStage = Pick<LiveCall, 'direction' | 'state'>;
+
+/** The fields that say whether a logged call was missed. */
+type MissedCallFields = Pick<CallLogEntry, 'direction' | 'outcome'>;
 
 /** The call state label vocabulary. */
 type CallTone = 'idle' | 'ringing' | 'pending' | 'active';
 
-export async function fetchCallState(): Promise<CallLike | null> {
-  const { call } = await fetchWithAuth('/api/calls/state');
-  return call ?? null;
+export async function fetchCallState(): Promise<LiveCall | null> {
+  return (await request('/api/calls/state', CallStateResponse)).call;
 }
 
 /**
- * Same rule the Worker enforces in server/api/calls.js. Checking it here first
+ * Same rule the Worker enforces in server/api/calls.ts. Checking it here first
  * gives an instant message instead of a round trip that is certain to fail.
  */
 export function isValidE164(value: unknown): boolean {
@@ -73,7 +65,7 @@ export function normaliseNumber(value: unknown): string {
  * was removed, or a list that has not loaded yet).
  */
 export function callSim(
-  call: CallLike | null | undefined,
+  call: Pick<LiveCall, 'iccid'> | null | undefined,
   phones: CallPhone[] | null | undefined,
 ): CallPhone | null {
   if (!call?.iccid || !Array.isArray(phones)) return null;
@@ -86,7 +78,7 @@ export function callSim(
  * how long the phone rang.
  */
 export function callElapsedSeconds(
-  call: CallLike | null | undefined,
+  call: Partial<Pick<LiveCall, 'answered_at' | 'started_at'>> | null | undefined,
   nowMs: number = Date.now(),
 ): number {
   const since = call?.answered_at ?? call?.started_at;
@@ -98,7 +90,8 @@ export function callElapsedSeconds(
 
 /** mm:ss, or h:mm:ss once a call passes an hour. */
 export function formatDuration(seconds: number | null | undefined): string {
-  const total = Math.max(0, Math.floor(seconds || 0));
+  const known = seconds === null || seconds === undefined || Number.isNaN(seconds) ? 0 : seconds;
+  const total = Math.max(0, Math.floor(known));
   const pad = (n: number) => String(n).padStart(2, '0');
   const minutes = Math.floor(total / 60) % 60;
   const hours = Math.floor(total / 3600);
@@ -111,7 +104,7 @@ export function formatDuration(seconds: number | null | undefined): string {
  * Which visual treatment a state gets. Kept here so the panel, the top bar and
  * any future surface cannot drift apart on what "ringing" looks like.
  */
-export function callTone(call: CallLike | null | undefined): CallTone {
+export function callTone(call: CallStage | null | undefined): CallTone {
   if (!call) return 'idle';
   if (call.state === 'ringing') return call.direction === 'inbound' ? 'ringing' : 'pending';
   if (call.state === 'active') return 'active';
@@ -126,9 +119,17 @@ export function callTone(call: CallLike | null | undefined): CallTone {
  */
 export function describeCallError(error: unknown): string | null {
   if (!error) return null;
-  const e = error as { name?: string; message?: string };
-  const name = e?.name ?? '';
-  const message = e?.message ?? String(error);
+  const name =
+    typeof error === 'object' && 'name' in error && typeof error.name === 'string'
+      ? error.name
+      : '';
+  const message =
+    typeof error === 'string' ||
+    typeof error === 'number' ||
+    typeof error === 'boolean' ||
+    typeof error === 'bigint'
+      ? String(error)
+      : toError(error).message;
   if (name === 'NotAllowedError' || /permission denied/i.test(message)) {
     return '浏览器拒绝了麦克风权限。请在地址栏的权限设置里允许麦克风，然后重试。';
   }
@@ -180,67 +181,63 @@ export const CALL_POLL_IDLE_MS = 10000;
 export function callPollDelay({
   call = null,
   panelOpen = false,
-}: { call?: CallLike | null; panelOpen?: boolean } = {}): number {
+}: { call?: object | null; panelOpen?: boolean } = {}): number {
   return call || panelOpen ? CALL_POLL_ACTIVE_MS : CALL_POLL_IDLE_MS;
 }
 
 /** Rejecting an inbound call is a hang-up, but it deserves its own label. */
-export function canReject(call: CallLike | null | undefined): boolean {
+export function canReject(call: CallStage | null | undefined): boolean {
   return canAnswer(call);
 }
 
-const STATE_LABELS: Record<string, string> = {
+const STATE_LABELS = {
   ringing: '来电',
   connecting: '正在连接',
   bridging: '正在接通',
   ending: '正在挂断',
   active: '通话中',
   ended: '已结束',
-};
+} as const satisfies Record<LiveCall['state'], string>;
 
 /** Human label for a call, or null when there is no call. */
-export function callStateLabel(call: CallLike | null | undefined): string | null {
+export function callStateLabel(call: Pick<LiveCall, 'state'> | null | undefined): string | null {
   if (!call) return null;
-  return STATE_LABELS[call.state] ?? String(call.state);
+  return STATE_LABELS[call.state];
 }
 
 /** Only one call may exist across the fleet, so dialing needs a clear line. */
-export function canDial(call: CallLike | null | undefined): boolean {
+export function canDial(call: object | null | undefined): boolean {
   return !call;
 }
 
-export function canAnswer(call: CallLike | null | undefined): boolean {
-  return Boolean(call && call.direction === 'inbound' && call.state === 'ringing');
+export function canAnswer(call: CallStage | null | undefined): boolean {
+  return call?.direction === 'inbound' && call.state === 'ringing';
 }
 
 /**
  * Hang-up must always be available while anything exists: it is also how a user
  * clears a stale lock left by a crashed call.
  */
-export function canHangup(call: CallLike | null | undefined): boolean {
+export function canHangup(call: object | null | undefined): boolean {
   return Boolean(call);
 }
 
-/**
- * How a finished call reads in the log. `in_progress` only appears for a row a
- * crash left behind, so it is labelled rather than hidden.
- */
-const OUTCOME_LABELS: Record<string, string> = {
+/** How a finished call reads in the log. */
+const OUTCOME_LABELS = {
   answered: '已接通',
   missed: '未接',
   rejected: '已拒接',
   cancelled: '已取消',
   failed: '未接通',
-  in_progress: '进行中',
-};
+} as const satisfies Record<(typeof ENDED_OUTCOMES)[number], string>;
 
-export function callOutcomeLabel(entry: CallLogEntry | null | undefined): string {
-  return (entry?.outcome ? OUTCOME_LABELS[entry.outcome] : undefined) ?? entry?.outcome ?? '';
+export function callOutcomeLabel(entry: Pick<CallLogEntry, 'outcome'> | null | undefined): string {
+  return entry ? OUTCOME_LABELS[entry.outcome] : '';
 }
 
 /** A call the operator should follow up on: it rang here and nobody answered. */
-export function isMissedCall(entry: CallLogEntry | null | undefined): boolean {
-  return entry?.direction === 'inbound' && entry?.outcome === 'missed';
+export function isMissedCall(entry: MissedCallFields | null | undefined): boolean {
+  return entry?.direction === 'inbound' && entry.outcome === 'missed';
 }
 
 /**
@@ -248,7 +245,7 @@ export function isMissedCall(entry: CallLogEntry | null | undefined): boolean {
  * button. `seenAt` is the last time the call panel was opened.
  */
 export function countMissedSince(
-  entries: CallLogEntry[] | null | undefined,
+  entries: readonly (MissedCallFields & Pick<CallLogEntry, 'started_at'>)[] | null | undefined,
   seenAt: unknown,
 ): number {
   const since = toEpochMilliseconds(seenAt) ?? 0;
@@ -264,13 +261,12 @@ export function formatCallTime(value: unknown, now: number = Date.now()): string
   return formatClock(value, now);
 }
 
-function post(path: string, body: unknown) {
-  return fetchWithAuth(path, { method: 'POST', body: JSON.stringify(body ?? {}) });
+function post<T>(path: string, schema: Schema<T>, body: Readonly<Record<string, unknown>>) {
+  return request(path, schema, { method: 'POST', body: JSON.stringify(body) });
 }
 
 export async function fetchIceServers(): Promise<IceServer[]> {
-  const { iceServers } = await fetchWithAuth('/api/calls/ice');
-  return iceServers ?? [];
+  return (await request('/api/calls/ice', IceServersResponse)).iceServers;
 }
 
 /**
@@ -287,14 +283,14 @@ export async function fetchCallHistory({
 }> {
   const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
   if (iccid) params.set('iccid', iccid);
-  const { calls, has_more: hasMore } = await fetchWithAuth(`/api/calls/history?${params}`);
-  return { calls: calls ?? [], hasMore: Boolean(hasMore) };
+  const page = await request(`/api/calls/history?${params.toString()}`, CallHistoryResponse);
+  return { calls: page.calls, hasMore: page.has_more };
 }
 
 /** The browser's SDP offer and its mid, as /dial and /answer take them. */
 interface MediaOffer {
   offer: unknown;
-  mid: string;
+  mid: string | null;
 }
 
 /** /dial additionally names the SIM and destination. */
@@ -303,13 +299,14 @@ interface DialParams extends MediaOffer {
   number: string;
 }
 
-/** The API surface call-session.ts drives; each returns the Worker's JSON. */
+/** The API surface call-session.ts drives; each returns the Worker's answer, parsed. */
 export const callApi = {
   dial: ({ iccid, number, offer, mid }: DialParams) =>
-    post('/api/calls/dial', { iccid, number, offer, mid }),
-  answer: ({ offer, mid }: MediaOffer) => post('/api/calls/answer', { offer, mid }),
-  connect: (callId: string) => post('/api/calls/connect', { call_id: callId }),
+    post('/api/calls/dial', CallMediaResponse, { iccid, number, offer, mid }),
+  answer: ({ offer, mid }: MediaOffer) =>
+    post('/api/calls/answer', CallMediaResponse, { offer, mid }),
+  connect: (callId: string) => post('/api/calls/connect', CallConnectResponse, { call_id: callId }),
   renegotiate: ({ answer, callId }: { answer: unknown; callId?: string }) =>
-    post('/api/calls/renegotiate', { answer, call_id: callId }),
-  hangup: (callId?: string) => post('/api/calls/hangup', { call_id: callId }),
+    post('/api/calls/renegotiate', CallRenegotiateResponse, { answer, call_id: callId }),
+  hangup: (callId?: string) => post('/api/calls/hangup', CallHangupResponse, { call_id: callId }),
 };

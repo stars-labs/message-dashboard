@@ -1,5 +1,5 @@
 import type { Permission } from '../../config/auth0-roles.js';
-import type { SessionUser } from '../handlers/auth0.js';
+import type { SessionUser } from '../../shared/api/auth.js';
 import { handleAuth0, type AuthRequest } from './auth0.js';
 import { enrichUserPermissions, requirePermission } from './rbac.js';
 

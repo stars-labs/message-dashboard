@@ -17,6 +17,7 @@ import { getUserRoles, setUserRole, type Auth0ManagementEnv } from '../utils/aut
 import { indexSession, unindexSession } from '../utils/user-sessions.js';
 import { scheduleAuthAudit } from '../utils/audit-log.js';
 import { boundedErrorText } from '../utils/d1-error.js';
+import { SessionUser, type MeResponse } from '../../shared/api/auth.js';
 
 /** The authorization_code token response (RFC 6749 §5.1; id_token per OpenID Connect Core §3.1.3.3). */
 const TokenSet = v.object({
@@ -28,19 +29,6 @@ interface LoginTokens {
   access_token?: string | undefined;
   id_token?: string | undefined;
 }
-
-/** The user the login callback stores in the session and the middleware attaches to requests. */
-export const SessionUser = v.object({
-  id: v.string(),
-  sub: v.optional(v.string()),
-  email: v.optional(v.string()),
-  name: v.optional(v.string()),
-  picture: v.optional(v.string()),
-  provider: v.optional(v.string()),
-  roles: v.array(v.string()),
-});
-
-export type SessionUser = v.InferOutput<typeof SessionUser>;
 
 /** The KV session written by the login callback under the auth_token value. */
 export const StoredSession = v.object({
@@ -558,7 +546,7 @@ export const auth0Handler = {
         // everything, instead of `undefined` which `.includes()` would throw on.
         permissions: user.permissions ?? [],
       },
-    });
+    } satisfies MeResponse);
   },
 
   // Verify JWT token (for API calls)

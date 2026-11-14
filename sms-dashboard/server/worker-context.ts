@@ -4,7 +4,7 @@
 //
 // Types-only module: every export is erased at runtime.
 
-import type { SessionUser } from './handlers/auth0.js';
+import type { SessionUser } from '../shared/api/auth.js';
 
 /**
  * The Request handlers receive: the Worker's request with the env and ctx the

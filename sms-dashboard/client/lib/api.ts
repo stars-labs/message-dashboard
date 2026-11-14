@@ -1,193 +1,184 @@
-import { auth } from './auth';
-import { messageCache } from './message-cache';
-import type { PagedMessage } from './message-page';
+import * as v from 'valibot';
+import { parseJson, readJson, type Schema } from '../../shared/parse-json.js';
+import { textOr } from '../../shared/text.js';
+import { BalanceChecksResponse, type BalanceCheck } from '../../shared/api/balance-checks.js';
+import {
+  CreateIccidMappingResponse,
+  DeleteIccidMappingResponse,
+  IccidMappingsResponse,
+  UpdateIccidMappingResponse,
+} from '../../shared/api/iccid-mappings.js';
+import { MessagePage, SendMessageResponse, type ApiMessage } from '../../shared/api/messages.js';
+import { PhonesResponse, type Phone } from '../../shared/api/phones.js';
+import { auth } from './auth.js';
+import { messageCache } from './message-cache.js';
 
 // Runtime cursors keep polling cheap even when IndexedDB is unavailable or the
 // current view deliberately avoids persistent caching (for example spam audit).
 const volatileMessageCursors = new Map<string, string>();
 
 /** The server's error body. `detail` is present for upstream failures. */
-interface ApiErrorBody {
-  error?: string;
-  detail?: string;
+const ErrorBody = v.object({
+  error: v.optional(v.string()),
+  detail: v.optional(v.string()),
+});
+
+/** A request the server refused or answered in a shape this client does not know. */
+export class ApiError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
 }
 
-/** A message row as the API returns it. */
-interface ApiMessage extends PagedMessage {
-  timestamp: string;
-  type?: string | null;
-  content?: string | null;
-  phone_iccid?: string | null;
-  phone_number?: string | null;
-  [column: string]: unknown;
-}
+type QueryValue = string | number | boolean;
 
-/** The paging envelope /api/messages returns. */
-interface ApiMessagePagination {
-  has_more?: boolean;
-  next_cursor?: { created_at?: string; id?: string } | null;
-  limit?: number;
-  offset?: number;
-  [column: string]: unknown;
-}
-
-interface ApiMessageSync {
-  server_time?: string;
-  is_incremental?: boolean;
-  from_cache?: number;
-  new_count?: number;
-  is_offline?: boolean;
-  [column: string]: unknown;
-}
-
-/** The /api/messages response, before and after the client merges cache. */
-interface ApiMessagePage {
-  success?: boolean;
-  data?: ApiMessage[];
-  pagination?: ApiMessagePagination;
-  sync?: ApiMessageSync;
-  failed?: boolean;
-  [column: string]: unknown;
-}
-
-/** Parameters /api/messages accepts. */
+/** Parameters /api/messages accepts, plus the two that steer the client cache. */
 interface GetMessagesParams {
-  phone_iccid?: string | null;
+  phone_iccid?: string;
   limit?: number;
-  include_filtered?: boolean | number | string;
-  force_refresh?: boolean;
-  reset_sync?: boolean;
+  include_filtered?: QueryValue;
+  force_refresh?: QueryValue;
+  reset_sync?: QueryValue;
   since?: string;
   until?: string;
   before_created_at?: string;
   before_id?: string;
   offset?: number;
-  [column: string]: unknown;
 }
 
-/** A balance check row as /api/balance-checks returns it. */
-interface ApiBalanceCheck {
-  id: string;
-  [column: string]: unknown;
+/** How a messages result was assembled: the server's window, and what the cache added. */
+interface MessageSync {
+  server_time?: string;
+  is_incremental?: boolean;
+  status_refreshed?: number;
+  new_count?: number;
+  from_cache?: number;
+  is_offline?: boolean;
 }
 
-export async function fetchWithAuth(endpoint: string, options: RequestInit = {}): Promise<any> {
-  const fullUrl = `${auth.baseUrl}${endpoint}`;
+/**
+ * GET /api/messages as the client sees it: the server's page, possibly merged
+ * with cached rows, or the cached rows alone while the server is unreachable.
+ * `failed` means neither was available.
+ */
+type MessagesResult =
+  | {
+      success: true;
+      data: ApiMessage[];
+      pagination: Partial<MessagePage['pagination']>;
+      sync: MessageSync;
+    }
+  | { data: []; pagination: Record<string, never>; failed: true };
 
+async function send(endpoint: string, options: RequestInit): Promise<Response> {
   // Credentials travel as the HttpOnly auth_token cookie, which the browser attaches
   // itself — there is no token for JavaScript to read or forward.
   // See docs/SECURITY-REVIEW.md finding 4.
-  const response = await fetch(fullUrl, {
+  const headers = new Headers(options.headers);
+  if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+  const response = await fetch(`${auth.baseUrl}${endpoint}`, {
     ...options,
     credentials: 'same-origin',
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    },
+    headers,
   });
 
   if (response.status === 401) {
     auth.logout();
-    throw new Error('Authentication required');
+    throw new ApiError('Authentication required', 401);
   }
 
   if (!response.ok) {
-    const errorText = await response.text();
-    let errorData: ApiErrorBody;
-    try {
-      errorData = JSON.parse(errorText) as ApiErrorBody;
-    } catch {
-      errorData = { error: 'Unknown error' };
-    }
+    const body = parseJson(await response.text(), ErrorBody);
+    const errorBody = body.ok ? body.value : { error: 'Unknown error' };
     // Include `detail` when the server sends one. Without it an upstream failure
     // surfaced as a bare "Auth0 Management API request failed" with the actual cause
     // (missing scope, bad credentials, absent role) only visible in the Worker logs.
-    const base = errorData.error || `Request failed with status ${response.status}`;
-    throw new Error(errorData.detail ? `${base}: ${errorData.detail}` : base);
+    const base = textOr(errorBody.error, `Request failed with status ${String(response.status)}`);
+    const detail = textOr(errorBody.detail, null);
+    throw new ApiError(detail === null ? base : `${base}: ${detail}`, response.status);
   }
 
-  return await response.json();
+  return response;
 }
 
-type EndpointParams = Record<string, unknown>;
-
-interface Endpoint {
-  url: string | ((params: Record<string, string | number | undefined>) => string);
-  method: 'GET' | 'POST' | 'PUT' | 'DELETE';
-}
-
-/** Route API method names to HTTP endpoints */
-const httpEndpoints = {
-  getPhones: { url: '/api/phones', method: 'GET' },
-  getMessages: { url: '/api/messages', method: 'GET' },
-  getBalanceChecks: { url: '/api/balance-checks', method: 'GET' },
-  sendMessage: { url: '/api/messages/send', method: 'POST' },
-  listIccidMappings: { url: '/api/iccid-mappings', method: 'GET' },
-  createIccidMapping: { url: '/api/iccid-mappings', method: 'POST' },
-  updateIccidMapping: { url: (params) => `/api/iccid-mappings/${params.id}`, method: 'PUT' },
-  deleteIccidMapping: { url: (params) => `/api/iccid-mappings/${params.id}`, method: 'DELETE' },
-} satisfies Record<string, Endpoint>;
-
-/** A method name the endpoint table actually contains. */
-type ApiMethod = keyof typeof httpEndpoints;
-
-async function apiRequest(method: ApiMethod, data: EndpointParams = {}): Promise<any> {
-  const endpoint: Endpoint = httpEndpoints[method];
-  if (!endpoint) {
-    throw new Error(`Unknown API method: ${method}`);
+/** Sends a request and parses the answer with `schema`; a mismatch is an ApiError. */
+export async function request<T>(
+  endpoint: string,
+  schema: Schema<T>,
+  options: RequestInit = {},
+): Promise<T> {
+  const response = await send(endpoint, options);
+  const parsed = await readJson(response, schema);
+  if (!parsed.ok) {
+    throw new ApiError(`Unexpected response from ${endpoint}: ${parsed.error}`, response.status);
   }
+  return parsed.value;
+}
 
-  const url =
-    typeof endpoint.url === 'function'
-      ? endpoint.url(data as Record<string, string | number | undefined>)
-      : endpoint.url;
-  const options: RequestInit = {
-    method: endpoint.method,
+/** A request whose answer the caller has not described yet: it gets `unknown`. */
+async function fetchWithAuth(endpoint: string, options: RequestInit = {}): Promise<unknown> {
+  return await request(endpoint, v.unknown(), options);
+}
+
+function withQuery(path: string, params: Readonly<Record<string, QueryValue | undefined>>): string {
+  const entries = Object.entries(params).flatMap(([key, value]) =>
+    value === undefined ? [] : [[key, String(value)]],
+  );
+  return entries.length === 0 ? path : `${path}?${new URLSearchParams(entries).toString()}`;
+}
+
+function jsonBody(method: 'POST' | 'PUT' | 'DELETE', body: unknown): RequestInit {
+  return { method, body: JSON.stringify(body) };
+}
+
+/** A limit of 0 or none means the default. */
+function positiveOr(value: number | undefined, fallback: number): number {
+  return value === undefined || value === 0 ? fallback : value;
+}
+
+function isTrue(value: QueryValue | undefined): boolean {
+  return value === true || value === 1 || value === '1';
+}
+
+function timeOf(message: ApiMessage): number {
+  return message.timestamp === null ? 0 : new Date(message.timestamp).getTime();
+}
+
+function offlinePage(messages: ApiMessage[], limit: number): MessagesResult {
+  return {
+    success: true,
+    data: messages,
+    pagination: { limit, offset: 0, has_more: messages.length >= limit },
+    sync: { from_cache: messages.length, is_offline: true },
   };
-
-  if (endpoint.method === 'GET' && data && Object.keys(data).length > 0) {
-    // Add query params for GET requests
-    const query = Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v)]));
-    const queryString = new URLSearchParams(query).toString();
-    return fetchWithAuth(`${url}?${queryString}`, options);
-  } else if (endpoint.method !== 'GET') {
-    // Add body for non-GET requests
-    options.body = JSON.stringify(data);
-  }
-
-  return fetchWithAuth(url, options);
 }
 
 export const api = {
   // Cache management
   cache: {
     async clear() {
-      return await messageCache.clearCache();
+      await messageCache.clearCache();
     },
   },
 
-  // Generic HTTP methods for AI features
-  async get(url: string, options: RequestInit = {}) {
+  // Generic HTTP methods for callers that parse the answer themselves.
+  async get(url: string, options: RequestInit = {}): Promise<unknown> {
     return await fetchWithAuth(url, { ...options, method: 'GET' });
   },
 
-  async post(url: string, data: unknown = {}, options: RequestInit = {}) {
-    return await fetchWithAuth(url, {
-      ...options,
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
+  async post(url: string, data: unknown = {}, options: RequestInit = {}): Promise<unknown> {
+    return await fetchWithAuth(url, { ...options, ...jsonBody('POST', data) });
   },
 
-  async put(url: string, data: unknown = {}, options: RequestInit = {}) {
-    return await fetchWithAuth(url, {
-      ...options,
-      method: 'PUT',
-      body: JSON.stringify(data),
-    });
+  async put(url: string, data: unknown = {}, options: RequestInit = {}): Promise<unknown> {
+    return await fetchWithAuth(url, { ...options, ...jsonBody('PUT', data) });
   },
 
-  async delete(url: string, options: RequestInit = {}) {
+  async delete(url: string, options: RequestInit = {}): Promise<unknown> {
     return await fetchWithAuth(url, { ...options, method: 'DELETE' });
   },
 
@@ -195,11 +186,9 @@ export const api = {
   // and callers do not need it — fetch sends it automatically.
   // See docs/SECURITY-REVIEW.md finding 4.
 
-  // Phones
-  async getPhones() {
+  async getPhones(): Promise<Phone[]> {
     try {
-      const response = await apiRequest('getPhones');
-      return response.success ? response.data : [];
+      return (await request('/api/phones', PhonesResponse)).data;
     } catch (error) {
       console.warn('Failed to get phones:', error);
       // Return empty array instead of throwing
@@ -208,18 +197,16 @@ export const api = {
   },
 
   // Messages - with client-side caching for reduced D1 reads
-  async getMessages(params: GetMessagesParams = {}): Promise<ApiMessagePage> {
-    const phoneIccid = params.phone_iccid || null;
-    const includeFiltered =
-      params.include_filtered === true ||
-      params.include_filtered === 1 ||
-      params.include_filtered === '1';
+  async getMessages(params: GetMessagesParams = {}): Promise<MessagesResult> {
+    const phoneIccid = textOr(params.phone_iccid, null);
+    const includeFiltered = isTrue(params.include_filtered);
     const cacheKey = includeFiltered
-      ? `filtered:${phoneIccid || 'global'}`
-      : phoneIccid || 'global';
+      ? `filtered:${phoneIccid ?? 'global'}`
+      : (phoneIccid ?? 'global');
     const persistentCacheEnabled = !includeFiltered;
-    const forceRefresh = params.force_refresh || false;
-    const resetSync = params.reset_sync || false;
+    const forceRefresh = Boolean(params.force_refresh);
+    const resetSync = Boolean(params.reset_sync);
+    const limit = positiveOr(params.limit, 500);
 
     try {
       // Step 1: Get cached messages first for immediate display
@@ -228,200 +215,160 @@ export const api = {
 
       if (!forceRefresh && persistentCacheEnabled) {
         try {
-          cachedMessages = (await messageCache.getCachedMessages(
-            phoneIccid,
-            params.limit || 500,
-          )) as ApiMessage[];
-          lastSyncTime = (await messageCache.getLastSyncTime(cacheKey)) as string | null;
+          cachedMessages = await messageCache.getCachedMessages(phoneIccid, limit);
+          lastSyncTime = await messageCache.getLastSyncTime(cacheKey);
         } catch (cacheErr) {
           console.warn('[API] Cache read failed:', cacheErr);
         }
       }
       if (!forceRefresh && !resetSync) {
-        lastSyncTime = volatileMessageCursors.get(cacheKey) || lastSyncTime;
+        lastSyncTime = volatileMessageCursors.get(cacheKey) ?? lastSyncTime;
       } else if (resetSync) {
         lastSyncTime = null;
       }
 
       // Step 2: Fetch new messages from API (incremental if we have cache)
-      const {
-        force_refresh: _forceRefresh,
-        reset_sync: _resetSync,
-        ...apiParams
-      } = params as GetMessagesParams;
+      const { force_refresh: _forceRefresh, reset_sync: _resetSync, ...apiParams } = params;
       if (lastSyncTime && !forceRefresh) {
         apiParams.since = lastSyncTime;
         // Reduce limit for incremental sync since we're only getting new messages
-        apiParams.limit = Math.min(params.limit || 100, 100);
+        apiParams.limit = Math.min(positiveOr(params.limit, 100), 100);
       }
 
-      let response = await apiRequest('getMessages', apiParams);
+      let response = await request(withQuery('/api/messages', apiParams), MessagePage);
 
-      if (response.success && response.sync?.is_incremental) {
+      if (response.sync.is_incremental) {
         const syncUntil = response.sync.server_time;
-        const collected: ApiMessage[] = [...(response.data || [])];
-        while (response.pagination?.has_more === true) {
-          const cursor = response.pagination?.next_cursor;
-          if (!syncUntil || !cursor?.created_at || !cursor?.id) {
+        const collected: ApiMessage[] = [...response.data];
+        while (response.pagination.has_more) {
+          const cursor = response.pagination.next_cursor;
+          if (!cursor?.created_at || !cursor.id) {
             throw new Error('Incremental message page is missing its stable cursor');
           }
-          response = await apiRequest('getMessages', {
-            ...apiParams,
-            since: lastSyncTime ?? undefined,
-            until: syncUntil,
-            before_created_at: cursor.created_at,
-            before_id: cursor.id,
-            offset: 0,
-          });
-          if (!response.success || response.sync?.server_time !== syncUntil) {
+          response = await request(
+            withQuery('/api/messages', {
+              ...apiParams,
+              since: lastSyncTime ?? undefined,
+              until: syncUntil,
+              before_created_at: cursor.created_at,
+              before_id: cursor.id,
+              offset: 0,
+            }),
+            MessagePage,
+          );
+          if (response.sync.server_time !== syncUntil) {
             throw new Error('Incremental message page changed its synchronization window');
           }
-          collected.push(...(response.data || []));
+          collected.push(...response.data);
         }
         response = {
           ...response,
           data: collected,
-          sync: {
-            ...response.sync,
-            server_time: syncUntil,
-            is_incremental: true,
-            new_count: collected.length,
-          },
+          sync: { ...response.sync, server_time: syncUntil, is_incremental: true },
         };
       }
 
-      if (response.success) {
-        const newMessages: ApiMessage[] = response.data || [];
-        const serverTime = response.sync?.server_time || new Date().toISOString();
+      const newMessages = response.data;
+      const serverTime = response.sync.server_time;
 
-        // Step 3: Cache new messages
-        if (persistentCacheEnabled && newMessages.length > 0) {
-          try {
-            await messageCache.cacheMessages(newMessages);
-            // Prune old messages to keep IndexedDB bounded
-            messageCache.pruneCache(200).catch(() => {});
-          } catch (cacheErr) {
-            console.warn('[API] Cache write failed:', cacheErr);
-          }
+      // Step 3: Cache new messages
+      if (persistentCacheEnabled && newMessages.length > 0) {
+        try {
+          await messageCache.cacheMessages(newMessages);
+          // Prune old messages to keep IndexedDB bounded
+          messageCache.pruneCache(200).catch(() => undefined);
+        } catch (cacheErr) {
+          console.warn('[API] Cache write failed:', cacheErr);
         }
-
-        // Step 4: Advance only after every incremental page completed. Forced
-        // history pagination must not move the live ingestion cursor.
-        if (!forceRefresh) {
-          volatileMessageCursors.set(cacheKey, serverTime);
-          if (persistentCacheEnabled) {
-            try {
-              await messageCache.setLastSyncTime(cacheKey, serverTime);
-            } catch (cacheErr) {
-              console.warn('[API] Failed to update sync time:', cacheErr);
-            }
-          }
-        }
-
-        // Step 5: Merge new messages with cached.
-        //
-        // A server row always wins over the cached copy with the same id: an
-        // incremental response now also carries outbound rows whose status
-        // changed (已发送 / 发送失败), and dropping them as "duplicates" was why a
-        // sent SMS stayed at 等待发送 for the life of the cache.
-        if (response.sync?.is_incremental && cachedMessages.length > 0) {
-          const existingIds = new Set(cachedMessages.map((m) => m.id));
-          const uniqueNewMessages = newMessages.filter((m) => !existingIds.has(m.id));
-          const freshById = new Map(newMessages.map((m) => [m.id, m]));
-          const merged = [
-            ...uniqueNewMessages,
-            ...cachedMessages.map((m) => freshById.get(m.id) ?? m),
-          ];
-          // Sort by timestamp descending and limit
-          merged.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-          const limitedMerged = merged.slice(0, params.limit || 500);
-          const requestedLimit = params.limit || 500;
-
-          return {
-            success: true,
-            data: limitedMerged,
-            pagination: {
-              ...response.pagination,
-              // An incremental response only describes newly ingested rows. A
-              // full local page may still have older server pages behind it.
-              has_more:
-                response.pagination?.has_more === true || cachedMessages.length >= requestedLimit,
-            },
-            sync: {
-              ...response.sync,
-              from_cache: cachedMessages.length,
-              new_count: uniqueNewMessages.length,
-            },
-          };
-        }
-
-        if (response.sync?.is_incremental) {
-          response.sync = { ...response.sync, new_count: newMessages.length };
-        }
-
-        // Full refresh - return API data directly
-        return response;
       }
 
-      // API failed - return cached data if available
-      if (cachedMessages.length > 0) {
+      // Step 4: Advance only after every incremental page completed. Forced
+      // history pagination must not move the live ingestion cursor.
+      if (!forceRefresh) {
+        volatileMessageCursors.set(cacheKey, serverTime);
+        if (persistentCacheEnabled) {
+          try {
+            await messageCache.setLastSyncTime(cacheKey, serverTime);
+          } catch (cacheErr) {
+            console.warn('[API] Failed to update sync time:', cacheErr);
+          }
+        }
+      }
+
+      // Step 5: Merge new messages with cached.
+      //
+      // A server row always wins over the cached copy with the same id: an
+      // incremental response now also carries outbound rows whose status
+      // changed (已发送 / 发送失败), and dropping them as "duplicates" was why a
+      // sent SMS stayed at 等待发送 for the life of the cache.
+      if (response.sync.is_incremental && cachedMessages.length > 0) {
+        const existingIds = new Set(cachedMessages.map((m) => m.id));
+        const uniqueNewMessages = newMessages.filter((m) => !existingIds.has(m.id));
+        const freshById = new Map(newMessages.map((m) => [m.id, m]));
+        const merged = [
+          ...uniqueNewMessages,
+          ...cachedMessages.map((m) => freshById.get(m.id) ?? m),
+        ];
+        // Sort by timestamp descending and limit
+        merged.sort((a, b) => timeOf(b) - timeOf(a));
+
         return {
           success: true,
-          data: cachedMessages,
+          data: merged.slice(0, limit),
           pagination: {
-            limit: params.limit || 500,
-            offset: 0,
-            has_more: cachedMessages.length >= (params.limit || 500),
+            ...response.pagination,
+            // An incremental response only describes newly ingested rows. A
+            // full local page may still have older server pages behind it.
+            has_more: response.pagination.has_more || cachedMessages.length >= limit,
           },
-          sync: { from_cache: cachedMessages.length, is_offline: true },
+          sync: {
+            ...response.sync,
+            from_cache: cachedMessages.length,
+            new_count: uniqueNewMessages.length,
+          },
         };
       }
 
-      // Nothing from the API and nothing cached: say so. Returning a bare empty
-      // page here made an outage render as a healthy, quiet inbox.
-      return { data: [], pagination: {}, failed: true };
+      // Full refresh - return API data directly
+      return {
+        success: true,
+        data: response.data,
+        pagination: response.pagination,
+        sync: response.sync.is_incremental
+          ? { ...response.sync, new_count: newMessages.length }
+          : response.sync,
+      };
     } catch (error) {
       console.warn('Failed to get messages:', error);
 
       // Try to return cached data on error
       try {
-        const cachedMessages = (await messageCache.getCachedMessages(
-          phoneIccid,
-          params.limit || 500,
-        )) as ApiMessage[];
-        if (cachedMessages.length > 0) {
-          return {
-            success: true,
-            data: cachedMessages,
-            pagination: {
-              limit: params.limit || 500,
-              offset: 0,
-              has_more: cachedMessages.length >= (params.limit || 500),
-            },
-            sync: { from_cache: cachedMessages.length, is_offline: true },
-          };
-        }
+        const cachedMessages = await messageCache.getCachedMessages(phoneIccid, limit);
+        if (cachedMessages.length > 0) return offlinePage(cachedMessages, limit);
       } catch (cacheErr) {
         console.warn('[API] Cache fallback failed:', cacheErr);
       }
 
+      // Nothing from the API and nothing cached: say so. Returning a bare empty
+      // page here made an outage render as a healthy, quiet inbox.
       return { data: [], pagination: {}, failed: true };
     }
   },
 
-  async getBalanceChecks(params: EndpointParams = {}): Promise<ApiBalanceCheck[]> {
+  async getBalanceChecks(
+    params: Readonly<Record<string, QueryValue | undefined>> = {},
+  ): Promise<BalanceCheck[]> {
     try {
-      const response = await apiRequest('getBalanceChecks', params);
-      return response?.success ? response.data || [] : [];
+      return (await request(withQuery('/api/balance-checks', params), BalanceChecksResponse)).data;
     } catch (error) {
       console.warn('Failed to get balance checks:', error);
       return [];
     }
   },
 
-  async sendMessage(data: unknown) {
+  async sendMessage(data: { phone_iccid: string; recipient: string; content: string }) {
     try {
-      return await apiRequest('sendMessage', data as EndpointParams);
+      return await request('/api/messages/send', SendMessageResponse, jsonBody('POST', data));
     } catch (error) {
       console.warn('Failed to send message:', error);
       throw error;
@@ -430,20 +377,32 @@ export const api = {
 
   // ICCID Mappings
   iccidMappings: {
-    async list(params: EndpointParams = {}) {
-      return await apiRequest('listIccidMappings', params);
+    async list(params: Readonly<Record<string, QueryValue | undefined>> = {}) {
+      return await request(withQuery('/api/iccid-mappings', params), IccidMappingsResponse);
     },
 
-    async create(data: unknown) {
-      return await apiRequest('createIccidMapping', data as EndpointParams);
+    async create(data: Readonly<Record<string, unknown>>) {
+      return await request(
+        '/api/iccid-mappings',
+        CreateIccidMappingResponse,
+        jsonBody('POST', data),
+      );
     },
 
-    async update(id: string, data: Record<string, unknown>) {
-      return await apiRequest('updateIccidMapping', { id, ...data } as EndpointParams);
+    async update(id: string, data: Readonly<Record<string, unknown>>) {
+      return await request(
+        `/api/iccid-mappings/${id}`,
+        UpdateIccidMappingResponse,
+        jsonBody('PUT', { id, ...data }),
+      );
     },
 
     async delete(id: string) {
-      return await apiRequest('deleteIccidMapping', { id });
+      return await request(
+        `/api/iccid-mappings/${id}`,
+        DeleteIccidMappingResponse,
+        jsonBody('DELETE', { id }),
+      );
     },
   },
 };

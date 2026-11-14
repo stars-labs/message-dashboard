@@ -42,6 +42,7 @@
     "autoprefixer": "^10.4.21",
     "eslint": "^10.14.0",
     "eslint-config-prettier": "10.1.8",
+    "fake-indexeddb": "6.2.8",
     "knip": "5.88.1",
     "oxlint": "^1.93.0",
     "postcss": "^8.5.6",

@@ -1,5 +1,6 @@
 import * as v from 'valibot';
-import { auth0Handler, StoredSession, type SessionUser } from '../handlers/auth0.js';
+import { auth0Handler, StoredSession } from '../handlers/auth0.js';
+import type { SessionUser } from '../../shared/api/auth.js';
 import { readKvJson, type KV } from '../lib/kv.js';
 import { json } from '../lib/response.js';
 import { secretMatches } from '../lib/secret.js';

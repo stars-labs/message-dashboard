@@ -4,6 +4,9 @@
  * and only fetching new messages since last sync
  */
 
+import * as v from 'valibot';
+import { ApiMessage } from '../../shared/api/messages.js';
+
 const DB_NAME = 'sms-dashboard-cache';
 // v2: spam filtering added. Every existing cache holds marketing SMS that the
 // server now hides, and cached rows have no filter_status at all. Without this
@@ -15,17 +18,14 @@ const DB_NAME = 'sms-dashboard-cache';
 // stale `2026` values. Clear it once more so corrected server rows replace them.
 // v5: Japanese OTP detection added and history backfilled; cached rows still hold
 // null verification_code from before that backfill.
-const DB_VERSION = 5;
+// v6: rows are read through the ApiMessage schema, and one that does not match
+// is skipped. Rows cached by earlier clients may predate columns the server
+// added since; clear them so the next sync refetches every row in full.
+const DB_VERSION = 6;
 const MESSAGES_STORE = 'messages';
 const META_STORE = 'meta';
 
-/** The message shape IndexedDB stores: whatever the server returned, by id. */
-interface CachedMessage {
-  id: string;
-  phone_iccid?: string | null;
-  timestamp: string;
-  [column: string]: unknown;
-}
+const SyncRecord = v.object({ key: v.string(), value: v.string() });
 
 let db: IDBDatabase | null = null;
 
@@ -40,7 +40,7 @@ async function initDB(): Promise<IDBDatabase> {
 
     request.onerror = () => {
       console.error('[MessageCache] Failed to open IndexedDB:', request.error);
-      reject(request.error);
+      reject(request.error ?? new Error('IndexedDB could not be opened'));
     };
 
     request.onsuccess = () => {
@@ -50,7 +50,7 @@ async function initDB(): Promise<IDBDatabase> {
     };
 
     request.onupgradeneeded = (event) => {
-      const database = (event.target as IDBOpenDBRequest).result;
+      const database = request.result;
 
       // Any upgrade discards the cache rather than trying to migrate rows. The
       // cache is a disposable copy of the server's data, so refetching is always
@@ -62,7 +62,7 @@ async function initDB(): Promise<IDBDatabase> {
           }
         }
         console.debug(
-          `[MessageCache] cleared cache upgrading v${event.oldVersion} -> v${DB_VERSION}`,
+          `[MessageCache] cleared cache upgrading v${String(event.oldVersion)} -> v${String(DB_VERSION)}`,
         );
       }
 
@@ -86,20 +86,25 @@ async function initDB(): Promise<IDBDatabase> {
   });
 }
 
+function timeOf(message: ApiMessage): number {
+  return message.timestamp === null ? 0 : new Date(message.timestamp).getTime();
+}
+
 /**
  * Get last sync timestamp for a phone (or global)
  */
-async function getLastSyncTime(phoneIccid: string = 'global'): Promise<string | null> {
+async function getLastSyncTime(phoneIccid = 'global'): Promise<string | null> {
   try {
-    await initDB();
+    const database = await initDB();
 
-    return new Promise<string | null>((resolve) => {
-      const transaction = db!.transaction([META_STORE], 'readonly');
+    return await new Promise<string | null>((resolve) => {
+      const transaction = database.transaction([META_STORE], 'readonly');
       const store = transaction.objectStore(META_STORE);
       const request = store.get(`lastSync_${phoneIccid}`);
 
       request.onsuccess = () => {
-        resolve(request.result?.value || null);
+        const record = v.safeParse(SyncRecord, request.result);
+        resolve(record.success && record.output.value !== '' ? record.output.value : null);
       };
 
       request.onerror = () => {
@@ -116,17 +121,21 @@ async function getLastSyncTime(phoneIccid: string = 'global'): Promise<string | 
 /**
  * Set last sync timestamp
  */
-async function setLastSyncTime(phoneIccid: string = 'global', timestamp: string): Promise<void> {
+async function setLastSyncTime(phoneIccid: string, timestamp: string): Promise<void> {
   try {
-    await initDB();
+    const database = await initDB();
 
-    return new Promise<void>((resolve, reject) => {
-      const transaction = db!.transaction([META_STORE], 'readwrite');
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction([META_STORE], 'readwrite');
       const store = transaction.objectStore(META_STORE);
       const request = store.put({ key: `lastSync_${phoneIccid}`, value: timestamp });
 
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        resolve();
+      };
+      request.onerror = () => {
+        reject(request.error ?? new Error('IndexedDB write failed'));
+      };
     });
   } catch (err) {
     console.warn('[MessageCache] setLastSyncTime error:', err);
@@ -134,42 +143,35 @@ async function setLastSyncTime(phoneIccid: string = 'global', timestamp: string)
 }
 
 /**
- * Get cached messages for a phone (or all)
+ * Get cached messages for a phone (or all). A stored row that is not a
+ * message as the API returns it is skipped.
  */
 async function getCachedMessages(
   phoneIccid: string | null = null,
   limit = 500,
-): Promise<CachedMessage[]> {
+): Promise<ApiMessage[]> {
   try {
-    await initDB();
+    const database = await initDB();
 
-    return new Promise<CachedMessage[]>((resolve) => {
-      const transaction = db!.transaction([MESSAGES_STORE], 'readonly');
+    return await new Promise<ApiMessage[]>((resolve) => {
+      const transaction = database.transaction([MESSAGES_STORE], 'readonly');
       const store = transaction.objectStore(MESSAGES_STORE);
 
-      const messages: CachedMessage[] = [];
-      let request;
+      const messages: ApiMessage[] = [];
+      // Newest first: for one phone by its index, for all by the timestamp index.
+      const request = phoneIccid
+        ? store.index('phone_iccid').openCursor(IDBKeyRange.only(phoneIccid), 'prev')
+        : store.index('timestamp').openCursor(null, 'prev');
 
-      if (phoneIccid) {
-        // Get messages for specific phone, sorted by timestamp desc
-        const index = store.index('phone_iccid');
-        request = index.openCursor(IDBKeyRange.only(phoneIccid), 'prev');
-      } else {
-        // Get all messages, sorted by timestamp desc
-        const index = store.index('timestamp');
-        request = index.openCursor(null, 'prev');
-      }
-
-      request.onsuccess = (event) => {
-        const cursor = (event.target as IDBRequest<IDBCursorWithValue | null>).result;
+      request.onsuccess = () => {
+        const cursor = request.result;
         if (cursor && messages.length < limit) {
-          messages.push(cursor.value);
+          const message = v.safeParse(ApiMessage, cursor.value);
+          if (message.success) messages.push(message.output);
           cursor.continue();
         } else {
           // Sort by timestamp descending
-          messages.sort(
-            (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
-          );
+          messages.sort((a, b) => timeOf(b) - timeOf(a));
           resolve(messages);
         }
       };
@@ -188,25 +190,25 @@ async function getCachedMessages(
 /**
  * Cache messages
  */
-async function cacheMessages(messages: CachedMessage[]): Promise<void> {
-  if (!messages || messages.length === 0) return;
+async function cacheMessages(messages: readonly ApiMessage[]): Promise<void> {
+  if (messages.length === 0) return;
 
   try {
-    await initDB();
+    const database = await initDB();
 
-    return new Promise<void>((resolve) => {
-      const transaction = db!.transaction([MESSAGES_STORE], 'readwrite');
+    await new Promise<void>((resolve) => {
+      const transaction = database.transaction([MESSAGES_STORE], 'readwrite');
       const store = transaction.objectStore(MESSAGES_STORE);
 
       let completed = 0;
       const total = messages.length;
 
-      messages.forEach((msg) => {
+      for (const msg of messages) {
         const request = store.put(msg);
         request.onsuccess = () => {
           completed++;
           if (completed === total) {
-            console.debug(`[MessageCache] Cached ${total} messages`);
+            console.debug(`[MessageCache] Cached ${String(total)} messages`);
             resolve();
           }
         };
@@ -215,9 +217,7 @@ async function cacheMessages(messages: CachedMessage[]): Promise<void> {
           completed++;
           if (completed === total) resolve();
         };
-      });
-
-      if (total === 0) resolve();
+      }
     });
   } catch (err) {
     console.warn('[MessageCache] cacheMessages error:', err);
@@ -229,10 +229,10 @@ async function cacheMessages(messages: CachedMessage[]): Promise<void> {
  */
 async function clearCache(): Promise<void> {
   try {
-    await initDB();
+    const database = await initDB();
 
-    return new Promise<void>((resolve, reject) => {
-      const transaction = db!.transaction([MESSAGES_STORE, META_STORE], 'readwrite');
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction([MESSAGES_STORE, META_STORE], 'readwrite');
 
       transaction.objectStore(MESSAGES_STORE).clear();
       transaction.objectStore(META_STORE).clear();
@@ -242,12 +242,20 @@ async function clearCache(): Promise<void> {
         resolve();
       };
 
-      transaction.onerror = () => reject(transaction.error);
+      transaction.onerror = () => {
+        reject(transaction.error ?? new Error('IndexedDB clear failed'));
+      };
     });
   } catch (err) {
     console.warn('[MessageCache] clearCache error:', err);
     throw err;
   }
+}
+
+/** The phone a stored row belongs to, read without trusting the row. */
+function storedPhone(value: unknown): string {
+  const row = v.safeParse(v.object({ phone_iccid: v.nullish(v.string()) }), value);
+  return (row.success ? row.output.phone_iccid : null) ?? 'global';
 }
 
 /**
@@ -256,19 +264,19 @@ async function clearCache(): Promise<void> {
  */
 async function pruneCache(maxMessagesPerPhone = 200): Promise<number> {
   try {
-    await initDB();
+    const database = await initDB();
 
     // Get all unique phone ICCIDs
     const phones = new Set<string>();
-    const transaction1 = db!.transaction([MESSAGES_STORE], 'readonly');
-    const store1 = transaction1.objectStore(MESSAGES_STORE);
+    const readTransaction = database.transaction([MESSAGES_STORE], 'readonly');
+    const readStore = readTransaction.objectStore(MESSAGES_STORE);
 
     await new Promise<void>((resolve) => {
-      const request = store1.openCursor();
-      request.onsuccess = (event) => {
-        const cursor = (event.target as IDBRequest<IDBCursorWithValue | null>).result;
+      const request = readStore.openCursor();
+      request.onsuccess = () => {
+        const cursor = request.result;
         if (cursor) {
-          phones.add((cursor.value as CachedMessage).phone_iccid ?? 'global');
+          phones.add(storedPhone(cursor.value));
           cursor.continue();
         } else {
           resolve();
@@ -284,22 +292,24 @@ async function pruneCache(maxMessagesPerPhone = 200): Promise<number> {
 
       if (messages.length > maxMessagesPerPhone) {
         const toDelete = messages.slice(maxMessagesPerPhone);
-        const transaction2 = db!.transaction([MESSAGES_STORE], 'readwrite');
-        const store2 = transaction2.objectStore(MESSAGES_STORE);
+        const writeTransaction = database.transaction([MESSAGES_STORE], 'readwrite');
+        const writeStore = writeTransaction.objectStore(MESSAGES_STORE);
 
         for (const msg of toDelete) {
-          store2.delete(msg.id);
+          writeStore.delete(msg.id);
           totalDeleted++;
         }
 
-        await new Promise((resolve) => {
-          transaction2.oncomplete = resolve;
+        await new Promise<void>((resolve) => {
+          writeTransaction.oncomplete = () => {
+            resolve();
+          };
         });
       }
     }
 
     if (totalDeleted > 0) {
-      console.debug(`[MessageCache] Pruned ${totalDeleted} old messages`);
+      console.debug(`[MessageCache] Pruned ${String(totalDeleted)} old messages`);
     }
 
     return totalDeleted;

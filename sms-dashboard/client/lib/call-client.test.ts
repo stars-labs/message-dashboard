@@ -40,8 +40,8 @@ describe('number handling', () => {
 });
 
 describe('call panel rules', () => {
-  const ringing = { direction: 'inbound', state: 'ringing' };
-  const dialing = { direction: 'outbound', state: 'connecting' };
+  const ringing = { direction: 'inbound', state: 'ringing' } as const;
+  const dialing = { direction: 'outbound', state: 'connecting' } as const;
 
   test('dialing needs a clear line because only one call may exist', () => {
     expect(canDial(null)).toBe(true);
@@ -62,11 +62,10 @@ describe('call panel rules', () => {
     expect(canHangup(null)).toBe(false);
   });
 
-  test('labels each state and falls back to the raw state', () => {
+  test('labels each state', () => {
     expect(callStateLabel(null)).toBeNull();
     expect(callStateLabel(ringing)).toBe('来电');
     expect(callStateLabel(dialing)).toBe('正在连接');
-    expect(callStateLabel({ state: 'something-new' })).toBe('something-new');
   });
 });
 
@@ -100,7 +99,8 @@ describe('call display helpers', () => {
   });
 
   test('callSim resolves the SIM a call is using', () => {
-    expect(callSim({ iccid: phones[1].iccid }, phones)).toBe(phones[1]);
+    const [, second] = phones;
+    expect(callSim({ iccid: second?.iccid ?? '' }, phones)).toBe(second ?? null);
     expect(callSim({ iccid: 'unknown' }, phones)).toBeNull();
     expect(callSim(null, phones)).toBeNull();
   });
@@ -134,13 +134,16 @@ describe('call display helpers', () => {
 });
 
 describe('call log helpers', () => {
-  const missed = { direction: 'inbound', outcome: 'missed', started_at: '2026-09-17T10:00:00Z' };
+  const missed = {
+    direction: 'inbound',
+    outcome: 'missed',
+    started_at: '2026-09-17T10:00:00Z',
+  } as const;
 
   test('outcomes read as plain Chinese', () => {
     expect(callOutcomeLabel({ outcome: 'answered' })).toBe('已接通');
     expect(callOutcomeLabel({ outcome: 'missed' })).toBe('未接');
     expect(callOutcomeLabel({ outcome: 'cancelled' })).toBe('已取消');
-    expect(callOutcomeLabel({})).toBe('');
   });
 
   test('only unanswered inbound calls count as missed', () => {
@@ -153,7 +156,7 @@ describe('call log helpers', () => {
     const entries = [
       missed,
       { ...missed, started_at: '2026-09-17T09:00:00Z' },
-      { direction: 'inbound', outcome: 'answered', started_at: '2026-09-17T11:00:00Z' },
+      { direction: 'inbound', outcome: 'answered', started_at: '2026-09-17T11:00:00Z' } as const,
     ];
     expect(countMissedSince(entries, '2026-09-17T09:30:00Z')).toBe(1);
     expect(countMissedSince(entries, null)).toBe(2);

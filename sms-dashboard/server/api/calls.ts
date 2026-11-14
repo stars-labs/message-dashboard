@@ -24,32 +24,19 @@ import { D1_MAX_BOUND_PARAMETERS, queryAll, queryFirst, type D1 } from '../lib/d
 import { OBJECT_MESSAGE, readBody, type MissingKeyMessages } from '../lib/request-body.js';
 import { handleAuth0, type AuthRequest } from '../middleware/auth0.js';
 import { authorize } from '../middleware/authorize.js';
-
-const DIRECTIONS = ['inbound', 'outbound'] as const;
-const CALL_STATES = ['ringing', 'connecting', 'bridging', 'active', 'ending', 'ended'] as const;
-const ENDED_OUTCOMES = ['answered', 'missed', 'rejected', 'cancelled', 'failed'] as const;
-
-type Direction = (typeof DIRECTIONS)[number];
-
-/** The live call record the fleet Durable Object holds. */
-const LiveCall = v.object({
-  id: v.string(),
-  direction: v.picklist(DIRECTIONS),
-  state: v.picklist(CALL_STATES),
-  iccid: v.string(),
-  number: v.nullable(v.string()),
-  started_at: v.string(),
-  requested_by: v.optional(v.nullable(v.string())),
-  answered_at: v.optional(v.string()),
-  answered_by: v.optional(v.nullable(v.string())),
-  session_id: v.optional(v.string()),
-  modem_session_id: v.optional(v.string()),
-  bridge_started: v.optional(v.literal(true)),
-  ended_at: v.optional(v.string()),
-  adapters: v.optional(v.object({ up: v.optional(v.string()), down: v.optional(v.string()) })),
-});
-
-type LiveCall = v.InferOutput<typeof LiveCall>;
+import {
+  CallHistoryRow,
+  IceServersResponse,
+  LiveCall,
+  SessionDescription,
+  type CallConnectResponse,
+  type CallHangupResponse,
+  type CallHistoryResponse,
+  type CallMediaResponse,
+  type CallRenegotiateResponse,
+  type CallStateResponse,
+  type Direction,
+} from '../../shared/api/calls.js';
 
 /** What the Durable Object answers to a read: the call and the revision it is at. */
 const CallSnapshot = v.nullable(v.object({ call: LiveCall, revision: v.string() }));
@@ -57,9 +44,7 @@ const CallSnapshot = v.nullable(v.object({ call: LiveCall, revision: v.string() 
 /** The fields of a Realtime SFU response the bridge reads; an error is reported in a 200 too. */
 const SfuBody = v.object({
   sessionId: v.optional(v.string()),
-  sessionDescription: v.optional(
-    v.object({ type: v.picklist(['offer', 'answer']), sdp: v.string() }),
-  ),
+  sessionDescription: v.optional(SessionDescription),
   requiresImmediateRenegotiation: v.optional(v.boolean()),
   tracks: v.optional(
     v.array(
@@ -74,7 +59,6 @@ const SfuBody = v.object({
 });
 
 type SfuBody = v.InferOutput<typeof SfuBody>;
-type SessionDescription = NonNullable<SfuBody['sessionDescription']>;
 
 /** `detail` is what the SFU sent, passed to the browser when a step fails. */
 interface SfuResult {
@@ -83,16 +67,6 @@ interface SfuResult {
   body: SfuBody;
   detail: unknown;
 }
-
-const IceServers = v.object({
-  iceServers: v.array(
-    v.object({
-      urls: v.union([v.string(), v.array(v.string())]),
-      username: v.optional(v.string()),
-      credential: v.optional(v.string()),
-    }),
-  ),
-});
 
 const Configured = v.pipe(v.string(), v.minLength(1));
 
@@ -508,23 +482,6 @@ const HISTORY_COLUMNS = `id, direction, iccid, remote_number, outcome, end_reaso
          started_at, answered_at, ended_at, duration_seconds, requested_by, answered_by`;
 
 /** A finished call; the history query never selects one still in progress. */
-const CallHistoryRow = v.object({
-  id: v.string(),
-  direction: v.picklist(DIRECTIONS),
-  iccid: v.string(),
-  remote_number: v.nullable(v.string()),
-  outcome: v.picklist(ENDED_OUTCOMES),
-  end_reason: v.nullable(v.string()),
-  started_at: v.string(),
-  answered_at: v.nullable(v.string()),
-  ended_at: v.nullable(v.string()),
-  duration_seconds: v.number(),
-  requested_by: v.nullable(v.string()),
-  answered_by: v.nullable(v.string()),
-});
-
-type CallHistoryRow = v.InferOutput<typeof CallHistoryRow>;
-
 const OpenRingRow = v.object({
   id: v.string(),
   started_at: v.string(),
@@ -758,7 +715,7 @@ export function setupCallRoutes(router: Router): void {
   router.get('/api/calls/state', async (request) => {
     const blocked = await authorize(request, 'messages.read');
     if (blocked) return blocked;
-    return json({ call: await readCall(request.env) });
+    return json({ call: await readCall(request.env) } satisfies CallStateResponse);
   });
 
   // The call log. Read only when someone opens the history — never on the
@@ -789,7 +746,10 @@ export function setupCallRoutes(router: Router): void {
     );
 
     const page = rows.slice(0, limit);
-    return json({ calls: await enrichCallPage(DB, page), has_more: rows.length > limit });
+    return json({
+      calls: await enrichCallPage(DB, page),
+      has_more: rows.length > limit,
+    } satisfies CallHistoryResponse);
   });
 
   // Short-lived ICE servers for the browser's PeerConnection. The TURN token
@@ -812,11 +772,11 @@ export function setupCallRoutes(router: Router): void {
       },
     );
     const text = await response.text();
-    const iceServers = parseJson(text, IceServers);
+    const iceServers = parseJson(text, IceServersResponse);
     if (!response.ok || !iceServers.ok) {
       return json({ error: 'Could not issue ICE servers', detail: text }, 502);
     }
-    return json(iceServers.value);
+    return json(iceServers.value satisfies IceServersResponse);
   });
 
   // Place an outbound call: take the lock, then publish the browser mic.
@@ -851,7 +811,7 @@ export function setupCallRoutes(router: Router): void {
     if ('error' in media) return failMedia(env, call, media.error);
     call.session_id = media.sessionId;
     if (!(await writeCall(env, call))) return callChanged();
-    return json({ call, answer: media.answer });
+    return json({ call, answer: media.answer } satisfies CallMediaResponse);
   });
 
   // Answer the call the daemon reported as ringing.
@@ -885,7 +845,7 @@ export function setupCallRoutes(router: Router): void {
     if ('error' in media) return failMedia(env, call, media.error);
     call.session_id = media.sessionId;
     if (!(await writeCall(env, call))) return callChanged();
-    return json({ call, answer: media.answer });
+    return json({ call, answer: media.answer } satisfies CallMediaResponse);
   });
 
   // Bridge the browser session to the Pi. Called once the PeerConnection is up.
@@ -991,7 +951,7 @@ export function setupCallRoutes(router: Router): void {
       // keeps that earlier, truer timestamp.
       await logCallAnswered(env.DB, call.id, { at: new Date().toISOString() });
     }
-    return json({ call, offer: offer ?? null });
+    return json({ call, offer: offer ?? null } satisfies CallConnectResponse);
   });
 
   // Apply the browser's answer to the pull offer from /connect.
@@ -1025,7 +985,7 @@ export function setupCallRoutes(router: Router): void {
     call.state = 'active';
     if (!(await writeCall(env, call))) return callChanged();
     await logCallAnswered(env.DB, call.id, { at: new Date().toISOString() });
-    return json({ call });
+    return json({ call } satisfies CallRenegotiateResponse);
   });
 
   // Close the adapters for the requested call. Older clients omit the ID.
@@ -1039,7 +999,7 @@ export function setupCallRoutes(router: Router): void {
     const { call_id: callId } = parsed.value;
     const call = await beginEnding(env, (current) => callId === undefined || current.id === callId);
     if (!call) {
-      return json({ call: null, already_clear: true });
+      return json({ call: null, already_clear: true } satisfies CallHangupResponse);
     }
     await closeAdapters(env, call);
     await clearCall(env, call);
@@ -1047,7 +1007,7 @@ export function setupCallRoutes(router: Router): void {
 
     call.state = 'ended';
     call.ended_at = new Date().toISOString();
-    return json({ call });
+    return json({ call } satisfies CallHangupResponse);
   });
 
   // Daemon-reported incoming call, repeated on every RING to keep it alive.
