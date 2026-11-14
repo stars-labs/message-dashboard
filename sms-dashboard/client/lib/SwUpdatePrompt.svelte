@@ -1,10 +1,10 @@
-<script>
+<script lang="ts">
   /**
    * "New version available" bar.
    *
-   * Registration lives here rather than in main.js so the prompt state and the
+   * Registration lives here rather than in main.ts so the prompt state and the
    * registration callbacks cannot drift apart. All the decision logic is in
-   * sw-update.js; this file is the rendering and the wiring to the browser.
+   * sw-update.ts; this file is the rendering and the wiring to the browser.
    */
   import { onMount } from 'svelte';
   import {
@@ -14,13 +14,29 @@
     dismiss,
     needRefresh,
     registerError,
+    type RegistrationLike,
   } from './sw-update.js';
 
-  let { registerServiceWorker = null } = $props();
+  type Updater = (reloadPage?: boolean) => Promise<void>;
+
+  /** The part of the PWA plugin's registerSW this uses; the plugin's own fits it. */
+  type RegisterServiceWorker = (options: {
+    immediate: boolean;
+    onNeedRefresh(): void;
+    onRegisteredSW(swUrl: string, registration: RegistrationLike | undefined): void;
+    onRegisterError(): void;
+  }) => Updater;
+
+  interface Props {
+    /** Stands in for registerSW, so tests need no service worker. */
+    registerServiceWorker?: RegisterServiceWorker | null;
+  }
+
+  let { registerServiceWorker = null }: Props = $props();
 
   const update = $state(createUpdateState());
   const checker = createUpdateChecker(update);
-  let updateSW = null;
+  let updateSW: Updater | null = null;
 
   export async function checkForUpdate() {
     return checker.check();
@@ -34,14 +50,20 @@
       // so a static import would break `vite dev` runs without it. Tests inject the
       // same registration contract without replacing browser globals.
       try {
-        const registerSW =
-          registerServiceWorker || (await import('virtual:pwa-register')).registerSW;
+        const registerSW: RegisterServiceWorker =
+          registerServiceWorker ?? (await import('virtual:pwa-register')).registerSW;
         if (disposed) return;
         updateSW = registerSW({
           immediate: true,
-          onNeedRefresh: () => needRefresh(update),
-          onRegisteredSW: (_swUrl, registration) => checker.setRegistration(registration),
-          onRegisterError: () => registerError(update),
+          onNeedRefresh: () => {
+            needRefresh(update);
+          },
+          onRegisteredSW: (_swUrl, registration) => {
+            checker.setRegistration(registration);
+          },
+          onRegisterError: () => {
+            registerError(update);
+          },
         });
       } catch {
         // No service worker support, or the virtual module is unavailable. The app is
@@ -81,14 +103,18 @@
     >
       <span class="text-sm flex-1">新版本已准备好</span>
       <button
-        onclick={() => applyUpdate(update, updateSW)}
+        onclick={() => {
+          applyUpdate(update, updateSW);
+        }}
         class="shrink-0 px-3 py-1.5 rounded-md bg-blue-600 text-white text-xs font-semibold
           hover:bg-blue-700 transition-colors"
       >
         重新载入
       </button>
       <button
-        onclick={() => dismiss(update)}
+        onclick={() => {
+          dismiss(update);
+        }}
         aria-label="稍后再说"
         class="shrink-0 opacity-50 hover:opacity-100 transition-opacity text-lg leading-none"
       >

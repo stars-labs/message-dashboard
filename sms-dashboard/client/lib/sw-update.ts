@@ -15,7 +15,7 @@ interface UpdateState {
 }
 
 /** The subset of ServiceWorkerRegistration this uses. */
-interface RegistrationLike {
+export interface RegistrationLike {
   waiting: unknown;
   update(): Promise<unknown>;
 }

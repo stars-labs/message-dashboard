@@ -1,15 +1,23 @@
-<script>
-  import { formatTaskAge, getDaemonStatusMeta } from './daemon-status.js';
+<script lang="ts">
+  import { formatTaskAge, getDaemonStatusMeta, type DaemonView } from './daemon-status.js';
   import { formatTimeAgo } from './time.js';
   import { overlay } from './overlay.js';
+  import { textOr } from '../../shared/text.js';
 
-  let { status, refreshing = false, onRefresh = null, onClose = null } = $props();
+  interface Props {
+    status: DaemonView | null;
+    refreshing?: boolean;
+    onRefresh?: (() => void) | null;
+    onClose?: (() => void) | null;
+  }
+
+  let { status, refreshing = false, onRefresh = null, onClose = null }: Props = $props();
 
   let meta = $derived(getDaemonStatusMeta(status?.status));
   let snapshot = $derived(status?.snapshot ?? null);
 
-  function formatBacklogAge(seconds) {
-    return seconds === null || seconds === undefined ? '无积压' : formatTaskAge(seconds);
+  function formatBacklogAge(seconds: number | null) {
+    return seconds === null ? '无积压' : formatTaskAge(seconds);
   }
 </script>
 
@@ -75,7 +83,7 @@
         ? 'bg-red-50'
         : 'bg-amber-50'}"
     >
-      {#each status.reasons as reason}
+      {#each status.reasons as reason, index (index)}
         <p
           class="text-xs leading-relaxed {status.status === 'offline' || status.status === 'error'
             ? 'text-red-700'
@@ -108,7 +116,7 @@
       <div class="flex items-center justify-between gap-3 px-4 py-2.5">
         <p class="text-xs font-medium text-stone-700">最老积压</p>
         <span class="text-[11px] font-mono tabular-nums text-stone-500">
-          {formatBacklogAge(snapshot.queue?.oldest_unacknowledged_age_seconds)}
+          {formatBacklogAge(snapshot.queue.oldest_unacknowledged_age_seconds)}
         </span>
       </div>
     </div>
@@ -117,20 +125,20 @@
   <footer class="grid grid-cols-4 border-t border-stone-200 bg-stone-50 rounded-b-lg">
     <div class="px-3 py-2.5 border-r border-stone-200">
       <p class="text-[10px] text-stone-400">待处理</p>
-      <p class="text-xs font-mono text-stone-700 mt-0.5">{snapshot?.queue?.pending ?? '—'}</p>
+      <p class="text-xs font-mono text-stone-700 mt-0.5">{snapshot?.queue.pending ?? '—'}</p>
     </div>
     <div class="px-3 py-2.5 border-r border-stone-200">
       <p class="text-[10px] text-stone-400">上传中</p>
-      <p class="text-xs font-mono text-stone-700 mt-0.5">{snapshot?.queue?.in_flight ?? '—'}</p>
+      <p class="text-xs font-mono text-stone-700 mt-0.5">{snapshot?.queue.in_flight ?? '—'}</p>
     </div>
     <div class="px-3 py-2.5 border-r border-stone-200">
       <p class="text-[10px] text-stone-400">人工处理</p>
-      <p class="text-xs font-mono text-stone-700 mt-0.5">{snapshot?.queue?.dead_letter ?? '—'}</p>
+      <p class="text-xs font-mono text-stone-700 mt-0.5">{snapshot?.queue.dead_letter ?? '—'}</p>
     </div>
     <div class="px-3 py-2.5 min-w-0">
       <p class="text-[10px] text-stone-400">版本</p>
       <p class="text-xs font-mono text-stone-700 mt-0.5 truncate" title={snapshot?.version}>
-        {snapshot?.version || '—'}
+        {textOr(snapshot?.version, '—')}
       </p>
     </div>
   </footer>

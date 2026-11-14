@@ -1,16 +1,22 @@
-<script>
-  import { onMount } from 'svelte';
+<script lang="ts">
+  import { onMount, type Snippet } from 'svelte';
+  import { textOr } from '../../shared/text.js';
   import { isForeignError, toError } from './error-origin.js';
 
-  let { componentName = 'Unknown', children } = $props();
+  interface Props {
+    componentName?: string;
+    children?: Snippet;
+  }
+
+  let { componentName = 'Unknown', children }: Props = $props();
 
   let hasError = $state(false);
   let errorMessage = $state('');
-  let errorDetails = $state(null);
+  let errorDetails = $state<Error | null>(null);
 
-  function handleError(error) {
+  function handleError(error: Error) {
     hasError = true;
-    errorMessage = error.message || 'An unexpected error occurred';
+    errorMessage = textOr(error.message, 'An unexpected error occurred');
     errorDetails = error;
     console.error(`[ErrorBoundary] Error in ${componentName}:`, error);
   }
@@ -26,24 +32,26 @@
     // thrown by browser extensions. A MetaMask injection failure used to blank the whole
     // dashboard. Foreign errors are left alone: not shown, and not preventDefault()ed, so
     // they still reach the console for whoever actually owns them.
-    const handleWindowError = (event) => {
-      if (!event.error) return;
+    const handleWindowError = (event: ErrorEvent) => {
+      const thrown: unknown = event.error;
+      if (!thrown) return;
+      const error = toError(thrown);
 
       if (
         isForeignError({
-          message: event.message ?? event.error?.message,
+          message: textOr(event.message, error.message),
           filename: event.filename,
-          stack: event.error?.stack,
+          stack: error.stack,
         })
       ) {
         return;
       }
 
-      handleError(event.error);
+      handleError(error);
       event.preventDefault();
     };
 
-    const handleUnhandledRejection = (event) => {
+    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
       const error = toError(event.reason);
 
       if (isForeignError({ message: error.message, stack: error.stack })) return;

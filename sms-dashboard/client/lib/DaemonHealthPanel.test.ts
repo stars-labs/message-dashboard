@@ -12,8 +12,10 @@ describe('DaemonHealthPanel v3 health contract', () => {
           status: 'healthy',
           last_heartbeat: '2026-09-03 08:00:00',
           reasons: [],
+          connected: true,
           snapshot: {
             schema_version: 3,
+            session_id: 'session-1',
             version: '8.0.1',
             uptime_seconds: 600,
             last_message_read_success_age_seconds: 4,

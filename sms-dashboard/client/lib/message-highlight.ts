@@ -12,7 +12,7 @@ export const DEFAULT_KEYWORD_COLOR = '#3B82F6';
 const HEX_COLOR = /^#(?:[0-9A-Fa-f]{3,4}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/;
 
 /** A keyword as stored, as the highlighter reads it. */
-interface HighlightKeyword {
+export interface HighlightKeyword {
   keyword?: string | null;
   color?: string | null;
   tag?: string | null;
@@ -46,7 +46,7 @@ export function safeColor(color: unknown): string {
  */
 export function getSegments(
   text: string | null | undefined,
-  kws: HighlightKeyword[] | null | undefined,
+  kws: readonly HighlightKeyword[] | null | undefined,
 ): HighlightSegment[] | null {
   if (!text || !kws || kws.length === 0) return null;
 

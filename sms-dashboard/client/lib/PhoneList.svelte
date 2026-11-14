@@ -335,7 +335,6 @@
                 signal={phone.signal || 0}
                 status={phone.status || 'offline'}
                 compact={true}
-                daemonConnected={daemonStatus.connected}
                 isInitialLoad={isLoading}
               />
             </div>

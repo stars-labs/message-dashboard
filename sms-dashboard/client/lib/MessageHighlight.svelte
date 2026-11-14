@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   // Renders SMS content with keyword matches highlighted.
   //
   // This component displays fully attacker-controlled text: anyone who knows one of the
@@ -10,10 +10,15 @@
   //
   // There is no `{@html}` here any more. Matches are emitted as real elements and every
   // interpolation — text, tag and colour — goes through Svelte's escaping. The slicing
-  // logic lives in message-highlight.js so it can be unit tested.
-  import { getSegments } from './message-highlight.js';
+  // logic lives in message-highlight.ts so it can be unit tested.
+  import { getSegments, type HighlightKeyword } from './message-highlight.js';
 
-  let { content = '', keywords = [] } = $props();
+  interface Props {
+    content?: string | null;
+    keywords?: readonly HighlightKeyword[];
+  }
+
+  let { content = '', keywords = [] }: Props = $props();
 
   let segments = $derived(getSegments(content, keywords));
 </script>
@@ -22,7 +27,7 @@
      runs of the original SMS text, so any newline or indentation Svelte kept as a text
      node would insert spaces into the rendered message. -->
 <span class="break-words"
-  >{#if segments}{#each segments as segment}{#if segment.match}<mark
+  >{#if segments}{#each segments as segment, index (index)}{#if segment.match}<mark
           class="kw-hl"
           style:--kw-color={segment.match.color}
           title={segment.match.tag}>{segment.text}</mark

@@ -1,3 +1,18 @@
+import type { HealthSnapshot } from '../../shared/api/daemon-status.js';
+
+/**
+ * The daemon status the dashboard shows: the last /api/daemon/status answer,
+ * or `error` when it could not be read, with whether the daemon counts as up.
+ */
+export interface DaemonView {
+  status: string;
+  message?: string;
+  reasons?: string[];
+  snapshot?: HealthSnapshot | null;
+  last_heartbeat?: string;
+  connected: boolean;
+}
+
 interface DaemonStatusMeta {
   label: string;
   dotClass: string;

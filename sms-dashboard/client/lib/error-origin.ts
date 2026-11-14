@@ -19,9 +19,9 @@ const IGNORABLE_MESSAGES = [
 ];
 
 interface ErrorSource {
-  filename?: string;
-  stack?: string;
-  message?: string;
+  filename?: string | undefined;
+  stack?: string | undefined;
+  message?: string | undefined;
 }
 
 /** True when the error did not come from application code. */
