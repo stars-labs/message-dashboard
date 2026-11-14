@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import * as v from 'valibot';
+import { BalanceCheck } from '../../shared/api/balance-checks.js';
 import type { Schema } from '../../shared/parse-json.js';
 import { createBalanceSchema } from '../../test/balance-schema.js';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
@@ -765,6 +766,10 @@ const QueuedCheck = v.object({
 
 const QueryBody = v.object({ success: v.literal(true), check: QueuedCheck });
 
+const ListedQueryBody = v.object({ success: v.literal(true), check: BalanceCheck });
+
+const QueuedIds = v.object({ outbound_message_id: v.nullable(v.string()) });
+
 const CheckRow = v.object({
   id: v.string(),
   sim_iccid: v.string(),
@@ -800,7 +805,7 @@ describe('POST /api/balance-checks/query', () => {
     const response = await balanceQueriesHandler.query(
       dashboardRequest({ method: 'POST', body: { phone_iccid: ICCID } }),
     );
-    const { check } = await read(response, QueryBody);
+    const { check } = await read(response, ListedQueryBody);
 
     expect(response.status).toBe(202);
     expect(check).toMatchObject({
@@ -808,25 +813,32 @@ describe('POST /api/balance-checks/query', () => {
       profile_id: MOBILE_PROFILE,
       method: 'sms',
       profile_carrier: 'China Mobile',
+      status: 'queued',
+      display_status: 'queued',
+      sim_index: 1,
+      sim_number: NUMBER,
+      outbound_content: '10086',
+      metrics: [],
     });
+    const { outbound_message_id: outboundId } = one(
+      QueuedIds,
+      `SELECT outbound_message_id FROM sim_balance_checks WHERE id = ?`,
+      check.id,
+    );
     expect(one(CheckRow, `SELECT * FROM sim_balance_checks WHERE id = ?`, check.id)).toEqual({
       id: check.id,
       sim_iccid: ICCID,
       profile_id: MOBILE_PROFILE,
       status: 'queued',
       step_index: 0,
-      outbound_message_id: check.outbound_message_id ?? null,
+      outbound_message_id: outboundId,
       requested_by_subject: USER,
       parser_version: 'cn-mobile-balance-v1',
     });
     expect(
-      one(
-        OutboundRow,
-        `SELECT ${OUTBOUND_COLUMNS} FROM messages WHERE id = ?`,
-        check.outbound_message_id ?? '',
-      ),
+      one(OutboundRow, `SELECT ${OUTBOUND_COLUMNS} FROM messages WHERE id = ?`, outboundId ?? ''),
     ).toEqual({
-      id: check.outbound_message_id ?? '',
+      id: outboundId ?? '',
       phone_iccid: ICCID,
       phone_number: NUMBER,
       content: '10086',
@@ -854,11 +866,11 @@ describe('POST /api/balance-checks/query', () => {
     const response = await balanceQueriesHandler.query(
       dashboardRequest({ method: 'POST', body: { phone_iccid: ICCID } }),
     );
-    const { check } = await read(response, QueryBody);
+    const { check } = await read(response, ListedQueryBody);
 
     expect(response.status).toBe(202);
     expect(check.profile_id).toBe(UNICOM_BROWSER_PROFILE);
-    expect(check.web_job_id).toBeString();
+    expect(check).toMatchObject({ method: 'browser', web_job_status: 'pending' });
     expect(
       one(CheckRow, `SELECT * FROM sim_balance_checks WHERE id = ?`, check.id).requested_by_subject,
     ).toBe(USER);
@@ -958,7 +970,7 @@ const BatchBody = v.object({
     queued: v.number(),
     failed_to_queue: v.number(),
   }),
-  checks: v.array(QueuedCheck),
+  checks: v.array(BalanceCheck),
   failures: v.array(
     v.object({ phone_iccid: v.string(), sim_index: v.number(), error: v.string() }),
   ),
@@ -1030,6 +1042,7 @@ describe('POST /api/balance-checks/query-batch', () => {
     expect(response.status).toBe(202);
     expect(body.summary).toMatchObject({ total: 120, eligible: 120, queued: 120 });
     expect(body.checks.map((check) => check.sim_iccid)).toEqual(iccids);
+    expect(body.checks.every((check) => check.display_status === 'queued')).toBe(true);
   });
 
   test('queues every eligible SIM of the selected methods, and reports one that fails', async () => {

@@ -246,10 +246,10 @@ export const QueuedBalanceCheck = v.union([
 
 export type QueuedBalanceCheck = v.InferOutput<typeof QueuedBalanceCheck>;
 
-/** POST /api/balance-checks/query. */
+/** POST /api/balance-checks/query: the check just queued, as the list shows it. */
 export const BalanceQueryResponse = v.object({
   success: v.literal(true),
-  check: QueuedBalanceCheck,
+  check: BalanceCheck,
 });
 
 export type BalanceQueryResponse = v.InferOutput<typeof BalanceQueryResponse>;
@@ -265,7 +265,7 @@ export const BalanceQueryBatchResponse = v.object({
     queued: v.number(),
     failed_to_queue: v.number(),
   }),
-  checks: v.array(QueuedBalanceCheck),
+  checks: v.array(BalanceCheck),
   failures: v.array(
     v.object({
       phone_iccid: v.string(),

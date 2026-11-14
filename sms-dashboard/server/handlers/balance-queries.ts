@@ -36,6 +36,7 @@ import {
   type BalanceQueryPreflightResponse,
   type BalanceQueryPreviewResponse,
   type BalanceQueryResponse,
+  type BalanceCheck,
   type QueuedBalanceCheck,
   type BalanceCheckDetailResponse,
   type BalanceCheckStatusResponse,
@@ -1195,25 +1196,14 @@ export async function updateBalanceCheckForSmsResult(
     .run();
 }
 
-export const balanceQueriesHandler = {
-  async list(request: ListRequest): Promise<Response> {
-    const url = new URL(request.url);
-    const phoneIccid = url.searchParams.get('phone_iccid');
-    const requestedLimit = Number.parseInt(url.searchParams.get('limit') ?? '100', 10);
-    const limit = Number.isFinite(requestedLimit)
-      ? Math.min(Math.max(requestedLimit, 1), 500)
-      : 100;
-    const conditions: string[] = [];
-    const params: string[] = [];
-
-    if (phoneIccid) {
-      conditions.push('c.sim_iccid = ?');
-      params.push(phoneIccid);
-    }
-
-    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-    const rows = await queryAll(
-      request.env.DB.prepare(
+/** Balance checks as the list shows them, newest first. */
+async function loadBalanceChecks(
+  db: D1<'all'>,
+  { where, params, limit }: { where: string; params: string[]; limit: number },
+): Promise<BalanceCheck[]> {
+  const rows = await queryAll(
+    db
+      .prepare(
         `
       SELECT
         c.id,
@@ -1285,16 +1275,60 @@ export const balanceQueriesHandler = {
       ORDER BY c.requested_at DESC
       LIMIT ?
     `,
-      ).bind(...params, limit),
-      ListRow,
-    );
+      )
+      .bind(...params, limit),
+    ListRow,
+  );
 
-    const checks = rows.map(({ metrics_json, skill_config, ...record }) => ({
-      ...record,
-      display_status: displayBalanceStatus(record),
-      profile_outputs: profileOutputs(skill_config),
-      metrics: parseMetrics(metrics_json),
-    }));
+  return rows.map(({ metrics_json, skill_config, ...record }) => ({
+    ...record,
+    display_status: displayBalanceStatus(record),
+    profile_outputs: profileOutputs(skill_config),
+    metrics: parseMetrics(metrics_json),
+  }));
+}
+
+/** The checks just queued, as the list shows them, in the order they were queued. */
+async function loadQueuedChecks(db: D1<'all'>, ids: readonly string[]): Promise<BalanceCheck[]> {
+  const byId = new Map<string, BalanceCheck>();
+  const chunkSize = D1_MAX_BOUND_PARAMETERS - 1;
+  for (let start = 0; start < ids.length; start += chunkSize) {
+    const chunk = ids.slice(start, start + chunkSize);
+    const checks = await loadBalanceChecks(db, {
+      where: `WHERE c.id IN (${chunk.map(() => '?').join(', ')})`,
+      params: chunk,
+      limit: chunk.length,
+    });
+    for (const check of checks) byId.set(check.id, check);
+  }
+  return ids.map((id) => {
+    const check = byId.get(id);
+    if (check === undefined) throw new Error(`Queued balance check ${id} is missing`);
+    return check;
+  });
+}
+
+export const balanceQueriesHandler = {
+  async list(request: ListRequest): Promise<Response> {
+    const url = new URL(request.url);
+    const phoneIccid = url.searchParams.get('phone_iccid');
+    const requestedLimit = Number.parseInt(url.searchParams.get('limit') ?? '100', 10);
+    const limit = Number.isFinite(requestedLimit)
+      ? Math.min(Math.max(requestedLimit, 1), 500)
+      : 100;
+    const conditions: string[] = [];
+    const params: string[] = [];
+
+    if (phoneIccid) {
+      conditions.push('c.sim_iccid = ?');
+      params.push(phoneIccid);
+    }
+
+    const checks = await loadBalanceChecks(request.env.DB, {
+      where: conditions.length ? `WHERE ${conditions.join(' AND ')}` : '',
+      params,
+      limit,
+    });
 
     return json({ success: true, data: checks } satisfies BalanceChecksResponse);
   },
@@ -1473,7 +1507,9 @@ export const balanceQueriesHandler = {
       );
     }
 
-    const check = await queueBalanceCheck(request.env.DB, item, requestedBySubject);
+    const queued = await queueBalanceCheck(request.env.DB, item, requestedBySubject);
+    const [check] = await loadQueuedChecks(request.env.DB, [queued.id]);
+    if (check === undefined) throw new Error(`Queued balance check ${queued.id} is missing`);
     return json({ success: true, check } satisfies BalanceQueryResponse, 202);
   },
 
@@ -1486,7 +1522,7 @@ export const balanceQueriesHandler = {
 
     const plan = await loadBalanceQueryPlan(request.env.DB, { scope });
     const eligible = filterBalancePlanByMethods(plan, methods);
-    const checks: QueuedBalanceCheck[] = [];
+    const queuedIds: string[] = [];
     const failures: { phone_iccid: string; sim_index: number; error: string }[] = [];
 
     // Queue on the server, one audited transaction per SIM. The daemon fetch endpoint
@@ -1494,7 +1530,7 @@ export const balanceQueriesHandler = {
     // normal user SMS delivery.
     for (const item of eligible) {
       try {
-        checks.push(await queueBalanceCheck(request.env.DB, item, requestedBySubject));
+        queuedIds.push((await queueBalanceCheck(request.env.DB, item, requestedBySubject)).id);
       } catch (error) {
         failures.push({
           phone_iccid: item.phone.iccid,
@@ -1503,6 +1539,8 @@ export const balanceQueriesHandler = {
         });
       }
     }
+
+    const checks = await loadQueuedChecks(request.env.DB, queuedIds);
 
     return json(
       {
