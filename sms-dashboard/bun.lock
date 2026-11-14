@@ -24,6 +24,7 @@
         "eslint-plugin-svelte": "3.24.1",
         "fake-indexeddb": "6.2.8",
         "knip": "5.88.1",
+        "playwright-core": "1.62.1",
         "postcss": "^8.5.6",
         "postcss-selector-parser": "^7.2.1",
         "postcss-value-parser": "^4.2.0",

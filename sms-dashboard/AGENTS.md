@@ -50,7 +50,11 @@ See [docs/deployment.md](../docs/deployment.md).
 ## Verification
 
 - Server changes: `bun run test`
-- Frontend changes: `bun run build` + check desktop and 440px mobile layouts
+- Frontend changes: `bun run build` + check desktop and 440px mobile layouts.
+  With `dev-server` running, `bun run screenshots -- --profile <dir> --out <dir>`
+  captures every view at both widths and writes `report.html` with console
+  errors and failed requests. Keep the profile outside the repo; the first run
+  opens a window for the Auth0 login.
 - Cross-component: run every affected component's gate
 
 ## UI rules
