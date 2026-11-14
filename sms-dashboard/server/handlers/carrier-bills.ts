@@ -2,12 +2,22 @@ import { json } from '../lib/response.js';
 import * as v from 'valibot';
 import { parseJson, readJson } from '../../shared/parse-json.js';
 import { queryAll, queryFirst, type D1, type D1Batch } from '../lib/d1.js';
+import {
+  CarrierBillingLinkedSim,
+  type CarrierBillingAccountsResponse,
+} from '../../shared/api/carrier-billing.js';
+import {
+  BILL_URGENCIES,
+  CarrierBill,
+  CarrierBillEvent,
+  CarrierBillSourceMessage,
+  type CarrierBillResponse,
+  type CarrierBillsResponse,
+} from '../../shared/api/carrier-bills.js';
 
-type BillUrgency = 'needs_review' | 'paid' | 'waived' | 'overdue' | 'due_soon' | 'open';
+type BillUrgency = (typeof BILL_URGENCIES)[number];
 
 type BillAction = 'payment_planned' | 'mark_paid' | 'waive' | 'reopen';
-
-const ActionStatus = v.picklist(['unpaid', 'payment_planned', 'paid', 'waived', 'needs_review']);
 
 const BILL_COLUMNS = [
   'id',
@@ -32,57 +42,18 @@ const BILL_COLUMNS = [
 
 /** A carrier_bills row joined with its account and notification SIM. */
 const BillRow = v.object({
-  id: v.string(),
-  billing_account_id: v.string(),
-  source_message_id: v.nullable(v.string()),
-  amount_minor: v.number(),
-  currency: v.string(),
-  due_date: v.string(),
-  received_at: v.string(),
-  parser_version: v.string(),
-  action_status: ActionStatus,
-  payment_planned_at: v.nullable(v.string()),
-  paid_at: v.nullable(v.string()),
-  paid_by: v.nullable(v.string()),
-  operator_note: v.nullable(v.string()),
-  version: v.number(),
-  created_at: v.string(),
-  updated_at: v.string(),
-  account_display_name: v.string(),
-  carrier: v.string(),
+  ...v.omit(CarrierBill, ['account_ref_masked', 'notification_sim', 'urgency', 'days_remaining'])
+    .entries,
   account_ref_last4: v.string(),
-  notification_sim_iccid: v.string(),
   notification_sim_index: v.nullable(v.number()),
   notification_sim_number: v.nullable(v.string()),
-  linked_sim_count: v.number(),
 });
 
 type BillRow = v.InferOutput<typeof BillRow>;
 
-const BillMemberRow = v.object({
-  iccid: v.string(),
-  sim_index: v.nullable(v.number()),
-  number: v.nullable(v.string()),
-  verification_source: v.string(),
-  verified_at: v.string(),
-  verified_by: v.string(),
-});
-
 const BillEventRow = v.object({
-  id: v.string(),
-  event_type: v.string(),
-  actor_type: v.string(),
-  actor_subject: v.nullable(v.string()),
-  source_message_id: v.nullable(v.string()),
+  ...v.omit(CarrierBillEvent, ['metadata']).entries,
   metadata_json: v.string(),
-  created_at: v.string(),
-});
-
-const SourceMessageRow = v.object({
-  id: v.string(),
-  sender: v.nullable(v.string()),
-  content: v.string(),
-  timestamp: v.nullable(v.string()),
 });
 
 const PriorEventRow = v.object({ bill_id: v.string() });
@@ -104,12 +75,7 @@ const AccountRow = v.object({
 
 const AccountMemberRow = v.object({
   billing_account_id: v.string(),
-  iccid: v.string(),
-  sim_index: v.nullable(v.number()),
-  number: v.nullable(v.string()),
-  verification_source: v.string(),
-  verified_at: v.string(),
-  verified_by: v.string(),
+  ...CarrierBillingLinkedSim.entries,
 });
 
 /** Request body of the four bill mutations; the note is stored trimmed. */
@@ -251,7 +217,7 @@ async function billDetail(db: D1<'all' | 'first'>, id: string | undefined, today
     `,
         )
         .bind(row.billing_account_id),
-      BillMemberRow,
+      CarrierBillingLinkedSim,
     ),
     queryAll(
       db
@@ -279,7 +245,7 @@ async function billDetail(db: D1<'all' | 'first'>, id: string | undefined, today
     `,
           )
           .bind(row.source_message_id),
-        SourceMessageRow,
+        CarrierBillSourceMessage,
       )
     : null;
 
@@ -517,7 +483,7 @@ export const carrierBillsHandler = {
         left.due_date.localeCompare(right.due_date) ||
         left.id.localeCompare(right.id),
     );
-    return json({ success: true, today, bills });
+    return json({ success: true, today, bills } satisfies CarrierBillsResponse);
   },
 
   async listAccounts(request: AccountsRequest) {
@@ -584,12 +550,14 @@ export const carrierBillsHandler = {
           .filter((member) => member.billing_account_id === account.id)
           .map(({ billing_account_id: _accountId, ...member }) => member),
       })),
-    });
+    } satisfies CarrierBillingAccountsResponse);
   },
 
   async get(request: GetRequest, { today = singaporeDate() }: { today?: string } = {}) {
     const bill = await billDetail(request.env.DB, request.params?.['id'], today);
-    return bill ? json({ success: true, bill }) : json({ error: 'Bill not found' }, 404);
+    return bill
+      ? json({ success: true, bill } satisfies CarrierBillResponse)
+      : json({ error: 'Bill not found' }, 404);
   },
 
   paymentPlanned: (request: MutationRequest) => mutateBill(request, 'payment_planned'),

@@ -3,22 +3,20 @@ import * as v from 'valibot';
 import { queryAll, queryFirst, type D1, type D1Batch } from '../lib/d1.js';
 import { readBody, type MissingKeyMessages } from '../lib/request-body.js';
 import { authorizeRunnerControl, RUNNER_SCOPES, type RunnerRequest } from '../utils/runner-auth.js';
+import {
+  BalanceRunner,
+  BalanceRunnerCapability,
+  RUNNER_CAPABILITIES,
+  RUNNER_STATES,
+  type BalanceRunnerCapabilitySummary,
+  type BalanceRunnersResponse,
+} from '../../shared/api/balance-runners.js';
 
 const ONLINE_SECONDS = 90;
 
-const RUNNER_CAPABILITIES = ['sms_ai', 'carrier_browser'] as const;
-const RUNNER_STATES = [
-  'starting',
-  'ready',
-  'busy',
-  'degraded',
-  'configuration_required',
-  'stopping',
-] as const;
 const AUTH_MODES = ['legacy_api_key', 'auth0_device'] as const;
 
 type RunnerCapability = (typeof RUNNER_CAPABILITIES)[number];
-type RunnerState = (typeof RUNNER_STATES)[number];
 
 const INVALID_HEARTBEAT = 'Invalid runner heartbeat';
 
@@ -85,38 +83,7 @@ const ExistingInstallationRow = v.object({
 });
 
 /** An installation owned by a dashboard user; the status query reads device installations only. */
-const InstallationRow = v.object({
-  id: v.string(),
-  display_name: v.string(),
-  auth_mode: v.literal('auth0_device'),
-  platform: v.string(),
-  version: v.string(),
-  last_heartbeat: v.string(),
-  seconds_since_heartbeat: v.number(),
-});
-
-/** A capability joined with its installation's heartbeat. */
-const CapabilityRow = v.object({
-  runner_id: v.string(),
-  capability: v.picklist(RUNNER_CAPABILITIES),
-  state: v.picklist(RUNNER_STATES),
-  current_job_id: v.nullable(v.string()),
-  concurrency: v.number(),
-  detail_code: v.nullable(v.string()),
-  last_heartbeat: v.string(),
-  seconds_since_heartbeat: v.number(),
-});
-
-type CapabilityRow = v.InferOutput<typeof CapabilityRow>;
-
-interface CapabilitySummary {
-  available: boolean;
-  state: RunnerState | 'offline';
-  runner_id: string | null;
-  current_job_id: string | null;
-  detail_code: string | null;
-  last_heartbeat: string | null;
-}
+const InstallationRow = v.omit(BalanceRunner, ['online', 'capabilities']);
 
 interface HeartbeatRequest extends RunnerRequest {
   env: RunnerRequest['env'] & { DB: D1<'first' | 'run'> & D1Batch<'first' | 'run'> };
@@ -132,7 +99,10 @@ function isOnline(row: { seconds_since_heartbeat: number }): boolean {
   return row.seconds_since_heartbeat <= ONLINE_SECONDS;
 }
 
-function summarize(rows: CapabilityRow[], capability: RunnerCapability): CapabilitySummary {
+function summarize(
+  rows: BalanceRunnerCapability[],
+  capability: RunnerCapability,
+): BalanceRunnerCapabilitySummary {
   const candidates = rows.filter((row) => row.capability === capability);
   const online = candidates.filter((row) => isOnline(row) && row.state !== 'stopping');
   const ready = online.find((row) => row.state === 'ready' || row.state === 'busy');
@@ -190,7 +160,7 @@ export async function loadBalanceRunnerStatus(db: D1<'all'>, authSubject: string
     `,
         )
         .bind(authSubject),
-      CapabilityRow,
+      BalanceRunnerCapability,
     ),
   ]);
 
@@ -199,7 +169,7 @@ export async function loadBalanceRunnerStatus(db: D1<'all'>, authSubject: string
     capabilities: {
       sms_ai: summarize(capabilityRows, 'sms_ai'),
       carrier_browser: summarize(capabilityRows, 'carrier_browser'),
-    } satisfies Record<RunnerCapability, CapabilitySummary>,
+    } satisfies Record<RunnerCapability, BalanceRunnerCapabilitySummary>,
     runners: installations.map((runner) => ({
       ...runner,
       online: isOnline(runner),
@@ -306,6 +276,6 @@ export const balanceRunnersHandler = {
     return json({
       success: true,
       ...(await loadBalanceRunnerStatus(request.env.DB, authSubject)),
-    });
+    } satisfies BalanceRunnersResponse);
   },
 };

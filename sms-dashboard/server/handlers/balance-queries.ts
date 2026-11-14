@@ -23,10 +23,19 @@ import {
   type WebJobStatus,
 } from '../../shared/balance-status.js';
 import {
+  BATCH_METHODS,
   BalanceConversationMessage,
   BalanceMetric,
   BalanceWebEvent,
+  INELIGIBLE_REASONS,
   PROFILE_METHODS,
+  QUERY_METHODS,
+  type BalanceMethod,
+  type BalanceQueryBatchResponse,
+  type BalanceQueryPreflightResponse,
+  type BalanceQueryPreviewResponse,
+  type BalanceQueryResponse,
+  type QueuedBalanceCheck,
   type BalanceCheckDetailResponse,
   type BalanceCheckStatusResponse,
   type BalanceChecksResponse,
@@ -39,14 +48,10 @@ import {
   newCarrierWebBalanceIds,
 } from './carrier-web-balance.js';
 
-const QUERY_METHODS = ['sms', 'browser'] as const;
-const BATCH_METHODS = ['direct_sms', 'sms_ai', 'browser'] as const;
-
 /** The three send outcomes the daemon reports for an outbound SMS. */
 export type SmsOutcome = 'confirmed' | 'submitted_unconfirmed' | 'failed';
 type BatchMethod = (typeof BATCH_METHODS)[number];
-type IneligibleReason =
-  'secondary' | 'offline' | 'unsupported' | 'unverified' | 'service_type' | 'cooldown';
+type IneligibleReason = (typeof INELIGIBLE_REASONS)[number];
 
 const Flag = v.picklist([0, 1]);
 
@@ -122,13 +127,6 @@ type PlanItem =
     };
 
 type EligiblePlanItem = Extract<PlanItem, { eligible: true }>;
-
-/** The category a profile falls into, and the runner capability it needs. */
-interface BalanceMethod {
-  category: BatchMethod | 'unsupported';
-  capability: 'carrier_browser' | 'sms_ai' | null;
-  interactive: boolean;
-}
 
 /** A message handed to the balancer: what was received, from whom. */
 interface BalanceMessage {
@@ -674,7 +672,7 @@ async function queueBalanceCheck(
   db: D1<'run'> & D1Batch<'run'>,
   { phone, profile }: { phone: Pick<PlanPhone, 'iccid' | 'number'>; profile: QueuedProfile },
   requestedBySubject: string | null,
-) {
+): Promise<QueuedBalanceCheck> {
   const requestedAt = new Date().toISOString();
   if (profile.method === 'browser') {
     const { checkId, jobId } = newCarrierWebBalanceIds();
@@ -1395,7 +1393,7 @@ export const balanceQueriesHandler = {
           profile_id: item.profile.id,
           ...queryMethod(item.profile),
         })),
-    });
+    } satisfies BalanceQueryPreviewResponse);
   },
 
   async preflight(request: PlanRequest): Promise<Response> {
@@ -1434,7 +1432,7 @@ export const balanceQueriesHandler = {
         method.capability === null
           ? { required: false, available: true, state: 'not_required' }
           : { required: true, ...runners.capabilities[method.capability] },
-    });
+    } satisfies BalanceQueryPreflightResponse);
   },
 
   async query(request: QueueRequest): Promise<Response> {
@@ -1461,7 +1459,7 @@ export const balanceQueriesHandler = {
     }
 
     const check = await queueBalanceCheck(request.env.DB, item, requestedBySubject);
-    return json({ success: true, check }, 202);
+    return json({ success: true, check } satisfies BalanceQueryResponse, 202);
   },
 
   async queryBatch(request: QueueRequest): Promise<Response> {
@@ -1473,7 +1471,7 @@ export const balanceQueriesHandler = {
 
     const plan = await loadBalanceQueryPlan(request.env.DB, { scope });
     const eligible = filterBalancePlanByMethods(plan, methods);
-    const checks: Awaited<ReturnType<typeof queueBalanceCheck>>[] = [];
+    const checks: QueuedBalanceCheck[] = [];
     const failures: { phone_iccid: string; sim_index: number; error: string }[] = [];
 
     // Queue on the server, one audited transaction per SIM. The daemon fetch endpoint
@@ -1504,7 +1502,7 @@ export const balanceQueriesHandler = {
         },
         checks,
         failures,
-      },
+      } satisfies BalanceQueryBatchResponse,
       202,
     );
   },

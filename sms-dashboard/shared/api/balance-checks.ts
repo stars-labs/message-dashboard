@@ -5,9 +5,30 @@ import {
   SKILL_JOB_STATUSES,
   WEB_JOB_STATUSES,
 } from '../balance-status.js';
+import {
+  BalanceRunnerCapabilities,
+  BalanceRunnerCapabilitySummary,
+  RUNNER_CAPABILITIES,
+} from './balance-runners.js';
 
 /** sim_balance_profiles.method, as the table's CHECK constraint lists it. */
 export const PROFILE_METHODS = ['sms', 'ussd', 'api', 'browser'] as const;
+
+/** The sim_balance_profiles.method values the query planner can run. */
+export const QUERY_METHODS = ['sms', 'browser'] as const;
+
+/** The ways a batch can query a SIM: plain SMS, SMS with the AI skill, or the carrier website. */
+export const BATCH_METHODS = ['direct_sms', 'sms_ai', 'browser'] as const;
+
+/** Why a SIM cannot be queried now. */
+export const INELIGIBLE_REASONS = [
+  'secondary',
+  'offline',
+  'unsupported',
+  'unverified',
+  'service_type',
+  'cooldown',
+] as const;
 
 /** A balance figure parsed from a carrier reply. */
 export const BalanceMetric = v.object({
@@ -121,3 +142,137 @@ export const BalanceCheckDetailResponse = v.object({
 });
 
 export type BalanceCheckDetailResponse = v.InferOutput<typeof BalanceCheckDetailResponse>;
+
+/** How a profile is queried, and the runner capability it needs. */
+export const BalanceMethod = v.object({
+  category: v.picklist([...BATCH_METHODS, 'unsupported']),
+  capability: v.nullable(v.picklist(RUNNER_CAPABILITIES)),
+  interactive: v.boolean(),
+});
+
+export type BalanceMethod = v.InferOutput<typeof BalanceMethod>;
+
+/** GET /api/balance-checks/query-preflight: whether one SIM can be queried now, and how. */
+export const BalanceQueryPreflightResponse = v.object({
+  success: v.literal(true),
+  eligible: v.boolean(),
+  reason: v.nullable(v.picklist(INELIGIBLE_REASONS)),
+  phone: v.object({
+    iccid: v.string(),
+    sim_index: v.number(),
+    number: v.string(),
+    carrier: v.nullable(v.string()),
+  }),
+  profile: v.nullable(
+    v.object({
+      id: v.string(),
+      method: v.picklist(QUERY_METHODS),
+      carrier: v.string(),
+    }),
+  ),
+  method: BalanceMethod,
+  runner: v.union([
+    v.object({
+      required: v.literal(false),
+      available: v.literal(true),
+      state: v.literal('not_required'),
+    }),
+    v.object({ required: v.literal(true), ...BalanceRunnerCapabilitySummary.entries }),
+  ]),
+});
+
+export type BalanceQueryPreflightResponse = v.InferOutput<typeof BalanceQueryPreflightResponse>;
+
+/** How many SIMs a query plan covers, and how many fell into each ineligible reason. */
+const BalanceQueryPlanSummary = v.object({
+  total: v.number(),
+  eligible: v.number(),
+  offline: v.number(),
+  unsupported: v.number(),
+  unverified: v.number(),
+  cooldown: v.number(),
+  secondary: v.number(),
+  service_type: v.number(),
+});
+
+/** POST /api/balance-checks/query-preview: the SIMs a batch would query, counted by method. */
+export const BalanceQueryPreviewResponse = v.object({
+  success: v.literal(true),
+  summary: BalanceQueryPlanSummary,
+  method_summary: v.object({
+    direct_sms: v.number(),
+    sms_ai: v.number(),
+    browser: v.number(),
+  }),
+  runner_capabilities: BalanceRunnerCapabilities,
+  eligible: v.array(
+    v.object({
+      phone_iccid: v.string(),
+      sim_index: v.number(),
+      phone_number: v.string(),
+      carrier: v.nullable(v.string()),
+      profile_id: v.string(),
+      category: v.picklist(BATCH_METHODS),
+      capability: v.nullable(v.picklist(RUNNER_CAPABILITIES)),
+      interactive: v.boolean(),
+    }),
+  ),
+});
+
+export type BalanceQueryPreviewResponse = v.InferOutput<typeof BalanceQueryPreviewResponse>;
+
+const QueuedCheckBase = {
+  id: v.string(),
+  sim_iccid: v.string(),
+  profile_id: v.string(),
+  status: v.literal('queued'),
+  requested_at: v.string(),
+  profile_carrier: v.string(),
+};
+
+/** A balance check just queued: an SMS check names its outbound message, a browser check its web job. */
+export const QueuedBalanceCheck = v.union([
+  v.object({
+    ...QueuedCheckBase,
+    method: v.literal('sms'),
+    outbound_message_id: v.string(),
+  }),
+  v.object({
+    ...QueuedCheckBase,
+    method: v.literal('browser'),
+    web_job_id: v.string(),
+  }),
+]);
+
+export type QueuedBalanceCheck = v.InferOutput<typeof QueuedBalanceCheck>;
+
+/** POST /api/balance-checks/query. */
+export const BalanceQueryResponse = v.object({
+  success: v.literal(true),
+  check: QueuedBalanceCheck,
+});
+
+export type BalanceQueryResponse = v.InferOutput<typeof BalanceQueryResponse>;
+
+/** POST /api/balance-checks/query-batch: the checks queued, and the SIMs that failed to queue. */
+export const BalanceQueryBatchResponse = v.object({
+  success: v.literal(true),
+  batch_id: v.string(),
+  summary: v.object({
+    ...BalanceQueryPlanSummary.entries,
+    selected: v.number(),
+    methods: v.array(v.picklist(BATCH_METHODS)),
+    queued: v.number(),
+    failed_to_queue: v.number(),
+  }),
+  checks: v.array(QueuedBalanceCheck),
+  failures: v.array(
+    v.object({
+      phone_iccid: v.string(),
+      sim_index: v.number(),
+      error: v.string(),
+    }),
+  ),
+});
+
+export type BalanceQueryBatchResponse = v.InferOutput<typeof BalanceQueryBatchResponse>;
