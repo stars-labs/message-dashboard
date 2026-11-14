@@ -262,7 +262,11 @@
                 fi
                 # Wrangler supports Node only; under Bun the local server
                 # reports Ready and then never answers a request.
-                CLOUDFLARE_INCLUDE_PROCESS_ENV=true exec node node_modules/wrangler/bin/wrangler.js dev --port 8787
+                # The browser talks to the Vite origin, which proxies here; without
+                # --local-upstream the Worker sees the production route as its
+                # origin and sends the Auth0 callback to production. Auth0 allows
+                # the localhost callback only, not 127.0.0.1.
+                CLOUDFLARE_INCLUDE_PROCESS_ENV=true exec node node_modules/wrangler/bin/wrangler.js dev --port 8787 --local-upstream localhost:8080
               '
             '';
           };
