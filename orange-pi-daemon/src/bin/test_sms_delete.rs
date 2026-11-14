@@ -124,7 +124,7 @@ fn log_first_messages(messages: &[MessageWithPath]) {
         info!("   Time: {}", msg.message.timestamp);
         info!(
             "   Text: {}",
-            &msg.message.content[..50.min(msg.message.content.len())]
+            msg.message.content.chars().take(50).collect::<String>()
         );
     }
 }

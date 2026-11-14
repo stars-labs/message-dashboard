@@ -327,7 +327,7 @@ impl MessageStore {
         if existing.is_some() {
             debug!(
                 "Duplicate message found, skipping: {} from {}",
-                &message.content[..20.min(message.content.len())],
+                message.content.chars().take(20).collect::<String>(),
                 &message.phone_iccid
             );
             return Ok(false);
@@ -618,6 +618,33 @@ impl MessageStore {
         }
 
         Ok(updated)
+    }
+}
+
+#[cfg(test)]
+mod duplicate_log_tests {
+    use super::*;
+    use crate::types::Direction;
+
+    #[test]
+    fn logging_a_duplicate_with_multibyte_text_does_not_panic() {
+        let store = MessageStore::new(":memory:").unwrap();
+        let message = Message {
+            phone_iccid: "iccid".to_string(),
+            phone_number: "10086".to_string(),
+            content: "您的登录验证码五分钟内有效请勿泄露".to_string(),
+            timestamp: "2024-01-01T12:00:00.000Z".to_string(),
+            direction: Direction::Received,
+        };
+        let subscriber = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::DEBUG)
+            .with_test_writer()
+            .finish();
+
+        tracing::subscriber::with_default(subscriber, || {
+            assert!(store.store_message(&message, "modem", "at:1").unwrap());
+            assert!(!store.store_message(&message, "modem", "at:2").unwrap());
+        });
     }
 }
 
