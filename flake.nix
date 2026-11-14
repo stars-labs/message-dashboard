@@ -362,6 +362,7 @@
               coreutils
               curl
               lsof
+              procps
             ];
             text = ''
               state_dir="''${XDG_RUNTIME_DIR:-/tmp}/message-dashboard-dev-$(id -u)"
@@ -376,12 +377,22 @@
                 lsof -nP -tiTCP:"$1" -sTCP:LISTEN 2>/dev/null | sort -u || true
               }
 
+              # The PID file holds the wrapper (sops exec-env, bun run), which does
+              # not pass a signal on to its children; killing it alone orphaned
+              # Wrangler and its second workerd on every restart.
+              kill_tree() {
+                for child in $(pgrep -P "$1" || true); do
+                  kill_tree "$child"
+                done
+                kill "$1" 2>/dev/null || true
+              }
+
               stop_pid_file() {
                 pid_file="$1"
                 if [ -f "$pid_file" ]; then
                   pid="$(cat "$pid_file")"
                   if kill -0 "$pid" 2>/dev/null; then
-                    kill "$pid" 2>/dev/null || true
+                    kill_tree "$pid"
                   fi
                   rm -f "$pid_file"
                 fi
