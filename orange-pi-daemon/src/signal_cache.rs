@@ -5,6 +5,15 @@ use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use tracing::{debug, trace};
 
+#[allow(
+    clippy::as_conversions,
+    clippy::cast_precision_loss,
+    reason = "the standard library has no u64 to f64 conversion; counters stay far below 2^53"
+)]
+fn percent_of(part: u64, whole: u64) -> f64 {
+    (part as f64 / whole as f64) * 100.0
+}
+
 /// Cache entry for signal data
 #[derive(Debug, Clone)]
 struct CacheEntry {
@@ -112,7 +121,7 @@ impl SignalCache {
         let misses = *self.miss_count.read().await;
         let total = hits + misses;
         let hit_rate = if total > 0 {
-            (hits as f64 / total as f64) * 100.0
+            percent_of(hits, total)
         } else {
             0.0
         };

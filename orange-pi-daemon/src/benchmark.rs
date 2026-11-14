@@ -1,7 +1,11 @@
 use crate::dbus_client::DBusClient;
 use crate::modem_manager::ModemManager;
 use anyhow::Result;
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+fn elapsed_millis(elapsed: Duration) -> f64 {
+    f64::from(u32::try_from(elapsed.as_millis()).unwrap_or(u32::MAX))
+}
 use tokio::process::Command;
 use tracing::{info, warn};
 
@@ -78,7 +82,7 @@ impl PerformanceBenchmark {
         }
 
         let elapsed = start.elapsed();
-        let avg_ms = elapsed.as_millis() as f64 / f64::from(iterations);
+        let avg_ms = elapsed_millis(elapsed) / f64::from(iterations);
 
         Ok(avg_ms)
     }
@@ -121,7 +125,7 @@ impl PerformanceBenchmark {
         }
 
         let elapsed = start.elapsed();
-        let avg_ms = elapsed.as_millis() as f64 / f64::from(iterations);
+        let avg_ms = elapsed_millis(elapsed) / f64::from(iterations);
 
         Ok(avg_ms)
     }
@@ -150,7 +154,7 @@ impl PerformanceBenchmark {
         }
 
         let elapsed = start.elapsed();
-        let avg_ms = elapsed.as_millis() as f64 / f64::from(iterations);
+        let avg_ms = elapsed_millis(elapsed) / f64::from(iterations);
 
         Ok(avg_ms)
     }

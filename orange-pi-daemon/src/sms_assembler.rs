@@ -105,7 +105,7 @@ impl SmsAssembler {
         parts.push(part);
 
         // Check if complete
-        if parts.len() == concat_info.total_parts as usize {
+        if parts.len() == usize::from(concat_info.total_parts) {
             // All parts received - assemble!
             debug!(
                 "All {} parts received for ref_id={} - assembling",

@@ -2,6 +2,7 @@
 
 use anyhow::Result;
 use nix::sys::termios::{self, BaudRate, SetArg};
+use orange_pi_daemon_rust::at_modem::control_char_slot;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::time::{Duration, Instant};
@@ -31,8 +32,8 @@ fn open_serial(port: &str) -> Result<File> {
         | termios::InputFlags::INLCR);
     term.output_flags &= !termios::OutputFlags::OPOST;
 
-    term.control_chars[termios::SpecialCharacterIndices::VMIN as usize] = 0;
-    term.control_chars[termios::SpecialCharacterIndices::VTIME as usize] = 1;
+    term.control_chars[control_char_slot(termios::SpecialCharacterIndices::VMIN)] = 0;
+    term.control_chars[control_char_slot(termios::SpecialCharacterIndices::VTIME)] = 1;
 
     termios::tcsetattr(&file, SetArg::TCSANOW, &term)?;
     termios::tcflush(&file, termios::FlushArg::TCIOFLUSH)?;

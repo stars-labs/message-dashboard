@@ -60,8 +60,17 @@ impl CachedPort {
 
 #[cfg(test)]
 mod tests {
-    use super::{retain_present_cached_modems, CachedPort, ModemManager};
+    use super::{retain_present_cached_modems, signal_from_percent, CachedPort, ModemManager};
     use std::collections::{BTreeMap, HashMap};
+
+    #[test]
+    fn test_signal_from_percent_maps_the_range_ends_and_rejects_overflow() {
+        let low = signal_from_percent(0).unwrap();
+        assert_eq!((low.percent, low.rssi), (0, -110));
+        let high = signal_from_percent(100).unwrap();
+        assert_eq!((high.percent, high.rssi), (100, 10));
+        assert!(signal_from_percent(u32::MAX).is_err());
+    }
 
     #[test]
     fn test_format_storage_aware_at_sms_path() {
@@ -153,6 +162,15 @@ struct MultipartGroup<'a> {
     sender: &'a str,
     ref_id: u8,
     total_parts: u8,
+}
+
+fn signal_from_percent(percent: u32) -> Result<SignalData> {
+    let percent =
+        i32::try_from(percent).map_err(|_| anyhow!("signal quality {percent}% out of range"))?;
+    Ok(SignalData {
+        percent,
+        rssi: (percent * 120 / 100) - 110,
+    })
 }
 
 impl ModemManager {
@@ -434,10 +452,7 @@ impl ModemManager {
             BackendMode::AtCommand => {
                 let port = self.get_port(modem_id).await;
                 let percent = self.at_modem.get_signal(&port).await?;
-                SignalData {
-                    percent: percent as i32,
-                    rssi: (percent as i32 * 120 / 100) - 110,
-                }
+                signal_from_percent(percent)?
             }
             BackendMode::DBus => {
                 let client = self
@@ -445,10 +460,7 @@ impl ModemManager {
                     .as_ref()
                     .ok_or_else(|| anyhow!("D-Bus not initialized"))?;
                 let (percent, _) = client.get_signal_quality(modem_id).await?;
-                SignalData {
-                    percent: percent as i32,
-                    rssi: (percent as i32 * 120 / 100) - 110,
-                }
+                signal_from_percent(percent)?
             }
         };
 
@@ -677,7 +689,7 @@ impl ModemManager {
         // Check if all parts are now available (including previously buffered ones)
         let message =
             match message_store.get_segments_with_storage(iccid, sender, ref_id, total_parts) {
-                Ok(segments) if segments.len() == total_parts as usize => {
+                Ok(segments) if segments.len() == usize::from(total_parts) => {
                     Self::complete_message(group, segments)
                 }
                 Ok(segments)

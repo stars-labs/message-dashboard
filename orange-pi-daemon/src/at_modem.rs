@@ -120,6 +120,14 @@ pub struct AtModemManager {
     timeout: Duration,
 }
 
+#[allow(
+    clippy::as_conversions,
+    reason = "nix declares SpecialCharacterIndices as a repr(usize) enum with no conversion to usize, and termios::control_chars is indexed by usize"
+)]
+pub fn control_char_slot(index: termios::SpecialCharacterIndices) -> usize {
+    index as usize
+}
+
 impl Default for AtModemManager {
     fn default() -> Self {
         Self::new()
@@ -614,8 +622,8 @@ impl AtModemManager {
         term.output_flags &= !termios::OutputFlags::OPOST;
 
         // Set read timeout: VMIN=0, VTIME=1 (0.1s timeout per read)
-        term.control_chars[termios::SpecialCharacterIndices::VMIN as usize] = 0;
-        term.control_chars[termios::SpecialCharacterIndices::VTIME as usize] = 1;
+        term.control_chars[control_char_slot(termios::SpecialCharacterIndices::VMIN)] = 0;
+        term.control_chars[control_char_slot(termios::SpecialCharacterIndices::VTIME)] = 1;
 
         termios::tcsetattr(&file, SetArg::TCSANOW, &term)
             .map_err(|e| anyhow!("tcsetattr failed: {e}"))?;
@@ -1279,7 +1287,7 @@ impl AtModemManager {
         let mut pos = 0;
 
         // SMSC length (skip SMSC address)
-        let smsc_len = pdu_bytes[pos] as usize;
+        let smsc_len = usize::from(pdu_bytes[pos]);
         pos += 1 + smsc_len;
 
         if pos >= pdu_bytes.len() {
@@ -1294,7 +1302,7 @@ impl AtModemManager {
         if pos >= pdu_bytes.len() {
             return Err(anyhow!("PDU truncated at sender length"));
         }
-        let sender_len = pdu_bytes[pos] as usize;
+        let sender_len = usize::from(pdu_bytes[pos]);
         pos += 1;
 
         // Sender type of address
@@ -1348,7 +1356,7 @@ impl AtModemManager {
         if pos >= pdu_bytes.len() {
             return Err(anyhow!("PDU truncated at UDL"));
         }
-        let user_data_len = pdu_bytes[pos] as usize;
+        let user_data_len = usize::from(pdu_bytes[pos]);
         pos += 1;
 
         // Check for UDH (User Data Header)
@@ -1359,7 +1367,7 @@ impl AtModemManager {
             if pos >= pdu_bytes.len() {
                 return Err(anyhow!("PDU truncated at UDHL"));
             }
-            let udhl = pdu_bytes[pos] as usize;
+            let udhl = usize::from(pdu_bytes[pos]);
             pos += 1;
 
             // Extract concatenation info from UDH
@@ -1447,7 +1455,7 @@ impl AtModemManager {
             if pos >= udh_bytes.len() {
                 break;
             }
-            let iedl = udh_bytes[pos] as usize;
+            let iedl = usize::from(udh_bytes[pos]);
             pos += 1;
 
             if pos + iedl > udh_bytes.len() {
@@ -1485,7 +1493,7 @@ impl AtModemManager {
     /// Map a BCD nibble (0x0-0xF) to its character per GSM 03.40 Section 9.1.2.3
     fn bcd_nibble_to_char(nibble: u8) -> Option<char> {
         match nibble {
-            0x0..=0x9 => Some((b'0' + nibble) as char),
+            0x0..=0x9 => Some(char::from(b'0' + nibble)),
             0xA => Some('*'),
             0xB => Some('#'),
             0xC => Some('a'),
@@ -1525,25 +1533,25 @@ impl AtModemManager {
 
         // Semi-octet BCD decoding: each byte has nibbles swapped (low nibble first)
         // After swapping, decode as BCD: (high_nibble * 10) + low_nibble
-        let decode_bcd = |b: u8| -> u32 {
+        let decode_bcd = |b: u8| -> u8 {
             let swapped = ((b & 0x0F) << 4) | ((b >> 4) & 0x0F);
             let high = (swapped >> 4) & 0x0F;
             let low = swapped & 0x0F;
-            u32::from(high * 10 + low)
+            high * 10 + low
         };
 
-        let year = decode_bcd(bytes[0]) as i32 + 2000;
-        let month = decode_bcd(bytes[1]);
-        let day = decode_bcd(bytes[2]);
-        let hour = decode_bcd(bytes[3]);
-        let minute = decode_bcd(bytes[4]);
-        let second = decode_bcd(bytes[5]);
+        let year = i32::from(decode_bcd(bytes[0])) + 2000;
+        let month = u32::from(decode_bcd(bytes[1]));
+        let day = u32::from(decode_bcd(bytes[2]));
+        let hour = u32::from(decode_bcd(bytes[3]));
+        let minute = u32::from(decode_bcd(bytes[4]));
+        let second = u32::from(decode_bcd(bytes[5]));
 
         // Timezone (in quarter hours, also BCD encoded)
         // Bit 7 of original byte = sign (0=positive, 1=negative)
         let tz_byte = bytes[6];
         let tz_sign = if (tz_byte & 0x80) != 0 { -1 } else { 1 };
-        let tz_quarters = decode_bcd(tz_byte & 0x7F) as i32; // Mask out sign bit before BCD decode
+        let tz_quarters = i32::from(decode_bcd(tz_byte & 0x7F)); // Mask out sign bit before BCD decode
         let tz_offset_minutes = tz_sign * tz_quarters * 15;
 
         // Convert to UTC
@@ -1640,7 +1648,7 @@ impl AtModemManager {
                 // ESC: next septet is extension character
                 escape_next = true;
             } else {
-                result.push(Self::GSM_DEFAULT_ALPHABET[char_val as usize]);
+                result.push(Self::GSM_DEFAULT_ALPHABET[usize::from(char_val)]);
             }
 
             bit_pos += 7;
@@ -1752,7 +1760,7 @@ impl AtModemManager {
             }
 
             let mut next = decoded.clone();
-            next.push(code_point as char);
+            next.push(char::from(code_point));
             Self::decode_decimal_ascii_candidates(raw, end, next, candidates);
         }
     }
@@ -1978,7 +1986,7 @@ impl AtModemManager {
         {
             return Err(anyhow!(
                 "Invalid SMS body: contains control character U+{:04X}",
-                c as u32
+                u32::from(c)
             ));
         }
 

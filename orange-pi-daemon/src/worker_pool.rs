@@ -41,12 +41,16 @@ pub struct WorkerPoolStats {
     pub avg_time_per_modem: Duration,
 }
 
+fn count_as_f64(count: usize) -> f64 {
+    f64::from(u32::try_from(count).unwrap_or(u32::MAX))
+}
+
 impl WorkerPoolStats {
     pub fn success_rate(&self) -> f64 {
         if self.total_modems == 0 {
             return 0.0;
         }
-        (self.successful as f64 / self.total_modems as f64) * 100.0
+        (count_as_f64(self.successful) / count_as_f64(self.total_modems)) * 100.0
     }
 }
 
@@ -240,7 +244,8 @@ impl WorkerPool {
         let mut stats = self.stats.write().await;
         stats.processing_time = start_time.elapsed();
         if stats.successful > 0 {
-            stats.avg_time_per_modem = stats.processing_time / stats.successful as u32;
+            stats.avg_time_per_modem =
+                stats.processing_time / u32::try_from(stats.successful).unwrap_or(u32::MAX);
         }
     }
 

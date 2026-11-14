@@ -846,7 +846,7 @@ async fn pump_nmea(
                 while pending.len() >= MODEM_FRAME {
                     let frame: Vec<u8> = pending.drain(..MODEM_FRAME).collect();
                     let payload = modem_to_adapter(&frame, &mut last_sample);
-                    let samples = (payload.len() / 4) as u32;
+                    let samples = u32::try_from(payload.len() / 4).unwrap_or(u32::MAX);
                     let packet = Packet { sequence_number: sequence, timestamp: sequence.wrapping_mul(samples), payload };
                     sequence = sequence.wrapping_add(1);
                     // No subscriber yet just means the up leg has not connected.

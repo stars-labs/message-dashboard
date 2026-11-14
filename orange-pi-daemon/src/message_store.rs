@@ -466,9 +466,9 @@ impl MessageStore {
     pub fn get_queue_stats(&self) -> Result<QueueStats> {
         let conn = self.conn.lock().unwrap();
         let (pending, dead_letter, in_flight, oldest_unacknowledged_age_seconds): (
-            i64,
-            i64,
-            i64,
+            usize,
+            usize,
+            usize,
             Option<i64>,
         ) = conn.query_row(
             "SELECT
@@ -483,11 +483,11 @@ impl MessageStore {
         )?;
 
         Ok(QueueStats {
-            pending: pending as usize,
-            dead_letter: dead_letter as usize,
-            in_flight: in_flight as usize,
+            pending,
+            dead_letter,
+            in_flight,
             oldest_unacknowledged_age_seconds: oldest_unacknowledged_age_seconds
-                .map(|value| value as u64),
+                .map(i64::cast_unsigned),
         })
     }
 
@@ -888,11 +888,11 @@ impl MessageStore {
                 params![iccid, sender, i64::from(ref_id), i64::from(total_parts)],
                 |row| {
                     Ok((
-                        row.get::<_, i64>(0)? as u8,
+                        row.get::<_, u8>(0)?,
                         row.get(1)?,
                         row.get(2)?,
                         row.get(3)?,
-                        row.get::<_, i64>(4)? as u32,
+                        row.get::<_, u32>(4)?,
                     ))
                 },
             )?
@@ -938,13 +938,13 @@ impl MessageStore {
                 Ok((
                     row.get(0)?,
                     row.get(1)?,
-                    row.get::<_, i64>(2)? as u8,
-                    row.get::<_, i64>(3)? as u8,
-                    row.get::<_, i64>(4)? as u8,
+                    row.get::<_, u8>(2)?,
+                    row.get::<_, u8>(3)?,
+                    row.get::<_, u8>(4)?,
                     row.get(5)?,
                     row.get(6)?,
                     row.get(7)?,
-                    row.get::<_, i64>(8)? as u32,
+                    row.get::<_, u32>(8)?,
                 ))
             })?
             .collect::<Result<Vec<_>, _>>()?;

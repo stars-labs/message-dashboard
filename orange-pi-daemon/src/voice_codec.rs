@@ -20,7 +20,10 @@ pub const MODEM_RATE: u32 = 8_000;
 /// Sample rate the adapter produces and consumes.
 pub const ADAPTER_RATE: u32 = 48_000;
 /// Integer ratio between the two rates.
-const RATIO: usize = (ADAPTER_RATE / MODEM_RATE) as usize;
+const RATIO: usize = 6;
+/// `RATIO` as a signed sample-arithmetic operand.
+const RATIO_I32: i32 = 6;
+const _: () = assert!(ADAPTER_RATE == MODEM_RATE * 6);
 
 /// One decoded adapter frame.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -33,7 +36,8 @@ pub struct Packet {
 
 fn put_varint(out: &mut Vec<u8>, mut v: u64) {
     loop {
-        let byte = (v & 0x7f) as u8;
+        let [low, ..] = v.to_le_bytes();
+        let byte = low & 0x7f;
         v >>= 7;
         if v == 0 {
             out.push(byte);
@@ -41,6 +45,16 @@ fn put_varint(out: &mut Vec<u8>, mut v: u64) {
         }
         out.push(byte | 0x80);
     }
+}
+
+fn low_u32(v: u64) -> u32 {
+    let [b0, b1, b2, b3, ..] = v.to_le_bytes();
+    u32::from_le_bytes([b0, b1, b2, b3])
+}
+
+/// Clamp to the `i16` range.
+fn saturate_i16(v: i32) -> i16 {
+    i16::try_from(v).unwrap_or(if v < 0 { i16::MIN } else { i16::MAX })
 }
 
 fn read_varint(buf: &[u8], pos: &mut usize) -> Option<u64> {
@@ -75,7 +89,11 @@ impl Packet {
         }
         if !self.payload.is_empty() {
             out.push(0x2a); // field 5, length-delimited
-            put_varint(&mut out, self.payload.len() as u64);
+                            // usize is at most 64 bits on every supported target, so the fallback is unreachable.
+            put_varint(
+                &mut out,
+                u64::try_from(self.payload.len()).unwrap_or(u64::MAX),
+            );
             out.extend_from_slice(&self.payload);
         }
         out
@@ -93,10 +111,10 @@ impl Packet {
             let field = key >> 3;
             let wire = key & 0x7;
             match (field, wire) {
-                (1, 0) => pkt.sequence_number = read_varint(buf, &mut pos)? as u32,
-                (2, 0) => pkt.timestamp = read_varint(buf, &mut pos)? as u32,
+                (1, 0) => pkt.sequence_number = low_u32(read_varint(buf, &mut pos)?),
+                (2, 0) => pkt.timestamp = low_u32(read_varint(buf, &mut pos)?),
                 (5, 2) => {
-                    let len = read_varint(buf, &mut pos)? as usize;
+                    let len = usize::try_from(read_varint(buf, &mut pos)?).ok()?;
                     let end = pos.checked_add(len)?;
                     if end > buf.len() {
                         return None;
@@ -109,7 +127,7 @@ impl Packet {
                     read_varint(buf, &mut pos)?;
                 }
                 (_, 2) => {
-                    let len = read_varint(buf, &mut pos)? as usize;
+                    let len = usize::try_from(read_varint(buf, &mut pos)?).ok()?;
                     pos = pos.checked_add(len)?;
                     if pos > buf.len() {
                         return None;
@@ -153,9 +171,9 @@ pub fn modem_to_adapter(pcm8k_mono: &[u8], last: &mut i16) -> Vec<u8> {
     for &sample in &input {
         let prev = i32::from(*last);
         let cur = i32::from(sample);
-        for step in 0..RATIO {
-            let interpolated = prev + (cur - prev) * step as i32 / RATIO as i32;
-            let v = interpolated as i16;
+        for step in 0..RATIO_I32 {
+            let interpolated = prev + (cur - prev) * step / RATIO_I32;
+            let v = saturate_i16(interpolated);
             out.push(v); // left
             out.push(v); // right
         }
@@ -181,7 +199,7 @@ pub fn adapter_to_modem(pcm48k_stereo: &[u8]) -> Vec<u8> {
         .as_chunks::<RATIO>()
         .0
         .iter()
-        .map(|g| (g.iter().sum::<i32>() / RATIO as i32) as i16)
+        .map(|g| saturate_i16(g.iter().sum::<i32>() / RATIO_I32))
         .collect();
     to_bytes(&out)
 }
@@ -256,7 +274,7 @@ mod tests {
     #[test]
     fn test_downsample_is_the_inverse_size() {
         // 12 stereo frames at 48 kHz -> 2 mono samples at 8 kHz.
-        let stereo: Vec<i16> = (0..RATIO * 2 * 2).map(|i| (i * 10) as i16).collect();
+        let stereo: Vec<i16> = (0i16..).step_by(10).take(RATIO * 2 * 2).collect();
         let out = adapter_to_modem(&to_bytes(&stereo));
         assert_eq!(out.len(), 2 * 2);
     }
@@ -281,6 +299,81 @@ mod tests {
         let up = modem_to_adapter(&pcm, &mut last);
         let down = to_i16(&adapter_to_modem(&up));
         assert_eq!(down, vec![500; 8]);
+    }
+
+    #[test]
+    fn test_upsample_interpolates_full_scale_swings_without_wrapping() {
+        let pcm = to_bytes(&[i16::MAX, i16::MIN]);
+        let mut last = 0;
+        let out = to_i16(&modem_to_adapter(&pcm, &mut last));
+        let left: Vec<i16> = out.chunks(2).map(|pair| pair[0]).collect();
+        assert_eq!(
+            left,
+            vec![0, 5461, 10922, 16383, 21844, 27305, 32767, 21845, 10922, 0, -10923, -21845]
+        );
+        assert_eq!(last, i16::MIN);
+    }
+
+    #[test]
+    fn test_saturate_i16_clamps_at_both_edges() {
+        assert_eq!(saturate_i16(0), 0);
+        assert_eq!(saturate_i16(i32::from(i16::MAX)), i16::MAX);
+        assert_eq!(saturate_i16(i32::from(i16::MIN)), i16::MIN);
+        assert_eq!(saturate_i16(i32::from(i16::MAX) + 1), i16::MAX);
+        assert_eq!(saturate_i16(i32::from(i16::MIN) - 1), i16::MIN);
+        assert_eq!(saturate_i16(i32::MAX), i16::MAX);
+        assert_eq!(saturate_i16(i32::MIN), i16::MIN);
+    }
+
+    #[test]
+    fn test_upsample_of_silence_is_silence() {
+        let mut last = 0;
+        let out = to_i16(&modem_to_adapter(&to_bytes(&[0; 4]), &mut last));
+        assert_eq!(out, vec![0; 4 * RATIO * 2]);
+    }
+
+    #[test]
+    fn test_downsample_keeps_full_scale_levels() {
+        for level in [i16::MIN, i16::MAX, 0] {
+            let stereo = vec![level; RATIO * 2];
+            assert_eq!(to_i16(&adapter_to_modem(&to_bytes(&stereo))), vec![level]);
+        }
+    }
+
+    #[test]
+    fn test_downsample_of_opposite_full_scale_channels_rounds_toward_zero() {
+        let mut stereo = Vec::new();
+        for _ in 0..RATIO {
+            stereo.push(i16::MIN);
+            stereo.push(i16::MAX);
+        }
+        assert_eq!(to_i16(&adapter_to_modem(&to_bytes(&stereo))), vec![0]);
+    }
+
+    #[test]
+    fn test_decode_keeps_the_low_32_bits_of_oversized_varints() {
+        let mut buf = vec![0x08];
+        put_varint(&mut buf, 0x1_0000_0005);
+        buf.push(0x10);
+        put_varint(&mut buf, u64::MAX);
+        assert_eq!(
+            Packet::decode(&buf),
+            Some(Packet {
+                sequence_number: 5,
+                timestamp: u32::MAX,
+                payload: Vec::new(),
+            })
+        );
+    }
+
+    #[test]
+    fn test_packet_roundtrip_of_a_multi_byte_length() {
+        let p = Packet {
+            sequence_number: u32::MAX,
+            timestamp: u32::MAX,
+            payload: vec![0xab; 300],
+        };
+        assert_eq!(Packet::decode(&p.encode()), Some(p));
     }
 
     #[test]
