@@ -370,6 +370,19 @@ afterEach(() => {
 });
 
 describe('balance management', () => {
+  test('shows a threshold without a currency as the bare number', () => {
+    stubApi();
+    const view = render(BalanceManagement, {
+      props: {
+        phoneNumbers: [{ ...phone, country: 'US', balance_threshold: 50 }],
+        balanceChecks: [],
+      },
+    });
+
+    expect(view.container.textContent).not.toContain('null');
+    expect(view.getAllByText('50').length).toBeGreaterThan(0);
+  });
+
   test('keeps each desktop table tab in its own scroll region', async () => {
     stubApi();
     const view = render(BalanceManagement, {

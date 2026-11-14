@@ -668,7 +668,8 @@
 
   function formatThreshold(threshold: BalanceRow['threshold']): string {
     if (!threshold) return '—';
-    return `${threshold.value} ${String(threshold.currency)}`;
+    const value = String(threshold.value);
+    return threshold.currency === null ? value : `${value} ${threshold.currency}`;
   }
 
   function openRow(row: BalanceRow) {
