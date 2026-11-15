@@ -57,6 +57,18 @@ async function refusal(access: Access, request: AppRequest): Promise<Response | 
   }
 }
 
+/**
+ * `request`, with a JSON array body read as null. Every contract body is an
+ * object, and a Valibot object schema accepts an array, reading `[]` as `{}`;
+ * as null, the schema answers with its own not-an-object message, as readBody did.
+ */
+async function withoutArrayBody(request: AppRequest): Promise<Request> {
+  if (request.method === 'GET' || request.body === null) return request;
+  const body = await readJson(request.clone(), v.unknown());
+  if (!body.ok || !Array.isArray(body.value)) return request;
+  return new Request(request, { body: 'null' });
+}
+
 /** oRPC always answers application/json; restate it as the Worker's other routes do. */
 function withMediaType(response: Response, errorType: string): Response {
   const headers = new Headers(response.headers);
@@ -110,7 +122,7 @@ export function createContractHandler(routes: AnyRouter) {
       const { access } = v.parse(RouteMeta, match.procedure['~orpc'].meta);
       const refused = await refusal(access, request);
       if (refused) return refused;
-      const { response } = await handler.handle(request, {
+      const { response } = await handler.handle(await withoutArrayBody(request), {
         context: { request, resHeaders: new Headers() },
       });
       return response ? withMediaType(response, errorType) : null;

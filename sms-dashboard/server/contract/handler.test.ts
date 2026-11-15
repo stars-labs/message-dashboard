@@ -330,6 +330,19 @@ describe('contract routes', () => {
     });
   });
 
+  // A Valibot object schema accepts an array, so a body whose fields are all
+  // optional would read `[]` as `{}`.
+  test('answer a JSON array body with 400, before the handler runs', async () => {
+    const { response } = await callWorker('PUT', '/api/filters/1', {
+      headers: as(ADMIN),
+      body: '[]',
+      bindings,
+    });
+    expect(await answer(response)).toMatchObject(
+      problemOf(400, 'Bad Request', 'BAD_REQUEST', 'Body must be a JSON object'),
+    );
+  });
+
   test('answer a body the handler rejects as a problem', async () => {
     const { response } = await callWorker('PUT', '/api/users/auth0%7Cother/role', {
       headers: as(ADMIN),
