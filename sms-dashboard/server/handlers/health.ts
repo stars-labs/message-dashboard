@@ -1,15 +1,17 @@
+import { ORPCError } from '@orpc/server';
 import * as v from 'valibot';
 import { queryFirst, type D1 } from '../lib/d1.js';
-import { json } from '../lib/response.js';
 import type { DaemonStatusResponse } from '../../shared/api/daemon-status.js';
+import type { HealthResponse, LiveResponse } from '../../shared/api/health.js';
 import { deriveDaemonHealth } from '../utils/daemon-health.js';
 import { classifyD1Error, logD1Error } from '../utils/d1-error.js';
 import type { D1ErrorClassification } from '../utils/d1-error.js';
 
-interface HealthRequest {
+interface HealthCall {
   env: { DB: D1<'first'> };
+  /** Headers to add to the answer, error or not. */
+  resHeaders: Headers;
 }
-
 const DAEMON_HEALTH_SELECT = `
   SELECT daemon_id, last_heartbeat, metadata,
     CAST((julianday('now') - julianday(last_heartbeat)) * 86400 AS INTEGER) AS seconds_since_heartbeat
@@ -25,8 +27,13 @@ const DaemonHealthRow = v.object({
   seconds_since_heartbeat: v.nullable(v.number()),
 });
 
-function uncached(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
-  return json(body, status, { 'Cache-Control': 'no-store', ...headers });
+/** Health answers describe this moment; nothing between here and the monitor may keep one. */
+function uncached(resHeaders: Headers): void {
+  resHeaders.set('Cache-Control', 'no-store');
+}
+
+function retryAfter(classification: D1ErrorClassification, resHeaders: Headers): void {
+  if (classification.retryAt) resHeaders.set('Retry-After', classification.retryAt.toUTCString());
 }
 
 function unavailableBody(classification: D1ErrorClassification, timestamp: string) {
@@ -50,98 +57,98 @@ function unavailableBody(classification: D1ErrorClassification, timestamp: strin
   };
 }
 
-function unavailableHeaders(classification: D1ErrorClassification): Record<string, string> {
-  return classification.retryAt ? { 'Retry-After': classification.retryAt.toUTCString() } : {};
+/** Readiness failed: a 503 whose `health` member says what is not ready. */
+function notHealthy(detail: string, health: object): ORPCError<'NOT_HEALTHY', { health: object }> {
+  return new ORPCError('NOT_HEALTHY', { status: 503, message: detail, data: { health } });
 }
 
 export const healthHandler = {
-  live(): Response {
-    return uncached({
-      status: 'alive',
-      timestamp: new Date().toISOString(),
-    });
+  live({ resHeaders }: Pick<HealthCall, 'resHeaders'>): LiveResponse {
+    uncached(resHeaders);
+    return { status: 'alive', timestamp: new Date().toISOString() };
   },
 
-  async check(request: HealthRequest): Promise<Response> {
-    const { env } = request;
+  async check({ env, resHeaders }: HealthCall): Promise<HealthResponse> {
+    uncached(resHeaders);
     const timestamp = new Date().toISOString();
 
+    let daemonHealth;
     try {
       // One indexed application-table read proves D1 is usable and supplies the
       // daemon state. A constant SELECT 1 can succeed after table reads are blocked.
-      const daemonHealth = await queryFirst(env.DB.prepare(DAEMON_HEALTH_SELECT), DaemonHealthRow);
-      const derived = deriveDaemonHealth(daemonHealth);
-      return uncached(
-        {
-          status: derived.status,
-          database: { status: 'connected' },
-          daemon: {
-            status: derived.status,
-            label: derived.label,
-            reasons: derived.reasons,
-            last_heartbeat: daemonHealth?.last_heartbeat ?? null,
-          },
-          timestamp,
-        },
-        derived.status === 'healthy' ? 200 : 503,
-      );
+      daemonHealth = await queryFirst(env.DB.prepare(DAEMON_HEALTH_SELECT), DaemonHealthRow);
     } catch (error) {
       const classification = classifyD1Error(error);
       logD1Error('health_readiness', error, classification);
-      return uncached(
+      retryAfter(classification, resHeaders);
+      throw notHealthy(
+        'Database dependency is unavailable',
         unavailableBody(classification, timestamp),
-        503,
-        unavailableHeaders(classification),
       );
     }
+
+    const derived = deriveDaemonHealth(daemonHealth);
+    const daemon = {
+      label: derived.label,
+      reasons: derived.reasons,
+      last_heartbeat: daemonHealth?.last_heartbeat ?? null,
+    };
+    if (derived.status !== 'healthy') {
+      throw notHealthy(derived.reasons[0] ?? derived.label, {
+        status: derived.status,
+        database: { status: 'connected' },
+        daemon: { status: derived.status, ...daemon },
+        timestamp,
+      });
+    }
+    return {
+      status: 'healthy',
+      database: { status: 'connected' },
+      daemon: { status: 'healthy', ...daemon },
+      timestamp,
+    };
   },
 
-  async daemonStatus(request: HealthRequest): Promise<Response> {
-    const { env } = request;
+  async daemonStatus({ env, resHeaders }: HealthCall): Promise<DaemonStatusResponse> {
+    uncached(resHeaders);
 
+    let daemonHealth;
     try {
-      const daemonHealth = await queryFirst(env.DB.prepare(DAEMON_HEALTH_SELECT), DaemonHealthRow);
-
-      if (!daemonHealth) {
-        const derived = deriveDaemonHealth(null);
-        return uncached({
-          status: derived.status,
-          label: derived.label,
-          message: derived.reasons[0],
-          reasons: derived.reasons,
-          snapshot: null,
-          timestamp: new Date().toISOString(),
-        } satisfies DaemonStatusResponse);
-      }
-
-      const derived = deriveDaemonHealth(daemonHealth);
-      const snapshot = derived.snapshot;
-
-      return uncached({
-        daemon_id: daemonHealth.daemon_id,
-        status: derived.status,
-        label: derived.label,
-        last_heartbeat: daemonHealth.last_heartbeat,
-        seconds_since_heartbeat: daemonHealth.seconds_since_heartbeat,
-        message: derived.reasons[0] ?? '正常运行中',
-        reasons: derived.reasons,
-        snapshot,
-        timestamp: new Date().toISOString(),
-      } satisfies DaemonStatusResponse);
+      daemonHealth = await queryFirst(env.DB.prepare(DAEMON_HEALTH_SELECT), DaemonHealthRow);
     } catch (error) {
       const classification = classifyD1Error(error);
       logD1Error('daemon_status', error, classification);
-      return uncached(
-        {
-          status: 'error',
-          code: classification.code,
-          message: 'Service status is temporarily unavailable',
-          retry_at: classification.retryAt?.toISOString() ?? null,
-          timestamp: new Date().toISOString(),
-        },
-        503,
-        unavailableHeaders(classification),
-      );
+      retryAfter(classification, resHeaders);
+      throw new ORPCError(classification.code, {
+        status: 503,
+        message: 'Service status is temporarily unavailable',
+        data: { retry_at: classification.retryAt?.toISOString() ?? null },
+      });
     }
+
+    if (!daemonHealth) {
+      const derived = deriveDaemonHealth(null);
+      return {
+        status: derived.status,
+        label: derived.label,
+        ...(derived.reasons[0] === undefined ? {} : { message: derived.reasons[0] }),
+        reasons: derived.reasons,
+        snapshot: null,
+        timestamp: new Date().toISOString(),
+      };
+    }
+
+    const derived = deriveDaemonHealth(daemonHealth);
+    return {
+      daemon_id: daemonHealth.daemon_id,
+      status: derived.status,
+      label: derived.label,
+      last_heartbeat: daemonHealth.last_heartbeat,
+      seconds_since_heartbeat: daemonHealth.seconds_since_heartbeat,
+      message: derived.reasons[0] ?? '正常运行中',
+      reasons: derived.reasons,
+      snapshot: derived.snapshot,
+      timestamp: new Date().toISOString(),
+    };
   },
 };

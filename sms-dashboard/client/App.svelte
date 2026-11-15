@@ -37,6 +37,7 @@
   import PullToRefresh from './lib/PullToRefresh.svelte';
   import { keywords as keywordsStore } from './lib/tag-store.js';
   import { ApiError, api, errorMessage, request } from './lib/api.js';
+  import { contractApi } from './lib/contract-client.js';
   import { getPhoneFlag } from './lib/countries.js';
   import { auth } from './lib/auth.js';
   import { getStatusMeta } from './lib/device-status.js';
@@ -65,7 +66,6 @@
     type BalanceCheckDetail,
   } from '../shared/api/balance-checks.js';
   import type { CallLogEntry, LiveCall } from '../shared/api/calls.js';
-  import { DaemonStatusResponse } from '../shared/api/daemon-status.js';
   import { FiltersResponse, type FilterRule } from '../shared/api/filters.js';
   import type { CreateIccidMappingResponse } from '../shared/api/iccid-mappings.js';
   import type { ApiMessage } from '../shared/api/messages.js';
@@ -796,7 +796,7 @@
   async function checkDaemonStatus() {
     lastDaemonPollAt = Date.now();
     try {
-      const data = await request('/api/daemon/status', DaemonStatusResponse);
+      const data = await contractApi.health.daemonStatus();
       daemonStatus = {
         status: data.status,
         reasons: data.reasons,

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from 'bun:test';
 import * as v from 'valibot';
+import { ORPCError } from '@orpc/server';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
 import type { D1, D1Statement } from '../lib/d1.js';
 import { healthHandler } from './health.js';
@@ -32,10 +33,6 @@ function dbStub({ row = null, error }: { row?: object | null; error?: Error } = 
   return { db, calls };
 }
 
-function request(db: D1<'first'>) {
-  return { env: { DB: db } };
-}
-
 function daemonSnapshot() {
   return JSON.stringify({
     schema_version: 3,
@@ -58,35 +55,62 @@ function healthRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
-const Body = v.looseObject({
-  status: v.string(),
-  database: v.optional(v.looseObject({ retry_at: v.optional(v.string()) })),
-  snapshot: v.optional(v.looseObject({})),
-});
+type HealthCall = Parameters<typeof healthHandler.check>[0];
 
-async function bodyOf(response: Response) {
-  return v.parse(Body, await response.json());
+interface Answer {
+  status: number;
+  body: unknown;
+  headers: Headers;
 }
 
-async function rawBody(response: Response): Promise<unknown> {
-  return await response.json();
+/** What the contract handler answers: the value, or the error's status, code, message and members. */
+async function answer(run: (call: HealthCall) => unknown, db: D1<'first'>): Promise<Answer> {
+  const resHeaders = new Headers();
+  try {
+    return { status: 200, body: await run({ env: { DB: db }, resHeaders }), headers: resHeaders };
+  } catch (error) {
+    if (!(error instanceof ORPCError)) throw error;
+    const members = v.parse(v.record(v.string(), v.unknown()), error.data ?? {});
+    return {
+      status: error.status,
+      body: { code: String(error.code), message: error.message, ...members },
+      headers: resHeaders,
+    };
+  }
+}
+
+const live = () => answer((call) => healthHandler.live(call), dbStub().db);
+const check = (db: D1<'first'>) => answer((call) => healthHandler.check(call), db);
+const daemonStatus = (db: D1<'first'>) => answer((call) => healthHandler.daemonStatus(call), db);
+
+const Readiness = v.looseObject({
+  status: v.string(),
+  database: v.optional(v.looseObject({ retry_at: v.optional(v.string()) })),
+});
+
+/** The readiness report: the answer itself, or the `health` member of a 503. */
+function readiness({ status, body }: Answer) {
+  return v.parse(
+    Readiness,
+    status === 503 ? v.parse(v.object({ health: v.unknown() }), body).health : body,
+  );
 }
 
 describe('Worker health monitoring', () => {
   test('liveness does not touch D1', async () => {
-    const response = healthHandler.live();
+    const answered = await live();
 
-    expect(response.status).toBe(200);
-    expect((await bodyOf(response)).status).toBe('alive');
+    expect(answered.status).toBe(200);
+    expect(answered.body).toMatchObject({ status: 'alive' });
   });
 
   test('readiness uses one real daemon_health lookup instead of SELECT 1', async () => {
     const { db, calls } = dbStub({ row: healthRow() });
 
-    const response = await healthHandler.check(request(db));
-    const body = await bodyOf(response);
+    const answered = await check(db);
+    const body = readiness(answered);
 
-    expect(response.status).toBe(200);
+    expect(answered.status).toBe(200);
     expect(body.status).toBe('healthy');
     expect(body.database).toEqual({ status: 'connected' });
     expect(calls).toHaveLength(1);
@@ -98,10 +122,14 @@ describe('Worker health monitoring', () => {
   test('readiness exposes a bounded quota error and midnight UTC retry time', async () => {
     const { db } = dbStub({ error: new Error(QUOTA_ERROR) });
 
-    const response = await healthHandler.check(request(db));
-    const body = await bodyOf(response);
+    const answered = await check(db);
+    const body = readiness(answered);
 
-    expect(response.status).toBe(503);
+    expect(answered.status).toBe(503);
+    expect(answered.body).toMatchObject({
+      code: 'NOT_HEALTHY',
+      message: 'Database dependency is unavailable',
+    });
     expect(body.status).toBe('unavailable');
     const retryAt = new Date(body.database?.retry_at ?? '');
     expect(body.database).toEqual({
@@ -111,8 +139,8 @@ describe('Worker health monitoring', () => {
       retry_at: retryAt.toISOString(),
     });
     expect(body).not.toHaveProperty('error');
-    expect(response.headers.get('Retry-After')).toBe(retryAt.toUTCString());
-    expect(response.headers.get('Cache-Control')).toBe('no-store');
+    expect(answered.headers.get('Retry-After')).toBe(retryAt.toUTCString());
+    expect(answered.headers.get('Cache-Control')).toBe('no-store');
     expect(retryAt.getUTCHours()).toBe(0);
   });
 
@@ -120,13 +148,15 @@ describe('Worker health monitoring', () => {
     const { db } = dbStub({ row: healthRow() });
 
     const answers = [
-      healthHandler.live(),
-      await healthHandler.check(request(db)),
-      await healthHandler.daemonStatus(request(db)),
-      await healthHandler.daemonStatus(request(dbStub({ error: new Error('boom') }).db)),
+      await live(),
+      await check(db),
+      await check(dbStub({ error: new Error('boom') }).db),
+      await daemonStatus(db),
+      await daemonStatus(dbStub({ error: new Error('boom') }).db),
     ];
 
-    expect(answers.map((response) => response.headers.get('Cache-Control'))).toEqual([
+    expect(answers.map(({ headers }) => headers.get('Cache-Control'))).toEqual([
+      'no-store',
       'no-store',
       'no-store',
       'no-store',
@@ -137,25 +167,24 @@ describe('Worker health monitoring', () => {
   test('readiness classifies other D1 failures without exposing raw errors', async () => {
     const { db } = dbStub({ error: new Error('internal database address') });
 
-    const response = await healthHandler.check(request(db));
-    const body = await bodyOf(response);
+    const answered = await check(db);
 
-    expect(response.status).toBe(503);
-    expect(body.database).toEqual({
+    expect(answered.status).toBe(503);
+    expect(readiness(answered).database).toEqual({
       status: 'unavailable',
       code: 'D1_UNAVAILABLE',
     });
-    expect(response.headers.has('Retry-After')).toBe(false);
-    expect(JSON.stringify(body)).not.toContain('internal database address');
+    expect(answered.headers.has('Retry-After')).toBe(false);
+    expect(JSON.stringify(answered.body)).not.toContain('internal database address');
   });
 
   test('readiness reports an unknown daemon as unavailable before it first connects', async () => {
     const { db } = dbStub({ row: null });
 
-    const response = await healthHandler.check(request(db));
+    const answered = await check(db);
 
-    expect(response.status).toBe(503);
-    expect(await rawBody(response)).toMatchObject({
+    expect(answered.status).toBe(503);
+    expect(readiness(answered)).toMatchObject({
       status: 'unknown',
       database: { status: 'connected' },
       daemon: { status: 'unknown', last_heartbeat: null },
@@ -165,10 +194,10 @@ describe('Worker health monitoring', () => {
   test('readiness answers 503 as unavailable when the row does not match the schema', async () => {
     const { db } = dbStub({ row: healthRow({ last_heartbeat: 5 }) });
 
-    const response = await healthHandler.check(request(db));
+    const answered = await check(db);
 
-    expect(response.status).toBe(503);
-    expect((await bodyOf(response)).database).toEqual({
+    expect(answered.status).toBe(503);
+    expect(readiness(answered).database).toEqual({
       status: 'unavailable',
       code: 'D1_UNAVAILABLE',
     });
@@ -177,17 +206,15 @@ describe('Worker health monitoring', () => {
   test('daemon status uses the same stable D1 error contract', async () => {
     const { db } = dbStub({ error: new Error(QUOTA_ERROR) });
 
-    const response = await healthHandler.daemonStatus(request(db));
-    const body = await rawBody(response);
+    const answered = await daemonStatus(db);
 
-    expect(response.status).toBe(503);
-    expect(body).toMatchObject({
-      status: 'error',
+    expect(answered.status).toBe(503);
+    expect(answered.body).toMatchObject({
       code: 'D1_QUOTA_EXCEEDED',
       message: 'Service status is temporarily unavailable',
     });
-    expect(JSON.stringify(body)).not.toContain('free tier daily row read limit');
-    expect(response.headers.has('Retry-After')).toBe(true);
+    expect(JSON.stringify(answered.body)).not.toContain('free tier daily row read limit');
+    expect(answered.headers.has('Retry-After')).toBe(true);
   });
 
   test('daemon status still returns readable state when the daemon is offline', async () => {
@@ -195,17 +222,16 @@ describe('Worker health monitoring', () => {
       row: healthRow({ last_heartbeat: '2026-09-02 06:00:00', seconds_since_heartbeat: 301 }),
     });
 
-    const response = await healthHandler.daemonStatus(request(db));
+    const answered = await daemonStatus(db);
 
-    expect(response.status).toBe(200);
-    expect((await bodyOf(response)).status).toBe('offline');
+    expect(answered.status).toBe(200);
+    expect(answered.body).toMatchObject({ status: 'offline' });
   });
 
   test('daemon status exposes only the v3 snapshot instead of legacy placeholders', async () => {
     const { db } = dbStub({ row: healthRow() });
 
-    const response = await healthHandler.daemonStatus(request(db));
-    const body = await rawBody(response);
+    const { body } = await daemonStatus(db);
 
     expect(body).toMatchObject({
       daemon_id: 'orange-pi-main',
@@ -232,10 +258,10 @@ describe('Worker health monitoring', () => {
   test('daemon status explains a daemon that has not connected yet', async () => {
     const { db } = dbStub({ row: null });
 
-    const response = await healthHandler.daemonStatus(request(db));
+    const answered = await daemonStatus(db);
 
-    expect(response.status).toBe(200);
-    expect(await rawBody(response)).toMatchObject({
+    expect(answered.status).toBe(200);
+    expect(answered.body).toMatchObject({
       status: 'unknown',
       message: '等待采集服务首次连接',
       snapshot: null,
@@ -245,10 +271,10 @@ describe('Worker health monitoring', () => {
   test('daemon status answers 503 when the row does not match the schema', async () => {
     const { db } = dbStub({ row: healthRow({ daemon_id: null }) });
 
-    const response = await healthHandler.daemonStatus(request(db));
+    const answered = await daemonStatus(db);
 
-    expect(response.status).toBe(503);
-    expect(await rawBody(response)).toMatchObject({ status: 'error', code: 'D1_UNAVAILABLE' });
+    expect(answered.status).toBe(503);
+    expect(answered.body).toMatchObject({ code: 'D1_UNAVAILABLE' });
   });
 });
 
@@ -286,10 +312,10 @@ describe('daemon_health lookup on SQLite', () => {
       { id: 'orange-pi-main', heartbeatSecondsAgo: 10, metadata: daemonSnapshot() },
     ]);
 
-    const response = await healthHandler.check(request(d1));
+    const answered = await check(d1);
 
-    expect(response.status).toBe(200);
-    expect((await bodyOf(response)).status).toBe('healthy');
+    expect(answered.status).toBe(200);
+    expect(readiness(answered).status).toBe('healthy');
   });
 
   test('a heartbeat older than three minutes reads offline', async () => {
@@ -297,8 +323,7 @@ describe('daemon_health lookup on SQLite', () => {
       { id: 'orange-pi-main', heartbeatSecondsAgo: 600, metadata: daemonSnapshot() },
     ]);
 
-    const response = await healthHandler.daemonStatus(request(d1));
-    const body = await rawBody(response);
+    const { body } = await daemonStatus(d1);
 
     expect(body).toMatchObject({ status: 'offline', daemon_id: 'orange-pi-main' });
   });
@@ -308,17 +333,13 @@ describe('daemon_health lookup on SQLite', () => {
       { id: 'someone-else', heartbeatSecondsAgo: 1, metadata: daemonSnapshot() },
     ]);
 
-    const response = await healthHandler.daemonStatus(request(d1));
-
-    expect(await rawBody(response)).toMatchObject({ status: 'unknown', snapshot: null });
+    expect((await daemonStatus(d1)).body).toMatchObject({ status: 'unknown', snapshot: null });
   });
 
   test('a row without a stored snapshot reads unknown', async () => {
     const d1 = databaseWith([{ id: 'orange-pi-main', heartbeatSecondsAgo: 1, metadata: null }]);
 
-    const response = await healthHandler.daemonStatus(request(d1));
-
-    expect(await rawBody(response)).toMatchObject({
+    expect((await daemonStatus(d1)).body).toMatchObject({
       status: 'unknown',
       message: '健康报告格式无效或缺失',
     });

@@ -10,9 +10,11 @@
 // Authentication state is therefore whether /api/auth/me answers, not whether a string
 // exists on the client.
 
-import { readJson } from '../../shared/parse-json.js';
+import { ORPCError } from '@orpc/client';
+import { ValidationError } from '@orpc/contract';
 import { textOr } from '../../shared/text.js';
-import { MeResponse } from '../../shared/api/auth.js';
+import type { MeResponse } from '../../shared/api/auth.js';
+import { contractClient } from './contract-link.js';
 
 /** The user the server returns from /api/auth/me. */
 type AuthUser = MeResponse['user'];
@@ -20,6 +22,13 @@ type AuthUser = MeResponse['user'];
 class Auth0Service {
   baseUrl: string;
   user: AuthUser | null;
+
+  // Not contractApi: that one signs the user out on a 401, which here only means
+  // there is no session yet.
+  private readonly api = contractClient(
+    () => this.baseUrl,
+    (request) => fetch(request, { credentials: 'same-origin' }),
+  );
 
   constructor() {
     this.baseUrl = textOr(
@@ -42,26 +51,21 @@ class Auth0Service {
 
   async getUser(): Promise<AuthUser | null> {
     try {
-      const response = await fetch(`${this.baseUrl}/api/auth/me`, {
-        credentials: 'same-origin',
-      });
-
-      if (response.ok) {
-        const body = await readJson(response, MeResponse);
-        if (!body.ok) throw new Error(`身份服务响应格式不符：${body.error}`);
-        this.user = body.value.user;
-        return this.user;
-      }
-
-      // 401/403 — no usable session.
-      this.user = null;
-      if (response.status === 401 || response.status === 403) return null;
-      // Any other status is the server failing, not the user being signed out.
-      // Returning null here sent an operator to the login screen during an
-      // outage, where logging in bounced straight back.
-      throw new Error(`身份服务返回 ${String(response.status)}`);
+      this.user = (await this.api.auth.me()).user;
+      return this.user;
     } catch (error) {
       this.user = null;
+      if (error instanceof ORPCError) {
+        // 401/403 — no usable session.
+        if (error.status === 401 || error.status === 403) return null;
+        // Any other status is the server failing, not the user being signed out.
+        // Returning null here sent an operator to the login screen during an
+        // outage, where logging in bounced straight back.
+        throw new Error(`身份服务返回 ${String(error.status)}`, { cause: error });
+      }
+      if (error instanceof ValidationError) {
+        throw new Error(`身份服务响应格式不符：${error.message}`, { cause: error });
+      }
       throw error;
     }
   }

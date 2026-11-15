@@ -1,4 +1,5 @@
 import type { ORPCError } from '@orpc/server';
+import * as v from 'valibot';
 import { NOT_JSON_MESSAGE } from '../lib/request-body.js';
 
 const TITLES: Partial<Record<number, string>> = {
@@ -24,8 +25,16 @@ export function problemResponse(status: number, code: string, detail: string): R
   });
 }
 
+const Extensions = v.record(v.string(), v.unknown());
+
+/** The problem for `error`; members of an object `data` are its extension members. */
 export function problemOf(error: ORPCError<string, unknown>) {
-  return problem(error.status, error.code, error.message);
+  const fixed = problem(error.status, error.code, error.message);
+  const extensions = v.is(Extensions, error.data) ? error.data : {};
+  return {
+    ...fixed,
+    ...Object.fromEntries(Object.entries(extensions).filter(([name]) => !(name in fixed))),
+  };
 }
 
 /**

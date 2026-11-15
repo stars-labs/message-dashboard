@@ -1,6 +1,8 @@
 import { implement } from '@orpc/server';
 import { contract } from '../../shared/api/contract/index.js';
+import { auth0Handler } from '../handlers/auth0.js';
 import { recordHeartbeat } from '../handlers/control.js';
+import { healthHandler } from '../handlers/health.js';
 import { usersHandler } from '../handlers/users.js';
 import type { AppRequest } from '../worker-context.js';
 
@@ -17,6 +19,18 @@ export const router = os.router({
     heartbeat: os.control.heartbeat.handler(({ context, input }) =>
       recordHeartbeat(context.request, input),
     ),
+  },
+  health: {
+    live: os.health.live.handler(({ context }) => healthHandler.live(context)),
+    ready: os.health.ready.handler(({ context: { request, resHeaders } }) =>
+      healthHandler.check({ env: request.env, resHeaders }),
+    ),
+    daemonStatus: os.health.daemonStatus.handler(({ context: { request, resHeaders } }) =>
+      healthHandler.daemonStatus({ env: request.env, resHeaders }),
+    ),
+  },
+  auth: {
+    me: os.auth.me.handler(({ context }) => auth0Handler.me(context.request)),
   },
   users: {
     list: os.users.list.handler(({ context: { request, resHeaders } }) =>

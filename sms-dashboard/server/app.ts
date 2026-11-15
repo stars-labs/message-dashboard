@@ -1,14 +1,11 @@
 import type { Permission } from '../config/auth0-roles.js';
 import { handleCORS, corsPreflight } from './middleware/cors.js';
-import { handleAuth0 } from './middleware/auth0.js';
 import { authorize } from './middleware/authorize.js';
-import { enrichUserPermissions } from './middleware/rbac.js';
 import { controlHandler } from './handlers/control.js';
 import { auth0Handler } from './handlers/auth0.js';
 import { phonesHandler } from './handlers/phones.js';
 import { messagesHandler } from './handlers/messages.js';
 import { iccidMappingsHandler } from './handlers/iccid-mappings.js';
-import { healthHandler } from './handlers/health.js';
 import { balanceQueriesHandler } from './handlers/balance-queries.js';
 import { balanceSkillRunnerHandler } from './handlers/balance-skill-runner.js';
 import { carrierWebBalanceHandler } from './handlers/carrier-web-balance.js';
@@ -52,9 +49,7 @@ function reportingErrors(handler: (request: AppRequest) => Promise<Response>) {
 
 router.options('*', corsPreflight);
 
-// Public API routes
-router.get('/api/live', () => healthHandler.live());
-router.get('/api/health', (request) => healthHandler.check(request));
+// Outside the contract for good: browser redirects, not the JSON API.
 // Legacy /favicon.ico requests (browsers ask for it even when index.html declares
 // icons) are redirected to the real PNG. This used to return an empty 204, which is
 // why the dashboard had no icon at all.
@@ -65,20 +60,6 @@ router.get('/favicon.ico', (request) =>
 router.get('/login', (request) => auth0Handler.login(request));
 router.get('/callback', auth0Handler.callback);
 router.get('/logout', auth0Handler.logout);
-
-router.get('/api/auth/me', async (request) => {
-  const authResponse = await handleAuth0(request);
-  if (authResponse) return authResponse;
-  // Attaches user.permissions, which the client uses to decide which nav items and
-  // write controls to render. Without this the response carried roles but no
-  // permissions, so the SPA had nothing to gate on.
-  enrichUserPermissions(request);
-  return auth0Handler.me(request);
-});
-
-router.get('/api/daemon/status', gate('messages.read'), (request) =>
-  healthHandler.daemonStatus(request),
-);
 
 router.get('/api/phones', gate('phones.read'), (request) => phonesHandler.list(request));
 

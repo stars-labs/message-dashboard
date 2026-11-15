@@ -9,6 +9,7 @@ import { contractRoutes } from './handler.js';
 
 const ADMIN = 'session-admin';
 const VIEWER = 'session-viewer';
+const ROLELESS = 'session-roleless';
 
 function session(roles: string[]): string {
   return JSON.stringify({
@@ -18,7 +19,11 @@ function session(roles: string[]): string {
 }
 
 const bindings = {
-  SESSIONS: memoryKv({ [ADMIN]: session(['sms-admin']), [VIEWER]: session(['sms-viewer']) }),
+  SESSIONS: memoryKv({
+    [ADMIN]: session(['sms-admin']),
+    [VIEWER]: session(['sms-viewer']),
+    [ROLELESS]: session([]),
+  }),
   AUTH0_M2M_CLIENT_ID: 'm2m-client',
   AUTH0_M2M_CLIENT_SECRET: 'm2m-secret',
 };
@@ -91,6 +96,10 @@ describe('contract routes', () => {
     expect(routeTable().slice(0, contractRoutes().length)).toEqual(contractRoutes());
     expect(contractRoutes()).toEqual([
       { method: 'POST', path: '/api/control/heartbeat' },
+      { method: 'GET', path: '/api/live' },
+      { method: 'GET', path: '/api/health' },
+      { method: 'GET', path: '/api/daemon/status' },
+      { method: 'GET', path: '/api/auth/me' },
       { method: 'GET', path: '/api/users' },
       { method: 'PUT', path: '/api/users/:id/role' },
     ]);
@@ -195,6 +204,69 @@ describe('contract routes', () => {
     expect(outbound.filter((url) => url.includes('/api/v2/users/'))).toEqual([
       'https://tenant.example.test/api/v2/users/auth0%7Cother/roles',
     ]);
+  });
+
+  test('answer a public route without credentials, and never cache health', async () => {
+    const live = await callWorker('GET', '/api/live');
+    expect([live.response.status, live.response.headers.get('Cache-Control')]).toEqual([
+      200,
+      'no-store',
+    ]);
+
+    // The harness's D1 has no daemon_health table: readiness fails as D1 unavailable.
+    const ready = await callWorker('GET', '/api/health');
+    expect({
+      ...(await answer(ready.response)),
+      cacheControl: ready.response.headers.get('Cache-Control'),
+    }).toMatchObject({
+      status: 503,
+      contentType: 'application/problem+json',
+      cacheControl: 'no-store',
+      body: {
+        title: 'Service Unavailable',
+        code: 'NOT_HEALTHY',
+        detail: 'Database dependency is unavailable',
+        health: { status: 'unavailable', database: { code: 'D1_UNAVAILABLE' } },
+      },
+    });
+  });
+
+  test('answer the signed-in user whatever their role, and no one else', async () => {
+    // Refused at the entry, before the procedure could look for a user itself.
+    const anonymous = await callWorker('GET', '/api/auth/me', { bindings });
+    expect(await answer(anonymous.response)).toEqual(
+      problemOf(401, 'Unauthorized', 'UNAUTHORIZED', 'No token provided'),
+    );
+
+    const roleless = await callWorker('GET', '/api/auth/me', {
+      headers: as(ROLELESS, false),
+      bindings,
+    });
+    expect(await answer(roleless.response)).toMatchObject({
+      status: 200,
+      body: { success: true, user: { roles: [], permissions: [] } },
+    });
+
+    const viewer = await callWorker('GET', '/api/auth/me', {
+      headers: as(VIEWER, false),
+      bindings,
+    });
+    const MePermissions = v.object({ user: v.object({ permissions: v.array(v.string()) }) });
+    const viewerAnswer = await answer(viewer.response);
+    expect(viewerAnswer.status).toBe(200);
+    expect(v.parse(MePermissions, viewerAnswer.body).user.permissions).toContain('messages.read');
+  });
+
+  test('answer a daemon status D1 cannot give as a problem', async () => {
+    const { response } = await callWorker('GET', '/api/daemon/status', {
+      headers: as(VIEWER, false),
+      bindings,
+    });
+    expect(await answer(response)).toMatchObject({
+      status: 503,
+      contentType: 'application/problem+json',
+      body: { code: 'D1_UNAVAILABLE', retry_at: null },
+    });
   });
 
   test('answer a body the handler rejects as a problem', async () => {

@@ -57,10 +57,17 @@ const responses: Record<string, OpenAPI.ResponseObject> = {
 };
 
 /** Security requirements for `access`; a permission is listed as the requirement's role. */
-function security(access: Access) {
-  return access.kind === 'daemon'
-    ? [{ daemonKey: [] }]
-    : [{ session: [access.permission] }, { auth0: [access.permission] }];
+function security(access: Access): OpenAPI.SecurityRequirementObject[] {
+  switch (access.kind) {
+    case 'public':
+      return [];
+    case 'session':
+      return [{ session: [] }, { auth0: [] }];
+    case 'user':
+      return [{ session: [access.permission] }, { auth0: [access.permission] }];
+    case 'daemon':
+      return [{ daemonKey: [] }];
+  }
 }
 
 export async function openapiDocument() {

@@ -2,8 +2,14 @@ import { oc } from '@orpc/contract';
 import * as v from 'valibot';
 import { ALL_PERMISSIONS } from '../../../config/auth0-roles.js';
 
-/** Who may call a route: a signed-in user holding a permission, or the Pi daemon's API key. */
+/**
+ * Who may call a route: anyone (`public`), anyone signed in whatever their role
+ * (`session`), a signed-in user holding a permission (`user`), or the Pi daemon's
+ * API key (`daemon`).
+ */
 export const Access = v.variant('kind', [
+  v.strictObject({ kind: v.literal('public') }),
+  v.strictObject({ kind: v.literal('session') }),
   v.strictObject({ kind: v.literal('user'), permission: v.picklist(ALL_PERMISSIONS) }),
   v.strictObject({ kind: v.literal('daemon') }),
 ]);

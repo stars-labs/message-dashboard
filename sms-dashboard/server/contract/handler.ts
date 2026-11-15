@@ -13,7 +13,9 @@ import { Method, RouteMeta, type Access } from '../../shared/api/contract/route.
 import { ErrorResponse } from '../../shared/api/error.js';
 import { readJson } from '../../shared/parse-json.js';
 import { requireApiKey } from '../handlers/control.js';
+import { handleAuth0 } from '../middleware/auth0.js';
 import { authorize } from '../middleware/authorize.js';
+import { enrichUserPermissions } from '../middleware/rbac.js';
 import type { AppRequest } from '../worker-context.js';
 import { daemonErrorOf, problemOf, problemResponse } from './errors.js';
 import { router, type ContractContext } from './router.js';
@@ -36,9 +38,23 @@ async function asProblem(refused: Response): Promise<Response> {
  * before oRPC reads the body, as the legacy gate did.
  */
 async function refusal(access: Access, request: AppRequest): Promise<Response | null> {
-  if (access.kind === 'daemon') return requireApiKey(request);
-  const refused = await authorize(request, access.permission);
-  return refused ? asProblem(refused) : null;
+  switch (access.kind) {
+    case 'public':
+      return null;
+    case 'daemon':
+      return requireApiKey(request);
+    case 'session': {
+      const refused = await handleAuth0(request);
+      if (refused) return asProblem(refused);
+      // The permissions the client gates its navigation and write controls on.
+      enrichUserPermissions(request);
+      return null;
+    }
+    case 'user': {
+      const refused = await authorize(request, access.permission);
+      return refused ? asProblem(refused) : null;
+    }
+  }
 }
 
 /** oRPC always answers application/json; restate it as the Worker's other routes do. */

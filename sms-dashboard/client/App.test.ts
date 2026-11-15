@@ -196,7 +196,7 @@ function responseFor(input: Parameters<typeof fetch>[0]): Response {
 }
 
 function stubApi(): void {
-  auth.baseUrl = '';
+  auth.baseUrl = 'http://localhost';
   fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(
     Object.assign((input: Parameters<typeof fetch>[0]) => Promise.resolve(responseFor(input)), {
       preconnect: () => undefined,

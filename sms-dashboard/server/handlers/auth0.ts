@@ -1,3 +1,4 @@
+import { ORPCError } from '@orpc/server';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { nanoid } from 'nanoid';
 import * as v from 'valibot';
@@ -11,7 +12,6 @@ import {
 } from '../../config/auth0-roles.js';
 import type { D1 } from '../lib/d1.js';
 import { readKvJson, type KV } from '../lib/kv.js';
-import { json } from '../lib/response.js';
 import { extractSessionToken } from '../utils/session-token.js';
 import { getUserRoles, setUserRole, type Auth0ManagementEnv } from '../utils/auth0-management.js';
 import { indexSession, unindexSession } from '../utils/user-sessions.js';
@@ -533,11 +533,12 @@ export const auth0Handler = {
   },
 
   // Get current user
-  me(request: MeRequest): Response {
+  /** GET /api/auth/me, once the session is checked: the user and their permissions. */
+  me(request: MeRequest): MeResponse {
     const { user } = request;
-    if (!user) return json({ error: 'Unauthorized' }, 401);
+    if (!user) throw new ORPCError('UNAUTHORIZED', { message: 'No signed-in user' });
 
-    return json({
+    return {
       success: true,
       user: {
         ...user,
@@ -546,7 +547,7 @@ export const auth0Handler = {
         // everything, instead of `undefined` which `.includes()` would throw on.
         permissions: user.permissions ?? [],
       },
-    } satisfies MeResponse);
+    };
   },
 
   // Verify JWT token (for API calls)

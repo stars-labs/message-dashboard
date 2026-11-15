@@ -485,32 +485,33 @@ describe('Auth0 logout', () => {
 });
 
 describe('Auth0 current user', () => {
-  test('returns the session user with its roles and permissions', async () => {
-    const response = auth0Handler.me({
-      user: { id: 'auth0|u1', provider: 'auth0', roles: ['viewer'], permissions: ['phones.read'] },
-    });
-
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
+  test('returns the session user with its roles and permissions', () => {
+    expect(
+      auth0Handler.me({
+        user: {
+          id: 'auth0|u1',
+          provider: 'auth0',
+          roles: ['viewer'],
+          permissions: ['phones.read'],
+        },
+      }),
+    ).toEqual({
       success: true,
       user: { id: 'auth0|u1', provider: 'auth0', roles: ['viewer'], permissions: ['phones.read'] },
     });
   });
 
-  test('reports no permissions when they have not been attached', async () => {
-    const response = auth0Handler.me({ user: { id: 'auth0|u1', roles: ['viewer'] } });
-
-    expect(await response.json()).toEqual({
+  test('reports no permissions when they have not been attached', () => {
+    expect(auth0Handler.me({ user: { id: 'auth0|u1', roles: ['viewer'] } })).toEqual({
       success: true,
       user: { id: 'auth0|u1', roles: ['viewer'], permissions: [] },
     });
   });
 
-  test('answers 401 without a signed-in user', async () => {
-    const response = auth0Handler.me({});
-
-    expect(response.status).toBe(401);
-    expect(await response.json()).toEqual({ error: 'Unauthorized' });
+  test('refuses with 401 without a signed-in user', () => {
+    expect(() => auth0Handler.me({})).toThrow(
+      expect.objectContaining({ status: 401, code: 'UNAUTHORIZED' }),
+    );
   });
 });
 

@@ -15,11 +15,21 @@ describe('the OpenAPI document', () => {
       Object.entries(doc.paths ?? {}).flatMap(([path, item]) =>
         Object.keys(item ?? {}).map((method) => `${method.toUpperCase()} ${path}`),
       ),
-    ).toEqual(['POST /api/control/heartbeat', 'GET /api/users', 'PUT /api/users/{id}/role']);
+    ).toEqual([
+      'POST /api/control/heartbeat',
+      'GET /api/live',
+      'GET /api/health',
+      'GET /api/daemon/status',
+      'GET /api/auth/me',
+      'GET /api/users',
+      'PUT /api/users/{id}/role',
+    ]);
   });
 
   test('says who may call each route', () => {
     expect(operation('/api/control/heartbeat', 'post').security).toEqual([{ daemonKey: [] }]);
+    expect(operation('/api/health', 'get').security).toEqual([]);
+    expect(operation('/api/auth/me', 'get').security).toEqual([{ session: [] }, { auth0: [] }]);
     expect(operation('/api/users', 'get').security).toEqual([
       { session: ['users.read'] },
       { auth0: ['users.read'] },

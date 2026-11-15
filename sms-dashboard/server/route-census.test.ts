@@ -6,17 +6,18 @@ import { routeTable } from '../test/worker-harness.js';
 const EXPECTED = [
   // Served by the oRPC contract (shared/api/contract/), ahead of the Router.
   ['POST', '/api/control/heartbeat'],
-  ['GET', '/api/users'],
-  ['PUT', '/api/users/:id/role'],
-  // The legacy Router.
   ['GET', '/api/live'],
   ['GET', '/api/health'],
+  ['GET', '/api/daemon/status'],
+  ['GET', '/api/auth/me'],
+  ['GET', '/api/users'],
+  ['PUT', '/api/users/:id/role'],
+  // The legacy Router. /favicon.ico, /login, /callback and /logout stay outside
+  // the contract for good: they are browser redirects, not the JSON API.
   ['GET', '/favicon.ico'],
   ['GET', '/login'],
   ['GET', '/callback'],
   ['GET', '/logout'],
-  ['GET', '/api/auth/me'],
-  ['GET', '/api/daemon/status'],
   ['GET', '/api/phones'],
   ['GET', '/api/messages'],
   ['GET', '/api/balance-checks'],

@@ -124,6 +124,410 @@
         ]
       }
     },
+    "/api/live": {
+      "get": {
+        "operationId": "health.live",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "const": "alive"
+                    },
+                    "timestamp": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "timestamp"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "security": []
+      }
+    },
+    "/api/health": {
+      "get": {
+        "operationId": "health.ready",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "const": "healthy"
+                    },
+                    "database": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "const": "connected"
+                        }
+                      },
+                      "required": [
+                        "status"
+                      ]
+                    },
+                    "daemon": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "const": "healthy"
+                        },
+                        "label": {
+                          "type": "string"
+                        },
+                        "reasons": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "last_heartbeat": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "label",
+                        "reasons",
+                        "last_heartbeat"
+                      ]
+                    },
+                    "timestamp": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "database",
+                    "daemon",
+                    "timestamp"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "security": []
+      }
+    },
+    "/api/daemon/status": {
+      "get": {
+        "operationId": "health.daemonStatus",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "enum": [
+                            "unknown",
+                            "offline",
+                            "degraded",
+                            "healthy"
+                          ],
+                          "type": "string"
+                        },
+                        "label": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "reasons": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "snapshot": {
+                          "type": "null"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "label",
+                        "reasons",
+                        "snapshot",
+                        "timestamp"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "daemon_id": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "enum": [
+                            "unknown",
+                            "offline",
+                            "degraded",
+                            "healthy"
+                          ],
+                          "type": "string"
+                        },
+                        "label": {
+                          "type": "string"
+                        },
+                        "last_heartbeat": {
+                          "type": "string"
+                        },
+                        "seconds_since_heartbeat": {
+                          "anyOf": [
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "reasons": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "snapshot": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "schema_version": {
+                                  "const": 3
+                                },
+                                "session_id": {
+                                  "type": "string"
+                                },
+                                "version": {
+                                  "type": "string"
+                                },
+                                "uptime_seconds": {
+                                  "type": "number"
+                                },
+                                "last_message_read_success_age_seconds": {
+                                  "anyOf": [
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "last_upload_success_age_seconds": {
+                                  "anyOf": [
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "queue": {
+                                  "type": "object",
+                                  "properties": {
+                                    "pending": {
+                                      "type": "number"
+                                    },
+                                    "in_flight": {
+                                      "type": "number"
+                                    },
+                                    "dead_letter": {
+                                      "type": "number"
+                                    },
+                                    "oldest_unacknowledged_age_seconds": {
+                                      "anyOf": [
+                                        {
+                                          "type": "number"
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ]
+                                    }
+                                  },
+                                  "required": [
+                                    "pending",
+                                    "in_flight",
+                                    "dead_letter",
+                                    "oldest_unacknowledged_age_seconds"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "schema_version",
+                                "session_id",
+                                "version",
+                                "uptime_seconds",
+                                "last_message_read_success_age_seconds",
+                                "last_upload_success_age_seconds",
+                                "queue"
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "daemon_id",
+                        "status",
+                        "label",
+                        "last_heartbeat",
+                        "seconds_since_heartbeat",
+                        "message",
+                        "reasons",
+                        "snapshot",
+                        "timestamp"
+                      ]
+                    }
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "security": [
+          {
+            "session": [
+              "messages.read"
+            ]
+          },
+          {
+            "auth0": [
+              "messages.read"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/auth/me": {
+      "get": {
+        "operationId": "auth.me",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "user": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "sub": {
+                          "type": "string"
+                        },
+                        "email": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "picture": {
+                          "type": "string"
+                        },
+                        "provider": {
+                          "type": "string"
+                        },
+                        "roles": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "permissions": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "roles",
+                        "permissions"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "user"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "auth0": []
+          }
+        ]
+      }
+    },
     "/api/users": {
       "get": {
         "operationId": "users.list",
