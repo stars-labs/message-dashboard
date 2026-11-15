@@ -16,7 +16,7 @@ export type HeartbeatResponse = v.InferOutput<typeof HeartbeatResponse>;
 export const control = {
   // The snapshot is read field by field (normalizeHealthSnapshot), so a daemon
   // a version ahead or behind gets the refusal it always got.
-  heartbeat: route({ kind: 'daemon' }, 'POST', '/api/control/heartbeat')
+  heartbeat: route({ kind: 'daemon', errors: 'flagged' }, 'POST', '/api/control/heartbeat')
     .input(v.unknown())
     .output(HeartbeatResponse),
 };

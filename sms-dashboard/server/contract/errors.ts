@@ -63,14 +63,42 @@ export function problemOf(error: ORPCError<string, unknown>) {
   };
 }
 
+/** The body a daemon route answers whole, in place of its usual error format. */
+const WireError = v.object({ wire: v.record(v.string(), v.unknown()) });
+
+export type DaemonErrors = 'plain' | 'flagged';
+
 /**
- * The daemon's error format, which shared/control-fixtures/ pins. oRPC decodes
- * the body before any procedure runs, so a body that is not JSON arrives here
- * as a BAD_REQUEST caused by JSON.parse.
+ * Why a daemon route refused a request. oRPC decodes the body before any
+ * procedure runs, so a body that is not JSON arrives here as a BAD_REQUEST
+ * caused by JSON.parse; a rejected input names its first issue.
  */
-export function daemonErrorOf(error: ORPCError<string, unknown>) {
-  return {
-    success: false,
-    error: error.cause instanceof SyntaxError ? NOT_JSON_MESSAGE : error.message,
+function daemonReason(error: ORPCError<string, unknown>): string {
+  if (error.cause instanceof SyntaxError) return NOT_JSON_MESSAGE;
+  if (error.cause instanceof ValidationError)
+    return error.cause.issues[0]?.message ?? error.message;
+  return error.message;
+}
+
+/** A failure the procedure did not choose: oRPC wraps what it threw. */
+function unexpected(error: ORPCError<string, unknown>): boolean {
+  return (
+    error.code === 'INTERNAL_SERVER_ERROR' &&
+    error.cause !== undefined &&
+    !(error.cause instanceof ValidationError)
+  );
+}
+
+/**
+ * The daemon's error format, which shared/control-fixtures/ and the route tests
+ * pin: `{ error }` or `{ success: false, error }` as the route declares, or the
+ * whole body a refusal gives as `data.wire`. An unexpected failure on a plain
+ * route answers as the Worker's own catch always did.
+ */
+export function daemonErrorOf(errors: DaemonErrors) {
+  return (error: ORPCError<string, unknown>) => {
+    if (v.is(WireError, error.data)) return error.data.wire;
+    if (errors === 'flagged') return { success: false, error: daemonReason(error) };
+    return { error: unexpected(error) ? 'Internal Server Error' : daemonReason(error) };
   };
 }

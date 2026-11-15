@@ -1,5 +1,5 @@
 import { describe, expect, spyOn, test } from 'bun:test';
-import { implement } from '@orpc/server';
+import { implement, ORPCError } from '@orpc/server';
 import * as v from 'valibot';
 import { route } from '../../shared/api/contract/route.js';
 import { TEST_API_KEY, testEnv } from '../../test/worker-harness.js';
@@ -9,9 +9,30 @@ import type { ContractContext } from './router.js';
 
 // A contract of its own, so the entry's rules are tested apart from the routes
 // that happen to use them today.
+const Body = v.nonOptional(
+  v.object({ name: v.string('name must be text') }, 'Body must be an object'),
+  'Body must be JSON',
+);
+
 const contract = {
-  control: route({ kind: 'daemon' }, 'POST', '/api/control/broken').output(v.unknown()),
-  page: route({ kind: 'daemon' }, 'POST', '/api/broken').output(v.unknown()),
+  control: route({ kind: 'daemon', errors: 'flagged' }, 'POST', '/api/control/broken').output(
+    v.unknown(),
+  ),
+  flagged: route({ kind: 'daemon', errors: 'flagged' }, 'POST', '/api/control/flagged')
+    .input(Body)
+    .output(v.unknown()),
+  plain: route({ kind: 'daemon', errors: 'plain' }, 'POST', '/api/control/plain')
+    .input(Body)
+    .output(v.unknown()),
+  plainBroken: route(
+    { kind: 'daemon', errors: 'plain' },
+    'POST',
+    '/api/control/plain-broken',
+  ).output(v.unknown()),
+  whole: route({ kind: 'daemon', errors: 'plain' }, 'POST', '/api/control/whole').output(
+    v.unknown(),
+  ),
+  page: route({ kind: 'daemon', errors: 'flagged' }, 'POST', '/api/broken').output(v.unknown()),
 };
 
 const os = implement(contract).$context<ContractContext>();
@@ -20,6 +41,12 @@ const fault = new Error('the database went away');
 const handle = createContractHandler(
   os.router({
     control: os.control.handler(() => Promise.reject(fault)),
+    flagged: os.flagged.handler(({ input }) => input),
+    plain: os.plain.handler(({ input }) => input),
+    plainBroken: os.plainBroken.handler(() => Promise.reject(fault)),
+    whole: os.whole.handler(() => {
+      throw new ORPCError('CONFLICT', { data: { wire: { ok: false, reason: 'busy' } } });
+    }),
     page: os.page.handler(() => Promise.reject(fault)),
   }),
 );
@@ -57,6 +84,44 @@ describe('the contract entry', () => {
       contentType: 'application/json;charset=utf-8',
       body: { success: false, error: 'Internal server error' },
       logged: true,
+    });
+  });
+
+  test("answers a daemon route's refusals in the format it declares", async () => {
+    const refusals = [];
+    for (const path of ['/api/control/flagged', '/api/control/plain']) {
+      for (const body of [undefined, '', '{"name":', '{"name":5}']) {
+        const { status, body: answered } = await answer(path, body);
+        refusals.push([path, body, status, answered]);
+      }
+    }
+    expect(refusals).toEqual([
+      ['/api/control/flagged', undefined, 400, { success: false, error: 'Body must be JSON' }],
+      ['/api/control/flagged', '', 400, { success: false, error: 'Body must be JSON' }],
+      ['/api/control/flagged', '{"name":', 400, { success: false, error: 'Body must be JSON' }],
+      ['/api/control/flagged', '{"name":5}', 400, { success: false, error: 'name must be text' }],
+      ['/api/control/plain', undefined, 400, { error: 'Body must be JSON' }],
+      ['/api/control/plain', '', 400, { error: 'Body must be JSON' }],
+      ['/api/control/plain', '{"name":', 400, { error: 'Body must be JSON' }],
+      ['/api/control/plain', '{"name":5}', 400, { error: 'name must be text' }],
+    ]);
+  });
+
+  test('answers an unexpected failure on a plain daemon route as the Worker always has', async () => {
+    expect(await answer('/api/control/plain-broken')).toEqual({
+      status: 500,
+      contentType: 'application/json;charset=utf-8',
+      body: { error: 'Internal Server Error' },
+      logged: true,
+    });
+  });
+
+  test('answers a body a daemon route gives whole, as given', async () => {
+    expect(await answer('/api/control/whole')).toEqual({
+      status: 409,
+      contentType: 'application/json;charset=utf-8',
+      body: { ok: false, reason: 'busy' },
+      logged: false,
     });
   });
 

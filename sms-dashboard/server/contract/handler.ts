@@ -17,7 +17,7 @@ import { handleAuth0 } from '../middleware/auth0.js';
 import { authorize } from '../middleware/authorize.js';
 import { enrichUserPermissions } from '../middleware/rbac.js';
 import type { AppRequest } from '../worker-context.js';
-import { daemonErrorOf, problemOf, problemResponse } from './errors.js';
+import { daemonErrorOf, problemOf, problemResponse, type DaemonErrors } from './errors.js';
 import { router, type ContractContext } from './router.js';
 
 const JSON_TYPE = 'application/json;charset=utf-8';
@@ -90,13 +90,19 @@ async function logUnexpected({ next }: { next: () => Promise<unknown> }): Promis
   }
 }
 
-/**
- * The routes of `routes` whose callers read one error format: the daemon's for
- * /api/control/, which shared/control-fixtures/ pins, and a problem for the rest.
- */
-function surface(routes: AnyRouter, control: boolean) {
+/** The error format a route answers in: one of the daemon's for /api/control/, else a problem. */
+function errorFormat(
+  procedure: TraverseContractProcedureCallbackOptions['contract'],
+): DaemonErrors | 'problem' {
+  if (!(procedure['~orpc'].route.path ?? '').startsWith(CONTROL_PREFIX)) return 'problem';
+  const { access } = v.parse(RouteMeta, procedure['~orpc'].meta);
+  return access.kind === 'daemon' ? access.errors : 'flagged';
+}
+
+/** The routes of `routes` whose callers read one error format. */
+function surface(routes: AnyRouter, format: DaemonErrors | 'problem') {
   const filter = ({ contract: procedure }: TraverseContractProcedureCallbackOptions) =>
-    (procedure['~orpc'].route.path ?? '').startsWith(CONTROL_PREFIX) === control;
+    errorFormat(procedure) === format;
   const matcher = new StandardOpenAPIMatcher({ filter });
   matcher.init(routes);
   return {
@@ -105,15 +111,19 @@ function surface(routes: AnyRouter, control: boolean) {
       filter,
       plugins: [new ResponseHeadersPlugin()],
       clientInterceptors: [logUnexpected],
-      customErrorResponseBodyEncoder: control ? daemonErrorOf : problemOf,
+      customErrorResponseBodyEncoder: format === 'problem' ? problemOf : daemonErrorOf(format),
     }),
-    errorType: control ? JSON_TYPE : PROBLEM_TYPE,
+    errorType: format === 'problem' ? PROBLEM_TYPE : JSON_TYPE,
   };
 }
 
 /** The entry for `routes`: their answer, or null when the request names none of them. */
 export function createContractHandler(routes: AnyRouter) {
-  const surfaces = [surface(routes, true), surface(routes, false)];
+  const surfaces = [
+    surface(routes, 'plain'),
+    surface(routes, 'flagged'),
+    surface(routes, 'problem'),
+  ];
   return async (request: AppRequest): Promise<Response | null> => {
     const pathname: `/${string}` = `/${new URL(request.url).pathname.replace(/^\/|\/$/g, '')}`;
     for (const { matcher, handler, errorType } of surfaces) {

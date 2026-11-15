@@ -5,13 +5,15 @@ import { ALL_PERMISSIONS } from '../../../config/auth0-roles.js';
 /**
  * Who may call a route: anyone (`public`), anyone signed in whatever their role
  * (`session`), a signed-in user holding a permission (`user`), or the Pi daemon's
- * API key (`daemon`).
+ * API key (`daemon`). A daemon route also says how it refuses a request:
+ * `{ error }` (`plain`) or `{ success: false, error }` (`flagged`), as each did
+ * before the contract; shared/control-fixtures/ and the route tests pin both.
  */
 export const Access = v.variant('kind', [
   v.strictObject({ kind: v.literal('public') }),
   v.strictObject({ kind: v.literal('session') }),
   v.strictObject({ kind: v.literal('user'), permission: v.picklist(ALL_PERMISSIONS) }),
-  v.strictObject({ kind: v.literal('daemon') }),
+  v.strictObject({ kind: v.literal('daemon'), errors: v.picklist(['plain', 'flagged']) }),
 ]);
 
 export type Access = v.InferOutput<typeof Access>;
