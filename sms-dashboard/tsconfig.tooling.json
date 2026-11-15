@@ -12,6 +12,7 @@
     "outDir": "./node_modules/.tmp/tooling-declarations"
   },
   "include": [
+    "package.json",
     "eslint.config.ts",
     "svelte.config.ts",
     "vite.config.ts",
