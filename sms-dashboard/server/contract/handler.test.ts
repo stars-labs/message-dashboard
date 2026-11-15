@@ -1,4 +1,8 @@
 import { describe, expect, test } from 'bun:test';
+import { traverseContractProcedures } from '@orpc/server';
+import * as v from 'valibot';
+import { contract } from '../../shared/api/contract/index.js';
+import { route, RouteMeta } from '../../shared/api/contract/route.js';
 import { memoryKv } from '../../test/memory-kv.js';
 import { callWorker, routeTable } from '../../test/worker-harness.js';
 import { contractRoutes } from './handler.js';
@@ -68,6 +72,21 @@ function problemOf(status: number, title: string, code: string, detail: string):
 }
 
 describe('contract routes', () => {
+  test('each say who may call them', () => {
+    const undeclared: string[] = [];
+    traverseContractProcedures({ router: contract, path: [] }, ({ contract: procedure, path }) => {
+      if (!v.is(RouteMeta, procedure['~orpc'].meta)) undeclared.push(path.join('.'));
+    });
+    expect(undeclared).toEqual([]);
+  });
+
+  test('cannot be declared without saying who may call them', () => {
+    const undeclared = () =>
+      // @ts-expect-error -- route() takes the access first; a route without one must not compile
+      route('GET', '/api/undeclared');
+    expect(typeof undeclared).toBe('function');
+  });
+
   test('are served first, and listed in the route table', () => {
     expect(routeTable().slice(0, contractRoutes().length)).toEqual(contractRoutes());
     expect(contractRoutes()).toEqual([

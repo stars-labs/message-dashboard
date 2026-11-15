@@ -103,6 +103,26 @@ export default defineConfig([
     },
   },
   {
+    name: 'A contract route says who may call it',
+    files: ['**/*.ts', '**/*.svelte'],
+    ignores: ['shared/api/contract/route.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: '@orpc/contract',
+              importNames: ['oc'],
+              message:
+                'Declare a contract route with route(access, method, path) from shared/api/contract/route.ts.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     name: 'shared: runs in the Worker and the browser, so assumes neither',
     files: ['shared/**/*.ts', 'config/**/*.ts'],
     languageOptions: { sourceType: 'module' },
