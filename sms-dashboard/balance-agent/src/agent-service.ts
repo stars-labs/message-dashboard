@@ -27,7 +27,7 @@ import {
 } from './runner/capabilities/carrier-browser-workflow.js';
 import { createSmsAiCapability } from './runner/capabilities/sms-ai.js';
 import { callCompanyAI, companyAIReachable, CompanyAIProtocol } from './runner/company-ai.js';
-import { createControlClient } from './runner/control-client.js';
+import { ControlError, createControlClient } from './runner/control-client.js';
 import { createRunnerPresence, type CapabilityPresence } from './runner/presence.js';
 import { runSerialCapability } from './runner/serial-runner.js';
 import type { SecureStore } from './secure-store.js';
@@ -156,13 +156,15 @@ export function createAgentService({
         baseUrl: dashboardUrl,
         getAccessToken: () => authSession.getAccessToken(),
       });
-      const response = await client.request('/api/control/balance-runners/check');
-      if (response.status === 401 || response.status === 403) {
-        return { ok: false, message: '登录无效或缺少 Runner 权限' };
-      }
-      if (!response.ok) return { ok: false, message: `Dashboard 返回 ${response.status}` };
+      await client.balanceRunnerControl.check();
       return { ok: true, message: '认证和连接正常' };
     } catch (error) {
+      if (error instanceof ControlError) {
+        if (error.status === 401 || error.status === 403) {
+          return { ok: false, message: '登录无效或缺少 Runner 权限' };
+        }
+        return { ok: false, message: `Dashboard 返回 ${String(error.status)}` };
+      }
       return { ok: false, message: `无法连接 Dashboard：${errorText(error)}` };
     }
   }

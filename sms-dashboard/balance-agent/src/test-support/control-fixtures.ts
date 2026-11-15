@@ -12,7 +12,6 @@ export function runnerFixture(name: string): ControlFixture {
 
 /** The Worker's recorded answer, as the control client would receive it. */
 export function recordedResponse({ response }: ControlFixture): Response {
-  return new Response(response.body === undefined ? null : JSON.stringify(response.body), {
-    status: response.status,
-  });
+  if (response.body === undefined) return new Response(null, { status: response.status });
+  return Response.json(response.body, { status: response.status });
 }

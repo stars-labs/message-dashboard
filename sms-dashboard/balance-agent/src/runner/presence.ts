@@ -1,5 +1,5 @@
 import type { BalanceRunnerCapability } from '../../../shared/api/balance-runners.js';
-import type { ControlClient } from './control-client.js';
+import { ControlError, type ControlClient } from './control-client.js';
 import { errorText } from '../../../shared/error-text.js';
 
 const HEARTBEAT_INTERVAL_MS = 30_000;
@@ -78,18 +78,19 @@ export function createRunnerPresence({
     const capabilitySnapshots = snapshots(selected);
     pending = pending
       .then(async () => {
-        const response = await controlClient.request('/api/control/balance-runners/heartbeat', {
-          method: 'POST',
-          body: JSON.stringify({
+        await controlClient.balanceRunnerControl
+          .heartbeat({
             runner_id: runnerId,
             session_id: sessionId,
             display_name: displayName,
             platform,
             version,
             capabilities: capabilitySnapshots,
-          }),
-        });
-        if (!response.ok) throw new Error(`heartbeat rejected (${response.status})`);
+          })
+          .catch((error: unknown) => {
+            if (!(error instanceof ControlError)) throw error;
+            throw new Error(`heartbeat rejected (${String(error.status)})`, { cause: error });
+          });
         lastError = null;
       })
       .catch((error: unknown) => {

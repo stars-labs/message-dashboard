@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import * as v from 'valibot';
-import { parseJson } from '../../../shared/parse-json.js';
+import { fakeControlClient, jsonAnswer } from '../test-support/control-client.js';
 import { createRunnerPresence } from './presence.js';
 
 const Heartbeat = v.object({
@@ -16,22 +16,20 @@ const Heartbeat = v.object({
 
 type Heartbeat = v.InferOutput<typeof Heartbeat>;
 
-function heartbeatBody(body: string): Heartbeat {
-  const parsed = parseJson(body, Heartbeat);
-  if (!parsed.ok) throw new Error(parsed.error);
-  return parsed.value;
+function heartbeatBody({ body }: { body: unknown }): Heartbeat {
+  return v.parse(Heartbeat, body);
+}
+
+/** A control client that accepts every heartbeat, as the Worker answers it. */
+function accepting() {
+  return fakeControlClient(() => jsonAnswer({ success: true, runner_id: 'workstation' }));
 }
 
 describe('runner presence client', () => {
   test('reports lifecycle state without exposing configuration', async () => {
-    const sent: string[] = [];
+    const { client, sent } = accepting();
     const presence = createRunnerPresence({
-      controlClient: {
-        request: (_path, options) => {
-          sent.push(options?.body ?? '');
-          return Promise.resolve(new Response(JSON.stringify({ success: true }), { status: 200 }));
-        },
-      },
+      controlClient: client,
       runnerId: 'workstation-legacy',
       sessionId: 'session-1',
       displayName: 'Workstation',
@@ -59,20 +57,15 @@ describe('runner presence client', () => {
       detail_code: 'human_verification_required',
     });
     expect(bodies[3]?.capabilities.every(({ state }) => state === 'stopping')).toBe(true);
-    expect(sent.join('')).not.toContain('token');
-    expect(sent.join('')).not.toContain('API_KEY');
+    expect(JSON.stringify(sent)).not.toContain('token');
+    expect(JSON.stringify(sent)).not.toContain('API_KEY');
   });
 
   test('periodic liveness omits unchanged capability state', async () => {
-    const sent: string[] = [];
+    const { client, sent } = accepting();
     let heartbeat: (() => Promise<void>) | undefined;
     const presence = createRunnerPresence({
-      controlClient: {
-        request: (_path, options) => {
-          sent.push(options?.body ?? '');
-          return Promise.resolve(new Response(null, { status: 200 }));
-        },
-      },
+      controlClient: client,
       runnerId: 'workstation',
       sessionId: 'session-1',
       displayName: 'Workstation',

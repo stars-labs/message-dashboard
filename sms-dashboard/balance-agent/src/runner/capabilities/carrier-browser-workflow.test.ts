@@ -9,6 +9,7 @@ import {
   waitForFirstVisible,
 } from './carrier-browser-workflow.js';
 import type { CarrierWebBalanceJob } from '../../../../shared/api/carrier-web-balance.js';
+import { fakeControlClient } from '../../test-support/control-client.js';
 
 function webJob(
   skill: CarrierWebBalanceJob['skill'],
@@ -133,7 +134,7 @@ describe('carrier browser workflow', () => {
   test('cancels before opening a browser when the agent is stopping', async () => {
     let launched = false;
     const processor = createCarrierBrowserJobProcessor({
-      controlClient: { request: () => Promise.resolve(new Response(null, { status: 204 })) },
+      controlClient: fakeControlClient(() => new Response(null, { status: 204 })).client,
       presence: { set: () => Promise.resolve() },
       runnerId: 'runner-1',
       browser: {
@@ -174,7 +175,7 @@ describe('carrier browser workflow', () => {
 
   test('reports that there is no verification window before a job starts', async () => {
     const processor = createCarrierBrowserJobProcessor({
-      controlClient: { request: () => Promise.resolve(new Response(null, { status: 204 })) },
+      controlClient: fakeControlClient(() => new Response(null, { status: 204 })).client,
       presence: { set: () => Promise.resolve() },
       runnerId: 'runner-1',
       browser: {

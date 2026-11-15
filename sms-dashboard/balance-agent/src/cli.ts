@@ -17,7 +17,7 @@ import { createKeychainStore, type KeychainStore } from './keychain-store.js';
 import { createAuthSession } from './runner/auth-session.js';
 import type { BrowserLauncher } from './runner/capabilities/carrier-browser-workflow.js';
 import { CompanyAIProtocol } from './runner/company-ai.js';
-import { createControlClient } from './runner/control-client.js';
+import { ControlError, createControlClient } from './runner/control-client.js';
 import { acquireRunLock } from './run-lock.js';
 import { createSettingsStore, type SettingsStore } from './settings-store.js';
 
@@ -254,13 +254,15 @@ async function dashboardDiagnostic(
       baseUrl: settings.dashboardUrl,
       getAccessToken: () => session.getAccessToken(),
     });
-    const response = await client.request('/api/control/balance-runners/check');
-    if (response.status === 401 || response.status === 403) {
-      return { ok: false, message: 'login is invalid or lacks runner permissions' };
-    }
-    if (!response.ok) return { ok: false, message: `Dashboard returned ${response.status}` };
+    await client.balanceRunnerControl.check();
     return { ok: true, message: 'authentication and connection are valid' };
   } catch (error) {
+    if (error instanceof ControlError) {
+      if (error.status === 401 || error.status === 403) {
+        return { ok: false, message: 'login is invalid or lacks runner permissions' };
+      }
+      return { ok: false, message: `Dashboard returned ${String(error.status)}` };
+    }
     return { ok: false, message: errorText(error) };
   }
 }

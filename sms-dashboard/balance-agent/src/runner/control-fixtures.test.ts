@@ -3,39 +3,27 @@
 // recorded requests and act on the recorded answers.
 import { describe, expect, test } from 'bun:test';
 import * as v from 'valibot';
-import { CarrierWebBalanceOtpResponse } from '../../../shared/api/carrier-web-balance.js';
-import { SuccessResponse } from '../../../shared/api/success.js';
-import { parseJson } from '../../../shared/parse-json.js';
+import {
+  CarrierWebBalanceOtpWire,
+  WebJobActionResponse,
+  WebJobHeartbeatResponse,
+} from '../../../shared/api/carrier-web-balance.js';
 import type { ControlFixture } from '../../../shared/control-fixtures/fixture.js';
+import { fakeControlClient, type Sent } from '../test-support/control-client.js';
 import { recordedResponse, runnerFixture } from '../test-support/control-fixtures.js';
 import { createCarrierBrowserCapability } from './capabilities/carrier-browser.js';
 import { createSmsAiCapability } from './capabilities/sms-ai.js';
-import type { ControlClient, ControlRequestOptions } from './control-client.js';
+import type { ControlClient } from './control-client.js';
 import { createRunnerPresence } from './presence.js';
-
-interface Sent {
-  method: string;
-  path: string;
-  body: unknown;
-}
 
 /** A control client that answers with the given fixtures, in order, and records what it was sent. */
 function replaying(...fixtures: ControlFixture[]): { client: ControlClient; sent: Sent[] } {
-  const sent: Sent[] = [];
   const queue = [...fixtures];
-  return {
-    sent,
-    client: {
-      request: (path: string, options: ControlRequestOptions = {}) => {
-        const body = options.body === undefined ? undefined : parseJson(options.body, v.unknown());
-        if (body && !body.ok) throw new Error(body.error);
-        sent.push({ method: options.method ?? 'GET', path, body: body?.value });
-        const next = queue.shift();
-        if (!next) throw new Error(`no recorded answer for ${path}`);
-        return Promise.resolve(recordedResponse(next));
-      },
-    },
-  };
+  return fakeControlClient(({ path }) => {
+    const next = queue.shift();
+    if (!next) throw new Error(`no recorded answer for ${path}`);
+    return recordedResponse(next);
+  });
 }
 
 function recorded({ request }: ControlFixture): Sent {
@@ -150,27 +138,33 @@ describe('runner fixtures', () => {
     expect(outcome).toEqual({ handled: false, retryDelay: 5_000 });
   });
 
-  test('the browser workflow can read every recorded job answer', () => {
+  test('every recorded job answer fits the contract the client checks it against', () => {
     for (const name of [
       'carrier-web-otp-requested',
-      'carrier-web-heartbeat',
       'carrier-web-complete',
       'carrier-web-fail',
       'carrier-web-release',
     ]) {
       const { response } = runnerFixture(name);
-      expect([name, v.is(SuccessResponse, response.body)]).toEqual([name, true]);
+      expect([name, v.is(WebJobActionResponse, response.body)]).toEqual([name, true]);
     }
     expect(
-      v.parse(CarrierWebBalanceOtpResponse, runnerFixture('carrier-web-otp').response.body),
-    ).toMatchObject({ code: '654321' });
+      v.is(WebJobHeartbeatResponse, runnerFixture('carrier-web-heartbeat').response.body),
+    ).toBe(true);
     expect(
-      v.parse(CarrierWebBalanceOtpResponse, runnerFixture('carrier-web-otp.cursor').response.body),
+      v.parse(CarrierWebBalanceOtpWire, runnerFixture('carrier-web-otp').response.body),
+    ).toEqual({ code: '654321' });
+    expect(
+      v.parse(CarrierWebBalanceOtpWire, runnerFixture('carrier-web-otp.cursor').response.body),
     ).toMatchObject({ code: null, cursor: { source_message_id: 'promo-1' } });
     expect(runnerFixture('carrier-web-otp.empty').response.status).toBe(204);
   });
 
-  test('a recorded runner check reads as valid credentials', () => {
-    expect(recordedResponse(runnerFixture('balance-runners-check')).ok).toBe(true);
+  test('the runner check sends the recorded request and reads its answer', async () => {
+    const check = runnerFixture('balance-runners-check');
+    const { client, sent } = replaying(check);
+
+    expect(await client.balanceRunnerControl.check()).toEqual({ success: true });
+    expect(sent).toEqual([recorded(check)]);
   });
 });

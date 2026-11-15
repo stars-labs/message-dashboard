@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import * as v from 'valibot';
 import { parseJson } from '../../../../shared/parse-json.js';
+import { fakeControlClient, jsonAnswer, type Sent } from '../../test-support/control-client.js';
 import { createSmsAiCapability } from './sms-ai.js';
 
 const skill = {
@@ -13,11 +14,6 @@ const skill = {
   forbidden_intents: ['充值', '办理'],
 };
 
-interface RecordedRequest {
-  path: string;
-  options: { body?: string | undefined };
-}
-
 type CallAI = Parameters<typeof createSmsAiCapability>[0]['callAI'];
 
 function createHarness({
@@ -27,33 +23,28 @@ function createHarness({
   content: string;
   callAI?: CallAI;
 }) {
-  const requests: RecordedRequest[] = [];
   const states: unknown[][] = [];
   const errors: string[] = [];
   const responses = [
-    new Response(
-      JSON.stringify({
-        id: 'job-1',
-        check_id: 'check-1',
-        step_index: 1,
-        attempts: 1,
-        response_content: content,
-        menu_options: [
-          { value: '0', label: '业务查询与退订' },
-          { value: '1', label: '话费与AI豆' },
-        ],
-        skill,
-      }),
-    ),
-    new Response(JSON.stringify({ success: true })),
+    jsonAnswer({
+      id: 'job-1',
+      check_id: 'check-1',
+      step_index: 1,
+      attempts: 1,
+      response_content: content,
+      menu_options: [
+        { value: '0', label: '业务查询与退订' },
+        { value: '1', label: '话费与AI豆' },
+      ],
+      skill,
+    }),
+    jsonAnswer({ success: true, action: 'reply', status: 'queued' }, 202),
   ];
+  const { client, sent: requests } = fakeControlClient(
+    () => responses.shift() ?? new Response(null, { status: 500 }),
+  );
   const capability = createSmsAiCapability({
-    controlClient: {
-      request: (path, options = {}) => {
-        requests.push({ path, options });
-        return Promise.resolve(responses.shift() ?? new Response(null, { status: 500 }));
-      },
-    },
+    controlClient: client,
     presence: {
       set: (...state) => {
         states.push(state);
@@ -80,12 +71,8 @@ const SubmittedDecision = v.object({
   decision: v.object({ action: v.string(), selected_option: v.nullable(v.string()) }),
 });
 
-function submittedBody(
-  request: RecordedRequest | undefined,
-): v.InferOutput<typeof SubmittedDecision> {
-  const parsed = parseJson(request?.options.body ?? '', SubmittedDecision);
-  if (!parsed.ok) throw new Error(parsed.error);
-  return parsed.value;
+function submittedBody(request: Sent | undefined): v.InferOutput<typeof SubmittedDecision> {
+  return v.parse(SubmittedDecision, request?.body);
 }
 
 const PromptBody = v.object({ menu_options: v.array(v.unknown()) });

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { CarrierWebBalanceJob } from '../../../../shared/api/carrier-web-balance.js';
+import { fakeControlClient, jsonAnswer } from '../../test-support/control-client.js';
 import { createCarrierBrowserCapability } from './carrier-browser.js';
 
 function webJob(id: string, simIndex: number | null): CarrierWebBalanceJob {
@@ -19,14 +20,9 @@ describe('carrier browser capability', () => {
   test('claims one job and reports its lifecycle', async () => {
     const states: unknown[][] = [];
     const jobs: CarrierWebBalanceJob[] = [];
-    const paths: string[] = [];
+    const { client, sent } = fakeControlClient(() => jsonAnswer(webJob('web-job-1', 36)));
     const capability = createCarrierBrowserCapability({
-      controlClient: {
-        request: (path) => {
-          paths.push(path);
-          return Promise.resolve(new Response(JSON.stringify(webJob('web-job-1', 36))));
-        },
-      },
+      controlClient: client,
       presence: {
         set: (...value) => {
           states.push(value);
@@ -42,8 +38,8 @@ describe('carrier browser capability', () => {
 
     expect(await capability.runOne()).toEqual({ handled: true, retryDelay: 0 });
     expect(jobs).toEqual([webJob('web-job-1', 36)]);
-    expect(paths).toEqual([
-      '/api/control/carrier-web-balance/jobs/claim?runner_id=browser-session',
+    expect(sent.map(({ method, path }) => `${method} ${path}`)).toEqual([
+      'GET /api/control/carrier-web-balance/jobs/claim?runner_id=browser-session',
     ]);
     expect(states).toEqual([['busy', 'web-job-1'], ['ready']]);
   });
@@ -51,7 +47,7 @@ describe('carrier browser capability', () => {
   test('does not launch a browser when the queue is empty', async () => {
     let processed = false;
     const capability = createCarrierBrowserCapability({
-      controlClient: { request: () => Promise.resolve(new Response(null, { status: 204 })) },
+      controlClient: fakeControlClient(() => new Response(null, { status: 204 })).client,
       presence: { set: () => Promise.resolve() },
       runnerId: 'browser-session',
       processJob: () => {
@@ -67,9 +63,7 @@ describe('carrier browser capability', () => {
   test('restores ready state when browser processing throws', async () => {
     const states: unknown[][] = [];
     const capability = createCarrierBrowserCapability({
-      controlClient: {
-        request: () => Promise.resolve(new Response(JSON.stringify(webJob('web-job-2', null)))),
-      },
+      controlClient: fakeControlClient(() => jsonAnswer(webJob('web-job-2', null))).client,
       presence: {
         set: (...value) => {
           states.push(value);

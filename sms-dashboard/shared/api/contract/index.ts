@@ -8,7 +8,7 @@ import { health } from './health.js';
 import { iccidMappings } from './iccid-mappings.js';
 import { keywords } from './keywords.js';
 import { messages } from './messages.js';
-import { balanceRunnerControl, balanceSkillJobs, carrierWebJobs } from './runner.js';
+import { runnerContract } from './runner.js';
 import { users } from './users.js';
 import { verification } from './verification.js';
 
@@ -16,9 +16,7 @@ import { verification } from './verification.js';
 export const contract = {
   control,
   balanceCheckControl,
-  balanceRunnerControl,
-  balanceSkillJobs,
-  carrierWebJobs,
+  ...runnerContract,
   health,
   auth,
   users,

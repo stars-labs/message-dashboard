@@ -30,14 +30,6 @@ export type CarrierWebBalanceJob = v.InferOutput<typeof CarrierWebBalanceJob>;
 /** Where the runner stopped reading candidate messages; the next poll starts after it. */
 const OtpCursor = v.object({ created_at: v.string(), source_message_id: v.string() });
 
-/** GET /api/control/carrier-web-balance/jobs/:id/otp, when the job is leased and its code was requested. */
-export const CarrierWebBalanceOtpResponse = v.object({
-  code: v.fallback(v.nullish(v.string()), null),
-  cursor: v.fallback(v.optional(OtpCursor), undefined),
-});
-
-export type CarrierWebBalanceOtpResponse = v.InferOutput<typeof CarrierWebBalanceOtpResponse>;
-
 /**
  * GET .../claim on the wire. The skill is the stored configuration passed on
  * as it is: a record keeps its key order, which an object schema would

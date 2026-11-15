@@ -9,20 +9,19 @@ import type {
   Response as PlaywrightResponse,
 } from 'playwright-core';
 import * as v from 'valibot';
-import {
-  CarrierWebBalanceOtpResponse,
-  type CarrierWebBalanceJob,
+import type {
+  CarrierWebBalanceJob,
+  CarrierWebBalanceOtpWire,
 } from '../../../../shared/api/carrier-web-balance.js';
 import type { ActiveWebJobStatus } from '../../../../shared/balance-status.js';
-import { parseJson, readJson } from '../../../../shared/parse-json.js';
+import { parseJson } from '../../../../shared/parse-json.js';
 import { textOr } from '../../../../shared/text.js';
-import { SuccessResponse } from '../../../../shared/api/success.js';
 import {
   extractUnicomWebBalance,
   UNICOM_BALANCE_FIELD,
 } from '../../../../shared/unicom-web-balance.js';
 import { extractM1WebBalance } from '../../../../shared/m1-web-balance.js';
-import type { ControlClient } from '../control-client.js';
+import { ControlError, type ControlClient } from '../control-client.js';
 import { errorText } from '../../../../shared/error-text.js';
 import type { CapabilityPresence } from '../presence.js';
 import { abortableSleep, type RunOutcome } from '../serial-runner.js';
@@ -265,25 +264,19 @@ export function createCarrierBrowserJobProcessor({
   // the checklogin interception, read by queryBalance.
   let sessionIdentity: string | null = null;
 
-  async function postJob(
-    job: CarrierWebBalanceJob,
-    action: 'otp-requested' | 'heartbeat' | 'complete' | 'fail' | 'release',
-    body: object = {},
-  ): Promise<void> {
-    const response = await controlClient.request(
-      `/api/control/carrier-web-balance/jobs/${encodeURIComponent(job.id)}/${action}`,
-      {
-        method: 'POST',
-        body: JSON.stringify({ runner_id: runnerId, ...body }),
-      },
-    );
-    if (!response.ok) {
+  type OtpPoll = Awaited<ReturnType<ControlClient['carrierWebJobs']['otp']>>;
+
+  /** Waits for a job action the Worker was sent; a refusal is reported with the action's name. */
+  async function postJob(action: string, sent: Promise<unknown>): Promise<void> {
+    try {
+      await sent;
+    } catch (error) {
+      if (!(error instanceof ControlError)) throw error;
       throw new Error(
-        `Worker rejected ${action} (${response.status}): ${(await response.text()).slice(0, 300)}`,
+        `Worker rejected ${action} (${String(error.status)}): ${error.body.slice(0, 300)}`,
+        { cause: error },
       );
     }
-    const answer = await readJson(response, SuccessResponse);
-    if (!answer.ok) throw new Error(`Worker returned an unreadable ${action} answer`);
   }
 
   async function findRandomPasswordTab(page: Page): Promise<LoginPanel | null> {
@@ -412,7 +405,13 @@ export function createCarrierBrowserJobProcessor({
     status: ActiveWebJobStatus,
     reason: string | null = null,
   ): Promise<void> {
-    await postJob(job, 'heartbeat', { status, ...(reason ? { reason } : {}) });
+    await postJob(
+      'heartbeat',
+      controlClient.carrierWebJobs.heartbeat({
+        params: { id: job.id },
+        body: { runner_id: runnerId, status, ...(reason ? { reason } : {}) },
+      }),
+    );
   }
 
   function carrierLabel(job: CarrierWebBalanceJob): string {
@@ -444,34 +443,40 @@ export function createCarrierBrowserJobProcessor({
         lastHeartbeat = Date.now();
       }
 
-      const query = new URLSearchParams({ runner_id: runnerId });
-      if (cursor) {
-        query.set('after_created_at', cursor.created_at);
-        query.set('after_source_message_id', cursor.source_message_id);
-      }
-      const response = await controlClient.request(
-        `/api/control/carrier-web-balance/jobs/${encodeURIComponent(job.id)}/otp?${query.toString()}`,
-      );
-      if (response.status === 204) {
+      const poll: OtpPoll = await controlClient.carrierWebJobs
+        .otp({
+          params: { id: job.id },
+          query: {
+            runner_id: runnerId,
+            ...(cursor
+              ? {
+                  after_created_at: cursor.created_at,
+                  after_source_message_id: cursor.source_message_id,
+                }
+              : {}),
+          },
+        })
+        .catch((error: unknown) => {
+          if (!(error instanceof ControlError)) throw error;
+          throw new Error(
+            `Could not poll login code (${String(error.status)}): ${error.body.slice(0, 300)}`,
+            { cause: error },
+          );
+        });
+      if (poll.status === 204) {
         await abortableSleep(2_000);
         continue;
       }
-      if (!response.ok) {
-        throw new Error(
-          `Could not poll login code (${response.status}): ${(await response.text()).slice(0, 300)}`,
-        );
-      }
-      const answer = await readJson(response, CarrierWebBalanceOtpResponse);
-      if (!answer.ok) throw new Error(`Could not read the carrier login code: ${answer.error}`);
-      const payload = answer.value;
-      if (!payload.code) {
-        if (payload.cursor?.created_at && payload.cursor.source_message_id) {
+      const payload: CarrierWebBalanceOtpWire = poll.body;
+      if (payload.code === null) {
+        if (payload.cursor.created_at && payload.cursor.source_message_id) {
           cursor = payload.cursor;
           await abortableSleep(2_000);
           continue;
         }
         throw new Error('Worker returned an empty carrier login code');
       }
+      if (!payload.code) throw new Error('Worker returned an empty carrier login code');
       return payload.code;
     }
     throw new Error('Timed out waiting for carrier login code or human verification');
@@ -500,7 +505,13 @@ export function createCarrierBrowserJobProcessor({
     );
     if (!requestButton) throw new Error('Could not find the M1 OTP request button');
     if (!job.otp_requested_at) {
-      await postJob(job, 'otp-requested');
+      await postJob(
+        'otp-requested',
+        controlClient.carrierWebJobs.otpRequested({
+          params: { id: job.id },
+          body: { runner_id: runnerId },
+        }),
+      );
       await requestButton.click();
     } else {
       logger.log(`Reusing the existing login code request for ${simLabel(job)}.`);
@@ -628,7 +639,13 @@ export function createCarrierBrowserJobProcessor({
     if (!requestButton) throw new Error('Could not find the random-password request control');
 
     if (!job.otp_requested_at) {
-      await postJob(job, 'otp-requested');
+      await postJob(
+        'otp-requested',
+        controlClient.carrierWebJobs.otpRequested({
+          params: { id: job.id },
+          body: { runner_id: runnerId },
+        }),
+      );
       await requestButton.click();
     } else {
       logger.log(`Reusing the existing login code request for ${simLabel(job)}.`);
@@ -736,7 +753,13 @@ export function createCarrierBrowserJobProcessor({
 
   async function release(job: CarrierWebBalanceJob, error: unknown): Promise<void> {
     try {
-      await postJob(job, 'release', { error: errorText(error) });
+      await postJob(
+        'release',
+        controlClient.carrierWebJobs.release({
+          params: { id: job.id },
+          body: { runner_id: runnerId, error: errorText(error) },
+        }),
+      );
     } catch (releaseError) {
       logger.error(`Could not release web balance job ${job.id}: ${errorText(releaseError)}`);
     }
@@ -744,7 +767,13 @@ export function createCarrierBrowserJobProcessor({
 
   async function fail(job: CarrierWebBalanceJob, error: unknown): Promise<void> {
     try {
-      await postJob(job, 'fail', { error: errorText(error) });
+      await postJob(
+        'fail',
+        controlClient.carrierWebJobs.fail({
+          params: { id: job.id },
+          body: { runner_id: runnerId, error: errorText(error) },
+        }),
+      );
     } catch (failError) {
       logger.error(`Could not fail web balance job ${job.id}: ${errorText(failError)}`);
     }
@@ -827,7 +856,13 @@ export function createCarrierBrowserJobProcessor({
         await loginM1(job, page);
         parsed = await queryM1Balance(job, target.balanceUrl, page);
       }
-      await postJob(job, 'complete', parsed);
+      await postJob(
+        'complete',
+        controlClient.carrierWebJobs.complete({
+          params: { id: job.id },
+          body: { runner_id: runnerId, ...parsed },
+        }),
+      );
       logger.log(`Stored carrier balance for ${simLabel(job)}.`);
       return { handled: true, retryDelay: 0 };
     } catch (error) {

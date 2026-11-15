@@ -34,7 +34,7 @@ const PRESENCE = { kind: 'runner', scope: RUNNER_SCOPES.heartbeat } as const;
 const SMS_AI = { kind: 'runner', scope: RUNNER_SCOPES.smsAi } as const;
 
 /** The SMS menu replies the Agent's company AI decides on, one leased job at a time. */
-export const balanceSkillJobs = {
+const balanceSkillJobs = {
   // 204: no job is waiting for this runner's account.
   claim: route(SMS_AI, 'GET', '/api/control/balance-skills/jobs/claim')
     .route({ inputStructure: 'detailed', outputStructure: 'detailed' })
@@ -60,7 +60,7 @@ const BROWSER = { kind: 'runner', scope: RUNNER_SCOPES.carrierBrowser } as const
 const WEB_JOBS = '/api/control/carrier-web-balance/jobs';
 
 /** The carrier portal queries the Agent runs in a browser, one leased job at a time. */
-export const carrierWebJobs = {
+const carrierWebJobs = {
   // 204: no job is waiting for this runner's account.
   claim: route(BROWSER, 'GET', `${WEB_JOBS}/claim`)
     .route({ inputStructure: 'detailed', outputStructure: 'detailed' })
@@ -104,9 +104,12 @@ export const carrierWebJobs = {
 };
 
 /** The Agent's sign-in check and its presence. */
-export const balanceRunnerControl = {
+const balanceRunnerControl = {
   check: route(PRESENCE, 'GET', '/api/control/balance-runners/check').output(RunnerCheckResponse),
   heartbeat: route(PRESENCE, 'POST', '/api/control/balance-runners/heartbeat')
     .input(RunnerHeartbeatBody)
     .output(RunnerHeartbeatResponse),
 };
+
+/** Every route the Balance Agent calls: its client is built from this alone. */
+export const runnerContract = { balanceRunnerControl, balanceSkillJobs, carrierWebJobs };
