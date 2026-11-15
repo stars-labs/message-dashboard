@@ -23,6 +23,8 @@ export type RunnerAuth =
   | { authorized: true; authMode: 'auth0_device'; subject: string }
   | { authorized: false };
 
+export type AuthorizedRunner = Extract<RunnerAuth, { authorized: true }>;
+
 /** The claims of a runner's Auth0 access token: its subject, its OAuth scopes and its RBAC permissions. */
 const RunnerClaims = v.object({
   sub: v.optional(v.string()),

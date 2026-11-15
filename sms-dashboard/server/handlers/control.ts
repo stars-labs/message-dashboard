@@ -100,13 +100,18 @@ function failed(error: unknown, message: string): never {
   throw new ORPCError('INTERNAL_SERVER_ERROR', { message });
 }
 
+/** How every /api/control/ route refuses a caller it does not admit. */
+export function unauthorized(): Response {
+  return json({ error: 'Unauthorized' }, 401);
+}
+
 /**
  * Every control route authenticates with the daemon's shared API key, never
  * Auth0. Returns a Response when the key is wrong.
  */
 export async function requireApiKey(request: DaemonRequest<unknown>): Promise<Response | null> {
   if (!(await secretMatches(request.headers.get('X-API-Key'), request.env.API_KEY))) {
-    return json({ error: 'Unauthorized' }, 401);
+    return unauthorized();
   }
   return null;
 }

@@ -67,6 +67,8 @@ function security(access: Access): OpenAPI.SecurityRequirementObject[] {
       return [{ session: [access.permission] }, { auth0: [access.permission] }];
     case 'daemon':
       return [{ daemonKey: [] }];
+    case 'runner':
+      return [{ daemonKey: [] }, { auth0: [access.scope] }];
   }
 }
 

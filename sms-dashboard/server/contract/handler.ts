@@ -12,10 +12,11 @@ import { contract } from '../../shared/api/contract/index.js';
 import { Method, RouteMeta, type Access } from '../../shared/api/contract/route.js';
 import { ErrorResponse } from '../../shared/api/error.js';
 import { readJson } from '../../shared/parse-json.js';
-import { requireApiKey } from '../handlers/control.js';
+import { requireApiKey, unauthorized } from '../handlers/control.js';
 import { handleAuth0 } from '../middleware/auth0.js';
 import { authorize } from '../middleware/authorize.js';
 import { enrichUserPermissions } from '../middleware/rbac.js';
+import { authorizeRunnerControl, type AuthorizedRunner } from '../utils/runner-auth.js';
 import type { AppRequest } from '../worker-context.js';
 import { daemonErrorOf, problemOf, problemResponse, type DaemonErrors } from './errors.js';
 import { router, type ContractContext } from './router.js';
@@ -33,39 +34,52 @@ async function asProblem(refused: Response): Promise<Response> {
   return problemResponse(refused.status, code, detail);
 }
 
+type Admission = { refused: Response } | { refused: null; runner: AuthorizedRunner | null };
+
+const ADMITTED: Admission = { refused: null, runner: null };
+
 /**
- * The refusal for a caller the route's access does not admit, or null. It runs
+ * Whether the route's access admits the caller, and as which runner. It runs
  * before oRPC reads the body, as the legacy gate did.
  */
-async function refusal(access: Access, request: AppRequest): Promise<Response | null> {
+async function admit(access: Access, request: AppRequest): Promise<Admission> {
   switch (access.kind) {
     case 'public':
-      return null;
-    case 'daemon':
-      return requireApiKey(request);
+      return ADMITTED;
+    case 'daemon': {
+      const refused = await requireApiKey(request);
+      return refused ? { refused } : ADMITTED;
+    }
+    case 'runner': {
+      const runner = await authorizeRunnerControl(request, access.scope);
+      return runner.authorized ? { refused: null, runner } : { refused: unauthorized() };
+    }
     case 'session': {
       const refused = await handleAuth0(request);
-      if (refused) return asProblem(refused);
+      if (refused) return { refused: await asProblem(refused) };
       // The permissions the client gates its navigation and write controls on.
       enrichUserPermissions(request);
-      return null;
+      return ADMITTED;
     }
     case 'user': {
       const refused = await authorize(request, access.permission);
-      return refused ? asProblem(refused) : null;
+      return refused ? { refused: await asProblem(refused) } : ADMITTED;
     }
   }
 }
 
 /**
- * `request`, with a JSON array body read as null. Every contract body is an
- * object, and a Valibot object schema accepts an array, reading `[]` as `{}`;
- * as null, the schema answers with its own not-an-object message, as readBody did.
+ * `request`, with its body as the route's schema should read it. Every contract
+ * body is an object, and a Valibot object schema accepts an array, reading `[]`
+ * as `{}`; as null, the schema answers with its own not-an-object message, as
+ * readBody did. On a daemon or runner route a body that is not JSON reads as
+ * none, so the schema answers with the message each route always gave.
  */
-async function withoutArrayBody(request: AppRequest): Promise<Request> {
+async function bodyAsRead(request: AppRequest, format: DaemonErrors | 'problem'): Promise<Request> {
   if (request.method === 'GET' || request.body === null) return request;
   const body = await readJson(request.clone(), v.unknown());
-  if (!body.ok || !Array.isArray(body.value)) return request;
+  if (!body.ok) return format === 'problem' ? request : new Request(request, { body: null });
+  if (!Array.isArray(body.value)) return request;
   return new Request(request, { body: 'null' });
 }
 
@@ -96,7 +110,8 @@ function errorFormat(
 ): DaemonErrors | 'problem' {
   if (!(procedure['~orpc'].route.path ?? '').startsWith(CONTROL_PREFIX)) return 'problem';
   const { access } = v.parse(RouteMeta, procedure['~orpc'].meta);
-  return access.kind === 'daemon' ? access.errors : 'flagged';
+  if (access.kind === 'daemon') return access.errors;
+  return access.kind === 'runner' ? 'plain' : 'flagged';
 }
 
 /** The routes of `routes` whose callers read one error format. */
@@ -106,6 +121,7 @@ function surface(routes: AnyRouter, format: DaemonErrors | 'problem') {
   const matcher = new StandardOpenAPIMatcher({ filter });
   matcher.init(routes);
   return {
+    format,
     matcher,
     handler: new OpenAPIHandler<ContractContext>(routes, {
       filter,
@@ -126,14 +142,14 @@ export function createContractHandler(routes: AnyRouter) {
   ];
   return async (request: AppRequest): Promise<Response | null> => {
     const pathname: `/${string}` = `/${new URL(request.url).pathname.replace(/^\/|\/$/g, '')}`;
-    for (const { matcher, handler, errorType } of surfaces) {
+    for (const { format, matcher, handler, errorType } of surfaces) {
       const match = await matcher.match(request.method, pathname);
       if (!match) continue;
       const { access } = v.parse(RouteMeta, match.procedure['~orpc'].meta);
-      const refused = await refusal(access, request);
-      if (refused) return refused;
-      const { response } = await handler.handle(await withoutArrayBody(request), {
-        context: { request, resHeaders: new Headers() },
+      const admission = await admit(access, request);
+      if (admission.refused) return admission.refused;
+      const { response } = await handler.handle(await bodyAsRead(request, format), {
+        context: { request, resHeaders: new Headers(), runner: admission.runner },
       });
       return response ? withMediaType(response, errorType) : null;
     }

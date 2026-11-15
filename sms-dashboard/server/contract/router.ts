@@ -17,12 +17,15 @@ import { iccidMappingsHandler } from '../handlers/iccid-mappings.js';
 import { messagesHandler } from '../handlers/messages.js';
 import { phonesHandler } from '../handlers/phones.js';
 import { usersHandler } from '../handlers/users.js';
+import type { AuthorizedRunner } from '../utils/runner-auth.js';
 import type { AppRequest } from '../worker-context.js';
 
 export interface ContractContext {
   /** Authorized for the route's declared access before the procedure runs. */
   request: AppRequest;
   resHeaders: Headers;
+  /** Who a runner route admitted; null on every other route. */
+  runner: AuthorizedRunner | null;
 }
 
 const os = implement(contract).$context<ContractContext>();

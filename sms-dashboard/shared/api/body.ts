@@ -24,20 +24,22 @@ const MISSING_KEY = /^"(.+)"$/;
 
 /**
  * A JSON object body: a missing required key answers its own message, no body
- * at all NOT_JSON_MESSAGE, as readBody does, and anything else that is not an
- * object `message`. The messages live in the schema, so every reader of the
- * body (the contract, readBody) reports the same thing.
+ * at all `absent` (on a daemon or runner route, a body that is not JSON reads
+ * as none), and anything else that is not an object `message`. The messages
+ * live in the schema, so every reader of the body (the contract, readBody)
+ * reports the same thing.
  */
 export function bodyObject<const Entries extends v.ObjectEntries>(
   entries: Entries,
   missing: MissingKeyMessages<Entries>,
   message: string = OBJECT_MESSAGE,
+  absent: string = NOT_JSON_MESSAGE,
 ) {
   return v.object(entries, (issue) => {
     const key = MISSING_KEY.exec(issue.expected)?.[1];
     const own: unknown =
       key !== undefined && Object.hasOwn(missing, key) ? Reflect.get(missing, key) : undefined;
     if (typeof own === 'string') return own;
-    return issue.input === undefined ? NOT_JSON_MESSAGE : message;
+    return issue.input === undefined ? absent : message;
   });
 }

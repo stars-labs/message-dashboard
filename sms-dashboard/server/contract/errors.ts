@@ -1,6 +1,5 @@
 import { ValidationError, type ORPCError } from '@orpc/server';
 import * as v from 'valibot';
-import { NOT_JSON_MESSAGE } from '../../shared/api/body.js';
 
 const TITLES: Partial<Record<number, string>> = {
   400: 'Bad Request',
@@ -69,12 +68,11 @@ const WireError = v.object({ wire: v.record(v.string(), v.unknown()) });
 export type DaemonErrors = 'plain' | 'flagged';
 
 /**
- * Why a daemon route refused a request. oRPC decodes the body before any
- * procedure runs, so a body that is not JSON arrives here as a BAD_REQUEST
- * caused by JSON.parse; a rejected input names its first issue.
+ * Why a daemon route refused a request: a rejected input names its first
+ * issue. A body that is not JSON never gets here; the entry reads it as none,
+ * and the route's schema answers it.
  */
 function daemonReason(error: ORPCError<string, unknown>): string {
-  if (error.cause instanceof SyntaxError) return NOT_JSON_MESSAGE;
   if (error.cause instanceof ValidationError)
     return error.cause.issues[0]?.message ?? error.message;
   return error.message;
