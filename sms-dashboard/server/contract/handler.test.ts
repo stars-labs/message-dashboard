@@ -192,6 +192,25 @@ describe('contract routes', () => {
     }
   });
 
+  test('say which field a body got wrong, without echoing the body back', async () => {
+    const { response } = await callWorker('PUT', '/api/users/auth0%7Cother/role', {
+      headers: as(ADMIN),
+      body: JSON.stringify({ role: 42, note: 'do-not-echo-me' }),
+      bindings,
+      network: auth0,
+    });
+    const text = await response.text();
+    expect(text).not.toContain('do-not-echo-me');
+    expect(JSON.parse(text)).toEqual({
+      type: 'about:blank',
+      title: 'Bad Request',
+      status: 400,
+      detail: 'Invalid type: Expected string but received 42',
+      code: 'BAD_REQUEST',
+      issues: [{ path: 'body.role', message: 'Invalid type: Expected string but received 42' }],
+    });
+  });
+
   // Auth0 ids carry a '|', which the browser sends as %7C; decoding twice, or not
   // at all, addresses the wrong user.
   test('decode a path parameter exactly once', async () => {

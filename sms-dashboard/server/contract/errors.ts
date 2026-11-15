@@ -1,4 +1,4 @@
-import type { ORPCError } from '@orpc/server';
+import { ValidationError, type ORPCError } from '@orpc/server';
 import * as v from 'valibot';
 import { NOT_JSON_MESSAGE } from '../lib/request-body.js';
 
@@ -27,8 +27,32 @@ export function problemResponse(status: number, code: string, detail: string): R
 
 const Extensions = v.record(v.string(), v.unknown());
 
-/** The problem for `error`; members of an object `data` are its extension members. */
+/**
+ * What a rejected input got wrong: each issue's path and message. Not the issue
+ * itself: its path segments carry the input they point into, and the caller's
+ * body is not echoed back.
+ */
+function issuesOf({ issues }: ValidationError) {
+  return issues.map(({ path = [], message }) => ({
+    path: path
+      .map((segment) => String(typeof segment === 'object' ? segment.key : segment))
+      .join('.'),
+    message,
+  }));
+}
+
+/**
+ * The problem for `error`. A rejected input names its first issue as the detail
+ * and lists the rest; otherwise members of an object `data` are extension members.
+ */
 export function problemOf(error: ORPCError<string, unknown>) {
+  if (error.cause instanceof ValidationError) {
+    const issues = issuesOf(error.cause);
+    return {
+      ...problem(error.status, error.code, issues[0]?.message ?? error.message),
+      issues,
+    };
+  }
   const fixed = problem(error.status, error.code, error.message);
   const extensions = v.is(Extensions, error.data) ? error.data : {};
   return {
