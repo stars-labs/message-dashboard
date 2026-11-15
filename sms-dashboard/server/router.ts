@@ -59,7 +59,7 @@ export function matchRoute(pattern: string, pathname: string): Record<string, st
  * matches. A route's handlers run in order until one returns a Response.
  */
 export class Router<Request extends RoutedRequest> {
-  private readonly routes: Record<Method, Route<Request>[]> = {
+  private readonly table: Record<Method, Route<Request>[]> = {
     GET: [],
     POST: [],
     PUT: [],
@@ -68,30 +68,35 @@ export class Router<Request extends RoutedRequest> {
   };
 
   get(path: string, ...handlers: RouteHandler<Request>[]) {
-    this.routes.GET.push({ path, handlers });
+    this.table.GET.push({ path, handlers });
   }
 
   post(path: string, ...handlers: RouteHandler<Request>[]) {
-    this.routes.POST.push({ path, handlers });
+    this.table.POST.push({ path, handlers });
   }
 
   put(path: string, ...handlers: RouteHandler<Request>[]) {
-    this.routes.PUT.push({ path, handlers });
+    this.table.PUT.push({ path, handlers });
   }
 
   delete(path: string, ...handlers: RouteHandler<Request>[]) {
-    this.routes.DELETE.push({ path, handlers });
+    this.table.DELETE.push({ path, handlers });
   }
 
   options(path: string, ...handlers: RouteHandler<Request>[]) {
-    this.routes.OPTIONS.push({ path, handlers });
+    this.table.OPTIONS.push({ path, handlers });
+  }
+
+  /** Every registered route, grouped by method, each method in the order it dispatches. */
+  routes(): { method: Method; path: string }[] {
+    return METHODS.flatMap((method) => this.table[method].map(({ path }) => ({ method, path })));
   }
 
   async handle(request: Request): Promise<Response | null | undefined> {
     const method = METHODS.find((candidate) => candidate === request.method);
     const pathname = new URL(request.url).pathname;
 
-    for (const route of method ? this.routes[method] : []) {
+    for (const route of method ? this.table[method] : []) {
       const params = matchRoute(route.path, pathname);
       if (!params) continue;
       if (route.path.includes(':')) request.params = params;

@@ -107,4 +107,21 @@ describe('Router', () => {
 
     expect(params).toEqual([{ id: 'auth0|abc' }, undefined]);
   });
+
+  test('lists its routes by method, each method in registration order', () => {
+    const router = new Router<TestRequest>();
+    router.post('/api/b', reply('b'));
+    router.get('/api/x', reply('x'));
+    router.options('*', reply('preflight'));
+    router.get('*', reply('fallback'));
+    router.delete('/api/b/:id', reply('gone'));
+
+    expect(router.routes()).toEqual([
+      { method: 'GET', path: '/api/x' },
+      { method: 'GET', path: '*' },
+      { method: 'POST', path: '/api/b' },
+      { method: 'DELETE', path: '/api/b/:id' },
+      { method: 'OPTIONS', path: '*' },
+    ]);
+  });
 });
