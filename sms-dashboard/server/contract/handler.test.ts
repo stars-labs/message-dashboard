@@ -144,6 +144,14 @@ describe('contract routes', () => {
       { method: 'POST', path: '/api/carrier-bills/:id/mark-paid' },
       { method: 'POST', path: '/api/carrier-bills/:id/waive' },
       { method: 'POST', path: '/api/carrier-bills/:id/reopen' },
+      { method: 'GET', path: '/api/calls/state' },
+      { method: 'GET', path: '/api/calls/history' },
+      { method: 'GET', path: '/api/calls/ice' },
+      { method: 'POST', path: '/api/calls/dial' },
+      { method: 'POST', path: '/api/calls/answer' },
+      { method: 'POST', path: '/api/calls/connect' },
+      { method: 'POST', path: '/api/calls/renegotiate' },
+      { method: 'POST', path: '/api/calls/hangup' },
     ]);
   });
 

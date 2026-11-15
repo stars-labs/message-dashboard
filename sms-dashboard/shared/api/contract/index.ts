@@ -1,6 +1,7 @@
 import { auth } from './auth.js';
 import { balanceChecks, balanceRunners } from './balance.js';
 import { carrierBills } from './bills.js';
+import { calls } from './calls.js';
 import { control } from './control.js';
 import { filters } from './filters.js';
 import { health } from './health.js';
@@ -24,4 +25,5 @@ export const contract = {
   balanceChecks,
   balanceRunners,
   carrierBills,
+  calls,
 };

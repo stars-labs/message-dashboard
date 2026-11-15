@@ -13,14 +13,14 @@
 //      dial or answer, because their signed endpoint URLs carry the command.
 //   3. renegotiate: apply the browser's answer to the pull offer.
 //
-// Browser routes authorise with `messages.read`: whoever may read SMS may call.
-// Daemon routes live under /api/control/, which the auth0 middleware gates with
-// X-API-Key.
+// The browser routes are on the contract (shared/api/contract/calls.ts), which
+// admits them with `messages.read`: whoever may read SMS may call. The daemon
+// routes live under /api/control/, which the auth0 middleware gates with X-API-Key.
 
-import type { ErrorResponse } from '../../shared/api/error.js';
+import { ORPCError } from '@orpc/server';
 import { json } from '../lib/response.js';
 import * as v from 'valibot';
-import { parseJson, readJson, type Parsed } from '../../shared/parse-json.js';
+import { parseJson, readJson } from '../../shared/parse-json.js';
 import { D1_MAX_BOUND_PARAMETERS, queryAll, queryFirst, type D1 } from '../lib/d1.js';
 import type { EndedCallRequest } from '../../shared/daemon-wire/EndedCallRequest.js';
 import type { IncomingCallRequest } from '../../shared/daemon-wire/IncomingCallRequest.js';
@@ -28,19 +28,24 @@ import { acceptsWire } from '../../shared/wire-schema.js';
 import { OBJECT_MESSAGE } from '../../shared/api/body.js';
 import { readBody, type MissingKeyMessages } from '../lib/request-body.js';
 import { handleAuth0, type AuthRequest } from '../middleware/auth0.js';
-import { authorize } from '../middleware/authorize.js';
 import {
   CallHistoryRow,
   IceServersResponse,
   LiveCall,
+  PhoneNumber,
   SessionDescription,
+  type AnswerBody,
+  type CallHistoryQuery,
+  type CallIdBody,
   type CallConnectResponse,
   type CallHangupResponse,
   type CallHistoryResponse,
   type CallMediaResponse,
   type CallRenegotiateResponse,
   type CallStateResponse,
+  type DialBody,
   type Direction,
+  type RenegotiateBody,
 } from '../../shared/api/calls.js';
 
 /** What the Durable Object answers to a read: the call and the revision it is at. */
@@ -109,7 +114,6 @@ interface CallRequest extends AuthRequest {
 type CallHandler = (request: CallRequest) => Promise<Response>;
 
 interface Router {
-  get(path: string, handler: CallHandler): void;
   post(path: string, handler: CallHandler): void;
 }
 
@@ -140,17 +144,13 @@ export function missingConfig(env: object): string[] {
   });
 }
 
-/** The SFU settings, or the 503 that names the missing ones. */
-function callConfig(env: CallEnv): CallConfig | Response {
+/** The SFU settings; without them a call route answers 503, naming the missing ones. */
+function callConfig(env: CallEnv): CallConfig {
   const result = v.safeParse(CallConfig, env);
   if (result.success) return result.output;
-  return json(
-    {
-      error: 'Voice calling is not configured',
-      detail: `missing ${missingConfig(env).join(', ')}`,
-    },
-    503,
-  );
+  throw new ORPCError('SERVICE_UNAVAILABLE', {
+    message: `Voice calling is not configured: missing ${missingConfig(env).join(', ')}`,
+  });
 }
 
 const revisions = new WeakMap<LiveCall, string>();
@@ -217,76 +217,25 @@ async function beginEnding(
   return null;
 }
 
-function callChanged(): Response {
-  return json({ error: 'No active call' }, 409);
+/** The call changed under a route that was about to write it. */
+function callChanged(): ORPCError<'CONFLICT', undefined> {
+  return new ORPCError('CONFLICT', { message: 'No active call' });
+}
+
+/** A refusal that answers the call as it now stands. */
+function conflict(
+  message: string,
+  call?: LiveCall,
+): ORPCError<'CONFLICT', { call: LiveCall } | undefined> {
+  return new ORPCError('CONFLICT', { message, data: call === undefined ? undefined : { call } });
 }
 
 const ICCID_MESSAGE = 'iccid is required';
-const NUMBER_MESSAGE = 'number must be E.164, for example +6591234567';
-const MEDIA_MESSAGE = 'offer and mid are required';
-const ANSWER_MESSAGE = 'answer is required';
 const CALL_ID_MESSAGE = 'Invalid call ID';
-
-/**
- * E.164 only. The SMS sender already refuses anything else for ordinary sends,
- * and a dialer is a place where a loose pattern turns a typo into a wrong number.
- */
-const PhoneNumber = v.pipe(v.string(NUMBER_MESSAGE), v.regex(/^\+[1-9]\d{6,14}$/, NUMBER_MESSAGE));
 
 export function validNumber(value: unknown): boolean {
   return v.is(PhoneNumber, value);
 }
-
-function sessionDescriptionBody<Type extends 'offer' | 'answer'>(type: Type, message: string) {
-  return v.object(
-    {
-      type: v.literal(type, message),
-      sdp: v.pipe(v.string(message), v.minLength(1, message)),
-    },
-    message,
-  );
-}
-
-const Mid = v.pipe(v.string(MEDIA_MESSAGE), v.minLength(1, MEDIA_MESSAGE));
-const CallId = v.optional(v.pipe(v.string(CALL_ID_MESSAGE), v.minLength(1, CALL_ID_MESSAGE)));
-
-const DialBody = v.object(
-  {
-    iccid: v.pipe(v.string(ICCID_MESSAGE), v.regex(/^[0-9A-Fa-f]{18,22}$/, ICCID_MESSAGE)),
-    number: PhoneNumber,
-    offer: sessionDescriptionBody('offer', MEDIA_MESSAGE),
-    mid: Mid,
-  },
-  OBJECT_MESSAGE,
-);
-
-const DIAL_MISSING_KEY_MESSAGES = {
-  iccid: ICCID_MESSAGE,
-  number: NUMBER_MESSAGE,
-  offer: MEDIA_MESSAGE,
-  mid: MEDIA_MESSAGE,
-} as const satisfies MissingKeyMessages<typeof DialBody>;
-
-const AnswerBody = v.object(
-  { offer: sessionDescriptionBody('offer', MEDIA_MESSAGE), mid: Mid },
-  OBJECT_MESSAGE,
-);
-
-const ANSWER_MISSING_KEY_MESSAGES = {
-  offer: MEDIA_MESSAGE,
-  mid: MEDIA_MESSAGE,
-} as const satisfies MissingKeyMessages<typeof AnswerBody>;
-
-const CallIdBody = v.object({ call_id: CallId }, OBJECT_MESSAGE);
-
-const RenegotiateBody = v.object(
-  { answer: sessionDescriptionBody('answer', ANSWER_MESSAGE), call_id: CallId },
-  OBJECT_MESSAGE,
-);
-
-const RENEGOTIATE_MISSING_KEY_MESSAGES = {
-  answer: ANSWER_MESSAGE,
-} as const satisfies MissingKeyMessages<typeof RenegotiateBody>;
 
 /** The daemon's RING report: `from` is null until the network sends a caller id. */
 const IncomingBody = acceptsWire<IncomingCallRequest>()(
@@ -421,9 +370,11 @@ async function sfu(
   return { ok, status: response.status, body: reply, detail: raw.value };
 }
 
-function sfuError(message: string, result: SfuResult): Response {
+/** An SFU failure, with what the SFU said, so the dashboard shows the cause. */
+function sfuError(message: string, result: SfuResult): ORPCError<'BAD_GATEWAY', undefined> {
   const detail = typeof result.detail === 'string' ? result.detail : JSON.stringify(result.detail);
-  return json({ error: message, detail } satisfies ErrorResponse, 502);
+  console.error(`[calls] ${message}:`, detail);
+  return new ORPCError('BAD_GATEWAY', { message: `${message}: ${detail}` });
 }
 
 /** Creates the browser session and publishes its mic. Returns { sessionId, answer } or { error }. */
@@ -431,7 +382,9 @@ async function publishMic(
   config: CallConfig,
   offer: { type: 'offer'; sdp: string },
   mid: string,
-): Promise<{ sessionId: string; answer: SessionDescription } | { error: Response }> {
+): Promise<
+  { sessionId: string; answer: SessionDescription } | { error: ORPCError<'BAD_GATEWAY', undefined> }
+> {
   const session = await sfu(config, 'POST', '/sessions/new');
   const sessionId = session.body.sessionId;
   if (!session.ok || !present(sessionId)) {
@@ -459,19 +412,17 @@ async function closeAdapters(env: CallEnv, call: LiveCall): Promise<void> {
   });
 }
 
-async function failMedia(env: CallEnv, call: LiveCall, response: Response): Promise<Response> {
+/** Ends `call` after its media failed, then answers `error`. */
+async function failMedia(
+  env: CallEnv,
+  call: LiveCall,
+  error: ORPCError<string, unknown>,
+): Promise<never> {
   await closeAdapters(env, call);
   if (await clearCall(env, call)) {
     await logCallEnded(env.DB, call, { reason: 'sfu_error', endedBy: 'worker' });
   }
-  return response;
-}
-
-/** A route whose body is optional reads a request without one as `{}`. */
-function readCallIdBody(request: CallRequest): Promise<Parsed<v.InferOutput<typeof CallIdBody>>> {
-  return request.body === null
-    ? Promise.resolve({ ok: true, value: {} })
-    : readBody(request, CallIdBody, {});
+  throw error;
 }
 
 // ---------------------------------------------------------------------------
@@ -720,25 +671,33 @@ function boundedInt(raw: string | null, fallback: number, min: number, max: numb
   return Math.min(max, Math.max(min, value));
 }
 
-export function setupCallRoutes(router: Router): void {
-  // Current call state, for the dashboard to poll.
-  router.get('/api/calls/state', async (request) => {
-    const blocked = await authorize(request, 'messages.read');
-    if (blocked) return blocked;
-    return json({ call: await readCall(request.env) } satisfies CallStateResponse);
-  });
+interface BrowserCall {
+  env: CallEnv;
+  user?: { id: string } | undefined;
+}
 
-  // The call log. Read only when someone opens the history — never on the
-  // polling path — so it cannot eat the D1 row-read quota.
-  router.get('/api/calls/history', async (request) => {
-    const blocked = await authorize(request, 'messages.read');
-    if (blocked) return blocked;
-    const { DB } = request.env;
+/**
+ * The browser's call routes, served through the contract with `messages.read`:
+ * whoever may read SMS may call.
+ */
+export const callsHandler = {
+  /** Current call state, for the dashboard to poll. */
+  async state({ env }: BrowserCall): Promise<CallStateResponse> {
+    return { call: await readCall(env) };
+  },
 
-    const url = new URL(request.url);
-    const limit = boundedInt(url.searchParams.get('limit'), 30, 1, 100);
-    const offset = boundedInt(url.searchParams.get('offset'), 0, 0, Number.MAX_SAFE_INTEGER);
-    const iccid = url.searchParams.get('iccid');
+  /**
+   * The call log. Read only when someone opens the history, never on the
+   * polling path, so it cannot eat the D1 row-read quota.
+   */
+  async history(
+    { env }: BrowserCall,
+    query: v.InferOutput<typeof CallHistoryQuery>,
+  ): Promise<CallHistoryResponse> {
+    const { DB } = env;
+    const limit = boundedInt(query.limit ?? null, 30, 1, 100);
+    const offset = boundedInt(query.offset ?? null, 0, 0, Number.MAX_SAFE_INTEGER);
+    const iccid = query.iccid;
 
     // One row past the page decides `has_more` without a second COUNT query.
     // A call still in progress is excluded: the dashboard shows the live call
@@ -756,20 +715,15 @@ export function setupCallRoutes(router: Router): void {
     );
 
     const page = rows.slice(0, limit);
-    return json({
-      calls: await enrichCallPage(DB, page),
-      has_more: rows.length > limit,
-    } satisfies CallHistoryResponse);
-  });
+    return { calls: await enrichCallPage(DB, page), has_more: rows.length > limit };
+  },
 
-  // Short-lived ICE servers for the browser's PeerConnection. The TURN token
-  // itself stays in the Worker; the browser only ever sees a 10-minute credential.
-  router.get('/api/calls/ice', async (request) => {
-    const blocked = await authorize(request, 'messages.read');
-    if (blocked) return blocked;
-    const config = callConfig(request.env);
-    if (config instanceof Response) return config;
-
+  /**
+   * Short-lived ICE servers for the browser's PeerConnection. The TURN token
+   * itself stays in the Worker; the browser only ever sees a 10-minute credential.
+   */
+  async ice({ env }: BrowserCall): Promise<IceServersResponse> {
+    const config = callConfig(env);
     const response = await fetch(
       `${TURN_BASE}/${config.TURN_KEY_ID}/credentials/generate-ice-servers`,
       {
@@ -784,25 +738,21 @@ export function setupCallRoutes(router: Router): void {
     const text = await response.text();
     const iceServers = parseJson(text, IceServersResponse);
     if (!response.ok || !iceServers.ok) {
-      return json({ error: 'Could not issue ICE servers', detail: text }, 502);
+      console.error('[calls] Could not issue ICE servers:', text);
+      throw new ORPCError('BAD_GATEWAY', { message: `Could not issue ICE servers: ${text}` });
     }
-    return json(iceServers.value satisfies IceServersResponse);
-  });
+    return iceServers.value;
+  },
 
-  // Place an outbound call: take the lock, then publish the browser mic.
-  router.post('/api/calls/dial', async (request) => {
-    const blocked = await authorize(request, 'messages.read');
-    if (blocked) return blocked;
-    const { env } = request;
+  /** Place an outbound call: take the lock, then publish the browser mic. */
+  async dial(
+    { env, user }: BrowserCall,
+    { iccid, number, offer, mid }: v.InferOutput<typeof DialBody>,
+  ): Promise<CallMediaResponse> {
     const config = callConfig(env);
-    if (config instanceof Response) return config;
-
-    const parsed = await readBody(request, DialBody, DIAL_MISSING_KEY_MESSAGES);
-    if (!parsed.ok) return json({ error: parsed.error }, 400);
-    const { iccid, number, offer, mid } = parsed.value;
 
     const existing = await readCall(env);
-    if (existing) return json({ error: 'Another call is already active', call: existing }, 409);
+    if (existing) throw conflict('Another call is already active', existing);
 
     const call: LiveCall = {
       id: crypto.randomUUID(),
@@ -811,74 +761,63 @@ export function setupCallRoutes(router: Router): void {
       iccid,
       number,
       started_at: new Date().toISOString(),
-      requested_by: request.user?.id ?? null,
+      requested_by: user?.id ?? null,
     };
-    if (!(await writeCall(env, call)))
-      return json({ error: 'Another call is already active' }, 409);
+    if (!(await writeCall(env, call))) throw conflict('Another call is already active');
     await logCallStarted(env.DB, call);
 
     const media = await publishMic(config, offer, mid);
     if ('error' in media) return failMedia(env, call, media.error);
     call.session_id = media.sessionId;
-    if (!(await writeCall(env, call))) return callChanged();
-    return json({ call, answer: media.answer } satisfies CallMediaResponse);
-  });
+    if (!(await writeCall(env, call))) throw callChanged();
+    return { call, answer: media.answer };
+  },
 
-  // Answer the call the daemon reported as ringing.
-  router.post('/api/calls/answer', async (request) => {
-    const blocked = await authorize(request, 'messages.read');
-    if (blocked) return blocked;
-    const { env } = request;
+  /** Answer the call the daemon reported as ringing. */
+  async answer(
+    { env, user }: BrowserCall,
+    { offer, mid }: v.InferOutput<typeof AnswerBody>,
+  ): Promise<CallMediaResponse> {
     const config = callConfig(env);
-    if (config instanceof Response) return config;
-
-    const parsed = await readBody(request, AnswerBody, ANSWER_MISSING_KEY_MESSAGES);
-    if (!parsed.ok) return json({ error: parsed.error }, 400);
-    const { offer, mid } = parsed.value;
 
     const call = await readCall(env);
-    if (!call) return json({ error: 'No call to answer' }, 404);
+    if (!call) throw new ORPCError('NOT_FOUND', { message: 'No call to answer' });
     if (call.direction !== 'inbound' || call.state !== 'ringing') {
-      return json({ error: 'Only a ringing inbound call can be answered', call }, 409);
+      throw conflict('Only a ringing inbound call can be answered', call);
     }
 
     // Take the call out of `ringing` first so a RING report cannot shorten its TTL.
     const answeredAt = new Date().toISOString();
-    const answeredBy = request.user?.id ?? null;
+    const answeredBy = user?.id ?? null;
     call.state = 'connecting';
     call.answered_at = answeredAt;
     call.answered_by = answeredBy;
-    if (!(await writeCall(env, call))) return callChanged();
+    if (!(await writeCall(env, call))) throw callChanged();
     await logCallAnswered(env.DB, call.id, { at: answeredAt, by: answeredBy });
 
     const media = await publishMic(config, offer, mid);
     if ('error' in media) return failMedia(env, call, media.error);
     call.session_id = media.sessionId;
-    if (!(await writeCall(env, call))) return callChanged();
-    return json({ call, answer: media.answer } satisfies CallMediaResponse);
-  });
+    if (!(await writeCall(env, call))) throw callChanged();
+    return { call, answer: media.answer };
+  },
 
-  // Bridge the browser session to the Pi. Called once the PeerConnection is up.
-  router.post('/api/calls/connect', async (request) => {
-    const blocked = await authorize(request, 'messages.read');
-    if (blocked) return blocked;
-    const { env } = request;
+  /** Bridge the browser session to the Pi. Called once the PeerConnection is up. */
+  async connect(
+    { env }: BrowserCall,
+    { call_id: callId }: v.InferOutput<typeof CallIdBody>,
+  ): Promise<CallConnectResponse> {
     const config = callConfig(env);
-    if (config instanceof Response) return config;
-
-    const parsed = await readCallIdBody(request);
-    if (!parsed.ok) return json({ error: parsed.error }, 400);
-    const { call_id: callId } = parsed.value;
     const call = await readCall(env);
     if (!call || (callId !== undefined && callId !== call.id)) {
-      return json({ error: 'No active call' }, 404);
+      throw new ORPCError('NOT_FOUND', { message: 'No active call' });
     }
     const sessionId = call.session_id;
     if (call.state !== 'connecting' || !present(sessionId) || call.bridge_started) {
-      return json({ error: 'Call is not ready to connect', call }, 409);
+      throw conflict('Call is not ready to connect', call);
     }
     call.bridge_started = true;
-    if (!(await writeCall(env, call))) return callChanged();
+    if (!(await writeCall(env, call))) throw callChanged();
 
     const action = call.direction === 'outbound' ? 'dial' : 'answer';
     const exp = Math.floor(Date.now() / 1000) + ENDPOINT_TTL_SECONDS;
@@ -912,7 +851,7 @@ export function setupCallRoutes(router: Router): void {
     }
     if (!(await writeCall(env, call))) {
       await closeAdapters(env, call);
-      return callChanged();
+      throw callChanged();
     }
 
     // Pi modem audio -> SFU, published as a new track in the adapter's own session.
@@ -937,7 +876,7 @@ export function setupCallRoutes(router: Router): void {
     call.modem_session_id = modemSessionId;
     if (!(await writeCall(env, call))) {
       await closeAdapters(env, call);
-      return callChanged();
+      throw callChanged();
     }
 
     const pull = await sfu(config, 'POST', `/sessions/${sessionId}/tracks/new`, {
@@ -953,7 +892,7 @@ export function setupCallRoutes(router: Router): void {
     call.state = renegotiate ? 'bridging' : 'active';
     if (!(await writeCall(env, call))) {
       await closeAdapters(env, call);
-      return callChanged();
+      throw callChanged();
     }
     if (!renegotiate) {
       // Audio is up: that is the answer moment for an outbound call. An inbound
@@ -961,28 +900,23 @@ export function setupCallRoutes(router: Router): void {
       // keeps that earlier, truer timestamp.
       await logCallAnswered(env.DB, call.id, { at: new Date().toISOString() });
     }
-    return json({ call, offer: offer ?? null } satisfies CallConnectResponse);
-  });
+    return { call, offer: offer ?? null };
+  },
 
-  // Apply the browser's answer to the pull offer from /connect.
-  router.post('/api/calls/renegotiate', async (request) => {
-    const blocked = await authorize(request, 'messages.read');
-    if (blocked) return blocked;
-    const { env } = request;
+  /** Apply the browser's answer to the pull offer from /connect. */
+  async renegotiate(
+    { env }: BrowserCall,
+    { answer, call_id: callId }: v.InferOutput<typeof RenegotiateBody>,
+  ): Promise<CallRenegotiateResponse> {
     const config = callConfig(env);
-    if (config instanceof Response) return config;
-
-    const parsed = await readBody(request, RenegotiateBody, RENEGOTIATE_MISSING_KEY_MESSAGES);
-    if (!parsed.ok) return json({ error: parsed.error }, 400);
-    const { answer, call_id: callId } = parsed.value;
 
     const call = await readCall(env);
     if (!call || (callId !== undefined && callId !== call.id)) {
-      return json({ error: 'No active call' }, 404);
+      throw new ORPCError('NOT_FOUND', { message: 'No active call' });
     }
     const sessionId = call.session_id;
     if (call.state !== 'bridging' || !present(sessionId)) {
-      return json({ error: 'Call is not waiting for renegotiation', call }, 409);
+      throw conflict('Call is not waiting for renegotiation', call);
     }
 
     const result = await sfu(config, 'PUT', `/sessions/${sessionId}/renegotiate`, {
@@ -993,34 +927,30 @@ export function setupCallRoutes(router: Router): void {
     }
 
     call.state = 'active';
-    if (!(await writeCall(env, call))) return callChanged();
+    if (!(await writeCall(env, call))) throw callChanged();
     await logCallAnswered(env.DB, call.id, { at: new Date().toISOString() });
-    return json({ call } satisfies CallRenegotiateResponse);
-  });
+    return { call };
+  },
 
-  // Close the adapters for the requested call. Older clients omit the ID.
-  router.post('/api/calls/hangup', async (request) => {
-    const blocked = await authorize(request, 'messages.read');
-    if (blocked) return blocked;
-    const { env } = request;
-
-    const parsed = await readCallIdBody(request);
-    if (!parsed.ok) return json({ error: parsed.error }, 400);
-    const { call_id: callId } = parsed.value;
+  /** Close the adapters for the requested call, or for whichever call there is when none is named. */
+  async hangup(
+    { env }: BrowserCall,
+    { call_id: callId }: v.InferOutput<typeof CallIdBody>,
+  ): Promise<CallHangupResponse> {
     const call = await beginEnding(env, (current) => callId === undefined || current.id === callId);
-    if (!call) {
-      return json({ call: null, already_clear: true } satisfies CallHangupResponse);
-    }
+    if (!call) return { call: null, already_clear: true };
     await closeAdapters(env, call);
     await clearCall(env, call);
     await logCallEnded(env.DB, call, { reason: 'hangup', endedBy: 'dashboard' });
 
     call.state = 'ended';
     call.ended_at = new Date().toISOString();
-    return json({ call } satisfies CallHangupResponse);
-  });
+    return { call };
+  },
+};
 
-  // Daemon-reported incoming call, repeated on every RING to keep it alive.
+/** The daemon's call reports, which the API key admits. */
+export function setupCallRoutes(router: Router): void {
   router.post('/api/control/calls/incoming', async (request) => {
     const authResponse = await handleAuth0(request);
     if (authResponse) return authResponse;

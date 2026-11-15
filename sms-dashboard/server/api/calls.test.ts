@@ -195,7 +195,7 @@ function registeredRoutes(): string[] {
   const record = (method: string) => (path: string) => {
     routes.push(`${method} ${path}`);
   };
-  const router: Router = { get: record('GET'), post: record('POST') };
+  const router: Router = { post: record('POST') };
   setupCallRoutes(router);
   return routes.sort();
 }
@@ -290,6 +290,20 @@ function errorBody(response: Response): Promise<ErrorResponse> {
 
 async function errorOf(response: Response): Promise<string> {
   return (await errorBody(response)).error;
+}
+
+const Problem = v.looseObject({
+  type: v.string(),
+  title: v.string(),
+  status: v.number(),
+  detail: v.string(),
+  code: v.string(),
+});
+
+/** The problem a browser route answers when it refuses or fails a request. */
+async function problemOf(response: Response) {
+  expect(response.headers.get('Content-Type')).toBe('application/problem+json');
+  return v.parse(Problem, await response.json());
 }
 
 const CallIdBody = v.looseObject({ call: v.looseObject({ id: v.string() }) });
@@ -429,10 +443,11 @@ describe('outbound media setup', () => {
     stubSfu(() => [500, { errorCode: 'boom', errorDescription: 'no capacity' }]);
 
     const response = await post('/api/calls/dial', dial);
-    const body = await errorBody(response);
+    const { detail } = await problemOf(response);
 
-    expect(body.error).toBe('Could not create an SFU session');
-    expect(body.detail).toContain('no capacity');
+    expect(response.status).toBe(502);
+    expect(detail).toStartWith('Could not create an SFU session: ');
+    expect(detail).toContain('no capacity');
   });
 
   test('a second dial is refused while any call exists', async () => {
@@ -444,6 +459,26 @@ describe('outbound media setup', () => {
     const response = await post('/api/calls/dial', dial);
 
     expect(response.status).toBe(409);
+    expect(await problemOf(response)).toMatchObject({
+      code: 'CONFLICT',
+      detail: 'Another call is already active',
+      call: { id: 'x', state: 'ringing' },
+    });
+    expect(sfu).toHaveLength(0);
+  });
+
+  test('a dial without the SFU settings answers 503 naming the missing ones', async () => {
+    const { post, env } = setup();
+    env.TURN_API_TOKEN = '';
+    const sfu = stubSfu({});
+
+    const response = await post('/api/calls/dial', dial);
+
+    expect(response.status).toBe(503);
+    expect(await problemOf(response)).toMatchObject({
+      code: 'SERVICE_UNAVAILABLE',
+      detail: 'Voice calling is not configured: missing TURN_API_TOKEN',
+    });
     expect(sfu).toHaveLength(0);
   });
 
@@ -1230,6 +1265,26 @@ describe('call history API', () => {
     expect(filtered.calls).toHaveLength(2);
   });
 
+  test('pages at most 100 calls, however many the limit asks for', async () => {
+    const { get, db } = setup();
+    for (let i = 0; i < 101; i += 1) {
+      const clock = `${String(Math.floor(i / 60)).padStart(2, '0')}:${String(i % 60).padStart(2, '0')}`;
+      db.seedCall({
+        id: `c${String(i).padStart(3, '0')}`,
+        direction: 'outbound',
+        iccid: ICCID,
+        remote_number: '+6592953543',
+        outcome: 'answered',
+        started_at: `2026-09-17T10:${clock}.000Z`,
+      });
+    }
+
+    const page = await parsed(await get('/api/calls/history', { limit: '101' }), HistoryBody);
+
+    expect(page.calls).toHaveLength(100);
+    expect(page.has_more).toBe(true);
+  });
+
   test('requires a session', async () => {
     const { get } = setup();
 
@@ -1259,7 +1314,7 @@ describe('ICE servers', () => {
     const response = await get('/api/calls/ice');
 
     expect(response.status).toBe(502);
-    expect(await errorOf(response)).toBe('Could not issue ICE servers');
+    expect((await problemOf(response)).detail).toBe('Could not issue ICE servers: upstream hiccup');
   });
 });
 
@@ -1297,7 +1352,10 @@ describe('malformed bodies', () => {
       const response = await post(path, body);
 
       expect(response.status).toBe(400);
-      expect(await errorOf(response)).toBe(error);
+      if (daemon) expect(await errorOf(response)).toBe(error);
+      else if (error === 'Body must be JSON') {
+        expect((await problemOf(response)).code).toBe('BAD_REQUEST');
+      } else expect((await problemOf(response)).detail).toBe(error);
       expect(env.CALL_STATE.call()).toEqual(call);
     },
   );
@@ -1340,16 +1398,9 @@ describe('authentication', () => {
 });
 
 describe('route surface', () => {
-  test('registers the browser routes and the daemon routes', () => {
+  // The browser routes are on the contract; route-census.test.ts lists them.
+  test('registers the daemon routes', () => {
     expect(registeredRoutes()).toEqual([
-      'GET /api/calls/history',
-      'GET /api/calls/ice',
-      'GET /api/calls/state',
-      'POST /api/calls/answer',
-      'POST /api/calls/connect',
-      'POST /api/calls/dial',
-      'POST /api/calls/hangup',
-      'POST /api/calls/renegotiate',
       'POST /api/control/calls/ended',
       'POST /api/control/calls/incoming',
     ]);

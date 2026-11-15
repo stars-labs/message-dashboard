@@ -11224,6 +11224,1353 @@
           }
         ]
       }
+    },
+    "/api/calls/state": {
+      "get": {
+        "operationId": "calls.state",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "call": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "direction": {
+                              "enum": [
+                                "inbound",
+                                "outbound"
+                              ],
+                              "type": "string"
+                            },
+                            "state": {
+                              "enum": [
+                                "ringing",
+                                "connecting",
+                                "bridging",
+                                "active",
+                                "ending",
+                                "ended"
+                              ],
+                              "type": "string"
+                            },
+                            "iccid": {
+                              "type": "string"
+                            },
+                            "number": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "started_at": {
+                              "type": "string"
+                            },
+                            "requested_by": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "answered_at": {
+                              "type": "string"
+                            },
+                            "answered_by": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "session_id": {
+                              "type": "string"
+                            },
+                            "modem_session_id": {
+                              "type": "string"
+                            },
+                            "bridge_started": {
+                              "const": true
+                            },
+                            "ended_at": {
+                              "type": "string"
+                            },
+                            "adapters": {
+                              "type": "object",
+                              "properties": {
+                                "up": {
+                                  "type": "string"
+                                },
+                                "down": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": []
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "direction",
+                            "state",
+                            "iccid",
+                            "number",
+                            "started_at"
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "call"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "security": [
+          {
+            "session": [
+              "messages.read"
+            ]
+          },
+          {
+            "auth0": [
+              "messages.read"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/calls/history": {
+      "get": {
+        "operationId": "calls.history",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "allowEmptyValue": true,
+            "allowReserved": true
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "allowEmptyValue": true,
+            "allowReserved": true
+          },
+          {
+            "name": "iccid",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "allowEmptyValue": true,
+            "allowReserved": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "calls": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "direction": {
+                            "enum": [
+                              "inbound",
+                              "outbound"
+                            ],
+                            "type": "string"
+                          },
+                          "iccid": {
+                            "type": "string"
+                          },
+                          "remote_number": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "outcome": {
+                            "enum": [
+                              "answered",
+                              "missed",
+                              "rejected",
+                              "cancelled",
+                              "failed"
+                            ],
+                            "type": "string"
+                          },
+                          "end_reason": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "started_at": {
+                            "type": "string"
+                          },
+                          "answered_at": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "ended_at": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "duration_seconds": {
+                            "type": "number"
+                          },
+                          "requested_by": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "answered_by": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "sim_index": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "sim_number": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "sim_carrier": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "direction",
+                          "iccid",
+                          "remote_number",
+                          "outcome",
+                          "end_reason",
+                          "started_at",
+                          "answered_at",
+                          "ended_at",
+                          "duration_seconds",
+                          "requested_by",
+                          "answered_by",
+                          "sim_index",
+                          "sim_number",
+                          "sim_carrier"
+                        ]
+                      }
+                    },
+                    "has_more": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "calls",
+                    "has_more"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "security": [
+          {
+            "session": [
+              "messages.read"
+            ]
+          },
+          {
+            "auth0": [
+              "messages.read"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/calls/ice": {
+      "get": {
+        "operationId": "calls.ice",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "iceServers": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "urls": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              }
+                            ]
+                          },
+                          "username": {
+                            "type": "string"
+                          },
+                          "credential": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "urls"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "iceServers"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "security": [
+          {
+            "session": [
+              "messages.read"
+            ]
+          },
+          {
+            "auth0": [
+              "messages.read"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/calls/dial": {
+      "post": {
+        "operationId": "calls.dial",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "iccid": {
+                    "type": "string",
+                    "pattern": "^[0-9A-Fa-f]{18,22}$"
+                  },
+                  "number": {
+                    "type": "string",
+                    "pattern": "^\\+[1-9]\\d{6,14}$"
+                  },
+                  "offer": {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "const": "offer"
+                      },
+                      "sdp": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "sdp"
+                    ]
+                  },
+                  "mid": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "iccid",
+                  "number",
+                  "offer",
+                  "mid"
+                ],
+                "$schema": "https://json-schema.org/draft/2020-12/schema"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "call": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "direction": {
+                          "enum": [
+                            "inbound",
+                            "outbound"
+                          ],
+                          "type": "string"
+                        },
+                        "state": {
+                          "enum": [
+                            "ringing",
+                            "connecting",
+                            "bridging",
+                            "active",
+                            "ending",
+                            "ended"
+                          ],
+                          "type": "string"
+                        },
+                        "iccid": {
+                          "type": "string"
+                        },
+                        "number": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "started_at": {
+                          "type": "string"
+                        },
+                        "requested_by": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "answered_at": {
+                          "type": "string"
+                        },
+                        "answered_by": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "session_id": {
+                          "type": "string"
+                        },
+                        "modem_session_id": {
+                          "type": "string"
+                        },
+                        "bridge_started": {
+                          "const": true
+                        },
+                        "ended_at": {
+                          "type": "string"
+                        },
+                        "adapters": {
+                          "type": "object",
+                          "properties": {
+                            "up": {
+                              "type": "string"
+                            },
+                            "down": {
+                              "type": "string"
+                            }
+                          },
+                          "required": []
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "direction",
+                        "state",
+                        "iccid",
+                        "number",
+                        "started_at"
+                      ]
+                    },
+                    "answer": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "enum": [
+                            "offer",
+                            "answer"
+                          ],
+                          "type": "string"
+                        },
+                        "sdp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "sdp"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "call",
+                    "answer"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "security": [
+          {
+            "session": [
+              "messages.read"
+            ]
+          },
+          {
+            "auth0": [
+              "messages.read"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/calls/answer": {
+      "post": {
+        "operationId": "calls.answer",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "offer": {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "const": "offer"
+                      },
+                      "sdp": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "sdp"
+                    ]
+                  },
+                  "mid": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "offer",
+                  "mid"
+                ],
+                "$schema": "https://json-schema.org/draft/2020-12/schema"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "call": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "direction": {
+                          "enum": [
+                            "inbound",
+                            "outbound"
+                          ],
+                          "type": "string"
+                        },
+                        "state": {
+                          "enum": [
+                            "ringing",
+                            "connecting",
+                            "bridging",
+                            "active",
+                            "ending",
+                            "ended"
+                          ],
+                          "type": "string"
+                        },
+                        "iccid": {
+                          "type": "string"
+                        },
+                        "number": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "started_at": {
+                          "type": "string"
+                        },
+                        "requested_by": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "answered_at": {
+                          "type": "string"
+                        },
+                        "answered_by": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "session_id": {
+                          "type": "string"
+                        },
+                        "modem_session_id": {
+                          "type": "string"
+                        },
+                        "bridge_started": {
+                          "const": true
+                        },
+                        "ended_at": {
+                          "type": "string"
+                        },
+                        "adapters": {
+                          "type": "object",
+                          "properties": {
+                            "up": {
+                              "type": "string"
+                            },
+                            "down": {
+                              "type": "string"
+                            }
+                          },
+                          "required": []
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "direction",
+                        "state",
+                        "iccid",
+                        "number",
+                        "started_at"
+                      ]
+                    },
+                    "answer": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "enum": [
+                            "offer",
+                            "answer"
+                          ],
+                          "type": "string"
+                        },
+                        "sdp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "sdp"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "call",
+                    "answer"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "security": [
+          {
+            "session": [
+              "messages.read"
+            ]
+          },
+          {
+            "auth0": [
+              "messages.read"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/calls/connect": {
+      "post": {
+        "operationId": "calls.connect",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "call_id": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [],
+                "default": {},
+                "$schema": "https://json-schema.org/draft/2020-12/schema"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "call": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "direction": {
+                          "enum": [
+                            "inbound",
+                            "outbound"
+                          ],
+                          "type": "string"
+                        },
+                        "state": {
+                          "enum": [
+                            "ringing",
+                            "connecting",
+                            "bridging",
+                            "active",
+                            "ending",
+                            "ended"
+                          ],
+                          "type": "string"
+                        },
+                        "iccid": {
+                          "type": "string"
+                        },
+                        "number": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "started_at": {
+                          "type": "string"
+                        },
+                        "requested_by": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "answered_at": {
+                          "type": "string"
+                        },
+                        "answered_by": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "session_id": {
+                          "type": "string"
+                        },
+                        "modem_session_id": {
+                          "type": "string"
+                        },
+                        "bridge_started": {
+                          "const": true
+                        },
+                        "ended_at": {
+                          "type": "string"
+                        },
+                        "adapters": {
+                          "type": "object",
+                          "properties": {
+                            "up": {
+                              "type": "string"
+                            },
+                            "down": {
+                              "type": "string"
+                            }
+                          },
+                          "required": []
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "direction",
+                        "state",
+                        "iccid",
+                        "number",
+                        "started_at"
+                      ]
+                    },
+                    "offer": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "enum": [
+                                "offer",
+                                "answer"
+                              ],
+                              "type": "string"
+                            },
+                            "sdp": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "sdp"
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "call",
+                    "offer"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "security": [
+          {
+            "session": [
+              "messages.read"
+            ]
+          },
+          {
+            "auth0": [
+              "messages.read"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/calls/renegotiate": {
+      "post": {
+        "operationId": "calls.renegotiate",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "answer": {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "const": "answer"
+                      },
+                      "sdp": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "sdp"
+                    ]
+                  },
+                  "call_id": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "answer"
+                ],
+                "$schema": "https://json-schema.org/draft/2020-12/schema"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "call": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "direction": {
+                          "enum": [
+                            "inbound",
+                            "outbound"
+                          ],
+                          "type": "string"
+                        },
+                        "state": {
+                          "enum": [
+                            "ringing",
+                            "connecting",
+                            "bridging",
+                            "active",
+                            "ending",
+                            "ended"
+                          ],
+                          "type": "string"
+                        },
+                        "iccid": {
+                          "type": "string"
+                        },
+                        "number": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "started_at": {
+                          "type": "string"
+                        },
+                        "requested_by": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "answered_at": {
+                          "type": "string"
+                        },
+                        "answered_by": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "session_id": {
+                          "type": "string"
+                        },
+                        "modem_session_id": {
+                          "type": "string"
+                        },
+                        "bridge_started": {
+                          "const": true
+                        },
+                        "ended_at": {
+                          "type": "string"
+                        },
+                        "adapters": {
+                          "type": "object",
+                          "properties": {
+                            "up": {
+                              "type": "string"
+                            },
+                            "down": {
+                              "type": "string"
+                            }
+                          },
+                          "required": []
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "direction",
+                        "state",
+                        "iccid",
+                        "number",
+                        "started_at"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "call"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "security": [
+          {
+            "session": [
+              "messages.read"
+            ]
+          },
+          {
+            "auth0": [
+              "messages.read"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/calls/hangup": {
+      "post": {
+        "operationId": "calls.hangup",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "call_id": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [],
+                "default": {},
+                "$schema": "https://json-schema.org/draft/2020-12/schema"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "call": {
+                          "type": "null"
+                        },
+                        "already_clear": {
+                          "const": true
+                        }
+                      },
+                      "required": [
+                        "call",
+                        "already_clear"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "call": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "direction": {
+                              "enum": [
+                                "inbound",
+                                "outbound"
+                              ],
+                              "type": "string"
+                            },
+                            "state": {
+                              "enum": [
+                                "ringing",
+                                "connecting",
+                                "bridging",
+                                "active",
+                                "ending",
+                                "ended"
+                              ],
+                              "type": "string"
+                            },
+                            "iccid": {
+                              "type": "string"
+                            },
+                            "number": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "started_at": {
+                              "type": "string"
+                            },
+                            "requested_by": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "answered_at": {
+                              "type": "string"
+                            },
+                            "answered_by": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "session_id": {
+                              "type": "string"
+                            },
+                            "modem_session_id": {
+                              "type": "string"
+                            },
+                            "bridge_started": {
+                              "const": true
+                            },
+                            "ended_at": {
+                              "type": "string"
+                            },
+                            "adapters": {
+                              "type": "object",
+                              "properties": {
+                                "up": {
+                                  "type": "string"
+                                },
+                                "down": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": []
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "direction",
+                            "state",
+                            "iccid",
+                            "number",
+                            "started_at"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "call"
+                      ]
+                    }
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "security": [
+          {
+            "session": [
+              "messages.read"
+            ]
+          },
+          {
+            "auth0": [
+              "messages.read"
+            ]
+          }
+        ]
+      }
     }
   }
 }

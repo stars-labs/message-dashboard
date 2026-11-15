@@ -2,6 +2,7 @@ import { implement } from '@orpc/server';
 import type * as v from 'valibot';
 import type { CarrierBillMutationBody } from '../../shared/api/carrier-bills.js';
 import { contract } from '../../shared/api/contract/index.js';
+import { callsHandler } from '../api/calls.js';
 import { filtersHandler } from '../api/filters.js';
 import { keywordsHandler } from '../api/keywords.js';
 import { verificationHandler } from '../api/verification.js';
@@ -209,6 +210,26 @@ export const router = os.router({
     ),
     reopen: os.carrierBills.reopen.handler(({ context, input }) =>
       carrierBillsHandler.reopen(context.request, billMutation(input)),
+    ),
+  },
+  calls: {
+    state: os.calls.state.handler(({ context }) => callsHandler.state(context.request)),
+    history: os.calls.history.handler(({ context, input }) =>
+      callsHandler.history(context.request, input.query),
+    ),
+    ice: os.calls.ice.handler(({ context }) => callsHandler.ice(context.request)),
+    dial: os.calls.dial.handler(({ context, input }) => callsHandler.dial(context.request, input)),
+    answer: os.calls.answer.handler(({ context, input }) =>
+      callsHandler.answer(context.request, input),
+    ),
+    connect: os.calls.connect.handler(({ context, input }) =>
+      callsHandler.connect(context.request, input),
+    ),
+    renegotiate: os.calls.renegotiate.handler(({ context, input }) =>
+      callsHandler.renegotiate(context.request, input),
+    ),
+    hangup: os.calls.hangup.handler(({ context, input }) =>
+      callsHandler.hangup(context.request, input),
     ),
   },
 });

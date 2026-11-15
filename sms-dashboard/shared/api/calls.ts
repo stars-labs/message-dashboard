@@ -1,4 +1,5 @@
 import * as v from 'valibot';
+import { bodyObject } from './body.js';
 
 export const DIRECTIONS = ['inbound', 'outbound'] as const;
 const CALL_STATES = ['ringing', 'connecting', 'bridging', 'active', 'ending', 'ended'] as const;
@@ -13,6 +14,71 @@ export const SessionDescription = v.object({
 });
 
 export type SessionDescription = v.InferOutput<typeof SessionDescription>;
+
+const ICCID_MESSAGE = 'iccid is required';
+const NUMBER_MESSAGE = 'number must be E.164, for example +6591234567';
+const MEDIA_MESSAGE = 'offer and mid are required';
+const ANSWER_MESSAGE = 'answer is required';
+const CALL_ID_MESSAGE = 'Invalid call ID';
+
+/**
+ * E.164 only. The SMS sender already refuses anything else for ordinary sends,
+ * and a dialer is a place where a loose pattern turns a typo into a wrong number.
+ */
+export const PhoneNumber = v.pipe(
+  v.string(NUMBER_MESSAGE),
+  v.regex(/^\+[1-9]\d{6,14}$/, NUMBER_MESSAGE),
+);
+
+/** A SessionDescription of one type, with an SDP; a body answers `message` for anything else. */
+function sessionDescriptionBody<Type extends 'offer' | 'answer'>(type: Type, message: string) {
+  return v.object(
+    {
+      type: v.literal(type, message),
+      sdp: v.pipe(v.string(message), v.minLength(1, message)),
+    },
+    message,
+  );
+}
+
+const Mid = v.pipe(v.string(MEDIA_MESSAGE), v.minLength(1, MEDIA_MESSAGE));
+const CallId = v.optional(v.pipe(v.string(CALL_ID_MESSAGE), v.minLength(1, CALL_ID_MESSAGE)));
+
+/** POST /api/calls/dial: the SIM and number, and the browser's offer to publish its mic. */
+export const DialBody = bodyObject(
+  {
+    iccid: v.pipe(v.string(ICCID_MESSAGE), v.regex(/^[0-9A-Fa-f]{18,22}$/, ICCID_MESSAGE)),
+    number: PhoneNumber,
+    offer: sessionDescriptionBody('offer', MEDIA_MESSAGE),
+    mid: Mid,
+  },
+  { iccid: ICCID_MESSAGE, number: NUMBER_MESSAGE, offer: MEDIA_MESSAGE, mid: MEDIA_MESSAGE },
+);
+
+/** POST /api/calls/answer: the browser's offer to publish its mic. */
+export const AnswerBody = bodyObject(
+  { offer: sessionDescriptionBody('offer', MEDIA_MESSAGE), mid: Mid },
+  { offer: MEDIA_MESSAGE, mid: MEDIA_MESSAGE },
+);
+
+/**
+ * POST /api/calls/connect and /hangup: the call meant, when the client names
+ * it. A request without a body names none.
+ */
+export const CallIdBody = v.optional(bodyObject({ call_id: CallId }, {}), {});
+
+/** POST /api/calls/renegotiate: the browser's answer to the pull offer from /connect. */
+export const RenegotiateBody = bodyObject(
+  { answer: sessionDescriptionBody('answer', ANSWER_MESSAGE), call_id: CallId },
+  { answer: ANSWER_MESSAGE },
+);
+
+/** GET /api/calls/history. The handler bounds the page and keeps any text. */
+export const CallHistoryQuery = v.object({
+  limit: v.optional(v.string()),
+  offset: v.optional(v.string()),
+  iccid: v.optional(v.string()),
+});
 
 /** The live call record the fleet Durable Object holds. */
 export const LiveCall = v.object({

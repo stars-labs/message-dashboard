@@ -65,6 +65,14 @@ describe('the OpenAPI document', () => {
       'POST /api/carrier-bills/{id}/mark-paid',
       'POST /api/carrier-bills/{id}/waive',
       'POST /api/carrier-bills/{id}/reopen',
+      'GET /api/calls/state',
+      'GET /api/calls/history',
+      'GET /api/calls/ice',
+      'POST /api/calls/dial',
+      'POST /api/calls/answer',
+      'POST /api/calls/connect',
+      'POST /api/calls/renegotiate',
+      'POST /api/calls/hangup',
     ]);
   });
 

@@ -2,20 +2,17 @@
 // panel uses to decide what it may show. The rules live here, not in the
 // component, so they can be tested without a DOM or a microphone.
 
+import * as v from 'valibot';
 import {
-  CallConnectResponse,
-  CallHangupResponse,
-  CallHistoryResponse,
-  CallMediaResponse,
-  CallRenegotiateResponse,
-  CallStateResponse,
-  IceServersResponse,
+  AnswerBody,
+  DialBody,
+  RenegotiateBody,
   type CallLogEntry,
   type ENDED_OUTCOMES,
+  type IceServersResponse,
   type LiveCall,
 } from '../../shared/api/calls.js';
-import type { Schema } from '../../shared/parse-json.js';
-import { request } from './api.js';
+import { contractApi } from './api.js';
 import { formatCardNumber } from './card-number.js';
 import { toError } from './error-origin.js';
 import { formatClock, toEpochMilliseconds } from './time.js';
@@ -40,7 +37,7 @@ type MissedCallFields = Pick<CallLogEntry, 'direction' | 'outcome'>;
 type CallTone = 'idle' | 'ringing' | 'pending' | 'active';
 
 export async function fetchCallState(): Promise<LiveCall | null> {
-  return (await request('/api/calls/state', CallStateResponse)).call;
+  return (await contractApi.calls.state()).call;
 }
 
 /**
@@ -256,12 +253,8 @@ export function formatCallTime(value: unknown, now: number = Date.now()): string
   return formatClock(value, now);
 }
 
-function post<T>(path: string, schema: Schema<T>, body: Readonly<Record<string, unknown>>) {
-  return request(path, schema, { method: 'POST', body: JSON.stringify(body) });
-}
-
 export async function fetchIceServers(): Promise<IceServer[]> {
-  return (await request('/api/calls/ice', IceServersResponse)).iceServers;
+  return (await contractApi.calls.ice()).iceServers;
 }
 
 /**
@@ -276,9 +269,9 @@ export async function fetchCallHistory({
   calls: CallLogEntry[];
   hasMore: boolean;
 }> {
-  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
-  if (iccid) params.set('iccid', iccid);
-  const page = await request(`/api/calls/history?${params.toString()}`, CallHistoryResponse);
+  const page = await contractApi.calls.history({
+    query: { limit: String(limit), offset: String(offset), ...(iccid ? { iccid } : {}) },
+  });
   return { calls: page.calls, hasMore: page.has_more };
 }
 
@@ -294,14 +287,16 @@ interface DialParams extends MediaOffer {
   number: string;
 }
 
-/** The API surface call-session.ts drives; each returns the Worker's answer, parsed. */
+/**
+ * The API surface call-session.ts drives; each returns the Worker's answer,
+ * parsed. The PeerConnection's descriptions are checked against the Worker's own
+ * body schemas first, so one that cannot be sent fails here with its message.
+ */
 export const callApi = {
-  dial: ({ iccid, number, offer, mid }: DialParams) =>
-    post('/api/calls/dial', CallMediaResponse, { iccid, number, offer, mid }),
-  answer: ({ offer, mid }: MediaOffer) =>
-    post('/api/calls/answer', CallMediaResponse, { offer, mid }),
-  connect: (callId: string) => post('/api/calls/connect', CallConnectResponse, { call_id: callId }),
+  dial: (params: DialParams) => contractApi.calls.dial(v.parse(DialBody, params)),
+  answer: (params: MediaOffer) => contractApi.calls.answer(v.parse(AnswerBody, params)),
+  connect: (callId: string) => contractApi.calls.connect({ call_id: callId }),
   renegotiate: ({ answer, callId }: { answer: unknown; callId?: string }) =>
-    post('/api/calls/renegotiate', CallRenegotiateResponse, { answer, call_id: callId }),
-  hangup: (callId?: string) => post('/api/calls/hangup', CallHangupResponse, { call_id: callId }),
+    contractApi.calls.renegotiate(v.parse(RenegotiateBody, { answer, call_id: callId })),
+  hangup: (callId?: string) => contractApi.calls.hangup({ call_id: callId }),
 };
