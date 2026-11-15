@@ -31,7 +31,7 @@ USB Modems → AT Commands                 /api/control/* (API key)           /a
 - **`sims.user_*` columns are the manual override** — `user_phone_number`, `user_carrier`, `user_country_code`, `user_notes`, `user_override_enabled`. The frontend "ICCID Mappings" page reads/writes these columns directly via the `iccid-mappings.js` handler querying `sims`. The old `iccid_mappings` table was dropped in migration 015.
 - **`device_view` is the primary read path** — never query `modems`/`sims`/`modem_state` directly from the frontend. The view joins all three and applies user overrides.
 - **Messages have no enforced FK** on `phone_iccid → sims.iccid` (dropped in migration 009). Messages can arrive for ICCIDs not yet in `sims`.
-- **Daemon is the source of truth** for hardware state. The DB reflects what the daemon last reported; stale DB data (e.g. modems offline for weeks still showing `active`) is a known issue (see ISSUES.md #2).
+- **Daemon is the source of truth** for hardware state. The DB reflects what the daemon last reported; stale DB data (e.g. modems offline for weeks still showing `active`) is a known issue.
 
 ## Entity Relationship
 
