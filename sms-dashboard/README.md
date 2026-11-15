@@ -9,8 +9,8 @@ Repository-wide development, secret, migration, and deployment rules live in
 ## Stack
 
 - Svelte 5, Tailwind CSS, and Vite for the frontend.
-- A JavaScript Cloudflare Worker with the local `SimpleRouter` implementation in
-  `server/index.js`.
+- A TypeScript Cloudflare Worker: routes are registered in `server/app.ts` on the
+  local `Router` (`server/router.ts`); `server/index.ts` is the Worker entry.
 - Cloudflare D1 for SIM inventory, modem state, messages, balance workflows, and
   audit records.
 - Auth0 JWT authentication and fail-closed RBAC for users.

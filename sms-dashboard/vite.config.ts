@@ -18,8 +18,8 @@ export default defineConfig({
 
       workbox: {
         // Precache the hashed build output and the icons only. Note the absence of
-        // `html`: `/` and `/index.html` are server-side auth gates (server/index.js
-        // :614-648 redirects to /login without a valid session), so a cached shell
+        // `html`: `/` and `/index.html` are server-side auth gates (appShellRedirect in
+        // server/frontend-gate.ts redirects to /login without a valid session), so a cached shell
         // would let an expired session render the app instead of re-authenticating.
         globPatterns: ['**/*.{js,css,svg,png,ico}'],
 
