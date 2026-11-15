@@ -136,6 +136,8 @@ describe('contract routes', () => {
       { method: 'GET', path: '/api/balance-checks/:id' },
       { method: 'GET', path: '/api/balance-runners' },
       { method: 'GET', path: '/api/carrier-billing/accounts' },
+      { method: 'POST', path: '/api/carrier-billing/backfill/preview' },
+      { method: 'POST', path: '/api/carrier-billing/backfill/execute' },
       { method: 'GET', path: '/api/carrier-bills' },
       { method: 'GET', path: '/api/carrier-bills/:id' },
       { method: 'POST', path: '/api/carrier-bills/:id/payment-planned' },

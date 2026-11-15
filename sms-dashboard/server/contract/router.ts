@@ -8,6 +8,7 @@ import { verificationHandler } from '../api/verification.js';
 import { auth0Handler } from '../handlers/auth0.js';
 import { balanceQueriesHandler } from '../handlers/balance-queries.js';
 import { balanceRunnersHandler } from '../handlers/balance-runners.js';
+import { carrierBillingBackfillHandler } from '../handlers/carrier-billing-backfill.js';
 import { carrierBillsHandler } from '../handlers/carrier-bills.js';
 import { recordHeartbeat } from '../handlers/control.js';
 import { healthHandler } from '../handlers/health.js';
@@ -180,6 +181,16 @@ export const router = os.router({
   carrierBills: {
     accounts: os.carrierBills.accounts.handler(({ context }) =>
       carrierBillsHandler.listAccounts(context.request),
+    ),
+    backfillPreview: os.carrierBills.backfillPreview.handler(({ context, input }) =>
+      carrierBillingBackfillHandler.preview(context.request, input),
+    ),
+    backfillExecute: os.carrierBills.backfillExecute.handler(({ context, input }) =>
+      carrierBillingBackfillHandler.execute(
+        context.request,
+        input.headers['idempotency-key'],
+        input.body,
+      ),
     ),
     list: os.carrierBills.list.handler(({ context, input }) =>
       carrierBillsHandler.list(context.request, input.query),

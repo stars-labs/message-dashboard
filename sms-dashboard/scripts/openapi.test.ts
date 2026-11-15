@@ -57,6 +57,8 @@ describe('the OpenAPI document', () => {
       'GET /api/balance-checks/{id}',
       'GET /api/balance-runners',
       'GET /api/carrier-billing/accounts',
+      'POST /api/carrier-billing/backfill/preview',
+      'POST /api/carrier-billing/backfill/execute',
       'GET /api/carrier-bills',
       'GET /api/carrier-bills/{id}',
       'POST /api/carrier-bills/{id}/payment-planned',

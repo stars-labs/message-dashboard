@@ -1,5 +1,11 @@
 import * as v from 'valibot';
-import { CarrierBillingAccountsResponse } from '../carrier-billing.js';
+import {
+  BackfillExecuteBody,
+  BackfillExecuteResponse,
+  BackfillPreviewBody,
+  BackfillPreviewResponse,
+  CarrierBillingAccountsResponse,
+} from '../carrier-billing.js';
 import {
   CarrierBillMutationBody,
   CarrierBillMutationResponse,
@@ -31,6 +37,23 @@ export const carrierBills = {
     'GET',
     '/api/carrier-billing/accounts',
   ).output(CarrierBillingAccountsResponse),
+  /** The account's historical bill messages a backfill would store. */
+  backfillPreview: route(
+    { kind: 'user', permission: 'bills.write' },
+    'POST',
+    '/api/carrier-billing/backfill/preview',
+  )
+    .input(BackfillPreviewBody)
+    .output(BackfillPreviewResponse),
+  /** Stores exactly the preview the operator saw, retried under its Idempotency-Key header. */
+  backfillExecute: route(
+    { kind: 'user', permission: 'bills.write' },
+    'POST',
+    '/api/carrier-billing/backfill/execute',
+  )
+    .route({ inputStructure: 'detailed' })
+    .input(v.object({ headers: IdempotencyHeaders, body: BackfillExecuteBody }))
+    .output(BackfillExecuteResponse),
   list: route({ kind: 'user', permission: 'bills.read' }, 'GET', '/api/carrier-bills')
     .route({ inputStructure: 'detailed' })
     .input(v.object({ query: CarrierBillsQuery }))

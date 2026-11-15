@@ -96,12 +96,22 @@ const ExecuteBody = v.looseObject({
   summary: v.optional(v.nullable(Counts)),
   idempotent: v.optional(v.boolean()),
 });
-const ErrorBody = v.looseObject({ error: v.string() });
-const CurrentVersionBody = v.looseObject({ current_version: v.number() });
+const Problem = v.looseObject({
+  type: v.string(),
+  title: v.string(),
+  status: v.number(),
+  detail: v.string(),
+  code: v.string(),
+});
 const NumberRow = v.object({ n: v.number() });
 
-async function errorOf(response: { json(): Promise<unknown> }): Promise<string> {
-  return v.parse(ErrorBody, await response.json()).error;
+async function problemOf(response: Response) {
+  expect(response.headers.get('Content-Type')).toBe('application/problem+json');
+  return v.parse(Problem, await response.json());
+}
+
+async function errorOf(response: Response): Promise<string> {
+  return (await problemOf(response)).detail;
 }
 
 function count(sql: string): number {
@@ -300,7 +310,7 @@ describe('backfill preview route', () => {
     const response = await previewRaw('not json');
 
     expect(response.status).toBe(400);
-    expect(await errorOf(response)).toBe('Body must be JSON');
+    expect((await problemOf(response)).code).toBe('BAD_REQUEST');
   });
 
   test('answers 400 when account_id is missing, empty or not a string', async () => {
@@ -364,7 +374,7 @@ describe('backfill execute route', () => {
 
     const notJson = await executeRaw('not json');
     expect(notJson.status).toBe(400);
-    expect(await errorOf(notJson)).toBe('Body must be JSON');
+    expect((await problemOf(notJson)).code).toBe('BAD_REQUEST');
     expect(count(`SELECT COUNT(*) AS n FROM carrier_bills`)).toBe(0);
   });
 
@@ -378,10 +388,10 @@ describe('backfill execute route', () => {
     });
 
     expect(response.status).toBe(409);
-    expect(await errorOf(response.clone())).toBe('Billing account version conflict');
-    expect(v.parse(CurrentVersionBody, await response.json()).current_version).toBe(
-      preview.account.version,
-    );
+    expect(await problemOf(response)).toMatchObject({
+      detail: 'Billing account version conflict',
+      current_version: preview.account.version,
+    });
   });
 
   test('answers 409 when the preview changed and 400 when it holds no bills', async () => {
@@ -515,7 +525,7 @@ describe('backfill request bodies', () => {
     ] as const) {
       const response = await executeBody(body);
       expect(response.status).toBe(400);
-      expect(await response.json()).toEqual({ error });
+      expect(await errorOf(response)).toBe(error);
     }
     expect(count(`SELECT COUNT(*) AS n FROM carrier_bills`)).toBe(0);
   });

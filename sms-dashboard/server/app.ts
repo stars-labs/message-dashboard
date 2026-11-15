@@ -1,13 +1,10 @@
-import type { Permission } from '../config/auth0-roles.js';
 import { handleCORS, corsPreflight } from './middleware/cors.js';
-import { authorize } from './middleware/authorize.js';
 import { controlHandler } from './handlers/control.js';
 import { auth0Handler } from './handlers/auth0.js';
 import { balanceQueriesHandler } from './handlers/balance-queries.js';
 import { balanceSkillRunnerHandler } from './handlers/balance-skill-runner.js';
 import { carrierWebBalanceHandler } from './handlers/carrier-web-balance.js';
 import { balanceRunnersHandler } from './handlers/balance-runners.js';
-import { carrierBillingBackfillHandler } from './handlers/carrier-billing-backfill.js';
 import { serveFrontend } from './frontend-handler.js';
 import { appShellRedirect } from './frontend-gate.js';
 import { setupCallRoutes } from './api/calls.js';
@@ -23,10 +20,6 @@ const router = new Router<AppRequest>();
 function isApiPath(request: Request): boolean {
   const { pathname } = new URL(request.url);
   return pathname === '/api' || pathname.startsWith('/api/');
-}
-
-function gate(permission: Permission) {
-  return (request: AppRequest) => authorize(request, permission);
 }
 
 /** Answers a daemon route's unexpected failure with its error text. */
@@ -53,14 +46,6 @@ router.get('/favicon.ico', (request) =>
 router.get('/login', (request) => auth0Handler.login(request));
 router.get('/callback', auth0Handler.callback);
 router.get('/logout', auth0Handler.logout);
-
-router.post('/api/carrier-billing/backfill/preview', gate('bills.write'), (request) =>
-  carrierBillingBackfillHandler.preview(request),
-);
-
-router.post('/api/carrier-billing/backfill/execute', gate('bills.write'), (request) =>
-  carrierBillingBackfillHandler.execute(request),
-);
 
 // Daemon and runner routes: each handler authenticates its caller itself, by API key
 // or runner token.

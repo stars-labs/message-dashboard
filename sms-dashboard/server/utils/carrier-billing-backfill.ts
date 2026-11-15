@@ -1,22 +1,18 @@
 import * as v from 'valibot';
 import { queryAll, queryFirst, type D1 } from '../lib/d1.js';
 import { parseSingtelPostpaidBillSms } from './singtel-postpaid-bill.js';
+import type {
+  BackfillAccount,
+  BackfillCandidate as PublicBackfillCandidate,
+  BackfillSummary,
+} from '../../shared/api/carrier-billing.js';
 
 const BILL_PREFIX = '<Singtel>Dear customer, your latest bill for Singtel a/c ';
 const BILL_FRAGMENT_SUFFIX = 'ill via My Singtel app at www.singtel.com/viewbill .';
 const MAX_FRAGMENT_GAP_MS = 5 * 60 * 1000;
 
-type BackfillDisposition = 'new' | 'duplicate' | 'conflict' | 'already_processed';
-
-/** One bill candidate in a preview, before it is executed. */
-export interface BackfillCandidate {
-  source_message_ids: string[];
-  source_kind: 'complete' | 'reassembled';
-  amount_minor: number;
-  currency: string;
-  due_date: string;
-  received_at: string | null;
-  parser_version: string;
+/** One bill candidate in a preview, with the message it would store. */
+export type BackfillCandidate = PublicBackfillCandidate & {
   message: {
     id: string;
     phone_iccid: string;
@@ -25,27 +21,10 @@ export interface BackfillCandidate {
     timestamp: string | null;
     type: 'received';
   };
-  disposition: BackfillDisposition;
-}
-
-export interface BackfillSummary {
-  candidates: number;
-  complete_messages: number;
-  reassembled_messages: number;
-  new_bills: number;
-  duplicates: number;
-  conflicts: number;
-  already_processed: number;
-}
+};
 
 export interface BackfillPreview {
-  account: {
-    id: string;
-    display_name: string;
-    account_ref_masked: string;
-    version: number;
-    notification_sim: { iccid: string; sim_index: number | null };
-  };
+  account: BackfillAccount;
   summary: BackfillSummary;
   candidates: BackfillCandidate[];
   preview_digest: string;
@@ -109,7 +88,7 @@ async function dispositionFor(
     BackfillCandidate,
     'source_message_ids' | 'due_date' | 'amount_minor' | 'currency'
   >,
-): Promise<BackfillDisposition> {
+): Promise<BackfillCandidate['disposition']> {
   const placeholders = candidate.source_message_ids.map(() => '?').join(', ');
   const processed = await queryFirst(
     db

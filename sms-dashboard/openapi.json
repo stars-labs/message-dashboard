@@ -8514,6 +8514,369 @@
         ]
       }
     },
+    "/api/carrier-billing/backfill/preview": {
+      "post": {
+        "operationId": "carrierBills.backfillPreview",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "account_id": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "account_id"
+                ],
+                "$schema": "https://json-schema.org/draft/2020-12/schema"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "account": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "display_name": {
+                          "type": "string"
+                        },
+                        "account_ref_masked": {
+                          "type": "string"
+                        },
+                        "version": {
+                          "type": "number"
+                        },
+                        "notification_sim": {
+                          "type": "object",
+                          "properties": {
+                            "iccid": {
+                              "type": "string"
+                            },
+                            "sim_index": {
+                              "anyOf": [
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "iccid",
+                            "sim_index"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "display_name",
+                        "account_ref_masked",
+                        "version",
+                        "notification_sim"
+                      ]
+                    },
+                    "summary": {
+                      "type": "object",
+                      "properties": {
+                        "candidates": {
+                          "type": "number"
+                        },
+                        "complete_messages": {
+                          "type": "number"
+                        },
+                        "reassembled_messages": {
+                          "type": "number"
+                        },
+                        "new_bills": {
+                          "type": "number"
+                        },
+                        "duplicates": {
+                          "type": "number"
+                        },
+                        "conflicts": {
+                          "type": "number"
+                        },
+                        "already_processed": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "candidates",
+                        "complete_messages",
+                        "reassembled_messages",
+                        "new_bills",
+                        "duplicates",
+                        "conflicts",
+                        "already_processed"
+                      ]
+                    },
+                    "preview_digest": {
+                      "type": "string"
+                    },
+                    "candidates": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "source_message_ids": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "source_kind": {
+                            "enum": [
+                              "complete",
+                              "reassembled"
+                            ],
+                            "type": "string"
+                          },
+                          "amount_minor": {
+                            "type": "number"
+                          },
+                          "currency": {
+                            "type": "string"
+                          },
+                          "due_date": {
+                            "type": "string"
+                          },
+                          "received_at": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "parser_version": {
+                            "type": "string"
+                          },
+                          "disposition": {
+                            "enum": [
+                              "new",
+                              "duplicate",
+                              "conflict",
+                              "already_processed"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "source_message_ids",
+                          "source_kind",
+                          "amount_minor",
+                          "currency",
+                          "due_date",
+                          "received_at",
+                          "parser_version",
+                          "disposition"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "account",
+                    "summary",
+                    "preview_digest",
+                    "candidates"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "security": [
+          {
+            "session": [
+              "bills.write"
+            ]
+          },
+          {
+            "auth0": [
+              "bills.write"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/carrier-billing/backfill/execute": {
+      "post": {
+        "operationId": "carrierBills.backfillExecute",
+        "parameters": [
+          {
+            "name": "idempotency-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "account_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "expected_version": {
+                    "type": "integer"
+                  },
+                  "preview_digest": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "account_id",
+                  "expected_version",
+                  "preview_digest"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "success": {
+                          "const": true
+                        },
+                        "idempotent": {
+                          "const": true
+                        },
+                        "summary": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "detected": {
+                                  "type": "number"
+                                },
+                                "duplicate_detected": {
+                                  "type": "number"
+                                },
+                                "parse_conflict": {
+                                  "type": "number"
+                                },
+                                "already_processed": {
+                                  "type": "number"
+                                }
+                              },
+                              "required": [
+                                "detected",
+                                "duplicate_detected",
+                                "parse_conflict",
+                                "already_processed"
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "success",
+                        "idempotent",
+                        "summary"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "success": {
+                          "const": true
+                        },
+                        "summary": {
+                          "type": "object",
+                          "properties": {
+                            "detected": {
+                              "type": "number"
+                            },
+                            "duplicate_detected": {
+                              "type": "number"
+                            },
+                            "parse_conflict": {
+                              "type": "number"
+                            },
+                            "already_processed": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "detected",
+                            "duplicate_detected",
+                            "parse_conflict",
+                            "already_processed"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "success",
+                        "summary"
+                      ]
+                    }
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "security": [
+          {
+            "session": [
+              "bills.write"
+            ]
+          },
+          {
+            "auth0": [
+              "bills.write"
+            ]
+          }
+        ]
+      }
+    },
     "/api/carrier-bills": {
       "get": {
         "operationId": "carrierBills.list",
