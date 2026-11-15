@@ -49,7 +49,6 @@ router.options('*', corsPreflight);
 // Public API routes
 router.get('/api/live', () => healthHandler.live());
 router.get('/api/health', (request) => healthHandler.check(request));
-router.get('/api/daemon/status', (request) => healthHandler.daemonStatus(request));
 // Legacy /favicon.ico requests (browsers ask for it even when index.html declares
 // icons) are redirected to the real PNG. This used to return an empty 204, which is
 // why the dashboard had no icon at all.
@@ -70,6 +69,10 @@ router.get('/api/auth/me', async (request) => {
   enrichUserPermissions(request);
   return auth0Handler.me(request);
 });
+
+router.get('/api/daemon/status', gate('messages.read'), (request) =>
+  healthHandler.daemonStatus(request),
+);
 
 router.get('/api/phones', gate('phones.read'), (request) => phonesHandler.list(request));
 

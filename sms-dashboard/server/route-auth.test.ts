@@ -6,7 +6,6 @@ import { callWorker, routeTable } from '../test/worker-harness.js';
 const PUBLIC = new Map([
   ['GET /api/live', 'liveness probe'],
   ['GET /api/health', 'uptime monitors: D1 and daemon status, no records'],
-  ['GET /api/daemon/status', 'registered as public since 88a9d01: heartbeat metadata, no records'],
   ['GET /favicon.ico', 'redirect to the icon'],
   ['GET /login', 'starts the Auth0 login'],
   ['GET /callback', 'Auth0 returns here before a session exists'],

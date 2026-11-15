@@ -6,12 +6,12 @@ import { routeTable } from '../test/worker-harness.js';
 const EXPECTED = [
   ['GET', '/api/live'],
   ['GET', '/api/health'],
-  ['GET', '/api/daemon/status'],
   ['GET', '/favicon.ico'],
   ['GET', '/login'],
   ['GET', '/callback'],
   ['GET', '/logout'],
   ['GET', '/api/auth/me'],
+  ['GET', '/api/daemon/status'],
   ['GET', '/api/phones'],
   ['GET', '/api/messages'],
   ['GET', '/api/balance-checks'],
