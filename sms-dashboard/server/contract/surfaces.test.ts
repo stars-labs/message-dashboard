@@ -1,6 +1,7 @@
 import { describe, expect, spyOn, test } from 'bun:test';
 import { implement, ORPCError } from '@orpc/server';
 import * as v from 'valibot';
+import { bodyObject } from '../../shared/api/body.js';
 import { route } from '../../shared/api/contract/route.js';
 import { TEST_API_KEY, testEnv } from '../../test/worker-harness.js';
 import type { AppRequest } from '../worker-context.js';
@@ -9,9 +10,10 @@ import type { ContractContext } from './router.js';
 
 // A contract of its own, so the entry's rules are tested apart from the routes
 // that happen to use them today.
-const Body = v.nonOptional(
-  v.object({ name: v.string('name must be text') }, 'Body must be an object'),
-  'Body must be JSON',
+const Body = bodyObject(
+  { name: v.string('name must be text') },
+  { name: 'name must be text' },
+  'Body must be an object',
 );
 
 const contract = {

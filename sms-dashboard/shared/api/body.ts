@@ -1,5 +1,8 @@
 import * as v from 'valibot';
 
+/** The message for a body that is empty or not JSON. */
+export const NOT_JSON_MESSAGE = 'Body must be JSON';
+
 /** The message for a JSON body that is not an object, for schemas that do not need their own. */
 export const OBJECT_MESSAGE = 'Body must be a JSON object';
 
@@ -20,9 +23,10 @@ type MissingKeyMessages<Entries extends v.ObjectEntries> = Readonly<
 const MISSING_KEY = /^"(.+)"$/;
 
 /**
- * A JSON object body: a missing required key answers its own message, anything
- * that is not an object answers `message`. The messages live in the schema, so
- * every reader of the body (the contract, readBody) reports the same thing.
+ * A JSON object body: a missing required key answers its own message, no body
+ * at all NOT_JSON_MESSAGE, as readBody does, and anything else that is not an
+ * object `message`. The messages live in the schema, so every reader of the
+ * body (the contract, readBody) reports the same thing.
  */
 export function bodyObject<const Entries extends v.ObjectEntries>(
   entries: Entries,
@@ -33,6 +37,7 @@ export function bodyObject<const Entries extends v.ObjectEntries>(
     const key = MISSING_KEY.exec(issue.expected)?.[1];
     const own: unknown =
       key !== undefined && Object.hasOwn(missing, key) ? Reflect.get(missing, key) : undefined;
-    return typeof own === 'string' ? own : message;
+    if (typeof own === 'string') return own;
+    return issue.input === undefined ? NOT_JSON_MESSAGE : message;
   });
 }

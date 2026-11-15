@@ -1,3 +1,4 @@
+import { NOT_JSON_MESSAGE } from '../../shared/api/body.js';
 import * as v from 'valibot';
 import { readJson, type Parsed } from '../../shared/parse-json.js';
 
@@ -22,8 +23,6 @@ function messageOf(issue: v.BaseIssue<unknown>, missingKeyMessages: object): str
   }
   return issue.message;
 }
-
-export const NOT_JSON_MESSAGE = 'Body must be JSON';
 
 /**
  * Reads a JSON request body. The error is the message a 400 should carry:

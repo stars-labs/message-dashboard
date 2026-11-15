@@ -1,6 +1,6 @@
 import { ValidationError, type ORPCError } from '@orpc/server';
 import * as v from 'valibot';
-import { NOT_JSON_MESSAGE } from '../lib/request-body.js';
+import { NOT_JSON_MESSAGE } from '../../shared/api/body.js';
 
 const TITLES: Partial<Record<number, string>> = {
   400: 'Bad Request',

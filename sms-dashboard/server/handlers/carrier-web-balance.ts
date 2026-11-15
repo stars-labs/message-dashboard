@@ -10,7 +10,8 @@ import {
   type D1Operation,
   type D1Statement,
 } from '../lib/d1.js';
-import { NOT_JSON_MESSAGE, readBody, type MissingKeyMessages } from '../lib/request-body.js';
+import { NOT_JSON_MESSAGE } from '../../shared/api/body.js';
+import { readBody, type MissingKeyMessages } from '../lib/request-body.js';
 import { textOr } from '../../shared/text.js';
 import type {
   CarrierWebBalanceJob,

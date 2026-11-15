@@ -2,7 +2,8 @@ import { json } from '../lib/response.js';
 import * as v from 'valibot';
 import type { Parsed } from '../../shared/parse-json.js';
 import { queryFirst, type D1, type D1Batch, type D1Statement } from '../lib/d1.js';
-import { NOT_JSON_MESSAGE, readBody, type MissingKeyMessages } from '../lib/request-body.js';
+import { NOT_JSON_MESSAGE } from '../../shared/api/body.js';
+import { readBody, type MissingKeyMessages } from '../lib/request-body.js';
 import { textOr } from '../../shared/text.js';
 import type { BalanceSkillJob } from '../../shared/api/balance-skill-jobs.js';
 import {
