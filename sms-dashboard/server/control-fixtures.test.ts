@@ -10,9 +10,7 @@ import {
 } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { readFileSync } from 'node:fs';
-import * as v from 'valibot';
 import type { ControlFixture } from '../shared/control-fixtures/fixture.js';
-import { parseJson } from '../shared/parse-json.js';
 import { callState, type CallFixture, type Fleet } from '../test/call-state-fleet.js';
 import { createControlSchema } from '../test/control-schema.js';
 import { controlFixtures } from '../test/control-fixtures.js';
@@ -30,7 +28,18 @@ const MENU_STEPS = JSON.stringify([
 interface World {
   sqlite: Database;
   fleet: Fleet;
-  send(method: string, path: string, body?: unknown): Promise<Response>;
+  send(
+    method: ControlFixture['request']['method'],
+    path: string,
+    body?: unknown,
+  ): Promise<Response>;
+}
+
+/** A response as the client receives it: the status, the media type and the exact body. */
+interface Answer {
+  status: number;
+  contentType: string | null;
+  text: string;
 }
 
 function liveCall(iccid: string, state: CallFixture['state'] = 'ringing'): CallFixture {
@@ -221,10 +230,7 @@ const SEEDS: Record<string, (world: World) => void | Promise<void>> = {
   },
 };
 
-async function replay(
-  name: string,
-  request: ControlFixture['request'],
-): Promise<ControlFixture['response']> {
+async function replay(name: string, request: ControlFixture['request']): Promise<Answer> {
   const sqlite = new Database(':memory:');
   await createControlSchema(sqlite);
   for (const migration of ['077_add_call_log', '078_one_open_ring_per_sim']) {
@@ -242,25 +248,31 @@ async function replay(
   );
   const fleet = callState(null);
   const bindings = { DB: sqliteD1(sqlite), CALL_STATE: fleet };
-  const send = async (method: string, path: string, body?: unknown) => {
+  const exchange = async ({ method, path, body, text, anonymous }: ControlFixture['request']) => {
+    const sent = body === undefined ? text : JSON.stringify(body);
     const { response } = await callWorker(method, path, {
       headers: {
-        'X-API-Key': TEST_API_KEY,
-        ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+        ...(anonymous ? {} : { 'X-API-Key': TEST_API_KEY }),
+        ...(sent === undefined ? {} : { 'Content-Type': 'application/json' }),
       },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      ...(sent === undefined ? {} : { body: sent }),
       bindings,
     });
     return response;
   };
+  const send: World['send'] = (method, path, body) => exchange({ method, path, body });
   await SEEDS[name]?.({ sqlite, fleet, send });
-  const response = await send(request.method, request.path, request.body);
+  const response = await exchange(request);
   const text = await response.text();
   sqlite.close();
-  if (text === '') return { status: response.status };
-  const body = parseJson(text, v.unknown());
-  if (!body.ok) throw new Error(`${name}: ${body.error}`);
-  return { status: response.status, body: body.value };
+  return { status: response.status, contentType: response.headers.get('Content-Type'), text };
+}
+
+/** What a recorded response looks like on the wire. */
+function onTheWire({ status, body }: ControlFixture['response']): Answer {
+  return body === undefined
+    ? { status, contentType: null, text: '' }
+    : { status, contentType: 'application/json;charset=utf-8', text: JSON.stringify(body) };
 }
 
 const fixtures = controlFixtures();
@@ -308,7 +320,7 @@ describe('control route fixtures', () => {
 
   for (const { name, fixture } of fixtures) {
     test(`the Worker answers ${name} as recorded`, async () => {
-      expect(await replay(name, fixture.request)).toEqual(fixture.response);
+      expect(await replay(name, fixture.request)).toEqual(onTheWire(fixture.response));
     });
   }
 });

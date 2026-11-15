@@ -1,0 +1,22 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/control/heartbeat",
+    "anonymous": true,
+    "body": {
+      "schema_version": 3,
+      "session_id": "daemon-session-1",
+      "version": "8.0.1",
+      "uptime_seconds": 3600,
+      "last_message_read_success_age_seconds": 5,
+      "last_upload_success_age_seconds": 10,
+      "queue": {
+        "pending": 0,
+        "in_flight": 0,
+        "dead_letter": 0,
+        "oldest_unacknowledged_age_seconds": null
+      }
+    }
+  },
+  "response": { "status": 401, "body": { "error": "Unauthorized" } }
+}

@@ -1,0 +1,14 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/control/heartbeat",
+    "body": { "schema_version": 2, "session_id": "daemon-session-1", "version": "7.0.0" }
+  },
+  "response": {
+    "status": 400,
+    "body": {
+      "success": false,
+      "error": "Failed to process heartbeat: Unsupported health schema version: 2"
+    }
+  }
+}
