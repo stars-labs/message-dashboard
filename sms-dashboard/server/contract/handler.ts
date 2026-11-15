@@ -1,7 +1,12 @@
 import { OpenAPIHandler } from '@orpc/openapi/fetch';
 import { StandardOpenAPIMatcher } from '@orpc/openapi/standard';
 import { ResponseHeadersPlugin } from '@orpc/server/plugins';
-import { traverseContractProcedures, type AnyRouter } from '@orpc/server';
+import {
+  ORPCError,
+  traverseContractProcedures,
+  type AnyRouter,
+  type TraverseContractProcedureCallbackOptions,
+} from '@orpc/server';
 import * as v from 'valibot';
 import { contract } from '../../shared/api/contract/index.js';
 import { Method, RouteMeta, type Access } from '../../shared/api/contract/route.js';
@@ -48,41 +53,61 @@ function withMediaType(response: Response, errorType: string): Response {
   return new Response(response.body, { status: response.status, headers });
 }
 
-/** One part of the contract, with the error format its callers read. */
-function surface(routes: AnyRouter, encodeError: typeof problemOf | typeof daemonErrorOf) {
-  const matcher = new StandardOpenAPIMatcher();
+const CONTROL_PREFIX = '/api/control/';
+
+/** Logs what a procedure did not expect; an ORPCError is an answer it chose. */
+async function logUnexpected({ next }: { next: () => Promise<unknown> }): Promise<unknown> {
+  try {
+    return await next();
+  } catch (error) {
+    if (!(error instanceof ORPCError)) console.error('[contract] Unexpected error:', error);
+    throw error;
+  }
+}
+
+/**
+ * The routes of `routes` whose callers read one error format: the daemon's for
+ * /api/control/, which shared/control-fixtures/ pins, and a problem for the rest.
+ */
+function surface(routes: AnyRouter, control: boolean) {
+  const filter = ({ contract: procedure }: TraverseContractProcedureCallbackOptions) =>
+    (procedure['~orpc'].route.path ?? '').startsWith(CONTROL_PREFIX) === control;
+  const matcher = new StandardOpenAPIMatcher({ filter });
   matcher.init(routes);
   return {
     matcher,
     handler: new OpenAPIHandler<ContractContext>(routes, {
+      filter,
       plugins: [new ResponseHeadersPlugin()],
-      customErrorResponseBodyEncoder: encodeError,
+      clientInterceptors: [logUnexpected],
+      customErrorResponseBodyEncoder: control ? daemonErrorOf : problemOf,
     }),
-    errorType: encodeError === problemOf ? PROBLEM_TYPE : JSON_TYPE,
+    errorType: control ? JSON_TYPE : PROBLEM_TYPE,
   };
 }
 
-const SURFACES = [
-  surface({ control: router.control }, daemonErrorOf),
-  surface({ users: router.users }, problemOf),
-];
+/** The entry for `routes`: their answer, or null when the request names none of them. */
+export function createContractHandler(routes: AnyRouter) {
+  const surfaces = [surface(routes, true), surface(routes, false)];
+  return async (request: AppRequest): Promise<Response | null> => {
+    const pathname: `/${string}` = `/${new URL(request.url).pathname.replace(/^\/|\/$/g, '')}`;
+    for (const { matcher, handler, errorType } of surfaces) {
+      const match = await matcher.match(request.method, pathname);
+      if (!match) continue;
+      const { access } = v.parse(RouteMeta, match.procedure['~orpc'].meta);
+      const refused = await refusal(access, request);
+      if (refused) return refused;
+      const { response } = await handler.handle(request, {
+        context: { request, resHeaders: new Headers() },
+      });
+      return response ? withMediaType(response, errorType) : null;
+    }
+    return null;
+  };
+}
 
 /** The answer when the request names a contract route, or null for the legacy Router. */
-export async function handleContract(request: AppRequest): Promise<Response | null> {
-  const pathname: `/${string}` = `/${new URL(request.url).pathname.replace(/^\/|\/$/g, '')}`;
-  for (const { matcher, handler, errorType } of SURFACES) {
-    const match = await matcher.match(request.method, pathname);
-    if (!match) continue;
-    const { access } = v.parse(RouteMeta, match.procedure['~orpc'].meta);
-    const refused = await refusal(access, request);
-    if (refused) return refused;
-    const { response } = await handler.handle(request, {
-      context: { request, resHeaders: new Headers() },
-    });
-    return response ? withMediaType(response, errorType) : null;
-  }
-  return null;
-}
+export const handleContract = createContractHandler(router);
 
 /** Every contract route, written as the legacy Router writes paths (`:id`). */
 export function contractRoutes(): { method: v.InferOutput<typeof Method>; path: string }[] {

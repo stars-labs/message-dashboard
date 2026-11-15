@@ -19,7 +19,7 @@ export { routeTable };
 
 export const TEST_API_KEY = 'test-api-key';
 
-function testEnv(overrides: Partial<AppEnv> = {}): AppEnv {
+export function testEnv(overrides: Partial<AppEnv> = {}): AppEnv {
   return {
     DB: sqliteD1(),
     SESSIONS: memoryKv(),
