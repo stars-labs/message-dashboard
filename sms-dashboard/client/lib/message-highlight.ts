@@ -6,7 +6,7 @@
 
 export const DEFAULT_KEYWORD_COLOR = '#3B82F6';
 
-// Mirrors server/utils/keyword-color.ts. Duplicated deliberately rather than imported:
+// Mirrors shared/keyword-color.ts. Duplicated deliberately rather than imported:
 // the client must not trust the server's validation for a value it puts in a style
 // attribute, and rows written before that validation existed may hold anything.
 const HEX_COLOR = /^#(?:[0-9A-Fa-f]{3,4}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/;

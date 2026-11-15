@@ -1,11 +1,8 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from 'bun:test';
 import * as v from 'valibot';
+import { memoryKv } from '../../test/memory-kv.js';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
-import { setupVerificationRoutes } from './verification.js';
-
-type Router = Parameters<typeof setupVerificationRoutes>[0];
-type Handler = Parameters<Router['post']>[1];
-type Request = Parameters<Handler>[0];
+import { callWorker } from '../../test/worker-harness.js';
 
 let logSpy: Mock<typeof console.log>;
 let errorSpy: Mock<typeof console.error>;
@@ -19,17 +16,6 @@ afterEach(() => {
   logSpy.mockRestore();
   errorSpy.mockRestore();
 });
-
-function registeredHandler(): { path: string; handler: Handler } {
-  let registered: { path: string; handler: Handler } | undefined;
-  setupVerificationRoutes({
-    post: (path, handler) => {
-      registered = { path, handler };
-    },
-  });
-  if (!registered) throw new Error('no route registered');
-  return registered;
-}
 
 function database(messages: { id: string; content: string; verification_code?: string }[]) {
   const d1 = sqliteD1();
@@ -59,27 +45,30 @@ function database(messages: { id: string; content: string; verification_code?: s
   return d1;
 }
 
-function request(
+const ADMIN = 'session-admin';
+const VIEWER = 'session-viewer';
+
+function session(roles: string[]): string {
+  return JSON.stringify({
+    user: { id: 'auth0|u', email: 'someone@example.test', roles },
+    expires_at: Date.now() + 3_600_000,
+  });
+}
+
+const SESSIONS = memoryKv({
+  [ADMIN]: session(['sms-admin']),
+  [VIEWER]: session(['sms-viewer']),
+});
+
+async function reprocess(
   db: ReturnType<typeof database>,
-  { query = '', credential = 'Bearer session-1', roles = ['admin'] } = {},
-): Request {
-  const sessions = new Map([
-    [
-      'session-1',
-      JSON.stringify({ user: { id: 'auth0|u', roles }, expires_at: Date.now() + 60_000 }),
-    ],
-  ]);
-  return {
-    url: `https://example.com/api/verification/reprocess${query}`,
-    headers: new Headers({ Authorization: credential }),
-    env: {
-      DB: db,
-      SESSIONS: {
-        get: (key) => Promise.resolve(sessions.get(key) ?? null),
-        delete: () => Promise.resolve(),
-      },
-    },
-  };
+  { query = '', token = ADMIN } = {},
+): Promise<Response> {
+  const { response } = await callWorker('POST', `/api/verification/reprocess${query}`, {
+    headers: { Cookie: `auth_token=${token}` },
+    bindings: { DB: db, SESSIONS },
+  });
+  return response;
 }
 
 const Body = v.looseObject({
@@ -91,34 +80,34 @@ const Body = v.looseObject({
   filter_sweep: v.optional(v.nullable(v.looseObject({ processed: v.number() }))),
 });
 
+const Problem = v.looseObject({ detail: v.string(), code: v.string() });
+
+async function problemOf(response: Response) {
+  expect(response.headers.get('Content-Type')).toBe('application/problem+json');
+  return v.parse(Problem, await response.json());
+}
+
 async function bodyOf(response: Response) {
   return v.parse(Body, await response.json());
 }
 
 describe('POST /api/verification/reprocess', () => {
-  test('registers the reprocess route', () => {
-    expect(registeredHandler().path).toBe('/api/verification/reprocess');
-  });
-
   test('answers 401 without a credential the middleware accepts', async () => {
-    const { handler } = registeredHandler();
-    const response = await handler(request(database([]), { credential: 'Bearer unknown' }));
+    const response = await reprocess(database([]), { token: 'unknown' });
     expect(response.status).toBe(401);
   });
 
   test('answers 403 to a role without filters.write', async () => {
-    const { handler } = registeredHandler();
-    const response = await handler(request(database([]), { roles: ['viewer'] }));
+    const response = await reprocess(database([]), { token: VIEWER });
     expect(response.status).toBe(403);
   });
 
   test('a dry run reports the changes and writes nothing', async () => {
-    const { handler } = registeredHandler();
     const db = database([
       { id: 'm1', content: 'Your code is 123456', verification_code: '000000' },
     ]);
 
-    const response = await handler(request(db, { query: '?dry_run=1' }));
+    const response = await reprocess(db, { query: '?dry_run=1' });
     const body = await bodyOf(response);
 
     expect(response.status).toBe(200);
@@ -130,12 +119,11 @@ describe('POST /api/verification/reprocess', () => {
   });
 
   test('a changing run rewrites the codes and then judges the pending messages', async () => {
-    const { handler } = registeredHandler();
     const db = database([
       { id: 'm1', content: 'Your code is 123456', verification_code: '000000' },
     ]);
 
-    const response = await handler(request(db));
+    const response = await reprocess(db);
     const body = await bodyOf(response);
 
     expect(body).toMatchObject({ success: true, changed: 1, dry_run: false });
@@ -147,25 +135,26 @@ describe('POST /api/verification/reprocess', () => {
   });
 
   test('a run with nothing to change does not sweep', async () => {
-    const { handler } = registeredHandler();
     const db = database([
       { id: 'm1', content: 'Your code is 123456', verification_code: '123456' },
     ]);
 
-    const body = await bodyOf(await handler(request(db)));
+    const body = await bodyOf(await reprocess(db));
 
     expect(body).toMatchObject({ success: true, processed: 1, changed: 0 });
     expect(body.filter_sweep).toBeNull();
   });
 
   test('answers 500 when the scan fails', async () => {
-    const { handler } = registeredHandler();
     const db = database([]);
     db.db.run('DROP TABLE messages');
 
-    const response = await handler(request(db));
+    const response = await reprocess(db);
 
     expect(response.status).toBe(500);
-    expect(await bodyOf(response)).toEqual({ error: 'Failed to reprocess verification codes' });
+    expect(await problemOf(response)).toMatchObject({
+      code: 'INTERNAL_SERVER_ERROR',
+      detail: 'Failed to reprocess verification codes',
+    });
   });
 });

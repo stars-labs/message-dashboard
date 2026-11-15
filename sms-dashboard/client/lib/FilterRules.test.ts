@@ -16,11 +16,13 @@ afterEach(() => {
   globalThis.confirm = originalConfirm;
 });
 
-function stubFetch(handler: (input: string | URL | Request, init?: RequestInit) => Response): void {
+/** Answers the component's requests; `handler` sees each as a Request. */
+function stubFetch(handler: (request: Request) => Response): void {
   auth.baseUrl = 'https://example.com';
   fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(
     Object.assign(
-      (input: string | URL | Request, init?: RequestInit) => Promise.resolve(handler(input, init)),
+      (input: string | URL | Request, init?: RequestInit) =>
+        Promise.resolve(handler(new Request(input, init))),
       { preconnect: () => undefined },
     ),
   );
@@ -69,11 +71,11 @@ describe('FilterRules', () => {
   });
 
   test('processes exactly one bounded history page per operator click', async () => {
-    const methods: (string | undefined)[] = [];
+    const methods: string[] = [];
     globalThis.confirm = () => true;
-    stubFetch((_input, init) => {
-      methods.push(init?.method);
-      if (init?.method === 'POST') {
+    stubFetch(({ method }) => {
+      methods.push(method);
+      if (method === 'POST') {
         return Response.json({
           mode: 'apply',
           processed: 200,

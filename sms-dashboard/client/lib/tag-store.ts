@@ -1,8 +1,8 @@
 // The active keyword list, loaded once and shared by the views that highlight
 // keyword matches.
 import { writable, get } from 'svelte/store';
-import { KeywordsResponse, type Keyword } from '../../shared/api/keywords.js';
-import { request } from './api.js';
+import type { Keyword } from '../../shared/api/keywords.js';
+import { contractApi } from './contract-client.js';
 
 const _keywords = writable<Keyword[]>([]);
 const _loading = writable(false);
@@ -15,7 +15,7 @@ async function loadKeywords(): Promise<Keyword[]> {
   _loading.set(true);
 
   try {
-    const response = await request('/api/keywords', KeywordsResponse);
+    const response = await contractApi.keywords.list();
     const activeKeywords = response.keywords
       .filter((k) => Boolean(k.is_active))
       .sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));

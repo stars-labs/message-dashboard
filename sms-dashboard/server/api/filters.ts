@@ -4,24 +4,25 @@
 // explicitly requested, one-page-at-a-time operation. Nothing here decides what
 // spam is — see utils/spam-filter.ts.
 
-import { json } from '../lib/response.js';
+import { ORPCError } from '@orpc/server';
 import * as v from 'valibot';
 import {
   FilterRule,
+  IMMUTABLE_RULE_MESSAGE,
+  PATTERN_MESSAGE,
   RULE_TYPE,
+  type CreateFilterBody,
   type FilterResponse,
   type FiltersResponse,
   type RuleType,
+  type UpdateFilterBody,
 } from '../../shared/api/filters.js';
-import { queryAll, queryFirst, queryOne, type D1, type D1Batch } from '../lib/d1.js';
-import { OBJECT_MESSAGE, readBody, type MissingKeyMessages } from '../lib/request-body.js';
-import { HISTORY_MISSING_KEY_MESSAGES, HistoryRequestBody } from '../utils/history-request.js';
+import type { HistoryRequestBody, RuleHistoryPage } from '../../shared/api/history.js';
 import type { SuccessResponse } from '../../shared/api/success.js';
-import type { AuthRequest } from '../middleware/auth0.js';
-import { authorize } from '../middleware/authorize.js';
+import { errorText } from '../../shared/error-text.js';
+import { queryAll, queryFirst, queryOne, type D1, type D1Batch } from '../lib/d1.js';
 import { normalizeSender } from '../utils/spam-filter.js';
 import { processRuleHistoryPage } from '../utils/filter-history.js';
-import { errorText } from '../../shared/error-text.js';
 
 /** Shortest allowed body keyword. A single character would hide almost everything. */
 const MIN_KEYWORD_LENGTH = 2;
@@ -29,57 +30,15 @@ const MIN_KEYWORD_LENGTH = 2;
 /** Shortest allowed sender pattern, so a stray '1' cannot match half the table. */
 const MIN_SENDER_LENGTH = 3;
 
-type FiltersDb = D1 & D1Batch;
-
-interface FilterRequest extends AuthRequest {
-  env: AuthRequest['env'] & { DB: FiltersDb };
-  params?: Record<string, string>;
-  text(): Promise<string>;
-}
-
-type FilterHandler = (request: FilterRequest) => Promise<Response>;
-
-interface Router {
-  get(path: string, handler: FilterHandler): void;
-  post(path: string, handler: FilterHandler): void;
-  put(path: string, handler: FilterHandler): void;
-  delete(path: string, handler: FilterHandler): void;
+interface FiltersCall {
+  env: { DB: D1 & D1Batch };
+  user?: { id: string } | undefined;
 }
 
 const FILTER_COLUMNS =
   'id, rule_type, pattern, note, is_active, created_by, created_at, updated_at';
 
 const ReferencedRow = v.object({ referenced: v.number() });
-
-const RULE_TYPE_MESSAGE = `rule_type must be one of: ${Object.values(RULE_TYPE).join(', ')}`;
-const PATTERN_MESSAGE = 'pattern is required';
-const NOTE_MESSAGE = 'note must be a string';
-const ACTIVE_MESSAGE = 'is_active must be true or false';
-const IMMUTABLE_MESSAGE = 'Rule type and pattern are immutable; create a new rule instead';
-
-const CreateBody = v.object(
-  {
-    rule_type: v.picklist(Object.values(RULE_TYPE), RULE_TYPE_MESSAGE),
-    pattern: v.string(PATTERN_MESSAGE),
-    note: v.nullish(v.string(NOTE_MESSAGE)),
-  },
-  OBJECT_MESSAGE,
-);
-
-const UpdateBody = v.object(
-  {
-    rule_type: v.optional(v.string(IMMUTABLE_MESSAGE)),
-    pattern: v.optional(v.string(IMMUTABLE_MESSAGE)),
-    note: v.nullish(v.string(NOTE_MESSAGE)),
-    is_active: v.optional(v.boolean(ACTIVE_MESSAGE)),
-  },
-  OBJECT_MESSAGE,
-);
-
-const CREATE_MISSING_KEY_MESSAGES = {
-  rule_type: RULE_TYPE_MESSAGE,
-  pattern: PATTERN_MESSAGE,
-} as const satisfies MissingKeyMessages<typeof CreateBody>;
 
 interface ValidatedRule {
   rule_type: RuleType;
@@ -146,170 +105,159 @@ export async function listFilterRules(db: D1<'all'>): Promise<FiltersResponse> {
   return { filters };
 }
 
-export function setupFilterRoutes(router: Router): void {
+/**
+ * Answers `error`: a refusal a handler chose stands, a duplicate
+ * rule is a conflict, and anything else is logged and answered as `message`.
+ */
+function fail(error: unknown, label: string, message: string): never {
+  if (error instanceof ORPCError) throw error;
+  if (isUniqueViolation(error)) {
+    throw new ORPCError('CONFLICT', { message: 'That rule already exists' });
+  }
+  console.error(`[filters] ${label}:`, error);
+  throw new ORPCError('INTERNAL_SERVER_ERROR', { message });
+}
+
+function notFound(): ORPCError<'NOT_FOUND', unknown> {
+  return new ORPCError('NOT_FOUND', { message: 'Filter rule not found' });
+}
+
+function validated(rule: Parameters<typeof validateRule>[0]): ValidatedRule {
+  const result = validateRule(rule);
+  if ('error' in result) throw new ORPCError('BAD_REQUEST', { message: result.error });
+  return result;
+}
+
+/** The rule `id` names: an id that is not a number names none. */
+function ruleId(id: string): number {
+  return Number(id);
+}
+
+export const filtersHandler = {
   // List rule metadata only. Historical hit counts require reading every matched
   // message and are not part of the dashboard's operational rule contract.
-  router.get('/api/filters', async (request) => {
-    const blocked = await authorize(request, 'filters.read');
-    if (blocked) return blocked;
-
+  async list({ env }: FiltersCall): Promise<FiltersResponse> {
     try {
-      return json(await listFilterRules(request.env.DB));
+      return await listFilterRules(env.DB);
     } catch (error) {
-      console.error('[filters] list failed:', error);
-      return json({ error: 'Failed to fetch filter rules' }, 500);
+      fail(error, 'list failed', 'Failed to fetch filter rules');
     }
-  });
+  },
 
   // Create a prospective rule. Existing messages remain historical facts.
-  router.post('/api/filters', async (request) => {
-    const blocked = await authorize(request, 'filters.write');
-    if (blocked) return blocked;
-
+  async create(
+    { env, user }: FiltersCall,
+    body: v.InferOutput<typeof CreateFilterBody>,
+  ): Promise<FilterResponse> {
     try {
-      const parsed = await readBody(request, CreateBody, CREATE_MISSING_KEY_MESSAGES);
-      if (!parsed.ok) return json({ error: parsed.error }, 400);
-      const body = parsed.value;
-      const validated = validateRule({
-        rule_type: body.rule_type,
-        pattern: body.pattern,
-        note: body.note,
-      });
-      if ('error' in validated) return json({ error: validated.error }, 400);
-
+      const rule = validated({ rule_type: body.rule_type, pattern: body.pattern, note: body.note });
       const inserted = await queryOne(
-        request.env.DB.prepare(
+        env.DB.prepare(
           `INSERT INTO filter_rules (rule_type, pattern, note, created_by)
          VALUES (?, ?, ?, ?)
          RETURNING ${FILTER_COLUMNS}`,
         ).bind(
-          validated.rule_type,
-          validated.pattern,
-          validated.note,
+          rule.rule_type,
+          rule.pattern,
+          rule.note,
           // The middleware builds `user.id`; there is no `sub` on it. Reading
           // request.user.sub silently stored null for every rule.
-          request.user?.id ?? null,
+          user?.id ?? null,
         ),
         FilterRule,
       );
-
-      return json({ filter: inserted } satisfies FilterResponse, 201);
+      return { filter: inserted };
     } catch (error) {
-      if (isUniqueViolation(error)) {
-        return json({ error: 'That rule already exists' }, 409);
-      }
-      console.error('[filters] create failed:', error);
-      return json({ error: 'Failed to create filter rule' }, 500);
+      fail(error, 'create failed', 'Failed to create filter rule');
     }
-  });
+  },
 
   // Matching identity is immutable. Notes and prospective active state may change.
-  router.put('/api/filters/:id', async (request) => {
-    const blocked = await authorize(request, 'filters.write');
-    if (blocked) return blocked;
-
-    const id = Number(request.params?.['id']);
+  async update(
+    { env }: FiltersCall,
+    id: string,
+    body: v.InferOutput<typeof UpdateFilterBody>,
+  ): Promise<FilterResponse> {
     try {
       const existing = await queryFirst(
-        request.env.DB.prepare(`SELECT ${FILTER_COLUMNS} FROM filter_rules WHERE id = ?`).bind(id),
+        env.DB.prepare(`SELECT ${FILTER_COLUMNS} FROM filter_rules WHERE id = ?`).bind(ruleId(id)),
         FilterRule,
       );
-      if (!existing) return json({ error: 'Filter rule not found' }, 404);
-
-      const parsed = await readBody(request, UpdateBody, {});
-      if (!parsed.ok) return json({ error: parsed.error }, 400);
-      const body = parsed.value;
+      if (!existing) throw notFound();
       if (
         (body.rule_type !== undefined && body.rule_type !== existing.rule_type) ||
         (body.pattern !== undefined && body.pattern.trim() !== existing.pattern)
       ) {
-        return json({ error: IMMUTABLE_MESSAGE }, 400);
+        throw new ORPCError('BAD_REQUEST', { message: IMMUTABLE_RULE_MESSAGE });
       }
-      const validated = validateRule({
+      const rule = validated({
         rule_type: existing.rule_type,
         pattern: existing.pattern,
         note: body.note ?? existing.note,
       });
-      if ('error' in validated) return json({ error: validated.error }, 400);
 
       const isActive = body.is_active === undefined ? existing.is_active : body.is_active ? 1 : 0;
 
       const updated = await queryFirst(
-        request.env.DB.prepare(
+        env.DB.prepare(
           `UPDATE filter_rules
          SET rule_type = ?, pattern = ?, note = ?, is_active = ?, updated_at = CURRENT_TIMESTAMP
          WHERE id = ?
          RETURNING ${FILTER_COLUMNS}`,
-        ).bind(validated.rule_type, validated.pattern, validated.note, isActive, id),
+        ).bind(rule.rule_type, rule.pattern, rule.note, isActive, ruleId(id)),
         FilterRule,
       );
-      if (!updated) return json({ error: 'Filter rule not found' }, 404);
-
-      return json({ filter: updated } satisfies FilterResponse);
+      if (!updated) throw notFound();
+      return { filter: updated };
     } catch (error) {
-      if (isUniqueViolation(error)) {
-        return json({ error: 'That rule already exists' }, 409);
-      }
-      console.error('[filters] update failed:', error);
-      return json({ error: 'Failed to update filter rule' }, 500);
+      fail(error, 'update failed', 'Failed to update filter rule');
     }
-  });
+  },
 
   // A referenced rule is historical provenance and cannot be physically deleted.
-  router.delete('/api/filters/:id', async (request) => {
-    const blocked = await authorize(request, 'filters.delete');
-    if (blocked) return blocked;
-
-    const id = Number(request.params?.['id']);
+  async remove({ env }: FiltersCall, id: string): Promise<SuccessResponse> {
     try {
       const referenced = await queryFirst(
-        request.env.DB.prepare(
+        env.DB.prepare(
           `SELECT 1 AS referenced FROM messages WHERE filter_rule_id = ? LIMIT 1`,
-        ).bind(id),
+        ).bind(ruleId(id)),
         ReferencedRow,
       );
       if (referenced) {
-        return json({ error: 'Rule has historical messages; deactivate it instead' }, 409);
+        throw new ORPCError('CONFLICT', {
+          message: 'Rule has historical messages; deactivate it instead',
+        });
       }
 
-      const result = await request.env.DB.prepare(`DELETE FROM filter_rules WHERE id = ?`)
-        .bind(id)
+      const result = await env.DB.prepare(`DELETE FROM filter_rules WHERE id = ?`)
+        .bind(ruleId(id))
         .run();
-      if (!result.meta.changes) return json({ error: 'Filter rule not found' }, 404);
-
-      return json({ success: true } satisfies SuccessResponse);
+      if (!result.meta.changes) throw notFound();
+      return { success: true };
     } catch (error) {
-      console.error('[filters] delete failed:', error);
-      return json({ error: 'Failed to delete filter rule' }, 500);
+      fail(error, 'delete failed', 'Failed to delete filter rule');
     }
-  });
+  },
 
   // Historical changes are explicit, bounded, and one page per operator action.
-  router.post('/api/filters/:id/history', async (request) => {
-    const blocked = await authorize(request, 'filters.write');
-    if (blocked) return blocked;
-
-    const id = Number(request.params?.['id']);
+  async history(
+    { env }: FiltersCall,
+    id: string,
+    { since, until, cursor }: v.InferOutput<typeof HistoryRequestBody>,
+  ): Promise<RuleHistoryPage> {
     try {
       const rule = await queryFirst(
-        request.env.DB.prepare(`SELECT ${FILTER_COLUMNS} FROM filter_rules WHERE id = ?`).bind(id),
+        env.DB.prepare(`SELECT ${FILTER_COLUMNS} FROM filter_rules WHERE id = ?`).bind(ruleId(id)),
         FilterRule,
       );
-      if (!rule) return json({ error: 'Filter rule not found' }, 404);
-
-      const parsed = await readBody(request, HistoryRequestBody, HISTORY_MISSING_KEY_MESSAGES);
-      if (!parsed.ok) return json({ error: parsed.error }, 400);
-      const { since, until, cursor } = parsed.value;
-
-      const result = await processRuleHistoryPage(request.env.DB, rule, {
+      if (!rule) throw notFound();
+      return await processRuleHistoryPage(env.DB, rule, {
         since: since.toISOString(),
         until: until.toISOString(),
         cursor: cursor ?? null,
       });
-      return json(result);
     } catch (error) {
-      console.error('[filters] history processing failed:', error);
-      return json({ error: 'Failed to process filter history' }, 500);
+      fail(error, 'history processing failed', 'Failed to process filter history');
     }
-  });
-}
+  },
+};

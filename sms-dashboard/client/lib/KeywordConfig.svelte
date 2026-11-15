@@ -2,15 +2,11 @@
   import { confirmAction } from './confirm.svelte.js';
   import { onMount } from 'svelte';
   import { SvelteMap } from 'svelte/reactivity';
-  import { KeywordHistoryPage, type HistoryCursor } from '../../shared/api/history.js';
-  import {
-    KeywordResponse,
-    KeywordsResponse,
-    type KeywordWithUsage,
-  } from '../../shared/api/keywords.js';
+  import type { HistoryCursor } from '../../shared/api/history.js';
+  import type { KeywordWithUsage } from '../../shared/api/keywords.js';
   import { textOr } from '../../shared/text.js';
-  import { SuccessResponse } from '../../shared/api/success.js';
-  import { errorMessage, request } from './api.js';
+  import { ApiError, errorMessage } from './api.js';
+  import { contractApi } from './contract-client.js';
   import MessageHighlight from './MessageHighlight.svelte';
   import { safeColor } from './message-highlight.js';
 
@@ -62,7 +58,7 @@
     loading = true;
     error = null;
     try {
-      const r = await request('/api/keywords', KeywordsResponse);
+      const r = await contractApi.keywords.list();
       keywords = r.keywords;
     } catch {
       error = '关键词加载失败';
@@ -103,27 +99,20 @@
     saving = true;
     try {
       if (editingKeyword) {
-        await request(`/api/keywords/${String(editingKeyword.id)}`, KeywordResponse, {
-          method: 'PUT',
-          body: JSON.stringify({
-            tag: formData.tag,
-            color: formData.color,
-            priority: formData.priority,
-          }),
+        await contractApi.keywords.update({
+          params: { id: String(editingKeyword.id) },
+          body: { tag: formData.tag, color: formData.color, priority: formData.priority },
         });
         notice = '关键词显示信息已更新。';
       } else {
-        await request('/api/keywords', KeywordResponse, {
-          method: 'POST',
-          body: JSON.stringify(formData),
-        });
+        await contractApi.keywords.create(formData);
         notice = '关键词已添加，将用于之后收到的新短信。';
       }
       showDialog = false;
       await loadKeywords();
     } catch (err) {
       error =
-        err instanceof Error && err.message === 'Keyword already exists'
+        err instanceof ApiError && err.status === 409
           ? '该关键词已存在，请换一个'
           : errorMessage(err, '保存失败');
     } finally {
@@ -144,7 +133,7 @@
     error = null;
     notice = null;
     try {
-      await request(`/api/keywords/${String(kw.id)}`, SuccessResponse, { method: 'DELETE' });
+      await contractApi.keywords.remove({ params: { id: String(kw.id) } });
       notice = '未使用的关键词已删除。';
       await loadKeywords();
     } catch (err) {
@@ -159,9 +148,9 @@
     error = null;
     notice = null;
     try {
-      await request(`/api/keywords/${String(kw.id)}`, KeywordResponse, {
-        method: 'PUT',
-        body: JSON.stringify({ is_active: !kw.is_active }),
+      await contractApi.keywords.update({
+        params: { id: String(kw.id) },
+        body: { is_active: !kw.is_active },
       });
       historyRuns.delete(kw.id);
       notice = kw.is_active
@@ -201,13 +190,9 @@
         processed: 0,
         inserted: 0,
       };
-      const result = await request(`/api/keywords/${String(kw.id)}/history`, KeywordHistoryPage, {
-        method: 'POST',
-        body: JSON.stringify({
-          since: window.since,
-          until: window.until,
-          cursor: window.cursor,
-        }),
+      const result = await contractApi.keywords.history({
+        params: { id: String(kw.id) },
+        body: { since: window.since, until: window.until, cursor: window.cursor },
       });
       const progress: HistoryProgress = {
         ...window,

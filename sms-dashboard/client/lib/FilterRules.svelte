@@ -2,16 +2,11 @@
   import { confirmAction } from './confirm.svelte.js';
   import { onMount } from 'svelte';
   import { SvelteMap } from 'svelte/reactivity';
-  import {
-    FilterResponse,
-    FiltersResponse,
-    type FilterRule,
-    type RuleType,
-  } from '../../shared/api/filters.js';
-  import { RuleHistoryPage, type HistoryCursor } from '../../shared/api/history.js';
+  import type { FilterRule, RuleType } from '../../shared/api/filters.js';
+  import type { HistoryCursor } from '../../shared/api/history.js';
   import { textOr } from '../../shared/text.js';
-  import { SuccessResponse } from '../../shared/api/success.js';
-  import { errorMessage, request } from './api.js';
+  import { errorMessage } from './api.js';
+  import { contractApi } from './contract-client.js';
 
   interface HistoryProgress {
     since: string;
@@ -64,7 +59,7 @@
     loading = true;
     error = null;
     try {
-      const response = await request('/api/filters', FiltersResponse);
+      const response = await contractApi.filters.list();
       rules = response.filters;
     } catch (err) {
       error = errorMessage(err, '加载过滤规则失败');
@@ -93,10 +88,10 @@
     notice = null;
     try {
       await (editingId === null
-        ? request('/api/filters', FilterResponse, { method: 'POST', body: JSON.stringify(form) })
-        : request(`/api/filters/${String(editingId)}`, FilterResponse, {
-            method: 'PUT',
-            body: JSON.stringify({ note: form.note }),
+        ? contractApi.filters.create(form)
+        : contractApi.filters.update({
+            params: { id: String(editingId) },
+            body: { note: form.note },
           }));
       notice = editingId === null ? '规则已添加，将用于之后收到的新短信。' : '备注已更新。';
       resetForm();
@@ -113,9 +108,9 @@
     error = null;
     notice = null;
     try {
-      await request(`/api/filters/${String(rule.id)}`, FilterResponse, {
-        method: 'PUT',
-        body: JSON.stringify({ is_active: !rule.is_active }),
+      await contractApi.filters.update({
+        params: { id: String(rule.id) },
+        body: { is_active: !rule.is_active },
       });
       historyRuns.delete(rule.id);
       notice = rule.is_active
@@ -143,7 +138,7 @@
     error = null;
     notice = null;
     try {
-      await request(`/api/filters/${String(rule.id)}`, SuccessResponse, { method: 'DELETE' });
+      await contractApi.filters.remove({ params: { id: String(rule.id) } });
       notice = '未使用的规则已删除。';
       await loadRules();
     } catch (err) {
@@ -179,13 +174,9 @@
         processed: 0,
         changed: 0,
       };
-      const result = await request(`/api/filters/${String(rule.id)}/history`, RuleHistoryPage, {
-        method: 'POST',
-        body: JSON.stringify({
-          since: window.since,
-          until: window.until,
-          cursor: window.cursor,
-        }),
+      const result = await contractApi.filters.history({
+        params: { id: String(rule.id) },
+        body: { since: window.since, until: window.until, cursor: window.cursor },
       });
       const progress: HistoryProgress = {
         ...window,

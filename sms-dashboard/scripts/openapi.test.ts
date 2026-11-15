@@ -23,6 +23,20 @@ describe('the OpenAPI document', () => {
       'GET /api/auth/me',
       'GET /api/users',
       'PUT /api/users/{id}/role',
+      'GET /api/keywords',
+      'POST /api/keywords',
+      'GET /api/keywords/{id}',
+      'PUT /api/keywords/{id}',
+      'DELETE /api/keywords/{id}',
+      'POST /api/keywords/{id}/history',
+      'POST /api/messages/batch-tags',
+      'GET /api/messages/{id}/tags',
+      'GET /api/filters',
+      'POST /api/filters',
+      'PUT /api/filters/{id}',
+      'DELETE /api/filters/{id}',
+      'POST /api/filters/{id}/history',
+      'POST /api/verification/reprocess',
     ]);
   });
 

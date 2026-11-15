@@ -102,6 +102,20 @@ describe('contract routes', () => {
       { method: 'GET', path: '/api/auth/me' },
       { method: 'GET', path: '/api/users' },
       { method: 'PUT', path: '/api/users/:id/role' },
+      { method: 'GET', path: '/api/keywords' },
+      { method: 'GET', path: '/api/keywords/:id' },
+      { method: 'POST', path: '/api/keywords' },
+      { method: 'PUT', path: '/api/keywords/:id' },
+      { method: 'DELETE', path: '/api/keywords/:id' },
+      { method: 'POST', path: '/api/keywords/:id/history' },
+      { method: 'POST', path: '/api/messages/batch-tags' },
+      { method: 'GET', path: '/api/messages/:id/tags' },
+      { method: 'GET', path: '/api/filters' },
+      { method: 'POST', path: '/api/filters' },
+      { method: 'PUT', path: '/api/filters/:id' },
+      { method: 'DELETE', path: '/api/filters/:id' },
+      { method: 'POST', path: '/api/filters/:id/history' },
+      { method: 'POST', path: '/api/verification/reprocess' },
     ]);
   });
 

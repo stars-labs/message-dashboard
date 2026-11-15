@@ -7,6 +7,7 @@ const TITLES: Partial<Record<number, string>> = {
   401: 'Unauthorized',
   403: 'Forbidden',
   404: 'Not Found',
+  409: 'Conflict',
   500: 'Internal Server Error',
   502: 'Bad Gateway',
   503: 'Service Unavailable',

@@ -14,9 +14,6 @@ import { carrierBillsHandler } from './handlers/carrier-bills.js';
 import { carrierBillingBackfillHandler } from './handlers/carrier-billing-backfill.js';
 import { serveFrontend } from './frontend-handler.js';
 import { appShellRedirect } from './frontend-gate.js';
-import { setupKeywordRoutes } from './api/keywords.js';
-import { setupFilterRoutes } from './api/filters.js';
-import { setupVerificationRoutes } from './api/verification.js';
 import { setupCallRoutes } from './api/calls.js';
 import { Router } from './router.js';
 import { contractRoutes, handleContract } from './contract/handler.js';
@@ -246,9 +243,6 @@ router.post('/api/control/carrier-web-balance/jobs/:id/release', (request) =>
   carrierWebBalanceHandler.release(request),
 );
 
-setupKeywordRoutes(router);
-setupFilterRoutes(router);
-setupVerificationRoutes(router);
 setupCallRoutes(router);
 
 // /api is never a page: an unknown API path falls through to the 404 below.

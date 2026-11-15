@@ -25,7 +25,8 @@ import { D1_MAX_BOUND_PARAMETERS, queryAll, queryFirst, type D1 } from '../lib/d
 import type { EndedCallRequest } from '../../shared/daemon-wire/EndedCallRequest.js';
 import type { IncomingCallRequest } from '../../shared/daemon-wire/IncomingCallRequest.js';
 import { acceptsWire } from '../../shared/wire-schema.js';
-import { OBJECT_MESSAGE, readBody, type MissingKeyMessages } from '../lib/request-body.js';
+import { OBJECT_MESSAGE } from '../../shared/api/body.js';
+import { readBody, type MissingKeyMessages } from '../lib/request-body.js';
 import { handleAuth0, type AuthRequest } from '../middleware/auth0.js';
 import { authorize } from '../middleware/authorize.js';
 import {

@@ -1,12 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from 'bun:test';
 import * as v from 'valibot';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
-import { listFilterRules, setupFilterRoutes } from './filters.js';
-
-type Router = Parameters<typeof setupFilterRoutes>[0];
-type Handler = Parameters<Router['get']>[1];
-type FilterRequest = Parameters<Handler>[0];
-type Method = 'get' | 'post' | 'put' | 'delete';
+import { listFilterRules } from './filters.js';
 
 let errorSpy: Mock<typeof console.error>;
 
@@ -17,24 +12,6 @@ beforeEach(() => {
 afterEach(() => {
   errorSpy.mockRestore();
 });
-
-function routes() {
-  const registered = new Map<string, Handler>();
-  const router: Router = {
-    get: (path, handler) => registered.set(`get ${path}`, handler),
-    post: (path, handler) => registered.set(`post ${path}`, handler),
-    put: (path, handler) => registered.set(`put ${path}`, handler),
-    delete: (path, handler) => registered.set(`delete ${path}`, handler),
-  };
-  setupFilterRoutes(router);
-  return registered;
-}
-
-function route(method: Method, path: string): Handler {
-  const handler = routes().get(`${method} ${path}`);
-  if (!handler) throw new Error(`no ${method} ${path} route`);
-  return handler;
-}
 
 function database() {
   const d1 = sqliteD1();
@@ -75,6 +52,54 @@ function database() {
 
 type TestDb = ReturnType<typeof database>;
 
+import { memoryKv } from '../../test/memory-kv.js';
+import { callWorker } from '../../test/worker-harness.js';
+
+const ADMIN = 'session-admin';
+const VIEWER = 'session-viewer';
+
+function session(roles: string[]): string {
+  return JSON.stringify({
+    user: { id: 'auth0|admin', email: 'someone@example.test', roles },
+    expires_at: Date.now() + 3_600_000,
+  });
+}
+
+const SESSIONS = memoryKv({
+  [ADMIN]: session(['sms-admin']),
+  [VIEWER]: session(['sms-viewer']),
+});
+
+async function call(
+  { d1 }: TestDb,
+  method: string,
+  path: string,
+  { body, token = ADMIN }: { body?: string; token?: string } = {},
+): Promise<Response> {
+  const { response } = await callWorker(method, path, {
+    headers: {
+      Cookie: `auth_token=${token}`,
+      ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+    },
+    ...(body === undefined ? {} : { body }),
+    bindings: { DB: d1, SESSIONS },
+  });
+  return response;
+}
+
+const Problem = v.looseObject({
+  type: v.string(),
+  title: v.string(),
+  status: v.number(),
+  detail: v.string(),
+  code: v.string(),
+});
+
+async function problemOf(response: Response) {
+  expect(response.headers.get('Content-Type')).toBe('application/problem+json');
+  return v.parse(Problem, await response.json());
+}
+
 function addRule(
   { db }: TestDb,
   rule: { rule_type: string; pattern: string; note?: string | null; is_active?: number },
@@ -106,44 +131,6 @@ function addMessage(
     message.filter_rule_id ?? null,
     message.created_at ?? '2026-01-01 00:00:00',
   );
-}
-
-function request(
-  { d1 }: TestDb,
-  {
-    path = '/api/filters',
-    method = 'GET',
-    body,
-    params = {},
-    roles = ['admin'],
-    credential = 'Bearer session-1',
-  }: {
-    path?: string;
-    method?: string;
-    body?: string;
-    params?: Record<string, string>;
-    roles?: string[];
-    credential?: string;
-  } = {},
-): FilterRequest {
-  const sessions = new Map([
-    [
-      'session-1',
-      JSON.stringify({ user: { id: 'auth0|admin', roles }, expires_at: Date.now() + 60_000 }),
-    ],
-  ]);
-  const init: RequestInit = { method, headers: { Authorization: credential } };
-  if (body !== undefined) init.body = body;
-  return Object.assign(new Request(`https://example.com${path}`, init), {
-    env: {
-      DB: d1,
-      SESSIONS: {
-        get: (key: string) => Promise.resolve(sessions.get(key) ?? null),
-        delete: () => Promise.resolve(),
-      },
-    },
-    params,
-  });
 }
 
 const RuleBody = v.object({
@@ -212,43 +199,23 @@ describe('filter rule list D1 reads', () => {
   });
 });
 
-describe('route registration', () => {
-  test('registers every filter route', () => {
-    expect([...routes().keys()].sort()).toEqual([
-      'delete /api/filters/:id',
-      'get /api/filters',
-      'post /api/filters',
-      'post /api/filters/:id/history',
-      'put /api/filters/:id',
-    ]);
-  });
-});
-
 describe('authorization', () => {
-  const guarded: { method: Method; path: string; httpMethod: string }[] = [
-    { method: 'get', path: '/api/filters', httpMethod: 'GET' },
-    { method: 'post', path: '/api/filters', httpMethod: 'POST' },
-    { method: 'put', path: '/api/filters/:id', httpMethod: 'PUT' },
-    { method: 'delete', path: '/api/filters/:id', httpMethod: 'DELETE' },
-    { method: 'post', path: '/api/filters/:id/history', httpMethod: 'POST' },
+  const guarded: { method: string; path: string }[] = [
+    { method: 'GET', path: '/api/filters' },
+    { method: 'POST', path: '/api/filters' },
+    { method: 'PUT', path: '/api/filters/1' },
+    { method: 'DELETE', path: '/api/filters/1' },
+    { method: 'POST', path: '/api/filters/1/history' },
   ];
 
-  for (const { method, path, httpMethod } of guarded) {
+  for (const { method, path } of guarded) {
     test(`${method} ${path} answers 401 without a credential the middleware accepts`, async () => {
-      const db = database();
-      const response = await route(
-        method,
-        path,
-      )(request(db, { method: httpMethod, credential: 'Bearer unknown', params: { id: '1' } }));
+      const response = await call(database(), method, path, { token: 'unknown' });
       expect(response.status).toBe(401);
     });
 
     test(`${method} ${path} answers 403 to a role without the permission`, async () => {
-      const db = database();
-      const response = await route(
-        method,
-        path,
-      )(request(db, { method: httpMethod, roles: ['viewer'], params: { id: '1' } }));
+      const response = await call(database(), method, path, { token: VIEWER });
       expect(response.status).toBe(403);
     });
   }
@@ -259,7 +226,7 @@ describe('GET /api/filters', () => {
     const db = database();
     addRule(db, { rule_type: 'sender', pattern: '10086', note: 'mobile' });
 
-    const response = await route('get', '/api/filters')(request(db));
+    const response = await call(db, 'GET', '/api/filters');
     const body = await bodyOf(response);
 
     expect(response.status).toBe(200);
@@ -279,7 +246,7 @@ describe('GET /api/filters', () => {
     const db = database();
     addRule(db, { rule_type: 'sender', pattern: '10086' });
 
-    const response = await route('get', '/api/filters')(request(db));
+    const response = await call(db, 'GET', '/api/filters');
     const [rule] = v.parse(
       v.object({ filters: v.array(v.object({ created_at: v.string(), updated_at: v.string() })) }),
       await response.json(),
@@ -293,16 +260,19 @@ describe('GET /api/filters', () => {
     const db = database();
     db.db.run('DROP TABLE filter_rules');
 
-    const response = await route('get', '/api/filters')(request(db));
+    const response = await call(db, 'GET', '/api/filters');
 
     expect(response.status).toBe(500);
-    expect(await bodyOf(response)).toEqual({ error: 'Failed to fetch filter rules' });
+    expect(await problemOf(response)).toMatchObject({
+      code: 'INTERNAL_SERVER_ERROR',
+      detail: 'Failed to fetch filter rules',
+    });
   });
 });
 
 describe('POST /api/filters', () => {
   function create(db: TestDb, body: string) {
-    return route('post', '/api/filters')(request(db, { method: 'POST', body }));
+    return call(db, 'POST', '/api/filters', { body });
   }
 
   test('creating a rule does not read or write historical messages', async () => {
@@ -425,7 +395,7 @@ describe('POST /api/filters', () => {
       const response = await create(db, JSON.stringify(body));
 
       expect(response.status).toBe(400);
-      expect(await bodyOf(response)).toEqual({ error: message });
+      expect(await problemOf(response)).toMatchObject({ code: 'BAD_REQUEST', detail: message });
       expect(ruleRows(db)).toEqual([]);
     });
   }
@@ -437,7 +407,10 @@ describe('POST /api/filters', () => {
     const response = await create(db, JSON.stringify({ rule_type: 'sender', pattern: '10086' }));
 
     expect(response.status).toBe(409);
-    expect(await bodyOf(response)).toEqual({ error: 'That rule already exists' });
+    expect(await problemOf(response)).toMatchObject({
+      code: 'CONFLICT',
+      detail: 'That rule already exists',
+    });
   });
 
   test('answers 400 when the body is not JSON', async () => {
@@ -446,7 +419,7 @@ describe('POST /api/filters', () => {
     const response = await create(db, 'not json');
 
     expect(response.status).toBe(400);
-    expect(await bodyOf(response)).toEqual({ error: 'Body must be JSON' });
+    expect(await problemOf(response)).toMatchObject({ code: 'BAD_REQUEST' });
     expect(ruleRows(db)).toEqual([]);
   });
 
@@ -457,16 +430,16 @@ describe('POST /api/filters', () => {
     const response = await create(db, JSON.stringify({ rule_type: 'sender', pattern: '10086' }));
 
     expect(response.status).toBe(500);
-    expect(await bodyOf(response)).toEqual({ error: 'Failed to create filter rule' });
+    expect(await problemOf(response)).toMatchObject({
+      code: 'INTERNAL_SERVER_ERROR',
+      detail: 'Failed to create filter rule',
+    });
   });
 });
 
 describe('PUT /api/filters/:id', () => {
   function update(db: TestDb, id: string, body: string) {
-    return route(
-      'put',
-      '/api/filters/:id',
-    )(request(db, { method: 'PUT', path: `/api/filters/${id}`, body, params: { id } }));
+    return call(db, 'PUT', `/api/filters/${id}`, { body });
   }
 
   test('toggling a rule changes only the rule row and keeps matching identity immutable', async () => {
@@ -512,7 +485,7 @@ describe('PUT /api/filters/:id', () => {
       const response = await update(db, '1', JSON.stringify(body));
 
       expect(response.status).toBe(400);
-      expect(await bodyOf(response)).toEqual({ error: message });
+      expect(await problemOf(response)).toMatchObject({ code: 'BAD_REQUEST', detail: message });
       expect(ruleRows(db)).toEqual([
         { rule_type: 'sender', pattern: '10086', note: 'old', is_active: 0 },
       ]);
@@ -587,19 +560,23 @@ describe('PUT /api/filters/:id', () => {
       const response = await update(db, '1', JSON.stringify(body));
 
       expect(response.status).toBe(400);
-      expect(await bodyOf(response)).toEqual({
-        error: 'Rule type and pattern are immutable; create a new rule instead',
+      expect(await problemOf(response)).toMatchObject({
+        code: 'BAD_REQUEST',
+        detail: 'Rule type and pattern are immutable; create a new rule instead',
       });
     });
   }
 
-  test('answers 404 to a rule that does not exist, without reading the body', async () => {
+  test('answers 404 to a rule that does not exist', async () => {
     const db = database();
 
-    const response = await update(db, '9', 'not json');
+    const response = await update(db, '9', JSON.stringify({ note: 'n' }));
 
     expect(response.status).toBe(404);
-    expect(await bodyOf(response)).toEqual({ error: 'Filter rule not found' });
+    expect(await problemOf(response)).toMatchObject({
+      code: 'NOT_FOUND',
+      detail: 'Filter rule not found',
+    });
   });
 
   test('answers 404 when the rule is deleted before the update lands', async () => {
@@ -619,7 +596,10 @@ describe('PUT /api/filters/:id', () => {
     const response = await update(racing, '1', JSON.stringify({ note: 'x' }));
 
     expect(response.status).toBe(404);
-    expect(await bodyOf(response)).toEqual({ error: 'Filter rule not found' });
+    expect(await problemOf(response)).toMatchObject({
+      code: 'NOT_FOUND',
+      detail: 'Filter rule not found',
+    });
   });
 
   test('answers 404 to an id that is not a number', async () => {
@@ -638,7 +618,10 @@ describe('PUT /api/filters/:id', () => {
     const response = await update(db, '1', JSON.stringify({ note: 'x' }));
 
     expect(response.status).toBe(400);
-    expect(await bodyOf(response)).toEqual({ error: 'body keyword must be at least 2 characters' });
+    expect(await problemOf(response)).toMatchObject({
+      code: 'BAD_REQUEST',
+      detail: 'body keyword must be at least 2 characters',
+    });
   });
 
   test('answers 400 when the body is not JSON', async () => {
@@ -648,16 +631,13 @@ describe('PUT /api/filters/:id', () => {
     const response = await update(db, '1', 'not json');
 
     expect(response.status).toBe(400);
-    expect(await bodyOf(response)).toEqual({ error: 'Body must be JSON' });
+    expect(await problemOf(response)).toMatchObject({ code: 'BAD_REQUEST' });
   });
 });
 
 describe('DELETE /api/filters/:id', () => {
   function remove(db: TestDb, id: string) {
-    return route(
-      'delete',
-      '/api/filters/:id',
-    )(request(db, { method: 'DELETE', path: `/api/filters/${id}`, params: { id } }));
+    return call(db, 'DELETE', `/api/filters/${id}`);
   }
 
   test('deletes an unreferenced rule', async () => {
@@ -679,8 +659,9 @@ describe('DELETE /api/filters/:id', () => {
     const response = await remove(db, '1');
 
     expect(response.status).toBe(409);
-    expect(await bodyOf(response)).toEqual({
-      error: 'Rule has historical messages; deactivate it instead',
+    expect(await problemOf(response)).toMatchObject({
+      code: 'CONFLICT',
+      detail: 'Rule has historical messages; deactivate it instead',
     });
     expect(ruleRows(db)).toHaveLength(1);
   });
@@ -691,7 +672,10 @@ describe('DELETE /api/filters/:id', () => {
     const response = await remove(db, '9');
 
     expect(response.status).toBe(404);
-    expect(await bodyOf(response)).toEqual({ error: 'Filter rule not found' });
+    expect(await problemOf(response)).toMatchObject({
+      code: 'NOT_FOUND',
+      detail: 'Filter rule not found',
+    });
   });
 
   test('answers 500 when the read fails', async () => {
@@ -701,7 +685,10 @@ describe('DELETE /api/filters/:id', () => {
     const response = await remove(db, '1');
 
     expect(response.status).toBe(500);
-    expect(await bodyOf(response)).toEqual({ error: 'Failed to delete filter rule' });
+    expect(await problemOf(response)).toMatchObject({
+      code: 'INTERNAL_SERVER_ERROR',
+      detail: 'Failed to delete filter rule',
+    });
   });
 });
 
@@ -709,17 +696,7 @@ describe('POST /api/filters/:id/history', () => {
   const range = { since: '2026-01-01T00:00:00Z', until: '2026-12-31T00:00:00Z' };
 
   function history(db: TestDb, id: string, body: string) {
-    return route(
-      'post',
-      '/api/filters/:id/history',
-    )(
-      request(db, {
-        method: 'POST',
-        path: `/api/filters/${id}/history`,
-        body,
-        params: { id },
-      }),
-    );
+    return call(db, 'POST', `/api/filters/${id}/history`, { body });
   }
 
   test('applies an active rule to the messages in range', async () => {
@@ -784,7 +761,10 @@ describe('POST /api/filters/:id/history', () => {
     const response = await history(db, '9', JSON.stringify(range));
 
     expect(response.status).toBe(404);
-    expect(await bodyOf(response)).toEqual({ error: 'Filter rule not found' });
+    expect(await problemOf(response)).toMatchObject({
+      code: 'NOT_FOUND',
+      detail: 'Filter rule not found',
+    });
   });
 
   const badRanges: [string, unknown][] = [
@@ -805,7 +785,10 @@ describe('POST /api/filters/:id/history', () => {
       const response = await history(db, '1', JSON.stringify(body));
 
       expect(response.status).toBe(400);
-      expect(await bodyOf(response)).toEqual({ error: 'A valid history time range is required' });
+      expect(await problemOf(response)).toMatchObject({
+        code: 'BAD_REQUEST',
+        detail: 'A valid history time range is required',
+      });
     });
   }
 
@@ -825,7 +808,10 @@ describe('POST /api/filters/:id/history', () => {
       const response = await history(db, '1', JSON.stringify({ ...range, cursor }));
 
       expect(response.status).toBe(400);
-      expect(await bodyOf(response)).toEqual({ error: 'Invalid history cursor' });
+      expect(await problemOf(response)).toMatchObject({
+        code: 'BAD_REQUEST',
+        detail: 'Invalid history cursor',
+      });
     });
   }
 
@@ -836,7 +822,7 @@ describe('POST /api/filters/:id/history', () => {
     const response = await history(db, '1', 'not json');
 
     expect(response.status).toBe(400);
-    expect(await bodyOf(response)).toEqual({ error: 'Body must be JSON' });
+    expect(await problemOf(response)).toMatchObject({ code: 'BAD_REQUEST' });
   });
 
   test('answers 400 when the body is not an object', async () => {
@@ -846,7 +832,10 @@ describe('POST /api/filters/:id/history', () => {
     const response = await history(db, '1', 'null');
 
     expect(response.status).toBe(400);
-    expect(await bodyOf(response)).toEqual({ error: 'Body must be a JSON object' });
+    expect(await problemOf(response)).toMatchObject({
+      code: 'BAD_REQUEST',
+      detail: 'Body must be a JSON object',
+    });
   });
 
   test('accepts a null cursor as the first page', async () => {

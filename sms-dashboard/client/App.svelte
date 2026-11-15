@@ -66,7 +66,7 @@
     type BalanceCheckDetail,
   } from '../shared/api/balance-checks.js';
   import type { CallLogEntry, LiveCall } from '../shared/api/calls.js';
-  import { FiltersResponse, type FilterRule } from '../shared/api/filters.js';
+  import type { FilterRule } from '../shared/api/filters.js';
   import type { CreateIccidMappingResponse } from '../shared/api/iccid-mappings.js';
   import type { ApiMessage } from '../shared/api/messages.js';
   import type { Phone } from '../shared/api/phones.js';
@@ -172,7 +172,7 @@
     showFiltered = !showFiltered;
     if (showFiltered && filterRules.length === 0) {
       try {
-        const response = await request('/api/filters', FiltersResponse);
+        const response = await contractApi.filters.list();
         filterRules = response.filters;
       } catch (error) {
         console.warn('[App] Could not load filter rules for labels:', error);

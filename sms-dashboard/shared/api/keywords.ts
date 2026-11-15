@@ -1,4 +1,6 @@
 import * as v from 'valibot';
+import { DEFAULT_KEYWORD_COLOR, normalizeKeywordColor } from '../keyword-color.js';
+import { bodyObject } from './body.js';
 
 /** A keyword_tags row, every column. */
 export const Keyword = v.object({
@@ -31,3 +33,103 @@ export type KeywordsResponse = v.InferOutput<typeof KeywordsResponse>;
 export const KeywordResponse = v.object({ keyword: Keyword });
 
 export type KeywordResponse = v.InferOutput<typeof KeywordResponse>;
+
+const REQUIRED_MESSAGE = 'Keyword and tag are required';
+const KEYWORD_MESSAGE = 'keyword must be a string';
+const TAG_MESSAGE = 'tag must be a string';
+const PRIORITY_MESSAGE = 'priority must be an integer';
+const CASE_SENSITIVE_MESSAGE = 'case_sensitive must be true or false';
+const WHOLE_WORD_MESSAGE = 'whole_word must be true or false';
+const ACTIVE_MESSAGE = 'is_active must be true or false';
+const MESSAGE_IDS_MESSAGE = 'messageIds must be an array of strings';
+
+const Required = v.pipe(v.string(REQUIRED_MESSAGE), v.nonEmpty(REQUIRED_MESSAGE));
+
+const Priority = v.pipe(v.number(PRIORITY_MESSAGE), v.integer(PRIORITY_MESSAGE));
+
+/**
+ * A colour is applied to a CSS custom property in every operator's browser, so
+ * a supplied one must be a hex literal. null and '' mean "not supplied" and
+ * resolve to `blank`.
+ */
+function colour<Blank>(blank: Blank) {
+  return v.pipe(
+    v.unknown(),
+    v.rawTransform(({ dataset, addIssue, NEVER }) => {
+      if (dataset.value === null || dataset.value === '') return blank;
+      const check = normalizeKeywordColor(dataset.value);
+      if (check.ok) return check.value;
+      addIssue({ message: `Invalid color: ${check.reason}` });
+      return NEVER;
+    }),
+  );
+}
+
+/** POST /api/keywords. */
+export const CreateKeywordBody = bodyObject(
+  {
+    keyword: Required,
+    tag: Required,
+    color: v.optional(colour(DEFAULT_KEYWORD_COLOR), DEFAULT_KEYWORD_COLOR),
+    priority: v.nullish(Priority, 0),
+    case_sensitive: v.optional(v.boolean(CASE_SENSITIVE_MESSAGE), false),
+    whole_word: v.optional(v.boolean(WHOLE_WORD_MESSAGE), false),
+  },
+  { keyword: REQUIRED_MESSAGE, tag: REQUIRED_MESSAGE },
+);
+
+/** PUT /api/keywords/:id. Only tag, colour, priority and is_active may change. */
+export const UpdateKeywordBody = bodyObject(
+  {
+    keyword: v.optional(v.string(KEYWORD_MESSAGE)),
+    tag: v.nullish(v.string(TAG_MESSAGE)),
+    color: v.optional(colour(undefined)),
+    priority: v.optional(v.nullable(Priority, 0)),
+    case_sensitive: v.optional(v.boolean(CASE_SENSITIVE_MESSAGE)),
+    whole_word: v.optional(v.boolean(WHOLE_WORD_MESSAGE)),
+    is_active: v.optional(v.boolean(ACTIVE_MESSAGE)),
+  },
+  {},
+);
+
+/** POST /api/messages/batch-tags. */
+export const BatchTagsBody = bodyObject(
+  { messageIds: v.array(v.string(MESSAGE_IDS_MESSAGE), MESSAGE_IDS_MESSAGE) },
+  { messageIds: MESSAGE_IDS_MESSAGE },
+);
+
+/** A keyword match in one message, as the batch answer lists it. */
+const BatchTag = v.object({
+  id: v.number(),
+  keyword: v.string(),
+  tag: v.string(),
+  color: v.nullable(v.string()),
+  priority: v.nullable(v.number()),
+  position: v.number(),
+  length: v.number(),
+});
+
+/** POST /api/messages/batch-tags: each message's matches, by message id. */
+export const BatchTagsResponse = v.object({
+  success: v.literal(true),
+  data: v.record(v.string(), v.array(BatchTag)),
+});
+
+export type BatchTagsResponse = v.InferOutput<typeof BatchTagsResponse>;
+
+/** A stored keyword match, with the keyword it came from. */
+export const MessageTag = v.object({
+  message_id: v.string(),
+  keyword_tag_id: v.number(),
+  matched_text: v.string(),
+  position: v.number(),
+  created_at: v.nullable(v.string()),
+  keyword: v.string(),
+  tag: v.string(),
+  color: v.nullable(v.string()),
+});
+
+/** GET /api/messages/:id/tags. */
+export const MessageTagsResponse = v.object({ tags: v.array(MessageTag) });
+
+export type MessageTagsResponse = v.InferOutput<typeof MessageTagsResponse>;

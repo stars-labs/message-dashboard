@@ -1,12 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from 'bun:test';
 import * as v from 'valibot';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
-import { setupKeywordRoutes } from './keywords.js';
-
-type Router = Parameters<typeof setupKeywordRoutes>[0];
-type Handler = Parameters<Router['get']>[1];
-type KeywordRequest = Parameters<Handler>[0];
-type Method = 'get' | 'post' | 'put' | 'delete';
 
 let errorSpy: Mock<typeof console.error>;
 
@@ -17,24 +11,6 @@ beforeEach(() => {
 afterEach(() => {
   errorSpy.mockRestore();
 });
-
-function routes() {
-  const registered = new Map<string, Handler>();
-  const router: Router = {
-    get: (path, handler) => registered.set(`get ${path}`, handler),
-    post: (path, handler) => registered.set(`post ${path}`, handler),
-    put: (path, handler) => registered.set(`put ${path}`, handler),
-    delete: (path, handler) => registered.set(`delete ${path}`, handler),
-  };
-  setupKeywordRoutes(router);
-  return registered;
-}
-
-function route(method: Method, path: string): Handler {
-  const handler = routes().get(`${method} ${path}`);
-  if (!handler) throw new Error(`no ${method} ${path} route`);
-  return handler;
-}
 
 function database() {
   const d1 = sqliteD1();
@@ -84,6 +60,54 @@ function database() {
 }
 
 type TestDb = ReturnType<typeof database>;
+
+import { memoryKv } from '../../test/memory-kv.js';
+import { callWorker } from '../../test/worker-harness.js';
+
+const ADMIN = 'session-admin';
+const VIEWER = 'session-viewer';
+
+function session(roles: string[]): string {
+  return JSON.stringify({
+    user: { id: 'auth0|admin', email: 'someone@example.test', roles },
+    expires_at: Date.now() + 3_600_000,
+  });
+}
+
+const SESSIONS = memoryKv({
+  [ADMIN]: session(['sms-admin']),
+  [VIEWER]: session(['sms-viewer']),
+});
+
+async function call(
+  { d1 }: TestDb,
+  method: string,
+  path: string,
+  { body, token = ADMIN }: { body?: string; token?: string } = {},
+): Promise<Response> {
+  const { response } = await callWorker(method, path, {
+    headers: {
+      Cookie: `auth_token=${token}`,
+      ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+    },
+    ...(body === undefined ? {} : { body }),
+    bindings: { DB: d1, SESSIONS },
+  });
+  return response;
+}
+
+const Problem = v.looseObject({
+  type: v.string(),
+  title: v.string(),
+  status: v.number(),
+  detail: v.string(),
+  code: v.string(),
+});
+
+async function problemOf(response: Response) {
+  expect(response.headers.get('Content-Type')).toBe('application/problem+json');
+  return v.parse(Problem, await response.json());
+}
 
 function addKeyword(
   { db }: TestDb,
@@ -136,44 +160,6 @@ function addTag(
   ).run(tag.message_id, tag.keyword_tag_id, tag.matched_text ?? 'code', tag.position);
 }
 
-function request(
-  { d1 }: TestDb,
-  {
-    path = '/api/keywords',
-    method = 'GET',
-    body,
-    params = {},
-    roles = ['admin'],
-    credential = 'Bearer session-1',
-  }: {
-    path?: string;
-    method?: string;
-    body?: string;
-    params?: Record<string, string>;
-    roles?: string[];
-    credential?: string;
-  } = {},
-): KeywordRequest {
-  const sessions = new Map([
-    [
-      'session-1',
-      JSON.stringify({ user: { id: 'auth0|admin', roles }, expires_at: Date.now() + 60_000 }),
-    ],
-  ]);
-  const init: RequestInit = { method, headers: { Authorization: credential } };
-  if (body !== undefined) init.body = body;
-  return Object.assign(new Request(`https://example.com${path}`, init), {
-    env: {
-      DB: d1,
-      SESSIONS: {
-        get: (key: string) => Promise.resolve(sessions.get(key) ?? null),
-        delete: () => Promise.resolve(),
-      },
-    },
-    params,
-  });
-}
-
 const Body = v.record(v.string(), v.unknown());
 
 async function bodyOf(response: Response) {
@@ -190,22 +176,16 @@ describe('keyword rule D1 reads', () => {
   test('creating a keyword never scans or writes historical messages', async () => {
     const db = database();
 
-    const response = await route(
-      'post',
-      '/api/keywords',
-    )(
-      request(db, {
-        method: 'POST',
-        body: JSON.stringify({
-          keyword: 'code',
-          tag: 'OTP',
-          color: '#3B82F6',
-          priority: 0,
-          case_sensitive: false,
-          whole_word: false,
-        }),
+    const response = await call(db, 'POST', '/api/keywords', {
+      body: JSON.stringify({
+        keyword: 'code',
+        tag: 'OTP',
+        color: '#3B82F6',
+        priority: 0,
+        case_sensitive: false,
+        whole_word: false,
       }),
-    );
+    });
 
     expect(response.status).toBe(201);
     expect(db.statements).toHaveLength(3);
@@ -216,16 +196,8 @@ describe('keyword rule D1 reads', () => {
     const db = database();
     addKeyword(db, { keyword: 'code' });
 
-    const handler = route('put', '/api/keywords/:id');
     const update = (body: unknown) =>
-      handler(
-        request(db, {
-          method: 'PUT',
-          path: '/api/keywords/1',
-          body: JSON.stringify(body),
-          params: { id: '1' },
-        }),
-      );
+      call(db, 'PUT', '/api/keywords/1', { body: JSON.stringify(body) });
 
     const response = await update({ tag: 'Login' });
     expect(response.status).toBe(200);
@@ -246,16 +218,9 @@ describe('keyword rule D1 reads', () => {
     addTag(db, { message_id: 'm-1', keyword_tag_id: 1, position: 0 });
     addTag(db, { message_id: 'm-1', keyword_tag_id: 2, position: 5 });
 
-    const response = await route(
-      'post',
-      '/api/messages/batch-tags',
-    )(
-      request(db, {
-        method: 'POST',
-        path: '/api/messages/batch-tags',
-        body: JSON.stringify({ messageIds: ['m-1'] }),
-      }),
-    );
+    const response = await call(db, 'POST', '/api/messages/batch-tags', {
+      body: JSON.stringify({ messageIds: ['m-1'] }),
+    });
 
     expect(response.status).toBe(200);
     expect(db.statements.join('\n')).toContain('kt.is_active = TRUE');
@@ -266,54 +231,27 @@ describe('keyword rule D1 reads', () => {
   });
 });
 
-describe('route registration', () => {
-  test('registers every keyword route', () => {
-    expect([...routes().keys()].sort()).toEqual([
-      'delete /api/keywords/:id',
-      'get /api/keywords',
-      'get /api/keywords/:id',
-      'get /api/messages/:id/tags',
-      'post /api/keywords',
-      'post /api/keywords/:id/history',
-      'post /api/messages/batch-tags',
-      'put /api/keywords/:id',
-    ]);
-  });
-});
-
 describe('authorization', () => {
-  const guarded: { method: Method; path: string; httpMethod: string; viewerAllowed: boolean }[] = [
-    { method: 'get', path: '/api/keywords', httpMethod: 'GET', viewerAllowed: false },
-    { method: 'get', path: '/api/keywords/:id', httpMethod: 'GET', viewerAllowed: false },
-    { method: 'post', path: '/api/keywords', httpMethod: 'POST', viewerAllowed: false },
-    { method: 'put', path: '/api/keywords/:id', httpMethod: 'PUT', viewerAllowed: false },
-    { method: 'delete', path: '/api/keywords/:id', httpMethod: 'DELETE', viewerAllowed: false },
-    { method: 'post', path: '/api/keywords/:id/history', httpMethod: 'POST', viewerAllowed: false },
-    { method: 'post', path: '/api/messages/batch-tags', httpMethod: 'POST', viewerAllowed: true },
-    { method: 'get', path: '/api/messages/:id/tags', httpMethod: 'GET', viewerAllowed: true },
+  const guarded: { method: string; path: string; viewerAllowed: boolean }[] = [
+    { method: 'GET', path: '/api/keywords', viewerAllowed: false },
+    { method: 'GET', path: '/api/keywords/1', viewerAllowed: false },
+    { method: 'POST', path: '/api/keywords', viewerAllowed: false },
+    { method: 'PUT', path: '/api/keywords/1', viewerAllowed: false },
+    { method: 'DELETE', path: '/api/keywords/1', viewerAllowed: false },
+    { method: 'POST', path: '/api/keywords/1/history', viewerAllowed: false },
+    { method: 'POST', path: '/api/messages/batch-tags', viewerAllowed: true },
+    { method: 'GET', path: '/api/messages/m-1/tags', viewerAllowed: true },
   ];
 
-  for (const { method, path, httpMethod, viewerAllowed } of guarded) {
+  for (const { method, path, viewerAllowed } of guarded) {
     test(`${method} ${path} answers 401 without a credential the middleware accepts`, async () => {
-      const response = await route(
-        method,
-        path,
-      )(
-        request(database(), {
-          method: httpMethod,
-          credential: 'Bearer unknown',
-          params: { id: '1' },
-        }),
-      );
+      const response = await call(database(), method, path, { token: 'unknown' });
       expect(response.status).toBe(401);
     });
 
     if (!viewerAllowed) {
       test(`${method} ${path} answers 403 to a role without the permission`, async () => {
-        const response = await route(
-          method,
-          path,
-        )(request(database(), { method: httpMethod, roles: ['viewer'], params: { id: '1' } }));
+        const response = await call(database(), method, path, { token: VIEWER });
         expect(response.status).toBe(403);
       });
     }
@@ -321,19 +259,16 @@ describe('authorization', () => {
 
   test('a viewer may read message tags', async () => {
     const db = database();
-    const response = await route(
-      'get',
-      '/api/messages/:id/tags',
-    )(request(db, { roles: ['viewer'], params: { id: 'm-1' } }));
+    const response = await call(db, 'GET', '/api/messages/m-1/tags', { token: VIEWER });
     expect(response.status).toBe(200);
   });
 
   test('a viewer may read batch tags', async () => {
     const db = database();
-    const response = await route(
-      'post',
-      '/api/messages/batch-tags',
-    )(request(db, { method: 'POST', roles: ['viewer'], body: '{"messageIds":["m-1"]}' }));
+    const response = await call(db, 'POST', '/api/messages/batch-tags', {
+      token: VIEWER,
+      body: '{"messageIds":["m-1"]}',
+    });
     expect(response.status).toBe(200);
   });
 });
@@ -350,7 +285,7 @@ describe('GET /api/keywords', () => {
     addTag(db, { message_id: 'm-1', keyword_tag_id: 1, position: 9 });
     addTag(db, { message_id: 'm-2', keyword_tag_id: 1, position: 0 });
 
-    const response = await route('get', '/api/keywords')(request(db));
+    const response = await call(db, 'GET', '/api/keywords');
     const body = await bodyOf(response);
 
     expect(response.status).toBe(200);
@@ -367,7 +302,7 @@ describe('GET /api/keywords', () => {
     const db = database();
     addKeyword(db, { keyword: 'code', tag: 'OTP', priority: 3, case_sensitive: 1 });
 
-    const body = await bodyOf(await route('get', '/api/keywords')(request(db)));
+    const body = await bodyOf(await call(db, 'GET', '/api/keywords'));
 
     expect(body).toMatchObject({
       keywords: [
@@ -391,19 +326,19 @@ describe('GET /api/keywords', () => {
     const db = database();
     db.db.run('DROP TABLE message_tags');
 
-    const response = await route('get', '/api/keywords')(request(db));
+    const response = await call(db, 'GET', '/api/keywords');
 
     expect(response.status).toBe(500);
-    expect(await bodyOf(response)).toEqual({ error: 'Failed to fetch keywords' });
+    expect(await problemOf(response)).toMatchObject({
+      code: 'INTERNAL_SERVER_ERROR',
+      detail: 'Failed to fetch keywords',
+    });
   });
 });
 
 describe('GET /api/keywords/:id', () => {
   function fetchOne(db: TestDb, id: string) {
-    return route(
-      'get',
-      '/api/keywords/:id',
-    )(request(db, { path: `/api/keywords/${id}`, params: { id } }));
+    return call(db, 'GET', `/api/keywords/${id}`);
   }
 
   test('answers the keyword with its usage count', async () => {
@@ -424,7 +359,10 @@ describe('GET /api/keywords/:id', () => {
     const response = await fetchOne(database(), '9');
 
     expect(response.status).toBe(404);
-    expect(await bodyOf(response)).toEqual({ error: 'Keyword not found' });
+    expect(await problemOf(response)).toMatchObject({
+      code: 'NOT_FOUND',
+      detail: 'Keyword not found',
+    });
   });
 
   test('answers 404 to an id that is not a number', async () => {
@@ -441,13 +379,16 @@ describe('GET /api/keywords/:id', () => {
     const response = await fetchOne(db, '1');
 
     expect(response.status).toBe(500);
-    expect(await bodyOf(response)).toEqual({ error: 'Failed to fetch keyword' });
+    expect(await problemOf(response)).toMatchObject({
+      code: 'INTERNAL_SERVER_ERROR',
+      detail: 'Failed to fetch keyword',
+    });
   });
 });
 
 describe('POST /api/keywords', () => {
   function create(db: TestDb, body: string) {
-    return route('post', '/api/keywords')(request(db, { method: 'POST', body }));
+    return call(db, 'POST', '/api/keywords', { body });
   }
 
   test('stores the keyword and answers the stored row', async () => {
@@ -565,7 +506,7 @@ describe('POST /api/keywords', () => {
       const response = await create(db, JSON.stringify(body));
 
       expect(response.status).toBe(400);
-      expect(await bodyOf(response)).toEqual({ error: message });
+      expect(await problemOf(response)).toMatchObject({ code: 'BAD_REQUEST', detail: message });
       expect(keywordRows(db)).toEqual([]);
     });
   }
@@ -595,7 +536,10 @@ describe('POST /api/keywords', () => {
       const response = await create(db, JSON.stringify(body));
 
       expect(response.status).toBe(400);
-      expect(await bodyOf(response)).toEqual({ error: 'Keyword and tag are required' });
+      expect(await problemOf(response)).toMatchObject({
+        code: 'BAD_REQUEST',
+        detail: 'Keyword and tag are required',
+      });
       expect(keywordRows(db)).toEqual([]);
     });
   }
@@ -621,7 +565,7 @@ describe('POST /api/keywords', () => {
       const response = await create(db, JSON.stringify({ keyword: 'code', tag: 'OTP', color }));
 
       expect(response.status).toBe(400);
-      expect(await bodyOf(response)).toEqual({ error: message });
+      expect(await problemOf(response)).toMatchObject({ code: 'BAD_REQUEST', detail: message });
       expect(keywordRows(db)).toEqual([]);
     });
   }
@@ -633,7 +577,10 @@ describe('POST /api/keywords', () => {
     const response = await create(db, JSON.stringify({ keyword: 'code', tag: 'OTP' }));
 
     expect(response.status).toBe(409);
-    expect(await bodyOf(response)).toEqual({ error: 'Keyword already exists' });
+    expect(await problemOf(response)).toMatchObject({
+      code: 'CONFLICT',
+      detail: 'Keyword already exists',
+    });
   });
 
   test('answers 400 when the body is not JSON', async () => {
@@ -642,7 +589,7 @@ describe('POST /api/keywords', () => {
     const response = await create(db, 'not json');
 
     expect(response.status).toBe(400);
-    expect(await bodyOf(response)).toEqual({ error: 'Body must be JSON' });
+    expect(await problemOf(response)).toMatchObject({ code: 'BAD_REQUEST' });
     expect(keywordRows(db)).toEqual([]);
   });
 
@@ -651,20 +598,18 @@ describe('POST /api/keywords', () => {
     db.db.run('DROP TABLE keyword_tags');
 
     const response = await create(db, JSON.stringify({ keyword: 'code', tag: 'OTP' }));
-    const body = await bodyOf(response);
 
     expect(response.status).toBe(500);
-    expect(body['error']).toBe('Failed to create keyword');
-    expect(body['detail']).toBe('no such table: keyword_tags');
+    expect(await problemOf(response)).toMatchObject({
+      code: 'INTERNAL_SERVER_ERROR',
+      detail: 'Failed to create keyword: no such table: keyword_tags',
+    });
   });
 });
 
 describe('PUT /api/keywords/:id', () => {
   function update(db: TestDb, body: string, id = '1') {
-    return route(
-      'put',
-      '/api/keywords/:id',
-    )(request(db, { method: 'PUT', path: `/api/keywords/${id}`, body, params: { id } }));
+    return call(db, 'PUT', `/api/keywords/${id}`, { body });
   }
 
   function seeded(overrides: Parameters<typeof addKeyword>[1] = { keyword: 'code' }) {
@@ -710,7 +655,10 @@ describe('PUT /api/keywords/:id', () => {
     const response = await update(racing, JSON.stringify({ tag: 'Login' }));
 
     expect(response.status).toBe(404);
-    expect(await bodyOf(response)).toMatchObject({ error: 'Keyword not found' });
+    expect(await problemOf(response)).toMatchObject({
+      code: 'NOT_FOUND',
+      detail: 'Keyword not found',
+    });
   });
 
   test('an empty tag keeps the stored one', async () => {
@@ -778,7 +726,7 @@ describe('PUT /api/keywords/:id', () => {
       const response = await update(db, JSON.stringify(body));
 
       expect(response.status).toBe(400);
-      expect(await bodyOf(response)).toEqual({ error: message });
+      expect(await problemOf(response)).toMatchObject({ code: 'BAD_REQUEST', detail: message });
       expect(keywordRows(db)).toMatchObject([{ tag: 'OTP', priority: 4, is_active: 0 }]);
     });
   }
@@ -834,7 +782,7 @@ describe('PUT /api/keywords/:id', () => {
       const response = await update(db, JSON.stringify({ color }));
 
       expect(response.status).toBe(400);
-      expect(await bodyOf(response)).toEqual({ error: message });
+      expect(await problemOf(response)).toMatchObject({ code: 'BAD_REQUEST', detail: message });
       expect(keywordRows(db)).toMatchObject([{ color: '#112233' }]);
     });
   }
@@ -863,31 +811,36 @@ describe('PUT /api/keywords/:id', () => {
       const response = await update(db, JSON.stringify(body));
 
       expect(response.status).toBe(400);
-      expect(await bodyOf(response)).toEqual({
-        error: 'Keyword and matching options are immutable; create a new keyword instead',
+      expect(await problemOf(response)).toMatchObject({
+        code: 'BAD_REQUEST',
+        detail: 'Keyword and matching options are immutable; create a new keyword instead',
       });
     });
   }
 
-  test('answers 404 to a keyword that does not exist, without reading the colour', async () => {
-    const response = await update(database(), JSON.stringify({ color: 'blue' }), '9');
+  test('answers 404 to a keyword that does not exist', async () => {
+    const response = await update(database(), JSON.stringify({ color: '#10B981' }), '9');
 
     expect(response.status).toBe(404);
-    expect(await bodyOf(response)).toEqual({ error: 'Keyword not found' });
+    expect(await problemOf(response)).toMatchObject({
+      code: 'NOT_FOUND',
+      detail: 'Keyword not found',
+    });
   });
 
   test('answers 400 when the body is not JSON', async () => {
     const response = await update(seeded(), 'not json');
 
     expect(response.status).toBe(400);
-    expect(await bodyOf(response)).toEqual({ error: 'Body must be JSON' });
+    expect(await problemOf(response)).toMatchObject({ code: 'BAD_REQUEST' });
   });
 
-  test('answers 404 to an unknown keyword before it reads the body', async () => {
-    const response = await update(database(), 'not json', '9');
-
-    expect(response.status).toBe(404);
-    expect(await bodyOf(response)).toEqual({ error: 'Keyword not found' });
+  // The contract checks the body before the handler looks the keyword up.
+  test('answers 400 to a body it rejects, whether or not the keyword exists', async () => {
+    for (const body of ['not json', JSON.stringify({ color: 'blue' })]) {
+      const response = await update(database(), body, '9');
+      expect([body, response.status]).toEqual([body, 400]);
+    }
   });
 
   test('answers 500 when the write fails', async () => {
@@ -902,10 +855,7 @@ describe('PUT /api/keywords/:id', () => {
 
 describe('DELETE /api/keywords/:id', () => {
   function remove(db: TestDb, id = '1') {
-    return route(
-      'delete',
-      '/api/keywords/:id',
-    )(request(db, { method: 'DELETE', path: `/api/keywords/${id}`, params: { id } }));
+    return call(db, 'DELETE', `/api/keywords/${id}`);
   }
 
   test('deletes an unreferenced keyword', async () => {
@@ -928,8 +878,9 @@ describe('DELETE /api/keywords/:id', () => {
     const response = await remove(db);
 
     expect(response.status).toBe(409);
-    expect(await bodyOf(response)).toEqual({
-      error: 'Keyword has historical messages; deactivate it instead',
+    expect(await problemOf(response)).toMatchObject({
+      code: 'CONFLICT',
+      detail: 'Keyword has historical messages; deactivate it instead',
     });
     expect(keywordRows(db)).toHaveLength(1);
   });
@@ -938,7 +889,10 @@ describe('DELETE /api/keywords/:id', () => {
     const response = await remove(database(), '9');
 
     expect(response.status).toBe(404);
-    expect(await bodyOf(response)).toEqual({ error: 'Keyword not found' });
+    expect(await problemOf(response)).toMatchObject({
+      code: 'NOT_FOUND',
+      detail: 'Keyword not found',
+    });
   });
 
   test('answers 500 when the read fails', async () => {
@@ -948,16 +902,16 @@ describe('DELETE /api/keywords/:id', () => {
     const response = await remove(db);
 
     expect(response.status).toBe(500);
-    expect(await bodyOf(response)).toEqual({ error: 'Failed to delete keyword' });
+    expect(await problemOf(response)).toMatchObject({
+      code: 'INTERNAL_SERVER_ERROR',
+      detail: 'Failed to delete keyword',
+    });
   });
 });
 
 describe('POST /api/messages/batch-tags', () => {
   function batch(db: TestDb, body: string) {
-    return route(
-      'post',
-      '/api/messages/batch-tags',
-    )(request(db, { method: 'POST', path: '/api/messages/batch-tags', body }));
+    return call(db, 'POST', '/api/messages/batch-tags', { body });
   }
 
   test('groups the active tags by message, in position order', async () => {
@@ -1046,7 +1000,7 @@ describe('POST /api/messages/batch-tags', () => {
       const response = await batch(db, JSON.stringify(body));
 
       expect(response.status).toBe(400);
-      expect(await bodyOf(response)).toEqual({ error: message });
+      expect(await problemOf(response)).toMatchObject({ code: 'BAD_REQUEST', detail: message });
       expect(db.statements).toEqual([]);
     });
   }
@@ -1058,7 +1012,10 @@ describe('POST /api/messages/batch-tags', () => {
     const response = await batch(db, JSON.stringify({ messageIds: ['m-1'] }));
 
     expect(response.status).toBe(500);
-    expect(await bodyOf(response)).toEqual({ error: 'Failed to fetch message tags' });
+    expect(await problemOf(response)).toMatchObject({
+      code: 'INTERNAL_SERVER_ERROR',
+      detail: 'Failed to fetch message tags',
+    });
   });
 
   test('answers 400 when the body is not JSON', async () => {
@@ -1067,7 +1024,7 @@ describe('POST /api/messages/batch-tags', () => {
     const response = await batch(db, 'not json');
 
     expect(response.status).toBe(400);
-    expect(await bodyOf(response)).toEqual({ error: 'Body must be JSON' });
+    expect(await problemOf(response)).toMatchObject({ code: 'BAD_REQUEST' });
   });
 });
 
@@ -1075,17 +1032,7 @@ describe('POST /api/keywords/:id/history', () => {
   const range = { since: '2026-01-01T00:00:00Z', until: '2026-12-31T00:00:00Z' };
 
   function history(db: TestDb, body: string, id = '1') {
-    return route(
-      'post',
-      '/api/keywords/:id/history',
-    )(
-      request(db, {
-        method: 'POST',
-        path: `/api/keywords/${id}/history`,
-        body,
-        params: { id },
-      }),
-    );
+    return call(db, 'POST', `/api/keywords/${id}/history`, { body });
   }
 
   function tagRows({ db }: TestDb) {
@@ -1158,7 +1105,10 @@ describe('POST /api/keywords/:id/history', () => {
     const response = await history(database(), JSON.stringify(range), '9');
 
     expect(response.status).toBe(404);
-    expect(await bodyOf(response)).toEqual({ error: 'Keyword not found' });
+    expect(await problemOf(response)).toMatchObject({
+      code: 'NOT_FOUND',
+      detail: 'Keyword not found',
+    });
   });
 
   test('answers 409 to an inactive keyword', async () => {
@@ -1168,8 +1118,9 @@ describe('POST /api/keywords/:id/history', () => {
     const response = await history(db, JSON.stringify(range));
 
     expect(response.status).toBe(409);
-    expect(await bodyOf(response)).toEqual({
-      error: 'Activate the keyword before applying it to history',
+    expect(await problemOf(response)).toMatchObject({
+      code: 'CONFLICT',
+      detail: 'Activate the keyword before applying it to history',
     });
   });
 
@@ -1191,7 +1142,10 @@ describe('POST /api/keywords/:id/history', () => {
       const response = await history(db, JSON.stringify(body));
 
       expect(response.status).toBe(400);
-      expect(await bodyOf(response)).toEqual({ error: 'A valid history time range is required' });
+      expect(await problemOf(response)).toMatchObject({
+        code: 'BAD_REQUEST',
+        detail: 'A valid history time range is required',
+      });
     });
   }
 
@@ -1211,7 +1165,10 @@ describe('POST /api/keywords/:id/history', () => {
       const response = await history(db, JSON.stringify({ ...range, cursor }));
 
       expect(response.status).toBe(400);
-      expect(await bodyOf(response)).toEqual({ error: 'Invalid history cursor' });
+      expect(await problemOf(response)).toMatchObject({
+        code: 'BAD_REQUEST',
+        detail: 'Invalid history cursor',
+      });
     });
   }
 
@@ -1222,7 +1179,7 @@ describe('POST /api/keywords/:id/history', () => {
     const response = await history(db, 'not json');
 
     expect(response.status).toBe(400);
-    expect(await bodyOf(response)).toEqual({ error: 'Body must be JSON' });
+    expect(await problemOf(response)).toMatchObject({ code: 'BAD_REQUEST' });
   });
 
   test('answers 400 when the body is not an object', async () => {
@@ -1232,7 +1189,10 @@ describe('POST /api/keywords/:id/history', () => {
     const response = await history(db, 'null');
 
     expect(response.status).toBe(400);
-    expect(await bodyOf(response)).toEqual({ error: 'Body must be a JSON object' });
+    expect(await problemOf(response)).toMatchObject({
+      code: 'BAD_REQUEST',
+      detail: 'Body must be a JSON object',
+    });
   });
 
   test('accepts a null cursor as the first page', async () => {
@@ -1247,10 +1207,7 @@ describe('POST /api/keywords/:id/history', () => {
 
 describe('GET /api/messages/:id/tags', () => {
   function tagsOf(db: TestDb, id: string) {
-    return route(
-      'get',
-      '/api/messages/:id/tags',
-    )(request(db, { path: `/api/messages/${id}/tags`, params: { id } }));
+    return call(db, 'GET', `/api/messages/${id}/tags`);
   }
 
   test('answers the active tags of one message with the keyword fields, in position order', async () => {
@@ -1306,6 +1263,9 @@ describe('GET /api/messages/:id/tags', () => {
     const response = await tagsOf(db, 'm-1');
 
     expect(response.status).toBe(500);
-    expect(await bodyOf(response)).toEqual({ error: 'Failed to fetch message tags' });
+    expect(await problemOf(response)).toMatchObject({
+      code: 'INTERNAL_SERVER_ERROR',
+      detail: 'Failed to fetch message tags',
+    });
   });
 });
