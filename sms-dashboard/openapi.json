@@ -124,6 +124,685 @@
         ]
       }
     },
+    "/api/control/devices": {
+      "post": {
+        "operationId": "control.devices",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "modem_reports": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "equipment_id": {
+                          "type": "string"
+                        },
+                        "manufacturer": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "model": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "firmware_revision": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "hardware_revision": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "detected_iccid": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "detected_phone_number": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "detected_operator": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "signal_percent": {
+                          "anyOf": [
+                            {
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "rssi": {
+                          "anyOf": [
+                            {
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "modem_index": {
+                          "anyOf": [
+                            {
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "usb_port": {
+                          "anyOf": [
+                            {
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "usb_path": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "status": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "equipment_id"
+                      ]
+                    }
+                  },
+                  "removed_equipment_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "sync_mode": {
+                    "anyOf": [
+                      {
+                        "enum": [
+                          "incremental",
+                          "full"
+                        ],
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "default": "incremental"
+                  },
+                  "session_id": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "default": null
+                  }
+                },
+                "required": [
+                  "modem_reports",
+                  "removed_equipment_ids"
+                ],
+                "$schema": "https://json-schema.org/draft/2020-12/schema"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "sync_mode": {
+                      "enum": [
+                        "incremental",
+                        "full"
+                      ],
+                      "type": "string"
+                    },
+                    "session_id": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "processed": {
+                      "type": "object",
+                      "properties": {
+                        "modem_reports": {
+                          "type": "number"
+                        },
+                        "modems_disconnected": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "modem_reports",
+                        "modems_disconnected"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "sync_mode",
+                    "session_id",
+                    "processed"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/DaemonError"
+          }
+        },
+        "security": [
+          {
+            "daemonKey": []
+          }
+        ]
+      }
+    },
+    "/api/control/messages": {
+      "post": {
+        "operationId": "control.uploadMessages",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "messages": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "default": "",
+                          "minLength": 1
+                        },
+                        "phone_iccid": {
+                          "type": "string",
+                          "default": "",
+                          "minLength": 1
+                        },
+                        "content": {
+                          "type": "string",
+                          "default": "",
+                          "minLength": 1
+                        },
+                        "phone_number": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "timestamp": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": []
+                    }
+                  }
+                },
+                "required": [
+                  "messages"
+                ],
+                "$schema": "https://json-schema.org/draft/2020-12/schema"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "processed": {
+                      "type": "number"
+                    },
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "enum": [
+                              "stored",
+                              "already_stored",
+                              "rejected"
+                            ],
+                            "type": "string"
+                          },
+                          "retryable": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "status"
+                        ]
+                      }
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "processed",
+                    "results",
+                    "message"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/DaemonError"
+          }
+        },
+        "security": [
+          {
+            "daemonKey": []
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "control.clearMessages",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "message"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/DaemonError"
+          }
+        },
+        "security": [
+          {
+            "daemonKey": []
+          }
+        ]
+      }
+    },
+    "/api/control/cleanup-test-data": {
+      "post": {
+        "operationId": "control.cleanupTestData",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "phoneIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "default": "",
+                      "minLength": 1
+                    },
+                    "minItems": 1
+                  }
+                },
+                "required": [
+                  "phoneIds"
+                ],
+                "$schema": "https://json-schema.org/draft/2020-12/schema"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "deleted": {
+                      "type": "number"
+                    },
+                    "cleanedNullIccid": {
+                      "type": "number"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "deleted",
+                    "cleanedNullIccid",
+                    "message"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/DaemonError"
+          }
+        },
+        "security": [
+          {
+            "daemonKey": []
+          }
+        ]
+      }
+    },
+    "/api/control/pending-sms": {
+      "get": {
+        "operationId": "control.pendingSms",
+        "parameters": [
+          {
+            "name": "x-daemon-session-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "pending_messages": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "phone_iccid": {
+                            "type": "string"
+                          },
+                          "phone_number": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "content": {
+                            "type": "string"
+                          },
+                          "recipient": {
+                            "type": "string"
+                          },
+                          "purpose": {
+                            "enum": [
+                              "user",
+                              "balance_maintenance"
+                            ],
+                            "type": "string"
+                          },
+                          "created_at": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "phone_iccid",
+                          "phone_number",
+                          "content",
+                          "recipient",
+                          "purpose",
+                          "created_at"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "pending_messages"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/DaemonError"
+          }
+        },
+        "security": [
+          {
+            "daemonKey": []
+          }
+        ]
+      }
+    },
+    "/api/control/sms-result": {
+      "post": {
+        "operationId": "control.smsResult",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "message_id": {
+                    "type": "string",
+                    "default": "",
+                    "minLength": 1
+                  },
+                  "outcome": {
+                    "enum": [
+                      "confirmed",
+                      "submitted_unconfirmed",
+                      "failed"
+                    ],
+                    "type": "string"
+                  },
+                  "error_message": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "sms_id": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "outcome"
+                ],
+                "$schema": "https://json-schema.org/draft/2020-12/schema"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "message"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/DaemonError"
+          }
+        },
+        "security": [
+          {
+            "daemonKey": []
+          }
+        ]
+      }
+    },
     "/api/live": {
       "get": {
         "operationId": "health.live",

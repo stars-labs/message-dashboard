@@ -2,15 +2,23 @@ import { ORPCError } from '@orpc/server';
 import { json } from '../lib/response.js';
 import * as v from 'valibot';
 import { queryAll, type D1, type D1Batch } from '../lib/d1.js';
-import { readBody, type MissingKeyMessages } from '../lib/request-body.js';
 import { secretMatches } from '../lib/secret.js';
 import { textOr } from '../../shared/text.js';
-import type { ModemReportsRequest } from '../../shared/daemon-wire/ModemReportsRequest.js';
-import type { MessageBatchRequest } from '../../shared/daemon-wire/MessageBatchRequest.js';
 import type { PendingSms } from '../../shared/daemon-wire/PendingSms.js';
-import type { SmsResult } from '../../shared/daemon-wire/SmsResult.js';
-import type { UploadResult } from '../../shared/daemon-wire/UploadResult.js';
-import { acceptsWire } from '../../shared/wire-schema.js';
+import {
+  INVALID_REMOVED,
+  INVALID_SYNC,
+  type CleanupBody,
+  type CleanupResponse,
+  type ClearMessagesResponse,
+  type DevicesBody,
+  type DevicesResponse,
+  type PendingSmsResponse,
+  type SmsResultBody,
+  type SmsResultResponse,
+  type UploadBody,
+  type UploadResponse,
+} from '../../shared/api/daemon.js';
 import { processCarrierBillMessages } from '../utils/carrier-billing.js';
 import { errorText } from '../../shared/error-text.js';
 import { normalizeHealthSnapshot } from '../utils/daemon-health.js';
@@ -40,120 +48,6 @@ interface StoredMessage {
   purpose: 'user' | 'balance_maintenance';
   balance_check_id: string | null;
 }
-
-const ARRAYS_REQUIRED = 'modem_reports and removed_equipment_ids must be arrays';
-const INVALID_REPORT = 'Invalid modem report';
-const INVALID_SYNC = 'Invalid sync mode or missing full-sync session ID';
-const INVALID_REMOVED = 'Invalid or conflicting removed equipment IDs';
-const MESSAGES_REQUIRED = 'Messages must be an array';
-const MESSAGE_ID_REQUIRED = 'Every message requires a daemon-assigned id';
-const MESSAGE_FIELDS_REQUIRED = 'Every message requires phone_iccid and content';
-const MESSAGE_FIELDS_NOT_TEXT = 'phone_number and timestamp must be text';
-const MESSAGE_ID_MISSING = 'message_id is required';
-const INVALID_OUTCOME = 'outcome must be confirmed, submitted_unconfirmed, or failed';
-const PHONE_IDS_REQUIRED = 'phoneIds must be an array';
-const PHONE_IDS_INVALID = 'phoneIds must be a non-empty array of ICCIDs';
-
-/** Required text whose absence answers the same message as a wrong type or an empty value. */
-function requiredText(message: string) {
-  return v.pipe(v.optional(v.string(message), ''), v.minLength(1, message));
-}
-
-const ReportText = v.nullish(v.string(INVALID_REPORT));
-const ReportInteger = v.nullish(v.pipe(v.number(INVALID_REPORT), v.integer(INVALID_REPORT)));
-
-/** One entry of the daemon's modem_reports array (orange-pi-daemon types.rs ModemReport). */
-const ModemReportSchema = v.object(
-  {
-    equipment_id: v.string(INVALID_REPORT),
-    manufacturer: ReportText,
-    model: ReportText,
-    firmware_revision: ReportText,
-    hardware_revision: ReportText,
-    detected_iccid: ReportText,
-    detected_phone_number: ReportText,
-    detected_operator: ReportText,
-    signal_percent: ReportInteger,
-    rssi: ReportInteger,
-    modem_index: ReportInteger,
-    usb_port: ReportInteger,
-    usb_path: ReportText,
-    status: ReportText,
-  },
-  INVALID_REPORT,
-);
-
-const DevicesBodySchema = acceptsWire<ModemReportsRequest, 'timestamp'>()(
-  v.object(
-    {
-      modem_reports: v.array(ModemReportSchema, ARRAYS_REQUIRED),
-      removed_equipment_ids: v.array(v.string(INVALID_REMOVED), ARRAYS_REQUIRED),
-      sync_mode: v.nullish(v.picklist(['incremental', 'full'], INVALID_SYNC), 'incremental'),
-      session_id: v.nullish(v.string(INVALID_SYNC), null),
-    },
-    ARRAYS_REQUIRED,
-  ),
-);
-
-const DEVICES_MISSING_KEY_MESSAGES = {
-  modem_reports: ARRAYS_REQUIRED,
-  removed_equipment_ids: ARRAYS_REQUIRED,
-} as const satisfies MissingKeyMessages<typeof DevicesBodySchema>;
-
-const UploadBodySchema = acceptsWire<MessageBatchRequest, 'direction'>()(
-  v.object(
-    {
-      messages: v.array(
-        v.object(
-          {
-            id: requiredText(MESSAGE_ID_REQUIRED),
-            phone_iccid: requiredText(MESSAGE_FIELDS_REQUIRED),
-            content: requiredText(MESSAGE_FIELDS_REQUIRED),
-            phone_number: v.nullish(v.string(MESSAGE_FIELDS_NOT_TEXT)),
-            timestamp: v.nullish(v.string(MESSAGE_FIELDS_NOT_TEXT)),
-          },
-          MESSAGE_ID_REQUIRED,
-        ),
-        MESSAGES_REQUIRED,
-      ),
-    },
-    MESSAGES_REQUIRED,
-  ),
-);
-
-const UPLOAD_MISSING_KEY_MESSAGES = {
-  messages: MESSAGES_REQUIRED,
-} as const satisfies MissingKeyMessages<typeof UploadBodySchema>;
-
-const SmsResultBodySchema = acceptsWire<SmsResult>()(
-  v.object(
-    {
-      message_id: requiredText(MESSAGE_ID_MISSING),
-      outcome: v.picklist(['confirmed', 'submitted_unconfirmed', 'failed'], INVALID_OUTCOME),
-      error_message: v.nullish(v.string('error_message must be text')),
-      sms_id: v.nullish(v.string('sms_id must be text')),
-    },
-    MESSAGE_ID_MISSING,
-  ),
-);
-
-const SMS_RESULT_MISSING_KEY_MESSAGES = {
-  outcome: INVALID_OUTCOME,
-} as const satisfies MissingKeyMessages<typeof SmsResultBodySchema>;
-
-const CleanupBodySchema = v.object(
-  {
-    phoneIds: v.pipe(
-      v.array(requiredText(PHONE_IDS_INVALID), PHONE_IDS_REQUIRED),
-      v.minLength(1, PHONE_IDS_INVALID),
-    ),
-  },
-  PHONE_IDS_REQUIRED,
-);
-
-const CLEANUP_MISSING_KEY_MESSAGES = {
-  phoneIds: PHONE_IDS_REQUIRED,
-} as const satisfies MissingKeyMessages<typeof CleanupBodySchema>;
 
 const IdRow = v.object({ id: v.string() });
 
@@ -186,12 +80,24 @@ interface DaemonRequest<Db> {
   env: { API_KEY?: string; DB: Db };
 }
 
-interface BodyRequest<Db> extends DaemonRequest<Db> {
-  text(): Promise<string>;
+/** A daemon route as the contract hands it over, once the API key has been checked. */
+interface DaemonCall<Db> {
+  env: { DB: Db };
 }
 
-interface UploadRequest extends BodyRequest<D1 & D1Batch<'run'>> {
+interface UploadCall extends DaemonCall<D1 & D1Batch<'run'>> {
   ctx: { waitUntil(promise: Promise<unknown>): void };
+}
+
+/** A refusal in the route's own error format. */
+function refused(code: 'BAD_REQUEST' | 'NOT_FOUND', message: string): ORPCError<string, undefined> {
+  return new ORPCError(code, { message });
+}
+
+/** Rethrows a refusal the handler chose; any other failure answers 500 with `message`. */
+function failed(error: unknown, message: string): never {
+  if (error instanceof ORPCError) throw error;
+  throw new ORPCError('INTERNAL_SERVER_ERROR', { message });
 }
 
 /**
@@ -232,24 +138,18 @@ function normalizeTimestamp(value: string | null | undefined): string {
 
 export const controlHandler = {
   // Synchronize the daemon's canonical modem reports without rewriting unchanged rows.
-  async updateDevices(request: BodyRequest<D1<'run'> & D1Batch<'run'>>): Promise<Response> {
-    const { env } = request;
-
-    const unauthorized = await requireApiKey(request);
-    if (unauthorized) return unauthorized;
-
-    const body = await readBody(request, DevicesBodySchema, DEVICES_MISSING_KEY_MESSAGES);
-    if (!body.ok) return json({ error: body.error }, 400);
+  async updateDevices(
+    { env }: DaemonCall<D1<'run'> & D1Batch<'run'>>,
+    body: v.InferOutput<typeof DevicesBody>,
+  ): Promise<DevicesResponse> {
     const {
       modem_reports: reports,
       removed_equipment_ids: removedEquipmentIds,
       sync_mode,
       session_id,
-    } = body.value;
+    } = body;
 
-    if (sync_mode === 'full' && !session_id) {
-      return json({ error: INVALID_SYNC }, 400);
-    }
+    if (sync_mode === 'full' && !session_id) throw refused('BAD_REQUEST', INVALID_SYNC);
 
     try {
       console.log(
@@ -265,7 +165,7 @@ export const controlHandler = {
         removedIds.some((id) => !id) ||
         acceptedReports.some((report) => removedIds.includes(report.equipment_id))
       ) {
-        return json({ error: INVALID_REMOVED }, 400);
+        throw refused('BAD_REQUEST', INVALID_REMOVED);
       }
       const verificationStatus = sync_mode === 'full' ? 'verified' : null;
       const lastVerifiedSession = sync_mode === 'full' ? session_id : null;
@@ -411,7 +311,7 @@ export const controlHandler = {
         reconciledDisconnected = disconnectResult.meta.changes;
       }
 
-      return json({
+      return {
         success: true,
         sync_mode,
         session_id,
@@ -419,27 +319,25 @@ export const controlHandler = {
           modem_reports: acceptedReports.length,
           modems_disconnected: explicitlyDisconnected + reconciledDisconnected,
         },
-      });
+      };
     } catch (error) {
+      if (error instanceof ORPCError) throw error;
       console.error('[control] Database error in updateDevices:', error);
-      return json({ success: false, error: 'Failed to update devices' }, 500);
+      // A plain route, but a failure has always answered in the flagged format.
+      throw new ORPCError('INTERNAL_SERVER_ERROR', {
+        data: { wire: { success: false, error: 'Failed to update devices' } },
+      });
     }
   },
 
   // Upload messages from Orange Pi
-  async uploadMessages(request: UploadRequest): Promise<Response> {
-    const { env } = request;
-
-    const unauthorized = await requireApiKey(request);
-    if (unauthorized) return unauthorized;
-
-    const body = await readBody(request, UploadBodySchema, UPLOAD_MISSING_KEY_MESSAGES);
-    if (!body.ok) return json({ success: false, error: body.error }, 400);
-    const { messages } = body.value;
-
+  async uploadMessages(
+    { env, ctx }: UploadCall,
+    { messages }: v.InferOutput<typeof UploadBody>,
+  ): Promise<UploadResponse> {
     try {
       let processed = 0;
-      const results: UploadResult[] = [];
+      const results: UploadResponse['results'] = [];
       const newMessages: StoredMessage[] = [];
 
       const insertStmt = env.DB.prepare(`
@@ -559,7 +457,7 @@ export const controlHandler = {
 
       // Process new messages with AI and keywords (async, don't wait)
       if (newMessages.length > 0) {
-        request.ctx.waitUntil(
+        ctx.waitUntil(
           Promise.all([
             Promise.all(
               newMessages.map(async (msg) => {
@@ -575,29 +473,23 @@ export const controlHandler = {
         );
       }
 
-      return json({
+      return {
         success: true,
         processed,
         results,
         message: `Successfully uploaded ${String(processed)} messages`,
-      });
+      };
     } catch (error) {
       console.error('[control] Upload messages error:', error);
-      return json({ success: false, error: `Failed to upload messages: ${errorText(error)}` }, 500);
+      failed(error, `Failed to upload messages: ${errorText(error)}`);
     }
   },
 
   // Cleanup test data
-  async cleanupTestData(request: BodyRequest<D1<'run'>>): Promise<Response> {
-    const { env } = request;
-
-    const unauthorized = await requireApiKey(request);
-    if (unauthorized) return unauthorized;
-
-    const body = await readBody(request, CleanupBodySchema, CLEANUP_MISSING_KEY_MESSAGES);
-    if (!body.ok) return json({ success: false, error: body.error }, 400);
-    const { phoneIds } = body.value;
-
+  async cleanupTestData(
+    { env }: DaemonCall<D1<'run'>>,
+    { phoneIds }: v.InferOutput<typeof CleanupBody>,
+  ): Promise<CleanupResponse> {
     try {
       // Delete test SIMs by ICCID
       const placeholders = phoneIds.map(() => '?').join(',');
@@ -610,15 +502,15 @@ export const controlHandler = {
         `DELETE FROM sims WHERE iccid IS NULL OR iccid = ''`,
       ).run();
 
-      return json({
+      return {
         success: true,
         deleted: result.meta.changes,
         cleanedNullIccid: cleanupNullIccid.meta.changes,
         message: `Deleted ${String(result.meta.changes)} test SIMs and ${String(cleanupNullIccid.meta.changes)} SIMs without ICCID`,
-      });
+      };
     } catch (error) {
       console.error('Cleanup error:', error);
-      return json({ success: false, error: 'Failed to cleanup test data' }, 500);
+      failed(error, 'Failed to cleanup test data');
     }
   },
 
@@ -631,18 +523,15 @@ export const controlHandler = {
   //
   // The atomic transition to 'processing' prevents duplicate sends in the race condition
   // where daemon polls again before the SMS send completes and status is updated to 'sent'.
-  async getPendingSMS(request: DaemonRequest<D1<'all' | 'run'>>): Promise<Response> {
-    const { env } = request;
-
-    const unauthorized = await requireApiKey(request);
-    if (unauthorized) return unauthorized;
-
+  async getPendingSMS(
+    { env }: DaemonCall<D1<'all' | 'run'>>,
+    rawDaemonSessionId: string | undefined,
+  ): Promise<PendingSmsResponse> {
     try {
-      const rawDaemonSessionId = request.headers.get('X-Daemon-Session-Id');
       const daemonSessionId = normalizeDaemonSessionId(rawDaemonSessionId);
 
       if (rawDaemonSessionId && !daemonSessionId) {
-        return json({ success: false, error: 'Invalid daemon session ID' }, 400);
+        throw refused('BAD_REQUEST', 'Invalid daemon session ID');
       }
 
       // A message claimed by a previous daemon process has an indeterminate
@@ -713,7 +602,7 @@ export const controlHandler = {
       );
 
       if (pending.length === 0) {
-        return json({ success: true, pending_messages: [] });
+        return { success: true, pending_messages: [] };
       }
 
       const ids = pending.map((row) => row.id);
@@ -744,24 +633,18 @@ export const controlHandler = {
       );
 
       const pendingMessages = messages satisfies PendingSms[];
-      return json({ success: true, pending_messages: pendingMessages });
+      return { success: true, pending_messages: pendingMessages };
     } catch (error) {
       console.error('Get pending SMS error:', error);
-      return json({ success: false, error: 'Failed to get pending SMS' }, 500);
+      failed(error, 'Failed to get pending SMS');
     }
   },
 
   // Update SMS send result from daemon
-  async updateSMSResult(request: BodyRequest<D1<'run'>>): Promise<Response> {
-    const { env } = request;
-
-    const unauthorized = await requireApiKey(request);
-    if (unauthorized) return unauthorized;
-
-    const body = await readBody(request, SmsResultBodySchema, SMS_RESULT_MISSING_KEY_MESSAGES);
-    if (!body.ok) return json({ success: false, error: body.error }, 400);
-    const { message_id, outcome, error_message, sms_id } = body.value;
-
+  async updateSMSResult(
+    { env }: DaemonCall<D1<'run'>>,
+    { message_id, outcome, error_message, sms_id }: v.InferOutput<typeof SmsResultBody>,
+  ): Promise<SmsResultResponse> {
     try {
       const result = await env.DB.prepare(
         `
@@ -780,31 +663,26 @@ export const controlHandler = {
         .run();
 
       if (result.meta.changes === 0) {
-        return json({ success: false, error: 'Message not found' }, 404);
+        throw refused('NOT_FOUND', 'Message not found');
       }
 
       await updateBalanceCheckForSmsResult(env.DB, message_id, outcome, error_message ?? null);
 
-      return json({ success: true, message: 'SMS result updated successfully' });
+      return { success: true, message: 'SMS result updated successfully' };
     } catch (error) {
       console.error('Update SMS result error:', error);
-      return json({ success: false, error: 'Failed to update SMS result' }, 500);
+      failed(error, 'Failed to update SMS result');
     }
   },
 
   // Clear all messages (admin endpoint)
-  async clearMessages(request: DaemonRequest<D1<'run'>>): Promise<Response> {
-    const { env } = request;
-
-    const unauthorized = await requireApiKey(request);
-    if (unauthorized) return unauthorized;
-
+  async clearMessages({ env }: DaemonCall<D1<'run'>>): Promise<ClearMessagesResponse> {
     try {
       const result = await env.DB.prepare('DELETE FROM messages').run();
-      return json({ success: true, message: `Cleared ${String(result.meta.changes)} messages` });
+      return { success: true, message: `Cleared ${String(result.meta.changes)} messages` };
     } catch (error) {
       console.error('[control] Clear messages error:', error);
-      return json({ success: false, error: `Failed to clear messages: ${errorText(error)}` }, 500);
+      failed(error, `Failed to clear messages: ${errorText(error)}`);
     }
   },
 };

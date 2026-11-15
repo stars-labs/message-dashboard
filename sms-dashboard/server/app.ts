@@ -1,5 +1,4 @@
 import { handleCORS, corsPreflight } from './middleware/cors.js';
-import { controlHandler } from './handlers/control.js';
 import { auth0Handler } from './handlers/auth0.js';
 import { balanceQueriesHandler } from './handlers/balance-queries.js';
 import { balanceSkillRunnerHandler } from './handlers/balance-skill-runner.js';
@@ -12,7 +11,6 @@ import { Router } from './router.js';
 import { contractRoutes, handleContract } from './contract/handler.js';
 import { problemResponse } from './contract/errors.js';
 import type { AppRequest } from './worker-context.js';
-import { errorText } from '../shared/error-text.js';
 import { json } from './lib/response.js';
 
 const router = new Router<AppRequest>();
@@ -20,17 +18,6 @@ const router = new Router<AppRequest>();
 function isApiPath(request: Request): boolean {
   const { pathname } = new URL(request.url);
   return pathname === '/api' || pathname.startsWith('/api/');
-}
-
-/** Answers a daemon route's unexpected failure with its error text. */
-function reportingErrors(handler: (request: AppRequest) => Promise<Response>) {
-  return async (request: AppRequest) => {
-    try {
-      return await handler(request);
-    } catch (error) {
-      return json({ error: errorText(error) }, 500);
-    }
-  };
 }
 
 router.options('*', corsPreflight);
@@ -49,30 +36,6 @@ router.get('/logout', auth0Handler.logout);
 
 // Daemon and runner routes: each handler authenticates its caller itself, by API key
 // or runner token.
-router.post(
-  '/api/control/messages',
-  reportingErrors((request) => controlHandler.uploadMessages(request)),
-);
-router.post(
-  '/api/control/devices',
-  reportingErrors((request) => controlHandler.updateDevices(request)),
-);
-router.delete(
-  '/api/control/messages',
-  reportingErrors((request) => controlHandler.clearMessages(request)),
-);
-router.post(
-  '/api/control/cleanup-test-data',
-  reportingErrors((request) => controlHandler.cleanupTestData(request)),
-);
-router.get(
-  '/api/control/pending-sms',
-  reportingErrors((request) => controlHandler.getPendingSMS(request)),
-);
-router.post(
-  '/api/control/sms-result',
-  reportingErrors((request) => controlHandler.updateSMSResult(request)),
-);
 
 router.post('/api/control/balance-checks', (request) => balanceQueriesHandler.create(request));
 

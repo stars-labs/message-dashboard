@@ -11,7 +11,7 @@ import { balanceQueriesHandler } from '../handlers/balance-queries.js';
 import { balanceRunnersHandler } from '../handlers/balance-runners.js';
 import { carrierBillingBackfillHandler } from '../handlers/carrier-billing-backfill.js';
 import { carrierBillsHandler } from '../handlers/carrier-bills.js';
-import { recordHeartbeat } from '../handlers/control.js';
+import { controlHandler, recordHeartbeat } from '../handlers/control.js';
 import { healthHandler } from '../handlers/health.js';
 import { iccidMappingsHandler } from '../handlers/iccid-mappings.js';
 import { messagesHandler } from '../handlers/messages.js';
@@ -44,6 +44,24 @@ export const router = os.router({
   control: {
     heartbeat: os.control.heartbeat.handler(({ context, input }) =>
       recordHeartbeat(context.request, input),
+    ),
+    devices: os.control.devices.handler(({ context, input }) =>
+      controlHandler.updateDevices(context.request, input),
+    ),
+    uploadMessages: os.control.uploadMessages.handler(({ context, input }) =>
+      controlHandler.uploadMessages(context.request, input),
+    ),
+    clearMessages: os.control.clearMessages.handler(({ context }) =>
+      controlHandler.clearMessages(context.request),
+    ),
+    cleanupTestData: os.control.cleanupTestData.handler(({ context, input }) =>
+      controlHandler.cleanupTestData(context.request, input),
+    ),
+    pendingSms: os.control.pendingSms.handler(({ context, input }) =>
+      controlHandler.getPendingSMS(context.request, input.headers['x-daemon-session-id']),
+    ),
+    smsResult: os.control.smsResult.handler(({ context, input }) =>
+      controlHandler.updateSMSResult(context.request, input),
     ),
   },
   health: {

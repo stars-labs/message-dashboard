@@ -17,6 +17,12 @@ describe('the OpenAPI document', () => {
       ),
     ).toEqual([
       'POST /api/control/heartbeat',
+      'POST /api/control/devices',
+      'POST /api/control/messages',
+      'DELETE /api/control/messages',
+      'POST /api/control/cleanup-test-data',
+      'GET /api/control/pending-sms',
+      'POST /api/control/sms-result',
       'GET /api/live',
       'GET /api/health',
       'GET /api/daemon/status',

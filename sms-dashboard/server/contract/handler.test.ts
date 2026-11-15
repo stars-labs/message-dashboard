@@ -96,6 +96,12 @@ describe('contract routes', () => {
     expect(routeTable().slice(0, contractRoutes().length)).toEqual(contractRoutes());
     expect(contractRoutes()).toEqual([
       { method: 'POST', path: '/api/control/heartbeat' },
+      { method: 'POST', path: '/api/control/devices' },
+      { method: 'POST', path: '/api/control/messages' },
+      { method: 'DELETE', path: '/api/control/messages' },
+      { method: 'POST', path: '/api/control/cleanup-test-data' },
+      { method: 'GET', path: '/api/control/pending-sms' },
+      { method: 'POST', path: '/api/control/sms-result' },
       { method: 'GET', path: '/api/live' },
       { method: 'GET', path: '/api/health' },
       { method: 'GET', path: '/api/daemon/status' },

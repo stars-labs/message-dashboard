@@ -6,6 +6,12 @@ import { routeTable } from '../test/worker-harness.js';
 const EXPECTED = [
   // Served by the oRPC contract (shared/api/contract/), ahead of the Router.
   ['POST', '/api/control/heartbeat'],
+  ['POST', '/api/control/devices'],
+  ['POST', '/api/control/messages'],
+  ['DELETE', '/api/control/messages'],
+  ['POST', '/api/control/cleanup-test-data'],
+  ['GET', '/api/control/pending-sms'],
+  ['POST', '/api/control/sms-result'],
   ['GET', '/api/live'],
   ['GET', '/api/health'],
   ['GET', '/api/daemon/status'],
@@ -68,16 +74,11 @@ const EXPECTED = [
   ['GET', '/login'],
   ['GET', '/callback'],
   ['GET', '/logout'],
-  ['GET', '/api/control/pending-sms'],
   ['GET', '/api/control/balance-runners/check'],
   ['GET', '/api/control/balance-skills/jobs/claim'],
   ['GET', '/api/control/carrier-web-balance/jobs/claim'],
   ['GET', '/api/control/carrier-web-balance/jobs/:id/otp'],
   ['GET', '*'],
-  ['POST', '/api/control/messages'],
-  ['POST', '/api/control/devices'],
-  ['POST', '/api/control/cleanup-test-data'],
-  ['POST', '/api/control/sms-result'],
   ['POST', '/api/control/balance-checks'],
   ['POST', '/api/control/balance-checks/continue'],
   ['POST', '/api/control/balance-checks/retry'],
@@ -92,7 +93,6 @@ const EXPECTED = [
   ['POST', '/api/control/carrier-web-balance/jobs/:id/release'],
   ['POST', '/api/control/calls/incoming'],
   ['POST', '/api/control/calls/ended'],
-  ['DELETE', '/api/control/messages'],
   ['OPTIONS', '*'],
 ] as const;
 
