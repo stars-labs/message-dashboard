@@ -90,13 +90,14 @@ function unexpected(error: ORPCError<string, unknown>): boolean {
 /**
  * The daemon's error format, which shared/control-fixtures/ and the route tests
  * pin: `{ error }` or `{ success: false, error }` as the route declares, or the
- * whole body a refusal gives as `data.wire`. An unexpected failure on a plain
- * route answers as the Worker's own catch always did.
+ * whole body a refusal gives as `data.wire`. An unexpected failure answers as
+ * the Worker's own catch always did, whatever the route's format.
  */
 export function daemonErrorOf(errors: DaemonErrors) {
   return (error: ORPCError<string, unknown>) => {
     if (v.is(WireError, error.data)) return error.data.wire;
+    if (unexpected(error)) return { error: 'Internal Server Error' };
     if (errors === 'flagged') return { success: false, error: daemonReason(error) };
-    return { error: unexpected(error) ? 'Internal Server Error' : daemonReason(error) };
+    return { error: daemonReason(error) };
   };
 }

@@ -98,11 +98,11 @@ async function answer(path: string, body?: string, credentials: Record<string, s
 }
 
 describe('the contract entry', () => {
-  test('answers /api/control/ routes in the daemon error format', async () => {
+  test('answers an unexpected failure on a flagged daemon route as the Worker always has', async () => {
     expect(await answer('/api/control/broken')).toEqual({
       status: 500,
       contentType: 'application/json;charset=utf-8',
-      body: { success: false, error: 'Internal server error' },
+      body: { error: 'Internal Server Error' },
       logged: true,
     });
   });
