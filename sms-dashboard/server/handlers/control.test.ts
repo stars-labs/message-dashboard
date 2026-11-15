@@ -1,15 +1,15 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import * as v from 'valibot';
 import type { Schema } from '../../shared/parse-json.js';
 import { createControlSchema } from '../../test/control-schema.js';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
-import type { D1, D1Batch } from '../lib/d1.js';
-import { controlHandler, normalizeDaemonSessionId, recordHeartbeat } from './control.js';
+import { callWorker, TEST_API_KEY } from '../../test/worker-harness.js';
+import type { AppEnv } from '../worker-context.js';
+import { normalizeDaemonSessionId, recordHeartbeat } from './control.js';
 
-type TestDb = D1 & D1Batch<'run'>;
+type TestDb = AppEnv['DB'];
 
-const API_KEY = 'secret';
 const ICCID = '898600520121F0517883';
 const NUMBER = '+8613520607015';
 
@@ -19,16 +19,17 @@ const ErrorBody = v.object({ success: v.optional(v.literal(false)), error: v.str
 
 let sqlite: Database;
 let db: TestDb;
-let background: Promise<unknown>[];
+let errorSpy: Mock<typeof console.error>;
 
 beforeEach(async () => {
   sqlite = new Database(':memory:');
   await createControlSchema(sqlite);
   db = sqliteD1(sqlite);
-  background = [];
+  errorSpy = spyOn(console, 'error').mockImplementation(() => undefined);
 });
 
 afterEach(() => {
+  errorSpy.mockRestore();
   sqlite.close();
 });
 
@@ -44,25 +45,34 @@ const untouchable: TestDb = {
 interface RequestOptions {
   apiKey?: string;
   headers?: Record<string, string>;
-  rawBody?: string;
+  rawBody?: string | undefined;
   database?: TestDb;
 }
 
-function controlRequest(
+const ROUTES = {
+  updateDevices: ['POST', '/api/control/devices'],
+  uploadMessages: ['POST', '/api/control/messages'],
+  clearMessages: ['DELETE', '/api/control/messages'],
+  cleanupTestData: ['POST', '/api/control/cleanup-test-data'],
+  getPendingSMS: ['GET', '/api/control/pending-sms'],
+  updateSMSResult: ['POST', '/api/control/sms-result'],
+} as const;
+
+type Route = keyof typeof ROUTES;
+
+async function send(
+  route: Route,
   body: unknown,
-  { apiKey = API_KEY, headers = {}, rawBody, database = db }: RequestOptions = {},
-) {
-  const text = rawBody ?? JSON.stringify(body);
-  return {
-    env: { API_KEY, DB: database },
-    headers: new Headers({ 'X-API-Key': apiKey, ...headers }),
-    text: () => Promise.resolve(text),
-    ctx: {
-      waitUntil: (promise: Promise<unknown>) => {
-        background.push(promise);
-      },
-    },
-  };
+  { apiKey = TEST_API_KEY, headers = {}, rawBody, database = db }: RequestOptions = {},
+): Promise<Response> {
+  const [method, path] = ROUTES[route];
+  const text = rawBody ?? (body === undefined ? undefined : JSON.stringify(body));
+  const { response } = await callWorker(method, path, {
+    headers: { 'X-API-Key': apiKey, ...headers },
+    ...(text === undefined ? {} : { body: text }),
+    bindings: { DB: database },
+  });
+  return response;
 }
 
 function one<T>(schema: Schema<T>, sql: string, ...params: (string | number | null)[]): T {
@@ -95,18 +105,12 @@ describe('every control route', () => {
       'updateSMSResult',
       'clearMessages',
     ] as const) {
-      let bodyRead = false;
-      const request = controlRequest({}, { apiKey: 'wrong', database: untouchable });
-      const response = await controlHandler[route]({
-        ...request,
-        text: () => {
-          bodyRead = true;
-          return request.text();
-        },
+      const response = await send(route, route === 'getPendingSMS' ? undefined : {}, {
+        apiKey: 'wrong',
+        database: untouchable,
       });
       expect(response.status).toBe(401);
       expect(await errorOf(response)).toBe('Unauthorized');
-      expect(bodyRead).toBe(false);
     }
   });
 
@@ -117,9 +121,7 @@ describe('every control route', () => {
       'updateSMSResult',
       'cleanupTestData',
     ] as const) {
-      const response = await controlHandler[route](
-        controlRequest(null, { rawBody: '{', database: untouchable }),
-      );
+      const response = await send(route, undefined, { rawBody: '{', database: untouchable });
       expect(response.status).toBe(400);
       expect(await errorOf(response)).toBe('Body must be JSON');
     }
@@ -207,7 +209,7 @@ const DevicesResult = v.object({
 });
 
 async function syncDevices(body: unknown) {
-  const response = await controlHandler.updateDevices(controlRequest(body));
+  const response = await send('updateDevices', body);
   expect(response.status).toBe(200);
   return read(response, DevicesResult);
 }
@@ -375,9 +377,7 @@ describe('POST /api/control/devices', () => {
       ],
     ];
     for (const [body, error] of cases) {
-      const response = await controlHandler.updateDevices(
-        controlRequest(body, { database: untouchable }),
-      );
+      const response = await send('updateDevices', body, { database: untouchable });
       expect(response.status).toBe(400);
       expect(await errorOf(response)).toBe(error);
     }
@@ -446,7 +446,7 @@ function sms(fields: Upload = {}): Upload {
 }
 
 async function upload(messages: Upload[], options: RequestOptions = {}) {
-  const response = await controlHandler.uploadMessages(controlRequest({ messages }, options));
+  const response = await send('uploadMessages', { messages }, options);
   expect(response.status).toBe(200);
   return read(response, UploadResult);
 }
@@ -528,7 +528,6 @@ describe('POST /api/control/messages', () => {
     `);
 
     await upload([sms({ content: 'hello world, hello' })]);
-    await Promise.all(background);
 
     expect(
       every(
@@ -544,6 +543,9 @@ describe('POST /api/control/messages', () => {
   test('links a balance reply to its pending check instead of the inbox', async () => {
     insertBalanceSim();
     insertPendingCheck('check-1');
+    sqlite.run(
+      `INSERT INTO keyword_tags (id, keyword, tag, is_active, priority) VALUES (1, '余额', 'balance', TRUE, 1)`,
+    );
 
     await upload([sms({ phone_number: '10086', content: '您的账户余额为82.36元。' })]);
 
@@ -556,7 +558,7 @@ describe('POST /api/control/messages', () => {
     expect(
       one(Row, `SELECT status, response_message_id FROM sim_balance_checks WHERE id = 'check-1'`),
     ).toEqual({ status: 'parsed', response_message_id: 'msg-1' });
-    expect(background).toHaveLength(0);
+    expect(count(`SELECT COUNT(*) AS count FROM message_tags`)).toBe(0);
   });
 
   test('parses a multipart balance reply once, from its merged text', async () => {
@@ -634,9 +636,7 @@ describe('POST /api/control/messages', () => {
       [{ messages: [sms({ timestamp: 1 })] }, 'phone_number and timestamp must be text'],
     ];
     for (const [body, error] of cases) {
-      const response = await controlHandler.uploadMessages(
-        controlRequest(body, { database: untouchable }),
-      );
+      const response = await send('uploadMessages', body, { database: untouchable });
       expect(response.status).toBe(400);
       expect(await read(response, ErrorBody)).toEqual({ success: false, error });
     }
@@ -695,12 +695,10 @@ function outboundState(id: string) {
 }
 
 function poll(session: string | null = 'rust-daemon-session-2', database: TestDb = db) {
-  return controlHandler.getPendingSMS(
-    controlRequest(null, {
-      headers: session === null ? {} : { 'X-Daemon-Session-Id': session },
-      database,
-    }),
-  );
+  return send('getPendingSMS', undefined, {
+    headers: session === null ? {} : { 'X-Daemon-Session-Id': session },
+    database,
+  });
 }
 
 describe('GET /api/control/pending-sms', () => {
@@ -869,7 +867,7 @@ describe('POST /api/control/sms-result', () => {
   });
 
   function result(body: unknown, database: TestDb = db) {
-    return controlHandler.updateSMSResult(controlRequest(body, { database }));
+    return send('updateSMSResult', body, { database });
   }
 
   function checkState() {
@@ -977,9 +975,7 @@ describe('POST /api/control/cleanup-test-data', () => {
         ('test-1', 1, '+1'), ('test-2', 2, '+2'), ('keep', 3, '+3'), ('', 4, '+4');
     `);
 
-    const response = await controlHandler.cleanupTestData(
-      controlRequest({ phoneIds: ['test-1', 'test-2', 'missing'] }),
-    );
+    const response = await send('cleanupTestData', { phoneIds: ['test-1', 'test-2', 'missing'] });
 
     expect(await response.json()).toEqual({
       success: true,
@@ -999,9 +995,7 @@ describe('POST /api/control/cleanup-test-data', () => {
       [{ phoneIds: [''] }, 'phoneIds must be a non-empty array of ICCIDs'],
     ];
     for (const [body, error] of cases) {
-      const response = await controlHandler.cleanupTestData(
-        controlRequest(body, { database: untouchable }),
-      );
+      const response = await send('cleanupTestData', body, { database: untouchable });
       expect(response.status).toBe(400);
       expect(await errorOf(response)).toBe(error);
     }
@@ -1013,10 +1007,234 @@ describe('DELETE /api/control/messages', () => {
     insertOutbound('msg-1');
     insertOutbound('msg-2');
 
-    const response = await controlHandler.clearMessages(controlRequest(null));
+    const response = await send('clearMessages', undefined);
 
     expect(await response.json()).toEqual({ success: true, message: 'Cleared 2 messages' });
     expect(count(`SELECT COUNT(*) AS count FROM messages`)).toBe(0);
+  });
+});
+
+describe('control error answers on the wire', () => {
+  const JSON_TYPE = 'application/json;charset=utf-8';
+
+  const offline: TestDb = {
+    prepare: () => {
+      throw new Error('D1 offline');
+    },
+    batch: () => {
+      throw new Error('D1 offline');
+    },
+  };
+
+  async function wire(response: Response) {
+    return {
+      status: response.status,
+      contentType: response.headers.get('Content-Type'),
+      text: await response.text(),
+    };
+  }
+
+  function answer(status: number, text: string) {
+    return { status, contentType: JSON_TYPE, text };
+  }
+
+  const validReport = { equipment_id: 'modem-a', manufacturer: 'Quectel', model: 'EC20' };
+  const validDevices = {
+    modem_reports: [validReport],
+    removed_equipment_ids: [],
+    sync_mode: 'incremental',
+    session_id: 'session-1',
+  };
+  const validMessage = { id: 'msg-1', phone_iccid: ICCID, content: 'hello' };
+
+  // These pin today's wire bytes, which the move onto the contract must keep.
+  test('devices answers each refused report with its exact bytes', async () => {
+    const arrays = '{"error":"modem_reports and removed_equipment_ids must be arrays"}';
+    const syncMode = '{"error":"Invalid sync mode or missing full-sync session ID"}';
+    const removed = '{"error":"Invalid or conflicting removed equipment IDs"}';
+    const cases: [string | undefined, unknown, number, string][] = [
+      ['{', undefined, 400, '{"error":"Body must be JSON"}'],
+      [undefined, null, 400, arrays],
+      [undefined, [], 400, arrays],
+      [undefined, { ...validDevices, modem_reports: 'x' }, 400, arrays],
+      [
+        undefined,
+        { ...validDevices, modem_reports: [{ equipment_id: 5 }] },
+        400,
+        '{"error":"Invalid modem report"}',
+      ],
+      [undefined, { ...validDevices, sync_mode: 'partial' }, 400, syncMode],
+      [undefined, { ...validDevices, sync_mode: 'full', session_id: null }, 400, syncMode],
+      [undefined, { ...validDevices, removed_equipment_ids: [''] }, 400, removed],
+      [undefined, { ...validDevices, removed_equipment_ids: ['modem-a'] }, 400, removed],
+    ];
+    for (const [rawBody, body, status, text] of cases) {
+      const response = await send('updateDevices', body, { rawBody, database: untouchable });
+      expect(await wire(response)).toEqual(answer(status, text));
+    }
+  });
+
+  test('devices answers a D1 failure with 500 and a fixed message', async () => {
+    const response = await send('updateDevices', validDevices, { database: offline });
+    expect(await wire(response)).toEqual(
+      answer(500, '{"success":false,"error":"Failed to update devices"}'),
+    );
+  });
+
+  test('messages upload answers each refused batch with its exact bytes', async () => {
+    const array = '{"success":false,"error":"Messages must be an array"}';
+    const cases: [string | undefined, unknown, string][] = [
+      ['{', undefined, '{"success":false,"error":"Body must be JSON"}'],
+      [undefined, [], array],
+      [undefined, {}, array],
+      [
+        undefined,
+        { messages: [{ ...validMessage, phone_number: 5 }] },
+        '{"success":false,"error":"phone_number and timestamp must be text"}',
+      ],
+    ];
+    for (const [rawBody, body, text] of cases) {
+      const response = await send('uploadMessages', body, { rawBody, database: untouchable });
+      expect(await wire(response)).toEqual(answer(400, text));
+    }
+  });
+
+  test('messages upload answers a D1 failure outside the per-message loop with 500', async () => {
+    const response = await send(
+      'uploadMessages',
+      { messages: [validMessage] },
+      { database: offline },
+    );
+    expect(await wire(response)).toEqual(
+      answer(500, '{"success":false,"error":"Failed to upload messages: D1 offline"}'),
+    );
+  });
+
+  test('cleanup-test-data answers each refused request with its exact bytes', async () => {
+    const cases: [string | undefined, unknown, string][] = [
+      ['{', undefined, '{"success":false,"error":"Body must be JSON"}'],
+      [undefined, [], '{"success":false,"error":"phoneIds must be an array"}'],
+      [
+        undefined,
+        { phoneIds: [] },
+        '{"success":false,"error":"phoneIds must be a non-empty array of ICCIDs"}',
+      ],
+    ];
+    for (const [rawBody, body, text] of cases) {
+      const response = await send('cleanupTestData', body, { rawBody, database: untouchable });
+      expect(await wire(response)).toEqual(answer(400, text));
+    }
+  });
+
+  test('cleanup-test-data answers a D1 failure with 500 and a fixed message', async () => {
+    const response = await send('cleanupTestData', { phoneIds: ['a'] }, { database: offline });
+    expect(await wire(response)).toEqual(
+      answer(500, '{"success":false,"error":"Failed to cleanup test data"}'),
+    );
+  });
+
+  test('pending-sms answers a malformed session header with 400 and a D1 failure with 500', async () => {
+    expect(
+      await wire(
+        await send('getPendingSMS', undefined, {
+          headers: { 'X-Daemon-Session-Id': 'bad session' },
+          database: untouchable,
+        }),
+      ),
+    ).toEqual(answer(400, '{"success":false,"error":"Invalid daemon session ID"}'));
+    expect(await wire(await send('getPendingSMS', undefined, { database: offline }))).toEqual(
+      answer(500, '{"success":false,"error":"Failed to get pending SMS"}'),
+    );
+  });
+
+  test('sms-result answers each refused or unmatched result with its exact bytes', async () => {
+    const cases: [string | undefined, unknown, TestDb, number, string][] = [
+      ['{', undefined, untouchable, 400, '{"success":false,"error":"Body must be JSON"}'],
+      [undefined, [], untouchable, 400, '{"success":false,"error":"message_id is required"}'],
+      [
+        undefined,
+        { message_id: 'msg-1', outcome: 'sent' },
+        untouchable,
+        400,
+        '{"success":false,"error":"outcome must be confirmed, submitted_unconfirmed, or failed"}',
+      ],
+      [
+        undefined,
+        { message_id: 'nope', outcome: 'confirmed' },
+        db,
+        404,
+        '{"success":false,"error":"Message not found"}',
+      ],
+      [
+        undefined,
+        { message_id: 'msg-1', outcome: 'confirmed' },
+        offline,
+        500,
+        '{"success":false,"error":"Failed to update SMS result"}',
+      ],
+    ];
+    for (const [rawBody, body, database, status, text] of cases) {
+      const response = await send('updateSMSResult', body, { rawBody, database });
+      expect(await wire(response)).toEqual(answer(status, text));
+    }
+  });
+
+  test('DELETE messages answers a D1 failure with 500 and the failure text', async () => {
+    const response = await send('clearMessages', undefined, { database: offline });
+    expect(await wire(response)).toEqual(
+      answer(500, '{"success":false,"error":"Failed to clear messages: D1 offline"}'),
+    );
+  });
+
+  test('an empty body answers that the body must be JSON', async () => {
+    const answers: [Route, string][] = [
+      ['updateDevices', '{"error":"Body must be JSON"}'],
+      ['uploadMessages', '{"success":false,"error":"Body must be JSON"}'],
+      ['cleanupTestData', '{"success":false,"error":"Body must be JSON"}'],
+      ['updateSMSResult', '{"success":false,"error":"Body must be JSON"}'],
+    ];
+    for (const [route, text] of answers) {
+      const response = await send(route, undefined, { rawBody: '', database: offline });
+      expect([route, await wire(response)]).toEqual([route, answer(400, text)]);
+    }
+  });
+
+  test('every route answers 401 without the API key', async () => {
+    for (const [method, path] of Object.values(ROUTES)) {
+      const { response } = await callWorker(method, path, {
+        ...(method === 'POST' ? { body: '{}' } : {}),
+        bindings: { DB: untouchable },
+      });
+      expect(await wire(response)).toEqual(answer(401, '{"error":"Unauthorized"}'));
+    }
+  });
+
+  test('request Content-Type: cleanup-test-data parses a JSON body sent without one', async () => {
+    const { response } = await callWorker('POST', ROUTES.cleanupTestData[1], {
+      headers: { 'X-API-Key': TEST_API_KEY },
+      body: JSON.stringify({ phoneIds: ['a'] }),
+      bindings: { DB: db },
+    });
+    expect(await wire(response)).toEqual(
+      answer(
+        200,
+        '{"success":true,"deleted":0,"cleanedNullIccid":0,"message":"Deleted 0 test SIMs and 0 SIMs without ICCID"}',
+      ),
+    );
+  });
+
+  test('request Content-Type: messages upload parses a JSON body sent without one', async () => {
+    const { response } = await callWorker('POST', ROUTES.uploadMessages[1], {
+      headers: { 'X-API-Key': TEST_API_KEY },
+      body: JSON.stringify({ messages: [validMessage] }),
+      bindings: { DB: db },
+    });
+    expect(await wire(response)).toEqual(
+      answer(
+        200,
+        '{"success":true,"processed":1,"results":[{"id":"msg-1","status":"stored"}],"message":"Successfully uploaded 1 messages"}',
+      ),
+    );
   });
 });
 
@@ -1029,6 +1247,10 @@ const HealthRow = v.object({
   metadata: v.nullable(v.string()),
   current_session_id: v.nullable(v.string()),
 });
+
+function heartbeatCall(headers: Record<string, string> = {}, database: TestDb = db) {
+  return { env: { DB: database }, headers: new Headers(headers) };
+}
 
 function snapshot(fields: Record<string, unknown> = {}) {
   return {
@@ -1054,9 +1276,7 @@ describe('POST /api/control/heartbeat', () => {
 
   test('stores the normalized health snapshot and the client address', async () => {
     const answer = await recordHeartbeat(
-      controlRequest(null, {
-        headers: { 'CF-Connecting-IP': '203.0.113.7', 'X-Forwarded-For': '10.0.0.1' },
-      }),
+      heartbeatCall({ 'CF-Connecting-IP': '203.0.113.7', 'X-Forwarded-For': '10.0.0.1' }),
       snapshot(),
     );
 
@@ -1073,13 +1293,10 @@ describe('POST /api/control/heartbeat', () => {
   });
 
   test('falls back to the forwarded address, then to unknown', async () => {
-    await recordHeartbeat(
-      controlRequest(null, { headers: { 'X-Forwarded-For': '10.0.0.1' } }),
-      snapshot(),
-    );
+    await recordHeartbeat(heartbeatCall({ 'X-Forwarded-For': '10.0.0.1' }), snapshot());
     expect(health().last_ip).toBe('10.0.0.1');
 
-    await recordHeartbeat(controlRequest(null), snapshot({ version: '8.2.0' }));
+    await recordHeartbeat(heartbeatCall(), snapshot({ version: '8.2.0' }));
     expect(health()).toMatchObject({ last_ip: 'unknown', version: '8.2.0' });
     expect(count(`SELECT COUNT(*) AS count FROM daemon_health`)).toBe(1);
   });
@@ -1100,10 +1317,7 @@ describe('POST /api/control/heartbeat', () => {
       ],
     ];
     for (const [body, error] of cases) {
-      const refused = await recordHeartbeat(
-        controlRequest(null, { database: untouchable }),
-        body,
-      ).then(
+      const refused = await recordHeartbeat(heartbeatCall({}, untouchable), body).then(
         () => null,
         (reason: unknown) => reason,
       );

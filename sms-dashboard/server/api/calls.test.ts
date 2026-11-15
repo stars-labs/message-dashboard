@@ -1397,6 +1397,134 @@ describe('authentication', () => {
   });
 });
 
+describe('daemon call errors on the wire', () => {
+  const INCOMING = '/api/control/calls/incoming';
+  const ENDED = '/api/control/calls/ended';
+  const JSON_TYPE = 'application/json;charset=utf-8';
+
+  const unreadableState: AppEnv['CALL_STATE'] = {
+    getByName: () => ({ fetch: () => Promise.reject(new Error('call state offline')) }),
+  };
+
+  async function wire(response: Response) {
+    return {
+      status: response.status,
+      contentType: response.headers.get('Content-Type'),
+      text: await response.text(),
+    };
+  }
+
+  function rejected(status: number, error: string) {
+    return { status, contentType: JSON_TYPE, text: JSON.stringify({ error }) };
+  }
+
+  async function escaping(path: string, body: string) {
+    const { response } = await callWorker('POST', path, {
+      headers: { 'Content-Type': 'application/json', 'X-API-Key': TEST_API_KEY },
+      body,
+      bindings: { CALL_STATE: unreadableState, DB: historyDb().d1 },
+    });
+    return response;
+  }
+
+  test('an empty body answers that the body must be JSON', async () => {
+    const { post } = setup();
+
+    for (const path of [INCOMING, ENDED]) {
+      expect([path, await wire(await post(path, ''))]).toEqual([
+        path,
+        rejected(400, 'Body must be JSON'),
+      ]);
+    }
+  });
+
+  // These pin today's wire bytes, which the move onto the contract must keep.
+  test('incoming answers each refused report with its exact bytes', async () => {
+    const { post } = setup();
+
+    expect(await wire(await post(INCOMING, '{'))).toEqual({
+      status: 400,
+      contentType: JSON_TYPE,
+      text: '{"error":"Body must be JSON"}',
+    });
+    expect(await wire(await post(INCOMING, 'null'))).toEqual({
+      status: 400,
+      contentType: JSON_TYPE,
+      text: '{"error":"Body must be a JSON object"}',
+    });
+    expect(await wire(await post(INCOMING, { from: '90421798' }))).toEqual({
+      status: 400,
+      contentType: JSON_TYPE,
+      text: '{"error":"iccid is required"}',
+    });
+    expect(await wire(await post(INCOMING, { iccid: 5 }))).toEqual({
+      status: 400,
+      contentType: JSON_TYPE,
+      text: '{"error":"iccid is required"}',
+    });
+    expect(await wire(await post(INCOMING, { iccid: ICCID, from: 5 }))).toEqual({
+      status: 400,
+      contentType: JSON_TYPE,
+      text: '{"error":"from must be a string"}',
+    });
+  });
+
+  test('incoming answers 409 with its exact bytes while another call is active', async () => {
+    const { post } = setup(
+      liveCall({ id: 'x', direction: 'outbound', state: 'active', iccid: 'other' }),
+    );
+
+    expect(await wire(await post(INCOMING, { iccid: ICCID, from: '90421798' }))).toEqual({
+      status: 409,
+      contentType: JSON_TYPE,
+      text: '{"ok":false,"reason":"another call is active"}',
+    });
+  });
+
+  test('ended answers each refused report with its exact bytes', async () => {
+    const { post } = setup();
+
+    expect(await wire(await post(ENDED, '{'))).toEqual({
+      status: 400,
+      contentType: JSON_TYPE,
+      text: '{"error":"Body must be JSON"}',
+    });
+    expect(await wire(await post(ENDED, 'null'))).toEqual({
+      status: 400,
+      contentType: JSON_TYPE,
+      text: '{"error":"Body must be a JSON object"}',
+    });
+    expect(await wire(await post(ENDED, {}))).toEqual({
+      status: 400,
+      contentType: JSON_TYPE,
+      text: '{"error":"call_id or iccid is required"}',
+    });
+    expect(await wire(await post(ENDED, { call_id: 5 }))).toEqual({
+      status: 400,
+      contentType: JSON_TYPE,
+      text: '{"error":"Invalid call ID"}',
+    });
+  });
+
+  test('a call state that cannot be read answers 500 with the app error body', async () => {
+    const expected = rejected(500, 'Internal Server Error');
+
+    expect(await wire(await escaping(INCOMING, JSON.stringify({ iccid: ICCID })))).toEqual(
+      expected,
+    );
+    expect(await wire(await escaping(ENDED, JSON.stringify({ iccid: ICCID })))).toEqual(expected);
+  });
+
+  test('a wrong API key answers 401 with its exact bytes on both routes', async () => {
+    const { post } = setup();
+
+    for (const path of [INCOMING, ENDED]) {
+      const response = await post(path, { iccid: ICCID }, { 'X-API-Key': 'wrong' });
+      expect(await wire(response)).toEqual(rejected(401, 'Unauthorized'));
+    }
+  });
+});
+
 describe('route surface', () => {
   // The browser routes are on the contract; route-census.test.ts lists them.
   test('registers the daemon routes', () => {
