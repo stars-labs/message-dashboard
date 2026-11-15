@@ -8,6 +8,7 @@
     "target": "ES2023",
     "lib": ["ES2023"],
     "module": "preserve",
+    "moduleResolution": "bundler",
     "moduleDetection": "force",
     "resolveJsonModule": true,
     "allowImportingTsExtensions": true,
