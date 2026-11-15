@@ -10,6 +10,17 @@ import {
   SkillDecisionResponse,
   SkillReleaseBody,
 } from '../balance-skill-jobs.js';
+import {
+  CarrierWebBalanceJobWire,
+  CarrierWebBalanceOtpWire,
+  WebJobActionResponse,
+  WebJobCompleteBody,
+  WebJobErrorBody,
+  WebJobHeartbeatBody,
+  WebJobHeartbeatResponse,
+  WebJobLeaseBody,
+  WebJobOtpQuery,
+} from '../carrier-web-balance.js';
 import { JobParams, RunnerIdQuery } from '../runner-jobs.js';
 import { RUNNER_SCOPES } from '../runner-scopes.js';
 import { route } from './route.js';
@@ -42,6 +53,54 @@ export const balanceSkillJobs = {
     .route({ inputStructure: 'detailed' })
     .input(v.object({ params: JobParams, body: SkillReleaseBody }))
     .output(v.object({ success: v.literal(true) })),
+};
+
+const BROWSER = { kind: 'runner', scope: RUNNER_SCOPES.carrierBrowser } as const;
+
+const WEB_JOBS = '/api/control/carrier-web-balance/jobs';
+
+/** The carrier portal queries the Agent runs in a browser, one leased job at a time. */
+export const carrierWebJobs = {
+  // 204: no job is waiting for this runner's account.
+  claim: route(BROWSER, 'GET', `${WEB_JOBS}/claim`)
+    .route({ inputStructure: 'detailed', outputStructure: 'detailed' })
+    .input(v.object({ query: RunnerIdQuery }))
+    .output(
+      v.union([
+        v.object({ status: v.literal(200), body: CarrierWebBalanceJobWire }),
+        v.object({ status: v.literal(204) }),
+      ]),
+    ),
+  otpRequested: route(BROWSER, 'POST', `${WEB_JOBS}/{id}/otp-requested`)
+    .route({ inputStructure: 'detailed' })
+    .input(v.object({ params: JobParams, body: WebJobLeaseBody }))
+    .output(WebJobActionResponse),
+  // 204: no code has arrived since the OTP was requested.
+  otp: route(BROWSER, 'GET', `${WEB_JOBS}/{id}/otp`)
+    .route({ inputStructure: 'detailed', outputStructure: 'detailed' })
+    .input(v.object({ params: JobParams, query: WebJobOtpQuery }))
+    .output(
+      v.union([
+        v.object({ status: v.literal(200), body: CarrierWebBalanceOtpWire }),
+        v.object({ status: v.literal(204) }),
+      ]),
+    ),
+  heartbeat: route(BROWSER, 'POST', `${WEB_JOBS}/{id}/heartbeat`)
+    .route({ inputStructure: 'detailed' })
+    .input(v.object({ params: JobParams, body: WebJobHeartbeatBody }))
+    .output(WebJobHeartbeatResponse),
+  complete: route(BROWSER, 'POST', `${WEB_JOBS}/{id}/complete`)
+    .route({ inputStructure: 'detailed' })
+    .input(v.object({ params: JobParams, body: WebJobCompleteBody }))
+    .output(WebJobActionResponse),
+  fail: route(BROWSER, 'POST', `${WEB_JOBS}/{id}/fail`)
+    .route({ inputStructure: 'detailed' })
+    .input(v.object({ params: JobParams, body: WebJobErrorBody }))
+    .output(WebJobActionResponse),
+  release: route(BROWSER, 'POST', `${WEB_JOBS}/{id}/release`)
+    .route({ inputStructure: 'detailed' })
+    .input(v.object({ params: JobParams, body: WebJobErrorBody }))
+    .output(WebJobActionResponse),
 };
 
 /** The Agent's sign-in check and its presence. */

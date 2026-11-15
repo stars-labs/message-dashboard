@@ -11,7 +11,7 @@ type RequiredKeys<T> = {
  * field names the message it answers when absent. Typed against the schema's
  * input: every required field needs one, and an optional field cannot have one.
  */
-export type MissingKeyMessages<Schema extends v.GenericSchema> = Readonly<
+type MissingKeyMessages<Schema extends v.GenericSchema> = Readonly<
   Record<RequiredKeys<v.InferInput<Schema>>, string>
 >;
 

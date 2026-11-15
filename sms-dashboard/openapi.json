@@ -1984,6 +1984,627 @@
         ]
       }
     },
+    "/api/control/carrier-web-balance/jobs/claim": {
+      "get": {
+        "operationId": "carrierWebJobs.claim",
+        "parameters": [
+          {
+            "name": "runner_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "allowEmptyValue": true,
+            "allowReserved": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "check_id": {
+                      "type": "string"
+                    },
+                    "sim_iccid": {
+                      "type": "string"
+                    },
+                    "sim_number": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "sim_index": {
+                      "anyOf": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "login_url": {
+                      "type": "string"
+                    },
+                    "otp_requested_at": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "skill": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "check_id",
+                    "sim_iccid",
+                    "sim_number",
+                    "sim_index",
+                    "login_url",
+                    "otp_requested_at",
+                    "skill"
+                  ]
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "OK"
+          },
+          "default": {
+            "$ref": "#/components/responses/DaemonError"
+          }
+        },
+        "security": [
+          {
+            "daemonKey": []
+          },
+          {
+            "auth0": [
+              "balance:browser:run"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/control/carrier-web-balance/jobs/{id}/otp-requested": {
+      "post": {
+        "operationId": "carrierWebJobs.otpRequested",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "runner_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "runner_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "status": {
+                      "enum": [
+                        "awaiting_otp",
+                        "parsed",
+                        "failed",
+                        "pending"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "status"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/DaemonError"
+          }
+        },
+        "security": [
+          {
+            "daemonKey": []
+          },
+          {
+            "auth0": [
+              "balance:browser:run"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/control/carrier-web-balance/jobs/{id}/otp": {
+      "get": {
+        "operationId": "carrierWebJobs.otp",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "runner_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "allowEmptyValue": true,
+            "allowReserved": true
+          },
+          {
+            "name": "after_created_at",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": ""
+            },
+            "allowEmptyValue": true,
+            "allowReserved": true
+          },
+          {
+            "name": "after_source_message_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": ""
+            },
+            "allowEmptyValue": true,
+            "allowReserved": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "null"
+                        },
+                        "cursor": {
+                          "type": "object",
+                          "properties": {
+                            "created_at": {
+                              "type": "string"
+                            },
+                            "source_message_id": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "created_at",
+                            "source_message_id"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "cursor"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "OK"
+          },
+          "default": {
+            "$ref": "#/components/responses/DaemonError"
+          }
+        },
+        "security": [
+          {
+            "daemonKey": []
+          },
+          {
+            "auth0": [
+              "balance:browser:run"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/control/carrier-web-balance/jobs/{id}/heartbeat": {
+      "post": {
+        "operationId": "carrierWebJobs.heartbeat",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "runner_id": {
+                    "type": "string"
+                  },
+                  "status": {},
+                  "reason": {}
+                },
+                "required": [
+                  "runner_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "status": {
+                      "enum": [
+                        "leased",
+                        "awaiting_otp",
+                        "authenticating",
+                        "querying",
+                        "human_verification_required"
+                      ],
+                      "type": "string"
+                    },
+                    "lease_seconds": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "status",
+                    "lease_seconds"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/DaemonError"
+          }
+        },
+        "security": [
+          {
+            "daemonKey": []
+          },
+          {
+            "auth0": [
+              "balance:browser:run"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/control/carrier-web-balance/jobs/{id}/complete": {
+      "post": {
+        "operationId": "carrierWebJobs.complete",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "runner_id": {
+                    "type": "string"
+                  },
+                  "balance": {},
+                  "currency": {},
+                  "account_number": {},
+                  "expires_at": {}
+                },
+                "required": [
+                  "runner_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "status": {
+                      "enum": [
+                        "awaiting_otp",
+                        "parsed",
+                        "failed",
+                        "pending"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "status"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/DaemonError"
+          }
+        },
+        "security": [
+          {
+            "daemonKey": []
+          },
+          {
+            "auth0": [
+              "balance:browser:run"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/control/carrier-web-balance/jobs/{id}/fail": {
+      "post": {
+        "operationId": "carrierWebJobs.fail",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "runner_id": {
+                    "type": "string"
+                  },
+                  "error": {}
+                },
+                "required": [
+                  "runner_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "status": {
+                      "enum": [
+                        "awaiting_otp",
+                        "parsed",
+                        "failed",
+                        "pending"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "status"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/DaemonError"
+          }
+        },
+        "security": [
+          {
+            "daemonKey": []
+          },
+          {
+            "auth0": [
+              "balance:browser:run"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/control/carrier-web-balance/jobs/{id}/release": {
+      "post": {
+        "operationId": "carrierWebJobs.release",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "runner_id": {
+                    "type": "string"
+                  },
+                  "error": {}
+                },
+                "required": [
+                  "runner_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "status": {
+                      "enum": [
+                        "awaiting_otp",
+                        "parsed",
+                        "failed",
+                        "pending"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "status"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/DaemonError"
+          }
+        },
+        "security": [
+          {
+            "daemonKey": []
+          },
+          {
+            "auth0": [
+              "balance:browser:run"
+            ]
+          }
+        ]
+      }
+    },
     "/api/live": {
       "get": {
         "operationId": "health.live",

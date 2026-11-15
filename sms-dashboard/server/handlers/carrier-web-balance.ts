@@ -1,4 +1,4 @@
-import { json } from '../lib/response.js';
+import { ORPCError } from '@orpc/server';
 import { nanoid } from 'nanoid';
 import * as v from 'valibot';
 import { parseJson } from '../../shared/parse-json.js';
@@ -10,20 +10,22 @@ import {
   type D1Operation,
   type D1Statement,
 } from '../lib/d1.js';
-import { NOT_JSON_MESSAGE } from '../../shared/api/body.js';
-import { readBody, type MissingKeyMessages } from '../lib/request-body.js';
-import { RUNNER_SCOPES } from '../../shared/api/runner-scopes.js';
 import { textOr } from '../../shared/text.js';
-import type {
-  CarrierWebBalanceJob,
-  CarrierWebBalanceOtpResponse,
-} from '../../shared/api/carrier-web-balance.js';
 import {
-  authorizeRunnerControl,
-  runnerCanAccessOwner,
-  type RunnerAuth,
-  type RunnerRequest,
-} from '../utils/runner-auth.js';
+  WebJobCompleteFields,
+  WebJobErrorFields,
+  WebJobHeartbeatFields,
+  type CarrierWebBalanceJobWire,
+  type CarrierWebBalanceOtpWire,
+  type WebJobActionResponse,
+  type WebJobCompleteBody,
+  type WebJobErrorBody,
+  type WebJobHeartbeatBody,
+  type WebJobHeartbeatResponse,
+  type WebJobLeaseBody,
+  type WebJobOtpQuery,
+} from '../../shared/api/carrier-web-balance.js';
+import { runnerCanAccessOwner, type AuthorizedRunner } from '../utils/runner-auth.js';
 import { senderMatches } from '../utils/spam-filter.js';
 import {
   ACTIVE_WEB_JOB_STATUSES,
@@ -73,12 +75,6 @@ const PROVIDERS: Readonly<Record<WebProvider, ProviderConfig>> = {
   },
 };
 
-const RUNNER_ID_REQUIRED = 'runner_id is required';
-const INVALID_STATUS = 'Invalid web job status';
-const INVALID_BALANCE = 'balance is invalid';
-const REASON_NOT_TEXT = 'reason must be text';
-const ERROR_NOT_TEXT = 'error must be text';
-
 const ActiveStatusSchema = v.picklist(ACTIVE_WEB_JOB_STATUSES);
 
 const LeasedRow = v.object({ id: v.string() });
@@ -120,58 +116,27 @@ const OtpCandidateRow = v.object({
 
 const SkillConfig = v.looseObject({ id: v.string() });
 
-const LeaseBody = v.object({ runner_id: v.string(RUNNER_ID_REQUIRED) }, RUNNER_ID_REQUIRED);
-
-const LEASE_MISSING_KEY_MESSAGES = {
-  runner_id: RUNNER_ID_REQUIRED,
-} as const satisfies MissingKeyMessages<typeof LeaseBody>;
-
-const HeartbeatBody = v.object(
-  {
-    status: v.picklist(ACTIVE_WEB_JOB_STATUSES, INVALID_STATUS),
-    reason: v.nullish(v.string(REASON_NOT_TEXT)),
-  },
-  INVALID_STATUS,
-);
-
-const HEARTBEAT_MISSING_KEY_MESSAGES = {
-  status: INVALID_STATUS,
-} as const satisfies MissingKeyMessages<typeof HeartbeatBody>;
-
-/** A completion field whose wrong type means the same as its absence: the checks below answer it. */
-const OptionalText = v.fallback(v.optional(v.string()), undefined);
-
-const CompleteBody = v.object(
-  {
-    balance: v.pipe(
-      v.number(INVALID_BALANCE),
-      v.minValue(-100000, INVALID_BALANCE),
-      v.maxValue(1000000, INVALID_BALANCE),
-    ),
-    currency: OptionalText,
-    account_number: OptionalText,
-    expires_at: OptionalText,
-  },
-  INVALID_BALANCE,
-);
-
-const COMPLETE_MISSING_KEY_MESSAGES = {
-  balance: INVALID_BALANCE,
-} as const satisfies MissingKeyMessages<typeof CompleteBody>;
-
-const ErrorBody = v.object({ error: v.nullish(v.string(ERROR_NOT_TEXT)) }, ERROR_NOT_TEXT);
-
 const IsoDate = v.pipe(v.string(), v.check(validIsoDate));
 
-interface JobRequest<Op extends D1Operation> extends RunnerRequest {
-  env: RunnerRequest['env'] & { DB: D1<Op | 'run'> & D1Batch<'run'> };
-  params?: Record<string, string>;
+/** A job route as the contract hands it over, once the runner has been admitted. */
+interface JobCall<Op extends D1Operation = 'first'> {
+  env: { DB: D1<Op | 'run'> & D1Batch<'run'> };
 }
 
-type QueryRequest<Op extends D1Operation> = JobRequest<Op> & { url: string };
-type BodyRequest = JobRequest<'first'> & { text(): Promise<string> };
+/** A refusal the Agent reads as { error }. */
+function refused(
+  code: 'BAD_REQUEST' | 'FORBIDDEN' | 'NOT_FOUND' | 'CONFLICT',
+  message: string,
+): ORPCError<string, undefined> {
+  return new ORPCError(code, { message });
+}
 
-type Lease = { ok: true; job: WebJob; runnerId: string } | { ok: false; response: Response };
+/** The rest of an action's body, read once the lease holds. */
+function fieldsOf<S extends v.GenericSchema>(schema: S, body: unknown): v.InferOutput<S> {
+  const parsed = v.safeParse(schema, body);
+  if (!parsed.success) throw refused('BAD_REQUEST', parsed.issues[0].message);
+  return parsed.output;
+}
 
 function normalizePhone(value: string, provider: WebProvider): string {
   const digits = value.replace(/\D/g, '');
@@ -211,8 +176,7 @@ function leaseIsActive(job: WebJob, runnerId: string): boolean {
   return new Date(`${job.lease_expires_at}Z`) > new Date();
 }
 
-async function loadJob(db: D1<'first'>, id: string | undefined): Promise<WebJob | null> {
-  if (id === undefined) return null;
+async function loadJob(db: D1<'first'>, id: string): Promise<WebJob | null> {
   return queryFirst(
     db
       .prepare(
@@ -333,63 +297,34 @@ export async function maintainWebBalanceJobs(db: D1<'run'> & D1Batch<'run'>) {
   };
 }
 
+/** The job `id`, when `runnerId` holds its lease for the admitted runner's account. */
 async function requireLease(
-  request: JobRequest<'first'>,
-  auth: RunnerAuth,
+  db: D1<'first'>,
+  auth: AuthorizedRunner,
+  id: string,
   runnerId: string,
-): Promise<Lease> {
-  const job = await loadJob(request.env.DB, request.params?.['id']);
-  if (job === null)
-    return { ok: false, response: json({ error: 'Web balance job not found' }, 404) };
+): Promise<WebJob> {
+  const job = await loadJob(db, id);
+  if (job === null) throw refused('NOT_FOUND', 'Web balance job not found');
   if (!runnerCanAccessOwner(auth, job.requested_by_subject)) {
-    return {
-      ok: false,
-      response: json({ error: 'Web balance job belongs to another account' }, 403),
-    };
+    throw refused('FORBIDDEN', 'Web balance job belongs to another account');
   }
   if (!leaseIsActive(job, runnerId)) {
-    return {
-      ok: false,
-      response: json({ error: 'Web balance job lease is not active for this runner' }, 409),
-    };
+    throw refused('CONFLICT', 'Web balance job lease is not active for this runner');
   }
-  if (job.check_status !== 'queued') {
-    return { ok: false, response: json({ error: 'Balance check is no longer queued' }, 409) };
-  }
-  return { ok: true, job, runnerId };
-}
-
-async function leaseFromBody(
-  request: BodyRequest,
-  auth: RunnerAuth,
-  body: { text(): Promise<string> },
-): Promise<Lease> {
-  const parsed = await readBody(body, LeaseBody, LEASE_MISSING_KEY_MESSAGES);
-  if (!parsed.ok) {
-    const error = parsed.error === NOT_JSON_MESSAGE ? RUNNER_ID_REQUIRED : parsed.error;
-    return { ok: false, response: json({ error }, 400) };
-  }
-  return requireLease(request, auth, parsed.value.runner_id);
-}
-
-function replayable(request: { text(): Promise<string> }): { text(): Promise<string> } {
-  const text = request.text();
-  return { text: () => text };
+  if (job.check_status !== 'queued') throw refused('CONFLICT', 'Balance check is no longer queued');
+  return job;
 }
 
 export const carrierWebBalanceHandler = {
-  async claim(request: QueryRequest<'first'>): Promise<Response> {
-    const auth = await authorizeRunnerControl(request, RUNNER_SCOPES.carrierBrowser);
-    if (!auth.authorized) {
-      return json({ error: 'Unauthorized' }, 401);
-    }
-    const runnerId = new URL(request.url).searchParams.get('runner_id')?.trim();
-    if (runnerId === undefined || runnerId === '' || runnerId.length > 200) {
-      return json({ error: RUNNER_ID_REQUIRED }, 400);
-    }
-
+  /** The oldest job this runner's account may take, leased to it; null when none waits. */
+  async claim(
+    { env }: JobCall,
+    auth: AuthorizedRunner,
+    runnerId: string,
+  ): Promise<CarrierWebBalanceJobWire | null> {
     const leased = await queryFirst(
-      request.env.DB.prepare(
+      env.DB.prepare(
         `
       UPDATE sim_balance_web_jobs
       SET status = 'leased', lease_owner = ?,
@@ -414,13 +349,13 @@ export const carrierWebBalanceHandler = {
       LeasedRow,
     );
 
-    if (leased === null) return new Response(null, { status: 204 });
-    const job = await loadJob(request.env.DB, leased.id);
+    if (leased === null) return null;
+    const job = await loadJob(env.DB, leased.id);
     if (job === null) throw new Error(`Leased web balance job ${leased.id} could not be loaded`);
     const skill = parseJson(job.skill_config, SkillConfig);
     if (!skill.ok || skill.value.id !== PROVIDERS[job.provider].skillId) {
-      await request.env.DB.batch([
-        request.env.DB.prepare(
+      await env.DB.batch([
+        env.DB.prepare(
           `
           UPDATE sim_balance_web_jobs
           SET status = 'failed', lease_owner = NULL, lease_expires_at = NULL,
@@ -428,7 +363,7 @@ export const carrierWebBalanceHandler = {
           WHERE id = ? AND lease_owner = ?
         `,
         ).bind(job.id, runnerId),
-        request.env.DB.prepare(
+        env.DB.prepare(
           `
           UPDATE sim_balance_checks
           SET status = 'failed', completed_at = CURRENT_TIMESTAMP,
@@ -437,13 +372,13 @@ export const carrierWebBalanceHandler = {
         `,
         ).bind(job.check_id),
       ]);
-      return new Response(null, { status: 204 });
+      return null;
     }
 
-    await eventStatement(request.env.DB, job.id, 'claimed', {
+    await eventStatement(env.DB, job.id, 'claimed', {
       attempts: job.attempts,
     }).run();
-    return json({
+    return {
       id: job.id,
       check_id: job.check_id,
       sim_iccid: job.sim_iccid,
@@ -452,23 +387,22 @@ export const carrierWebBalanceHandler = {
       login_url: job.login_url,
       otp_requested_at: job.otp_requested_at,
       skill: skill.value,
-    } satisfies CarrierWebBalanceJob);
+    };
   },
 
-  async otpRequested(request: BodyRequest): Promise<Response> {
-    const auth = await authorizeRunnerControl(request, RUNNER_SCOPES.carrierBrowser);
-    if (!auth.authorized) {
-      return json({ error: 'Unauthorized' }, 401);
-    }
-    const lease = await leaseFromBody(request, auth, request);
-    if (!lease.ok) return lease.response;
-    const { job, runnerId } = lease;
+  async otpRequested(
+    { env }: JobCall,
+    auth: AuthorizedRunner,
+    id: string,
+    { runner_id: runnerId }: v.InferOutput<typeof WebJobLeaseBody>,
+  ): Promise<WebJobActionResponse> {
+    const job = await requireLease(env.DB, auth, id, runnerId);
     if (job.otp_requested_at !== null) {
-      return json({ error: 'OTP was already requested for this job' }, 409);
+      throw refused('CONFLICT', 'OTP was already requested for this job');
     }
 
-    await request.env.DB.batch([
-      request.env.DB.prepare(
+    await env.DB.batch([
+      env.DB.prepare(
         `
         UPDATE sim_balance_web_jobs
         SET status = 'awaiting_otp', otp_requested_at = CURRENT_TIMESTAMP,
@@ -477,36 +411,32 @@ export const carrierWebBalanceHandler = {
         WHERE id = ? AND lease_owner = ? AND status = 'leased'
       `,
       ).bind(NORMAL_LEASE_SECONDS, job.id, runnerId),
-      eventStatement(request.env.DB, job.id, 'otp_requested'),
+      eventStatement(env.DB, job.id, 'otp_requested'),
     ]);
-    return json({ success: true, status: 'awaiting_otp' });
+    return { success: true, status: 'awaiting_otp' };
   },
 
-  async otp(request: QueryRequest<'first' | 'all'>): Promise<Response> {
-    const auth = await authorizeRunnerControl(request, RUNNER_SCOPES.carrierBrowser);
-    if (!auth.authorized) {
-      return json({ error: 'Unauthorized' }, 401);
-    }
-    const url = new URL(request.url);
-    const runnerId = url.searchParams.get('runner_id')?.trim();
-    if (runnerId === undefined) return json({ error: RUNNER_ID_REQUIRED }, 400);
-    const lease = await requireLease(request, auth, runnerId);
-    if (!lease.ok) return lease.response;
-    const { job } = lease;
-    if (job.otp_requested_at === null) return json({ error: 'OTP has not been requested' }, 409);
+  /** The code the carrier sent since the OTP was requested; null when none has arrived. */
+  async otp(
+    { env }: JobCall<'first' | 'all'>,
+    auth: AuthorizedRunner,
+    id: string,
+    {
+      runner_id: runnerId,
+      after_created_at: afterCreatedAt,
+      after_source_message_id: afterSourceMessageId,
+    }: v.InferOutput<typeof WebJobOtpQuery>,
+  ): Promise<CarrierWebBalanceOtpWire | null> {
+    const job = await requireLease(env.DB, auth, id, runnerId);
+    if (job.otp_requested_at === null) throw refused('CONFLICT', 'OTP has not been requested');
 
-    const afterCreatedAt = textOr(url.searchParams.get('after_created_at')?.trim(), '');
-    const afterSourceMessageId = textOr(
-      url.searchParams.get('after_source_message_id')?.trim(),
-      '',
-    );
     const hasCursor =
       afterCreatedAt !== '' &&
       afterSourceMessageId !== '' &&
       afterCreatedAt.length <= 40 &&
       afterSourceMessageId.length <= 200;
     const cursorPredicate = hasCursor ? 'AND (created_at > ? OR (created_at = ? AND id > ?))' : '';
-    const statement = request.env.DB.prepare(`
+    const statement = env.DB.prepare(`
       SELECT id, phone_number, content, verification_code, created_at
       FROM messages
       WHERE phone_iccid = ? AND type = 'received'
@@ -536,18 +466,18 @@ export const carrierWebBalanceHandler = {
     );
     if (message === undefined) {
       const last = candidates.at(-1);
-      if (last === undefined) return new Response(null, { status: 204 });
-      return json({
+      if (last === undefined) return null;
+      return {
         code: null,
         cursor: {
           created_at: last.created_at,
           source_message_id: last.id,
         },
-      } satisfies CarrierWebBalanceOtpResponse);
+      };
     }
 
-    await request.env.DB.batch([
-      request.env.DB.prepare(
+    await env.DB.batch([
+      env.DB.prepare(
         `
         UPDATE sim_balance_web_jobs
         SET otp_message_id = ?, lease_expires_at = datetime('now', '+' || ? || ' seconds'),
@@ -555,31 +485,28 @@ export const carrierWebBalanceHandler = {
         WHERE id = ? AND lease_owner = ?
       `,
       ).bind(message.id, NORMAL_LEASE_SECONDS, job.id, runnerId),
-      eventStatement(request.env.DB, job.id, 'otp_matched', { message_id: message.id }),
+      eventStatement(env.DB, job.id, 'otp_matched', { message_id: message.id }),
     ]);
-    return json({ code: message.verification_code } satisfies CarrierWebBalanceOtpResponse);
+    return { code: message.verification_code };
   },
 
-  async heartbeat(request: BodyRequest): Promise<Response> {
-    const auth = await authorizeRunnerControl(request, RUNNER_SCOPES.carrierBrowser);
-    if (!auth.authorized) {
-      return json({ error: 'Unauthorized' }, 401);
-    }
-    const body = replayable(request);
-    const lease = await leaseFromBody(request, auth, body);
-    if (!lease.ok) return lease.response;
-    const { job, runnerId } = lease;
-    const parsed = await readBody(body, HeartbeatBody, HEARTBEAT_MISSING_KEY_MESSAGES);
-    if (!parsed.ok) return json({ error: parsed.error }, 400);
-    const { status } = parsed.value;
+  async heartbeat(
+    { env }: JobCall,
+    auth: AuthorizedRunner,
+    id: string,
+    body: v.InferOutput<typeof WebJobHeartbeatBody>,
+  ): Promise<WebJobHeartbeatResponse> {
+    const job = await requireLease(env.DB, auth, id, body.runner_id);
+    const runnerId = body.runner_id;
+    const { status, reason: reported } = fieldsOf(WebJobHeartbeatFields, body);
 
     const human = status === 'human_verification_required';
     const leaseSeconds = human ? HUMAN_LEASE_SECONDS : NORMAL_LEASE_SECONDS;
     const reason = human
-      ? textOr(parsed.value.reason, 'Official site requested human verification').slice(0, 500)
+      ? textOr(reported, 'Official site requested human verification').slice(0, 500)
       : null;
     const statements: D1Statement<'run'>[] = [
-      request.env.DB.prepare(
+      env.DB.prepare(
         `
         UPDATE sim_balance_web_jobs
         SET status = ?, human_reason = ?,
@@ -591,48 +518,50 @@ export const carrierWebBalanceHandler = {
     ];
     if (job.status !== status || job.human_reason !== reason) {
       statements.push(
-        eventStatement(request.env.DB, job.id, status, {
+        eventStatement(env.DB, job.id, status, {
           status,
           ...(reason === null || reason === '' ? {} : { reason }),
         }),
       );
     }
-    await request.env.DB.batch(statements);
-    return json({ success: true, status, lease_seconds: leaseSeconds });
+    await env.DB.batch(statements);
+    return { success: true, status, lease_seconds: leaseSeconds };
   },
 
-  async complete(request: BodyRequest): Promise<Response> {
-    const auth = await authorizeRunnerControl(request, RUNNER_SCOPES.carrierBrowser);
-    if (!auth.authorized) {
-      return json({ error: 'Unauthorized' }, 401);
-    }
-    const body = replayable(request);
-    const lease = await leaseFromBody(request, auth, body);
-    if (!lease.ok) return lease.response;
-    const { job, runnerId } = lease;
-    const parsed = await readBody(body, CompleteBody, COMPLETE_MISSING_KEY_MESSAGES);
-    if (!parsed.ok) return json({ error: parsed.error }, 400);
-    const { balance, currency, account_number: accountNumber } = parsed.value;
+  async complete(
+    { env }: JobCall,
+    auth: AuthorizedRunner,
+    id: string,
+    body: v.InferOutput<typeof WebJobCompleteBody>,
+  ): Promise<WebJobActionResponse> {
+    const job = await requireLease(env.DB, auth, id, body.runner_id);
+    const runnerId = body.runner_id;
+    const {
+      balance,
+      currency,
+      account_number: accountNumber,
+      expires_at: reportedExpiry,
+    } = fieldsOf(WebJobCompleteFields, body);
     const provider = PROVIDERS[job.provider];
     if (currency !== provider.currency) {
-      return json({ error: `currency must be ${provider.currency}` }, 400);
+      throw refused('BAD_REQUEST', `currency must be ${provider.currency}`);
     }
     const account = normalizePhone(accountNumber ?? '', job.provider);
     if (account === '' || account !== normalizePhone(job.sim_number ?? '', job.provider)) {
-      return json({ error: 'Authenticated account does not match the balance task SIM' }, 409);
+      throw refused('CONFLICT', 'Authenticated account does not match the balance task SIM');
     }
 
     let expiresAt: string | null = null;
     if (provider.expiryRequired) {
-      const expiry = v.safeParse(IsoDate, parsed.value.expires_at);
+      const expiry = v.safeParse(IsoDate, reportedExpiry);
       if (!expiry.success) {
-        return json({ error: 'expires_at must be a real ISO calendar date' }, 400);
+        throw refused('BAD_REQUEST', 'expires_at must be a real ISO calendar date');
       }
       expiresAt = expiry.output;
     }
 
     const statements: D1Statement<'run'>[] = [
-      request.env.DB.prepare(
+      env.DB.prepare(
         `
         UPDATE sim_balance_checks
         SET status = 'parsed', completed_at = CURRENT_TIMESTAMP,
@@ -641,7 +570,7 @@ export const carrierWebBalanceHandler = {
         WHERE id = ? AND status = 'queued'
       `,
       ).bind(provider.rawResponse, job.check_id),
-      request.env.DB.prepare(
+      env.DB.prepare(
         `
         INSERT INTO sim_balance_metrics (
           check_id, metric_type, value, unit, currency, expires_at
@@ -655,7 +584,7 @@ export const carrierWebBalanceHandler = {
     ];
     if (provider.expiryRequired) {
       statements.push(
-        request.env.DB.prepare(
+        env.DB.prepare(
           `
         INSERT INTO sim_balance_metrics (
           check_id, metric_type, value, unit, currency, expires_at
@@ -668,7 +597,7 @@ export const carrierWebBalanceHandler = {
       );
     }
     statements.push(
-      request.env.DB.prepare(
+      env.DB.prepare(
         `
         UPDATE sim_balance_web_jobs
         SET status = 'completed', lease_owner = NULL, lease_expires_at = NULL,
@@ -676,33 +605,33 @@ export const carrierWebBalanceHandler = {
         WHERE id = ? AND lease_owner = ?
       `,
       ).bind(job.id, runnerId),
-      eventStatement(request.env.DB, job.id, 'completed', {
+      eventStatement(env.DB, job.id, 'completed', {
         currency: provider.currency,
         parser_version: job.profile_parser_version,
         ...(expiresAt === null || expiresAt === '' ? {} : { expires_at: expiresAt }),
       }),
     );
-    const results = await request.env.DB.batch(statements);
+    const results = await env.DB.batch(statements);
     if (results[0]?.meta.changes === 0) {
-      return json({ error: 'Balance check changed before completion' }, 409);
+      throw refused('CONFLICT', 'Balance check changed before completion');
     }
-    return json({ success: true, status: 'parsed' });
+    return { success: true, status: 'parsed' };
   },
 
-  async fail(request: BodyRequest): Promise<Response> {
-    const auth = await authorizeRunnerControl(request, RUNNER_SCOPES.carrierBrowser);
-    if (!auth.authorized) {
-      return json({ error: 'Unauthorized' }, 401);
-    }
-    const body = replayable(request);
-    const lease = await leaseFromBody(request, auth, body);
-    if (!lease.ok) return lease.response;
-    const { job, runnerId } = lease;
-    const parsed = await readBody(body, ErrorBody, {});
-    if (!parsed.ok) return json({ error: parsed.error }, 400);
-    const error = textOr(parsed.value.error, 'Web balance query failed').slice(0, 1000);
-    await request.env.DB.batch([
-      request.env.DB.prepare(
+  async fail(
+    { env }: JobCall,
+    auth: AuthorizedRunner,
+    id: string,
+    body: v.InferOutput<typeof WebJobErrorBody>,
+  ): Promise<WebJobActionResponse> {
+    const job = await requireLease(env.DB, auth, id, body.runner_id);
+    const runnerId = body.runner_id;
+    const error = textOr(fieldsOf(WebJobErrorFields, body).error, 'Web balance query failed').slice(
+      0,
+      1000,
+    );
+    await env.DB.batch([
+      env.DB.prepare(
         `
         UPDATE sim_balance_checks
         SET status = 'failed', completed_at = CURRENT_TIMESTAMP,
@@ -710,7 +639,7 @@ export const carrierWebBalanceHandler = {
         WHERE id = ? AND status = 'queued'
       `,
       ).bind(error, job.check_id),
-      request.env.DB.prepare(
+      env.DB.prepare(
         `
         UPDATE sim_balance_web_jobs
         SET status = 'failed', lease_owner = NULL, lease_expires_at = NULL,
@@ -718,26 +647,26 @@ export const carrierWebBalanceHandler = {
         WHERE id = ? AND lease_owner = ?
       `,
       ).bind(error, job.id, runnerId),
-      eventStatement(request.env.DB, job.id, 'failed', { error }),
+      eventStatement(env.DB, job.id, 'failed', { error }),
     ]);
-    return json({ success: true, status: 'failed' });
+    return { success: true, status: 'failed' };
   },
 
-  async release(request: BodyRequest): Promise<Response> {
-    const auth = await authorizeRunnerControl(request, RUNNER_SCOPES.carrierBrowser);
-    if (!auth.authorized) {
-      return json({ error: 'Unauthorized' }, 401);
-    }
-    const body = replayable(request);
-    const lease = await leaseFromBody(request, auth, body);
-    if (!lease.ok) return lease.response;
-    const { job, runnerId } = lease;
-    const parsed = await readBody(body, ErrorBody, {});
-    if (!parsed.ok) return json({ error: parsed.error }, 400);
-    const error = textOr(parsed.value.error, 'Runner released the job').slice(0, 1000);
+  async release(
+    { env }: JobCall,
+    auth: AuthorizedRunner,
+    id: string,
+    body: v.InferOutput<typeof WebJobErrorBody>,
+  ): Promise<WebJobActionResponse> {
+    const job = await requireLease(env.DB, auth, id, body.runner_id);
+    const runnerId = body.runner_id;
+    const error = textOr(fieldsOf(WebJobErrorFields, body).error, 'Runner released the job').slice(
+      0,
+      1000,
+    );
     const terminal = job.otp_requested_at !== null;
     const statements: D1Statement<'run'>[] = [
-      request.env.DB.prepare(
+      env.DB.prepare(
         `
         UPDATE sim_balance_web_jobs
         SET status = ?, lease_owner = NULL, lease_expires_at = NULL,
@@ -745,11 +674,11 @@ export const carrierWebBalanceHandler = {
         WHERE id = ? AND lease_owner = ?
       `,
       ).bind(terminal ? 'failed' : 'pending', error, job.id, runnerId),
-      eventStatement(request.env.DB, job.id, terminal ? 'failed_after_otp' : 'released', { error }),
+      eventStatement(env.DB, job.id, terminal ? 'failed_after_otp' : 'released', { error }),
     ];
     if (terminal) {
       statements.push(
-        request.env.DB.prepare(
+        env.DB.prepare(
           `
         UPDATE sim_balance_checks
         SET status = 'failed', completed_at = CURRENT_TIMESTAMP,
@@ -759,8 +688,8 @@ export const carrierWebBalanceHandler = {
         ).bind(error, job.check_id),
       );
     }
-    await request.env.DB.batch(statements);
-    return json({ success: true, status: terminal ? 'failed' : 'pending' });
+    await env.DB.batch(statements);
+    return { success: true, status: terminal ? 'failed' : 'pending' };
   },
 };
 

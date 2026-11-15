@@ -12,6 +12,7 @@ import { balanceRunnersHandler } from '../handlers/balance-runners.js';
 import { balanceSkillRunnerHandler } from '../handlers/balance-skill-runner.js';
 import { carrierBillingBackfillHandler } from '../handlers/carrier-billing-backfill.js';
 import { carrierBillsHandler } from '../handlers/carrier-bills.js';
+import { carrierWebBalanceHandler } from '../handlers/carrier-web-balance.js';
 import { controlHandler, recordHeartbeat } from '../handlers/control.js';
 import { healthHandler } from '../handlers/health.js';
 import { iccidMappingsHandler } from '../handlers/iccid-mappings.js';
@@ -122,6 +123,65 @@ export const router = os.router({
     ),
     release: os.balanceSkillJobs.release.handler(({ context, input }) =>
       balanceSkillRunnerHandler.release(
+        context.request,
+        runnerOf(context),
+        input.params.id,
+        input.body,
+      ),
+    ),
+  },
+  carrierWebJobs: {
+    claim: os.carrierWebJobs.claim.handler(async ({ context, input }) => {
+      const job = await carrierWebBalanceHandler.claim(
+        context.request,
+        runnerOf(context),
+        input.query.runner_id,
+      );
+      return job === null ? { status: 204 as const } : { status: 200 as const, body: job };
+    }),
+    otpRequested: os.carrierWebJobs.otpRequested.handler(({ context, input }) =>
+      carrierWebBalanceHandler.otpRequested(
+        context.request,
+        runnerOf(context),
+        input.params.id,
+        input.body,
+      ),
+    ),
+    otp: os.carrierWebJobs.otp.handler(async ({ context, input }) => {
+      const otp = await carrierWebBalanceHandler.otp(
+        context.request,
+        runnerOf(context),
+        input.params.id,
+        input.query,
+      );
+      return otp === null ? { status: 204 as const } : { status: 200 as const, body: otp };
+    }),
+    heartbeat: os.carrierWebJobs.heartbeat.handler(({ context, input }) =>
+      carrierWebBalanceHandler.heartbeat(
+        context.request,
+        runnerOf(context),
+        input.params.id,
+        input.body,
+      ),
+    ),
+    complete: os.carrierWebJobs.complete.handler(({ context, input }) =>
+      carrierWebBalanceHandler.complete(
+        context.request,
+        runnerOf(context),
+        input.params.id,
+        input.body,
+      ),
+    ),
+    fail: os.carrierWebJobs.fail.handler(({ context, input }) =>
+      carrierWebBalanceHandler.fail(
+        context.request,
+        runnerOf(context),
+        input.params.id,
+        input.body,
+      ),
+    ),
+    release: os.carrierWebJobs.release.handler(({ context, input }) =>
+      carrierWebBalanceHandler.release(
         context.request,
         runnerOf(context),
         input.params.id,

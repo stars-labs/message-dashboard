@@ -1,6 +1,5 @@
 import { handleCORS, corsPreflight } from './middleware/cors.js';
 import { auth0Handler } from './handlers/auth0.js';
-import { carrierWebBalanceHandler } from './handlers/carrier-web-balance.js';
 import { serveFrontend } from './frontend-handler.js';
 import { appShellRedirect } from './frontend-gate.js';
 import { Router } from './router.js';
@@ -29,37 +28,6 @@ router.get('/favicon.ico', (request) =>
 router.get('/login', (request) => auth0Handler.login(request));
 router.get('/callback', auth0Handler.callback);
 router.get('/logout', auth0Handler.logout);
-
-// Daemon and runner routes: each handler authenticates its caller itself, by API key
-// or runner token.
-
-router.get('/api/control/carrier-web-balance/jobs/claim', (request) =>
-  carrierWebBalanceHandler.claim(request),
-);
-
-router.post('/api/control/carrier-web-balance/jobs/:id/otp-requested', (request) =>
-  carrierWebBalanceHandler.otpRequested(request),
-);
-
-router.get('/api/control/carrier-web-balance/jobs/:id/otp', (request) =>
-  carrierWebBalanceHandler.otp(request),
-);
-
-router.post('/api/control/carrier-web-balance/jobs/:id/heartbeat', (request) =>
-  carrierWebBalanceHandler.heartbeat(request),
-);
-
-router.post('/api/control/carrier-web-balance/jobs/:id/complete', (request) =>
-  carrierWebBalanceHandler.complete(request),
-);
-
-router.post('/api/control/carrier-web-balance/jobs/:id/fail', (request) =>
-  carrierWebBalanceHandler.fail(request),
-);
-
-router.post('/api/control/carrier-web-balance/jobs/:id/release', (request) =>
-  carrierWebBalanceHandler.release(request),
-);
 
 // /api is never a page: an unknown API path falls through to the 404 below.
 router.get('*', async (request) =>

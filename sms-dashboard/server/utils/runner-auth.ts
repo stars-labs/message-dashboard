@@ -3,7 +3,7 @@ import type { RunnerScope } from '../../shared/api/runner-scopes.js';
 import { auth0Handler } from '../handlers/auth0.js';
 import { secretMatches } from '../lib/secret.js';
 
-export interface RunnerRequest {
+interface RunnerRequest {
   headers: { get(name: string): string | null };
   env: {
     API_KEY?: string;
