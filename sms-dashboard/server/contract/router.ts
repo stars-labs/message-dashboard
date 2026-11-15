@@ -73,6 +73,23 @@ export const router = os.router({
       daemonCallsHandler.ended(context.request, input),
     ),
   },
+  balanceCheckControl: {
+    create: os.balanceCheckControl.create.handler(async ({ context, input }) => ({
+      status: 202,
+      body: await balanceQueriesHandler.create(context.request, input),
+    })),
+    continue: os.balanceCheckControl.continue.handler(async ({ context, input }) => ({
+      status: 202,
+      body: await balanceQueriesHandler.continue(context.request, input),
+    })),
+    retry: os.balanceCheckControl.retry.handler(async ({ context, input }) => ({
+      status: 202,
+      body: await balanceQueriesHandler.retry(context.request, input),
+    })),
+    stop: os.balanceCheckControl.stop.handler(({ context, input }) =>
+      balanceQueriesHandler.stop(context.request, input),
+    ),
+  },
   health: {
     live: os.health.live.handler(({ context }) => healthHandler.live(context)),
     ready: os.health.ready.handler(({ context: { request, resHeaders } }) =>

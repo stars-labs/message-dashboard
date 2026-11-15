@@ -1,6 +1,5 @@
 import { handleCORS, corsPreflight } from './middleware/cors.js';
 import { auth0Handler } from './handlers/auth0.js';
-import { balanceQueriesHandler } from './handlers/balance-queries.js';
 import { balanceSkillRunnerHandler } from './handlers/balance-skill-runner.js';
 import { carrierWebBalanceHandler } from './handlers/carrier-web-balance.js';
 import { balanceRunnersHandler } from './handlers/balance-runners.js';
@@ -35,16 +34,6 @@ router.get('/logout', auth0Handler.logout);
 
 // Daemon and runner routes: each handler authenticates its caller itself, by API key
 // or runner token.
-
-router.post('/api/control/balance-checks', (request) => balanceQueriesHandler.create(request));
-
-router.post('/api/control/balance-checks/continue', (request) =>
-  balanceQueriesHandler.continue(request),
-);
-
-router.post('/api/control/balance-checks/retry', (request) => balanceQueriesHandler.retry(request));
-
-router.post('/api/control/balance-checks/stop', (request) => balanceQueriesHandler.stop(request));
 
 router.post('/api/control/balance-runners/heartbeat', (request) =>
   balanceRunnersHandler.heartbeat(request),

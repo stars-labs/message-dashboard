@@ -1757,7 +1757,9 @@ describe('balance reply correlation', () => {
       `SELECT ${OUTBOUND_COLUMNS} FROM messages WHERE type = 'sent' AND balance_check_id = ?`,
       'bal-menu',
     );
-    expect(result).toEqual({ queued: true, message_id: sent[0]?.id ?? null });
+    const [outbound] = sent;
+    if (outbound === undefined) throw new Error('no follow-up was queued');
+    expect(result).toEqual({ queued: true, message_id: outbound.id });
     expect(checkState('bal-menu')).toMatchObject({
       status: 'queued',
       step_index: 1,

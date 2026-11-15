@@ -1,8 +1,7 @@
 import { ORPCError } from '@orpc/server';
-import { json } from '../lib/response.js';
 import { nanoid } from 'nanoid';
 import * as v from 'valibot';
-import { parseJson, type Parsed, type Schema } from '../../shared/parse-json.js';
+import { parseJson, type Schema } from '../../shared/parse-json.js';
 import {
   D1_MAX_BOUND_PARAMETERS,
   queryAll,
@@ -12,9 +11,6 @@ import {
   type D1RunResult,
   type D1Statement,
 } from '../lib/d1.js';
-import { NOT_JSON_MESSAGE } from '../../shared/api/body.js';
-import { readBody, type MissingKeyMessages } from '../lib/request-body.js';
-import { secretMatches } from '../lib/secret.js';
 import { parseBalanceSkillConfig } from '../../shared/balance-skill.js';
 import {
   CHECK_STATUSES,
@@ -51,6 +47,11 @@ import {
   type BalanceQueryBody,
   type BalanceQueryPreflightQuery,
   PHONE_ICCID_REQUIRED,
+  type BalanceCheckCreateBody,
+  type BalanceCheckCreateResponse,
+  type BalanceCheckIdBody,
+  type BalanceCheckStepResponse,
+  type BalanceCheckStopResponse,
 } from '../../shared/api/balance-checks.js';
 import { errorText } from '../../shared/error-text.js';
 import { senderMatches } from '../utils/spam-filter.js';
@@ -204,9 +205,6 @@ const CASH_BALANCE_PATTERNS = new Map<string, readonly RegExp[]>([
   ],
 ]);
 
-const INVALID_JSON = 'Invalid JSON body';
-const CHECK_REQUIRED = 'phone_iccid and profile_id are required';
-const CHECK_ID_REQUIRED = 'check_id is required';
 const NOT_ELIGIBLE = 'SIM is not eligible for a balance query';
 
 const INELIGIBLE_ERRORS: Readonly<Record<IneligibleReason, string>> = {
@@ -217,22 +215,6 @@ const INELIGIBLE_ERRORS: Readonly<Record<IneligibleReason, string>> = {
   secondary: NOT_ELIGIBLE,
   service_type: NOT_ELIGIBLE,
 };
-
-const CreateBody = v.object(
-  { phone_iccid: v.string(CHECK_REQUIRED), profile_id: v.string(CHECK_REQUIRED) },
-  CHECK_REQUIRED,
-);
-
-const CREATE_MISSING_KEY_MESSAGES = {
-  phone_iccid: CHECK_REQUIRED,
-  profile_id: CHECK_REQUIRED,
-} as const satisfies MissingKeyMessages<typeof CreateBody>;
-
-const CheckIdBody = v.object({ check_id: v.string(CHECK_ID_REQUIRED) }, CHECK_ID_REQUIRED);
-
-const CHECK_ID_MISSING_KEY_MESSAGES = {
-  check_id: CHECK_ID_REQUIRED,
-} as const satisfies MissingKeyMessages<typeof CheckIdBody>;
 
 const CheckStatusSchema = v.picklist(CHECK_STATUSES);
 const SkillJobStatusSchema = v.nullable(v.picklist(SKILL_JOB_STATUSES));
@@ -347,33 +329,22 @@ function subjectOf(user: { id: string } | undefined): string {
   return user.id;
 }
 
-interface ControlRequest {
-  headers: { get(name: string): string | null };
-  env: { API_KEY?: string; DB: D1<'first' | 'run'> & D1Batch<'run'> };
-  text(): Promise<string>;
+/** An ops route as the contract hands it over, once the API key has been checked. */
+interface OpsCall {
+  env: { DB: D1<'first' | 'run'> & D1Batch<'run'> };
 }
 
-function badRequest(error: string): Response {
-  return json({ success: false, error }, 400);
+/** A refusal the ops scripts read as { success: false, error }. */
+function refused(
+  code: 'BAD_REQUEST' | 'NOT_FOUND' | 'CONFLICT',
+  message: string,
+): ORPCError<string, undefined> {
+  return new ORPCError(code, { message });
 }
 
 /** A batch statement that changed no row lost a race with another writer. */
 function changed(result: D1RunResult | undefined): boolean {
   return result !== undefined && result.meta.changes > 0;
-}
-
-/** readBody, answering a body that is not JSON with this API's own message. */
-async function readBalanceBody<S extends v.GenericSchema>(
-  request: { text(): Promise<string> },
-  schema: S,
-  missingKeyMessages: MissingKeyMessages<S>,
-): Promise<Parsed<v.InferOutput<S>>> {
-  const body = await readBody(request, schema, missingKeyMessages);
-  return body.ok || body.error !== NOT_JSON_MESSAGE ? body : { ok: false, error: INVALID_JSON };
-}
-
-function hasApiKey(request: ControlRequest): Promise<boolean> {
-  return secretMatches(request.headers.get('X-API-Key'), request.env.API_KEY);
 }
 
 function normalizeCarrier(value: string | null): string {
@@ -885,7 +856,7 @@ export async function linkBalanceReply(
   check: BalanceCheckRow,
   message: BalanceMessage,
   { mergedContent = null }: { mergedContent?: string | null } = {},
-): Promise<{ queued: boolean; message_id: string | null } | { linked: boolean }> {
+): Promise<FollowUp | { linked: boolean }> {
   // A merged reply is parsed as one message; otherwise the raw part is used.
   const content = mergedContent ?? message.content;
   const nextStep = matchingNextStep(check, content);
@@ -1032,6 +1003,9 @@ export async function expireStaleBalanceChecks(
   };
 }
 
+/** A follow-up step: queued with its outbound message, or lost to a writer that got there first. */
+type FollowUp = { queued: true; message_id: string } | { queued: false; message_id: null };
+
 export async function queueBalanceFollowUp(
   db: D1<'run'> & D1Batch<'run'>,
   check: FollowUpCheck,
@@ -1039,7 +1013,7 @@ export async function queueBalanceFollowUp(
   step: { command: string },
   fromStatus: CheckStatus,
   extraStatements: readonly D1Statement<'run'>[] = [],
-): Promise<{ queued: boolean; message_id: string | null }> {
+): Promise<FollowUp> {
   const messageId = `msg-balance-${nanoid()}`;
   const [insert] = await db.batch([
     db
@@ -1093,8 +1067,9 @@ export async function queueBalanceFollowUp(
     ...extraStatements,
   ]);
 
-  const queued = changed(insert);
-  return { queued, message_id: queued ? messageId : null };
+  return changed(insert)
+    ? { queued: true, message_id: messageId }
+    : { queued: false, message_id: null };
 }
 
 export async function updateBalanceCheckForSmsResult(
@@ -1498,14 +1473,11 @@ export const balanceQueriesHandler = {
     };
   },
 
-  async create(request: ControlRequest): Promise<Response> {
-    if (!(await hasApiKey(request))) return json({ error: 'Unauthorized' }, 401);
-
-    const body = await readBalanceBody(request, CreateBody, CREATE_MISSING_KEY_MESSAGES);
-    if (!body.ok) return badRequest(body.error);
-    const { phone_iccid, profile_id } = body.value;
-
-    const db = request.env.DB;
+  async create(
+    { env }: OpsCall,
+    { phone_iccid, profile_id }: v.InferOutput<typeof BalanceCheckCreateBody>,
+  ): Promise<BalanceCheckCreateResponse> {
+    const db = env.DB;
     const [profile, phone, recent] = await Promise.all([
       queryFirst(
         db
@@ -1545,30 +1517,27 @@ export const balanceQueriesHandler = {
       ),
     ]);
 
-    if (!profile) {
-      return json({ success: false, error: 'Balance profile is not enabled' }, 404);
-    }
+    if (!profile) throw refused('NOT_FOUND', 'Balance profile is not enabled');
     if (profile.method !== 'sms' && profile.method !== 'browser') {
-      return json({ success: false, error: 'Profile method is not implemented' }, 400);
+      throw refused('BAD_REQUEST', 'Profile method is not implemented');
     }
-    if (phone?.sim_status !== 'active') {
-      return json({ success: false, error: 'SIM is not active' }, 409);
-    }
+    if (phone?.sim_status !== 'active') throw refused('CONFLICT', 'SIM is not active');
     if (
       phone.country !== profile.country_code ||
       !carrierMatchesProfile(phone.carrier, profile.carrier)
     ) {
-      return json({ success: false, error: 'SIM does not match the carrier profile' }, 409);
+      throw refused('CONFLICT', 'SIM does not match the carrier profile');
     }
     if (recent) {
-      return json(
-        {
-          success: false,
-          error: 'This SIM has already been queried in the last 24 hours',
-          previous_check: recent,
+      throw new ORPCError('TOO_MANY_REQUESTS', {
+        data: {
+          wire: {
+            success: false,
+            error: 'This SIM has already been queried in the last 24 hours',
+            previous_check: recent,
+          },
         },
-        429,
-      );
+      });
     }
 
     const check = await queueBalanceCheck(
@@ -1576,24 +1545,15 @@ export const balanceQueriesHandler = {
       { phone, profile: { ...profile, method: profile.method } },
       null,
     );
-
-    return json(
-      {
-        success: true,
-        check,
-      },
-      202,
-    );
+    return { success: true, check };
   },
 
-  async continue(request: ControlRequest): Promise<Response> {
-    if (!(await hasApiKey(request))) return json({ error: 'Unauthorized' }, 401);
-
-    const body = await readBalanceBody(request, CheckIdBody, CHECK_ID_MISSING_KEY_MESSAGES);
-    if (!body.ok) return badRequest(body.error);
-
+  async continue(
+    { env }: OpsCall,
+    { check_id }: v.InferOutput<typeof BalanceCheckIdBody>,
+  ): Promise<BalanceCheckStepResponse> {
     const check = await queryFirst(
-      request.env.DB.prepare(
+      env.DB.prepare(
         `
       SELECT
         c.id, c.status, c.step_index, c.response_message_id,
@@ -1605,26 +1565,24 @@ export const balanceQueriesHandler = {
       LEFT JOIN device_view dv ON dv.iccid = c.sim_iccid
       WHERE c.id = ?
     `,
-      ).bind(body.value.check_id),
+      ).bind(check_id),
       ContinueRow,
     );
 
-    if (!check) return json({ success: false, error: 'Balance check not found' }, 404);
+    if (!check) throw refused('NOT_FOUND', 'Balance check not found');
     if (
       (check.status !== 'response_received' && check.status !== 'unparsed') ||
       check.response_message_id === null ||
       check.raw_response === null
     ) {
-      return json({ success: false, error: 'Balance check cannot be continued' }, 409);
+      throw refused('CONFLICT', 'Balance check cannot be continued');
     }
 
     const step = matchingNextStep(check, check.raw_response);
-    if (!step) {
-      return json({ success: false, error: 'No allowlisted next step matches the reply' }, 409);
-    }
+    if (!step) throw refused('CONFLICT', 'No allowlisted next step matches the reply');
 
     const result = await queueBalanceFollowUp(
-      request.env.DB,
+      env.DB,
       check,
       {
         id: check.response_message_id,
@@ -1636,31 +1594,26 @@ export const balanceQueriesHandler = {
     );
 
     if (!result.queued) {
-      return json({ success: false, error: 'Balance check changed before it was continued' }, 409);
+      throw refused('CONFLICT', 'Balance check changed before it was continued');
     }
 
-    return json(
-      {
-        success: true,
-        check: {
-          id: check.id,
-          status: 'queued',
-          step_index: check.step_index + 1,
-          outbound_message_id: result.message_id,
-        },
+    return {
+      success: true,
+      check: {
+        id: check.id,
+        status: 'queued',
+        step_index: check.step_index + 1,
+        outbound_message_id: result.message_id,
       },
-      202,
-    );
+    };
   },
 
-  async retry(request: ControlRequest): Promise<Response> {
-    if (!(await hasApiKey(request))) return json({ error: 'Unauthorized' }, 401);
-
-    const body = await readBalanceBody(request, CheckIdBody, CHECK_ID_MISSING_KEY_MESSAGES);
-    if (!body.ok) return badRequest(body.error);
-
+  async retry(
+    { env }: OpsCall,
+    { check_id }: v.InferOutput<typeof BalanceCheckIdBody>,
+  ): Promise<BalanceCheckStepResponse> {
     const check = await queryFirst(
-      request.env.DB.prepare(
+      env.DB.prepare(
         `
       SELECT
         c.id, c.status, c.step_index,
@@ -1680,7 +1633,7 @@ export const balanceQueriesHandler = {
       )
       WHERE c.id = ?
     `,
-      ).bind(body.value.check_id),
+      ).bind(check_id),
       RetryRow,
     );
 
@@ -1691,11 +1644,11 @@ export const balanceQueriesHandler = {
       check.message_content !== step?.command ||
       check.message_recipient !== check.destination
     ) {
-      return json({ success: false, error: 'No allowlisted failed step can be retried' }, 409);
+      throw refused('CONFLICT', 'No allowlisted failed step can be retried');
     }
 
-    const [message, requeued] = await request.env.DB.batch([
-      request.env.DB.prepare(
+    const [message, requeued] = await env.DB.batch([
+      env.DB.prepare(
         `
         UPDATE messages
         SET status = 'sending', error_message = NULL,
@@ -1704,7 +1657,7 @@ export const balanceQueriesHandler = {
           AND purpose = 'balance_maintenance'
       `,
       ).bind(check.message_id),
-      request.env.DB.prepare(
+      env.DB.prepare(
         `
         UPDATE sim_balance_checks
         SET status = 'queued', completed_at = NULL, deadline_at = NULL, error = NULL,
@@ -1715,45 +1668,40 @@ export const balanceQueriesHandler = {
     ]);
 
     if (!changed(message) || !changed(requeued)) {
-      return json({ success: false, error: 'Balance check changed before retry' }, 409);
+      throw refused('CONFLICT', 'Balance check changed before retry');
     }
 
-    return json(
-      {
-        success: true,
-        check: {
-          id: check.id,
-          status: 'queued',
-          step_index: check.step_index,
-          outbound_message_id: check.message_id,
-        },
+    return {
+      success: true,
+      check: {
+        id: check.id,
+        status: 'queued',
+        step_index: check.step_index,
+        outbound_message_id: check.message_id,
       },
-      202,
-    );
+    };
   },
 
-  async stop(request: ControlRequest): Promise<Response> {
-    if (!(await hasApiKey(request))) return json({ error: 'Unauthorized' }, 401);
-
-    const body = await readBalanceBody(request, CheckIdBody, CHECK_ID_MISSING_KEY_MESSAGES);
-    if (!body.ok) return badRequest(body.error);
-
+  async stop(
+    { env }: OpsCall,
+    { check_id }: v.InferOutput<typeof BalanceCheckIdBody>,
+  ): Promise<BalanceCheckStopResponse> {
     const check = await queryFirst(
-      request.env.DB.prepare(
+      env.DB.prepare(
         `
       SELECT id, status FROM sim_balance_checks WHERE id = ?
     `,
-      ).bind(body.value.check_id),
+      ).bind(check_id),
       StopRow,
     );
-    if (!check) return json({ success: false, error: 'Balance check not found' }, 404);
+    if (!check) throw refused('NOT_FOUND', 'Balance check not found');
     if (check.status !== 'awaiting_response' && check.status !== 'response_received') {
-      return json({ success: false, error: 'Balance check is not stoppable' }, 409);
+      throw refused('CONFLICT', 'Balance check is not stoppable');
     }
 
     const finalStatus = check.status === 'awaiting_response' ? 'timed_out' : 'unparsed';
-    const [stopped] = await request.env.DB.batch([
-      request.env.DB.prepare(
+    const [stopped] = await env.DB.batch([
+      env.DB.prepare(
         `
         UPDATE sim_balance_checks
         SET status = ?, completed_at = CURRENT_TIMESTAMP,
@@ -1762,7 +1710,7 @@ export const balanceQueriesHandler = {
         WHERE id = ? AND status = ?
       `,
       ).bind(finalStatus, finalStatus, check.id, check.status),
-      request.env.DB.prepare(
+      env.DB.prepare(
         `
         UPDATE sim_balance_skill_jobs
         SET status = 'stopped', lease_owner = NULL, lease_expires_at = NULL,
@@ -1773,10 +1721,8 @@ export const balanceQueriesHandler = {
       ).bind(check.id),
     ]);
 
-    if (!changed(stopped)) {
-      return json({ success: false, error: 'Balance check changed before stop' }, 409);
-    }
+    if (!changed(stopped)) throw refused('CONFLICT', 'Balance check changed before stop');
 
-    return json({ success: true, check: { id: check.id, status: finalStatus } });
+    return { success: true, check: { id: check.id, status: finalStatus } };
   },
 };
