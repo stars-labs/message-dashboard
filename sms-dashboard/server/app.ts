@@ -23,11 +23,17 @@ import { setupVerificationRoutes } from './api/verification.js';
 import { setupCallRoutes } from './api/calls.js';
 import { Router } from './router.js';
 import { contractRoutes, handleContract } from './contract/handler.js';
+import { problemResponse } from './contract/errors.js';
 import type { AppRequest } from './worker-context.js';
 import { errorText } from '../shared/error-text.js';
 import { json } from './lib/response.js';
 
 const router = new Router<AppRequest>();
+
+function isApiPath(request: Request): boolean {
+  const { pathname } = new URL(request.url);
+  return pathname === '/api' || pathname.startsWith('/api/');
+}
 
 function gate(permission: Permission) {
   return (request: AppRequest) => authorize(request, permission);
@@ -264,9 +270,11 @@ setupFilterRoutes(router);
 setupVerificationRoutes(router);
 setupCallRoutes(router);
 
-router.get(
-  '*',
-  async (request) => (await appShellRedirect(request, request.env)) ?? serveFrontend(request),
+// /api is never a page: an unknown API path falls through to the 404 below.
+router.get('*', async (request) =>
+  isApiPath(request)
+    ? null
+    : ((await appShellRedirect(request, request.env)) ?? serveFrontend(request)),
 );
 
 /** Every route the app serves, in dispatch order: the contract first, then the Router. */
@@ -281,9 +289,11 @@ export async function handleRequest(request: AppRequest): Promise<Response> {
     const response = (await handleContract(request)) ?? (await router.handle(request));
 
     if (!response) {
-      const pathname = new URL(request.url).pathname;
-      if (pathname === '/api' || pathname.startsWith('/api/')) {
-        return handleCORS(json({ error: 'Not Found' }, 404));
+      if (isApiPath(request)) {
+        const { pathname } = new URL(request.url);
+        return handleCORS(
+          problemResponse(404, 'NOT_FOUND', `No route for ${request.method} ${pathname}`),
+        );
       }
 
       console.log(`[Worker] No route matched, serving frontend`);

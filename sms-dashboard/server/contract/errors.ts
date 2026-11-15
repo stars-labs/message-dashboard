@@ -12,8 +12,16 @@ const TITLES: Partial<Record<number, string>> = {
 };
 
 /** An RFC 9457 problem: `type` is about:blank, so `title` is the status phrase. */
-export function problem(status: number, code: string, detail: string) {
+function problem(status: number, code: string, detail: string) {
   return { type: 'about:blank', title: TITLES[status] ?? 'Error', status, detail, code };
+}
+
+/** A problem as a response, for answers the contract handler does not write itself. */
+export function problemResponse(status: number, code: string, detail: string): Response {
+  return new Response(JSON.stringify(problem(status, code, detail)), {
+    status,
+    headers: { 'Content-Type': 'application/problem+json' },
+  });
 }
 
 export function problemOf(error: ORPCError<string, unknown>) {

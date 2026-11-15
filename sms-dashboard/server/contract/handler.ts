@@ -15,7 +15,7 @@ import { readJson } from '../../shared/parse-json.js';
 import { requireApiKey } from '../handlers/control.js';
 import { authorize } from '../middleware/authorize.js';
 import type { AppRequest } from '../worker-context.js';
-import { daemonErrorOf, problem, problemOf } from './errors.js';
+import { daemonErrorOf, problemOf, problemResponse } from './errors.js';
 import { router, type ContractContext } from './router.js';
 
 const JSON_TYPE = 'application/json;charset=utf-8';
@@ -28,10 +28,7 @@ async function asProblem(refused: Response): Promise<Response> {
   const body = await readJson(refused, RefusalBody);
   const detail = body.ok ? (body.value.message ?? body.value.error) : refused.statusText;
   const code = refused.status === 403 ? 'FORBIDDEN' : 'UNAUTHORIZED';
-  return new Response(JSON.stringify(problem(refused.status, code, detail)), {
-    status: refused.status,
-    headers: { 'Content-Type': PROBLEM_TYPE },
-  });
+  return problemResponse(refused.status, code, detail);
 }
 
 /**

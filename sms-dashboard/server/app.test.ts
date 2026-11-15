@@ -9,18 +9,40 @@ describe('the whole Worker, from a request to its response', () => {
     expect(outbound).toEqual([]);
   });
 
-  test('answers a non-GET request to an unknown API path with a JSON 404', async () => {
-    const { response } = await callWorker('POST', '/api/no-such-route');
-
-    expect(response.status).toBe(404);
-    expect(await response.json()).toEqual({ error: 'Not Found' });
+  test('answers any request to an unknown API path with a problem 404', async () => {
+    const answered = [];
+    for (const [method, path] of [
+      ['GET', '/api/no-such-route'],
+      ['POST', '/api/no-such-route'],
+      ['DELETE', '/api/users'],
+      ['GET', '/api'],
+    ] as const) {
+      const { response } = await callWorker(method, path);
+      answered.push({
+        status: response.status,
+        contentType: response.headers.get('Content-Type'),
+        body: await response.json(),
+      });
+    }
+    expect(answered).toEqual(
+      ['GET /api/no-such-route', 'POST /api/no-such-route', 'DELETE /api/users', 'GET /api'].map(
+        (route) => ({
+          status: 404,
+          contentType: 'application/problem+json',
+          body: {
+            type: 'about:blank',
+            title: 'Not Found',
+            status: 404,
+            detail: `No route for ${route}`,
+            code: 'NOT_FOUND',
+          },
+        }),
+      ),
+    );
   });
 
-  // Current behaviour, not intent: the `GET *` frontend fallback is registered
-  // before the 404 branch runs, so a mistyped API path gets HTML. The contract
-  // router answers /api itself (GRA-63); this test changes with it.
-  test('serves the app shell for a GET to an unknown API path', async () => {
-    const { response } = await callWorker('GET', '/api/no-such-route');
+  test('still serves the app shell for a page outside the API', async () => {
+    const { response } = await callWorker('GET', '/apis-are-pages-too');
 
     expect(response.status).toBe(200);
     expect(response.headers.get('Content-Type')).toContain('text/html');
