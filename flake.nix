@@ -6,6 +6,9 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    # Locked apart from `nixpkgs`, which also builds the Orange Pi system: a
+    # developer tool it alone provides (oasdiff) can move without changing the Pi.
+    nixpkgs-tools.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     flake-parts.url = "github:hercules-ci/flake-parts";
     sops-nix = {
       url = "github:Mic92/sops-nix";
@@ -193,6 +196,40 @@
                 echo "daemon wire bindings are out of date: commit the regenerated $wire" >&2
                 exit 1
               fi
+            '';
+          };
+
+          # Breaking changes between the committed sms-dashboard/openapi.json and the
+          # one on a base ref (default origin/main). /api/control/ is what the Pi
+          # daemon and the Balance Agent speak, and they cannot roll back with the
+          # Worker, so a breaking change there fails; browser routes ship with their
+          # client, so theirs are reported only. OASDIFF_FORMAT=githubactions in CI.
+          check-api-compat = pkgs.writeShellApplication {
+            name = "check-api-compat";
+            runtimeInputs = [
+              pkgs.git
+              inputs'.nixpkgs-tools.legacyPackages.oasdiff
+            ];
+            text = ''
+              base_ref="''${1:-origin/main}"
+              format="''${OASDIFF_FORMAT:-text}"
+              root="$(git rev-parse --show-toplevel)"
+              spec="sms-dashboard/openapi.json"
+              if ! git -C "$root" cat-file -e "$base_ref:$spec" 2>/dev/null; then
+                echo "$base_ref has no $spec yet; nothing to compare against."
+                exit 0
+              fi
+              base="$(mktemp)"
+              trap 'rm -f "$base"' EXIT
+              git -C "$root" show "$base_ref:$spec" > "$base"
+
+              echo "/api/control/ (daemon and Balance Agent): a breaking change fails"
+              oasdiff breaking --fail-on ERR --format "$format" \
+                --match-path '^/api/control/' "$base" "$root/$spec"
+
+              echo "browser routes (deployed with their client): reported only"
+              oasdiff breaking --format "$format" \
+                --unmatch-path '^/api/control/' "$base" "$root/$spec"
             '';
           };
 
@@ -556,6 +593,7 @@
               orange-pi-daemon-rust
               balance-agent-cli
               release-balance-agent
+              check-api-compat
               ;
             default = sms-daemon;
             # Alias for easier access
@@ -586,6 +624,7 @@
                 dev-frontend
                 dev-server
                 balance-agent-cli
+                check-api-compat
                 check-daemon
                 pi-route
               ]
@@ -630,6 +669,7 @@
                 echo "  • dev-server    — restart/stop/status the unique :8080 + :8787 pair"
                 echo "  • balance-agent — authenticated CLI for SMS AI and browser balance work"
                 echo "  • check-daemon  — required Rust format check + strict Clippy + full test suite"
+                echo "  • check-api-compat — breaking API changes against origin/main (fails for /api/control/)"
                 echo "  • pi-route      — route Pi subnet past the VPN (sudo; run when on VPN)"
                 echo ""
 
@@ -681,6 +721,10 @@
           };
 
           apps = {
+            check-api-compat = {
+              type = "app";
+              program = "${check-api-compat}/bin/check-api-compat";
+            };
             balance-agent-cli = {
               type = "app";
               program = "${balance-agent-cli}/bin/balance-agent";

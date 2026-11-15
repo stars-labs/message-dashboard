@@ -1,7 +1,8 @@
 # Gates for every push and pull request. Each job mirrors a local command the
 # agent guides already require: `check-daemon` for the Rust daemon, `bun run check`
-# (typecheck, lint, test, build) for the dashboard, and an evaluation of the Orange Pi
-# system so a broken NixOS module is caught before a deploy. On main the Pi
+# (typecheck, lint, test, build) for the dashboard, `check-api-compat` on pull
+# requests, and an evaluation of the Orange Pi system so a broken NixOS module is
+# caught before a deploy. On main the Pi
 # system is also built on an arm64 runner and pushed to Cachix, so the Pi only
 # downloads (`pi-deploy <path>`, see docs/deployment.md). Deploys themselves
 # stay manual: the Worker through wrangler, the Pi from its own side.
@@ -62,6 +63,24 @@ jobs:
           bun-version: 1.4.2
       - run: bun install --frozen-lockfile
       - run: bun run check
+
+  # The committed openapi.json of the pull request against the base branch's.
+  # The dashboard job already fails when that file is not what the contract
+  # generates, so comparing the files compares the contracts.
+  api-compat:
+    name: API compatibility (oasdiff)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: cachix/install-nix-action@v31
+      - name: Breaking changes against the base branch
+        env:
+          OASDIFF_FORMAT: githubactions
+          BASE_REF: ${{ github.base_ref }}
+        run: nix run .#check-api-compat -- "origin/$BASE_REF"
 
   nixos:
     name: Orange Pi system evaluates

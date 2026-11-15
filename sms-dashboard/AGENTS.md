@@ -57,6 +57,10 @@ See [docs/deployment.md](../docs/deployment.md).
   cannot be rolled back with the Worker. `shared/control-fixtures/` records each
   exchange; the Worker, the daemon and the agent are all tested against it. A
   fixture changes only when every client changes with it.
+- Routes on the contract (`shared/api/contract/`): `bun run openapi` regenerates
+  `openapi.json`, which `bun run check` compares with the contract.
+  `check-api-compat` lists breaking changes against `origin/main` and fails for
+  `/api/control/*`; CI runs it on every pull request.
 - Frontend changes: `bun run build` + check desktop and 440px mobile layouts.
   With `dev-server` running, `bun run screenshots -- --profile <dir> --out <dir>`
   captures every view at both widths and writes `report.html` with console
