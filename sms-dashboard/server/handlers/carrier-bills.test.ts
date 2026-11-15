@@ -84,15 +84,26 @@ const BillsBody = v.object({
 });
 const AccountsBody = v.object({ success: v.literal(true), accounts: v.array(Record_) });
 const BillBody = v.looseObject({ bill: Record_ });
-const ErrorBody = v.looseObject({ error: v.string() });
+const Problem = v.looseObject({
+  type: v.string(),
+  title: v.string(),
+  status: v.number(),
+  detail: v.string(),
+  code: v.string(),
+});
 const NumberRow = v.object({ n: v.number() });
 
 async function bodyOf(response: Response) {
   return v.parse(Record_, await response.json());
 }
 
+async function problemOf(response: Response) {
+  expect(response.headers.get('Content-Type')).toBe('application/problem+json');
+  return v.parse(Problem, await response.json());
+}
+
 async function errorOf(response: Response): Promise<string> {
-  return v.parse(ErrorBody, await response.json()).error;
+  return (await problemOf(response)).detail;
 }
 
 function count(database: Database, sql: string): number {
@@ -631,9 +642,10 @@ describe('carrier bills API', () => {
       body: { expected_version: 99 },
       idempotencyKey: 'stale',
     });
-    const body = await bodyOf(response);
+    const body = await problemOf(response);
 
-    expect(body['error']).toBe('Bill version conflict');
+    expect(response.status).toBe(409);
+    expect(body.detail).toBe('Bill version conflict');
     expect(body['current_version']).toBe(1);
     const bill = v.parse(Record_, body['bill']);
     expect(bill).toMatchObject({ id: 'bill-1', version: 1, action_status: 'unpaid' });
@@ -655,7 +667,7 @@ describe('carrier bills API', () => {
     expect(longest.status).toBe(200);
   });
 
-  test('answers 400 without a bill id and 401 without an actor', async () => {
+  test('answers 404 without a bill id and 401 without an actor', async () => {
     const noId = await act('waive', '', { body: { expected_version: 1 }, idempotencyKey: 'k' });
     const noActor = await act('waive', 'bill-1', {
       body: { expected_version: 1 },
@@ -663,8 +675,7 @@ describe('carrier bills API', () => {
       token: null,
     });
 
-    expect(noId.status).toBe(400);
-    expect(await errorOf(noId)).toBe('Missing bill id');
+    expect(noId.status).toBe(404);
     expect(noActor.status).toBe(401);
   });
 
@@ -672,7 +683,7 @@ describe('carrier bills API', () => {
     const response = await act('waive', 'bill-1', { rawBody: 'not json', idempotencyKey: 'k' });
 
     expect(response.status).toBe(400);
-    expect(await errorOf(response)).toBe('Body must be JSON');
+    expect((await problemOf(response)).code).toBe('BAD_REQUEST');
   });
 
   test('answers 400 unless expected_version is a positive integer', async () => {
@@ -737,10 +748,10 @@ describe('carrier bills API', () => {
       body: { expected_version: 1 },
       idempotencyKey: 'k',
     });
-    const body = await bodyOf(response);
+    const body = await problemOf(response);
 
     expect(response.status).toBe(409);
-    expect(body['error']).toBe('Bill version conflict');
+    expect(body.detail).toBe('Bill version conflict');
     expect(body['current_version']).toBe(5);
     expect(v.parse(Record_, body['bill'])).toMatchObject({ id: 'bill-1', version: 5 });
     expect(

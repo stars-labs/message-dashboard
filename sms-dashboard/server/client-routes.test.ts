@@ -121,11 +121,9 @@ const apiRoutes = routeTable().filter(({ path }) => path.startsWith('/api/'));
 describe('client routes', () => {
   const calls = clientCalls();
 
-  test('reads the URLs in both TypeScript modules and Svelte components', () => {
-    const files = new Set(
-      calls.map(({ site }) => site.slice(site.lastIndexOf('.'), site.indexOf(':'))),
-    );
-    expect([...files].sort()).toEqual(['.svelte', '.ts']);
+  test('reads the scripts of both TypeScript modules and Svelte components', () => {
+    const kinds = new Set(clientSources().map(({ file }) => file.slice(file.lastIndexOf('.'))));
+    expect([...kinds].sort()).toEqual(['.svelte', '.ts']);
   });
 
   test('every hand-built URL is sent by a call whose method is known', () => {

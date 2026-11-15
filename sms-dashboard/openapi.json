@@ -8342,6 +8342,2525 @@
           }
         ]
       }
+    },
+    "/api/carrier-billing/accounts": {
+      "get": {
+        "operationId": "carrierBills.accounts",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "accounts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "country_code": {
+                            "type": "string"
+                          },
+                          "carrier": {
+                            "type": "string"
+                          },
+                          "currency": {
+                            "type": "string"
+                          },
+                          "display_name": {
+                            "type": "string"
+                          },
+                          "account_ref_masked": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string"
+                          },
+                          "version": {
+                            "type": "number"
+                          },
+                          "payment_due_count": {
+                            "type": "number"
+                          },
+                          "notification_sim": {
+                            "type": "object",
+                            "properties": {
+                              "iccid": {
+                                "type": "string"
+                              },
+                              "sim_index": {
+                                "anyOf": [
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "number": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "iccid",
+                              "sim_index",
+                              "number"
+                            ]
+                          },
+                          "linked_sims": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "iccid": {
+                                  "type": "string"
+                                },
+                                "sim_index": {
+                                  "anyOf": [
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "number": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "verification_source": {
+                                  "type": "string"
+                                },
+                                "verified_at": {
+                                  "type": "string"
+                                },
+                                "verified_by": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "iccid",
+                                "sim_index",
+                                "number",
+                                "verification_source",
+                                "verified_at",
+                                "verified_by"
+                              ]
+                            }
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "country_code",
+                          "carrier",
+                          "currency",
+                          "display_name",
+                          "account_ref_masked",
+                          "status",
+                          "version",
+                          "payment_due_count",
+                          "notification_sim",
+                          "linked_sims"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "accounts"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "security": [
+          {
+            "session": [
+              "bills.read"
+            ]
+          },
+          {
+            "auth0": [
+              "bills.read"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/carrier-bills": {
+      "get": {
+        "operationId": "carrierBills.list",
+        "parameters": [
+          {
+            "name": "carrier",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "allowEmptyValue": true,
+            "allowReserved": true
+          },
+          {
+            "name": "account_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "allowEmptyValue": true,
+            "allowReserved": true
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "allowEmptyValue": true,
+            "allowReserved": true
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "allowEmptyValue": true,
+            "allowReserved": true
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "allowEmptyValue": true,
+            "allowReserved": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "today": {
+                      "type": "string"
+                    },
+                    "bills": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "billing_account_id": {
+                            "type": "string"
+                          },
+                          "source_message_id": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "amount_minor": {
+                            "type": "number"
+                          },
+                          "currency": {
+                            "type": "string"
+                          },
+                          "due_date": {
+                            "type": "string"
+                          },
+                          "received_at": {
+                            "type": "string"
+                          },
+                          "parser_version": {
+                            "type": "string"
+                          },
+                          "action_status": {
+                            "enum": [
+                              "unpaid",
+                              "payment_planned",
+                              "paid",
+                              "waived",
+                              "needs_review"
+                            ],
+                            "type": "string"
+                          },
+                          "payment_planned_at": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "paid_at": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "paid_by": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "operator_note": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "version": {
+                            "type": "number"
+                          },
+                          "created_at": {
+                            "type": "string"
+                          },
+                          "updated_at": {
+                            "type": "string"
+                          },
+                          "account_display_name": {
+                            "type": "string"
+                          },
+                          "carrier": {
+                            "type": "string"
+                          },
+                          "notification_sim_iccid": {
+                            "type": "string"
+                          },
+                          "linked_sim_count": {
+                            "type": "number"
+                          },
+                          "account_ref_masked": {
+                            "type": "string"
+                          },
+                          "notification_sim": {
+                            "type": "object",
+                            "properties": {
+                              "iccid": {
+                                "type": "string"
+                              },
+                              "sim_index": {
+                                "anyOf": [
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "number": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "iccid",
+                              "sim_index",
+                              "number"
+                            ]
+                          },
+                          "urgency": {
+                            "enum": [
+                              "needs_review",
+                              "paid",
+                              "waived",
+                              "overdue",
+                              "due_soon",
+                              "open"
+                            ],
+                            "type": "string"
+                          },
+                          "days_remaining": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "billing_account_id",
+                          "source_message_id",
+                          "amount_minor",
+                          "currency",
+                          "due_date",
+                          "received_at",
+                          "parser_version",
+                          "action_status",
+                          "payment_planned_at",
+                          "paid_at",
+                          "paid_by",
+                          "operator_note",
+                          "version",
+                          "created_at",
+                          "updated_at",
+                          "account_display_name",
+                          "carrier",
+                          "notification_sim_iccid",
+                          "linked_sim_count",
+                          "account_ref_masked",
+                          "notification_sim",
+                          "urgency",
+                          "days_remaining"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "today",
+                    "bills"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "security": [
+          {
+            "session": [
+              "bills.read"
+            ]
+          },
+          {
+            "auth0": [
+              "bills.read"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/carrier-bills/{id}": {
+      "get": {
+        "operationId": "carrierBills.get",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "bill": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "billing_account_id": {
+                          "type": "string"
+                        },
+                        "source_message_id": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "amount_minor": {
+                          "type": "number"
+                        },
+                        "currency": {
+                          "type": "string"
+                        },
+                        "due_date": {
+                          "type": "string"
+                        },
+                        "received_at": {
+                          "type": "string"
+                        },
+                        "parser_version": {
+                          "type": "string"
+                        },
+                        "action_status": {
+                          "enum": [
+                            "unpaid",
+                            "payment_planned",
+                            "paid",
+                            "waived",
+                            "needs_review"
+                          ],
+                          "type": "string"
+                        },
+                        "payment_planned_at": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "paid_at": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "paid_by": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "operator_note": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "version": {
+                          "type": "number"
+                        },
+                        "created_at": {
+                          "type": "string"
+                        },
+                        "updated_at": {
+                          "type": "string"
+                        },
+                        "account_display_name": {
+                          "type": "string"
+                        },
+                        "carrier": {
+                          "type": "string"
+                        },
+                        "notification_sim_iccid": {
+                          "type": "string"
+                        },
+                        "linked_sim_count": {
+                          "type": "number"
+                        },
+                        "account_ref_masked": {
+                          "type": "string"
+                        },
+                        "notification_sim": {
+                          "type": "object",
+                          "properties": {
+                            "iccid": {
+                              "type": "string"
+                            },
+                            "sim_index": {
+                              "anyOf": [
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "number": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "iccid",
+                            "sim_index",
+                            "number"
+                          ]
+                        },
+                        "urgency": {
+                          "enum": [
+                            "needs_review",
+                            "paid",
+                            "waived",
+                            "overdue",
+                            "due_soon",
+                            "open"
+                          ],
+                          "type": "string"
+                        },
+                        "days_remaining": {
+                          "type": "number"
+                        },
+                        "linked_sims": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "iccid": {
+                                "type": "string"
+                              },
+                              "sim_index": {
+                                "anyOf": [
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "number": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "verification_source": {
+                                "type": "string"
+                              },
+                              "verified_at": {
+                                "type": "string"
+                              },
+                              "verified_by": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "iccid",
+                              "sim_index",
+                              "number",
+                              "verification_source",
+                              "verified_at",
+                              "verified_by"
+                            ]
+                          }
+                        },
+                        "source_message": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "sender": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "content": {
+                                  "type": "string"
+                                },
+                                "timestamp": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "sender",
+                                "content",
+                                "timestamp"
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "events": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "event_type": {
+                                "type": "string"
+                              },
+                              "actor_type": {
+                                "type": "string"
+                              },
+                              "actor_subject": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "source_message_id": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "created_at": {
+                                "type": "string"
+                              },
+                              "metadata": {}
+                            },
+                            "required": [
+                              "id",
+                              "event_type",
+                              "actor_type",
+                              "actor_subject",
+                              "source_message_id",
+                              "created_at",
+                              "metadata"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "billing_account_id",
+                        "source_message_id",
+                        "amount_minor",
+                        "currency",
+                        "due_date",
+                        "received_at",
+                        "parser_version",
+                        "action_status",
+                        "payment_planned_at",
+                        "paid_at",
+                        "paid_by",
+                        "operator_note",
+                        "version",
+                        "created_at",
+                        "updated_at",
+                        "account_display_name",
+                        "carrier",
+                        "notification_sim_iccid",
+                        "linked_sim_count",
+                        "account_ref_masked",
+                        "notification_sim",
+                        "urgency",
+                        "days_remaining",
+                        "linked_sims",
+                        "source_message",
+                        "events"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "bill"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "security": [
+          {
+            "session": [
+              "bills.read"
+            ]
+          },
+          {
+            "auth0": [
+              "bills.read"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/carrier-bills/{id}/payment-planned": {
+      "post": {
+        "operationId": "carrierBills.paymentPlanned",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "idempotency-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "expected_version": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "note": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 1000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "expected_version"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "idempotent": {
+                      "const": true
+                    },
+                    "bill": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "billing_account_id": {
+                          "type": "string"
+                        },
+                        "source_message_id": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "amount_minor": {
+                          "type": "number"
+                        },
+                        "currency": {
+                          "type": "string"
+                        },
+                        "due_date": {
+                          "type": "string"
+                        },
+                        "received_at": {
+                          "type": "string"
+                        },
+                        "parser_version": {
+                          "type": "string"
+                        },
+                        "action_status": {
+                          "enum": [
+                            "unpaid",
+                            "payment_planned",
+                            "paid",
+                            "waived",
+                            "needs_review"
+                          ],
+                          "type": "string"
+                        },
+                        "payment_planned_at": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "paid_at": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "paid_by": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "operator_note": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "version": {
+                          "type": "number"
+                        },
+                        "created_at": {
+                          "type": "string"
+                        },
+                        "updated_at": {
+                          "type": "string"
+                        },
+                        "account_display_name": {
+                          "type": "string"
+                        },
+                        "carrier": {
+                          "type": "string"
+                        },
+                        "notification_sim_iccid": {
+                          "type": "string"
+                        },
+                        "linked_sim_count": {
+                          "type": "number"
+                        },
+                        "account_ref_masked": {
+                          "type": "string"
+                        },
+                        "notification_sim": {
+                          "type": "object",
+                          "properties": {
+                            "iccid": {
+                              "type": "string"
+                            },
+                            "sim_index": {
+                              "anyOf": [
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "number": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "iccid",
+                            "sim_index",
+                            "number"
+                          ]
+                        },
+                        "urgency": {
+                          "enum": [
+                            "needs_review",
+                            "paid",
+                            "waived",
+                            "overdue",
+                            "due_soon",
+                            "open"
+                          ],
+                          "type": "string"
+                        },
+                        "days_remaining": {
+                          "type": "number"
+                        },
+                        "linked_sims": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "iccid": {
+                                "type": "string"
+                              },
+                              "sim_index": {
+                                "anyOf": [
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "number": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "verification_source": {
+                                "type": "string"
+                              },
+                              "verified_at": {
+                                "type": "string"
+                              },
+                              "verified_by": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "iccid",
+                              "sim_index",
+                              "number",
+                              "verification_source",
+                              "verified_at",
+                              "verified_by"
+                            ]
+                          }
+                        },
+                        "source_message": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "sender": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "content": {
+                                  "type": "string"
+                                },
+                                "timestamp": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "sender",
+                                "content",
+                                "timestamp"
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "events": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "event_type": {
+                                "type": "string"
+                              },
+                              "actor_type": {
+                                "type": "string"
+                              },
+                              "actor_subject": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "source_message_id": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "created_at": {
+                                "type": "string"
+                              },
+                              "metadata": {}
+                            },
+                            "required": [
+                              "id",
+                              "event_type",
+                              "actor_type",
+                              "actor_subject",
+                              "source_message_id",
+                              "created_at",
+                              "metadata"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "billing_account_id",
+                        "source_message_id",
+                        "amount_minor",
+                        "currency",
+                        "due_date",
+                        "received_at",
+                        "parser_version",
+                        "action_status",
+                        "payment_planned_at",
+                        "paid_at",
+                        "paid_by",
+                        "operator_note",
+                        "version",
+                        "created_at",
+                        "updated_at",
+                        "account_display_name",
+                        "carrier",
+                        "notification_sim_iccid",
+                        "linked_sim_count",
+                        "account_ref_masked",
+                        "notification_sim",
+                        "urgency",
+                        "days_remaining",
+                        "linked_sims",
+                        "source_message",
+                        "events"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "bill"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "security": [
+          {
+            "session": [
+              "bills.write"
+            ]
+          },
+          {
+            "auth0": [
+              "bills.write"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/carrier-bills/{id}/mark-paid": {
+      "post": {
+        "operationId": "carrierBills.markPaid",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "idempotency-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "expected_version": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "note": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 1000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "expected_version"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "idempotent": {
+                      "const": true
+                    },
+                    "bill": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "billing_account_id": {
+                          "type": "string"
+                        },
+                        "source_message_id": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "amount_minor": {
+                          "type": "number"
+                        },
+                        "currency": {
+                          "type": "string"
+                        },
+                        "due_date": {
+                          "type": "string"
+                        },
+                        "received_at": {
+                          "type": "string"
+                        },
+                        "parser_version": {
+                          "type": "string"
+                        },
+                        "action_status": {
+                          "enum": [
+                            "unpaid",
+                            "payment_planned",
+                            "paid",
+                            "waived",
+                            "needs_review"
+                          ],
+                          "type": "string"
+                        },
+                        "payment_planned_at": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "paid_at": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "paid_by": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "operator_note": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "version": {
+                          "type": "number"
+                        },
+                        "created_at": {
+                          "type": "string"
+                        },
+                        "updated_at": {
+                          "type": "string"
+                        },
+                        "account_display_name": {
+                          "type": "string"
+                        },
+                        "carrier": {
+                          "type": "string"
+                        },
+                        "notification_sim_iccid": {
+                          "type": "string"
+                        },
+                        "linked_sim_count": {
+                          "type": "number"
+                        },
+                        "account_ref_masked": {
+                          "type": "string"
+                        },
+                        "notification_sim": {
+                          "type": "object",
+                          "properties": {
+                            "iccid": {
+                              "type": "string"
+                            },
+                            "sim_index": {
+                              "anyOf": [
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "number": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "iccid",
+                            "sim_index",
+                            "number"
+                          ]
+                        },
+                        "urgency": {
+                          "enum": [
+                            "needs_review",
+                            "paid",
+                            "waived",
+                            "overdue",
+                            "due_soon",
+                            "open"
+                          ],
+                          "type": "string"
+                        },
+                        "days_remaining": {
+                          "type": "number"
+                        },
+                        "linked_sims": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "iccid": {
+                                "type": "string"
+                              },
+                              "sim_index": {
+                                "anyOf": [
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "number": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "verification_source": {
+                                "type": "string"
+                              },
+                              "verified_at": {
+                                "type": "string"
+                              },
+                              "verified_by": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "iccid",
+                              "sim_index",
+                              "number",
+                              "verification_source",
+                              "verified_at",
+                              "verified_by"
+                            ]
+                          }
+                        },
+                        "source_message": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "sender": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "content": {
+                                  "type": "string"
+                                },
+                                "timestamp": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "sender",
+                                "content",
+                                "timestamp"
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "events": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "event_type": {
+                                "type": "string"
+                              },
+                              "actor_type": {
+                                "type": "string"
+                              },
+                              "actor_subject": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "source_message_id": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "created_at": {
+                                "type": "string"
+                              },
+                              "metadata": {}
+                            },
+                            "required": [
+                              "id",
+                              "event_type",
+                              "actor_type",
+                              "actor_subject",
+                              "source_message_id",
+                              "created_at",
+                              "metadata"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "billing_account_id",
+                        "source_message_id",
+                        "amount_minor",
+                        "currency",
+                        "due_date",
+                        "received_at",
+                        "parser_version",
+                        "action_status",
+                        "payment_planned_at",
+                        "paid_at",
+                        "paid_by",
+                        "operator_note",
+                        "version",
+                        "created_at",
+                        "updated_at",
+                        "account_display_name",
+                        "carrier",
+                        "notification_sim_iccid",
+                        "linked_sim_count",
+                        "account_ref_masked",
+                        "notification_sim",
+                        "urgency",
+                        "days_remaining",
+                        "linked_sims",
+                        "source_message",
+                        "events"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "bill"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "security": [
+          {
+            "session": [
+              "bills.write"
+            ]
+          },
+          {
+            "auth0": [
+              "bills.write"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/carrier-bills/{id}/waive": {
+      "post": {
+        "operationId": "carrierBills.waive",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "idempotency-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "expected_version": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "note": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 1000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "expected_version"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "idempotent": {
+                      "const": true
+                    },
+                    "bill": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "billing_account_id": {
+                          "type": "string"
+                        },
+                        "source_message_id": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "amount_minor": {
+                          "type": "number"
+                        },
+                        "currency": {
+                          "type": "string"
+                        },
+                        "due_date": {
+                          "type": "string"
+                        },
+                        "received_at": {
+                          "type": "string"
+                        },
+                        "parser_version": {
+                          "type": "string"
+                        },
+                        "action_status": {
+                          "enum": [
+                            "unpaid",
+                            "payment_planned",
+                            "paid",
+                            "waived",
+                            "needs_review"
+                          ],
+                          "type": "string"
+                        },
+                        "payment_planned_at": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "paid_at": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "paid_by": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "operator_note": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "version": {
+                          "type": "number"
+                        },
+                        "created_at": {
+                          "type": "string"
+                        },
+                        "updated_at": {
+                          "type": "string"
+                        },
+                        "account_display_name": {
+                          "type": "string"
+                        },
+                        "carrier": {
+                          "type": "string"
+                        },
+                        "notification_sim_iccid": {
+                          "type": "string"
+                        },
+                        "linked_sim_count": {
+                          "type": "number"
+                        },
+                        "account_ref_masked": {
+                          "type": "string"
+                        },
+                        "notification_sim": {
+                          "type": "object",
+                          "properties": {
+                            "iccid": {
+                              "type": "string"
+                            },
+                            "sim_index": {
+                              "anyOf": [
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "number": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "iccid",
+                            "sim_index",
+                            "number"
+                          ]
+                        },
+                        "urgency": {
+                          "enum": [
+                            "needs_review",
+                            "paid",
+                            "waived",
+                            "overdue",
+                            "due_soon",
+                            "open"
+                          ],
+                          "type": "string"
+                        },
+                        "days_remaining": {
+                          "type": "number"
+                        },
+                        "linked_sims": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "iccid": {
+                                "type": "string"
+                              },
+                              "sim_index": {
+                                "anyOf": [
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "number": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "verification_source": {
+                                "type": "string"
+                              },
+                              "verified_at": {
+                                "type": "string"
+                              },
+                              "verified_by": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "iccid",
+                              "sim_index",
+                              "number",
+                              "verification_source",
+                              "verified_at",
+                              "verified_by"
+                            ]
+                          }
+                        },
+                        "source_message": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "sender": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "content": {
+                                  "type": "string"
+                                },
+                                "timestamp": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "sender",
+                                "content",
+                                "timestamp"
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "events": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "event_type": {
+                                "type": "string"
+                              },
+                              "actor_type": {
+                                "type": "string"
+                              },
+                              "actor_subject": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "source_message_id": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "created_at": {
+                                "type": "string"
+                              },
+                              "metadata": {}
+                            },
+                            "required": [
+                              "id",
+                              "event_type",
+                              "actor_type",
+                              "actor_subject",
+                              "source_message_id",
+                              "created_at",
+                              "metadata"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "billing_account_id",
+                        "source_message_id",
+                        "amount_minor",
+                        "currency",
+                        "due_date",
+                        "received_at",
+                        "parser_version",
+                        "action_status",
+                        "payment_planned_at",
+                        "paid_at",
+                        "paid_by",
+                        "operator_note",
+                        "version",
+                        "created_at",
+                        "updated_at",
+                        "account_display_name",
+                        "carrier",
+                        "notification_sim_iccid",
+                        "linked_sim_count",
+                        "account_ref_masked",
+                        "notification_sim",
+                        "urgency",
+                        "days_remaining",
+                        "linked_sims",
+                        "source_message",
+                        "events"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "bill"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "security": [
+          {
+            "session": [
+              "bills.write"
+            ]
+          },
+          {
+            "auth0": [
+              "bills.write"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/carrier-bills/{id}/reopen": {
+      "post": {
+        "operationId": "carrierBills.reopen",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "idempotency-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "expected_version": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "note": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 1000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "expected_version"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "idempotent": {
+                      "const": true
+                    },
+                    "bill": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "billing_account_id": {
+                          "type": "string"
+                        },
+                        "source_message_id": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "amount_minor": {
+                          "type": "number"
+                        },
+                        "currency": {
+                          "type": "string"
+                        },
+                        "due_date": {
+                          "type": "string"
+                        },
+                        "received_at": {
+                          "type": "string"
+                        },
+                        "parser_version": {
+                          "type": "string"
+                        },
+                        "action_status": {
+                          "enum": [
+                            "unpaid",
+                            "payment_planned",
+                            "paid",
+                            "waived",
+                            "needs_review"
+                          ],
+                          "type": "string"
+                        },
+                        "payment_planned_at": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "paid_at": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "paid_by": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "operator_note": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "version": {
+                          "type": "number"
+                        },
+                        "created_at": {
+                          "type": "string"
+                        },
+                        "updated_at": {
+                          "type": "string"
+                        },
+                        "account_display_name": {
+                          "type": "string"
+                        },
+                        "carrier": {
+                          "type": "string"
+                        },
+                        "notification_sim_iccid": {
+                          "type": "string"
+                        },
+                        "linked_sim_count": {
+                          "type": "number"
+                        },
+                        "account_ref_masked": {
+                          "type": "string"
+                        },
+                        "notification_sim": {
+                          "type": "object",
+                          "properties": {
+                            "iccid": {
+                              "type": "string"
+                            },
+                            "sim_index": {
+                              "anyOf": [
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "number": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "iccid",
+                            "sim_index",
+                            "number"
+                          ]
+                        },
+                        "urgency": {
+                          "enum": [
+                            "needs_review",
+                            "paid",
+                            "waived",
+                            "overdue",
+                            "due_soon",
+                            "open"
+                          ],
+                          "type": "string"
+                        },
+                        "days_remaining": {
+                          "type": "number"
+                        },
+                        "linked_sims": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "iccid": {
+                                "type": "string"
+                              },
+                              "sim_index": {
+                                "anyOf": [
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "number": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "verification_source": {
+                                "type": "string"
+                              },
+                              "verified_at": {
+                                "type": "string"
+                              },
+                              "verified_by": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "iccid",
+                              "sim_index",
+                              "number",
+                              "verification_source",
+                              "verified_at",
+                              "verified_by"
+                            ]
+                          }
+                        },
+                        "source_message": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "sender": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "content": {
+                                  "type": "string"
+                                },
+                                "timestamp": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "sender",
+                                "content",
+                                "timestamp"
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "events": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "event_type": {
+                                "type": "string"
+                              },
+                              "actor_type": {
+                                "type": "string"
+                              },
+                              "actor_subject": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "source_message_id": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "created_at": {
+                                "type": "string"
+                              },
+                              "metadata": {}
+                            },
+                            "required": [
+                              "id",
+                              "event_type",
+                              "actor_type",
+                              "actor_subject",
+                              "source_message_id",
+                              "created_at",
+                              "metadata"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "billing_account_id",
+                        "source_message_id",
+                        "amount_minor",
+                        "currency",
+                        "due_date",
+                        "received_at",
+                        "parser_version",
+                        "action_status",
+                        "payment_planned_at",
+                        "paid_at",
+                        "paid_by",
+                        "operator_note",
+                        "version",
+                        "created_at",
+                        "updated_at",
+                        "account_display_name",
+                        "carrier",
+                        "notification_sim_iccid",
+                        "linked_sim_count",
+                        "account_ref_masked",
+                        "notification_sim",
+                        "urgency",
+                        "days_remaining",
+                        "linked_sims",
+                        "source_message",
+                        "events"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "bill"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "security": [
+          {
+            "session": [
+              "bills.write"
+            ]
+          },
+          {
+            "auth0": [
+              "bills.write"
+            ]
+          }
+        ]
+      }
     }
   }
 }

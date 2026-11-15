@@ -1,7 +1,6 @@
-import { json } from '../lib/response.js';
-import type { ErrorResponse } from '../../shared/api/error.js';
+import { ORPCError } from '@orpc/server';
 import * as v from 'valibot';
-import { parseJson, readJson } from '../../shared/parse-json.js';
+import { parseJson } from '../../shared/parse-json.js';
 import { queryAll, queryFirst, type D1, type D1Batch } from '../lib/d1.js';
 import {
   CarrierBillingLinkedSim,
@@ -16,6 +15,8 @@ import {
   type CarrierBillMutationResponse,
   type CarrierBillResponse,
   type CarrierBillsResponse,
+  type CarrierBillMutationBody,
+  type CarrierBillsQuery,
 } from '../../shared/api/carrier-bills.js';
 
 type BillUrgency = (typeof BILL_URGENCIES)[number];
@@ -81,46 +82,29 @@ const AccountMemberRow = v.object({
   ...CarrierBillingLinkedSim.entries,
 });
 
-/** Request body of the four bill mutations; the note is stored trimmed. */
-const VERSION_MESSAGE = 'expected_version must be a positive integer';
-const NOTE_MESSAGE = 'note must be a string of at most 1000 characters';
-
-const MutationBody = v.object(
-  {
-    expected_version: v.pipe(
-      v.number(VERSION_MESSAGE),
-      v.integer(VERSION_MESSAGE),
-      v.minValue(1, VERSION_MESSAGE),
-    ),
-    note: v.optional(
-      v.nullable(v.pipe(v.string(NOTE_MESSAGE), v.trim(), v.maxLength(1000, NOTE_MESSAGE))),
-    ),
-  },
-  VERSION_MESSAGE,
-);
-
 type BillDb = D1<'all' | 'first' | 'run'> & D1Batch<'all' | 'first' | 'run'>;
 
-interface ListRequest {
-  url: string;
-  env: { DB: D1<'all'> };
-}
-
-interface AccountsRequest {
-  env: { DB: D1<'all'> };
-}
-
-interface GetRequest {
+interface ReadCall {
   env: { DB: D1<'all' | 'first'> };
-  params?: Record<string, string>;
 }
 
-interface MutationRequest {
+interface MutationCall {
   env: { DB: BillDb };
-  user?: { id: string };
-  params?: Record<string, string>;
-  headers: { get(name: string): string | null };
-  text(): Promise<string>;
+  user?: { id: string } | undefined;
+}
+
+/** A bill action as the contract hands it over: the bill, the retry key and the body. */
+interface Mutation {
+  id: string;
+  idempotencyKey: string | undefined;
+  body: v.InferOutput<typeof CarrierBillMutationBody>;
+}
+
+function versionConflict(bill: BillRow): ORPCError<'CONFLICT', CarrierBillConflict> {
+  return new ORPCError('CONFLICT', {
+    message: 'Bill version conflict',
+    data: { current_version: bill.version, bill: presentBill(bill, singaporeDate()) },
+  });
 }
 
 function singaporeDate(now: Date = new Date()): string {
@@ -188,7 +172,7 @@ const BILL_SELECT = `
   LEFT JOIN device_view d ON d.iccid = a.notification_sim_iccid
 `;
 
-async function findBill(db: D1<'first'>, id: string | undefined): Promise<BillRow | null> {
+async function findBill(db: D1<'first'>, id: string): Promise<BillRow | null> {
   return queryFirst(db.prepare(`${BILL_SELECT} WHERE b.id = ?`).bind(id), BillRow);
 }
 
@@ -197,7 +181,7 @@ function parseMetadata(text: string): unknown {
   return parsed.ok && typeof parsed.value === 'object' && parsed.value !== null ? parsed.value : {};
 }
 
-async function billDetail(db: D1<'all' | 'first'>, id: string | undefined, today: string) {
+async function billDetail(db: D1<'all' | 'first'>, id: string, today: string) {
   const row = await findBill(db, id);
   if (!row) return null;
 
@@ -289,23 +273,22 @@ async function storedBillDetail(db: D1<'all' | 'first'>, id: string) {
   return bill;
 }
 
-async function mutateBill(request: MutationRequest, action: BillAction): Promise<Response> {
-  const db = request.env.DB;
-  const billId = request.params?.['id'];
-  const actor = request.user?.id;
-  const idempotencyKey = request.headers.get('Idempotency-Key')?.trim();
-  if (!billId) return json({ error: 'Missing bill id' }, 400);
-  if (!actor) return json({ error: 'Unauthorized' }, 401);
+async function mutateBill(
+  { env, user }: MutationCall,
+  { id: billId, idempotencyKey: rawKey, body }: Mutation,
+  action: BillAction,
+): Promise<CarrierBillMutationResponse> {
+  const db = env.DB;
+  const actor = user?.id;
+  const idempotencyKey = rawKey?.trim();
+  if (!actor) throw new ORPCError('UNAUTHORIZED');
   if (!idempotencyKey || idempotencyKey.length > 200) {
-    return json({ error: 'A bounded Idempotency-Key header is required' }, 400);
+    throw new ORPCError('BAD_REQUEST', {
+      message: 'A bounded Idempotency-Key header is required',
+    });
   }
-
-  const raw = await readJson(request, v.unknown());
-  if (!raw.ok) return json({ error: 'Body must be JSON' }, 400);
-  const body = v.safeParse(MutationBody, raw.value);
-  if (!body.success) return json({ error: body.issues[0].message }, 400);
-  const expectedVersion = body.output.expected_version;
-  const note = emptyToNull(body.output.note);
+  const expectedVersion = body.expected_version;
+  const note = emptyToNull(body.note);
 
   const prior = await queryFirst(
     db
@@ -320,27 +303,16 @@ async function mutateBill(request: MutationRequest, action: BillAction): Promise
   );
   if (prior) {
     if (prior.bill_id !== billId) {
-      return json({ error: 'Idempotency key was already used for another bill' }, 409);
+      throw new ORPCError('CONFLICT', {
+        message: 'Idempotency key was already used for another bill',
+      });
     }
-    return json({
-      success: true,
-      idempotent: true,
-      bill: await storedBillDetail(db, billId),
-    } satisfies CarrierBillMutationResponse);
+    return { success: true, idempotent: true, bill: await storedBillDetail(db, billId) };
   }
 
   const current = await findBill(db, billId);
-  if (!current) return json({ error: 'Bill not found' }, 404);
-  if (current.version !== expectedVersion) {
-    return json(
-      {
-        error: 'Bill version conflict',
-        current_version: current.version,
-        bill: presentBill(current, singaporeDate()),
-      } satisfies CarrierBillConflict,
-      409,
-    );
-  }
+  if (!current) throw new ORPCError('NOT_FOUND', { message: 'Bill not found' });
+  if (current.version !== expectedVersion) throw versionConflict(current);
 
   const next = (
     {
@@ -366,6 +338,7 @@ async function mutateBill(request: MutationRequest, action: BillAction): Promise
     note,
   });
 
+  let updated: boolean;
   try {
     const results = await db.batch([
       db
@@ -406,18 +379,7 @@ async function mutateBill(request: MutationRequest, action: BillAction): Promise
         .bind(eventId, billId, next.event, actor, idempotencyKey, metadata),
     ]);
 
-    if (results[0]?.meta.changes !== 1) {
-      const latest = await findBill(db, billId);
-      if (!latest) return json({ error: 'Bill not found' } satisfies ErrorResponse, 404);
-      return json(
-        {
-          error: 'Bill version conflict',
-          current_version: latest.version,
-          bill: presentBill(latest, singaporeDate()),
-        } satisfies CarrierBillConflict,
-        409,
-      );
-    }
+    updated = results[0]?.meta.changes === 1;
   } catch (error) {
     const raced = await queryFirst(
       db
@@ -431,31 +393,28 @@ async function mutateBill(request: MutationRequest, action: BillAction): Promise
       PriorEventRow,
     );
     if (raced?.bill_id === billId) {
-      return json({
-        success: true,
-        idempotent: true,
-        bill: await storedBillDetail(db, billId),
-      } satisfies CarrierBillMutationResponse);
+      return { success: true, idempotent: true, bill: await storedBillDetail(db, billId) };
     }
     throw error;
   }
 
-  return json({
-    success: true,
-    bill: await storedBillDetail(db, billId),
-  } satisfies CarrierBillMutationResponse);
+  if (!updated) {
+    const latest = await findBill(db, billId);
+    if (!latest) throw new ORPCError('NOT_FOUND', { message: 'Bill not found' });
+    throw versionConflict(latest);
+  }
+  return { success: true, bill: await storedBillDetail(db, billId) };
 }
 
 export const carrierBillsHandler = {
-  async list(request: ListRequest, { today = singaporeDate() }: { today?: string } = {}) {
-    const url = new URL(request.url);
+  async list(
+    { env }: ReadCall,
+    query: v.InferOutput<typeof CarrierBillsQuery>,
+  ): Promise<CarrierBillsResponse> {
+    const today = singaporeDate();
     const clauses: string[] = [];
     const params: string[] = [];
-    const carrier = url.searchParams.get('carrier');
-    const accountId = url.searchParams.get('account_id');
-    const from = url.searchParams.get('from');
-    const to = url.searchParams.get('to');
-    const status = url.searchParams.get('status');
+    const { carrier, account_id: accountId, from, to, status } = query;
 
     if (carrier) {
       clauses.push('a.carrier = ?');
@@ -466,19 +425,23 @@ export const carrierBillsHandler = {
       params.push(accountId);
     }
     if (from) {
-      if (!validIsoDate(from)) return json({ error: 'from must be an ISO date' }, 400);
+      if (!validIsoDate(from)) {
+        throw new ORPCError('BAD_REQUEST', { message: 'from must be an ISO date' });
+      }
       clauses.push('b.due_date >= ?');
       params.push(from);
     }
     if (to) {
-      if (!validIsoDate(to)) return json({ error: 'to must be an ISO date' }, 400);
+      if (!validIsoDate(to)) {
+        throw new ORPCError('BAD_REQUEST', { message: 'to must be an ISO date' });
+      }
       clauses.push('b.due_date <= ?');
       params.push(to);
     }
 
     const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
     const rows = await queryAll(
-      request.env.DB.prepare(
+      env.DB.prepare(
         `
       ${BILL_SELECT}
       ${where}
@@ -497,13 +460,13 @@ export const carrierBillsHandler = {
         left.due_date.localeCompare(right.due_date) ||
         left.id.localeCompare(right.id),
     );
-    return json({ success: true, today, bills } satisfies CarrierBillsResponse);
+    return { success: true, today, bills };
   },
 
-  async listAccounts(request: AccountsRequest) {
+  async listAccounts({ env }: ReadCall): Promise<CarrierBillingAccountsResponse> {
     const [accounts, members] = await Promise.all([
       queryAll(
-        request.env.DB.prepare(
+        env.DB.prepare(
           `
         SELECT
           a.id, a.country_code, a.carrier, a.currency, a.display_name,
@@ -524,7 +487,7 @@ export const carrierBillsHandler = {
         AccountRow,
       ),
       queryAll(
-        request.env.DB.prepare(
+        env.DB.prepare(
           `
         SELECT
           s.billing_account_id,
@@ -543,7 +506,7 @@ export const carrierBillsHandler = {
         AccountMemberRow,
       ),
     ]);
-    return json({
+    return {
       success: true,
       accounts: accounts.map((account) => ({
         id: account.id,
@@ -564,18 +527,18 @@ export const carrierBillsHandler = {
           .filter((member) => member.billing_account_id === account.id)
           .map(({ billing_account_id: _accountId, ...member }) => member),
       })),
-    } satisfies CarrierBillingAccountsResponse);
+    };
   },
 
-  async get(request: GetRequest, { today = singaporeDate() }: { today?: string } = {}) {
-    const bill = await billDetail(request.env.DB, request.params?.['id'], today);
-    return bill
-      ? json({ success: true, bill } satisfies CarrierBillResponse)
-      : json({ error: 'Bill not found' }, 404);
+  async get({ env }: ReadCall, id: string): Promise<CarrierBillResponse> {
+    const bill = await billDetail(env.DB, id, singaporeDate());
+    if (!bill) throw new ORPCError('NOT_FOUND', { message: 'Bill not found' });
+    return { success: true, bill };
   },
 
-  paymentPlanned: (request: MutationRequest) => mutateBill(request, 'payment_planned'),
-  markPaid: (request: MutationRequest) => mutateBill(request, 'mark_paid'),
-  waive: (request: MutationRequest) => mutateBill(request, 'waive'),
-  reopen: (request: MutationRequest) => mutateBill(request, 'reopen'),
+  paymentPlanned: (call: MutationCall, mutation: Mutation) =>
+    mutateBill(call, mutation, 'payment_planned'),
+  markPaid: (call: MutationCall, mutation: Mutation) => mutateBill(call, mutation, 'mark_paid'),
+  waive: (call: MutationCall, mutation: Mutation) => mutateBill(call, mutation, 'waive'),
+  reopen: (call: MutationCall, mutation: Mutation) => mutateBill(call, mutation, 'reopen'),
 };

@@ -135,6 +135,13 @@ describe('contract routes', () => {
       { method: 'POST', path: '/api/balance-checks/query-batch' },
       { method: 'GET', path: '/api/balance-checks/:id' },
       { method: 'GET', path: '/api/balance-runners' },
+      { method: 'GET', path: '/api/carrier-billing/accounts' },
+      { method: 'GET', path: '/api/carrier-bills' },
+      { method: 'GET', path: '/api/carrier-bills/:id' },
+      { method: 'POST', path: '/api/carrier-bills/:id/payment-planned' },
+      { method: 'POST', path: '/api/carrier-bills/:id/mark-paid' },
+      { method: 'POST', path: '/api/carrier-bills/:id/waive' },
+      { method: 'POST', path: '/api/carrier-bills/:id/reopen' },
     ]);
   });
 

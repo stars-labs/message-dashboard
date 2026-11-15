@@ -1,4 +1,6 @@
 import { implement } from '@orpc/server';
+import type * as v from 'valibot';
+import type { CarrierBillMutationBody } from '../../shared/api/carrier-bills.js';
 import { contract } from '../../shared/api/contract/index.js';
 import { filtersHandler } from '../api/filters.js';
 import { keywordsHandler } from '../api/keywords.js';
@@ -6,6 +8,7 @@ import { verificationHandler } from '../api/verification.js';
 import { auth0Handler } from '../handlers/auth0.js';
 import { balanceQueriesHandler } from '../handlers/balance-queries.js';
 import { balanceRunnersHandler } from '../handlers/balance-runners.js';
+import { carrierBillsHandler } from '../handlers/carrier-bills.js';
 import { recordHeartbeat } from '../handlers/control.js';
 import { healthHandler } from '../handlers/health.js';
 import { iccidMappingsHandler } from '../handlers/iccid-mappings.js';
@@ -21,6 +24,19 @@ export interface ContractContext {
 }
 
 const os = implement(contract).$context<ContractContext>();
+
+/** A bill action's detailed input, as the handler takes it. */
+function billMutation(input: {
+  params: { id: string };
+  headers: { 'idempotency-key'?: string | undefined };
+  body: v.InferOutput<typeof CarrierBillMutationBody>;
+}) {
+  return {
+    id: input.params.id,
+    idempotencyKey: input.headers['idempotency-key'],
+    body: input.body,
+  };
+}
 
 export const router = os.router({
   control: {
@@ -159,6 +175,29 @@ export const router = os.router({
   balanceRunners: {
     status: os.balanceRunners.status.handler(({ context }) =>
       balanceRunnersHandler.status(context.request),
+    ),
+  },
+  carrierBills: {
+    accounts: os.carrierBills.accounts.handler(({ context }) =>
+      carrierBillsHandler.listAccounts(context.request),
+    ),
+    list: os.carrierBills.list.handler(({ context, input }) =>
+      carrierBillsHandler.list(context.request, input.query),
+    ),
+    get: os.carrierBills.get.handler(({ context, input }) =>
+      carrierBillsHandler.get(context.request, input.params.id),
+    ),
+    paymentPlanned: os.carrierBills.paymentPlanned.handler(({ context, input }) =>
+      carrierBillsHandler.paymentPlanned(context.request, billMutation(input)),
+    ),
+    markPaid: os.carrierBills.markPaid.handler(({ context, input }) =>
+      carrierBillsHandler.markPaid(context.request, billMutation(input)),
+    ),
+    waive: os.carrierBills.waive.handler(({ context, input }) =>
+      carrierBillsHandler.waive(context.request, billMutation(input)),
+    ),
+    reopen: os.carrierBills.reopen.handler(({ context, input }) =>
+      carrierBillsHandler.reopen(context.request, billMutation(input)),
     ),
   },
 });

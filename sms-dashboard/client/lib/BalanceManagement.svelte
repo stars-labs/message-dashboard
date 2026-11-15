@@ -7,7 +7,7 @@
   import { formatCardNumber } from './card-number.js';
   import { buildCarrierOptions, carrierKey } from './carrier.js';
   import { getCountryFlag } from './countries.js';
-  import { contractApi, errorMessage, request } from './api.js';
+  import { contractApi, errorMessage } from './api.js';
   import { getSimServiceTypeLabel } from './sim-service-type.js';
   import { groupByPrimary } from './group-by-primary.js';
   import {
@@ -32,17 +32,12 @@
     type BalanceMetric,
   } from '../../shared/api/balance-checks.js';
   import {
-    BalanceRunnersResponse,
+    type BalanceRunnersResponse,
     RUNNER_CAPABILITIES,
     type BalanceRunnerCapabilitySummary,
   } from '../../shared/api/balance-runners.js';
-  import { CarrierBillingAccountsResponse } from '../../shared/api/carrier-billing.js';
-  import {
-    CarrierBillMutationResponse,
-    CarrierBillResponse,
-    CarrierBillsResponse,
-    type CarrierBill,
-  } from '../../shared/api/carrier-bills.js';
+  import type { CarrierBillingAccountsResponse } from '../../shared/api/carrier-billing.js';
+  import type { CarrierBill, CarrierBillResponse } from '../../shared/api/carrier-bills.js';
   import type { Phone } from '../../shared/api/phones.js';
   import type { SummaryStatus } from '../../shared/prepaid-health.js';
   import { textOr } from '../../shared/text.js';
@@ -78,7 +73,7 @@
 
   type BillAccount = CarrierBillingAccountsResponse['accounts'][number];
   type BillDetail = CarrierBillResponse['bill'];
-  type BillAction = 'payment-planned' | 'mark-paid' | 'waive' | 'reopen';
+  type BillAction = 'paymentPlanned' | 'markPaid' | 'waive' | 'reopen';
   type BatchMethod = (typeof BATCH_METHODS)[number];
   type StatusFilter = 'all' | 'payment' | 'expiry' | 'missing' | SummaryStatus;
   type OverviewSortKey =
@@ -383,7 +378,7 @@
 
   async function loadBillingAccounts() {
     try {
-      const result = await request('/api/carrier-billing/accounts', CarrierBillingAccountsResponse);
+      const result = await contractApi.carrierBills.accounts();
       billAccounts = result.accounts;
       billAccountsError = null;
     } catch (error) {
@@ -400,8 +395,8 @@
     billError = null;
     try {
       const [billResult, accountResult] = await Promise.all([
-        request('/api/carrier-bills', CarrierBillsResponse),
-        request('/api/carrier-billing/accounts', CarrierBillingAccountsResponse),
+        contractApi.carrierBills.list({ query: {} }),
+        contractApi.carrierBills.accounts(),
       ]);
       bills = billResult.bills;
       billAccounts = accountResult.accounts;
@@ -422,10 +417,7 @@
     const account = billingAccountBySim.get(row.phone.iccid);
     if (!account) return;
     try {
-      const result = await request(
-        `/api/carrier-bills?account_id=${encodeURIComponent(account.id)}`,
-        CarrierBillsResponse,
-      );
+      const result = await contractApi.carrierBills.list({ query: { account_id: account.id } });
       const accountBills = result.bills;
       const bill =
         accountBills.find((candidate) =>
@@ -442,10 +434,7 @@
   async function openBill(bill: CarrierBill) {
     billDetailLoading = true;
     try {
-      const result = await request(
-        `/api/carrier-bills/${encodeURIComponent(bill.id)}`,
-        CarrierBillResponse,
-      );
+      const result = await contractApi.carrierBills.get({ params: { id: bill.id } });
       selectedBill = result.bill;
     } catch (error) {
       notice = { type: 'error', message: errorMessage(error, '账单详情加载失败') };
@@ -465,15 +454,11 @@
       return;
     billActionBusy = true;
     try {
-      const result = await request(
-        `/api/carrier-bills/${encodeURIComponent(selectedBill.id)}/${action}`,
-        CarrierBillMutationResponse,
-        {
-          method: 'POST',
-          body: JSON.stringify({ expected_version: selectedBill.version }),
-          headers: { 'Idempotency-Key': crypto.randomUUID() },
-        },
-      );
+      const result = await contractApi.carrierBills[action]({
+        params: { id: selectedBill.id },
+        headers: { 'idempotency-key': crypto.randomUUID() },
+        body: { expected_version: selectedBill.version },
+      });
       selectedBill = result.bill;
       bills = bills.map((bill) => (bill.id === result.bill.id ? result.bill : bill));
       notice = { type: 'success', message: `账单已${label}` };
@@ -1816,7 +1801,7 @@
           {#if !['paid', 'waived'].includes(selectedBill.action_status)}
             <button
               type="button"
-              onclick={() => recordBillAction('payment-planned', '计划付款')}
+              onclick={() => recordBillAction('paymentPlanned', '计划付款')}
               disabled={billActionBusy}
               class="px-3 py-2 text-sm text-stone-600 bg-stone-100 hover:bg-stone-200 rounded-lg disabled:opacity-50"
               >计划付款</button
@@ -1830,7 +1815,7 @@
             >
             <button
               type="button"
-              onclick={() => recordBillAction('mark-paid', '标记为已付款')}
+              onclick={() => recordBillAction('markPaid', '标记为已付款')}
               disabled={billActionBusy}
               class="px-3 py-2 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg disabled:opacity-50"
               >标记已付款</button

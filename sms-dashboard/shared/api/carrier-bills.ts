@@ -1,4 +1,5 @@
 import * as v from 'valibot';
+import { bodyObject } from './body.js';
 import { CarrierBillingLinkedSim, CarrierBillingNotificationSim } from './carrier-billing.js';
 
 /** carrier_bills.action_status: what the operator has done about a bill. */
@@ -103,11 +104,44 @@ export const CarrierBillMutationResponse = v.object({
 
 export type CarrierBillMutationResponse = v.InferOutput<typeof CarrierBillMutationResponse>;
 
-/** POST /api/carrier-bills/:id/<action>, 409: the bill changed; it is answered as it now stands. */
+/**
+ * POST /api/carrier-bills/:id/<action>, 409: the members the problem adds when
+ * the bill changed, which answer the bill as it now stands.
+ */
 export const CarrierBillConflict = v.object({
-  error: v.string(),
   current_version: v.number(),
   bill: CarrierBill,
 });
+
+/** GET /api/carrier-bills. The handler checks the dates and filters by status. */
+export const CarrierBillsQuery = v.object({
+  carrier: v.optional(v.string()),
+  account_id: v.optional(v.string()),
+  from: v.optional(v.string()),
+  to: v.optional(v.string()),
+  status: v.optional(v.string()),
+});
+
+const VERSION_MESSAGE = 'expected_version must be a positive integer';
+const NOTE_MESSAGE = 'note must be a string of at most 1000 characters';
+
+/** The body of the four bill actions; the note is stored trimmed. */
+export const CarrierBillMutationBody = bodyObject(
+  {
+    expected_version: v.pipe(
+      v.number(VERSION_MESSAGE),
+      v.integer(VERSION_MESSAGE),
+      v.minValue(1, VERSION_MESSAGE),
+    ),
+    note: v.optional(
+      v.nullable(v.pipe(v.string(NOTE_MESSAGE), v.trim(), v.maxLength(1000, NOTE_MESSAGE))),
+    ),
+  },
+  { expected_version: VERSION_MESSAGE },
+  VERSION_MESSAGE,
+);
+
+/** The header a bill action or a backfill execution is retried under; the handler bounds it. */
+export const IdempotencyHeaders = v.object({ 'idempotency-key': v.optional(v.string()) });
 
 export type CarrierBillConflict = v.InferOutput<typeof CarrierBillConflict>;

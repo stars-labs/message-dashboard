@@ -7,7 +7,6 @@ import { balanceQueriesHandler } from './handlers/balance-queries.js';
 import { balanceSkillRunnerHandler } from './handlers/balance-skill-runner.js';
 import { carrierWebBalanceHandler } from './handlers/carrier-web-balance.js';
 import { balanceRunnersHandler } from './handlers/balance-runners.js';
-import { carrierBillsHandler } from './handlers/carrier-bills.js';
 import { carrierBillingBackfillHandler } from './handlers/carrier-billing-backfill.js';
 import { serveFrontend } from './frontend-handler.js';
 import { appShellRedirect } from './frontend-gate.js';
@@ -55,10 +54,6 @@ router.get('/login', (request) => auth0Handler.login(request));
 router.get('/callback', auth0Handler.callback);
 router.get('/logout', auth0Handler.logout);
 
-router.get('/api/carrier-billing/accounts', gate('bills.read'), (request) =>
-  carrierBillsHandler.listAccounts(request),
-);
-
 router.post('/api/carrier-billing/backfill/preview', gate('bills.write'), (request) =>
   carrierBillingBackfillHandler.preview(request),
 );
@@ -66,23 +61,6 @@ router.post('/api/carrier-billing/backfill/preview', gate('bills.write'), (reque
 router.post('/api/carrier-billing/backfill/execute', gate('bills.write'), (request) =>
   carrierBillingBackfillHandler.execute(request),
 );
-
-router.get('/api/carrier-bills', gate('bills.read'), (request) =>
-  carrierBillsHandler.list(request),
-);
-
-router.get('/api/carrier-bills/:id', gate('bills.read'), (request) =>
-  carrierBillsHandler.get(request),
-);
-
-for (const [path, action] of [
-  ['/api/carrier-bills/:id/payment-planned', 'paymentPlanned'],
-  ['/api/carrier-bills/:id/mark-paid', 'markPaid'],
-  ['/api/carrier-bills/:id/waive', 'waive'],
-  ['/api/carrier-bills/:id/reopen', 'reopen'],
-] as const) {
-  router.post(path, gate('bills.write'), (request) => carrierBillsHandler[action](request));
-}
 
 // Daemon and runner routes: each handler authenticates its caller itself, by API key
 // or runner token.
