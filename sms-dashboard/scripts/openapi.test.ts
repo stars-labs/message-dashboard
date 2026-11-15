@@ -23,6 +23,8 @@ describe('the OpenAPI document', () => {
       'POST /api/control/cleanup-test-data',
       'GET /api/control/pending-sms',
       'POST /api/control/sms-result',
+      'POST /api/control/calls/incoming',
+      'POST /api/control/calls/ended',
       'GET /api/live',
       'GET /api/health',
       'GET /api/daemon/status',

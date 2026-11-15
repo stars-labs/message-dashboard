@@ -2,7 +2,7 @@ import { implement } from '@orpc/server';
 import type * as v from 'valibot';
 import type { CarrierBillMutationBody } from '../../shared/api/carrier-bills.js';
 import { contract } from '../../shared/api/contract/index.js';
-import { callsHandler } from '../api/calls.js';
+import { callsHandler, daemonCallsHandler } from '../api/calls.js';
 import { filtersHandler } from '../api/filters.js';
 import { keywordsHandler } from '../api/keywords.js';
 import { verificationHandler } from '../api/verification.js';
@@ -62,6 +62,12 @@ export const router = os.router({
     ),
     smsResult: os.control.smsResult.handler(({ context, input }) =>
       controlHandler.updateSMSResult(context.request, input),
+    ),
+    callIncoming: os.control.callIncoming.handler(({ context, input }) =>
+      daemonCallsHandler.incoming(context.request, input),
+    ),
+    callEnded: os.control.callEnded.handler(({ context, input }) =>
+      daemonCallsHandler.ended(context.request, input),
     ),
   },
   health: {

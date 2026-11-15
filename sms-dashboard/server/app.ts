@@ -6,7 +6,6 @@ import { carrierWebBalanceHandler } from './handlers/carrier-web-balance.js';
 import { balanceRunnersHandler } from './handlers/balance-runners.js';
 import { serveFrontend } from './frontend-handler.js';
 import { appShellRedirect } from './frontend-gate.js';
-import { setupCallRoutes } from './api/calls.js';
 import { Router } from './router.js';
 import { contractRoutes, handleContract } from './contract/handler.js';
 import { problemResponse } from './contract/errors.js';
@@ -92,8 +91,6 @@ router.post('/api/control/carrier-web-balance/jobs/:id/fail', (request) =>
 router.post('/api/control/carrier-web-balance/jobs/:id/release', (request) =>
   carrierWebBalanceHandler.release(request),
 );
-
-setupCallRoutes(router);
 
 // /api is never a page: an unknown API path falls through to the 404 below.
 router.get('*', async (request) =>

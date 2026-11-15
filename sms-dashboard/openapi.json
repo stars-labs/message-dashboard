@@ -803,6 +803,288 @@
         ]
       }
     },
+    "/api/control/calls/incoming": {
+      "post": {
+        "operationId": "control.callIncoming",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "iccid": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "from": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "iccid"
+                ],
+                "$schema": "https://json-schema.org/draft/2020-12/schema"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "ok": {
+                          "const": true
+                        },
+                        "call": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "direction": {
+                              "enum": [
+                                "inbound",
+                                "outbound"
+                              ],
+                              "type": "string"
+                            },
+                            "state": {
+                              "enum": [
+                                "ringing",
+                                "connecting",
+                                "bridging",
+                                "active",
+                                "ending",
+                                "ended"
+                              ],
+                              "type": "string"
+                            },
+                            "iccid": {
+                              "type": "string"
+                            },
+                            "number": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "started_at": {
+                              "type": "string"
+                            },
+                            "requested_by": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "answered_at": {
+                              "type": "string"
+                            },
+                            "answered_by": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "session_id": {
+                              "type": "string"
+                            },
+                            "modem_session_id": {
+                              "type": "string"
+                            },
+                            "bridge_started": {
+                              "const": true
+                            },
+                            "ended_at": {
+                              "type": "string"
+                            },
+                            "adapters": {
+                              "type": "object",
+                              "properties": {
+                                "up": {
+                                  "type": "string"
+                                },
+                                "down": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": []
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "direction",
+                            "state",
+                            "iccid",
+                            "number",
+                            "started_at"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "ok",
+                        "call"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "ok": {
+                          "const": true
+                        },
+                        "ignored": {
+                          "const": true
+                        }
+                      },
+                      "required": [
+                        "ok",
+                        "ignored"
+                      ]
+                    }
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/DaemonError"
+          }
+        },
+        "security": [
+          {
+            "daemonKey": []
+          }
+        ]
+      }
+    },
+    "/api/control/calls/ended": {
+      "post": {
+        "operationId": "control.callEnded",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "call_id": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "iccid": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "reason": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [],
+                "$schema": "https://json-schema.org/draft/2020-12/schema"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "ok": {
+                          "const": true
+                        },
+                        "ignored": {
+                          "const": true
+                        }
+                      },
+                      "required": [
+                        "ok",
+                        "ignored"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "ok": {
+                          "const": true
+                        },
+                        "call_id": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "ok",
+                        "call_id"
+                      ]
+                    }
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/DaemonError"
+          }
+        },
+        "security": [
+          {
+            "daemonKey": []
+          }
+        ]
+      }
+    },
     "/api/live": {
       "get": {
         "operationId": "health.live",

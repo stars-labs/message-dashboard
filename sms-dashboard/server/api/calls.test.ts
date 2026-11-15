@@ -9,15 +9,7 @@ import { sqliteD1 } from '../../test/sqlite-d1.js';
 import { callWorker, TEST_API_KEY } from '../../test/worker-harness.js';
 import type { D1, D1Batch } from '../lib/d1.js';
 import type { AppEnv } from '../worker-context.js';
-import {
-  adapterEndpoint,
-  missingConfig,
-  setupCallRoutes,
-  unansweredOutcome,
-  validNumber,
-} from './calls.js';
-
-type Router = Parameters<typeof setupCallRoutes>[0];
+import { adapterEndpoint, missingConfig, unansweredOutcome, validNumber } from './calls.js';
 
 const SESSION_TOKEN = 'session-token';
 const ICCID = '8965012306052373985';
@@ -188,16 +180,6 @@ async function callRoute(
     network,
   });
   return response;
-}
-
-function registeredRoutes(): string[] {
-  const routes: string[] = [];
-  const record = (method: string) => (path: string) => {
-    routes.push(`${method} ${path}`);
-  };
-  const router: Router = { post: record('POST') };
-  setupCallRoutes(router);
-  return routes.sort();
 }
 
 function setup(call: CallFixture | null = null, DB?: AppEnv['DB']) {
@@ -1522,15 +1504,5 @@ describe('daemon call errors on the wire', () => {
       const response = await post(path, { iccid: ICCID }, { 'X-API-Key': 'wrong' });
       expect(await wire(response)).toEqual(rejected(401, 'Unauthorized'));
     }
-  });
-});
-
-describe('route surface', () => {
-  // The browser routes are on the contract; route-census.test.ts lists them.
-  test('registers the daemon routes', () => {
-    expect(registeredRoutes()).toEqual([
-      'POST /api/control/calls/ended',
-      'POST /api/control/calls/incoming',
-    ]);
   });
 });

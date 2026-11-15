@@ -4,7 +4,7 @@ import * as v from 'valibot';
 export const NOT_JSON_MESSAGE = 'Body must be JSON';
 
 /** The message for a JSON body that is not an object, for schemas that do not need their own. */
-export const OBJECT_MESSAGE = 'Body must be a JSON object';
+const OBJECT_MESSAGE = 'Body must be a JSON object';
 
 type RequiredKeys<T> = {
   [K in keyof T]-?: undefined extends T[K] ? never : K;

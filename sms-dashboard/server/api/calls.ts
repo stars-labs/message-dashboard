@@ -18,16 +18,9 @@
 // routes live under /api/control/, which the auth0 middleware gates with X-API-Key.
 
 import { ORPCError } from '@orpc/server';
-import { json } from '../lib/response.js';
 import * as v from 'valibot';
 import { parseJson, readJson } from '../../shared/parse-json.js';
 import { D1_MAX_BOUND_PARAMETERS, queryAll, queryFirst, type D1 } from '../lib/d1.js';
-import type { EndedCallRequest } from '../../shared/daemon-wire/EndedCallRequest.js';
-import type { IncomingCallRequest } from '../../shared/daemon-wire/IncomingCallRequest.js';
-import { acceptsWire } from '../../shared/wire-schema.js';
-import { OBJECT_MESSAGE } from '../../shared/api/body.js';
-import { readBody, type MissingKeyMessages } from '../lib/request-body.js';
-import { handleAuth0, type AuthRequest } from '../middleware/auth0.js';
 import {
   CallHistoryRow,
   IceServersResponse,
@@ -45,6 +38,10 @@ import {
   type CallStateResponse,
   type DialBody,
   type Direction,
+  type EndedCallBody,
+  type EndedCallResponse,
+  type IncomingCallBody,
+  type IncomingCallResponse,
   type RenegotiateBody,
 } from '../../shared/api/calls.js';
 
@@ -103,18 +100,6 @@ interface CallEnv {
   TURN_API_TOKEN?: string;
   VOICE_BRIDGE_HOST?: string;
   API_KEY?: string;
-}
-
-interface CallRequest extends AuthRequest {
-  env: AuthRequest['env'] & CallEnv;
-  body: ReadableStream | null;
-  text(): Promise<string>;
-}
-
-type CallHandler = (request: CallRequest) => Promise<Response>;
-
-interface Router {
-  post(path: string, handler: CallHandler): void;
 }
 
 /** Safety net: a wedged call disappears on its own rather than blocking the fleet. */
@@ -230,45 +215,9 @@ function conflict(
   return new ORPCError('CONFLICT', { message, data: call === undefined ? undefined : { call } });
 }
 
-const ICCID_MESSAGE = 'iccid is required';
-const CALL_ID_MESSAGE = 'Invalid call ID';
-
 export function validNumber(value: unknown): boolean {
   return v.is(PhoneNumber, value);
 }
-
-/** The daemon's RING report: `from` is null until the network sends a caller id. */
-const IncomingBody = acceptsWire<IncomingCallRequest>()(
-  v.object(
-    {
-      iccid: v.pipe(v.string(ICCID_MESSAGE), v.minLength(1, ICCID_MESSAGE)),
-      from: v.nullish(v.string('from must be a string')),
-    },
-    OBJECT_MESSAGE,
-  ),
-);
-
-const INCOMING_MISSING_KEY_MESSAGES = {
-  iccid: ICCID_MESSAGE,
-} as const satisfies MissingKeyMessages<typeof IncomingBody>;
-
-/** The daemon's end report: `call_id` is null for a ring that stopped unanswered. */
-const EndedBody = acceptsWire<EndedCallRequest>()(
-  v.pipe(
-    v.object(
-      {
-        call_id: v.nullish(v.string(CALL_ID_MESSAGE)),
-        iccid: v.nullish(v.string('iccid must be a string')),
-        reason: v.nullish(v.string('reason must be a string')),
-      },
-      OBJECT_MESSAGE,
-    ),
-    v.check(
-      ({ call_id, iccid }) => (call_id ?? '') !== '' || (iccid ?? '') !== '',
-      'call_id or iccid is required',
-    ),
-  ),
-);
 
 function present(value: string | null | undefined): value is string {
   return value !== undefined && value !== null && value !== '';
@@ -949,23 +898,28 @@ export const callsHandler = {
   },
 };
 
-/** The daemon's call reports, which the API key admits. */
-export function setupCallRoutes(router: Router): void {
-  router.post('/api/control/calls/incoming', async (request) => {
-    const authResponse = await handleAuth0(request);
-    if (authResponse) return authResponse;
-    const { env } = request;
+interface DaemonCall {
+  env: CallEnv;
+}
 
-    const parsed = await readBody(request, IncomingBody, INCOMING_MISSING_KEY_MESSAGES);
-    if (!parsed.ok) return json({ error: parsed.error }, 400);
-    const { iccid } = parsed.value;
-    const from = present(parsed.value.from) ? parsed.value.from : null;
+/** The daemon's call reports, which the contract admits with its API key. */
+export const daemonCallsHandler = {
+  /** A RING report: start or refresh the ringing call, unless another call holds the lock. */
+  async incoming(
+    { env }: DaemonCall,
+    body: v.InferOutput<typeof IncomingCallBody>,
+  ): Promise<IncomingCallResponse> {
+    const { iccid } = body;
+    const from = present(body.from) ? body.from : null;
 
     let existing = await readCall(env);
     const open = existing ? null : await claimRing(env.DB, iccid, from);
     for (;;) {
       if (existing && (existing.state !== 'ringing' || existing.iccid !== iccid)) {
-        return json({ ok: false, reason: 'another call is active' }, 409);
+        // The daemon expects this 409, in the body it has always read.
+        throw new ORPCError('CONFLICT', {
+          data: { wire: { ok: false, reason: 'another call is active' } },
+        });
       }
       const knownNumber = [existing?.number, open?.remote_number].find(present) ?? null;
       const call: LiveCall = {
@@ -982,30 +936,25 @@ export function setupCallRoutes(router: Router): void {
         } else if (from !== null && !present(existing?.number ?? open?.remote_number)) {
           await logCallerId(env.DB, call.id, from);
         }
-        return json({ ok: true, call });
+        return { ok: true, call };
       }
       existing = await readCall(env);
       // An ended ring should not be revived by a refresh that was already in flight.
-      if (!existing) return json({ ok: true, ignored: true });
+      if (!existing) return { ok: true, ignored: true };
     }
-  });
+  },
 
-  // Daemon-reported end: remote hangup, modem failure, or a ring that stopped.
-  router.post('/api/control/calls/ended', async (request) => {
-    const authResponse = await handleAuth0(request);
-    if (authResponse) return authResponse;
-    const { env } = request;
-
-    const parsed = await readBody(request, EndedBody, {});
-    if (!parsed.ok) return json({ error: parsed.error }, 400);
-    const { call_id: callId, iccid, reason } = parsed.value;
-
+  /** The daemon's end report: remote hangup, modem failure, or a ring that stopped. */
+  async ended(
+    { env }: DaemonCall,
+    { call_id: callId, iccid, reason }: v.InferOutput<typeof EndedCallBody>,
+  ): Promise<EndedCallResponse> {
     const call = await beginEnding(env, (current) =>
       present(callId)
         ? current.id === callId
         : current.iccid === iccid && current.state === 'ringing',
     );
-    if (!call) return json({ ok: true, ignored: true });
+    if (!call) return { ok: true, ignored: true };
 
     await closeAdapters(env, call);
     await clearCall(env, call);
@@ -1013,6 +962,6 @@ export function setupCallRoutes(router: Router): void {
       reason: present(reason) ? reason.slice(0, 40) : 'ended',
       endedBy: 'daemon',
     });
-    return json({ ok: true, call_id: call.id });
-  });
-}
+    return { ok: true, call_id: call.id };
+  },
+};

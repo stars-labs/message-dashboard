@@ -1,4 +1,7 @@
 import * as v from 'valibot';
+import type { EndedCallRequest } from '../daemon-wire/EndedCallRequest.js';
+import type { IncomingCallRequest } from '../daemon-wire/IncomingCallRequest.js';
+import { acceptsWire } from '../wire-schema.js';
 import { bodyObject } from './body.js';
 
 export const DIRECTIONS = ['inbound', 'outbound'] as const;
@@ -179,3 +182,48 @@ export const CallHangupResponse = v.union([
 ]);
 
 export type CallHangupResponse = v.InferOutput<typeof CallHangupResponse>;
+
+/** POST /api/control/calls/incoming: the daemon's RING report; `from` is null until the network sends a caller id. */
+export const IncomingCallBody = acceptsWire<IncomingCallRequest>()(
+  bodyObject(
+    {
+      iccid: v.pipe(v.string(ICCID_MESSAGE), v.minLength(1, ICCID_MESSAGE)),
+      from: v.nullish(v.string('from must be a string')),
+    },
+    { iccid: ICCID_MESSAGE },
+  ),
+);
+
+/** The ringing call, or nothing when the ring ended while this report was in flight. */
+export const IncomingCallResponse = v.union([
+  v.object({ ok: v.literal(true), call: LiveCall }),
+  v.object({ ok: v.literal(true), ignored: v.literal(true) }),
+]);
+
+export type IncomingCallResponse = v.InferOutput<typeof IncomingCallResponse>;
+
+/** POST /api/control/calls/ended: `call_id` is null for a ring that stopped unanswered. */
+export const EndedCallBody = acceptsWire<EndedCallRequest>()(
+  v.pipe(
+    bodyObject(
+      {
+        call_id: v.nullish(v.string(CALL_ID_MESSAGE)),
+        iccid: v.nullish(v.string('iccid must be a string')),
+        reason: v.nullish(v.string('reason must be a string')),
+      },
+      {},
+    ),
+    v.check(
+      ({ call_id, iccid }) => (call_id ?? '') !== '' || (iccid ?? '') !== '',
+      'call_id or iccid is required',
+    ),
+  ),
+);
+
+/** The call that ended, or nothing when no call matched. */
+export const EndedCallResponse = v.union([
+  v.object({ ok: v.literal(true), ignored: v.literal(true) }),
+  v.object({ ok: v.literal(true), call_id: v.string() }),
+]);
+
+export type EndedCallResponse = v.InferOutput<typeof EndedCallResponse>;

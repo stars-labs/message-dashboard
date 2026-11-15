@@ -12,6 +12,8 @@ const EXPECTED = [
   ['POST', '/api/control/cleanup-test-data'],
   ['GET', '/api/control/pending-sms'],
   ['POST', '/api/control/sms-result'],
+  ['POST', '/api/control/calls/incoming'],
+  ['POST', '/api/control/calls/ended'],
   ['GET', '/api/live'],
   ['GET', '/api/health'],
   ['GET', '/api/daemon/status'],
@@ -91,8 +93,6 @@ const EXPECTED = [
   ['POST', '/api/control/carrier-web-balance/jobs/:id/complete'],
   ['POST', '/api/control/carrier-web-balance/jobs/:id/fail'],
   ['POST', '/api/control/carrier-web-balance/jobs/:id/release'],
-  ['POST', '/api/control/calls/incoming'],
-  ['POST', '/api/control/calls/ended'],
   ['OPTIONS', '*'],
 ] as const;
 
