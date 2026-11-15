@@ -49,7 +49,10 @@ See [docs/deployment.md](../docs/deployment.md).
 
 ## Verification
 
-- Server changes: `bun run test`
+- Server changes: `bun run test`. `test/worker-harness.ts` drives the whole Worker;
+  adding, removing or reordering a route means updating `server/route-census.test.ts`,
+  and a route that answers without credentials must be listed, with its reason, in
+  `server/route-auth.test.ts`.
 - Frontend changes: `bun run build` + check desktop and 440px mobile layouts.
   With `dev-server` running, `bun run screenshots -- --profile <dir> --out <dir>`
   captures every view at both widths and writes `report.html` with console
