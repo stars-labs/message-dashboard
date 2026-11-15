@@ -4,8 +4,11 @@ import * as v from 'valibot';
 import { ErrorResponse } from '../../shared/api/error.js';
 import { parseJson, readJson, type Schema } from '../../shared/parse-json.js';
 import { callState, type CallFixture, type Fleet } from '../../test/call-state-fleet.js';
+import { memoryKv } from '../../test/memory-kv.js';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
-import type { D1 } from '../lib/d1.js';
+import { callWorker, TEST_API_KEY } from '../../test/worker-harness.js';
+import type { D1, D1Batch } from '../lib/d1.js';
+import type { AppEnv } from '../worker-context.js';
 import {
   adapterEndpoint,
   missingConfig,
@@ -15,9 +18,6 @@ import {
 } from './calls.js';
 
 type Router = Parameters<typeof setupCallRoutes>[0];
-type CallHandler = Parameters<Router['get']>[1];
-type CallRequest = Parameters<CallHandler>[0];
-type CallEnv = CallRequest['env'];
 
 const SESSION_TOKEN = 'session-token';
 const ICCID = '8965012306052373985';
@@ -101,92 +101,118 @@ function historyDb() {
   };
 }
 
-type TestEnv = CallEnv & { CALL_STATE: Fleet; API_KEY: string };
+type TestEnv = Pick<
+  AppEnv,
+  | 'CALL_STATE'
+  | 'REALTIME_APP_ID'
+  | 'REALTIME_APP_SECRET'
+  | 'TURN_KEY_ID'
+  | 'TURN_API_TOKEN'
+  | 'VOICE_BRIDGE_HOST'
+  | 'API_KEY'
+> & { CALL_STATE: Fleet };
 
-function envStub(CALL_STATE: Fleet, DB: CallEnv['DB']): TestEnv {
+function envStub(CALL_STATE: Fleet): TestEnv {
   return {
-    SESSIONS: {
-      get: (key) =>
-        Promise.resolve(
-          key === SESSION_TOKEN
-            ? JSON.stringify({
-                expires_at: Date.now() + 60_000,
-                user: { id: 'auth0|op', roles: ['admin'] },
-              })
-            : null,
-        ),
-      delete: () => Promise.resolve(),
-    },
     CALL_STATE,
     REALTIME_APP_ID: 'app',
     REALTIME_APP_SECRET: 'secret',
     TURN_KEY_ID: 'turn',
     TURN_API_TOKEN: 'token',
     VOICE_BRIDGE_HOST: 'voice-bridge.example.test',
-    API_KEY: 'daemon-key',
-    DB,
+    API_KEY: TEST_API_KEY,
   };
 }
 
-const unavailableD1: D1 = {
+const unavailableD1: D1 & D1Batch = {
   prepare() {
+    throw new Error('D1 unavailable');
+  },
+  batch() {
     throw new Error('D1 unavailable');
   },
 };
 
+type Network = (request: Request) => Response | Promise<Response>;
+
+let network: Network;
+let errorSpy: Mock<typeof console.error>;
+
+beforeEach(() => {
+  network = (request) => {
+    throw new Error(`unexpected network call: ${request.url}`);
+  };
+  errorSpy = spyOn(console, 'error').mockImplementation(() => undefined);
+});
+
+afterEach(() => {
+  errorSpy.mockRestore();
+});
+
 /**
- * A request the way the router delivers it: the router assigns `request.env`
- * before dispatch. Browser routes authenticate with the auth_token cookie,
- * /api/control/ routes with X-API-Key. A string body is sent as raw text,
- * anything else as its JSON, and `undefined` sends no body at all.
+ * Browser routes authenticate with the auth_token cookie, /api/control/ routes
+ * with X-API-Key. A string body is sent as raw text, anything else as its JSON,
+ * and `undefined` sends no body at all. A header given an empty value is removed.
  */
-function request(
+async function callRoute(
   env: TestEnv,
+  DB: AppEnv['DB'],
   method: 'GET' | 'POST',
   path: string,
   body: unknown,
-  headers: Record<string, string>,
-): CallRequest {
+  overrides: Record<string, string>,
+): Promise<Response> {
   const daemon = path.startsWith('/api/control/');
-  const all = new Headers(
-    daemon ? { 'x-api-key': env.API_KEY } : { cookie: `auth_token=${SESSION_TOKEN}` },
+  const headers = new Headers(
+    daemon ? { 'x-api-key': TEST_API_KEY } : { cookie: `auth_token=${SESSION_TOKEN}` },
   );
-  all.set('content-type', 'application/json');
-  for (const [name, value] of Object.entries(headers)) all.set(name, value);
-  const url = `https://example.test${path}`;
-  if (method === 'GET') return Object.assign(new Request(url, { headers: all }), { env });
+  headers.set('content-type', 'application/json');
+  for (const [name, value] of Object.entries(overrides)) {
+    if (value === '') headers.delete(name);
+    else headers.set(name, value);
+  }
   const text = body === undefined || typeof body === 'string' ? body : JSON.stringify(body);
-  return Object.assign(new Request(url, { method: 'POST', headers: all, body: text ?? null }), {
-    env,
+  const { response } = await callWorker(method, path, {
+    headers: Object.fromEntries(headers),
+    ...(method === 'POST' && text !== undefined ? { body: text } : {}),
+    bindings: {
+      ...env,
+      DB,
+      SESSIONS: memoryKv({
+        [SESSION_TOKEN]: JSON.stringify({
+          expires_at: Date.now() + 3_600_000,
+          user: { id: 'auth0|op', email: 'op@example.test', roles: ['sms-viewer'] },
+        }),
+      }),
+    },
+    network,
   });
+  return response;
 }
 
-function setup(call: CallFixture | null = null, DB?: CallEnv['DB']) {
-  const routes = new Map<string, CallHandler>();
-  const record = (method: string) => (path: string, handler: CallHandler) => {
-    routes.set(`${method} ${path}`, handler);
+function registeredRoutes(): string[] {
+  const routes: string[] = [];
+  const record = (method: string) => (path: string) => {
+    routes.push(`${method} ${path}`);
   };
   const router: Router = { get: record('GET'), post: record('POST') };
   setupCallRoutes(router);
+  return routes.sort();
+}
 
+function setup(call: CallFixture | null = null, DB?: AppEnv['DB']) {
   const db = historyDb();
-  const env = envStub(callState(call), DB ?? db.d1);
-
-  function dispatch(method: 'GET' | 'POST', path: string, req: CallRequest) {
-    const handler = routes.get(`${method} ${path}`);
-    if (handler === undefined) throw new Error(`no route ${method} ${path}`);
-    return handler(req);
-  }
+  const env = envStub(callState(call));
+  const store = DB ?? db.d1;
 
   return {
     env,
     db,
-    routes,
     post: (path: string, body?: unknown, headers: Record<string, string> = {}) =>
-      dispatch('POST', path, request(env, 'POST', path, body, headers)),
+      callRoute(env, store, 'POST', path, body, headers),
     get: (path: string, query?: Record<string, string>, headers: Record<string, string> = {}) => {
       const suffix = query ? `?${new URLSearchParams(query).toString()}` : '';
-      return dispatch('GET', path, request(env, 'GET', `${path}${suffix}`, undefined, headers));
+      return callRoute(env, store, 'GET', `${path}${suffix}`, undefined, headers);
     },
   };
 }
@@ -200,45 +226,32 @@ interface SfuCall {
   body: unknown;
 }
 
-let fetchSpy: Mock<typeof fetch>;
-
-beforeEach(() => {
-  fetchSpy = spyOn(globalThis, 'fetch');
-});
-
-afterEach(() => {
-  fetchSpy.mockRestore();
-});
-
-function stubFetch(handler: (input: string, init: RequestInit | undefined) => Promise<Response>) {
-  fetchSpy.mockImplementation(
-    Object.assign(
-      (input: string | URL | Request, init?: RequestInit) => {
-        if (typeof input !== 'string') throw new TypeError('the Worker fetches by URL string');
-        return handler(input, init);
-      },
-      { preconnect: () => undefined },
-    ),
-  );
+/**
+ * callWorker restores fetch when its own call finishes, so a call still in
+ * flight beside it would lose its network. A scenario that overlaps calls runs
+ * under this, which keeps the stubbed network in place until the scenario ends.
+ */
+function stubFetch(handler: (request: Request) => Promise<Response>) {
+  network = handler;
 }
 
 /** Records SFU calls and answers them from a path -> response table. */
 function stubSfu(responses: SfuResponses): SfuCall[] {
   const calls: SfuCall[] = [];
-  stubFetch((url, init) => {
-    const path = new URL(url).pathname.replace('/v1/apps/app', '');
-    const text = init?.body;
+  stubFetch(async (request) => {
+    const path = new URL(request.url).pathname.replace('/v1/apps/app', '');
+    const text = await request.text();
     let body: unknown;
-    if (typeof text === 'string') {
+    if (text !== '') {
       const sent = parseJson(text, v.unknown());
       if (!sent.ok) throw new Error(sent.error);
       body = sent.value;
     }
-    calls.push({ path, method: init?.method, body });
+    calls.push({ path, method: request.method, body });
     const entry = typeof responses === 'function' ? responses(path, calls.length) : responses[path];
-    if (entry instanceof Response) return Promise.resolve(entry);
+    if (entry instanceof Response) return entry;
     const [status, reply] = entry ?? [404, { errorCode: 'not_found' }];
-    return Promise.resolve(new Response(JSON.stringify(reply), { status }));
+    return new Response(JSON.stringify(reply), { status });
   });
   return calls;
 }
@@ -257,16 +270,6 @@ function adapterTrack(call: SfuCall) {
   return v.parse(AdapterRequest, call.body).tracks[0];
 }
 
-async function rejection(promise: Promise<unknown>): Promise<Error> {
-  try {
-    await promise;
-  } catch (error) {
-    if (error instanceof Error) return error;
-    throw error;
-  }
-  throw new Error('expected the call to reject');
-}
-
 async function parsed<T>(response: Response, schema: Schema<T>): Promise<T> {
   const result = await readJson(response, schema);
   if (!result.ok) throw new Error(result.error);
@@ -275,6 +278,18 @@ async function parsed<T>(response: Response, schema: Schema<T>): Promise<T> {
 
 function json(response: Response): Promise<unknown> {
   return parsed(response, v.unknown());
+}
+
+function loggedFailures(): string {
+  return errorSpy.mock.calls.flat().map(String).join('\n');
+}
+
+function errorBody(response: Response): Promise<ErrorResponse> {
+  return parsed(response, ErrorResponse);
+}
+
+async function errorOf(response: Response): Promise<string> {
+  return (await errorBody(response)).error;
 }
 
 const CallIdBody = v.looseObject({ call: v.looseObject({ id: v.string() }) });
@@ -414,12 +429,10 @@ describe('outbound media setup', () => {
     stubSfu(() => [500, { errorCode: 'boom', errorDescription: 'no capacity' }]);
 
     const response = await post('/api/calls/dial', dial);
-    const body = await readJson(response, ErrorResponse);
+    const body = await errorBody(response);
 
-    expect(body.ok).toBe(true);
-    if (!body.ok) return;
-    expect(body.value.error).toBe('Could not create an SFU session');
-    expect(body.value.detail).toContain('no capacity');
+    expect(body.error).toBe('Could not create an SFU session');
+    expect(body.detail).toContain('no capacity');
   });
 
   test('a second dial is refused while any call exists', async () => {
@@ -457,7 +470,7 @@ describe('outbound media setup', () => {
       const { post, env } = setup();
       const entered = Promise.withResolvers<undefined>();
       const resume = Promise.withResolvers<undefined>();
-      stubFetch(async (url) => {
+      stubFetch(async ({ url }) => {
         if (url.endsWith('/sessions/new')) {
           entered.resolve(undefined);
           await resume.promise;
@@ -1042,23 +1055,25 @@ describe('live call state that does not match the schema', () => {
     started_at: STARTED_AT,
   };
 
-  test('the state route throws instead of passing a call without an iccid on', async () => {
+  test('the state route fails instead of passing a call without an iccid on', async () => {
     const { get, env } = setup();
     env.CALL_STATE.replace(unreadable);
 
-    const error = await rejection(get('/api/calls/state'));
+    const response = await get('/api/calls/state');
 
-    expect(error.message).toContain('Live call state is unreadable');
+    expect(response.status).toBe(500);
+    expect(loggedFailures()).toContain('Live call state is unreadable');
   });
 
-  test('hangup throws instead of clearing a call it cannot read', async () => {
+  test('hangup fails instead of clearing a call it cannot read', async () => {
     const { post, env } = setup();
     env.CALL_STATE.replace(unreadable);
     stubSfu({});
 
-    const error = await rejection(post('/api/calls/hangup', {}));
+    const response = await post('/api/calls/hangup', {});
 
-    expect(error.message).toContain('Live call state is unreadable');
+    expect(response.status).toBe(500);
+    expect(loggedFailures()).toContain('Live call state is unreadable');
   });
 });
 
@@ -1244,7 +1259,7 @@ describe('ICE servers', () => {
     const response = await get('/api/calls/ice');
 
     expect(response.status).toBe(502);
-    expect(await json(response)).toMatchObject({ error: 'Could not issue ICE servers' });
+    expect(await errorOf(response)).toBe('Could not issue ICE servers');
   });
 });
 
@@ -1282,7 +1297,7 @@ describe('malformed bodies', () => {
       const response = await post(path, body);
 
       expect(response.status).toBe(400);
-      expect(await json(response)).toMatchObject({ error });
+      expect(await errorOf(response)).toBe(error);
       expect(env.CALL_STATE.call()).toEqual(call);
     },
   );
@@ -1326,9 +1341,7 @@ describe('authentication', () => {
 
 describe('route surface', () => {
   test('registers the browser routes and the daemon routes', () => {
-    const { routes } = setup();
-
-    expect([...routes.keys()].sort()).toEqual([
+    expect(registeredRoutes()).toEqual([
       'GET /api/calls/history',
       'GET /api/calls/ice',
       'GET /api/calls/state',

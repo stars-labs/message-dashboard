@@ -29,7 +29,7 @@ const bindings = {
 };
 
 /** Auth0's Management API with an empty tenant. */
-function auth0(url: string): Response {
+function auth0({ url }: Request): Response {
   if (url.endsWith('/oauth/token')) return Response.json({ access_token: 't', expires_in: 86400 });
   if (url.includes('/api/v2/roles?')) {
     return Response.json([
@@ -260,7 +260,7 @@ describe('contract routes', () => {
       headers: as(ADMIN),
       body: JSON.stringify({ role: 'sms-viewer' }),
       bindings,
-      network: (url) => (url.includes('/roles') ? rateLimited() : auth0(url)),
+      network: (request) => (request.url.includes('/roles') ? rateLimited() : auth0(request)),
     });
     expect(outbound.filter((url) => url.includes('/api/v2/users/'))).toEqual([
       'https://tenant.example.test/api/v2/users/auth0%7Cother/roles',

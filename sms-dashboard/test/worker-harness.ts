@@ -52,7 +52,53 @@ interface WorkerInit {
   body?: string;
   bindings?: Partial<AppEnv>;
   /** Answers the Worker's outbound calls, standing in for an upstream such as Auth0. */
-  network?: (url: string) => Response;
+  network?: (request: Request) => Response | Promise<Response>;
+}
+
+type Network = WorkerInit['network'];
+
+/**
+ * The calls in flight share one fetch stub, restored when the last finishes:
+ * a stub per call would be restored under a call still running beside it.
+ * Calls that overlap must answer the network the same way, or a request
+ * could reach the other call's double.
+ */
+const inFlight = new Set<{ network: Network; outbound: string[] }>();
+let restoreFetch: (() => void) | null = null;
+
+function shareNetwork(call: { network: Network; outbound: string[] }): () => void {
+  for (const other of inFlight) {
+    if (other.network !== call.network) {
+      throw new Error('overlapping callWorker calls must share one network double');
+    }
+  }
+  inFlight.add(call);
+  if (restoreFetch === null) {
+    const stub = spyOn(globalThis, 'fetch').mockImplementation(
+      Object.assign(
+        async (input: Parameters<typeof fetch>[0], requestInit?: RequestInit) => {
+          const request =
+            input instanceof Request
+              ? new Request(input, requestInit)
+              : new Request(input.toString(), requestInit);
+          for (const active of inFlight) active.outbound.push(request.url);
+          if (call.network) return await call.network(request);
+          throw new Error(`the harness refuses network calls: ${request.url}`);
+        },
+        { preconnect: () => undefined },
+      ),
+    );
+    restoreFetch = () => {
+      stub.mockRestore();
+    };
+  }
+  return () => {
+    inFlight.delete(call);
+    if (inFlight.size === 0 && restoreFetch !== null) {
+      restoreFetch();
+      restoreFetch = null;
+    }
+  };
 }
 
 export async function callWorker(
@@ -61,17 +107,7 @@ export async function callWorker(
   init: WorkerInit = {},
 ): Promise<WorkerCall> {
   const outbound: string[] = [];
-  const network = spyOn(globalThis, 'fetch').mockImplementation(
-    Object.assign(
-      (input: Parameters<typeof fetch>[0]) => {
-        const url = input instanceof Request ? input.url : input.toString();
-        outbound.push(url);
-        if (init.network) return Promise.resolve(init.network(url));
-        return Promise.reject(new Error(`the harness refuses network calls: ${url}`));
-      },
-      { preconnect: () => undefined },
-    ),
-  );
+  const release = shareNetwork({ network: init.network, outbound });
   const background: Promise<unknown>[] = [];
   const ctx: AppContext = { waitUntil: (promise) => background.push(promise) };
   const incoming = new Request(`https://worker.test${path}`, {
@@ -85,6 +121,6 @@ export async function callWorker(
     await Promise.allSettled(background);
     return { response, outbound };
   } finally {
-    network.mockRestore();
+    release();
   }
 }
