@@ -1324,4 +1324,19 @@ describe('POST /api/control/heartbeat', () => {
       expect(refused).toMatchObject({ status: 400, message: error });
     }
   });
+
+  test('answers a body that is empty or not JSON as the route did before the contract', async () => {
+    for (const body of ['', '{"schema_version":']) {
+      const { response } = await callWorker('POST', '/api/control/heartbeat', {
+        headers: { 'X-API-Key': TEST_API_KEY },
+        body,
+        bindings: { DB: untouchable },
+      });
+      expect([body, response.status, await response.text()]).toEqual([
+        body,
+        400,
+        '{"success":false,"error":"Body must be JSON"}',
+      ]);
+    }
+  });
 });

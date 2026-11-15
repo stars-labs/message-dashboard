@@ -18,6 +18,7 @@ import {
   UploadBody,
   UploadResponse,
 } from '../daemon.js';
+import { NOT_JSON_MESSAGE } from '../body.js';
 import { route } from './route.js';
 
 /** The daemon's API key; the route refuses in { success: false, error }. */
@@ -39,7 +40,12 @@ export const control = {
   // The snapshot is read field by field (normalizeHealthSnapshot), so a daemon
   // a version ahead or behind gets the refusal it always got.
   heartbeat: route(DAEMON, 'POST', '/api/control/heartbeat')
-    .input(v.unknown())
+    .input(
+      v.pipe(
+        v.unknown(),
+        v.check((body) => body !== undefined, NOT_JSON_MESSAGE),
+      ),
+    )
     .output(HeartbeatResponse),
   // The one route that refuses a report in { error }, as it always has.
   devices: route({ kind: 'daemon', errors: 'plain' }, 'POST', '/api/control/devices')
