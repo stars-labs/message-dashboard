@@ -36,10 +36,6 @@ new_sqlite_classes = ["CallState"]
 
 # Environment variables
 [vars]
-ENVIRONMENT = "production"
-DEFAULT_USER_GROUP = "viewer"
-WORKER_URL = "https://sexy.itoken.world"
-
 # Voice calls: host of the daemon's voice bridge on the Orange Pi. The Realtime SFU
 # adapters connect to wss://<host>/voice/... with a per-call HMAC signature.
 VOICE_BRIDGE_HOST = "voice-bridge.itoken.world"
