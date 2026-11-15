@@ -8,7 +8,11 @@
       "decision": {
         "action": "reply",
         "selected_option": "11",
-        "confidence": 0.98
+        "balance": null,
+        "currency": null,
+        "confidence": 0.98,
+        "evidence": "",
+        "reason": ""
       }
     }
   },
