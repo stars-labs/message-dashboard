@@ -363,9 +363,11 @@ describe('runner refusals on the wire', () => {
     ).toEqual(answer(400, '{"error":"model must be text"}'));
 
     const valid = decide({ decision: { action: 'stop', reason: 'done' } });
-    expect(
-      await send('POST', '/api/control/balance-skills/jobs/nope/decision', { body: valid }),
-    ).toEqual(answer(404, '{"error":"Skill job not found"}'));
+    for (const id of ['nope', '']) {
+      expect(
+        await send('POST', `/api/control/balance-skills/jobs/${id}/decision`, { body: valid }),
+      ).toEqual(answer(404, '{"error":"Skill job not found"}'));
+    }
     expect(await send('POST', path, { body: valid })).toEqual(
       answer(409, '{"error":"Skill job lease is not active for this runner"}'),
     );
@@ -405,9 +407,11 @@ describe('runner refusals on the wire', () => {
     ).toEqual(answer(400, '{"error":"error must be text"}'));
 
     const valid = '{"runner_id":"runner-1"}';
-    expect(
-      await send('POST', '/api/control/balance-skills/jobs/nope/release', { body: valid }),
-    ).toEqual(answer(404, '{"error":"Skill job not found"}'));
+    for (const id of ['nope', '']) {
+      expect(
+        await send('POST', `/api/control/balance-skills/jobs/${id}/release`, { body: valid }),
+      ).toEqual(answer(404, '{"error":"Skill job not found"}'));
+    }
     expect(await send('POST', path, { body: valid })).toEqual(
       answer(409, '{"error":"Skill job lease is not active for this runner"}'),
     );

@@ -9,6 +9,7 @@ import { verificationHandler } from '../api/verification.js';
 import { auth0Handler } from '../handlers/auth0.js';
 import { balanceQueriesHandler } from '../handlers/balance-queries.js';
 import { balanceRunnersHandler } from '../handlers/balance-runners.js';
+import { balanceSkillRunnerHandler } from '../handlers/balance-skill-runner.js';
 import { carrierBillingBackfillHandler } from '../handlers/carrier-billing-backfill.js';
 import { carrierBillsHandler } from '../handlers/carrier-bills.js';
 import { controlHandler, recordHeartbeat } from '../handlers/control.js';
@@ -100,6 +101,32 @@ export const router = os.router({
     check: os.balanceRunnerControl.check.handler(() => ({ success: true }) as const),
     heartbeat: os.balanceRunnerControl.heartbeat.handler(({ context, input }) =>
       balanceRunnersHandler.heartbeat(context.request, runnerOf(context), input),
+    ),
+  },
+  balanceSkillJobs: {
+    claim: os.balanceSkillJobs.claim.handler(async ({ context, input }) => {
+      const job = await balanceSkillRunnerHandler.claim(
+        context.request,
+        runnerOf(context),
+        input.query.runner_id,
+      );
+      return job === null ? { status: 204 as const } : { status: 200 as const, body: job };
+    }),
+    decision: os.balanceSkillJobs.decision.handler(({ context, input }) =>
+      balanceSkillRunnerHandler.decide(
+        context.request,
+        runnerOf(context),
+        input.params.id,
+        input.body,
+      ),
+    ),
+    release: os.balanceSkillJobs.release.handler(({ context, input }) =>
+      balanceSkillRunnerHandler.release(
+        context.request,
+        runnerOf(context),
+        input.params.id,
+        input.body,
+      ),
     ),
   },
   health: {

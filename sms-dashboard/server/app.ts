@@ -1,6 +1,5 @@
 import { handleCORS, corsPreflight } from './middleware/cors.js';
 import { auth0Handler } from './handlers/auth0.js';
-import { balanceSkillRunnerHandler } from './handlers/balance-skill-runner.js';
 import { carrierWebBalanceHandler } from './handlers/carrier-web-balance.js';
 import { serveFrontend } from './frontend-handler.js';
 import { appShellRedirect } from './frontend-gate.js';
@@ -33,18 +32,6 @@ router.get('/logout', auth0Handler.logout);
 
 // Daemon and runner routes: each handler authenticates its caller itself, by API key
 // or runner token.
-
-router.get('/api/control/balance-skills/jobs/claim', (request) =>
-  balanceSkillRunnerHandler.claim(request),
-);
-
-router.post('/api/control/balance-skills/jobs/:id/decision', (request) =>
-  balanceSkillRunnerHandler.decide(request),
-);
-
-router.post('/api/control/balance-skills/jobs/:id/release', (request) =>
-  balanceSkillRunnerHandler.release(request),
-);
 
 router.get('/api/control/carrier-web-balance/jobs/claim', (request) =>
   carrierWebBalanceHandler.claim(request),

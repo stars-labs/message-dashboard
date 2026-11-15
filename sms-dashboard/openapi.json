@@ -1639,6 +1639,351 @@
         ]
       }
     },
+    "/api/control/balance-skills/jobs/claim": {
+      "get": {
+        "operationId": "balanceSkillJobs.claim",
+        "parameters": [
+          {
+            "name": "runner_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "allowEmptyValue": true,
+            "allowReserved": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "check_id": {
+                      "type": "string"
+                    },
+                    "step_index": {
+                      "type": "number"
+                    },
+                    "attempts": {
+                      "type": "number"
+                    },
+                    "skill": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "version": {
+                          "type": "string"
+                        },
+                        "objective": {
+                          "type": "string"
+                        },
+                        "confidence_threshold": {
+                          "type": "number"
+                        },
+                        "max_turns": {
+                          "type": "number"
+                        },
+                        "allowed_currencies": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "forbidden_intents": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "version",
+                        "objective",
+                        "confidence_threshold",
+                        "max_turns",
+                        "allowed_currencies",
+                        "forbidden_intents"
+                      ]
+                    },
+                    "menu_options": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "value": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "value",
+                          "label"
+                        ]
+                      }
+                    },
+                    "response_content": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "check_id",
+                    "step_index",
+                    "attempts",
+                    "skill",
+                    "menu_options",
+                    "response_content"
+                  ]
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "OK"
+          },
+          "default": {
+            "$ref": "#/components/responses/DaemonError"
+          }
+        },
+        "security": [
+          {
+            "daemonKey": []
+          },
+          {
+            "auth0": [
+              "balance:skills:run"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/control/balance-skills/jobs/{id}/decision": {
+      "post": {
+        "operationId": "balanceSkillJobs.decision",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "runner_id": {
+                    "type": "string"
+                  },
+                  "decision": {},
+                  "model": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "runner_id",
+                  "decision"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "success": {
+                          "const": true
+                        },
+                        "action": {
+                          "const": "complete"
+                        },
+                        "status": {
+                          "const": "parsed"
+                        }
+                      },
+                      "required": [
+                        "success",
+                        "action",
+                        "status"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "success": {
+                          "const": true
+                        },
+                        "action": {
+                          "const": "stop"
+                        },
+                        "reason": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "success",
+                        "action",
+                        "reason"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "action": {
+                      "const": "reply"
+                    },
+                    "status": {
+                      "const": "queued"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "action",
+                    "status"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/DaemonError"
+          }
+        },
+        "security": [
+          {
+            "daemonKey": []
+          },
+          {
+            "auth0": [
+              "balance:skills:run"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/control/balance-skills/jobs/{id}/release": {
+      "post": {
+        "operationId": "balanceSkillJobs.release",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "runner_id": {
+                    "type": "string"
+                  },
+                  "error": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "runner_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/DaemonError"
+          }
+        },
+        "security": [
+          {
+            "daemonKey": []
+          },
+          {
+            "auth0": [
+              "balance:skills:run"
+            ]
+          }
+        ]
+      }
+    },
     "/api/live": {
       "get": {
         "operationId": "health.live",
