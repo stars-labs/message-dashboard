@@ -1,9 +1,9 @@
 // Screenshots every dashboard view at desktop and mobile width against a running
 // dev server, and writes report.html beside the images with what the browser
-// reported on each page. Login is a human step: when the profile has no session,
-// a visible window opens on /login and the run waits for the operator.
+// reported on each page. It signs in with a short-lived admin session it writes
+// to local KV, and deletes that session when it is done.
 //
-//   bun run screenshots -- --profile <dir outside the repo> --out <dir>
+//   bun run screenshots -- --out <dir>
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -18,35 +18,35 @@ const VIEWPORTS = {
   mobile: { width: 440, height: 900 },
 } as const satisfies Record<Viewport, { width: number; height: number }>;
 
-const LOGIN_TIMEOUT_MS = 5 * 60_000;
+const SESSION_TTL_S = 30 * 60;
+const ADMIN_ROLE = 'sms-admin';
 const SETTLE_TIMEOUT_MS = 15_000;
 
 const { values } = parseArgs({
   options: {
     'base-url': { type: 'string', default: 'http://localhost:8080' },
-    profile: { type: 'string' },
     out: { type: 'string' },
   },
 });
 function required(value: string | undefined, flag: string): string {
   if (value === undefined) {
-    throw new Error(`missing --${flag}; usage: bun run screenshots -- --profile <dir> --out <dir>`);
+    throw new Error(`missing --${flag}; usage: bun run screenshots -- --out <dir>`);
   }
   return value;
 }
 
 const baseUrl = values['base-url'];
-const profile = required(values.profile, 'profile');
 const out = required(values.out, 'out');
 
-function launch(headless: boolean): Promise<BrowserContext> {
-  return chromium.launchPersistentContext(profile, {
-    // The full Chromium build, also headless: the repo installs no headless shell.
-    channel: 'chromium',
-    headless,
-    deviceScaleFactor: 2,
-    viewport: VIEWPORTS.desktop,
-  });
+/** Runs wrangler against the local state dev-server uses; fails loudly. */
+async function wrangler(args: string[]): Promise<void> {
+  const proc = Bun.spawn(['bunx', 'wrangler', ...args], { stdout: 'ignore', stderr: 'pipe' });
+  const code = await proc.exited;
+  if (code !== 0) {
+    throw new Error(
+      `wrangler ${args.slice(0, 3).join(' ')} failed: ${await new Response(proc.stderr).text()}`,
+    );
+  }
 }
 
 async function signedIn(context: BrowserContext): Promise<boolean> {
@@ -54,22 +54,6 @@ async function signedIn(context: BrowserContext): Promise<boolean> {
   if (response.ok()) return true;
   if (response.status() === 401 || response.status() === 403) return false;
   throw new Error(`/api/auth/me answered ${String(response.status())}; is the dev server running?`);
-}
-
-async function waitForLogin(): Promise<void> {
-  const context = await launch(false);
-  try {
-    const page = context.pages()[0] ?? (await context.newPage());
-    await page.goto(`${baseUrl}/login`);
-    console.log('Log in in the opened browser window; waiting up to 5 minutes.');
-    const deadline = Date.now() + LOGIN_TIMEOUT_MS;
-    while (!(await signedIn(context))) {
-      if (Date.now() > deadline) throw new Error('Timed out waiting for login.');
-      await page.waitForTimeout(2_000);
-    }
-  } finally {
-    await context.close();
-  }
 }
 
 function recordIssues(page: Page, issues: PageIssue[]): void {
@@ -126,15 +110,41 @@ async function capture(
 
 await mkdir(out, { recursive: true });
 
-let context = await launch(true);
-if (!(await signedIn(context))) {
-  await context.close();
-  await waitForLogin();
-  context = await launch(true);
-}
+// A session written straight into the local SESSIONS namespace, shaped like the
+// one the Auth0 callback stores, so no person or identity provider takes part.
+const token = `screenshots-${crypto.randomUUID()}`;
+await wrangler([
+  'kv',
+  'key',
+  'put',
+  '--binding',
+  'SESSIONS',
+  '--local',
+  '--ttl',
+  String(SESSION_TTL_S),
+  token,
+  JSON.stringify({
+    user: {
+      id: 'screenshots|local',
+      email: 'screenshots@localhost',
+      name: 'Screenshots',
+      roles: [ADMIN_ROLE],
+    },
+    expires_at: Date.now() + SESSION_TTL_S * 1000,
+  }),
+]);
 
+// The full Chromium build, also headless: the repo installs no headless shell.
+const browser = await chromium.launch({ channel: 'chromium' });
 const captures: PageCapture[] = [];
 try {
+  const context = await browser.newContext({ deviceScaleFactor: 2, viewport: VIEWPORTS.desktop });
+  await context.addCookies([{ name: 'auth_token', value: token, url: baseUrl, httpOnly: true }]);
+  if (!(await signedIn(context))) {
+    throw new Error(
+      "the local session was not accepted; is dev-server using this checkout's .wrangler state?",
+    );
+  }
   for (const view of Object.keys(VIEW_PERMISSION).filter(isView)) {
     for (const viewport of VIEWPORT_ORDER) {
       const result = await capture(context, view, viewport);
@@ -143,7 +153,8 @@ try {
     }
   }
 } finally {
-  await context.close();
+  await browser.close();
+  await wrangler(['kv', 'key', 'delete', '--binding', 'SESSIONS', '--local', token]);
 }
 
 const capturedAt = new Date().toISOString();

@@ -62,10 +62,9 @@ See [docs/deployment.md](../docs/deployment.md).
   `check-api-compat` lists breaking changes against `origin/main` and fails for
   `/api/control/*`; CI runs it on every pull request.
 - Frontend changes: `bun run build` + check desktop and 440px mobile layouts.
-  With `dev-server` running, `bun run screenshots -- --profile <dir> --out <dir>`
-  captures every view at both widths and writes `report.html` with console
-  errors and failed requests. Keep the profile outside the repo; the first run
-  opens a window for the Auth0 login.
+  With `dev-server` running, `bun run screenshots -- --out <dir>` captures every
+  view at both widths and writes `report.html` with console errors and failed
+  requests. It signs in with a temporary admin session in local KV, no login.
 - Cross-component: run every affected component's gate
 
 ## UI rules
