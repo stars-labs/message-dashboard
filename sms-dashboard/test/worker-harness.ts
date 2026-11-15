@@ -13,7 +13,9 @@ await mock.module('../server/frontend-assets.js', () => ({
   },
 }));
 
-const { handleRequest } = await import('../server/app.js');
+const { handleRequest, routeTable } = await import('../server/app.js');
+
+export { routeTable };
 
 const TEST_API_KEY = 'test-api-key';
 

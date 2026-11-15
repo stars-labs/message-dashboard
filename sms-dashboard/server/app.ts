@@ -277,6 +277,11 @@ router.get(
   async (request) => (await appShellRedirect(request, request.env)) ?? serveFrontend(request),
 );
 
+/** Every route the app registers, in the order the router dispatches them. */
+export function routeTable() {
+  return router.routes();
+}
+
 export async function handleRequest(request: AppRequest): Promise<Response> {
   console.log(`[Worker] Received request: ${request.method} ${request.url}`);
 
