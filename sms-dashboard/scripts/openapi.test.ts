@@ -29,6 +29,8 @@ describe('the OpenAPI document', () => {
       'POST /api/control/balance-checks/continue',
       'POST /api/control/balance-checks/retry',
       'POST /api/control/balance-checks/stop',
+      'GET /api/control/balance-runners/check',
+      'POST /api/control/balance-runners/heartbeat',
       'GET /api/live',
       'GET /api/health',
       'GET /api/daemon/status',

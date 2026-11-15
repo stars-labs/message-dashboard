@@ -1449,6 +1449,196 @@
         ]
       }
     },
+    "/api/control/balance-runners/check": {
+      "get": {
+        "operationId": "balanceRunnerControl.check",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/DaemonError"
+          }
+        },
+        "security": [
+          {
+            "daemonKey": []
+          },
+          {
+            "auth0": [
+              "balance:runners:heartbeat"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/control/balance-runners/heartbeat": {
+      "post": {
+        "operationId": "balanceRunnerControl.heartbeat",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "runner_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "session_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "display_name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "platform": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
+                  "version": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
+                  "capabilities": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "capability": {
+                          "enum": [
+                            "sms_ai",
+                            "carrier_browser"
+                          ],
+                          "type": "string"
+                        },
+                        "state": {
+                          "enum": [
+                            "starting",
+                            "ready",
+                            "busy",
+                            "degraded",
+                            "configuration_required",
+                            "stopping"
+                          ],
+                          "type": "string"
+                        },
+                        "current_job_id": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 200
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "default": null
+                        },
+                        "detail_code": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 100
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "default": null
+                        },
+                        "concurrency": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 8,
+                          "default": 1
+                        }
+                      },
+                      "required": [
+                        "capability",
+                        "state"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "runner_id",
+                  "session_id",
+                  "display_name",
+                  "platform",
+                  "version",
+                  "capabilities"
+                ],
+                "$schema": "https://json-schema.org/draft/2020-12/schema"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "runner_id": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "runner_id"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/DaemonError"
+          }
+        },
+        "security": [
+          {
+            "daemonKey": []
+          },
+          {
+            "auth0": [
+              "balance:runners:heartbeat"
+            ]
+          }
+        ]
+      }
+    },
     "/api/live": {
       "get": {
         "operationId": "health.live",

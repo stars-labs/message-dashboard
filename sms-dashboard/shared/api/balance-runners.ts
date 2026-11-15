@@ -1,4 +1,5 @@
 import * as v from 'valibot';
+import { bodyObject } from './body.js';
 
 /** The work a Balance Agent runner can take on. */
 export const RUNNER_CAPABILITIES = ['sms_ai', 'carrier_browser'] as const;
@@ -71,3 +72,72 @@ export const BalanceRunnersResponse = v.object({
 });
 
 export type BalanceRunnersResponse = v.InferOutput<typeof BalanceRunnersResponse>;
+
+const INVALID_HEARTBEAT = 'Invalid runner heartbeat';
+
+function boundedText(max: number) {
+  return v.pipe(
+    v.string(INVALID_HEARTBEAT),
+    v.trim(),
+    v.minLength(1, INVALID_HEARTBEAT),
+    v.maxLength(max, INVALID_HEARTBEAT),
+  );
+}
+
+const HeartbeatCapability = v.object(
+  {
+    capability: v.picklist(RUNNER_CAPABILITIES, INVALID_HEARTBEAT),
+    state: v.picklist(RUNNER_STATES, INVALID_HEARTBEAT),
+    current_job_id: v.nullish(boundedText(200), null),
+    detail_code: v.nullish(boundedText(100), null),
+    concurrency: v.optional(
+      v.pipe(
+        v.number(INVALID_HEARTBEAT),
+        v.integer(INVALID_HEARTBEAT),
+        v.minValue(1, INVALID_HEARTBEAT),
+        v.maxValue(8, INVALID_HEARTBEAT),
+      ),
+      1,
+    ),
+  },
+  INVALID_HEARTBEAT,
+);
+
+/** POST /api/control/balance-runners/heartbeat: each capability at most once. */
+export const RunnerHeartbeatBody = bodyObject(
+  {
+    runner_id: boundedText(200),
+    session_id: boundedText(200),
+    display_name: boundedText(200),
+    platform: boundedText(100),
+    version: boundedText(100),
+    capabilities: v.pipe(
+      v.array(HeartbeatCapability, INVALID_HEARTBEAT),
+      v.check(
+        (items) => new Set(items.map((item) => item.capability)).size === items.length,
+        INVALID_HEARTBEAT,
+      ),
+    ),
+  },
+  {
+    runner_id: INVALID_HEARTBEAT,
+    session_id: INVALID_HEARTBEAT,
+    display_name: INVALID_HEARTBEAT,
+    platform: INVALID_HEARTBEAT,
+    version: INVALID_HEARTBEAT,
+    capabilities: INVALID_HEARTBEAT,
+  },
+  INVALID_HEARTBEAT,
+);
+
+export const RunnerHeartbeatResponse = v.object({
+  success: v.literal(true),
+  runner_id: v.string(),
+});
+
+export type RunnerHeartbeatResponse = v.InferOutput<typeof RunnerHeartbeatResponse>;
+
+/** GET /api/control/balance-runners/check: the Agent's credentials are good. */
+export const RunnerCheckResponse = v.object({ success: v.literal(true) });
+
+export type RunnerCheckResponse = v.InferOutput<typeof RunnerCheckResponse>;

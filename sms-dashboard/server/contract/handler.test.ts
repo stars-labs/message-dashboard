@@ -108,6 +108,8 @@ describe('contract routes', () => {
       { method: 'POST', path: '/api/control/balance-checks/continue' },
       { method: 'POST', path: '/api/control/balance-checks/retry' },
       { method: 'POST', path: '/api/control/balance-checks/stop' },
+      { method: 'GET', path: '/api/control/balance-runners/check' },
+      { method: 'POST', path: '/api/control/balance-runners/heartbeat' },
       { method: 'GET', path: '/api/live' },
       { method: 'GET', path: '/api/health' },
       { method: 'GET', path: '/api/daemon/status' },

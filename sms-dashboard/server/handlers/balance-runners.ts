@@ -1,17 +1,15 @@
 import { ORPCError } from '@orpc/server';
-import { json } from '../lib/response.js';
 import * as v from 'valibot';
 import { queryAll, queryFirst, type D1, type D1Batch } from '../lib/d1.js';
-import { readBody, type MissingKeyMessages } from '../lib/request-body.js';
-import { RUNNER_SCOPES } from '../../shared/api/runner-scopes.js';
-import { authorizeRunnerControl, type RunnerRequest } from '../utils/runner-auth.js';
+import type { AuthorizedRunner } from '../utils/runner-auth.js';
 import {
   BalanceRunner,
   BalanceRunnerCapability,
   RUNNER_CAPABILITIES,
-  RUNNER_STATES,
   type BalanceRunnerCapabilitySummary,
   type BalanceRunnersResponse,
+  type RunnerHeartbeatBody,
+  type RunnerHeartbeatResponse,
 } from '../../shared/api/balance-runners.js';
 
 const ONLINE_SECONDS = 90;
@@ -19,64 +17,6 @@ const ONLINE_SECONDS = 90;
 const AUTH_MODES = ['legacy_api_key', 'auth0_device'] as const;
 
 type RunnerCapability = (typeof RUNNER_CAPABILITIES)[number];
-
-const INVALID_HEARTBEAT = 'Invalid runner heartbeat';
-
-function boundedText(max: number) {
-  return v.pipe(
-    v.string(INVALID_HEARTBEAT),
-    v.trim(),
-    v.minLength(1, INVALID_HEARTBEAT),
-    v.maxLength(max, INVALID_HEARTBEAT),
-  );
-}
-
-const HeartbeatCapability = v.object(
-  {
-    capability: v.picklist(RUNNER_CAPABILITIES, INVALID_HEARTBEAT),
-    state: v.picklist(RUNNER_STATES, INVALID_HEARTBEAT),
-    current_job_id: v.nullish(boundedText(200), null),
-    detail_code: v.nullish(boundedText(100), null),
-    concurrency: v.optional(
-      v.pipe(
-        v.number(INVALID_HEARTBEAT),
-        v.integer(INVALID_HEARTBEAT),
-        v.minValue(1, INVALID_HEARTBEAT),
-        v.maxValue(8, INVALID_HEARTBEAT),
-      ),
-      1,
-    ),
-  },
-  INVALID_HEARTBEAT,
-);
-
-/** One heartbeat reports each capability at most once. */
-const HeartbeatBody = v.object(
-  {
-    runner_id: boundedText(200),
-    session_id: boundedText(200),
-    display_name: boundedText(200),
-    platform: boundedText(100),
-    version: boundedText(100),
-    capabilities: v.pipe(
-      v.array(HeartbeatCapability, INVALID_HEARTBEAT),
-      v.check(
-        (items) => new Set(items.map((item) => item.capability)).size === items.length,
-        INVALID_HEARTBEAT,
-      ),
-    ),
-  },
-  INVALID_HEARTBEAT,
-);
-
-const HEARTBEAT_MISSING_KEY_MESSAGES = {
-  runner_id: INVALID_HEARTBEAT,
-  session_id: INVALID_HEARTBEAT,
-  display_name: INVALID_HEARTBEAT,
-  platform: INVALID_HEARTBEAT,
-  version: INVALID_HEARTBEAT,
-  capabilities: INVALID_HEARTBEAT,
-} as const satisfies MissingKeyMessages<typeof HeartbeatBody>;
 
 const ExistingInstallationRow = v.object({
   auth_mode: v.picklist(AUTH_MODES),
@@ -87,9 +27,9 @@ const ExistingInstallationRow = v.object({
 /** An installation owned by a dashboard user; the status query reads device installations only. */
 const InstallationRow = v.omit(BalanceRunner, ['online', 'capabilities']);
 
-interface HeartbeatRequest extends RunnerRequest {
-  env: RunnerRequest['env'] & { DB: D1<'first' | 'run'> & D1Batch<'first' | 'run'> };
-  text(): Promise<string>;
+/** A heartbeat as the contract hands it over, once the runner has been admitted. */
+interface HeartbeatCall {
+  env: { DB: D1<'first' | 'run'> & D1Batch<'first' | 'run'> };
 }
 
 interface StatusRequest {
@@ -181,22 +121,13 @@ export async function loadBalanceRunnerStatus(db: D1<'all'>, authSubject: string
 }
 
 export const balanceRunnersHandler = {
-  async check(request: RunnerRequest): Promise<Response> {
-    const auth = await authorizeRunnerControl(request, RUNNER_SCOPES.heartbeat);
-    if (!auth.authorized) return json({ error: 'Unauthorized' }, 401);
-    return json({ success: true });
-  },
-
-  async heartbeat(request: HeartbeatRequest): Promise<Response> {
-    const auth = await authorizeRunnerControl(request, RUNNER_SCOPES.heartbeat);
-    if (!auth.authorized) return json({ error: 'Unauthorized' }, 401);
-
-    const parsed = await readBody(request, HeartbeatBody, HEARTBEAT_MISSING_KEY_MESSAGES);
-    if (!parsed.ok) return json({ error: parsed.error }, 400);
-    const heartbeat = parsed.value;
-
+  async heartbeat(
+    { env }: HeartbeatCall,
+    auth: AuthorizedRunner,
+    heartbeat: v.InferOutput<typeof RunnerHeartbeatBody>,
+  ): Promise<RunnerHeartbeatResponse> {
     const existing = await queryFirst(
-      request.env.DB.prepare(
+      env.DB.prepare(
         `
       SELECT auth_mode, auth_subject, revoked_at
       FROM balance_runner_installations WHERE id = ?
@@ -205,17 +136,19 @@ export const balanceRunnersHandler = {
       ExistingInstallationRow,
     );
     if (existing !== null && existing.revoked_at !== null) {
-      return json({ error: 'Runner installation is revoked' }, 403);
+      throw new ORPCError('FORBIDDEN', { message: 'Runner installation is revoked' });
     }
     if (
       existing !== null &&
       (existing.auth_mode !== auth.authMode ||
         (auth.authMode === 'auth0_device' && existing.auth_subject !== auth.subject))
     ) {
-      return json({ error: 'Runner identity does not match this installation' }, 409);
+      throw new ORPCError('CONFLICT', {
+        message: 'Runner identity does not match this installation',
+      });
     }
 
-    const installation = request.env.DB.prepare(
+    const installation = env.DB.prepare(
       `
       INSERT INTO balance_runner_installations (
         id, display_name, auth_mode, auth_subject, platform, version, last_heartbeat
@@ -240,7 +173,7 @@ export const balanceRunnersHandler = {
     );
 
     const capabilities = heartbeat.capabilities.map((capability) =>
-      request.env.DB.prepare(
+      env.DB.prepare(
         `
         INSERT INTO balance_runner_capabilities (
           runner_id, capability, state, session_id, current_job_id,
@@ -266,8 +199,8 @@ export const balanceRunnersHandler = {
       ),
     );
 
-    await request.env.DB.batch([installation, ...capabilities]);
-    return json({ success: true, runner_id: heartbeat.runner_id });
+    await env.DB.batch([installation, ...capabilities]);
+    return { success: true, runner_id: heartbeat.runner_id };
   },
 
   /** GET /api/balance-runners: the signed-in user's own runners. */
