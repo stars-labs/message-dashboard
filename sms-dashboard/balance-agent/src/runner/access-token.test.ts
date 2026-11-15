@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { assertRunnerAccessToken, REQUIRED_RUNNER_SCOPES } from './access-token.js';
+import { ALL_RUNNER_SCOPES } from '../../../shared/api/runner-scopes.js';
+import { assertRunnerAccessToken } from './access-token.js';
 
 function token(payload: object): string {
   return `header.${Buffer.from(JSON.stringify(payload)).toString('base64url')}.signature`;
@@ -10,7 +11,7 @@ describe('Balance Agent access-token preflight', () => {
     const payload = assertRunnerAccessToken(
       token({
         aud: 'dashboard-api',
-        scope: REQUIRED_RUNNER_SCOPES.join(' '),
+        scope: ALL_RUNNER_SCOPES.join(' '),
       }),
       'dashboard-api',
     );
@@ -22,7 +23,7 @@ describe('Balance Agent access-token preflight', () => {
       assertRunnerAccessToken(
         token({
           aud: ['userinfo', 'dashboard-api'],
-          permissions: REQUIRED_RUNNER_SCOPES,
+          permissions: ALL_RUNNER_SCOPES,
         }),
         'dashboard-api',
       ),
@@ -48,7 +49,7 @@ describe('Balance Agent access-token preflight', () => {
       assertRunnerAccessToken(
         token({
           aud: 'another-api',
-          permissions: REQUIRED_RUNNER_SCOPES,
+          permissions: ALL_RUNNER_SCOPES,
         }),
         'dashboard-api',
       ),

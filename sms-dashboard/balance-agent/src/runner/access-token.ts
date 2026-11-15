@@ -1,11 +1,6 @@
 import * as v from 'valibot';
 import { parseJson } from '../../../shared/parse-json.js';
-
-const REQUIRED_RUNNER_SCOPES = Object.freeze([
-  'balance:runners:heartbeat',
-  'balance:skills:run',
-  'balance:browser:run',
-]);
+import { ALL_RUNNER_SCOPES } from '../../../shared/api/runner-scopes.js';
 
 const TokenPayload = v.looseObject({
   aud: v.optional(v.unknown()),
@@ -38,11 +33,9 @@ export function assertRunnerAccessToken(token: unknown, expectedAudience: string
     ...(typeof payload.scope === 'string' ? payload.scope.split(/\s+/) : []),
     ...(v.is(UnknownList, payload.permissions) ? payload.permissions : []),
   ]);
-  const missing = REQUIRED_RUNNER_SCOPES.filter((scope) => !granted.has(scope));
+  const missing = ALL_RUNNER_SCOPES.filter((scope) => !granted.has(scope));
   if (missing.length) {
     throw new Error(`Auth0 access token is missing runner permissions: ${missing.join(', ')}`);
   }
   return payload;
 }
-
-export { REQUIRED_RUNNER_SCOPES };

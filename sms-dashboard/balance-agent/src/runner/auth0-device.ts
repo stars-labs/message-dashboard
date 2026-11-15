@@ -1,15 +1,10 @@
 import * as v from 'valibot';
 import { readJson } from '../../../shared/parse-json.js';
+import { ALL_RUNNER_SCOPES } from '../../../shared/api/runner-scopes.js';
 import { textOr } from '../../../shared/text.js';
 import type { FetchImpl } from './control-client.js';
 
-const RUNNER_SCOPES = [
-  'openid',
-  'offline_access',
-  'balance:runners:heartbeat',
-  'balance:skills:run',
-  'balance:browser:run',
-];
+const REQUESTED_SCOPES = ['openid', 'offline_access', ...ALL_RUNNER_SCOPES];
 
 const OptionalText = v.fallback(v.optional(v.string()), undefined);
 
@@ -128,7 +123,7 @@ export function createAuth0DeviceClient({
         new URLSearchParams({
           client_id: clientId,
           audience,
-          scope: RUNNER_SCOPES.join(' '),
+          scope: REQUESTED_SCOPES.join(' '),
         }),
         fetchImpl,
         signal,
@@ -213,5 +208,3 @@ export function createAuth0DeviceClient({
     },
   });
 }
-
-export { RUNNER_SCOPES };

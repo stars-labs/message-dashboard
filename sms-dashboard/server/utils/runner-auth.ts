@@ -1,4 +1,5 @@
 import * as v from 'valibot';
+import type { RunnerScope } from '../../shared/api/runner-scopes.js';
 import { auth0Handler } from '../handlers/auth0.js';
 import { secretMatches } from '../lib/secret.js';
 
@@ -11,14 +12,6 @@ export interface RunnerRequest {
     AUTH0_CLIENT_ID?: string;
   };
 }
-
-export const RUNNER_SCOPES = Object.freeze({
-  heartbeat: 'balance:runners:heartbeat',
-  smsAi: 'balance:skills:run',
-  carrierBrowser: 'balance:browser:run',
-} as const);
-
-type RunnerScope = (typeof RUNNER_SCOPES)[keyof typeof RUNNER_SCOPES];
 
 /**
  * The result of a runner authorization check. `authorized` is the discriminant, so

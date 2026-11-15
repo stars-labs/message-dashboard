@@ -12,6 +12,7 @@ import {
 } from '../lib/d1.js';
 import { NOT_JSON_MESSAGE } from '../../shared/api/body.js';
 import { readBody, type MissingKeyMessages } from '../lib/request-body.js';
+import { RUNNER_SCOPES } from '../../shared/api/runner-scopes.js';
 import { textOr } from '../../shared/text.js';
 import type {
   CarrierWebBalanceJob,
@@ -20,7 +21,6 @@ import type {
 import {
   authorizeRunnerControl,
   runnerCanAccessOwner,
-  RUNNER_SCOPES,
   type RunnerAuth,
   type RunnerRequest,
 } from '../utils/runner-auth.js';

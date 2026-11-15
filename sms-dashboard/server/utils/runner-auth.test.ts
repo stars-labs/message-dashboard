@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, spyOn, test, type Mock } from 'bun:test';
+import { RUNNER_SCOPES } from '../../shared/api/runner-scopes.js';
 import { auth0Handler } from '../handlers/auth0.js';
 import {
   authorizeRunnerControl,
   hasRunnerScope,
   runnerCanAccessOwner,
-  RUNNER_SCOPES,
   type RunnerAuth,
 } from './runner-auth.js';
 

@@ -4,6 +4,7 @@ import type { Parsed } from '../../shared/parse-json.js';
 import { queryFirst, type D1, type D1Batch, type D1Statement } from '../lib/d1.js';
 import { NOT_JSON_MESSAGE } from '../../shared/api/body.js';
 import { readBody, type MissingKeyMessages } from '../lib/request-body.js';
+import { RUNNER_SCOPES } from '../../shared/api/runner-scopes.js';
 import { textOr } from '../../shared/text.js';
 import type { BalanceSkillJob } from '../../shared/api/balance-skill-jobs.js';
 import {
@@ -18,7 +19,6 @@ import { errorText } from '../../shared/error-text.js';
 import {
   authorizeRunnerControl,
   runnerCanAccessOwner,
-  RUNNER_SCOPES,
   type RunnerRequest,
 } from '../utils/runner-auth.js';
 import { queueBalanceFollowUp } from './balance-queries.js';

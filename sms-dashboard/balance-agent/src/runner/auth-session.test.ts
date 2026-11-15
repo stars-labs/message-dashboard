@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import { createAuthSession, type SecureStore } from './auth-session.js';
-import { REQUIRED_RUNNER_SCOPES } from './access-token.js';
+import { ALL_RUNNER_SCOPES } from '../../../shared/api/runner-scopes.js';
 
 function token(audience = 'dashboard-api'): string {
   const payload = {
     aud: audience,
-    permissions: REQUIRED_RUNNER_SCOPES,
+    permissions: ALL_RUNNER_SCOPES,
   };
   return `header.${Buffer.from(JSON.stringify(payload)).toString('base64url')}.signature`;
 }

@@ -3,7 +3,8 @@ import { json } from '../lib/response.js';
 import * as v from 'valibot';
 import { queryAll, queryFirst, type D1, type D1Batch } from '../lib/d1.js';
 import { readBody, type MissingKeyMessages } from '../lib/request-body.js';
-import { authorizeRunnerControl, RUNNER_SCOPES, type RunnerRequest } from '../utils/runner-auth.js';
+import { RUNNER_SCOPES } from '../../shared/api/runner-scopes.js';
+import { authorizeRunnerControl, type RunnerRequest } from '../utils/runner-auth.js';
 import {
   BalanceRunner,
   BalanceRunnerCapability,

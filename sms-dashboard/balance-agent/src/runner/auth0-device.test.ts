@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { failureOf } from '../test-support/failure-of.js';
-import { createAuth0DeviceClient, RUNNER_SCOPES } from './auth0-device.js';
+import { createAuth0DeviceClient } from './auth0-device.js';
 
 describe('Auth0 device client', () => {
   test('requests only the runner and identity scopes', async () => {
@@ -22,7 +22,9 @@ describe('Auth0 device client', () => {
     await client.begin();
     const fields = request?.body;
     expect(request?.url).toBe('https://tenant.example/oauth/device/code');
-    expect(fields?.get('scope')).toBe(RUNNER_SCOPES.join(' '));
+    expect(fields?.get('scope')).toBe(
+      'openid offline_access balance:runners:heartbeat balance:skills:run balance:browser:run',
+    );
     expect(fields?.get('client_secret')).toBe(null);
   });
 
