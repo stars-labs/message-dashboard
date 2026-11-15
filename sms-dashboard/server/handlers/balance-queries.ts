@@ -1,3 +1,4 @@
+import { ORPCError } from '@orpc/server';
 import { json } from '../lib/response.js';
 import { nanoid } from 'nanoid';
 import * as v from 'valibot';
@@ -43,6 +44,12 @@ import {
   type BalanceCheckDetailResponse,
   type BalanceCheckStatusResponse,
   type BalanceChecksResponse,
+  type BalanceCheckStatusQuery,
+  type BalanceChecksQuery,
+  type BalanceQueryBatchBody,
+  type BalanceQueryBody,
+  type BalanceQueryPreflightQuery,
+  PHONE_ICCID_REQUIRED,
 } from '../../shared/api/balance-checks.js';
 import { errorText } from '../../shared/error-text.js';
 import { senderMatches } from '../utils/spam-filter.js';
@@ -169,7 +176,6 @@ const CHINA_MOBILE_NAMES = ['china mobile', 'cmcc', '中国移动', '移动'];
 const CHINA_UNICOM_NAMES = ['china unicom', 'unicom', '中国联通', '联通'];
 const CHINA_TELECOM_NAMES = ['china telecom', 'telecom', 'ctcc', '中国电信', '电信'];
 const CMHK_NAMES = ['cmhk', 'china mobile hong kong', '中国移动香港', '中移香港', '香港移动'];
-const MAX_BATCH_SCOPE = 500;
 const BALANCE_COOLDOWN_PREDICATE = `
   status IN ('queued', 'awaiting_response')
   OR (status IN ('response_received', 'parsed', 'unparsed')
@@ -198,9 +204,6 @@ const CASH_BALANCE_PATTERNS = new Map<string, readonly RegExp[]>([
 ]);
 
 const INVALID_JSON = 'Invalid JSON body';
-const SCOPE_REQUIRED = 'A unique non-empty SIM scope is required';
-const METHODS_REQUIRED = 'A unique list of supported methods is required';
-const PHONE_ICCID_REQUIRED = 'phone_iccid is required';
 const CHECK_REQUIRED = 'phone_iccid and profile_id are required';
 const CHECK_ID_REQUIRED = 'check_id is required';
 const NOT_ELIGIBLE = 'SIM is not eligible for a balance query';
@@ -213,59 +216,6 @@ const INELIGIBLE_ERRORS: Readonly<Record<IneligibleReason, string>> = {
   secondary: NOT_ELIGIBLE,
   service_type: NOT_ELIGIBLE,
 };
-
-function unique(items: readonly unknown[]): boolean {
-  return new Set(items).size === items.length;
-}
-
-const Scope = v.pipe(
-  v.array(
-    v.pipe(
-      v.string(SCOPE_REQUIRED),
-      v.trim(),
-      v.minLength(1, SCOPE_REQUIRED),
-      v.maxLength(64, SCOPE_REQUIRED),
-    ),
-    SCOPE_REQUIRED,
-  ),
-  v.minLength(1, SCOPE_REQUIRED),
-  v.maxLength(MAX_BATCH_SCOPE, SCOPE_REQUIRED),
-  v.check((iccids) => unique(iccids), SCOPE_REQUIRED),
-);
-
-const PreviewBody = v.object({ phone_iccids: Scope }, SCOPE_REQUIRED);
-
-const PREVIEW_MISSING_KEY_MESSAGES = {
-  phone_iccids: SCOPE_REQUIRED,
-} as const satisfies MissingKeyMessages<typeof PreviewBody>;
-
-const QueryBody = v.object(
-  {
-    phone_iccid: v.pipe(v.string(PHONE_ICCID_REQUIRED), v.minLength(1, PHONE_ICCID_REQUIRED)),
-  },
-  PHONE_ICCID_REQUIRED,
-);
-
-const QUERY_MISSING_KEY_MESSAGES = {
-  phone_iccid: PHONE_ICCID_REQUIRED,
-} as const satisfies MissingKeyMessages<typeof QueryBody>;
-
-const BatchBody = v.object(
-  {
-    methods: v.pipe(
-      v.array(v.picklist(BATCH_METHODS, METHODS_REQUIRED), METHODS_REQUIRED),
-      v.minLength(1, METHODS_REQUIRED),
-      v.check((methods) => unique(methods), METHODS_REQUIRED),
-    ),
-    phone_iccids: Scope,
-  },
-  METHODS_REQUIRED,
-);
-
-const BATCH_MISSING_KEY_MESSAGES = {
-  methods: METHODS_REQUIRED,
-  phone_iccids: SCOPE_REQUIRED,
-} as const satisfies MissingKeyMessages<typeof BatchBody>;
 
 const CreateBody = v.object(
   { phone_iccid: v.string(CHECK_REQUIRED), profile_id: v.string(CHECK_REQUIRED) },
@@ -376,28 +326,24 @@ const RetryRow = v.object({
 
 const StopRow = v.object({ id: v.string(), status: CheckStatusSchema });
 
-interface ListRequest {
-  url: string;
-  env: { DB: D1<'all'> };
-}
-
-interface DetailRequest {
-  params?: Record<string, string>;
+interface ReadCall {
   env: { DB: D1<'first' | 'all'> };
 }
 
-interface PlanRequest {
-  url: string;
-  method: string;
-  user?: { id: string };
+interface PlanCall {
+  user?: { id: string } | undefined;
   env: { DB: D1<'all'> };
-  text(): Promise<string>;
 }
 
-interface QueueRequest {
-  user?: { id: string };
+interface QueueCall {
+  user?: { id: string } | undefined;
   env: { DB: D1<'all' | 'run'> & D1Batch<'run'> };
-  text(): Promise<string>;
+}
+
+/** The signed-in user the route's access already required, as the runner owner and auditor. */
+function subjectOf(user: { id: string } | undefined): string {
+  if (user === undefined || user.id === '') throw new ORPCError('UNAUTHORIZED');
+  return user.id;
 }
 
 interface ControlRequest {
@@ -1303,10 +1249,12 @@ async function loadQueuedChecks(db: D1<'all'>, ids: readonly string[]): Promise<
 }
 
 export const balanceQueriesHandler = {
-  async list(request: ListRequest): Promise<Response> {
-    const url = new URL(request.url);
-    const phoneIccid = url.searchParams.get('phone_iccid');
-    const requestedLimit = Number.parseInt(url.searchParams.get('limit') ?? '100', 10);
+  async list(
+    { env }: ReadCall,
+    query: v.InferOutput<typeof BalanceChecksQuery>,
+  ): Promise<BalanceChecksResponse> {
+    const phoneIccid = query.phone_iccid;
+    const requestedLimit = Number.parseInt(query.limit ?? '100', 10);
     const limit = Number.isFinite(requestedLimit)
       ? Math.min(Math.max(requestedLimit, 1), 500)
       : 100;
@@ -1318,30 +1266,35 @@ export const balanceQueriesHandler = {
       params.push(phoneIccid);
     }
 
-    const checks = await loadBalanceChecks(request.env.DB, {
+    const checks = await loadBalanceChecks(env.DB, {
       where: conditions.length ? `WHERE ${conditions.join(' AND ')}` : '',
       params,
       limit,
     });
 
-    return json({ success: true, data: checks } satisfies BalanceChecksResponse);
+    return { success: true, data: checks };
   },
 
-  async status(request: ListRequest): Promise<Response> {
+  async status(
+    { env }: ReadCall,
+    query: v.InferOutput<typeof BalanceCheckStatusQuery>,
+  ): Promise<BalanceCheckStatusResponse> {
     const ids = [
       ...new Set(
-        (new URL(request.url).searchParams.get('ids') ?? '')
+        (query.ids ?? '')
           .split(',')
           .map((id) => id.trim())
           .filter(Boolean),
       ),
     ];
     if (!ids.length || ids.length > 100 || ids.some((id) => id.length > 200)) {
-      return json({ error: 'ids must contain 1 to 100 balance check IDs' }, 400);
+      throw new ORPCError('BAD_REQUEST', {
+        message: 'ids must contain 1 to 100 balance check IDs',
+      });
     }
     const placeholders = ids.map(() => '?').join(', ');
     const rows = await queryAll(
-      request.env.DB.prepare(
+      env.DB.prepare(
         `
       SELECT c.id, c.status, c.updated_at, c.completed_at,
         (SELECT sj.status FROM sim_balance_skill_jobs sj
@@ -1356,30 +1309,32 @@ export const balanceQueriesHandler = {
       ).bind(...ids),
       StatusRow,
     );
-    return json({
+    return {
       success: true,
       data: rows.map((record) => ({
         ...record,
         display_status: displayBalanceStatus(record),
       })),
-    } satisfies BalanceCheckStatusResponse);
+    };
   },
 
-  async detail(request: DetailRequest): Promise<Response> {
-    const id = (request.params?.['id'] ?? '').trim();
-    if (!id || id.length > 200) return json({ error: 'Invalid balance check ID' }, 400);
+  async detail({ env }: ReadCall, rawId: string): Promise<BalanceCheckDetailResponse> {
+    const id = rawId.trim();
+    if (!id || id.length > 200) {
+      throw new ORPCError('BAD_REQUEST', { message: 'Invalid balance check ID' });
+    }
     const check = await queryFirst(
-      request.env.DB.prepare(
+      env.DB.prepare(
         `
       SELECT id FROM sim_balance_checks WHERE id = ?
     `,
       ).bind(id),
       IdRow,
     );
-    if (!check) return json({ error: 'Balance check not found' }, 404);
+    if (!check) throw new ORPCError('NOT_FOUND', { message: 'Balance check not found' });
     const [conversation, webEvents] = await Promise.all([
       queryAll(
-        request.env.DB.prepare(
+        env.DB.prepare(
           `
         SELECT id, type, content, timestamp, status, phone_number, recipient
         FROM messages
@@ -1390,7 +1345,7 @@ export const balanceQueriesHandler = {
         BalanceConversationMessage,
       ),
       queryAll(
-        request.env.DB.prepare(
+        env.DB.prepare(
           `
         SELECT e.id, e.event_type, e.detail_json, e.created_at
         FROM sim_balance_web_events e
@@ -1402,26 +1357,18 @@ export const balanceQueriesHandler = {
         BalanceWebEvent,
       ),
     ]);
-    return json({
-      success: true,
-      data: { id, conversation, web_events: webEvents },
-    } satisfies BalanceCheckDetailResponse);
+    return { success: true, data: { id, conversation, web_events: webEvents } };
   },
 
-  async preview(request: PlanRequest): Promise<Response> {
-    const requestedBySubject = request.user?.id;
-    if (!requestedBySubject) return json({ error: 'Unauthorized' }, 401);
-    let scope: string[] | null = null;
-    if (request.method === 'POST') {
-      const body = await readBalanceBody(request, PreviewBody, PREVIEW_MISSING_KEY_MESSAGES);
-      if (!body.ok) return badRequest(body.error);
-      scope = body.value.phone_iccids;
-    }
+  async preview(
+    { env, user }: PlanCall,
+    scope: readonly string[] | null,
+  ): Promise<BalanceQueryPreviewResponse> {
     const [plan, runners] = await Promise.all([
-      loadBalanceQueryPlan(request.env.DB, { scope }),
-      loadBalanceRunnerStatus(request.env.DB, requestedBySubject),
+      loadBalanceQueryPlan(env.DB, { scope }),
+      loadBalanceRunnerStatus(env.DB, subjectOf(user)),
     ]);
-    return json({
+    return {
       success: true,
       summary: summarizePlan(plan),
       method_summary: summarizeMethods(plan),
@@ -1436,24 +1383,26 @@ export const balanceQueriesHandler = {
           profile_id: item.profile.id,
           ...queryMethod(item.profile),
         })),
-    } satisfies BalanceQueryPreviewResponse);
+    };
   },
 
-  async preflight(request: PlanRequest): Promise<Response> {
-    const requestedBySubject = request.user?.id;
-    if (!requestedBySubject) return json({ error: 'Unauthorized' }, 401);
-    const phoneIccid = new URL(request.url).searchParams.get('phone_iccid')?.trim();
-    if (!phoneIccid) return badRequest(PHONE_ICCID_REQUIRED);
+  async preflight(
+    { env, user }: PlanCall,
+    query: v.InferOutput<typeof BalanceQueryPreflightQuery>,
+  ): Promise<BalanceQueryPreflightResponse> {
+    const requestedBySubject = subjectOf(user);
+    const phoneIccid = query.phone_iccid?.trim();
+    if (!phoneIccid) throw new ORPCError('BAD_REQUEST', { message: PHONE_ICCID_REQUIRED });
 
     const [items, runners] = await Promise.all([
-      loadBalanceQueryPlan(request.env.DB, { scope: [phoneIccid], allowDiscovery: true }),
-      loadBalanceRunnerStatus(request.env.DB, requestedBySubject),
+      loadBalanceQueryPlan(env.DB, { scope: [phoneIccid], allowDiscovery: true }),
+      loadBalanceRunnerStatus(env.DB, requestedBySubject),
     ]);
     const item = items[0];
-    if (!item) return json({ success: false, error: 'SIM not found' }, 404);
+    if (!item) throw new ORPCError('NOT_FOUND', { message: 'SIM not found' });
 
     const method = describeBalanceMethod(item.profile);
-    return json({
+    return {
       success: true,
       eligible: item.eligible,
       reason: item.reason,
@@ -1475,46 +1424,43 @@ export const balanceQueriesHandler = {
         method.capability === null
           ? { required: false, available: true, state: 'not_required' }
           : { required: true, ...runners.capabilities[method.capability] },
-    } satisfies BalanceQueryPreflightResponse);
+    };
   },
 
-  async query(request: QueueRequest): Promise<Response> {
-    const requestedBySubject = request.user?.id;
-    if (!requestedBySubject) return json({ error: 'Unauthorized' }, 401);
-    const body = await readBalanceBody(request, QueryBody, QUERY_MISSING_KEY_MESSAGES);
-    if (!body.ok) return badRequest(body.error);
-
-    const [item] = await loadBalanceQueryPlan(request.env.DB, {
-      scope: [body.value.phone_iccid],
+  async query(
+    { env, user }: QueueCall,
+    body: v.InferOutput<typeof BalanceQueryBody>,
+  ): Promise<BalanceQueryResponse> {
+    const requestedBySubject = subjectOf(user);
+    const [item] = await loadBalanceQueryPlan(env.DB, {
+      scope: [body.phone_iccid],
       allowDiscovery: true,
     });
-    if (!item) return json({ success: false, error: 'SIM not found' }, 404);
+    if (!item) throw new ORPCError('NOT_FOUND', { message: 'SIM not found' });
     if (!item.eligible) {
-      return json(
-        {
-          success: false,
-          error: INELIGIBLE_ERRORS[item.reason],
+      throw new ORPCError(item.reason === 'cooldown' ? 'TOO_MANY_REQUESTS' : 'CONFLICT', {
+        message: INELIGIBLE_ERRORS[item.reason],
+        data: {
           reason: item.reason,
           previous_check: item.recentCheck,
         } satisfies BalanceQueryRefusal,
-        item.reason === 'cooldown' ? 429 : 409,
-      );
+      });
     }
 
-    const queued = await queueBalanceCheck(request.env.DB, item, requestedBySubject);
-    const [check] = await loadQueuedChecks(request.env.DB, [queued.id]);
+    const queued = await queueBalanceCheck(env.DB, item, requestedBySubject);
+    const [check] = await loadQueuedChecks(env.DB, [queued.id]);
     if (check === undefined) throw new Error(`Queued balance check ${queued.id} is missing`);
-    return json({ success: true, check } satisfies BalanceQueryResponse, 202);
+    return { success: true, check };
   },
 
-  async queryBatch(request: QueueRequest): Promise<Response> {
-    const requestedBySubject = request.user?.id;
-    if (!requestedBySubject) return json({ error: 'Unauthorized' }, 401);
-    const body = await readBalanceBody(request, BatchBody, BATCH_MISSING_KEY_MESSAGES);
-    if (!body.ok) return badRequest(body.error);
-    const { methods, phone_iccids: scope } = body.value;
+  async queryBatch(
+    { env, user }: QueueCall,
+    body: v.InferOutput<typeof BalanceQueryBatchBody>,
+  ): Promise<BalanceQueryBatchResponse> {
+    const requestedBySubject = subjectOf(user);
+    const { methods, phone_iccids: scope } = body;
 
-    const plan = await loadBalanceQueryPlan(request.env.DB, { scope });
+    const plan = await loadBalanceQueryPlan(env.DB, { scope });
     const eligible = filterBalancePlanByMethods(plan, methods);
     const queuedIds: string[] = [];
     const failures: { phone_iccid: string; sim_index: number; error: string }[] = [];
@@ -1524,7 +1470,7 @@ export const balanceQueriesHandler = {
     // normal user SMS delivery.
     for (const item of eligible) {
       try {
-        queuedIds.push((await queueBalanceCheck(request.env.DB, item, requestedBySubject)).id);
+        queuedIds.push((await queueBalanceCheck(env.DB, item, requestedBySubject)).id);
       } catch (error) {
         failures.push({
           phone_iccid: item.phone.iccid,
@@ -1534,24 +1480,21 @@ export const balanceQueriesHandler = {
       }
     }
 
-    const checks = await loadQueuedChecks(request.env.DB, queuedIds);
+    const checks = await loadQueuedChecks(env.DB, queuedIds);
 
-    return json(
-      {
-        success: true,
-        batch_id: `balance-batch-${nanoid()}`,
-        summary: {
-          ...summarizePlan(plan),
-          selected: eligible.length,
-          methods,
-          queued: checks.length,
-          failed_to_queue: failures.length,
-        },
-        checks,
-        failures,
-      } satisfies BalanceQueryBatchResponse,
-      202,
-    );
+    return {
+      success: true,
+      batch_id: `balance-batch-${nanoid()}`,
+      summary: {
+        ...summarizePlan(plan),
+        selected: eligible.length,
+        methods,
+        queued: checks.length,
+        failed_to_queue: failures.length,
+      },
+      checks,
+      failures,
+    };
   },
 
   async create(request: ControlRequest): Promise<Response> {

@@ -1,4 +1,5 @@
 import * as v from 'valibot';
+import { bodyObject } from './body.js';
 import {
   CHECK_STATUSES,
   DISPLAY_STATUSES,
@@ -81,6 +82,15 @@ export const BalanceCheck = v.object({
 });
 
 export type BalanceCheck = v.InferOutput<typeof BalanceCheck>;
+
+/** GET /api/balance-checks. The limit is clamped by the handler, which keeps any text. */
+export const BalanceChecksQuery = v.object({
+  phone_iccid: v.optional(v.string()),
+  limit: v.optional(v.string()),
+});
+
+/** GET /api/balance-checks/status: comma-separated check ids, checked by the handler. */
+export const BalanceCheckStatusQuery = v.object({ ids: v.optional(v.string()) });
 
 export const BalanceChecksResponse = v.object({
   success: v.literal(true),
@@ -290,12 +300,72 @@ export const RecentBalanceCheck = v.object({
 
 export type RecentBalanceCheck = v.InferOutput<typeof RecentBalanceCheck>;
 
-/** POST /api/balance-checks/query, 409 or 429: why the SIM cannot be queried now. */
+/**
+ * POST /api/balance-checks/query, 409 or 429: the members the problem adds to
+ * say why the SIM cannot be queried now.
+ */
 export const BalanceQueryRefusal = v.object({
-  success: v.literal(false),
-  error: v.string(),
   reason: v.picklist(INELIGIBLE_REASONS),
   previous_check: v.nullable(RecentBalanceCheck),
 });
+
+const SCOPE_REQUIRED = 'A unique non-empty SIM scope is required';
+const METHODS_REQUIRED = 'A unique list of supported methods is required';
+export const PHONE_ICCID_REQUIRED = 'phone_iccid is required';
+
+/** The most SIMs one preview or batch may name. */
+const MAX_BATCH_SCOPE = 500;
+
+function unique(items: readonly unknown[]): boolean {
+  return new Set(items).size === items.length;
+}
+
+const Scope = v.pipe(
+  v.array(
+    v.pipe(
+      v.string(SCOPE_REQUIRED),
+      v.trim(),
+      v.minLength(1, SCOPE_REQUIRED),
+      v.maxLength(64, SCOPE_REQUIRED),
+    ),
+    SCOPE_REQUIRED,
+  ),
+  v.minLength(1, SCOPE_REQUIRED),
+  v.maxLength(MAX_BATCH_SCOPE, SCOPE_REQUIRED),
+  v.check((iccids) => unique(iccids), SCOPE_REQUIRED),
+);
+
+/** POST /api/balance-checks/query-preview. */
+export const BalanceQueryPreviewBody = bodyObject(
+  { phone_iccids: Scope },
+  { phone_iccids: SCOPE_REQUIRED },
+  SCOPE_REQUIRED,
+);
+
+/** GET /api/balance-checks/query-preflight. */
+export const BalanceQueryPreflightQuery = v.object({ phone_iccid: v.optional(v.string()) });
+
+/** POST /api/balance-checks/query. */
+export const BalanceQueryBody = bodyObject(
+  {
+    phone_iccid: v.pipe(v.string(PHONE_ICCID_REQUIRED), v.minLength(1, PHONE_ICCID_REQUIRED)),
+  },
+  { phone_iccid: PHONE_ICCID_REQUIRED },
+  PHONE_ICCID_REQUIRED,
+);
+
+/** POST /api/balance-checks/query-batch. The methods are checked before the scope. */
+export const BalanceQueryBatchBody = bodyObject(
+  {
+    methods: v.pipe(
+      v.array(v.picklist(BATCH_METHODS, METHODS_REQUIRED), METHODS_REQUIRED),
+      v.minLength(1, METHODS_REQUIRED),
+      v.check((methods) => unique(methods), METHODS_REQUIRED),
+    ),
+    phone_iccids: Scope,
+  },
+  { methods: METHODS_REQUIRED, phone_iccids: SCOPE_REQUIRED },
+  METHODS_REQUIRED,
+);
 
 export type BalanceQueryRefusal = v.InferOutput<typeof BalanceQueryRefusal>;

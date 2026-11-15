@@ -5299,6 +5299,3049 @@
           }
         ]
       }
+    },
+    "/api/balance-checks": {
+      "get": {
+        "operationId": "balanceChecks.list",
+        "parameters": [
+          {
+            "name": "phone_iccid",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "allowEmptyValue": true,
+            "allowReserved": true
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "allowEmptyValue": true,
+            "allowReserved": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "sim_iccid": {
+                            "type": "string"
+                          },
+                          "profile_id": {
+                            "type": "string"
+                          },
+                          "requested_at": {
+                            "type": "string"
+                          },
+                          "sent_at": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "completed_at": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "status": {
+                            "enum": [
+                              "queued",
+                              "awaiting_response",
+                              "response_received",
+                              "parsed",
+                              "failed",
+                              "timed_out",
+                              "unparsed"
+                            ],
+                            "type": "string"
+                          },
+                          "step_index": {
+                            "type": "number"
+                          },
+                          "response_sender": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "raw_response": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "error": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "parser_version": {
+                            "type": "string"
+                          },
+                          "country_code": {
+                            "type": "string"
+                          },
+                          "profile_carrier": {
+                            "type": "string"
+                          },
+                          "method": {
+                            "enum": [
+                              "sms",
+                              "ussd",
+                              "api",
+                              "browser"
+                            ],
+                            "type": "string"
+                          },
+                          "command": {
+                            "type": "string"
+                          },
+                          "destination": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "conversation_steps": {
+                            "type": "string"
+                          },
+                          "sim_index": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "sim_number": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "sim_carrier": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "sim_country": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "outbound_content": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "outbound_recipient": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "outbound_timestamp": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "outbound_status": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "response_content": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "response_phone_number": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "response_timestamp": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "skill_job_status": {
+                            "anyOf": [
+                              {
+                                "enum": [
+                                  "pending",
+                                  "leased",
+                                  "completed",
+                                  "stopped"
+                                ],
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "web_job_status": {
+                            "anyOf": [
+                              {
+                                "enum": [
+                                  "pending",
+                                  "leased",
+                                  "awaiting_otp",
+                                  "authenticating",
+                                  "querying",
+                                  "human_verification_required",
+                                  "completed",
+                                  "failed",
+                                  "stopped"
+                                ],
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "web_human_reason": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "display_status": {
+                            "enum": [
+                              "queued",
+                              "awaiting_response",
+                              "response_received",
+                              "parsed",
+                              "failed",
+                              "timed_out",
+                              "unparsed",
+                              "skill_pending",
+                              "skill_processing",
+                              "web_pending",
+                              "web_processing",
+                              "web_otp",
+                              "web_authenticating",
+                              "web_querying",
+                              "web_human_required"
+                            ],
+                            "type": "string"
+                          },
+                          "profile_outputs": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "metrics": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "metric_type": {
+                                  "type": "string"
+                                },
+                                "value": {
+                                  "anyOf": [
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "unit": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "currency": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "expires_at": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "metric_type",
+                                "value",
+                                "unit",
+                                "currency",
+                                "expires_at"
+                              ]
+                            }
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "sim_iccid",
+                          "profile_id",
+                          "requested_at",
+                          "sent_at",
+                          "completed_at",
+                          "status",
+                          "step_index",
+                          "response_sender",
+                          "raw_response",
+                          "error",
+                          "parser_version",
+                          "country_code",
+                          "profile_carrier",
+                          "method",
+                          "command",
+                          "destination",
+                          "conversation_steps",
+                          "sim_index",
+                          "sim_number",
+                          "sim_carrier",
+                          "sim_country",
+                          "outbound_content",
+                          "outbound_recipient",
+                          "outbound_timestamp",
+                          "outbound_status",
+                          "response_content",
+                          "response_phone_number",
+                          "response_timestamp",
+                          "skill_job_status",
+                          "web_job_status",
+                          "web_human_reason",
+                          "display_status",
+                          "profile_outputs",
+                          "metrics"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "security": [
+          {
+            "session": [
+              "messages.read"
+            ]
+          },
+          {
+            "auth0": [
+              "messages.read"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/balance-checks/status": {
+      "get": {
+        "operationId": "balanceChecks.status",
+        "parameters": [
+          {
+            "name": "ids",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "allowEmptyValue": true,
+            "allowReserved": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "enum": [
+                              "queued",
+                              "awaiting_response",
+                              "response_received",
+                              "parsed",
+                              "failed",
+                              "timed_out",
+                              "unparsed"
+                            ],
+                            "type": "string"
+                          },
+                          "updated_at": {
+                            "type": "string"
+                          },
+                          "completed_at": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "skill_job_status": {
+                            "anyOf": [
+                              {
+                                "enum": [
+                                  "pending",
+                                  "leased",
+                                  "completed",
+                                  "stopped"
+                                ],
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "web_job_status": {
+                            "anyOf": [
+                              {
+                                "enum": [
+                                  "pending",
+                                  "leased",
+                                  "awaiting_otp",
+                                  "authenticating",
+                                  "querying",
+                                  "human_verification_required",
+                                  "completed",
+                                  "failed",
+                                  "stopped"
+                                ],
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "web_human_reason": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "display_status": {
+                            "enum": [
+                              "queued",
+                              "awaiting_response",
+                              "response_received",
+                              "parsed",
+                              "failed",
+                              "timed_out",
+                              "unparsed",
+                              "skill_pending",
+                              "skill_processing",
+                              "web_pending",
+                              "web_processing",
+                              "web_otp",
+                              "web_authenticating",
+                              "web_querying",
+                              "web_human_required"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "status",
+                          "updated_at",
+                          "completed_at",
+                          "skill_job_status",
+                          "web_job_status",
+                          "web_human_reason",
+                          "display_status"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "security": [
+          {
+            "session": [
+              "messages.read"
+            ]
+          },
+          {
+            "auth0": [
+              "messages.read"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/balance-checks/query-preview": {
+      "get": {
+        "operationId": "balanceChecks.previewAll",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "summary": {
+                      "type": "object",
+                      "properties": {
+                        "total": {
+                          "type": "number"
+                        },
+                        "eligible": {
+                          "type": "number"
+                        },
+                        "offline": {
+                          "type": "number"
+                        },
+                        "unsupported": {
+                          "type": "number"
+                        },
+                        "unverified": {
+                          "type": "number"
+                        },
+                        "cooldown": {
+                          "type": "number"
+                        },
+                        "secondary": {
+                          "type": "number"
+                        },
+                        "service_type": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "total",
+                        "eligible",
+                        "offline",
+                        "unsupported",
+                        "unverified",
+                        "cooldown",
+                        "secondary",
+                        "service_type"
+                      ]
+                    },
+                    "method_summary": {
+                      "type": "object",
+                      "properties": {
+                        "direct_sms": {
+                          "type": "number"
+                        },
+                        "sms_ai": {
+                          "type": "number"
+                        },
+                        "browser": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "direct_sms",
+                        "sms_ai",
+                        "browser"
+                      ]
+                    },
+                    "runner_capabilities": {
+                      "type": "object",
+                      "properties": {
+                        "sms_ai": {
+                          "type": "object",
+                          "properties": {
+                            "available": {
+                              "type": "boolean"
+                            },
+                            "state": {
+                              "enum": [
+                                "starting",
+                                "ready",
+                                "busy",
+                                "degraded",
+                                "configuration_required",
+                                "stopping",
+                                "offline"
+                              ],
+                              "type": "string"
+                            },
+                            "runner_id": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "current_job_id": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "detail_code": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "last_heartbeat": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "available",
+                            "state",
+                            "runner_id",
+                            "current_job_id",
+                            "detail_code",
+                            "last_heartbeat"
+                          ]
+                        },
+                        "carrier_browser": {
+                          "type": "object",
+                          "properties": {
+                            "available": {
+                              "type": "boolean"
+                            },
+                            "state": {
+                              "enum": [
+                                "starting",
+                                "ready",
+                                "busy",
+                                "degraded",
+                                "configuration_required",
+                                "stopping",
+                                "offline"
+                              ],
+                              "type": "string"
+                            },
+                            "runner_id": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "current_job_id": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "detail_code": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "last_heartbeat": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "available",
+                            "state",
+                            "runner_id",
+                            "current_job_id",
+                            "detail_code",
+                            "last_heartbeat"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "sms_ai",
+                        "carrier_browser"
+                      ]
+                    },
+                    "eligible": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "phone_iccid": {
+                            "type": "string"
+                          },
+                          "sim_index": {
+                            "type": "number"
+                          },
+                          "phone_number": {
+                            "type": "string"
+                          },
+                          "carrier": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "profile_id": {
+                            "type": "string"
+                          },
+                          "category": {
+                            "enum": [
+                              "direct_sms",
+                              "sms_ai",
+                              "browser"
+                            ],
+                            "type": "string"
+                          },
+                          "capability": {
+                            "anyOf": [
+                              {
+                                "enum": [
+                                  "sms_ai",
+                                  "carrier_browser"
+                                ],
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "interactive": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "phone_iccid",
+                          "sim_index",
+                          "phone_number",
+                          "carrier",
+                          "profile_id",
+                          "category",
+                          "capability",
+                          "interactive"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "summary",
+                    "method_summary",
+                    "runner_capabilities",
+                    "eligible"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "security": [
+          {
+            "session": [
+              "balances.query"
+            ]
+          },
+          {
+            "auth0": [
+              "balances.query"
+            ]
+          }
+        ]
+      },
+      "post": {
+        "operationId": "balanceChecks.preview",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "phone_iccids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64
+                    },
+                    "minItems": 1,
+                    "maxItems": 500
+                  }
+                },
+                "required": [
+                  "phone_iccids"
+                ],
+                "$schema": "https://json-schema.org/draft/2020-12/schema"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "summary": {
+                      "type": "object",
+                      "properties": {
+                        "total": {
+                          "type": "number"
+                        },
+                        "eligible": {
+                          "type": "number"
+                        },
+                        "offline": {
+                          "type": "number"
+                        },
+                        "unsupported": {
+                          "type": "number"
+                        },
+                        "unverified": {
+                          "type": "number"
+                        },
+                        "cooldown": {
+                          "type": "number"
+                        },
+                        "secondary": {
+                          "type": "number"
+                        },
+                        "service_type": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "total",
+                        "eligible",
+                        "offline",
+                        "unsupported",
+                        "unverified",
+                        "cooldown",
+                        "secondary",
+                        "service_type"
+                      ]
+                    },
+                    "method_summary": {
+                      "type": "object",
+                      "properties": {
+                        "direct_sms": {
+                          "type": "number"
+                        },
+                        "sms_ai": {
+                          "type": "number"
+                        },
+                        "browser": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "direct_sms",
+                        "sms_ai",
+                        "browser"
+                      ]
+                    },
+                    "runner_capabilities": {
+                      "type": "object",
+                      "properties": {
+                        "sms_ai": {
+                          "type": "object",
+                          "properties": {
+                            "available": {
+                              "type": "boolean"
+                            },
+                            "state": {
+                              "enum": [
+                                "starting",
+                                "ready",
+                                "busy",
+                                "degraded",
+                                "configuration_required",
+                                "stopping",
+                                "offline"
+                              ],
+                              "type": "string"
+                            },
+                            "runner_id": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "current_job_id": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "detail_code": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "last_heartbeat": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "available",
+                            "state",
+                            "runner_id",
+                            "current_job_id",
+                            "detail_code",
+                            "last_heartbeat"
+                          ]
+                        },
+                        "carrier_browser": {
+                          "type": "object",
+                          "properties": {
+                            "available": {
+                              "type": "boolean"
+                            },
+                            "state": {
+                              "enum": [
+                                "starting",
+                                "ready",
+                                "busy",
+                                "degraded",
+                                "configuration_required",
+                                "stopping",
+                                "offline"
+                              ],
+                              "type": "string"
+                            },
+                            "runner_id": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "current_job_id": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "detail_code": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "last_heartbeat": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "available",
+                            "state",
+                            "runner_id",
+                            "current_job_id",
+                            "detail_code",
+                            "last_heartbeat"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "sms_ai",
+                        "carrier_browser"
+                      ]
+                    },
+                    "eligible": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "phone_iccid": {
+                            "type": "string"
+                          },
+                          "sim_index": {
+                            "type": "number"
+                          },
+                          "phone_number": {
+                            "type": "string"
+                          },
+                          "carrier": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "profile_id": {
+                            "type": "string"
+                          },
+                          "category": {
+                            "enum": [
+                              "direct_sms",
+                              "sms_ai",
+                              "browser"
+                            ],
+                            "type": "string"
+                          },
+                          "capability": {
+                            "anyOf": [
+                              {
+                                "enum": [
+                                  "sms_ai",
+                                  "carrier_browser"
+                                ],
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "interactive": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "phone_iccid",
+                          "sim_index",
+                          "phone_number",
+                          "carrier",
+                          "profile_id",
+                          "category",
+                          "capability",
+                          "interactive"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "summary",
+                    "method_summary",
+                    "runner_capabilities",
+                    "eligible"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "security": [
+          {
+            "session": [
+              "balances.query"
+            ]
+          },
+          {
+            "auth0": [
+              "balances.query"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/balance-checks/query-preflight": {
+      "get": {
+        "operationId": "balanceChecks.preflight",
+        "parameters": [
+          {
+            "name": "phone_iccid",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "allowEmptyValue": true,
+            "allowReserved": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "eligible": {
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "anyOf": [
+                        {
+                          "enum": [
+                            "secondary",
+                            "offline",
+                            "unsupported",
+                            "unverified",
+                            "service_type",
+                            "cooldown"
+                          ],
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "phone": {
+                      "type": "object",
+                      "properties": {
+                        "iccid": {
+                          "type": "string"
+                        },
+                        "sim_index": {
+                          "type": "number"
+                        },
+                        "number": {
+                          "type": "string"
+                        },
+                        "carrier": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "iccid",
+                        "sim_index",
+                        "number",
+                        "carrier"
+                      ]
+                    },
+                    "profile": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "method": {
+                              "enum": [
+                                "sms",
+                                "browser"
+                              ],
+                              "type": "string"
+                            },
+                            "carrier": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "method",
+                            "carrier"
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "method": {
+                      "type": "object",
+                      "properties": {
+                        "category": {
+                          "enum": [
+                            "direct_sms",
+                            "sms_ai",
+                            "browser",
+                            "unsupported"
+                          ],
+                          "type": "string"
+                        },
+                        "capability": {
+                          "anyOf": [
+                            {
+                              "enum": [
+                                "sms_ai",
+                                "carrier_browser"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "interactive": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "category",
+                        "capability",
+                        "interactive"
+                      ]
+                    },
+                    "runner": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "required": {
+                              "const": false
+                            },
+                            "available": {
+                              "const": true
+                            },
+                            "state": {
+                              "const": "not_required"
+                            }
+                          },
+                          "required": [
+                            "required",
+                            "available",
+                            "state"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "required": {
+                              "const": true
+                            },
+                            "available": {
+                              "type": "boolean"
+                            },
+                            "state": {
+                              "enum": [
+                                "starting",
+                                "ready",
+                                "busy",
+                                "degraded",
+                                "configuration_required",
+                                "stopping",
+                                "offline"
+                              ],
+                              "type": "string"
+                            },
+                            "runner_id": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "current_job_id": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "detail_code": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "last_heartbeat": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "required",
+                            "available",
+                            "state",
+                            "runner_id",
+                            "current_job_id",
+                            "detail_code",
+                            "last_heartbeat"
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "eligible",
+                    "reason",
+                    "phone",
+                    "profile",
+                    "method",
+                    "runner"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "security": [
+          {
+            "session": [
+              "balances.query"
+            ]
+          },
+          {
+            "auth0": [
+              "balances.query"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/balance-checks/query": {
+      "post": {
+        "operationId": "balanceChecks.query",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "phone_iccid": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "phone_iccid"
+                ],
+                "$schema": "https://json-schema.org/draft/2020-12/schema"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "check": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "sim_iccid": {
+                          "type": "string"
+                        },
+                        "profile_id": {
+                          "type": "string"
+                        },
+                        "requested_at": {
+                          "type": "string"
+                        },
+                        "sent_at": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "completed_at": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "status": {
+                          "enum": [
+                            "queued",
+                            "awaiting_response",
+                            "response_received",
+                            "parsed",
+                            "failed",
+                            "timed_out",
+                            "unparsed"
+                          ],
+                          "type": "string"
+                        },
+                        "step_index": {
+                          "type": "number"
+                        },
+                        "response_sender": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "raw_response": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "error": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "parser_version": {
+                          "type": "string"
+                        },
+                        "country_code": {
+                          "type": "string"
+                        },
+                        "profile_carrier": {
+                          "type": "string"
+                        },
+                        "method": {
+                          "enum": [
+                            "sms",
+                            "ussd",
+                            "api",
+                            "browser"
+                          ],
+                          "type": "string"
+                        },
+                        "command": {
+                          "type": "string"
+                        },
+                        "destination": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "conversation_steps": {
+                          "type": "string"
+                        },
+                        "sim_index": {
+                          "anyOf": [
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "sim_number": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "sim_carrier": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "sim_country": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "outbound_content": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "outbound_recipient": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "outbound_timestamp": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "outbound_status": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "response_content": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "response_phone_number": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "response_timestamp": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "skill_job_status": {
+                          "anyOf": [
+                            {
+                              "enum": [
+                                "pending",
+                                "leased",
+                                "completed",
+                                "stopped"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "web_job_status": {
+                          "anyOf": [
+                            {
+                              "enum": [
+                                "pending",
+                                "leased",
+                                "awaiting_otp",
+                                "authenticating",
+                                "querying",
+                                "human_verification_required",
+                                "completed",
+                                "failed",
+                                "stopped"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "web_human_reason": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "display_status": {
+                          "enum": [
+                            "queued",
+                            "awaiting_response",
+                            "response_received",
+                            "parsed",
+                            "failed",
+                            "timed_out",
+                            "unparsed",
+                            "skill_pending",
+                            "skill_processing",
+                            "web_pending",
+                            "web_processing",
+                            "web_otp",
+                            "web_authenticating",
+                            "web_querying",
+                            "web_human_required"
+                          ],
+                          "type": "string"
+                        },
+                        "profile_outputs": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "metrics": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "metric_type": {
+                                "type": "string"
+                              },
+                              "value": {
+                                "anyOf": [
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "unit": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "currency": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "expires_at": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "metric_type",
+                              "value",
+                              "unit",
+                              "currency",
+                              "expires_at"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "sim_iccid",
+                        "profile_id",
+                        "requested_at",
+                        "sent_at",
+                        "completed_at",
+                        "status",
+                        "step_index",
+                        "response_sender",
+                        "raw_response",
+                        "error",
+                        "parser_version",
+                        "country_code",
+                        "profile_carrier",
+                        "method",
+                        "command",
+                        "destination",
+                        "conversation_steps",
+                        "sim_index",
+                        "sim_number",
+                        "sim_carrier",
+                        "sim_country",
+                        "outbound_content",
+                        "outbound_recipient",
+                        "outbound_timestamp",
+                        "outbound_status",
+                        "response_content",
+                        "response_phone_number",
+                        "response_timestamp",
+                        "skill_job_status",
+                        "web_job_status",
+                        "web_human_reason",
+                        "display_status",
+                        "profile_outputs",
+                        "metrics"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "check"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "security": [
+          {
+            "session": [
+              "balances.query"
+            ]
+          },
+          {
+            "auth0": [
+              "balances.query"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/balance-checks/query-batch": {
+      "post": {
+        "operationId": "balanceChecks.queryBatch",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "methods": {
+                    "type": "array",
+                    "items": {
+                      "enum": [
+                        "direct_sms",
+                        "sms_ai",
+                        "browser"
+                      ],
+                      "type": "string"
+                    },
+                    "minItems": 1
+                  },
+                  "phone_iccids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64
+                    },
+                    "minItems": 1,
+                    "maxItems": 500
+                  }
+                },
+                "required": [
+                  "methods",
+                  "phone_iccids"
+                ],
+                "$schema": "https://json-schema.org/draft/2020-12/schema"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "batch_id": {
+                      "type": "string"
+                    },
+                    "summary": {
+                      "type": "object",
+                      "properties": {
+                        "total": {
+                          "type": "number"
+                        },
+                        "eligible": {
+                          "type": "number"
+                        },
+                        "offline": {
+                          "type": "number"
+                        },
+                        "unsupported": {
+                          "type": "number"
+                        },
+                        "unverified": {
+                          "type": "number"
+                        },
+                        "cooldown": {
+                          "type": "number"
+                        },
+                        "secondary": {
+                          "type": "number"
+                        },
+                        "service_type": {
+                          "type": "number"
+                        },
+                        "selected": {
+                          "type": "number"
+                        },
+                        "methods": {
+                          "type": "array",
+                          "items": {
+                            "enum": [
+                              "direct_sms",
+                              "sms_ai",
+                              "browser"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "queued": {
+                          "type": "number"
+                        },
+                        "failed_to_queue": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "total",
+                        "eligible",
+                        "offline",
+                        "unsupported",
+                        "unverified",
+                        "cooldown",
+                        "secondary",
+                        "service_type",
+                        "selected",
+                        "methods",
+                        "queued",
+                        "failed_to_queue"
+                      ]
+                    },
+                    "checks": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "sim_iccid": {
+                            "type": "string"
+                          },
+                          "profile_id": {
+                            "type": "string"
+                          },
+                          "requested_at": {
+                            "type": "string"
+                          },
+                          "sent_at": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "completed_at": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "status": {
+                            "enum": [
+                              "queued",
+                              "awaiting_response",
+                              "response_received",
+                              "parsed",
+                              "failed",
+                              "timed_out",
+                              "unparsed"
+                            ],
+                            "type": "string"
+                          },
+                          "step_index": {
+                            "type": "number"
+                          },
+                          "response_sender": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "raw_response": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "error": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "parser_version": {
+                            "type": "string"
+                          },
+                          "country_code": {
+                            "type": "string"
+                          },
+                          "profile_carrier": {
+                            "type": "string"
+                          },
+                          "method": {
+                            "enum": [
+                              "sms",
+                              "ussd",
+                              "api",
+                              "browser"
+                            ],
+                            "type": "string"
+                          },
+                          "command": {
+                            "type": "string"
+                          },
+                          "destination": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "conversation_steps": {
+                            "type": "string"
+                          },
+                          "sim_index": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "sim_number": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "sim_carrier": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "sim_country": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "outbound_content": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "outbound_recipient": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "outbound_timestamp": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "outbound_status": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "response_content": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "response_phone_number": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "response_timestamp": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "skill_job_status": {
+                            "anyOf": [
+                              {
+                                "enum": [
+                                  "pending",
+                                  "leased",
+                                  "completed",
+                                  "stopped"
+                                ],
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "web_job_status": {
+                            "anyOf": [
+                              {
+                                "enum": [
+                                  "pending",
+                                  "leased",
+                                  "awaiting_otp",
+                                  "authenticating",
+                                  "querying",
+                                  "human_verification_required",
+                                  "completed",
+                                  "failed",
+                                  "stopped"
+                                ],
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "web_human_reason": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "display_status": {
+                            "enum": [
+                              "queued",
+                              "awaiting_response",
+                              "response_received",
+                              "parsed",
+                              "failed",
+                              "timed_out",
+                              "unparsed",
+                              "skill_pending",
+                              "skill_processing",
+                              "web_pending",
+                              "web_processing",
+                              "web_otp",
+                              "web_authenticating",
+                              "web_querying",
+                              "web_human_required"
+                            ],
+                            "type": "string"
+                          },
+                          "profile_outputs": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "metrics": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "metric_type": {
+                                  "type": "string"
+                                },
+                                "value": {
+                                  "anyOf": [
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "unit": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "currency": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "expires_at": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "metric_type",
+                                "value",
+                                "unit",
+                                "currency",
+                                "expires_at"
+                              ]
+                            }
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "sim_iccid",
+                          "profile_id",
+                          "requested_at",
+                          "sent_at",
+                          "completed_at",
+                          "status",
+                          "step_index",
+                          "response_sender",
+                          "raw_response",
+                          "error",
+                          "parser_version",
+                          "country_code",
+                          "profile_carrier",
+                          "method",
+                          "command",
+                          "destination",
+                          "conversation_steps",
+                          "sim_index",
+                          "sim_number",
+                          "sim_carrier",
+                          "sim_country",
+                          "outbound_content",
+                          "outbound_recipient",
+                          "outbound_timestamp",
+                          "outbound_status",
+                          "response_content",
+                          "response_phone_number",
+                          "response_timestamp",
+                          "skill_job_status",
+                          "web_job_status",
+                          "web_human_reason",
+                          "display_status",
+                          "profile_outputs",
+                          "metrics"
+                        ]
+                      }
+                    },
+                    "failures": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "phone_iccid": {
+                            "type": "string"
+                          },
+                          "sim_index": {
+                            "type": "number"
+                          },
+                          "error": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "phone_iccid",
+                          "sim_index",
+                          "error"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "batch_id",
+                    "summary",
+                    "checks",
+                    "failures"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "security": [
+          {
+            "session": [
+              "balances.query"
+            ]
+          },
+          {
+            "auth0": [
+              "balances.query"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/balance-checks/{id}": {
+      "get": {
+        "operationId": "balanceChecks.detail",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "conversation": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "type": {
+                                "anyOf": [
+                                  {
+                                    "enum": [
+                                      "sent",
+                                      "received"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "content": {
+                                "type": "string"
+                              },
+                              "timestamp": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "status": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "phone_number": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "recipient": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "type",
+                              "content",
+                              "timestamp",
+                              "status",
+                              "phone_number",
+                              "recipient"
+                            ]
+                          }
+                        },
+                        "web_events": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "number"
+                              },
+                              "event_type": {
+                                "type": "string"
+                              },
+                              "detail_json": {
+                                "type": "string"
+                              },
+                              "created_at": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "event_type",
+                              "detail_json",
+                              "created_at"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "conversation",
+                        "web_events"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "security": [
+          {
+            "session": [
+              "messages.read"
+            ]
+          },
+          {
+            "auth0": [
+              "messages.read"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/balance-runners": {
+      "get": {
+        "operationId": "balanceRunners.status",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "online_seconds": {
+                      "type": "number"
+                    },
+                    "capabilities": {
+                      "type": "object",
+                      "properties": {
+                        "sms_ai": {
+                          "type": "object",
+                          "properties": {
+                            "available": {
+                              "type": "boolean"
+                            },
+                            "state": {
+                              "enum": [
+                                "starting",
+                                "ready",
+                                "busy",
+                                "degraded",
+                                "configuration_required",
+                                "stopping",
+                                "offline"
+                              ],
+                              "type": "string"
+                            },
+                            "runner_id": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "current_job_id": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "detail_code": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "last_heartbeat": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "available",
+                            "state",
+                            "runner_id",
+                            "current_job_id",
+                            "detail_code",
+                            "last_heartbeat"
+                          ]
+                        },
+                        "carrier_browser": {
+                          "type": "object",
+                          "properties": {
+                            "available": {
+                              "type": "boolean"
+                            },
+                            "state": {
+                              "enum": [
+                                "starting",
+                                "ready",
+                                "busy",
+                                "degraded",
+                                "configuration_required",
+                                "stopping",
+                                "offline"
+                              ],
+                              "type": "string"
+                            },
+                            "runner_id": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "current_job_id": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "detail_code": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "last_heartbeat": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "available",
+                            "state",
+                            "runner_id",
+                            "current_job_id",
+                            "detail_code",
+                            "last_heartbeat"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "sms_ai",
+                        "carrier_browser"
+                      ]
+                    },
+                    "runners": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "display_name": {
+                            "type": "string"
+                          },
+                          "auth_mode": {
+                            "const": "auth0_device"
+                          },
+                          "platform": {
+                            "type": "string"
+                          },
+                          "version": {
+                            "type": "string"
+                          },
+                          "last_heartbeat": {
+                            "type": "string"
+                          },
+                          "seconds_since_heartbeat": {
+                            "type": "number"
+                          },
+                          "online": {
+                            "type": "boolean"
+                          },
+                          "capabilities": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "runner_id": {
+                                  "type": "string"
+                                },
+                                "capability": {
+                                  "enum": [
+                                    "sms_ai",
+                                    "carrier_browser"
+                                  ],
+                                  "type": "string"
+                                },
+                                "state": {
+                                  "enum": [
+                                    "starting",
+                                    "ready",
+                                    "busy",
+                                    "degraded",
+                                    "configuration_required",
+                                    "stopping"
+                                  ],
+                                  "type": "string"
+                                },
+                                "current_job_id": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "concurrency": {
+                                  "type": "number"
+                                },
+                                "detail_code": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "last_heartbeat": {
+                                  "type": "string"
+                                },
+                                "seconds_since_heartbeat": {
+                                  "type": "number"
+                                }
+                              },
+                              "required": [
+                                "runner_id",
+                                "capability",
+                                "state",
+                                "current_job_id",
+                                "concurrency",
+                                "detail_code",
+                                "last_heartbeat",
+                                "seconds_since_heartbeat"
+                              ]
+                            }
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "display_name",
+                          "auth_mode",
+                          "platform",
+                          "version",
+                          "last_heartbeat",
+                          "seconds_since_heartbeat",
+                          "online",
+                          "capabilities"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "online_seconds",
+                    "capabilities",
+                    "runners"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "security": [
+          {
+            "session": [
+              "messages.read"
+            ]
+          },
+          {
+            "auth0": [
+              "messages.read"
+            ]
+          }
+        ]
+      }
     }
   }
 }

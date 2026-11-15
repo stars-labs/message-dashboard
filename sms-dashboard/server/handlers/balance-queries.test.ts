@@ -247,6 +247,23 @@ async function errorOf(response: { json(): Promise<unknown> }): Promise<string> 
   return (await read(response, ErrorBody)).error;
 }
 
+const Problem = v.looseObject({
+  type: v.string(),
+  title: v.string(),
+  status: v.number(),
+  detail: v.string(),
+  code: v.string(),
+});
+
+async function problemOf(response: Response) {
+  expect(response.headers.get('Content-Type')).toBe('application/problem+json');
+  return v.parse(Problem, await response.json());
+}
+
+async function detailOf(response: Response): Promise<string> {
+  return (await problemOf(response)).detail;
+}
+
 /** A database the handler must not touch: input validation answers first. */
 const untouchable: TestDb = {
   prepare: () => {
@@ -647,7 +664,7 @@ describe('/api/balance-checks/query-preview', () => {
         database: untouchable,
       });
       expect(response.status).toBe(400);
-      expect(await errorOf(response)).toBe('A unique non-empty SIM scope is required');
+      expect(await detailOf(response)).toBe('A unique non-empty SIM scope is required');
     }
   });
 
@@ -657,7 +674,7 @@ describe('/api/balance-checks/query-preview', () => {
       database: untouchable,
     });
     expect(response.status).toBe(400);
-    expect(await errorOf(response)).toBe('Invalid JSON body');
+    expect((await problemOf(response)).code).toBe('BAD_REQUEST');
   });
 
   test('requires a signed-in user', async () => {
@@ -744,11 +761,11 @@ describe('GET /api/balance-checks/query-preflight', () => {
   test('requires a SIM that exists', async () => {
     const missing = await preflight('  ');
     expect(missing.status).toBe(400);
-    expect(await errorOf(missing)).toBe('phone_iccid is required');
+    expect(await detailOf(missing)).toBe('phone_iccid is required');
 
     const unknown = await preflight('nope');
     expect(unknown.status).toBe(404);
-    expect(await errorOf(unknown)).toBe('SIM not found');
+    expect(await detailOf(unknown)).toBe('SIM not found');
   });
 });
 
@@ -900,8 +917,7 @@ describe('POST /api/balance-checks/query', () => {
         body: { phone_iccid: iccid },
       });
       expect(response.status).toBe(status);
-      expect(await errorOf(response.clone())).toBe(error);
-      expect(await read(response, v.looseObject({ reason: v.string() }))).toMatchObject({ reason });
+      expect(await problemOf(response)).toMatchObject({ detail: error, reason });
     }
   });
 
@@ -931,7 +947,7 @@ describe('POST /api/balance-checks/query', () => {
       body: { phone_iccid: 'nope' },
     });
     expect(response.status).toBe(404);
-    expect(await errorOf(response)).toBe('SIM not found');
+    expect(await detailOf(response)).toBe('SIM not found');
   });
 
   test('rejects a missing or empty phone_iccid instead of planning the whole fleet', async () => {
@@ -941,7 +957,7 @@ describe('POST /api/balance-checks/query', () => {
         database: untouchable,
       });
       expect(response.status).toBe(400);
-      expect(await errorOf(response)).toBe('phone_iccid is required');
+      expect(await detailOf(response)).toBe('phone_iccid is required');
     }
   });
 
@@ -951,7 +967,7 @@ describe('POST /api/balance-checks/query', () => {
       database: untouchable,
     });
     expect(response.status).toBe(400);
-    expect(await errorOf(response)).toBe('Invalid JSON body');
+    expect((await problemOf(response)).code).toBe('BAD_REQUEST');
   });
 });
 
@@ -979,7 +995,7 @@ describe('POST /api/balance-checks/query-batch', () => {
         database: untouchable,
       });
       expect(response.status).toBe(400);
-      expect(await errorOf(response)).toBe('A unique list of supported methods is required');
+      expect(await detailOf(response)).toBe('A unique list of supported methods is required');
     }
   });
 
@@ -1000,7 +1016,7 @@ describe('POST /api/balance-checks/query-batch', () => {
         database: untouchable,
       });
       expect(response.status).toBe(400);
-      expect(await errorOf(response)).toBe('A unique non-empty SIM scope is required');
+      expect(await detailOf(response)).toBe('A unique non-empty SIM scope is required');
     }
   });
 
@@ -1010,7 +1026,7 @@ describe('POST /api/balance-checks/query-batch', () => {
         body,
         database: untouchable,
       });
-      expect(await errorOf(response)).toBe('A unique list of supported methods is required');
+      expect(await detailOf(response)).toBe('A unique list of supported methods is required');
     }
   });
 
@@ -1435,12 +1451,15 @@ describe('GET /api/balance-checks/status', () => {
 
   test('requires between 1 and 100 short ids', async () => {
     const tooMany = Array.from({ length: 101 }, (_, index) => `bal-${String(index)}`).join(',');
-    for (const ids of ['', ' , ', tooMany, 'x'.repeat(201)]) {
-      const response = await call('GET', `/api/balance-checks/status?ids=${ids}`, {
+    for (const query of ['', '?ids=', '?ids= , ', `?ids=${tooMany}`, `?ids=${'x'.repeat(201)}`]) {
+      const response = await call('GET', `/api/balance-checks/status${query}`, {
         database: untouchable,
       });
       expect(response.status).toBe(400);
-      expect(await errorOf(response)).toBe('ids must contain 1 to 100 balance check IDs');
+      expect(await problemOf(response)).toMatchObject({
+        code: 'BAD_REQUEST',
+        detail: 'ids must contain 1 to 100 balance check IDs',
+      });
     }
   });
 });
@@ -1520,11 +1539,17 @@ describe('GET /api/balance-checks/:id', () => {
         database: untouchable,
       });
       expect(response.status).toBe(400);
-      expect(await errorOf(response)).toBe('Invalid balance check ID');
+      expect(await problemOf(response)).toMatchObject({
+        code: 'BAD_REQUEST',
+        detail: 'Invalid balance check ID',
+      });
     }
     const missing = await call('GET', '/api/balance-checks/nope');
     expect(missing.status).toBe(404);
-    expect(await errorOf(missing)).toBe('Balance check not found');
+    expect(await problemOf(missing)).toMatchObject({
+      code: 'NOT_FOUND',
+      detail: 'Balance check not found',
+    });
   });
 });
 

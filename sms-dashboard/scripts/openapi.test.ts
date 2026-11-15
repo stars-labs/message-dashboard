@@ -47,6 +47,15 @@ describe('the OpenAPI document', () => {
       'DELETE /api/filters/{id}',
       'POST /api/filters/{id}/history',
       'POST /api/verification/reprocess',
+      'GET /api/balance-checks',
+      'GET /api/balance-checks/status',
+      'GET /api/balance-checks/query-preview',
+      'POST /api/balance-checks/query-preview',
+      'GET /api/balance-checks/query-preflight',
+      'POST /api/balance-checks/query',
+      'POST /api/balance-checks/query-batch',
+      'GET /api/balance-checks/{id}',
+      'GET /api/balance-runners',
     ]);
   });
 

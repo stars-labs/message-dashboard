@@ -75,13 +75,13 @@ export async function openapiDocument() {
     // OpenAPI 3.1 schemas are JSON Schema 2020-12. The converter's default is to
     // drop what it cannot convert; a schema left out of the document would hide
     // its changes from the compatibility check, so that fails the generation.
-    // Checks and transforms are named: they refine a value whose type the
-    // document already states, and JSON Schema cannot express them.
+    // Checks and transforms, trim among them, are named: they refine a value
+    // whose type the document already states, and JSON Schema cannot express them.
     schemaConverters: [
       new experimental_ValibotToJsonSchemaConverter({
         target: 'draft-2020-12',
         errorMode: 'throw',
-        ignoreActions: ['check', 'transform', 'raw_transform'],
+        ignoreActions: ['check', 'transform', 'raw_transform', 'trim'],
       }),
     ],
   }).generate(contract, {

@@ -7,7 +7,7 @@
   import { formatCardNumber } from './card-number.js';
   import { buildCarrierOptions, carrierKey } from './carrier.js';
   import { getCountryFlag } from './countries.js';
-  import { errorMessage, request } from './api.js';
+  import { contractApi, errorMessage, request } from './api.js';
   import { getSimServiceTypeLabel } from './sim-service-type.js';
   import { groupByPrimary } from './group-by-primary.js';
   import {
@@ -25,10 +25,8 @@
   } from './balance-overview.js';
   import { activeBalanceCheckIds, balancePollDelay } from './balance-polling.js';
   import {
-    BalanceQueryBatchResponse,
-    BalanceQueryPreflightResponse,
-    BalanceQueryPreviewResponse,
-    BalanceQueryResponse,
+    type BalanceQueryPreflightResponse,
+    type BalanceQueryPreviewResponse,
     BATCH_METHODS,
     type BalanceCheck,
     type BalanceMetric,
@@ -345,7 +343,7 @@
 
   async function loadRunnerStatus() {
     try {
-      runnerStatus = await request('/api/balance-runners', BalanceRunnersResponse);
+      runnerStatus = await contractApi.balanceRunners.status();
     } catch {
       runnerStatus = null;
     } finally {
@@ -683,10 +681,9 @@
     queryingIccid = row.phone.iccid;
     notice = null;
     try {
-      const preflight = await request(
-        `/api/balance-checks/query-preflight?phone_iccid=${encodeURIComponent(row.phone.iccid)}`,
-        BalanceQueryPreflightResponse,
-      );
+      const preflight = await contractApi.balanceChecks.preflight({
+        query: { phone_iccid: row.phone.iccid },
+      });
       if (!preflight.eligible) throw new Error(textOr(preflight.reason, '当前 SIM 暂时不能查询'));
       if (
         (preflight.runner.required && !preflight.runner.available) ||
@@ -711,9 +708,8 @@
     if (manageLoading) queryingIccid = row.phone.iccid;
     notice = null;
     try {
-      const result = await request('/api/balance-checks/query', BalanceQueryResponse, {
-        method: 'POST',
-        body: JSON.stringify({ phone_iccid: row.phone.iccid }),
+      const { body: result } = await contractApi.balanceChecks.query({
+        phone_iccid: row.phone.iccid,
       });
       singlePreview = null;
       notice = {
@@ -750,14 +746,7 @@
           ? `手动选择 ${selectedRows.length} 张卡`
           : currentFilterLabel(scopeRows.length),
       };
-      const preview = await request(
-        '/api/balance-checks/query-preview',
-        BalanceQueryPreviewResponse,
-        {
-          method: 'POST',
-          body: JSON.stringify({ phone_iccids: phoneIccids }),
-        },
-      );
+      const preview = await contractApi.balanceChecks.preview({ phone_iccids: phoneIccids });
       batchPreview = preview;
       batchMethods = {
         direct_sms: true,
@@ -788,12 +777,9 @@
       return;
     batchSubmitting = true;
     try {
-      const result = await request('/api/balance-checks/query-batch', BalanceQueryBatchResponse, {
-        method: 'POST',
-        body: JSON.stringify({
-          methods,
-          phone_iccids: batchScope.phoneIccids,
-        }),
+      const { body: result } = await contractApi.balanceChecks.queryBatch({
+        methods,
+        phone_iccids: batchScope.phoneIccids,
       });
       batchPreview = null;
       batchScope = null;

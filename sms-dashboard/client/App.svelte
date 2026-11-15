@@ -36,7 +36,7 @@
   import BalanceManagement from './lib/BalanceManagement.svelte';
   import PullToRefresh from './lib/PullToRefresh.svelte';
   import { keywords as keywordsStore } from './lib/tag-store.js';
-  import { ApiError, api, contractApi, errorMessage, request } from './lib/api.js';
+  import { ApiError, api, contractApi, errorMessage } from './lib/api.js';
   import { getPhoneFlag } from './lib/countries.js';
   import { auth } from './lib/auth.js';
   import { getStatusMeta } from './lib/device-status.js';
@@ -58,12 +58,7 @@
     nextMessageOffset,
   } from './lib/message-page.js';
   import type { MeResponse } from '../shared/api/auth.js';
-  import {
-    BalanceCheckDetailResponse,
-    BalanceCheckStatusResponse,
-    type BalanceCheck,
-    type BalanceCheckDetail,
-  } from '../shared/api/balance-checks.js';
+  import type { BalanceCheck, BalanceCheckDetail } from '../shared/api/balance-checks.js';
   import type { CallLogEntry, LiveCall } from '../shared/api/calls.js';
   import type { FilterRule } from '../shared/api/filters.js';
   import type { CreateIccidMappingResponse } from '../shared/api/iccid-mappings.js';
@@ -626,10 +621,7 @@
     balanceDetailCheck = check;
     balanceDetail = null;
     try {
-      const result = await request(
-        `/api/balance-checks/${encodeURIComponent(check.id)}`,
-        BalanceCheckDetailResponse,
-      );
+      const result = await contractApi.balanceChecks.detail({ params: { id: check.id } });
       if (isBalanceDetailOpen(check.id)) {
         balanceDetail = result.data;
       }
@@ -650,10 +642,9 @@
 
     const activeIds = options.activeIds ?? [];
     if (activeIds.length > 0) {
-      const result = await request(
-        `/api/balance-checks/status?ids=${encodeURIComponent(activeIds.join(','))}`,
-        BalanceCheckStatusResponse,
-      );
+      const result = await contractApi.balanceChecks.status({
+        query: { ids: activeIds.join(',') },
+      });
       const updates = new Map(
         result.data.map((status): [string, typeof status] => [status.id, status]),
       );

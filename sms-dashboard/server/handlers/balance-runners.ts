@@ -1,3 +1,4 @@
+import { ORPCError } from '@orpc/server';
 import { json } from '../lib/response.js';
 import * as v from 'valibot';
 import { queryAll, queryFirst, type D1, type D1Batch } from '../lib/d1.js';
@@ -92,7 +93,7 @@ interface HeartbeatRequest extends RunnerRequest {
 
 interface StatusRequest {
   env: { DB: D1<'all'> };
-  user?: { id: string };
+  user?: { id: string } | undefined;
 }
 
 function isOnline(row: { seconds_since_heartbeat: number }): boolean {
@@ -268,14 +269,9 @@ export const balanceRunnersHandler = {
     return json({ success: true, runner_id: heartbeat.runner_id });
   },
 
-  async status(request: StatusRequest): Promise<Response> {
-    const authSubject = request.user?.id;
-    if (authSubject === undefined || authSubject === '') {
-      return json({ error: 'Unauthorized' }, 401);
-    }
-    return json({
-      success: true,
-      ...(await loadBalanceRunnerStatus(request.env.DB, authSubject)),
-    } satisfies BalanceRunnersResponse);
+  /** GET /api/balance-runners: the signed-in user's own runners. */
+  async status({ env, user }: StatusRequest): Promise<BalanceRunnersResponse> {
+    if (user === undefined || user.id === '') throw new ORPCError('UNAUTHORIZED');
+    return { success: true, ...(await loadBalanceRunnerStatus(env.DB, user.id)) };
   },
 };

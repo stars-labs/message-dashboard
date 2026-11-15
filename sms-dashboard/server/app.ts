@@ -55,14 +55,6 @@ router.get('/login', (request) => auth0Handler.login(request));
 router.get('/callback', auth0Handler.callback);
 router.get('/logout', auth0Handler.logout);
 
-router.get('/api/balance-checks', gate('messages.read'), (request) =>
-  balanceQueriesHandler.list(request),
-);
-
-router.get('/api/balance-checks/status', gate('messages.read'), (request) =>
-  balanceQueriesHandler.status(request),
-);
-
 router.get('/api/carrier-billing/accounts', gate('bills.read'), (request) =>
   carrierBillsHandler.listAccounts(request),
 );
@@ -91,34 +83,6 @@ for (const [path, action] of [
 ] as const) {
   router.post(path, gate('bills.write'), (request) => carrierBillsHandler[action](request));
 }
-
-router.get('/api/balance-checks/query-preview', gate('balances.query'), (request) =>
-  balanceQueriesHandler.preview(request),
-);
-
-router.post('/api/balance-checks/query-preview', gate('balances.query'), (request) =>
-  balanceQueriesHandler.preview(request),
-);
-
-router.get('/api/balance-checks/query-preflight', gate('balances.query'), (request) =>
-  balanceQueriesHandler.preflight(request),
-);
-
-router.get('/api/balance-runners', gate('messages.read'), (request) =>
-  balanceRunnersHandler.status(request),
-);
-
-router.post('/api/balance-checks/query', gate('balances.query'), (request) =>
-  balanceQueriesHandler.query(request),
-);
-
-router.post('/api/balance-checks/query-batch', gate('balances.query'), (request) =>
-  balanceQueriesHandler.queryBatch(request),
-);
-
-router.get('/api/balance-checks/:id', gate('messages.read'), (request) =>
-  balanceQueriesHandler.detail(request),
-);
 
 // Daemon and runner routes: each handler authenticates its caller itself, by API key
 // or runner token.

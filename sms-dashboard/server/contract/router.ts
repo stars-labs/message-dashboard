@@ -4,6 +4,8 @@ import { filtersHandler } from '../api/filters.js';
 import { keywordsHandler } from '../api/keywords.js';
 import { verificationHandler } from '../api/verification.js';
 import { auth0Handler } from '../handlers/auth0.js';
+import { balanceQueriesHandler } from '../handlers/balance-queries.js';
+import { balanceRunnersHandler } from '../handlers/balance-runners.js';
 import { recordHeartbeat } from '../handlers/control.js';
 import { healthHandler } from '../handlers/health.js';
 import { iccidMappingsHandler } from '../handlers/iccid-mappings.js';
@@ -124,6 +126,39 @@ export const router = os.router({
   verification: {
     reprocess: os.verification.reprocess.handler(({ context, input }) =>
       verificationHandler.reprocess(context.request, input.query),
+    ),
+  },
+  balanceChecks: {
+    list: os.balanceChecks.list.handler(({ context, input }) =>
+      balanceQueriesHandler.list(context.request, input.query),
+    ),
+    status: os.balanceChecks.status.handler(({ context, input }) =>
+      balanceQueriesHandler.status(context.request, input.query),
+    ),
+    detail: os.balanceChecks.detail.handler(({ context, input }) =>
+      balanceQueriesHandler.detail(context.request, input.params.id),
+    ),
+    previewAll: os.balanceChecks.previewAll.handler(({ context }) =>
+      balanceQueriesHandler.preview(context.request, null),
+    ),
+    preview: os.balanceChecks.preview.handler(({ context, input }) =>
+      balanceQueriesHandler.preview(context.request, input.phone_iccids),
+    ),
+    preflight: os.balanceChecks.preflight.handler(({ context, input }) =>
+      balanceQueriesHandler.preflight(context.request, input.query),
+    ),
+    query: os.balanceChecks.query.handler(async ({ context, input }) => ({
+      status: 202,
+      body: await balanceQueriesHandler.query(context.request, input),
+    })),
+    queryBatch: os.balanceChecks.queryBatch.handler(async ({ context, input }) => ({
+      status: 202,
+      body: await balanceQueriesHandler.queryBatch(context.request, input),
+    })),
+  },
+  balanceRunners: {
+    status: os.balanceRunners.status.handler(({ context }) =>
+      balanceRunnersHandler.status(context.request),
     ),
   },
 });

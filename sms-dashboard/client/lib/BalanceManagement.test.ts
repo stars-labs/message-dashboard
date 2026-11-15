@@ -300,21 +300,20 @@ function batchResponse(): BalanceQueryBatchResponse {
   };
 }
 
-type Route = (url: URL, init: RequestInit | undefined) => Response | undefined;
+type Route = (url: URL, request: Request) => Response | undefined | Promise<Response | undefined>;
 
 function stubApi(route: Route = () => undefined): void {
   auth.baseUrl = 'https://example.com';
   fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(
     Object.assign(
-      (input: string | URL | Request, init?: RequestInit) => {
-        const url = new URL(input instanceof Request ? input.url : String(input));
-        const routed = route(url, init);
-        if (routed) return Promise.resolve(routed);
-        if (url.pathname === '/api/balance-runners') {
-          return Promise.resolve(Response.json(runnersResponse()));
-        }
+      async (input: string | URL | Request, init?: RequestInit) => {
+        const request = new Request(input, init);
+        const url = new URL(request.url);
+        const routed = await route(url, request);
+        if (routed) return routed;
+        if (url.pathname === '/api/balance-runners') return Response.json(runnersResponse());
         if (url.pathname === '/api/carrier-billing/accounts') {
-          return Promise.resolve(Response.json(accountsResponse([])));
+          return Response.json(accountsResponse([]));
         }
         throw new Error(`Unexpected request: ${url.href}`);
       },
@@ -323,8 +322,11 @@ function stubApi(route: Route = () => undefined): void {
   );
 }
 
-function jsonRequestBody<T>(init: RequestInit | undefined, schema: v.GenericSchema<unknown, T>): T {
-  const parsed = parseJson(typeof init?.body === 'string' ? init.body : '', schema);
+async function jsonRequestBody<T>(
+  request: Request,
+  schema: v.GenericSchema<unknown, T>,
+): Promise<T> {
+  const parsed = parseJson(await request.text(), schema);
   if (!parsed.ok) throw new Error(parsed.error);
   return parsed.value;
 }
@@ -769,7 +771,7 @@ describe('balance management', () => {
 
   test('opens Balance Agent guidance instead of silently queueing when a required runner is offline', async () => {
     let queued = 0;
-    stubApi((url, init) => {
+    stubApi((url, request) => {
       if (url.pathname === '/api/balance-checks/query-preflight') {
         return Response.json(
           preflight({
@@ -778,7 +780,7 @@ describe('balance management', () => {
           }),
         );
       }
-      if (url.pathname === '/api/balance-checks/query' && init?.method === 'POST') {
+      if (url.pathname === '/api/balance-checks/query' && request.method === 'POST') {
         queued += 1;
         return Response.json(queryResponse(), { status: 202 });
       }
@@ -805,7 +807,7 @@ describe('balance management', () => {
 
   test('warns about human verification before queueing an available browser query', async () => {
     let queued = 0;
-    stubApi((url, init) => {
+    stubApi((url, request) => {
       if (url.pathname === '/api/balance-checks/query-preflight') {
         return Response.json(
           preflight({
@@ -814,7 +816,7 @@ describe('balance management', () => {
           }),
         );
       }
-      if (url.pathname === '/api/balance-checks/query' && init?.method === 'POST') {
+      if (url.pathname === '/api/balance-checks/query' && request.method === 'POST') {
         queued += 1;
         return Response.json(queryResponse(), { status: 202 });
       }
@@ -846,10 +848,10 @@ describe('balance management', () => {
     const submittedMethods: string[][] = [];
     const previewScopes: string[][] = [];
     const submittedScopes: string[][] = [];
-    stubApi((url, init) => {
+    stubApi(async (url, request) => {
       if (url.pathname === '/api/balance-checks/query-preview') {
-        expect(init?.method).toBe('POST');
-        previewScopes.push(jsonRequestBody(init, PreviewBody).phone_iccids);
+        expect(request.method).toBe('POST');
+        previewScopes.push((await jsonRequestBody(request, PreviewBody)).phone_iccids);
         return Response.json(
           previewResponse({
             eligible: 6,
@@ -861,8 +863,8 @@ describe('balance management', () => {
           }),
         );
       }
-      if (url.pathname === '/api/balance-checks/query-batch' && init?.method === 'POST') {
-        const body = jsonRequestBody(init, BatchBody);
+      if (url.pathname === '/api/balance-checks/query-batch' && request.method === 'POST') {
+        const body = await jsonRequestBody(request, BatchBody);
         submittedMethods.push(body.methods);
         submittedScopes.push(body.phone_iccids);
         return Response.json(batchResponse(), { status: 202 });
@@ -898,9 +900,9 @@ describe('balance management', () => {
     });
     const PreviewBody = v.object({ phone_iccids: v.array(v.string()) });
     const previewScopes: string[][] = [];
-    stubApi((url, init) => {
+    stubApi(async (url, request) => {
       if (url.pathname === '/api/balance-checks/query-preview') {
-        previewScopes.push(jsonRequestBody(init, PreviewBody).phone_iccids);
+        previewScopes.push((await jsonRequestBody(request, PreviewBody)).phone_iccids);
         return Response.json(
           previewResponse({
             eligible: 1,
@@ -940,9 +942,9 @@ describe('balance management', () => {
     });
     const PreviewBody = v.object({ phone_iccids: v.array(v.string()) });
     const previewScopes: string[][] = [];
-    stubApi((url, init) => {
+    stubApi(async (url, request) => {
       if (url.pathname === '/api/balance-checks/query-preview') {
-        previewScopes.push(jsonRequestBody(init, PreviewBody).phone_iccids);
+        previewScopes.push((await jsonRequestBody(request, PreviewBody)).phone_iccids);
         return Response.json(
           previewResponse({
             eligible: 1,

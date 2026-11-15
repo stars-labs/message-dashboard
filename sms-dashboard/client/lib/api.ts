@@ -2,7 +2,7 @@ import * as v from 'valibot';
 import { parseJson, readJson, type Schema } from '../../shared/parse-json.js';
 import { textOr } from '../../shared/text.js';
 import { ErrorResponse } from '../../shared/api/error.js';
-import { BalanceChecksResponse, type BalanceCheck } from '../../shared/api/balance-checks.js';
+import type { BalanceCheck } from '../../shared/api/balance-checks.js';
 import type {
   CreateIccidMappingBody,
   UpdateIccidMappingBody,
@@ -152,13 +152,6 @@ export async function request<T>(
     throw new ApiError(`Unexpected response from ${endpoint}: ${parsed.error}`, response.status);
   }
   return parsed.value;
-}
-
-function withQuery(path: string, params: Readonly<Record<string, QueryValue | undefined>>): string {
-  const entries = Object.entries(params).flatMap(([key, value]) =>
-    value === undefined ? [] : [[key, String(value)]],
-  );
-  return entries.length === 0 ? path : `${path}?${new URLSearchParams(entries).toString()}`;
 }
 
 /** A limit of 0 or none means the default. */
@@ -367,7 +360,7 @@ export const api = {
     params: Readonly<Record<string, QueryValue | undefined>> = {},
   ): Promise<BalanceCheck[]> {
     try {
-      return (await request(withQuery('/api/balance-checks', params), BalanceChecksResponse)).data;
+      return (await contractApi.balanceChecks.list({ query: queryText(params) })).data;
     } catch (error) {
       console.warn('Failed to get balance checks:', error);
       return [];

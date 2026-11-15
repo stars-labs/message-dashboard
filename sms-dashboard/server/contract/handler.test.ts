@@ -126,6 +126,15 @@ describe('contract routes', () => {
       { method: 'DELETE', path: '/api/filters/:id' },
       { method: 'POST', path: '/api/filters/:id/history' },
       { method: 'POST', path: '/api/verification/reprocess' },
+      { method: 'GET', path: '/api/balance-checks' },
+      { method: 'GET', path: '/api/balance-checks/status' },
+      { method: 'GET', path: '/api/balance-checks/query-preview' },
+      { method: 'POST', path: '/api/balance-checks/query-preview' },
+      { method: 'GET', path: '/api/balance-checks/query-preflight' },
+      { method: 'POST', path: '/api/balance-checks/query' },
+      { method: 'POST', path: '/api/balance-checks/query-batch' },
+      { method: 'GET', path: '/api/balance-checks/:id' },
+      { method: 'GET', path: '/api/balance-runners' },
     ]);
   });
 
