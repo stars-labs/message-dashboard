@@ -53,6 +53,7 @@ function dbStub() {
 interface Auth0Fixture {
   roles?: string[];
   failOn?: string | null;
+  failWith?: { status: number; headers?: Record<string, string> };
   users?: {
     user_id: string;
     email?: string;
@@ -74,6 +75,7 @@ function requestUrl(input: string | URL | Request): string {
 function mockAuth0({
   roles = ['viewer'],
   failOn = null,
+  failWith = { status: 500 },
   users = [
     { user_id: 'auth0|1', email: 'a@poloniex.com', name: 'A', last_login: null, logins_count: 3 },
   ],
@@ -82,7 +84,7 @@ function mockAuth0({
 }: Auth0Fixture = {}) {
   const respond = (url: string, method: string): Response => {
     if (failOn && url.includes(failOn)) {
-      return new Response('upstream boom', { status: 500 });
+      return new Response('upstream boom', failWith);
     }
 
     if (url.includes('/oauth/token')) {
@@ -322,6 +324,20 @@ describe('GET /api/users', () => {
 
     const res = await usersHandler.list(listRequest());
     expect(res.status).toBe(502);
+    expect(await bodyOf(res)).toMatchObject({
+      success: false,
+      error: 'Auth0 Management API request failed',
+    });
+  });
+
+  test('surfaces a rate-limited Management API as 502, dropping its Retry-After', async () => {
+    mockAuth0({
+      failOn: '/api/v2/users',
+      failWith: { status: 429, headers: { 'Retry-After': '30' } },
+    });
+
+    const res = await usersHandler.list(listRequest());
+    expect([res.status, res.headers.get('Retry-After')]).toEqual([502, null]);
     expect(await bodyOf(res)).toMatchObject({
       success: false,
       error: 'Auth0 Management API request failed',
