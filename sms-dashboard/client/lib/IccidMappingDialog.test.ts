@@ -9,19 +9,25 @@ type SavedMapping = CreateIccidMappingResponse['data'];
 
 const originalBaseUrl = auth.baseUrl;
 let fetchSpy: ReturnType<typeof spyOn<typeof globalThis, 'fetch'>> | undefined;
+let sent: Request[] = [];
 
 afterEach(() => {
   cleanup();
+  sent = [];
   fetchSpy?.mockRestore();
   fetchSpy = undefined;
   auth.baseUrl = originalBaseUrl;
 });
 
-function stubFetch(handler: (input: string | URL | Request, init?: RequestInit) => Response): void {
+function stubFetch(handler: (request: Request) => Response): void {
   auth.baseUrl = 'https://example.com';
   fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(
     Object.assign(
-      (input: string | URL | Request, init?: RequestInit) => Promise.resolve(handler(input, init)),
+      (input: string | URL | Request, init?: RequestInit) => {
+        const request = new Request(input, init);
+        sent.push(request.clone());
+        return Promise.resolve(handler(request));
+      },
       { preconnect: () => undefined },
     ),
   );
@@ -92,12 +98,10 @@ function field<T extends HTMLElement>(element: HTMLElement, type: new () => T): 
   return element;
 }
 
-function sentBody(): unknown {
-  const call = fetchSpy?.mock.calls[0];
-  const body = call?.[1]?.body;
-  if (typeof body !== 'string') throw new Error('no request body was sent');
-  const parsed: unknown = JSON.parse(body);
-  return parsed;
+async function sentBody(): Promise<unknown> {
+  const request = sent[0];
+  if (!request) throw new Error('no request was sent');
+  return await request.json();
 }
 
 function open(props: Partial<{ phone: Phone | null; show: boolean }> = {}) {
@@ -170,7 +174,7 @@ describe('IccidMappingDialog form', () => {
     await waitFor(() => {
       expect(closeCount()).toBe(1);
     });
-    expect(sentBody()).toMatchObject({ phone_number: '+6591234567', country_code: 'SG' });
+    expect(await sentBody()).toMatchObject({ phone_number: '+6591234567', country_code: 'SG' });
   });
 
   test('shows an inactive status for a card that is not active', () => {
@@ -261,8 +265,8 @@ describe('IccidMappingDialog saving', () => {
       expect(closeCount()).toBe(1);
     });
     expect(view.container.querySelector('[role="dialog"]')).toBeNull();
-    expect(fetchSpy?.mock.calls[0]?.[0]).toBe('https://example.com/api/iccid-mappings');
-    expect(sentBody()).toEqual({
+    expect(sent[0]?.url).toBe('https://example.com/api/iccid-mappings');
+    expect(await sentBody()).toEqual({
       iccid: '898600520121F0517883',
       phone_number: '+8613520607016',
       sim_index: 12,
@@ -295,7 +299,7 @@ describe('IccidMappingDialog saving', () => {
     await waitFor(() => {
       expect(fetchSpy).toHaveBeenCalledTimes(1);
     });
-    expect(sentBody()).toMatchObject({
+    expect(await sentBody()).toMatchObject({
       country_code: 'CN',
       carrier: null,
       imei: null,
@@ -314,7 +318,7 @@ describe('IccidMappingDialog saving', () => {
     await waitFor(() => {
       expect(fetchSpy).toHaveBeenCalledTimes(1);
     });
-    expect(sentBody()).toMatchObject({
+    expect(await sentBody()).toMatchObject({
       service_type: 'prepaid',
       service_type_source: 'contract_or_bill',
     });
@@ -330,7 +334,7 @@ describe('IccidMappingDialog saving', () => {
     await waitFor(() => {
       expect(saves).toHaveLength(1);
     });
-    expect(sentBody()).toMatchObject({ sim_role: 'secondary', primary_iccid: 'PRIMARY-1' });
+    expect(await sentBody()).toMatchObject({ sim_role: 'secondary', primary_iccid: 'PRIMARY-1' });
     expect(saves[0]).toMatchObject({ sim_role: 'secondary', primary_iccid: 'PRIMARY-1' });
   });
 
@@ -343,7 +347,7 @@ describe('IccidMappingDialog saving', () => {
     await waitFor(() => {
       expect(fetchSpy).toHaveBeenCalledTimes(1);
     });
-    expect(sentBody()).toMatchObject({ primary_iccid: null });
+    expect(await sentBody()).toMatchObject({ primary_iccid: null });
   });
 
   test('a failed save shows the reason and keeps the dialog open', async () => {

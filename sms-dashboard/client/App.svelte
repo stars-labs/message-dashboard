@@ -36,8 +36,7 @@
   import BalanceManagement from './lib/BalanceManagement.svelte';
   import PullToRefresh from './lib/PullToRefresh.svelte';
   import { keywords as keywordsStore } from './lib/tag-store.js';
-  import { ApiError, api, errorMessage, request } from './lib/api.js';
-  import { contractApi } from './lib/contract-client.js';
+  import { ApiError, api, contractApi, errorMessage, request } from './lib/api.js';
   import { getPhoneFlag } from './lib/countries.js';
   import { auth } from './lib/auth.js';
   import { getStatusMeta } from './lib/device-status.js';

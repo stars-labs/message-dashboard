@@ -1,16 +1,21 @@
-import { json } from '../lib/response.js';
-import type { ErrorResponse } from '../../shared/api/error.js';
+import { ORPCError } from '@orpc/server';
 import * as v from 'valibot';
-import { readJson } from '../../shared/parse-json.js';
 import { queryAll, queryFirst, queryOne, type D1 } from '../lib/d1.js';
 import { errorText } from '../../shared/error-text.js';
 import {
   IccidMapping,
   IccidMappingDetail,
   SavedIccidMapping,
+  SimMapping,
+  type BulkIccidMappingsBody,
+  type BulkIccidMappingsResponse,
+  type CreateIccidMappingBody,
   type CreateIccidMappingResponse,
   type DeleteIccidMappingResponse,
+  type IccidMappingDetailResponse,
+  type IccidMappingsQuery,
   type IccidMappingsResponse,
+  type UpdateIccidMappingBody,
   type UpdateIccidMappingResponse,
 } from '../../shared/api/iccid-mappings.js';
 
@@ -45,45 +50,6 @@ const PrimaryTargetRow = v.object({ sim_role: v.string() });
 
 const TotalRow = v.object({ total: v.number() });
 
-const NonEmptyString = v.pipe(v.string(), v.nonEmpty());
-const SimIndex = v.pipe(v.number(), v.integer(), v.minValue(1));
-const OptionalText = v.optional(v.nullable(v.string()));
-
-const SimWriteFields = {
-  country_code: OptionalText,
-  carrier: OptionalText,
-  imei: OptionalText,
-  notes: OptionalText,
-  service_type: OptionalText,
-  service_type_source: OptionalText,
-  sim_role: OptionalText,
-  primary_iccid: OptionalText,
-};
-
-/** One SIM as bulk import receives it; the threshold is not imported. */
-const SimMapping = v.object({
-  iccid: NonEmptyString,
-  phone_number: NonEmptyString,
-  sim_index: SimIndex,
-  ...SimWriteFields,
-});
-
-/** Request body of POST /api/iccid-mappings. A null threshold uses the currency default in the client. */
-const CreateBody = v.object({
-  ...SimMapping.entries,
-  balance_threshold: v.optional(v.nullable(v.number())),
-});
-
-/** Request body of PUT /api/iccid-mappings/:id; the ICCID comes from the path. */
-const UpdateBody = v.object({
-  phone_number: NonEmptyString,
-  sim_index: SimIndex,
-  ...SimWriteFields,
-  balance_threshold: v.optional(v.nullable(v.number())),
-});
-
-const BulkBody = v.object({ mappings: v.array(v.unknown()) });
-
 const PositiveIntegerText = v.pipe(v.string(), v.regex(/^[1-9]\d*$/), v.transform(Number));
 
 type ServiceTypeResolution =
@@ -111,37 +77,28 @@ interface Operator {
   email?: string | undefined;
 }
 
-interface ListRequest {
-  url: string;
+interface ReadCall {
   env: { DB: D1<'all' | 'first'> };
 }
 
-interface GetRequest {
-  env: { DB: D1<'first'> };
-  params?: Record<string, string>;
-}
-
-interface WriteRequest {
+interface WriteCall {
   env: { DB: D1<'first' | 'run'> };
-  user?: Operator;
-  text(): Promise<string>;
+  user?: Operator | undefined;
 }
 
-interface UpdateRequest extends WriteRequest {
-  params?: Record<string, string>;
+function badRequest(message: string): ORPCError<'BAD_REQUEST', unknown> {
+  return new ORPCError('BAD_REQUEST', { message });
 }
 
-interface DeleteRequest {
-  env: { DB: D1<'run'> };
-  params?: Record<string, string>;
+/** Answers `error`: a refusal the handler chose stands; anything else is logged and is `message`. */
+function fail(error: unknown, label: string, message: string): never {
+  if (error instanceof ORPCError) throw error;
+  console.error(`[iccid-mappings] ${label}:`, error);
+  throw new ORPCError('INTERNAL_SERVER_ERROR', { message });
 }
 
-function badRequest(error: string): Response {
-  return json({ success: false, error }, 400);
-}
-
-function positiveInteger(raw: string | null, fallback: number): number | null {
-  if (raw === null || raw === '') return fallback;
+function positiveInteger(raw: string | undefined, fallback: number): number | null {
+  if (raw === undefined || raw === '') return fallback;
   const parsed = v.safeParse(PositiveIntegerText, raw);
   return parsed.success ? parsed.output : null;
 }
@@ -246,19 +203,20 @@ const DETAIL_SELECT = `
 `;
 
 export const iccidMappingsHandler = {
-  async list(request: ListRequest): Promise<Response> {
-    const { env } = request;
-    const url = new URL(request.url);
-    const page = positiveInteger(url.searchParams.get('page'), 1);
-    const limit = positiveInteger(url.searchParams.get('limit'), 20);
+  async list(
+    { env }: ReadCall,
+    query: v.InferOutput<typeof IccidMappingsQuery>,
+  ): Promise<IccidMappingsResponse> {
+    const page = positiveInteger(query.page, 1);
+    const limit = positiveInteger(query.limit, 20);
     if (page === null || limit === null) {
-      return badRequest('page and limit must be positive integers');
+      throw badRequest('page and limit must be positive integers');
     }
-    const search = url.searchParams.get('search') ?? '';
+    const search = query.search ?? '';
     const offset = (page - 1) * limit;
 
     try {
-      let query = `
+      let sql = `
         SELECT
           iccid as id,
           iccid,
@@ -289,15 +247,15 @@ export const iccidMappingsHandler = {
       const params: unknown[] = [];
 
       if (search) {
-        query += ` AND (iccid LIKE ? OR number LIKE ? OR carrier LIKE ? OR notes LIKE ?)`;
+        sql += ` AND (iccid LIKE ? OR number LIKE ? OR carrier LIKE ? OR notes LIKE ?)`;
         const searchPattern = `%${search}%`;
         params.push(searchPattern, searchPattern, searchPattern, searchPattern);
       }
 
-      query += ` ORDER BY sim_index ASC LIMIT ? OFFSET ?`;
+      sql += ` ORDER BY sim_index ASC LIMIT ? OFFSET ?`;
       params.push(limit, offset);
 
-      const mappings = await queryAll(env.DB.prepare(query).bind(...params), IccidMapping);
+      const mappings = await queryAll(env.DB.prepare(sql).bind(...params), IccidMapping);
 
       let countQuery = `SELECT COUNT(*) as total FROM device_view WHERE 1=1`;
       const countParams: unknown[] = [];
@@ -314,7 +272,7 @@ export const iccidMappingsHandler = {
       );
       const total = totalResult?.total ?? 0;
 
-      return json({
+      return {
         success: true,
         data: mappings,
         pagination: {
@@ -323,74 +281,43 @@ export const iccidMappingsHandler = {
           total,
           totalPages: Math.ceil(total / limit),
         },
-      } satisfies IccidMappingsResponse);
+      };
     } catch (error) {
-      console.error('[iccid-mappings] Error listing ICCID mappings:', error);
-      return json(
-        {
-          success: false,
-          error: 'Failed to fetch ICCID mappings',
-          detail: errorText(error),
-        } satisfies ErrorResponse,
-        500,
+      fail(
+        error,
+        'Error listing ICCID mappings',
+        `Failed to fetch ICCID mappings: ${errorText(error)}`,
       );
     }
   },
 
-  async get(request: GetRequest): Promise<Response> {
-    const { env } = request;
-    const id = request.params?.['id'];
-
+  async get({ env }: ReadCall, id: string): Promise<IccidMappingDetailResponse> {
     try {
       const mapping = await queryFirst(env.DB.prepare(DETAIL_SELECT).bind(id), IccidMappingDetail);
-
-      if (!mapping) {
-        return json({ success: false, error: 'ICCID mapping not found' }, 404);
-      }
-
-      return json({ success: true, data: mapping });
+      if (!mapping) throw new ORPCError('NOT_FOUND', { message: 'ICCID mapping not found' });
+      return { success: true, data: mapping };
     } catch (error) {
-      console.error('[iccid-mappings] Error fetching ICCID mapping:', error);
-      return json({ success: false, error: 'Failed to fetch ICCID mapping' }, 500);
+      fail(error, 'Error fetching ICCID mapping', 'Failed to fetch ICCID mapping');
     }
   },
 
-  async getByIccid(request: GetRequest): Promise<Response> {
-    const { env } = request;
-    const iccid = request.params?.['iccid'];
-
+  async getByIccid({ env }: ReadCall, iccid: string): Promise<IccidMappingDetailResponse> {
     try {
       const mapping = await queryFirst(
         env.DB.prepare(DETAIL_SELECT).bind(iccid),
         IccidMappingDetail,
       );
-
-      if (!mapping) {
-        return json({ success: false, error: 'ICCID not found' }, 404);
-      }
-
-      return json({ success: true, data: mapping });
+      if (!mapping) throw new ORPCError('NOT_FOUND', { message: 'ICCID not found' });
+      return { success: true, data: mapping };
     } catch (error) {
-      console.error('[iccid-mappings] Error fetching ICCID by ID:', error);
-      return json({ success: false, error: 'Failed to fetch ICCID mapping' }, 500);
+      fail(error, 'Error fetching ICCID by ID', 'Failed to fetch ICCID mapping');
     }
   },
 
-  async create(request: WriteRequest): Promise<Response> {
-    const { env, user } = request;
-    const parsed = await readJson(request, CreateBody);
-    if (!parsed.ok) {
-      return json(
-        {
-          success: false,
-          error: 'ICCID, phone number, and sim_index are required',
-          detail: parsed.error,
-        } satisfies ErrorResponse,
-        400,
-      );
-    }
-    const data = parsed.value;
-
+  async create(
+    { env, user }: WriteCall,
+    data: v.InferOutput<typeof CreateIccidMappingBody>,
+  ): Promise<{ status: 200 | 201; body: CreateIccidMappingResponse }> {
     try {
       const { iccid, phone_number, sim_index, country_code, carrier, imei, notes } = data;
       const balanceThreshold = data.balance_threshold ?? null;
@@ -400,9 +327,9 @@ export const iccidMappingsHandler = {
         ExistingSimRow,
       );
       const service = resolveServiceType(data, simExists);
-      if ('error' in service) return badRequest(service.error);
+      if ('error' in service) throw badRequest(service.error);
       const role = await resolveSimRole(data, simExists, env);
-      if ('error' in role) return badRequest(role.error);
+      if ('error' in role) throw badRequest(role.error);
 
       if (!simExists) {
         await env.DB.prepare(
@@ -493,39 +420,21 @@ export const iccidMappingsHandler = {
         SavedIccidMapping,
       );
 
-      return json(
-        { success: true, data: mapping } satisfies CreateIccidMappingResponse,
-        simExists ? 200 : 201,
-      );
+      return { status: simExists ? 200 : 201, body: { success: true, data: mapping } };
     } catch (error) {
-      console.error('[iccid-mappings] Error creating ICCID mapping:', error);
-      return json(
-        {
-          success: false,
-          error: 'Failed to create ICCID mapping',
-          detail: errorText(error),
-        } satisfies ErrorResponse,
-        500,
+      fail(
+        error,
+        'Error creating ICCID mapping',
+        `Failed to create ICCID mapping: ${errorText(error)}`,
       );
     }
   },
 
-  async update(request: UpdateRequest): Promise<Response> {
-    const { env, user } = request;
-    const id = request.params?.['id'];
-    const parsed = await readJson(request, UpdateBody);
-    if (!parsed.ok) {
-      return json(
-        {
-          success: false,
-          error: 'phone_number and sim_index are required',
-          detail: parsed.error,
-        } satisfies ErrorResponse,
-        400,
-      );
-    }
-    const data = parsed.value;
-
+  async update(
+    { env, user }: WriteCall,
+    id: string,
+    data: v.InferOutput<typeof UpdateIccidMappingBody>,
+  ): Promise<UpdateIccidMappingResponse> {
     try {
       const { phone_number, sim_index, country_code, carrier, imei, notes } = data;
       const balanceThreshold = data.balance_threshold ?? null;
@@ -534,13 +443,11 @@ export const iccidMappingsHandler = {
         env.DB.prepare(EXISTING_SIM_SELECT).bind(id),
         ExistingSimRow,
       );
-      if (!existing) {
-        return json({ success: false, error: 'ICCID mapping not found' }, 404);
-      }
+      if (!existing) throw new ORPCError('NOT_FOUND', { message: 'ICCID mapping not found' });
       const service = resolveServiceType(data, existing);
-      if ('error' in service) return badRequest(service.error);
+      if ('error' in service) throw badRequest(service.error);
       const role = await resolveSimRole(data, existing, env);
-      if ('error' in role) return badRequest(role.error);
+      if ('error' in role) throw badRequest(role.error);
 
       await env.DB.prepare(
         `
@@ -589,21 +496,14 @@ export const iccidMappingsHandler = {
 
       const mapping = await queryFirst(env.DB.prepare(DETAIL_SELECT).bind(id), IccidMappingDetail);
 
-      if (!mapping) {
-        return json({ success: false, error: 'ICCID mapping not found' }, 404);
-      }
-
-      return json({ success: true, data: mapping } satisfies UpdateIccidMappingResponse);
+      if (!mapping) throw new ORPCError('NOT_FOUND', { message: 'ICCID mapping not found' });
+      return { success: true, data: mapping };
     } catch (error) {
-      console.error('[iccid-mappings] Error updating ICCID mapping:', error);
-      return json({ success: false, error: 'Failed to update ICCID mapping' }, 500);
+      fail(error, 'Error updating ICCID mapping', 'Failed to update ICCID mapping');
     }
   },
 
-  async delete(request: DeleteRequest): Promise<Response> {
-    const { env } = request;
-    const id = request.params?.['id'];
-
+  async delete({ env }: WriteCall, id: string): Promise<DeleteIccidMappingResponse> {
     try {
       // If this SIM is a primary with secondaries still attached, the ON DELETE RESTRICT FK aborts.
       await env.DB.prepare(
@@ -614,35 +514,22 @@ export const iccidMappingsHandler = {
         .bind(id)
         .run();
 
-      return json({
-        success: true,
-        message: 'ICCID mapping deleted successfully',
-      } satisfies DeleteIccidMappingResponse);
+      return { success: true, message: 'ICCID mapping deleted successfully' };
     } catch (error) {
       if (/FOREIGN KEY constraint failed/i.test(errorText(error))) {
-        return json(
-          {
-            success: false,
-            error:
-              'This is a primary SIM with secondary SIMs still attached. Set them back to standalone first.',
-          },
-          409,
-        );
+        throw new ORPCError('CONFLICT', {
+          message:
+            'This is a primary SIM with secondary SIMs still attached. Set them back to standalone first.',
+        });
       }
-      console.error('[iccid-mappings] Error deleting ICCID mapping:', error);
-      return json({ success: false, error: 'Failed to delete ICCID mapping' }, 500);
+      fail(error, 'Error deleting ICCID mapping', 'Failed to delete ICCID mapping');
     }
   },
 
-  async bulkImport(request: WriteRequest): Promise<Response> {
-    const { env, user } = request;
-    const body = await readJson(request, BulkBody);
-
-    if (!body.ok) {
-      return json({ success: false, error: 'Mappings must be an array' }, 400);
-    }
-    const { mappings } = body.value;
-
+  async bulkImport(
+    { env, user }: WriteCall,
+    { mappings }: v.InferOutput<typeof BulkIccidMappingsBody>,
+  ): Promise<BulkIccidMappingsResponse> {
     try {
       let created = 0;
       let updated = 0;
@@ -761,26 +648,13 @@ export const iccidMappingsHandler = {
         }
       }
 
-      return json({
+      return {
         success: true,
-        summary: {
-          total: mappings.length,
-          created,
-          updated,
-          failed,
-        },
-        errors: errors.length > 0 ? errors : undefined,
-      });
+        summary: { total: mappings.length, created, updated, failed },
+        ...(errors.length > 0 ? { errors } : {}),
+      };
     } catch (error) {
-      console.error('[iccid-mappings] Error in bulk import:', error);
-      return json(
-        {
-          success: false,
-          error: 'Failed to import ICCID mappings',
-          detail: errorText(error),
-        } satisfies ErrorResponse,
-        500,
-      );
+      fail(error, 'Error in bulk import', `Failed to import ICCID mappings: ${errorText(error)}`);
     }
   },
 };

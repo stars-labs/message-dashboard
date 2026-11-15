@@ -198,6 +198,21 @@ describe('GET /api/messages reads', () => {
     `);
   });
 
+  // The list statement binds limit + 1 and the offset, last.
+  test('a limit or offset that is absent, not a number or out of range falls back', async () => {
+    const bounds = [];
+    for (const query of ['', 'limit=abc&offset=x', 'limit=9999', 'limit=0&offset=-5']) {
+      const [list] = await statementsOf(query);
+      bounds.push([query, list?.params.slice(-2)]);
+    }
+    expect(bounds).toEqual([
+      ['', [51, 0]],
+      ['limit=abc&offset=x', [51, 0]],
+      ['limit=9999', [501, 0]],
+      ['limit=0&offset=-5', [2, 0]],
+    ]);
+  });
+
   test('the spam drawer', async () => {
     expect(await statementsOf('include_filtered=1&limit=20&offset=40')).toMatchInlineSnapshot(`
       [

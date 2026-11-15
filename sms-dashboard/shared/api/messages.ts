@@ -1,4 +1,5 @@
 import * as v from 'valibot';
+import { bodyObject } from './body.js';
 
 /** A message as GET /api/messages returns it: the row plus its SIM's device fields. */
 export const ApiMessage = v.object({
@@ -67,3 +68,34 @@ export const SendMessageResponse = v.object({
 });
 
 export type SendMessageResponse = v.InferOutput<typeof SendMessageResponse>;
+
+/**
+ * GET /api/messages query. Every value stays text: the route bounds limit and
+ * offset, and checks the timestamps and cursor, as it always has.
+ */
+export const MessagesQuery = v.object({
+  phone_iccid: v.optional(v.string()),
+  limit: v.optional(v.string()),
+  offset: v.optional(v.string()),
+  since: v.optional(v.string()),
+  until: v.optional(v.string()),
+  before_created_at: v.optional(v.string()),
+  before_id: v.optional(v.string()),
+  include_filtered: v.optional(v.string()),
+});
+
+const SEND_REQUIRED_MESSAGE =
+  'Missing required fields: phone_iccid, recipient, and content are required';
+
+const SendField = v.pipe(v.string(SEND_REQUIRED_MESSAGE), v.nonEmpty(SEND_REQUIRED_MESSAGE));
+
+/** POST /api/messages/send. The recipient is checked further by normalizeRecipient. */
+export const SendMessageBody = bodyObject(
+  { phone_iccid: SendField, recipient: SendField, content: SendField },
+  {
+    phone_iccid: SEND_REQUIRED_MESSAGE,
+    recipient: SEND_REQUIRED_MESSAGE,
+    content: SEND_REQUIRED_MESSAGE,
+  },
+  SEND_REQUIRED_MESSAGE,
+);

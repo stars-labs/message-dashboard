@@ -3,9 +3,6 @@ import { handleCORS, corsPreflight } from './middleware/cors.js';
 import { authorize } from './middleware/authorize.js';
 import { controlHandler } from './handlers/control.js';
 import { auth0Handler } from './handlers/auth0.js';
-import { phonesHandler } from './handlers/phones.js';
-import { messagesHandler } from './handlers/messages.js';
-import { iccidMappingsHandler } from './handlers/iccid-mappings.js';
 import { balanceQueriesHandler } from './handlers/balance-queries.js';
 import { balanceSkillRunnerHandler } from './handlers/balance-skill-runner.js';
 import { carrierWebBalanceHandler } from './handlers/carrier-web-balance.js';
@@ -57,10 +54,6 @@ router.get('/favicon.ico', (request) =>
 router.get('/login', (request) => auth0Handler.login(request));
 router.get('/callback', auth0Handler.callback);
 router.get('/logout', auth0Handler.logout);
-
-router.get('/api/phones', gate('phones.read'), (request) => phonesHandler.list(request));
-
-router.get('/api/messages', gate('messages.read'), (request) => messagesHandler.list(request));
 
 router.get('/api/balance-checks', gate('messages.read'), (request) =>
   balanceQueriesHandler.list(request),
@@ -125,39 +118,6 @@ router.post('/api/balance-checks/query-batch', gate('balances.query'), (request)
 
 router.get('/api/balance-checks/:id', gate('messages.read'), (request) =>
   balanceQueriesHandler.detail(request),
-);
-
-router.post('/api/messages/send', gate('messages.send'), (request) =>
-  messagesHandler.send(request),
-);
-
-// ICCID Mappings routes
-router.get('/api/iccid-mappings', gate('phones.read'), (request) =>
-  iccidMappingsHandler.list(request),
-);
-
-router.get('/api/iccid-mappings/:id', gate('phones.read'), (request) =>
-  iccidMappingsHandler.get(request),
-);
-
-router.get('/api/iccid-mappings/by-iccid/:iccid', gate('phones.read'), (request) =>
-  iccidMappingsHandler.getByIccid(request),
-);
-
-router.post('/api/iccid-mappings', gate('phones.write'), (request) =>
-  iccidMappingsHandler.create(request),
-);
-
-router.put('/api/iccid-mappings/:id', gate('phones.write'), (request) =>
-  iccidMappingsHandler.update(request),
-);
-
-router.delete('/api/iccid-mappings/:id', gate('phones.write'), (request) =>
-  iccidMappingsHandler.delete(request),
-);
-
-router.post('/api/iccid-mappings/bulk', gate('phones.write'), (request) =>
-  iccidMappingsHandler.bulkImport(request),
 );
 
 // Daemon and runner routes: each handler authenticates its caller itself, by API key

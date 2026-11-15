@@ -1,4 +1,5 @@
 import * as v from 'valibot';
+import { bodyObject } from './body.js';
 
 /** A SIM as GET /api/iccid-mappings lists it: a device_view row under the mapping names. */
 export const IccidMapping = v.object({
@@ -87,3 +88,96 @@ export const DeleteIccidMappingResponse = v.object({
 });
 
 export type DeleteIccidMappingResponse = v.InferOutput<typeof DeleteIccidMappingResponse>;
+
+/** GET /api/iccid-mappings/:id and /by-iccid/:iccid. */
+export const IccidMappingDetailResponse = v.object({
+  success: v.literal(true),
+  data: IccidMappingDetail,
+});
+
+export type IccidMappingDetailResponse = v.InferOutput<typeof IccidMappingDetailResponse>;
+
+/** GET /api/iccid-mappings query, as text: the route checks page and limit. */
+export const IccidMappingsQuery = v.object({
+  page: v.optional(v.string()),
+  limit: v.optional(v.string()),
+  search: v.optional(v.string()),
+});
+
+const CREATE_REQUIRED_MESSAGE = 'ICCID, phone number, and sim_index are required';
+const UPDATE_REQUIRED_MESSAGE = 'phone_number and sim_index are required';
+
+const NonEmptyString = (message: string) => v.pipe(v.string(message), v.nonEmpty(message));
+const SimIndex = (message: string) =>
+  v.pipe(v.number(message), v.integer(message), v.minValue(1, message));
+const OptionalText = v.optional(v.nullable(v.string()));
+
+/**
+ * The SIM fields every write may carry. Absent and present-but-empty mean
+ * different things to the service type and role (see resolveServiceType), so
+ * none has a default.
+ */
+const SimWriteFields = {
+  country_code: OptionalText,
+  carrier: OptionalText,
+  imei: OptionalText,
+  notes: OptionalText,
+  service_type: OptionalText,
+  service_type_source: OptionalText,
+  sim_role: OptionalText,
+  primary_iccid: OptionalText,
+};
+
+/** One SIM as bulk import receives it; the threshold is not imported. */
+export const SimMapping = v.object({
+  iccid: NonEmptyString(CREATE_REQUIRED_MESSAGE),
+  phone_number: NonEmptyString(CREATE_REQUIRED_MESSAGE),
+  sim_index: SimIndex(CREATE_REQUIRED_MESSAGE),
+  ...SimWriteFields,
+});
+
+/** POST /api/iccid-mappings. A null threshold uses the currency default in the client. */
+export const CreateIccidMappingBody = bodyObject(
+  { ...SimMapping.entries, balance_threshold: v.optional(v.nullable(v.number())) },
+  {
+    iccid: CREATE_REQUIRED_MESSAGE,
+    phone_number: CREATE_REQUIRED_MESSAGE,
+    sim_index: CREATE_REQUIRED_MESSAGE,
+  },
+  CREATE_REQUIRED_MESSAGE,
+);
+
+/** PUT /api/iccid-mappings/:id; the ICCID comes from the path. */
+export const UpdateIccidMappingBody = bodyObject(
+  {
+    phone_number: NonEmptyString(UPDATE_REQUIRED_MESSAGE),
+    sim_index: SimIndex(UPDATE_REQUIRED_MESSAGE),
+    ...SimWriteFields,
+    balance_threshold: v.optional(v.nullable(v.number())),
+  },
+  { phone_number: UPDATE_REQUIRED_MESSAGE, sim_index: UPDATE_REQUIRED_MESSAGE },
+  UPDATE_REQUIRED_MESSAGE,
+);
+
+const MAPPINGS_MESSAGE = 'Mappings must be an array';
+
+/** POST /api/iccid-mappings/bulk. Each mapping is checked on its own, so one bad row fails alone. */
+export const BulkIccidMappingsBody = bodyObject(
+  { mappings: v.array(v.unknown(), MAPPINGS_MESSAGE) },
+  { mappings: MAPPINGS_MESSAGE },
+  MAPPINGS_MESSAGE,
+);
+
+/** POST /api/iccid-mappings/bulk: how many were written, and why the rest were not. */
+export const BulkIccidMappingsResponse = v.object({
+  success: v.literal(true),
+  summary: v.object({
+    total: v.number(),
+    created: v.number(),
+    updated: v.number(),
+    failed: v.number(),
+  }),
+  errors: v.optional(v.array(v.string())),
+});
+
+export type BulkIccidMappingsResponse = v.InferOutput<typeof BulkIccidMappingsResponse>;

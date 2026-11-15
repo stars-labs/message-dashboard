@@ -91,7 +91,7 @@
       const response = await api.iccidMappings.create({
         iccid: phone.iccid,
         phone_number: phoneNumber,
-        sim_index: simIndex ? parseInt(simIndex) : null,
+        sim_index: parseInt(simIndex),
         country_code: textOr(country, null),
         carrier: textOr(carrier, null),
         imei: textOr(imei, null),

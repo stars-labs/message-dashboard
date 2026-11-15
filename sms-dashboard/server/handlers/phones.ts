@@ -1,8 +1,8 @@
-import { json } from '../lib/response.js';
+import { ORPCError } from '@orpc/server';
 import { Phone, type PhonesResponse } from '../../shared/api/phones.js';
 import { queryAll, type D1 } from '../lib/d1.js';
 
-interface ListRequest {
+interface ListCall {
   env: { DB: D1<'all'> };
 }
 
@@ -35,9 +35,7 @@ const DEVICE_COLUMNS = `
 
 export const phonesHandler = {
   // List all phones
-  async list(request: ListRequest): Promise<Response> {
-    const { env } = request;
-
+  async list({ env }: ListCall): Promise<PhonesResponse> {
     try {
       const results = await queryAll(
         env.DB.prepare(
@@ -50,7 +48,7 @@ export const phonesHandler = {
         Phone,
       );
 
-      return json({ success: true, data: results } satisfies PhonesResponse);
+      return { success: true, data: results };
     } catch (error) {
       // Log error details server-side for debugging
       console.error(
@@ -59,7 +57,7 @@ export const phonesHandler = {
       );
 
       // Return generic error to client without exposing stack trace
-      return json({ success: false, error: 'Failed to fetch phones' }, 500);
+      throw new ORPCError('INTERNAL_SERVER_ERROR', { message: 'Failed to fetch phones' });
     }
   },
 };

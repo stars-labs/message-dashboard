@@ -2,8 +2,7 @@
   import { confirmAction } from './confirm.svelte.js';
   // Admin-only user/role administration. Reached only when the caller holds
   // `users.read`; the server enforces that independently on both endpoints.
-  import { errorMessage } from './api.js';
-  import { contractApi } from './contract-client.js';
+  import { contractApi, errorMessage } from './api.js';
   import type { ManagedUser } from '../../shared/api/users.js';
   import { textOr } from '../../shared/text.js';
 

@@ -310,8 +310,12 @@
     const current = panel;
     if (current === null) return;
     error = null;
+    const fd = current.formData;
+    if (typeof fd.sim_index !== 'number') {
+      error = '请输入卡号';
+      return;
+    }
     try {
-      const fd = current.formData;
       const payload = {
         iccid: fd.iccid,
         phone_number: fd.phone_number,

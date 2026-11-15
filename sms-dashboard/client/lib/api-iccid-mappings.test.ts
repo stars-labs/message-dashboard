@@ -20,9 +20,9 @@ function answerEveryRequest(body: unknown, status: number): string[] {
   const sent: string[] = [];
   fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(
     Object.assign(
-      (url: string | URL | Request, init?: RequestInit) => {
-        const href = url instanceof Request ? url.url : url;
-        sent.push(`${init?.method ?? 'GET'} ${new URL(href).pathname}`);
+      (input: string | URL | Request, init?: RequestInit) => {
+        const request = new Request(input, init);
+        sent.push(`${request.method} ${new URL(request.url).pathname}`);
         return Promise.resolve(Response.json(body, { status }));
       },
       { preconnect: () => undefined },
@@ -39,10 +39,12 @@ describe('ICCID mapping writes', () => {
   test('a rejected create is sent once and reports the server error', async () => {
     const sent = failEveryRequest();
 
-    const error = await api.iccidMappings.create({ iccid: '8986' }).then(
-      () => null,
-      (e: unknown) => e,
-    );
+    const error = await api.iccidMappings
+      .create({ iccid: '8986', phone_number: '+6591234567', sim_index: 1 })
+      .then(
+        () => null,
+        (e: unknown) => e,
+      );
 
     expect(error instanceof Error ? error.message : error).toBe('ICCID already mapped');
     expect(sent).toEqual(['POST /api/iccid-mappings']);
@@ -51,7 +53,9 @@ describe('ICCID mapping writes', () => {
   test('a rejected update is sent once', async () => {
     const sent = failEveryRequest();
 
-    await api.iccidMappings.update('8986', { number: '+6591234567' }).catch(() => null);
+    await api.iccidMappings
+      .update('8986', { phone_number: '+6591234567', sim_index: 1 })
+      .catch(() => null);
 
     expect(sent).toEqual(['PUT /api/iccid-mappings/8986']);
   });

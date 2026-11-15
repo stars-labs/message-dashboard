@@ -3,15 +3,14 @@ import { parseJson, readJson, type Schema } from '../../shared/parse-json.js';
 import { textOr } from '../../shared/text.js';
 import { ErrorResponse } from '../../shared/api/error.js';
 import { BalanceChecksResponse, type BalanceCheck } from '../../shared/api/balance-checks.js';
-import {
-  CreateIccidMappingResponse,
-  DeleteIccidMappingResponse,
-  IccidMappingsResponse,
-  UpdateIccidMappingResponse,
+import type {
+  CreateIccidMappingBody,
+  UpdateIccidMappingBody,
 } from '../../shared/api/iccid-mappings.js';
-import { MessagePage, SendMessageResponse, type ApiMessage } from '../../shared/api/messages.js';
-import { PhonesResponse, type Phone } from '../../shared/api/phones.js';
+import type { ApiMessage, MessagePage } from '../../shared/api/messages.js';
+import type { Phone } from '../../shared/api/phones.js';
 import { auth } from './auth.js';
+import { contractClient } from './contract-link.js';
 import { messageCache } from './message-cache.js';
 
 // Runtime cursors keep polling cheap even when IndexedDB is unavailable or the
@@ -96,7 +95,7 @@ async function send(endpoint: string, options: RequestInit): Promise<Response> {
 }
 
 /** Sends a request the contract client built; a refusal or failure is an ApiError. */
-export async function sendContract(built: Request): Promise<Response> {
+async function sendContract(built: Request): Promise<Response> {
   return checked(await fetch(built, { credentials: 'same-origin' }));
 }
 
@@ -124,6 +123,23 @@ async function checked(response: Response): Promise<Response> {
   return response;
 }
 
+/**
+ * The routes served through the contract, for a signed-in dashboard. Failures
+ * arrive as ApiError, as with `request`, and a 401 signs the user out.
+ */
+export const contractApi = contractClient(() => auth.baseUrl, sendContract);
+
+/** Query parameters as the URL carries them: text, and absent when undefined. */
+function queryText(
+  params: Readonly<Record<string, QueryValue | undefined>>,
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(params).flatMap(([key, value]) =>
+      value === undefined ? [] : [[key, String(value)]],
+    ),
+  );
+}
+
 /** Sends a request and parses the answer with `schema`; a mismatch is an ApiError. */
 export async function request<T>(
   endpoint: string,
@@ -143,10 +159,6 @@ function withQuery(path: string, params: Readonly<Record<string, QueryValue | un
     value === undefined ? [] : [[key, String(value)]],
   );
   return entries.length === 0 ? path : `${path}?${new URLSearchParams(entries).toString()}`;
-}
-
-function jsonBody(method: 'POST' | 'PUT' | 'DELETE', body: unknown): RequestInit {
-  return { method, body: JSON.stringify(body) };
 }
 
 /** A limit of 0 or none means the default. */
@@ -185,7 +197,7 @@ export const api = {
 
   async getPhones(): Promise<Phone[]> {
     try {
-      return (await request('/api/phones', PhonesResponse)).data;
+      return (await contractApi.messages.phones()).data;
     } catch (error) {
       console.warn('Failed to get phones:', error);
       // Return empty array instead of throwing
@@ -232,7 +244,7 @@ export const api = {
         apiParams.limit = Math.min(positiveOr(params.limit, 100), 100);
       }
 
-      let response = await request(withQuery('/api/messages', apiParams), MessagePage);
+      let response = await contractApi.messages.list({ query: queryText(apiParams) });
 
       if (response.sync.is_incremental) {
         const syncUntil = response.sync.server_time;
@@ -242,8 +254,8 @@ export const api = {
           if (!cursor?.created_at || !cursor.id) {
             throw new Error('Incremental message page is missing its stable cursor');
           }
-          response = await request(
-            withQuery('/api/messages', {
+          response = await contractApi.messages.list({
+            query: queryText({
               ...apiParams,
               since: lastSyncTime ?? undefined,
               until: syncUntil,
@@ -251,8 +263,7 @@ export const api = {
               before_id: cursor.id,
               offset: 0,
             }),
-            MessagePage,
-          );
+          });
           if (response.sync.server_time !== syncUntil) {
             throw new Error('Incremental message page changed its synchronization window');
           }
@@ -365,7 +376,7 @@ export const api = {
 
   async sendMessage(data: { phone_iccid: string; recipient: string; content: string }) {
     try {
-      return await request('/api/messages/send', SendMessageResponse, jsonBody('POST', data));
+      return await contractApi.messages.send(data);
     } catch (error) {
       console.warn('Failed to send message:', error);
       throw error;
@@ -375,31 +386,20 @@ export const api = {
   // ICCID Mappings
   iccidMappings: {
     async list(params: Readonly<Record<string, QueryValue | undefined>> = {}) {
-      return await request(withQuery('/api/iccid-mappings', params), IccidMappingsResponse);
+      return await contractApi.iccidMappings.list({ query: queryText(params) });
     },
 
-    async create(data: Readonly<Record<string, unknown>>) {
-      return await request(
-        '/api/iccid-mappings',
-        CreateIccidMappingResponse,
-        jsonBody('POST', data),
-      );
+    /** The saved SIM; the status says only whether it was new. */
+    async create(data: v.InferInput<typeof CreateIccidMappingBody>) {
+      return (await contractApi.iccidMappings.create(data)).body;
     },
 
-    async update(id: string, data: Readonly<Record<string, unknown>>) {
-      return await request(
-        `/api/iccid-mappings/${id}`,
-        UpdateIccidMappingResponse,
-        jsonBody('PUT', { id, ...data }),
-      );
+    async update(id: string, data: v.InferInput<typeof UpdateIccidMappingBody>) {
+      return await contractApi.iccidMappings.update({ params: { id }, body: data });
     },
 
     async delete(id: string) {
-      return await request(
-        `/api/iccid-mappings/${id}`,
-        DeleteIccidMappingResponse,
-        jsonBody('DELETE', { id }),
-      );
+      return await contractApi.iccidMappings.remove({ params: { id } });
     },
   },
 };

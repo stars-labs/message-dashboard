@@ -6,6 +6,9 @@ import { verificationHandler } from '../api/verification.js';
 import { auth0Handler } from '../handlers/auth0.js';
 import { recordHeartbeat } from '../handlers/control.js';
 import { healthHandler } from '../handlers/health.js';
+import { iccidMappingsHandler } from '../handlers/iccid-mappings.js';
+import { messagesHandler } from '../handlers/messages.js';
+import { phonesHandler } from '../handlers/phones.js';
 import { usersHandler } from '../handlers/users.js';
 import type { AppRequest } from '../worker-context.js';
 
@@ -45,6 +48,38 @@ export const router = os.router({
         input.params.id,
         input.body.role,
       ),
+    ),
+  },
+  messages: {
+    phones: os.messages.phones.handler(({ context }) => phonesHandler.list(context.request)),
+    list: os.messages.list.handler(({ context, input }) =>
+      messagesHandler.list(context.request, input.query),
+    ),
+    send: os.messages.send.handler(({ context, input }) =>
+      messagesHandler.send(context.request, input),
+    ),
+  },
+  iccidMappings: {
+    list: os.iccidMappings.list.handler(({ context, input }) =>
+      iccidMappingsHandler.list(context.request, input.query),
+    ),
+    get: os.iccidMappings.get.handler(({ context, input }) =>
+      iccidMappingsHandler.get(context.request, input.params.id),
+    ),
+    byIccid: os.iccidMappings.byIccid.handler(({ context, input }) =>
+      iccidMappingsHandler.getByIccid(context.request, input.params.iccid),
+    ),
+    create: os.iccidMappings.create.handler(({ context, input }) =>
+      iccidMappingsHandler.create(context.request, input),
+    ),
+    update: os.iccidMappings.update.handler(({ context, input }) =>
+      iccidMappingsHandler.update(context.request, input.params.id, input.body),
+    ),
+    remove: os.iccidMappings.remove.handler(({ context, input }) =>
+      iccidMappingsHandler.delete(context.request, input.params.id),
+    ),
+    bulk: os.iccidMappings.bulk.handler(({ context, input }) =>
+      iccidMappingsHandler.bulkImport(context.request, input),
     ),
   },
   keywords: {

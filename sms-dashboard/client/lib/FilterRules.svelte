@@ -5,8 +5,7 @@
   import type { FilterRule, RuleType } from '../../shared/api/filters.js';
   import type { HistoryCursor } from '../../shared/api/history.js';
   import { textOr } from '../../shared/text.js';
-  import { errorMessage } from './api.js';
-  import { contractApi } from './contract-client.js';
+  import { contractApi, errorMessage } from './api.js';
 
   interface HistoryProgress {
     since: string;

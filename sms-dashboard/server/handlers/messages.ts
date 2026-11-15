@@ -1,10 +1,14 @@
-import { json } from '../lib/response.js';
+import { ORPCError } from '@orpc/server';
 import { nanoid } from 'nanoid';
 import * as v from 'valibot';
-import { readJson } from '../../shared/parse-json.js';
 import { VISIBLE_FILTER_STATUSES } from '../utils/spam-filter.js';
 import { normalizeRecipient } from '../utils/recipient.js';
-import type { MessagePage, SendMessageResponse } from '../../shared/api/messages.js';
+import type {
+  MessagePage,
+  MessagesQuery,
+  SendMessageBody,
+  SendMessageResponse,
+} from '../../shared/api/messages.js';
 import { D1_MAX_BOUND_PARAMETERS, queryAll, queryFirst, type D1 } from '../lib/d1.js';
 
 /**
@@ -13,19 +17,12 @@ import { D1_MAX_BOUND_PARAMETERS, queryAll, queryFirst, type D1 } from '../lib/d
  */
 const OUTBOUND_REFRESH_LIMIT = 50;
 
-interface ListRequest {
-  url: string;
+interface ListCall {
   env: { DB: D1<'all'> };
 }
 
-interface GetRequest {
-  env: { DB: D1<'first'> };
-  params?: Record<string, string>;
-}
-
-interface SendRequest {
+interface SendCall {
   env: { DB: D1<'first' | 'run'> };
-  text(): Promise<string>;
 }
 
 const MESSAGE_COLUMN_NAMES = [
@@ -49,7 +46,6 @@ const MESSAGE_COLUMN_NAMES = [
   'processing_session_id',
 ];
 
-const MESSAGE_COLUMNS = MESSAGE_COLUMN_NAMES.join(', ');
 const MESSAGE_COLUMNS_OF_M = MESSAGE_COLUMN_NAMES.map((name) => `m.${name}`).join(', ');
 
 /** A messages row, every column the API returns. */
@@ -180,33 +176,29 @@ async function enrichMessagePage(db: D1<'all'>, messages: MessageRow[]) {
   });
 }
 
-/** Request body of POST /api/messages/send; the recipient is validated further by normalizeRecipient. */
-const SendBody = v.object({
-  phone_iccid: v.pipe(v.string(), v.nonEmpty()),
-  recipient: v.pipe(v.string(), v.nonEmpty()),
-  content: v.pipe(v.string(), v.nonEmpty()),
-});
+function badRequest(message: string): ORPCError<'BAD_REQUEST', unknown> {
+  return new ORPCError('BAD_REQUEST', { message });
+}
 
 export const messagesHandler = {
   // List messages with pagination
-  async list(request: ListRequest): Promise<Response> {
-    const { env } = request;
-    const url = new URL(request.url);
-    const phoneIccid = url.searchParams.get('phone_iccid');
-    const requestedLimit = Number.parseInt(url.searchParams.get('limit') ?? '50', 10);
-    const requestedOffset = Number.parseInt(url.searchParams.get('offset') ?? '0', 10);
+  async list({ env }: ListCall, query: v.InferOutput<typeof MessagesQuery>): Promise<MessagePage> {
+    // The query reads as URLSearchParams.get() read it: an absent value is null.
+    const phoneIccid = query.phone_iccid ?? null;
+    const requestedLimit = Number.parseInt(query.limit ?? '50', 10);
+    const requestedOffset = Number.parseInt(query.offset ?? '0', 10);
     const limit = Number.isFinite(requestedLimit) ? Math.min(Math.max(requestedLimit, 1), 500) : 50;
     const offset = Number.isFinite(requestedOffset) ? Math.max(requestedOffset, 0) : 0;
-    const since = url.searchParams.get('since');
+    const since = query.since ?? null;
     const isIncremental = since !== null;
     const serverTime = new Date().toISOString();
-    const requestedUntil = url.searchParams.get('until');
+    const requestedUntil = query.until ?? null;
     const syncUntil =
       requestedUntil === null || requestedUntil === '' ? serverTime : requestedUntil;
-    const beforeCreatedAt = url.searchParams.get('before_created_at');
-    const beforeId = url.searchParams.get('before_id');
+    const beforeCreatedAt = query.before_created_at ?? null;
+    const beforeId = query.before_id ?? null;
     // Spam/marketing messages are hidden unless explicitly asked for.
-    const includeFiltered = url.searchParams.get('include_filtered') === '1';
+    const includeFiltered = query.include_filtered === '1';
 
     try {
       // Carrier maintenance traffic is retained for its own audit workflow and
@@ -224,22 +216,19 @@ export const messagesHandler = {
 
       if (isIncremental) {
         if (Number.isNaN(Date.parse(since))) {
-          return json({ success: false, error: 'Invalid since timestamp' }, 400);
+          throw badRequest('Invalid since timestamp');
         }
         if (requestedOffset !== 0) {
-          return json(
-            { success: false, error: 'Incremental sync uses a keyset cursor, not offset' },
-            400,
-          );
+          throw badRequest('Incremental sync uses a keyset cursor, not offset');
         }
         if (requestedUntil && Number.isNaN(Date.parse(requestedUntil))) {
-          return json({ success: false, error: 'Invalid until timestamp' }, 400);
+          throw badRequest('Invalid until timestamp');
         }
         if (
           (beforeCreatedAt === null) !== (beforeId === null) ||
           (beforeCreatedAt && Number.isNaN(Date.parse(beforeCreatedAt)))
         ) {
-          return json({ success: false, error: 'Invalid incremental page cursor' }, 400);
+          throw badRequest('Invalid incremental page cursor');
         }
         // created_at is the ingestion clock. Message timestamps come from modems and
         // may be delayed, so they cannot safely serve as an incremental cursor.
@@ -263,7 +252,7 @@ export const messagesHandler = {
       const orderBy = isIncremental
         ? 'm.created_at DESC, m.id DESC'
         : 'm.timestamp DESC, m.id DESC';
-      const query = `
+      const sql = `
         SELECT ${MESSAGE_COLUMNS_OF_M}
         FROM messages m
         ${listWhere}
@@ -274,7 +263,7 @@ export const messagesHandler = {
       // unbounded COUNT/SUM over message history.
       listParams.push(limit + 1, offset);
 
-      const rawMessages = await queryAll(env.DB.prepare(query).bind(...listParams), MessageRow);
+      const rawMessages = await queryAll(env.DB.prepare(sql).bind(...listParams), MessageRow);
       const hasMore = rawMessages.length > limit;
       const pageRows = rawMessages.slice(0, limit);
       const lastPageRow = pageRows.at(-1);
@@ -308,7 +297,7 @@ export const messagesHandler = {
             : null,
       };
 
-      return json({
+      return {
         success: true,
         data: messages,
         pagination,
@@ -318,70 +307,29 @@ export const messagesHandler = {
           // Rows already known to the client whose status changed.
           status_refreshed: extraRows.length,
         },
-      } satisfies MessagePage);
-    } catch {
-      // Error handling - list messages
-      return json({ success: false, error: 'Failed to fetch messages' }, 500);
-    }
-  },
-
-  // Get specific message
-  async get(request: GetRequest): Promise<Response> {
-    const { env } = request;
-    const messageId = request.params?.['id'];
-
-    try {
-      const message = await queryFirst(
-        env.DB.prepare(
-          `
-        SELECT ${MESSAGE_COLUMNS} FROM messages WHERE id = ?
-      `,
-        ).bind(messageId),
-        MessageRow,
-      );
-
-      if (!message) {
-        return json({ success: false, error: 'Message not found' }, 404);
-      }
-
-      return json({ success: true, data: message });
-    } catch {
-      // Error handling - get message
-      return json({ success: false, error: 'Failed to fetch message' }, 500);
+      };
+    } catch (error) {
+      if (error instanceof ORPCError) throw error;
+      console.error('[messages] list failed:', error);
+      throw new ORPCError('INTERNAL_SERVER_ERROR', { message: 'Failed to fetch messages' });
     }
   },
 
   // Send SMS
-  async send(request: SendRequest): Promise<Response> {
-    const { env } = request;
+  async send(
+    { env }: SendCall,
+    body: v.InferOutput<typeof SendMessageBody>,
+  ): Promise<SendMessageResponse> {
+    // The recipient ends up inside an `AT+CMGS="..."` command on the daemon, where a
+    // CR would terminate the command and let the rest execute as AT commands. Only
+    // E.164 gets past here, and the NORMALISED value is what we store — never
+    // body.recipient. See docs/SECURITY-REVIEW.md finding 3.
+    const { phone_iccid: phoneIccid, content } = body;
+    const recipientCheck = normalizeRecipient(body.recipient);
+    if (!recipientCheck.ok) throw badRequest(`Invalid recipient: ${recipientCheck.reason}`);
+    const recipient = recipientCheck.value;
 
     try {
-      const parsed = await readJson(request, SendBody);
-
-      // Validate input
-      if (!parsed.ok) {
-        return json(
-          {
-            success: false,
-            error: 'Missing required fields: phone_iccid, recipient, and content are required',
-          },
-          400,
-        );
-      }
-
-      // The recipient ends up inside an `AT+CMGS="..."` command on the daemon, where a
-      // CR would terminate the command and let the rest execute as AT commands. Only
-      // E.164 gets past here, and the NORMALISED value is what we store — never
-      // body.recipient. See docs/SECURITY-REVIEW.md finding 3.
-      const { phone_iccid: phoneIccid, content } = parsed.value;
-      const recipientCheck = normalizeRecipient(parsed.value.recipient);
-
-      if (!recipientCheck.ok) {
-        return json({ success: false, error: `Invalid recipient: ${recipientCheck.reason}` }, 400);
-      }
-
-      const recipient = recipientCheck.value;
-
       // Get phone details - check for active statuses
       const phone = await queryFirst(
         env.DB.prepare(
@@ -403,21 +351,10 @@ export const messagesHandler = {
           v.object({ iccid: v.string(), sim_status: v.string() }),
         );
 
-        if (anyPhone) {
-          return json(
-            {
-              success: false,
-              error: `Phone found but status is '${anyPhone.sim_status}' (not active)`,
-            },
-            400,
-          );
-        }
-        return json(
-          {
-            success: false,
-            error: `Phone with ICCID '${phoneIccid}' not found in database`,
-          },
-          400,
+        throw badRequest(
+          anyPhone
+            ? `Phone found but status is '${anyPhone.sim_status}' (not active)`
+            : `Phone with ICCID '${phoneIccid}' not found in database`,
         );
       }
 
@@ -437,7 +374,7 @@ export const messagesHandler = {
       // Note: SMS sending is now handled by daemon polling /api/control/pending-sms
       // The daemon will pick up this message and send it via real SMS network
 
-      return json({
+      return {
         success: true,
         messageId, // Add messageId at top level for WebSocket handler
         data: {
@@ -449,10 +386,11 @@ export const messagesHandler = {
           type: 'sent',
           status: 'pending',
         },
-      } satisfies SendMessageResponse);
-    } catch {
-      // Error handling - send message
-      return json({ success: false, error: 'Failed to send message' }, 500);
+      };
+    } catch (error) {
+      if (error instanceof ORPCError) throw error;
+      console.error('[messages] send failed:', error);
+      throw new ORPCError('INTERNAL_SERVER_ERROR', { message: 'Failed to send message' });
     }
   },
 };

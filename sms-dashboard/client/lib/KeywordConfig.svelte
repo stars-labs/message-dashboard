@@ -5,8 +5,7 @@
   import type { HistoryCursor } from '../../shared/api/history.js';
   import type { KeywordWithUsage } from '../../shared/api/keywords.js';
   import { textOr } from '../../shared/text.js';
-  import { ApiError, errorMessage } from './api.js';
-  import { contractApi } from './contract-client.js';
+  import { ApiError, contractApi, errorMessage } from './api.js';
   import MessageHighlight from './MessageHighlight.svelte';
   import { safeColor } from './message-highlight.js';
 

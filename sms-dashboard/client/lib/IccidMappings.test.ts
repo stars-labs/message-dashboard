@@ -1,16 +1,25 @@
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/svelte';
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import type { IccidMapping, IccidMappingsResponse } from '../../shared/api/iccid-mappings.js';
+import { auth } from './auth.js';
 import IccidMappings from './IccidMappings.svelte';
 
+const originalBaseUrl = auth.baseUrl;
 let fetchSpy: ReturnType<typeof spyOn<typeof globalThis, 'fetch'>> | undefined;
 
-function stubMappings(rows: Parameters<typeof mapping>[0][]): void {
+function stubFetch(handler: (request: Request) => Promise<Response> | Response): void {
+  auth.baseUrl = 'https://example.com';
   fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(
-    Object.assign(() => Promise.resolve(Response.json(mappingsResponse(rows))), {
-      preconnect: () => undefined,
-    }),
+    Object.assign(
+      async (input: string | URL | Request, init?: RequestInit) =>
+        await handler(new Request(input, init)),
+      { preconnect: () => undefined },
+    ),
   );
+}
+
+function stubMappings(rows: Parameters<typeof mapping>[0][]): void {
+  stubFetch(() => Response.json(mappingsResponse(rows)));
 }
 
 // A full GET /api/iccid-mappings row: the fields a test names, the rest empty.
@@ -60,6 +69,7 @@ afterEach(() => {
   cleanup();
   fetchSpy?.mockRestore();
   fetchSpy = undefined;
+  auth.baseUrl = originalBaseUrl;
 });
 
 describe('Device & Card sorting', () => {
@@ -219,20 +229,14 @@ describe('Device & Card editing', () => {
       balance_threshold: 50,
     });
     const puts: unknown[] = [];
-    fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(
-      Object.assign(
-        (_input: string | URL | Request, init?: RequestInit) => {
-          if (init?.method === 'PUT' && typeof init.body === 'string') {
-            const body: unknown = JSON.parse(init.body);
-            puts.push(body);
-            const { balance_threshold: _threshold, ...detail } = row;
-            return Promise.resolve(Response.json({ success: true, data: detail }));
-          }
-          return Promise.resolve(Response.json(mappingsResponse([row])));
-        },
-        { preconnect: () => undefined },
-      ),
-    );
+    stubFetch(async (request) => {
+      if (request.method === 'PUT') {
+        puts.push(await request.json());
+        const { balance_threshold: _threshold, ...detail } = row;
+        return Response.json({ success: true, data: detail });
+      }
+      return Response.json(mappingsResponse([row]));
+    });
 
     const view = render(IccidMappings);
     await waitFor(() => {

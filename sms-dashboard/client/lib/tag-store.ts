@@ -2,7 +2,7 @@
 // keyword matches.
 import { writable, get } from 'svelte/store';
 import type { Keyword } from '../../shared/api/keywords.js';
-import { contractApi } from './contract-client.js';
+import { contractApi } from './api.js';
 
 const _keywords = writable<Keyword[]>([]);
 const _loading = writable(false);
