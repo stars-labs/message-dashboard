@@ -17,7 +17,7 @@ const { handleRequest, routeTable } = await import('../server/app.js');
 
 export { routeTable };
 
-const TEST_API_KEY = 'test-api-key';
+export const TEST_API_KEY = 'test-api-key';
 
 function testEnv(overrides: Partial<AppEnv> = {}): AppEnv {
   return {
@@ -50,7 +50,7 @@ interface WorkerCall {
 export async function callWorker(
   method: string,
   path: string,
-  init: { headers?: Record<string, string>; body?: string; env?: AppEnv } = {},
+  init: { headers?: Record<string, string>; body?: string; bindings?: Partial<AppEnv> } = {},
 ): Promise<WorkerCall> {
   const outbound: string[] = [];
   const network = spyOn(globalThis, 'fetch').mockImplementation(
@@ -70,7 +70,7 @@ export async function callWorker(
     headers: init.headers ?? {},
     ...(init.body === undefined ? {} : { body: init.body }),
   });
-  const request: AppRequest = Object.assign(incoming, { env: init.env ?? testEnv(), ctx });
+  const request: AppRequest = Object.assign(incoming, { env: testEnv(init.bindings), ctx });
   try {
     const response = await handleRequest(request);
     await Promise.allSettled(background);

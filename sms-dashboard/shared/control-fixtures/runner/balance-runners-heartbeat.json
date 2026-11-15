@@ -1,0 +1,29 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/control/balance-runners/heartbeat",
+    "body": {
+      "runner_id": "runner-1",
+      "session_id": "runner-session-1",
+      "display_name": "Workstation",
+      "platform": "darwin",
+      "version": "1.0.0",
+      "capabilities": [
+        {
+          "capability": "sms_ai",
+          "state": "ready",
+          "current_job_id": null,
+          "concurrency": 1,
+          "detail_code": null
+        }
+      ]
+    }
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "success": true,
+      "runner_id": "runner-1"
+    }
+  }
+}

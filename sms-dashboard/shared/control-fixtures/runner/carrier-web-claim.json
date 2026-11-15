@@ -1,0 +1,27 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/control/carrier-web-balance/jobs/claim?runner_id=runner-1"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "id": "web-job-1",
+      "check_id": "check-1",
+      "sim_iccid": "89860123456789012345",
+      "sim_number": "+8613800000001",
+      "sim_index": 1,
+      "login_url": "https://imgxx.client.10010.com/shengyuhuafeiwt2024/index.html#/",
+      "otp_requested_at": null,
+      "skill": {
+        "id": "unicom-web-balance",
+        "version": "1",
+        "login_mode": "random_password",
+        "query_origin": "https://imgxx.client.10010.com",
+        "query_endpoint": "https://www.10010.com/mall/service/query/userinfoquery",
+        "max_otp_requests": 1,
+        "human_verification_timeout_seconds": 900
+      }
+    }
+  }
+}

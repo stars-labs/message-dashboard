@@ -1,0 +1,16 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/control/balance-skills/jobs/skill-job-1/release",
+    "body": {
+      "runner_id": "runner-1",
+      "error": "model timed out"
+    }
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "success": true
+    }
+  }
+}

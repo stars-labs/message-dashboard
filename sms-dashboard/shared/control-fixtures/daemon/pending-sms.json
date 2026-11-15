@@ -1,0 +1,23 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/control/pending-sms"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "success": true,
+      "pending_messages": [
+        {
+          "id": "outbound-1",
+          "phone_iccid": "89860123456789012345",
+          "phone_number": "+8613800000001",
+          "content": "hello",
+          "recipient": "+8613900000002",
+          "purpose": "user",
+          "created_at": "2026-11-14 23:00:00"
+        }
+      ]
+    }
+  }
+}

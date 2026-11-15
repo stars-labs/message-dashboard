@@ -1,0 +1,16 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/control/carrier-web-balance/jobs/web-job-1/otp-requested",
+    "body": {
+      "runner_id": "runner-1"
+    }
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "success": true,
+      "status": "awaiting_otp"
+    }
+  }
+}

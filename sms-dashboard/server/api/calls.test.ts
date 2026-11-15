@@ -3,9 +3,9 @@ import { readFileSync } from 'node:fs';
 import * as v from 'valibot';
 import { ErrorResponse } from '../../shared/api/error.js';
 import { parseJson, readJson, type Schema } from '../../shared/parse-json.js';
+import { callState, type CallFixture, type Fleet } from '../../test/call-state-fleet.js';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
 import type { D1 } from '../lib/d1.js';
-import { CallState } from './call-state.js';
 import {
   adapterEndpoint,
   missingConfig,
@@ -25,17 +25,6 @@ const OTHER_ICCID = '8965030124051507919';
 const OFFER = { type: 'offer', sdp: 'v=0 offer' };
 const STARTED_AT = '2026-09-17T10:00:00.000Z';
 
-interface CallFixture {
-  id: string;
-  direction: 'inbound' | 'outbound';
-  state: 'ringing' | 'connecting' | 'bridging' | 'active' | 'ending' | 'ended';
-  iccid: string;
-  number: string | null;
-  started_at: string;
-  session_id?: string;
-  adapters?: { up?: string; down?: string };
-}
-
 function liveCall(fields: Pick<CallFixture, 'id' | 'state'> & Partial<CallFixture>): CallFixture {
   return {
     direction: 'outbound',
@@ -43,56 +32,6 @@ function liveCall(fields: Pick<CallFixture, 'id' | 'state'> & Partial<CallFixtur
     number: null,
     started_at: STARTED_AT,
     ...fields,
-  };
-}
-
-const StoredCall = v.looseObject({ id: v.string(), state: v.string(), iccid: v.string() });
-const StoredRecord = v.object({ call: v.unknown(), expiresAt: v.number() });
-
-interface Fleet {
-  getByName(name: string): { fetch(input: string, init?: RequestInit): Promise<Response> };
-  call(): unknown;
-  current(): v.InferOutput<typeof StoredCall>;
-  ttl(): number;
-  replace(call: unknown): void;
-}
-
-function callState(initial: CallFixture | null): Fleet {
-  const data = new Map<string, unknown>([['initialized', true]]);
-  const object = new CallState(
-    {
-      storage: {
-        kv: {
-          get: (key) => data.get(key),
-          put: (key, value) => {
-            data.set(key, value);
-          },
-          delete: (key) => {
-            data.delete(key);
-          },
-        },
-        transactionSync: (fn) => fn(),
-      },
-      blockConcurrencyWhile: (fn) => {
-        void fn();
-      },
-    },
-    { SESSIONS: { get: () => Promise.resolve(null) } },
-  );
-  const replace = (call: unknown) => {
-    data.set('call', { call, revision: crypto.randomUUID(), expiresAt: Date.now() + 3_600_000 });
-  };
-  if (initial) replace(initial);
-  const call = (): unknown => {
-    const stored = v.safeParse(StoredRecord, data.get('call'));
-    return stored.success ? stored.output.call : null;
-  };
-  return {
-    getByName: () => ({ fetch: (url, init) => object.fetch(new Request(url, init)) }),
-    call,
-    current: () => v.parse(StoredCall, call()),
-    ttl: () => Math.round((v.parse(StoredRecord, data.get('call')).expiresAt - Date.now()) / 1000),
-    replace,
   };
 }
 

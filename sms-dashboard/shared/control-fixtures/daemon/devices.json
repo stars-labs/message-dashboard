@@ -1,0 +1,42 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/control/devices",
+    "body": {
+      "modem_reports": [
+        {
+          "detected_iccid": "89860123456789012345",
+          "detected_operator": "China Mobile",
+          "detected_phone_number": "+8613800000001",
+          "equipment_id": "861234567890123",
+          "firmware_revision": "EC20CEFAG",
+          "hardware_revision": null,
+          "manufacturer": "Quectel",
+          "model": "EC20",
+          "modem_index": 0,
+          "rssi": -60,
+          "signal_percent": 75,
+          "status": "connected",
+          "usb_path": "1-1.2",
+          "usb_port": 2
+        }
+      ],
+      "removed_equipment_ids": [],
+      "session_id": "daemon-session-1",
+      "sync_mode": "full",
+      "timestamp": "2026-11-15T00:00:00.000Z"
+    }
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "success": true,
+      "sync_mode": "full",
+      "session_id": "daemon-session-1",
+      "processed": {
+        "modem_reports": 1,
+        "modems_disconnected": 0
+      }
+    }
+  }
+}

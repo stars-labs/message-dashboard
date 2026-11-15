@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/control/sms-result",
+    "body": {
+      "message_id": "outbound-1",
+      "outcome": "confirmed",
+      "error_message": null
+    }
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "success": true,
+      "message": "SMS result updated successfully"
+    }
+  }
+}

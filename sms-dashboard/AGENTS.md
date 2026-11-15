@@ -53,6 +53,10 @@ See [docs/deployment.md](../docs/deployment.md).
   adding, removing or reordering a route means updating `server/route-census.test.ts`,
   and a route that answers without credentials must be listed, with its reason, in
   `server/route-auth.test.ts`.
+- `/api/control/*` is what the Pi daemon and the Balance Agent speak, and they
+  cannot be rolled back with the Worker. `shared/control-fixtures/` records each
+  exchange; the Worker, the daemon and the agent are all tested against it. A
+  fixture changes only when every client changes with it.
 - Frontend changes: `bun run build` + check desktop and 440px mobile layouts.
   With `dev-server` running, `bun run screenshots -- --profile <dir> --out <dir>`
   captures every view at both widths and writes `report.html` with console
