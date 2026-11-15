@@ -1,10 +1,12 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import * as v from 'valibot';
 import { BalanceCheck } from '../../shared/api/balance-checks.js';
 import type { Schema } from '../../shared/parse-json.js';
 import { createBalanceSchema } from '../../test/balance-schema.js';
+import { memoryKv } from '../../test/memory-kv.js';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
+import { callWorker } from '../../test/worker-harness.js';
 import type { D1, D1Batch } from '../lib/d1.js';
 import {
   balanceQueriesHandler,
@@ -237,11 +239,11 @@ function count(sql: string, ...params: (string | number | null)[]): number {
   return one(CountRow, sql, ...params).count;
 }
 
-async function read<T>(response: Response, schema: Schema<T>): Promise<T> {
+async function read<T>(response: { json(): Promise<unknown> }, schema: Schema<T>): Promise<T> {
   return v.parse(schema, await response.json());
 }
 
-async function errorOf(response: Response): Promise<string> {
+async function errorOf(response: { json(): Promise<unknown> }): Promise<string> {
   return (await read(response, ErrorBody)).error;
 }
 
@@ -255,34 +257,37 @@ const untouchable: TestDb = {
   },
 };
 
-interface DashboardOptions {
-  url?: string;
-  method?: string;
+const ADMIN_TOKEN = 'session-admin';
+
+const SESSIONS = memoryKv({
+  [ADMIN_TOKEN]: JSON.stringify({
+    user: { id: USER, email: 'operator@example.com', roles: ['sms-admin'] },
+    expires_at: Date.now() + 3_600_000,
+  }),
+});
+
+interface CallOptions {
   body?: unknown;
   rawBody?: string;
-  user?: string | null;
-  params?: Record<string, string>;
+  token?: string | null;
   database?: TestDb;
 }
 
-function dashboardRequest({
-  url = 'https://example.com/api/balance-checks',
-  method = 'GET',
-  body,
-  rawBody,
-  user = USER,
-  params = {},
-  database = db,
-}: DashboardOptions = {}) {
-  const text = rawBody ?? JSON.stringify(body ?? null);
-  return {
-    url,
-    method,
-    env: { DB: database },
-    ...(user === null ? {} : { user: { id: user } }),
-    params,
-    text: () => Promise.resolve(text),
-  };
+async function call(
+  method: string,
+  path: string,
+  { body, rawBody, token = ADMIN_TOKEN, database = db }: CallOptions = {},
+): Promise<Response> {
+  const text = rawBody ?? (body === undefined ? undefined : JSON.stringify(body));
+  const { response } = await callWorker(method, path, {
+    headers: {
+      ...(token === null ? {} : { Cookie: `auth_token=${token}` }),
+      ...(text === undefined ? {} : { 'Content-Type': 'application/json' }),
+    },
+    ...(text === undefined ? {} : { body: text }),
+    bindings: { DB: database, SESSIONS },
+  });
+  return response;
 }
 
 interface ControlOptions {
@@ -589,7 +594,7 @@ describe('/api/balance-checks/query-preview', () => {
     insertSim({ iccid: 'sim-2', index: 2, online: false });
     insertSim({ iccid: 'sim-3', index: 3, carrier: 'Singtel', country: 'SG' });
 
-    const response = await balanceQueriesHandler.preview(dashboardRequest());
+    const response = await call('GET', '/api/balance-checks/query-preview');
     const body = await read(response, PreviewBody);
 
     expect(response.status).toBe(200);
@@ -625,9 +630,9 @@ describe('/api/balance-checks/query-preview', () => {
     insertSim({ iccid: 'sim-2', index: 2 });
     insertSim({ iccid: 'sim-3', index: 3 });
 
-    const response = await balanceQueriesHandler.preview(
-      dashboardRequest({ method: 'POST', body: { phone_iccids: ['sim-1', ' sim-3 '] } }),
-    );
+    const response = await call('POST', '/api/balance-checks/query-preview', {
+      body: { phone_iccids: ['sim-1', ' sim-3 '] },
+    });
     const body = await read(response, PreviewBody);
 
     expect(response.status).toBe(200);
@@ -637,28 +642,30 @@ describe('/api/balance-checks/query-preview', () => {
 
   test('rejects a POST without a valid scope', async () => {
     for (const body of [{}, { phone_iccids: [] }, { phone_iccids: ['a', 'a'] }, ['sim-1']]) {
-      const response = await balanceQueriesHandler.preview(
-        dashboardRequest({ method: 'POST', body, database: untouchable }),
-      );
+      const response = await call('POST', '/api/balance-checks/query-preview', {
+        body,
+        database: untouchable,
+      });
       expect(response.status).toBe(400);
       expect(await errorOf(response)).toBe('A unique non-empty SIM scope is required');
     }
   });
 
   test('rejects a POST body that is not JSON', async () => {
-    const response = await balanceQueriesHandler.preview(
-      dashboardRequest({ method: 'POST', rawBody: '{', database: untouchable }),
-    );
+    const response = await call('POST', '/api/balance-checks/query-preview', {
+      rawBody: '{',
+      database: untouchable,
+    });
     expect(response.status).toBe(400);
     expect(await errorOf(response)).toBe('Invalid JSON body');
   });
 
   test('requires a signed-in user', async () => {
-    const response = await balanceQueriesHandler.preview(
-      dashboardRequest({ user: null, database: untouchable }),
-    );
+    const response = await call('GET', '/api/balance-checks/query-preview', {
+      token: null,
+      database: untouchable,
+    });
     expect(response.status).toBe(401);
-    expect(await errorOf(response)).toBe('Unauthorized');
   });
 });
 
@@ -681,8 +688,11 @@ const PreflightBody = v.object({
   runner: v.record(v.string(), v.unknown()),
 });
 
-function preflightUrl(iccid: string): string {
-  return `https://example.com/api/balance-checks/query-preflight?phone_iccid=${encodeURIComponent(iccid)}`;
+function preflight(iccid: string): Promise<Response> {
+  return call(
+    'GET',
+    `/api/balance-checks/query-preflight?phone_iccid=${encodeURIComponent(iccid)}`,
+  );
 }
 
 describe('GET /api/balance-checks/query-preflight', () => {
@@ -696,9 +706,7 @@ describe('GET /api/balance-checks/query-preflight', () => {
       VALUES ('runner-1', 'carrier_browser', 'ready', 'session-1');
     `);
 
-    const response = await balanceQueriesHandler.preflight(
-      dashboardRequest({ url: preflightUrl(` ${ICCID} `) }),
-    );
+    const response = await preflight(` ${ICCID} `);
     const body = await read(response, PreflightBody);
 
     expect(response.status).toBe(200);
@@ -716,9 +724,7 @@ describe('GET /api/balance-checks/query-preflight', () => {
     enableDirectMobileProfile();
     insertSim({ iccid: ICCID, index: 1 });
 
-    const response = await balanceQueriesHandler.preflight(
-      dashboardRequest({ url: preflightUrl(ICCID) }),
-    );
+    const response = await preflight(ICCID);
     const body = await read(response, PreflightBody);
 
     expect(body.method.category).toBe('direct_sms');
@@ -728,9 +734,7 @@ describe('GET /api/balance-checks/query-preflight', () => {
   test('reports why a SIM is not eligible', async () => {
     insertSim({ iccid: ICCID, index: 1, carrier: 'Singtel', country: 'SG' });
 
-    const response = await balanceQueriesHandler.preflight(
-      dashboardRequest({ url: preflightUrl(ICCID) }),
-    );
+    const response = await preflight(ICCID);
     const body = await read(response, PreflightBody);
 
     expect(body).toMatchObject({ eligible: false, reason: 'unsupported', profile: null });
@@ -738,15 +742,11 @@ describe('GET /api/balance-checks/query-preflight', () => {
   });
 
   test('requires a SIM that exists', async () => {
-    const missing = await balanceQueriesHandler.preflight(
-      dashboardRequest({ url: preflightUrl('  ') }),
-    );
+    const missing = await preflight('  ');
     expect(missing.status).toBe(400);
     expect(await errorOf(missing)).toBe('phone_iccid is required');
 
-    const unknown = await balanceQueriesHandler.preflight(
-      dashboardRequest({ url: preflightUrl('nope') }),
-    );
+    const unknown = await preflight('nope');
     expect(unknown.status).toBe(404);
     expect(await errorOf(unknown)).toBe('SIM not found');
   });
@@ -802,9 +802,9 @@ describe('POST /api/balance-checks/query', () => {
     enableDirectMobileProfile();
     insertSim({ iccid: ICCID, index: 1, number: NUMBER });
 
-    const response = await balanceQueriesHandler.query(
-      dashboardRequest({ method: 'POST', body: { phone_iccid: ICCID } }),
-    );
+    const response = await call('POST', '/api/balance-checks/query', {
+      body: { phone_iccid: ICCID },
+    });
     const { check } = await read(response, ListedQueryBody);
 
     expect(response.status).toBe(202);
@@ -863,9 +863,9 @@ describe('POST /api/balance-checks/query', () => {
       );
     `);
 
-    const response = await balanceQueriesHandler.query(
-      dashboardRequest({ method: 'POST', body: { phone_iccid: ICCID } }),
-    );
+    const response = await call('POST', '/api/balance-checks/query', {
+      body: { phone_iccid: ICCID },
+    });
     const { check } = await read(response, ListedQueryBody);
 
     expect(response.status).toBe(202);
@@ -896,16 +896,12 @@ describe('POST /api/balance-checks/query', () => {
       ['recent', 'cooldown', 429, 'This SIM has already been queried in the last 24 hours'],
     ] as const;
     for (const [iccid, reason, status, error] of cases) {
-      const response = await balanceQueriesHandler.query(
-        dashboardRequest({ method: 'POST', body: { phone_iccid: iccid } }),
-      );
-      expect(response.status).toBe(status);
-      expect(
-        await read(response, v.looseObject({ error: v.string(), reason: v.string() })),
-      ).toMatchObject({
-        error,
-        reason,
+      const response = await call('POST', '/api/balance-checks/query', {
+        body: { phone_iccid: iccid },
       });
+      expect(response.status).toBe(status);
+      expect(await errorOf(response.clone())).toBe(error);
+      expect(await read(response, v.looseObject({ reason: v.string() }))).toMatchObject({ reason });
     }
   });
 
@@ -914,9 +910,9 @@ describe('POST /api/balance-checks/query', () => {
     insertSim({ iccid: ICCID, index: 1 });
     insertCheck({ id: 'bal-recent', status: 'parsed', requestedAt: '2099-01-01 00:00:00' });
 
-    const response = await balanceQueriesHandler.query(
-      dashboardRequest({ method: 'POST', body: { phone_iccid: ICCID } }),
-    );
+    const response = await call('POST', '/api/balance-checks/query', {
+      body: { phone_iccid: ICCID },
+    });
 
     expect(response.status).toBe(429);
     expect(await read(response, v.looseObject({ previous_check: v.unknown() }))).toMatchObject({
@@ -931,30 +927,29 @@ describe('POST /api/balance-checks/query', () => {
   });
 
   test('answers 404 for an unknown SIM', async () => {
-    const response = await balanceQueriesHandler.query(
-      dashboardRequest({ method: 'POST', body: { phone_iccid: 'nope' } }),
-    );
+    const response = await call('POST', '/api/balance-checks/query', {
+      body: { phone_iccid: 'nope' },
+    });
     expect(response.status).toBe(404);
     expect(await errorOf(response)).toBe('SIM not found');
   });
 
   test('rejects a missing or empty phone_iccid instead of planning the whole fleet', async () => {
     for (const body of [{}, { phone_iccid: '' }, { phone_iccid: 7 }, null, ['x']]) {
-      const response = await balanceQueriesHandler.query(
-        dashboardRequest({ method: 'POST', body, database: untouchable }),
-      );
-      expect(response.status).toBe(400);
-      expect(await read(response, ErrorBody)).toEqual({
-        success: false,
-        error: 'phone_iccid is required',
+      const response = await call('POST', '/api/balance-checks/query', {
+        body,
+        database: untouchable,
       });
+      expect(response.status).toBe(400);
+      expect(await errorOf(response)).toBe('phone_iccid is required');
     }
   });
 
   test('rejects a body that is not JSON', async () => {
-    const response = await balanceQueriesHandler.query(
-      dashboardRequest({ method: 'POST', rawBody: 'nope', database: untouchable }),
-    );
+    const response = await call('POST', '/api/balance-checks/query', {
+      rawBody: 'nope',
+      database: untouchable,
+    });
     expect(response.status).toBe(400);
     expect(await errorOf(response)).toBe('Invalid JSON body');
   });
@@ -979,13 +974,10 @@ const BatchBody = v.object({
 describe('POST /api/balance-checks/query-batch', () => {
   test('rejects absent, duplicate, or unknown method selections before loading the plan', async () => {
     for (const methods of [undefined, [], ['browser', 'browser'], ['ussd'], [1], 'browser']) {
-      const response = await balanceQueriesHandler.queryBatch(
-        dashboardRequest({
-          method: 'POST',
-          body: { methods, phone_iccids: [ICCID] },
-          database: untouchable,
-        }),
-      );
+      const response = await call('POST', '/api/balance-checks/query-batch', {
+        body: { methods, phone_iccids: [ICCID] },
+        database: untouchable,
+      });
       expect(response.status).toBe(400);
       expect(await errorOf(response)).toBe('A unique list of supported methods is required');
     }
@@ -1003,13 +995,10 @@ describe('POST /api/balance-checks/query-batch', () => {
       ['x'.repeat(65)],
       tooMany,
     ]) {
-      const response = await balanceQueriesHandler.queryBatch(
-        dashboardRequest({
-          method: 'POST',
-          body: { methods: ['browser'], phone_iccids: phoneIccids },
-          database: untouchable,
-        }),
-      );
+      const response = await call('POST', '/api/balance-checks/query-batch', {
+        body: { methods: ['browser'], phone_iccids: phoneIccids },
+        database: untouchable,
+      });
       expect(response.status).toBe(400);
       expect(await errorOf(response)).toBe('A unique non-empty SIM scope is required');
     }
@@ -1017,9 +1006,10 @@ describe('POST /api/balance-checks/query-batch', () => {
 
   test('checks the methods before the scope, and answers a non-object body about the methods', async () => {
     for (const body of [{}, [], null]) {
-      const response = await balanceQueriesHandler.queryBatch(
-        dashboardRequest({ method: 'POST', body, database: untouchable }),
-      );
+      const response = await call('POST', '/api/balance-checks/query-batch', {
+        body,
+        database: untouchable,
+      });
       expect(await errorOf(response)).toBe('A unique list of supported methods is required');
     }
   });
@@ -1031,12 +1021,9 @@ describe('POST /api/balance-checks/query-batch', () => {
       insertSim({ iccid, index: index + 1 });
     });
 
-    const response = await balanceQueriesHandler.queryBatch(
-      dashboardRequest({
-        method: 'POST',
-        body: { methods: ['direct_sms'], phone_iccids: iccids },
-      }),
-    );
+    const response = await call('POST', '/api/balance-checks/query-batch', {
+      body: { methods: ['direct_sms'], phone_iccids: iccids },
+    });
     const body = await read(response, BatchBody);
 
     expect(response.status).toBe(202);
@@ -1060,13 +1047,10 @@ describe('POST /api/balance-checks/query-batch', () => {
       },
     };
 
-    const response = await balanceQueriesHandler.queryBatch(
-      dashboardRequest({
-        method: 'POST',
-        body: { methods: ['direct_sms'], phone_iccids: ['sim-1', 'sim-2', 'sim-3', 'sim-4'] },
-        database: flaky,
-      }),
-    );
+    const response = await call('POST', '/api/balance-checks/query-batch', {
+      body: { methods: ['direct_sms'], phone_iccids: ['sim-1', 'sim-2', 'sim-3', 'sim-4'] },
+      database: flaky,
+    });
     const body = await read(response, BatchBody);
 
     expect(response.status).toBe(202);
@@ -1275,11 +1259,7 @@ describe('GET /api/balance-checks', () => {
       checkId: 'bal-1',
     });
 
-    const response = await balanceQueriesHandler.list(
-      dashboardRequest({
-        url: `https://example.com/api/balance-checks?phone_iccid=${ICCID}&limit=25`,
-      }),
-    );
+    const response = await call('GET', `/api/balance-checks?phone_iccid=${ICCID}&limit=25`);
     const { data } = await read(response, ListBody);
 
     expect(response.status).toBe(200);
@@ -1346,14 +1326,9 @@ describe('GET /api/balance-checks', () => {
     insertCheck({ id: 'new', sim: 'sim-2', status: 'parsed', requestedAt: '2026-09-02 10:00:00' });
 
     const ids = async (query: string) =>
-      (
-        await read(
-          await balanceQueriesHandler.list(
-            dashboardRequest({ url: `https://example.com/api/balance-checks${query}` }),
-          ),
-          ListBody,
-        )
-      ).data.map((check) => check['id']);
+      (await read(await call('GET', `/api/balance-checks${query}`), ListBody)).data.map(
+        (check) => check['id'],
+      );
 
     expect(await ids('')).toEqual(['new', 'old']);
     expect(await ids('?limit=0')).toEqual(['new']);
@@ -1387,7 +1362,7 @@ describe('GET /api/balance-checks', () => {
              ('wj-done', 'web-done', 'china_unicom', 'completed', NULL);
     `);
 
-    const { data } = await read(await balanceQueriesHandler.list(dashboardRequest()), ListBody);
+    const { data } = await read(await call('GET', '/api/balance-checks'), ListBody);
     const byId = new Map(data.map((check) => [check['id'], check]));
 
     expect(byId.get('skill')).toMatchObject({
@@ -1422,11 +1397,7 @@ describe('GET /api/balance-checks/status', () => {
       UPDATE sim_balance_checks SET updated_at = '2026-09-04 10:00:00';
     `);
 
-    const response = await balanceQueriesHandler.status(
-      dashboardRequest({
-        url: 'https://example.com/api/balance-checks/status?ids=bal-1, bal-2,bal-1,,',
-      }),
-    );
+    const response = await call('GET', '/api/balance-checks/status?ids=bal-1, bal-2,bal-1,,');
     const { data } = await read(response, StatusBody);
 
     expect(data).toHaveLength(2);
@@ -1465,12 +1436,9 @@ describe('GET /api/balance-checks/status', () => {
   test('requires between 1 and 100 short ids', async () => {
     const tooMany = Array.from({ length: 101 }, (_, index) => `bal-${String(index)}`).join(',');
     for (const ids of ['', ' , ', tooMany, 'x'.repeat(201)]) {
-      const response = await balanceQueriesHandler.status(
-        dashboardRequest({
-          url: `https://example.com/api/balance-checks/status?ids=${ids}`,
-          database: untouchable,
-        }),
-      );
+      const response = await call('GET', `/api/balance-checks/status?ids=${ids}`, {
+        database: untouchable,
+      });
       expect(response.status).toBe(400);
       expect(await errorOf(response)).toBe('ids must contain 1 to 100 balance check IDs');
     }
@@ -1510,9 +1478,7 @@ describe('GET /api/balance-checks/:id', () => {
       VALUES ('wj', 'claimed', '{"runner":"r1"}', '2026-09-01 10:00:05');
     `);
 
-    const response = await balanceQueriesHandler.detail(
-      dashboardRequest({ params: { id: ' bal-1 ' } }),
-    );
+    const response = await call('GET', `/api/balance-checks/${encodeURIComponent(' bal-1 ')}`);
     const body = await read(response, DetailBody);
 
     expect(body.data).toEqual({
@@ -1549,16 +1515,14 @@ describe('GET /api/balance-checks/:id', () => {
   });
 
   test('answers 400 for a bad id and 404 for an unknown one', async () => {
-    for (const params of [{}, { id: '  ' }, { id: 'x'.repeat(201) }]) {
-      const response = await balanceQueriesHandler.detail(
-        dashboardRequest({ params, database: untouchable }),
-      );
+    for (const id of ['  ', 'x'.repeat(201)]) {
+      const response = await call('GET', `/api/balance-checks/${encodeURIComponent(id)}`, {
+        database: untouchable,
+      });
       expect(response.status).toBe(400);
       expect(await errorOf(response)).toBe('Invalid balance check ID');
     }
-    const missing = await balanceQueriesHandler.detail(
-      dashboardRequest({ params: { id: 'nope' } }),
-    );
+    const missing = await call('GET', '/api/balance-checks/nope');
     expect(missing.status).toBe(404);
     expect(await errorOf(missing)).toBe('Balance check not found');
   });
@@ -2320,11 +2284,13 @@ describe('row schemas', () => {
     insertSim({ iccid: ICCID, index: 1 });
     sqlite.run(`UPDATE sims SET sim_index = 'S01' WHERE iccid = '${ICCID}'`);
 
-    const failure = await balanceQueriesHandler.preview(dashboardRequest()).then(
-      () => null,
-      (error: unknown) => error,
-    );
-    expect(failure).toBeInstanceOf(v.ValiError);
+    const errorSpy = spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const response = await call('GET', '/api/balance-checks/query-preview');
+      expect(response.status).toBe(500);
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });
 

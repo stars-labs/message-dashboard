@@ -1,41 +1,79 @@
-import { beforeEach, describe, expect, test } from 'bun:test';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  setSystemTime,
+  spyOn,
+  test,
+  type Mock,
+} from 'bun:test';
 import { Database } from 'bun:sqlite';
 import * as v from 'valibot';
+import { memoryKv } from '../../test/memory-kv.js';
 import { createSimsSchema } from '../../test/sims-schema.js';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
-import { carrierBillsHandler, deriveBillUrgency } from './carrier-bills.js';
+import { callWorker } from '../../test/worker-harness.js';
+import type { AppEnv } from '../worker-context.js';
+import { deriveBillUrgency } from './carrier-bills.js';
 
-const ADMIN = { id: 'auth0|admin', email: 'admin@example.com' };
+const ADMIN_TOKEN = 'session-admin';
 
-interface MutationOptions {
-  id?: string;
+const SESSIONS = memoryKv({
+  [ADMIN_TOKEN]: JSON.stringify({
+    user: { id: 'auth0|admin', email: 'admin@example.com', roles: ['sms-admin'] },
+    expires_at: Date.now() + 3_600_000,
+  }),
+});
+
+interface CallOptions {
   body?: unknown;
   rawBody?: string;
   idempotencyKey?: string;
-  user?: { id: string } | null;
+  token?: string | null;
+  DB?: AppEnv['DB'];
 }
 
-function mutation(
-  db: ReturnType<typeof sqliteD1> | Pick<ReturnType<typeof sqliteD1>, 'prepare' | 'batch'>,
-  { id, body, rawBody, idempotencyKey, user = ADMIN }: MutationOptions = {},
-) {
-  const headers = new Headers();
-  if (idempotencyKey) headers.set('Idempotency-Key', idempotencyKey);
-  const text = rawBody ?? JSON.stringify(body);
-  return {
-    env: { DB: db },
-    ...(user === null ? {} : { user }),
-    params: id === undefined ? {} : { id },
-    headers,
-    text: () => Promise.resolve(text),
-  };
+async function call(
+  method: string,
+  path: string,
+  { body, rawBody, idempotencyKey, token = ADMIN_TOKEN, DB = db }: CallOptions = {},
+): Promise<Response> {
+  const text = body === undefined ? rawBody : JSON.stringify(body);
+  const { response } = await callWorker(method, path, {
+    headers: {
+      ...(token === null ? {} : { Cookie: `auth_token=${token}` }),
+      ...(idempotencyKey === undefined ? {} : { 'Idempotency-Key': idempotencyKey }),
+      ...(text === undefined ? {} : { 'Content-Type': 'application/json' }),
+    },
+    ...(text === undefined ? {} : { body: text }),
+    bindings: { DB, SESSIONS },
+  });
+  return response;
 }
 
-function listRequest(db: ReturnType<typeof sqliteD1>, query = '') {
-  return {
-    env: { DB: db },
-    url: `https://dashboard.example/api/carrier-bills${query}`,
-  };
+function list(query = ''): Promise<Response> {
+  return call('GET', `/api/carrier-bills${query}`);
+}
+
+function listAccounts(): Promise<Response> {
+  return call('GET', '/api/carrier-billing/accounts');
+}
+
+function detail(id: string): Promise<Response> {
+  return call('GET', `/api/carrier-bills/${id}`);
+}
+
+function act(
+  action: 'payment-planned' | 'mark-paid' | 'waive' | 'reopen',
+  id: string,
+  options: CallOptions = {},
+): Promise<Response> {
+  return call('POST', `/api/carrier-bills/${id}/${action}`, options);
+}
+
+function singaporeNoon(date: string) {
+  setSystemTime(new Date(`${date}T04:00:00Z`));
 }
 
 const Record_ = v.record(v.string(), v.unknown());
@@ -48,16 +86,6 @@ const AccountsBody = v.object({ success: v.literal(true), accounts: v.array(Reco
 const BillBody = v.looseObject({ bill: Record_ });
 const ErrorBody = v.looseObject({ error: v.string() });
 const NumberRow = v.object({ n: v.number() });
-
-async function failure(promise: Promise<unknown>): Promise<Error> {
-  try {
-    await promise;
-  } catch (error) {
-    if (error instanceof Error) return error;
-    throw error;
-  }
-  throw new Error('expected the promise to reject');
-}
 
 async function bodyOf(response: Response) {
   return v.parse(Record_, await response.json());
@@ -73,8 +101,15 @@ function count(database: Database, sql: string): number {
 
 let database: Database;
 let db: ReturnType<typeof sqliteD1>;
+let errorSpy: Mock<typeof console.error>;
+
+afterEach(() => {
+  setSystemTime();
+  errorSpy.mockRestore();
+});
 
 beforeEach(async () => {
+  errorSpy = spyOn(console, 'error').mockImplementation(() => undefined);
   database = new Database(':memory:');
   await createSimsSchema(database);
   database.run(`
@@ -170,7 +205,8 @@ describe('carrier bill urgency', () => {
 
 describe('carrier bills API', () => {
   test('lists account-level bills with linked SIM and notification details', async () => {
-    const response = await carrierBillsHandler.list(listRequest(db), { today: '2026-09-10' });
+    singaporeNoon('2026-09-10');
+    const response = await list();
     const body = v.parse(BillsBody, await response.json());
 
     expect(response.status).toBe(200);
@@ -205,13 +241,14 @@ describe('carrier bills API', () => {
   });
 
   test('orders bills by urgency, then due date, then id', async () => {
+    singaporeNoon('2026-09-10');
     insertBill('bill-paid', '2026-08-01', 'paid');
     insertBill('bill-review', '2026-10-01', 'needs_review');
     insertBill('bill-overdue', '2026-09-01');
     insertBill('bill-open', '2026-12-01');
     insertBill('bill-waived', '2026-07-01', 'waived');
 
-    const response = await carrierBillsHandler.list(listRequest(db), { today: '2026-09-10' });
+    const response = await list();
     const body = v.parse(BillsBody, await response.json());
 
     expect(body.bills.map((bill) => [bill.id, bill.urgency])).toEqual([
@@ -228,9 +265,7 @@ describe('carrier bills API', () => {
     insertBill('bill-paid', '2026-08-01', 'paid');
     insertBill('bill-overdue', '2026-09-01');
     const ids = async (query: string) =>
-      v
-        .parse(BillsBody, await (await carrierBillsHandler.list(listRequest(db, query))).json())
-        .bills.map((bill) => bill.id);
+      v.parse(BillsBody, await (await list(query)).json()).bills.map((bill) => bill.id);
 
     expect(await ids('?carrier=M1')).toEqual(['bill-overdue', 'bill-paid']);
     expect(await ids('?account_id=account-1')).toEqual(['bill-1']);
@@ -250,15 +285,15 @@ describe('carrier bills API', () => {
       ['?to=2026-9-1', 'to must be an ISO date'],
       ['?to=2026-02-30', 'to must be an ISO date'],
       ['?to=2026-00-10', 'to must be an ISO date'],
-    ]) {
-      const response = await carrierBillsHandler.list(listRequest(db, query));
+    ] as const) {
+      const response = await list(query);
       expect(response.status).toBe(400);
-      expect(await response.json()).toEqual({ error });
+      expect(await errorOf(response)).toBe(error);
     }
   });
 
   test('lists billing accounts and their explicitly verified SIM memberships', async () => {
-    const response = await carrierBillsHandler.listAccounts({ env: { DB: db } });
+    const response = await listAccounts();
     const body = v.parse(AccountsBody, await response.json());
 
     expect(body.accounts).toEqual([
@@ -322,14 +357,8 @@ describe('carrier bills API', () => {
       `UPDATE carrier_billing_account_sims SET removed_at = '2026-08-15' WHERE sim_iccid = 'linked-sim'`,
     );
 
-    const accounts = v.parse(
-      AccountsBody,
-      await (await carrierBillsHandler.listAccounts({ env: { DB: db } })).json(),
-    );
-    const bills = v.parse(
-      BillsBody,
-      await (await carrierBillsHandler.list(listRequest(db))).json(),
-    );
+    const accounts = v.parse(AccountsBody, await (await listAccounts()).json());
+    const bills = v.parse(BillsBody, await (await list()).json());
 
     expect(accounts.accounts.map((account) => account['linked_sims'])).toEqual([
       [expect.objectContaining({ iccid: 'm1-sim' })],
@@ -339,10 +368,8 @@ describe('carrier bills API', () => {
   });
 
   test('returns bill detail with retained source evidence and immutable events', async () => {
-    const response = await carrierBillsHandler.get(
-      { env: { DB: db }, params: { id: 'bill-1' } },
-      { today: '2026-08-24' },
-    );
+    singaporeNoon('2026-08-24');
+    const response = await detail('bill-1');
     const body = v.parse(BillBody, await response.json());
 
     expect(response.status).toBe(200);
@@ -374,10 +401,7 @@ describe('carrier bills API', () => {
   test('returns null source evidence when the bill has no retained message', async () => {
     insertBill('bill-bare', '2026-10-01');
 
-    const response = await carrierBillsHandler.get({
-      env: { DB: db },
-      params: { id: 'bill-bare' },
-    });
+    const response = await detail('bill-bare');
     const body = v.parse(BillBody, await response.json());
 
     expect(body.bill['source_message']).toBeNull();
@@ -392,7 +416,7 @@ describe('carrier bills API', () => {
         ('event-5', 'bill-1', 'waived', 'system', '5')
     `);
 
-    const response = await carrierBillsHandler.get({ env: { DB: db }, params: { id: 'bill-1' } });
+    const response = await detail('bill-1');
     const body = v.parse(BillBody, await response.json());
     const metadata = v
       .parse(v.array(v.looseObject({ id: v.string(), metadata: v.unknown() })), body.bill['events'])
@@ -408,20 +432,17 @@ describe('carrier bills API', () => {
   });
 
   test('answers 404 for a bill that does not exist', async () => {
-    const response = await carrierBillsHandler.get({ env: { DB: db }, params: { id: 'nope' } });
+    const response = await detail('nope');
 
     expect(response.status).toBe(404);
-    expect(await response.json()).toEqual({ error: 'Bill not found' });
+    expect(await errorOf(response)).toBe('Bill not found');
   });
 
   test('records a payment plan with optimistic concurrency and user audit', async () => {
-    const response = await carrierBillsHandler.paymentPlanned(
-      mutation(db, {
-        id: 'bill-1',
-        body: { expected_version: 1, note: 'Pay on Friday' },
-        idempotencyKey: 'plan-bill-1-v1',
-      }),
-    );
+    const response = await act('payment-planned', 'bill-1', {
+      body: { expected_version: 1, note: 'Pay on Friday' },
+      idempotencyKey: 'plan-bill-1-v1',
+    });
     const body = v.parse(BillBody, await response.json());
 
     expect(response.status).toBe(200);
@@ -453,9 +474,7 @@ describe('carrier bills API', () => {
     const paid = v.parse(
       BillBody,
       await (
-        await carrierBillsHandler.markPaid(
-          mutation(db, { id: 'bill-1', body: { expected_version: 1 }, idempotencyKey: 'k1' }),
-        )
+        await act('mark-paid', 'bill-1', { body: { expected_version: 1 }, idempotencyKey: 'k1' })
       ).json(),
     );
     expect(paid.bill).toMatchObject({
@@ -469,9 +488,7 @@ describe('carrier bills API', () => {
     const waived = v.parse(
       BillBody,
       await (
-        await carrierBillsHandler.waive(
-          mutation(db, { id: 'bill-1', body: { expected_version: 2 }, idempotencyKey: 'k2' }),
-        )
+        await act('waive', 'bill-1', { body: { expected_version: 2 }, idempotencyKey: 'k2' })
       ).json(),
     );
     expect(waived.bill).toMatchObject({
@@ -484,9 +501,7 @@ describe('carrier bills API', () => {
     const reopened = v.parse(
       BillBody,
       await (
-        await carrierBillsHandler.reopen(
-          mutation(db, { id: 'bill-1', body: { expected_version: 3 }, idempotencyKey: 'k3' }),
-        )
+        await act('reopen', 'bill-1', { body: { expected_version: 3 }, idempotencyKey: 'k3' })
       ).json(),
     );
     expect(reopened.bill).toMatchObject({ action_status: 'unpaid', version: 4 });
@@ -500,19 +515,17 @@ describe('carrier bills API', () => {
   });
 
   test('reopens a resolved bill and clears resolution fields', async () => {
-    await carrierBillsHandler.markPaid(
-      mutation(db, { id: 'bill-1', body: { expected_version: 1 }, idempotencyKey: 'paid-first' }),
-    );
+    await act('mark-paid', 'bill-1', {
+      body: { expected_version: 1 },
+      idempotencyKey: 'paid-first',
+    });
     const reopened = v.parse(
       BillBody,
       await (
-        await carrierBillsHandler.reopen(
-          mutation(db, {
-            id: 'bill-1',
-            body: { expected_version: 2, note: 'Payment was reversed' },
-            idempotencyKey: 'reopen-paid',
-          }),
-        )
+        await act('reopen', 'bill-1', {
+          body: { expected_version: 2, note: 'Payment was reversed' },
+          idempotencyKey: 'reopen-paid',
+        })
       ).json(),
     );
     expect(reopened.bill).toMatchObject({
@@ -525,20 +538,14 @@ describe('carrier bills API', () => {
   });
 
   test('trims the note, ignores a blank one, and keeps the earlier note', async () => {
-    await carrierBillsHandler.paymentPlanned(
-      mutation(db, {
-        id: 'bill-1',
-        body: { expected_version: 1, note: '  Pay later  ' },
-        idempotencyKey: 'k1',
-      }),
-    );
-    await carrierBillsHandler.markPaid(
-      mutation(db, {
-        id: 'bill-1',
-        body: { expected_version: 2, note: '   ' },
-        idempotencyKey: 'k2',
-      }),
-    );
+    await act('payment-planned', 'bill-1', {
+      body: { expected_version: 1, note: '  Pay later  ' },
+      idempotencyKey: 'k1',
+    });
+    await act('mark-paid', 'bill-1', {
+      body: { expected_version: 2, note: '   ' },
+      idempotencyKey: 'k2',
+    });
 
     expect(database.query(`SELECT operator_note, version FROM carrier_bills`).get()).toEqual({
       operator_note: 'Pay later',
@@ -552,20 +559,14 @@ describe('carrier bills API', () => {
   });
 
   test('accepts a note of 1000 characters after trimming and rejects a longer one', async () => {
-    const ok = await carrierBillsHandler.paymentPlanned(
-      mutation(db, {
-        id: 'bill-1',
-        body: { expected_version: 1, note: ` ${'x'.repeat(1000)} ` },
-        idempotencyKey: 'k1',
-      }),
-    );
-    const tooLong = await carrierBillsHandler.markPaid(
-      mutation(db, {
-        id: 'bill-1',
-        body: { expected_version: 2, note: 'x'.repeat(1001) },
-        idempotencyKey: 'k2',
-      }),
-    );
+    const ok = await act('payment-planned', 'bill-1', {
+      body: { expected_version: 1, note: ` ${'x'.repeat(1000)} ` },
+      idempotencyKey: 'k1',
+    });
+    const tooLong = await act('mark-paid', 'bill-1', {
+      body: { expected_version: 2, note: 'x'.repeat(1001) },
+      idempotencyKey: 'k2',
+    });
 
     expect(ok.status).toBe(200);
     expect(tooLong.status).toBe(400);
@@ -573,14 +574,13 @@ describe('carrier bills API', () => {
   });
 
   test('returns the prior result when the same idempotency key is retried', async () => {
-    const actionRequest = () =>
-      mutation(db, {
-        id: 'bill-1',
+    const markPaid = () =>
+      act('mark-paid', 'bill-1', {
         body: { expected_version: 1 },
         idempotencyKey: 'paid-bill-1-v1',
       });
-    await carrierBillsHandler.markPaid(actionRequest());
-    const retry = await carrierBillsHandler.markPaid(actionRequest());
+    await markPaid();
+    const retry = await markPaid();
     const body = await bodyOf(retry);
 
     expect(retry.status).toBe(200);
@@ -597,40 +597,29 @@ describe('carrier bills API', () => {
 
   test('answers 409 when the idempotency key was used for another bill', async () => {
     insertBill('bill-2', '2026-10-01');
-    await carrierBillsHandler.markPaid(
-      mutation(db, { id: 'bill-2', body: { expected_version: 1 }, idempotencyKey: 'shared' }),
-    );
+    await act('mark-paid', 'bill-2', { body: { expected_version: 1 }, idempotencyKey: 'shared' });
 
-    const response = await carrierBillsHandler.markPaid(
-      mutation(db, { id: 'bill-1', body: { expected_version: 1 }, idempotencyKey: 'shared' }),
-    );
+    const response = await act('mark-paid', 'bill-1', {
+      body: { expected_version: 1 },
+      idempotencyKey: 'shared',
+    });
 
     expect(response.status).toBe(409);
-    expect(await response.json()).toEqual({
-      error: 'Idempotency key was already used for another bill',
-    });
+    expect(await errorOf(response)).toBe('Idempotency key was already used for another bill');
   });
 
   test('rejects stale versions and missing idempotency keys without mutation', async () => {
-    const stale = await carrierBillsHandler.waive(
-      mutation(db, {
-        id: 'bill-1',
-        body: { expected_version: 99 },
-        idempotencyKey: 'waive-stale',
-      }),
-    );
-    const missingKey = await carrierBillsHandler.waive(
-      mutation(db, {
-        id: 'bill-1',
-        body: { expected_version: 1 },
-      }),
-    );
+    const stale = await act('waive', 'bill-1', {
+      body: { expected_version: 99 },
+      idempotencyKey: 'waive-stale',
+    });
+    const missingKey = await act('waive', 'bill-1', {
+      body: { expected_version: 1 },
+    });
 
     expect(stale.status).toBe(409);
     expect(missingKey.status).toBe(400);
-    expect(await missingKey.json()).toEqual({
-      error: 'A bounded Idempotency-Key header is required',
-    });
+    expect(await errorOf(missingKey)).toBe('A bounded Idempotency-Key header is required');
     expect(database.query(`SELECT action_status, version FROM carrier_bills`).get()).toEqual({
       action_status: 'unpaid',
       version: 1,
@@ -638,9 +627,10 @@ describe('carrier bills API', () => {
   });
 
   test('a stale version answers 409 with the current version and bill', async () => {
-    const response = await carrierBillsHandler.waive(
-      mutation(db, { id: 'bill-1', body: { expected_version: 99 }, idempotencyKey: 'stale' }),
-    );
+    const response = await act('waive', 'bill-1', {
+      body: { expected_version: 99 },
+      idempotencyKey: 'stale',
+    });
     const body = await bodyOf(response);
 
     expect(body['error']).toBe('Bill version conflict');
@@ -652,47 +642,37 @@ describe('carrier bills API', () => {
 
   test('answers 400 for an idempotency key that is empty or longer than 200 characters', async () => {
     for (const idempotencyKey of ['   ', 'k'.repeat(201)]) {
-      const response = await carrierBillsHandler.waive(
-        mutation(db, { id: 'bill-1', body: { expected_version: 1 }, idempotencyKey }),
-      );
+      const response = await act('waive', 'bill-1', {
+        body: { expected_version: 1 },
+        idempotencyKey,
+      });
       expect(response.status).toBe(400);
     }
-    const longest = await carrierBillsHandler.waive(
-      mutation(db, {
-        id: 'bill-1',
-        body: { expected_version: 1 },
-        idempotencyKey: 'k'.repeat(200),
-      }),
-    );
+    const longest = await act('waive', 'bill-1', {
+      body: { expected_version: 1 },
+      idempotencyKey: 'k'.repeat(200),
+    });
     expect(longest.status).toBe(200);
   });
 
   test('answers 400 without a bill id and 401 without an actor', async () => {
-    const noId = await carrierBillsHandler.waive(
-      mutation(db, { body: { expected_version: 1 }, idempotencyKey: 'k' }),
-    );
-    const noActor = await carrierBillsHandler.waive(
-      mutation(db, {
-        id: 'bill-1',
-        body: { expected_version: 1 },
-        idempotencyKey: 'k',
-        user: null,
-      }),
-    );
+    const noId = await act('waive', '', { body: { expected_version: 1 }, idempotencyKey: 'k' });
+    const noActor = await act('waive', 'bill-1', {
+      body: { expected_version: 1 },
+      idempotencyKey: 'k',
+      token: null,
+    });
 
     expect(noId.status).toBe(400);
-    expect(await noId.json()).toEqual({ error: 'Missing bill id' });
+    expect(await errorOf(noId)).toBe('Missing bill id');
     expect(noActor.status).toBe(401);
-    expect(await noActor.json()).toEqual({ error: 'Unauthorized' });
   });
 
   test('answers 400 for a body that is not JSON', async () => {
-    const response = await carrierBillsHandler.waive(
-      mutation(db, { id: 'bill-1', rawBody: 'not json', idempotencyKey: 'k' }),
-    );
+    const response = await act('waive', 'bill-1', { rawBody: 'not json', idempotencyKey: 'k' });
 
     expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: 'Body must be JSON' });
+    expect(await errorOf(response)).toBe('Body must be JSON');
   });
 
   test('answers 400 unless expected_version is a positive integer', async () => {
@@ -707,9 +687,7 @@ describe('carrier bills API', () => {
       { expected_version: '1' },
       { expected_version: null },
     ]) {
-      const response = await carrierBillsHandler.waive(
-        mutation(db, { id: 'bill-1', body, idempotencyKey: 'k' }),
-      );
+      const response = await act('waive', 'bill-1', { body, idempotencyKey: 'k' });
       expect(response.status).toBe(400);
       expect(await errorOf(response)).toBe('expected_version must be a positive integer');
     }
@@ -717,29 +695,32 @@ describe('carrier bills API', () => {
 
   test('answers 400 for a note that is not a string', async () => {
     for (const note of [5, true, { text: 'x' }, ['x']]) {
-      const response = await carrierBillsHandler.waive(
-        mutation(db, { id: 'bill-1', body: { expected_version: 1, note }, idempotencyKey: 'k' }),
-      );
+      const response = await act('waive', 'bill-1', {
+        body: { expected_version: 1, note },
+        idempotencyKey: 'k',
+      });
       expect(response.status).toBe(400);
       expect(await errorOf(response)).toBe('note must be a string of at most 1000 characters');
     }
   });
 
   test('reports the version error before the note error', async () => {
-    const response = await carrierBillsHandler.waive(
-      mutation(db, { id: 'bill-1', body: { expected_version: 0, note: 5 }, idempotencyKey: 'k' }),
-    );
+    const response = await act('waive', 'bill-1', {
+      body: { expected_version: 0, note: 5 },
+      idempotencyKey: 'k',
+    });
 
     expect(await errorOf(response)).toBe('expected_version must be a positive integer');
   });
 
   test('answers 404 for a bill that does not exist', async () => {
-    const response = await carrierBillsHandler.waive(
-      mutation(db, { id: 'nope', body: { expected_version: 1 }, idempotencyKey: 'k' }),
-    );
+    const response = await act('waive', 'nope', {
+      body: { expected_version: 1 },
+      idempotencyKey: 'k',
+    });
 
     expect(response.status).toBe(404);
-    expect(await response.json()).toEqual({ error: 'Bill not found' });
+    expect(await errorOf(response)).toBe('Bill not found');
   });
 
   test('answers 409 with the latest bill when another writer changes it during the update', async () => {
@@ -751,9 +732,11 @@ describe('carrier bills API', () => {
       },
     };
 
-    const response = await carrierBillsHandler.waive(
-      mutation(racing, { id: 'bill-1', body: { expected_version: 1 }, idempotencyKey: 'k' }),
-    );
+    const response = await act('waive', 'bill-1', {
+      DB: racing,
+      body: { expected_version: 1 },
+      idempotencyKey: 'k',
+    });
     const body = await bodyOf(response);
 
     expect(response.status).toBe(409);
@@ -777,9 +760,11 @@ describe('carrier bills API', () => {
       },
     };
 
-    const response = await carrierBillsHandler.waive(
-      mutation(racing, { id: 'bill-1', body: { expected_version: 1 }, idempotencyKey: 'k' }),
-    );
+    const response = await act('waive', 'bill-1', {
+      DB: racing,
+      body: { expected_version: 1 },
+      idempotencyKey: 'k',
+    });
     const body = await bodyOf(response);
 
     expect(response.status).toBe(200);
@@ -793,21 +778,21 @@ describe('carrier bills API', () => {
       batch: () => Promise.reject(new Error('D1 is down')),
     };
 
-    const error = await failure(
-      carrierBillsHandler.waive(
-        mutation(failing, { id: 'bill-1', body: { expected_version: 1 }, idempotencyKey: 'k' }),
-      ),
-    );
+    const response = await act('waive', 'bill-1', {
+      DB: failing,
+      body: { expected_version: 1 },
+      idempotencyKey: 'k',
+    });
 
-    expect(error.message).toBe('D1 is down');
+    expect(response.status).toBe(500);
   });
 
   test('a bill row that does not match the schema fails the request', async () => {
     database.run(`PRAGMA ignore_check_constraints = ON`);
     database.run(`UPDATE carrier_bills SET action_status = 'lost' WHERE id = 'bill-1'`);
 
-    const error = await failure(carrierBillsHandler.list(listRequest(db)));
+    const response = await list();
 
-    expect(error.message).toContain('"lost"');
+    expect(response.status).toBe(500);
   });
 });

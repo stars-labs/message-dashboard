@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import * as v from 'valibot';
+import { memoryKv } from '../../test/memory-kv.js';
 import { createRunnerSchema } from '../../test/runner-schema.js';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
+import { callWorker } from '../../test/worker-harness.js';
 import { auth0Handler } from './auth0.js';
 import { balanceRunnersHandler } from './balance-runners.js';
 
@@ -90,8 +92,26 @@ function signInDevice(subject: string): Record<string, string> {
   return { Authorization: 'Bearer device-jwt' };
 }
 
-async function status(subject: string) {
-  const response = await balanceRunnersHandler.status({ env: { DB: db }, user: { id: subject } });
+const ALICE = 'auth0|alice';
+const ALICE_TOKEN = 'session-alice';
+
+const SESSIONS = memoryKv({
+  [ALICE_TOKEN]: JSON.stringify({
+    user: { id: ALICE, email: 'alice@example.com', roles: ['sms-viewer'] },
+    expires_at: Date.now() + 3_600_000,
+  }),
+});
+
+async function statusResponse(token: string | null): Promise<Response> {
+  const { response } = await callWorker('GET', '/api/balance-runners', {
+    headers: token === null ? {} : { Cookie: `auth_token=${token}` },
+    bindings: { DB: db, SESSIONS },
+  });
+  return response;
+}
+
+async function status() {
+  const response = await statusResponse(ALICE_TOKEN);
   expect(response.status).toBe(200);
   return v.parse(StatusBody, await response.json());
 }
@@ -336,7 +356,7 @@ describe('runner status', () => {
         ('stale', 'carrier_browser', 'ready', 'session-2', 'login', datetime('now', '-120 seconds'));
     `);
 
-    const body = await status('auth0|alice');
+    const body = await status();
     expect(body.capabilities.sms_ai).toMatchObject({
       available: true,
       state: 'ready',
@@ -366,7 +386,7 @@ describe('runner status', () => {
         ('b-busy', 'sms_ai', 'busy', 's-b');
     `);
 
-    const body = await status('auth0|alice');
+    const body = await status();
     expect(body.capabilities.sms_ai).toMatchObject({
       available: true,
       state: 'busy',
@@ -375,7 +395,7 @@ describe('runner status', () => {
   });
 
   test('reports a capability no runner offers as offline', async () => {
-    const body = await status('auth0|alice');
+    const body = await status();
     expect(body.capabilities.sms_ai).toEqual({
       available: false,
       state: 'offline',
@@ -403,14 +423,14 @@ describe('runner status', () => {
         ('legacy', 'carrier_browser', 'ready', 'legacy-session');
     `);
 
-    const body = await status('auth0|alice');
+    const body = await status();
     expect(body.runners.map((runner) => runner.id)).toEqual(['alice']);
     expect(body.capabilities.sms_ai.available).toBe(true);
     expect(body.capabilities.carrier_browser.available).toBe(false);
   });
 
   test('refuses a request without a signed-in user', async () => {
-    const response = await balanceRunnersHandler.status({ env: { DB: db } });
+    const response = await statusResponse(null);
     expect(response.status).toBe(401);
   });
 });

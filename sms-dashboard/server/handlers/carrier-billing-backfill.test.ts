@@ -1,11 +1,12 @@
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, spyOn, test, afterEach, type Mock } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import * as v from 'valibot';
+import { memoryKv } from '../../test/memory-kv.js';
 import { createSimsSchema } from '../../test/sims-schema.js';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
-import type { D1 } from '../lib/d1.js';
+import { callWorker } from '../../test/worker-harness.js';
+import type { AppEnv } from '../worker-context.js';
 import { previewCarrierBillBackfill } from '../utils/carrier-billing-backfill.js';
-import { carrierBillingBackfillHandler } from './carrier-billing-backfill.js';
 
 const ACCOUNT_REFERENCE = '12345678';
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep'];
@@ -23,24 +24,57 @@ async function sha256(value: string): Promise<string> {
 
 interface RequestOptions {
   key?: string | null;
-  user?: { id: string } | null;
+  token?: string | null;
+  DB?: AppEnv['DB'];
 }
 
-function rawRequest(
-  binding: D1,
+const ADMIN_TOKEN = 'session-admin';
+
+const SESSIONS = memoryKv({
+  [ADMIN_TOKEN]: JSON.stringify({
+    user: { id: 'auth0|admin', email: 'admin@example.com', roles: ['sms-admin'] },
+    expires_at: Date.now() + 3_600_000,
+  }),
+});
+
+async function rawCall(
+  path: string,
   text: string,
-  { key = 'backfill-execute', user = { id: 'auth0|admin' } }: RequestOptions = {},
-) {
-  return {
-    env: { DB: binding },
-    ...(user === null ? {} : { user }),
-    headers: new Headers(key === null ? {} : { 'Idempotency-Key': key }),
-    text: () => Promise.resolve(text),
-  };
+  { key = 'backfill-execute', token = ADMIN_TOKEN, DB = db }: RequestOptions = {},
+): Promise<Response> {
+  const { response } = await callWorker('POST', path, {
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token === null ? {} : { Cookie: `auth_token=${token}` }),
+      ...(key === null ? {} : { 'Idempotency-Key': key }),
+    },
+    body: text,
+    bindings: { DB, SESSIONS },
+  });
+  return response;
 }
 
-function bodyRequest(binding: D1, body: unknown, options?: RequestOptions) {
-  return rawRequest(binding, JSON.stringify(body), options);
+function bodyCall(path: string, body: unknown, options?: RequestOptions): Promise<Response> {
+  return rawCall(path, JSON.stringify(body), options);
+}
+
+const PREVIEW = '/api/carrier-billing/backfill/preview';
+const EXECUTE = '/api/carrier-billing/backfill/execute';
+
+function previewBody(body: unknown, options?: RequestOptions) {
+  return bodyCall(PREVIEW, body, options);
+}
+
+function previewRaw(text: string, options?: RequestOptions) {
+  return rawCall(PREVIEW, text, options);
+}
+
+function executeBody(body: unknown, options?: RequestOptions) {
+  return bodyCall(EXECUTE, body, options);
+}
+
+function executeRaw(text: string, options?: RequestOptions) {
+  return rawCall(EXECUTE, text, options);
 }
 
 const Record_ = v.record(v.string(), v.unknown());
@@ -62,17 +96,29 @@ const ExecuteBody = v.looseObject({
   summary: v.optional(v.nullable(Counts)),
   idempotent: v.optional(v.boolean()),
 });
+const ErrorBody = v.looseObject({ error: v.string() });
+const CurrentVersionBody = v.looseObject({ current_version: v.number() });
 const NumberRow = v.object({ n: v.number() });
+
+async function errorOf(response: { json(): Promise<unknown> }): Promise<string> {
+  return v.parse(ErrorBody, await response.json()).error;
+}
 
 function count(sql: string): number {
   return v.parse(NumberRow, database.query(sql).get()).n;
 }
 
 let database: Database;
-let db: D1;
+let db: AppEnv['DB'];
 let preparedSql: string[];
+let errorSpy: Mock<typeof console.error>;
+
+afterEach(() => {
+  errorSpy.mockRestore();
+});
 
 beforeEach(async () => {
+  errorSpy = spyOn(console, 'error').mockImplementation(() => undefined);
   preparedSql = [];
   database = new Database(':memory:');
   await createSimsSchema(database);
@@ -150,6 +196,7 @@ beforeEach(async () => {
   );
   const base = sqliteD1(database);
   db = {
+    ...base,
     prepare: (sql) => {
       preparedSql.push(sql);
       return base.prepare(sql);
@@ -158,9 +205,7 @@ beforeEach(async () => {
 });
 
 async function previewOf() {
-  const response = await carrierBillingBackfillHandler.preview(
-    bodyRequest(db, { account_id: 'account-1' }),
-  );
+  const response = await previewBody({ account_id: 'account-1' });
   return v.parse(PreviewBody, await response.json());
 }
 
@@ -192,30 +237,25 @@ describe('historical carrier bill backfill', () => {
   });
 
   test('executes only an exact preview and is idempotent on retry', async () => {
-    const previewResponse = await carrierBillingBackfillHandler.preview(
-      bodyRequest(db, { account_id: 'account-1' }),
-    );
+    const previewResponse = await previewBody({ account_id: 'account-1' });
     const preview = v.parse(PreviewBody, await previewResponse.json());
-    const wrong = await carrierBillingBackfillHandler.execute(
-      bodyRequest(
-        db,
-        {
-          account_id: 'account-1',
-          expected_version: preview.account.version,
-          preview_digest: '0'.repeat(64),
-        },
-        { key: 'wrong-preview' },
-      ),
+    const wrong = await executeBody(
+      {
+        account_id: 'account-1',
+        expected_version: preview.account.version,
+        preview_digest: '0'.repeat(64),
+      },
+      { key: 'wrong-preview' },
     );
     const executeRequest = () =>
-      bodyRequest(db, {
+      executeBody({
         account_id: 'account-1',
         expected_version: preview.account.version,
         preview_digest: preview.preview_digest,
       });
-    const executed = await carrierBillingBackfillHandler.execute(executeRequest());
+    const executed = await executeRequest();
     const result = v.parse(ExecuteBody, await executed.json());
-    const retry = await carrierBillingBackfillHandler.execute(executeRequest());
+    const retry = await executeRequest();
 
     expect(previewResponse.status).toBe(200);
     expect(wrong.status).toBe(409);
@@ -239,9 +279,7 @@ describe('historical carrier bill backfill', () => {
 
 describe('backfill preview route', () => {
   test('answers the public preview without the candidate messages', async () => {
-    const response = await carrierBillingBackfillHandler.preview(
-      bodyRequest(db, { account_id: 'account-1' }),
-    );
+    const response = await previewBody({ account_id: 'account-1' });
     const body = v.parse(Record_, await response.json());
     const preview = v.parse(PreviewBody, body);
 
@@ -259,58 +297,50 @@ describe('backfill preview route', () => {
   });
 
   test('answers 400 for a body that is not JSON', async () => {
-    const response = await carrierBillingBackfillHandler.preview(rawRequest(db, 'not json'));
+    const response = await previewRaw('not json');
 
     expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: 'Body must be JSON' });
+    expect(await errorOf(response)).toBe('Body must be JSON');
   });
 
   test('answers 400 when account_id is missing, empty or not a string', async () => {
     for (const body of [{}, { account_id: '' }, { account_id: 7 }, { account_id: null }, []]) {
-      const response = await carrierBillingBackfillHandler.preview(bodyRequest(db, body));
+      const response = await previewBody(body);
       expect(response.status).toBe(400);
-      expect(await response.json()).toEqual({ error: 'account_id is required' });
+      expect(await errorOf(response)).toBe('account_id is required');
     }
   });
 
   test('answers 400 for a JSON body that is not an object', async () => {
     for (const body of [null, 'account-1', 7]) {
-      const response = await carrierBillingBackfillHandler.preview(bodyRequest(db, body));
+      const response = await previewBody(body);
       expect(response.status).toBe(400);
-      expect(await response.json()).toEqual({ error: 'account_id is required' });
+      expect(await errorOf(response)).toBe('account_id is required');
     }
   });
 
   test('answers 409 for an account that is unknown or not active', async () => {
     database.run(`UPDATE carrier_billing_accounts SET status = 'inactive'`);
     for (const accountId of ['account-1', 'nope']) {
-      const response = await carrierBillingBackfillHandler.preview(
-        bodyRequest(db, { account_id: accountId }),
-      );
+      const response = await previewBody({ account_id: accountId });
       expect(response.status).toBe(409);
-      expect(await response.json()).toEqual({
-        error: 'Billing account must be active with a verified notification SIM',
-      });
+      expect(await errorOf(response)).toBe(
+        'Billing account must be active with a verified notification SIM',
+      );
     }
   });
 
   test('lets a failure that is not an unready account propagate', async () => {
-    const failing: D1 = {
+    const failing: AppEnv['DB'] = {
       prepare() {
         throw new Error('D1 is down');
       },
+      batch: () => Promise.reject(new Error('D1 is down')),
     };
 
-    let message = '';
-    try {
-      await carrierBillingBackfillHandler.preview(
-        bodyRequest(failing, { account_id: 'account-1' }),
-      );
-    } catch (error) {
-      message = error instanceof Error ? error.message : '';
-    }
+    const response = await previewBody({ account_id: 'account-1' }, { DB: failing });
 
-    expect(message).toBe('D1 is down');
+    expect(response.status).toBe(500);
   });
 });
 
@@ -323,42 +353,35 @@ describe('backfill execute route', () => {
       preview_digest: preview.preview_digest,
     };
 
-    const anonymous = await carrierBillingBackfillHandler.execute(
-      bodyRequest(db, body, { user: null }),
-    );
+    const anonymous = await executeBody(body, { token: null });
     expect(anonymous.status).toBe(401);
-    expect(await anonymous.json()).toEqual({ error: 'Unauthorized' });
 
     for (const key of [null, '   ', 'k'.repeat(201)]) {
-      const response = await carrierBillingBackfillHandler.execute(bodyRequest(db, body, { key }));
+      const response = await executeBody(body, { key });
       expect(response.status).toBe(400);
-      expect(await response.json()).toEqual({
-        error: 'A bounded Idempotency-Key header is required',
-      });
+      expect(await errorOf(response)).toBe('A bounded Idempotency-Key header is required');
     }
 
-    const notJson = await carrierBillingBackfillHandler.execute(rawRequest(db, 'not json'));
+    const notJson = await executeRaw('not json');
     expect(notJson.status).toBe(400);
-    expect(await notJson.json()).toEqual({ error: 'Body must be JSON' });
+    expect(await errorOf(notJson)).toBe('Body must be JSON');
     expect(count(`SELECT COUNT(*) AS n FROM carrier_bills`)).toBe(0);
   });
 
   test('answers 409 with the current version when expected_version is stale', async () => {
     const preview = await previewOf();
 
-    const response = await carrierBillingBackfillHandler.execute(
-      bodyRequest(db, {
-        account_id: 'account-1',
-        expected_version: preview.account.version + 1,
-        preview_digest: preview.preview_digest,
-      }),
-    );
+    const response = await executeBody({
+      account_id: 'account-1',
+      expected_version: preview.account.version + 1,
+      preview_digest: preview.preview_digest,
+    });
 
     expect(response.status).toBe(409);
-    expect(await response.json()).toEqual({
-      error: 'Billing account version conflict',
-      current_version: preview.account.version,
-    });
+    expect(await errorOf(response.clone())).toBe('Billing account version conflict');
+    expect(v.parse(CurrentVersionBody, await response.json()).current_version).toBe(
+      preview.account.version,
+    );
   });
 
   test('answers 409 when the preview changed and 400 when it holds no bills', async () => {
@@ -370,19 +393,18 @@ describe('backfill execute route', () => {
     };
     database.run(`UPDATE messages SET phone_number = 'Other'`);
 
-    const changed = await carrierBillingBackfillHandler.execute(
-      bodyRequest(db, body, { key: 'changed' }),
-    );
+    const changed = await executeBody(body, { key: 'changed' });
     expect(changed.status).toBe(409);
-    expect(await changed.json()).toEqual({ error: 'Backfill preview changed; run preview again' });
+    expect(await errorOf(changed)).toBe('Backfill preview changed; run preview again');
 
     const empty = await previewOf();
     expect(empty.candidates).toHaveLength(0);
-    const none = await carrierBillingBackfillHandler.execute(
-      bodyRequest(db, { ...body, preview_digest: empty.preview_digest }, { key: 'none' }),
+    const none = await executeBody(
+      { ...body, preview_digest: empty.preview_digest },
+      { key: 'none' },
     );
     expect(none.status).toBe(400);
-    expect(await none.json()).toEqual({ error: 'Backfill preview contains no bill candidates' });
+    expect(await errorOf(none)).toBe('Backfill preview contains no bill candidates');
     expect(count(`SELECT COUNT(*) AS n FROM carrier_bills`)).toBe(0);
   });
 
@@ -393,18 +415,13 @@ describe('backfill execute route', () => {
       ) VALUES ('event-1', 'account-1', 'backfill_executed', 'auth0|admin', 'used');
     `);
 
-    const response = await carrierBillingBackfillHandler.execute(
-      bodyRequest(
-        db,
-        { account_id: 'account-2', expected_version: 1, preview_digest: 'x' },
-        { key: 'used' },
-      ),
+    const response = await executeBody(
+      { account_id: 'account-2', expected_version: 1, preview_digest: 'x' },
+      { key: 'used' },
     );
 
     expect(response.status).toBe(409);
-    expect(await response.json()).toEqual({
-      error: 'Idempotency key was already used for another account',
-    });
+    expect(await errorOf(response)).toBe('Idempotency key was already used for another account');
   });
 
   test('replays the stored summary for a key already used, and null when it holds none', async () => {
@@ -425,12 +442,9 @@ describe('backfill execute route', () => {
     `);
 
     const replay = async (key: string) => {
-      const response = await carrierBillingBackfillHandler.execute(
-        bodyRequest(
-          db,
-          { account_id: 'account-1', expected_version: 1, preview_digest: 'x' },
-          { key },
-        ),
+      const response = await executeBody(
+        { account_id: 'account-1', expected_version: 1, preview_digest: 'x' },
+        { key },
       );
       return response.json();
     };
@@ -452,11 +466,12 @@ describe('backfill execute route', () => {
       expected_version: preview.account.version,
       preview_digest: preview.preview_digest,
     };
-    await carrierBillingBackfillHandler.execute(bodyRequest(db, body, { key: 'first' }));
+    await executeBody(body, { key: 'first' });
     const refreshed = await previewOf();
 
-    const again = await carrierBillingBackfillHandler.execute(
-      bodyRequest(db, { ...body, preview_digest: refreshed.preview_digest }, { key: 'second' }),
+    const again = await executeBody(
+      { ...body, preview_digest: refreshed.preview_digest },
+      { key: 'second' },
     );
     const result = v.parse(ExecuteBody, await again.json());
 
@@ -498,7 +513,7 @@ describe('backfill request bodies', () => {
       [{ account_id: 'account-1', expected_version: valid.expected_version }, MALFORMED_BODY],
       [null, 'account_id is required'],
     ] as const) {
-      const response = await carrierBillingBackfillHandler.execute(bodyRequest(db, body));
+      const response = await executeBody(body);
       expect(response.status).toBe(400);
       expect(await response.json()).toEqual({ error });
     }
