@@ -43,14 +43,22 @@ function testEnv(overrides: Partial<AppEnv> = {}): AppEnv {
 
 interface WorkerCall {
   response: Response;
-  /** URLs the Worker tried to fetch; the harness refuses every one. */
+  /** URLs the Worker tried to fetch; the harness refuses every one unless `network` answers it. */
   outbound: string[];
+}
+
+interface WorkerInit {
+  headers?: Record<string, string>;
+  body?: string;
+  bindings?: Partial<AppEnv>;
+  /** Answers the Worker's outbound calls, standing in for an upstream such as Auth0. */
+  network?: (url: string) => Response;
 }
 
 export async function callWorker(
   method: string,
   path: string,
-  init: { headers?: Record<string, string>; body?: string; bindings?: Partial<AppEnv> } = {},
+  init: WorkerInit = {},
 ): Promise<WorkerCall> {
   const outbound: string[] = [];
   const network = spyOn(globalThis, 'fetch').mockImplementation(
@@ -58,6 +66,7 @@ export async function callWorker(
       (input: Parameters<typeof fetch>[0]) => {
         const url = input instanceof Request ? input.url : input.toString();
         outbound.push(url);
+        if (init.network) return Promise.resolve(init.network(url));
         return Promise.reject(new Error(`the harness refuses network calls: ${url}`));
       },
       { preconnect: () => undefined },

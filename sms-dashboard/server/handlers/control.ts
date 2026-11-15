@@ -1,8 +1,8 @@
+import { ORPCError } from '@orpc/server';
 import { json } from '../lib/response.js';
 import * as v from 'valibot';
-import { readJson } from '../../shared/parse-json.js';
 import { queryAll, type D1, type D1Batch } from '../lib/d1.js';
-import { NOT_JSON_MESSAGE, readBody, type MissingKeyMessages } from '../lib/request-body.js';
+import { readBody, type MissingKeyMessages } from '../lib/request-body.js';
 import { secretMatches } from '../lib/secret.js';
 import { textOr } from '../../shared/text.js';
 import type { ModemReportsRequest } from '../../shared/daemon-wire/ModemReportsRequest.js';
@@ -15,6 +15,7 @@ import { processCarrierBillMessages } from '../utils/carrier-billing.js';
 import { errorText } from '../../shared/error-text.js';
 import { normalizeHealthSnapshot } from '../utils/daemon-health.js';
 import type { HealthSnapshot } from '../../shared/api/daemon-status.js';
+import type { HeartbeatResponse } from '../../shared/api/contract/control.js';
 import { findKeywordMatches } from '../utils/keyword-match.js';
 import { classifyMessage, loadActiveRules } from '../utils/spam-filter.js';
 import { extractVerificationCode } from '../utils/verification.js';
@@ -197,7 +198,7 @@ interface UploadRequest extends BodyRequest<D1 & D1Batch<'run'>> {
  * Every control route authenticates with the daemon's shared API key, never
  * Auth0. Returns a Response when the key is wrong.
  */
-async function requireApiKey(request: DaemonRequest<unknown>): Promise<Response | null> {
+export async function requireApiKey(request: DaemonRequest<unknown>): Promise<Response | null> {
   if (!(await secretMatches(request.headers.get('X-API-Key'), request.env.API_KEY))) {
     return json({ error: 'Unauthorized' }, 401);
   }
@@ -806,74 +807,72 @@ export const controlHandler = {
       return json({ success: false, error: `Failed to clear messages: ${errorText(error)}` }, 500);
     }
   },
-
-  // Daemon heartbeat endpoint
-  async heartbeat(request: BodyRequest<D1<'run'>>): Promise<Response> {
-    const { env } = request;
-
-    const unauthorized = await requireApiKey(request);
-    if (unauthorized) return unauthorized;
-
-    const body = await readJson(request, v.unknown());
-    if (!body.ok) return json({ success: false, error: NOT_JSON_MESSAGE }, 400);
-
-    // normalizeHealthSnapshot throws only for a snapshot the daemon must not send.
-    let snapshot: HealthSnapshot;
-    try {
-      snapshot = normalizeHealthSnapshot(body.value);
-    } catch (error) {
-      return json(
-        { success: false, error: `Failed to process heartbeat: ${errorText(error)}` },
-        400,
-      );
-    }
-
-    try {
-      const clientIp = textOr(
-        request.headers.get('CF-Connecting-IP'),
-        textOr(request.headers.get('X-Forwarded-For'), 'unknown'),
-      );
-      await env.DB.prepare(
-        `
-          INSERT INTO daemon_health (
-            daemon_id, last_heartbeat, status, last_ip, version,
-            error_count, metadata, current_session_id, updated_at
-          ) VALUES (
-            'orange-pi-main', CURRENT_TIMESTAMP, 'online', ?, ?,
-            0, ?, ?, CURRENT_TIMESTAMP
-          )
-          ON CONFLICT(daemon_id) DO UPDATE SET
-            last_heartbeat = CURRENT_TIMESTAMP,
-            status = 'online',
-            last_ip = excluded.last_ip,
-            version = excluded.version,
-            error_count = excluded.error_count,
-            metadata = excluded.metadata,
-            current_session_id = excluded.current_session_id,
-            updated_at = CURRENT_TIMESTAMP
-      `,
-      )
-        .bind(clientIp, snapshot.version, JSON.stringify(snapshot), snapshot.session_id)
-        .run();
-
-      console.log(
-        `[control] Health snapshot received: session=${snapshot.session_id}, version=${snapshot.version}`,
-      );
-
-      return json({
-        success: true,
-        message: 'Heartbeat received',
-        received_at: new Date().toISOString(),
-      });
-    } catch (error) {
-      console.error('[control] Heartbeat error:', error);
-      return json(
-        { success: false, error: `Failed to process heartbeat: ${errorText(error)}` },
-        500,
-      );
-    }
-  },
 };
+
+interface HeartbeatCall {
+  headers: { get(name: string): string | null };
+  env: { DB: D1<'run'> };
+}
+
+/**
+ * POST /api/control/heartbeat, once the daemon's API key has been checked: store
+ * the health snapshot. Refusals keep the daemon's error format,
+ * { success: false, error }, which the control handler writes.
+ */
+export async function recordHeartbeat(
+  { headers, env }: HeartbeatCall,
+  raw: unknown,
+): Promise<HeartbeatResponse> {
+  // normalizeHealthSnapshot throws only for a snapshot the daemon must not send.
+  let snapshot: HealthSnapshot;
+  try {
+    snapshot = normalizeHealthSnapshot(raw);
+  } catch (error) {
+    throw new ORPCError('BAD_REQUEST', {
+      message: `Failed to process heartbeat: ${errorText(error)}`,
+    });
+  }
+
+  try {
+    const clientIp = textOr(
+      headers.get('CF-Connecting-IP'),
+      textOr(headers.get('X-Forwarded-For'), 'unknown'),
+    );
+    await env.DB.prepare(
+      `
+        INSERT INTO daemon_health (
+          daemon_id, last_heartbeat, status, last_ip, version,
+          error_count, metadata, current_session_id, updated_at
+        ) VALUES (
+          'orange-pi-main', CURRENT_TIMESTAMP, 'online', ?, ?,
+          0, ?, ?, CURRENT_TIMESTAMP
+        )
+        ON CONFLICT(daemon_id) DO UPDATE SET
+          last_heartbeat = CURRENT_TIMESTAMP,
+          status = 'online',
+          last_ip = excluded.last_ip,
+          version = excluded.version,
+          error_count = excluded.error_count,
+          metadata = excluded.metadata,
+          current_session_id = excluded.current_session_id,
+          updated_at = CURRENT_TIMESTAMP
+    `,
+    )
+      .bind(clientIp, snapshot.version, JSON.stringify(snapshot), snapshot.session_id)
+      .run();
+
+    console.log(
+      `[control] Health snapshot received: session=${snapshot.session_id}, version=${snapshot.version}`,
+    );
+
+    return { success: true, message: 'Heartbeat received', received_at: new Date().toISOString() };
+  } catch (error) {
+    console.error('[control] Heartbeat error:', error);
+    throw new ORPCError('INTERNAL_SERVER_ERROR', {
+      message: `Failed to process heartbeat: ${errorText(error)}`,
+    });
+  }
+}
 
 // Process keywords for a message
 async function processMessageKeywords(

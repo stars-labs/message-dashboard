@@ -5,7 +5,7 @@ import type { Schema } from '../../shared/parse-json.js';
 import { createControlSchema } from '../../test/control-schema.js';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
 import type { D1, D1Batch } from '../lib/d1.js';
-import { controlHandler, normalizeDaemonSessionId } from './control.js';
+import { controlHandler, normalizeDaemonSessionId, recordHeartbeat } from './control.js';
 
 type TestDb = D1 & D1Batch<'run'>;
 
@@ -94,7 +94,6 @@ describe('every control route', () => {
       'getPendingSMS',
       'updateSMSResult',
       'clearMessages',
-      'heartbeat',
     ] as const) {
       let bodyRead = false;
       const request = controlRequest({}, { apiKey: 'wrong', database: untouchable });
@@ -117,7 +116,6 @@ describe('every control route', () => {
       'uploadMessages',
       'updateSMSResult',
       'cleanupTestData',
-      'heartbeat',
     ] as const) {
       const response = await controlHandler[route](
         controlRequest(null, { rawBody: '{', database: untouchable }),
@@ -1055,19 +1053,14 @@ describe('POST /api/control/heartbeat', () => {
   }
 
   test('stores the normalized health snapshot and the client address', async () => {
-    const response = await controlHandler.heartbeat(
-      controlRequest(snapshot(), {
+    const answer = await recordHeartbeat(
+      controlRequest(null, {
         headers: { 'CF-Connecting-IP': '203.0.113.7', 'X-Forwarded-For': '10.0.0.1' },
       }),
+      snapshot(),
     );
 
-    expect(response.status).toBe(200);
-    expect(
-      await read(
-        response,
-        v.object({ success: v.literal(true), message: v.string(), received_at: v.string() }),
-      ),
-    ).toMatchObject({ message: 'Heartbeat received' });
+    expect(answer).toMatchObject({ success: true, message: 'Heartbeat received' });
     expect(health()).toEqual({
       daemon_id: 'orange-pi-main',
       status: 'online',
@@ -1080,12 +1073,13 @@ describe('POST /api/control/heartbeat', () => {
   });
 
   test('falls back to the forwarded address, then to unknown', async () => {
-    await controlHandler.heartbeat(
-      controlRequest(snapshot(), { headers: { 'X-Forwarded-For': '10.0.0.1' } }),
+    await recordHeartbeat(
+      controlRequest(null, { headers: { 'X-Forwarded-For': '10.0.0.1' } }),
+      snapshot(),
     );
     expect(health().last_ip).toBe('10.0.0.1');
 
-    await controlHandler.heartbeat(controlRequest(snapshot({ version: '8.2.0' })));
+    await recordHeartbeat(controlRequest(null), snapshot({ version: '8.2.0' }));
     expect(health()).toMatchObject({ last_ip: 'unknown', version: '8.2.0' });
     expect(count(`SELECT COUNT(*) AS count FROM daemon_health`)).toBe(1);
   });
@@ -1106,11 +1100,14 @@ describe('POST /api/control/heartbeat', () => {
       ],
     ];
     for (const [body, error] of cases) {
-      const response = await controlHandler.heartbeat(
-        controlRequest(body, { database: untouchable }),
+      const refused = await recordHeartbeat(
+        controlRequest(null, { database: untouchable }),
+        body,
+      ).then(
+        () => null,
+        (reason: unknown) => reason,
       );
-      expect(response.status).toBe(400);
-      expect(await read(response, ErrorBody)).toEqual({ success: false, error });
+      expect(refused).toMatchObject({ status: 400, message: error });
     }
   });
 });

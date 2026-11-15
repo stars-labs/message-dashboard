@@ -3,7 +3,7 @@
 // `PUT /api/users/:id/role` is the most security-sensitive endpoint in this codebase: it
 // is a privilege-escalation primitive. Its guards are therefore explicit and tested:
 //
-//   * admin-only, enforced by requirePermission('users.write') at the route
+//   * admin-only: its contract (shared/api/contract/users.ts) requires users.write
 //   * the target role must be one of the two known roles — no arbitrary role injection
 //   * an admin may not change their OWN role, which blocks self-lockout and removes the
 //     trivial "promote myself" path if the permission is ever mis-granted
@@ -11,11 +11,9 @@
 //   * the target's live sessions are revoked, or a demotion would not take effect for up
 //     to 24 hours (roles are snapshotted into the session at login)
 
-import { json } from '../lib/response.js';
-import * as v from 'valibot';
+import { ORPCError } from '@orpc/server';
 import { createRoleConfig, getKnownRoles } from '../../config/auth0-roles.js';
 import type { SetRoleResponse, UsersResponse } from '../../shared/api/users.js';
-import { readJson } from '../../shared/parse-json.js';
 import type { D1 } from '../lib/d1.js';
 import type { KV } from '../lib/kv.js';
 import {
@@ -28,36 +26,41 @@ import {
 import { revokeUserSessions } from '../utils/user-sessions.js';
 import { writeAuditLog } from '../utils/audit-log.js';
 
-interface ListRequest {
+interface ListCall {
   env: Auth0ManagementEnv;
+  /** Headers to add to the answer, error or not. */
+  resHeaders: Headers;
 }
 
-interface SetRoleRequest {
+interface SetRoleCall extends ListCall {
   env: Auth0ManagementEnv & { SESSIONS: KV<'get' | 'put' | 'delete'>; DB: D1<'run'> };
-  params?: Record<string, string>;
-  user?: { id: string; email?: string | undefined };
-  text(): Promise<string>;
+  user?: { id: string; email?: string | undefined } | undefined;
 }
 
-/** Map an Auth0ManagementError to a response without leaking its body to the client. */
-function managementFailure(error: unknown): Response {
-  const message = error instanceof Error ? error.message : undefined;
+/**
+ * The error to answer for a failed Management API call, without leaking its body.
+ * Auth0 rate limiting is a 503 the caller can retry, carrying Auth0's Retry-After.
+ */
+function managementFailure(error: unknown, resHeaders: Headers): ORPCError<string, undefined> {
+  const message = error instanceof Error ? error.message : 'unknown error';
   const body = error instanceof Auth0ManagementError ? error.body : undefined;
   console.error('Auth0 Management API error:', message, body);
-  return json(
-    {
-      success: false,
-      error: 'Auth0 Management API request failed',
-      detail: message ?? 'unknown error',
-    },
-    502,
-  );
+  if (error instanceof Auth0ManagementError && error.status === 429) {
+    if (error.retryAfter !== null) resHeaders.set('Retry-After', error.retryAfter);
+    return new ORPCError('SERVICE_UNAVAILABLE', {
+      status: 503,
+      message: 'Auth0 is rate limiting the Management API; try again shortly',
+    });
+  }
+  return new ORPCError('BAD_GATEWAY', {
+    status: 502,
+    message: `Auth0 Management API request failed: ${message}`,
+  });
 }
 
 export const usersHandler = {
   /** GET /api/users — every tenant user with their current role. */
-  async list(request: ListRequest): Promise<Response> {
-    const { env } = request;
+  async list({ env, resHeaders }: ListCall): Promise<UsersResponse> {
     const roleConfig = createRoleConfig(env);
 
     try {
@@ -85,51 +88,40 @@ export const usersHandler = {
       // which configured name means what. The names are deployment config
       // (AUTH0_ADMIN_ROLE etc., currently sms-admin/sms-viewer), so a client that
       // hardcoded "admin" would mislabel every row after a rename.
-      return json({
+      return {
         success: true,
         users: withRoles,
         known_roles: getKnownRoles(roleConfig),
         admin_role: roleConfig.ADMIN_ROLE,
         viewer_role: roleConfig.VIEWER_ROLE,
-      } satisfies UsersResponse);
+      };
     } catch (error) {
-      return managementFailure(error);
+      throw managementFailure(error, resHeaders);
     }
   },
 
   /** PUT /api/users/:id/role — body { role: 'admin' | 'viewer' }. */
-  async setRole(request: SetRoleRequest): Promise<Response> {
-    const { env, user } = request;
-    const targetId = request.params?.['id'];
-    const roleConfig = createRoleConfig(env);
-    const knownRoles = getKnownRoles(roleConfig);
-
-    if (!targetId) {
-      return json({ success: false, error: 'Missing user id' }, 400);
-    }
-
-    const parsed = await readJson(request, v.unknown());
-    if (!parsed.ok) {
-      return json({ success: false, error: 'Body must be JSON' }, 400);
-    }
+  async setRole(
+    { env, user, resHeaders }: SetRoleCall,
+    targetId: string,
+    requested: string,
+  ): Promise<SetRoleResponse> {
+    const knownRoles = getKnownRoles(createRoleConfig(env));
 
     // Allow-list, not a blocklist: only these two strings can ever be assigned.
-    const body = v.safeParse(v.object({ role: v.picklist(knownRoles) }), parsed.value);
-    if (!body.success) {
-      return json({ success: false, error: `role must be one of: ${knownRoles.join(', ')}` }, 400);
+    const role = knownRoles.find((known) => known === requested);
+    if (role === undefined) {
+      throw new ORPCError('BAD_REQUEST', {
+        message: `role must be one of: ${knownRoles.join(', ')}`,
+      });
     }
-    const { role } = body.output;
 
     // Self-change guard. Blocks an admin demoting themselves into lockout, and means
     // this endpoint can never be used to escalate the caller's own privileges.
     if (targetId === user?.id) {
-      return json(
-        {
-          success: false,
-          error: 'You cannot change your own role. Ask another admin, or use the Auth0 dashboard.',
-        },
-        403,
-      );
+      throw new ORPCError('FORBIDDEN', {
+        message: 'You cannot change your own role. Ask another admin, or use the Auth0 dashboard.',
+      });
     }
 
     try {
@@ -153,15 +145,15 @@ export const usersHandler = {
         },
       });
 
-      return json({
+      return {
         success: true,
         user_id: targetId,
         role,
         previous_roles: previousRoles,
         sessions_revoked: revoked,
-      } satisfies SetRoleResponse);
+      };
     } catch (error) {
-      return managementFailure(error);
+      throw managementFailure(error, resHeaders);
     }
   },
 };

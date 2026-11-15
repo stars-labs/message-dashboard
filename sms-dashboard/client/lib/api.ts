@@ -18,8 +18,11 @@ import { messageCache } from './message-cache.js';
 // current view deliberately avoids persistent caching (for example spam audit).
 const volatileMessageCursors = new Map<string, string>();
 
-/** The error body, read leniently: a proxy or crash can answer without one. */
-const ErrorBody = v.partial(ErrorResponse);
+/**
+ * The error body, read leniently: a proxy or crash can answer without one. Routes
+ * on the contract answer RFC 9457 problems, which carry `title` instead of `error`.
+ */
+const ErrorBody = v.partial(v.object({ ...ErrorResponse.entries, title: v.string() }));
 
 /** A request the server refused or answered in a shape this client does not know. */
 export class ApiError extends Error {
@@ -83,12 +86,22 @@ async function send(endpoint: string, options: RequestInit): Promise<Response> {
   // See docs/SECURITY-REVIEW.md finding 4.
   const headers = new Headers(options.headers);
   if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
-  const response = await fetch(`${auth.baseUrl}${endpoint}`, {
-    ...options,
-    credentials: 'same-origin',
-    headers,
-  });
+  return checked(
+    await fetch(`${auth.baseUrl}${endpoint}`, {
+      ...options,
+      credentials: 'same-origin',
+      headers,
+    }),
+  );
+}
 
+/** Sends a request the contract client built; a refusal or failure is an ApiError. */
+export async function sendContract(built: Request): Promise<Response> {
+  return checked(await fetch(built, { credentials: 'same-origin' }));
+}
+
+/** The response when it succeeded; otherwise the ApiError it stands for. */
+async function checked(response: Response): Promise<Response> {
   if (response.status === 401) {
     auth.logout();
     throw new ApiError('Authentication required', 401);
@@ -100,7 +113,10 @@ async function send(endpoint: string, options: RequestInit): Promise<Response> {
     // Include `detail` when the server sends one. Without it an upstream failure
     // surfaced as a bare "Auth0 Management API request failed" with the actual cause
     // (missing scope, bad credentials, absent role) only visible in the Worker logs.
-    const base = textOr(errorBody.error, `Request failed with status ${String(response.status)}`);
+    const base = textOr(
+      errorBody.error ?? errorBody.title,
+      `Request failed with status ${String(response.status)}`,
+    );
     const detail = textOr(errorBody.detail, null);
     throw new ApiError(detail === null ? base : `${base}: ${detail}`, response.status);
   }

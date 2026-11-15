@@ -30,6 +30,11 @@
     "db:migrate": "bunx wrangler d1 execute sms-dashboard --file=./migrations/schema.sql"
   },
   "dependencies": {
+    "@orpc/client": "1.16.2",
+    "@orpc/contract": "1.16.2",
+    "@orpc/openapi": "1.16.2",
+    "@orpc/openapi-client": "1.16.2",
+    "@orpc/server": "1.16.2",
     "jose": "^6.0.11",
     "nanoid": "^5.1.5",
     "valibot": "^1.5.0"

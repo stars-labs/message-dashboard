@@ -30,12 +30,20 @@ const TTL_LEEWAY = 0.2;
 export class Auth0ManagementError extends Error {
   status: number;
   body: string | null;
+  /** The upstream Retry-After, when Auth0 sent one. */
+  retryAfter: string | null;
 
-  constructor(message: string, status: number, body: string | null) {
+  constructor(
+    message: string,
+    status: number,
+    body: string | null,
+    retryAfter: string | null = null,
+  ) {
     super(message);
     this.name = 'Auth0ManagementError';
     this.status = status;
     this.body = body;
+    this.retryAfter = retryAfter;
   }
 }
 
@@ -136,6 +144,7 @@ export async function getManagementToken(env: Auth0ManagementEnv): Promise<strin
       `Failed to obtain Auth0 Management token (${response.status})`,
       response.status,
       body,
+      response.headers.get('Retry-After'),
     );
   }
 
@@ -184,6 +193,7 @@ async function mgmtFetch(
       `Auth0 Management API ${method} ${path} failed (${response.status})`,
       response.status,
       text,
+      response.headers.get('Retry-After'),
     );
   }
 

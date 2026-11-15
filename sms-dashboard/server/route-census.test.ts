@@ -4,6 +4,11 @@ import { routeTable } from '../test/worker-harness.js';
 // The routes the Worker registers, in dispatch order. A change here is a change
 // to the API: say why in the commit that makes it.
 const EXPECTED = [
+  // Served by the oRPC contract (shared/api/contract/), ahead of the Router.
+  ['POST', '/api/control/heartbeat'],
+  ['GET', '/api/users'],
+  ['PUT', '/api/users/:id/role'],
+  // The legacy Router.
   ['GET', '/api/live'],
   ['GET', '/api/health'],
   ['GET', '/favicon.ico'],
@@ -23,7 +28,6 @@ const EXPECTED = [
   ['GET', '/api/balance-checks/query-preflight'],
   ['GET', '/api/balance-runners'],
   ['GET', '/api/balance-checks/:id'],
-  ['GET', '/api/users'],
   ['GET', '/api/iccid-mappings'],
   ['GET', '/api/iccid-mappings/:id'],
   ['GET', '/api/iccid-mappings/by-iccid/:iccid'],
@@ -56,7 +60,6 @@ const EXPECTED = [
   ['POST', '/api/control/devices'],
   ['POST', '/api/control/cleanup-test-data'],
   ['POST', '/api/control/sms-result'],
-  ['POST', '/api/control/heartbeat'],
   ['POST', '/api/control/balance-checks'],
   ['POST', '/api/control/balance-checks/continue'],
   ['POST', '/api/control/balance-checks/retry'],
@@ -82,7 +85,6 @@ const EXPECTED = [
   ['POST', '/api/calls/hangup'],
   ['POST', '/api/control/calls/incoming'],
   ['POST', '/api/control/calls/ended'],
-  ['PUT', '/api/users/:id/role'],
   ['PUT', '/api/iccid-mappings/:id'],
   ['PUT', '/api/keywords/:id'],
   ['PUT', '/api/filters/:id'],

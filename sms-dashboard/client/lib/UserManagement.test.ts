@@ -16,11 +16,13 @@ afterEach(() => {
   globalThis.confirm = originalConfirm;
 });
 
-function stubFetch(handler: (input: string | URL | Request, init?: RequestInit) => Response): void {
+/** Answers the component's requests; `handler` sees each as a Request. */
+function stubFetch(handler: (request: Request) => Response | Promise<Response>): void {
   auth.baseUrl = 'https://example.com';
   fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(
     Object.assign(
-      (input: string | URL | Request, init?: RequestInit) => Promise.resolve(handler(input, init)),
+      async (input: string | URL | Request, init?: RequestInit) =>
+        await handler(new Request(input, init)),
       { preconnect: () => undefined },
     ),
   );
@@ -143,14 +145,9 @@ describe('UserManagement', () => {
   test('PUTs the new role and reports how many sessions were revoked', async () => {
     const calls: { url: string; method: string | undefined; body: unknown }[] = [];
     globalThis.confirm = () => true;
-    stubFetch((input, init) => {
-      const url = input instanceof Request ? input.url : String(input);
-      if (init?.method === 'PUT') {
-        calls.push({
-          url,
-          method: init.method,
-          body: typeof init.body === 'string' ? JSON.parse(init.body) : null,
-        });
+    stubFetch(async (request) => {
+      if (request.method === 'PUT') {
+        calls.push({ url: request.url, method: request.method, body: await request.json() });
         return Response.json(roleResponse({ sessions_revoked: 3 }));
       }
       return Response.json(usersResponse([user({ id: 'auth0|1', email: 'a@example.com' })]));
@@ -176,8 +173,29 @@ describe('UserManagement', () => {
     ]);
   });
 
+  test('treats an answer the contract does not describe as a failure', async () => {
+    stubFetch(() => Response.json({ success: true, users: 'not a list' }));
+
+    const view = render(UserManagement);
+
+    await waitFor(() => {
+      expect(view.getByText(/does not match expected schema/)).toBeTruthy();
+    });
+  });
+
   test('shows the server error text when loading fails', async () => {
-    stubFetch(() => Response.json({ error: 'Forbidden: users.read required' }, { status: 403 }));
+    stubFetch(() =>
+      Response.json(
+        {
+          type: 'about:blank',
+          title: 'Forbidden',
+          status: 403,
+          detail: 'users.read required',
+          code: 'FORBIDDEN',
+        },
+        { status: 403, headers: { 'Content-Type': 'application/problem+json' } },
+      ),
+    );
 
     const view = render(UserManagement);
 

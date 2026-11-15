@@ -2,8 +2,9 @@
   import { confirmAction } from './confirm.svelte.js';
   // Admin-only user/role administration. Reached only when the caller holds
   // `users.read`; the server enforces that independently on both endpoints.
-  import { errorMessage, request } from './api.js';
-  import { SetRoleResponse, UsersResponse, type ManagedUser } from '../../shared/api/users.js';
+  import { errorMessage } from './api.js';
+  import { contractApi } from './contract-client.js';
+  import type { ManagedUser } from '../../shared/api/users.js';
   import { textOr } from '../../shared/text.js';
 
   // The signed-in admin's own id, so we can disable their own row — the server refuses
@@ -42,7 +43,7 @@
     loading = true;
     error = null;
     try {
-      const r = await request('/api/users', UsersResponse);
+      const r = await contractApi.users.list();
       users = r.users;
       knownRoles = r.known_roles;
       adminRole = r.admin_role;
@@ -70,14 +71,7 @@
     error = null;
     notice = null;
     try {
-      const result = await request(
-        `/api/users/${encodeURIComponent(user.id)}/role`,
-        SetRoleResponse,
-        {
-          method: 'PUT',
-          body: JSON.stringify({ role }),
-        },
-      );
+      const result = await contractApi.users.setRole({ params: { id: user.id }, body: { role } });
       notice = `${textOr(user.email, user.id)} → ${roleLabel(role)}（已注销 ${result.sessions_revoked} 个会话）`;
       await load();
     } catch (e) {

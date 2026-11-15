@@ -4,6 +4,7 @@
 // guards: role allow-list, self-change refusal, audit logging, session revocation.
 import { afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from 'bun:test';
 import * as v from 'valibot';
+import { ORPCError } from '@orpc/server';
 import { parseJson } from '../../shared/parse-json.js';
 import type { D1RunResult, D1Statement } from '../lib/d1.js';
 import { usersHandler } from './users.js';
@@ -142,40 +143,38 @@ function baseEnv() {
 }
 
 function listRequest(env: Partial<ListRequest['env']> = {}): ListRequest {
-  return { env: { ...baseEnv(), ...env } };
+  return { env: { ...baseEnv(), ...env }, resHeaders: new Headers() };
 }
 
 function setRoleRequest(
-  overrides: {
-    user?: SetRoleRequest['user'];
-    params?: Record<string, string>;
-    body?: string;
-    env?: ReturnType<typeof baseEnv>;
-  } = {},
+  overrides: { user?: SetRoleRequest['user']; env?: ReturnType<typeof baseEnv> } = {},
 ): SetRoleRequest {
   return {
     env: overrides.env ?? baseEnv(),
     user: overrides.user ?? { id: 'auth0|admin', email: 'admin@poloniex.com' },
-    params: overrides.params ?? { id: 'auth0|target' },
-    text: () => Promise.resolve(overrides.body ?? JSON.stringify({ role: 'admin' })),
+    resHeaders: new Headers(),
   };
 }
 
-function withRole(role: unknown): string {
-  return JSON.stringify({ role });
-}
-
-async function bodyOf(response: Response): Promise<unknown> {
-  return await response.json();
+/** How a call was refused: the status, code and message the contract handler answers with. */
+async function refusal(
+  call: Promise<unknown>,
+): Promise<{ status: number; code: string; message: string }> {
+  try {
+    await call;
+  } catch (error) {
+    if (!(error instanceof ORPCError)) throw error;
+    return { status: error.status, code: String(error.code), message: error.message };
+  }
+  throw new Error('the call was not refused');
 }
 
 const Users = v.object({
   users: v.array(v.object({ id: v.string(), role: v.nullable(v.string()) })),
 });
 
-async function usersOf(response: Response) {
-  const parsed = v.parse(Users, await bodyOf(response));
-  return parsed.users;
+async function usersOf(call: Promise<unknown>) {
+  return v.parse(Users, await call).users;
 }
 
 beforeEach(() => {
@@ -194,10 +193,7 @@ describe('GET /api/users', () => {
   test('returns users with their resolved role', async () => {
     mockAuth0({ roles: ['viewer'] });
 
-    const res = await usersHandler.list(listRequest());
-
-    expect(res.status).toBe(200);
-    expect(await bodyOf(res)).toEqual({
+    expect(await usersHandler.list(listRequest())).toEqual({
       success: true,
       users: [
         {
@@ -219,15 +215,14 @@ describe('GET /api/users', () => {
   test('reports null role for a user holding neither role', async () => {
     mockAuth0({ members: { rol_viewer: [], rol_admin: [] } });
 
-    const users = await usersOf(await usersHandler.list(listRequest()));
+    const users = await usersOf(usersHandler.list(listRequest()));
     expect(users[0]?.role).toBeNull();
   });
 
   test('fills the fields Auth0 left out with null and zero', async () => {
     mockAuth0({ users: [{ user_id: 'auth0|1' }], members: { rol_viewer: [], rol_admin: [] } });
 
-    const body = await bodyOf(await usersHandler.list(listRequest()));
-    expect(body).toMatchObject({
+    expect(await usersHandler.list(listRequest())).toMatchObject({
       users: [
         {
           id: 'auth0|1',
@@ -245,7 +240,7 @@ describe('GET /api/users', () => {
   test('admin wins when a user somehow holds both roles', async () => {
     mockAuth0({ members: { rol_viewer: ['auth0|1'], rol_admin: ['auth0|1'] } });
 
-    const users = await usersOf(await usersHandler.list(listRequest()));
+    const users = await usersOf(usersHandler.list(listRequest()));
     expect(users[0]?.role).toBe('admin');
   });
 
@@ -263,7 +258,7 @@ describe('GET /api/users', () => {
       members: { rol_viewer: many.slice(0, 30).map((u) => u.user_id), rol_admin: [] },
     });
 
-    const users = await usersOf(await usersHandler.list(listRequest()));
+    const users = await usersOf(usersHandler.list(listRequest()));
     expect(users).toHaveLength(60);
 
     // token + roles lookup + user list + 2 role-membership calls. Generous ceiling, but
@@ -281,7 +276,7 @@ describe('GET /api/users', () => {
       members: { rol_admin: ['auth0|a'], rol_viewer: ['auth0|b'] },
     });
 
-    const users = await usersOf(await usersHandler.list(listRequest()));
+    const users = await usersOf(usersHandler.list(listRequest()));
     const byId = Object.fromEntries(users.map((u) => [u.id, u.role]));
 
     expect(byId).toEqual({ 'auth0|a': 'admin', 'auth0|b': 'viewer', 'auth0|c': null });
@@ -299,9 +294,7 @@ describe('GET /api/users', () => {
 
     const req = listRequest({ AUTH0_ADMIN_ROLE: 'sms-admin', AUTH0_VIEWER_ROLE: 'sms-viewer' });
 
-    const res = await usersHandler.list(req);
-
-    expect(await bodyOf(res)).toMatchObject({
+    expect(await usersHandler.list(req)).toMatchObject({
       admin_role: 'sms-admin',
       viewer_role: 'sms-viewer',
       known_roles: ['sms-admin', 'sms-viewer'],
@@ -315,33 +308,39 @@ describe('GET /api/users', () => {
     const id = 'google-oauth2|110599213519946932722';
     mockAuth0({ users: [{ user_id: id }], members: { rol_admin: [id], rol_viewer: [] } });
 
-    const users = await usersOf(await usersHandler.list(listRequest()));
+    const users = await usersOf(usersHandler.list(listRequest()));
     expect(users[0]).toMatchObject({ id, role: 'admin' });
   });
 
   test('surfaces a Management API failure as 502, not a fake success', async () => {
     mockAuth0({ failOn: '/api/v2/users' });
 
-    const res = await usersHandler.list(listRequest());
-    expect(res.status).toBe(502);
-    expect(await bodyOf(res)).toMatchObject({
-      success: false,
-      error: 'Auth0 Management API request failed',
-    });
+    const refused = await refusal(usersHandler.list(listRequest()));
+    expect([refused.status, refused.code]).toEqual([502, 'BAD_GATEWAY']);
+    expect(refused.message).toStartWith('Auth0 Management API request failed: ');
   });
 
-  test('surfaces a rate-limited Management API as 502, dropping its Retry-After', async () => {
+  test('surfaces a rate-limited Management API as a retryable 503 with its Retry-After', async () => {
     mockAuth0({
       failOn: '/api/v2/users',
       failWith: { status: 429, headers: { 'Retry-After': '30' } },
     });
 
-    const res = await usersHandler.list(listRequest());
-    expect([res.status, res.headers.get('Retry-After')]).toEqual([502, null]);
-    expect(await bodyOf(res)).toMatchObject({
-      success: false,
-      error: 'Auth0 Management API request failed',
+    const request = listRequest();
+    expect(await refusal(usersHandler.list(request))).toEqual({
+      status: 503,
+      code: 'SERVICE_UNAVAILABLE',
+      message: 'Auth0 is rate limiting the Management API; try again shortly',
     });
+    expect(request.resHeaders.get('Retry-After')).toBe('30');
+  });
+
+  test('sends no Retry-After when Auth0 gave none', async () => {
+    mockAuth0({ failOn: '/api/v2/users', failWith: { status: 429 } });
+
+    const request = listRequest();
+    expect((await refusal(usersHandler.list(request))).status).toBe(503);
+    expect(request.resHeaders.has('Retry-After')).toBe(false);
   });
 
   test('surfaces a malformed users page as 502', async () => {
@@ -357,89 +356,43 @@ describe('GET /api/users', () => {
       ),
     );
 
-    const res = await usersHandler.list(listRequest());
-    expect(res.status).toBe(502);
+    expect((await refusal(usersHandler.list(listRequest()))).status).toBe(502);
   });
 });
 
 describe('PUT /api/users/:id/role — role allow-list', () => {
-  const bad: unknown[] = ['superadmin', 'sms', '', 'ADMIN', 'admin ', null, 42, ['admin']];
-  for (const role of bad) {
+  // A role that is not a string never reaches the handler: the contract rejects it.
+  for (const role of ['superadmin', 'sms', '', 'ADMIN', 'admin ']) {
     test(`rejects role ${JSON.stringify(role)} with 400`, async () => {
       mockAuth0();
 
-      const res = await usersHandler.setRole(setRoleRequest({ body: withRole(role) }));
-      expect(res.status).toBe(400);
-      expect(await bodyOf(res)).toEqual({
-        success: false,
-        error: 'role must be one of: admin, viewer',
+      expect(await refusal(usersHandler.setRole(setRoleRequest(), 'auth0|target', role))).toEqual({
+        status: 400,
+        code: 'BAD_REQUEST',
+        message: 'role must be one of: admin, viewer',
       });
       // Nothing was mutated.
       expect(calls.some((c) => c.method === 'POST' && c.url.includes('/roles'))).toBe(false);
     });
   }
-
-  test('rejects a body without a role', async () => {
-    mockAuth0();
-    const res = await usersHandler.setRole(setRoleRequest({ body: '{}' }));
-    expect(res.status).toBe(400);
-    expect(await bodyOf(res)).toEqual({
-      success: false,
-      error: 'role must be one of: admin, viewer',
-    });
-  });
-
-  test('rejects a body that is JSON but not an object', async () => {
-    mockAuth0();
-    const res = await usersHandler.setRole(setRoleRequest({ body: 'null' }));
-    expect(res.status).toBe(400);
-    expect(await bodyOf(res)).toEqual({
-      success: false,
-      error: 'role must be one of: admin, viewer',
-    });
-  });
-
-  test('rejects a non-JSON body', async () => {
-    mockAuth0();
-    const res = await usersHandler.setRole(setRoleRequest({ body: 'not json' }));
-    expect(res.status).toBe(400);
-    expect(await bodyOf(res)).toEqual({ success: false, error: 'Body must be JSON' });
-  });
-
-  test('rejects a missing user id', async () => {
-    mockAuth0();
-    const res = await usersHandler.setRole(setRoleRequest({ params: {} }));
-    expect(res.status).toBe(400);
-    expect(await bodyOf(res)).toEqual({ success: false, error: 'Missing user id' });
-  });
 });
 
 describe('PUT /api/users/:id/role — self-change guard', () => {
   test('refuses to change your own role, even to the same value', async () => {
     mockAuth0();
 
-    const res = await usersHandler.setRole(
-      setRoleRequest({ params: { id: 'auth0|admin' }, body: withRole('viewer') }),
-    );
+    const refused = await refusal(usersHandler.setRole(setRoleRequest(), 'auth0|admin', 'viewer'));
 
-    expect(res.status).toBe(403);
-    expect(v.parse(v.object({ error: v.string() }), await bodyOf(res)).error).toMatch(
-      /your own role/i,
-    );
+    expect([refused.status, refused.code]).toEqual([403, 'FORBIDDEN']);
+    expect(refused.message).toMatch(/your own role/i);
     expect(calls.some((c) => c.method === 'POST' && c.url.includes('/roles'))).toBe(false);
     expect(audit).toHaveLength(0);
   });
 
   test('refuses self-promotion to admin', async () => {
     mockAuth0();
-    const res = await usersHandler.setRole(
-      setRoleRequest({
-        user: { id: 'auth0|self', email: 'v@poloniex.com' },
-        params: { id: 'auth0|self' },
-        body: withRole('admin'),
-      }),
-    );
-    expect(res.status).toBe(403);
+    const request = setRoleRequest({ user: { id: 'auth0|self', email: 'v@poloniex.com' } });
+    expect((await refusal(usersHandler.setRole(request, 'auth0|self', 'admin'))).status).toBe(403);
   });
 });
 
@@ -454,10 +407,7 @@ describe('PUT /api/users/:id/role — success path', () => {
       'tok-2': 'session',
     });
 
-    const res = await usersHandler.setRole(setRoleRequest({ env }));
-
-    expect(res.status).toBe(200);
-    expect(await bodyOf(res)).toEqual({
+    expect(await usersHandler.setRole(setRoleRequest({ env }), 'auth0|target', 'admin')).toEqual({
       success: true,
       user_id: 'auth0|target',
       role: 'admin',
@@ -494,21 +444,18 @@ describe('PUT /api/users/:id/role — success path', () => {
   test('demotion to viewer works the same way', async () => {
     mockAuth0({ roles: ['admin'] });
 
-    const res = await usersHandler.setRole(setRoleRequest({ body: withRole('viewer') }));
-
-    expect(res.status).toBe(200);
-    expect(await bodyOf(res)).toMatchObject({ role: 'viewer' });
+    expect(await usersHandler.setRole(setRoleRequest(), 'auth0|target', 'viewer')).toMatchObject({
+      role: 'viewer',
+    });
     expect(String(audit[0]?.[4])).toContain('"to":"viewer"');
   });
 
   test('a Management API failure returns 502 and writes no audit row', async () => {
     mockAuth0({ roles: ['viewer'], failOn: '/oauth/token' });
 
-    const res = await usersHandler.setRole(setRoleRequest());
-    expect(res.status).toBe(502);
-    expect(v.parse(v.object({ detail: v.string() }), await bodyOf(res)).detail).toContain(
-      'Failed to obtain',
-    );
+    const refused = await refusal(usersHandler.setRole(setRoleRequest(), 'auth0|target', 'admin'));
+    expect([refused.status, refused.code]).toEqual([502, 'BAD_GATEWAY']);
+    expect(refused.message).toContain('Failed to obtain');
     expect(audit).toHaveLength(0);
   });
 });

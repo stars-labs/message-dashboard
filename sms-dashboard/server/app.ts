@@ -9,7 +9,6 @@ import { phonesHandler } from './handlers/phones.js';
 import { messagesHandler } from './handlers/messages.js';
 import { iccidMappingsHandler } from './handlers/iccid-mappings.js';
 import { healthHandler } from './handlers/health.js';
-import { usersHandler } from './handlers/users.js';
 import { balanceQueriesHandler } from './handlers/balance-queries.js';
 import { balanceSkillRunnerHandler } from './handlers/balance-skill-runner.js';
 import { carrierWebBalanceHandler } from './handlers/carrier-web-balance.js';
@@ -23,6 +22,7 @@ import { setupFilterRoutes } from './api/filters.js';
 import { setupVerificationRoutes } from './api/verification.js';
 import { setupCallRoutes } from './api/calls.js';
 import { Router } from './router.js';
+import { contractRoutes, handleContract } from './contract/handler.js';
 import type { AppRequest } from './worker-context.js';
 import { errorText } from '../shared/error-text.js';
 import { json } from './lib/response.js';
@@ -147,13 +147,6 @@ router.post('/api/messages/send', gate('messages.send'), (request) =>
   messagesHandler.send(request),
 );
 
-// User + role administration. Admin-only: `users.read`/`users.write` appear solely in
-// the admin role's permission set. PUT is a privilege-escalation primitive — see
-// server/handlers/users.ts for the guards it carries.
-router.get('/api/users', gate('users.read'), (request) => usersHandler.list(request));
-
-router.put('/api/users/:id/role', gate('users.write'), (request) => usersHandler.setRole(request));
-
 // ICCID Mappings routes
 router.get('/api/iccid-mappings', gate('phones.read'), (request) =>
   iccidMappingsHandler.list(request),
@@ -208,10 +201,6 @@ router.get(
 router.post(
   '/api/control/sms-result',
   reportingErrors((request) => controlHandler.updateSMSResult(request)),
-);
-router.post(
-  '/api/control/heartbeat',
-  reportingErrors((request) => controlHandler.heartbeat(request)),
 );
 
 router.post('/api/control/balance-checks', (request) => balanceQueriesHandler.create(request));
@@ -280,16 +269,16 @@ router.get(
   async (request) => (await appShellRedirect(request, request.env)) ?? serveFrontend(request),
 );
 
-/** Every route the app registers, in the order the router dispatches them. */
+/** Every route the app serves, in dispatch order: the contract first, then the Router. */
 export function routeTable() {
-  return router.routes();
+  return [...contractRoutes(), ...router.routes()];
 }
 
 export async function handleRequest(request: AppRequest): Promise<Response> {
   console.log(`[Worker] Received request: ${request.method} ${request.url}`);
 
   try {
-    const response = await router.handle(request);
+    const response = (await handleContract(request)) ?? (await router.handle(request));
 
     if (!response) {
       const pathname = new URL(request.url).pathname;
