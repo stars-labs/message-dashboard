@@ -6,7 +6,6 @@ import { createRunnerSchema } from '../../test/runner-schema.js';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
 import { callWorker } from '../../test/worker-harness.js';
 import { auth0Handler } from './auth0.js';
-import { balanceRunnersHandler } from './balance-runners.js';
 
 const API_KEY = 'daemon-key';
 
@@ -71,16 +70,26 @@ afterEach(() => {
   sqlite.close();
 });
 
-function heartbeatRequest(
+const API_KEY_HEADERS = { 'X-API-Key': API_KEY };
+
+async function check(headers: Record<string, string> = API_KEY_HEADERS): Promise<Response> {
+  const { response } = await callWorker('GET', '/api/control/balance-runners/check', {
+    headers,
+    bindings: { DB: db, API_KEY },
+  });
+  return response;
+}
+
+async function heartbeat(
   body: unknown,
-  headers: Record<string, string> = { 'X-API-Key': API_KEY },
-) {
-  const text = typeof body === 'string' ? body : JSON.stringify(body);
-  return {
-    env: { API_KEY, AUTH0_DOMAIN: 'tenant.example', DB: db },
-    headers: new Headers(headers),
-    text: () => Promise.resolve(text),
-  };
+  headers: Record<string, string> = API_KEY_HEADERS,
+): Promise<Response> {
+  const { response } = await callWorker('POST', '/api/control/balance-runners/heartbeat', {
+    headers,
+    body: typeof body === 'string' ? body : JSON.stringify(body),
+    bindings: { DB: db, API_KEY },
+  });
+  return response;
 }
 
 /** A device token for `subject` that carries the heartbeat scope. */
@@ -138,31 +147,27 @@ function heartbeatAge(table: string, column: string): number {
 
 describe('runner credential check', () => {
   test('accepts runner credentials without changing control-plane state', async () => {
-    const response = await balanceRunnersHandler.check(heartbeatRequest(null));
+    const response = await check();
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ success: true });
     expect(count('balance_runner_installations')).toBe(0);
   });
 
   test('refuses a wrong API key', async () => {
-    const response = await balanceRunnersHandler.check(
-      heartbeatRequest(null, { 'X-API-Key': 'wrong' }),
-    );
+    const response = await check({ 'X-API-Key': 'wrong' });
     expect(response.status).toBe(401);
   });
 });
 
 describe('runner heartbeat', () => {
   test('registers a legacy runner without storing a credential', async () => {
-    const response = await balanceRunnersHandler.heartbeat(
-      heartbeatRequest({
-        ...HEARTBEAT,
-        runner_id: ' workstation-legacy ',
-        capabilities: [
-          { capability: 'sms_ai', state: 'ready', current_job_id: null, detail_code: null },
-        ],
-      }),
-    );
+    const response = await heartbeat({
+      ...HEARTBEAT,
+      runner_id: ' workstation-legacy ',
+      capabilities: [
+        { capability: 'sms_ai', state: 'ready', current_job_id: null, detail_code: null },
+      ],
+    });
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ success: true, runner_id: 'workstation-legacy' });
@@ -189,9 +194,7 @@ describe('runner heartbeat', () => {
   });
 
   test('registers a device runner under its Auth0 subject', async () => {
-    const response = await balanceRunnersHandler.heartbeat(
-      heartbeatRequest(HEARTBEAT, signInDevice('auth0|alice')),
-    );
+    const response = await heartbeat(HEARTBEAT, signInDevice('auth0|alice'));
 
     expect(response.status).toBe(200);
     expect(
@@ -203,16 +206,14 @@ describe('runner heartbeat', () => {
   });
 
   test('updates an existing capability in place', async () => {
-    await balanceRunnersHandler.heartbeat(heartbeatRequest(HEARTBEAT));
-    const response = await balanceRunnersHandler.heartbeat(
-      heartbeatRequest({
-        ...HEARTBEAT,
-        session_id: 'session-2',
-        capabilities: [
-          { capability: 'sms_ai', state: 'busy', current_job_id: 'job-7', concurrency: 2 },
-        ],
-      }),
-    );
+    await heartbeat(HEARTBEAT);
+    const response = await heartbeat({
+      ...HEARTBEAT,
+      session_id: 'session-2',
+      capabilities: [
+        { capability: 'sms_ai', state: 'busy', current_job_id: 'job-7', concurrency: 2 },
+      ],
+    });
 
     expect(response.status).toBe(200);
     expect(
@@ -243,9 +244,7 @@ describe('runner heartbeat', () => {
       ) VALUES ('runner-1', 'sms_ai', 'ready', 'session-1', datetime('now', '-120 seconds'));
     `);
 
-    const response = await balanceRunnersHandler.heartbeat(
-      heartbeatRequest({ ...HEARTBEAT, capabilities: [] }),
-    );
+    const response = await heartbeat({ ...HEARTBEAT, capabilities: [] });
 
     expect(response.status).toBe(200);
     expect(heartbeatAge('balance_runner_installations', 'id')).toBeLessThan(5);
@@ -258,7 +257,7 @@ describe('runner heartbeat', () => {
         id, display_name, auth_mode, platform, version, revoked_at
       ) VALUES ('runner-1', 'Runner', 'legacy_api_key', 'darwin', '1', CURRENT_TIMESTAMP)
     `);
-    const response = await balanceRunnersHandler.heartbeat(heartbeatRequest(HEARTBEAT));
+    const response = await heartbeat(HEARTBEAT);
     expect(response.status).toBe(403);
     expect(count('balance_runner_capabilities')).toBe(0);
   });
@@ -269,7 +268,7 @@ describe('runner heartbeat', () => {
         id, display_name, auth_mode, auth_subject, platform, version
       ) VALUES ('runner-1', 'Runner', 'auth0_device', 'auth0|device-1', 'darwin', '1')
     `);
-    const response = await balanceRunnersHandler.heartbeat(heartbeatRequest(HEARTBEAT));
+    const response = await heartbeat(HEARTBEAT);
     expect(response.status).toBe(409);
     expect(
       sqlite
@@ -286,21 +285,19 @@ describe('runner heartbeat', () => {
         id, display_name, auth_mode, auth_subject, platform, version
       ) VALUES ('runner-1', 'Runner', 'auth0_device', 'auth0|alice', 'darwin', '1')
     `);
-    const response = await balanceRunnersHandler.heartbeat(
-      heartbeatRequest(HEARTBEAT, signInDevice('auth0|mallory')),
-    );
+    const response = await heartbeat(HEARTBEAT, signInDevice('auth0|mallory'));
     expect(response.status).toBe(409);
     expect(count('balance_runner_capabilities')).toBe(0);
   });
 
   test('refuses a heartbeat without runner credentials', async () => {
-    const response = await balanceRunnersHandler.heartbeat(heartbeatRequest(HEARTBEAT, {}));
+    const response = await heartbeat(HEARTBEAT, {});
     expect(response.status).toBe(401);
     expect(count('balance_runner_installations')).toBe(0);
   });
 
   test('answers 400 to a body that is not JSON', async () => {
-    const response = await balanceRunnersHandler.heartbeat(heartbeatRequest('{not json'));
+    const response = await heartbeat('{not json');
     expect(response.status).toBe(400);
     expect(await errorOf(response)).toBe('Body must be JSON');
   });
@@ -334,7 +331,7 @@ describe('runner heartbeat', () => {
     ['a null concurrency', { ...HEARTBEAT, capabilities: [{ ...capability, concurrency: null }] }],
     ['an array concurrency', { ...HEARTBEAT, capabilities: [{ ...capability, concurrency: [3] }] }],
   ])('answers 400 to %s', async (_case, body) => {
-    const response = await balanceRunnersHandler.heartbeat(heartbeatRequest(body));
+    const response = await heartbeat(body);
     expect(response.status).toBe(400);
     expect(await errorOf(response)).toBe('Invalid runner heartbeat');
     expect(count('balance_runner_installations')).toBe(0);

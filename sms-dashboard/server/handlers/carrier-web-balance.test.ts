@@ -4,10 +4,10 @@ import * as v from 'valibot';
 import type { Schema } from '../../shared/parse-json.js';
 import { createBalanceSchema } from '../../test/balance-schema.js';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
+import { callWorker } from '../../test/worker-harness.js';
 import type { D1, D1Batch } from '../lib/d1.js';
 import { auth0Handler } from './auth0.js';
 import {
-  carrierWebBalanceHandler,
   createCarrierWebBalanceStatements,
   maintainWebBalanceJobs,
   newCarrierWebBalanceIds,
@@ -95,25 +95,45 @@ afterEach(() => {
   sqlite.close();
 });
 
-function makeRequest({
-  id,
-  runnerId = 'runner-1',
-  query = {},
-  body,
-  rawBody,
-  headers = { 'X-API-Key': API_KEY },
-  database = db,
-}: RequestOptions = {}) {
+type Operation = 'claim' | 'otpRequested' | 'otp' | 'heartbeat' | 'complete' | 'fail' | 'release';
+
+const OPERATIONS: Record<Operation, { method: 'GET' | 'POST'; path: string }> = {
+  claim: { method: 'GET', path: 'claim' },
+  otpRequested: { method: 'POST', path: ':id/otp-requested' },
+  otp: { method: 'GET', path: ':id/otp' },
+  heartbeat: { method: 'POST', path: ':id/heartbeat' },
+  complete: { method: 'POST', path: ':id/complete' },
+  fail: { method: 'POST', path: ':id/fail' },
+  release: { method: 'POST', path: ':id/release' },
+};
+
+async function send(
+  operation: Operation,
+  {
+    id,
+    runnerId = 'runner-1',
+    query = {},
+    body,
+    rawBody,
+    headers = { 'X-API-Key': API_KEY },
+    database = db,
+  }: RequestOptions = {},
+): Promise<Response> {
+  const { method, path } = OPERATIONS[operation];
   const params = new URLSearchParams(query);
   if (runnerId !== null) params.set('runner_id', runnerId);
+  const route = path.replace(':id', encodeURIComponent(id ?? ''));
   const text = rawBody ?? JSON.stringify(body ?? null);
-  return {
-    env: { API_KEY, AUTH0_DOMAIN: 'tenant.example', DB: database },
-    headers: new Headers(headers),
-    url: `https://example.com/api/control/carrier-web-balance/jobs/claim?${params.toString()}`,
-    params: id === undefined ? {} : { id },
-    text: () => Promise.resolve(text),
-  };
+  const { response } = await callWorker(
+    method,
+    `/api/control/carrier-web-balance/jobs/${route}?${params.toString()}`,
+    {
+      headers,
+      ...(method === 'POST' ? { body: text } : {}),
+      bindings: { DB: database, API_KEY },
+    },
+  );
+  return response;
 }
 
 function signInDevice(subject: string, scope: string = BROWSER_SCOPE): Record<string, string> {
@@ -176,21 +196,12 @@ function count(sql: string): number {
   return one(CountRow, sql).count;
 }
 
-async function failure(promise: Promise<unknown>): Promise<unknown> {
-  try {
-    await promise;
-  } catch (error) {
-    return error;
-  }
-  throw new Error('expected the promise to reject');
-}
-
 async function errorOf(response: Response): Promise<string> {
   return v.parse(ErrorBody, await response.json()).error;
 }
 
 async function claim() {
-  const response = await carrierWebBalanceHandler.claim(makeRequest());
+  const response = await send('claim');
   expect(response.status).toBe(200);
   return v.parse(Claimed, await response.json());
 }
@@ -216,9 +227,7 @@ function switchToM1() {
 }
 
 async function requestOtp(jobId: string) {
-  const response = await carrierWebBalanceHandler.otpRequested(
-    makeRequest({ id: jobId, body: { runner_id: 'runner-1' } }),
-  );
+  const response = await send('otpRequested', { id: jobId, body: { runner_id: 'runner-1' } });
   expect(response.status).toBe(200);
 }
 
@@ -262,7 +271,7 @@ const VALID_BODIES: Record<BodyHandlerName, Record<string, unknown>> = {
 };
 
 function callBodyHandler(name: BodyHandlerName, options: RequestOptions) {
-  return carrierWebBalanceHandler[name](makeRequest(options));
+  return send(name, options);
 }
 
 describe('carrier browser balance job protocol', () => {
@@ -292,7 +301,7 @@ describe('carrier browser balance job protocol', () => {
   test('forces the pending-job index on the claim hot path', async () => {
     const recorded = recording(db);
 
-    await carrierWebBalanceHandler.claim(makeRequest({ database: recorded }));
+    await send('claim', { database: recorded });
 
     expect(recorded.prepared[0]).toContain(
       'sim_balance_web_jobs j INDEXED BY idx_balance_web_jobs_pending_claim',
@@ -302,7 +311,7 @@ describe('carrier browser balance job protocol', () => {
   test('does not let a legacy runner claim a Dashboard-owned browser job', async () => {
     sqlite.run("UPDATE sim_balance_checks SET requested_by_subject = 'auth0|alice'");
 
-    const response = await carrierWebBalanceHandler.claim(makeRequest());
+    const response = await send('claim');
     expect(response.status).toBe(204);
     expect(jobState().status).toBe('pending');
   });
@@ -310,7 +319,7 @@ describe('carrier browser balance job protocol', () => {
   test('keeps the five-second claim path free of maintenance work', async () => {
     sqlite.run("UPDATE sim_balance_web_jobs SET status = 'stopped' WHERE id = 'job-1'");
 
-    const response = await carrierWebBalanceHandler.claim(makeRequest());
+    const response = await send('claim');
 
     expect(response.status).toBe(204);
     expect(checkState().status).toBe('queued');
@@ -321,7 +330,7 @@ describe('carrier browser balance job protocol', () => {
     await requestOtp(job.id);
     insertMessage('wrong-context', '10010', '优惠码123456', '123456');
     insertMessage('right', '+8610010', '您的随机密码为654321，请勿泄露', '654321');
-    const response = await carrierWebBalanceHandler.otp(makeRequest({ id: job.id }));
+    const response = await send('otp', { id: job.id });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ code: '654321' });
   });
@@ -333,7 +342,7 @@ describe('carrier browser balance job protocol', () => {
     insertMessage('source-message-2', '10010', '优惠码234567', '234567', "'2026-09-04 10:00:00'");
     sqlite.run("UPDATE sim_balance_web_jobs SET otp_requested_at = '2026-09-04 09:59:00'");
 
-    const first = await carrierWebBalanceHandler.otp(makeRequest({ id: job.id }));
+    const first = await send('otp', { id: job.id });
     expect(first.status).toBe(200);
     expect(await first.json()).toEqual({
       code: null,
@@ -350,15 +359,13 @@ describe('carrier browser balance job protocol', () => {
       '654321',
       "'2026-09-04 10:00:01'",
     );
-    const second = await carrierWebBalanceHandler.otp(
-      makeRequest({
-        id: job.id,
-        query: {
-          after_created_at: '2026-09-04 10:00:00',
-          after_source_message_id: 'source-message-2',
-        },
-      }),
-    );
+    const second = await send('otp', {
+      id: job.id,
+      query: {
+        after_created_at: '2026-09-04 10:00:00',
+        after_source_message_id: 'source-message-2',
+      },
+    });
 
     expect(second.status).toBe(200);
     expect(await second.json()).toEqual({ code: '654321' });
@@ -382,7 +389,7 @@ describe('carrier browser balance job protocol', () => {
       { after_created_at: 'x'.repeat(41), after_source_message_id: 'early' },
       { after_created_at: '2026-09-04 10:00:00', after_source_message_id: 'x'.repeat(201) },
     ]) {
-      const response = await carrierWebBalanceHandler.otp(makeRequest({ id: job.id, query }));
+      const response = await send('otp', { id: job.id, query });
       expect(await response.json()).toEqual({ code: '654321' });
     }
   });
@@ -392,7 +399,7 @@ describe('carrier browser balance job protocol', () => {
     await requestOtp(job.id);
     insertMessage('right', '+8610010', '您的随机密码为654321，请勿泄露', '654321');
 
-    await carrierWebBalanceHandler.otp(makeRequest({ id: job.id }));
+    await send('otp', { id: job.id });
 
     expect(jobState().otp_message_id).toBe('right');
     expect(events().at(-1)).toEqual({
@@ -413,7 +420,7 @@ describe('carrier browser balance job protocol', () => {
       'iccid-2',
     );
 
-    const response = await carrierWebBalanceHandler.otp(makeRequest({ id: job.id }));
+    const response = await send('otp', { id: job.id });
 
     expect(response.status).toBe(204);
   });
@@ -422,7 +429,7 @@ describe('carrier browser balance job protocol', () => {
     const job = await claim();
     await requestOtp(job.id);
 
-    const response = await carrierWebBalanceHandler.otp(makeRequest({ id: job.id }));
+    const response = await send('otp', { id: job.id });
 
     expect(response.status).toBe(204);
   });
@@ -430,7 +437,7 @@ describe('carrier browser balance job protocol', () => {
   test('refuses an OTP poll before an OTP was requested', async () => {
     const job = await claim();
 
-    const response = await carrierWebBalanceHandler.otp(makeRequest({ id: job.id }));
+    const response = await send('otp', { id: job.id });
 
     expect(response.status).toBe(409);
     expect(await errorOf(response)).toBe('OTP has not been requested');
@@ -440,9 +447,7 @@ describe('carrier browser balance job protocol', () => {
     const job = await claim();
     await requestOtp(job.id);
 
-    const response = await carrierWebBalanceHandler.otpRequested(
-      makeRequest({ id: job.id, body: { runner_id: 'runner-1' } }),
-    );
+    const response = await send('otpRequested', { id: job.id, body: { runner_id: 'runner-1' } });
 
     expect(response.status).toBe(409);
     expect(await errorOf(response)).toBe('OTP was already requested for this job');
@@ -451,9 +456,7 @@ describe('carrier browser balance job protocol', () => {
 
   test('moves the job to awaiting_otp when the OTP is requested', async () => {
     const job = await claim();
-    const response = await carrierWebBalanceHandler.otpRequested(
-      makeRequest({ id: job.id, body: { runner_id: 'runner-1' } }),
-    );
+    const response = await send('otpRequested', { id: job.id, body: { runner_id: 'runner-1' } });
 
     expect(await response.json()).toEqual({ success: true, status: 'awaiting_otp' });
     expect(jobState().status).toBe('awaiting_otp');
@@ -462,16 +465,14 @@ describe('carrier browser balance job protocol', () => {
 
   test('extends the lease while waiting for human verification', async () => {
     const job = await claim();
-    const response = await carrierWebBalanceHandler.heartbeat(
-      makeRequest({
-        id: job.id,
-        body: {
-          runner_id: 'runner-1',
-          status: 'human_verification_required',
-          reason: '请完成滑块验证',
-        },
-      }),
-    );
+    const response = await send('heartbeat', {
+      id: job.id,
+      body: {
+        runner_id: 'runner-1',
+        status: 'human_verification_required',
+        reason: '请完成滑块验证',
+      },
+    });
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ lease_seconds: 900 });
     expect(jobState()).toMatchObject({
@@ -482,23 +483,21 @@ describe('carrier browser balance job protocol', () => {
 
   test('renews a lease without appending duplicate heartbeat events', async () => {
     const job = await claim();
-    const heartbeatRequest = () =>
-      makeRequest({ id: job.id, body: { runner_id: 'runner-1', status: 'awaiting_otp' } });
+    const heartbeat = () =>
+      send('heartbeat', { id: job.id, body: { runner_id: 'runner-1', status: 'awaiting_otp' } });
 
-    await carrierWebBalanceHandler.heartbeat(heartbeatRequest());
-    await carrierWebBalanceHandler.heartbeat(heartbeatRequest());
+    await heartbeat();
+    await heartbeat();
 
     expect(events().filter((event) => event.event_type === 'awaiting_otp')).toHaveLength(1);
   });
 
   test('keeps the normal lease and no reason for an ordinary heartbeat', async () => {
     const job = await claim();
-    const response = await carrierWebBalanceHandler.heartbeat(
-      makeRequest({
-        id: job.id,
-        body: { runner_id: 'runner-1', status: 'querying', reason: 'ignored' },
-      }),
-    );
+    const response = await send('heartbeat', {
+      id: job.id,
+      body: { runner_id: 'runner-1', status: 'querying', reason: 'ignored' },
+    });
 
     expect(await response.json()).toEqual({
       success: true,
@@ -519,7 +518,7 @@ describe('carrier browser balance job protocol', () => {
     insertMessage('wrong-sender', '10010', 'OTP for login to selfcare portal is 111111', '111111');
     insertMessage('right-m1', 'M1 Limited', 'OTP for login to selfcare portal is 222222', '222222');
 
-    const response = await carrierWebBalanceHandler.otp(makeRequest({ id: job.id }));
+    const response = await send('otp', { id: job.id });
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ code: '222222' });
@@ -527,33 +526,29 @@ describe('carrier browser balance job protocol', () => {
 
   test('stores a balance only for the task account', async () => {
     const job = await claim();
-    const mismatch = await carrierWebBalanceHandler.complete(
-      makeRequest({
-        id: job.id,
-        body: {
-          runner_id: 'runner-1',
-          balance: 18.25,
-          currency: 'CNY',
-          account_number: '+8618600000000',
-        },
-      }),
-    );
+    const mismatch = await send('complete', {
+      id: job.id,
+      body: {
+        runner_id: 'runner-1',
+        balance: 18.25,
+        currency: 'CNY',
+        account_number: '+8618600000000',
+      },
+    });
     expect(mismatch.status).toBe(409);
     expect(await errorOf(mismatch)).toBe(
       'Authenticated account does not match the balance task SIM',
     );
 
-    const response = await carrierWebBalanceHandler.complete(
-      makeRequest({
-        id: job.id,
-        body: {
-          runner_id: 'runner-1',
-          balance: 18.25,
-          currency: 'CNY',
-          account_number: SIM_NUMBER,
-        },
-      }),
-    );
+    const response = await send('complete', {
+      id: job.id,
+      body: {
+        runner_id: 'runner-1',
+        balance: 18.25,
+        currency: 'CNY',
+        account_number: SIM_NUMBER,
+      },
+    });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ success: true, status: 'parsed' });
     expect(checkState()).toMatchObject({
@@ -576,29 +571,25 @@ describe('carrier browser balance job protocol', () => {
 
   test('accepts an account number written with the country code', async () => {
     const job = await claim();
-    const response = await carrierWebBalanceHandler.complete(
-      makeRequest({
-        id: job.id,
-        body: {
-          runner_id: 'runner-1',
-          balance: 1,
-          currency: 'CNY',
-          account_number: '17600419127',
-        },
-      }),
-    );
+    const response = await send('complete', {
+      id: job.id,
+      body: {
+        runner_id: 'runner-1',
+        balance: 1,
+        currency: 'CNY',
+        account_number: '17600419127',
+      },
+    });
 
     expect(response.status).toBe(200);
   });
 
   test.each([-100001, 1000001])('refuses a balance of %d', async (balance) => {
     const job = await claim();
-    const response = await carrierWebBalanceHandler.complete(
-      makeRequest({
-        id: job.id,
-        body: { runner_id: 'runner-1', balance, currency: 'CNY', account_number: SIM_NUMBER },
-      }),
-    );
+    const response = await send('complete', {
+      id: job.id,
+      body: { runner_id: 'runner-1', balance, currency: 'CNY', account_number: SIM_NUMBER },
+    });
 
     expect(response.status).toBe(400);
     expect(await errorOf(response)).toBe('balance is invalid');
@@ -606,12 +597,10 @@ describe('carrier browser balance job protocol', () => {
 
   test.each([-100000, 0, 1000000])('accepts a balance of %d', async (balance) => {
     const job = await claim();
-    const response = await carrierWebBalanceHandler.complete(
-      makeRequest({
-        id: job.id,
-        body: { runner_id: 'runner-1', balance, currency: 'CNY', account_number: SIM_NUMBER },
-      }),
-    );
+    const response = await send('complete', {
+      id: job.id,
+      body: { runner_id: 'runner-1', balance, currency: 'CNY', account_number: SIM_NUMBER },
+    });
 
     expect(response.status).toBe(200);
   });
@@ -625,17 +614,15 @@ describe('carrier browser balance job protocol', () => {
     ['a missing value', undefined],
   ])('refuses a completion whose balance is %s', async (_case, balance) => {
     const job = await claim();
-    const response = await carrierWebBalanceHandler.complete(
-      makeRequest({
-        id: job.id,
-        body: {
-          runner_id: 'runner-1',
-          balance,
-          currency: 'CNY',
-          account_number: SIM_NUMBER,
-        },
-      }),
-    );
+    const response = await send('complete', {
+      id: job.id,
+      body: {
+        runner_id: 'runner-1',
+        balance,
+        currency: 'CNY',
+        account_number: SIM_NUMBER,
+      },
+    });
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: 'balance is invalid' });
     expect(checkState().status).toBe('queued');
@@ -643,12 +630,10 @@ describe('carrier browser balance job protocol', () => {
 
   test('refuses a completion in the wrong currency', async () => {
     const job = await claim();
-    const response = await carrierWebBalanceHandler.complete(
-      makeRequest({
-        id: job.id,
-        body: { runner_id: 'runner-1', balance: 1, currency: 'SGD', account_number: SIM_NUMBER },
-      }),
-    );
+    const response = await send('complete', {
+      id: job.id,
+      body: { runner_id: 'runner-1', balance: 1, currency: 'SGD', account_number: SIM_NUMBER },
+    });
 
     expect(response.status).toBe(400);
     expect(await errorOf(response)).toBe('currency must be CNY');
@@ -662,17 +647,15 @@ describe('carrier browser balance job protocol', () => {
     ['a list', [SIM_NUMBER]],
   ])('refuses a completion whose account number is %s', async (_case, accountNumber) => {
     const job = await claim();
-    const response = await carrierWebBalanceHandler.complete(
-      makeRequest({
-        id: job.id,
-        body: {
-          runner_id: 'runner-1',
-          balance: 18.25,
-          currency: 'CNY',
-          account_number: accountNumber,
-        },
-      }),
-    );
+    const response = await send('complete', {
+      id: job.id,
+      body: {
+        runner_id: 'runner-1',
+        balance: 18.25,
+        currency: 'CNY',
+        account_number: accountNumber,
+      },
+    });
     expect(response.status).toBe(409);
     expect(checkState().status).toBe('queued');
   });
@@ -680,12 +663,10 @@ describe('carrier browser balance job protocol', () => {
   test('does not match a missing account number to a SIM without a number', async () => {
     sqlite.run("UPDATE sims SET phone_number = ''");
     const job = await claim();
-    const response = await carrierWebBalanceHandler.complete(
-      makeRequest({
-        id: job.id,
-        body: { runner_id: 'runner-1', balance: 18.25, currency: 'CNY' },
-      }),
-    );
+    const response = await send('complete', {
+      id: job.id,
+      body: { runner_id: 'runner-1', balance: 18.25, currency: 'CNY' },
+    });
     expect(response.status).toBe(409);
     expect(checkState().status).toBe('queued');
   });
@@ -700,18 +681,16 @@ describe('carrier browser balance job protocol', () => {
       },
     };
 
-    const response = await carrierWebBalanceHandler.complete(
-      makeRequest({
-        id: job.id,
-        database: racing,
-        body: {
-          runner_id: 'runner-1',
-          balance: 18.25,
-          currency: 'CNY',
-          account_number: SIM_NUMBER,
-        },
-      }),
-    );
+    const response = await send('complete', {
+      id: job.id,
+      database: racing,
+      body: {
+        runner_id: 'runner-1',
+        balance: 18.25,
+        currency: 'CNY',
+        account_number: SIM_NUMBER,
+      },
+    });
 
     expect(response.status).toBe(409);
     expect(await errorOf(response)).toBe('Balance check changed before completion');
@@ -723,35 +702,31 @@ describe('carrier browser balance job protocol', () => {
     switchToM1();
     const job = await claim();
 
-    const partial = await carrierWebBalanceHandler.complete(
-      makeRequest({
-        id: job.id,
-        body: {
-          runner_id: 'runner-1',
-          balance: 9.97,
-          currency: 'SGD',
-          account_number: M1_NUMBER,
-        },
-      }),
-    );
+    const partial = await send('complete', {
+      id: job.id,
+      body: {
+        runner_id: 'runner-1',
+        balance: 9.97,
+        currency: 'SGD',
+        account_number: M1_NUMBER,
+      },
+    });
     expect(partial.status).toBe(400);
     expect(await errorOf(partial)).toBe('expires_at must be a real ISO calendar date');
     expect(
       count("SELECT COUNT(*) AS count FROM sim_balance_metrics WHERE check_id = 'check-1'"),
     ).toBe(0);
 
-    const response = await carrierWebBalanceHandler.complete(
-      makeRequest({
-        id: job.id,
-        body: {
-          runner_id: 'runner-1',
-          balance: 9.97,
-          currency: 'SGD',
-          account_number: M1_NUMBER,
-          expires_at: '2026-09-20',
-        },
-      }),
-    );
+    const response = await send('complete', {
+      id: job.id,
+      body: {
+        runner_id: 'runner-1',
+        balance: 9.97,
+        currency: 'SGD',
+        account_number: M1_NUMBER,
+        expires_at: '2026-09-20',
+      },
+    });
 
     expect(response.status).toBe(200);
     expect(metrics()).toEqual([
@@ -768,18 +743,16 @@ describe('carrier browser balance job protocol', () => {
   test('accepts an M1 account number written without the country code', async () => {
     switchToM1();
     const job = await claim();
-    const response = await carrierWebBalanceHandler.complete(
-      makeRequest({
-        id: job.id,
-        body: {
-          runner_id: 'runner-1',
-          balance: 9.97,
-          currency: 'SGD',
-          account_number: '90950236',
-          expires_at: '2026-09-20',
-        },
-      }),
-    );
+    const response = await send('complete', {
+      id: job.id,
+      body: {
+        runner_id: 'runner-1',
+        balance: 9.97,
+        currency: 'SGD',
+        account_number: '90950236',
+        expires_at: '2026-09-20',
+      },
+    });
 
     expect(response.status).toBe(200);
   });
@@ -789,18 +762,16 @@ describe('carrier browser balance job protocol', () => {
     async (expiresAt) => {
       switchToM1();
       const job = await claim();
-      const response = await carrierWebBalanceHandler.complete(
-        makeRequest({
-          id: job.id,
-          body: {
-            runner_id: 'runner-1',
-            balance: 9.97,
-            currency: 'SGD',
-            account_number: M1_NUMBER,
-            expires_at: expiresAt,
-          },
-        }),
-      );
+      const response = await send('complete', {
+        id: job.id,
+        body: {
+          runner_id: 'runner-1',
+          balance: 9.97,
+          currency: 'SGD',
+          account_number: M1_NUMBER,
+          expires_at: expiresAt,
+        },
+      });
 
       expect(response.status).toBe(400);
       expect(await errorOf(response)).toBe('expires_at must be a real ISO calendar date');
@@ -810,18 +781,16 @@ describe('carrier browser balance job protocol', () => {
   test('refuses an M1 completion whose expiry is a list holding a date', async () => {
     switchToM1();
     const job = await claim();
-    const response = await carrierWebBalanceHandler.complete(
-      makeRequest({
-        id: job.id,
-        body: {
-          runner_id: 'runner-1',
-          balance: 9.97,
-          currency: 'SGD',
-          account_number: M1_NUMBER,
-          expires_at: ['2026-09-20'],
-        },
-      }),
-    );
+    const response = await send('complete', {
+      id: job.id,
+      body: {
+        runner_id: 'runner-1',
+        balance: 9.97,
+        currency: 'SGD',
+        account_number: M1_NUMBER,
+        expires_at: ['2026-09-20'],
+      },
+    });
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({
       error: 'expires_at must be a real ISO calendar date',
@@ -831,9 +800,10 @@ describe('carrier browser balance job protocol', () => {
   test('does not requeue a browser login after an OTP was requested', async () => {
     const job = await claim();
     await requestOtp(job.id);
-    const response = await carrierWebBalanceHandler.release(
-      makeRequest({ id: job.id, body: { runner_id: 'runner-1', error: 'Browser closed' } }),
-    );
+    const response = await send('release', {
+      id: job.id,
+      body: { runner_id: 'runner-1', error: 'Browser closed' },
+    });
     expect(await response.json()).toEqual({ success: true, status: 'failed' });
     expect(jobState().status).toBe('failed');
     expect(checkState()).toMatchObject({ status: 'failed', error: 'Browser closed' });
@@ -845,9 +815,10 @@ describe('carrier browser balance job protocol', () => {
 
   test('requeues a browser job released before any OTP was requested', async () => {
     const job = await claim();
-    const response = await carrierWebBalanceHandler.release(
-      makeRequest({ id: job.id, body: { runner_id: 'runner-1', error: 'Browser closed' } }),
-    );
+    const response = await send('release', {
+      id: job.id,
+      body: { runner_id: 'runner-1', error: 'Browser closed' },
+    });
 
     expect(await response.json()).toEqual({ success: true, status: 'pending' });
     expect(jobState()).toMatchObject({
@@ -862,9 +833,10 @@ describe('carrier browser balance job protocol', () => {
 
   test('fails the job and its check', async () => {
     const job = await claim();
-    const response = await carrierWebBalanceHandler.fail(
-      makeRequest({ id: job.id, body: { runner_id: 'runner-1', error: 'Portal changed' } }),
-    );
+    const response = await send('fail', {
+      id: job.id,
+      body: { runner_id: 'runner-1', error: 'Portal changed' },
+    });
 
     expect(await response.json()).toEqual({ success: true, status: 'failed' });
     expect(jobState()).toMatchObject({
@@ -884,34 +856,28 @@ describe('carrier browser balance job protocol', () => {
     ['release', 'Runner released the job'],
   ] as const)('gives a %s without an error a default one', async (action, expected) => {
     const job = await claim();
-    await carrierWebBalanceHandler[action](
-      makeRequest({ id: job.id, body: { runner_id: 'runner-1', error: '' } }),
-    );
+    await send(action, { id: job.id, body: { runner_id: 'runner-1', error: '' } });
 
     expect(jobState().last_error).toBe(expected);
   });
 
   test.each(['fail', 'release'] as const)('truncates the error of a %s', async (action) => {
     const job = await claim();
-    await carrierWebBalanceHandler[action](
-      makeRequest({ id: job.id, body: { runner_id: 'runner-1', error: 'e'.repeat(1500) } }),
-    );
+    await send(action, { id: job.id, body: { runner_id: 'runner-1', error: 'e'.repeat(1500) } });
 
     expect(jobState().last_error).toHaveLength(1000);
   });
 
   test('truncates a human verification reason', async () => {
     const job = await claim();
-    await carrierWebBalanceHandler.heartbeat(
-      makeRequest({
-        id: job.id,
-        body: {
-          runner_id: 'runner-1',
-          status: 'human_verification_required',
-          reason: 'r'.repeat(600),
-        },
-      }),
-    );
+    await send('heartbeat', {
+      id: job.id,
+      body: {
+        runner_id: 'runner-1',
+        status: 'human_verification_required',
+        reason: 'r'.repeat(600),
+      },
+    });
 
     expect(jobState().human_reason).toHaveLength(500);
   });
@@ -923,9 +889,10 @@ describe('carrier browser balance job protocol', () => {
     ['missing', undefined, 'Invalid web job status'],
   ])('refuses a heartbeat whose status is %s', async (_case, status, message) => {
     const job = await claim();
-    const response = await carrierWebBalanceHandler.heartbeat(
-      makeRequest({ id: job.id, body: { runner_id: 'runner-1', status } }),
-    );
+    const response = await send('heartbeat', {
+      id: job.id,
+      body: { runner_id: 'runner-1', status },
+    });
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: message });
   });
@@ -936,12 +903,10 @@ describe('carrier browser balance job protocol', () => {
     ['a list', ['x']],
   ])('refuses a heartbeat whose reason is %s', async (_case, reason) => {
     const job = await claim();
-    const response = await carrierWebBalanceHandler.heartbeat(
-      makeRequest({
-        id: job.id,
-        body: { runner_id: 'runner-1', status: 'human_verification_required', reason },
-      }),
-    );
+    const response = await send('heartbeat', {
+      id: job.id,
+      body: { runner_id: 'runner-1', status: 'human_verification_required', reason },
+    });
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: 'reason must be text' });
     expect(jobState().status).toBe('leased');
@@ -949,12 +914,10 @@ describe('carrier browser balance job protocol', () => {
 
   test('falls back to the default reason when a heartbeat gives an empty one', async () => {
     const job = await claim();
-    const response = await carrierWebBalanceHandler.heartbeat(
-      makeRequest({
-        id: job.id,
-        body: { runner_id: 'runner-1', status: 'human_verification_required', reason: '' },
-      }),
-    );
+    const response = await send('heartbeat', {
+      id: job.id,
+      body: { runner_id: 'runner-1', status: 'human_verification_required', reason: '' },
+    });
     expect(response.status).toBe(200);
     expect(jobState().human_reason).toBe('Official site requested human verification');
   });
@@ -963,9 +926,10 @@ describe('carrier browser balance job protocol', () => {
     'refuses a %s whose error is not text',
     async (action) => {
       const job = await claim();
-      const response = await carrierWebBalanceHandler[action](
-        makeRequest({ id: job.id, body: { runner_id: 'runner-1', error: { message: 'x' } } }),
-      );
+      const response = await send(action, {
+        id: job.id,
+        body: { runner_id: 'runner-1', error: { message: 'x' } },
+      });
       expect(response.status).toBe(400);
       expect(await response.json()).toEqual({ error: 'error must be text' });
       expect(jobState().status).toBe('leased');
@@ -980,7 +944,7 @@ describe('claiming', () => {
     ['blank', '   '],
     ['too long', 'r'.repeat(201)],
   ])('refuses a runner ID that is %s', async (_case, runnerId) => {
-    const response = await carrierWebBalanceHandler.claim(makeRequest({ runnerId }));
+    const response = await send('claim', { runnerId });
 
     expect(response.status).toBe(400);
     expect(await errorOf(response)).toBe('runner_id is required');
@@ -988,7 +952,7 @@ describe('claiming', () => {
   });
 
   test('trims the runner ID it leases the job to', async () => {
-    const response = await carrierWebBalanceHandler.claim(makeRequest({ runnerId: ' runner-9 ' }));
+    const response = await send('claim', { runnerId: ' runner-9 ' });
 
     expect(response.status).toBe(200);
     expect(jobState().lease_owner).toBe('runner-9');
@@ -997,7 +961,7 @@ describe('claiming', () => {
   test('answers 204 when no job is pending', async () => {
     await claim();
 
-    const response = await carrierWebBalanceHandler.claim(makeRequest({ runnerId: 'runner-2' }));
+    const response = await send('claim', { runnerId: 'runner-2' });
 
     expect(response.status).toBe(204);
   });
@@ -1005,7 +969,7 @@ describe('claiming', () => {
   test('stops leasing a job after three attempts', async () => {
     sqlite.run('UPDATE sim_balance_web_jobs SET attempts = 3');
 
-    const response = await carrierWebBalanceHandler.claim(makeRequest());
+    const response = await send('claim');
 
     expect(response.status).toBe(204);
     expect(jobState().status).toBe('pending');
@@ -1014,7 +978,7 @@ describe('claiming', () => {
   test('does not lease a job whose check is no longer queued', async () => {
     sqlite.run("UPDATE sim_balance_checks SET status = 'failed'");
 
-    const response = await carrierWebBalanceHandler.claim(makeRequest());
+    const response = await send('claim');
 
     expect(response.status).toBe(204);
     expect(jobState().status).toBe('pending');
@@ -1032,7 +996,7 @@ describe('claiming', () => {
       'cn-unicom-browser-random-password-v1',
     ]);
 
-    const response = await carrierWebBalanceHandler.claim(makeRequest());
+    const response = await send('claim');
 
     expect(response.status).toBe(204);
     expect(jobState()).toMatchObject({
@@ -1049,32 +1013,37 @@ describe('claiming', () => {
   test('refuses to read a SIM index that is not a number', async () => {
     sqlite.run("UPDATE sims SET sim_index = 'first'");
 
-    const error = await failure(carrierWebBalanceHandler.claim(makeRequest()));
+    const errorSpy = spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const response = await send('claim');
 
-    expect(error).toBeInstanceOf(v.ValiError);
+      expect(response.status).toBe(500);
+      expect(await response.text()).toBe('{"error":"Internal Server Error"}');
+      expect(errorSpy.mock.calls.flat().some((logged) => logged instanceof v.ValiError)).toBe(true);
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });
 
 describe('runner credentials', () => {
   test('refuses a claim without credentials', async () => {
-    const response = await carrierWebBalanceHandler.claim(makeRequest({ headers: {} }));
+    const response = await send('claim', { headers: {} });
 
     expect(response.status).toBe(401);
     expect(jobState().status).toBe('pending');
   });
 
   test('refuses a claim with a wrong API key', async () => {
-    const response = await carrierWebBalanceHandler.claim(
-      makeRequest({ headers: { 'X-API-Key': 'wrong' } }),
-    );
+    const response = await send('claim', { headers: { 'X-API-Key': 'wrong' } });
 
     expect(response.status).toBe(401);
   });
 
   test('refuses a device token that lacks the browser scope', async () => {
-    const response = await carrierWebBalanceHandler.claim(
-      makeRequest({ headers: signInDevice('auth0|alice', 'balance:runners:heartbeat') }),
-    );
+    const response = await send('claim', {
+      headers: signInDevice('auth0|alice', 'balance:runners:heartbeat'),
+    });
 
     expect(response.status).toBe(401);
     expect(jobState().status).toBe('pending');
@@ -1114,12 +1083,10 @@ describe('runner credentials', () => {
     leaseTo('runner-1');
     sqlite.run("UPDATE sim_balance_checks SET requested_by_subject = 'auth0|alice'");
 
-    const response = await carrierWebBalanceHandler.otp(
-      makeRequest({
-        id: 'job-1',
-        headers: signInDevice('auth0|alice', 'balance:runners:heartbeat'),
-      }),
-    );
+    const response = await send('otp', {
+      id: 'job-1',
+      headers: signInDevice('auth0|alice', 'balance:runners:heartbeat'),
+    });
 
     expect(response.status).toBe(401);
   });
@@ -1127,7 +1094,7 @@ describe('runner credentials', () => {
   test('refuses an OTP poll without credentials', async () => {
     leaseTo('runner-1');
 
-    const response = await carrierWebBalanceHandler.otp(makeRequest({ id: 'job-1', headers: {} }));
+    const response = await send('otp', { id: 'job-1', headers: {} });
 
     expect(response.status).toBe(401);
   });
@@ -1135,9 +1102,7 @@ describe('runner credentials', () => {
   test('lets a device runner claim a job its account requested', async () => {
     sqlite.run("UPDATE sim_balance_checks SET requested_by_subject = 'auth0|alice'");
 
-    const response = await carrierWebBalanceHandler.claim(
-      makeRequest({ headers: signInDevice('auth0|alice') }),
-    );
+    const response = await send('claim', { headers: signInDevice('auth0|alice') });
 
     expect(response.status).toBe(200);
     expect(jobState()).toMatchObject({ status: 'leased', lease_owner: 'runner-1' });
@@ -1146,18 +1111,14 @@ describe('runner credentials', () => {
   test("does not let a device runner claim another account's job", async () => {
     sqlite.run("UPDATE sim_balance_checks SET requested_by_subject = 'auth0|alice'");
 
-    const response = await carrierWebBalanceHandler.claim(
-      makeRequest({ headers: signInDevice('auth0|mallory') }),
-    );
+    const response = await send('claim', { headers: signInDevice('auth0|mallory') });
 
     expect(response.status).toBe(204);
     expect(jobState().status).toBe('pending');
   });
 
   test('does not let a device runner claim a legacy control job', async () => {
-    const response = await carrierWebBalanceHandler.claim(
-      makeRequest({ headers: signInDevice('auth0|alice') }),
-    );
+    const response = await send('claim', { headers: signInDevice('auth0|alice') });
 
     expect(response.status).toBe(204);
     expect(jobState().status).toBe('pending');
@@ -1210,7 +1171,7 @@ describe('job ownership', () => {
   test('otp refuses a legacy runner on a Dashboard-owned job', async () => {
     ownedBy('auth0|alice');
 
-    const response = await carrierWebBalanceHandler.otp(makeRequest({ id: 'job-1' }));
+    const response = await send('otp', { id: 'job-1' });
 
     expect(response.status).toBe(403);
   });
@@ -1218,9 +1179,7 @@ describe('job ownership', () => {
   test("otp refuses another account's device runner", async () => {
     ownedBy('auth0|alice');
 
-    const response = await carrierWebBalanceHandler.otp(
-      makeRequest({ id: 'job-1', headers: signInDevice('auth0|mallory') }),
-    );
+    const response = await send('otp', { id: 'job-1', headers: signInDevice('auth0|mallory') });
 
     expect(response.status).toBe(403);
   });
@@ -1228,13 +1187,11 @@ describe('job ownership', () => {
   test('lets the owning account heartbeat its job', async () => {
     ownedBy('auth0|alice');
 
-    const response = await carrierWebBalanceHandler.heartbeat(
-      makeRequest({
-        id: 'job-1',
-        headers: signInDevice('auth0|alice'),
-        body: { runner_id: 'runner-1', status: 'querying' },
-      }),
-    );
+    const response = await send('heartbeat', {
+      id: 'job-1',
+      headers: signInDevice('auth0|alice'),
+      body: { runner_id: 'runner-1', status: 'querying' },
+    });
 
     expect(response.status).toBe(200);
     expect(jobState().status).toBe('querying');
@@ -1250,17 +1207,18 @@ describe('job lease', () => {
   });
 
   test('otp answers 404 for an unknown job', async () => {
-    const response = await carrierWebBalanceHandler.otp(makeRequest({ id: 'missing' }));
+    const response = await send('otp', { id: 'missing' });
 
     expect(response.status).toBe(404);
   });
 
-  test('answers 404 when the route carries no job ID', async () => {
-    const response = await carrierWebBalanceHandler.heartbeat(
-      makeRequest({ body: VALID_BODIES.heartbeat }),
-    );
+  test('answers 404 when the route carries an empty job ID', async () => {
+    const response = await send('heartbeat', { body: VALID_BODIES.heartbeat });
 
     expect(response.status).toBe(404);
+    expect(response.headers.get('Content-Type')).toBe('application/json;charset=utf-8');
+    expect(await response.text()).toBe('{"error":"Web balance job not found"}');
+    expect(jobState().status).toBe('pending');
   });
 
   test.each(BODY_HANDLERS)("%s refuses another runner's lease", async (name) => {
@@ -1287,9 +1245,7 @@ describe('job lease', () => {
     async (status) => {
       leaseTo('runner-1', status);
 
-      const response = await carrierWebBalanceHandler.heartbeat(
-        makeRequest({ id: 'job-1', body: VALID_BODIES.heartbeat }),
-      );
+      const response = await send('heartbeat', { id: 'job-1', body: VALID_BODIES.heartbeat });
 
       expect(response.status).toBe(409);
       expect(jobState().status).toBe(status);
@@ -1300,9 +1256,7 @@ describe('job lease', () => {
     leaseTo('runner-1');
     sqlite.run('UPDATE sim_balance_web_jobs SET lease_expires_at = NULL');
 
-    const response = await carrierWebBalanceHandler.heartbeat(
-      makeRequest({ id: 'job-1', body: VALID_BODIES.heartbeat }),
-    );
+    const response = await send('heartbeat', { id: 'job-1', body: VALID_BODIES.heartbeat });
 
     expect(response.status).toBe(409);
   });
@@ -1322,7 +1276,7 @@ describe('job lease', () => {
     sqlite.run('UPDATE sim_balance_web_jobs SET otp_requested_at = CURRENT_TIMESTAMP');
 
     for (const runnerId of ['runner-2', '']) {
-      const response = await carrierWebBalanceHandler.otp(makeRequest({ id: 'job-1', runnerId }));
+      const response = await send('otp', { id: 'job-1', runnerId });
       expect(response.status).toBe(409);
     }
   });
@@ -1330,9 +1284,7 @@ describe('job lease', () => {
   test('otp refuses a poll that names no runner', async () => {
     leaseTo('runner-1');
 
-    const response = await carrierWebBalanceHandler.otp(
-      makeRequest({ id: 'job-1', runnerId: null }),
-    );
+    const response = await send('otp', { id: 'job-1', runnerId: null });
 
     expect(response.status).toBe(400);
     expect(await errorOf(response)).toBe('runner_id is required');
@@ -1359,7 +1311,7 @@ describe('runner ID in the request body', () => {
     ['a non-text runner ID', { runner_id: 7 }],
     ['a null runner ID', { runner_id: null }],
   ])('answers 400 to %s', async (_case, body) => {
-    const response = await carrierWebBalanceHandler.heartbeat(makeRequest({ id: 'job-1', body }));
+    const response = await send('heartbeat', { id: 'job-1', body });
 
     expect(response.status).toBe(400);
     expect(await errorOf(response)).toBe('runner_id is required');
@@ -1367,9 +1319,7 @@ describe('runner ID in the request body', () => {
   });
 
   test('checks the runner ID before looking the job up', async () => {
-    const response = await carrierWebBalanceHandler.heartbeat(
-      makeRequest({ id: 'missing', body: {} }),
-    );
+    const response = await send('heartbeat', { id: 'missing', body: {} });
 
     expect(response.status).toBe(400);
   });
@@ -1377,9 +1327,10 @@ describe('runner ID in the request body', () => {
   test('checks the lease before the rest of the body', async () => {
     leaseTo('runner-2');
 
-    const response = await carrierWebBalanceHandler.heartbeat(
-      makeRequest({ id: 'job-1', body: { runner_id: 'runner-1', status: 'bogus' } }),
-    );
+    const response = await send('heartbeat', {
+      id: 'job-1',
+      body: { runner_id: 'runner-1', status: 'bogus' },
+    });
 
     expect(response.status).toBe(409);
   });
@@ -1558,7 +1509,7 @@ describe('queueing a browser balance check', () => {
 
 describe('response shapes', () => {
   test('describes the claim with plain fields only', async () => {
-    const response = await carrierWebBalanceHandler.claim(makeRequest());
+    const response = await send('claim');
     const body = v.parse(Fields, await response.json());
 
     expect(Object.keys(body).sort()).toEqual([

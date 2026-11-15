@@ -4,9 +4,9 @@ import * as v from 'valibot';
 import type { Schema } from '../../shared/parse-json.js';
 import { createBalanceSchema } from '../../test/balance-schema.js';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
+import { callWorker } from '../../test/worker-harness.js';
 import type { D1, D1Batch } from '../lib/d1.js';
 import { auth0Handler } from './auth0.js';
-import { balanceSkillRunnerHandler } from './balance-skill-runner.js';
 
 const API_KEY = 'secret';
 const PROFILE = 'cn-mobile-sms-menu-v1';
@@ -80,22 +80,34 @@ interface RequestOptions {
   headers?: Record<string, string>;
 }
 
-function runnerRequest({
-  id,
-  body,
-  rawBody,
+const RUNNER_HEADERS = { 'X-API-Key': API_KEY };
+
+async function claimResponse({
   runnerId = 'runner-1',
-  headers = { 'X-API-Key': API_KEY },
-}: RequestOptions = {}) {
+  headers = RUNNER_HEADERS,
+}: Pick<RequestOptions, 'runnerId' | 'headers'> = {}): Promise<Response> {
   const query = runnerId === null ? '' : `?runner_id=${encodeURIComponent(runnerId)}`;
-  const text = rawBody ?? JSON.stringify(body ?? null);
-  return {
-    env: { API_KEY, AUTH0_DOMAIN: 'tenant.example', DB: db },
-    headers: new Headers(headers),
-    url: `https://example.com/api/control/balance-skills/jobs/claim${query}`,
-    params: id === undefined ? {} : { id },
-    text: () => Promise.resolve(text),
-  };
+  const { response } = await callWorker('GET', `/api/control/balance-skills/jobs/claim${query}`, {
+    headers,
+    bindings: { DB: db, API_KEY },
+  });
+  return response;
+}
+
+async function jobResponse(
+  action: 'decision' | 'release',
+  { id = 'job-1', body, rawBody, headers = RUNNER_HEADERS }: RequestOptions = {},
+): Promise<Response> {
+  const { response } = await callWorker(
+    'POST',
+    `/api/control/balance-skills/jobs/${encodeURIComponent(id)}/${action}`,
+    {
+      headers,
+      body: rawBody ?? JSON.stringify(body ?? null),
+      bindings: { DB: db, API_KEY },
+    },
+  );
+  return response;
 }
 
 /** A device token for `subject` that carries the SMS AI scope. */
@@ -145,8 +157,8 @@ function checkState() {
   );
 }
 
-async function claim(options: RequestOptions = {}) {
-  const response = await balanceSkillRunnerHandler.claim(runnerRequest(options));
+async function claim(options: Pick<RequestOptions, 'runnerId' | 'headers'> = {}) {
+  const response = await claimResponse(options);
   expect(response.status).toBe(200);
   return read(response, ClaimedJob);
 }
@@ -156,13 +168,10 @@ function decide(
   body: Record<string, unknown> = {},
   options: RequestOptions = {},
 ) {
-  return balanceSkillRunnerHandler.decide(
-    runnerRequest({
-      id: 'job-1',
-      body: { runner_id: 'runner-1', model: 'company-model', decision, ...body },
-      ...options,
-    }),
-  );
+  return jobResponse('decision', {
+    body: { runner_id: 'runner-1', model: 'company-model', decision, ...body },
+    ...options,
+  });
 }
 
 const REPLY = { action: 'reply', selected_option: '11', confidence: 0.98 };
@@ -210,14 +219,14 @@ describe('POST /api/control/balance-skills/jobs/claim', () => {
   });
 
   test('answers 204 when no job is waiting', async () => {
-    const response = await balanceSkillRunnerHandler.claim(runnerRequest());
+    const response = await claimResponse();
     expect(response.status).toBe(204);
   });
 
   test('does not let a legacy runner claim a Dashboard-owned job', async () => {
     seedJob(MENU, { owner: 'auth0|alice' });
 
-    const response = await balanceSkillRunnerHandler.claim(runnerRequest());
+    const response = await claimResponse();
 
     expect(response.status).toBe(204);
     expect(jobState().status).toBe('pending');
@@ -226,9 +235,7 @@ describe('POST /api/control/balance-skills/jobs/claim', () => {
   test('lets only the owning account claim a Dashboard-owned job', async () => {
     seedJob(MENU, { owner: 'auth0|alice' });
 
-    const other = await balanceSkillRunnerHandler.claim(
-      runnerRequest({ headers: signInDevice('auth0|bob') }),
-    );
+    const other = await claimResponse({ headers: signInDevice('auth0|bob') });
     expect(other.status).toBe(204);
 
     const job = await claim({ headers: signInDevice('auth0|alice') });
@@ -238,7 +245,7 @@ describe('POST /api/control/balance-skills/jobs/claim', () => {
   test('stops a job whose skill has used its turns instead of handing it out', async () => {
     seedJob(MENU, { step: 4 });
 
-    const response = await balanceSkillRunnerHandler.claim(runnerRequest());
+    const response = await claimResponse();
 
     expect(response.status).toBe(204);
     expect(jobState()).toMatchObject({
@@ -253,7 +260,7 @@ describe('POST /api/control/balance-skills/jobs/claim', () => {
     seedJob(MENU);
     sqlite.run(`UPDATE sim_balance_profiles SET skill_config = '{}' WHERE id = '${PROFILE}'`);
 
-    const response = await balanceSkillRunnerHandler.claim(runnerRequest());
+    const response = await claimResponse();
 
     expect(response.status).toBe(204);
     expect(jobState().status).toBe('stopped');
@@ -262,12 +269,12 @@ describe('POST /api/control/balance-skills/jobs/claim', () => {
   test('requires runner credentials and a runner_id', async () => {
     seedJob(MENU);
 
-    const unauthorized = await balanceSkillRunnerHandler.claim(runnerRequest({ headers: {} }));
+    const unauthorized = await claimResponse({ headers: {} });
     expect(unauthorized.status).toBe(401);
     expect(await errorOf(unauthorized)).toBe('Unauthorized');
 
     for (const runnerId of [null, '  ', 'r'.repeat(201)]) {
-      const response = await balanceSkillRunnerHandler.claim(runnerRequest({ runnerId }));
+      const response = await claimResponse({ runnerId });
       expect(response.status).toBe(400);
       expect(await errorOf(response)).toBe('runner_id is required');
     }
@@ -410,9 +417,7 @@ describe('POST /api/control/balance-skills/jobs/:id/decision', () => {
       expect(await errorOf(response)).toBe('runner_id and decision are required');
     }
     for (const rawBody of ['{', 'null', '[]']) {
-      const response = await balanceSkillRunnerHandler.decide(
-        runnerRequest({ id: 'job-1', rawBody }),
-      );
+      const response = await jobResponse('decision', { rawBody });
       expect(response.status).toBe(400);
       expect(await errorOf(response)).toBe('runner_id and decision are required');
     }
@@ -432,9 +437,10 @@ describe('POST /api/control/balance-skills/jobs/:id/decision', () => {
   });
 
   test('answers 404 for an unknown job and 403 for another account', async () => {
-    const missing = await balanceSkillRunnerHandler.decide(
-      runnerRequest({ id: 'nope', body: { runner_id: 'runner-1', decision: REPLY } }),
-    );
+    const missing = await jobResponse('decision', {
+      id: 'nope',
+      body: { runner_id: 'runner-1', decision: REPLY },
+    });
     expect(missing.status).toBe(404);
     expect(await errorOf(missing)).toBe('Skill job not found');
 
@@ -510,7 +516,7 @@ describe('POST /api/control/balance-skills/jobs/:id/release', () => {
   });
 
   function release(body: unknown, options: RequestOptions = {}) {
-    return balanceSkillRunnerHandler.release(runnerRequest({ id: 'job-1', body, ...options }));
+    return jobResponse('release', { body, ...options });
   }
 
   test('returns a leased job to the queue with the runner reason', async () => {
@@ -555,9 +561,7 @@ describe('POST /api/control/balance-skills/jobs/:id/release', () => {
   });
 
   test('answers 404, 403 and 409 for a job this runner cannot release', async () => {
-    const missing = await balanceSkillRunnerHandler.release(
-      runnerRequest({ id: 'nope', body: { runner_id: 'runner-1' } }),
-    );
+    const missing = await jobResponse('release', { id: 'nope', body: { runner_id: 'runner-1' } });
     expect(missing.status).toBe(404);
 
     const other = await release({ runner_id: 'runner-2' });
@@ -579,10 +583,15 @@ describe('row schemas', () => {
     seedJob(MENU);
     sqlite.run(`UPDATE sim_balance_skill_jobs SET step_index = 'first'`);
 
-    const failure = await balanceSkillRunnerHandler.claim(runnerRequest()).then(
-      () => null,
-      (error: unknown) => error,
-    );
-    expect(failure).toBeInstanceOf(v.ValiError);
+    const errorSpy = spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const response = await claimResponse();
+
+      expect(response.status).toBe(500);
+      expect(await response.text()).toBe('{"error":"Internal Server Error"}');
+      expect(errorSpy.mock.calls.flat().some((logged) => logged instanceof v.ValiError)).toBe(true);
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });

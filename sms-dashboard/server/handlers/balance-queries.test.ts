@@ -9,7 +9,6 @@ import { sqliteD1 } from '../../test/sqlite-d1.js';
 import { callWorker } from '../../test/worker-harness.js';
 import type { D1, D1Batch } from '../lib/d1.js';
 import {
-  balanceQueriesHandler,
   buildBalanceQueryPlan,
   carrierMatchesProfile,
   describeBalanceMethod,
@@ -311,22 +310,26 @@ interface ControlOptions {
   rawBody?: string;
   apiKey?: string;
   database?: TestDb;
-  onRead?: () => void;
 }
 
-function controlRequest(
+const CONTROL_PATHS = {
+  create: '/api/control/balance-checks',
+  continue: '/api/control/balance-checks/continue',
+  retry: '/api/control/balance-checks/retry',
+  stop: '/api/control/balance-checks/stop',
+};
+
+async function control(
+  action: keyof typeof CONTROL_PATHS,
   body: unknown,
-  { rawBody, apiKey = API_KEY, database = db, onRead }: ControlOptions = {},
-) {
-  const text = rawBody ?? JSON.stringify(body);
-  return {
-    headers: new Headers({ 'X-API-Key': apiKey }),
-    env: { API_KEY, DB: database },
-    text: () => {
-      onRead?.();
-      return Promise.resolve(text);
-    },
-  };
+  { rawBody, apiKey = API_KEY, database = db }: ControlOptions = {},
+): Promise<Response> {
+  const { response } = await callWorker('POST', CONTROL_PATHS[action], {
+    headers: { 'X-API-Key': apiKey },
+    body: rawBody ?? JSON.stringify(body),
+    bindings: { DB: database, API_KEY },
+  });
+  return response;
 }
 
 const PHONE: PlanPhone = {
@@ -1094,43 +1097,34 @@ describe('POST /api/balance-checks/query-batch', () => {
 
 describe('POST /api/control/balance-checks', () => {
   test('rejects an invalid API key before reading the body', async () => {
-    let bodyRead = false;
-    const response = await balanceQueriesHandler.create(
-      controlRequest(
-        {},
-        { apiKey: 'wrong', database: untouchable, onRead: () => (bodyRead = true) },
-      ),
-    );
+    const response = await control('create', null, {
+      rawBody: '{',
+      apiKey: 'wrong',
+      database: untouchable,
+    });
     expect(response.status).toBe(401);
     expect(await errorOf(response)).toBe('Unauthorized');
-    expect(bodyRead).toBe(false);
   });
 
   test('requires a SIM and a profile', async () => {
     for (const body of [{}, { phone_iccid: ICCID }, { phone_iccid: ICCID, profile_id: 1 }, []]) {
-      const response = await balanceQueriesHandler.create(
-        controlRequest(body, { database: untouchable }),
-      );
+      const response = await control('create', body, { database: untouchable });
       expect(response.status).toBe(400);
       expect(await errorOf(response)).toBe('phone_iccid and profile_id are required');
     }
-    const notJson = await balanceQueriesHandler.create(
-      controlRequest(null, { rawBody: '{', database: untouchable }),
-    );
+    const notJson = await control('create', null, { rawBody: '{', database: untouchable });
     expect(await errorOf(notJson)).toBe('Invalid JSON body');
   });
 
   test('queues only the allowlisted destination and command', async () => {
     insertSim({ iccid: ICCID, index: 1, number: NUMBER });
 
-    const response = await balanceQueriesHandler.create(
-      controlRequest({
-        phone_iccid: ICCID,
-        profile_id: MOBILE_PROFILE,
-        destination: '+6599999999',
-        command: 'SUBSCRIBE',
-      }),
-    );
+    const response = await control('create', {
+      phone_iccid: ICCID,
+      profile_id: MOBILE_PROFILE,
+      destination: '+6599999999',
+      command: 'SUBSCRIBE',
+    });
     const { check } = await read(response, QueryBody);
 
     expect(response.status).toBe(202);
@@ -1149,9 +1143,10 @@ describe('POST /api/control/balance-checks', () => {
   test('creates a browser job without queueing an outbound SMS', async () => {
     insertSim({ iccid: ICCID, index: 1, carrier: '联通' });
 
-    const response = await balanceQueriesHandler.create(
-      controlRequest({ phone_iccid: ICCID, profile_id: UNICOM_BROWSER_PROFILE }),
-    );
+    const response = await control('create', {
+      phone_iccid: ICCID,
+      profile_id: UNICOM_BROWSER_PROFILE,
+    });
     const { check } = await read(response, QueryBody);
 
     expect(response.status).toBe(202);
@@ -1170,9 +1165,7 @@ describe('POST /api/control/balance-checks', () => {
       ['nope', 'SIM is not active'],
       ['unicom', 'SIM does not match the carrier profile'],
     ] as const) {
-      const response = await balanceQueriesHandler.create(
-        controlRequest({ phone_iccid: iccid, profile_id: MOBILE_PROFILE }),
-      );
+      const response = await control('create', { phone_iccid: iccid, profile_id: MOBILE_PROFILE });
       expect(response.status).toBe(409);
       expect(await errorOf(response)).toBe(error);
     }
@@ -1187,9 +1180,7 @@ describe('POST /api/control/balance-checks', () => {
       requestedAt: '2026-08-14 01:00:00',
     });
 
-    const response = await balanceQueriesHandler.create(
-      controlRequest({ phone_iccid: ICCID, profile_id: MOBILE_PROFILE }),
-    );
+    const response = await control('create', { phone_iccid: ICCID, profile_id: MOBILE_PROFILE });
 
     expect(response.status).toBe(429);
     expect(await response.json()).toEqual({
@@ -1209,9 +1200,7 @@ describe('POST /api/control/balance-checks', () => {
     insertCheck({ id: 'bal-timed-out', status: 'timed_out' });
     insertCheck({ id: 'bal-old', status: 'parsed', requestedAt: now('-25 hours') });
 
-    const response = await balanceQueriesHandler.create(
-      controlRequest({ phone_iccid: ICCID, profile_id: MOBILE_PROFILE }),
-    );
+    const response = await control('create', { phone_iccid: ICCID, profile_id: MOBILE_PROFILE });
     expect(response.status).toBe(202);
   });
 
@@ -1224,15 +1213,11 @@ describe('POST /api/control/balance-checks', () => {
       ) VALUES ('cn-mobile-ussd', 'CN', 'China Mobile', 'ussd', '*100#', 'ussd-v1', 1);
     `);
 
-    const disabled = await balanceQueriesHandler.create(
-      controlRequest({ phone_iccid: ICCID, profile_id: MOBILE_PROFILE }),
-    );
+    const disabled = await control('create', { phone_iccid: ICCID, profile_id: MOBILE_PROFILE });
     expect(disabled.status).toBe(404);
     expect(await errorOf(disabled)).toBe('Balance profile is not enabled');
 
-    const ussd = await balanceQueriesHandler.create(
-      controlRequest({ phone_iccid: ICCID, profile_id: 'cn-mobile-ussd' }),
-    );
+    const ussd = await control('create', { phone_iccid: ICCID, profile_id: 'cn-mobile-ussd' });
     expect(ussd.status).toBe(400);
     expect(await errorOf(ussd)).toBe('Profile method is not implemented');
   });
@@ -2080,9 +2065,7 @@ describe('POST /api/control/balance-checks/continue', () => {
       rawResponse: '1.话费与AI豆',
     });
 
-    const response = await balanceQueriesHandler.continue(
-      controlRequest({ check_id: 'bal-existing' }),
-    );
+    const response = await control('continue', { check_id: 'bal-existing' });
     const { check } = await read(response, ContinuedBody);
 
     const sent = every(OutboundRow, `SELECT ${OUTBOUND_COLUMNS} FROM messages WHERE type = 'sent'`);
@@ -2108,7 +2091,7 @@ describe('POST /api/control/balance-checks/continue', () => {
       .run('[{"response_contains":"","command":"1"}]', MOBILE_PROFILE);
 
     for (const id of ['no-message', 'no-text']) {
-      const response = await balanceQueriesHandler.continue(controlRequest({ check_id: id }));
+      const response = await control('continue', { check_id: id });
       expect(response.status).toBe(409);
       expect(await errorOf(response)).toBe('Balance check cannot be continued');
     }
@@ -2125,31 +2108,29 @@ describe('POST /api/control/balance-checks/continue', () => {
     insertSim({ iccid: 'sim-2', index: 2 });
     insertCheck({ id: 'bal-waiting', status: 'awaiting_response', sim: 'sim-2' });
 
-    const other = await balanceQueriesHandler.continue(controlRequest({ check_id: 'bal-other' }));
+    const other = await control('continue', { check_id: 'bal-other' });
     expect(other.status).toBe(409);
     expect(await errorOf(other)).toBe('No allowlisted next step matches the reply');
 
-    const waiting = await balanceQueriesHandler.continue(
-      controlRequest({ check_id: 'bal-waiting' }),
-    );
+    const waiting = await control('continue', { check_id: 'bal-waiting' });
     expect(waiting.status).toBe(409);
     expect(await errorOf(waiting)).toBe('Balance check cannot be continued');
 
-    const missing = await balanceQueriesHandler.continue(controlRequest({ check_id: 'nope' }));
+    const missing = await control('continue', { check_id: 'nope' });
     expect(missing.status).toBe(404);
     expect(await errorOf(missing)).toBe('Balance check not found');
   });
 
   test('requires the API key and a check_id', async () => {
-    const unauthorized = await balanceQueriesHandler.continue(
-      controlRequest({ check_id: 'x' }, { apiKey: 'wrong', database: untouchable }),
+    const unauthorized = await control(
+      'continue',
+      { check_id: 'x' },
+      { apiKey: 'wrong', database: untouchable },
     );
     expect(unauthorized.status).toBe(401);
 
     for (const body of [{}, { check_id: 1 }, []]) {
-      const response = await balanceQueriesHandler.continue(
-        controlRequest(body, { database: untouchable }),
-      );
+      const response = await control('continue', body, { database: untouchable });
       expect(response.status).toBe(400);
       expect(await errorOf(response)).toBe('check_id is required');
     }
@@ -2192,7 +2173,7 @@ describe('POST /api/control/balance-checks/retry', () => {
   test('requeues only the last failed allowlisted maintenance step', async () => {
     failedStep('1');
 
-    const response = await balanceQueriesHandler.retry(controlRequest({ check_id: 'bal-failed' }));
+    const response = await control('retry', { check_id: 'bal-failed' });
     const { check } = await read(response, ContinuedBody);
 
     expect(response.status).toBe(202);
@@ -2218,7 +2199,7 @@ describe('POST /api/control/balance-checks/retry', () => {
   test('rejects a failed message whose content differs from the configured step', async () => {
     failedStep('2');
 
-    const response = await balanceQueriesHandler.retry(controlRequest({ check_id: 'bal-failed' }));
+    const response = await control('retry', { check_id: 'bal-failed' });
 
     expect(response.status).toBe(409);
     expect(await errorOf(response)).toBe('No allowlisted failed step can be retried');
@@ -2237,7 +2218,7 @@ describe('POST /api/control/balance-checks/retry', () => {
     });
 
     for (const id of ['bal-start', 'nope']) {
-      const response = await balanceQueriesHandler.retry(controlRequest({ check_id: id }));
+      const response = await control('retry', { check_id: id });
       expect(response.status).toBe(409);
       expect(await errorOf(response)).toBe('No allowlisted failed step can be retried');
     }
@@ -2252,7 +2233,7 @@ describe('POST /api/control/balance-checks/stop', () => {
   test('terminalizes an awaiting reply as timed out', async () => {
     insertCheck({ id: 'bal-waiting', status: 'awaiting_response' });
 
-    const response = await balanceQueriesHandler.stop(controlRequest({ check_id: 'bal-waiting' }));
+    const response = await control('stop', { check_id: 'bal-waiting' });
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
@@ -2274,9 +2255,7 @@ describe('POST /api/control/balance-checks/stop', () => {
       VALUES ('job', 'bal-unresolved', 'reply', 0, 'leased');
     `);
 
-    const response = await balanceQueriesHandler.stop(
-      controlRequest({ check_id: 'bal-unresolved' }),
-    );
+    const response = await control('stop', { check_id: 'bal-unresolved' });
 
     expect(await response.json()).toEqual({
       success: true,
@@ -2294,11 +2273,11 @@ describe('POST /api/control/balance-checks/stop', () => {
   test('refuses a check that is not stoppable', async () => {
     insertCheck({ id: 'bal-parsed', status: 'parsed' });
 
-    const parsed = await balanceQueriesHandler.stop(controlRequest({ check_id: 'bal-parsed' }));
+    const parsed = await control('stop', { check_id: 'bal-parsed' });
     expect(parsed.status).toBe(409);
     expect(await errorOf(parsed)).toBe('Balance check is not stoppable');
 
-    const missing = await balanceQueriesHandler.stop(controlRequest({ check_id: 'nope' }));
+    const missing = await control('stop', { check_id: 'nope' });
     expect(missing.status).toBe(404);
   });
 });
