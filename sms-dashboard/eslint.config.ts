@@ -20,6 +20,47 @@ const unusedVars: [
   { argsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_', ignoreRestSiblings: true },
 ];
 
+// A later block that sets a rule for a file replaces the options of an earlier
+// one, so each block below lists every selector or import its files are held to.
+
+const UNTYPED_DATA = [
+  {
+    selector:
+      "CallExpression[callee.type='MemberExpression'][callee.property.name=/^(first|all|raw|get|json)$/][typeArguments]",
+    message:
+      'A type argument here is an unchecked cast. Parse the value with a schema: readJson / parseJson (shared/parse-json.ts) or queryAll / queryFirst (server/lib/d1.ts).',
+  },
+  {
+    selector:
+      "CallExpression[callee.type='MemberExpression'][callee.property.name='json'][arguments.length=0]",
+    message: 'Read JSON bodies with readJson(body, schema) from shared/parse-json.ts.',
+  },
+  {
+    selector: "CallExpression[callee.object.name='JSON'][callee.property.name='parse']",
+    message: 'Parse JSON text with parseJson(text, schema) from shared/parse-json.ts.',
+  },
+  {
+    selector:
+      "CallExpression[callee.type='MemberExpression'][callee.property.name=/^(all|first|raw)$/][arguments.length=0]",
+    message: 'Read D1 rows with queryAll / queryFirst from server/lib/d1.ts.',
+  },
+];
+
+const API_PATH_MESSAGE =
+  'Call the Dashboard through the contract client (client/lib/api.ts contractApi, balance-agent control-client), not a hand-built /api/ URL.';
+
+const API_PATHS = [
+  { selector: 'Literal[value=/^(https?:\\/\\/[^\\/]*)?\\/api\\//]', message: API_PATH_MESSAGE },
+  { selector: 'TemplateElement[value.raw=/^\\/api\\//]', message: API_PATH_MESSAGE },
+];
+
+const ORPC_OC = {
+  name: '@orpc/contract',
+  importNames: ['oc'],
+  message:
+    'Declare a contract route with route(access, method, path) from shared/api/contract/route.ts.',
+};
+
 export default defineConfig([
   // Whatever git ignores is not source: local worktrees, caches, builds.
   includeIgnoreFile(fileURLToPath(new URL('.gitignore', import.meta.url))),
@@ -76,48 +117,64 @@ export default defineConfig([
     name: 'Untyped data enters through a schema',
     files: ['**/*.ts'],
     ignores: ['shared/parse-json.ts', 'server/lib/d1.ts', '**/*.test.ts'],
-    rules: {
-      'no-restricted-syntax': [
-        'error',
-        {
-          selector:
-            "CallExpression[callee.type='MemberExpression'][callee.property.name=/^(first|all|raw|get|json)$/][typeArguments]",
-          message:
-            'A type argument here is an unchecked cast. Parse the value with a schema: readJson / parseJson (shared/parse-json.ts) or queryAll / queryFirst (server/lib/d1.ts).',
-        },
-        {
-          selector:
-            "CallExpression[callee.type='MemberExpression'][callee.property.name='json'][arguments.length=0]",
-          message: 'Read JSON bodies with readJson(body, schema) from shared/parse-json.ts.',
-        },
-        {
-          selector: "CallExpression[callee.object.name='JSON'][callee.property.name='parse']",
-          message: 'Parse JSON text with parseJson(text, schema) from shared/parse-json.ts.',
-        },
-        {
-          selector:
-            "CallExpression[callee.type='MemberExpression'][callee.property.name=/^(all|first|raw)$/][arguments.length=0]",
-          message: 'Read D1 rows with queryAll / queryFirst from server/lib/d1.ts.',
-        },
-      ],
-    },
+    rules: { 'no-restricted-syntax': ['error', ...UNTYPED_DATA] },
+  },
+  {
+    name: 'Clients reach the Dashboard through the contract client',
+    files: ['client/**/*.ts', 'balance-agent/src/**/*.ts'],
+    ignores: ['**/*.test.ts'],
+    rules: { 'no-restricted-syntax': ['error', ...UNTYPED_DATA, ...API_PATHS] },
+  },
+  {
+    name: 'Svelte components reach the Dashboard through the contract client',
+    files: ['client/**/*.svelte'],
+    rules: { 'no-restricted-syntax': ['error', ...API_PATHS] },
   },
   {
     name: 'A contract route says who may call it',
     files: ['**/*.ts', '**/*.svelte'],
     ignores: ['shared/api/contract/route.ts'],
+    rules: { 'no-restricted-imports': ['error', { paths: [ORPC_OC] }] },
+  },
+  {
+    name: 'Only the contract admits a caller',
+    files: ['server/**/*.ts'],
+    ignores: ['server/contract/handler.ts', 'server/middleware/authorize.ts', '**/*.test.ts'],
     rules: {
       'no-restricted-imports': [
         'error',
         {
-          paths: [
+          paths: [ORPC_OC],
+          patterns: [
             {
-              name: '@orpc/contract',
-              importNames: ['oc'],
+              regex: '(^|/)(auth0|authorize|control|runner-auth)(\\.js)?$',
+              importNames: ['handleAuth0', 'authorize', 'requireApiKey', 'authorizeRunnerControl'],
               message:
-                'Declare a contract route with route(access, method, path) from shared/api/contract/route.ts.',
+                "Declare the route's access on the contract (shared/api/contract/route.ts); server/contract/handler.ts admits the caller.",
             },
           ],
+        },
+      ],
+    },
+  },
+  {
+    name: 'Only the contract reads a query',
+    files: ['server/**/*.ts'],
+    // The OAuth redirects build and read Auth0's query, outside the contract.
+    ignores: ['server/handlers/auth0.ts', '**/*.test.ts'],
+    rules: {
+      'no-restricted-properties': [
+        'error',
+        {
+          property: 'searchParams',
+          message: "Declare the query on the route's contract input; the handler gets it parsed.",
+        },
+      ],
+      'no-restricted-globals': [
+        'error',
+        {
+          name: 'URLSearchParams',
+          message: "Declare the query on the route's contract input; the handler gets it parsed.",
         },
       ],
     },
