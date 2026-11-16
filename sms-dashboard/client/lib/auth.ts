@@ -73,21 +73,6 @@ class Auth0Service {
   isAuthenticated(): boolean {
     return this.user !== null;
   }
-
-  // Helper method to make authenticated API calls
-  async authenticatedFetch(url: string, options: RequestInit = {}): Promise<Response> {
-    const response = await fetch(url, {
-      ...options,
-      credentials: 'same-origin',
-    });
-
-    if (response.status === 401) {
-      this.logout();
-      throw new Error('Authentication required');
-    }
-
-    return response;
-  }
 }
 
 export const auth = new Auth0Service();

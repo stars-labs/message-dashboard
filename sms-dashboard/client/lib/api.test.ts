@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
-import * as v from 'valibot';
-import { ApiError, api, errorMessage, request } from './api.js';
+import { ApiError, api, contractApi, errorMessage } from './api.js';
 import { auth } from './auth.js';
 
 const originalBaseUrl = auth.baseUrl;
@@ -19,13 +18,19 @@ afterEach(() => {
   auth.baseUrl = originalBaseUrl;
 });
 
+/** A request the client made, with the options it passed to fetch alongside it. */
+interface Sent {
+  url: string;
+  init: RequestInit | undefined;
+}
+
 /** Answers with `response` and records each request the client made. */
-function answer(response: () => Response): Request[] {
-  const requests: Request[] = [];
+function answer(response: () => Response): Sent[] {
+  const requests: Sent[] = [];
   fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(
     Object.assign(
       (url: string | URL | Request, init?: RequestInit) => {
-        requests.push(new Request(url, init));
+        requests.push({ url: new Request(url).url, init });
         return Promise.resolve(response());
       },
       { preconnect: () => undefined },
@@ -41,33 +46,21 @@ async function failureOf(promise: Promise<unknown>): Promise<unknown> {
   );
 }
 
-const Ok = v.object({ ok: v.literal(true) });
+const phones = () => contractApi.messages.phones();
 
-describe('request', () => {
-  test('parses the answer with the schema and sends the session cookie', async () => {
-    const requests = answer(() => Response.json({ ok: true, extra: 1 }));
+describe('contractApi', () => {
+  test('sends the session cookie and checks the answer against the contract', async () => {
+    const requests = answer(() => Response.json({ success: true, data: [] }));
 
-    expect(await request('/api/thing', Ok)).toEqual({ ok: true });
-    expect(requests[0]?.url).toBe('https://example.com/api/thing');
-    expect(requests[0]?.credentials).toBe('same-origin');
-    expect(requests[0]?.headers.get('Content-Type')).toBe('application/json');
-  });
-
-  test('keeps the headers the caller passed, in any form', async () => {
-    const requests = answer(() => Response.json({ ok: true }));
-
-    await request('/api/thing', Ok, { headers: new Headers({ 'X-Trace': 'a' }) });
-    await request('/api/thing', Ok, { headers: [['Content-Type', 'text/plain']] });
-
-    expect(requests[0]?.headers.get('X-Trace')).toBe('a');
-    expect(requests[0]?.headers.get('Content-Type')).toBe('application/json');
-    expect(requests[1]?.headers.get('Content-Type')).toBe('text/plain');
+    expect(await phones()).toEqual({ success: true, data: [] });
+    expect(requests[0]?.url).toBe('https://example.com/api/phones');
+    expect(requests[0]?.init?.credentials).toBe('same-origin');
   });
 
   test('signs out and fails on 401', async () => {
     answer(() => Response.json({ error: 'Unauthorized' }, { status: 401 }));
 
-    const error = await failureOf(request('/api/thing', Ok));
+    const error = await failureOf(phones());
 
     expect(error).toBeInstanceOf(ApiError);
     expect(error instanceof ApiError ? [error.status, error.message] : null).toEqual([
@@ -81,32 +74,41 @@ describe('request', () => {
     answer(() =>
       Response.json({ error: 'Upstream failed', detail: 'missing scope' }, { status: 502 }),
     );
-    const error = await failureOf(request('/api/thing', Ok));
+    const error = await failureOf(phones());
     expect(error instanceof ApiError ? [error.status, error.message] : null).toEqual([
       502,
       'Upstream failed: missing scope',
     ]);
   });
 
+  test('reports a problem by its title and detail', async () => {
+    answer(() =>
+      Response.json(
+        { type: 'about:blank', title: 'Forbidden', status: 403, detail: 'needs phones.read' },
+        { status: 403 },
+      ),
+    );
+    const error = await failureOf(phones());
+    expect(error instanceof ApiError ? [error.status, error.message] : null).toEqual([
+      403,
+      'Forbidden: needs phones.read',
+    ]);
+  });
+
   test('names the status when the error body says nothing usable', async () => {
     answer(() => Response.json({ error: '' }, { status: 500 }));
-    const blank = await failureOf(request('/api/thing', Ok));
+    const blank = await failureOf(phones());
     expect(blank instanceof Error ? blank.message : null).toBe('Request failed with status 500');
 
     answer(() => new Response('<html>Bad gateway</html>', { status: 502 }));
-    const html = await failureOf(request('/api/thing', Ok));
+    const html = await failureOf(phones());
     expect(html instanceof Error ? html.message : null).toBe('Unknown error');
   });
 
-  test('fails on an answer that does not match the schema', async () => {
-    answer(() => Response.json({ ok: 'yes' }));
+  test('fails on an answer that does not match the contract', async () => {
+    answer(() => Response.json({ success: true, data: 'none' }));
 
-    const error = await failureOf(request('/api/thing', Ok));
-
-    expect(error).toBeInstanceOf(ApiError);
-    expect(error instanceof Error ? error.message : '').toStartWith(
-      'Unexpected response from /api/thing:',
-    );
+    expect(await failureOf(phones())).toBeInstanceOf(Error);
   });
 });
 

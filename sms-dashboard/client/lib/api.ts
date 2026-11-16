@@ -1,5 +1,5 @@
 import * as v from 'valibot';
-import { parseJson, readJson, type Schema } from '../../shared/parse-json.js';
+import { parseJson } from '../../shared/parse-json.js';
 import { textOr } from '../../shared/text.js';
 import { ErrorResponse } from '../../shared/api/error.js';
 import type { BalanceCheck } from '../../shared/api/balance-checks.js';
@@ -79,23 +79,11 @@ type MessagesResult =
     }
   | { data: []; pagination: Record<string, never>; failed: true };
 
-async function send(endpoint: string, options: RequestInit): Promise<Response> {
+/** Sends a request the contract client built; a refusal or failure is an ApiError. */
+async function send(built: Request): Promise<Response> {
   // Credentials travel as the HttpOnly auth_token cookie, which the browser attaches
   // itself — there is no token for JavaScript to read or forward.
   // See docs/SECURITY-REVIEW.md finding 4.
-  const headers = new Headers(options.headers);
-  if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
-  return checked(
-    await fetch(`${auth.baseUrl}${endpoint}`, {
-      ...options,
-      credentials: 'same-origin',
-      headers,
-    }),
-  );
-}
-
-/** Sends a request the contract client built; a refusal or failure is an ApiError. */
-async function sendContract(built: Request): Promise<Response> {
   return checked(await fetch(built, { credentials: 'same-origin' }));
 }
 
@@ -125,9 +113,9 @@ async function checked(response: Response): Promise<Response> {
 
 /**
  * The routes served through the contract, for a signed-in dashboard. Failures
- * arrive as ApiError, as with `request`, and a 401 signs the user out.
+ * arrive as ApiError, and a 401 signs the user out.
  */
-export const contractApi = contractClient(() => auth.baseUrl, sendContract);
+export const contractApi = contractClient(() => auth.baseUrl, send);
 
 /** Query parameters as the URL carries them: text, and absent when undefined. */
 function queryText(
@@ -138,20 +126,6 @@ function queryText(
       value === undefined ? [] : [[key, String(value)]],
     ),
   );
-}
-
-/** Sends a request and parses the answer with `schema`; a mismatch is an ApiError. */
-export async function request<T>(
-  endpoint: string,
-  schema: Schema<T>,
-  options: RequestInit = {},
-): Promise<T> {
-  const response = await send(endpoint, options);
-  const parsed = await readJson(response, schema);
-  if (!parsed.ok) {
-    throw new ApiError(`Unexpected response from ${endpoint}: ${parsed.error}`, response.status);
-  }
-  return parsed.value;
 }
 
 /** A limit of 0 or none means the default. */
