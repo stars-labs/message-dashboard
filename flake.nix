@@ -6,6 +6,9 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    # Locked apart from `nixpkgs`, which also builds the Orange Pi system: a
+    # developer tool it alone provides (oasdiff) can move without changing the Pi.
+    nixpkgs-tools.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     flake-parts.url = "github:hercules-ci/flake-parts";
     sops-nix = {
       url = "github:Mic92/sops-nix";
@@ -172,27 +175,85 @@
           # Alias for backward compatibility
           orange-pi-daemon-rust = sms-daemon;
 
+          # The daemon-Worker wire types are generated into
+          # sms-dashboard/shared/daemon-wire by ts-rs during `cargo test`. Wipe the
+          # directory, regenerate, and fail on any difference from what is checked in
+          # (changed, deleted, or untracked files).
+          check-daemon-wire = pkgs.writeShellApplication {
+            name = "check-daemon-wire";
+            runtimeInputs = with pkgs; [
+              cargo
+              git
+            ];
+            text = ''
+              root="$(git rev-parse --show-toplevel)"
+              wire="sms-dashboard/shared/daemon-wire"
+              rm -f "$root/$wire"/*.ts
+              (cd "$root/orange-pi-daemon" && cargo test --locked --lib export_bindings)
+              if [ -n "$(git -C "$root" status --porcelain --untracked-files=all -- "$wire")" ]; then
+                git -C "$root" status --short --untracked-files=all -- "$wire"
+                git -C "$root" --no-pager diff -- "$wire"
+                echo "daemon wire bindings are out of date: commit the regenerated $wire" >&2
+                exit 1
+              fi
+            '';
+          };
+
+          # Breaking changes between the committed sms-dashboard/openapi.json and the
+          # one on a base ref (default origin/main). /api/control/ is what the Pi
+          # daemon and the Balance Agent speak, and they cannot roll back with the
+          # Worker, so a breaking change there fails; browser routes ship with their
+          # client, so theirs are reported only. OASDIFF_FORMAT=githubactions in CI.
+          check-api-compat = pkgs.writeShellApplication {
+            name = "check-api-compat";
+            runtimeInputs = [
+              pkgs.git
+              inputs'.nixpkgs-tools.legacyPackages.oasdiff
+            ];
+            text = ''
+              base_ref="''${1:-origin/main}"
+              format="''${OASDIFF_FORMAT:-text}"
+              root="$(git rev-parse --show-toplevel)"
+              spec="sms-dashboard/openapi.json"
+              if ! git -C "$root" cat-file -e "$base_ref:$spec" 2>/dev/null; then
+                echo "$base_ref has no $spec yet; nothing to compare against."
+                exit 0
+              fi
+              base="$(mktemp)"
+              trap 'rm -f "$base"' EXIT
+              git -C "$root" show "$base_ref:$spec" > "$base"
+
+              echo "/api/control/ (daemon and Balance Agent): a breaking change fails"
+              oasdiff breaking --fail-on ERR --format "$format" \
+                --match-path '^/api/control/' "$base" "$root/$spec"
+
+              echo "browser routes (deployed with their client): reported only"
+              oasdiff breaking --format "$format" \
+                --unmatch-path '^/api/control/' "$base" "$root/$spec"
+            '';
+          };
+
           # One local entry point for the same Rust validation required by Nix.
           check-daemon = pkgs.writeShellApplication {
             name = "check-daemon";
             runtimeInputs = with pkgs; [
               cargo
+              check-daemon-wire
+              clippy
               git
               rustfmt
             ];
             text = ''
               cd "$(git rev-parse --show-toplevel)/orange-pi-daemon"
               cargo fmt --all --check
-              cargo test
+              cargo clippy --locked --all-targets --all-features -- -D warnings
+              cargo test --locked
+              check-daemon-wire
             '';
           };
 
           # Dev convenience commands. These land on $PATH inside the devShell (via
           # direnv `use flake`), so they work from anywhere in the repo tree.
-          #
-          # `bun` deliberately is NOT declared here: it already comes from the
-          # nix-darwin/NixOS system config, and declaring a second one would mean two
-          # answers to "which bun does this project use".
 
           # Runs the Cloudflare Worker locally with Auth0 secrets injected.
           #
@@ -206,6 +267,7 @@
               coreutils
               sops
               git
+              nodejs_22
             ];
             text = ''
               repo_root="$(git rev-parse --show-toplevel)"
@@ -235,7 +297,13 @@
                   echo "dev-api: missing secrets:$missing" >&2
                   exit 1
                 fi
-                CLOUDFLARE_INCLUDE_PROCESS_ENV=true exec bunx wrangler dev --port 8787
+                # Wrangler supports Node only; under Bun the local server
+                # reports Ready and then never answers a request.
+                # The browser talks to the Vite origin, which proxies here; without
+                # --local-upstream the Worker sees the production route as its
+                # origin and sends the Auth0 callback to production. Auth0 allows
+                # the localhost callback only, not 127.0.0.1.
+                CLOUDFLARE_INCLUDE_PROCESS_ENV=true exec node node_modules/wrangler/bin/wrangler.js dev --port 8787 --local-upstream localhost:8080
               '
             '';
           };
@@ -279,7 +347,7 @@
             runtimeInputs = with pkgs; [ git ];
             text = ''
               repo_root="$(git rev-parse --show-toplevel)"
-              exec bun "$repo_root/sms-dashboard/balance-agent/src/cli.js" "$@"
+              exec bun "$repo_root/sms-dashboard/balance-agent/src/cli.ts" "$@"
             '';
           };
 
@@ -300,6 +368,8 @@
             text = ''
               version="''${1:?usage: release-balance-agent <version>}"
               repo_root="$(git rev-parse --show-toplevel)"
+              # balance-agent is a workspace of sms-dashboard, whose lockfile pins it.
+              (cd "$repo_root/sms-dashboard" && bun install --frozen-lockfile)
               cd "$repo_root/sms-dashboard/balance-agent"
 
               echo "==> Building Balance Agent v''${version}"
@@ -329,6 +399,7 @@
               coreutils
               curl
               lsof
+              procps
             ];
             text = ''
               state_dir="''${XDG_RUNTIME_DIR:-/tmp}/message-dashboard-dev-$(id -u)"
@@ -343,12 +414,22 @@
                 lsof -nP -tiTCP:"$1" -sTCP:LISTEN 2>/dev/null | sort -u || true
               }
 
+              # The PID file holds the wrapper (sops exec-env, bun run), which does
+              # not pass a signal on to its children; killing it alone orphaned
+              # Wrangler and its second workerd on every restart.
+              kill_tree() {
+                for child in $(pgrep -P "$1" || true); do
+                  kill_tree "$child"
+                done
+                kill "$1" 2>/dev/null || true
+              }
+
               stop_pid_file() {
                 pid_file="$1"
                 if [ -f "$pid_file" ]; then
                   pid="$(cat "$pid_file")"
                   if kill -0 "$pid" 2>/dev/null; then
-                    kill "$pid" 2>/dev/null || true
+                    kill_tree "$pid"
                   fi
                   rm -f "$pid_file"
                 fi
@@ -410,19 +491,26 @@
                 log_file="$3"
                 pid_file="$4"
                 for _ in $(seq 1 60); do
-                  if curl --fail --silent --output /dev/null "$url"; then
+                  # Any HTTP status means the server is answering; /api/health
+                  # is 503 whenever the daemon is offline, as it always is locally.
+                  # The time limit keeps a server that accepts but never answers
+                  # from blocking startup forever.
+                  status="$(curl --silent --output /dev/null --max-time 2 --write-out '%{http_code}' "$url" || true)"
+                  if [ "$status" != "000" ]; then
                     return 0
                   fi
                   pid="$(cat "$pid_file")"
                   if ! kill -0 "$pid" 2>/dev/null; then
                     echo "dev-server: $name exited during startup." >&2
                     tail -n 30 "$log_file" >&2
+                    stop_servers
                     return 1
                   fi
                   sleep 0.25
                 done
                 echo "dev-server: timed out waiting for $name at $url." >&2
                 tail -n 30 "$log_file" >&2
+                stop_servers
                 return 1
               }
 
@@ -505,6 +593,7 @@
               orange-pi-daemon-rust
               balance-agent-cli
               release-balance-agent
+              check-api-compat
               ;
             default = sms-daemon;
             # Alias for easier access
@@ -535,6 +624,7 @@
                 dev-frontend
                 dev-server
                 balance-agent-cli
+                check-api-compat
                 check-daemon
                 pi-route
               ]
@@ -550,7 +640,7 @@
                 age
 
                 # Frontend development
-                oxlint
+                bun
 
                 # Rust development
                 cargo
@@ -578,7 +668,8 @@
                 echo "  • dev-api       — Wrangler + Auth0 secrets via SOPS on :8787"
                 echo "  • dev-server    — restart/stop/status the unique :8080 + :8787 pair"
                 echo "  • balance-agent — authenticated CLI for SMS AI and browser balance work"
-                echo "  • check-daemon  — required Rust format check + full test suite"
+                echo "  • check-daemon  — required Rust format check + strict Clippy + full test suite"
+                echo "  • check-api-compat — breaking API changes against origin/main (fails for /api/control/)"
                 echo "  • pi-route      — route Pi subnet past the VPN (sudo; run when on VPN)"
                 echo ""
 
@@ -630,6 +721,10 @@
           };
 
           apps = {
+            check-api-compat = {
+              type = "app";
+              program = "${check-api-compat}/bin/check-api-compat";
+            };
             balance-agent-cli = {
               type = "app";
               program = "${balance-agent-cli}/bin/balance-agent";

@@ -1,7 +1,11 @@
 use crate::dbus_client::DBusClient;
 use crate::modem_manager::ModemManager;
 use anyhow::Result;
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+fn elapsed_millis(elapsed: Duration) -> f64 {
+    f64::from(u32::try_from(elapsed.as_millis()).unwrap_or(u32::MAX))
+}
 use tokio::process::Command;
 use tracing::{info, warn};
 
@@ -78,7 +82,7 @@ impl PerformanceBenchmark {
         }
 
         let elapsed = start.elapsed();
-        let avg_ms = elapsed.as_millis() as f64 / iterations as f64;
+        let avg_ms = elapsed_millis(elapsed) / f64::from(iterations);
 
         Ok(avg_ms)
     }
@@ -121,7 +125,7 @@ impl PerformanceBenchmark {
         }
 
         let elapsed = start.elapsed();
-        let avg_ms = elapsed.as_millis() as f64 / iterations as f64;
+        let avg_ms = elapsed_millis(elapsed) / f64::from(iterations);
 
         Ok(avg_ms)
     }
@@ -150,7 +154,7 @@ impl PerformanceBenchmark {
         }
 
         let elapsed = start.elapsed();
-        let avg_ms = elapsed.as_millis() as f64 / iterations as f64;
+        let avg_ms = elapsed_millis(elapsed) / f64::from(iterations);
 
         Ok(avg_ms)
     }
@@ -175,7 +179,7 @@ impl PerformanceBenchmark {
         }
 
         let elapsed = start.elapsed().as_secs_f64();
-        let ops_per_sec = operations as f64 / elapsed;
+        let ops_per_sec = f64::from(operations) / elapsed;
 
         info!("✅ Completed {} operations in {:.2}s", operations, elapsed);
         info!("📊 Throughput: {:.1} operations/second", ops_per_sec);

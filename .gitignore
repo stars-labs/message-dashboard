@@ -28,6 +28,10 @@ orange-pi-daemon/test_connection
 
 # Database dumps
 sms-dashboard/dump.sql
+*.db
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
 
 # Generated files
 sms-dashboard/server/frontend-assets.js

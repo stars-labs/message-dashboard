@@ -1,0 +1,16 @@
+// The IPC contract between the renderer, the preload script and the main
+// process. It runs in all three, so it assumes none of them.
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "tsBuildInfoFile": "./node_modules/.tmp/contract.tsbuildinfo",
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "declaration": true,
+    "outDir": "./node_modules/.tmp/contract-declarations"
+  },
+  "include": ["src/ipc/**/*.ts"],
+  "exclude": ["src/**/*.test.ts"],
+  "references": [{ "path": "../tsconfig.shared.json" }]
+}

@@ -1,0 +1,9 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/control/carrier-web-balance/jobs/web-job-1/otp?runner_id=runner-1"
+  },
+  "response": {
+    "status": 204
+  }
+}

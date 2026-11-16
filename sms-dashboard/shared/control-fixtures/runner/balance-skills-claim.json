@@ -1,0 +1,45 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/control/balance-skills/jobs/claim?runner_id=runner-1"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "id": "skill-job-1",
+      "check_id": "check-1",
+      "step_index": 0,
+      "attempts": 1,
+      "skill": {
+        "id": "readonly-balance-menu",
+        "version": "1",
+        "objective": "查询当前可用现金话费余额",
+        "confidence_threshold": 0.85,
+        "max_turns": 4,
+        "allowed_currencies": ["CNY"],
+        "forbidden_intents": [
+          "充值",
+          "缴费",
+          "订购",
+          "退订",
+          "办理",
+          "开通",
+          "购买",
+          "套餐变更",
+          "活动"
+        ]
+      },
+      "menu_options": [
+        {
+          "value": "11",
+          "label": "账务查询"
+        },
+        {
+          "value": "12",
+          "label": "客户服务"
+        }
+      ],
+      "response_content": "11.账务查询\n12.客户服务"
+    }
+  }
+}

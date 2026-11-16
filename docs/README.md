@@ -111,7 +111,7 @@ message-dashboard/
     ├── dist/                 # Built frontend assets
     ├── public/               # Static assets
     ├── scripts/              # Build and utility scripts
-    │   ├── build-unified.js  # Unified build script
+    │   ├── build-unified.ts  # Unified build script
     │   ├── diagnose-phone-issues.js
     │   └── test-phone-data.js
     ├── server/               # Backend source code (Workers)

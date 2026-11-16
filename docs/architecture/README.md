@@ -16,7 +16,7 @@ this page describes how the parts connect.
 | Rust daemon (`orange-pi-daemon/`) | Tokio on Orange Pi, NixOS | EC20 modems over AT commands on `/dev/ttyUSB*`; Worker `/api/control/*` | `X-API-Key` |
 | Worker API (`sms-dashboard/server/`) | Cloudflare Worker, `sexy.itoken.world` | D1 `DB`, KV `SESSIONS`, Auth0, Realtime SFU | — |
 | Dashboard SPA (`sms-dashboard/client/`) | Svelte 5, served by the same Worker | Worker `/api/*` | Auth0 login, HttpOnly cookie, RBAC |
-| Balance Agent (`sms-dashboard/balance-agent/`) | Electron app + CLI on an operator Mac, built on `runner-core/` | Worker `/api/control/*`, company AI API, carrier web portals | Auth0 device flow, scoped to the requesting `sub` |
+| Balance Agent (`sms-dashboard/balance-agent/`) | Electron app + CLI on an operator Mac, built on its own `src/runner/` | Worker `/api/control/*`, company AI API, carrier web portals | Auth0 device flow, scoped to the requesting `sub` |
 | Realtime SFU | Cloudflare Realtime | Browser WebRTC media; daemon voice bridge over `wss` | per-call HMAC |
 
 Notes:

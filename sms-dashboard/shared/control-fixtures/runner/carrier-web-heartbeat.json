@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/control/carrier-web-balance/jobs/web-job-1/heartbeat",
+    "body": {
+      "runner_id": "runner-1",
+      "status": "awaiting_otp"
+    }
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "success": true,
+      "status": "awaiting_otp",
+      "lease_seconds": 120
+    }
+  }
+}

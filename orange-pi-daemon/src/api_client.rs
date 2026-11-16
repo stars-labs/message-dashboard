@@ -1,23 +1,27 @@
-use crate::health::HealthSnapshot;
+use crate::identifiers::{Iccid, Imei};
 use crate::message_store::StoredMessage;
-use crate::sync_manager::SyncMode;
-use crate::types::*;
+use crate::types::Config;
+use crate::wire::{
+    CallEndReason, EndedCallRequest, HealthSnapshot, IncomingCallRequest, MessageBatchRequest,
+    ModemReport, ModemReportsRequest, PendingSms, PendingSmsResponse, SyncMode, UploadResponse,
+    UploadResult, UploadedMessage,
+};
 use anyhow::{Context, Result};
 use reqwest::Client;
-use serde_json::json;
+use serde::Serialize;
 use tracing::info;
 
-#[derive(Debug, serde::Deserialize)]
-pub struct UploadResult {
-    pub id: String,
-    pub status: String,
-    #[serde(default)]
-    pub retryable: bool,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct UploadResponse {
-    results: Vec<UploadResult>,
+impl<'a> From<&'a StoredMessage> for UploadedMessage<'a> {
+    fn from(stored: &'a StoredMessage) -> Self {
+        Self {
+            content: &stored.message.content,
+            direction: &stored.message.direction,
+            id: &stored.source_message_id,
+            phone_iccid: &stored.message.phone_iccid,
+            phone_number: &stored.message.phone_number,
+            timestamp: &stored.message.timestamp,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -27,14 +31,12 @@ pub struct ApiClient {
 }
 
 impl ApiClient {
-    pub fn new(config: Config) -> Self {
-        Self {
-            client: Client::builder()
-                .timeout(std::time::Duration::from_secs(30)) // Increased to 30s for large uploads
-                .build()
-                .expect("Failed to create HTTP client"),
-            config,
-        }
+    pub fn new(config: Config) -> Result<Self> {
+        let client = Client::builder()
+            .timeout(std::time::Duration::from_secs(30)) // Increased to 30s for large uploads
+            .build()
+            .context("Failed to create HTTP client")?;
+        Ok(Self { client, config })
     }
 
     /// Send an independent, versioned process and task health report.
@@ -53,7 +55,7 @@ impl ApiClient {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            anyhow::bail!("Health endpoint returned {}: {}", status, body);
+            anyhow::bail!("Health endpoint returned {status}: {body}");
         }
 
         Ok(())
@@ -63,7 +65,7 @@ impl ApiClient {
     pub async fn upload_modem_reports(
         &self,
         reports: &[ModemReport],
-        removed_equipment_ids: &[String],
+        removed_equipment_ids: &[Imei],
         sync_mode: SyncMode,
         session_id: &str,
     ) -> Result<()> {
@@ -87,13 +89,13 @@ impl ApiClient {
             session_id
         );
 
-        let payload = json!({
-            "sync_mode": sync_mode.as_str(),
-            "session_id": session_id,
-            "timestamp": timestamp,
-            "modem_reports": reports,
-            "removed_equipment_ids": removed_equipment_ids,
-        });
+        let payload = ModemReportsRequest {
+            modem_reports: reports,
+            removed_equipment_ids,
+            session_id,
+            sync_mode,
+            timestamp: &timestamp,
+        };
 
         let response = self
             .client
@@ -111,7 +113,7 @@ impl ApiClient {
                 .text()
                 .await
                 .unwrap_or_else(|_| String::from("(no body)"));
-            anyhow::bail!("API returned error: {} - {}", status, body);
+            anyhow::bail!("API returned error: {status} - {body}");
         }
 
         info!(
@@ -123,11 +125,12 @@ impl ApiClient {
 
     /// Upload messages with proper batching to avoid overwhelming the API
     pub async fn upload_messages(&self, messages: &[StoredMessage]) -> Result<Vec<UploadResult>> {
+        const BATCH_SIZE: usize = 50; // Match the server's internal batch size
+
         if messages.is_empty() {
             return Ok(vec![]);
         }
 
-        const BATCH_SIZE: usize = 50; // Match the server's internal batch size
         let url = format!("{}/api/control/messages", self.config.api_url);
 
         // Process messages in batches to avoid overwhelming the API
@@ -138,7 +141,7 @@ impl ApiClient {
             info!(
                 "📤 Uploading batch {}/{} ({} messages)",
                 batch_num + 1,
-                (total + BATCH_SIZE - 1) / BATCH_SIZE,
+                total.div_ceil(BATCH_SIZE),
                 chunk.len()
             );
 
@@ -147,14 +150,9 @@ impl ApiClient {
                 .client
                 .post(&url)
                 .header("x-api-key", &self.config.api_key)
-                .json(&json!({ "messages": chunk.iter().map(|stored| json!({
-                    "id": stored.source_message_id,
-                    "phone_iccid": stored.message.phone_iccid,
-                    "phone_number": stored.message.phone_number,
-                    "content": stored.message.content,
-                    "timestamp": stored.message.timestamp,
-                    "direction": stored.message.direction,
-                })).collect::<Vec<_>>() }))
+                .json(&MessageBatchRequest {
+                    messages: chunk.iter().map(UploadedMessage::from).collect(),
+                })
                 .send()
                 .await
                 .context(format!("Failed to upload message batch {}", batch_num + 1))?;
@@ -188,7 +186,7 @@ impl ApiClient {
         info!(
             "✅ Successfully uploaded {} messages in {} batches",
             results.len(),
-            (total + BATCH_SIZE - 1) / BATCH_SIZE
+            total.div_ceil(BATCH_SIZE)
         );
         Ok(results)
     }
@@ -209,19 +207,14 @@ impl ApiClient {
             anyhow::bail!("API returned error: {}", response.status());
         }
 
-        #[derive(serde::Deserialize)]
-        struct PendingResponse {
-            pending_messages: Vec<PendingSms>,
-        }
-
-        let data: PendingResponse = response.json().await?;
+        let data: PendingSmsResponse = response.json().await?;
         Ok(data.pending_messages)
     }
 
     /// Report a ringing SIM. Repeated while it rings; the Worker refreshes a
     /// short-lived KV entry and answers 409 when another call is active.
-    pub async fn report_incoming_call(&self, iccid: &str, from: Option<&str>) -> Result<()> {
-        self.post_call_event("incoming", json!({ "iccid": iccid, "from": from }))
+    pub async fn report_incoming_call(&self, iccid: &Iccid, from: Option<&str>) -> Result<()> {
+        self.post_call_event("incoming", &IncomingCallRequest { from, iccid })
             .await
     }
 
@@ -230,32 +223,36 @@ impl ApiClient {
     pub async fn report_call_ended(
         &self,
         call_id: Option<&str>,
-        iccid: &str,
-        reason: &str,
+        iccid: &Iccid,
+        reason: CallEndReason,
     ) -> Result<()> {
         self.post_call_event(
             "ended",
-            json!({ "call_id": call_id, "iccid": iccid, "reason": reason }),
+            &EndedCallRequest {
+                call_id,
+                iccid,
+                reason,
+            },
         )
         .await
     }
 
-    async fn post_call_event(&self, event: &str, body: serde_json::Value) -> Result<()> {
+    async fn post_call_event(&self, event: &str, body: &impl Serialize) -> Result<()> {
         let url = format!("{}/api/control/calls/{}", self.config.api_url, event);
         let response = self
             .client
             .post(&url)
             .header("x-api-key", &self.config.api_key)
             .timeout(std::time::Duration::from_secs(10))
-            .json(&body)
+            .json(body)
             .send()
             .await
-            .with_context(|| format!("Failed to report call {}", event))?;
+            .with_context(|| format!("Failed to report call {event}"))?;
         let status = response.status();
         // 409: another call holds the single-call lock, which is expected.
         if !status.is_success() && status != reqwest::StatusCode::CONFLICT {
             let body = response.text().await.unwrap_or_default();
-            anyhow::bail!("calls/{} returned {}: {}", event, status, body);
+            anyhow::bail!("calls/{event} returned {status}: {body}");
         }
         Ok(())
     }

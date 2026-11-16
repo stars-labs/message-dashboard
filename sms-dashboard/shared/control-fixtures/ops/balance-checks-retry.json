@@ -1,0 +1,21 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/control/balance-checks/retry",
+    "body": {
+      "check_id": "check-1"
+    }
+  },
+  "response": {
+    "status": 202,
+    "body": {
+      "success": true,
+      "check": {
+        "id": "check-1",
+        "status": "queued",
+        "step_index": 1,
+        "outbound_message_id": "option-1"
+      }
+    }
+  }
+}

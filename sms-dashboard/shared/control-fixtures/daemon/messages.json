@@ -1,0 +1,32 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/control/messages",
+    "body": {
+      "messages": [
+        {
+          "content": "Your code is 123456",
+          "direction": "received",
+          "id": "018c1a55-73a0-7b9b-8c06-123456789abc",
+          "phone_iccid": "89860123456789012345",
+          "phone_number": "+8610086",
+          "timestamp": "2026-11-15T00:00:00.000Z"
+        }
+      ]
+    }
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "success": true,
+      "processed": 1,
+      "results": [
+        {
+          "id": "018c1a55-73a0-7b9b-8c06-123456789abc",
+          "status": "stored"
+        }
+      ],
+      "message": "Successfully uploaded 1 messages"
+    }
+  }
+}

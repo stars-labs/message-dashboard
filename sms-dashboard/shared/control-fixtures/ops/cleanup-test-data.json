@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/control/cleanup-test-data",
+    "body": {
+      "phoneIds": ["89860123456789012345"]
+    }
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "success": true,
+      "deleted": 1,
+      "cleanedNullIccid": 0,
+      "message": "Deleted 1 test SIMs and 0 SIMs without ICCID"
+    }
+  }
+}

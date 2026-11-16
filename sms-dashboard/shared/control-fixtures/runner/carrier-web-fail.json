@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/control/carrier-web-balance/jobs/web-job-1/fail",
+    "body": {
+      "runner_id": "runner-1",
+      "error": "portal unavailable"
+    }
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "success": true,
+      "status": "failed"
+    }
+  }
+}

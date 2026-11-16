@@ -1,0 +1,19 @@
+// Tests of the Balance Agent. They run under Bun.
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "tsBuildInfoFile": "./node_modules/.tmp/test.tsbuildinfo",
+    "types": ["bun"],
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "declaration": true,
+    "outDir": "./node_modules/.tmp/test-declarations"
+  },
+  "include": ["src/**/*.test.ts", "src/test-support/**/*.ts"],
+  "references": [
+    { "path": "../tsconfig.shared.json" },
+    { "path": "./tsconfig.contract.json" },
+    { "path": "./tsconfig.main.json" }
+  ]
+}

@@ -1,0 +1,16 @@
+// The settings window. DOM only: it has no Node and no Electron, just the
+// window.balanceAgent bridge the preload script exposes.
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "tsBuildInfoFile": "./node_modules/.tmp/renderer.tsbuildinfo",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "declaration": true,
+    "outDir": "./node_modules/.tmp/renderer-declarations"
+  },
+  "include": ["src/renderer/**/*.ts"],
+  "references": [{ "path": "./tsconfig.contract.json" }]
+}

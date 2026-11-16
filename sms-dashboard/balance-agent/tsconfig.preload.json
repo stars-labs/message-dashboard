@@ -1,0 +1,15 @@
+// The preload script: it runs in the sandboxed renderer process, where only
+// Electron's renderer-side API exists.
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "tsBuildInfoFile": "./node_modules/.tmp/preload.tsbuildinfo",
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "declaration": true,
+    "outDir": "./node_modules/.tmp/preload-declarations"
+  },
+  "include": ["src/preload.ts"],
+  "references": [{ "path": "../tsconfig.shared.json" }, { "path": "./tsconfig.contract.json" }]
+}
