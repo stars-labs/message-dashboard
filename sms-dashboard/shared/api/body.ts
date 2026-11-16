@@ -25,9 +25,7 @@ const MISSING_KEY = /^"(.+)"$/;
 /**
  * A JSON object body: a missing required key answers its own message, no body
  * at all `absent` (on a daemon or runner route, a body that is not JSON reads
- * as none), and anything else that is not an object `message`. The messages
- * live in the schema, so every reader of the body (the contract, readBody)
- * reports the same thing.
+ * as none), and anything else that is not an object `message`.
  */
 export function bodyObject<const Entries extends v.ObjectEntries>(
   entries: Entries,

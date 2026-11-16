@@ -14,20 +14,16 @@ afterEach(() => {
 });
 
 function makeRequest({
-  url = 'https://sexy.itoken.world/api/phones',
   headers = {},
   sessions = {},
 }: {
-  url?: string;
   headers?: Record<string, string>;
   sessions?: Record<string, string | Error>;
 }) {
   const deleted: string[] = [];
   const request: AuthRequest = {
-    url,
     headers: new Headers(headers),
     env: {
-      API_KEY: 'daemon-key',
       AUTH0_ROLE_NAMESPACE: claim,
       SESSIONS: {
         get: (key) => {
@@ -58,56 +54,16 @@ function session(overrides: Record<string, unknown> = {}): string {
   });
 }
 
-describe('handleAuth0 control endpoints', () => {
-  test('lets a request with the daemon API key through', async () => {
-    const { request } = makeRequest({
-      url: 'https://sexy.itoken.world/api/control/pending',
-      headers: { 'X-API-Key': 'daemon-key' },
-    });
-    expect(await handleAuth0(request)).toBeUndefined();
-  });
-
-  test('rejects a wrong API key with 401', async () => {
-    const { request } = makeRequest({
-      url: 'https://sexy.itoken.world/api/control/pending',
-      headers: { 'X-API-Key': 'other' },
-    });
-    const response = await handleAuth0(request);
-    expect(response?.status).toBe(401);
-    expect(await body(response)).toEqual({ error: 'Unauthorized' });
-  });
-
-  test('rejects a missing API key with 401', async () => {
-    const { request } = makeRequest({ url: 'https://sexy.itoken.world/api/control/pending' });
-    const response = await handleAuth0(request);
-    expect(response?.status).toBe(401);
-  });
-
-  test('decides by the path, so a query string naming a control path does not change the scheme', async () => {
-    const { request } = makeRequest({
-      url: 'https://sexy.itoken.world/api/phones?next=/api/control/pending',
-      headers: { Cookie: 'auth_token=tok-1' },
-      sessions: { 'tok-1': session() },
-    });
-    expect(await handleAuth0(request)).toBeUndefined();
-    expect(request.user?.id).toBe('auth0|u1');
-  });
-
-  test('accepts no session in place of the API key on a control path', async () => {
-    const { request } = makeRequest({
-      url: 'https://sexy.itoken.world/api/control/pending',
-      headers: { Cookie: 'auth_token=tok-1' },
-      sessions: { 'tok-1': session() },
-    });
-    const response = await handleAuth0(request);
-    expect(response?.status).toBe(401);
-    expect(request.user).toBeUndefined();
-  });
-});
-
 describe('handleAuth0 sessions', () => {
   test('answers 401 when no credential is presented', async () => {
     const { request } = makeRequest({});
+    const response = await handleAuth0(request);
+    expect(response?.status).toBe(401);
+    expect(await body(response)).toEqual({ error: 'No token provided' });
+  });
+
+  test('does not take the daemon API key for a session', async () => {
+    const { request } = makeRequest({ headers: { 'X-API-Key': 'daemon-key' } });
     const response = await handleAuth0(request);
     expect(response?.status).toBe(401);
     expect(await body(response)).toEqual({ error: 'No token provided' });

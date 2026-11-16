@@ -3,15 +3,12 @@ import { auth0Handler, StoredSession } from '../handlers/auth0.js';
 import type { SessionUser } from '../../shared/api/auth.js';
 import { readKvJson, type KV } from '../lib/kv.js';
 import { json } from '../lib/response.js';
-import { secretMatches } from '../lib/secret.js';
 import { createRoleConfig, rolesFromToken, type RoleEnv } from '../../config/auth0-roles.js';
 import { extractSessionToken } from '../utils/session-token.js';
 
 export interface AuthRequest {
-  url: string;
   headers: { get(name: string): string | null };
   env: RoleEnv & {
-    API_KEY?: string;
     AUTH0_DOMAIN?: string;
     AUTH0_AUDIENCE?: string;
     AUTH0_CLIENT_ID?: string;
@@ -33,14 +30,6 @@ const JwtClaims = v.object({
 // Auth0 authentication middleware
 export async function handleAuth0(request: AuthRequest): Promise<Response | undefined> {
   const { env } = request;
-
-  // Check for API key for control endpoints
-  if (new URL(request.url).pathname.startsWith('/api/control/')) {
-    if (!(await secretMatches(request.headers.get('X-API-Key'), env.API_KEY))) {
-      return json({ error: 'Unauthorized' }, 401);
-    }
-    return; // Continue to handler
-  }
 
   // Credential comes from the HttpOnly auth_token cookie for browsers, or an
   // Authorization header for programmatic callers presenting an Auth0 JWT.

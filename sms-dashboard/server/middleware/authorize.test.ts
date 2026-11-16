@@ -3,7 +3,6 @@ import { authorize, type AuthorizeRequest } from './authorize.js';
 
 function makeRequest(storedSession?: string): AuthorizeRequest {
   return {
-    url: 'https://sexy.itoken.world/api/phones',
     headers: new Headers(storedSession === undefined ? {} : { Cookie: 'auth_token=token-1' }),
     env: {
       AUTH0_ROLE_NAMESPACE: 'https://sexy.itoken.world/roles',

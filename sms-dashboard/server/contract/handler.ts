@@ -71,9 +71,9 @@ async function admit(access: Access, request: AppRequest): Promise<Admission> {
 /**
  * `request`, with its body as the route's schema should read it. Every contract
  * body is an object, and a Valibot object schema accepts an array, reading `[]`
- * as `{}`; as null, the schema answers with its own not-an-object message, as
- * readBody did. On a daemon or runner route a body that is not JSON reads as
- * none, so the schema answers with the message each route always gave.
+ * as `{}`; as null, the schema answers with its own not-an-object message. On
+ * a daemon or runner route a body that is not JSON reads as none, so the
+ * schema answers with the message each route always gave.
  */
 async function bodyAsRead(request: AppRequest, format: DaemonErrors | 'problem'): Promise<Request> {
   if (request.method === 'GET' || request.body === null) return request;
