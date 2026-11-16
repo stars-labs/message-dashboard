@@ -27,13 +27,11 @@ export interface AppContext {
 
 /**
  * The Request handlers receive: the Worker's request with the env and ctx the
- * runtime passed alongside it, and the route parameters and caller the router
- * and the auth middleware add.
+ * runtime passed alongside it, and the caller the auth middleware adds.
  */
 export interface AppRequest extends Request {
   env: AppEnv;
   ctx: AppContext;
-  params?: Record<string, string>;
   user?: SessionUser & { permissions?: string[] };
   auth0Token?: Record<string, unknown>;
 }

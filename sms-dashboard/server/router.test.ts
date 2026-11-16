@@ -1,37 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import { matchRoute, Router } from './router.js';
-
-describe('matchRoute', () => {
-  test('matches a literal path, the catch-all, and a prefix', () => {
-    expect(matchRoute('/api/live', '/api/live')).toEqual({});
-    expect(matchRoute('/api/live', '/api/live/x')).toBeNull();
-    expect(matchRoute('*', '/anything')).toEqual({});
-    expect(matchRoute('/assets/*', '/assets/app.js')).toEqual({});
-    expect(matchRoute('/assets/*', '/other/app.js')).toBeNull();
-  });
-
-  test('captures and decodes parameters', () => {
-    expect(matchRoute('/api/users/:id/role', '/api/users/auth0%7Cabc/role')).toEqual({
-      id: 'auth0|abc',
-    });
-    expect(matchRoute('/api/a/:x/b/:y', '/api/a/1/b/2')).toEqual({ x: '1', y: '2' });
-  });
-
-  test('keeps a segment whose encoding is malformed as it arrived', () => {
-    expect(matchRoute('/api/users/:id', '/api/users/%E0%A4%A')).toEqual({ id: '%E0%A4%A' });
-  });
-
-  test('needs every literal segment and the same number of segments', () => {
-    expect(matchRoute('/api/users/:id', '/api/groups/1')).toBeNull();
-    expect(matchRoute('/api/users/:id', '/api/users/1/role')).toBeNull();
-    expect(matchRoute('/api/users/:id', '/api/users')).toBeNull();
-  });
-});
+import { Router } from './router.js';
 
 interface TestRequest {
   url: string;
   method: string;
-  params?: Record<string, string>;
 }
 
 function request(method: string, path: string): TestRequest {
@@ -49,78 +21,41 @@ async function bodyOf(response: Response | null | undefined): Promise<string | n
 describe('Router', () => {
   test('dispatches on the method and the first matching path', async () => {
     const router = new Router<TestRequest>();
-    router.get('/api/live', reply('live'));
-    router.get('/api/*', reply('api'));
-    router.post('/api/live', reply('post'));
+    router.get('/login', reply('login'));
+    router.get('*', reply('shell'));
+    router.options('*', reply('preflight'));
 
-    expect(await bodyOf(await router.handle(request('GET', '/api/live')))).toBe('live');
-    expect(await bodyOf(await router.handle(request('GET', '/api/other')))).toBe('api');
-    expect(await bodyOf(await router.handle(request('POST', '/api/live')))).toBe('post');
-    expect(await router.handle(request('PUT', '/api/live'))).toBeNull();
-    expect(await router.handle(request('PATCH', '/api/live'))).toBeNull();
+    expect(await bodyOf(await router.handle(request('GET', '/login')))).toBe('login');
+    expect(await bodyOf(await router.handle(request('GET', '/login/x')))).toBe('shell');
+    expect(await bodyOf(await router.handle(request('OPTIONS', '/login')))).toBe('preflight');
+    expect(await router.handle(request('POST', '/login'))).toBeNull();
   });
 
-  test('runs a route’s handlers until one responds, and stops at the first matching route', async () => {
+  test('matches a path as a whole, not a prefix', async () => {
     const router = new Router<TestRequest>();
-    const seen: string[] = [];
-    router.get(
-      '/api/x',
-      () => {
-        seen.push('gate');
-        return null;
-      },
-      () => {
-        seen.push('handler');
-        return new Response('x');
-      },
-      () => {
-        seen.push('unreached');
-        return new Response('y');
-      },
-    );
-    router.get('/api/x', reply('second route'));
+    router.get('/login', reply('login'));
 
-    expect(await bodyOf(await router.handle(request('GET', '/api/x')))).toBe('x');
-    expect(seen).toEqual(['gate', 'handler']);
+    expect(await router.handle(request('GET', '/login/x'))).toBeNull();
+    expect(await router.handle(request('GET', '/log'))).toBeNull();
   });
 
-  test('answers nothing when the matching route’s handlers all pass', async () => {
+  test('stops at the first matching route even when it does not answer', async () => {
     const router = new Router<TestRequest>();
-    router.get('/api/x', () => undefined);
+    router.get('/x', () => undefined);
     router.get('*', reply('fallback'));
 
-    expect(await router.handle(request('GET', '/api/x'))).toBeUndefined();
-  });
-
-  test('sets the decoded parameters only for a parameterised route', async () => {
-    const router = new Router<TestRequest>();
-    const params: (Record<string, string> | undefined)[] = [];
-    const record = (req: TestRequest) => {
-      params.push(req.params);
-      return new Response('ok');
-    };
-    router.get('/api/users/:id', record);
-    router.get('/api/live', record);
-
-    await router.handle(request('GET', '/api/users/auth0%7Cabc'));
-    await router.handle(request('GET', '/api/live'));
-
-    expect(params).toEqual([{ id: 'auth0|abc' }, undefined]);
+    expect(await router.handle(request('GET', '/x'))).toBeUndefined();
   });
 
   test('lists its routes by method, each method in registration order', () => {
     const router = new Router<TestRequest>();
-    router.post('/api/b', reply('b'));
-    router.get('/api/x', reply('x'));
     router.options('*', reply('preflight'));
-    router.get('*', reply('fallback'));
-    router.delete('/api/b/:id', reply('gone'));
+    router.get('/login', reply('login'));
+    router.get('*', reply('shell'));
 
     expect(router.routes()).toEqual([
-      { method: 'GET', path: '/api/x' },
+      { method: 'GET', path: '/login' },
       { method: 'GET', path: '*' },
-      { method: 'POST', path: '/api/b' },
-      { method: 'DELETE', path: '/api/b/:id' },
       { method: 'OPTIONS', path: '*' },
     ]);
   });
