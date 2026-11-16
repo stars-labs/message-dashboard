@@ -14,9 +14,38 @@
 - `modems.detected_iccid` — live field. `modems.current_iccid` is dead legacy.
 - `modem_state` dropped in migration `033` — signal fields are on `modems`.
 - SIM indices: `S` + two digits (`S01`, `S36`) — use the centralized formatter.
-- Auth: browser → Auth0 JWT + RBAC; daemon → `API_KEY`. Middleware: CORS → JWT → RBAC.
+- Auth: browser → Auth0 session + RBAC; daemon → `API_KEY`; Balance Agent →
+  `API_KEY` or an Auth0 token with the route's scope. Each route declares which.
 
 Full schema and auth contracts: [docs/data-contracts.md](../docs/data-contracts.md)
+
+## Adding an API route
+
+Every `/api/*` route is declared on the contract, in `shared/api/contract/`, with
+`route(access, method, path)`; it says who may call it, and the schemas say what
+goes in and out:
+
+```ts
+// shared/api/contract/iccid-mappings.ts
+get: route({ kind: 'user', permission: 'phones.read' }, 'GET', '/api/iccid-mappings/{id}')
+  .route({ inputStructure: 'detailed' })
+  .input(v.object({ params: v.object({ id: v.string() }) }))
+  .output(IccidMappingDetailResponse),
+
+// server/contract/router.ts: the caller is admitted and the input parsed before this runs
+get: os.iccidMappings.get.handler(({ context, input }) =>
+  iccidMappingsHandler.get(context.request, input.params.id),
+),
+```
+
+The dashboard calls it as `contractApi.iccidMappings.get({ params: { id } })`
+(`client/lib/api.ts`), the Balance Agent through `balance-agent/src/runner/control-client.ts`.
+`bun run lint` rejects the old ways back: an `/api/` URL in `client/` or
+`balance-agent/src/`, a server import of `handleAuth0`, `authorize`,
+`requireApiKey` or `authorizeRunnerControl` outside `server/contract/handler.ts`,
+and `searchParams` / `URLSearchParams` in `server/` outside the OAuth redirects
+(`server/handlers/auth0.ts`). The legacy `Router` in `server/app.ts` serves only
+those redirects, CORS preflight and the app shell.
 
 ## Development
 

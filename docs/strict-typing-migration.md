@@ -95,10 +95,11 @@ it: request bodies, query/params, D1 rows, KV values, `fetch` responses
 - JSON text and upstream responses: `readJson(body, schema)` / `parseJson(text, schema)`
   from `shared/parse-json.ts`. They return `{ ok, value } | { ok: false, error }`;
   the handler answers the bad input itself.
-- Request bodies: `readBody(request, Schema, MISSING_KEY_MESSAGES)` from
-  `server/lib/request-body.ts`. The schema declares every 400 message; the
-  missing-key table is typed to list exactly the required keys. A body that is
-  not JSON answers `NOT_JSON_MESSAGE`; a JSON array is never an object body.
+- Request bodies and queries: the route's contract input (`shared/api/contract/`),
+  parsed before the handler runs. A body schema built with `bodyObject` from
+  `shared/api/body.ts` declares every 400 message; the missing-key table is
+  typed to list exactly the required keys. A body that is not JSON answers
+  `NOT_JSON_MESSAGE`; a JSON array is never an object body.
 - D1: `queryAll` / `queryFirst` from `server/lib/d1.ts`. No `.first<T>()` /
   `.all<T>()` type arguments. ESLint enforces both rules.
 - Row schemas live next to the query that produces them and list exactly the
