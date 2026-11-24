@@ -9,7 +9,6 @@ const EXPECTED = [
   ['POST', '/api/control/devices'],
   ['POST', '/api/control/messages'],
   ['DELETE', '/api/control/messages'],
-  ['POST', '/api/control/cleanup-test-data'],
   ['GET', '/api/control/pending-sms'],
   ['POST', '/api/control/sms-result'],
   ['POST', '/api/control/calls/incoming'],

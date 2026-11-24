@@ -53,7 +53,6 @@ const ROUTES = {
   updateDevices: ['POST', '/api/control/devices'],
   uploadMessages: ['POST', '/api/control/messages'],
   clearMessages: ['DELETE', '/api/control/messages'],
-  cleanupTestData: ['POST', '/api/control/cleanup-test-data'],
   getPendingSMS: ['GET', '/api/control/pending-sms'],
   updateSMSResult: ['POST', '/api/control/sms-result'],
 } as const;
@@ -100,7 +99,6 @@ describe('every control route', () => {
     for (const route of [
       'updateDevices',
       'uploadMessages',
-      'cleanupTestData',
       'getPendingSMS',
       'updateSMSResult',
       'clearMessages',
@@ -115,12 +113,7 @@ describe('every control route', () => {
   });
 
   test('answers 400 to a body that is not JSON', async () => {
-    for (const route of [
-      'updateDevices',
-      'uploadMessages',
-      'updateSMSResult',
-      'cleanupTestData',
-    ] as const) {
+    for (const route of ['updateDevices', 'uploadMessages', 'updateSMSResult'] as const) {
       const response = await send(route, undefined, { rawBody: '{', database: untouchable });
       expect(response.status).toBe(400);
       expect(await errorOf(response)).toBe('Body must be JSON');
@@ -968,40 +961,6 @@ describe('POST /api/control/sms-result', () => {
   });
 });
 
-describe('POST /api/control/cleanup-test-data', () => {
-  test('deletes the listed SIMs and any SIM without an ICCID', async () => {
-    sqlite.run(`
-      INSERT INTO sims (iccid, sim_index, phone_number) VALUES
-        ('test-1', 1, '+1'), ('test-2', 2, '+2'), ('keep', 3, '+3'), ('', 4, '+4');
-    `);
-
-    const response = await send('cleanupTestData', { phoneIds: ['test-1', 'test-2', 'missing'] });
-
-    expect(await response.json()).toEqual({
-      success: true,
-      deleted: 2,
-      cleanedNullIccid: 1,
-      message: 'Deleted 2 test SIMs and 1 SIMs without ICCID',
-    });
-    expect(every(Row, `SELECT iccid FROM sims`)).toEqual([{ iccid: 'keep' }]);
-  });
-
-  test('requires a non-empty list of ICCIDs', async () => {
-    const cases: [unknown, string][] = [
-      [{}, 'phoneIds must be an array'],
-      [{ phoneIds: 'test-1' }, 'phoneIds must be an array'],
-      [{ phoneIds: [] }, 'phoneIds must be a non-empty array of ICCIDs'],
-      [{ phoneIds: [5] }, 'phoneIds must be a non-empty array of ICCIDs'],
-      [{ phoneIds: [''] }, 'phoneIds must be a non-empty array of ICCIDs'],
-    ];
-    for (const [body, error] of cases) {
-      const response = await send('cleanupTestData', body, { database: untouchable });
-      expect(response.status).toBe(400);
-      expect(await errorOf(response)).toBe(error);
-    }
-  });
-});
-
 describe('DELETE /api/control/messages', () => {
   test('deletes every message', async () => {
     insertOutbound('msg-1');
@@ -1110,29 +1069,6 @@ describe('control error answers on the wire', () => {
     );
   });
 
-  test('cleanup-test-data answers each refused request with its exact bytes', async () => {
-    const cases: [string | undefined, unknown, string][] = [
-      ['{', undefined, '{"success":false,"error":"Body must be JSON"}'],
-      [undefined, [], '{"success":false,"error":"phoneIds must be an array"}'],
-      [
-        undefined,
-        { phoneIds: [] },
-        '{"success":false,"error":"phoneIds must be a non-empty array of ICCIDs"}',
-      ],
-    ];
-    for (const [rawBody, body, text] of cases) {
-      const response = await send('cleanupTestData', body, { rawBody, database: untouchable });
-      expect(await wire(response)).toEqual(answer(400, text));
-    }
-  });
-
-  test('cleanup-test-data answers a D1 failure with 500 and a fixed message', async () => {
-    const response = await send('cleanupTestData', { phoneIds: ['a'] }, { database: offline });
-    expect(await wire(response)).toEqual(
-      answer(500, '{"success":false,"error":"Failed to cleanup test data"}'),
-    );
-  });
-
   test('pending-sms answers a malformed session header with 400 and a D1 failure with 500', async () => {
     expect(
       await wire(
@@ -1190,7 +1126,6 @@ describe('control error answers on the wire', () => {
     const answers: [Route, string][] = [
       ['updateDevices', '{"error":"Body must be JSON"}'],
       ['uploadMessages', '{"success":false,"error":"Body must be JSON"}'],
-      ['cleanupTestData', '{"success":false,"error":"Body must be JSON"}'],
       ['updateSMSResult', '{"success":false,"error":"Body must be JSON"}'],
     ];
     for (const [route, text] of answers) {
@@ -1207,20 +1142,6 @@ describe('control error answers on the wire', () => {
       });
       expect(await wire(response)).toEqual(answer(401, '{"error":"Unauthorized"}'));
     }
-  });
-
-  test('request Content-Type: cleanup-test-data parses a JSON body sent without one', async () => {
-    const { response } = await callWorker('POST', ROUTES.cleanupTestData[1], {
-      headers: { 'X-API-Key': TEST_API_KEY },
-      body: JSON.stringify({ phoneIds: ['a'] }),
-      bindings: { DB: db },
-    });
-    expect(await wire(response)).toEqual(
-      answer(
-        200,
-        '{"success":true,"deleted":0,"cleanedNullIccid":0,"message":"Deleted 0 test SIMs and 0 SIMs without ICCID"}',
-      ),
-    );
   });
 
   test('request Content-Type: messages upload parses a JSON body sent without one', async () => {
