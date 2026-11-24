@@ -16,7 +16,6 @@ const BILL_PREFIX = '<Singtel>Dear customer, your latest bill for Singtel a/c ';
 const BILL_FRAGMENT_SUFFIX = 'ill via My Singtel app at www.singtel.com/viewbill .';
 const MAX_FRAGMENT_GAP_MS = 5 * 60 * 1000;
 
-/** One bill candidate in a preview, with the message it would store. */
 export type BackfillCandidate = PublicBackfillCandidate & {
   message: {
     id: string;
@@ -39,7 +38,6 @@ function timeOf(timestamp: string | null): number {
   return timestamp === null ? Number.NaN : Date.parse(timestamp);
 }
 
-/** Thrown when the account is not active or its notification SIM is unverified. */
 export class AccountNotReadyError extends Error {
   readonly code = 'ACCOUNT_NOT_READY';
 

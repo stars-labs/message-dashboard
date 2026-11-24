@@ -21,10 +21,6 @@ import {
   type MessageRow,
 } from '../db/messages.js';
 
-/**
- * How many outbound status changes one incremental response carries. Sending is
- * operator-driven and rare next to inbound traffic, so this is generous.
- */
 const OUTBOUND_REFRESH_LIMIT = 50;
 
 interface ListCall {
@@ -71,9 +67,7 @@ function badRequest(message: string): ORPCError<'BAD_REQUEST', unknown> {
 }
 
 export const messagesHandler = {
-  // List messages with pagination
   async list({ env }: ListCall, query: v.InferOutput<typeof MessagesQuery>): Promise<MessagePage> {
-    // The query reads as URLSearchParams.get() read it: an absent value is null.
     const phoneIccid = query.phone_iccid ?? null;
     const requestedLimit = Number.parseInt(query.limit ?? '50', 10);
     const requestedOffset = Number.parseInt(query.offset ?? '0', 10);
@@ -87,12 +81,10 @@ export const messagesHandler = {
       requestedUntil === null || requestedUntil === '' ? serverTime : requestedUntil;
     const beforeCreatedAt = query.before_created_at ?? null;
     const beforeId = query.before_id ?? null;
-    // Spam/marketing messages are hidden unless explicitly asked for.
     const includeFiltered = query.include_filtered === '1';
 
     try {
-      // Carrier maintenance traffic is retained for its own audit workflow and
-      // must never appear in either the normal inbox or the spam drawer.
+      // Carrier maintenance traffic (purpose != 'user') never appears in the inbox or the spam drawer.
       const conditions = [`m.purpose = 'user'`];
       const scopeParams: unknown[] = [];
 
@@ -141,8 +133,7 @@ export const messagesHandler = {
       const orderBy = isIncremental
         ? 'm.created_at DESC, m.id DESC'
         : 'm.timestamp DESC, m.id DESC';
-      // Fetch one extra row to answer "is there another page?" without an
-      // unbounded COUNT/SUM over message history.
+      // One extra row answers "is there another page?" without a COUNT over message history.
       listParams.push(limit + 1, offset);
 
       const rawMessages = await listMessages(env.DB, {
@@ -155,10 +146,8 @@ export const messagesHandler = {
       const lastPageRow = pageRows.at(-1);
 
       // An outbound row is written once and its status moves later, so paging on
-      // created_at alone never delivered 已发送 or 发送失败 — the dashboard sat on
-      // 等待发送 forever. Ask separately for outbound rows whose updated_at moved
-      // inside this window but which are too old for the page above. Outbound
-      // volume is low and the window is the poll interval, so this stays small.
+      // created_at alone would never deliver the final status. Also fetch outbound
+      // rows whose updated_at moved inside this window but are too old for the page above.
       const refreshRows = isIncremental
         ? await listOutboundStatusChanges(env.DB, {
             since,
@@ -190,7 +179,6 @@ export const messagesHandler = {
         sync: {
           server_time: isIncremental ? syncUntil : serverTime,
           is_incremental: isIncremental,
-          // Rows already known to the client whose status changed.
           status_refreshed: extraRows.length,
         },
       };
@@ -201,26 +189,22 @@ export const messagesHandler = {
     }
   },
 
-  // Send SMS
   async send(
     { env }: SendCall,
     body: v.InferOutput<typeof SendMessageBody>,
   ): Promise<SendMessageResponse> {
     // The recipient ends up inside an `AT+CMGS="..."` command on the daemon, where a
-    // CR would terminate the command and let the rest execute as AT commands. Only
-    // E.164 gets past here, and the NORMALISED value is what we store — never
-    // body.recipient. See docs/SECURITY-REVIEW.md finding 3.
+    // CR would let the rest execute as AT commands. Store the normalised value,
+    // never body.recipient (docs/SECURITY-REVIEW.md finding 3).
     const { phone_iccid: phoneIccid, content } = body;
     const recipientCheck = normalizeRecipient(body.recipient);
     if (!recipientCheck.ok) throw badRequest(`Invalid recipient: ${recipientCheck.reason}`);
     const recipient = recipientCheck.value;
 
     try {
-      // Get phone details - check for active statuses
       const phone = await findActiveDeviceNumber(env.DB, phoneIccid);
 
       if (!phone) {
-        // Check if phone exists with any status
         const anyPhone = await findDeviceStatus(env.DB, phoneIccid);
 
         throw badRequest(
@@ -230,7 +214,6 @@ export const messagesHandler = {
         );
       }
 
-      // Create message record - simple and clean
       const messageId = `msg-sent-${nanoid()}`;
       const timestamp = new Date().toISOString();
 
@@ -243,12 +226,11 @@ export const messagesHandler = {
         recipient,
       });
 
-      // Note: SMS sending is now handled by daemon polling /api/control/pending-sms
-      // The daemon will pick up this message and send it via real SMS network
+      // The daemon polls /api/control/pending-sms and sends the message.
 
       return {
         success: true,
-        messageId, // Add messageId at top level for WebSocket handler
+        messageId,
         data: {
           id: messageId,
           phone_iccid: phoneIccid,

@@ -5,10 +5,6 @@ import {
   hasVerificationCode,
 } from './verification.js';
 
-// hasVerificationCode() is the OTP safety guard used by the spam filter: a message
-// that carries an explicitly LABELLED code is never filtered, whatever rule it
-// matched. It must be high precision in the "is a code" direction — a false
-// negative here means a real verification code gets hidden.
 describe('hasVerificationCode — Chinese labels', () => {
   test.each([
     ['验证码：754852，感谢您使用网上营业厅【中国联通】'],
@@ -80,7 +76,6 @@ describe('hasVerificationCode — contextual OTPs without an explicit label', ()
     ['123456 を入力して認証してください'],
     ['789012、有効期限は5分です'],
     ['123456 は5分間有効です'],
-    // Real messages reported by an operator: Amazon (亚马逊卓越) OTP SMS.
     ['【亚马逊卓越】 Amazon コード：447106。'],
     ['【亚马逊卓越】 Amazon コード：923564。'],
     ['【亚马逊卓越】 Amazon コード：385345。'],
@@ -92,8 +87,7 @@ describe('hasVerificationCode — contextual OTPs without an explicit label', ()
 
 describe('hasVerificationCode — must NOT fire on marketing text', () => {
   test.each([
-    // Mentions the word but carries no code. These are the 4 anti-fraud
-    // broadcasts found in the real message table.
+    // Mention the word but carry no code.
     [
       '【广州市反诈中心联合广州联通】提醒您:接到机票退改签的电话或短信，请务必通过官方渠道进行核实，切勿泄露银行卡号、支付密码、验证码等个人信息。',
     ],
@@ -101,7 +95,7 @@ describe('hasVerificationCode — must NOT fire on marketing text', () => {
       '公益短信：【郴州公安提醒】如遇客服来电，要求办理退款、理赔等，一定要通过官方途径核查！不得在网站上填写银行卡号、密码、验证码等信息',
     ],
     ['短信验证码的请求，做好信息安全防范！联通好服务，用心为客户【上海联通】'],
-    // Real marketing bodies with plenty of digits but no labelled code.
+    // Plenty of digits but no labelled code.
     [
       '【中国联通】尊敬的用户，您在中国联通订购的"广东在网得24个月沃视频月卡优惠"(方案编号: 25GD300965)，将于2026-08-31到期。',
     ],
@@ -110,7 +104,6 @@ describe('hasVerificationCode — must NOT fire on marketing text', () => {
     ],
     ['中国海关提示，请勿携带下列物品进入中国境内'],
     ['【12306】刘洋购票成功，8月5日G6588次，福田站19:59开。'],
-    // Japanese marketing / non-OTP numbers must not match.
     ['お知らせ：商品番号は1234です'],
     ['ご登録ありがとうございます。ポイント123456が付与されました。'],
     ['お問い合わせ番号: 567890'],

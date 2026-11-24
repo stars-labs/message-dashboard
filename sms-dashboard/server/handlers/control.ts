@@ -97,10 +97,7 @@ export function unauthorized(): Response {
   return json({ error: 'Unauthorized' }, 401);
 }
 
-/**
- * Every control route authenticates with the daemon's shared API key, never
- * Auth0. Returns a Response when the key is wrong.
- */
+/** Control routes use the daemon's shared API key, never Auth0. Returns a Response when it is wrong. */
 export async function requireApiKey(request: DaemonRequest<unknown>): Promise<Response | null> {
   if (!(await secretMatches(request.headers.get('X-API-Key'), request.env.API_KEY))) {
     return unauthorized();
@@ -134,7 +131,6 @@ function normalizeTimestamp(value: string | null | undefined): string {
 }
 
 export const controlHandler = {
-  // Synchronize the daemon's canonical modem reports without rewriting unchanged rows.
   async updateDevices(
     { env }: DaemonCall<D1<'run'> & D1Batch<'run'>>,
     body: v.InferOutput<typeof DevicesBody>,
@@ -194,14 +190,13 @@ export const controlHandler = {
     } catch (error) {
       if (error instanceof ORPCError) throw error;
       console.error('[control] Database error in updateDevices:', error);
-      // A plain route, but a failure has always answered in the flagged format.
+      // The daemon expects { success: false, error } on failure.
       throw new ORPCError('INTERNAL_SERVER_ERROR', {
         data: { wire: { success: false, error: 'Failed to update devices' } },
       });
     }
   },
 
-  // Upload messages from Orange Pi
   async uploadMessages(
     { env, ctx }: UploadCall,
     { messages }: v.InferOutput<typeof UploadBody>,
@@ -211,17 +206,14 @@ export const controlHandler = {
       const results: UploadResponse['results'] = [];
       const newMessages: StoredMessage[] = [];
 
-      // Spam rules are loaded ONCE per upload, not per message. Classification is
-      // done inline rather than in ctx.waitUntil: the row must never be readable
-      // while still 'pending', or marketing SMS would flash into the default list
-      // in the window before a background task caught up.
+      // Classified inline, not in ctx.waitUntil: a row must never be readable while
+      // still 'pending', or marketing SMS would flash into the default list.
       const filterRules = await loadActiveRules(env.DB);
 
-      // Multi-part carrier replies arrive as separate messages sharing a sender and
-      // timestamp, so group them before linking; otherwise the check closes on
-      // whichever part is processed first.
+      // Parts of one carrier reply must be grouped before linking, or the check
+      // closes on whichever part is processed first.
       const multipartReplies = mergeMultipartReplies(messages);
-      // Group key -> the check that claimed it, so later parts join that check.
+      // Group key -> the check that claimed it.
       const claimedReplyGroups = new Map<string, BalanceCheckRow>();
 
       for (const msg of messages) {
@@ -230,11 +222,9 @@ export const controlHandler = {
           const timestamp = normalizeTimestamp(msg.timestamp);
           const phoneNumber = msg.phone_number ?? null;
           const reply = multipartReplies.get(messageId);
-          // A later part reuses its group's check rather than re-running the
-          // pending lookup, which would find the same check and could queue a
-          // duplicate follow-up for it.
+          // A later part reuses its group's check; re-running the pending lookup could
+          // queue a duplicate follow-up.
           const groupClaim = reply ? (claimedReplyGroups.get(reply.key) ?? null) : null;
-          // findPendingBalanceCheck returns null for a missing number anyway.
           const balanceCheck =
             groupClaim ??
             (await findPendingBalanceCheck(env.DB, {
@@ -259,14 +249,12 @@ export const controlHandler = {
             balance_check_id: balanceCheck?.id ?? null,
           };
 
-          // Spam/marketing verdict. phone_number carries the SENDER's number for
-          // received messages, which is what the sender rules match on.
+          // phone_number is the sender's number, which the sender rules match on.
           const verdict = balanceCheck
             ? { filter_status: 'filtered', filter_rule_id: null }
             : classifyMessage(record, filterRules);
 
-          // D1's primary key is the sole idempotency boundary. No content/timestamp
-          // comparison is valid here: two equal SMS payloads may be distinct SMS.
+          // The primary key is the sole idempotency boundary: equal payloads may be distinct SMS.
           const changes = await insertReceivedMessage(env.DB, {
             id: messageId,
             phone_iccid: msg.phone_iccid,
@@ -287,9 +275,8 @@ export const controlHandler = {
 
           processed += 1;
           results.push({ id: messageId, status: 'stored' });
-          // Only a newly inserted message may trigger side effects, and a multi-part
-          // reply triggers them once: the part that claimed the check decides it
-          // using the whole merged text. Later parts are inserted already linked.
+          // Only a new message triggers side effects; for a multi-part reply, only the
+          // part that claimed the check, using the merged text.
           if (balanceCheck) {
             if (!groupClaim) {
               await linkBalanceReply(
@@ -301,8 +288,7 @@ export const controlHandler = {
             }
           } else newMessages.push(record);
         } catch (err) {
-          // Per-message failure must not abort the batch. The daemon retries
-          // transient errors; permanent input errors become dead_letter locally.
+          // The daemon retries retryable rejections; the others become dead_letter locally.
           const retryable = !(err instanceof TypeError);
           console.error(
             `[control] Message ${messageId} failed (retryable=${String(retryable)}):`,
@@ -312,7 +298,6 @@ export const controlHandler = {
         }
       }
 
-      // Process new messages with AI and keywords (async, don't wait)
       if (newMessages.length > 0) {
         ctx.waitUntil(
           Promise.all([
@@ -342,15 +327,8 @@ export const controlHandler = {
     }
   },
 
-  // Poll and claim pending SMS. Process health has one separate authoritative writer.
-  //
-  // SMS Status Flow:
-  //   'sending' (created by user)
-  //   → 'processing' (atomically set when daemon fetches)
-  //   → 'sent'/'failed' (reported by daemon after modem response)
-  //
-  // The atomic transition to 'processing' prevents duplicate sends in the race condition
-  // where daemon polls again before the SMS send completes and status is updated to 'sent'.
+  // Status flow: 'sending' -> 'processing' (claimed on poll) -> 'sent'/'failed'/'unknown'
+  // (daemon report). Claiming on poll keeps a repeat poll from sending a message twice.
   async getPendingSMS(
     { env }: DaemonCall<D1<'all' | 'run'>>,
     rawDaemonSessionId: string | undefined,
@@ -362,22 +340,15 @@ export const controlHandler = {
         throw refused('BAD_REQUEST', 'Invalid daemon session ID');
       }
 
-      // A message claimed by a previous daemon process has an indeterminate
-      // delivery result. Never put it back in the send queue automatically: the
-      // old process may have handed it to the modem before restarting. Mark it
-      // explicitly unknown so a human can decide whether to send a new message.
-      // The NULL branch safely adopts records created by pre-session daemons,
-      // after allowing their normal send/report window to expire.
+      // A message claimed by a previous daemon process may already have reached the
+      // modem, so never requeue it: mark it unknown for a human to decide.
       if (daemonSessionId) {
         await markStaleProcessingMessagesUnknown(env.DB, daemonSessionId);
       }
 
-      // A message with nothing to send to or from can never be sent, and the
-      // daemon's PendingSms requires both: fail it rather than put it on the wire.
+      // The daemon's PendingSms requires both numbers; fail what lacks one.
       await failUnsendableMessages(env.DB);
 
-      // Claim pending messages by marking them 'processing', so a poll that
-      // arrives before this batch is reported cannot send them twice.
       const ids = await listSendingMessageIds(env.DB);
 
       if (ids.length === 0) {
@@ -396,7 +367,6 @@ export const controlHandler = {
     }
   },
 
-  // Update SMS send result from daemon
   async updateSMSResult(
     { env }: DaemonCall<D1<'run'>>,
     { message_id, outcome, error_message, sms_id }: v.InferOutput<typeof SmsResultBody>,
@@ -423,7 +393,6 @@ export const controlHandler = {
     }
   },
 
-  // Clear all messages (admin endpoint)
   async clearMessages({ env }: DaemonCall<D1<'run'>>): Promise<ClearMessagesResponse> {
     try {
       const changes = await deleteAllMessages(env.DB);
@@ -440,16 +409,11 @@ interface HeartbeatCall {
   env: { DB: D1<'run'> };
 }
 
-/**
- * POST /api/control/heartbeat, once the daemon's API key has been checked: store
- * the health snapshot. Refusals keep the daemon's error format,
- * { success: false, error }, which the control handler writes.
- */
+/** POST /api/control/heartbeat: store the daemon's health snapshot. */
 export async function recordHeartbeat(
   { headers, env }: HeartbeatCall,
   raw: unknown,
 ): Promise<HeartbeatResponse> {
-  // normalizeHealthSnapshot throws only for a snapshot the daemon must not send.
   let snapshot: HealthSnapshot;
   try {
     snapshot = normalizeHealthSnapshot(raw);
@@ -484,7 +448,6 @@ export async function recordHeartbeat(
   }
 }
 
-// Process keywords for a message
 async function processMessageKeywords(
   db: D1<'all' | 'run'>,
   message: StoredMessage,

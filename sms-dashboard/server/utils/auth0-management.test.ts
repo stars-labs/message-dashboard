@@ -1,4 +1,3 @@
-// Run with: bun test server/utils/auth0-management.test.ts
 import { afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from 'bun:test';
 import * as v from 'valibot';
 import { parseJson } from '../../shared/parse-json.js';
@@ -22,7 +21,6 @@ interface Put {
   options: { expirationTtl?: number } | undefined;
 }
 
-// Minimal in-memory stand-in for a Workers KV namespace.
 function kvStub() {
   const store = new Map<string, string>();
   const puts: Put[] = [];
@@ -68,7 +66,7 @@ interface Reply {
 let calls: Call[];
 let fetchSpy: Mock<typeof fetch>;
 
-// Queue of responses, matched in order; the last one repeats.
+// Responses are matched in order; the last one repeats.
 function mockFetch(responses: Reply[]) {
   let i = 0;
   const respond = (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
@@ -173,7 +171,6 @@ describe('getManagementToken', () => {
     expect(env.SESSIONS.puts).toHaveLength(0);
   });
 
-  // A Management API failure must never look like success — these calls grant access.
   test('throws on a non-2xx token response', async () => {
     mockFetch([{ status: 401, body: { error: 'access_denied' } }]);
 
@@ -244,8 +241,6 @@ describe('resolveRoleIds', () => {
     });
   });
 
-  // Deploying without creating the roles is the most likely setup mistake; it must be a
-  // loud error naming what is missing, not a silent empty map.
   test('throws naming the roles that do not exist in Auth0', async () => {
     mockFetch([TOKEN_OK, { body: [{ id: 'rol_viewer', name: 'viewer' }] }]);
 
@@ -465,7 +460,6 @@ describe('setUserRole', () => {
 
     expect(sent(assign)).toEqual({ roles: ['rol_admin'] });
     expect(sent(remove)).toEqual({ roles: ['rol_viewer'] });
-    // Assign must precede remove, so a mid-way failure leaves access rather than lockout.
     expect(assign && remove && mutations.indexOf(assign)).toBeLessThan(
       remove ? mutations.indexOf(remove) : -1,
     );
@@ -486,7 +480,6 @@ describe('setUserRole', () => {
     expect(calls.map((c) => c.method)).toEqual(['POST', 'GET', 'POST', 'DELETE']);
   });
 
-  // No arbitrary role injection, even before the handler's own allow-list.
   test('rejects a role outside the known set', async () => {
     mockFetch([TOKEN_OK, ROLES_OK]);
 

@@ -1,7 +1,5 @@
-// GET /api/messages is the dashboard's heaviest D1 read: it ran the account
-// over its daily row-read quota in 2026-09. These tests pin the statements each
-// kind of request runs, with their parameters, and the indexes they use, so a
-// change to how the route reads its query cannot quietly change what D1 reads.
+// GET /api/messages is the dashboard's heaviest D1 read (row-read quota). These tests
+// pin the statements, their parameters and the indexes they use.
 import { Database } from 'bun:sqlite';
 import { afterEach, beforeEach, describe, expect, setSystemTime, test } from 'bun:test';
 import type { D1, D1Batch, D1Statement } from './lib/d1.js';
@@ -24,7 +22,6 @@ interface Executed {
   params: unknown[];
 }
 
-/** `d1`, recording each statement it executes and the parameters bound to it. */
 function recording(d1: D1 & D1Batch): { db: D1 & D1Batch; executed: Executed[] } {
   const executed: Executed[] = [];
   const wrap = (sql: string, statement: D1Statement, params: unknown[]): D1Statement => ({
@@ -60,8 +57,7 @@ beforeEach(async () => {
   ]) {
     sqlite.run(await Bun.file(new URL(`../migrations/${migration}.sql`, import.meta.url)).text());
   }
-  // One message every request below returns, so the statements that enrich a
-  // page with its SIM run too.
+  // A message every request returns, so the SIM enrichment statements run too.
   sqlite.run(
     `INSERT INTO messages (id, phone_iccid, content, type, filter_status, timestamp, created_at)
      VALUES ('m-1', '89860123456789012345', 'code 123456', 'received', 'clean',
@@ -80,11 +76,7 @@ function planOf({ sql, params }: Executed): string {
   ).join('\n');
 }
 
-/**
- * The statements a request ran. Each must read through an index: which one is
- * the planner's choice, and depends on statistics, but a scan of messages
- * reads its whole history.
- */
+// Each statement must read through an index; which one is the planner's choice.
 async function statementsOf(query: string): Promise<Executed[]> {
   const { db, executed } = recording(sqliteD1(sqlite));
   const { response } = await callWorker('GET', `/api/messages?${query}`, {

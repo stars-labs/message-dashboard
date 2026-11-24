@@ -1,14 +1,6 @@
-// Per-user index of live session tokens.
-//
-// Roles are snapshotted into the KV session at login, so without this a demotion or
-// revocation does nothing until the session expires 24 hours later. The `SESSIONS` KV is
-// keyed by opaque token, which cannot be searched by user, so we maintain a reverse
-// index and use it to drop every session a user holds when their role changes.
-//
-// Caveat, worth being precise about: Workers KV is eventually consistent, so revocation
-// is bounded by KV propagation (worst case ~60s), not instant. That is still 60 seconds
-// instead of 24 hours. True instant revocation would need a per-request D1 lookup, which
-// is not worth the added latency on every API call.
+// Reverse index user -> session tokens: SESSIONS is keyed by opaque token, so a role
+// change could not otherwise find the user's sessions. KV is eventually consistent,
+// so revocation is not instant.
 
 import * as v from 'valibot';
 import { readKvJson, type KV, type KVOperation } from '../lib/kv.js';
@@ -27,7 +19,6 @@ const TokenIndex = v.fallback(
 
 const INDEX_PREFIX = 'usess:';
 
-// Matches the session TTL, so an abandoned index cannot outlive the sessions it lists.
 const INDEX_TTL_SECONDS = 24 * 60 * 60;
 
 function indexKey(userId: string): string {
@@ -41,7 +32,6 @@ async function readIndex(env: SessionEnv<'get'>, userId: string): Promise<string
   return stored.value;
 }
 
-/** Record that `token` is a live session for `userId`. Called at login. */
 export async function indexSession(
   env: SessionEnv<'get' | 'put'>,
   userId: string | null | undefined,
@@ -58,7 +48,6 @@ export async function indexSession(
   });
 }
 
-/** Drop a single token from the index. Called at logout. */
 export async function unindexSession(
   env: SessionEnv<'get' | 'put' | 'delete'>,
   userId: string | null | undefined,
@@ -78,13 +67,7 @@ export async function unindexSession(
   });
 }
 
-/**
- * Delete every session belonging to `userId`, forcing re-authentication.
- *
- * Returns the number of sessions dropped. Sessions are deleted before the index, so a
- * failure part-way leaves the index pointing at already-dead tokens (harmless) rather
- * than orphaning live sessions with no way to find them.
- */
+/** Sessions are deleted before the index, so a partial failure leaves dead tokens indexed, never live ones orphaned. */
 export async function revokeUserSessions(
   env: SessionEnv<'get' | 'delete'>,
   userId: string | null | undefined,

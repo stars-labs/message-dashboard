@@ -7,7 +7,6 @@ const DEFAULT_PAGE_SIZE = 200;
 const MAX_PAGE_SIZE = 500;
 const SAMPLE_LIMIT = 12;
 
-/** One code change in a page, as reported to the caller. */
 interface CodeChange {
   id: string;
   previous: string | null;
@@ -30,12 +29,7 @@ function normaliseCode(value: unknown): string | null {
   return typeof value === 'string' && value !== '' ? value : null;
 }
 
-/**
- * Recalculate one bounded page of stored verification codes.
- *
- * The caller owns the cursor and passes next_cursor into the next request. This
- * keeps the operation stateless, resumable, and within a Worker's request budget.
- */
+/** Stateless: the caller owns the cursor and passes next_cursor into the next request. */
 export async function reprocessVerificationPage(
   db: D1<'all' | 'run'> & D1Batch<'all' | 'run'>,
   {

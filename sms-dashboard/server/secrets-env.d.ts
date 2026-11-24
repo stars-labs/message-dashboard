@@ -1,7 +1,5 @@
-// Secrets set with `wrangler secret put`. wrangler types generates Env from
-// wrangler.toml, which does not list them, so they are merged in here. Each is
-// optional: an environment may not set it, and the code reading it decides
-// what its absence means.
+// Secrets set with `wrangler secret put`; wrangler.toml does not list them, so wrangler
+// types omits them. Optional: the code reading each decides what absence means.
 interface Env {
   API_KEY?: string;
   AUTH0_DOMAIN?: string;

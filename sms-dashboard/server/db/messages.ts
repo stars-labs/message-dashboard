@@ -24,7 +24,6 @@ const MESSAGE_COLUMN_NAMES = [
 
 const MESSAGE_COLUMNS_OF_M = MESSAGE_COLUMN_NAMES.map((name) => `m.${name}`).join(', ');
 
-/** A messages row, every column the API returns. */
 const MessageRow = v.object({
   id: v.string(),
   phone_iccid: v.nullable(v.string()),
@@ -48,7 +47,6 @@ const MessageRow = v.object({
 
 export type MessageRow = v.InferOutput<typeof MessageRow>;
 
-/** The device_view columns enrichMessagePage joins onto each message. */
 const DeviceSummary = v.object({
   iccid: v.string(),
   number: v.string(),
@@ -63,12 +61,8 @@ export type DeviceSummary = v.InferOutput<typeof DeviceSummary>;
 const CountRow = v.object({ n: v.number() });
 const IdRow = v.object({ id: v.string() });
 
-/**
- * Timestamps are stored as ISO-8601 with a T separator and a Z suffix (migration
- * 018 normalised them). datetime() would return a space-separated, Z-less string,
- * which compares wrongly against that format, so build the cutoff with strftime
- * in exactly the stored shape.
- */
+// Timestamps are stored as ISO-8601 with T and Z; datetime() returns a space-separated,
+// Z-less string that compares wrongly against them.
 const CUTOFF_EXPR = `strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)`;
 
 export function listMessages(
@@ -86,11 +80,8 @@ export function listMessages(
   return queryAll(db.prepare(sql).bind(...params), MessageRow);
 }
 
-/**
- * Outbound rows whose status moved inside the sync window. Scoped to `sent`
- * rows and ordered by the indexed `updated_at` (migration 079), so it cannot
- * turn into a scan of message history.
- */
+// Scoped to `sent` rows and ordered by the indexed `updated_at` (migration 079), so it
+// cannot scan message history.
 export function listOutboundStatusChanges(
   db: D1<'all'>,
   {
@@ -295,8 +286,6 @@ export async function updateMessageFilterVerdicts(
   const update = db.prepare(
     `UPDATE messages SET filter_status = ?, filter_rule_id = ? WHERE id = ?`,
   );
-  // One bound statement per row. Do NOT try to bind many rows onto a single
-  // "WHERE id = ?" statement — the parameter count would not match.
   await db.batch(
     verdicts.map((verdict) => update.bind(verdict.filterStatus, verdict.filterRuleId, verdict.id)),
   );

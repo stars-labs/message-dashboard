@@ -1,4 +1,3 @@
-// Run with: bun test server/utils/spam-filter.test.ts
 import { describe, expect, test } from 'bun:test';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
 import type { D1, D1Statement } from '../lib/d1.js';
@@ -12,7 +11,6 @@ import {
   type SpamRule,
 } from './spam-filter.js';
 
-// Mirrors the seed rules in migrations/035_add_message_filter.sql.
 // Ordered by id, which is the order classifyMessage evaluates them in.
 const RULES: SpamRule[] = [
   { id: 1, rule_type: 'body_keyword', pattern: '外交部领保中心' },
@@ -24,12 +22,10 @@ const RULES: SpamRule[] = [
   { id: 7, rule_type: 'sender', pattern: '12306' },
   { id: 8, rule_type: 'sender', pattern: 'M1 Limited' },
   { id: 9, rule_type: 'sender', pattern: '10001' },
-  // Added by migration 070.
   { id: 10, rule_type: 'body_keyword', pattern: '请您评价' },
   { id: 11, rule_type: 'body_keyword', pattern: '心级服务' },
 ];
 
-// A received message with only the fields the classifier reads.
 function received(fields: ClassifiableMessage): ClassifiableMessage {
   return { type: 'received', content: '', phone_number: null, ...fields };
 }
@@ -61,8 +57,6 @@ describe('senderMatches', () => {
     expect(senderMatches('13910001', '10001')).toBe(false);
   });
 
-  // The strict form stays strict: balance correlation depends on it rejecting a
-  // campaign-suffixed sender, which is a different origin from the shortcode.
   test('does NOT match a campaign-suffixed shortcode', () => {
     expect(senderMatches('100860011575', '10086')).toBe(false);
     expect(senderMatches('10086100', '10086')).toBe(false);
@@ -70,9 +64,6 @@ describe('senderMatches', () => {
 });
 
 describe('senderMatchesSpamRule', () => {
-  // Carriers append a per-campaign suffix to their shortcode, so one marketing
-  // blast arrives from 100860011575 and the next from 10086123456. Exact match
-  // alone lets every one of them through.
   test('matches a shortcode carrying a campaign suffix', () => {
     expect(senderMatchesSpamRule('100860011575', '10086')).toBe(true);
     expect(senderMatchesSpamRule('+86100860011575', '10086')).toBe(true);
@@ -85,14 +76,12 @@ describe('senderMatchesSpamRule', () => {
     expect(senderMatchesSpamRule('85212580', '12580')).toBe(true);
   });
 
-  // The suffix must extend the shortcode, never merely contain it: a real mobile
-  // number can end with or embed a shortcode, but cannot start with one.
+  // A real mobile number can end with or embed a shortcode, but cannot start with one.
   test('does NOT match numbers that only contain the shortcode', () => {
     expect(senderMatchesSpamRule('13910086', '10086')).toBe(false);
     expect(senderMatchesSpamRule('8613100862222', '10086')).toBe(false);
   });
 
-  // A different sender, not another campaign from the same one.
   test('keeps alphanumeric sender IDs exact', () => {
     expect(senderMatchesSpamRule('M1 Limited', 'M1 Limited')).toBe(true);
     expect(senderMatchesSpamRule('M1 Limited Promo', 'M1 Limited')).toBe(false);
@@ -100,7 +89,6 @@ describe('senderMatchesSpamRule', () => {
 });
 
 describe('classifyMessage — body keyword rules', () => {
-  // Backstop for the sender fix: the same campaign from a sender with no rule.
   test('filters the 满意度调研 broadcast on wording alone', () => {
     const msg = received({
       content: '【心级服务 让爱连接】邀请您参与2道问题调研，期待您的10分满意！',
@@ -194,7 +182,6 @@ describe('classifyMessage — sender rules', () => {
     });
   });
 
-  // Regression guard: an endsWith() implementation would wrongly filter this.
   test('does NOT filter a real mobile number that merely ends with a shortcode', () => {
     const msg = received({
       content: '您的验证码是 384912，请勿泄露。',
@@ -211,9 +198,6 @@ describe('classifyMessage — sender rules', () => {
     expect(classifyMessage(msg, RULES).filter_status).toBe('clean');
   });
 
-  // Observed in production: a 移动 satisfaction survey from a suffixed shortcode.
-  // The body carries no verification code, and "无验证码" showed in the UI, yet the
-  // message stayed visible because 100860011575 !== 10086.
   test('filters the 移动 satisfaction survey from a suffixed shortcode', () => {
     const msg = received({
       content:
@@ -268,9 +252,7 @@ describe('classifyMessage — messages that must never be filtered', () => {
   });
 });
 
-// 10010 is 2,864 of the 8,624 messages in the real table, but 14 of those are
-// genuine 联通网上营业厅 login codes. Blanket-blocking the shortcode would hide them,
-// so a labelled code overrides every rule.
+// A labelled code overrides every rule, including a blanket sender rule.
 describe('classifyMessage — OTP safety guard', () => {
   test('keeps a real 10010 verification code even though 10010 is blocked', () => {
     const msg = received({

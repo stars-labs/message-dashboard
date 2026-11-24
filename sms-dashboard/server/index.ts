@@ -8,12 +8,10 @@ import type { AppRequest } from './worker-context.js';
 
 export default {
   async fetch(incoming: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    // The router and middleware read env and ctx from the request itself.
     const request: AppRequest = Object.assign(incoming, { env, ctx });
     return handleRequest(request);
   },
 
-  // Nightly maintenance (cron in wrangler.toml).
   async scheduled(event: { cron: string }, env: Env) {
     console.log(`[scheduled] cron ${event.cron} firing`);
 
@@ -33,11 +31,10 @@ export default {
       console.error('[scheduled] web balance maintenance failed:', error);
     }
 
-    // The five-minute trigger exists only for balance response windows. Keep the
-    // heavier retention and full-database reconciliation on the nightly trigger.
+    // The five-minute trigger is only for balance response windows; the heavier work is nightly.
     if (event.cron !== '17 4 * * *') return;
 
-    // Retention first: no point classifying messages that are about to be deleted.
+    // Retention before classification: no point classifying messages about to be deleted.
     try {
       const purge = await purgeExpiredMessages(env.DB);
       console.log(`[scheduled] retention: deleted ${purge.deleted}, exhausted=${purge.exhausted}`);
@@ -45,8 +42,7 @@ export default {
       console.error('[scheduled] retention failed:', error);
     }
 
-    // Then finish any classification a request-scoped sweep ran out of time for.
-    // 'pending' is the cursor, so this self-heals an interrupted backfill.
+    // 'pending' is the cursor, so an interrupted request-scoped sweep self-heals here.
     try {
       const sweep = await sweepPending(env.DB);
       console.log(

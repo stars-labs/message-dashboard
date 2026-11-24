@@ -28,7 +28,6 @@ const bindings = {
   AUTH0_M2M_CLIENT_SECRET: 'm2m-secret',
 };
 
-/** Auth0's Management API with an empty tenant. */
 function auth0({ url }: Request): Response {
   if (url.endsWith('/oauth/token')) return Response.json({ access_token: 't', expires_in: 86400 });
   if (url.includes('/api/v2/roles?')) {

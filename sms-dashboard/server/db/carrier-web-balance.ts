@@ -25,7 +25,6 @@ type WebEventDetail = Readonly<Record<string, string | number>>;
 
 const LeasedRow = v.object({ id: v.string() });
 
-/** A sim_balance_web_jobs row joined with its check, profile and SIM. */
 const WebJobRow = v.object({
   id: v.string(),
   check_id: v.string(),
@@ -51,7 +50,7 @@ const WebJobRow = v.object({
 
 export type WebJob = v.InferOutput<typeof WebJobRow>;
 
-/** Messages.created_at and verification_code are nullable columns; the query's predicates exclude both nulls. */
+// created_at and verification_code are nullable columns; the query's predicates exclude both nulls.
 const OtpCandidateRow = v.object({
   id: v.string(),
   phone_number: v.nullable(v.string()),

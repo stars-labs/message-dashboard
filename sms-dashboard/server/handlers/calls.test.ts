@@ -142,9 +142,8 @@ afterEach(() => {
 });
 
 /**
- * Browser routes authenticate with the auth_token cookie, /api/control/ routes
- * with X-API-Key. A string body is sent as raw text, anything else as its JSON,
- * and `undefined` sends no body at all. A header given an empty value is removed.
+ * Browser routes use the auth_token cookie, /api/control/ routes X-API-Key. A string
+ * body is sent raw, `undefined` sends none, and an empty header value removes it.
  */
 async function callRoute(
   env: TestEnv,
@@ -217,7 +216,6 @@ function stubFetch(handler: (request: Request) => Promise<Response>) {
   network = handler;
 }
 
-/** Records SFU calls and answers them from a path -> response table. */
 function stubSfu(responses: SfuResponses): SfuCall[] {
   const calls: SfuCall[] = [];
   stubFetch(async (request) => {
@@ -282,7 +280,6 @@ const Problem = v.looseObject({
   code: v.string(),
 });
 
-/** The problem a browser route answers when it refuses or fails a request. */
 async function problemOf(response: Response) {
   expect(response.headers.get('Content-Type')).toBe('application/problem+json');
   return v.parse(Problem, await response.json());
@@ -1420,7 +1417,7 @@ describe('daemon call errors on the wire', () => {
     }
   });
 
-  // These pin today's wire bytes, which the move onto the contract must keep.
+  // These pin the exact wire bytes the daemon reads.
   test('incoming answers each refused report with its exact bytes', async () => {
     const { post } = setup();
 

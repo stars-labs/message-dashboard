@@ -34,7 +34,6 @@ const BillingStreamRow = v.object({
 
 export type BillingStream = v.InferOutput<typeof BillingStreamRow>;
 
-/** The billing account row the preview requires. */
 const BillableAccountRow = v.object({
   id: v.string(),
   display_name: v.string(),
@@ -46,7 +45,6 @@ const BillableAccountRow = v.object({
   notification_sim_index: v.nullable(v.number()),
 });
 
-/** The message columns bill scans read. */
 const ScanMessageRow = v.object({
   id: v.string(),
   phone_iccid: v.string(),

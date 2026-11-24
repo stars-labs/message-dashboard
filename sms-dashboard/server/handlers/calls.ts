@@ -1,21 +1,13 @@
-// Voice calls: browser <-> Cloudflare Realtime SFU <-> voice bridge on the Orange Pi.
+// A Durable Object owns the live call state; D1 holds the call log, written only at
+// transitions, so three-second polling never touches D1.
 //
-// A single Durable Object owns the fleet's live call state. D1 holds the call log, written
-// at transitions (start, answer, end) and read when someone opens the history, so
-// three-second polling still never touches D1. Audio is never recorded or proxied
-// through the Worker.
-//
-// Media flow for one call (see docs/voice-call-plan.md, "Media topology"):
+// Media flow (docs/voice-call-plan.md, "Media topology"):
 //   1. dial / answer: create the browser session and publish its mic as `mic`.
 //   2. connect: create the `down` adapter (SFU streams `mic` to the Pi) and the
 //      `up` adapter (the Pi feeds modem audio in as `modem`), then pull `modem`
 //      into the browser session. Creating the adapters is what makes the daemon
 //      dial or answer, because their signed endpoint URLs carry the command.
 //   3. renegotiate: apply the browser's answer to the pull offer.
-//
-// The browser routes are on the contract (shared/api/contract/calls.ts), which
-// admits them with `messages.read`: whoever may read SMS may call. The daemon
-// routes live under /api/control/, which the auth0 middleware gates with X-API-Key.
 
 import { ORPCError } from '@orpc/server';
 import * as v from 'valibot';
@@ -58,10 +50,9 @@ import {
   type RenegotiateBody,
 } from '../../shared/api/calls.js';
 
-/** What the Durable Object answers to a read: the call and the revision it is at. */
 const CallSnapshot = v.nullable(v.object({ call: LiveCall, revision: v.string() }));
 
-/** The fields of a Realtime SFU response the bridge reads; an error is reported in a 200 too. */
+/** The SFU can report an error inside a 200. */
 const SfuBody = v.object({
   sessionId: v.optional(v.string()),
   sessionDescription: v.optional(SessionDescription),
@@ -80,7 +71,6 @@ const SfuBody = v.object({
 
 type SfuBody = v.InferOutput<typeof SfuBody>;
 
-/** `detail` is what the SFU sent, passed to the browser as text when a step fails. */
 interface SfuResult {
   ok: boolean;
   status: number;
@@ -90,7 +80,6 @@ interface SfuResult {
 
 const Configured = v.pipe(v.string(), v.minLength(1));
 
-/** The settings every SFU-facing route needs. */
 const CallConfig = v.object({
   REALTIME_APP_ID: Configured,
   REALTIME_APP_SECRET: Configured,
@@ -115,17 +104,11 @@ interface CallEnv {
   API_KEY?: string;
 }
 
-/** Safety net: a wedged call disappears on its own rather than blocking the fleet. */
+/** A wedged call expires on its own rather than blocking the fleet. */
 const CALL_TTL_SECONDS = 3600;
-/**
- * A ringing call lives until the daemon stops refreshing it. The daemon reports
- * every RING (every few seconds). A missed call is also cleared explicitly by
- * /api/control/calls/ended, so the TTL is a fallback for a lost end report.
- */
+/** The daemon refreshes a ring on every RING; the TTL only covers a lost end report. */
 const RING_TTL_SECONDS = 60;
-/** How long a signed adapter endpoint stays valid; matches the call TTL. */
 const ENDPOINT_TTL_SECONDS = CALL_TTL_SECONDS;
-/** Track names inside the SFU: the browser microphone and the modem audio. */
 const TRACK_MIC = 'mic';
 const TRACK_MODEM = 'modem';
 
@@ -142,7 +125,6 @@ export function missingConfig(env: object): string[] {
   });
 }
 
-/** The SFU settings; without them a call route answers 503, naming the missing ones. */
 function callConfig(env: CallEnv): CallConfig {
   const result = v.safeParse(CallConfig, env);
   if (result.success) return result.output;
@@ -168,7 +150,6 @@ async function changeCall(
   env: CallEnv,
   expected: LiveCall | null,
   call: LiveCall | null,
-  // Ignored by the Durable Object when `call` is null (a clear has no TTL).
   ttl: number = CALL_TTL_SECONDS,
 ): Promise<boolean> {
   const expectedRevision = expected === null ? null : revisions.get(expected);
@@ -215,12 +196,10 @@ async function beginEnding(
   return null;
 }
 
-/** The call changed under a route that was about to write it. */
 function callChanged(): ORPCError<'CONFLICT', undefined> {
   return new ORPCError('CONFLICT', { message: 'No active call' });
 }
 
-/** A refusal that answers the call as it now stands. */
 function conflict(
   message: string,
   call?: LiveCall,
@@ -252,8 +231,7 @@ function toHex(buffer: ArrayBuffer): string {
  *
  * Path: /voice/{callId}/{leg}/{action}/{iccid}/{number}/{exp}/{sig}
  * sig = hex HMAC-SHA256(API_KEY, "callId\nleg\naction\niccid\nnumber\nexp").
- * The daemon already holds API_KEY, so no new shared secret is needed. The same
- * test vector lives in the daemon's tests; change both together.
+ * The same test vector lives in the daemon's tests; change both together.
  */
 export async function adapterEndpoint(
   config: Pick<CallConfig, 'API_KEY' | 'VOICE_BRIDGE_HOST'>,
@@ -289,7 +267,7 @@ export async function adapterEndpoint(
   return `wss://${config.VOICE_BRIDGE_HOST}/voice/${segments.join('/')}`;
 }
 
-/** SFU REST call. `body === undefined` sends no body at all, which sessions/new requires. */
+/** `body === undefined` sends no body at all, which sessions/new requires. */
 async function sfu(
   config: Pick<CallConfig, 'REALTIME_APP_ID' | 'REALTIME_APP_SECRET'>,
   method: string,
@@ -332,14 +310,12 @@ async function sfu(
   return { ok, status: response.status, body: reply, detail: raw.value };
 }
 
-/** An SFU failure, with what the SFU said, so the dashboard shows the cause. */
 function sfuError(message: string, result: SfuResult): ORPCError<'BAD_GATEWAY', undefined> {
   const detail = typeof result.detail === 'string' ? result.detail : JSON.stringify(result.detail);
   console.error(`[calls] ${message}:`, detail);
   return new ORPCError('BAD_GATEWAY', { message: `${message}: ${detail}` });
 }
 
-/** Creates the browser session and publishes its mic. Returns { sessionId, answer } or { error }. */
 async function publishMic(
   config: CallConfig,
   offer: { type: 'offer'; sdp: string },
@@ -364,7 +340,7 @@ async function publishMic(
   return { sessionId, answer };
 }
 
-/** Best effort, and only possible with SFU credentials: the daemon also hangs up when its WebSocket drops or the call TTL ends. */
+/** Best effort: the daemon also hangs up when its WebSocket drops or the call TTL ends. */
 async function closeAdapters(env: CallEnv, call: LiveCall): Promise<void> {
   const ids = [call.adapters?.up, call.adapters?.down].filter(present);
   const config = v.safeParse(CallConfig, env);
@@ -374,7 +350,6 @@ async function closeAdapters(env: CallEnv, call: LiveCall): Promise<void> {
   });
 }
 
-/** Ends `call` after its media failed, then answers `error`. */
 async function failMedia(
   env: CallEnv,
   call: LiveCall,
@@ -387,18 +362,11 @@ async function failMedia(
   throw error;
 }
 
-// ---------------------------------------------------------------------------
-// Call history (D1 `calls`, migration 077)
-//
-// Every write is swallowed on failure: logging must never stop a call being
-// placed, answered, or — above all — hung up, because hangup is what releases
-// the fleet lock. A missing history row is an annoyance; a stuck lock blocks
-// the whole fleet.
-// ---------------------------------------------------------------------------
+// Every history write is swallowed on failure: logging must never stop a call being
+// placed, answered, or hung up, because hangup releases the fleet lock.
 
-/** A call cannot really last this long; a row still open lost its end report. */
+/** A row still open after this lost its end report. */
 const STALE_CALL_MS = 2 * 60 * 60 * 1000;
-/** A ring nobody answered cannot last this long either. */
 const STALE_RING_MS = 5 * 60 * 1000;
 
 async function history(db: D1<'run'>, write: (db: D1<'run'>) => Promise<unknown>): Promise<void> {
@@ -409,11 +377,7 @@ async function history(db: D1<'run'>, write: (db: D1<'run'>) => Promise<unknown>
   }
 }
 
-/**
- * Close rows whose end report never arrived. An unanswered ring is swept sooner
- * than a connected call: it can only have been missed, and while it stays open
- * it both hides from the log and holds this SIM's open-ring slot.
- */
+/** An unanswered ring is swept sooner: while open it holds this SIM's open-ring slot. */
 function sweepStaleCalls(db: D1<'run'>, now: string): Promise<unknown> {
   return closeStaleCalls(db, {
     now,
@@ -423,12 +387,9 @@ function sweepStaleCalls(db: D1<'run'>, now: string): Promise<unknown> {
 }
 
 /**
- * Claim the log row for a ring and return whichever row is authoritative.
- *
  * Concurrent RING and caller-ID reports can both reach D1 before either claims
- * the live state. The partial unique index (migration 078) keeps one open row
- * per SIM, so both reports can use the same ID. Live state still works when
- * D1 is unavailable.
+ * the live state. The partial unique index keeps one open row per SIM, so both
+ * reports use the same ID.
  */
 async function claimRing(
   db: D1<'first' | 'run'>,
@@ -447,23 +408,17 @@ async function claimRing(
   }
 }
 
-/** Open the row for a call that just started. Repeat reports must not duplicate it. */
 function logCallStarted(db: D1<'run'>, call: LiveCall): Promise<void> {
   return history(db, async (log) => {
-    // Sweep first: a ring whose TTL expired with no end report would otherwise
-    // sit in progress forever and read as a call that never finished.
     await sweepStaleCalls(log, new Date().toISOString());
-
     await insertCall(log, call);
   });
 }
 
-/** A caller id that only arrived with a later RING. */
 function logCallerId(db: D1<'run'>, callId: string, number: string): Promise<void> {
   return history(db, (log) => setRemoteNumber(log, callId, number));
 }
 
-/** Answer time, and for an inbound call whoever pressed answer. */
 function logCallAnswered(
   db: D1<'run'>,
   callId: string,
@@ -474,10 +429,7 @@ function logCallAnswered(
 
 type EndedBy = 'dashboard' | 'daemon' | 'worker';
 
-/**
- * What to call a call that never carried audio, once it is known who ended it.
- * `dashboard` is the operator, `daemon` the Pi, `worker` a setup failure here.
- */
+/** `dashboard` is the operator, `daemon` the Pi, `worker` a setup failure here. */
 export function unansweredOutcome(
   direction: Direction,
   endedBy: EndedBy,
@@ -491,10 +443,8 @@ export function unansweredOutcome(
 }
 
 /**
- * Close the row out. Idempotent through the `in_progress` guard: the dashboard
- * and the daemon both report the end of the same call, and whoever arrives
- * first decides. Talk time comes from the row's own `answered_at`, so it is
- * right even if the live state of the call was already gone.
+ * Idempotent through the `in_progress` guard: the dashboard and the daemon both
+ * report the end of the same call, and whoever arrives first decides.
  */
 function logCallEnded(
   db: D1<'run'>,
@@ -512,7 +462,6 @@ function logCallEnded(
   });
 }
 
-/** Attach each call's SIM identity, when that SIM is still in inventory. */
 async function enrichCallPage(db: D1<'all'>, calls: CallHistoryRow[]) {
   const iccids = [...new Set(calls.map((call) => call.iccid).filter(present))];
   const sims = new Map<string, SimRow>();
@@ -545,20 +494,12 @@ interface BrowserCall {
   user?: { id: string } | undefined;
 }
 
-/**
- * The browser's call routes, served through the contract with `messages.read`:
- * whoever may read SMS may call.
- */
 export const callsHandler = {
-  /** Current call state, for the dashboard to poll. */
   async state({ env }: BrowserCall): Promise<CallStateResponse> {
     return { call: await readCall(env) };
   },
 
-  /**
-   * The call log. Read only when someone opens the history, never on the
-   * polling path, so it cannot eat the D1 row-read quota.
-   */
+  /** Never on the polling path, so it cannot eat the D1 row-read quota. */
   async history(
     { env }: BrowserCall,
     query: v.InferOutput<typeof CallHistoryQuery>,
@@ -569,18 +510,13 @@ export const callsHandler = {
     const iccid = query.iccid;
 
     // One row past the page decides `has_more` without a second COUNT query.
-    // A call still in progress is excluded: the dashboard shows the live call
-    // from the KV lock, and listing it here too would show it twice.
     const rows = await listCallHistory(DB, { iccid, limit: limit + 1, offset });
 
     const page = rows.slice(0, limit);
     return { calls: await enrichCallPage(DB, page), has_more: rows.length > limit };
   },
 
-  /**
-   * Short-lived ICE servers for the browser's PeerConnection. The TURN token
-   * itself stays in the Worker; the browser only ever sees a 10-minute credential.
-   */
+  /** The TURN token stays in the Worker; the browser only sees a 10-minute credential. */
   async ice({ env }: BrowserCall): Promise<IceServersResponse> {
     const config = callConfig(env);
     const response = await fetch(
@@ -603,7 +539,6 @@ export const callsHandler = {
     return iceServers.value;
   },
 
-  /** Place an outbound call: take the lock, then publish the browser mic. */
   async dial(
     { env, user }: BrowserCall,
     { iccid, number, offer, mid }: v.InferOutput<typeof DialBody>,
@@ -632,7 +567,6 @@ export const callsHandler = {
     return { call, answer: media.answer };
   },
 
-  /** Answer the call the daemon reported as ringing. */
   async answer(
     { env, user }: BrowserCall,
     { offer, mid }: v.InferOutput<typeof AnswerBody>,
@@ -661,7 +595,6 @@ export const callsHandler = {
     return { call, answer: media.answer };
   },
 
-  /** Bridge the browser session to the Pi. Called once the PeerConnection is up. */
   async connect(
     { env }: BrowserCall,
     { call_id: callId }: v.InferOutput<typeof CallIdBody>,
@@ -754,15 +687,13 @@ export const callsHandler = {
       throw callChanged();
     }
     if (!renegotiate) {
-      // Audio is up: that is the answer moment for an outbound call. An inbound
-      // call already recorded when the operator pressed answer, and COALESCE
-      // keeps that earlier, truer timestamp.
+      // Audio is up: the answer moment for an outbound call. An inbound call
+      // recorded it when the operator pressed answer, and COALESCE keeps that.
       await logCallAnswered(env.DB, call.id, { at: new Date().toISOString() });
     }
     return { call, offer: offer ?? null };
   },
 
-  /** Apply the browser's answer to the pull offer from /connect. */
   async renegotiate(
     { env }: BrowserCall,
     { answer, call_id: callId }: v.InferOutput<typeof RenegotiateBody>,
@@ -791,7 +722,6 @@ export const callsHandler = {
     return { call };
   },
 
-  /** Close the adapters for the requested call, or for whichever call there is when none is named. */
   async hangup(
     { env }: BrowserCall,
     { call_id: callId }: v.InferOutput<typeof CallIdBody>,
@@ -812,9 +742,7 @@ interface DaemonCall {
   env: CallEnv;
 }
 
-/** The daemon's call reports, which the contract admits with its API key. */
 export const daemonCallsHandler = {
-  /** A RING report: start or refresh the ringing call, unless another call holds the lock. */
   async incoming(
     { env }: DaemonCall,
     body: v.InferOutput<typeof IncomingCallBody>,
@@ -826,7 +754,7 @@ export const daemonCallsHandler = {
     const open = existing ? null : await claimRing(env.DB, iccid, from);
     for (;;) {
       if (existing && (existing.state !== 'ringing' || existing.iccid !== iccid)) {
-        // The daemon expects this 409, in the body it has always read.
+        // The daemon reads this 409 body.
         throw new ORPCError('CONFLICT', {
           data: { wire: { ok: false, reason: 'another call is active' } },
         });
@@ -854,7 +782,6 @@ export const daemonCallsHandler = {
     }
   },
 
-  /** The daemon's end report: remote hangup, modem failure, or a ring that stopped. */
   async ended(
     { env }: DaemonCall,
     { call_id: callId, iccid, reason }: v.InferOutput<typeof EndedCallBody>,

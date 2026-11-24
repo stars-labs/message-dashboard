@@ -15,7 +15,6 @@ const ExistingInstallationRow = v.object({
   revoked_at: v.nullable(v.string()),
 });
 
-/** An installation owned by a dashboard user; the status query reads device installations only. */
 const InstallationRow = v.omit(BalanceRunner, ['online', 'capabilities']);
 
 export function listUserRunnerInstallations(db: D1<'all'>, authSubject: string) {

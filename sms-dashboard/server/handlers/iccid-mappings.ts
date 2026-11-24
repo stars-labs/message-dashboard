@@ -90,7 +90,6 @@ function badRequest(message: string): ORPCError<'BAD_REQUEST', unknown> {
   return new ORPCError('BAD_REQUEST', { message });
 }
 
-/** Answers `error`: a refusal the handler chose stands; anything else is logged and is `message`. */
 function fail(error: unknown, label: string, message: string): never {
   if (error instanceof ORPCError) throw error;
   console.error(`[iccid-mappings] ${label}:`, error);
@@ -148,7 +147,7 @@ export function resolveServiceType(
   };
 }
 
-/** Async because a secondary must point at a real primary SIM, a cross-row lookup the SQL triggers cannot do safely. */
+/** A secondary must point at a real primary SIM: a cross-row lookup the SQL triggers cannot do safely. */
 export async function resolveSimRole(
   data: SimRoleInput,
   existing: Pick<ExistingSim, 'sim_role' | 'primary_iccid'> | null,

@@ -119,11 +119,8 @@ function ownBy(subject: string) {
   sqlite.run('UPDATE sim_balance_checks SET requested_by_subject = ?', [subject]);
 }
 
-/**
- * Every runner route, its scope, and what it answers a caller it admits when
- * the request carries no runner_id and a body that is not JSON: its own first
- * refusal, reached without D1.
- */
+// Each runner route, its scope, and its first refusal for an admitted caller whose request has
+// no runner_id and a non-JSON body (reached without D1).
 const RUNNER_ROUTES: [string, string, string, ReturnType<typeof answer>][] = [
   ['GET', '/api/control/balance-runners/check', HEARTBEAT_SCOPE, answer(200, '{"success":true}')],
   [

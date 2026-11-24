@@ -1,17 +1,8 @@
-// Extract the caller's session credential from a request.
-//
-// Browsers send it as the `auth_token` cookie, which is set HttpOnly/Secure/SameSite=Lax
-// by the login callback. The cookie is preferred precisely because JavaScript cannot read
-// it: the token used to also be handed to the SPA in a redirect URL query parameter,
-// which leaked it via the Referer header, browser history and Workers request logs.
-// See docs/SECURITY-REVIEW.md finding 4.
-//
-// The Authorization header is still accepted so a programmatic client can present an
-// Auth0 JWT directly; it is only consulted when no cookie is present.
+// The HttpOnly `auth_token` cookie wins; the Authorization header (an Auth0 JWT from
+// programmatic clients) is consulted only when no cookie is present.
 
 const COOKIE_NAME = 'auth_token';
 
-/** Where the credential came from. The cookie is the trusted browser path. */
 interface SessionCredential {
   token: string;
   source: 'cookie' | 'header';
@@ -36,14 +27,7 @@ export function extractSessionToken(
   return null;
 }
 
-/**
- * Read a single cookie value.
- *
- * Splits on ';' then on the FIRST '=' only — a cookie value may legitimately contain
- * '=' (base64 padding), and `split('=')[1]` would silently truncate it. Names are
- * matched exactly so `xauth_token` or `auth_token_backup` cannot satisfy a lookup for
- * `auth_token`.
- */
+/** Splits on the first '=' only: values may contain '=' (base64 padding). Names match exactly. */
 export function readCookie(cookieHeader: string | null | undefined, name: string): string | null {
   if (typeof cookieHeader !== 'string' || !cookieHeader) return null;
 

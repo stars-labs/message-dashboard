@@ -1,8 +1,4 @@
-// Spam/marketing filter rule management.
-//
-// Rule mutations affect new ingestion only. Historical changes are a separate,
-// explicitly requested, one-page-at-a-time operation. Nothing here decides what
-// spam is — see utils/spam-filter.ts.
+// Rule mutations affect new ingestion only; historical changes go through `history`.
 
 import { ORPCError } from '@orpc/server';
 import type * as v from 'valibot';
@@ -31,10 +27,9 @@ import type { D1, D1Batch } from '../lib/d1.js';
 import { normalizeSender } from '../utils/spam-filter.js';
 import { processRuleHistoryPage } from '../utils/filter-history.js';
 
-/** Shortest allowed body keyword. A single character would hide almost everything. */
 const MIN_KEYWORD_LENGTH = 2;
 
-/** Shortest allowed sender pattern, so a stray '1' cannot match half the table. */
+/** A stray '1' must not match half the table. */
 const MIN_SENDER_LENGTH = 3;
 
 interface FiltersCall {
@@ -50,7 +45,6 @@ interface ValidatedRule {
 
 type ValidationResult = ValidatedRule | { error: string };
 
-/** Validate and normalise a rule payload. */
 function validateRule({
   rule_type,
   pattern,
@@ -77,8 +71,7 @@ function validateRule({
     return { error: `sender pattern must be at least ${MIN_SENDER_LENGTH} characters` };
   }
 
-  // Numeric short codes retain the existing canonical storage format. Named
-  // sender IDs are stored verbatim and compared case-insensitively.
+  // Numeric short codes are stored in canonical digit form; named sender IDs verbatim.
   if (/^[+\d\s-]+$/.test(trimmed)) {
     const digits = normalizeSender(trimmed);
     if (digits.length < MIN_SENDER_LENGTH) {
@@ -100,10 +93,6 @@ export async function listFilterRules(db: D1<'all'>): Promise<FiltersResponse> {
   return { filters };
 }
 
-/**
- * Answers `error`: a refusal a handler chose stands, a duplicate
- * rule is a conflict, and anything else is logged and answered as `message`.
- */
 function fail(error: unknown, label: string, message: string): never {
   if (error instanceof ORPCError) throw error;
   if (isUniqueViolation(error)) {
@@ -123,14 +112,13 @@ function validated(rule: Parameters<typeof validateRule>[0]): ValidatedRule {
   return result;
 }
 
-/** The rule `id` names: an id that is not a number names none. */
+/** A non-numeric id yields NaN, which matches no row. */
 function ruleId(id: string): number {
   return Number(id);
 }
 
 export const filtersHandler = {
-  // List rule metadata only. Historical hit counts require reading every matched
-  // message and are not part of the dashboard's operational rule contract.
+  // No hit counts: they would require reading every matched message.
   async list({ env }: FiltersCall): Promise<FiltersResponse> {
     try {
       return await listFilterRules(env.DB);
@@ -139,7 +127,6 @@ export const filtersHandler = {
     }
   },
 
-  // Create a prospective rule. Existing messages remain historical facts.
   async create(
     { env, user }: FiltersCall,
     body: v.InferOutput<typeof CreateFilterBody>,
@@ -150,8 +137,6 @@ export const filtersHandler = {
         rule_type: rule.rule_type,
         pattern: rule.pattern,
         note: rule.note,
-        // The middleware builds `user.id`; there is no `sub` on it. Reading
-        // request.user.sub silently stored null for every rule.
         created_by: user?.id ?? null,
       });
       return { filter: inserted };
@@ -160,7 +145,7 @@ export const filtersHandler = {
     }
   },
 
-  // Matching identity is immutable. Notes and prospective active state may change.
+  // Rule type and pattern are immutable; only the note and active state change.
   async update(
     { env }: FiltersCall,
     id: string,
@@ -196,7 +181,7 @@ export const filtersHandler = {
     }
   },
 
-  // A referenced rule is historical provenance and cannot be physically deleted.
+  // A rule referenced by messages is provenance and cannot be deleted.
   async remove({ env }: FiltersCall, id: string): Promise<SuccessResponse> {
     try {
       if (await isFilterReferenced(env.DB, ruleId(id))) {
@@ -213,7 +198,7 @@ export const filtersHandler = {
     }
   },
 
-  // Historical changes are explicit, bounded, and one page per operator action.
+  // One bounded page per operator action.
   async history(
     { env }: FiltersCall,
     id: string,

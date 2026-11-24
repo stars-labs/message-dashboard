@@ -41,10 +41,6 @@ interface KeywordsCall {
   user?: { id: string } | undefined;
 }
 
-/**
- * Answers `error`: a refusal a handler chose stands; anything
- * else is logged and answered as `message`.
- */
 function fail(error: unknown, label: string, message: string): never {
   if (error instanceof ORPCError) throw error;
   console.error(`${label}:`, error);
@@ -119,11 +115,9 @@ export const keywordsHandler = {
         throw new ORPCError('BAD_REQUEST', { message: IMMUTABLE_MESSAGE });
       }
 
-      // An omitted colour keeps the stored one — but a row written before the
-      // colour validation existed may hold a payload, so that value is run
-      // through the same check and falls back to the default instead of 400ing.
-      // Rejecting it would make such a row impossible to edit via the API.
-      // See docs/SECURITY-REVIEW.md finding 2.
+      // A stored colour may predate validation and hold a payload: re-check it and
+      // fall back to the default instead of rejecting, which would make the row
+      // uneditable (docs/SECURITY-REVIEW.md finding 2).
       let resolvedColor = color;
       if (resolvedColor === undefined) {
         const storedCheck = normalizeKeywordColor(existing.color);
@@ -163,7 +157,6 @@ export const keywordsHandler = {
     }
   },
 
-  // Batch get tags for multiple messages - to reduce XHR requests
   async batchTags(
     { env }: KeywordsCall,
     { messageIds }: v.InferOutput<typeof BatchTagsBody>,
@@ -196,7 +189,7 @@ export const keywordsHandler = {
     }
   },
 
-  // Historical tagging is explicit, bounded, and one page per operator action.
+  // One bounded page per operator action.
   async history(
     { env }: KeywordsCall,
     id: string,

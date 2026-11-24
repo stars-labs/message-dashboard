@@ -14,11 +14,6 @@ export function nextD1Reset(now: Date = new Date()): Date {
   return reset;
 }
 
-/**
- * A quota error carries when it clears; any other failure has no retry time.
- * The union makes that a compile-time distinction rather than an optional
- * field the caller has to remember to check.
- */
 export type D1ErrorClassification =
   | { code: 'D1_QUOTA_EXCEEDED'; quota: 'rows_read' | 'rows_written'; retryAt: Date }
   | { code: 'D1_UNAVAILABLE'; quota?: undefined; retryAt?: undefined };

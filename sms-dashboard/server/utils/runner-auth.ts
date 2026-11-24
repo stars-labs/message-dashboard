@@ -13,11 +13,6 @@ interface RunnerRequest {
   };
 }
 
-/**
- * The result of a runner authorization check. `authorized` is the discriminant, so
- * `authMode` and `subject` can only be read on the success branch — callers used to
- * read them off a failure result and get `undefined`.
- */
 export type RunnerAuth =
   | { authorized: true; authMode: 'legacy_api_key'; subject: null }
   | { authorized: true; authMode: 'auth0_device'; subject: string }
@@ -25,7 +20,6 @@ export type RunnerAuth =
 
 export type AuthorizedRunner = Extract<RunnerAuth, { authorized: true }>;
 
-/** The claims of a runner's Auth0 access token: its subject, its OAuth scopes and its RBAC permissions. */
 const RunnerClaims = v.object({
   sub: v.optional(v.string()),
   scope: v.optional(v.string()),

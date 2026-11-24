@@ -172,12 +172,9 @@ export async function resolveLoginRoles({
 }
 
 /**
- * Reconcile a login token with Auth0 before provisioning the default viewer role.
- *
- * A missing custom claim does not prove that the user has no roles. Treating it as
- * proof previously let an Action/namespace failure demote an existing administrator:
- * setUserRole(viewer) removes the configured admin role. Auth0's Management API is the
- * source of truth whenever the signed login token carries no recognised Dashboard role.
+ * A missing custom claim does not prove the user has no roles (a broken Action or
+ * namespace looks the same), and setUserRole(viewer) removes the admin role. So the
+ * Management API decides whenever the token carries no recognised Dashboard role.
  */
 export async function ensureDashboardLoginRole({
   tokenRoles,
@@ -211,7 +208,6 @@ export async function ensureDashboardLoginRole({
 }
 
 export const auth0Handler = {
-  // Login - redirect to Auth0
   login(request: LoginRequest): Response {
     console.log('[Auth0 Handler] Login route hit');
     const { env } = request;
@@ -219,7 +215,6 @@ export const auth0Handler = {
     const redirectUri = `${url.origin}/callback`;
 
     if (!env.AUTH0_DOMAIN || !env.AUTH0_CLIENT_ID) {
-      // Auth0 not configured - return error
       return new Response(
         'Auth0 configuration missing. Please configure AUTH0_DOMAIN and AUTH0_CLIENT_ID.',
         {
@@ -236,10 +231,8 @@ export const auth0Handler = {
     authUrl.searchParams.set('scope', 'openid profile email');
     authUrl.searchParams.set('state', nanoid());
 
-    // Browser login creates a Dashboard session from the verified ID token. The
-    // runner API audience belongs to the Native Balance Agent and must not be
-    // requested by this Regular Web Application unless a separate login audience
-    // is explicitly configured.
+    // The runner API audience belongs to the Balance Agent; only a dedicated login
+    // audience may be requested here.
     if (env.AUTH0_LOGIN_AUDIENCE) {
       authUrl.searchParams.set('audience', env.AUTH0_LOGIN_AUDIENCE);
     }
@@ -247,7 +240,6 @@ export const auth0Handler = {
     return Response.redirect(authUrl.toString(), 302);
   },
 
-  // Callback - handle Auth0 response
   callback: async (request: CallbackRequest): Promise<Response> => {
     const { env } = request;
     const roleConfig = createRoleConfig(env);
@@ -276,10 +268,7 @@ export const auth0Handler = {
       const domain = env.AUTH0_DOMAIN;
       if (!domain) throw new Error('AUTH0_DOMAIN is not configured');
 
-      // Exchange code for tokens
       const redirectUri = `${url.origin}/callback`;
-      // Token exchange with Auth0
-
       const tokenResponse = await fetch(`https://${domain}/oauth/token`, {
         method: 'POST',
         headers: {
@@ -313,7 +302,6 @@ export const auth0Handler = {
       }
       const tokens = tokenBody.value;
 
-      // Get user info from Auth0
       const userResponse = await fetch(`https://${domain}/userinfo`, {
         headers: {
           Authorization: `Bearer ${tokens.access_token}`,
@@ -345,24 +333,15 @@ export const auth0Handler = {
       const claims = claimsParsed.value;
       const userInfo = infoParsed.value;
 
-      // Create or update user in database
       const userId = userInfo.sub;
 
-      // Roles come from the namespaced claim only, via the shared config so this
-      // path cannot drift from the JWT middleware. The previous version preferred a
-      // top-level `roles` claim and, failing that, base64-decoded the access token
-      // WITHOUT verifying its signature and trusted the roles it found there. Those
-      // roles are persisted into the KV session below, so they are a real
-      // authorization input. See docs/SECURITY-REVIEW.md finding 5.
+      // Roles are persisted into the KV session, so they are an authorization input:
+      // only the namespaced claim of a verified token counts.
       const userRoles = await resolveLoginRoles({
         userInfo: claims,
         tokens,
         env,
-        // `callback` is passed as a bare handler from the router (`router.get('/callback',
-        // auth0Handler.callback)`), so relying on `this` here makes it undefined in
-        // production and crashes with "Cannot read properties of undefined
-        // (reading 'verifyToken')". Call the exported handler explicitly instead of
-        // depending on invocation context.
+        // `callback` is registered as a bare handler, so `this` is undefined here.
         verifyToken: (token: string, audience?: string) =>
           auth0Handler.verifyToken(token, env, audience),
       });
@@ -376,10 +355,6 @@ export const auth0Handler = {
         roles: userRoles,
       };
 
-      // Email policy: verified address, on an allowed domain. Runs unconditionally —
-      // the old version only ran when ALLOWED_EMAIL_DOMAINS was set, so an unset list
-      // meant no email check at all, and it read the domain from the first '@' with a
-      // case-sensitive compare. See config/auth0-roles.ts.
       const emailCheck = isEmailAllowed(userInfo, env);
 
       if (!emailCheck.allowed) {
@@ -393,17 +368,8 @@ export const auth0Handler = {
         return new Response(`Access denied: ${emailCheck.reason}`, { status: 403 });
       }
 
-      // First-time users are provisioned as `viewer`, but only after Auth0 confirms
-      // that no known Dashboard role is already assigned. A missing token claim can
-      // mean the Post-Login Action or namespace is broken; it must never demote an
-      // existing administrator.
-      //
-      // Deliberately AFTER the verified-email and allowed-domain checks above, so this
-      // can only ever fire for someone already entitled to access, and deliberately
-      // hard-coded to the viewer role — this code path must never be able to grant
-      // admin. The app still requires an *explicit* role afterwards, so the gate below
-      // stays fail-closed; "default viewer" is a real Auth0 role assignment, not the
-      // absence of one. See docs/SECURITY-REVIEW.md finding 1.
+      // Must stay after the email checks (only entitled users get provisioned) and
+      // must only ever assign viewer, never admin.
       try {
         const roleResolution = await ensureDashboardLoginRole({
           tokenRoles: user.roles,
@@ -421,39 +387,27 @@ export const auth0Handler = {
           });
         }
       } catch (provisionError) {
-        // Deny rather than infer anything from a missing claim. This covers both the
-        // authoritative role lookup and a genuine first-user viewer assignment.
         logAuthFailure('auth_role_reconciliation_failed', provisionError);
         return authenticationUnavailable();
       }
 
-      // Role gate. Uses the shared helper rather than a third copy of this logic, and
-      // there is no env flag that can skip it — the old
-      // `&& env.USE_AUTH0_ROLES !== 'false'` let a roleless user through, and
-      // production shipped with that flag set to "false".
-      //
-      // Checked BEFORE the session is minted: the old order wrote a valid 24-hour
-      // session into KV and only then redirected the roleless user away, leaving a
-      // usable credential behind for an account that was just denied.
+      // Checked before the session is minted so a denied account never gets a credential.
       if (!hasAnyRole(user.roles, roleConfig)) {
         return Response.redirect(new URL('/login?error=no_role', url.origin).toString(), 302);
       }
 
-      // Create session
       const sessionToken = nanoid();
       const sessionData = {
         user: user,
         id_token: tokens.id_token,
-        expires_at: Date.now() + 24 * 60 * 60 * 1000, // 24 hours
+        expires_at: Date.now() + 24 * 60 * 60 * 1000,
       };
 
       await env.SESSIONS.put(sessionToken, JSON.stringify(sessionData), {
-        expirationTtl: 24 * 60 * 60, // 24 hours in seconds
+        expirationTtl: 24 * 60 * 60,
       });
 
-      // Reverse index so a role change can find and kill this session. Without it a
-      // demotion would not take effect until the 24h TTL expired, because roles are
-      // snapshotted into sessionData above.
+      // Roles are snapshotted into the session; the index lets a role change kill it.
       await indexSession(env, user.id, sessionToken);
 
       scheduleAuthAudit(request, {
@@ -463,11 +417,7 @@ export const auth0Handler = {
         details: { provider: 'auth0', roles: user.roles },
       });
 
-      // The session token is delivered ONLY as an HttpOnly cookie. It used to also be
-      // appended to this redirect as `?token=...`, which leaked a live 24-hour
-      // credential into the Referer header on any outbound link, into browser history,
-      // and into Workers request logs — defeating the HttpOnly flag set here.
-      // See docs/SECURITY-REVIEW.md finding 4.
+      // Cookie only: a token in the redirect URL would leak via Referer, history and logs.
       const frontendUrl = new URL('/', url.origin);
 
       return new Response(null, {
@@ -483,20 +433,16 @@ export const auth0Handler = {
     }
   },
 
-  // Logout
   logout: async (request: LogoutRequest): Promise<Response> => {
     const { env } = request;
 
-    // Reads the cookie as well as the header, otherwise a browser logout left the KV
-    // session alive until it expired 24 hours later.
     const credential = extractSessionToken(
       request.headers.get('Authorization'),
       request.headers.get('Cookie'),
     );
 
     if (credential) {
-      // Read the session first so the reverse index can be pruned; otherwise it would
-      // accumulate dead tokens until its own TTL expired.
+      // Read the session first so its reverse-index entry can be pruned.
       try {
         const stored = await readKvJson(env.SESSIONS, credential.token, StoredSession);
         if (stored?.ok === true) {
@@ -522,7 +468,7 @@ export const auth0Handler = {
     logoutUrl.searchParams.set('client_id', env.AUTH0_CLIENT_ID ?? '');
     logoutUrl.searchParams.set('returnTo', url.origin);
 
-    // Clear the cookie locally too; the Auth0 redirect only ends the IdP session.
+    // The Auth0 redirect only ends the IdP session, so clear the cookie here too.
     return new Response(null, {
       status: 302,
       headers: {
@@ -532,7 +478,6 @@ export const auth0Handler = {
     });
   },
 
-  // Get current user
   /** GET /api/auth/me, once the session is checked: the user and their permissions. */
   me(request: MeRequest): MeResponse {
     const { user } = request;
@@ -542,15 +487,11 @@ export const auth0Handler = {
       success: true,
       user: {
         ...user,
-        // Explicit rather than relying on enrichUserPermissions having run: if this
-        // route is ever wired without it, the client sees "no permissions" and hides
-        // everything, instead of `undefined` which `.includes()` would throw on.
         permissions: user.permissions ?? [],
       },
     };
   },
 
-  // Verify JWT token (for API calls)
   async verifyToken(
     token: string,
     env: VerifyEnv,
@@ -570,7 +511,6 @@ export const auth0Handler = {
 
       return payload;
     } catch {
-      // JWT verification failed
       return null;
     }
   },

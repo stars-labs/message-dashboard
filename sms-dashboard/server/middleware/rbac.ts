@@ -1,12 +1,4 @@
-// Role-Based Access Control middleware, backed by Auth0 roles.
-//
-// This gate fails CLOSED. It previously keyed off `env.USE_AUTH0_ROLES !== 'false'`,
-// which meant a missing, misspelled or unexpected value silently disabled every
-// permission check — and production shipped with the flag set to "false", so every
-// authenticated user held every permission. There is deliberately no longer any
-// environment switch that can turn authorization off; see docs/SECURITY-REVIEW.md
-// findings 1 and 5.
-//
+// Fails closed: no environment switch can turn authorization off.
 // The role -> permission table lives in config/auth0-roles.ts.
 
 import { createRoleConfig, getKnownRoles, permissionsForRoles } from '../../config/auth0-roles.js';
@@ -22,11 +14,7 @@ function forbidden(message: string): Response {
   return json({ error: 'Forbidden', message }, 403);
 }
 
-/**
- * Build the gate for one permission. It returns a Response to short-circuit the
- * route, or undefined to let it proceed. A permission the role table does not
- * grant is denied, so the gate fails closed.
- */
+// Returns a Response to short-circuit the route, or undefined to let it proceed.
 export function requirePermission(
   permission: Permission,
 ): (request: PermissionRequest) => Response | undefined {
@@ -52,14 +40,7 @@ export function requirePermission(
   };
 }
 
-/**
- * Attach the caller's effective permissions, which is also what /api/auth/me returns so
- * the client can hide controls it may not use.
- *
- * Defaults to none and only ever grows on an explicit positive role match — the version
- * before the security review had an else-branch that handed out the full permission set
- * when role checking was disabled.
- */
+// Also what /api/auth/me returns so the client can hide controls. Defaults to none.
 export function enrichUserPermissions(request: PermissionRequest): void {
   const { user, env } = request;
 

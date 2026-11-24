@@ -32,13 +32,11 @@ export interface ContractContext {
 
 const os = implement(contract).$context<ContractContext>();
 
-/** The runner a runner route admitted; the entry runs none of them without one. */
 function runnerOf({ runner }: ContractContext): AuthorizedRunner {
   if (runner === null) throw new Error('a runner route ran without an admitted runner');
   return runner;
 }
 
-/** A bill action's detailed input, as the handler takes it. */
 function billMutation(input: {
   params: { id: string };
   headers: { 'idempotency-key'?: string | undefined };

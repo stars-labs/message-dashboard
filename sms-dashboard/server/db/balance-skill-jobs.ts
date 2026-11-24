@@ -5,10 +5,7 @@ import type { BalanceDecision, BalanceSkill } from '../../shared/balance-skill.j
 import { CHECK_STATUSES, SKILL_JOB_STATUSES } from '../../shared/balance-status.js';
 import type { AuthorizedRunner } from '../utils/runner-auth.js';
 
-/**
- * A skill job with its check, profile, SIM number and the reply it answers. The
- * reply is an inner join, so its id and content are never null here.
- */
+// The reply is an inner join, so its id and content are never null.
 const SkillJobRow = v.object({
   id: v.string(),
   check_id: v.string(),

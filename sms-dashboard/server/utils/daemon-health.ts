@@ -6,7 +6,7 @@ import {
   HealthSnapshot,
 } from '../../shared/api/daemon-status.js';
 
-/** Ages in seconds. `null` means "never happened". */
+/** `null` means "never happened". */
 type Age = number | null;
 
 type DaemonHealthStatus = (typeof DAEMON_HEALTH_STATUSES)[number];
@@ -18,7 +18,6 @@ interface DaemonHealth {
   snapshot: HealthSnapshot | null;
 }
 
-/** The daemon_health row columns this module reads. */
 interface DaemonHealthRow {
   daemon_id?: string;
   last_heartbeat?: string | null;
@@ -53,7 +52,6 @@ function describeVersion(value: unknown): string {
     : 'missing';
 }
 
-/** The daemon upload is unknown: it crosses the daemon boundary and is read field by field. */
 export function normalizeHealthSnapshot(raw: unknown): HealthSnapshot {
   const schemaVersion = field(raw, 'schema_version');
   if (schemaVersion !== HEALTH_SCHEMA_VERSION) {
@@ -88,7 +86,6 @@ function parseHealthSnapshot(metadata: unknown): HealthSnapshot | null {
   return result.success ? result.output : null;
 }
 
-/** Age every "seconds since" field by the time elapsed since the snapshot was taken. */
 function advance(snapshot: HealthSnapshot, heartbeatAge: number): HealthSnapshot {
   if (!Number.isFinite(heartbeatAge)) return snapshot;
   const plus = (value: Age): Age => (value === null ? null : value + heartbeatAge);

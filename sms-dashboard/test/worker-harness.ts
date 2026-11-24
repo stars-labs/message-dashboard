@@ -1,6 +1,3 @@
-// Drives the whole Worker in-process: a Request goes through handleRequest, as
-// the runtime's fetch would send it, with every binding an in-memory double.
-// Any call to the network fails the request and is reported in `outbound`.
 import { mock, spyOn } from 'bun:test';
 import type { AppContext, AppEnv, AppRequest } from '../server/worker-context.js';
 import { memoryKv } from './memory-kv.js';
@@ -43,7 +40,7 @@ export function testEnv(overrides: Partial<AppEnv> = {}): AppEnv {
 
 interface WorkerCall {
   response: Response;
-  /** URLs the Worker tried to fetch; the harness refuses every one unless `network` answers it. */
+  /** URLs the Worker tried to fetch; refused unless `network` answers them. */
   outbound: string[];
 }
 
@@ -57,12 +54,8 @@ interface WorkerInit {
 
 type Network = WorkerInit['network'];
 
-/**
- * The calls in flight share one fetch stub, restored when the last finishes:
- * a stub per call would be restored under a call still running beside it.
- * Calls that overlap must answer the network the same way, or a request
- * could reach the other call's double.
- */
+// Calls in flight share one fetch stub, restored when the last finishes; overlapping
+// calls must therefore answer the network the same way.
 const inFlight = new Set<{ network: Network; outbound: string[] }>();
 let restoreFetch: (() => void) | null = null;
 

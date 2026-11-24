@@ -33,13 +33,11 @@ interface DurableContext {
   blockConcurrencyWhile(fn: () => Promise<void>): void;
 }
 
-/** The KV namespace used once, to migrate a call from before the Durable Object. */
 interface MigrationEnv {
   SESSIONS: KV<'get'>;
 }
 
-// A single object owns the live call. A revision identifies the exact snapshot
-// an asynchronous operation started from.
+// A revision identifies the exact snapshot an asynchronous operation started from.
 export class CallState {
   storage: SyncStorage;
 

@@ -10,7 +10,6 @@ import type { HistoryCursor, KeywordHistoryPage } from '../../shared/api/history
 
 const KEYWORD_HISTORY_PAGE_SIZE = 200;
 
-/** A keyword_tags row as history application reads it. */
 export interface HistoryKeyword {
   id: number;
   keyword: string;
@@ -22,11 +21,7 @@ function cursorFor(row: KeywordHistoryRow): HistoryCursor {
   return { created_at: row.created_at, id: row.id };
 }
 
-/**
- * Apply one keyword to one bounded chronological page. The SQL deliberately does
- * not search message content: filtering before LIMIT could scan an unbounded
- * number of D1 rows. Eligibility and matching happen in memory after the read.
- */
+/** The SQL does not search content: filtering before LIMIT could scan unbounded D1 rows. Matching happens in memory. */
 export async function processKeywordHistoryPage(
   db: D1<'all' | 'run'> & D1Batch<'all' | 'run'>,
   keyword: HistoryKeyword,

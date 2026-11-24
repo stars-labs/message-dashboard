@@ -10,7 +10,6 @@ interface VerificationCall {
 }
 
 export const verificationHandler = {
-  /** POST /api/verification/reprocess: one page, then the spam sweep when codes changed. */
   async reprocess(
     { env }: VerificationCall,
     query: v.InferOutput<typeof ReprocessQuery>,

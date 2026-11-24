@@ -1,9 +1,3 @@
-// Message retention: everything is kept for 12 months, then deleted.
-//
-// Applies to received and sent alike, filtered or not. Spam is retained just as
-// long as anything else, so a rule that turns out to be wrong can still be
-// audited months later.
-
 import type { D1, D1Batch } from '../lib/d1.js';
 import {
   countExpiredMessages as countExpiredMessagesBefore,
@@ -11,19 +5,13 @@ import {
   listExpiredMessageIds,
 } from '../db/messages.js';
 
-/** SQLite date modifier defining the retention window. */
 const RETENTION_MODIFIER = '-12 months';
 
-/**
- * Rows per batch. Also the bound-parameter count per statement, kept well under
- * SQLite's variable limit.
- */
+/** Also the bound-parameter count per statement; stays under SQLite's variable limit. */
 const BATCH_SIZE = 200;
 
-/** Safety stop, so a bug cannot turn into an unbounded delete loop. */
 const MAX_BATCHES = 50;
 
-/** How many messages are currently past the retention window. */
 export async function countExpiredMessages(
   db: D1<'first'>,
   modifier: string = RETENTION_MODIFIER,
@@ -32,12 +20,8 @@ export async function countExpiredMessages(
 }
 
 /**
- * Delete messages older than the retention window, in bounded batches.
- *
- * Deletes by explicit id list rather than `DELETE ... LIMIT`, which depends on a
- * SQLite compile-time option, and removes each message's keyword tags in the same
- * batch rather than relying on ON DELETE CASCADE — foreign key enforcement is not
- * guaranteed to be on, and orphaned message_tags rows would accumulate silently.
+ * Deletes by id list (`DELETE ... LIMIT` needs a SQLite compile-time option) and
+ * removes message_tags in the same batch (foreign keys may not be enforced).
  */
 export async function purgeExpiredMessages(
   db: D1<'all' | 'first'> & D1Batch<'all' | 'first'>,
@@ -68,8 +52,7 @@ export async function purgeExpiredMessages(
     }
   }
 
-  // True when we stopped on the batch cap rather than because we were done, so
-  // the next run has more to do. Surfaced instead of silently truncating.
+  // Stopped on the batch cap, not because the backlog is empty.
   const exhausted = batches >= maxBatches && (await countExpiredMessages(db, modifier)) > 0;
 
   if (deleted > 0 || exhausted) {

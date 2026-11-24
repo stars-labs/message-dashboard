@@ -1,36 +1,19 @@
-// Validation for outbound SMS recipients.
-//
-// A recipient submitted to POST /api/messages/send is stored, then picked up by the
-// Rust daemon, which interpolates it into an `AT+CMGS="<recipient>"` command written
-// straight to a modem's serial port. AT commands are CR-terminated, so a CR in this
-// value ends the command and the modem parses the rest as a new one — letting a caller
-// run arbitrary AT commands (send from any SIM, wipe stored messages).
-// See docs/SECURITY-REVIEW.md finding 3.
-//
-// The daemon validates independently; this is the trust boundary, so a bad value never
-// reaches the database or the pending-send queue in the first place.
+// The daemon interpolates the recipient into `AT+CMGS="<recipient>"` on the modem's
+// serial port. A CR ends the AT command, so an unvalidated value could inject
+// arbitrary AT commands. The daemon validates too; this keeps bad values out of D1.
 
 type RecipientCheck = { ok: true; value: string } | { ok: false; reason: string };
 
 const E164 = /^\+?[0-9]{6,15}$/;
 const SHORT_CODE = /^[0-9]{3,5}$/;
 
-/**
- * Validate a recipient as E.164 or a carrier short code.
- *
- * Rejects rather than sanitises. Stripping separators or control characters would risk
- * sending the message to a different number than the caller asked for, and silently
- * "fixing" a payload hides the attempt; a 400 is both safer and diagnosable.
- */
+/** E.164 or carrier short code. Rejects rather than sanitises, so no message goes to a different number than asked. */
 export function normalizeRecipient(recipient: unknown): RecipientCheck {
   if (typeof recipient !== 'string') {
     return { ok: false, reason: 'recipient must be a string' };
   }
 
-  // Only spaces and tabs are trimmed — deliberately NOT String.trim(), which also
-  // strips CR/LF. A trailing "\r\n" would then normalise to a valid number and return
-  // 200, silently discarding evidence of an injection attempt; a control character
-  // anywhere in a phone number is anomalous and should fail loudly.
+  // Not String.trim(): it strips CR/LF, which would let a trailing "\r\n" pass as valid.
   const value = recipient.replace(/^[ \t]+|[ \t]+$/g, '');
 
   if (!value) {

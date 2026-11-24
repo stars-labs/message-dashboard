@@ -1,13 +1,11 @@
-// High-confidence verification-code detection shared by ingestion, filtering and
-// historical reprocessing. A bare number is never enough: every accepted candidate
-// must have an OTP label, a login/verification action, or an expiry/security signal.
+// A bare number is never enough: every accepted candidate needs an OTP label, a
+// login/verification action, or an expiry/security signal.
 
 const ZH_LABEL = '验证码|校验码|动态码|动态密码|驗證碼|校驗碼|動態碼|動態密碼';
 const EN_CODE_LABEL =
   'otp|passcode|pin|(?:verification|security|authentication|login|access|confirmation|one[- ]time)\\s+(?:code|password)';
 const JA_LABEL = '認証コード|確認コード|ワンタイムパスワード|ワンタイムコード|セキュリティコード';
 
-/** The evidence label attached to a detected code. Used by tests and audit trails. */
 type VerificationReason =
   | 'zh_label_before'
   | 'zh_label_after'
@@ -39,10 +37,7 @@ interface DetectedCode {
   reason: VerificationReason;
 }
 
-/**
- * Ordered from the most explicit forms to contextual forms. Each expression has
- * exactly one capture group: the code shown in the UI.
- */
+/** Most explicit forms first. Each expression has exactly one capture group: the code. */
 const VERIFICATION_CODE_PATTERNS: CodePattern[] = [
   {
     reason: 'zh_label_before',
@@ -157,23 +152,21 @@ function isRejectedCandidate(
   const before = content.slice(Math.max(0, offset - 32), offset);
   const after = content.slice(offset + code.length, offset + code.length + 48);
 
-  // A date fragment cannot be an OTP without an explicit OTP label.
+  // A date fragment is not an OTP without an explicit label.
   if (!reason.includes('label') && /^\s*(?:年|[-/]\s*\d)/.test(after)) return true;
 
-  // English "code" is overloaded. Do not turn promo/area/postal codes into OTPs.
+  // "code" is overloaded: promo/area/postal codes.
   if (reason === 'en_generic_code_before') {
     if (NON_OTP_CODE_PREFIX.test(before)) return true;
     if (NON_OTP_CODE_ACTION.test(after)) return true;
   }
   if (reason === 'en_login_action' && NON_OTP_CODE_ACTION.test(after)) return true;
 
-  // Japanese コード is equally overloaded (product/coupon/order codes).
   if (reason === 'ja_generic_code_before' && JA_NON_OTP_CODE_PREFIX.test(before)) return true;
 
   return false;
 }
 
-/** Return the code and the evidence that made it trustworthy, or null. */
 export function detectVerificationCode(content: unknown): DetectedCode | null {
   if (typeof content !== 'string' || content === '') return null;
 
@@ -188,12 +181,10 @@ export function detectVerificationCode(content: unknown): DetectedCode | null {
   return null;
 }
 
-/** The code alone, as persisted with a message. */
 export function extractVerificationCode(content: unknown): string | null {
   return detectVerificationCode(content)?.code ?? null;
 }
 
-/** Single boolean definition used by the spam-filter safety guard. */
 export function hasVerificationCode(content: unknown): boolean {
   return detectVerificationCode(content) !== null;
 }

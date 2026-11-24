@@ -18,9 +18,7 @@ function isApiPath(request: Request): boolean {
 router.options('*', corsPreflight);
 
 // Outside the contract for good: browser redirects, not the JSON API.
-// Legacy /favicon.ico requests (browsers ask for it even when index.html declares
-// icons) are redirected to the real PNG. This used to return an empty 204, which is
-// why the dashboard had no icon at all.
+// Browsers ask for /favicon.ico even when index.html declares icons.
 router.get('/favicon.ico', (request) =>
   Response.redirect(new URL('/favicon-32.png', request.url).toString(), 301),
 );
@@ -36,7 +34,6 @@ router.get('*', async (request) =>
     : ((await appShellRedirect(request, request.env)) ?? serveFrontend(request)),
 );
 
-/** Every route the app serves, in dispatch order: the contract first, then the Router. */
 export function routeTable() {
   return [...contractRoutes(), ...router.routes()];
 }

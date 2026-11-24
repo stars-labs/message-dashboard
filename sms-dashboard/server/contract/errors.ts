@@ -18,7 +18,6 @@ function problem(status: number, code: string, detail: string) {
   return { type: 'about:blank', title: TITLES[status] ?? 'Error', status, detail, code };
 }
 
-/** A problem as a response, for answers the contract handler does not write itself. */
 export function problemResponse(status: number, code: string, detail: string): Response {
   return new Response(JSON.stringify(problem(status, code, detail)), {
     status,
@@ -28,11 +27,7 @@ export function problemResponse(status: number, code: string, detail: string): R
 
 const Extensions = v.record(v.string(), v.unknown());
 
-/**
- * What a rejected input got wrong: each issue's path and message. Not the issue
- * itself: its path segments carry the input they point into, and the caller's
- * body is not echoed back.
- */
+// Path and message only: the issue itself carries the caller's input.
 function issuesOf({ issues }: ValidationError) {
   return issues.map(({ path = [], message }) => ({
     path: path
@@ -42,10 +37,6 @@ function issuesOf({ issues }: ValidationError) {
   }));
 }
 
-/**
- * The problem for `error`. A rejected input names its first issue as the detail
- * and lists the rest; otherwise members of an object `data` are extension members.
- */
 export function problemOf(error: ORPCError<string, unknown>) {
   if (error.cause instanceof ValidationError) {
     const issues = issuesOf(error.cause);
@@ -62,23 +53,16 @@ export function problemOf(error: ORPCError<string, unknown>) {
   };
 }
 
-/** The body a daemon route answers whole, in place of its usual error format. */
 const WireError = v.object({ wire: v.record(v.string(), v.unknown()) });
 
 export type DaemonErrors = 'plain' | 'flagged';
 
-/**
- * Why a daemon route refused a request: a rejected input names its first
- * issue. A body that is not JSON never gets here; the entry reads it as none,
- * and the route's schema answers it.
- */
 function daemonReason(error: ORPCError<string, unknown>): string {
   if (error.cause instanceof ValidationError)
     return error.cause.issues[0]?.message ?? error.message;
   return error.message;
 }
 
-/** A failure the procedure did not choose: oRPC wraps what it threw. */
 function unexpected(error: ORPCError<string, unknown>): boolean {
   return (
     error.code === 'INTERNAL_SERVER_ERROR' &&
@@ -87,12 +71,8 @@ function unexpected(error: ORPCError<string, unknown>): boolean {
   );
 }
 
-/**
- * The daemon's error format, which shared/control-fixtures/ and the route tests
- * pin: `{ error }` or `{ success: false, error }` as the route declares, or the
- * whole body a refusal gives as `data.wire`. An unexpected failure answers as
- * the Worker's own catch always did, whatever the route's format.
- */
+// The daemon's wire error format, pinned by shared/control-fixtures/: `{ error }`,
+// `{ success: false, error }`, or the whole body in `data.wire`.
 export function daemonErrorOf(errors: DaemonErrors) {
   return (error: ORPCError<string, unknown>) => {
     if (v.is(WireError, error.data)) return error.data.wire;

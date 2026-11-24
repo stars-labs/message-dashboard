@@ -16,11 +16,6 @@ function redirect(request: GateRequest, path: string): Response {
   return Response.redirect(new URL(path, request.url).toString(), 302);
 }
 
-/**
- * The redirect for a browser opening the app shell (`/` or `/index.html`)
- * without a live session for a dashboard role, or null to serve it. Every other
- * path is served as is.
- */
 export async function appShellRedirect(
   request: GateRequest,
   env: GateEnv,
@@ -28,14 +23,10 @@ export async function appShellRedirect(
   const { pathname } = new URL(request.url);
   if (pathname !== '/' && pathname !== '/index.html') return null;
 
-  // Shared cookie reader rather than a second inline parser: the previous
-  // `authCookie.split('=')[1]` truncated any value containing '=', and
-  // `startsWith('auth_token=')` would also have matched a differently named cookie.
   const token = readCookie(request.headers.get('Cookie'), 'auth_token');
   if (!token) return redirect(request, '/login');
 
-  // A stored value that is not a session is treated as no session, as the API
-  // middleware treats it.
+  // A stored value that is not a session counts as no session, as in the API middleware.
   const stored = await readKvJson(env.SESSIONS, token, StoredSession);
   if (!stored?.ok) return redirect(request, '/login');
 

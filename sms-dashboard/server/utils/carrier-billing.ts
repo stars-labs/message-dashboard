@@ -22,10 +22,7 @@ import type { SingtelBill } from './singtel-postpaid-bill.js';
 const RECONCILIATION_PAGE_SIZE = 100;
 const SINGTEL_BILL_PREFIX = '<Singtel>Dear customer, your latest bill for Singtel a/c ';
 
-/**
- * What happened to one candidate message. These are also the summary keys in
- * handlers/carrier-billing-backfill.ts, which counts each outcome.
- */
+/** Also the summary keys in handlers/carrier-billing-backfill.ts. */
 export type BillOutcome =
   'detected' | 'duplicate_detected' | 'parse_conflict' | 'already_processed' | 'ignored' | 'failed';
 
@@ -34,7 +31,6 @@ export interface BillProcessingResult {
   bill_id?: string;
 }
 
-/** The message fields bill processing requires. */
 const BillCandidate = v.object({
   id: v.string(),
   phone_iccid: v.string(),

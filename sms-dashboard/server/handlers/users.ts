@@ -1,16 +1,3 @@
-// User + role administration.
-//
-// `PUT /api/users/:id/role` is the most security-sensitive endpoint in this codebase: it
-// is a privilege-escalation primitive. Its guards are therefore explicit and tested:
-//
-//   * admin-only: its contract (shared/api/contract/users.ts) requires users.write
-//   * the target role must be one of the two known roles — no arbitrary role injection
-//   * an admin may not change their OWN role, which blocks self-lockout and removes the
-//     trivial "promote myself" path if the permission is ever mis-granted
-//   * every change writes an audit_logs row with actor, target and old -> new
-//   * the target's live sessions are revoked, or a demotion would not take effect for up
-//     to 24 hours (roles are snapshotted into the session at login)
-
 import { ORPCError } from '@orpc/server';
 import { createRoleConfig, getKnownRoles } from '../../config/auth0-roles.js';
 import type { SetRoleResponse, UsersResponse } from '../../shared/api/users.js';
@@ -64,10 +51,7 @@ export const usersHandler = {
     const roleConfig = createRoleConfig(env);
 
     try {
-      // Constant number of Management API calls regardless of user count. The previous
-      // version asked Auth0 for each user's roles individually via Promise.all, which
-      // returned HTTP 429 (rate limited) as soon as the tenant had more than a few
-      // users — the requests all fired concurrently.
+      // Per-user role calls hit Auth0's 429 rate limit; this makes a constant number of calls.
       const { users, roleByUserId } = await listUsersWithRoles(env);
 
       const withRoles = users.map((u) => {
@@ -79,15 +63,11 @@ export const usersHandler = {
           last_login: u.last_login ?? null,
           logins_count: u.logins_count ?? 0,
           roles: role ? [role] : [],
-          // The single role this app cares about, or null if they hold neither.
           role,
         };
       });
 
-      // admin_role/viewer_role are returned explicitly so the UI never has to guess
-      // which configured name means what. The names are deployment config
-      // (AUTH0_ADMIN_ROLE etc., currently sms-admin/sms-viewer), so a client that
-      // hardcoded "admin" would mislabel every row after a rename.
+      // Role names are deployment config (AUTH0_ADMIN_ROLE etc.), so the UI must be told them.
       return {
         success: true,
         users: withRoles,
@@ -108,7 +88,6 @@ export const usersHandler = {
   ): Promise<SetRoleResponse> {
     const knownRoles = getKnownRoles(createRoleConfig(env));
 
-    // Allow-list, not a blocklist: only these two strings can ever be assigned.
     const role = knownRoles.find((known) => known === requested);
     if (role === undefined) {
       throw new ORPCError('BAD_REQUEST', {
@@ -116,8 +95,7 @@ export const usersHandler = {
       });
     }
 
-    // Self-change guard. Blocks an admin demoting themselves into lockout, and means
-    // this endpoint can never be used to escalate the caller's own privileges.
+    // Prevents self-lockout and self-escalation.
     if (targetId === user?.id) {
       throw new ORPCError('FORBIDDEN', {
         message: 'You cannot change your own role. Ask another admin, or use the Auth0 dashboard.',
@@ -129,7 +107,7 @@ export const usersHandler = {
 
       await setUserRole(env, targetId, role);
 
-      // Without this the change is invisible until their session expires.
+      // Roles are snapshotted into the session at login; without this a demotion waits out the 24h TTL.
       const revoked = await revokeUserSessions(env, targetId);
 
       await writeAuditLog(env, {

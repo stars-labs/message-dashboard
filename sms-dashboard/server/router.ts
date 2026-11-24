@@ -2,7 +2,7 @@ const METHODS = ['GET', 'OPTIONS'] as const;
 
 type Method = (typeof METHODS)[number];
 
-/** A route handler. Null or undefined means the route does not answer this request. */
+// Null or undefined means the route does not answer this request.
 type RouteHandler<Request> = (
   request: Request,
 ) => Promise<Response | null | undefined> | Response | null | undefined;
@@ -12,11 +12,7 @@ interface Route<Request> {
   handler: RouteHandler<Request>;
 }
 
-/**
- * The routes outside the contract: browser redirects, the app shell and CORS
- * preflight. A path is a literal or `*`. A request goes to the first route
- * registered for its method whose path matches.
- */
+// Routes outside the contract. A path is a literal or `*`; the first registered match wins.
 export class Router<Request extends { url: string; method: string }> {
   private readonly table: Record<Method, Route<Request>[]> = { GET: [], OPTIONS: [] };
 
@@ -28,7 +24,6 @@ export class Router<Request extends { url: string; method: string }> {
     this.table.OPTIONS.push({ path, handler });
   }
 
-  /** Every registered route, grouped by method, each method in the order it dispatches. */
   routes(): { method: Method; path: string }[] {
     return METHODS.flatMap((method) => this.table[method].map(({ path }) => ({ method, path })));
   }

@@ -23,7 +23,6 @@ export interface Fleet {
   replace(call: unknown): void;
 }
 
-/** The real CallState Durable Object over in-memory storage. */
 export function callState(initial: CallFixture | null): Fleet {
   const data = new Map<string, unknown>([['initialized', true]]);
   const object = new CallState(

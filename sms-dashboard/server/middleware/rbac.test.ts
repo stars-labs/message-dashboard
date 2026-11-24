@@ -1,9 +1,3 @@
-// Run with: bun test server/middleware/rbac.test.ts
-//
-// These tests pin the authorization model closed. The bug they were written for:
-// USE_AUTH0_ROLES="false" made requirePermission() return undefined (= allow) for
-// every permission, and enrichUserPermissions() explicitly granted the full
-// permission list to everyone. See docs/SECURITY-REVIEW.md finding 1.
 import { describe, expect, test } from 'bun:test';
 import { enrichUserPermissions, requirePermission, type PermissionRequest } from './rbac.js';
 import { ALL_PERMISSIONS, ROLE_PERMISSIONS, type Permission } from '../../config/auth0-roles.js';
@@ -15,7 +9,6 @@ function req(
   return { user, env: { ...envOverrides } };
 }
 
-// requirePermission returns undefined to allow, or a Response to deny.
 function isAllowed(request: PermissionRequest, permission: Permission): boolean {
   return requirePermission(permission)(request) === undefined;
 }
@@ -43,8 +36,7 @@ describe('requirePermission — unauthenticated', () => {
   });
 });
 
-// The full matrix. Every permission is decided for every role, so adding a permission
-// to a route without adding it to the role map fails loudly here.
+// Every permission is decided for every role, so a permission missing from the role map fails here.
 describe('requirePermission — admin/viewer matrix', () => {
   const matrix: [string, readonly string[]][] = Object.entries(ROLE_PERMISSIONS);
   for (const [role, expected] of matrix) {
@@ -68,7 +60,6 @@ describe('requirePermission — viewer restrictions', () => {
     expect(isAllowed(viewer(), 'messages.send')).toBe(true);
   });
 
-  // P0 regression: routes use phones.write, which the old permission list omitted.
   test('viewer is denied phones.write with 403', () => {
     const result = denial(viewer(), 'phones.write');
     expect(result).toBeInstanceOf(Response);
@@ -131,7 +122,7 @@ describe('requirePermission — roleless and unknown roles', () => {
     expect(isAllowed(req({ roles: ['billing'] }), 'messages.read')).toBe(false);
   });
 
-  // Sessions minted before the split carry roles: ['sms'], which now grants nothing.
+  // Older sessions carry roles: ['sms'], which grants nothing.
   test('denies the retired sms role', () => {
     expect(isAllowed(req({ roles: ['sms'] }), 'messages.read')).toBe(false);
   });
@@ -142,9 +133,7 @@ describe('requirePermission — roleless and unknown roles', () => {
   });
 });
 
-// The core of finding 1: the old code keyed off `env.USE_AUTH0_ROLES !== 'false'`, so a
-// missing/typo'd/unexpected value silently disabled every check. No env value may
-// re-open the gate.
+// No env value may re-open the gate.
 describe('requirePermission — fails closed regardless of env', () => {
   for (const value of ['false', 'FALSE', '0', 'no', '', undefined, 'true', 'yes']) {
     test(`denies a roleless user when USE_AUTH0_ROLES=${JSON.stringify(value)}`, () => {
@@ -198,7 +187,6 @@ describe('enrichUserPermissions', () => {
     expect(enrichedPermissions({ roles: [] })).toEqual([]);
   });
 
-  // The old else-branch handed out every permission here.
   test('grants nothing to a roleless user when USE_AUTH0_ROLES=false', () => {
     expect(enrichedPermissions({ roles: [] }, { USE_AUTH0_ROLES: 'false' })).toEqual([]);
   });

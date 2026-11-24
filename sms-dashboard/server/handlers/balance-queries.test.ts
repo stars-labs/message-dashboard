@@ -2301,8 +2301,7 @@ describe('row schemas', () => {
 });
 
 describe('multipart carrier replies', () => {
-  // Real S62 reply, split by the carrier into three parts that share a sender and
-  // arrival timestamp. The balance sits in the third part.
+  // One carrier reply in three parts sharing sender and timestamp; the balance is in the third.
   const parts = [
     {
       id: 'part-1',
@@ -2330,7 +2329,6 @@ describe('multipart carrier replies', () => {
   test('groups parts that share sender and timestamp', () => {
     const merged = mergeMultipartReplies(parts);
     expect(merged.size).toBe(3);
-    // Every part of one reply resolves to the same group and the same merged text.
     const group = merged.get('part-1');
     for (const part of parts) {
       expect(merged.get(part.id)).toEqual(group);
@@ -2371,13 +2369,10 @@ describe('multipart carrier replies', () => {
     const merged = mergeMultipartReplies(parts);
     const full = merged.get('part-1')?.content ?? '';
 
-    // The fragment carrying the balance is parseable, but the fragment processed
-    // first is not — which is what closed S62 as unparsed before its balance part
-    // was ever examined.
+    // The first fragment alone is unparseable; only the third carries the balance.
     expect(parseBalanceMetrics('cn-mobile-balance-v1', parts[0]?.content ?? '')).toEqual([]);
     expect(parseBalanceMetrics('cn-mobile-balance-v1', parts[2]?.content ?? '')).toHaveLength(1);
 
-    // Merging makes the outcome independent of which part arrives first.
     expect(merged.get('part-3')?.content).toBe(full);
     const metrics = parseBalanceMetrics('cn-mobile-balance-v1', full);
     expect(metrics).toHaveLength(1);

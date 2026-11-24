@@ -8,13 +8,8 @@ interface KVOperations {
 
 export type KVOperation = keyof KVOperations;
 
-/**
- * The part of a KV namespace a caller uses, e.g. `KV<'get' | 'put'>`. The real
- * binding satisfies it and a test double implements exactly those operations.
- */
 export type KV<Op extends KVOperation = KVOperation> = Pick<KVOperations, Op>;
 
-/** Reads a JSON value stored as text: null when the key is absent, otherwise the schema's verdict. */
 export async function readKvJson<T>(
   kv: KV<'get'>,
   key: string,

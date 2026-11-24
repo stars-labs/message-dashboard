@@ -57,10 +57,8 @@ const profileColumns = {
   skill_config: v.string(),
 };
 
-/** A sim_balance_profiles row of any method. */
 const ProfileRow = v.object({ ...profileColumns, method: v.picklist(PROFILE_METHODS) });
 
-/** A sim_balance_profiles row whose method the planner can run. */
 const QueryProfileRow = v.object({ ...profileColumns, method: v.picklist(QUERY_METHODS) });
 
 export type BalanceProfile = v.InferOutput<typeof QueryProfileRow>;
@@ -75,10 +73,6 @@ const BALANCE_COOLDOWN_PREDICATE = `
     AND datetime(requested_at) >= datetime('now', '-24 hours'))
 `;
 
-/**
- * A pending check as reply correlation reads it. The query only returns checks
- * whose deadline the reply arrived before, so the window flag is never null.
- */
 const PendingCheckRow = v.object({
   id: v.string(),
   sim_iccid: v.string(),
@@ -191,14 +185,12 @@ const RetryRow = v.object({
 
 const StopRow = v.object({ id: v.string(), status: CheckStatusSchema });
 
-/** A message handed to the balancer: what was received, from whom. */
 export interface BalanceMessage {
   id: string;
   phone_number: string | null;
   content: string;
 }
 
-/** The fields of a balance check a follow-up SMS is queued from. */
 export interface FollowUpCheck {
   id: string;
   sim_number: string | null;
@@ -211,7 +203,7 @@ function changed(result: D1RunResult | undefined): boolean {
   return result !== undefined && result.meta.changes > 0;
 }
 
-/** The SIMs in scope, by index; a scope larger than D1 binds is read in chunks. */
+// A scope larger than D1's bind limit is read in chunks.
 export async function listPlanPhones(
   db: D1<'all'>,
   scope: readonly string[] | null,

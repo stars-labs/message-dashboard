@@ -1,14 +1,5 @@
-// Re-applying spam rules to messages that already exist.
-//
-// Design: 'pending' IS the cursor. Anything that needs (re)judging is marked
-// pending, then swept in bounded pages. If a sweep runs out of time it simply
-// stops — the next call, whether from the API or the nightly cron, picks up
-// exactly where it left off. No progress table, no resume token.
-//
-// SQL is only ever used to NARROW candidates, never to decide. A pre-filter that
-// selects too much is harmless because classifyMessage() has the final say; one
-// that selects too little would silently leave messages misjudged, so the
-// pre-filters below deliberately err toward over-selecting.
+// 'pending' is the cursor: a sweep that runs out of time just stops, and the next
+// call resumes where it left off.
 
 import type { D1, D1Batch } from '../lib/d1.js';
 import {
@@ -18,20 +9,15 @@ import {
 } from '../db/messages.js';
 import { classifyMessage, loadActiveRules, FILTER_STATUS } from './spam-filter.js';
 
-/** Rows fetched and updated per iteration. Also the D1 batch size. */
+/** Also the D1 batch size. */
 const PAGE_SIZE = 200;
 
-/** Stop starting new pages after this long, to stay inside the Worker's budget. */
 const DEFAULT_BUDGET_MS = 20_000;
 
-/** How many messages are still waiting to be judged. */
 export function countPending(db: D1<'first'>): Promise<number> {
   return countMessagesByFilterStatus(db, FILTER_STATUS.PENDING);
 }
 
-/**
- * Judge messages currently marked 'pending', in bounded pages.
- */
 export async function sweepPending(
   db: D1<'all' | 'first' | 'run'> & D1Batch<'all' | 'first' | 'run'>,
   {
@@ -62,7 +48,6 @@ export async function sweepPending(
 
     processed += results.length;
 
-    // Short page means we drained the queue.
     if (results.length < pageSize) break;
   }
 

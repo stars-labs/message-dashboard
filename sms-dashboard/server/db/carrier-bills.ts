@@ -27,7 +27,6 @@ const BILL_COLUMNS = [
   .map((column) => `b.${column}`)
   .join(', ');
 
-/** A carrier_bills row joined with its account and notification SIM. */
 export const BillRow = v.object({
   ...v.omit(CarrierBill, ['account_ref_masked', 'notification_sim', 'urgency', 'days_remaining'])
     .entries,

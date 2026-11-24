@@ -2,11 +2,7 @@ async function digest(value: string): Promise<Uint8Array> {
   return new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)));
 }
 
-/**
- * Compares a presented secret with the configured one in constant time. Both
- * sides are hashed first so their lengths match, then every byte is compared
- * without an early exit. An empty or missing secret never matches.
- */
+// Constant time: both sides are hashed so their lengths match, then compared without an early exit.
 export async function secretMatches(
   presented: string | null,
   expected: string | undefined,

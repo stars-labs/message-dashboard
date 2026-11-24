@@ -7,7 +7,6 @@ const FILTER_COLUMNS =
 
 const ReferencedRow = v.object({ referenced: v.number() });
 
-/** One active row from filter_rules, whose rule_type the table restricts to the known kinds. */
 const SpamRuleRow = v.object({
   id: v.number(),
   rule_type: v.picklist(Object.values(RULE_TYPE)),
@@ -16,7 +15,6 @@ const SpamRuleRow = v.object({
 
 export type SpamRule = v.InferOutput<typeof SpamRuleRow>;
 
-/** One message row a rule history page scans. */
 const HistoryRow = v.object({
   id: v.string(),
   type: v.string(),

@@ -1,7 +1,3 @@
-// Run with: bun test server/handlers/users.test.ts
-//
-// PUT /api/users/:id/role is a privilege-escalation primitive. These tests pin its
-// guards: role allow-list, self-change refusal, audit logging, session revocation.
 import { afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from 'bun:test';
 import * as v from 'valibot';
 import { ORPCError } from '@orpc/server';
@@ -33,7 +29,6 @@ function kvStub(initial: Record<string, string> = {}) {
   };
 }
 
-// Records the centralized audit_logs bind() parameters so we can assert on them.
 function dbStub() {
   const run: D1RunResult = { meta: { changes: 1, last_row_id: 1 } };
   const prepare = (): D1Statement<'run'> => ({
@@ -106,7 +101,6 @@ function mockAuth0({
       ]);
     }
 
-    // A specific user's roles — used by setRole to record the previous value.
     if (/\/users\/[^/?]+\/roles/.test(url)) {
       if (method === 'GET') return Response.json(roles.map((r) => ({ id: `rol_${r}`, name: r })));
       return new Response('', { status: 204 });
@@ -244,9 +238,7 @@ describe('GET /api/users', () => {
     expect(users[0]?.role).toBe('admin');
   });
 
-  // THE regression test. The first implementation asked Auth0 for each user's roles
-  // individually — concurrently, via Promise.all — which returned HTTP 429 as soon as
-  // the tenant had more than a handful of users. Cost must not scale with user count.
+  // Per-user role calls hit Auth0's 429 rate limit; cost must not scale with user count.
   test('makes a constant number of Management API calls regardless of user count', async () => {
     const many = Array.from({ length: 60 }, (_, i) => ({
       user_id: `auth0|${String(i)}`,
@@ -261,11 +253,9 @@ describe('GET /api/users', () => {
     const users = await usersOf(usersHandler.list(listRequest()));
     expect(users).toHaveLength(60);
 
-    // token + roles lookup + user list + 2 role-membership calls. Generous ceiling, but
-    // far below the 60+ the per-user version would make.
+    // token + roles lookup + user list + 2 role-membership calls, with headroom.
     expect(calls.length).toBeLessThanOrEqual(8);
 
-    // Explicitly: not one per-user roles call anywhere.
     const perUserRoleCalls = calls.filter((c) => /\/users\/[^/?]+\/roles/.test(c.url));
     expect(perUserRoleCalls).toHaveLength(0);
   });
@@ -282,9 +272,6 @@ describe('GET /api/users', () => {
     expect(byId).toEqual({ 'auth0|a': 'admin', 'auth0|b': 'viewer', 'auth0|c': null });
   });
 
-  // Production uses sms-admin / sms-viewer, not the defaults. The response must carry
-  // which configured name means what, or a client comparing against "admin" mislabels
-  // every row.
   test('resolves and reports renamed roles', async () => {
     mockAuth0({
       roleNames: { admin: 'sms-admin', viewer: 'sms-viewer' },
@@ -302,8 +289,7 @@ describe('GET /api/users', () => {
     });
   });
 
-  // Production uses google-oauth2|... ids, which contain a '|' and must survive the
-  // round trip through the URL path.
+  // google-oauth2|... ids contain a '|' that must survive the URL path.
   test('handles provider-prefixed user ids containing a pipe', async () => {
     const id = 'google-oauth2|110599213519946932722';
     mockAuth0({ users: [{ user_id: id }], members: { rol_admin: [id], rol_viewer: [] } });
@@ -371,7 +357,6 @@ describe('PUT /api/users/:id/role — role allow-list', () => {
         code: 'BAD_REQUEST',
         message: 'role must be one of: admin, viewer',
       });
-      // Nothing was mutated.
       expect(calls.some((c) => c.method === 'POST' && c.url.includes('/roles'))).toBe(false);
     });
   }
@@ -415,12 +400,10 @@ describe('PUT /api/users/:id/role — success path', () => {
       sessions_revoked: 2,
     });
 
-    // Sessions actually gone — a demotion that leaves the session alive is not a demotion.
     expect(env.SESSIONS.store.has('tok-1')).toBe(false);
     expect(env.SESSIONS.store.has('tok-2')).toBe(false);
     expect(env.SESSIONS.store.has('usess:auth0|target')).toBe(false);
 
-    // Audit row records actor, target and the transition.
     expect(audit).toHaveLength(1);
     expect(audit[0]?.slice(0, 4)).toEqual([
       'role_changed',

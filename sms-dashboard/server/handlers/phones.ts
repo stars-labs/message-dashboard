@@ -16,7 +16,6 @@ export const phonesHandler = {
         '[Phones] List error:',
         error instanceof Error ? (error.stack ?? error) : error,
       );
-      // The stack stays in the log; the client gets a fixed message.
       throw new ORPCError('INTERNAL_SERVER_ERROR', { message: 'Failed to fetch phones' });
     }
   },

@@ -1,8 +1,3 @@
-// The recipient of an outbound SMS is stored, then handed to the Rust daemon, which
-// interpolates it into an `AT+CMGS="..."` command. A CR in the value terminates that
-// command and the modem executes whatever follows. The daemon validates too, but this
-// is the trust boundary — rejecting here means a malformed value never reaches the
-// database or the pending-send queue. See docs/SECURITY-REVIEW.md finding 3.
 import { describe, expect, test } from 'bun:test';
 import { normalizeRecipient } from './recipient.js';
 
@@ -37,7 +32,6 @@ describe('normalizeRecipient — carrier short codes', () => {
 });
 
 describe('normalizeRecipient — AT command injection', () => {
-  // The literal payload from the security review.
   test('rejects CRLF followed by an AT command', () => {
     const result = normalizeRecipient('+6512345678\r\nAT+CMGD=1,4\r');
     expect(result.ok).toBe(false);
@@ -61,7 +55,6 @@ describe('normalizeRecipient — AT command injection', () => {
     expect(normalizeRecipient('+65123\0').ok).toBe(false);
   });
 
-  // Whitespace is trimmed, so a payload must not be able to hide behind it.
   test('rejects an injection payload that would survive trimming', () => {
     expect(normalizeRecipient(' +6512345678\r\nAT+CMGD=1,4 ').ok).toBe(false);
   });
@@ -82,8 +75,6 @@ describe('normalizeRecipient — malformed input', () => {
     expect(normalizeRecipient('+1234567890123456').ok).toBe(false); // 16 digits
   });
 
-  // Formatting humans type. Rejected rather than stripped: silently removing
-  // separators risks dialling a different number than the caller intended.
   test('rejects separators and punctuation', () => {
     expect(normalizeRecipient('+65 1234 5678').ok).toBe(false);
     expect(normalizeRecipient('+65-1234-5678').ok).toBe(false);

@@ -2,7 +2,6 @@ import { boundedErrorText, classifyD1Error } from './d1-error.js';
 import { insertAuditLog } from '../db/audit-log.js';
 import type { D1, D1RunResult } from '../lib/d1.js';
 
-/** One audit_logs row. `details` is serialized; callers choose its shape. */
 interface AuditEvent {
   action: string;
   resourceType?: string;
@@ -15,7 +14,6 @@ interface AuditEnv {
   DB: D1<'run'>;
 }
 
-/** Single writer for audit_logs. Callers decide whether the event is required. */
 export async function writeAuditLog(
   env: AuditEnv,
   { action, resourceType = 'user', resourceId, userEmail = null, details = {} }: AuditEvent,
@@ -29,10 +27,7 @@ export async function writeAuditLog(
   });
 }
 
-/**
- * Authentication audit events are observability, not an authentication authority.
- * Keep them off the callback's critical path and always contain their failures.
- */
+/** Observability only: kept off the auth callback's critical path, failures contained. */
 export function scheduleAuthAudit(
   request: { env: AuditEnv; ctx: { waitUntil(promise: Promise<unknown>): void } },
   event: AuditEvent,

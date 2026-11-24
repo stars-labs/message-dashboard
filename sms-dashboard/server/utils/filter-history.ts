@@ -12,7 +12,6 @@ import type { SpamRule } from './spam-filter.js';
 
 const FILTER_HISTORY_PAGE_SIZE = 200;
 
-/** A rule as processRuleHistoryPage reads it. */
 export interface HistoryRule extends SpamRule {
   is_active: number | boolean;
 }
@@ -21,10 +20,7 @@ function historyCursor(row: HistoryRow): HistoryCursor {
   return { created_at: row.created_at, id: row.id };
 }
 
-/**
- * Explicitly apply or release one rule over one bounded slice of history.
- * Rule mutations never call this function; an operator must request every page.
- */
+/** Rule mutations never call this; an operator requests every page. */
 export async function processRuleHistoryPage(
   db: D1<'all' | 'run'> & D1Batch<'all' | 'run'>,
   rule: HistoryRule,
@@ -62,8 +58,7 @@ export async function processRuleHistoryPage(
       conditions.push(`instr(content, ?) > 0`);
       params.push(rule.pattern);
     } else {
-      // This is deliberately an over-inclusive candidate search. The canonical
-      // classifier below makes the final decision, including country prefixes.
+      // Over-inclusive on purpose; classifyMessage below decides, including country prefixes.
       conditions.push(`phone_number LIKE '%' || ? || '%'`);
       params.push(rule.pattern);
     }

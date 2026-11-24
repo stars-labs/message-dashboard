@@ -35,7 +35,6 @@ interface World {
   ): Promise<Response>;
 }
 
-/** A response as the client receives it: the status, the media type and the exact body. */
 interface Answer {
   status: number;
   contentType: string | null;
@@ -268,7 +267,6 @@ async function replay(name: string, request: ControlFixture['request']): Promise
   return { status: response.status, contentType: response.headers.get('Content-Type'), text };
 }
 
-/** What a recorded response looks like on the wire. */
 function onTheWire({ status, body }: ControlFixture['response']): Answer {
   return body === undefined
     ? { status, contentType: null, text: '' }

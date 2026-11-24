@@ -1,10 +1,8 @@
-/** One occurrence of a configured keyword in a message body. */
 interface KeywordMatch {
   text: string;
   position: number;
 }
 
-/** Find every non-overlapping occurrence of a configured keyword. */
 export function findKeywordMatches(
   text: string | null | undefined,
   keyword: string | null | undefined,

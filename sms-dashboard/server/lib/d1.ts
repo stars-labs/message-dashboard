@@ -16,11 +16,8 @@ interface StatementOperations {
 
 export type D1Operation = keyof StatementOperations;
 
-/**
- * The part of a D1 prepared statement a caller uses. Code names the operations
- * it needs, e.g. `D1<'all' | 'first'>`, so the real binding satisfies the type
- * and a test double implements exactly those operations.
- */
+// Callers name the operations they use, e.g. `D1<'all' | 'first'>`, so a test double
+// implements only those.
 export type D1Statement<Op extends D1Operation = D1Operation> = Pick<StatementOperations, Op> & {
   bind(...values: unknown[]): D1Statement<Op>;
 };
@@ -29,12 +26,11 @@ export interface D1<Op extends D1Operation = D1Operation> {
   prepare(query: string): D1Statement<Op>;
 }
 
-/** Runs statements from the same database as one transaction; only their write metadata is read. */
+// Statements run as one transaction.
 export interface D1Batch<Op extends D1Operation = D1Operation> {
   batch(statements: D1Statement<Op>[]): Promise<D1RunResult[]>;
 }
 
-/** D1 returns untyped rows; every read goes through a row schema so a schema drift throws instead of leaking. */
 export async function queryAll<T>(
   statement: Pick<StatementOperations, 'all'>,
   row: Schema<T>,
@@ -51,7 +47,6 @@ export async function queryFirst<T>(
   return result === null ? null : v.parse(row, result);
 }
 
-/** For a statement that always yields a row, such as INSERT ... RETURNING; no row throws. */
 export async function queryOne<T>(
   statement: Pick<StatementOperations, 'first'>,
   row: Schema<T>,

@@ -537,15 +537,11 @@ function keyPart(value: unknown): string {
   return typeof value === 'string' || typeof value === 'number' ? String(value) : '';
 }
 
-// A carrier reply can arrive as several SMS parts. In text mode the daemon cannot
-// read the concatenation header, so each part is uploaded as its own message and
-// the parts of one reply share a sender and an arrival timestamp.
-//
-// Without this grouping the first part processed claims the check and finalizes it
-// on a fragment, so a balance carried by a later part is never parsed.
-//
-// Parts carry no sequence number, so batch order is the only ordering available.
-// Both consumers search for a substring, so concatenation order is not significant.
+// In text mode the daemon cannot read the concatenation header, so each part of a
+// carrier reply is uploaded as its own message; the parts share sender and arrival
+// timestamp. Without grouping, the first part processed finalizes the check on a
+// fragment and a balance in a later part is never parsed. Parts carry no sequence
+// number, so batch order is the only ordering available.
 export function mergeMultipartReplies(
   messages: readonly UploadedPart[],
 ): Map<string, { key: string; content: string }> {
@@ -580,7 +576,6 @@ export async function linkBalanceReply(
   message: BalanceMessage,
   { mergedContent = null }: { mergedContent?: string | null } = {},
 ): Promise<FollowUp | { linked: boolean }> {
-  // A merged reply is parsed as one message; otherwise the raw part is used.
   const content = mergedContent ?? message.content;
   const nextStep = matchingNextStep(check, content);
   const responseWindowOpen = check.response_window_open === 1;
@@ -822,9 +817,8 @@ export const balanceQueriesHandler = {
     const queuedIds: string[] = [];
     const failures: { phone_iccid: string; sim_index: number; error: string }[] = [];
 
-    // Queue on the server, one audited transaction per SIM. The daemon fetch endpoint
-    // applies a separate maintenance-message cap, so a fleet action cannot monopolise
-    // normal user SMS delivery.
+    // One audited transaction per SIM. Daemon fetch ranks messages per purpose, so a
+    // fleet action cannot monopolise normal user SMS delivery.
     for (const item of eligible) {
       try {
         queuedIds.push((await queueBalanceCheck(env.DB, item, requestedBySubject)).id);

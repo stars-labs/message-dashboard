@@ -21,11 +21,7 @@ function binding(value: unknown): SQLQueryBindings {
   throw new TypeError(`D1 cannot bind a ${typeof value}`);
 }
 
-/**
- * The D1 port backed by an in-memory SQLite database, so tests run the real
- * SQL. Statements bind like D1's: every bind returns a new statement, and one
- * that binds more parameters than D1 allows fails as it would on D1.
- */
+// Binds like D1: every bind returns a new statement, and exceeding D1's parameter limit fails.
 export function sqliteD1(db: Database = new Database(':memory:')): D1 & D1Batch & { db: Database } {
   // Bun's run().changes also counts rows written by triggers; D1 reports
   // SQLite's changes(), the rows the statement itself changed.

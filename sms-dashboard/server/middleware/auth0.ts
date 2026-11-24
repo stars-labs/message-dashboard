@@ -18,7 +18,6 @@ export interface AuthRequest {
   auth0Token?: Record<string, unknown>;
 }
 
-/** The standard claims read from a verified Auth0 JWT; roles come from the configured claim. */
 const JwtClaims = v.object({
   sub: v.string(),
   email: v.optional(v.string()),
@@ -27,13 +26,10 @@ const JwtClaims = v.object({
   picture: v.optional(v.string()),
 });
 
-// Auth0 authentication middleware
 export async function handleAuth0(request: AuthRequest): Promise<Response | undefined> {
   const { env } = request;
 
-  // Credential comes from the HttpOnly auth_token cookie for browsers, or an
-  // Authorization header for programmatic callers presenting an Auth0 JWT.
-  // See docs/SECURITY-REVIEW.md finding 4.
+  // HttpOnly auth_token cookie for browsers, Authorization header for Auth0 JWT callers.
   const credential = extractSessionToken(
     request.headers.get('Authorization'),
     request.headers.get('Cookie'),
@@ -46,7 +42,6 @@ export async function handleAuth0(request: AuthRequest): Promise<Response | unde
   const token = credential.token;
 
   try {
-    // First check if it's a session token in KV store
     const stored = await readKvJson(env.SESSIONS, token, StoredSession);
 
     if (stored) {
@@ -55,18 +50,15 @@ export async function handleAuth0(request: AuthRequest): Promise<Response | unde
       }
       const session = stored.value;
 
-      // Check if session is expired
       if (session.expires_at < Date.now()) {
         await env.SESSIONS.delete(token);
         return json({ error: 'Session expired' }, 401);
       }
 
-      // Add user to request
       request.user = session.user;
-      return; // Continue to handler
+      return;
     }
 
-    // If not a session token, try to verify as Auth0 JWT
     const jwtPayload = await auth0Handler.verifyToken(token, env);
     const claims = v.safeParse(JwtClaims, jwtPayload);
 
@@ -74,21 +66,17 @@ export async function handleAuth0(request: AuthRequest): Promise<Response | unde
       return json({ error: 'Invalid token' }, 401);
     }
 
-    // Create user object from JWT payload
     request.user = {
       id: claims.output.sub,
       email: claims.output.email,
       name: claims.output.name ?? claims.output.nickname,
       picture: claims.output.picture,
-      // Namespaced claim only — see config/auth0-roles.ts and
-      // docs/SECURITY-REVIEW.md finding 5.
+      // Namespaced claim only; see config/auth0-roles.ts.
       roles: rolesFromToken(jwtPayload, createRoleConfig(env)),
     };
 
-    // Store the full Auth0 token payload for role checking
     request.auth0Token = jwtPayload;
   } catch {
-    // Auth0 middleware error
     return json({ error: 'Authentication failed' }, 401);
   }
 

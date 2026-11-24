@@ -34,7 +34,6 @@ const BatchTagRow = v.object({
 
 type BatchTagRow = v.InferOutput<typeof BatchTagRow>;
 
-/** One message row the page scans. */
 const KeywordHistoryRow = v.object({
   id: v.string(),
   type: v.nullable(v.string()),
@@ -287,7 +286,6 @@ export function listActiveKeywordMatchers(db: D1<'all'>) {
   );
 }
 
-/** One multi-row INSERT for the tags of a newly uploaded message. */
 export async function insertKeywordMatches(
   db: D1<'run'>,
   matches: (readonly [string, number, string, number])[],
