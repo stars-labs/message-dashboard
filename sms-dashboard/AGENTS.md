@@ -126,6 +126,12 @@ See [docs/deployment.md](../docs/deployment.md).
   away from it, or sideways scroll on mobile; screenshots land in `e2e-results/`.
   A new view is covered by adding it to `shared/views.ts`; data it needs goes in
   the seed.
+- Behavior: e2e proves a view renders; the `verify` skill
+  ([`.claude/skills/verify/`](../.claude/skills/verify/SKILL.md)) proves a feature
+  works. `bun run verify` drives one journey on the same stack, with the daemon's
+  calls and a sandboxed Balance Agent; its feature map says what to drive and what
+  counts as proof. A change to `/api/control/*` runs both journeys in
+  `scripts/verify/journeys/` besides the fixtures.
 - Cross-component: run every affected component's gate
 
 ## UI rules

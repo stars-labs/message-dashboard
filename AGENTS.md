@@ -66,6 +66,8 @@ no longer reported fails too, so remove it once fixed.
 
 ## Reference docs
 
+- [Verify skill & feature map](.claude/skills/verify/SKILL.md): drive the dashboard,
+  the Balance Agent and the daemon's protocol to prove a change works
 - [Data model & auth contracts](docs/data-contracts.md)
 - [Deployment procedures](docs/deployment.md)
 - [Balance Agent CLI](docs/balance-agent-cli.md)
