@@ -15,7 +15,7 @@
     "browser:install": "PLAYWRIGHT_BROWSERS_PATH=0 playwright-core install chromium --no-shell",
     "start": "bun run build && electron .",
     "cli": "bun src/cli.ts",
-    "test": "bun test src",
+    "test": "bun test --coverage --coverage-reporter=lcov src",
     "typecheck": "tsc -b",
     "check": "bun run typecheck && bun run test && bun run build",
     "pack:mac": "bun run browser:install && bun run build && electron-builder --mac dir"

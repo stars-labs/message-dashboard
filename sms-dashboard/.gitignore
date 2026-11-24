@@ -50,3 +50,4 @@ key.txt
 !secrets.enc.yaml
 
 e2e-results/
+coverage/

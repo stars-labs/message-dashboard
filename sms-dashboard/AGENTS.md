@@ -97,6 +97,11 @@ See [docs/deployment.md](../docs/deployment.md).
 
 ## Verification
 
+- Coverage: `bun run test` (and the Balance Agent's) write lcov reports to
+  `coverage/`; `bun run check` ends with `check:coverage`, which fails when the
+  line or function total of the runtime, client or agent suite falls below its
+  floor in `scripts/check-coverage.ts`. Raise a floor when coverage rises; never
+  lower one to make a change pass.
 - Server changes: `bun run test`. `test/worker-harness.ts` drives the whole Worker;
   adding, removing or reordering a route means updating `server/route-census.test.ts`,
   and a route that answers without credentials must be listed, with its reason, in
