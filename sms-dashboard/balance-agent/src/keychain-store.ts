@@ -33,7 +33,7 @@ const runSecurityCommand: RunCommand = (args, { input = null, inherit = false } 
       child.stdout?.on('data', (chunk: Buffer) => stdout.push(chunk));
       child.stderr?.on('data', (chunk: Buffer) => stderr.push(chunk));
       if (input === null) child.stdin?.end();
-      else child.stdin?.end(`${input}\n`);
+      else child.stdin?.end(input);
     }
     child.on('error', reject);
     child.on('close', (code) => {
@@ -96,7 +96,8 @@ export function createKeychainStore({
         return;
       }
       const result = await runCommand(['add-generic-password', ...identity(key), '-U', '-w'], {
-        input: value,
+        // `security -w` prompts for the password and then a retype; one line stores "".
+        input: `${value}\n${value}\n`,
       });
       if (result.code !== 0) throw commandError('write', result);
     },

@@ -34,7 +34,8 @@ describe('Balance Agent CLI Keychain store', () => {
       '-w',
     ]);
     expect(invocations[0]?.args).not.toContain('refresh-secret');
-    expect(invocations[0]?.options).toEqual({ input: 'refresh-secret' });
+    // `security -w` reads the password, then a retype; one line stores an empty one.
+    expect(invocations[0]?.options).toEqual({ input: 'refresh-secret\nrefresh-secret\n' });
   });
 
   test('keeps credentials under a separate service only when asked to', () => {
