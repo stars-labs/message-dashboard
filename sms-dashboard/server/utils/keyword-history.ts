@@ -1,5 +1,10 @@
-import * as v from 'valibot';
-import { queryAll, type D1, type D1Batch, type D1Statement } from '../lib/d1.js';
+import {
+  insertMessageTags,
+  listHistoryMessages,
+  type KeywordHistoryRow,
+  type MessageTagInsert,
+} from '../db/keywords.js';
+import type { D1, D1Batch } from '../lib/d1.js';
 import { findKeywordMatches } from './keyword-match.js';
 import type { HistoryCursor, KeywordHistoryPage } from '../../shared/api/history.js';
 
@@ -12,18 +17,6 @@ export interface HistoryKeyword {
   case_sensitive: number | boolean;
   whole_word: number | boolean;
 }
-
-/** One message row the page scans. */
-const KeywordHistoryRow = v.object({
-  id: v.string(),
-  type: v.nullable(v.string()),
-  content: v.string(),
-  filter_status: v.string(),
-  verification_code: v.nullable(v.string()),
-  created_at: v.string(),
-});
-
-type KeywordHistoryRow = v.InferOutput<typeof KeywordHistoryRow>;
 
 function cursorFor(row: KeywordHistoryRow): HistoryCursor {
   return { created_at: row.created_at, id: row.id };
@@ -61,22 +54,11 @@ export async function processKeywordHistoryPage(
     1,
     Math.min(Number(pageSize) || KEYWORD_HISTORY_PAGE_SIZE, KEYWORD_HISTORY_PAGE_SIZE),
   );
-  const results = await queryAll(
-    db
-      .prepare(
-        `SELECT id, type, content, filter_status, verification_code, created_at
-     FROM messages
-     WHERE ${conditions.join('\n       AND ')}
-     ORDER BY created_at, id
-     LIMIT ?`,
-      )
-      .bind(...params, limit + 1),
-    KeywordHistoryRow,
-  );
+  const results = await listHistoryMessages(db, conditions, params, limit + 1);
 
   const hasMore = results.length > limit;
   const page = results.slice(0, limit);
-  const statements: D1Statement<'all' | 'run'>[] = [];
+  const tags: MessageTagInsert[] = [];
   let eligible = 0;
   let matchedMessages = 0;
 
@@ -98,20 +80,16 @@ export async function processKeywordHistoryPage(
     if (matches.length > 0) matchedMessages++;
 
     for (const match of matches) {
-      statements.push(
-        db
-          .prepare(
-            `INSERT OR IGNORE INTO message_tags
-           (message_id, keyword_tag_id, matched_text, position)
-         VALUES (?, ?, ?, ?)`,
-          )
-          .bind(message.id, keyword.id, match.text, match.position),
-      );
+      tags.push({
+        message_id: message.id,
+        keyword_tag_id: keyword.id,
+        matched_text: match.text,
+        position: match.position,
+      });
     }
   }
 
-  const resultsForWrites = statements.length > 0 ? await db.batch(statements) : [];
-  const inserted = resultsForWrites.reduce((total, result) => total + result.meta.changes, 0);
+  const inserted = await insertMessageTags(db, tags);
 
   const last = page.at(-1);
   return {

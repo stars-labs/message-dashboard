@@ -1,5 +1,10 @@
-import * as v from 'valibot';
-import { queryAll, type D1, type D1Batch, type D1Statement } from '../lib/d1.js';
+import {
+  listHistoryMessages,
+  updateMessageVerdicts,
+  type HistoryRow,
+  type MessageVerdict,
+} from '../db/filters.js';
+import type { D1, D1Batch } from '../lib/d1.js';
 import { RULE_TYPE } from '../../shared/api/filters.js';
 import type { HistoryCursor, RuleHistoryPage } from '../../shared/api/history.js';
 import { classifyMessage, FILTER_STATUS, loadActiveRules } from './spam-filter.js';
@@ -11,19 +16,6 @@ const FILTER_HISTORY_PAGE_SIZE = 200;
 export interface HistoryRule extends SpamRule {
   is_active: number | boolean;
 }
-
-/** One message row the page scans. */
-const HistoryRow = v.object({
-  id: v.string(),
-  type: v.string(),
-  content: v.string(),
-  phone_number: v.nullable(v.string()),
-  filter_status: v.string(),
-  filter_rule_id: v.nullable(v.number()),
-  created_at: v.string(),
-});
-
-type HistoryRow = v.InferOutput<typeof HistoryRow>;
 
 function historyCursor(row: HistoryRow): HistoryCursor {
   return { created_at: row.created_at, id: row.id };
@@ -84,18 +76,7 @@ export async function processRuleHistoryPage(
     1,
     Math.min(Number(pageSize) || FILTER_HISTORY_PAGE_SIZE, FILTER_HISTORY_PAGE_SIZE),
   );
-  const results = await queryAll(
-    db
-      .prepare(
-        `SELECT id, type, content, phone_number, filter_status, filter_rule_id, created_at
-     FROM messages
-     WHERE ${conditions.join('\n       AND ')}
-     ORDER BY created_at, id
-     LIMIT ?`,
-      )
-      .bind(...params, limit + 1),
-    HistoryRow,
-  );
+  const results = await listHistoryMessages(db, conditions, params, limit + 1);
 
   const hasMore = results.length > limit;
   const page = results.slice(0, limit);
@@ -104,7 +85,7 @@ export async function processRuleHistoryPage(
   }
 
   const activeRules = await loadActiveRules(db);
-  const changed: D1Statement<'all' | 'run'>[] = [];
+  const changed: MessageVerdict[] = [];
 
   for (const message of page) {
     const verdict = classifyMessage(message, activeRules);
@@ -114,18 +95,14 @@ export async function processRuleHistoryPage(
     )
       continue;
 
-    changed.push(
-      db
-        .prepare(
-          `UPDATE messages
-       SET filter_status = ?, filter_rule_id = ?
-       WHERE id = ?`,
-        )
-        .bind(verdict.filter_status, verdict.filter_rule_id, message.id),
-    );
+    changed.push({
+      id: message.id,
+      filter_status: verdict.filter_status,
+      filter_rule_id: verdict.filter_rule_id,
+    });
   }
 
-  if (changed.length > 0) await db.batch(changed);
+  await updateMessageVerdicts(db, changed);
 
   const last = page.at(-1);
   return {

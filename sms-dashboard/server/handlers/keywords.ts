@@ -1,10 +1,8 @@
 import { ORPCError } from '@orpc/server';
-import * as v from 'valibot';
+import type * as v from 'valibot';
 import type { HistoryRequestBody, KeywordHistoryPage } from '../../shared/api/history.js';
 import {
-  Keyword,
-  KeywordWithUsage,
-  MessageTag,
+  type KeywordWithUsage,
   type BatchTagsBody,
   type BatchTagsResponse,
   type CreateKeywordBody,
@@ -16,7 +14,21 @@ import {
 import type { SuccessResponse } from '../../shared/api/success.js';
 import { errorText } from '../../shared/error-text.js';
 import { DEFAULT_KEYWORD_COLOR, normalizeKeywordColor } from '../../shared/keyword-color.js';
-import { queryAll, queryFirst, queryOne, type D1, type D1Batch } from '../lib/d1.js';
+import {
+  deleteKeyword,
+  findActiveKeywordId,
+  findKeyword,
+  findKeywordId,
+  findKeywordWithUsage,
+  getKeyword,
+  insertKeyword,
+  isKeywordReferenced,
+  listActiveTagsForMessages,
+  listKeywordsWithUsage,
+  listMessageTags,
+  updateKeyword,
+} from '../db/keywords.js';
+import type { D1, D1Batch } from '../lib/d1.js';
 import { processKeywordHistoryPage } from '../utils/keyword-history.js';
 
 const MAX_BATCH_MESSAGES = 100;
@@ -43,46 +55,10 @@ function notFound(): ORPCError<'NOT_FOUND', unknown> {
   return new ORPCError('NOT_FOUND', { message: 'Keyword not found' });
 }
 
-const KEYWORD_COLUMNS =
-  'id, keyword, tag, color, priority, is_active, case_sensitive, whole_word, created_by, created_at, updated_at';
-
-const KEYWORD_COLUMNS_OF_KT = KEYWORD_COLUMNS.split(', ')
-  .map((column) => `kt.${column}`)
-  .join(', ');
-
-const IdRow = v.object({ id: v.number() });
-
-const ReferencedRow = v.object({ referenced: v.number() });
-
-const BatchTagRow = v.object({
-  message_id: v.string(),
-  id: v.number(),
-  keyword: v.string(),
-  tag: v.string(),
-  color: v.nullable(v.string()),
-  priority: v.nullable(v.number()),
-  position: v.number(),
-  matched_text: v.string(),
-  length: v.number(),
-});
-
 export const keywordsHandler = {
   async list({ env }: KeywordsCall): Promise<KeywordsResponse> {
     try {
-      const keywords = await queryAll(
-        env.DB.prepare(
-          `
-                SELECT
-                    ${KEYWORD_COLUMNS_OF_KT},
-                    COUNT(DISTINCT mt.message_id) as usage_count
-                FROM keyword_tags kt
-                LEFT JOIN message_tags mt ON kt.id = mt.keyword_tag_id
-                GROUP BY kt.id
-                ORDER BY kt.priority DESC, kt.keyword ASC
-            `,
-        ),
-        KeywordWithUsage,
-      );
+      const keywords = await listKeywordsWithUsage(env.DB);
       return { keywords };
     } catch (error) {
       fail(error, 'Error fetching keywords', 'Failed to fetch keywords');
@@ -91,20 +67,7 @@ export const keywordsHandler = {
 
   async get({ env }: KeywordsCall, id: string): Promise<{ keyword: KeywordWithUsage }> {
     try {
-      const keyword = await queryFirst(
-        env.DB.prepare(
-          `
-                SELECT
-                    ${KEYWORD_COLUMNS_OF_KT},
-                    COUNT(DISTINCT mt.message_id) as usage_count
-                FROM keyword_tags kt
-                LEFT JOIN message_tags mt ON kt.id = mt.keyword_tag_id
-                WHERE kt.id = ?
-                GROUP BY kt.id
-            `,
-        ).bind(id),
-        KeywordWithUsage,
-      );
+      const keyword = await findKeywordWithUsage(env.DB, id);
       if (!keyword) throw notFound();
       return { keyword };
     } catch (error) {
@@ -118,30 +81,20 @@ export const keywordsHandler = {
   ): Promise<KeywordResponse> {
     const { keyword, tag, color, priority, case_sensitive, whole_word } = body;
     try {
-      const existing = await queryFirst(
-        env.DB.prepare('SELECT id FROM keyword_tags WHERE keyword = ? AND is_active = TRUE').bind(
-          keyword,
-        ),
-        IdRow,
-      );
+      const existing = await findActiveKeywordId(env.DB, keyword);
       if (existing) throw new ORPCError('CONFLICT', { message: 'Keyword already exists' });
 
-      const result = await env.DB.prepare(
-        `
-                INSERT INTO keyword_tags (
-                    keyword, tag, color, priority, case_sensitive, whole_word, created_by
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
-            `,
-      )
-        .bind(keyword, tag, color, priority, case_sensitive, whole_word, user?.id ?? null)
-        .run();
+      const keywordId = await insertKeyword(env.DB, {
+        keyword,
+        tag,
+        color,
+        priority,
+        case_sensitive,
+        whole_word,
+        created_by: user?.id ?? null,
+      });
 
-      const newKeyword = await queryOne(
-        env.DB.prepare(`SELECT ${KEYWORD_COLUMNS} FROM keyword_tags WHERE id = ?`).bind(
-          result.meta.last_row_id,
-        ),
-        Keyword,
-      );
+      const newKeyword = await getKeyword(env.DB, keywordId);
       return { keyword: newKeyword };
     } catch (error) {
       fail(error, 'Error creating keyword', `Failed to create keyword: ${errorText(error)}`);
@@ -154,10 +107,7 @@ export const keywordsHandler = {
     body: v.InferOutput<typeof UpdateKeywordBody>,
   ): Promise<KeywordResponse> {
     try {
-      const existing = await queryFirst(
-        env.DB.prepare(`SELECT ${KEYWORD_COLUMNS} FROM keyword_tags WHERE id = ?`).bind(id),
-        Keyword,
-      );
+      const existing = await findKeyword(env.DB, id);
       if (!existing) throw notFound();
 
       const { keyword, tag, color, priority, case_sensitive, whole_word, is_active } = body;
@@ -182,24 +132,12 @@ export const keywordsHandler = {
 
       const nextTag = tag === undefined || tag === null || tag === '' ? existing.tag : tag;
 
-      const updated = await queryFirst(
-        env.DB.prepare(
-          `
-                UPDATE keyword_tags
-                SET tag = ?, color = ?, priority = ?, is_active = ?,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-                RETURNING ${KEYWORD_COLUMNS}
-            `,
-        ).bind(
-          nextTag,
-          resolvedColor,
-          priority ?? existing.priority,
-          is_active ?? existing.is_active,
-          id,
-        ),
-        Keyword,
-      );
+      const updated = await updateKeyword(env.DB, id, {
+        tag: nextTag,
+        color: resolvedColor,
+        priority: priority ?? existing.priority,
+        is_active: is_active ?? existing.is_active,
+      });
       if (!updated) throw notFound();
       return { keyword: updated };
     } catch (error) {
@@ -209,25 +147,16 @@ export const keywordsHandler = {
 
   async remove({ env }: KeywordsCall, id: string): Promise<SuccessResponse> {
     try {
-      const existing = await queryFirst(
-        env.DB.prepare('SELECT id FROM keyword_tags WHERE id = ?').bind(id),
-        IdRow,
-      );
+      const existing = await findKeywordId(env.DB, id);
       if (!existing) throw notFound();
 
-      const referenced = await queryFirst(
-        env.DB.prepare(
-          'SELECT 1 AS referenced FROM message_tags WHERE keyword_tag_id = ? LIMIT 1',
-        ).bind(id),
-        ReferencedRow,
-      );
-      if (referenced) {
+      if (await isKeywordReferenced(env.DB, id)) {
         throw new ORPCError('CONFLICT', {
           message: 'Keyword has historical messages; deactivate it instead',
         });
       }
 
-      await env.DB.prepare('DELETE FROM keyword_tags WHERE id = ?').bind(id).run();
+      await deleteKeyword(env.DB, id);
       return { success: true };
     } catch (error) {
       fail(error, 'Error deleting keyword', 'Failed to delete keyword');
@@ -243,30 +172,8 @@ export const keywordsHandler = {
 
     try {
       const limitedIds = messageIds.slice(0, MAX_BATCH_MESSAGES);
-      const placeholders = limitedIds.map(() => '?').join(',');
 
-      const rows = await queryAll(
-        env.DB.prepare(
-          `
-                SELECT
-                    mt.message_id,
-                    kt.id,
-                    kt.keyword,
-                    kt.tag,
-                    kt.color,
-                    kt.priority,
-                    mt.position,
-                    mt.matched_text,
-                    LENGTH(mt.matched_text) as length
-                FROM message_tags mt
-                JOIN keyword_tags kt ON mt.keyword_tag_id = kt.id
-                WHERE mt.message_id IN (${placeholders})
-                  AND kt.is_active = TRUE
-                ORDER BY mt.message_id, mt.position ASC
-            `,
-        ).bind(...limitedIds),
-        BatchTagRow,
-      );
+      const rows = await listActiveTagsForMessages(env.DB, limitedIds);
 
       const tagsByMessage = new Map<string, BatchTagsResponse['data'][string]>();
       for (const row of rows) {
@@ -296,10 +203,7 @@ export const keywordsHandler = {
     { since, until, cursor }: v.InferOutput<typeof HistoryRequestBody>,
   ): Promise<KeywordHistoryPage> {
     try {
-      const keyword = await queryFirst(
-        env.DB.prepare(`SELECT ${KEYWORD_COLUMNS} FROM keyword_tags WHERE id = ?`).bind(id),
-        Keyword,
-      );
+      const keyword = await findKeyword(env.DB, id);
       if (!keyword) throw notFound();
       if (!keyword.is_active) {
         throw new ORPCError('CONFLICT', {
@@ -324,26 +228,7 @@ export const keywordsHandler = {
 
   async messageTags({ env }: KeywordsCall, id: string): Promise<MessageTagsResponse> {
     try {
-      const tags = await queryAll(
-        env.DB.prepare(
-          `
-                SELECT
-                    mt.message_id,
-                    mt.keyword_tag_id,
-                    mt.matched_text,
-                    mt.position,
-                    mt.created_at,
-                    kt.keyword,
-                    kt.tag,
-                    kt.color
-                FROM message_tags mt
-                JOIN keyword_tags kt ON mt.keyword_tag_id = kt.id
-                WHERE mt.message_id = ? AND kt.is_active = TRUE
-                ORDER BY mt.position ASC
-            `,
-        ).bind(id),
-        MessageTag,
-      );
+      const tags = await listMessageTags(env.DB, id);
       return { tags };
     } catch (error) {
       fail(error, 'Error fetching message tags', 'Failed to fetch message tags');

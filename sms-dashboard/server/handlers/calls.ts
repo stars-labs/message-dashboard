@@ -20,9 +20,22 @@
 import { ORPCError } from '@orpc/server';
 import * as v from 'valibot';
 import { parseJson, readJson } from '../../shared/parse-json.js';
-import { D1_MAX_BOUND_PARAMETERS, queryAll, queryFirst, type D1 } from '../lib/d1.js';
 import {
-  CallHistoryRow,
+  closeStaleCalls,
+  findOpenRing,
+  insertCall,
+  insertInboundRing,
+  listCallHistory,
+  listSimsByIccid,
+  markCallAnswered,
+  markCallEnded,
+  setRemoteNumber,
+  type OpenRingRow,
+  type SimRow,
+} from '../db/calls.js';
+import { D1_MAX_BOUND_PARAMETERS, type D1 } from '../lib/d1.js';
+import {
+  type CallHistoryRow,
   IceServersResponse,
   LiveCall,
   PhoneNumber,
@@ -388,27 +401,6 @@ const STALE_CALL_MS = 2 * 60 * 60 * 1000;
 /** A ring nobody answered cannot last this long either. */
 const STALE_RING_MS = 5 * 60 * 1000;
 
-const HISTORY_COLUMNS = `id, direction, iccid, remote_number, outcome, end_reason,
-         started_at, answered_at, ended_at, duration_seconds, requested_by, answered_by`;
-
-/** A finished call; the history query never selects one still in progress. */
-const OpenRingRow = v.object({
-  id: v.string(),
-  started_at: v.string(),
-  remote_number: v.nullable(v.string()),
-});
-
-type OpenRingRow = v.InferOutput<typeof OpenRingRow>;
-
-const SimRow = v.object({
-  iccid: v.string(),
-  number: v.string(),
-  carrier: v.nullable(v.string()),
-  sim_index: v.number(),
-});
-
-type SimRow = v.InferOutput<typeof SimRow>;
-
 async function history(db: D1<'run'>, write: (db: D1<'run'>) => Promise<unknown>): Promise<void> {
   try {
     await write(db);
@@ -423,21 +415,11 @@ async function history(db: D1<'run'>, write: (db: D1<'run'>) => Promise<unknown>
  * it both hides from the log and holds this SIM's open-ring slot.
  */
 function sweepStaleCalls(db: D1<'run'>, now: string): Promise<unknown> {
-  return db
-    .prepare(
-      `UPDATE calls
-        SET outcome = CASE WHEN answered_at IS NULL THEN 'missed' ELSE 'failed' END,
-            end_reason = 'stale',
-            ended_at = COALESCE(ended_at, ?)
-      WHERE outcome = 'in_progress'
-        AND (started_at < ? OR (answered_at IS NULL AND started_at < ?))`,
-    )
-    .bind(
-      now,
-      new Date(Date.now() - STALE_CALL_MS).toISOString(),
-      new Date(Date.now() - STALE_RING_MS).toISOString(),
-    )
-    .run();
+  return closeStaleCalls(db, {
+    now,
+    startedBefore: new Date(Date.now() - STALE_CALL_MS).toISOString(),
+    ringStartedBefore: new Date(Date.now() - STALE_RING_MS).toISOString(),
+  });
 }
 
 /**
@@ -456,27 +438,9 @@ async function claimRing(
   try {
     const now = new Date().toISOString();
     await sweepStaleCalls(db, now);
-    await db
-      .prepare(
-        `INSERT OR IGNORE INTO calls (id, direction, iccid, remote_number, outcome, started_at)
-       VALUES (?, 'inbound', ?, ?, 'in_progress', ?)`,
-      )
-      .bind(crypto.randomUUID(), iccid, from, now)
-      .run();
+    await insertInboundRing(db, { id: crypto.randomUUID(), iccid, from, now });
 
-    return await queryFirst(
-      db
-        .prepare(
-          `SELECT id, started_at, remote_number
-         FROM calls
-        WHERE iccid = ? AND direction = 'inbound' AND outcome = 'in_progress'
-          AND answered_at IS NULL
-        ORDER BY started_at DESC
-        LIMIT 1`,
-        )
-        .bind(iccid),
-      OpenRingRow,
-    );
+    return await findOpenRing(db, iccid);
   } catch (error) {
     console.error('call history ring claim failed', error);
     return null;
@@ -490,32 +454,13 @@ function logCallStarted(db: D1<'run'>, call: LiveCall): Promise<void> {
     // sit in progress forever and read as a call that never finished.
     await sweepStaleCalls(log, new Date().toISOString());
 
-    await log
-      .prepare(
-        `INSERT INTO calls (id, direction, iccid, remote_number, outcome, started_at, requested_by)
-       VALUES (?, ?, ?, ?, 'in_progress', ?, ?)
-       ON CONFLICT(id) DO NOTHING`,
-      )
-      .bind(
-        call.id,
-        call.direction,
-        call.iccid,
-        call.number,
-        call.started_at,
-        call.requested_by ?? null,
-      )
-      .run();
+    await insertCall(log, call);
   });
 }
 
 /** A caller id that only arrived with a later RING. */
 function logCallerId(db: D1<'run'>, callId: string, number: string): Promise<void> {
-  return history(db, (log) =>
-    log
-      .prepare(`UPDATE calls SET remote_number = ? WHERE id = ? AND remote_number IS NULL`)
-      .bind(number, callId)
-      .run(),
-  );
+  return history(db, (log) => setRemoteNumber(log, callId, number));
 }
 
 /** Answer time, and for an inbound call whoever pressed answer. */
@@ -524,16 +469,7 @@ function logCallAnswered(
   callId: string,
   { at, by = null }: { at: string; by?: string | null },
 ): Promise<void> {
-  return history(db, (log) =>
-    log
-      .prepare(
-        `UPDATE calls
-        SET answered_at = COALESCE(answered_at, ?), answered_by = COALESCE(answered_by, ?)
-      WHERE id = ? AND outcome = 'in_progress'`,
-      )
-      .bind(at, by, callId)
-      .run(),
-  );
+  return history(db, (log) => markCallAnswered(log, callId, at, by));
 }
 
 type EndedBy = 'dashboard' | 'daemon' | 'worker';
@@ -567,20 +503,12 @@ function logCallEnded(
 ): Promise<void> {
   return history(db, (log) => {
     const endedAt = new Date().toISOString();
-    return log
-      .prepare(
-        `UPDATE calls
-          SET ended_at = ?,
-              end_reason = ?,
-              duration_seconds = CASE
-                WHEN answered_at IS NULL THEN 0
-                ELSE MAX(0, CAST((julianday(?) - julianday(answered_at)) * 86400 AS INTEGER))
-              END,
-              outcome = CASE WHEN answered_at IS NULL THEN ? ELSE 'answered' END
-        WHERE id = ? AND outcome = 'in_progress'`,
-      )
-      .bind(endedAt, reason, endedAt, unansweredOutcome(call.direction, endedBy, reason), call.id)
-      .run();
+    return markCallEnded(log, {
+      callId: call.id,
+      endedAt,
+      reason,
+      unansweredOutcome: unansweredOutcome(call.direction, endedBy, reason),
+    });
   });
 }
 
@@ -591,15 +519,7 @@ async function enrichCallPage(db: D1<'all'>, calls: CallHistoryRow[]) {
 
   for (let start = 0; start < iccids.length; start += D1_MAX_BOUND_PARAMETERS) {
     const chunk = iccids.slice(start, start + D1_MAX_BOUND_PARAMETERS);
-    const placeholders = chunk.map(() => '?').join(', ');
-    const rows = await queryAll(
-      db
-        .prepare(
-          `SELECT iccid, number, carrier, sim_index FROM device_view WHERE iccid IN (${placeholders})`,
-        )
-        .bind(...chunk),
-      SimRow,
-    );
+    const rows = await listSimsByIccid(db, chunk);
     for (const sim of rows) sims.set(sim.iccid, sim);
   }
 
@@ -651,17 +571,7 @@ export const callsHandler = {
     // One row past the page decides `has_more` without a second COUNT query.
     // A call still in progress is excluded: the dashboard shows the live call
     // from the KV lock, and listing it here too would show it twice.
-    const binds = iccid ? [iccid, limit + 1, offset] : [limit + 1, offset];
-    const rows = await queryAll(
-      DB.prepare(
-        `SELECT ${HISTORY_COLUMNS}
-         FROM calls
-        WHERE outcome != 'in_progress'${iccid ? ' AND iccid = ?' : ''}
-        ORDER BY started_at DESC, id DESC
-        LIMIT ? OFFSET ?`,
-      ).bind(...binds),
-      CallHistoryRow,
-    );
+    const rows = await listCallHistory(DB, { iccid, limit: limit + 1, offset });
 
     const page = rows.slice(0, limit);
     return { calls: await enrichCallPage(DB, page), has_more: rows.length > limit };

@@ -5,9 +5,8 @@
 // spam is — see utils/spam-filter.ts.
 
 import { ORPCError } from '@orpc/server';
-import * as v from 'valibot';
+import type * as v from 'valibot';
 import {
-  FilterRule,
   IMMUTABLE_RULE_MESSAGE,
   PATTERN_MESSAGE,
   RULE_TYPE,
@@ -20,7 +19,15 @@ import {
 import type { HistoryRequestBody, RuleHistoryPage } from '../../shared/api/history.js';
 import type { SuccessResponse } from '../../shared/api/success.js';
 import { errorText } from '../../shared/error-text.js';
-import { queryAll, queryFirst, queryOne, type D1, type D1Batch } from '../lib/d1.js';
+import {
+  deleteFilter,
+  findFilter,
+  insertFilter,
+  isFilterReferenced,
+  listFilters,
+  updateFilter,
+} from '../db/filters.js';
+import type { D1, D1Batch } from '../lib/d1.js';
 import { normalizeSender } from '../utils/spam-filter.js';
 import { processRuleHistoryPage } from '../utils/filter-history.js';
 
@@ -34,11 +41,6 @@ interface FiltersCall {
   env: { DB: D1 & D1Batch };
   user?: { id: string } | undefined;
 }
-
-const FILTER_COLUMNS =
-  'id, rule_type, pattern, note, is_active, created_by, created_at, updated_at';
-
-const ReferencedRow = v.object({ referenced: v.number() });
 
 interface ValidatedRule {
   rule_type: RuleType;
@@ -93,14 +95,7 @@ function isUniqueViolation(error: unknown): boolean {
 }
 
 export async function listFilterRules(db: D1<'all'>): Promise<FiltersResponse> {
-  const filters = await queryAll(
-    db.prepare(
-      `SELECT ${FILTER_COLUMNS}
-     FROM filter_rules
-     ORDER BY rule_type, id`,
-    ),
-    FilterRule,
-  );
+  const filters = await listFilters(db);
 
   return { filters };
 }
@@ -151,21 +146,14 @@ export const filtersHandler = {
   ): Promise<FilterResponse> {
     try {
       const rule = validated({ rule_type: body.rule_type, pattern: body.pattern, note: body.note });
-      const inserted = await queryOne(
-        env.DB.prepare(
-          `INSERT INTO filter_rules (rule_type, pattern, note, created_by)
-         VALUES (?, ?, ?, ?)
-         RETURNING ${FILTER_COLUMNS}`,
-        ).bind(
-          rule.rule_type,
-          rule.pattern,
-          rule.note,
-          // The middleware builds `user.id`; there is no `sub` on it. Reading
-          // request.user.sub silently stored null for every rule.
-          user?.id ?? null,
-        ),
-        FilterRule,
-      );
+      const inserted = await insertFilter(env.DB, {
+        rule_type: rule.rule_type,
+        pattern: rule.pattern,
+        note: rule.note,
+        // The middleware builds `user.id`; there is no `sub` on it. Reading
+        // request.user.sub silently stored null for every rule.
+        created_by: user?.id ?? null,
+      });
       return { filter: inserted };
     } catch (error) {
       fail(error, 'create failed', 'Failed to create filter rule');
@@ -179,10 +167,7 @@ export const filtersHandler = {
     body: v.InferOutput<typeof UpdateFilterBody>,
   ): Promise<FilterResponse> {
     try {
-      const existing = await queryFirst(
-        env.DB.prepare(`SELECT ${FILTER_COLUMNS} FROM filter_rules WHERE id = ?`).bind(ruleId(id)),
-        FilterRule,
-      );
+      const existing = await findFilter(env.DB, ruleId(id));
       if (!existing) throw notFound();
       if (
         (body.rule_type !== undefined && body.rule_type !== existing.rule_type) ||
@@ -198,15 +183,12 @@ export const filtersHandler = {
 
       const isActive = body.is_active === undefined ? existing.is_active : body.is_active ? 1 : 0;
 
-      const updated = await queryFirst(
-        env.DB.prepare(
-          `UPDATE filter_rules
-         SET rule_type = ?, pattern = ?, note = ?, is_active = ?, updated_at = CURRENT_TIMESTAMP
-         WHERE id = ?
-         RETURNING ${FILTER_COLUMNS}`,
-        ).bind(rule.rule_type, rule.pattern, rule.note, isActive, ruleId(id)),
-        FilterRule,
-      );
+      const updated = await updateFilter(env.DB, ruleId(id), {
+        rule_type: rule.rule_type,
+        pattern: rule.pattern,
+        note: rule.note,
+        is_active: isActive,
+      });
       if (!updated) throw notFound();
       return { filter: updated };
     } catch (error) {
@@ -217,22 +199,14 @@ export const filtersHandler = {
   // A referenced rule is historical provenance and cannot be physically deleted.
   async remove({ env }: FiltersCall, id: string): Promise<SuccessResponse> {
     try {
-      const referenced = await queryFirst(
-        env.DB.prepare(
-          `SELECT 1 AS referenced FROM messages WHERE filter_rule_id = ? LIMIT 1`,
-        ).bind(ruleId(id)),
-        ReferencedRow,
-      );
-      if (referenced) {
+      if (await isFilterReferenced(env.DB, ruleId(id))) {
         throw new ORPCError('CONFLICT', {
           message: 'Rule has historical messages; deactivate it instead',
         });
       }
 
-      const result = await env.DB.prepare(`DELETE FROM filter_rules WHERE id = ?`)
-        .bind(ruleId(id))
-        .run();
-      if (!result.meta.changes) throw notFound();
+      const changes = await deleteFilter(env.DB, ruleId(id));
+      if (!changes) throw notFound();
       return { success: true };
     } catch (error) {
       fail(error, 'delete failed', 'Failed to delete filter rule');
@@ -246,10 +220,7 @@ export const filtersHandler = {
     { since, until, cursor }: v.InferOutput<typeof HistoryRequestBody>,
   ): Promise<RuleHistoryPage> {
     try {
-      const rule = await queryFirst(
-        env.DB.prepare(`SELECT ${FILTER_COLUMNS} FROM filter_rules WHERE id = ?`).bind(ruleId(id)),
-        FilterRule,
-      );
+      const rule = await findFilter(env.DB, ruleId(id));
       if (!rule) throw notFound();
       return await processRuleHistoryPage(env.DB, rule, {
         since: since.toISOString(),

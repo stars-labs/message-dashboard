@@ -1,8 +1,8 @@
 // Spam/marketing SMS classification.
 //
-import * as v from 'valibot';
 import { RULE_TYPE } from '../../shared/api/filters.js';
-import { queryAll, type D1 } from '../lib/d1.js';
+import { listActiveSpamRules, type SpamRule } from '../db/filters.js';
+import type { D1 } from '../lib/d1.js';
 import { hasVerificationCode } from './verification.js';
 
 const SHORT_CODE_COUNTRY_PREFIXES = ['86', '852'];
@@ -36,14 +36,7 @@ type FilterStatus = (typeof FILTER_STATUS)[keyof typeof FILTER_STATUS];
  */
 export const VISIBLE_FILTER_STATUSES: FilterStatus[] = [FILTER_STATUS.CLEAN, FILTER_STATUS.PENDING];
 
-/** One active row from filter_rules, whose rule_type the table restricts to the known kinds. */
-const SpamRuleRow = v.object({
-  id: v.number(),
-  rule_type: v.picklist(Object.values(RULE_TYPE)),
-  pattern: v.string(),
-});
-
-export type SpamRule = v.InferOutput<typeof SpamRuleRow>;
+export type { SpamRule };
 
 /** The verdict written to a messages row. */
 interface Classification {
@@ -199,13 +192,5 @@ export function classifyMessage(
  * Load the active rules in evaluation order. The single read path for rules.
  */
 export function loadActiveRules(db: D1<'all'>): Promise<SpamRule[]> {
-  return queryAll(
-    db.prepare(
-      `SELECT id, rule_type, pattern
-       FROM filter_rules
-       WHERE is_active = 1
-       ORDER BY id`,
-    ),
-    SpamRuleRow,
-  );
+  return listActiveSpamRules(db);
 }
