@@ -1,5 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import { migrationViolations } from './migration-rules.ts';
+import {
+  baselineThrough,
+  baselineViolations,
+  databaseFiles,
+  migrationViolations,
+  pendingMigrations,
+} from './migration-rules.ts';
 
 const applied = [
   { name: '006_drop_phones_table.sql', sql: 'DROP TABLE phones;' },
@@ -73,5 +79,53 @@ describe('migrationViolations', () => {
       '082b_suffix.sql must be named NNN_snake_case.sql.',
       '083_Mixed-Case.sql must be named NNN_snake_case.sql.',
     ]);
+  });
+});
+
+describe('baselineThrough', () => {
+  test('reads the last migration the baseline includes from its header', () => {
+    expect(baselineThrough('-- The production schema.\n-- through: 080\nPRAGMA x;\n')).toBe(80);
+  });
+
+  test('throws when the header does not say', () => {
+    expect(() => baselineThrough('PRAGMA x;\n')).toThrow('-- through: NNN');
+  });
+});
+
+describe('baselineViolations', () => {
+  test('accepts a baseline that includes every applied migration', () => {
+    expect(baselineViolations(80, applied)).toEqual([]);
+  });
+
+  test('rejects a baseline behind the applied migrations', () => {
+    expect(baselineViolations(79, applied)).toEqual([
+      'schema.sql is through 079, but main has migrations up to 080; regenerate it from production.',
+    ]);
+  });
+});
+
+describe('pendingMigrations', () => {
+  test('lists the migrations after the baseline, in number order', () => {
+    expect(
+      pendingMigrations(
+        [
+          '082_b.sql',
+          '080_fix.sql',
+          '081_a.sql',
+          '0011_add_daemon_health.sql',
+          'schema.sql',
+          'reference-data.sql',
+        ],
+        80,
+      ),
+    ).toEqual(['081_a.sql', '082_b.sql']);
+  });
+});
+
+describe('databaseFiles', () => {
+  test('builds production: schema, reference data, then the pending migrations', () => {
+    expect(
+      databaseFiles(['081_a.sql', 'reference-data.sql', '080_fix.sql', 'schema.sql'], 80),
+    ).toEqual(['schema.sql', 'reference-data.sql', '081_a.sql']);
   });
 });

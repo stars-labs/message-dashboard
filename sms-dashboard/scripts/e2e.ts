@@ -1,10 +1,10 @@
 // bun run e2e [-- --out <dir>]: every view, at desktop and mobile width, against
-// the real Worker on a fresh local D1 built from migrations/schema.sql and
+// the real Worker on a fresh local D1 built as test/schema.ts builds it, plus
 // scripts/e2e/seed.sql, with Auth0 answered by scripts/e2e/fake-auth0.ts. A view
 // fails on any console error or warning, page error, failed or 4xx/5xx request,
 // a redirect away from it, or (mobile) horizontal overflow.
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -14,6 +14,7 @@ import * as v from 'valibot';
 import type { PageIssue } from './page-report.ts';
 import { sessionRecord, signedIn, visit, VIEWPORT_ORDER, VIEWPORTS, VIEWS } from './page-visit.ts';
 import { startFakeAuth0 } from './e2e/fake-auth0.ts';
+import { baselineThrough, databaseFiles } from './migration-rules.ts';
 
 const READY_TIMEOUT_MS = 90_000;
 const SESSION_TTL_S = 60 * 60;
@@ -82,7 +83,11 @@ const failures: string[] = [];
 
 try {
   const local = ['--local', '--persist-to', state];
-  for (const file of ['migrations/schema.sql', 'scripts/e2e/seed.sql']) {
+  const through = baselineThrough(await Bun.file('migrations/schema.sql').text());
+  const database = databaseFiles(await readdir('migrations'), through).map(
+    (name) => `migrations/${name}`,
+  );
+  for (const file of [...database, 'scripts/e2e/seed.sql']) {
     await run(
       ['node', ...WRANGLER, 'd1', 'execute', 'sms-dashboard', ...local, '--file', file, '--yes'],
       `applying ${file}`,

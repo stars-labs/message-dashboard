@@ -1,6 +1,8 @@
--- The production schema, through migration 080. Generated, do not edit:
+-- The production schema. Generated, do not edit:
 --   wrangler d1 export sms-dashboard --remote --no-data --output migrations/schema.sql
--- then restore this header. Regenerate after applying a migration to production.
+-- then restore this header. Regenerate after applying a migration to production,
+-- and set `through` to that migration's number.
+-- through: 080
 PRAGMA defer_foreign_keys=TRUE;
 CREATE TABLE audit_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -3,7 +3,7 @@
 import { Database } from 'bun:sqlite';
 import { afterEach, beforeEach, describe, expect, setSystemTime, test } from 'bun:test';
 import type { D1, D1Batch, D1Statement } from './lib/d1.js';
-import { createControlSchema } from '../test/control-schema.js';
+import { createSchema } from '../test/schema.js';
 import { memoryKv } from '../test/memory-kv.js';
 import { planDetails } from '../test/query-plan.js';
 import { sqliteD1 } from '../test/sqlite-d1.js';
@@ -50,13 +50,7 @@ let sqlite: Database;
 beforeEach(async () => {
   setSystemTime(new Date('2026-11-15T00:00:00.000Z'));
   sqlite = new Database(':memory:');
-  await createControlSchema(sqlite);
-  for (const migration of [
-    '074_optimize_message_inbox_reads',
-    '079_index_outbound_status_refresh',
-  ]) {
-    sqlite.run(await Bun.file(new URL(`../migrations/${migration}.sql`, import.meta.url)).text());
-  }
+  await createSchema(sqlite);
   // A message every request returns, so the SIM enrichment statements run too.
   sqlite.run(
     `INSERT INTO messages (id, phone_iccid, content, type, filter_status, timestamp, created_at)

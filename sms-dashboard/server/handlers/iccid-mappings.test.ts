@@ -3,7 +3,7 @@ import { Database } from 'bun:sqlite';
 import * as v from 'valibot';
 import { memoryKv } from '../../test/memory-kv.js';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
-import { createSimsSchema } from '../../test/sims-schema.js';
+import { createSchema } from '../../test/schema.js';
 import { callWorker } from '../../test/worker-harness.js';
 import type { D1, D1Batch, D1Statement } from '../lib/d1.js';
 import { resolveServiceType, resolveSimRole } from './iccid-mappings.js';
@@ -20,7 +20,7 @@ afterEach(() => {
 
 async function createMigratedDatabase() {
   const database = new Database(':memory:');
-  await createSimsSchema(database);
+  await createSchema(database);
   return database;
 }
 

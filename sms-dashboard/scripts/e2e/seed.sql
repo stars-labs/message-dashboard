@@ -46,9 +46,6 @@ VALUES ('e2e-msg-4', '8965000000000000002', '+6580000002', 'Running late, there 
 INSERT INTO message_tags (message_id, keyword_tag_id, matched_text, position)
 VALUES ('e2e-msg-1', (SELECT id FROM keyword_tags WHERE keyword = 'verification'), 'verification', 5);
 
-INSERT INTO sim_balance_profiles (id, country_code, carrier, method, command, destination, expected_senders, parser_version, response_window_minutes, discovery_enabled, enabled)
-VALUES ('cn-mobile-sms-menu-v1', 'CN', 'China Mobile', 'sms', '10086', '10086', '["10086"]', 'cn-mobile-menu-v1', 30, 1, 1);
-
 INSERT INTO sim_balance_checks (id, sim_iccid, profile_id, requested_at, sent_at, completed_at, status, response_sender, raw_response, parser_version, requested_by_subject)
 VALUES ('e2e-check-1', '8986000000000000003', 'cn-mobile-sms-menu-v1',
    strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-1 days'), strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-1 days'),

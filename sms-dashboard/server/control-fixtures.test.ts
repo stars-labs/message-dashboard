@@ -9,10 +9,9 @@ import {
   test,
 } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { readFileSync } from 'node:fs';
 import type { ControlFixture } from '../shared/control-fixtures/fixture.js';
 import { callState, type CallFixture, type Fleet } from '../test/call-state-fleet.js';
-import { createControlSchema } from '../test/control-schema.js';
+import { createSchema } from '../test/schema.js';
 import { controlFixtures } from '../test/control-fixtures.js';
 import { sqliteD1 } from '../test/sqlite-d1.js';
 import { callWorker, routeTable, TEST_API_KEY } from '../test/worker-harness.js';
@@ -231,10 +230,7 @@ const SEEDS: Record<string, (world: World) => void | Promise<void>> = {
 
 async function replay(name: string, request: ControlFixture['request']): Promise<Answer> {
   const sqlite = new Database(':memory:');
-  await createControlSchema(sqlite);
-  for (const migration of ['077_add_call_log', '078_one_open_ring_per_sim']) {
-    sqlite.run(readFileSync(new URL(`../migrations/${migration}.sql`, import.meta.url), 'utf8'));
-  }
+  await createSchema(sqlite);
   sqlite
     .query(
       `INSERT INTO sims (iccid, sim_index, phone_number, carrier, country_code, imei)

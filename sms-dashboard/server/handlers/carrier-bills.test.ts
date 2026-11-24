@@ -11,7 +11,7 @@ import {
 import { Database } from 'bun:sqlite';
 import * as v from 'valibot';
 import { memoryKv } from '../../test/memory-kv.js';
-import { createSimsSchema } from '../../test/sims-schema.js';
+import { createSchema } from '../../test/schema.js';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
 import { callWorker } from '../../test/worker-harness.js';
 import type { AppEnv } from '../worker-context.js';
@@ -122,31 +122,17 @@ afterEach(() => {
 beforeEach(async () => {
   errorSpy = spyOn(console, 'error').mockImplementation(() => undefined);
   database = new Database(':memory:');
-  await createSimsSchema(database);
+  await createSchema(database);
   database.run(`
-    CREATE TABLE messages (
-      id TEXT PRIMARY KEY,
-      phone_iccid TEXT,
-      phone_number TEXT,
-      content TEXT NOT NULL,
-      timestamp TIMESTAMP,
-      type TEXT
-    );
     INSERT INTO sims (iccid, sim_index, phone_number, country_code, carrier) VALUES
       ('notification-sim', 79, '+6590000079', 'SG', 'Singtel'),
       ('linked-sim', 80, '+6590000080', 'SG', 'Singtel'),
       ('m1-sim', 81, '+6590000081', 'SG', 'M1');
-    INSERT INTO messages VALUES (
+    INSERT INTO messages (id, phone_iccid, phone_number, content, timestamp, type) VALUES (
       'message-1', 'notification-sim', 'Singtel', 'retained bill source',
       '2026-08-20T00:00:00Z', 'received'
     );
   `);
-  for (const name of [
-    '066_add_carrier_billing.sql',
-    '067_add_carrier_billing_account_events.sql',
-  ]) {
-    database.run(await Bun.file(new URL(`../../migrations/${name}`, import.meta.url)).text());
-  }
   database.run(`
     INSERT INTO carrier_billing_accounts (
       id, country_code, carrier, currency, display_name,

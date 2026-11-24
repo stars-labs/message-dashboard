@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, spyOn, test, afterEach, type Mock } from 
 import { Database } from 'bun:sqlite';
 import * as v from 'valibot';
 import { memoryKv } from '../../test/memory-kv.js';
-import { createSimsSchema } from '../../test/sims-schema.js';
+import { createSchema } from '../../test/schema.js';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
 import { callWorker } from '../../test/worker-harness.js';
 import type { AppEnv } from '../worker-context.js';
@@ -131,16 +131,8 @@ beforeEach(async () => {
   errorSpy = spyOn(console, 'error').mockImplementation(() => undefined);
   preparedSql = [];
   database = new Database(':memory:');
-  await createSimsSchema(database);
+  await createSchema(database);
   database.run(`
-    CREATE TABLE messages (
-      id TEXT PRIMARY KEY,
-      phone_iccid TEXT,
-      phone_number TEXT,
-      content TEXT NOT NULL,
-      timestamp TIMESTAMP,
-      type TEXT
-    );
     INSERT INTO sims (
       iccid, sim_index, phone_number, country_code, carrier,
       service_type, service_type_source, service_type_verified_at
@@ -149,12 +141,6 @@ beforeEach(async () => {
       'postpaid', 'contract_or_bill', '2026-01-01'
     );
   `);
-  for (const name of [
-    '066_add_carrier_billing.sql',
-    '067_add_carrier_billing_account_events.sql',
-  ]) {
-    database.run(await Bun.file(new URL(`../../migrations/${name}`, import.meta.url)).text());
-  }
   database
     .query(
       `

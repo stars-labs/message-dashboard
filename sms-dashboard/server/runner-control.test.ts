@@ -3,7 +3,7 @@
 // move onto the contract must leave all of it as it is.
 import { afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { createBalanceSchema } from '../test/balance-schema.js';
+import { createSchema } from '../test/schema.js';
 import { sqliteD1 } from '../test/sqlite-d1.js';
 import { callWorker, TEST_API_KEY } from '../test/worker-harness.js';
 import { auth0Handler } from './handlers/auth0.js';
@@ -33,7 +33,7 @@ let errorSpy: Mock<typeof console.error>;
 
 beforeEach(async () => {
   sqlite = new Database(':memory:');
-  await createBalanceSchema(sqlite);
+  await createSchema(sqlite);
   sqlite.run(`
     INSERT INTO sims (iccid, sim_index, phone_number) VALUES ('iccid-1', 1, '+8617600419127');
     INSERT INTO messages (

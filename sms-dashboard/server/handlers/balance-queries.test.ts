@@ -3,7 +3,7 @@ import { Database } from 'bun:sqlite';
 import * as v from 'valibot';
 import { BalanceCheck } from '../../shared/api/balance-checks.js';
 import type { Schema } from '../../shared/parse-json.js';
-import { createBalanceSchema } from '../../test/balance-schema.js';
+import { createSchema } from '../../test/schema.js';
 import { memoryKv } from '../../test/memory-kv.js';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
 import { callWorker } from '../../test/worker-harness.js';
@@ -57,7 +57,7 @@ let db: TestDb;
 
 beforeEach(async () => {
   sqlite = new Database(':memory:');
-  await createBalanceSchema(sqlite);
+  await createSchema(sqlite);
   db = sqliteD1(sqlite);
 });
 
@@ -1057,7 +1057,8 @@ describe('POST /api/balance-checks/query-batch', () => {
     enableDirectMobileProfile();
     insertSim({ iccid: 'sim-1', index: 1 });
     insertSim({ iccid: 'sim-2', index: 2 });
-    insertSim({ iccid: 'sim-3', index: 3, carrier: '联通' });
+    // CMHK's only profile is discovery, not yet verified.
+    insertSim({ iccid: 'sim-3', index: 3, carrier: 'CMHK', country: 'HK' });
     insertSim({ iccid: 'sim-4', index: 4, online: false });
     let batches = 0;
     const flaky: TestDb = {

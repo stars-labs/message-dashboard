@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from 
 import { Database } from 'bun:sqlite';
 import * as v from 'valibot';
 import { memoryKv } from '../../test/memory-kv.js';
-import { createSimsSchema } from '../../test/sims-schema.js';
+import { createSchema } from '../../test/schema.js';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
 import { callWorker } from '../../test/worker-harness.js';
 import type { D1, D1Batch } from '../lib/d1.js';
@@ -60,7 +60,7 @@ const PhonesBody = v.object({
 
 async function seeded() {
   const database = new Database(':memory:');
-  await createSimsSchema(database);
+  await createSchema(database);
   const insert = database.query(
     `INSERT INTO sims (iccid, sim_index, phone_number, country_code, carrier)
      VALUES (?, ?, ?, 'SG', 'Singtel')`,
@@ -109,7 +109,7 @@ describe('GET /api/phones', () => {
 
   test('answers 500 when a row does not match the device_view schema', async () => {
     const database = new Database(':memory:');
-    await createSimsSchema(database);
+    await createSchema(database);
     database.run(`DROP VIEW device_view`);
     database.run(`CREATE VIEW device_view AS SELECT
       '1' AS id, NULL AS equipment_id, '1' AS iccid, 'n' AS number, NULL AS country,

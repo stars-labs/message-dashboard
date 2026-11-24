@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from 
 import { Database } from 'bun:sqlite';
 import * as v from 'valibot';
 import { memoryKv } from '../../test/memory-kv.js';
-import { createRunnerSchema } from '../../test/runner-schema.js';
+import { createSchema } from '../../test/schema.js';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
 import { callWorker } from '../../test/worker-harness.js';
 import { auth0Handler } from './auth0.js';
@@ -60,7 +60,7 @@ let verifySpy: Mock<typeof auth0Handler.verifyToken> | undefined;
 
 beforeEach(async () => {
   sqlite = new Database(':memory:');
-  await createRunnerSchema(sqlite);
+  await createSchema(sqlite);
   db = sqliteD1(sqlite);
 });
 

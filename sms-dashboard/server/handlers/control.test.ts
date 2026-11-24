@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from 
 import { Database } from 'bun:sqlite';
 import * as v from 'valibot';
 import type { Schema } from '../../shared/parse-json.js';
-import { createControlSchema } from '../../test/control-schema.js';
+import { createSchema } from '../../test/schema.js';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
 import { callWorker, TEST_API_KEY } from '../../test/worker-harness.js';
 import type { AppEnv } from '../worker-context.js';
@@ -23,7 +23,7 @@ let errorSpy: Mock<typeof console.error>;
 
 beforeEach(async () => {
   sqlite = new Database(':memory:');
-  await createControlSchema(sqlite);
+  await createSchema(sqlite);
   db = sqliteD1(sqlite);
   errorSpy = spyOn(console, 'error').mockImplementation(() => undefined);
 });

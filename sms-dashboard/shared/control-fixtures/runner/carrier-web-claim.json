@@ -18,7 +18,7 @@
         "version": "1",
         "login_mode": "random_password",
         "query_origin": "https://imgxx.client.10010.com",
-        "query_endpoint": "https://www.10010.com/mall/service/query/userinfoquery",
+        "query_endpoint": "https://mxx.client.10010.com/servicequerybusiness/balancenew/accountBalancenew.htm",
         "max_otp_requests": 1,
         "human_verification_timeout_seconds": 900
       }

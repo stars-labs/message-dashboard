@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from 
 import { Database } from 'bun:sqlite';
 import * as v from 'valibot';
 import type { Schema } from '../../shared/parse-json.js';
-import { createBalanceSchema } from '../../test/balance-schema.js';
+import { createSchema } from '../../test/schema.js';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
 import { callWorker } from '../../test/worker-harness.js';
 import type { D1, D1Batch } from '../lib/d1.js';
@@ -74,7 +74,7 @@ let verifySpy: Mock<typeof auth0Handler.verifyToken>;
 
 beforeEach(async () => {
   sqlite = new Database(':memory:');
-  await createBalanceSchema(sqlite);
+  await createSchema(sqlite);
   sqlite.run(`
     INSERT INTO sims (iccid, sim_index, phone_number) VALUES ('iccid-1', 1, '${SIM_NUMBER}');
     INSERT INTO sim_balance_checks (
