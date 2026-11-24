@@ -1,6 +1,6 @@
 # Gates for every push and pull request. Each job mirrors a local command the
 # agent guides already require: `check-daemon` for the Rust daemon, `bun run check`
-# (typecheck, lint, test, build) for the dashboard, `check-api-compat` on pull
+# (typecheck, lint, test, build) and `bun run e2e` for the dashboard, `check-api-compat` on pull
 # requests, and an evaluation of the Orange Pi system so a broken NixOS module is
 # caught before a deploy. On main the Pi
 # system is also built on an arm64 runner and pushed to Cachix, so the Pi only
@@ -63,6 +63,30 @@ jobs:
           bun-version: 1.4.2
       - run: bun install --frozen-lockfile
       - run: bun run check
+
+  e2e:
+    name: Dashboard e2e (bun run e2e)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sms-dashboard
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      # Wrangler runs on Node only (see dev-api in flake.nix).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: bun install --frozen-lockfile
+      - run: PLAYWRIGHT_BROWSERS_PATH=0 bunx playwright-core install chromium --no-shell --with-deps
+      - run: bun run e2e
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results
+          path: sms-dashboard/e2e-results/
 
   # The committed openapi.json of the pull request against the base branch's.
   # The dashboard job already fails when that file is not what the contract

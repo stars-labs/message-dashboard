@@ -102,6 +102,15 @@ See [docs/deployment.md](../docs/deployment.md).
   With `dev-server` running, `bun run screenshots -- --out <dir>` captures every
   view at both widths and writes `report.html` with console errors and failed
   requests. It signs in with a temporary admin session in local KV, no login.
+- `bun run e2e` (CI runs it on every push and pull request) starts the real Worker
+  on a fresh local D1 built from `migrations/schema.sql` plus
+  `scripts/e2e/seed.sql`, with Auth0 answered by `scripts/e2e/fake-auth0.ts`, and
+  opens every view in `shared/views.ts` at 1440px and 440px. A view fails on a
+  console error or warning, a page error, a failed or 4xx/5xx request, a redirect
+  away from it, or sideways scroll on mobile; screenshots land in `e2e-results/`.
+  A new view is covered by adding it to `shared/views.ts`; data it needs goes in
+  the seed. After a migration reaches production, regenerate `schema.sql` (its
+  header says how).
 - Cross-component: run every affected component's gate
 
 ## UI rules

@@ -48,3 +48,5 @@ key.txt
 *.age
 # Keep encrypted secrets
 !secrets.enc.yaml
+
+e2e-results/
