@@ -12,5 +12,5 @@
     "outDir": "./node_modules/.tmp/client-test-declarations"
   },
   "include": ["client/**/*.test.ts", "test/setup.ts"],
-  "references": [{ "path": "./tsconfig.client.json" }]
+  "references": [{ "path": "./tsconfig.client.json" }, { "path": "./tsconfig.tooling.json" }]
 }

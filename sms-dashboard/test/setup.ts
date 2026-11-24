@@ -4,6 +4,7 @@ import { GlobalRegistrator } from '@happy-dom/global-registrator';
 import { plugin } from 'bun';
 import { compile, compileModule } from 'svelte/compiler';
 import { readFileSync } from 'node:fs';
+import svelteConfig from '../svelte.config.ts';
 
 GlobalRegistrator.register();
 
@@ -40,7 +41,11 @@ plugin({
   setup(build) {
     build.onLoad({ filter: /\.svelte$/ }, ({ path }) => {
       const source = readFileSync(path, 'utf8');
-      const { js } = compile(source, { filename: path, generate: 'client' });
+      const { js } = compile(source, {
+        ...svelteConfig.compilerOptions,
+        filename: path,
+        generate: 'client',
+      });
       return { contents: js.code, loader: 'js' };
     });
 
