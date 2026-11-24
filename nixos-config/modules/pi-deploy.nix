@@ -26,7 +26,10 @@ let
 
   pi-deploy = pkgs.writeShellApplication {
     name = "pi-deploy";
-    runtimeInputs = [ pkgs.systemd pkgs.coreutils ];
+    runtimeInputs = [
+      pkgs.systemd
+      pkgs.coreutils
+    ];
     text = ''
       if [ $# -ne 1 ]; then
         echo "usage: pi-deploy <nixos-system store path or .drv>" >&2

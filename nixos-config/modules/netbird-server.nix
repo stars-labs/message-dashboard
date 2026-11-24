@@ -21,7 +21,12 @@
 #   datastore-key       DataStoreEncryptionKey
 #   auth0-m2m-secret    client secret of the NetBird Management application
 #   relay-auth-secret   shared by management and relay
-{ config, lib, pkgs, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 
 let
   domain = "netbird.starslab.qzz.io";
@@ -56,21 +61,34 @@ in
       # through an invite from the dashboard.
       disableSingleAccountMode = true;
       settings = {
-        DataStoreEncryptionKey = { _secret = "${secrets}/datastore-key"; };
-        Stuns = [ { Proto = "udp"; URI = "stun:${domain}:3478"; Username = ""; Password = null; } ];
+        DataStoreEncryptionKey = {
+          _secret = "${secrets}/datastore-key";
+        };
+        Stuns = [
+          {
+            Proto = "udp";
+            URI = "stun:${domain}:3478";
+            Username = "";
+            Password = null;
+          }
+        ];
         # The TURN block the module adds by default would point at a coturn
         # that does not exist; clients fall back to the relay instead.
         TURNConfig = {
           TimeBasedCredentials = false;
           CredentialsTTL = "12h";
           # Unused with no TURN servers; a file only to keep it out of the store.
-          Secret = { _secret = "${secrets}/relay-auth-secret"; };
+          Secret = {
+            _secret = "${secrets}/relay-auth-secret";
+          };
           Turns = [ ];
         };
         Relay = {
           Addresses = [ "rels://${domain}:443/relay" ];
           CredentialsTTL = "24h";
-          Secret = { _secret = "${secrets}/relay-auth-secret"; };
+          Secret = {
+            _secret = "${secrets}/relay-auth-secret";
+          };
         };
         HttpConfig = {
           AuthIssuer = auth0.issuer;
@@ -85,7 +103,9 @@ in
             Issuer = auth0.issuer;
             TokenEndpoint = "${auth0.issuer}oauth/token";
             ClientID = auth0.managementClientId;
-            ClientSecret = { _secret = "${secrets}/auth0-m2m-secret"; };
+            ClientSecret = {
+              _secret = "${secrets}/auth0-m2m-secret";
+            };
             GrantType = "client_credentials";
           };
           ExtraConfig.Audience = "${auth0.issuer}api/v2/";
@@ -111,7 +131,10 @@ in
           AuthorizationEndpoint = "${auth0.issuer}authorize";
           TokenEndpoint = "${auth0.issuer}oauth/token";
           Scope = auth0.scope;
-          RedirectURLs = [ "http://localhost:53000/" "http://localhost:54000/" ];
+          RedirectURLs = [
+            "http://localhost:53000/"
+            "http://localhost:54000/"
+          ];
           UseIDToken = false;
         };
       };
@@ -165,8 +188,16 @@ in
       enableACME = true;
       forceSSL = true;
       listen = [
-        { addr = "0.0.0.0"; port = 80; }
-        { addr = "127.0.0.1"; port = nginxHttpsPort; ssl = true; proxyProtocol = true; }
+        {
+          addr = "0.0.0.0";
+          port = 80;
+        }
+        {
+          addr = "127.0.0.1";
+          port = nginxHttpsPort;
+          ssl = true;
+          proxyProtocol = true;
+        }
       ];
       extraConfig = ''
         set_real_ip_from 127.0.0.1;

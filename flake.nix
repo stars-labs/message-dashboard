@@ -608,6 +608,8 @@
             daemon-rust = orange-pi-daemon-rust;
           };
 
+          formatter = pkgs.nixfmt-tree;
+
           checks.daemon-format =
             pkgs.runCommand "daemon-format-check"
               {
@@ -759,7 +761,10 @@
 
             # CI uses this shell: small enough to cache, with the same `check-daemon` gate.
             rust = pkgs.mkShell {
-              packages = [ check-daemon ] ++ (with pkgs; [
+              packages = [
+                check-daemon
+              ]
+              ++ (with pkgs; [
                 cargo
                 rustc
                 rust-analyzer

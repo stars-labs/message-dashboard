@@ -165,12 +165,14 @@ in
     ];
 
     systemd.services.sms-daemon = {
-      description = if cfg.useDBus
-        then "SMS Dashboard Daemon (D-Bus/ModemManager mode)"
-        else "SMS Dashboard Daemon (Direct AT commands mode)";
-      after = [ "network-online.target" ] ++ (if cfg.useDBus then [ "ModemManager.service" ] else []);
-      wants = [ "network-online.target" ] ++ (if cfg.useDBus then [ "ModemManager.service" ] else []);
-      requires = if cfg.useDBus then [ "ModemManager.service" ] else [];
+      description =
+        if cfg.useDBus then
+          "SMS Dashboard Daemon (D-Bus/ModemManager mode)"
+        else
+          "SMS Dashboard Daemon (Direct AT commands mode)";
+      after = [ "network-online.target" ] ++ (if cfg.useDBus then [ "ModemManager.service" ] else [ ]);
+      wants = [ "network-online.target" ] ++ (if cfg.useDBus then [ "ModemManager.service" ] else [ ]);
+      requires = if cfg.useDBus then [ "ModemManager.service" ] else [ ];
       wantedBy = [ "multi-user.target" ];
 
       # systemd reads start limits from [Unit]; NixOS renders these top-level options there.
@@ -191,7 +193,8 @@ in
 
         HOME = "/var/lib/sms-daemon";
         TMPDIR = "/var/lib/sms-daemon/tmp";
-      } // optionalAttrs (cfg.voiceBridgeDomain != null) {
+      }
+      // optionalAttrs (cfg.voiceBridgeDomain != null) {
         VOICE_BRIDGE_DOMAIN = cfg.voiceBridgeDomain;
         VOICE_BRIDGE_ACME_DIR = "/var/lib/sms-daemon/acme";
         VOICE_BRIDGE_PORT = toString cfg.voiceBridgePort;
@@ -260,7 +263,8 @@ in
           NoNewPrivileges = true;
           CapabilityBoundingSet = [
             "CAP_NET_RAW"
-          ] ++ optional voiceBridgeNeedsBindCap "CAP_NET_BIND_SERVICE";
+          ]
+          ++ optional voiceBridgeNeedsBindCap "CAP_NET_BIND_SERVICE";
           # Only a privileged port needs the capability; behind the SNI router
           # the bridge sits on 8443 and does without it.
           AmbientCapabilities = optional voiceBridgeNeedsBindCap "CAP_NET_BIND_SERVICE";
@@ -353,46 +357,50 @@ in
         util-linux
       ];
 
-      preStart = if cfg.useDBus then ''
-        # D-Bus mode: verify ModemManager is running
-        if ! systemctl is-active ModemManager.service >/dev/null 2>&1; then
-          echo "Error: ModemManager is not running (required for D-Bus mode)" >&2
-          exit 1
-        fi
-        modem_count=$(mmcli -L 2>/dev/null | grep -c "Modem/" || echo "0")
-        echo "ModemManager mode: $modem_count modem(s) detected"
-        logger -t sms-daemon "Starting SMS daemon (D-Bus mode: $modem_count modems)"
-      '' else ''
-        # AT command mode: wait for USB enumeration to settle before starting.
-        #
-        # The daemon builds its modem cache ONCE at startup. On boot (or after a
-        # USB topology change) the kernel keeps enumerating ttyUSB ports for tens
-        # of seconds; starting before that finishes freezes the cache at a low
-        # count (observed: 10 instead of 60). We poll until the port count stays
-        # unchanged for several consecutive checks, with a hard timeout fallback.
-        poll_interval=5      # seconds between polls
-        settle_target=4      # consecutive stable polls required (~20s steady)
-        max_wait=180         # hard cap so boot never hangs
-        last=-1
-        stable=0
-        elapsed=0
-        while [ "$elapsed" -lt "$max_wait" ]; do
-          count=$(ls /dev/ttyUSB* 2>/dev/null | wc -l)
-          if [ "$count" -gt 0 ] && [ "$count" -eq "$last" ]; then
-            stable=$((stable + 1))
-          else
+      preStart =
+        if cfg.useDBus then
+          ''
+            # D-Bus mode: verify ModemManager is running
+            if ! systemctl is-active ModemManager.service >/dev/null 2>&1; then
+              echo "Error: ModemManager is not running (required for D-Bus mode)" >&2
+              exit 1
+            fi
+            modem_count=$(mmcli -L 2>/dev/null | grep -c "Modem/" || echo "0")
+            echo "ModemManager mode: $modem_count modem(s) detected"
+            logger -t sms-daemon "Starting SMS daemon (D-Bus mode: $modem_count modems)"
+          ''
+        else
+          ''
+            # AT command mode: wait for USB enumeration to settle before starting.
+            #
+            # The daemon builds its modem cache ONCE at startup. On boot (or after a
+            # USB topology change) the kernel keeps enumerating ttyUSB ports for tens
+            # of seconds; starting before that finishes freezes the cache at a low
+            # count (observed: 10 instead of 60). We poll until the port count stays
+            # unchanged for several consecutive checks, with a hard timeout fallback.
+            poll_interval=5      # seconds between polls
+            settle_target=4      # consecutive stable polls required (~20s steady)
+            max_wait=180         # hard cap so boot never hangs
+            last=-1
             stable=0
-          fi
-          last=$count
-          [ "$stable" -ge "$settle_target" ] && break
-          sleep "$poll_interval"
-          elapsed=$((elapsed + poll_interval))
-        done
-        usb_ports=$last
-        at_ports=$((usb_ports / 4))  # Each modem exposes ~4 ports
-        echo "AT command mode: USB settled at $usb_ports ports ($at_ports modems) after ''${elapsed}s"
-        logger -t sms-daemon "Starting SMS daemon (AT mode: $at_ports modems, USB settled in ''${elapsed}s)"
-      '';
+            elapsed=0
+            while [ "$elapsed" -lt "$max_wait" ]; do
+              count=$(ls /dev/ttyUSB* 2>/dev/null | wc -l)
+              if [ "$count" -gt 0 ] && [ "$count" -eq "$last" ]; then
+                stable=$((stable + 1))
+              else
+                stable=0
+              fi
+              last=$count
+              [ "$stable" -ge "$settle_target" ] && break
+              sleep "$poll_interval"
+              elapsed=$((elapsed + poll_interval))
+            done
+            usb_ports=$last
+            at_ports=$((usb_ports / 4))  # Each modem exposes ~4 ports
+            echo "AT command mode: USB settled at $usb_ports ports ($at_ports modems) after ''${elapsed}s"
+            logger -t sms-daemon "Starting SMS daemon (AT mode: $at_ports modems, USB settled in ''${elapsed}s)"
+          '';
 
       postStop = ''
         # Log service stop
