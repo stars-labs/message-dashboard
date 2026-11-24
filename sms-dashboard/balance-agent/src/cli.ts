@@ -109,7 +109,8 @@ Configuration options:
   --name NAME
 
 Credentials are stored in macOS Keychain. The CLI never accepts secret values as
-command-line arguments.`;
+command-line arguments. BALANCE_AGENT_KEYCHAIN_SERVICE selects another Keychain
+service for them.`;
 }
 
 function defaultConfigPath({

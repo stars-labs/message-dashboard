@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { failureOf } from './test-support/failure-of.js';
-import { createKeychainStore, type RunCommand } from './keychain-store.js';
+import { createKeychainStore, keychainService, type RunCommand } from './keychain-store.js';
 
 interface Invocation {
   args: string[];
@@ -35,6 +35,12 @@ describe('Balance Agent CLI Keychain store', () => {
     ]);
     expect(invocations[0]?.args).not.toContain('refresh-secret');
     expect(invocations[0]?.options).toEqual({ input: 'refresh-secret' });
+  });
+
+  test('keeps credentials under a separate service only when asked to', () => {
+    expect(keychainService('balance-agent.verify-1')).toBe('balance-agent.verify-1');
+    expect(keychainService('  ')).toBe('io.qzz.message-dashboard.balance-agent.cli');
+    expect(keychainService('')).toBe('io.qzz.message-dashboard.balance-agent.cli');
   });
 
   test('reads a credential without exposing it in an error', async () => {

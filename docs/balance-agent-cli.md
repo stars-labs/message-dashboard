@@ -76,6 +76,8 @@ Non-secret settings are stored at
 `$XDG_CONFIG_HOME/message-dashboard/balance-agent.json`, falling back to
 `~/.config/message-dashboard/balance-agent.json`. The CLI Keychain entries are a
 separate installation from the Electron application's encrypted credential file.
+`BALANCE_AGENT_KEYCHAIN_SERVICE` stores them under another Keychain service, so a
+local verification run never reads or overwrites the operator's own tokens.
 
 ## Diagnostics and Operation
 

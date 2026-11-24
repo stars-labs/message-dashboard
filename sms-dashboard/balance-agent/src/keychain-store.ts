@@ -54,8 +54,14 @@ function commandError(operation: string, result: CommandResult): Error {
   return new Error(`macOS Keychain ${operation} failed${detail ? `: ${detail}` : ''}`);
 }
 
+/** BALANCE_AGENT_KEYCHAIN_SERVICE, when set, keeps a run's credentials apart from the operator's. */
+export function keychainService(override = process.env['BALANCE_AGENT_KEYCHAIN_SERVICE']): string {
+  const service = (override ?? '').trim();
+  return service === '' ? DEFAULT_SERVICE : service;
+}
+
 export function createKeychainStore({
-  service = DEFAULT_SERVICE,
+  service = keychainService(),
   platform = process.platform,
   runCommand = runSecurityCommand,
 }: {
