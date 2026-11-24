@@ -14,53 +14,187 @@
     ../modules/pi-deploy.nix
   ];
 
-  networking.hostName = "orange-pi-sms";
-
   # claude-code is unfree.
   nixpkgs.config.allowUnfree = true;
 
-  # NetworkManager is the only network manager here; dhcpcd on top of it
-  # produces duplicate leases, routes, and DNS entries.
-  # Do not set networking.useDHCP: the NetworkManager module sets it to false,
-  # and a plain true conflicts at eval.
-  networking.dhcpcd.enable = false;
-  networking.nameservers = [
-    "8.8.8.8"
-    "8.8.4.4"
-  ];
+  networking = {
+    hostName = "orange-pi-sms";
 
-  networking.firewall.enable = false;
+    # NetworkManager is the only network manager here; dhcpcd on top of it
+    # produces duplicate leases, routes, and DNS entries.
+    # Do not set networking.useDHCP: the NetworkManager module sets it to false,
+    # and a plain true conflicts at eval.
+    dhcpcd.enable = false;
+    nameservers = [
+      "8.8.8.8"
+      "8.8.4.4"
+    ];
 
-  services.openssh = {
-    enable = true;
-    ports = [ 22 ];
-    settings = {
-      PasswordAuthentication = false;
-      KbdInteractiveAuthentication = false;
-      PermitRootLogin = "prohibit-password"; # nixos-rebuild connects as root with a key
-      AllowUsers = [
-        "htx"
-        "root"
-      ];
-      MaxAuthTries = 3;
-      MaxSessions = 2;
-      ClientAliveInterval = 300;
-      ClientAliveCountMax = 2;
-      X11Forwarding = false;
-      PermitTunnel = "no";
-      AllowAgentForwarding = false;
-      AllowStreamLocalForwarding = false;
-      AllowTcpForwarding = false;
-      AuthenticationMethods = "publickey";
-      PubkeyAuthentication = true;
-      UsePAM = true;
-      PrintMotd = false;
-      PrintLastLog = true;
-      TCPKeepAlive = false;
-      Compression = false;
-      StrictModes = true;
-      IgnoreRhosts = true;
-      HostbasedAuthentication = false;
+    firewall.enable = false;
+
+    networkmanager = {
+      enable = true;
+      dns = "systemd-resolved";
+
+      # NetworkManager owns every interface, so addressing lives here rather than
+      # in networking.interfaces.
+      ensureProfiles.profiles = {
+        # Office uplink on enP4p65s0; the fixed address is the deploy and access
+        # target in docs/deployment.md.
+        lan-static = {
+          connection = {
+            id = "lan-static";
+            type = "ethernet";
+            interface-name = "enP4p65s0";
+            autoconnect = "true";
+            autoconnect-priority = "100";
+          };
+          ipv4 = {
+            method = "manual";
+            addresses = "10.171.150.102/24";
+            gateway = "10.171.150.1";
+            ignore-auto-dns = "true";
+            route-metric = "100";
+            may-fail = "false";
+          };
+          ipv6.method = "ignore";
+        };
+
+        # Spare port; the higher route metric keeps the static uplink as default
+        # route, and DNS stays on networking.nameservers.
+        lan-dhcp = {
+          connection = {
+            id = "lan-dhcp";
+            type = "ethernet";
+            interface-name = "enP3p49s0";
+            autoconnect = "true";
+            autoconnect-priority = "50";
+          };
+          ipv4 = {
+            method = "auto";
+            ignore-auto-dns = "true";
+            route-metric = "200";
+          };
+          ipv6.method = "ignore";
+        };
+      };
+    };
+  };
+
+  services = {
+    openssh = {
+      enable = true;
+      ports = [ 22 ];
+      settings = {
+        PasswordAuthentication = false;
+        KbdInteractiveAuthentication = false;
+        PermitRootLogin = "prohibit-password"; # nixos-rebuild connects as root with a key
+        AllowUsers = [
+          "htx"
+          "root"
+        ];
+        MaxAuthTries = 3;
+        MaxSessions = 2;
+        ClientAliveInterval = 300;
+        ClientAliveCountMax = 2;
+        X11Forwarding = false;
+        PermitTunnel = "no";
+        AllowAgentForwarding = false;
+        AllowStreamLocalForwarding = false;
+        AllowTcpForwarding = false;
+        AuthenticationMethods = "publickey";
+        PubkeyAuthentication = true;
+        UsePAM = true;
+        PrintMotd = false;
+        PrintLastLog = true;
+        TCPKeepAlive = false;
+        Compression = false;
+        StrictModes = true;
+        IgnoreRhosts = true;
+        HostbasedAuthentication = false;
+      };
+    };
+
+    fail2ban = {
+      enable = false;
+      maxretry = 3;
+      bantime = "1h";
+      bantime-increment = {
+        enable = true;
+        factor = "2";
+        maxtime = "24h";
+        rndtime = "8m";
+      };
+
+      jails = {
+        sshd = {
+          settings = {
+            enabled = true;
+            port = "22";
+            filter = "sshd[mode=aggressive]";
+            maxretry = 3;
+            findtime = "10m";
+            bantime = "1h";
+          };
+        };
+      };
+    };
+
+    logrotate.enable = false;
+    watchdogd = {
+      enable = true;
+      settings = {
+        "device /dev/watchdog" = {
+          timeout = 30;
+          interval = 10;
+          safe-exit = true;
+        };
+        loadavg = {
+          enabled = true;
+          interval = 60;
+          warning = 8.0;
+          critical = 12.0; # reboots
+        };
+        meminfo = {
+          enabled = true;
+          interval = 60;
+          warning = 0.85;
+          critical = 0.95; # reboots
+        };
+        filenr = {
+          enabled = true;
+          logmark = true;
+        };
+      };
+    };
+
+    resolved = {
+      enable = true;
+      settings = {
+        Resolve = {
+          DNSSEC = "false"; # validation failures
+          DNSOverTLS = "opportunistic";
+          LLMNR = "false";
+        };
+      };
+    };
+
+    journald.settings.Journal = {
+      Storage = "persistent";
+      SystemMaxUse = "1G";
+      SystemKeepFree = "500M";
+      RuntimeMaxUse = "200M";
+      RuntimeKeepFree = "100M";
+      MaxRetentionSec = "30d";
+
+      Compress = "yes";
+      SplitMode = "uid";
+      RateLimitIntervalSec = "30s";
+      RateLimitBurst = "10000";
+
+      ForwardToSyslog = "yes";
+      MaxLevelStore = "debug";
+      MaxLevelSyslog = "info";
     };
   };
 
@@ -73,31 +207,6 @@
     *                                                                  *
     ********************************************************************
   '';
-
-  services.fail2ban = {
-    enable = false;
-    maxretry = 3;
-    bantime = "1h";
-    bantime-increment = {
-      enable = true;
-      factor = "2";
-      maxtime = "24h";
-      rndtime = "8m";
-    };
-
-    jails = {
-      sshd = {
-        settings = {
-          enabled = true;
-          port = "22";
-          filter = "sshd[mode=aggressive]";
-          maxretry = 3;
-          findtime = "10m";
-          bantime = "1h";
-        };
-      };
-    };
-  };
 
   users.users.htx = {
     isNormalUser = true;
@@ -156,34 +265,6 @@
       Defaults env_keep="COLORS DISPLAY HOSTNAME HISTSIZE LS_COLORS"
       Defaults secure_path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
     '';
-  };
-
-  services.logrotate.enable = false;
-  services.watchdogd = {
-    enable = true;
-    settings = {
-      "device /dev/watchdog" = {
-        timeout = 30;
-        interval = 10;
-        safe-exit = true;
-      };
-      loadavg = {
-        enabled = true;
-        interval = 60;
-        warning = 8.0;
-        critical = 12.0; # reboots
-      };
-      meminfo = {
-        enabled = true;
-        interval = 60;
-        warning = 0.85;
-        critical = 0.95; # reboots
-      };
-      filenr = {
-        enabled = true;
-        logmark = true;
-      };
-    };
   };
 
   # Nothing else reclaims old generations or dead store paths on this box.
@@ -380,83 +461,6 @@
   };
 
   systemd.coredump.enable = false;
-
-  networking.networkmanager = {
-    enable = true;
-    dns = "systemd-resolved";
-
-    # NetworkManager owns every interface, so addressing lives here rather than
-    # in networking.interfaces.
-    ensureProfiles.profiles = {
-      # Office uplink on enP4p65s0; the fixed address is the deploy and access
-      # target in docs/deployment.md.
-      lan-static = {
-        connection = {
-          id = "lan-static";
-          type = "ethernet";
-          interface-name = "enP4p65s0";
-          autoconnect = "true";
-          autoconnect-priority = "100";
-        };
-        ipv4 = {
-          method = "manual";
-          addresses = "10.171.150.102/24";
-          gateway = "10.171.150.1";
-          ignore-auto-dns = "true";
-          route-metric = "100";
-          may-fail = "false";
-        };
-        ipv6.method = "ignore";
-      };
-
-      # Spare port; the higher route metric keeps the static uplink as default
-      # route, and DNS stays on networking.nameservers.
-      lan-dhcp = {
-        connection = {
-          id = "lan-dhcp";
-          type = "ethernet";
-          interface-name = "enP3p49s0";
-          autoconnect = "true";
-          autoconnect-priority = "50";
-        };
-        ipv4 = {
-          method = "auto";
-          ignore-auto-dns = "true";
-          route-metric = "200";
-        };
-        ipv6.method = "ignore";
-      };
-    };
-  };
-
-  services.resolved = {
-    enable = true;
-    settings = {
-      Resolve = {
-        DNSSEC = "false"; # validation failures
-        DNSOverTLS = "opportunistic";
-        LLMNR = "false";
-      };
-    };
-  };
-
-  services.journald.settings.Journal = {
-    Storage = "persistent";
-    SystemMaxUse = "1G";
-    SystemKeepFree = "500M";
-    RuntimeMaxUse = "200M";
-    RuntimeKeepFree = "100M";
-    MaxRetentionSec = "30d";
-
-    Compress = "yes";
-    SplitMode = "uid";
-    RateLimitIntervalSec = "30s";
-    RateLimitBurst = "10000";
-
-    ForwardToSyslog = "yes";
-    MaxLevelStore = "debug";
-    MaxLevelSyslog = "info";
-  };
 
   time.timeZone = "Asia/Singapore";
 

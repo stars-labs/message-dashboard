@@ -145,7 +145,7 @@ in
 
     users.users.${cfg.user} = {
       isSystemUser = true;
-      group = cfg.group;
+      inherit (cfg) group;
       extraGroups = [ "dialout" ];
       home = "/var/lib/sms-daemon";
       createHome = false;

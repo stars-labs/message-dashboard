@@ -21,12 +21,7 @@
 #   datastore-key       DataStoreEncryptionKey
 #   auth0-m2m-secret    client secret of the NetBird Management application
 #   relay-auth-secret   shared by management and relay
-{
-  config,
-  lib,
-  pkgs,
-  ...
-}:
+{ config, ... }:
 
 let
   domain = "netbird.starslab.qzz.io";
@@ -46,190 +41,192 @@ let
   nginxHttpsPort = 8444;
 in
 {
-  services.netbird.server = {
-    enable = true;
-    enableNginx = true;
-    inherit domain;
-    coturn.enable = false;
+  services = {
+    netbird.server = {
+      enable = true;
+      enableNginx = true;
+      inherit domain;
+      coturn.enable = false;
 
-    management = {
-      oidcConfigEndpoint = "${auth0.issuer}.well-known/openid-configuration";
-      disableAnonymousMetrics = true;
-      # Anyone with a Google account can pass Auth0. In single-account mode
-      # every such login would join the one network as a user, so each new
-      # identity gets its own empty account instead and people join ours only
-      # through an invite from the dashboard.
-      disableSingleAccountMode = true;
-      settings = {
-        DataStoreEncryptionKey = {
-          _secret = "${secrets}/datastore-key";
-        };
-        Stuns = [
-          {
-            Proto = "udp";
-            URI = "stun:${domain}:3478";
-            Username = "";
-            Password = null;
-          }
-        ];
-        # The TURN block the module adds by default would point at a coturn
-        # that does not exist; clients fall back to the relay instead.
-        TURNConfig = {
-          TimeBasedCredentials = false;
-          CredentialsTTL = "12h";
-          # Unused with no TURN servers; a file only to keep it out of the store.
-          Secret = {
-            _secret = "${secrets}/relay-auth-secret";
+      management = {
+        oidcConfigEndpoint = "${auth0.issuer}.well-known/openid-configuration";
+        disableAnonymousMetrics = true;
+        # Anyone with a Google account can pass Auth0. In single-account mode
+        # every such login would join the one network as a user, so each new
+        # identity gets its own empty account instead and people join ours only
+        # through an invite from the dashboard.
+        disableSingleAccountMode = true;
+        settings = {
+          DataStoreEncryptionKey = {
+            _secret = "${secrets}/datastore-key";
           };
-          Turns = [ ];
-        };
-        Relay = {
-          Addresses = [ "rels://${domain}:443/relay" ];
-          CredentialsTTL = "24h";
-          Secret = {
-            _secret = "${secrets}/relay-auth-secret";
-          };
-        };
-        HttpConfig = {
-          AuthIssuer = auth0.issuer;
-          AuthAudience = auth0.audience;
-          AuthUserIDClaim = "sub";
-        };
-        # Auth0 access tokens carry no profile claims; the management API
-        # fills names and emails from the Auth0 Management API instead.
-        IdpManagerConfig = {
-          ManagerType = "auth0";
-          ClientConfig = {
-            Issuer = auth0.issuer;
-            TokenEndpoint = "${auth0.issuer}oauth/token";
-            ClientID = auth0.managementClientId;
-            ClientSecret = {
-              _secret = "${secrets}/auth0-m2m-secret";
+          Stuns = [
+            {
+              Proto = "udp";
+              URI = "stun:${domain}:3478";
+              Username = "";
+              Password = null;
+            }
+          ];
+          # The TURN block the module adds by default would point at a coturn
+          # that does not exist; clients fall back to the relay instead.
+          TURNConfig = {
+            TimeBasedCredentials = false;
+            CredentialsTTL = "12h";
+            # Unused with no TURN servers; a file only to keep it out of the store.
+            Secret = {
+              _secret = "${secrets}/relay-auth-secret";
             };
-            GrantType = "client_credentials";
+            Turns = [ ];
           };
-          ExtraConfig.Audience = "${auth0.issuer}api/v2/";
-        };
-        DeviceAuthorizationFlow = {
-          Provider = "hosted";
-          ProviderConfig = {
+          Relay = {
+            Addresses = [ "rels://${domain}:443/relay" ];
+            CredentialsTTL = "24h";
+            Secret = {
+              _secret = "${secrets}/relay-auth-secret";
+            };
+          };
+          HttpConfig = {
+            AuthIssuer = auth0.issuer;
+            AuthAudience = auth0.audience;
+            AuthUserIDClaim = "sub";
+          };
+          # Auth0 access tokens carry no profile claims; the management API
+          # fills names and emails from the Auth0 Management API instead.
+          IdpManagerConfig = {
+            ManagerType = "auth0";
+            ClientConfig = {
+              Issuer = auth0.issuer;
+              TokenEndpoint = "${auth0.issuer}oauth/token";
+              ClientID = auth0.managementClientId;
+              ClientSecret = {
+                _secret = "${secrets}/auth0-m2m-secret";
+              };
+              GrantType = "client_credentials";
+            };
+            ExtraConfig.Audience = "${auth0.issuer}api/v2/";
+          };
+          DeviceAuthorizationFlow = {
+            Provider = "hosted";
+            ProviderConfig = {
+              Audience = auth0.audience;
+              ClientID = auth0.cliClientId;
+              ClientSecret = "";
+              Domain = auth0.domain;
+              Scope = auth0.scope;
+              UseIDToken = false;
+              TokenEndpoint = "${auth0.issuer}oauth/token";
+              DeviceAuthEndpoint = "${auth0.issuer}oauth/device/code";
+            };
+          };
+          PKCEAuthorizationFlow.ProviderConfig = {
             Audience = auth0.audience;
             ClientID = auth0.cliClientId;
             ClientSecret = "";
             Domain = auth0.domain;
-            Scope = auth0.scope;
-            UseIDToken = false;
+            AuthorizationEndpoint = "${auth0.issuer}authorize";
             TokenEndpoint = "${auth0.issuer}oauth/token";
-            DeviceAuthEndpoint = "${auth0.issuer}oauth/device/code";
+            Scope = auth0.scope;
+            RedirectURLs = [
+              "http://localhost:53000/"
+              "http://localhost:54000/"
+            ];
+            UseIDToken = false;
           };
         };
-        PKCEAuthorizationFlow.ProviderConfig = {
-          Audience = auth0.audience;
-          ClientID = auth0.cliClientId;
-          ClientSecret = "";
-          Domain = auth0.domain;
-          AuthorizationEndpoint = "${auth0.issuer}authorize";
-          TokenEndpoint = "${auth0.issuer}oauth/token";
-          Scope = auth0.scope;
-          RedirectURLs = [
-            "http://localhost:53000/"
-            "http://localhost:54000/"
-          ];
-          UseIDToken = false;
+      };
+
+      dashboard.settings = {
+        AUTH_AUTHORITY = auth0.issuer;
+        AUTH_CLIENT_ID = auth0.dashboardClientId;
+        AUTH_AUDIENCE = auth0.audience;
+        AUTH_SUPPORTED_SCOPES = auth0.scope;
+        AUTH_REDIRECT_URI = "/auth";
+        AUTH_SILENT_REDIRECT_URI = "/silent-auth";
+        USE_AUTH0 = true;
+        NETBIRD_TOKEN_SOURCE = "accessToken";
+        NETBIRD_DRAG_QUERY_PARAMS = true;
+      };
+    };
+
+    netbird.relay = {
+      enable = true;
+      authSecretFile = "${secrets}/relay-auth-secret";
+      settings = {
+        listen-address = "127.0.0.1:${toString relayPort}";
+        exposed-address = "rels://${domain}:443/relay";
+        enable-stun = true;
+        stun-ports = [ 3478 ];
+      };
+    };
+
+    nginx = {
+      recommendedProxySettings = true;
+      recommendedTlsSettings = true;
+
+      streamConfig = ''
+        map $ssl_preread_server_name $sni_backend {
+          ${voiceDomain} 127.0.0.1:${toString voicePort};
+          default        127.0.0.1:${toString nginxHttpsPort};
+        }
+        server {
+          listen 0.0.0.0:443;
+          ssl_preread on;
+          proxy_pass $sni_backend;
+          proxy_protocol on;
+          proxy_connect_timeout 5s;
+        }
+      '';
+
+      virtualHosts.${domain} = {
+        enableACME = true;
+        forceSSL = true;
+        listen = [
+          {
+            addr = "0.0.0.0";
+            port = 80;
+          }
+          {
+            addr = "127.0.0.1";
+            port = nginxHttpsPort;
+            ssl = true;
+            proxyProtocol = true;
+          }
+        ];
+        extraConfig = ''
+          set_real_ip_from 127.0.0.1;
+          real_ip_header proxy_protocol;
+          client_header_timeout 1d;
+          client_body_timeout 1d;
+        '';
+        locations = {
+          "/relay" = {
+            proxyPass = "http://127.0.0.1:${toString relayPort}";
+            proxyWebsockets = true;
+            extraConfig = "proxy_read_timeout 1d;";
+          };
+          # WebSocket fallbacks newer clients use where gRPC is blocked.
+          "/ws-proxy/management" = {
+            proxyPass = "http://127.0.0.1:${toString config.services.netbird.server.management.port}";
+            proxyWebsockets = true;
+            extraConfig = "proxy_read_timeout 1d;";
+          };
+          "/ws-proxy/signal" = {
+            proxyPass = "http://127.0.0.1:${toString config.services.netbird.server.signal.port}";
+            proxyWebsockets = true;
+            extraConfig = "proxy_read_timeout 1d;";
+          };
         };
       };
     };
 
-    dashboard.settings = {
-      AUTH_AUTHORITY = auth0.issuer;
-      AUTH_CLIENT_ID = auth0.dashboardClientId;
-      AUTH_AUDIENCE = auth0.audience;
-      AUTH_SUPPORTED_SCOPES = auth0.scope;
-      AUTH_REDIRECT_URI = "/auth";
-      AUTH_SILENT_REDIRECT_URI = "/silent-auth";
-      USE_AUTH0 = true;
-      NETBIRD_TOKEN_SOURCE = "accessToken";
-      NETBIRD_DRAG_QUERY_PARAMS = true;
-    };
-  };
-
-  services.netbird.relay = {
-    enable = true;
-    authSecretFile = "${secrets}/relay-auth-secret";
-    settings = {
-      listen-address = "127.0.0.1:${toString relayPort}";
-      exposed-address = "rels://${domain}:443/relay";
-      enable-stun = true;
-      stun-ports = [ 3478 ];
+    sms-daemon = {
+      voiceBridgePort = 8443;
+      voiceBridgeBehindProxy = true;
     };
   };
 
   security.acme.acceptTerms = true;
-
-  services.nginx = {
-    recommendedProxySettings = true;
-    recommendedTlsSettings = true;
-
-    streamConfig = ''
-      map $ssl_preread_server_name $sni_backend {
-        ${voiceDomain} 127.0.0.1:${toString voicePort};
-        default        127.0.0.1:${toString nginxHttpsPort};
-      }
-      server {
-        listen 0.0.0.0:443;
-        ssl_preread on;
-        proxy_pass $sni_backend;
-        proxy_protocol on;
-        proxy_connect_timeout 5s;
-      }
-    '';
-
-    virtualHosts.${domain} = {
-      enableACME = true;
-      forceSSL = true;
-      listen = [
-        {
-          addr = "0.0.0.0";
-          port = 80;
-        }
-        {
-          addr = "127.0.0.1";
-          port = nginxHttpsPort;
-          ssl = true;
-          proxyProtocol = true;
-        }
-      ];
-      extraConfig = ''
-        set_real_ip_from 127.0.0.1;
-        real_ip_header proxy_protocol;
-        client_header_timeout 1d;
-        client_body_timeout 1d;
-      '';
-      locations = {
-        "/relay" = {
-          proxyPass = "http://127.0.0.1:${toString relayPort}";
-          proxyWebsockets = true;
-          extraConfig = "proxy_read_timeout 1d;";
-        };
-        # WebSocket fallbacks newer clients use where gRPC is blocked.
-        "/ws-proxy/management" = {
-          proxyPass = "http://127.0.0.1:${toString config.services.netbird.server.management.port}";
-          proxyWebsockets = true;
-          extraConfig = "proxy_read_timeout 1d;";
-        };
-        "/ws-proxy/signal" = {
-          proxyPass = "http://127.0.0.1:${toString config.services.netbird.server.signal.port}";
-          proxyWebsockets = true;
-          extraConfig = "proxy_read_timeout 1d;";
-        };
-      };
-    };
-  };
-
-  services.sms-daemon = {
-    voiceBridgePort = 8443;
-    voiceBridgeBehindProxy = true;
-  };
 
   systemd.tmpfiles.rules = [ "d ${secrets} 0700 root root -" ];
 }

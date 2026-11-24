@@ -61,12 +61,7 @@
               lanzaboote.nixosModules.lanzaboote
 
               (
-                {
-                  config,
-                  pkgs,
-                  lib,
-                  ...
-                }:
+                { config, ... }:
                 {
                   nix.settings.experimental-features = [
                     "nix-command"
@@ -114,10 +109,8 @@
       perSystem =
         {
           config,
-          self',
           inputs',
           pkgs,
-          system,
           lib,
           ...
         }:
