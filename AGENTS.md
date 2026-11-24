@@ -70,6 +70,7 @@ no longer reported fails too, so remove it once fixed.
   the Balance Agent and the daemon's protocol to prove a change works
 - [Data model & auth contracts](docs/data-contracts.md)
 - [Deployment procedures](docs/deployment.md)
+- [Auth0 tenant setup](docs/auth0.md)
 - [Balance Agent CLI](docs/balance-agent-cli.md)
 - [SMS hardware safety](docs/sms-hardware-storage-safety-plan.md)
 - [Voice call plan](docs/voice-call-plan.md)
