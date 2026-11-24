@@ -28,6 +28,39 @@ describe('Auth0 device client', () => {
     expect(fields?.get('client_secret')).toBe(null);
   });
 
+  test('talks plain HTTP to a loopback stand-in for the tenant', async () => {
+    let url: string | undefined;
+    const client = createAuth0DeviceClient({
+      issuer: 'http://127.0.0.1:4100/',
+      clientId: 'native-client',
+      audience: 'audience',
+      fetchImpl: (requested) => {
+        url = requested;
+        return Promise.resolve(Response.json({ device_code: 'device', user_code: 'ABCD' }));
+      },
+    });
+    await client.begin();
+    expect(url).toBe('http://127.0.0.1:4100/oauth/device/code');
+  });
+
+  test('refuses plain HTTP to anything but loopback, and HTTPS to loopback', async () => {
+    for (const issuer of [
+      'http://tenant.example',
+      'http://localhost.example.com',
+      'https://localhost:4100',
+    ]) {
+      const client = createAuth0DeviceClient({
+        issuer,
+        clientId: 'native-client',
+        audience: 'audience',
+        fetchImpl: () => Promise.reject(new Error('must not be called')),
+      });
+      expect(await failureOf(client.begin())).toBe(
+        'Auth0 issuer must use HTTPS (plain HTTP only for localhost)',
+      );
+    }
+  });
+
   test('waits through authorization_pending and returns tokens', async () => {
     const replies = [
       new Response(JSON.stringify({ error: 'authorization_pending' }), { status: 403 }),

@@ -1,6 +1,7 @@
 import * as v from 'valibot';
 import { readJson } from '../../../shared/parse-json.js';
 import { ALL_RUNNER_SCOPES } from '../../../shared/api/runner-scopes.js';
+import { auth0Origin } from '../../../shared/auth0-origin.js';
 import { textOr } from '../../../shared/text.js';
 import type { FetchImpl } from './control-client.js';
 
@@ -50,7 +51,11 @@ type Sleep = (ms: number, signal?: AbortSignal) => Promise<void>;
 
 function issuerUrl(issuer: string, path: string): string {
   const base = issuer.trim().replace(/\/+$/, '');
-  if (!base.startsWith('https://')) throw new Error('Auth0 issuer must use HTTPS');
+  const url = URL.parse(base);
+  const allowed = url ? auth0Origin(url.host) === url.origin : false;
+  if (!allowed) {
+    throw new Error('Auth0 issuer must use HTTPS (plain HTTP only for localhost)');
+  }
   return `${base}${path}`;
 }
 

@@ -12,7 +12,7 @@ import {
 } from '../../config/auth0-roles.js';
 import type { D1 } from '../lib/d1.js';
 import { readKvJson, type KV } from '../lib/kv.js';
-import { auth0Origin } from '../utils/auth0-origin.js';
+import { auth0Origin } from '../../shared/auth0-origin.js';
 import { extractSessionToken } from '../utils/session-token.js';
 import { getUserRoles, setUserRole, type Auth0ManagementEnv } from '../utils/auth0-management.js';
 import { indexSession, unindexSession } from '../utils/user-sessions.js';

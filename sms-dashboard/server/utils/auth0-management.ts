@@ -5,7 +5,7 @@ import * as v from 'valibot';
 import { createRoleConfig, type RoleEnv } from '../../config/auth0-roles.js';
 import { parseJson } from '../../shared/parse-json.js';
 import { readKvJson, type KV } from '../lib/kv.js';
-import { auth0Origin } from './auth0-origin.js';
+import { auth0Origin } from '../../shared/auth0-origin.js';
 
 export interface Auth0ManagementEnv extends RoleEnv {
   AUTH0_DOMAIN?: string;
